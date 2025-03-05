@@ -1,0 +1,23 @@
+{
+  "name": "evm",
+  "module": "index.ts",
+  "type": "module",
+  "scripts": {
+    "local:deploy": "forge script script/local_deploy.s.sol:Deploy --rpc-url http://127.0.0.1:1460 --broadcast",
+    "local:base:deploy": "bun run local:base:impersonate_coinbase && forge script script/base_deploy.s.sol:Deploy --rpc-url http://127.0.0.1:8453 --broadcast --unlocked",
+    "local:base": "anvil --port 8453 --fork-url https://base-mainnet.g.alchemy.com/v2/eVQ4RBA_J_5qYBwwe4xOFrJ83Udm5zdZ",
+    "local:base:impersonate_coinbase": "cast rpc -r http://127.0.0.1:8453 anvil_impersonateAccount 0x20FE51A9229EEf2cF8Ad9E89d91CAb9312cF3b7A",
+    "local:sonic": "anvil --port 1460 --fork-url https://sonic-mainnet.g.alchemy.com/v2/eVQ4RBA_J_5qYBwwe4xOFrJ83Udm5zdZ",
+    "local:sonic:impersonate_coinbase": "cast rpc -r http://127.0.0.1:1460 anvil_impersonateAccount 0x51ba05662a3b00731d451014540049b08a4e9ea5",
+    "local:sonic:deploy": "bun run local:sonic:impersonate_coinbase && forge script script/sonic_deploy.s.sol:Deploy --rpc-url http://127.0.0.1:1460 --broadcast --unlocked"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "viem": "^2.23.5"
+  }
+}

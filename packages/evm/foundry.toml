@@ -1,0 +1,15 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+gas_limit = 100_000_000 # ETH is 30M, but we use a higher value. the base value
+optimizer = true
+optimizer_runs = 1_000
+remappings = [
+  "forge-std=lib/forge-std/src",
+  "solady=lib/solady/src",
+  "dn404=lib/dn404/src",
+  "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/"
+]
+
+# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
