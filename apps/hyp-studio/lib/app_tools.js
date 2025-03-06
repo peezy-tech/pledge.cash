@@ -1,14 +1,5 @@
 import { cloneDeep } from "lodash-es";
 
-export async function hashFile(file) {
-  const buf = await file.arrayBuffer();
-  const hashBuf = await crypto.subtle.digest("SHA-256", buf);
-  const hash = Array.from(new Uint8Array(hashBuf))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-  return hash;
-}
-
 export async function exportApp(blueprint, resolveFile) {
   blueprint = cloneDeep(blueprint);
 
@@ -26,6 +17,13 @@ export async function exportApp(blueprint, resolveFile) {
       type: "script",
       url: blueprint.script,
       file: await resolveFile(blueprint.script),
+    });
+  }
+  if (blueprint.image) {
+    assets.push({
+      type: "texture",
+      url: blueprint.image.url,
+      file: await resolveFile(blueprint.image.url),
     });
   }
   for (const key in blueprint.props) {
@@ -125,4 +123,10 @@ function str2ab(str) {
 function ab2str(buf) {
   // convert Uint8Array to string
   return String.fromCharCode.apply(null, buf);
+}
+
+export async function hashFile(file) {
+  const hash = crypto.createHash("sha256");
+  hash.update(file);
+  return hash.digest("hex");
 }
