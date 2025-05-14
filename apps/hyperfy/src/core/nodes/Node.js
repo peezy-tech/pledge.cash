@@ -3,12 +3,14 @@ import * as THREE from '../extras/three'
 
 const _v1 = new THREE.Vector3()
 const _v2 = new THREE.Vector3()
+const _v3 = new THREE.Vector3()
 const _q1 = new THREE.Quaternion()
 const _m1 = new THREE.Matrix4()
 const _m2 = new THREE.Matrix4()
 const _m3 = new THREE.Matrix4()
-
-const defaultScale = new THREE.Vector3(1, 1, 1)
+const _box3 = new THREE.Box3()
+const _sphere = new THREE.Sphere()
+const _points = []
 
 const defaults = {
   active: true,
@@ -19,12 +21,27 @@ const defaults = {
 
 let nodeIds = -1
 
+const EPSILON = 0.000000001
+
 const secure = { allowRef: false }
 export function getRef(pNode) {
+  if (!pNode || !pNode._isRef) return pNode
   secure.allowRef = true
   const node = pNode._ref
   secure.allowRef = false
   return node
+}
+
+export function secureRef(obj = {}, getRef) {
+  const tpl = {
+    get _ref() {
+      if (!secure.allowRef) return null
+      return getRef()
+    },
+  }
+  obj._isRef = true
+  Object.defineProperty(obj, '_ref', Object.getOwnPropertyDescriptor(tpl, '_ref'))
+  return obj
 }
 
 export class Node {
@@ -57,12 +74,18 @@ export class Node {
       this.setTransformed()
     })
     this.scale._onChange(() => {
+      // scale set to exactly zero on any axis causes matrices to have NaN values.
+      // this causes our octrees to fail into an infinite loop
+      if (this.scale.x === 0 || this.scale.y === 0 || this.scale.z === 0) {
+        return this.scale.set(this.scale.x || EPSILON, this.scale.y || EPSILON, this.scale.z || EPSILON)
+      }
       this.setTransformed()
     })
     this._onPointerEnter = data.onPointerEnter
     this._onPointerLeave = data.onPointerLeave
     this._onPointerDown = data.onPointerDown
     this._onPointerUp = data.onPointerUp
+    this._cursor = data.cursor
     this._active = isBoolean(data.active) ? data.active : defaults.active
     // this.scale._onChange?
     this.isDirty = false
@@ -92,6 +115,8 @@ export class Node {
       children[i].deactivate()
     }
     this.unmount()
+    this.isDirty = false
+    this.isTransformed = true
     this.mounted = false
   }
 
@@ -171,14 +196,20 @@ export class Node {
     if (!this._active && this.mounted) {
       this.deactivate()
     } else if (this._active && this.parent?.mounted) {
+      this.activate(this.parent.ctx)
+    } else if (this._active && !this.parent) {
       this.activate(this.ctx)
     }
   }
 
   clean() {
     if (!this.isDirty) return
+    let top = this
+    while (top.parent && top.parent.isDirty) {
+      top = top.parent
+    }
     let didTransform
-    this.traverse(node => {
+    top.traverse(node => {
       if (node.isTransformed) {
         didTransform = true
       }
@@ -243,6 +274,7 @@ export class Node {
     this._onPointerDown = source._onPointerDown
     this._onPointerUp = source._onPointerUp
     this._cursor = source._cursor
+    this._active = source._active
     if (recursive) {
       for (let i = 0; i < source.children.length; i++) {
         const child = source.children[i]
@@ -263,30 +295,36 @@ export class Node {
     return null
   }
 
-  // onPhysicsMovement = (position, quaternion) => {
-  //   if (this.parent) {
-  //     _m1.compose(position, quaternion, defaultScale)
-  //     _m2.copy(this.parent.matrixWorld).invert()
-  //     _m3.multiplyMatrices(_m2, _m1)
-  //     _m3.decompose(this.position, this.quaternion, _v1)
-  //     // this.matrix.copy(_m3)
-  //     // this.matrixWorld.copy(_m1)
-  //   } else {
-  //     this.position.copy(position)
-  //     this.quaternion.copy(quaternion)
-  //     // this.matrix.compose(this.position, this.quaternion, this.scale)
-  //     // this.matrixWorld.copy(this.matrix)
-  //   }
-  // }
-
   // todo: getWorldQuaternion etc
   getWorldPosition(vec3 = _v1) {
     this.matrixWorld.decompose(vec3, _q1, _v2)
     return vec3
   }
 
-  getStats() {
-    return null
+  getWorldMatrix(mat = _m1) {
+    return mat.copy(this.matrixWorld)
+  }
+
+  getStats(recursive, stats) {
+    if (!stats) {
+      stats = {
+        geometries: new Set(),
+        materials: new Set(),
+        triangles: 0,
+        textureBytes: 0,
+      }
+    }
+    this.applyStats(stats)
+    if (recursive) {
+      for (const child of this.children) {
+        child.getStats(recursive, stats)
+      }
+    }
+    return stats
+  }
+
+  applyStats(stats) {
+    // nodes should override this and add their stats
   }
 
   get onPointerEnter() {
@@ -381,6 +419,18 @@ export class Node {
         set parent(value) {
           throw new Error('Cannot set parent directly')
         },
+        get children() {
+          return self.children.map(child => {
+            return child.getProxy()
+          })
+        },
+        get(id) {
+          const node = self.get(id)
+          return node?.getProxy() || null
+        },
+        getWorldMatrix(mat) {
+          return self.getWorldMatrix(mat)
+        },
         add(pNode) {
           const node = getRef(pNode)
           self.add(node)
@@ -403,9 +453,15 @@ export class Node {
           const node = self.clone(recursive)
           return node.getProxy()
         },
+        clean() {
+          self.clean()
+        },
         get _ref() {
           if (!secure.allowRef) return null
           return self
+        },
+        get _isRef() {
+          return true
         },
         get onPointerEnter() {
           return self.onPointerEnter

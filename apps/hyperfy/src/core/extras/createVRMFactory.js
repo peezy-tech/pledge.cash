@@ -2,6 +2,8 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js'
 
 import * as THREE from './three'
 import { DEG2RAD } from './general'
+import { getTrianglesFromGeometry } from './getTrianglesFromGeometry'
+import { getTextureBytesFromMaterial } from './getTextureBytesFromMaterial'
 
 const v1 = new THREE.Vector3()
 const v2 = new THREE.Vector3()
@@ -87,6 +89,10 @@ export function createVRMFactory(glb, setupMaterial) {
     }
   }
 
+  // this.headToEyes = this.eyePosition.clone().sub(headPos)
+  const headPos = normBones.head.node.getWorldPosition(new THREE.Vector3())
+  const headToHeight = height - headPos.y
+
   const getBoneName = vrmBoneName => {
     return glb.userData.vrm.humanoid.getRawBoneNode(vrmBoneName)?.name
   }
@@ -95,7 +101,23 @@ export function createVRMFactory(glb, setupMaterial) {
     // ...
   }
 
-  return (matrix, hooks, node) => {
+  return {
+    create,
+    applyStats(stats) {
+      glb.scene.traverse(obj => {
+        if (obj.geometry && !stats.geometries.has(obj.geometry.uuid)) {
+          stats.geometries.add(obj.geometry.uuid)
+          stats.triangles += getTrianglesFromGeometry(obj.geometry)
+        }
+        if (obj.material && !stats.materials.has(obj.material.uuid)) {
+          stats.materials.add(obj.material.uuid)
+          stats.textureBytes += getTextureBytesFromMaterial(obj.material)
+        }
+      })
+    },
+  }
+
+  function create(matrix, hooks, node) {
     const vrm = cloneGLB(glb)
     const tvrm = vrm.userData.vrm
     const skinnedMeshes = getSkinnedMeshes(vrm.scene)
@@ -184,9 +206,18 @@ export function createVRMFactory(glb, setupMaterial) {
         currentEmote.action?.fadeOut(0.15)
         currentEmote = null
       }
+      if (!url) return
+      const opts = getQueryParams(url)
+      const loop = opts.l !== '0'
+      const speed = parseFloat(opts.s || 1)
+
       if (emotes[url]) {
         currentEmote = emotes[url]
-        currentEmote.action?.reset().fadeIn(0.15).play()
+        if (currentEmote.action) {
+          currentEmote.action.clampWhenFinished = !loop
+          currentEmote.action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce)
+          currentEmote.action.reset().fadeIn(0.15).play()
+        }
       } else {
         const emote = {
           url,
@@ -202,9 +233,12 @@ export function createVRMFactory(glb, setupMaterial) {
             getBoneName,
           })
           const action = mixer.clipAction(clip)
+          action.timeScale = speed
           emote.action = action
           // if its still this emote, play it!
           if (currentEmote === emote) {
+            action.clampWhenFinished = !loop
+            action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce)
             action.play()
           }
         })
@@ -226,17 +260,30 @@ export function createVRMFactory(glb, setupMaterial) {
       return bonesByName[name]
     }
 
-    const applyBoneMatrixWorld = (name, matrix) => {
-      const bone = findBone(name)
-      matrix.multiplyMatrices(vrm.scene.matrixWorld, bone.matrixWorld)
+    let firstPersonActive = false
+    const setFirstPerson = active => {
+      if (firstPersonActive === active) return
+      const head = findBone('neck')
+      head.scale.setScalar(active ? 0 : 1)
+      firstPersonActive = active
+    }
+
+    const m1 = new THREE.Matrix4()
+    const getBoneTransform = boneName => {
+      const bone = findBone(boneName)
+      if (!bone) return null
+      // combine the scene's world matrix with the bone's world matrix
+      return m1.multiplyMatrices(vrm.scene.matrixWorld, bone.matrixWorld)
     }
 
     return {
       raw: vrm,
       height,
-      applyBoneMatrixWorld,
+      headToHeight,
       setEmote,
+      setFirstPerson,
       update,
+      getBoneTransform,
       move(_matrix) {
         matrix.copy(_matrix)
         hooks.octree?.move(sItem)
@@ -271,4 +318,17 @@ function createCapsule(radius, height) {
   const geometry = new THREE.CapsuleGeometry(radius, height)
   geometry.translate(0, fullHeight / 2, 0)
   return geometry
+}
+
+let queryParams = {}
+function getQueryParams(url) {
+  if (!queryParams[url]) {
+    url = new URL(url)
+    const params = {}
+    for (const [key, value] of url.searchParams.entries()) {
+      params[key] = value
+    }
+    queryParams[url] = params
+  }
+  return queryParams[url]
 }

@@ -1,3 +1,4 @@
+import * as THREE from './three'
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
 const cache = new Map() // id -> { id, pmesh, refs }
@@ -24,7 +25,7 @@ class PMeshHandle {
 }
 
 export function geometryToPxMesh(world, geometry, convex) {
-  const id = geometry.uuid
+  const id = `${geometry.uuid}_${convex ? 'convex' : 'triangles'}`
 
   // check and return cached if already cooked
   let item = cache.get(id)
@@ -41,20 +42,19 @@ export function geometryToPxMesh(world, geometry, convex) {
   // console.log('geometry', geometry)
   // console.log('convex', convex)
 
-  const position = geometry.attributes.position
+  let position = geometry.attributes.position
   const index = geometry.index
 
-  // const is16Bit = index?.array instanceof Uint16Array
-  // console.log('is16Bit', is16Bit)
-
   if (position.isInterleavedBufferAttribute) {
-    console.error('TODO: collider needs deinterleaveAttribute')
+    // deinterleave!
+    position = BufferGeometryUtils.deinterleaveAttribute(position)
+    position = new THREE.BufferAttribute(new Float32Array(position.array), position.itemSize, false)
   }
 
   // console.log('position', position)
   // console.log('index', index)
 
-  const positions = geometry.attributes.position.array
+  const positions = position.array
   const floatBytes = positions.length * positions.BYTES_PER_ELEMENT
   const pointsPtr = PHYSX._webidl_malloc(floatBytes)
   PHYSX.HEAPF32.set(positions, pointsPtr >> 2)
@@ -79,7 +79,17 @@ export function geometryToPxMesh(world, geometry, convex) {
     // console.log('points.count', desc.points.count)
     // console.log('points.stride', desc.points.stride)
 
-    const indices = index.array // Uint16Array or Uint32Array
+    let indices = index.array // Uint16Array or Uint32Array
+
+    // for some reason i'm seeing Uint8Arrays in some glbs, specifically the vipe rooms.
+    // so we just coerce these up to u16
+    if (indices instanceof Uint8Array) {
+      indices = new Uint16Array(index.array.length)
+      for (let i = 0; i < index.array.length; i++) {
+        indices[i] = index.array[i]
+      }
+    }
+
     const indexBytes = indices.length * indices.BYTES_PER_ELEMENT
     const indexPtr = PHYSX._webidl_malloc(indexBytes)
     if (indices instanceof Uint16Array) {
@@ -87,6 +97,7 @@ export function geometryToPxMesh(world, geometry, convex) {
       desc.triangles.stride = 6 // 3 × 2 bytes per triangle
       desc.flags.raise(PHYSX.PxTriangleMeshFlagEnum.e16_BIT_INDICES)
     } else {
+      // note: this is here for brevity but no longer used as we force everything to 16 bit
       PHYSX.HEAPU32.set(indices, indexPtr >> 2)
       desc.triangles.stride = 12 // 3 × 4 bytes per triangle
     }
@@ -105,9 +116,9 @@ export function geometryToPxMesh(world, geometry, convex) {
     } catch (err) {
       console.error('geometryToPxMesh failed...')
       console.error(err)
+    } finally {
+      PHYSX._webidl_free(indexPtr)
     }
-
-    PHYSX._webidl_free(indexPtr)
   }
 
   PHYSX._webidl_free(pointsPtr)

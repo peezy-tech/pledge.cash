@@ -22,6 +22,7 @@ export class Entities extends System {
     super(world)
     this.items = new Map()
     this.players = new Map()
+    this.player = null
     this.hot = new Set()
     this.removed = []
   }
@@ -45,16 +46,24 @@ export class Entities extends System {
     this.items.set(entity.data.id, entity)
     if (data.type === 'player') {
       this.players.set(entity.data.id, entity)
+      // on the client remote players emit enter events here.
+      // but on the server, enter events is delayed for players entering until after their snapshot is sent
+      // that way they can actually respond correctly to follow-through events.
+      // see ServerNetwork.js -> onConnection
+      if (this.world.network.isClient && data.owner !== this.world.network.id) {
+        this.world.events.emit('enter', { playerId: entity.data.id })
+      }
     }
     if (data.owner === this.world.network.id) {
       this.player = entity
+      this.world.emit('player', entity)
     }
     return entity
   }
 
   remove(id) {
     const entity = this.items.get(id)
-    if (!entity) console.warn(`tried to remove entity that did not exist: ${id}`)
+    if (!entity) return console.warn(`tried to remove entity that did not exist: ${id}`)
     if (entity.isPlayer) this.players.delete(entity.data.id)
     entity.destroy()
     this.items.delete(id)
@@ -99,5 +108,14 @@ export class Entities extends System {
     for (const data of datas) {
       this.add(data)
     }
+  }
+
+  destroy() {
+    this.items.forEach(item => {
+      this.remove(item.data.id)
+    })
+    this.items.clear()
+    this.players.clear()
+    this.hot.clear()
   }
 }

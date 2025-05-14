@@ -1,3 +1,5 @@
+import moment from 'moment'
+import { uuid } from '../utils'
 import { System } from './System'
 
 /**
@@ -16,29 +18,71 @@ export class Chat extends System {
     super(world)
     this.msgs = []
     this.listeners = new Set()
-    this.commands = new Map()
   }
 
   add(msg, broadcast) {
-    const isCmd = msg.body.startsWith('/')
-    if (!isCmd) {
-      this.msgs = [...this.msgs, msg]
-      if (this.msgs.length > CHAT_MAX_MESSAGES) {
-        this.msgs.shift()
-      }
-      for (const callback of this.listeners) {
-        callback(this.msgs)
-      }
-      if (msg.fromId) {
-        const player = this.world.entities.getPlayer(msg.fromId)
-        player?.chat(msg.body)
-      }
+    // add to chat messages
+    this.msgs = [...this.msgs, msg]
+    if (this.msgs.length > CHAT_MAX_MESSAGES) {
+      this.msgs.shift()
     }
+    for (const callback of this.listeners) {
+      callback(this.msgs)
+    }
+    if (msg.fromId) {
+      const player = this.world.entities.getPlayer(msg.fromId)
+      player?.chat(msg.body)
+    }
+    // emit chat event
+    const readOnly = Object.freeze({ ...msg })
+    this.world.events.emit('chat', readOnly)
+    // maybe broadcast
     if (broadcast) {
       this.world.network.send('chatAdded', msg)
     }
-    const readOnly = Object.freeze({ ...msg })
-    this.world.events.emit('chat', readOnly)
+  }
+
+  command(text) {
+    if (this.world.network.isServer) return
+    const playerId = this.world.network.id
+    const args = text
+      .slice(1)
+      .split(' ')
+      .map(str => str.trim())
+      .filter(str => !!str)
+    const isAdminCommand = args[0] === 'admin'
+    if (args[0] === 'stats') {
+      this.world.prefs.setStats(!this.world.prefs.stats)
+    }
+    if (!isAdminCommand) {
+      this.world.events.emit('command', { playerId, args })
+    }
+    this.world.network.send('command', args)
+  }
+
+  clear(broadcast) {
+    this.msgs = []
+    for (const callback of this.listeners) {
+      callback(this.msgs)
+    }
+    if (broadcast) {
+      this.world.network.send('chatCleared')
+    }
+  }
+
+  send(text) {
+    // only available as a client
+    if (!this.world.network.isClient) return
+    const player = this.world.entities.player
+    const data = {
+      id: uuid(),
+      from: player.data.name,
+      fromId: player.data.id,
+      body: text,
+      createdAt: moment().toISOString(),
+    }
+    this.add(data, true)
+    return data
   }
 
   serialize() {
@@ -58,5 +102,10 @@ export class Chat extends System {
     return () => {
       this.listeners.delete(callback)
     }
+  }
+
+  destroy() {
+    this.msgs = []
+    this.listeners.clear()
   }
 }

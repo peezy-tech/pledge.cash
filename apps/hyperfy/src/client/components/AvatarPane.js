@@ -6,12 +6,9 @@ import { usePane } from './usePane'
 import { AvatarPreview } from '../AvatarPreview'
 
 export function AvatarPane({ world, info }) {
-  const paneRef = useRef()
-  const headRef = useRef()
   const viewportRef = useRef()
   const previewRef = useRef()
   const [stats, setStats] = useState(null)
-  usePane('avatar', paneRef, headRef)
   useEffect(() => {
     const viewport = viewportRef.current
     const preview = new AvatarPreview(world, viewport)
@@ -24,83 +21,97 @@ export function AvatarPane({ world, info }) {
   }, [])
   return (
     <div
-      ref={paneRef}
       className='vpane'
       css={css`
         position: absolute;
-        top: 20px;
-        left: 20px;
-        width: 320px;
-        background: rgba(22, 22, 28, 1);
-        border: 1px solid rgba(255, 255, 255, 0.03);
-        border-radius: 10px;
-        box-shadow: rgba(0, 0, 0, 0.5) 0px 10px 30px;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 16rem;
+        height: 24rem;
+        background: rgba(11, 10, 21, 0.85);
+        border: 0.0625rem solid #2a2b39;
+        backdrop-filter: blur(5px);
+        border-radius: 1rem;
         pointer-events: auto;
         display: flex;
         flex-direction: column;
+        font-size: 1rem;
+        overflow: hidden;
         .vpane-head {
-          height: 40px;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+          height: 3.125rem;
           display: flex;
           align-items: center;
-          padding: 0 0 0 10px;
+          padding: 0 0.3rem 0 1rem;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.03);
           &-title {
-            padding-left: 7px;
+            font-size: 1rem;
             font-weight: 500;
             flex: 1;
           }
           &-close {
-            width: 40px;
-            height: 40px;
+            width: 2.5rem;
+            height: 2.5rem;
             display: flex;
             align-items: center;
             justify-content: center;
-            cursor: pointer;
+            color: #5d6077;
+            &:hover {
+              cursor: pointer;
+              color: white;
+            }
           }
         }
         .vpane-content {
           flex: 1;
-          padding: 20px;
-          overflow-y: auto;
+          position: relative;
         }
         .vpane-viewport {
-          height: 300px;
-          background: #1f1f2a;
-          border-radius: 10px;
-          overflow: hidden;
-          margin: 0 0 10px;
+          position: absolute;
+          inset: 0;
         }
         .vpane-actions {
+          position: absolute;
+          bottom: 0;
+          left: 0;
+          right: 0;
           display: flex;
-          gap: 10px;
+          align-items: center;
+          gap: 0.625rem;
+          padding: 1rem;
         }
         .vpane-action {
           flex-basis: 50%;
-          background: #252630;
-          border-radius: 10px;
-          height: 40px;
+          height: 2.5rem;
+          background: rgba(11, 10, 21, 0.85);
+          border: 0.0625rem solid #2a2b39;
+          border-radius: 0.5rem;
+          backdrop-filter: blur(5px);
           display: flex;
           align-items: center;
           justify-content: center;
-          cursor: pointer;
+          font-size: 0.9375rem;
+          &:hover {
+            cursor: pointer;
+          }
         }
       `}
     >
-      <div className='vpane-head' ref={headRef}>
-        <UserIcon size={20} />
+      <div className='vpane-head'>
         <div className='vpane-head-title'>Avatar</div>
         <div className='vpane-head-close' onClick={() => world.emit('avatar', null)}>
           <XIcon size={20} />
         </div>
       </div>
-      <div className='vpane-content noscrollbar'>
-        <div className='vpane-viewport' ref={viewportRef} />
-        <div className='vpane-actions'>
-          <div className='vpane-action' onClick={info.onEquip}>
-            <span>Equip</span>
-          </div>
-          <div className='vpane-action' onClick={info.onPlace}>
-            <span>Place</span>
+      <div className='vpane-content'>
+        <div className='vpane-viewport' ref={viewportRef}>
+          <div className='vpane-actions'>
+            <div className='vpane-action' onClick={info.onEquip}>
+              <span>Equip</span>
+            </div>
+            <div className='vpane-action' onClick={info.onPlace}>
+              <span>Place</span>
+            </div>
           </div>
         </div>
       </div>

@@ -1,6 +1,10 @@
 import * as THREE from './extras/three'
 import EventEmitter from 'eventemitter3'
 
+import { Settings } from './systems/Settings'
+import { Collections } from './systems/Collections'
+import { Apps } from './systems/Apps'
+import { Anchors } from './systems/Anchors'
 import { Events } from './systems/Events'
 import { Chat } from './systems/Chat'
 import { Blueprints } from './systems/Blueprints'
@@ -20,12 +24,20 @@ export class World extends EventEmitter {
     this.accumulator = 0
     this.systems = []
     this.networkRate = 1 / 8 // 8Hz
+    this.assetsUrl = null
+    this.assetsDir = null
     this.hot = new Set()
 
     this.rig = new THREE.Object3D()
-    this.camera = new THREE.PerspectiveCamera(70, 0, 0.01, 2000)
+    // NOTE: camera near is slightly smaller than spherecast. far is slightly more than skybox.
+    // this gives us minimal z-fighting without needing logarithmic depth buffers
+    this.camera = new THREE.PerspectiveCamera(70, 0, 0.2, 1200)
     this.rig.add(this.camera)
 
+    this.register('settings', Settings)
+    this.register('collections', Collections)
+    this.register('apps', Apps)
+    this.register('anchors', Anchors)
     this.register('events', Events)
     this.register('scripts', Scripts)
     this.register('chat', Chat)
@@ -43,6 +55,8 @@ export class World extends EventEmitter {
   }
 
   async init(options) {
+    this.storage = options.storage
+    this.assetsDir = options.assetsDir
     for (const system of this.systems) {
       await system.init(options)
     }
@@ -61,6 +75,7 @@ export class World extends EventEmitter {
     // update time, delta, frame and accumulator
     time /= 1000
     let delta = time - this.time
+    if (delta < 0) delta = 0
     if (delta > this.maxDeltaTime) {
       delta = this.maxDeltaTime
     }
@@ -175,7 +190,7 @@ export class World extends EventEmitter {
   }
 
   setupMaterial = material => {
-    this.environment?.csm.setupMaterial(material)
+    this.environment.csm?.setupMaterial(material)
   }
 
   setHot(item, hot) {
@@ -183,6 +198,44 @@ export class World extends EventEmitter {
       this.hot.add(item)
     } else {
       this.hot.delete(item)
+    }
+  }
+
+  resolveURL(url, allowLocal) {
+    if (!url) return url
+    url = url.trim()
+    if (url.startsWith('blob')) {
+      return url
+    }
+    if (url.startsWith('asset://')) {
+      if (this.assetsDir && allowLocal) {
+        return url.replace('asset:/', this.assetsDir)
+      } else if (this.assetsUrl) {
+        return url.replace('asset:/', this.assetsUrl)
+      } else {
+        console.error('resolveURL: no assetsUrl or assetsDir defined')
+        return url
+      }
+    }
+    if (url.match(/^https?:\/\//i)) {
+      return url
+    }
+    if (url.startsWith('//')) {
+      return `https:${url}`
+    }
+    if (url.startsWith('/')) {
+      return url
+    }
+    return `https://${url}`
+  }
+
+  inject(runtime) {
+    this.apps.inject(runtime)
+  }
+
+  destroy() {
+    for (const system of this.systems) {
+      system.destroy()
     }
   }
 }

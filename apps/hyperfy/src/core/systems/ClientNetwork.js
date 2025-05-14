@@ -1,4 +1,9 @@
+import moment from 'moment'
+import { emoteUrls } from '../extras/playerEmotes'
 import { readPacket, writePacket } from '../packets'
+import { storage } from '../storage'
+import { uuid } from '../utils'
+import { hashFile } from '../utils-client'
 import { System } from './System'
 
 /**
@@ -19,10 +24,12 @@ export class ClientNetwork extends System {
     this.queue = []
   }
 
-  init({ wsUrl, apiUrl }) {
-    const authToken = this.world.client.storage.get('authToken')
-    this.apiUrl = apiUrl
-    this.ws = new WebSocket(`${wsUrl}?authToken=${authToken}`)
+  init({ wsUrl, name, avatar }) {
+    const authToken = storage.get('authToken')
+    let url = `${wsUrl}?authToken=${authToken}`
+    if (name) url += `&name=${encodeURIComponent(name)}`
+    if (avatar) url += `&avatar=${encodeURIComponent(avatar)}`
+    this.ws = new WebSocket(url)
     this.ws.binaryType = 'arraybuffer'
     this.ws.addEventListener('message', this.onPacket)
     this.ws.addEventListener('close', this.onClose)
@@ -39,6 +46,17 @@ export class ClientNetwork extends System {
   }
 
   async upload(file) {
+    {
+      // first check if we even need to upload it
+      const hash = await hashFile(file)
+      const ext = file.name.split('.').pop().toLowerCase()
+      const filename = `${hash}.${ext}`
+      const url = `${this.apiUrl}/upload-check?filename=${filename}`
+      const resp = await fetch(url)
+      const data = await resp.json()
+      if (data.exists) return // console.log('already uploaded:', filename)
+    }
+    // then upload it
     const form = new FormData()
     form.append('file', file)
     const url = `${this.apiUrl}/upload`
@@ -76,14 +94,67 @@ export class ClientNetwork extends System {
   onSnapshot(data) {
     this.id = data.id
     this.serverTimeOffset = data.serverTime - performance.now()
+    this.apiUrl = data.apiUrl
+    this.maxUploadSize = data.maxUploadSize
+    this.world.assetsUrl = data.assetsUrl
+
+    // preload environment model and avatar
+    if (data.settings.model) {
+      this.world.loader.preload('model', data.settings.model.url)
+    } else if (this.world.environment.base) {
+      this.world.loader.preload('model', this.world.environment.base.model)
+    }
+    if (data.settings.avatar) {
+      this.world.loader.preload('avatar', data.settings.avatar.url)
+    }
+    // preload some blueprints
+    for (const item of data.blueprints) {
+      if (item.preload) {
+        if (item.model) {
+          const type = item.model.endsWith('.vrm') ? 'avatar' : 'model'
+          this.world.loader.preload(type, item.model)
+        }
+        if (item.script) {
+          this.world.loader.preload('script', item.script)
+        }
+        for (const value of Object.values(item.props || {})) {
+          if (value === undefined || value === null || !value?.url || !value?.type) continue
+          this.world.loader.preload(value.type, value.url)
+        }
+      }
+    }
+    // preload emotes
+    for (const url of emoteUrls) {
+      this.world.loader.preload('emote', url)
+    }
+    // preload local player avatar
+    for (const item of data.entities) {
+      if (item.type === 'player' && item.owner === this.id) {
+        const url = item.sessionAvatar || item.avatar
+        this.world.loader.preload('avatar', url)
+      }
+    }
+    this.world.loader.execPreload()
+
+    this.world.collections.deserialize(data.collections)
+    this.world.settings.deserialize(data.settings)
     this.world.chat.deserialize(data.chat)
     this.world.blueprints.deserialize(data.blueprints)
     this.world.entities.deserialize(data.entities)
-    this.world.client.storage.set('authToken', data.authToken)
+    this.world.livekit?.deserialize(data.livekit)
+    storage.set('authToken', data.authToken)
+  }
+
+  onSettingsModified = data => {
+    this.world.settings.set(data.key, data.value)
   }
 
   onChatAdded = msg => {
     this.world.chat.add(msg, false)
+  }
+
+  onChatCleared = () => {
+    this.world.chat.clear()
   }
 
   onBlueprintAdded = blueprint => {
@@ -100,6 +171,7 @@ export class ClientNetwork extends System {
 
   onEntityModified = data => {
     const entity = this.world.entities.get(data.id)
+    if (!entity) return console.error('onEntityModified: no entity found', data)
     entity.modify(data)
   }
 
@@ -117,8 +189,42 @@ export class ClientNetwork extends System {
     this.world.entities.player?.teleport(data)
   }
 
+  onPlayerPush = data => {
+    this.world.entities.player?.push(data.force)
+  }
+
+  onPlayerSessionAvatar = data => {
+    this.world.entities.player?.setSessionAvatar(data.avatar)
+  }
+
+  onPong = time => {
+    this.world.stats?.onPong(time)
+  }
+
+  onKick = code => {
+    this.world.emit('kick', code)
+  }
+
   onClose = code => {
+    this.world.chat.add({
+      id: uuid(),
+      from: null,
+      fromId: null,
+      body: `You have been disconnected.`,
+      createdAt: moment().toISOString(),
+    })
     this.world.emit('disconnect', code || true)
     console.log('disconnect', code)
+  }
+
+  destroy() {
+    if (this.ws) {
+      this.ws.removeEventListener('message', this.onPacket)
+      this.ws.removeEventListener('close', this.onClose)
+      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+        this.ws.close()
+      }
+      this.ws = null
+    }
   }
 }

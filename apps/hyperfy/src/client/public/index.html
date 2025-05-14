@@ -1,8 +1,22 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <title>World</title>
     <meta charset="utf-8" />
+    <title>{title}</title>
+    <meta name="description" content="{desc}" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="{url}" />
+    <meta property="og:title" content="{title}" />
+    <meta property="og:description" content="{desc}" />
+    <meta property="og:image" content="{image}" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="{url}" />
+    <meta name="twitter:title" content="{title}" />
+    <meta name="twitter:description" content="{desc}" />
+    <meta name="twitter:image" content="{image}" />
+
     <meta
       name="viewport"
       content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"
@@ -10,17 +24,15 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <!-- <link rel='icon' href='/favicon.ico' /> -->
+    <link rel="preload" href="/rubik.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" type="text/css" href="/index.css?v={buildId}" />
-    <script src="https://cdn.jsdelivr.net/npm/ses@1.10.0/dist/ses.umd.min.js"></script>
-    <script type="module">
-      import Yoga from 'https://cdn.jsdelivr.net/npm/yoga-layout@3.2.1/+esm'
-      window.Yoga = Yoga
+    <script>
+      window.PARTICLES_PATH = '{particlesPath}'
     </script>
   </head>
   <body>
     <div id="root"></div>
-    <script src="/physx-js-webidl.js"></script>
     <script src="/env.js?v={buildId}"></script>
-    <script src="{jsFile}"></script>
+    <script src="{jsPath}" type="module"></script>
   </body>
 </html>

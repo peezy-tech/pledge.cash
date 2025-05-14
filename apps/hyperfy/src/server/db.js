@@ -128,4 +128,99 @@ const migrations = [
       }
     }
   },
+  // blueprint.config -> blueprint.props
+  async db => {
+    const blueprints = await db('blueprints')
+    for (const blueprint of blueprints) {
+      const data = JSON.parse(blueprint.data)
+      data.props = data.config
+      delete data.config
+      await db('blueprints')
+        .where('id', blueprint.id)
+        .update({
+          data: JSON.stringify(data),
+        })
+    }
+  },
+  // add blueprint.public and blueprint.locked fields
+  async db => {
+    const blueprints = await db('blueprints')
+    for (const blueprint of blueprints) {
+      const data = JSON.parse(blueprint.data)
+      let changed
+      if (data.public === undefined) {
+        data.public = false
+        changed = true
+      }
+      if (data.locked === undefined) {
+        data.locked = false
+        changed = true
+      }
+      if (changed) {
+        await db('blueprints')
+          .where('id', blueprint.id)
+          .update({
+            data: JSON.stringify(data),
+          })
+      }
+    }
+  },
+  // add blueprint.unique field
+  async db => {
+    const blueprints = await db('blueprints')
+    for (const blueprint of blueprints) {
+      const data = JSON.parse(blueprint.data)
+      let changed
+      if (data.unique === undefined) {
+        data.unique = false
+        changed = true
+      }
+      if (changed) {
+        await db('blueprints')
+          .where('id', blueprint.id)
+          .update({
+            data: JSON.stringify(data),
+          })
+      }
+    }
+  },
+  // rename config key to settings
+  async db => {
+    let config = await db('config').where('key', 'config').first()
+    if (config) {
+      const settings = config.value
+      await db('config').insert({ key: 'settings', value: settings })
+      await db('config').where('key', 'config').delete()
+    }
+  },
+  // add blueprint.disabled field
+  async db => {
+    const blueprints = await db('blueprints')
+    for (const blueprint of blueprints) {
+      const data = JSON.parse(blueprint.data)
+      if (data.disabled === undefined) {
+        data.disabled = false
+        await db('blueprints')
+          .where('id', blueprint.id)
+          .update({
+            data: JSON.stringify(data),
+          })
+      }
+    }
+  },
+  // add entity.scale field
+  async db => {
+    const entities = await db('entities')
+    for (const entity of entities) {
+      const data = JSON.parse(entity.data)
+      if (!data.scale) {
+        data.scale = [1, 1, 1]
+        await db('entities')
+          .where('id', entity.id)
+          .update({
+            data: JSON.stringify(data),
+          })
+      }
+    }
+  },
 ]

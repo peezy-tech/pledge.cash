@@ -35,7 +35,7 @@ export class Blueprints extends System {
     if (!changed) return
     this.items.set(blueprint.id, modified)
     for (const [_, entity] of this.world.entities.items) {
-      if (entity.blueprint === blueprint) {
+      if (entity.data.blueprint === blueprint.id) {
         entity.data.state = {}
         entity.build()
       }
@@ -52,23 +52,12 @@ export class Blueprints extends System {
   }
 
   deserialize(datas) {
-    const preloads = []
     for (const data of datas) {
       this.add(data)
-      if (data.preload) {
-        if (data.model) {
-          const type = data.model.endsWith('.vrm') ? 'avatar' : 'model'
-          preloads.push({ type, url: data.model })
-        }
-        if (data.script) {
-          preloads.push({ type: 'script', url: data.script })
-        }
-        for (const value of Object.values(data.config || {})) {
-          if (!value.url || !value.type) continue
-          preloads.push({ type: value.type, url: value.url })
-        }
-      }
     }
-    this.world.loader.preload(preloads)
+  }
+
+  destroy() {
+    this.items.clear()
   }
 }

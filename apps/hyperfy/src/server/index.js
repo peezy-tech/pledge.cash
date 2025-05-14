@@ -12,32 +12,59 @@ import compress from '@fastify/compress'
 import statics from '@fastify/static'
 import multipart from '@fastify/multipart'
 
-import { loadPhysX } from './physx/loadPhysX'
-
 import { createServerWorld } from '../core/createServerWorld'
 import { hashFile } from '../core/utils-server'
 import { getDB } from './db'
+import { Storage } from './Storage'
+import { initCollections } from './collections'
 
 const rootDir = path.join(__dirname, '../')
 const worldDir = path.join(rootDir, process.env.WORLD)
 const assetsDir = path.join(worldDir, '/assets')
+const collectionsDir = path.join(worldDir, '/collections')
 const port = process.env.PORT
 
+// create world folders if needed
 await fs.ensureDir(worldDir)
 await fs.ensureDir(assetsDir)
+await fs.ensureDir(collectionsDir)
 
-// copy core assets
-await fs.copy(path.join(rootDir, 'src/core/assets'), path.join(assetsDir))
+// copy over built-in assets and collections
+await fs.copy(path.join(rootDir, 'src/world/assets'), path.join(assetsDir))
+await fs.copy(path.join(rootDir, 'src/world/collections'), path.join(collectionsDir))
 
+// init collections
+const collections = await initCollections({ collectionsDir, assetsDir })
+
+// init db
 const db = await getDB(path.join(worldDir, '/db.sqlite'))
 
+// init storage
+const storage = new Storage(path.join(worldDir, '/storage.json'))
+
+// create world
 const world = createServerWorld()
-world.init({ db, loadPhysX })
+world.assetsUrl = process.env.PUBLIC_ASSETS_URL
+world.collections.deserialize(collections)
+world.init({ db, storage, assetsDir })
 
 const fastify = Fastify({ logger: { level: 'error' } })
 
 fastify.register(cors)
 fastify.register(compress)
+fastify.get('/', async (req, reply) => {
+  const title = world.settings.title || 'World'
+  const desc = world.settings.desc || ''
+  const image = world.resolveURL(world.settings.image?.url) || ''
+  const url = process.env.PUBLIC_ASSETS_URL
+  const filePath = path.join(__dirname, 'public', 'index.html')
+  let html = fs.readFileSync(filePath, 'utf-8')
+  html = html.replaceAll('{url}', url)
+  html = html.replaceAll('{title}', title)
+  html = html.replaceAll('{desc}', desc)
+  html = html.replaceAll('{image}', image)
+  reply.type('text/html').send(html)
+})
 fastify.register(statics, {
   root: path.join(__dirname, 'public'),
   prefix: '/',
@@ -74,8 +101,8 @@ for (const key in process.env) {
   }
 }
 const envsCode = `
-  if (!globalThis.process) globalThis.process = {}
-  globalThis.process.env = ${JSON.stringify(publicEnvs)}
+  if (!globalThis.env) globalThis.env = {}
+  globalThis.env = ${JSON.stringify(publicEnvs)}
 `
 fastify.get('/env.js', async (req, reply) => {
   reply.type('application/javascript').send(envsCode)
@@ -84,7 +111,6 @@ fastify.get('/env.js', async (req, reply) => {
 fastify.post('/api/upload', async (req, reply) => {
   // console.log('DEBUG: slow uploads')
   // await new Promise(resolve => setTimeout(resolve, 2000))
-
   const file = await req.file()
   const ext = file.filename.split('.').pop().toLowerCase()
   // create temp buffer to store contents
@@ -102,6 +128,13 @@ fastify.post('/api/upload', async (req, reply) => {
   if (!exists) {
     await fs.writeFile(filePath, buffer)
   }
+})
+
+fastify.get('/api/upload-check', async (req, reply) => {
+  const filename = req.query.filename
+  const filePath = path.join(assetsDir, filename)
+  const exists = await fs.exists(filePath)
+  return { exists }
 })
 
 fastify.get('/health', async (request, reply) => {
@@ -128,16 +161,17 @@ fastify.get('/status', async (request, reply) => {
     const status = {
       uptime: Math.round(world.time),
       protected: process.env.ADMIN_CODE !== undefined ? true : false,
-      connectedUsers: []
+      connectedUsers: [],
+      commitHash: process.env.COMMIT_HASH,
     }
-    for (const socket of world.network.sockets.values()) {  
+    for (const socket of world.network.sockets.values()) {
       status.connectedUsers.push({
-        id: socket.player.data.user.id,
+        id: socket.player.data.userId,
         position: socket.player.position.current.toArray(),
-        name: socket.player.data.user.name
+        name: socket.player.data.name,
       })
     }
-    
+
     return reply.code(200).send(status)
   } catch (error) {
     console.error('Status failed:', error)
@@ -163,8 +197,19 @@ try {
 
 async function worldNetwork(fastify) {
   fastify.get('/ws', { websocket: true }, (ws, req) => {
-    world.network.onConnection(ws, req.query.authToken)
+    world.network.onConnection(ws, req.query)
   })
 }
 
 console.log(`running on port ${port}`)
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  await fastify.close()
+  process.exit(0)
+})
+
+process.on('SIGTERM', async () => {
+  await fastify.close()
+  process.exit(0)
+})

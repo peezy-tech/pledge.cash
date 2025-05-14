@@ -1,7 +1,9 @@
+import { isNumber, isString } from 'lodash-es'
 import { Node } from './Node'
 
 const defaults = {
   label: '...',
+  health: 100,
 }
 
 export class Nametag extends Node {
@@ -9,12 +11,13 @@ export class Nametag extends Node {
     super(data)
     this.name = 'nametag'
 
-    this._label = data.label || defaults.label
+    this.label = data.label
+    this.health = data.health
   }
 
   mount() {
     if (this.ctx.world.nametags) {
-      this.handle = this.ctx.world.nametags.add(this.label)
+      this.handle = this.ctx.world.nametags.add({ name: this._label, health: this._health })
       this.handle?.move(this.matrixWorld)
     }
   }
@@ -32,7 +35,7 @@ export class Nametag extends Node {
 
   copy(source, recursive) {
     super.copy(source, recursive)
-    this.label = source.label
+    this._label = source._label
     return this
   }
 
@@ -40,10 +43,29 @@ export class Nametag extends Node {
     return this._label
   }
 
-  set label(value) {
+  set label(value = defaults.label) {
+    if (isNumber(value)) {
+      value = value + ''
+    }
+    if (!isString(value)) {
+      throw new Error('[nametag] label invalid')
+    }
     if (this._label === value) return
     this._label = value
-    this.handle?.rename(value)
+    this.handle?.setName(value)
+  }
+
+  get health() {
+    return this._health
+  }
+
+  set health(value = defaults.health) {
+    if (!isNumber(value)) {
+      throw new Error('[nametag] health not a number')
+    }
+    if (this._health === value) return
+    this._health = value
+    this.handle?.setHealth(value)
   }
 
   getProxy() {
@@ -55,6 +77,12 @@ export class Nametag extends Node {
         },
         set label(value) {
           self.label = value
+        },
+        get health() {
+          return self.health
+        },
+        set health(value) {
+          self.health = value
         },
       }
       proxy = Object.defineProperties(proxy, Object.getOwnPropertyDescriptors(super.getProxy())) // inherit Node properties

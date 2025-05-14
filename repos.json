@@ -4,7 +4,7 @@
       "name": "hyperfy",
       "upstreamUrl": "~/repos/github/hyperfy-xyz/hyperfy",
       "localPath": "apps/hyperfy",
-      "branch": "drama.haus"
+      "branch": "dev"
     },
     {
       "name": "shamir-secret-sharing",

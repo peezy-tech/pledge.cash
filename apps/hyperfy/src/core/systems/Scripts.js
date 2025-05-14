@@ -5,6 +5,8 @@ import { DEG2RAD, RAD2DEG } from '../extras/general'
 import { clamp, num, uuid } from '../utils'
 import { LerpVector3 } from '../extras/LerpVector3'
 import { LerpQuaternion } from '../extras/LerpQuaternion'
+import { Curve } from '../extras/Curve'
+import { prng } from '../extras/prng'
 
 /**
  * Script System
@@ -20,14 +22,23 @@ export class Scripts extends System {
     this.compartment = new Compartment({
       console: {
         log: (...args) => console.log(...args),
+        warn: (...args) => console.warn(...args),
         error: (...args) => console.error(...args),
         time: (...args) => console.time(...args),
         timeEnd: (...args) => console.timeEnd(...args),
       },
+      Date: {
+        now: () => Date.now(),
+      },
+      URL: {
+        createObjectURL: blob => URL.createObjectURL(blob),
+      },
+      Math,
       eval: undefined,
       harden: undefined,
       lockdown: undefined,
       num,
+      prng,
       clamp,
       // Layers,
       Object3D: THREE.Object3D,
@@ -38,7 +49,7 @@ export class Scripts extends System {
       LerpVector3,
       LerpQuaternion,
       // Material: Material,
-      // Curve: Curve,
+      Curve,
       // Gradient: Gradient,
       DEG2RAD,
       RAD2DEG,
@@ -60,11 +71,13 @@ export class Scripts extends System {
   }
 }
 
+// NOTE: config is deprecated and renamed to props
 function wrapRawCode(code) {
   return `
   (function() {
     const shared = {}
-    return (world, app, fetch) => {
+    return (world, app, fetch, props, setTimeout) => {
+      const config = props // deprecated
       ${code}
     }
   })()

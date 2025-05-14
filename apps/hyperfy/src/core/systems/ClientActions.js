@@ -2,6 +2,7 @@ import * as THREE from 'three'
 
 import { System } from './System'
 import { ControlPriorities } from '../extras/ControlPriorities'
+import { isTouch } from '../../client/utils'
 
 const BATCH_SIZE = 500
 
@@ -20,19 +21,7 @@ export class ClientActions extends System {
   start() {
     this.action = createAction(this.world)
     this.btnDown = false
-    this.control = this.world.controls.bind({
-      priority: ControlPriorities.ACTION,
-      onPress: code => {
-        if (code === 'KeyE') {
-          this.btnDown = true
-        }
-      },
-      onRelease: code => {
-        if (code === 'KeyE') {
-          this.btnDown = false
-        }
-      },
-    })
+    this.control = this.world.controls.bind({ priority: ControlPriorities.ACTION })
   }
 
   register(node) {
@@ -53,12 +42,15 @@ export class ClientActions extends System {
   update(delta) {
     const cameraPos = this.world.rig.position
 
+    this.btnDown = this.control.keyE.down || this.control.touchB.down
+
     // clear current action if its no longer in distance
     if (this.current.node) {
       const distance = this.current.node.worldPos.distanceTo(cameraPos)
-      if (distance > this.current.node.distance) {
+      if (distance > this.current.node._distance) {
         this.current.node = null
         this.current.distance = Infinity
+        this.emit('change', false)
         this.action.stop()
       } else {
         this.current.distance = distance
@@ -74,7 +66,7 @@ export class ClientActions extends System {
       if (node.finished) continue
       if (this.current.node === node) continue
       const distance = node.worldPos.distanceTo(cameraPos)
-      if (distance <= node.distance && distance < this.current.distance) {
+      if (distance <= node._distance && distance < this.current.distance) {
         this.current.node = node
         this.current.distance = distance
         didChange = true
@@ -85,6 +77,7 @@ export class ClientActions extends System {
     }
     if (didChange) {
       this.action.start(this.current.node)
+      this.emit('change', true)
     }
     this.action.update(delta)
   }
@@ -92,6 +85,7 @@ export class ClientActions extends System {
   destroy() {
     this.control.release()
     this.control = null
+    this.nodes = []
   }
 }
 
@@ -111,7 +105,7 @@ function createAction(world) {
     board.drawPie(left + 6, 6, 16, 100, '#484848') // grey
     board.drawPie(left + 6, 6, 16, ratio * 100, '#ffffff') // white
     board.drawCircle(left + 10, 10, 12, '#000000') // inner
-    board.drawText(left + 16, 14, 'E', '#ffffff', 18, 400) // E
+    if (!isTouch) board.drawText(left + 16, 14, 'E', '#ffffff', 18, 400) // E
     board.drawText(left + 47, 14, label, '#ffffff', 18, 400) // label
     board.commit()
     // console.timeEnd('draw')
@@ -132,7 +126,7 @@ function createAction(world) {
       node = _node
       world.actions.btnDown = false
       node.progress = 0
-      draw(node.label, node.progress / node.duration)
+      draw(node._label, node.progress / node._duration)
       world.stage.scene.add(mesh)
     },
     update(delta) {
@@ -144,18 +138,18 @@ function createAction(world) {
         if (node.progress === 0) {
           cancelled = false
           try {
-            node.onStart()
+            node._onStart()
           } catch (err) {
             console.error('action.onStart:', err)
           }
         }
         node.progress += delta
-        if (node.progress > node.duration) node.progress = node.duration
-        draw(node.label, node.progress / node.duration)
-        if (node.progress === node.duration) {
+        if (node.progress > node._duration) node.progress = node._duration
+        draw(node._label, node.progress / node._duration)
+        if (node.progress === node._duration) {
           node.progress = 0
           try {
-            node.onTrigger()
+            node._onTrigger({ playerId: world.entities.player.data.id })
           } catch (err) {
             console.error('action.onTrigger:', err)
           }
@@ -163,7 +157,7 @@ function createAction(world) {
       } else if (node.progress > 0) {
         if (!cancelled) {
           try {
-            node.onCancel()
+            node._onCancel()
           } catch (err) {
             console.error('action.onCancel:', err)
           }
@@ -171,7 +165,7 @@ function createAction(world) {
         }
         node.progress -= delta
         if (node.progress < 0) node.progress = 0
-        draw(node.label, node.progress / node.duration)
+        draw(node._label, node.progress / node._duration)
       }
     },
     stop() {

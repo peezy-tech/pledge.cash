@@ -1,15 +1,17 @@
 import moment from 'moment'
 import { writePacket } from '../packets'
 import { Socket } from '../Socket'
-import { addRole, hasRole, serializeRoles, uuid } from '../utils'
+import { addRole, hasRole, removeRole, serializeRoles, uuid } from '../utils'
 import { System } from './System'
 import { createJWT, readJWT } from '../utils-server'
-import { cloneDeep } from 'lodash-es'
+import { cloneDeep, isNumber } from 'lodash-es'
 import * as THREE from '../extras/three'
 
 const SAVE_INTERVAL = parseInt(process.env.SAVE_INTERVAL || '60') // seconds
 const PING_RATE = 1 // seconds
 const defaultSpawn = '{ "position": [0, 0, 0], "quaternion": [0, 0, 0, 1] }'
+
+const HEALTH_MAX = 100
 
 /**
  * Server Network System
@@ -53,10 +55,22 @@ export class ServerNetwork extends System {
       data.state = {}
       this.world.entities.add(data, true)
     }
+    // hydrate settings
+    let settingsRow = await this.db('config').where('key', 'settings').first()
+    try {
+      const settings = JSON.parse(settingsRow?.value || '{}')
+      this.world.settings.deserialize(settings)
+    } catch (err) {
+      console.error(err)
+    }
+    // watch settings changes
+    this.world.settings.on('change', this.saveSettings)
     // queue first save
     if (SAVE_INTERVAL) {
       this.saveTimerId = setTimeout(this.save, SAVE_INTERVAL * 1000)
     }
+    // load environment model
+    await this.world.environment.updateModel()
   }
 
   preFixedUpdate() {
@@ -178,8 +192,44 @@ export class ServerNetwork extends System {
     this.saveTimerId = setTimeout(this.save, SAVE_INTERVAL * 1000)
   }
 
-  async onConnection(ws, authToken) {
+  saveSettings = async () => {
+    const data = this.world.settings.serialize()
+    const value = JSON.stringify(data)
+    await this.db('config')
+      .insert({
+        key: 'settings',
+        value,
+      })
+      .onConflict('key')
+      .merge({
+        value,
+      })
+  }
+
+  isAdmin(player) {
+    return hasRole(player.data.roles, 'admin')
+  }
+
+  isBuilder(player) {
+    return this.world.settings.public || this.isAdmin(player)
+  }
+
+  async onConnection(ws, params) {
     try {
+      // check player limit
+      const playerLimit = this.world.settings.playerLimit
+      if (isNumber(playerLimit) && playerLimit > 0 && this.sockets.size >= playerLimit) {
+        const packet = writePacket('kick', 'player_limit')
+        ws.send(packet)
+        ws.disconnect()
+        return
+      }
+
+      // check connection params
+      let authToken = params.authToken
+      let name = params.name
+      let avatar = params.avatar
+
       // get or create user
       let user
       if (authToken) {
@@ -194,6 +244,7 @@ export class ServerNetwork extends System {
         user = {
           id: uuid(),
           name: 'Anonymous',
+          avatar: null,
           roles: '',
           createdAt: moment().toISOString(),
         }
@@ -202,24 +253,40 @@ export class ServerNetwork extends System {
       }
       user.roles = user.roles.split(',')
 
+      // disconnect if user already in this world
+      if (this.sockets.has(user.id)) {
+        const packet = writePacket('kick', 'duplicate_user')
+        ws.send(packet)
+        ws.disconnect()
+        return
+      }
+
       // if there is no admin code, everyone is a temporary admin (eg for local dev)
       // all roles prefixed with `~` are temporary and not persisted to db
       if (!process.env.ADMIN_CODE) {
         user.roles.push('~admin')
       }
 
+      // livekit options
+      const livekit = await this.world.livekit.getPlayerOpts(user.id)
+
       // create socket
-      const socket = new Socket({ ws, network: this })
+      const socket = new Socket({ id: user.id, ws, network: this })
 
       // spawn player
       socket.player = this.world.entities.add(
         {
-          id: uuid(),
+          id: user.id,
           type: 'player',
           position: this.spawn.position.slice(),
           quaternion: this.spawn.quaternion.slice(),
-          owner: socket.id,
-          user,
+          owner: socket.id, // deprecated, same as userId
+          userId: user.id, // deprecated, same as userId
+          name: name || user.name,
+          health: HEALTH_MAX,
+          avatar: user.avatar || this.world.settings.avatar?.url || 'asset://avatar.vrm',
+          sessionAvatar: avatar || null,
+          roles: user.roles,
         },
         true
       )
@@ -228,129 +295,113 @@ export class ServerNetwork extends System {
       socket.send('snapshot', {
         id: socket.id,
         serverTime: performance.now(),
+        assetsUrl: process.env.PUBLIC_ASSETS_URL,
+        apiUrl: process.env.PUBLIC_API_URL,
+        maxUploadSize: process.env.PUBLIC_MAX_UPLOAD_SIZE,
+        collections: this.world.collections.serialize(),
+        settings: this.world.settings.serialize(),
         chat: this.world.chat.serialize(),
         blueprints: this.world.blueprints.serialize(),
         entities: this.world.entities.serialize(),
+        livekit,
         authToken,
       })
 
       this.sockets.set(socket.id, socket)
+
+      // enter events on the server are sent after the snapshot.
+      // on the client these are sent during PlayerRemote.js entity instantiation!
+      this.world.events.emit('enter', { playerId: socket.player.data.id })
     } catch (err) {
       console.error(err)
     }
   }
 
   onChatAdded = async (socket, msg) => {
-    // TODO: check for spoofed messages, permissions/roles etc
-    // handle slash commands
-    if (msg.body.startsWith('/')) {
-      const [cmd, ...args] = msg.body.slice(1).split(' ')
-      const player = socket.player
-      const id = player.data.id
-      const user = player.data.user
-      switch (cmd) {
-        case 'admin': {
-          const code = args[0]
-          if (code !== process.env.ADMIN_CODE || !process.env.ADMIN_CODE) return
-
-          if (hasRole(user.roles, 'admin')) {
-            return socket.send('chatAdded', {
-              id: uuid(),
-              from: null,
-              fromId: null,
-              body: 'You are already an admin',
-              createdAt: moment().toISOString(),
-            })
-          }
-
-          addRole(user.roles, 'admin')
-          player.modify({ user })
-          this.send('entityModified', { id, user })
-          socket.send('chatAdded', {
-            id: uuid(),
-            from: null,
-            fromId: null,
-            body: 'Admin granted!',
-            createdAt: moment().toISOString(),
-          })
-          await this.db('users')
-            .where('id', user.id)
-            .update({ roles: serializeRoles(user.roles) })
-          break
-        }
-
-        case 'name': {
-          const name = args[0]
-          if (!name) return
-          player.data.user.name = name
-          player.modify({ user })
-          this.send('entityModified', { id, user })
-          socket.send('chatAdded', {
-            id: uuid(),
-            from: null,
-            fromId: null,
-            body: `Name set to ${name}!`,
-            createdAt: moment().toISOString(),
-          })
-          await this.db('users').where('id', user.id).update({ name })
-          break
-        }
-
-        case 'spawn': {
-          if (!hasRole(user.roles, 'admin')) return
-          const action = args[0]
-
-          if (action === 'set') {
-            this.spawn = {
-              position: player.data.position.slice(),
-              quaternion: player.data.quaternion.slice(),
-            }
-          } else if (action === 'clear') {
-            this.spawn = {
-              position: [0, 0, 0],
-              quaternion: [0, 0, 0, 1],
-            }
-          } else {
-            return
-          }
-
-          const data = JSON.stringify(this.spawn)
-          await this.db('config')
-            .insert({
-              key: 'spawn',
-              value: data,
-            })
-            .onConflict('key')
-            .merge({
-              value: data,
-            })
-          break
-        }
-
-        default:
-          if (!this.world.chat.commands.has(cmd)) break
-
-          const { fn, isAdmin } = this.world.chat.commands.get(cmd)
-          if (isAdmin && !hasRole(user.roles, 'admin')) break
-
-          fn(...args)
-          break
-      }
-
-      return
-    }
-    // handle chat messages
     this.world.chat.add(msg, false)
     this.send('chatAdded', msg, socket.id)
   }
 
+  onCommand = async (socket, args) => {
+    // TODO: check for spoofed messages, permissions/roles etc
+    // handle slash commands
+    const player = socket.player
+    const playerId = player.data.id
+    const [cmd, arg1, arg2] = args
+    // become admin command
+    if (cmd === 'admin') {
+      const code = arg1
+      if (process.env.ADMIN_CODE && process.env.ADMIN_CODE === code) {
+        const id = player.data.id
+        const userId = player.data.userId
+        const roles = player.data.roles
+        const granting = !hasRole(roles, 'admin')
+        if (granting) {
+          addRole(roles, 'admin')
+        } else {
+          removeRole(roles, 'admin')
+        }
+        player.modify({ roles })
+        this.send('entityModified', { id, roles })
+        socket.send('chatAdded', {
+          id: uuid(),
+          from: null,
+          fromId: null,
+          body: granting ? 'Admin granted!' : 'Admin revoked!',
+          createdAt: moment().toISOString(),
+        })
+        await this.db('users')
+          .where('id', userId)
+          .update({ roles: serializeRoles(roles) })
+      }
+    }
+    if (cmd === 'name') {
+      const name = arg1
+      if (name) {
+        const id = player.data.id
+        const userId = player.data.userId
+        player.data.name = name
+        player.modify({ name })
+        this.send('entityModified', { id, name })
+        socket.send('chatAdded', {
+          id: uuid(),
+          from: null,
+          fromId: null,
+          body: `Name set to ${name}!`,
+          createdAt: moment().toISOString(),
+        })
+        await this.db('users').where('id', userId).update({ name })
+      }
+    }
+    if (cmd === 'spawn') {
+      const op = arg1
+      this.onSpawnModified(socket, op)
+    }
+    if (cmd === 'chat') {
+      const op = arg1
+      if (op === 'clear' && this.isBuilder(socket.player)) {
+        this.world.chat.clear(true)
+      }
+    }
+    // emit event for all except admin
+    if (cmd !== 'admin') {
+      this.world.events.emit('command', { playerId, args })
+    }
+  }
+
   onBlueprintAdded = (socket, blueprint) => {
+    if (!this.isBuilder(socket.player)) {
+      return console.error('player attempted to add blueprint without builder permission')
+    }
     this.world.blueprints.add(blueprint)
     this.send('blueprintAdded', blueprint, socket.id)
     this.dirtyBlueprints.add(blueprint.id)
   }
 
   onBlueprintModified = (socket, data) => {
+    if (!this.isBuilder(socket.player)) {
+      return console.error('player attempted to modify blueprint without builder permission')
+    }
     const blueprint = this.world.blueprints.get(data.id)
     // if new version is greater than current version, allow it
     if (data.version > blueprint.version) {
@@ -365,25 +416,38 @@ export class ServerNetwork extends System {
   }
 
   onEntityAdded = (socket, data) => {
-    // TODO: check client permission
+    if (!this.isBuilder(socket.player)) {
+      return console.error('player attempted to add entity without builder permission')
+    }
     const entity = this.world.entities.add(data)
     this.send('entityAdded', data, socket.id)
     if (entity.isApp) this.dirtyApps.add(entity.data.id)
   }
 
   onEntityModified = async (socket, data) => {
-    // TODO: check client permission
     const entity = this.world.entities.get(data.id)
+    if (!entity) return console.error('onEntityModified: no entity found', data)
     entity.modify(data)
     this.send('entityModified', data, socket.id)
     if (entity.isApp) {
       // mark for saving
       this.dirtyApps.add(entity.data.id)
     }
-    if (entity.isPlayer && data.user) {
-      // update player (only avatar field for now)
-      const { id, avatar } = entity.data.user
-      await this.db('users').where('id', id).update({ avatar })
+    if (entity.isPlayer) {
+      // persist player name and avatar changes
+      const changes = {}
+      let changed
+      if (data.hasOwnProperty('name')) {
+        changes.name = data.name
+        changed = true
+      }
+      if (data.hasOwnProperty('avatar')) {
+        changes.avatar = data.avatar
+        changed = true
+      }
+      if (changed) {
+        await this.db('users').where('id', entity.data.userId).update(changes)
+      }
     }
   }
 
@@ -394,15 +458,66 @@ export class ServerNetwork extends System {
   }
 
   onEntityRemoved = (socket, id) => {
-    // TODO: check client permission
+    if (!this.isBuilder(socket.player))
+      return console.error('player attempted to remove entity without builder permission')
     const entity = this.world.entities.get(id)
     this.world.entities.remove(id)
     this.send('entityRemoved', id, socket.id)
     if (entity.isApp) this.dirtyApps.add(id)
   }
 
+  onSettingsModified = (socket, data) => {
+    if (!this.isBuilder(socket.player))
+      return console.error('player attempted to modify settings without builder permission')
+    this.world.settings.set(data.key, data.value)
+    this.send('settingsModified', data, socket.id)
+  }
+
+  onSpawnModified = async (socket, op) => {
+    if (!this.isBuilder(socket.player)) {
+      return console.error('player attempted to modify spawn without builder permission')
+    }
+    const player = socket.player
+    if (op === 'set') {
+      this.spawn = { position: player.data.position.slice(), quaternion: player.data.quaternion.slice() }
+    } else if (op === 'clear') {
+      this.spawn = { position: [0, 0, 0], quaternion: [0, 0, 0, 1] }
+    } else {
+      return
+    }
+    const data = JSON.stringify(this.spawn)
+    await this.db('config')
+      .insert({
+        key: 'spawn',
+        value: data,
+      })
+      .onConflict('key')
+      .merge({
+        value: data,
+      })
+    socket.send('chatAdded', {
+      id: uuid(),
+      from: null,
+      fromId: null,
+      body: op === 'set' ? 'Spawn updated' : 'Spawn cleared',
+      createdAt: moment().toISOString(),
+    })
+  }
+
   onPlayerTeleport = (socket, data) => {
     this.sendTo(data.networkId, 'playerTeleport', data)
+  }
+
+  onPlayerPush = (socket, data) => {
+    this.sendTo(data.networkId, 'playerPush', data)
+  }
+
+  onPlayerSessionAvatar = (socket, data) => {
+    this.sendTo(data.networkId, 'playerSessionAvatar', data.avatar)
+  }
+
+  onPing = (socket, time) => {
+    socket.send('pong', time)
   }
 
   onDisconnect = (socket, code) => {

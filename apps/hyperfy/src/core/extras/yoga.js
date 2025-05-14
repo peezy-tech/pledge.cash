@@ -1,3 +1,5 @@
+import Yoga from 'yoga-layout'
+
 export const Display = {}
 export const FlexDirection = {}
 export const JustifyContent = {}
@@ -16,6 +18,9 @@ export const initYoga = () => {
   JustifyContent['flex-start'] = Yoga.JUSTIFY_FLEX_START
   JustifyContent['flex-end'] = Yoga.JUSTIFY_FLEX_END
   JustifyContent['center'] = Yoga.JUSTIFY_CENTER
+  JustifyContent['space-between'] = Yoga.JUSTIFY_SPACE_BETWEEN
+  JustifyContent['space-around'] = Yoga.JUSTIFY_SPACE_AROUND
+  JustifyContent['space-evenly'] = Yoga.JUSTIFY_SPACE_EVENLY
   AlignItems['stretch'] = Yoga.ALIGN_STRETCH
   AlignItems['flex-start'] = Yoga.ALIGN_FLEX_START
   AlignItems['flex-end'] = Yoga.ALIGN_FLEX_END
@@ -31,4 +36,40 @@ export const initYoga = () => {
   FlexWrap['no-wrap'] = Yoga.WRAP_NO_WRAP
   FlexWrap['wrap'] = Yoga.WRAP_WRAP
   FlexWrap['wrap-reverse'] = Yoga.WRAP_WRAP_REVERSE
+}
+
+const displays = ['flex', 'none']
+
+export function isDisplay(value) {
+  return displays.includes(value)
+}
+
+const flexDirections = ['column', 'column-reverse', 'row', 'row-reverse', 'flex-start', 'flex-end', 'center']
+
+export function isFlexDirection(value) {
+  return flexDirections.includes(value)
+}
+
+const justifyContents = ['flex-start', 'flex-end', 'center', 'space-between', 'space-around', 'space-evenly']
+
+export function isJustifyContent(value) {
+  return justifyContents.includes(value)
+}
+
+const alignItems = ['stretch', 'flex-start', 'flex-end', 'center', 'baseline']
+
+export function isAlignItem(value) {
+  return alignItems.includes(value)
+}
+
+const alignContents = ['flex-start', 'flex-end', 'stretch', 'center', 'space-between', 'space-around', 'space-evenly']
+
+export function isAlignContent(value) {
+  return alignContents.includes(value)
+}
+
+const flexWraps = ['no-wrap', 'wrap', 'wrap-reverse']
+
+export function isFlexWrap(value) {
+  return flexWraps.includes(value)
 }
