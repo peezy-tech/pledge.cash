@@ -1,3 +1,4 @@
+import 'ses'
 import { StrictMode } from 'react'
 import ReactDOM from 'react-dom/client'
 import {
@@ -20,6 +21,9 @@ import './styles.css'
 import reportWebVitals from './reportWebVitals.ts'
 
 import App from './App.tsx'
+import { PageHome } from './routes/home.tsx'
+
+
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -39,8 +43,15 @@ const indexRoute = createRoute({
   component: App,
 })
 
+const homeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/home',
+  component: PageHome,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  homeRoute,
   TanStackQueryDemo(rootRoute),
 ])
 
