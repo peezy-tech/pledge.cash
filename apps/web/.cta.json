@@ -1,6 +1,6 @@
 {
-  "projectName": "apps/web",
-  "mode": "file-router",
+  "projectName": "web",
+  "mode": "code-router",
   "typescript": true,
   "tailwind": true,
   "packageManager": "bun",
