@@ -63,6 +63,7 @@ const CreateConfigForm = ({
   const [transactionSignature, setTransactionSignature] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [isFormLocked, setIsFormLocked] = useState(true);
 
   // Configurable parameters state
   // poolFees.baseFee
@@ -112,6 +113,10 @@ const CreateConfigForm = ({
   const [curve1SqrtPrice, setCurve1SqrtPrice] = useState("79226673521066979257578248091");
   const [curve1Liquidity, setCurve1Liquidity] = useState("1");
 
+
+  const handleToggleLock = () => {
+    setIsFormLocked(prev => !prev);
+  };
 
   const handleCreateConfig = async () => {
     if (!payerPrivateKey) {
@@ -209,8 +214,8 @@ const CreateConfigForm = ({
       transaction.partialSign(configKeypair);
 
       const signature = await sendAndConfirmTransaction(
-        connection,
-        transaction,
+        connection as any,
+        transaction as any,
         [payer, configKeypair],
         { commitment: "confirmed", skipPreflight: true }
       );
@@ -241,7 +246,7 @@ const CreateConfigForm = ({
     <Card className="w-full max-w-3xl mx-auto">
       <CardHeader>
         <CardTitle>Create DBC Config</CardTitle>
-        <CardDescription>Configure and deploy a new Dynamic Bonding Curve configuration.</CardDescription>
+        <CardDescription>Configure and deploy a new Dynamic Bonding Curve configuration. {isFormLocked ? "Unlock to customize parameters." : "Parameters unlocked."}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-2">
@@ -256,198 +261,235 @@ const CreateConfigForm = ({
           />
         </div>
 
-        <Separator />
-        <h3 className="text-lg font-medium">Pool Fees: Base Fee</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="cliffFeeNumerator">Cliff Fee Numerator (BN):</Label>
-              <Input id="cliffFeeNumerator" type="text" value={cliffFeeNumerator} onChange={(e) => setCliffFeeNumerator(e.target.value)} disabled={isLoading} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="baseFeeNumberOfPeriod">Number of Periods (number):</Label>
-              <Input id="baseFeeNumberOfPeriod" type="text" value={baseFeeNumberOfPeriod} onChange={(e) => setBaseFeeNumberOfPeriod(e.target.value)} disabled={isLoading} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="reductionFactor">Reduction Factor (BN):</Label>
-              <Input id="reductionFactor" type="text" value={reductionFactor} onChange={(e) => setReductionFactor(e.target.value)} disabled={isLoading} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="periodFrequency">Period Frequency (BN):</Label>
-              <Input id="periodFrequency" type="text" value={periodFrequency} onChange={(e) => setPeriodFrequency(e.target.value)} disabled={isLoading} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="feeSchedulerMode">Fee Scheduler Mode:</Label>
-              <Select value={feeSchedulerMode.toString()} onValueChange={(value) => setFeeSchedulerMode(Number(value) as FeeSchedulerMode)} disabled={isLoading}>
-                <SelectTrigger id="feeSchedulerMode"><SelectValue placeholder="Select mode" /></SelectTrigger>
-                <SelectContent>
-                  {feeSchedulerModeOptions.map(opt => <SelectItem key={opt.label} value={opt.value.toString()}>{opt.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-        </div>
+        <Button onClick={handleToggleLock} disabled={isLoading} variant="outline" className="w-full">
+          {isFormLocked ? "Unlock to Customize Parameters" : "Lock Parameters"}
+        </Button>
 
-        <Separator />
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="activationType">Activation Type:</Label>
-              <Select value={activationType.toString()} onValueChange={(value) => setActivationType(Number(value) as ActivationType)} disabled={isLoading}>
-                <SelectTrigger id="activationType"><SelectValue placeholder="Select type" /></SelectTrigger>
-                <SelectContent>
-                  {activationTypeOptions.map(opt => <SelectItem key={opt.label} value={opt.value.toString()}>{opt.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Pool Fees: Base Fee</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="cliffFeeNumerator">Cliff Fee Numerator (BN):</Label>
+                <Input id="cliffFeeNumerator" type="text" value={cliffFeeNumerator} onChange={(e) => setCliffFeeNumerator(e.target.value)} disabled={isLoading || isFormLocked} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="baseFeeNumberOfPeriod">Number of Periods (number):</Label>
+                <Input id="baseFeeNumberOfPeriod" type="text" value={baseFeeNumberOfPeriod} onChange={(e) => setBaseFeeNumberOfPeriod(e.target.value)} disabled={isLoading || isFormLocked} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reductionFactor">Reduction Factor (BN):</Label>
+                <Input id="reductionFactor" type="text" value={reductionFactor} onChange={(e) => setReductionFactor(e.target.value)} disabled={isLoading || isFormLocked} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="periodFrequency">Period Frequency (BN):</Label>
+                <Input id="periodFrequency" type="text" value={periodFrequency} onChange={(e) => setPeriodFrequency(e.target.value)} disabled={isLoading || isFormLocked} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="feeSchedulerMode">Fee Scheduler Mode:</Label>
+                <Select value={feeSchedulerMode.toString()} onValueChange={(value) => setFeeSchedulerMode(Number(value) as FeeSchedulerMode)} disabled={isLoading || isFormLocked}>
+                  <SelectTrigger id="feeSchedulerMode"><SelectValue placeholder="Select mode" /></SelectTrigger>
+                  <SelectContent>
+                    {feeSchedulerModeOptions.map(opt => <SelectItem key={opt.label} value={opt.value.toString()}>{opt.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="collectFeeMode">Collect Fee Mode:</Label>
-              <Select value={collectFeeMode.toString()} onValueChange={(value) => setCollectFeeMode(Number(value) as CollectFeeMode)} disabled={isLoading}>
-                <SelectTrigger id="collectFeeMode"><SelectValue placeholder="Select mode" /></SelectTrigger>
-                <SelectContent>
-                  {collectFeeModeOptions.map(opt => <SelectItem key={opt.label} value={opt.value.toString()}>{opt.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
+          </CardContent>
+        </Card>
 
-            <div className="space-y-2">
-              <Label htmlFor="migrationOption">Migration Option:</Label>
-              <Select value={migrationOption.toString()} onValueChange={(value) => setMigrationOption(Number(value) as MigrationOption)} disabled={isLoading}>
-                <SelectTrigger id="migrationOption"><SelectValue placeholder="Select option" /></SelectTrigger>
-                <SelectContent>
-                  {migrationOptionOptions.map(opt => <SelectItem key={opt.label} value={opt.value.toString()}>{opt.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="tokenType">Token Type:</Label>
-              <Select value={tokenType.toString()} onValueChange={(value) => setTokenType(Number(value) as TokenType)} disabled={isLoading}>
-                <SelectTrigger id="tokenType"><SelectValue placeholder="Select type" /></SelectTrigger>
-                <SelectContent>
-                  {tokenTypeOptions.map(opt => <SelectItem key={opt.label} value={opt.value.toString()}>{opt.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">General Configuration</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="activationType">Activation Type:</Label>
+                  <Select value={activationType.toString()} onValueChange={(value) => setActivationType(Number(value) as ActivationType)} disabled={isLoading || isFormLocked}>
+                    <SelectTrigger id="activationType"><SelectValue placeholder="Select type" /></SelectTrigger>
+                    <SelectContent>
+                      {activationTypeOptions.map(opt => <SelectItem key={opt.label} value={opt.value.toString()}>{opt.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="collectFeeMode">Collect Fee Mode:</Label>
+                  <Select value={collectFeeMode.toString()} onValueChange={(value) => setCollectFeeMode(Number(value) as CollectFeeMode)} disabled={isLoading || isFormLocked}>
+                    <SelectTrigger id="collectFeeMode"><SelectValue placeholder="Select mode" /></SelectTrigger>
+                    <SelectContent>
+                      {collectFeeModeOptions.map(opt => <SelectItem key={opt.label} value={opt.value.toString()}>{opt.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="tokenDecimal">Token Decimal:</Label>
-              <Select value={tokenDecimal.toString()} onValueChange={(value) => setTokenDecimal(Number(value) as TokenDecimal)} disabled={isLoading}>
-                <SelectTrigger id="tokenDecimal"><SelectValue placeholder="Select decimal" /></SelectTrigger>
-                <SelectContent>
-                  {tokenDecimalOptions.map(opt => <SelectItem key={opt.label} value={opt.value.toString()}>{opt.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
+                <div className="space-y-2">
+                  <Label htmlFor="migrationOption">Migration Option:</Label>
+                  <Select value={migrationOption.toString()} onValueChange={(value) => setMigrationOption(Number(value) as MigrationOption)} disabled={isLoading || isFormLocked}>
+                    <SelectTrigger id="migrationOption"><SelectValue placeholder="Select option" /></SelectTrigger>
+                    <SelectContent>
+                      {migrationOptionOptions.map(opt => <SelectItem key={opt.label} value={opt.value.toString()}>{opt.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="tokenType">Token Type:</Label>
+                  <Select value={tokenType.toString()} onValueChange={(value) => setTokenType(Number(value) as TokenType)} disabled={isLoading || isFormLocked}>
+                    <SelectTrigger id="tokenType"><SelectValue placeholder="Select type" /></SelectTrigger>
+                    <SelectContent>
+                      {tokenTypeOptions.map(opt => <SelectItem key={opt.label} value={opt.value.toString()}>{opt.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="tokenDecimal">Token Decimal:</Label>
+                  <Select value={tokenDecimal.toString()} onValueChange={(value) => setTokenDecimal(Number(value) as TokenDecimal)} disabled={isLoading || isFormLocked}>
+                    <SelectTrigger id="tokenDecimal"><SelectValue placeholder="Select decimal" /></SelectTrigger>
+                    <SelectContent>
+                      {tokenDecimalOptions.map(opt => <SelectItem key={opt.label} value={opt.value.toString()}>{opt.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
             </div>
-        </div>
+          </CardContent>
+        </Card>
         
-        <Separator />
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="migrationQuoteThreshold">Migration Quote Threshold (BN):</Label>
-              <Input id="migrationQuoteThreshold" type="text" value={migrationQuoteThreshold} onChange={(e) => setMigrationQuoteThreshold(e.target.value)} disabled={isLoading} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="partnerLpPercentage">Partner LP Percentage (number):</Label>
-              <Input id="partnerLpPercentage" type="text" value={partnerLpPercentage} onChange={(e) => setPartnerLpPercentage(e.target.value)} disabled={isLoading} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="creatorLpPercentage">Creator LP Percentage (number):</Label>
-              <Input id="creatorLpPercentage" type="text" value={creatorLpPercentage} onChange={(e) => setCreatorLpPercentage(e.target.value)} disabled={isLoading} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="partnerLockedLpPercentage">Partner Locked LP Percentage (number):</Label>
-              <Input id="partnerLockedLpPercentage" type="text" value={partnerLockedLpPercentage} onChange={(e) => setPartnerLockedLpPercentage(e.target.value)} disabled={isLoading} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="creatorLockedLpPercentage">Creator Locked LP Percentage (number):</Label>
-              <Input id="creatorLockedLpPercentage" type="text" value={creatorLockedLpPercentage} onChange={(e) => setCreatorLockedLpPercentage(e.target.value)} disabled={isLoading} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="sqrtStartPrice">SQRT Start Price (BN):</Label>
-              <Input id="sqrtStartPrice" type="text" value={sqrtStartPrice} onChange={(e) => setSqrtStartPrice(e.target.value)} disabled={isLoading} />
-            </div>
-        </div>
-
-        <Separator />
-        <h3 className="text-lg font-medium">Locked Vesting</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="lvAmountPerPeriod">Amount Per Period (BN):</Label>
-              <Input id="lvAmountPerPeriod" type="text" value={lvAmountPerPeriod} onChange={(e) => setLvAmountPerPeriod(e.target.value)} disabled={isLoading} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="lvCliffDuration">Cliff Duration From Migration Time (BN):</Label>
-              <Input id="lvCliffDuration" type="text" value={lvCliffDuration} onChange={(e) => setLvCliffDuration(e.target.value)} disabled={isLoading} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="lvFrequency">Frequency (BN):</Label>
-              <Input id="lvFrequency" type="text" value={lvFrequency} onChange={(e) => setLvFrequency(e.target.value)} disabled={isLoading} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="lvNumberOfPeriod">Number of Periods (BN):</Label>
-              <Input id="lvNumberOfPeriod" type="text" value={lvNumberOfPeriod} onChange={(e) => setLvNumberOfPeriod(e.target.value)} disabled={isLoading} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="lvCliffUnlockAmount">Cliff Unlock Amount (BN):</Label>
-              <Input id="lvCliffUnlockAmount" type="text" value={lvCliffUnlockAmount} onChange={(e) => setLvCliffUnlockAmount(e.target.value)} disabled={isLoading} />
-            </div>
-        </div>
-        
-        <Separator />
-        <div className="space-y-2">
-            <Label htmlFor="migrationFeeOption">Migration Fee Option:</Label>
-            <Select value={migrationFeeOption.toString()} onValueChange={(value) => setMigrationFeeOption(Number(value) as MigrationFeeOption)} disabled={isLoading}>
-                <SelectTrigger id="migrationFeeOption"><SelectValue placeholder="Select option" /></SelectTrigger>
-                <SelectContent>
-                  {migrationFeeOptionOptions.map(opt => <SelectItem key={opt.label} value={opt.value.toString()}>{opt.label}</SelectItem>)}
-                </SelectContent>
-            </Select>
-        </div>
-
-        <Separator />
-        <h3 className="text-lg font-medium">Token Supply</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="preMigrationTokenSupply">Pre-Migration Token Supply (BN):</Label>
-              <Input id="preMigrationTokenSupply" type="text" value={preMigrationTokenSupply} onChange={(e) => setPreMigrationTokenSupply(e.target.value)} disabled={isLoading} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="postMigrationTokenSupply">Post-Migration Token Supply (BN):</Label>
-              <Input id="postMigrationTokenSupply" type="text" value={postMigrationTokenSupply} onChange={(e) => setPostMigrationTokenSupply(e.target.value)} disabled={isLoading} />
-            </div>
-        </div>
-
-        <Separator />
-        <div className="space-y-2">
-            <Label htmlFor="creatorTradingFeePercentage">Creator Trading Fee Percentage (number):</Label>
-            <Input id="creatorTradingFeePercentage" type="text" value={creatorTradingFeePercentage} onChange={(e) => setCreatorTradingFeePercentage(e.target.value)} disabled={isLoading} />
-        </div>
-
-        <Separator />
-        <h3 className="text-lg font-medium">Curve Data (2 points)</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-                <p className="font-medium mb-2">Point 1:</p>
-                <div className="space-y-2 mb-4">
-                  <Label htmlFor="curve0SqrtPrice">SQRT Price (BN):</Label>
-                  <Input id="curve0SqrtPrice" type="text" value={curve0SqrtPrice} onChange={(e) => setCurve0SqrtPrice(e.target.value)} disabled={isLoading} />
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Migration & LP Settings</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="migrationQuoteThreshold">Migration Quote Threshold (BN):</Label>
+                  <Input id="migrationQuoteThreshold" type="text" value={migrationQuoteThreshold} onChange={(e) => setMigrationQuoteThreshold(e.target.value)} disabled={isLoading || isFormLocked} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="curve0Liquidity">Liquidity (BN):</Label>
-                  <Input id="curve0Liquidity" type="text" value={curve0Liquidity} onChange={(e) => setCurve0Liquidity(e.target.value)} disabled={isLoading} />
-                </div>
-            </div>
-            <div>
-                <p className="font-medium mb-2">Point 2:</p>
-                <div className="space-y-2 mb-4">
-                  <Label htmlFor="curve1SqrtPrice">SQRT Price (BN):</Label>
-                  <Input id="curve1SqrtPrice" type="text" value={curve1SqrtPrice} onChange={(e) => setCurve1SqrtPrice(e.target.value)} disabled={isLoading} />
+                  <Label htmlFor="partnerLpPercentage">Partner LP Percentage (number):</Label>
+                  <Input id="partnerLpPercentage" type="text" value={partnerLpPercentage} onChange={(e) => setPartnerLpPercentage(e.target.value)} disabled={isLoading || isFormLocked} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="curve1Liquidity">Liquidity (BN):</Label>
-                  <Input id="curve1Liquidity" type="text" value={curve1Liquidity} onChange={(e) => setCurve1Liquidity(e.target.value)} disabled={isLoading} />
+                  <Label htmlFor="creatorLpPercentage">Creator LP Percentage (number):</Label>
+                  <Input id="creatorLpPercentage" type="text" value={creatorLpPercentage} onChange={(e) => setCreatorLpPercentage(e.target.value)} disabled={isLoading || isFormLocked} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="partnerLockedLpPercentage">Partner Locked LP Percentage (number):</Label>
+                  <Input id="partnerLockedLpPercentage" type="text" value={partnerLockedLpPercentage} onChange={(e) => setPartnerLockedLpPercentage(e.target.value)} disabled={isLoading || isFormLocked} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="creatorLockedLpPercentage">Creator Locked LP Percentage (number):</Label>
+                  <Input id="creatorLockedLpPercentage" type="text" value={creatorLockedLpPercentage} onChange={(e) => setCreatorLockedLpPercentage(e.target.value)} disabled={isLoading || isFormLocked} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sqrtStartPrice">SQRT Start Price (BN):</Label>
+                  <Input id="sqrtStartPrice" type="text" value={sqrtStartPrice} onChange={(e) => setSqrtStartPrice(e.target.value)} disabled={isLoading || isFormLocked} />
                 </div>
             </div>
-        </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Locked Vesting</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="lvAmountPerPeriod">Amount Per Period (BN):</Label>
+                  <Input id="lvAmountPerPeriod" type="text" value={lvAmountPerPeriod} onChange={(e) => setLvAmountPerPeriod(e.target.value)} disabled={isLoading || isFormLocked} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lvCliffDuration">Cliff Duration From Migration Time (BN):</Label>
+                  <Input id="lvCliffDuration" type="text" value={lvCliffDuration} onChange={(e) => setLvCliffDuration(e.target.value)} disabled={isLoading || isFormLocked} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lvFrequency">Frequency (BN):</Label>
+                  <Input id="lvFrequency" type="text" value={lvFrequency} onChange={(e) => setLvFrequency(e.target.value)} disabled={isLoading || isFormLocked} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lvNumberOfPeriod">Number of Periods (BN):</Label>
+                  <Input id="lvNumberOfPeriod" type="text" value={lvNumberOfPeriod} onChange={(e) => setLvNumberOfPeriod(e.target.value)} disabled={isLoading || isFormLocked} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lvCliffUnlockAmount">Cliff Unlock Amount (BN):</Label>
+                  <Input id="lvCliffUnlockAmount" type="text" value={lvCliffUnlockAmount} onChange={(e) => setLvCliffUnlockAmount(e.target.value)} disabled={isLoading || isFormLocked} />
+                </div>
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Fee Options & Token Supply</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4">
+            <div className="space-y-2">
+                <Label htmlFor="migrationFeeOption">Migration Fee Option:</Label>
+                <Select value={migrationFeeOption.toString()} onValueChange={(value) => setMigrationFeeOption(Number(value) as MigrationFeeOption)} disabled={isLoading || isFormLocked}>
+                    <SelectTrigger id="migrationFeeOption"><SelectValue placeholder="Select option" /></SelectTrigger>
+                    <SelectContent>
+                      {migrationFeeOptionOptions.map(opt => <SelectItem key={opt.label} value={opt.value.toString()}>{opt.label}</SelectItem>)}
+                    </SelectContent>
+                </Select>
+            </div>
+
+            <Separator />
+            <h4 className="text-md font-medium pt-2">Token Supply</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="preMigrationTokenSupply">Pre-Migration Token Supply (BN):</Label>
+                  <Input id="preMigrationTokenSupply" type="text" value={preMigrationTokenSupply} onChange={(e) => setPreMigrationTokenSupply(e.target.value)} disabled={isLoading || isFormLocked} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="postMigrationTokenSupply">Post-Migration Token Supply (BN):</Label>
+                  <Input id="postMigrationTokenSupply" type="text" value={postMigrationTokenSupply} onChange={(e) => setPostMigrationTokenSupply(e.target.value)} disabled={isLoading || isFormLocked} />
+                </div>
+            </div>
+
+            <Separator />
+            <div className="space-y-2 pt-2">
+                <Label htmlFor="creatorTradingFeePercentage">Creator Trading Fee Percentage (number):</Label>
+                <Input id="creatorTradingFeePercentage" type="text" value={creatorTradingFeePercentage} onChange={(e) => setCreatorTradingFeePercentage(e.target.value)} disabled={isLoading || isFormLocked} />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Curve Data (2 points)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <p className="font-medium mb-2">Point 1:</p>
+                    <div className="space-y-2 mb-4">
+                      <Label htmlFor="curve0SqrtPrice">SQRT Price (BN):</Label>
+                      <Input id="curve0SqrtPrice" type="text" value={curve0SqrtPrice} onChange={(e) => setCurve0SqrtPrice(e.target.value)} disabled={isLoading || isFormLocked} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="curve0Liquidity">Liquidity (BN):</Label>
+                      <Input id="curve0Liquidity" type="text" value={curve0Liquidity} onChange={(e) => setCurve0Liquidity(e.target.value)} disabled={isLoading || isFormLocked} />
+                    </div>
+                </div>
+                <div>
+                    <p className="font-medium mb-2">Point 2:</p>
+                    <div className="space-y-2 mb-4">
+                      <Label htmlFor="curve1SqrtPrice">SQRT Price (BN):</Label>
+                      <Input id="curve1SqrtPrice" type="text" value={curve1SqrtPrice} onChange={(e) => setCurve1SqrtPrice(e.target.value)} disabled={isLoading || isFormLocked} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="curve1Liquidity">Liquidity (BN):</Label>
+                      <Input id="curve1Liquidity" type="text" value={curve1Liquidity} onChange={(e) => setCurve1Liquidity(e.target.value)} disabled={isLoading || isFormLocked} />
+                    </div>
+                </div>
+            </div>
+          </CardContent>
+        </Card>
       </CardContent>
       <CardFooter className="flex flex-col items-start space-y-4">
         <Button onClick={handleCreateConfig} disabled={isLoading} className="w-full">

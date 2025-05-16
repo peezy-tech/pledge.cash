@@ -2,8 +2,10 @@ import { useState } from 'react'
 
 import CreateConfigForm from './components/CreateConfigForm'
 import CreatePoolForm from './components/CreatePoolForm'
+import TokenCreationPage from './components/token-creation-page'
+import ChartsPage from './components/charts-page'
 
-function App() {
+function Forms() {
   const [configAddress, setConfigAddress] = useState<string>("")
 
   const handleConfigCreated = (address: string) => {
@@ -28,6 +30,12 @@ function App() {
       </footer>
     </>
   )
+}
+
+
+
+function App() {
+  return <TokenCreationPage />
 }
 
 export default App
