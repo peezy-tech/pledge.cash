@@ -13,8 +13,10 @@
     "@metaplex-foundation/mpl-token-metadata": "^3.4.0",
     "@metaplex-foundation/umi": "^1.0.0",
     "@metaplex-foundation/umi-bundle-defaults": "^1.0.0",
+    "@meteora-ag/dynamic-bonding-curve-sdk": "^1.1.4",
     "@solana/spl-token-registry": "^0.2.4574",
-    "@solana/web3.js": "1"
+    "@solana/web3.js": "1",
+    "bs58": "^6.0.0"
   },
   "scripts": {
     "token:monitor": "node scripts/watch_token_transfers.js",

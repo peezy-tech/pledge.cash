@@ -28,7 +28,19 @@ export const builtInPackets = [
 export const customPackets = [
   'aiProcessQuery',
   'aiCancelStream',
-  'llmEvent'
+  'llmEvent',
+  'modsRequestPatches',
+  'modsPatches',
+  'modsRequestAppliedPatches',
+  'modsAppliedPatches',
+  'modsApplyPatch',
+  'modsApplyPatchResult',
+  'walletConnect',
+  'walletDisconnect',
+  'depositRequest',
+  'depositResponse',
+  'withdrawRequest',
+  'withdrawResponse'
 ]
 
 // Combined packet names (built-in + custom)
