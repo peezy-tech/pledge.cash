@@ -4,6 +4,7 @@ import CreateConfigForm from './components/CreateConfigForm'
 import CreatePoolForm from './components/CreatePoolForm'
 import TokenCreationPage from './components/token-creation-page'
 import ChartsPage from './components/charts-page'
+import CreateSwapForm from './components/CreateSwapForm'
 
 function Forms() {
   const [configAddress, setConfigAddress] = useState<string>("")
@@ -22,6 +23,9 @@ function Forms() {
         <div className="form-section">
           <CreatePoolForm initialConfigAddress={configAddress} />
         </div>
+        <div className="form-section">
+          <CreateSwapForm />
+        </div>
       </div>
       <footer className="read-the-docs">
         <p>Ensure your devnet wallet has SOL for transaction fees.</p>
@@ -35,7 +39,7 @@ function Forms() {
 
 
 function App() {
-  return <TokenCreationPage />
+  return <Forms />
 }
 
 export default App

@@ -67,10 +67,10 @@ const CreateConfigForm = ({
 
   // Configurable parameters state
   // poolFees.baseFee
-  const [cliffFeeNumerator, setCliffFeeNumerator] = useState("2500000");
-  const [baseFeeNumberOfPeriod, setBaseFeeNumberOfPeriod] = useState("0");
-  const [reductionFactor, setReductionFactor] = useState("0");
-  const [periodFrequency, setPeriodFrequency] = useState("0");
+  const [cliffFeeNumerator, setCliffFeeNumerator] = useState("500000000");
+  const [baseFeeNumberOfPeriod, setBaseFeeNumberOfPeriod] = useState("37");
+  const [reductionFactor, setReductionFactor] = useState("822");
+  const [periodFrequency, setPeriodFrequency] = useState("1");
   const [feeSchedulerMode, setFeeSchedulerMode] = useState<FeeSchedulerMode>(FeeSchedulerMode.Linear);
 
   // activationType
@@ -84,12 +84,12 @@ const CreateConfigForm = ({
   // tokenDecimal
   const [tokenDecimal, setTokenDecimal] = useState<TokenDecimal>(TokenDecimal.NINE);
   
-  const [migrationQuoteThreshold, setMigrationQuoteThreshold] = useState("3000000000");
-  const [partnerLpPercentage, setPartnerLpPercentage] = useState("50");
-  const [creatorLpPercentage, setCreatorLpPercentage] = useState("50");
+  const [migrationQuoteThreshold, setMigrationQuoteThreshold] = useState("161417203068");
+  const [partnerLpPercentage, setPartnerLpPercentage] = useState("0");
+  const [creatorLpPercentage, setCreatorLpPercentage] = useState("0");
   const [partnerLockedLpPercentage, setPartnerLockedLpPercentage] = useState("0");
-  const [creatorLockedLpPercentage, setCreatorLockedLpPercentage] = useState("0");
-  const [sqrtStartPrice, setSqrtStartPrice] = useState("58333726687135158");
+  const [creatorLockedLpPercentage, setCreatorLockedLpPercentage] = useState("100");
+  const [sqrtStartPrice, setSqrtStartPrice] = useState("6948097559493766");
 
   // lockedVesting
   const [lvAmountPerPeriod, setLvAmountPerPeriod] = useState("0");
@@ -99,19 +99,26 @@ const CreateConfigForm = ({
   const [lvCliffUnlockAmount, setLvCliffUnlockAmount] = useState("0");
   
   // migrationFeeOption
-  const [migrationFeeOption, setMigrationFeeOption] = useState<MigrationFeeOption>(MigrationFeeOption.FixedBps100);
+  const [migrationFeeOption, setMigrationFeeOption] = useState<MigrationFeeOption>(3 as MigrationFeeOption);
 
   // tokenSupply
-  const [preMigrationTokenSupply, setPreMigrationTokenSupply] = useState("10000000000000000000");
-  const [postMigrationTokenSupply, setPostMigrationTokenSupply] = useState("10000000000000000000");
+  const [preMigrationTokenSupply, setPreMigrationTokenSupply] = useState("1000000000000000000");
+  const [postMigrationTokenSupply, setPostMigrationTokenSupply] = useState("1000000000000000000");
 
-  const [creatorTradingFeePercentage, setCreatorTradingFeePercentage] = useState("0");
+  const [creatorTradingFeePercentage, setCreatorTradingFeePercentage] = useState("100");
 
-  // Curve points (state for 2 points as in the original example)
-  const [curve0SqrtPrice, setCurve0SqrtPrice] = useState("233334906748540631");
-  const [curve0Liquidity, setCurve0Liquidity] = useState("622226417996106429201027821619672729");
-  const [curve1SqrtPrice, setCurve1SqrtPrice] = useState("79226673521066979257578248091");
-  const [curve1Liquidity, setCurve1Liquidity] = useState("1");
+  // Curve points (state for 1 point as per new JSON)
+  const [curve0SqrtPrice, setCurve0SqrtPrice] = useState("12352173439212113");
+  const [curve0Liquidity, setCurve0Liquidity] = useState("10164074144088359041115261727390087");
+
+  // poolFees.dynamicFee (New states based on JSON)
+  const [dynamicFeeBinStep, setDynamicFeeBinStep] = useState("1");
+  const [dynamicFeeBinStepU128, setDynamicFeeBinStepU128] = useState("1844674407370955");
+  const [dynamicFeeFilterPeriod, setDynamicFeeFilterPeriod] = useState("10");
+  const [dynamicFeeDecayPeriod, setDynamicFeeDecayPeriod] = useState("120");
+  const [dynamicFeeReductionFactor, setDynamicFeeReductionFactor] = useState("5000");
+  const [dynamicFeeMaxVolatilityAccumulator, setDynamicFeeMaxVolatilityAccumulator] = useState("14460000");
+  const [dynamicFeeVariableFeeControl, setDynamicFeeVariableFeeControl] = useState("1913");
 
 
   const handleToggleLock = () => {
@@ -153,12 +160,20 @@ const CreateConfigForm = ({
         poolFees: {
           baseFee: {
             cliffFeeNumerator: new BN(cliffFeeNumerator),
-            numberOfPeriod: parseInt(baseFeeNumberOfPeriod,10), // The SDK type is number, but original example uses BN(0). Let's assume number. If BN is needed, use new BN(baseFeeNumberOfPeriod)
+            numberOfPeriod: parseInt(baseFeeNumberOfPeriod,10),
             reductionFactor: new BN(reductionFactor),
             periodFrequency: new BN(periodFrequency),
             feeSchedulerMode: feeSchedulerMode,
           },
-          dynamicFee: null, // Kept as null, can be made configurable if needed
+          dynamicFee: {
+            binStep: parseInt(dynamicFeeBinStep, 10),
+            binStepU128: new BN(dynamicFeeBinStepU128),
+            filterPeriod: parseInt(dynamicFeeFilterPeriod, 10),
+            decayPeriod: parseInt(dynamicFeeDecayPeriod, 10),
+            reductionFactor: parseInt(dynamicFeeReductionFactor, 10),
+            maxVolatilityAccumulator: parseInt(dynamicFeeMaxVolatilityAccumulator, 10),
+            variableFeeControl: parseInt(dynamicFeeVariableFeeControl, 10),
+          },
         },
         activationType: activationType,
         collectFeeMode: collectFeeMode,
@@ -184,27 +199,17 @@ const CreateConfigForm = ({
           postMigrationTokenSupply: new BN(postMigrationTokenSupply),
         },
         creatorTradingFeePercentage: parseInt(creatorTradingFeePercentage, 10),
-        padding0: [], // Kept as empty array
-        padding1: [], // Kept as empty array
+        padding0: [],
+        padding1: [],
         curve: [
           {
             sqrtPrice: new BN(curve0SqrtPrice),
             liquidity: new BN(curve0Liquidity),
           },
-          {
-            sqrtPrice: new BN(curve1SqrtPrice),
-            liquidity: new BN(curve1Liquidity),
-          },
         ],
       };
       
-      // Correcting numberOfPeriod for baseFee if it should be BN
-      // The SDK CreateConfigParams expects poolFees.baseFee.numberOfPeriod to be a number.
-      // If it must be BN per your setup:
-      // createConfigParam.poolFees.baseFee.numberOfPeriod = new BN(baseFeeNumberOfPeriod);
-      // For now, sticking to number as per SDK type, original script has BN(0) which is fine for number 0.
-
-      const client = new DynamicBondingCurveClient(connection, "confirmed");
+      const client = new DynamicBondingCurveClient(connection as any, "confirmed");
       const transaction = await client.partner.createConfig(createConfigParam);
 
       const { blockhash } = await connection.getLatestBlockhash("confirmed");
@@ -461,7 +466,7 @@ const CreateConfigForm = ({
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Curve Data (2 points)</CardTitle>
+            <CardTitle className="text-xl">Curve Data (1 point)</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 pt-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -476,17 +481,44 @@ const CreateConfigForm = ({
                       <Input id="curve0Liquidity" type="text" value={curve0Liquidity} onChange={(e) => setCurve0Liquidity(e.target.value)} disabled={isLoading || isFormLocked} />
                     </div>
                 </div>
-                <div>
-                    <p className="font-medium mb-2">Point 2:</p>
-                    <div className="space-y-2 mb-4">
-                      <Label htmlFor="curve1SqrtPrice">SQRT Price (BN):</Label>
-                      <Input id="curve1SqrtPrice" type="text" value={curve1SqrtPrice} onChange={(e) => setCurve1SqrtPrice(e.target.value)} disabled={isLoading || isFormLocked} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="curve1Liquidity">Liquidity (BN):</Label>
-                      <Input id="curve1Liquidity" type="text" value={curve1Liquidity} onChange={(e) => setCurve1Liquidity(e.target.value)} disabled={isLoading || isFormLocked} />
-                    </div>
-                </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Pool Fees: Dynamic Fee</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="dynamicFeeBinStep">Bin Step (number):</Label>
+                <Input id="dynamicFeeBinStep" type="text" value={dynamicFeeBinStep} onChange={(e) => setDynamicFeeBinStep(e.target.value)} disabled={isLoading || isFormLocked} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dynamicFeeBinStepU128">Bin Step U128 (BN):</Label>
+                <Input id="dynamicFeeBinStepU128" type="text" value={dynamicFeeBinStepU128} onChange={(e) => setDynamicFeeBinStepU128(e.target.value)} disabled={isLoading || isFormLocked} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dynamicFeeFilterPeriod">Filter Period (number):</Label>
+                <Input id="dynamicFeeFilterPeriod" type="text" value={dynamicFeeFilterPeriod} onChange={(e) => setDynamicFeeFilterPeriod(e.target.value)} disabled={isLoading || isFormLocked} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dynamicFeeDecayPeriod">Decay Period (number):</Label>
+                <Input id="dynamicFeeDecayPeriod" type="text" value={dynamicFeeDecayPeriod} onChange={(e) => setDynamicFeeDecayPeriod(e.target.value)} disabled={isLoading || isFormLocked} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dynamicFeeReductionFactor">Reduction Factor (number):</Label>
+                <Input id="dynamicFeeReductionFactor" type="text" value={dynamicFeeReductionFactor} onChange={(e) => setDynamicFeeReductionFactor(e.target.value)} disabled={isLoading || isFormLocked} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dynamicFeeMaxVolatilityAccumulator">Max Volatility Accumulator (number):</Label>
+                <Input id="dynamicFeeMaxVolatilityAccumulator" type="text" value={dynamicFeeMaxVolatilityAccumulator} onChange={(e) => setDynamicFeeMaxVolatilityAccumulator(e.target.value)} disabled={isLoading || isFormLocked} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dynamicFeeVariableFeeControl">Variable Fee Control (number):</Label>
+                <Input id="dynamicFeeVariableFeeControl" type="text" value={dynamicFeeVariableFeeControl} onChange={(e) => setDynamicFeeVariableFeeControl(e.target.value)} disabled={isLoading || isFormLocked} />
+              </div>
             </div>
           </CardContent>
         </Card>

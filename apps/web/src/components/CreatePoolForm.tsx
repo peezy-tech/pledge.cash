@@ -94,7 +94,7 @@ const CreatePoolForm: React.FC<CreatePoolFormProps> = ({ initialConfigAddress })
         poolCreator: poolCreator.publicKey,
       };
 
-      const client = new DynamicBondingCurveClient(connection, "confirmed");
+      const client = new DynamicBondingCurveClient(connection as any, "confirmed");
 
       console.log("Creating pool transaction...");
       const poolTransaction = await client.pool.createPool(createPoolParam);
@@ -105,7 +105,7 @@ const CreatePoolForm: React.FC<CreatePoolFormProps> = ({ initialConfigAddress })
 
       const signature = await sendAndConfirmTransaction(
         connection,
-        poolTransaction,
+        poolTransaction as any,
         [payer, baseMintKeypair, poolCreator], // poolCreator might not need to sign if it's the same as payer & payer is signer
         {
           commitment: "confirmed",
