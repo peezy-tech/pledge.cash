@@ -24,6 +24,7 @@ export class App extends Entity {
   constructor(world, data, local) {
     super(world, data, local)
     this.isApp = true
+    this.lockable = false
     this.n = 0
     this.worldNodes = new Set()
     this.hotEvents = 0
@@ -187,6 +188,10 @@ export class App extends Entity {
     this.deadHook = { dead: false }
     // clear fields
     this.onFields?.([])
+    // unregister any MCP tools
+    if (this.world.ai) {
+      this.world.ai.unregisterAppMCPTools?.(this.data.id)
+    }
   }
 
   fixedUpdate(delta) {
@@ -242,6 +247,16 @@ export class App extends Entity {
   }
 
   modify(data) {
+    // Handle state changes
+    if (data.hasOwnProperty('state')) {
+      this.data.state = data.state
+    }
+    
+    // Handle lockable changes
+    if (data.hasOwnProperty('lockable')) {
+      this.lockable = data.lockable
+    }
+
     let rebuild
     if (data.hasOwnProperty('blueprint')) {
       this.data.blueprint = data.blueprint
@@ -281,10 +296,6 @@ export class App extends Entity {
     }
     if (data.hasOwnProperty('pinned')) {
       this.data.pinned = data.pinned
-    }
-    if (data.hasOwnProperty('state')) {
-      this.data.state = data.state
-      rebuild = true
     }
     if (rebuild) {
       this.build()

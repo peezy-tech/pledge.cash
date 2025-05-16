@@ -10,7 +10,9 @@ export function createPlayerProxy(entity, player) {
   const rotation = new THREE.Euler()
   const quaternion = new THREE.Quaternion()
   let activeEffectConfig = null
-  return {
+  
+  // Create the base player proxy
+  const proxy = {
     get networkId() {
       return player.data.owner
     },
@@ -53,6 +55,9 @@ export function createPlayerProxy(entity, player) {
     },
     get destroyed() {
       return !!player.destroyed
+    },
+    get lockable() {
+      return player.lockable
     },
     teleport(position, rotationY) {
       if (player.data.owner === world.network.id) {
@@ -164,5 +169,59 @@ export function createPlayerProxy(entity, player) {
       }
       world.livekit.setScreenShareTarget(targetId)
     },
+    replaceAnimations(newEmotes, reset = false) {
+      if (player.data.owner === world.network.id) {
+        player.replaceAnimations(newEmotes, reset)
+      }
+    },
+    setLockable(lockable = true) {
+      // if (world.network.isServer) {
+        player.setLockable(lockable)
+      // }
+    },
+    setDoubleJumpEnabled(enabled) {
+      if (player.data.owner === world.network.id) {
+        player.setDoubleJumpEnabled(enabled)
+      }
+    },
+    isInAir() {
+      return player.isInAir()
+    },
+    setZoom(zoomValue) {
+      if (player.data.owner === world.network.id) {
+        player.setZoom(zoomValue)
+      }
+    },
+    setZoomEnabled(enabled) {
+      if (player.data.owner === world.network.id) {
+        player.setZoomEnabled(enabled)
+      }
+    },
   }
+  
+  // Add injected player methods and properties if available
+  if (world.apps) {
+    // Add getters
+    for (const key in world.apps.playerGetters) {
+      Object.defineProperty(proxy, key, {
+        get: () => world.apps.playerGetters[key](player),
+        enumerable: true,
+      })
+    }
+    
+    // Add setters
+    for (const key in world.apps.playerSetters) {
+      Object.defineProperty(proxy, key, {
+        set: (value) => world.apps.playerSetters[key](player, value),
+        enumerable: true,
+      })
+    }
+    
+    // Add methods
+    for (const key in world.apps.playerMethods) {
+      proxy[key] = (...args) => world.apps.playerMethods[key](entity, player, ...args)
+    }
+  }
+  
+  return proxy
 }

@@ -32,6 +32,7 @@ export class Apps extends System {
     super(world)
     this.initWorldHooks()
     this.initAppHooks()
+    this.initPlayerHooks()
   }
 
   initWorldHooks() {
@@ -213,6 +214,20 @@ export class Apps extends System {
           }
         })
       },
+      setPlayerLockable(entity, playerId, lockable = true) {
+        if (!world.network.isServer) return
+        const player = world.entities.getPlayer(playerId)
+        if (!player) return
+        
+        // Set lockable property directly on the player
+        player.lockable = lockable
+        
+        // Send the update to clients
+        world.network.send('entityModified', {
+          id: player.data.id,
+          lockable
+        })
+      },
     }
   }
 
@@ -241,6 +256,9 @@ export class Apps extends System {
       keepActive(entity) {
         return entity.keepActive
       },
+      lockable(entity) {
+        return entity.lockable
+      },
     }
     this.appSetters = {
       state(entity, value) {
@@ -248,6 +266,13 @@ export class Apps extends System {
       },
       keepActive(entity, value) {
         entity.keepActive = value
+      },
+      lockable(entity, value) {
+        entity.lockable = value
+        world.network.send('entityModified', {
+          id: entity.data.id,
+          lockable: value
+        })
       },
     }
     this.appMethods = {
@@ -316,10 +341,83 @@ export class Apps extends System {
         }
         entity.onFields?.(entity.fields)
       },
+      setLockable(entity, lockable = true) {
+        entity.lockable = lockable
+        world.network.send('entityModified', {
+          id: entity.data.id,
+          lockable
+        })
+      },
     }
   }
 
-  inject({ world, app }) {
+  initPlayerHooks() {
+    this.playerGetters = {}
+    this.playerSetters = {}
+    this.playerMethods = {
+      // Add a helper method to register a custom data field and create a getter/setter for it
+      registerCustomData: (entity, player, field, options = {}) => {
+        const { namespace, defaultValue, onChange } = options
+        
+        // Create key with optional namespace
+        const key = namespace ? `${namespace}:${field}` : field
+        
+        // Initialize the custom data object if needed
+        if (!player.data.custom) {
+          player.data.custom = {}
+        }
+        
+        // Set default value if provided and field doesn't exist
+        if (defaultValue !== undefined && player.data.custom[key] === undefined) {
+          player.data.custom[key] = defaultValue
+        }
+        
+        // Create a getter for this custom field
+        if (!this.playerGetters[field]) {
+          this.playerGetters[field] = (player) => {
+            return player.data.custom?.[key] ?? defaultValue
+          }
+        }
+        
+        // Create a setter for this custom field
+        if (!this.playerSetters[field]) {
+          this.playerSetters[field] = (player, value) => {
+            // Initialize the custom data object if needed
+            if (!player.data.custom) {
+              player.data.custom = {}
+            }
+            
+            // Only update if the value has changed
+            if (player.data.custom[key] !== value) {
+              // Set the value
+              player.data.custom[key] = value
+              
+              // Call the onChange handler if provided
+              if (onChange) {
+                onChange(player, value)
+              }
+              
+              // Send network update
+              if (entity.world.network.isServer) {
+                entity.world.network.send('entityModified', { 
+                  id: player.data.id,
+                  customProp: { key, value }
+                })
+              }
+            }
+          }
+        }
+        
+        // Return a getter and setter for the registered field
+        return {
+          get: () => this.playerGetters[field](player),
+          set: (value) => this.playerSetters[field](player, value)
+        }
+      }
+    }
+  }
+
+  inject({ world, app, player }) {
     if (world) {
       for (const key in world) {
         const value = world[key]
@@ -349,6 +447,22 @@ export class Apps extends System {
         }
         if (value.set) {
           this.appSetters[key] = value.set
+        }
+      }
+    }
+    if (player) {
+      for (const key in player) {
+        const value = player[key]
+        const isFunction = typeof value === 'function'
+        if (isFunction) {
+          this.playerMethods[key] = value
+          continue
+        }
+        if (value.get) {
+          this.playerGetters[key] = value.get
+        }
+        if (value.set) {
+          this.playerSetters[key] = value.set
         }
       }
     }

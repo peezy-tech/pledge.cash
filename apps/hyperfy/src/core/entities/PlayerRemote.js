@@ -17,6 +17,13 @@ export class PlayerRemote extends Entity {
   constructor(world, data, local) {
     super(world, data, local)
     this.isPlayer = true
+    
+    // Initialize custom data if it doesn't exist
+    if (!this.data.custom) {
+      this.data.custom = {}
+    }
+    
+    this.lockable = true
     this.init()
   }
 
@@ -178,6 +185,9 @@ export class PlayerRemote extends Entity {
       this.nametag.health = data.health
       this.world.events.emit('health', { playerId: this.data.id, health: data.health })
     }
+    if (data.hasOwnProperty('lockable')) {
+      this.lockable = data.lockable
+    }
     if (data.hasOwnProperty('avatar')) {
       this.data.avatar = data.avatar
       avatarChanged = true
@@ -188,6 +198,41 @@ export class PlayerRemote extends Entity {
     }
     if (data.hasOwnProperty('roles')) {
       this.data.roles = data.roles
+    }
+    if (data.hasOwnProperty('custom')) {
+      // Initialize if needed
+      if (!this.data.custom) {
+        this.data.custom = {}
+      }
+      
+      // Merge custom properties instead of replacing the entire object
+      if (typeof data.custom === 'object' && data.custom !== null) {
+        for (const key in data.custom) {
+          const value = data.custom[key]
+          this.data.custom[key] = value
+          // Emit event for each property change
+          this.world.events.emit(`custom:${key}`, { 
+            playerId: this.data.id, 
+            key, 
+            value 
+          })
+        }
+      }
+    }
+    // Handle individual custom property modifications
+    else if (data.hasOwnProperty('customProp')) {
+      // Initialize if needed
+      if (!this.data.custom) {
+        this.data.custom = {}
+      }
+      
+      const { key, value } = data.customProp
+      this.data.custom[key] = value
+      this.world.events.emit(`custom:${key}`, { 
+        playerId: this.data.id, 
+        key, 
+        value 
+      })
     }
     if (avatarChanged) {
       this.applyAvatar()
@@ -222,5 +267,14 @@ export class PlayerRemote extends Entity {
     if (local) {
       this.world.network.send('entityRemoved', this.data.id)
     }
+  }
+
+  setLockable(lockable = true) {
+    console.log('setLockable', lockable)
+    this.lockable = lockable
+    this.world.network.send('entityModified', {
+      id: this.data.id,
+      lockable,
+    })
   }
 }
