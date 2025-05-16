@@ -1,35 +1,32 @@
-import logo from './logo.svg'
+import { useState } from 'react'
+
+import CreateConfigForm from './components/CreateConfigForm'
+import CreatePoolForm from './components/CreatePoolForm'
 
 function App() {
+  const [configAddress, setConfigAddress] = useState<string>("")
+
+  const handleConfigCreated = (address: string) => {
+    setConfigAddress(address)
+  }
+
   return (
-    <div className="text-center">
-      <header className="min-h-screen flex flex-col items-center justify-center bg-[#282c34] text-white text-[calc(10px+2vmin)]">
-        <img
-          src={logo}
-          className="h-[40vmin] pointer-events-none animate-[spin_20s_linear_infinite]"
-          alt="logo"
-        />
-        <p>
-          Edit <code>src/App.tsx</code> and save to reload.
-        </p>
-        <a
-          className="text-[#61dafb] hover:underline"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-        <a
-          className="text-[#61dafb] hover:underline"
-          href="https://tanstack.com"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn TanStack
-        </a>
-      </header>
-    </div>
+    <>
+      <h1>Meteora Dynamic Bonding Curve (DBC) Tools</h1>
+      <div className="container">
+        <div className="form-section">
+          <CreateConfigForm onConfigCreated={handleConfigCreated} />
+        </div>
+        <div className="form-section">
+          <CreatePoolForm initialConfigAddress={configAddress} />
+        </div>
+      </div>
+      <footer className="read-the-docs">
+        <p>Ensure your devnet wallet has SOL for transaction fees.</p>
+        <p>These forms interact directly with the Solana devnet.</p>
+        <p><strong>Never use mainnet private keys in a frontend example like this.</strong></p>
+      </footer>
+    </>
   )
 }
 
