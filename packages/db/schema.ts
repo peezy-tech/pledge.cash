@@ -7,7 +7,11 @@ import * as t from "drizzle-orm/sqlite-core";
 export const users = table(
   "users",
   {
-    id: t.text().$default(() => `user_${generateUniqueString(16)}`).notNull().primaryKey(),
+    id: t
+      .text()
+      .$default(() => `user_${generateUniqueString(16)}`)
+      .notNull()
+      .primaryKey(),
     name: t.text(),
     role: t.text().$type<"user" | "admin">().default("user"),
     oauthProvider: t.text(),

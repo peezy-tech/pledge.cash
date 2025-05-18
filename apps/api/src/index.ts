@@ -141,7 +141,6 @@ const app = new Elysia()
           if (refreshToken) userDbData.oauthRefreshToken = refreshToken;
         }
 
-        
         if (tokens.hasScopes()) {
           const scopeValue = tokens.scopes();
           if (scopeValue) userDbData.oauthScope = scopeValue.join(" ");

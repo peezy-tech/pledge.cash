@@ -1,6 +1,6 @@
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
-import * as orm from 'drizzle-orm';
+import * as orm from "drizzle-orm";
 import path from "path";
 
 const DB_PATH = `${
