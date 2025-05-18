@@ -7,7 +7,7 @@ import * as t from "drizzle-orm/sqlite-core";
 export const users = table(
   "users",
   {
-    id: t.int().primaryKey({ autoIncrement: true }),
+    id: t.text().$default(() => `user_${generateUniqueString(16)}`),
     name: t.text().notNull(),
     referralId: t.int().references((): AnySQLiteColumn => users.id),
     role: t.text().$type<"user" | "admin">().default("user"),
