@@ -5,6 +5,7 @@ import CreatePoolForm from './components/CreatePoolForm'
 import TokenCreationPage from './components/token-creation-page'
 import ChartsPage from './components/charts-page'
 import CreateSwapForm from './components/CreateSwapForm'
+import { LoginForm } from './components/login-form'
 
 function Forms() {
   const [configAddress, setConfigAddress] = useState<string>("")
@@ -39,7 +40,13 @@ function Forms() {
 
 
 function App() {
-  return <Forms />
+  return (
+    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
+      <div className="w-full max-w-sm">
+        <LoginForm />
+      </div>
+    </div>
+  )
 }
 
 export default App
