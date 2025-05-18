@@ -1,5 +1,5 @@
 {
-  "name": "db",
+  "name": "@repo/db",
   "module": "index.ts",
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "db:up": "drizzle-kit up",
     "db:introspect": "drizzle-kit introspect",
     "db:drop": "drizzle-kit drop",
-    "db:studio": "drizzle-kit studio",
+    "db:studio": "drizzle-kit studio"
   },
   "devDependencies": {
     "@types/bun": "latest",

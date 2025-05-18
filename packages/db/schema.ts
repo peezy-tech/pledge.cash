@@ -7,18 +7,17 @@ import * as t from "drizzle-orm/sqlite-core";
 export const users = table(
   "users",
   {
-    id: t.text().$default(() => `user_${generateUniqueString(16)}`),
-    name: t.text().notNull(),
-    referralId: t.int().references((): AnySQLiteColumn => users.id),
+    id: t.text().$default(() => `user_${generateUniqueString(16)}`).notNull().primaryKey(),
+    name: t.text(),
     role: t.text().$type<"user" | "admin">().default("user"),
-    oauthProvider: t.text().notNull(),
-    oauthId: t.text().notNull(),
-    oauthAccessToken: t.text().notNull(),
-    oauthRefreshToken: t.text().notNull(),
-    oauthExpiresAt: t.int().notNull(),
-    oauthScope: t.text().notNull(),
-    oauthTokenType: t.text().notNull(),
-    oauthIdToken: t.text().notNull(),
+    oauthProvider: t.text(),
+    oauthId: t.text(),
+    oauthAccessToken: t.text(),
+    oauthRefreshToken: t.text(),
+    oauthExpiresAt: t.int(),
+    oauthScope: t.text(),
+    oauthTokenType: t.text(),
+    oauthIdToken: t.text(),
   },
   (table) => [t.uniqueIndex("name_idx").on(table.name)]
 );

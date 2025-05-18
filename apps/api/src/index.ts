@@ -1,6 +1,8 @@
 import { Elysia, t } from "elysia";
 import { cors } from "@elysiajs/cors";
 import { oauth2 } from "elysia-oauth2";
+import { db, orm } from "@repo/db";
+import { users } from "@repo/db/schema";
 
 if (!process.env.TWITTER_CLIENT_ID || !process.env.TWITTER_CLIENT_SECRET) {
   throw new Error("TWITTER_CLIENT_ID and TWITTER_CLIENT_SECRET must be set");
@@ -33,6 +35,7 @@ const app = new Elysia()
       const url = await oauth2.createURL("Twitter", [
         "users.read",
         "tweet.read",
+        "offline.access",
       ]);
       return redirect(url.href);
     }
@@ -72,9 +75,6 @@ const app = new Elysia()
           details: "Authorization code missing.",
         };
       }
-      // The 'query' parameter might be needed depending on how elysia-oauth2 handles Twitter's response.
-      // Typically, code and state are in query params for OAuth2.
-      // The library might handle this internally when calling authorize.
       try {
         const tokens = await oauth2.authorize(
           "Twitter",
@@ -95,6 +95,91 @@ const app = new Elysia()
         );
         const twitterUserData = await twitterUserResponse.json();
         console.log(twitterUserData);
+
+        const twitterApiData = twitterUserData.data;
+
+        if (!twitterApiData || typeof twitterApiData.id !== "string") {
+          console.error(
+            "Twitter user data or ID is missing or invalid in the API response:",
+            twitterUserData
+          );
+          // Throw an error, which will be caught by the surrounding try...catch block
+          throw new Error("Twitter user data or ID is missing or invalid.");
+        }
+
+        const twitterUserId = twitterApiData.id;
+        // Name might be null or not provided by the API, handle undefined
+        const twitterUserName = twitterApiData.name as string | undefined;
+
+        let user = await db
+          .select()
+          .from(users)
+          .where(
+            orm.and(
+              orm.eq(users.oauthProvider, "twitter"),
+              orm.eq(users.oauthId, twitterUserId)
+            )
+          )
+          .limit(1)
+          .then((rows) => rows[0]);
+
+        const userDbData: any = {
+          oauthAccessToken: accessToken,
+        };
+
+        if (twitterUserName !== undefined) {
+          userDbData.name = twitterUserName; // Update/set name if provided
+        }
+
+        console.log(tokens);
+
+        const hasRefreshToken = tokens.hasRefreshToken();
+        console.log({ hasRefreshToken });
+        if (hasRefreshToken) {
+          const refreshToken = tokens.refreshToken();
+          console.log({ refreshToken });
+          if (refreshToken) userDbData.oauthRefreshToken = refreshToken;
+        }
+
+        
+        if (tokens.hasScopes()) {
+          const scopeValue = tokens.scopes();
+          if (scopeValue) userDbData.oauthScope = scopeValue.join(" ");
+        }
+
+        const tokenTypeValue = tokens.tokenType?.();
+        if (tokenTypeValue) userDbData.oauthTokenType = tokenTypeValue;
+
+        const expiresInSeconds = tokens.accessTokenExpiresInSeconds();
+        const expiresAt = tokens.accessTokenExpiresAt();
+        console.log({ expiresInSeconds, expiresAt });
+
+        if (expiresInSeconds) userDbData.oauthExpiresAt = expiresAt;
+
+        console.log(userDbData);
+
+        if (user) {
+          // User exists: Update their record (e.g., name, tokens)
+          const updatedUsers = await db
+            .update(users)
+            .set(userDbData) // Set new token info and potentially updated name
+            .where(orm.eq(users.id, user.id)) // user.id is the existing primary key
+            .returning();
+          user = updatedUsers[0]; // Drizzle returns an array
+          console.log("Existing user updated:", user.id);
+        } else {
+          // User does not exist: Insert a new record
+          const newUsers = await db
+            .insert(users)
+            .values({
+              ...userDbData, // Spread common fields (name, token data)
+              oauthProvider: "twitter",
+              oauthId: twitterUserId,
+            })
+            .returning();
+          user = newUsers[0]; // Drizzle returns an array
+          console.log("New user created:", user.id);
+        }
 
         return {
           message: "Twitter OAuth successful!",
