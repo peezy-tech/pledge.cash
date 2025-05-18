@@ -1,8 +1,0 @@
-.DS_Store
-.env*
-!.env.example
-*.notes.md
-.notes/
-node_modules/
-build/
-world*

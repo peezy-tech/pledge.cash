@@ -1,12 +1,6 @@
 {
   "repos": [
     {
-      "name": "hyperfy",
-      "upstreamUrl": "~/repos/github/hyperfy-xyz/hyperfy",
-      "localPath": "apps/hyperfy",
-      "branch": "anime-rivals"
-    },
-    {
       "name": "shamir-secret-sharing",
       "upstreamUrl": "~/repos/github/shamir-secret-sharing",
       "localPath": "packages/shamir-secret-sharing",
