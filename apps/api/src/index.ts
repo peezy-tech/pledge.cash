@@ -1,23 +1,35 @@
 import { Elysia, t } from "elysia";
 import { cors } from "@elysiajs/cors";
 import { oauth2 } from "elysia-oauth2";
+import jwt from "jsonwebtoken";
 import { db, orm } from "@repo/db";
-import { users } from "@repo/db/schema";
+import * as schemaImport from "@repo/db/schema";
+
+// Define types for context
+const { users } = schemaImport;
+type DbType = typeof db;
+type OrmType = typeof orm;
+type SchemaType = typeof schemaImport;
 
 if (!process.env.TWITTER_CLIENT_ID || !process.env.TWITTER_CLIENT_SECRET) {
   throw new Error("TWITTER_CLIENT_ID and TWITTER_CLIENT_SECRET must be set");
 }
 
 if (!process.env.COOKIE_SECRET) {
-  throw new Error("COOKIE_SECRET must be set for signing cookies");
+  throw new Error("COOKIE_SECRET must be set for signing cookies and JWTs");
 }
 
 const app = new Elysia({
   cookie: {
     secrets: process.env.COOKIE_SECRET,
-    sign: ['sessionId']
+    sign: ['authToken']
   }
 })
+  .decorate({
+    db,
+    orm,
+    schema: schemaImport
+  })
   .use(
     cors({
       origin: (req) => true,
@@ -56,6 +68,9 @@ const app = new Elysia({
       query,
       cookie,
       set,
+      db,
+      orm,
+      schema
     }: {
       oauth2: any;
       query: {
@@ -66,6 +81,9 @@ const app = new Elysia({
       };
       cookie: any;
       set: any;
+      db: DbType;
+      orm: OrmType;
+      schema: SchemaType;
     }) => {
       if (query.error) {
         console.error(
@@ -126,11 +144,11 @@ const app = new Elysia({
 
         let user = await db
           .select()
-          .from(users)
+          .from(schema.users)
           .where(
             orm.and(
-              orm.eq(users.oauthProvider, "twitter"),
-              orm.eq(users.oauthId, twitterUserId)
+              orm.eq(schema.users.oauthProvider, "twitter"),
+              orm.eq(schema.users.oauthId, twitterUserId)
             )
           )
           .limit(1)
@@ -173,16 +191,16 @@ const app = new Elysia({
         if (user) {
           // User exists: Update their record (e.g., name, tokens)
           const updatedUsers = await db
-            .update(users)
+            .update(schema.users)
             .set(userDbData) // Set new token info and potentially updated name
-            .where(orm.eq(users.id, user.id)) // user.id is the existing primary key
+            .where(orm.eq(schema.users.id, user.id)) // Use schema.users
             .returning();
           user = updatedUsers[0]; // Drizzle returns an array
           console.log("Existing user updated:", user.id);
         } else {
           // User does not exist: Insert a new record
           const newUsers = await db
-            .insert(users)
+            .insert(schema.users)
             .values({
               ...userDbData, // Spread common fields (name, token data)
               oauthProvider: "twitter",
@@ -193,10 +211,11 @@ const app = new Elysia({
           console.log("New user created:", user.id);
         }
 
-        // Set session cookie
+        // Set session cookie with JWT
         if (user && user.id) {
-          cookie.sessionId.value = user.id;
-          cookie.sessionId.set({
+          const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET!, { expiresIn: '7d' });
+          cookie.authToken.value = token;
+          cookie.authToken.set({
             httpOnly: true,
             maxAge: 7 * 24 * 60 * 60, // 7 days
             path: '/',
@@ -204,7 +223,7 @@ const app = new Elysia({
             sameSite: 'lax'
           });
         } else {
-          console.error("User or user.id is undefined, cannot set cookie.");
+          console.error("User or user.id is undefined, cannot set auth token cookie.");
           // Handle the case where user or user.id is not available
           // Potentially return an error or redirect
         }
@@ -220,40 +239,46 @@ const app = new Elysia({
       }
     }
   )
-  .get('/me', async ({ cookie, set }: { cookie: any; set: any; }) => {
-    const sessionId = cookie.sessionId.value;
+  .get('/me', async ({ cookie, set, db, orm, schema }: { cookie: any; set: any; db: DbType; orm: OrmType; schema: SchemaType; }) => {
+    const token = cookie.authToken.value;
 
-    if (!sessionId) {
+    if (!token) {
       set.status = 401;
-      return { error: 'Unauthorized: No session cookie' };
+      return { error: 'Unauthorized: No auth token provided' };
     }
 
-    // Here, you would typically validate the sessionId further if it were a signed JWT or similar
-    // For now, we assume if the signed cookie 'sessionId' exists and is verified by Elysia, it's a valid user ID.
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string; iat: number; exp: number };
+      const userId = decoded.userId;
 
-    const user = await db
-      .select()
-      .from(users)
-      .where(orm.eq(users.id, sessionId as string))
-      .limit(1)
-      .then((rows) => rows[0]);
+      // Fetch user from DB using the userId from JWT
+      const user = await db
+        .select()
+        .from(schema.users)
+        .where(orm.eq(schema.users.id, userId))
+        .limit(1)
+        .then((rows) => rows[0]);
 
-    if (!user) {
+      if (!user) {
+        set.status = 401;
+        cookie.authToken.remove(); // Remove invalid token
+        return { error: 'Unauthorized: Invalid token or user not found' };
+      }
+
+      // Return user data (excluding sensitive info like tokens)
+      return {
+        id: user.id,
+        name: user.name,
+        // Add other non-sensitive fields as needed
+      };
+    } catch (err) {
       set.status = 401;
-      // Optionally, remove the invalid cookie
-      cookie.sessionId.remove();
-      return { error: 'Unauthorized: Invalid session' };
+      cookie.authToken.remove(); // Remove invalid or expired token
+      return { error: 'Unauthorized: Invalid or expired token' };
     }
-
-    // Return user data (excluding sensitive info like tokens)
-    return {
-      id: user.id,
-      name: user.name,
-      // Add other non-sensitive fields as needed
-    };
   }, {
     cookie: t.Cookie({
-      sessionId: t.Optional(t.String()) // Define sessionId as an optional string cookie
+      authToken: t.Optional(t.String())
     })
   })
   .listen(3000);
