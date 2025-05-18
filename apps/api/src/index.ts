@@ -8,7 +8,16 @@ if (!process.env.TWITTER_CLIENT_ID || !process.env.TWITTER_CLIENT_SECRET) {
   throw new Error("TWITTER_CLIENT_ID and TWITTER_CLIENT_SECRET must be set");
 }
 
-const app = new Elysia()
+if (!process.env.COOKIE_SECRET) {
+  throw new Error("COOKIE_SECRET must be set for signing cookies");
+}
+
+const app = new Elysia({
+  cookie: {
+    secrets: process.env.COOKIE_SECRET,
+    sign: ['sessionId']
+  }
+})
   .use(
     cors({
       origin: (req) => true,
@@ -45,6 +54,8 @@ const app = new Elysia()
     async ({
       oauth2,
       query,
+      cookie,
+      set,
     }: {
       oauth2: any;
       query: {
@@ -53,6 +64,8 @@ const app = new Elysia()
         error?: string;
         error_description?: string;
       };
+      cookie: any;
+      set: any;
     }) => {
       if (query.error) {
         console.error(
@@ -180,6 +193,22 @@ const app = new Elysia()
           console.log("New user created:", user.id);
         }
 
+        // Set session cookie
+        if (user && user.id) {
+          cookie.sessionId.value = user.id;
+          cookie.sessionId.set({
+            httpOnly: true,
+            maxAge: 7 * 24 * 60 * 60, // 7 days
+            path: '/',
+            // secure: process.env.NODE_ENV === 'production', // Enable in production
+            sameSite: 'lax'
+          });
+        } else {
+          console.error("User or user.id is undefined, cannot set cookie.");
+          // Handle the case where user or user.id is not available
+          // Potentially return an error or redirect
+        }
+
         return {
           message: "Twitter OAuth successful!",
           accessToken,
@@ -191,6 +220,42 @@ const app = new Elysia()
       }
     }
   )
+  .get('/me', async ({ cookie, set }: { cookie: any; set: any; }) => {
+    const sessionId = cookie.sessionId.value;
+
+    if (!sessionId) {
+      set.status = 401;
+      return { error: 'Unauthorized: No session cookie' };
+    }
+
+    // Here, you would typically validate the sessionId further if it were a signed JWT or similar
+    // For now, we assume if the signed cookie 'sessionId' exists and is verified by Elysia, it's a valid user ID.
+
+    const user = await db
+      .select()
+      .from(users)
+      .where(orm.eq(users.id, sessionId as string))
+      .limit(1)
+      .then((rows) => rows[0]);
+
+    if (!user) {
+      set.status = 401;
+      // Optionally, remove the invalid cookie
+      cookie.sessionId.remove();
+      return { error: 'Unauthorized: Invalid session' };
+    }
+
+    // Return user data (excluding sensitive info like tokens)
+    return {
+      id: user.id,
+      name: user.name,
+      // Add other non-sensitive fields as needed
+    };
+  }, {
+    cookie: t.Cookie({
+      sessionId: t.Optional(t.String()) // Define sessionId as an optional string cookie
+    })
+  })
   .listen(3000);
 
 console.log("Server running on port 3000");
