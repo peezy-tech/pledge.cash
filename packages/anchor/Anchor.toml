@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-my_cpi = "MkKuuePdcgWSFTPmFE7PyAvWDEGD7oVpGagR6zRDzyc"
+my_cpi = "EhPfX28bxUEHw1CCyJcUZ8pr9SeyhtStz2N9NYWmv1th"
 
 [programs.localnet]
-anchor = "ACjieUsWjBkfxcy6rzGSTtXf2uTWESN6UMMUYsm5jeXP"
+anchor = "Fbh7hB3QeqmcPuWCPWRPXRzJTfbvx9aQaVQdcjH69jRQ"
 
 [registry]
 url = "https://api.apr.dev"
@@ -20,3 +20,9 @@ wallet = "~/.config/solana/id.json"
 
 [scripts]
 test = "bun run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+
+[test.validator]
+url = "https://devnet.helius-rpc.com/?api-key=81b1290d-9852-4dcc-9c9c-4a4be7ddf3e3"
+ 
+[[test.validator.clone]]
+address = "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN"
