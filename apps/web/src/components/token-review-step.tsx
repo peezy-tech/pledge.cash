@@ -1,6 +1,6 @@
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from "recharts"
 import { Check, Loader2 } from "lucide-react"
-import Image from "next/image"
+// import Image from "next/image"
 import type { TokenFormData } from "@/app/page"
 
 interface TokenReviewStepProps {
@@ -76,12 +76,12 @@ export default function TokenReviewStep({ formData, onDeploy, isDeploying, isDep
               <div className="flex items-center gap-4 p-4 border rounded-md">
                 {formData.imagePreview ? (
                   <div className="relative h-16 w-16 rounded-full overflow-hidden border">
-                    <Image
+                    {/* <Image
                       src={formData.imagePreview || "/placeholder.svg"}
                       alt="Token preview"
                       fill
                       className="object-cover"
-                    />
+                    /> */}
                   </div>
                 ) : (
                   <div className="h-16 w-16 rounded-full bg-gray-200"></div>

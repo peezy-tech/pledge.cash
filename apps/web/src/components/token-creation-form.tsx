@@ -1,7 +1,7 @@
 import type React from "react"
 
 import { useState } from "react"
-import Image from "next/image"
+// import Image from "next/image"
 import { Coins, Upload } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -96,7 +96,7 @@ export default function TokenCreationForm() {
 
               {imagePreview ? (
                 <div className="relative h-24 w-24 rounded-full overflow-hidden border">
-                  <Image src={imagePreview || "/placeholder.svg"} alt="Token preview" fill className="object-cover" />
+                  {/* <Image src={imagePreview || "/placeholder.svg"} alt="Token preview" fill className="object-cover" /> */}
                 </div>
               ) : (
                 <div className="h-24 w-24 rounded-full bg-muted flex items-center justify-center">
