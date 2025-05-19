@@ -22,7 +22,6 @@ import '@solana/wallet-adapter-react-ui/styles.css';
 import reportWebVitals from './reportWebVitals.ts'
 
 import App from './App.tsx'
-import { PageHome } from './routes/home.tsx'
 
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
 import { WalletModalProvider, WalletMultiButton } from '@solana/wallet-adapter-react-ui';
@@ -67,15 +66,8 @@ const indexRoute = createRoute({
   component: App,
 })
 
-const homeRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/home',
-  component: PageHome,
-})
-
 const routeTree = rootRoute.addChildren([
   indexRoute,
-  homeRoute,
   TanStackQueryDemo(rootRoute),
 ])
 
