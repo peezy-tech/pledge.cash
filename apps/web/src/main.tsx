@@ -10,6 +10,7 @@ import {
 } from '@tanstack/react-router'
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 import TanStackQueryDemo from './routes/demo.tanstack-query.tsx'
+import TokenAdmin from './routes/token-admin.tsx'
 
 import Header from './components/Header'
 
@@ -69,6 +70,7 @@ const indexRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   indexRoute,
   TanStackQueryDemo(rootRoute),
+  TokenAdmin(rootRoute),
 ])
 
 const router = createRouter({
