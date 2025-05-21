@@ -11,6 +11,7 @@ import {
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 import TanStackQueryDemo from './routes/demo.tanstack-query.tsx'
 import TokenAdmin from './routes/token-admin.tsx'
+import { HomePage } from './routes/home.tsx'
 
 import Header from './components/Header'
 
@@ -22,10 +23,8 @@ import './styles.css'
 import '@solana/wallet-adapter-react-ui/styles.css';
 import reportWebVitals from './reportWebVitals.ts'
 
-import App from './App.tsx'
-
 import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
-import { WalletModalProvider, WalletMultiButton } from '@solana/wallet-adapter-react-ui';
+import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
 import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
 import { clusterApiUrl } from '@solana/web3.js';
 import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
@@ -48,9 +47,6 @@ const rootRoute = createRootRoute({
         <WalletProvider wallets={wallets} autoConnect>
           <WalletModalProvider>
             <Header />
-            <div style={{ position: 'absolute', top: '20px', right: '20px', zIndex: 9999 }}>
-              <WalletMultiButton />
-            </div>
             <Outlet />
             <TanStackRouterDevtools />
             <TanStackQueryLayout />
@@ -64,7 +60,7 @@ const rootRoute = createRootRoute({
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  component: App,
+  component: HomePage,
 })
 
 const routeTree = rootRoute.addChildren([

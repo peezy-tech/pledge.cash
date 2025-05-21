@@ -11,11 +11,6 @@ function App() {
       <div className="w-full max-w-sm">
         <LoginForm />
       </div>
-      <div className="mt-4">
-        <Link to="/token-admin" className="text-blue-500 hover:underline">
-          Go to Token Admin
-        </Link>
-      </div>
     </div>
   )
 }

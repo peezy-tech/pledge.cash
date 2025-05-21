@@ -6,6 +6,9 @@ import CreateConfigForm from '../components/CreateConfigForm'
 import CreatePoolForm from '../components/CreatePoolForm'
 import CreateSwapForm from '../components/CreateSwapForm'
 
+import {  WalletMultiButton } from '@solana/wallet-adapter-react-ui';
+
+
 export function TokenAdminPage() {
   const [configAddress, setConfigAddress] = useState<string>("")
 
@@ -16,6 +19,7 @@ export function TokenAdminPage() {
   return (
     <>
       <h1>Meteora Dynamic Bonding Curve (DBC) Tools</h1>
+      
       <div className="container">
         <div className="form-section">
           <CreateConfigForm onConfigCreated={handleConfigCreated} />
@@ -26,6 +30,9 @@ export function TokenAdminPage() {
         <div className="form-section">
           <CreateSwapForm />
         </div>
+      </div>
+      <div style={{ position: 'absolute', top: '20px', right: '20px', zIndex: 9999 }}>
+        <WalletMultiButton />
       </div>
       <footer className="read-the-docs">
         <p>Ensure your devnet wallet has SOL for transaction fees.</p>
