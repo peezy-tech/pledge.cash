@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 export function EditName() {
-  const [name, setName] = useState('Toph Beifong')
+  const [name, setName] = useState('Anonymous')
   const [isEditing, setIsEditing] = useState(false)
 
   return (

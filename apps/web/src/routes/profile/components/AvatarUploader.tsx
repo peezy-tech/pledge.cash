@@ -22,13 +22,12 @@ export function AvatarUploader({ onAvatarUpload }: AvatarUploaderProps) {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { 'model/gltf-binary': ['.glb'], 'model/vrm': ['.vrm'] },
+    accept: { 'model/vrm': ['.vrm'] },
     multiple: false,
   })
 
   return (
     <div className="mb-8">
-      <h3 className="text-xl font-semibold mb-4">Upload Avatar</h3>
       <div
         {...getRootProps()}
         className={`p-8 border-2 border-dashed rounded hover:border-blue-500 cursor-pointer text-center 
