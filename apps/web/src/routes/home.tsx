@@ -1,13 +1,16 @@
-import { useState } from 'react'
 import { createRoute } from '@tanstack/react-router'
 import type { RootRoute } from '@tanstack/react-router'
+import { WorldGrid } from './home/components/WorldGrid'
+import { PageLayout } from './PageLayout'
 
 export function HomePage() {
   return (
-    <div className="container p-4">
-      <h1 className="text-2xl mb-4">Home Page</h1>
-      <p>This is the home page where users can discover content.</p>
-    </div>
+    <PageLayout 
+      title="Explore"
+      description="Discover and trade user-built virtual worlds and games. Each world is tokenized, allowing you to buy and sell these digital experiences."
+    >
+      <WorldGrid />
+    </PageLayout>
   )
 }
 

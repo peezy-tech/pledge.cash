@@ -2,22 +2,16 @@
 
 @plugin "tailwindcss-animate";
 
-@custom-variant dark (&:is(.dark *));
-
-body {
-  @apply m-0;
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu',
-    'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+.container-style {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 1rem; /* p-4 */
 }
 
-code {
-  font-family:
-    source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+.section-style {
+  @apply mb-8 bg-gray-800 p-6 rounded-lg;
 }
 
-* {
-  @apply text-white;
+.page-title {
+  @apply text-white mb-6 text-center;
 }

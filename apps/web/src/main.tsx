@@ -16,7 +16,6 @@ import ProfilePage from './routes/profile.tsx'
 import LaunchPage from './routes/launch.tsx'
 
 import Header from './components/Header'
-import GalaxyBackground from './components/GalaxyBackground'
 
 import TanStackQueryLayout from './integrations/tanstack-query/layout.tsx'
 
@@ -49,11 +48,12 @@ const rootRoute = createRootRoute({
       <ConnectionProvider endpoint={endpoint}>
         <WalletProvider wallets={wallets} autoConnect>
           <WalletModalProvider>
-            <GalaxyBackground />
-            <Header />
-            <Outlet />
-            <TanStackRouterDevtools />
-            <TanStackQueryLayout />
+            <div style={{ backgroundColor: 'black', minHeight: '100vh' }}>
+              <Header />
+              <Outlet />
+              <TanStackRouterDevtools />
+              <TanStackQueryLayout />
+            </div>
           </WalletModalProvider>
         </WalletProvider>
       </ConnectionProvider>
