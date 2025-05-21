@@ -15,3 +15,24 @@
 .page-title {
   @apply text-white mb-6 text-center;
 }
+
+/* Make all text white by default */
+body {
+  @apply text-white;
+}
+
+/* Ensure all text elements inherit white color */
+h1, h2, h3, h4, h5, h6,
+p, span, div, a,
+input, textarea, select, button,
+label, li {
+  @apply text-white;
+}
+
+/* Override any dark text colors that may be set elsewhere */
+.text-black,
+.text-gray-900,
+.text-gray-800,
+.text-gray-700 {
+  @apply text-white;
+}

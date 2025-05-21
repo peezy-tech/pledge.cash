@@ -16,18 +16,20 @@ export function TokenAdminPage() {
     setConfigAddress(address)
   }
 
+
   return (
     <>
+      <style>{`body { background-color: white; }`}</style>
       <h1>Meteora Dynamic Bonding Curve (DBC) Tools</h1>
       
-      <div className="container">
-        <div className="form-section">
+      <div className="container" style={{ backgroundColor: 'white' }}>
+        <div className="form-section" style={{ backgroundColor: 'white' }}>
           <CreateConfigForm onConfigCreated={handleConfigCreated} />
         </div>
-        <div className="form-section">
+        <div className="form-section" style={{ backgroundColor: 'white' }}>
           <CreatePoolForm initialConfigAddress={configAddress} />
         </div>
-        <div className="form-section">
+        <div className="form-section" style={{ backgroundColor: 'white' }}>
           <CreateSwapForm />
         </div>
       </div>
