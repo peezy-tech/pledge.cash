@@ -1,125 +1,56 @@
-import { useState } from 'react'
+import { Canvas } from '@react-three/fiber'
+import { OrbitControls } from '@react-three/drei'
+import { VRM, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { Suspense, useEffect, useState } from 'react'
+import type { GLTFParser } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
 interface AvatarViewerProps {
-  imageUrl?: string
+  avatarUrl: string
 }
 
-export function AvatarViewer({ imageUrl = 'https://via.placeholder.com/200/4f46e5/ffffff?text=Avatar' }: AvatarViewerProps) {
-  const [rotation, setRotation] = useState(0)
-  const [zoom, setZoom] = useState(1)
-  
-  const containerStyle: React.CSSProperties = {
-    padding: '20px',
-    background: 'linear-gradient(to bottom right, #1f2937, #111827)',
-    borderRadius: '12px',
-    color: 'white',
-    boxShadow: '0px 4px 15px rgba(0, 0, 0, 0.2)',
-    width: '100%',
-    marginBottom: '20px'
+interface CustomGLTF extends GLTF {
+  userData: {
+    vrm: VRM
   }
-  
-  const viewerStyle: React.CSSProperties = {
-    width: '200px',
-    height: '200px',
-    margin: '0 auto 20px',
-    borderRadius: '50%',
-    overflow: 'hidden',
-    position: 'relative',
-    boxShadow: '0 0 20px rgba(79, 70, 229, 0.3)',
-    border: '4px solid #4f46e5'
-  }
-  
-  const imageStyle: React.CSSProperties = {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',
-    transform: `rotate(${rotation}deg) scale(${zoom})`,
-    transition: 'transform 0.3s ease-out'
-  }
-  
-  const controlsStyle: React.CSSProperties = {
-    display: 'flex',
-    justifyContent: 'center',
-    gap: '20px',
-    marginBottom: '15px'
-  }
-  
-  const sliderContainerStyle: React.CSSProperties = {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    width: '120px'
-  }
-  
-  const sliderLabelStyle: React.CSSProperties = {
-    fontSize: '0.8rem',
-    marginBottom: '5px',
-    color: '#9ca3af'
-  }
-  
-  const sliderStyle: React.CSSProperties = {
-    width: '100%',
-    accentColor: '#4f46e5'
-  }
-  
-  const handleRotateLeft = () => {
-    setRotation(prev => prev - 90)
-  }
-  
-  const handleRotateRight = () => {
-    setRotation(prev => prev + 90)
-  }
-  
-  const handleZoomChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setZoom(parseFloat(e.target.value))
-  }
-  
-  const buttonStyle: React.CSSProperties = {
-    backgroundColor: '#4f46e5',
-    color: 'white',
-    padding: '8px 16px',
-    borderRadius: '4px',
-    border: 'none',
-    marginRight: '10px',
-    cursor: 'pointer',
-    transition: 'background-color 0.3s'
-  }
-  
+}
+
+function Model({ url }: { url: string }) {
+  const [vrm, setVrm] = useState<VRM | null>(null)
+
+  useEffect(() => {
+    const loader = new GLTFLoader()
+    loader.register((parser: GLTFParser) => new VRMLoaderPlugin(parser))
+
+    loader.load(
+      url,
+      (gltf: GLTF) => {
+        const customGltf = gltf as CustomGLTF
+        VRMUtils.removeUnnecessaryJoints(customGltf.scene)
+        VRMUtils.removeUnnecessaryVertices(customGltf.scene)
+        const loadedVrm = customGltf.userData.vrm
+        setVrm(loadedVrm)
+      },
+      (progress: ProgressEvent) => console.log('Loading model...', 100.0 * (progress.loaded / progress.total), '%'),
+      (error: unknown) => console.error(error)
+    )
+  }, [url])
+
+  return vrm ? <primitive object={vrm.scene} /> : null
+}
+
+export function AvatarViewer({ avatarUrl }: AvatarViewerProps) {
   return (
-    <div style={containerStyle}>
-      <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '16px', textAlign: 'center' }}>Your Avatar</h2>
-      
-      <div style={viewerStyle}>
-        <img 
-          src={imageUrl} 
-          alt="User avatar" 
-          style={imageStyle} 
-        />
-      </div>
-      
-      <div style={controlsStyle}>
-        <div style={sliderContainerStyle}>
-          <div style={sliderLabelStyle}>Zoom: {zoom.toFixed(1)}x</div>
-          <input
-            type="range"
-            min="0.5"
-            max="2"
-            step="0.1"
-            value={zoom}
-            onChange={handleZoomChange}
-            style={sliderStyle}
-          />
-        </div>
-      </div>
-      
-      <div style={{ display: 'flex', justifyContent: 'center' }}>
-        <button onClick={handleRotateLeft} style={buttonStyle}>
-          Rotate Left
-        </button>
-        <button onClick={handleRotateRight} style={buttonStyle}>
-          Rotate Right
-        </button>
-      </div>
+    <div className="w-full h-[70vh] bg-gray-800 rounded">
+      <Canvas camera={{ position: [0, 1.5, 1.5], fov: 50 }}>
+        <ambientLight intensity={0.5} />
+        <directionalLight position={[2.5, 8, 5]} intensity={1} />
+        <Suspense fallback={null}>
+          <Model url={avatarUrl} />
+        </Suspense>
+        <OrbitControls target={[0, 1.5, 0]} />
+      </Canvas>
     </div>
   )
 } 
