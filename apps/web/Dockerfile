@@ -22,6 +22,9 @@ COPY package.json ./
 # Bun will automatically use bun.lockb if present in the workdir
 RUN bun install --frozen-lockfile
 
+# Install serve globally
+RUN bun add -g serve
+
 # Copy all source files for the specific application (apps/web)
 COPY . .
 
@@ -42,4 +45,4 @@ EXPOSE 4173
 USER nodeuser
 
 # Start the application using the 'serve' script (vite preview)
-CMD ["bun", "run", "serve", "--host"] 
+CMD ["serve", "-s", "dist", "-l", "tcp://0.0.0.0:4173"] 
