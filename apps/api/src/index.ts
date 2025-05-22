@@ -4,6 +4,7 @@ import { oauth2 } from "elysia-oauth2";
 import jwt from "jsonwebtoken";
 import { db, orm } from "@repo/db";
 import * as schemaImport from "@repo/db/schema";
+import { staticPlugin } from "@elysiajs/static";
 
 // Define types for context
 const { users } = schemaImport;
@@ -47,9 +48,7 @@ const app = new Elysia({
       ],
     })
   )
-  .get("/", () => {
-    return { message: "Hello from Elysia!" };
-  })
+  .use(staticPlugin({ prefix: "/" }))
   .get(
     "/auth/twitter",
     async ({ oauth2, redirect }: { oauth2: any; redirect: any }) => {

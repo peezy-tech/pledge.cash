@@ -10,7 +10,7 @@ const DB_PATH = `${
 }/${process.env.DB_NAME ?? "sqlite.db"}`;
 
 const client = createClient({
-  url: `file:${DB_PATH}`,
+  url: `file:sqlite.db`,
 });
 
 const db = drizzle(client);
