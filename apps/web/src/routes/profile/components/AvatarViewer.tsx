@@ -22,52 +22,48 @@ function Model({ url, onHeadPositionKnown }: ModelProps) {
   const { mixer, actions } = useAnimations(clips, vrm.scene)
 
   useEffect(() => {
-    if (vrm && actions.idle) {
+    if (actions.idle) {
       actions.idle.setEffectiveTimeScale(0.5)
       actions.idle.play()
-    } else if (vrm && !actions.idle) {
+    } else {
       console.error('No idle animation found')
     }
-  }, [vrm, actions])
+  }, [actions])
 
   useEffect(() => {
-    if (vrm && vrm.humanoid) {
-      const headBone = vrm.humanoid.getNormalizedBoneNode('head')
-      if (headBone) {
-        const headPosition = new THREE.Vector3()
-        headBone.getWorldPosition(headPosition)
-        onHeadPositionKnown(headPosition)
-      } else {
-        console.warn('Head bone not found in VRM. Falling back to hips or default.')
-        let fallbackPosition: THREE.Vector3
-        const hipsBone = vrm.humanoid.getNormalizedBoneNode('hips')
-        if (hipsBone) {
-          fallbackPosition = new THREE.Vector3()
-          hipsBone.getWorldPosition(fallbackPosition)
-          // Adjust Y if needed, hips are usually lower than desired target
-          fallbackPosition.y += 0.8 // Example adjustment to approximate head height
-        } else {
-          // Absolute fallback if no hips either
-          fallbackPosition = new THREE.Vector3(0, 1.0, 0) // Default Y an assumption
-        }
-        onHeadPositionKnown(fallbackPosition)
-      }
-    } else if (vrm) {
-      // VRM loaded but no humanoid data, or still processing.
-      console.warn('VRM loaded, but humanoid data not (yet) available. Using default target.')
-      onHeadPositionKnown(new THREE.Vector3(0, 1.0, 0))
+    // VRM is guaranteed to exist from the hook
+    const humanoid = vrm.humanoid;
+    if (!humanoid) {
+      console.warn('VRM loaded, but humanoid data not available. Using default target.');
+      onHeadPositionKnown(new THREE.Vector3(0, 1.0, 0));
+      return;
     }
-    // If vrm is null (still loading, or failed), this effect won't call onHeadPositionKnown here.
-    // The initial state of orbitTarget in AvatarViewer handles the pre-load scenario.
+    
+    const headBone = humanoid.getNormalizedBoneNode('head');
+    if (headBone) {
+      const headPosition = new THREE.Vector3();
+      headBone.getWorldPosition(headPosition);
+      onHeadPositionKnown(headPosition);
+    } else {
+      console.warn('Head bone not found in VRM. Falling back to hips or default.');
+      const hipsBone = humanoid.getNormalizedBoneNode('hips');
+      if (hipsBone) {
+        const fallbackPosition = new THREE.Vector3();
+        hipsBone.getWorldPosition(fallbackPosition);
+        // Adjust Y if needed, hips are usually lower than desired target
+        fallbackPosition.y += 0.8; // Example adjustment to approximate head height
+        onHeadPositionKnown(fallbackPosition);
+      } else {
+        // Absolute fallback if no hips either
+        onHeadPositionKnown(new THREE.Vector3(0, 1.0, 0)); // Default Y an assumption
+      }
+    }
   }, [vrm, onHeadPositionKnown])
 
   useFrame((_, delta) => {
-    if (vrm) {
-      vrm.update(delta)
-    }
-    if (mixer) {
-      mixer.update(delta)
-    }
+    // VRM and mixer are guaranteed to exist
+    vrm.update(delta)
+    mixer.update(delta)
   })
 
   if (!vrm) {
@@ -84,44 +80,44 @@ function Model({ url, onHeadPositionKnown }: ModelProps) {
 }
 
 export function AvatarViewer({ avatarUrl }: AvatarViewerProps) {
+  const CAMERA_DISTANCE = 1.5; // Single value to control camera distance
+  const VERTICAL_OFFSET = -0.2; // Constant to offset both look-at point and camera height
   const [orbitTarget, setOrbitTarget] = useState<THREE.Vector3>(() => new THREE.Vector3(0, 1.5, 0))
-  const [isInitialCameraSetupDone, setIsInitialCameraSetupDone] = useState(false)
   const cameraRef = useRef<THREE.PerspectiveCamera>(null)
   const controlsRef = useRef<OrbitControlsImpl>(null)
 
   const handleHeadPositionKnown = useCallback((newLookAtTarget: THREE.Vector3) => {
-    setOrbitTarget(newLookAtTarget)
-  }, [setOrbitTarget])
+    // Apply vertical offset to the look-at target
+    const adjustedTarget = newLookAtTarget.clone()
+    adjustedTarget.y += VERTICAL_OFFSET
+    setOrbitTarget(adjustedTarget)
+  }, [setOrbitTarget, VERTICAL_OFFSET])
 
-  // Effect to position camera once head position is known and camera is available
+  // Effect to update camera whenever head position changes
   useEffect(() => {
-    if (cameraRef.current && orbitTarget && !isInitialCameraSetupDone) {
-      const newCameraPos = orbitTarget.clone().add(new THREE.Vector3(0, 0.05, 0.85))
-      cameraRef.current.position.copy(newCameraPos)
-      cameraRef.current.up.set(0, 1, 0)
-      cameraRef.current.lookAt(orbitTarget)
-      
-      if (controlsRef.current) {
-        controlsRef.current.target.copy(orbitTarget);
-        controlsRef.current.update()
-      }
-      setIsInitialCameraSetupDone(true)
+    const camera = cameraRef.current;
+    if (!camera) return;
+    
+    // Position camera at proper height looking at the head
+    // The orbitTarget already has the VERTICAL_OFFSET applied
+    const newCameraPos = orbitTarget.clone().add(new THREE.Vector3(0, 0.05, CAMERA_DISTANCE));
+    camera.position.copy(newCameraPos);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(orbitTarget);
+    
+    const controls = controlsRef.current;
+    if (controls) {
+      controls.target.copy(orbitTarget);
+      controls.update();
     }
-  }, [orbitTarget, isInitialCameraSetupDone])
-
-  // Reset camera setup flag when avatarUrl changes, to allow repositioning for new avatar
-  useEffect(() => {
-    setIsInitialCameraSetupDone(false)
-  }, [avatarUrl])
+  }, [orbitTarget, CAMERA_DISTANCE])
 
   return (
     <div className="w-full h-[70vh] bg-gray-800 rounded">
       <Canvas
-        camera={{ position: [0, 1.5, 1.8], fov: 50 }}
+        camera={{ position: [0, 1.5, CAMERA_DISTANCE], fov: 50 }}
         onCreated={({ camera }) => {
           cameraRef.current = camera as THREE.PerspectiveCamera
-          // If head position is already known by this point (fast model load),
-          // the useEffect listening to orbitTarget will handle the positioning.
         }}
       >
         <ambientLight intensity={0.5} />
