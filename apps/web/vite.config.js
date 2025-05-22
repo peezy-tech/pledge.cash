@@ -16,5 +16,11 @@ export default defineConfig({
     alias: {
       '@': resolve(__dirname, './src'),
     },
+    preview: {
+      allowedHosts: [
+        "hyp.studio",
+        ".hyp.studio",
+      ]
+    }
   }
 });
