@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Cache packages
 COPY package.json package.json
-COPY bun.lockb bun.lockb
+COPY bun.lock bun.lock
 
 COPY /apps/api/package.json ./apps/api/package.json
 COPY /packages/db/package.json ./packages/db/package.json
