@@ -48,7 +48,7 @@ const app = new Elysia({
       ],
     })
   )
-  .use(staticPlugin({ prefix: "/" }))
+  .use(staticPlugin({ prefix: "/", indexHTML: true }))
   .get(
     "/auth/twitter",
     async ({ oauth2, redirect }: { oauth2: any; redirect: any }) => {
