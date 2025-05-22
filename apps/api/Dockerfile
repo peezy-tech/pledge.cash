@@ -27,7 +27,6 @@ RUN bun run build
 # Move web dist to api public folder
 # RUN mkdir -p /app/apps/api/public
 # RUN cp -r /app/apps/web/dist/* /app/public/
-COPY /apps/web/dist /app/public
 
 # Reset workdir
 WORKDIR /app
@@ -46,6 +45,7 @@ RUN bun build \
 # FROM gcr.io/distroless/base
 
 WORKDIR /app
+COPY /apps/web/dist /app/public
 
 # COPY --from=build /app/server server
 # COPY /apps/api/public /app/public
