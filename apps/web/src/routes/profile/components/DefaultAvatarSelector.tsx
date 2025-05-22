@@ -8,7 +8,6 @@ const defaultAvatars = [
   { name: "Bitcoin Guy", url: `${BUCKET_URL}/BitcoinGuy.vrm` },
   { name: "Chadworldfix", url: `${BUCKET_URL}/Chadworldfix.vrm` },
   { name: "Cyber Spartain", url: `${BUCKET_URL}/CyberSpartain_v6_merged.vrm` },
-  { name: "Doge Coin", url: `${BUCKET_URL}/DogeCoin.vrm` },
   { name: "George Droyd", url: `${BUCKET_URL}/GeorgeDroyd_VRM.vrm` },
   { name: "Lain", url: `${BUCKET_URL}/LainPink.vrm` },
   { name: "Mog Tubby", url: `${BUCKET_URL}/MOG_Tubby.vrm` },

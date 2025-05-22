@@ -39,7 +39,7 @@ export function AvatarUploader({ onAvatarUpload }: AvatarUploaderProps) {
         ) : isDragActive ? (
           <p>Drop the avatar file here ...</p>
         ) : (
-          <p>Drag 'n' drop a .vrm or .glb file here, or click to select file</p>
+          <p>Drag 'n' drop a .vrm file here, or click to select file</p>
         )}
       </div>
     </div>
