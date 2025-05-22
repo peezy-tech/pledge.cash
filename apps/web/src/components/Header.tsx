@@ -1,8 +1,7 @@
 import { Link } from '@tanstack/react-router'
-import { useModal } from '../context/ModalContext';
+import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 
 export default function Header() {
-  const { toggleModal } = useModal();
 
   return (
     <header className="p-2 flex gap-4 bg-black/30 backdrop-blur-sm text-white justify-between items-center">
@@ -33,12 +32,7 @@ export default function Header() {
         </Link>
       </nav>
       <div className="flex items-center gap-2">
-        <button
-          onClick={toggleModal}
-          className="px-3 py-2 font-semibold rounded-md hover:bg-white/10 transition-colors"
-        >
-          Sign In
-        </button>
+        <WalletMultiButton />
       </div>
     </header>
   )

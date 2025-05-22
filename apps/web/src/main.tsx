@@ -22,8 +22,6 @@ import LaunchPage from './routes/launch.tsx'
 
 import Header from './components/Header'
 import ShowroomBackground from './components/ShowroomBackground'
-import SignInModal from './components/SignInModal'
-import { ModalProvider } from './context/ModalContext'
 
 import TanStackQueryLayout from './integrations/tanstack-query/layout.tsx'
 
@@ -49,16 +47,13 @@ const rootRoute = createRootRoute({
       <ConnectionProvider endpoint={endpoint}>
         <WalletProvider wallets={wallets} autoConnect>
           <WalletModalProvider>
-            <ModalProvider>
               <div style={{ backgroundColor: 'transparent', minHeight: '100vh' }}>
                 <ShowroomBackground />
                 <Header />
-                <SignInModal />
                 <Outlet />
                 <TanStackRouterDevtools />
                 <TanStackQueryLayout />
               </div>
-            </ModalProvider>
           </WalletModalProvider>
         </WalletProvider>
       </ConnectionProvider>
