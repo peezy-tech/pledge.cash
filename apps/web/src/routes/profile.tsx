@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { createRoute } from '@tanstack/react-router'
-import type { RootRoute } from '@tanstack/react-router'
-import { PageLayout } from './PageLayout'
 import { SectionContainer } from '../components/SectionContainer'
+import { PageLayout } from './PageLayout'
 import { EditName } from './profile/components/EditName'
 import { AvatarViewer } from './profile/components/AvatarViewer'
 import { AvatarUploader } from './profile/components/AvatarUploader'
+import { DefaultAvatarSelector } from './profile/components/DefaultAvatarSelector'
+import type { RootRoute } from '@tanstack/react-router'
 
 export function ProfilePage() {
   const [avatarUrl, setAvatarUrl] = useState('/avatar.vrm')
@@ -15,6 +16,10 @@ export function ProfilePage() {
     setAvatarUrl(newUrl)
     // In a real app, you would upload the file to a server here
     // and update the avatarUrl with the server's response.
+  }
+
+  const handleDefaultAvatarSelect = (url: string) => {
+    setAvatarUrl(url)
   }
 
   return (
@@ -32,6 +37,9 @@ export function ProfilePage() {
           </SectionContainer>
           <SectionContainer title="Upload Avatar">
             <AvatarUploader onAvatarUpload={handleAvatarUpload} />
+          </SectionContainer>
+          <SectionContainer title="Default Avatars">
+            <DefaultAvatarSelector onAvatarSelect={handleDefaultAvatarSelect} />
           </SectionContainer>
         </div>
       </div>
