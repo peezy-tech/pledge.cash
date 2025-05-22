@@ -19,7 +19,7 @@ export default defineConfig({
     preview: {
       allowedHosts: [
         "hyp.studio",
-        ".hyp.studio",
+        "dev.hyp.studio",
       ]
     }
   }
