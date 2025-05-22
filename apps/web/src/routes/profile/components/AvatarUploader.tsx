@@ -8,8 +8,8 @@ interface AvatarUploaderProps {
 export function AvatarUploader({ onAvatarUpload }: AvatarUploaderProps) {
   const [preview, setPreview] = useState<string | null>(null)
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    if (acceptedFiles && acceptedFiles.length > 0) {
+  const onDrop = useCallback((acceptedFiles: Array<File>) => {
+    if (acceptedFiles.length > 0) {
       const file = acceptedFiles[0]
       onAvatarUpload(file)
       const reader = new FileReader()
@@ -26,12 +26,36 @@ export function AvatarUploader({ onAvatarUpload }: AvatarUploaderProps) {
     multiple: false,
   })
 
+  const containerStyle: React.CSSProperties = {
+    position: 'relative',
+    cursor: 'pointer',
+    perspective: '1000px',
+    marginBottom: '2rem'
+  }
+
+  const cardStyle: React.CSSProperties = {
+    position: 'relative',
+    transition: 'transform 0.6s',
+    transformStyle: 'preserve-3d',
+    borderRadius: '12px',
+    boxShadow: '0px 4px 15px rgba(0, 0, 0, 0.2)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backdropFilter: 'blur(4px)',
+    color: 'white',
+    padding: '2rem',
+  }
+
   return (
-    <div className="mb-8">
+    <div style={containerStyle}>
       <div
         {...getRootProps()}
-        className={`p-8 border-2 border-dashed rounded hover:border-blue-500 cursor-pointer text-center 
-          ${isDragActive ? 'border-blue-500 bg-gray-700' : 'border-gray-600 bg-gray-800'}`}
+        style={{
+          ...cardStyle,
+          borderWidth: '2px',
+          borderStyle: 'dashed',
+          borderColor: isDragActive ? '#3b82f6' : '#4b5563',
+          textAlign: 'center',
+        }}
       >
         <input {...getInputProps()} />
         {preview ? (

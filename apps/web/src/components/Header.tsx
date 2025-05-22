@@ -7,7 +7,7 @@ export default function Header() {
   const toggleModal = () => setIsModalOpen(!isModalOpen);
 
   return (
-    <header className="p-4 flex gap-4 bg-black/70 text-white justify-between items-center">
+    <header className="p-2 flex gap-4 bg-black/30 backdrop-blur-sm text-white justify-between items-center">
       <nav className="flex flex-row gap-2">
         <Link 
           to="/" 

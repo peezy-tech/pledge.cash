@@ -22,6 +22,8 @@ export function LaunchCard({ onSubmit }: LaunchCardProps) {
     position: 'relative',
     width: '100%',
     height: '100%',
+    transition: 'transform 0.6s',
+    transformStyle: 'preserve-3d',
     borderRadius: '12px',
     boxShadow: '0px 4px 15px rgba(0, 0, 0, 0.2)'
   }
@@ -30,9 +32,11 @@ export function LaunchCard({ onSubmit }: LaunchCardProps) {
     position: 'relative',
     width: '100%',
     height: '100%',
+    backfaceVisibility: 'hidden',
     borderRadius: '12px',
     overflow: 'hidden',
-    background: 'linear-gradient(to bottom right, #1f2937, #111827)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backdropFilter: 'blur(4px)',
     color: 'white',
     padding: '24px'
   }

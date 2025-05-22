@@ -7,7 +7,6 @@ export function HomePage() {
   return (
     <PageLayout 
       title="Explore"
-      description="Discover and trade user-built virtual worlds and games. Each world is tokenized, allowing you to buy and sell these digital experiences."
     >
       <WorldGrid />
     </PageLayout>

@@ -21,13 +21,13 @@ export function ImageUpload({ imageUrl, setImageUrl }: ImageUploadProps) {
     e.preventDefault()
     setIsDragging(false)
     
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+    if (e.dataTransfer.files.length) {
       handleFile(e.dataTransfer.files[0])
     }
   }
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
+    if (e.target.files && e.target.files.length) {
       handleFile(e.target.files[0])
     }
   }
@@ -51,7 +51,7 @@ export function ImageUpload({ imageUrl, setImageUrl }: ImageUploadProps) {
       </label>
       <div
         className={`mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-dashed rounded-lg ${
-          isDragging ? 'border-blue-500 bg-blue-50 bg-opacity-10' : 'border-gray-700'
+          isDragging ? 'border-white bg-opacity-20 backdrop-blur-sm' : 'border-gray-700 bg-opacity-50 backdrop-blur-sm'
         }`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -68,7 +68,7 @@ export function ImageUpload({ imageUrl, setImageUrl }: ImageUploadProps) {
               <button
                 type="button"
                 onClick={() => setImageUrl('')}
-                className="absolute top-0 right-0 bg-red-600 text-white p-1 rounded-full"
+                className="absolute top-0 right-0 bg-opacity-70 backdrop-blur-sm text-white p-1 rounded-full"
               >
                 ✕
               </button>
@@ -92,7 +92,7 @@ export function ImageUpload({ imageUrl, setImageUrl }: ImageUploadProps) {
               <div className="flex text-sm text-gray-400">
                 <label
                   htmlFor="file-upload"
-                  className="relative cursor-pointer bg-gray-800 rounded-md font-medium text-blue-500 hover:text-blue-400 focus-within:outline-none"
+                  className="relative cursor-pointer bg-opacity-50 backdrop-blur-sm rounded-md font-medium text-white hover:text-gray-300 focus-within:outline-none"
                 >
                   <span className="px-2">Upload a file</span>
                   <input

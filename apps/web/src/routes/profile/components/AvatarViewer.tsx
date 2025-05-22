@@ -112,30 +112,50 @@ export function AvatarViewer({ avatarUrl }: AvatarViewerProps) {
     }
   }, [orbitTarget, CAMERA_DISTANCE])
 
+  const containerStyle: React.CSSProperties = {
+    position: 'relative',
+    perspective: '1000px'
+  }
+
+  const cardStyle: React.CSSProperties = {
+    position: 'relative',
+    transition: 'transform 0.6s',
+    transformStyle: 'preserve-3d',
+    borderRadius: '12px',
+    boxShadow: '0px 4px 15px rgba(0, 0, 0, 0.2)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backdropFilter: 'blur(4px)',
+    color: 'white',
+    height: '70vh',
+    overflow: 'hidden'
+  }
+
   return (
-    <div className="w-full h-[70vh] bg-gray-800 rounded">
-      <Canvas
-        camera={{ position: [0, 1.5, CAMERA_DISTANCE], fov: 50 }}
-        onCreated={({ camera }) => {
-          cameraRef.current = camera as THREE.PerspectiveCamera
-        }}
-      >
-        <ambientLight intensity={0.5} />
-        <directionalLight position={[2.5, 8, 5]} intensity={1} />
-        <Suspense fallback={null}>
-          <Model
-            key={avatarUrl}
-            url={avatarUrl}
-            onHeadPositionKnown={handleHeadPositionKnown}
+    <div style={containerStyle}>
+      <div style={cardStyle}>
+        <Canvas
+          camera={{ position: [0, 1.5, CAMERA_DISTANCE], fov: 50 }}
+          onCreated={({ camera }) => {
+            cameraRef.current = camera as THREE.PerspectiveCamera
+          }}
+        >
+          <ambientLight intensity={0.5} />
+          <directionalLight position={[2.5, 8, 5]} intensity={1} />
+          <Suspense fallback={null}>
+            <Model
+              key={avatarUrl}
+              url={avatarUrl}
+              onHeadPositionKnown={handleHeadPositionKnown}
+            />
+          </Suspense>
+          <OrbitControls
+            ref={controlsRef}
+            target={orbitTarget.toArray() as [number, number, number]} // Controlled target
+            enableDamping
+            dampingFactor={0.05}
           />
-        </Suspense>
-        <OrbitControls
-          ref={controlsRef}
-          target={orbitTarget.toArray() as [number, number, number]} // Controlled target
-          enableDamping
-          dampingFactor={0.05}
-        />
-      </Canvas>
+        </Canvas>
+      </div>
     </div>
   )
 } 
