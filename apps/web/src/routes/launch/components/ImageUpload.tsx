@@ -47,7 +47,7 @@ export function ImageUpload({ imageUrl, setImageUrl }: ImageUploadProps) {
   return (
     <div className="mt-2">
       <label className="block text-sm font-medium text-white mb-1">
-        World Image
+        Image
       </label>
       <div
         className={`mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-dashed rounded-lg ${

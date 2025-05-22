@@ -45,7 +45,6 @@ export function LaunchCard({ onSubmit }: LaunchCardProps) {
     <div style={containerStyle}>
       <div style={cardInnerStyle}>
         <div style={cardFaceStyle}>
-          <h2 className="text-xl font-bold mb-6 text-center">Launch Your World</h2>
           <LaunchForm onSubmit={onSubmit} />
         </div>
       </div>
