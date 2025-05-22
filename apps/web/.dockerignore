@@ -1,0 +1,30 @@
+node_modules
+.DS_Store
+.git
+.gitignore
+.vscode/
+dist/
+
+# If you have environment files that should not be in the image, add them here
+# .env
+# .env.*
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Diagnostic reports (https://nodejs.org/api/report.html)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Local files specific to your IDE or setup
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw? 

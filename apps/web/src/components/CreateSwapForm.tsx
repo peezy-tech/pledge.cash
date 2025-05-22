@@ -5,7 +5,6 @@ import {
   PublicKey,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
-import type { Transaction } from "@solana/web3.js"; // Type-only import
 import {
   DynamicBondingCurveClient,
   TokenType, // Import TokenType
@@ -16,7 +15,6 @@ import type { // Type-only imports
   PoolConfig,
   QuoteResult,
   SwapParam,
-  PoolMetrics // Corrected type
 } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import BN from "bn.js";
 import bs58 from "bs58";

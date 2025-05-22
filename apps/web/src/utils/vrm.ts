@@ -14,6 +14,9 @@ export const loadAnim = async (url: string, vrm: VRM) => {
   const loader = new FBXLoader() // A loader which loads FBX
   return loader.loadAsync(url).then((asset) => {
     const clip = THREE.AnimationClip.findByName(asset.animations, 'mixamo.com') // extract the AnimationClip
+    if (!clip) {
+      return console.error('Failed to load animation')
+    }
 
     const tracks: THREE.KeyframeTrack[] = [] // KeyframeTracks compatible with VRM will be added here
 
@@ -71,17 +74,19 @@ export const loadAnim = async (url: string, vrm: VRM) => {
             })
           }
 
+          // NOTE: build step was complaining about types, so we're using Array.from() on track.times and track.values. 
+          // if it gets scuffed somehow, we can revert this and ignore the types.
           tracks.push(
             new THREE.QuaternionKeyframeTrack(
               `${vrmNodeName}.${propertyName}`,
-              track.times,
-              track.values.map((v, i) =>
+              Array.from(track.times),
+              Array.from(track.values).map((v, i) =>
                 vrm.meta?.metaVersion === '0' && i % 2 === 0 ? -v : v
               )
             )
           )
         } else if (track instanceof THREE.VectorKeyframeTrack) {
-          const value = track.values.map(
+          const value = Array.from(track.values).map(
             (v, i) =>
               (vrm.meta?.metaVersion === '0' && i % 3 !== 1 ? -v : v) *
               hipsPositionScale
@@ -89,7 +94,7 @@ export const loadAnim = async (url: string, vrm: VRM) => {
           tracks.push(
             new THREE.VectorKeyframeTrack(
               `${vrmNodeName}.${propertyName}`,
-              track.times,
+              Array.from(track.times),
               value
             )
           )

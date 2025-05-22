@@ -1,6 +1,5 @@
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { OrbitControls, SpotLight, useAnimations } from '@react-three/drei'
-import type { VRM } from '@pixiv/three-vrm'
+import { Canvas, useFrame } from '@react-three/fiber'
+import { OrbitControls, useAnimations } from '@react-three/drei'
 import { Suspense, useEffect, useState, useRef, useCallback } from 'react'
 import { useVRMloader } from '@/hooks/useVrmloader'
 import { useClips } from '@/hooks/useClips'

@@ -1,7 +1,7 @@
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from "recharts"
 import { Check, Loader2 } from "lucide-react"
 // import Image from "next/image"
-import type { TokenFormData } from "@/app/page"
+import type { TokenFormData } from "@/components/token-creation-page"
 
 interface TokenReviewStepProps {
   formData: TokenFormData
@@ -10,7 +10,7 @@ interface TokenReviewStepProps {
   isDeployed: boolean
 }
 
-export default function TokenReviewStep({ formData, onDeploy, isDeploying, isDeployed }: TokenReviewStepProps) {
+export default function TokenReviewStep({ formData, isDeploying, isDeployed }: TokenReviewStepProps) {
   // Generate vesting schedule data
   const vestingData = Array.from({ length: 49 }, (_, i) => {
     const month = i

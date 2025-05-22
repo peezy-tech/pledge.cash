@@ -6,7 +6,7 @@ import { useState, useEffect } from "react"
 import { Coins, Upload } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import type { TokenFormData } from "@/app/page"
+import type { TokenFormData } from "@/components/token-creation-page"
 
 interface TokenMetadataStepProps {
   formData: TokenFormData

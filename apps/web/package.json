@@ -13,6 +13,7 @@
     "check": "prettier --write . && eslint --fix"
   },
   "dependencies": {
+    "@meteora-ag/dynamic-bonding-curve-sdk": "^1.1.4",
     "@pixiv/three-vrm": "^3.4.0",
     "@radix-ui/react-label": "^2.1.6",
     "@radix-ui/react-radio-group": "^1.3.6",
@@ -33,6 +34,8 @@
     "@tanstack/react-router": "^1.114.3",
     "@tanstack/react-router-devtools": "^1.114.3",
     "@types/three": "^0.176.0",
+    "bn.js": "^5.2.2",
+    "bs58": "^6.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lodash-es": "^4.17.21",
@@ -53,6 +56,7 @@
     "@tanstack/eslint-config": "^0.1.0",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react": "^16.2.0",
+    "@types/bn.js": "^5.1.6",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.3.4",

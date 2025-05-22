@@ -3,7 +3,6 @@ import {
   Connection,
   Keypair,
   sendAndConfirmTransaction,
-  PublicKey,
 } from "@solana/web3.js";
 import {
   DynamicBondingCurveClient,
