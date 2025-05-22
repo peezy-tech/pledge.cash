@@ -21,6 +21,8 @@ export function LaunchForm({ onSubmit }: LaunchFormProps) {
     onSubmit({ name, ticker, description, imageUrl })
   }
 
+  const inputStyle = "w-full rounded-lg bg-opacity-50 backdrop-blur-sm border border-gray-700 text-white px-4 py-2 focus:ring-white focus:border-white"
+
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <div className="space-y-4">
@@ -33,7 +35,7 @@ export function LaunchForm({ onSubmit }: LaunchFormProps) {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-lg bg-gray-800 border-gray-700 text-white px-4 py-2 focus:ring-blue-500 focus:border-blue-500"
+            className={inputStyle}
             required
           />
         </div>
@@ -47,7 +49,7 @@ export function LaunchForm({ onSubmit }: LaunchFormProps) {
             type="text"
             value={ticker}
             onChange={(e) => setTicker(e.target.value)}
-            className="w-full rounded-lg bg-gray-800 border-gray-700 text-white px-4 py-2 focus:ring-blue-500 focus:border-blue-500"
+            className={inputStyle}
             required
           />
         </div>
@@ -61,7 +63,7 @@ export function LaunchForm({ onSubmit }: LaunchFormProps) {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={4}
-            className="w-full rounded-lg bg-gray-800 border-gray-700 text-white px-4 py-2 focus:ring-blue-500 focus:border-blue-500"
+            className={inputStyle}
             required
           />
         </div>
@@ -71,7 +73,7 @@ export function LaunchForm({ onSubmit }: LaunchFormProps) {
 
       <button
         type="submit"
-        className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow transition duration-200"
+        className="w-full py-3 px-4 bg-opacity-50 backdrop-blur-sm border border-gray-700 text-white font-semibold rounded-lg shadow transition duration-200 hover:bg-white hover:bg-opacity-10"
       >
         Launch World
       </button>

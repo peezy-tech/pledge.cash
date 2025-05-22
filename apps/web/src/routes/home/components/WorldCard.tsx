@@ -45,7 +45,7 @@ export function WorldCard({ id, title, imageUrl, price }: WorldCardProps) {
     transformStyle: 'preserve-3d',
     transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
     borderRadius: '12px',
-    boxShadow: '0px 4px 15px rgba(0, 0, 0, 0.2)'
+    boxShadow: '0px 4px 15px rgba(0, 0, 0, 0.2)',
   }
 
   const cardFaceStyle: React.CSSProperties = {
@@ -55,7 +55,8 @@ export function WorldCard({ id, title, imageUrl, price }: WorldCardProps) {
     backfaceVisibility: 'hidden',
     borderRadius: '12px',
     overflow: 'hidden',
-    background: 'linear-gradient(to bottom right, #1f2937, #111827)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backdropFilter: 'blur(4px)',
     color: 'white'
   }
 
@@ -70,7 +71,7 @@ export function WorldCard({ id, title, imageUrl, price }: WorldCardProps) {
   }
 
   return (
-    <div style={containerStyle} onClick={handleFlip}>
+    <div style={containerStyle} /* onClick={handleFlip} */>
       <div style={cardInnerStyle}>
         {/* Front side */}
         <div style={cardFrontStyle}>
@@ -91,14 +92,37 @@ export function WorldCard({ id, title, imageUrl, price }: WorldCardProps) {
               background: 'linear-gradient(to top, rgba(0,0,0,0.7), transparent)', 
               opacity: 0.5 
             }}></div>
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                handleFlip();
+              }}
+              style={{
+                position: 'absolute',
+                bottom: '8px',
+                right: '8px',
+                width: '24px',
+                height: '24px',
+                padding: '0',
+                backgroundColor: 'rgba(255, 255, 255, 0.4)',
+                backdropFilter: 'blur(2px)',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                zIndex: 3,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <img 
+                src="/flip.png" 
+                alt="Flip card" 
+                style={{ width: '75%', height: '75%', display: 'block' }} 
+              />
+            </div>
           </div>
           <div style={{ padding: '16px' }}>
             <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>{title}</h3>
-            <div style={{ 
-              marginTop: '8px', 
-              fontSize: '0.75rem', 
-              color: '#c4b5fd',
-            }}>Click to flip</div>
           </div>
         </div>
 
@@ -109,8 +133,37 @@ export function WorldCard({ id, title, imageUrl, price }: WorldCardProps) {
             display: 'flex', 
             flexDirection: 'column', 
             height: '100%', 
-            justifyContent: 'space-between' 
+            justifyContent: 'space-between',
+            position: 'relative' // Added for positioning the flip icon
           }}>
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                handleFlip();
+              }}
+              style={{
+                position: 'absolute',
+                top: '8px',
+                right: '8px',
+                width: '24px',
+                height: '24px',
+                padding: '0',
+                backgroundColor: 'rgba(255, 255, 255, 0.4)',
+                backdropFilter: 'blur(2px)',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                zIndex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <img 
+                src="/flip.png" 
+                alt="Flip card" 
+                style={{ width: '75%', height: '75%', display: 'block' }} 
+              />
+            </div>
             <div>
               <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '8px' }}>{title}</h3>
               <p style={{ color: '#4ade80', fontSize: '1.25rem', marginBottom: '16px' }}>${price.toFixed(2)}</p>
@@ -130,7 +183,7 @@ export function WorldCard({ id, title, imageUrl, price }: WorldCardProps) {
                   style={{ 
                     width: '100%', 
                     padding: '8px 12px', 
-                    backgroundColor: '#374151', 
+                    backgroundColor: 'rgba(55, 65, 81, 0.8)', 
                     borderRadius: '4px', 
                     color: 'white' 
                   }}
@@ -141,11 +194,12 @@ export function WorldCard({ id, title, imageUrl, price }: WorldCardProps) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                 <button 
                   style={{ 
-                    backgroundColor: '#22c55e', 
+                    backgroundColor: 'rgba(34, 197, 94, 0.9)', 
                     color: 'white', 
                     padding: '8px 0', 
                     borderRadius: '4px',
-                    transition: 'background-color 0.3s'
+                    transition: 'background-color 0.3s',
+                    backdropFilter: 'blur(4px)'
                   }}
                   onClick={(e) => {
                     e.stopPropagation()
@@ -156,11 +210,12 @@ export function WorldCard({ id, title, imageUrl, price }: WorldCardProps) {
                 </button>
                 <button 
                   style={{ 
-                    backgroundColor: '#ef4444', 
+                    backgroundColor: 'rgba(239, 68, 68, 0.9)', 
                     color: 'white', 
                     padding: '8px 0', 
                     borderRadius: '4px',
-                    transition: 'background-color 0.3s'
+                    transition: 'background-color 0.3s',
+                    backdropFilter: 'blur(4px)'
                   }}
                   onClick={(e) => {
                     e.stopPropagation()

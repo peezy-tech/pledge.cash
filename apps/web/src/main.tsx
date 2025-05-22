@@ -9,6 +9,11 @@ import {
   createRouter,
 } from '@tanstack/react-router'
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
+import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
+import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
+import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
+import { clusterApiUrl } from '@solana/web3.js';
+import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
 import TanStackQueryDemo from './routes/demo.tanstack-query.tsx'
 import TokenAdmin from './routes/token-admin.tsx'
 import { HomePage } from './routes/home.tsx'
@@ -16,6 +21,7 @@ import ProfilePage from './routes/profile.tsx'
 import LaunchPage from './routes/launch.tsx'
 
 import Header from './components/Header'
+import ShowroomBackground from './components/ShowroomBackground'
 
 import TanStackQueryLayout from './integrations/tanstack-query/layout.tsx'
 
@@ -24,13 +30,6 @@ import * as TanStackQueryProvider from './integrations/tanstack-query/root-provi
 import './styles.css'
 import '@solana/wallet-adapter-react-ui/styles.css';
 import reportWebVitals from './reportWebVitals.ts'
-
-import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
-import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
-import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
-import { clusterApiUrl } from '@solana/web3.js';
-import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
-
 
 const rootRoute = createRootRoute({
   component: () => {
@@ -48,12 +47,13 @@ const rootRoute = createRootRoute({
       <ConnectionProvider endpoint={endpoint}>
         <WalletProvider wallets={wallets} autoConnect>
           <WalletModalProvider>
-            <div style={{ backgroundColor: 'black', minHeight: '100vh' }}>
-              <Header />
-              <Outlet />
-              <TanStackRouterDevtools />
-              <TanStackQueryLayout />
-            </div>
+              <div style={{ backgroundColor: 'transparent', minHeight: '100vh' }}>
+                <ShowroomBackground />
+                <Header />
+                <Outlet />
+                <TanStackRouterDevtools />
+                <TanStackQueryLayout />
+              </div>
           </WalletModalProvider>
         </WalletProvider>
       </ConnectionProvider>

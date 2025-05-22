@@ -32,15 +32,13 @@ export function ProfilePage() {
         </div>
 
         <div className="md:col-span-1 space-y-8">
-          <SectionContainer title="Name">
+          
             <EditName />
-          </SectionContainer>
-          <SectionContainer title="Upload Avatar">
+          
+          
             <AvatarUploader onAvatarUpload={handleAvatarUpload} />
-          </SectionContainer>
-          <SectionContainer title="Default Avatars">
             <DefaultAvatarSelector onAvatarSelect={handleDefaultAvatarSelect} />
-          </SectionContainer>
+          
         </div>
       </div>
     </PageLayout>
