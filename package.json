@@ -5,7 +5,10 @@
     "build": "turbo build",
     "dev": "turbo dev",
     "lint": "turbo lint",
-    "format": "prettier --write \"**/*.{ts,tsx,md}\""
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "docker:build": "docker build -f apps/api/Dockerfile -t hypstudio  .",
+    "docker:tag": "docker tag hypstudio itspeezy/hypstudio:latest",
+    "docker:push": "docker push itspeezy/hypstudio:latest"
   },
   "devDependencies": {
     "prettier": "^3.4.2",
