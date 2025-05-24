@@ -281,6 +281,67 @@ const app = new Elysia({
       authToken: t.Optional(t.String())
     })
   })
+  .guard(
+    {
+      async resolve({ cookie, db, orm, schema }: { cookie: any, db: DbType, orm: OrmType, schema: SchemaType }) {
+        const tokenValue = cookie.authToken?.value;
+
+        if (!tokenValue) {
+          return { currentUser: undefined as (typeof schema.users.$inferSelect | undefined) };
+        }
+
+        // JWT_SECRET should be checked at application startup.
+        // If it's not set, jwt.verify will throw an error which is caught below.
+        try {
+          const decoded = jwt.verify(tokenValue, process.env.JWT_SECRET!) as { userId: string };
+          const user = await db
+            .select({
+              id: schema.users.id,
+              name: schema.users.name,
+              // Add other non-sensitive fields from your 'users' schema as needed
+            })
+            .from(schema.users)
+            .where(orm.eq(schema.users.id, decoded.userId))
+            .limit(1)
+            .then((rows) => rows[0]);
+
+          if (!user) {
+            // Valid token, but user not found (e.g., deleted account)
+            if (cookie.authToken) cookie.authToken.remove();
+            return { currentUser: undefined };
+          }
+          return { currentUser: user };
+        } catch (err) {
+          // Token is invalid (e.g., expired, malformed, signature mismatch)
+          if (cookie.authToken) cookie.authToken.remove(); // Clear the invalid token
+          return { currentUser: undefined };
+        }
+      },
+      cookie: t.Cookie({ // Ensures cookie.authToken is properly typed and accessible
+        authToken: t.Optional(t.String())
+      })
+    },
+    (app) =>
+      app.guard(
+        {
+          beforeHandle: async ({ currentUser, set }) => {
+            if (!currentUser) {
+              set.status = 401; // Unauthorized
+              return { error: "Unauthorized: Access denied. Please log in." };
+            }
+            // If currentUser exists, the request proceeds to the handler.
+          },
+        },
+        (guardedApp) =>
+          guardedApp.get("/protected/user-profile", ({ currentUser }) => {
+            // This route is protected.
+            // 'currentUser' is guaranteed to be populated here due to 'beforeHandle'.
+            // The type of 'currentUser' will be inferred from the resolver's return type.
+            return { user: currentUser };
+          })
+        // Add more protected routes here using guardedApp.get(...), guardedApp.post(...), etc.
+      )
+  )
   .use(serverManager)
   .listen(3000);
 
