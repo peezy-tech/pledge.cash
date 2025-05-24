@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 import { db, orm } from "@repo/db";
 import * as schemaImport from "@repo/db/schema";
 import { staticPlugin } from "@elysiajs/static";
+import serverManager from "./docker_client";
 
 // Define types for context
 const { users } = schemaImport;
@@ -280,6 +281,7 @@ const app = new Elysia({
       authToken: t.Optional(t.String())
     })
   })
+  .use(serverManager)
   .listen(3000);
 
 console.log("Server running on port 3000");
