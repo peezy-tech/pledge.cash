@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { createRoute } from '@tanstack/react-router'
-import { SectionContainer } from '../components/SectionContainer'
 import { PageLayout } from './PageLayout'
 import { EditName } from './profile/components/EditName'
 import { AvatarViewer } from './profile/components/AvatarViewer'
