@@ -5,6 +5,7 @@ import { EditName } from './profile/components/EditName'
 import { AvatarViewer } from './profile/components/AvatarViewer'
 import { AvatarUploader } from './profile/components/AvatarUploader'
 import { DefaultAvatarSelector } from './profile/components/DefaultAvatarSelector'
+import { ProtectedRoute } from '../components/ProtectedRoute'
 import type { RootRoute } from '@tanstack/react-router'
 
 export function ProfilePage() {
@@ -22,25 +23,41 @@ export function ProfilePage() {
   }
 
   return (
-    <PageLayout title="Player">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-        <div className="md:col-span-2">
-          <div className="mb-8">
-            <AvatarViewer avatarUrl={avatarUrl} />
+    <ProtectedRoute 
+      fallback={
+        <PageLayout title="Profile - Access Restricted">
+          <div className="text-center py-12">
+            <h2 className="text-2xl font-bold text-white mb-4">Profile Access Restricted</h2>
+            <p className="text-gray-300 mb-6">
+              You need to connect your wallet and login to access your profile.
+            </p>
+            <p className="text-sm text-gray-400">
+              Click the "Connect Wallet" button in the header to get started.
+            </p>
+          </div>
+        </PageLayout>
+      }
+    >
+      <PageLayout title="Player">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="md:col-span-2">
+            <div className="mb-8">
+              <AvatarViewer avatarUrl={avatarUrl} />
+            </div>
+          </div>
+
+          <div className="md:col-span-1 space-y-8">
+            
+              <EditName />
+            
+            
+              <AvatarUploader onAvatarUpload={handleAvatarUpload} />
+              <DefaultAvatarSelector onAvatarSelect={handleDefaultAvatarSelect} />
+            
           </div>
         </div>
-
-        <div className="md:col-span-1 space-y-8">
-          
-            <EditName />
-          
-          
-            <AvatarUploader onAvatarUpload={handleAvatarUpload} />
-            <DefaultAvatarSelector onAvatarSelect={handleDefaultAvatarSelect} />
-          
-        </div>
-      </div>
-    </PageLayout>
+      </PageLayout>
+    </ProtectedRoute>
   )
 }
 

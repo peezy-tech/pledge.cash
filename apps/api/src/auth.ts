@@ -58,8 +58,7 @@ export const auth_routes = new Elysia()
     const profile = await auth.verify(authTokenCookie?.value);
 
     if (!profile || !profile?.walletAddress) {
-      set.status = 401;
-      return { error: "Unauthorized" };
+      return { walletAddress: null };
     }
 
     return profile;

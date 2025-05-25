@@ -107,4 +107,6 @@ const app = new Elysia({
   .use(serverManager)
   .listen(3000);
 
+export type App = typeof app;
+
 console.log("Server running on port 3000");
