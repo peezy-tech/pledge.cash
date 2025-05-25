@@ -14,37 +14,15 @@ export const users = table(
       .primaryKey(),
     name: t.text(),
     role: t.text().$type<"user" | "admin">().default("user"),
-    oauthProvider: t.text(),
-    oauthId: t.text(),
-    oauthAccessToken: t.text(),
-    oauthRefreshToken: t.text(),
-    oauthExpiresAt: t.int(),
-    oauthScope: t.text(),
-    oauthTokenType: t.text(),
-    oauthIdToken: t.text(),
+    solana_account: t.text().unique(),
+    evm_address: t.text().unique(),
+    selected_avatar_id: t.text().references(() => avatars.id),
   },
-  (table) => [t.uniqueIndex("name_idx").on(table.name)]
 );
 
-export const posts = table(
-  "posts",
-  {
-    id: t.int().primaryKey({ autoIncrement: true }),
-    slug: t.text().$default(() => generateUniqueString(16)),
-    title: t.text(),
-    ownerId: t.int("owner_id").references(() => users.id),
-  },
-  (table) => [
-    t.uniqueIndex("slug_idx").on(table.slug),
-    t.index("title_idx").on(table.title),
-  ]
-);
-
-export const comments = table("comments", {
-  id: t.int().primaryKey({ autoIncrement: true }),
-  text: t.text({ length: 256 }),
-  postId: t.int("post_id").references(() => posts.id),
-  ownerId: t.int("owner_id").references(() => users.id),
+export const avatars = table("avatars", {
+  id: t.text().primaryKey(),
+  url: t.text(),
 });
 
 function generateUniqueString(length: number = 12): string {

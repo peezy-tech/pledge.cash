@@ -1,7 +1,6 @@
-import { Elysia, Context, t, RouteSchema } from "elysia";
+import { Elysia, t } from "elysia";
 
 import jwt from "@elysiajs/jwt";
-import { Cookie, UnwrapSchema } from "elysia";
 
 import crypto from 'crypto'
 import bs58 from 'bs58'
@@ -19,30 +18,11 @@ export const verifySolanaSignature = (signature: string, message: string, wallet
 export const AUTH_TOKEN_COOKIE = "auth_token" as const;
 const COOKIE_SECRET = "foo";
 
-// Define a type for the JWT payload
-interface AuthJWTPayload {
-  walletAddress?: string;
-  nonce?: string;
-}
-
-// Define a type for the context decorated by the JWT plugin
-interface AuthContext {
-  [AUTH_TOKEN_COOKIE]: {
-    sign: (payload: AuthJWTPayload) => Promise<string>;
-    verify: (token?: string) => Promise<AuthJWTPayload | null | undefined>;
-  };
-  cookie: {
-    [AUTH_TOKEN_COOKIE]: Cookie<string | undefined>;
-  };
-  set: Context['set'];
-  body?: any; // For POST requests, define more specifically if needed
-}
-
 const cookieSchema = t.Cookie({
   [AUTH_TOKEN_COOKIE]: t.Optional(t.String()),
 });
 
-export const auth_routes = new Elysia()
+export const auth_routes = new Elysia({name: 'auth'})
   .use(
     jwt({
       name: AUTH_TOKEN_COOKIE,
@@ -53,7 +33,7 @@ export const auth_routes = new Elysia()
       })
     })
   )
-  .get(AUTH_TOKEN_COOKIE, async ({ [AUTH_TOKEN_COOKIE]: auth, set, cookie }: AuthContext) => {
+  .get(AUTH_TOKEN_COOKIE, async ({ [AUTH_TOKEN_COOKIE]: auth, set, cookie }) => {
     const authTokenCookie = cookie[AUTH_TOKEN_COOKIE];
     const profile = await auth.verify(authTokenCookie?.value);
 
@@ -65,7 +45,7 @@ export const auth_routes = new Elysia()
   })
   .put(
     AUTH_TOKEN_COOKIE,
-    async ({ [AUTH_TOKEN_COOKIE]: auth, set, cookie }: AuthContext) => {
+    async ({ [AUTH_TOKEN_COOKIE]: auth, set, cookie }) => {
       const authTokenCookie = cookie[AUTH_TOKEN_COOKIE];
       const profile = await auth.verify(authTokenCookie?.value);
 
@@ -90,7 +70,7 @@ export const auth_routes = new Elysia()
   )
   .post(
     AUTH_TOKEN_COOKIE,
-    async ({ [AUTH_TOKEN_COOKIE]: auth, set, cookie, body }: AuthContext & { body: { signature: string; message: string; walletAddress: string; } }) => {
+    async ({ [AUTH_TOKEN_COOKIE]: auth, set, cookie, body }) => {
       const authTokenCookie = cookie[AUTH_TOKEN_COOKIE];
       const profile = await auth.verify(authTokenCookie?.value);
 
@@ -136,7 +116,7 @@ export const auth_routes = new Elysia()
       }),
     }
   )
-  .delete(AUTH_TOKEN_COOKIE, async ({ [AUTH_TOKEN_COOKIE]: auth, set, cookie }: AuthContext) => {
+  .delete(AUTH_TOKEN_COOKIE, async ({ [AUTH_TOKEN_COOKIE]: auth, set, cookie }) => {
     const authTokenCookie = cookie[AUTH_TOKEN_COOKIE];
     const profile = await auth.verify(authTokenCookie?.value);
 
@@ -150,36 +130,3 @@ export const auth_routes = new Elysia()
     return { success: true };
   });
 
-
-// export const server = new Elysia()
-//   .use(auth_routes)
-//   .guard({}, (app) =>
-//     app
-//       .resolve(async ({ set, cookie, [AUTH_TOKEN_COOKIE]: auth }) => {
-//         const authTokenCookie = cookie[AUTH_TOKEN_COOKIE];
-//         const profile = await auth.verify(authTokenCookie.value);
-//         return {
-//           walletAddress: profile ? profile.walletAddress as string : undefined,
-//           actor: {
-//             address: "0x0",
-//             chainId: 0,
-//             world: "0x0",
-//           },
-//         };
-//       })
-//       .guard(
-//         {
-//           beforeHandle: async ({ walletAddress, set }) => {
-//             if (!walletAddress) return (set.status = "Unauthorized");
-//           },
-//         },
-//         (app) =>
-//           app
-//             .get("foo", ({ walletAddress }) => ({ walletAddress }) => {
-//               return { walletAddress };
-//             })
-
-//       )
-//   );
-
-// export type Server = typeof server;
