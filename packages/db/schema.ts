@@ -33,12 +33,28 @@ export const worlds = table("worlds", {
   created_at: t.integer().default(Date.now()),
 });
 
-export const coins = table("coins", {
+export const pools = table("pools", {
+  id: t.text().primaryKey().$default(() => `pool_${generateUniqueString(16)}`),
+  name: t.text().notNull(),
+  symbol: t.text().notNull(),
+  uri: t.text().notNull(),
+  configAddress: t.text().notNull(),
+  baseMintAddress: t.text().notNull().unique(),
+  quoteMintAddress: t.text().notNull(),
+  creatorWalletAddress: t.text().notNull(),
+  userId: t.text().references(() => users.id),
+  transactionSignature: t.text().unique(),
+  createdAt: t.integer().default(() => Date.now()).notNull(),
+});
+
+export const tokens = table("tokens", {
   id: t.text().primaryKey(),
-  name: t.text(),
-  description: t.text(),
-  url: t.text(),
-  created_at: t.integer().default(Date.now()),
+  poolId: t.text().references(() => pools.id).notNull(),
+  name: t.text().notNull(),
+  symbol: t.text().notNull(),
+  uri: t.text().notNull(),
+  type: t.text().$type<"SPL" | "Token2022">().default("SPL").notNull(),
+  createdAt: t.integer().default(() => Date.now()).notNull(),
 });
 
 function generateUniqueString(length: number = 12): string {

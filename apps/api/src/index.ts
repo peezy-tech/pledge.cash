@@ -5,6 +5,7 @@ import * as schemaImport from "@repo/db/schema";
 import { staticPlugin } from "@elysiajs/static";
 import serverManager from "./docker_client";
 import { auth_routes, AUTH_TOKEN_COOKIE } from "./auth";
+import { pool_routes } from "./pool_routes";
 
 migrate();
 
@@ -61,6 +62,7 @@ const app = new Elysia({
       .get("/protected/user-profile", (context) => {
         return { user: context.currentUser };
       })
+      .use(pool_routes)
   )
   .use(staticPlugin({ prefix: "/", indexHTML: true }))
   .use(serverManager)

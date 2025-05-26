@@ -1,16 +1,19 @@
 import { useState, useEffect } from "react";
 import {
-  Connection,
-  Keypair,
+  // Connection, // No longer directly used for sending tx
+  // Keypair, // No longer generating keypairs client-side for payer or base mint
   PublicKey,
-  sendAndConfirmTransaction,
+  Transaction,
+  // sendAndConfirmTransaction, // Replaced by API calls
 } from "@solana/web3.js";
-import {
-  DynamicBondingCurveClient,
-  TokenType,
-} from "@meteora-ag/dynamic-bonding-curve-sdk";
-import { NATIVE_MINT } from "@solana/spl-token";
-import bs58 from "bs58";
+import { useWallet } from "@solana/wallet-adapter-react"; // Added
+import { api } from "@/utils/api"; // Added for API calls
+// import {
+//   DynamicBondingCurveClient, // SDK usage moved to backend
+//   TokenType,
+// } from "@meteora-ag/dynamic-bonding-curve-sdk";
+// import { NATIVE_MINT } from "@solana/spl-token"; // Moved to backend
+// import bs58 from "bs58"; // No longer decoding private keys
 import { Buffer } from 'buffer';
 
 import { Button } from "@/components/ui/button";
@@ -35,7 +38,9 @@ interface CreatePoolFormProps {
 }
 
 const CreatePoolForm: React.FC<CreatePoolFormProps> = ({ initialConfigAddress }) => {
-  const [payerPrivateKey, setPayerPrivateKey] = useState("");
+  // const [payerPrivateKey, setPayerPrivateKey] = useState(""); // Removed
+  const { publicKey, signTransaction, connected } = useWallet(); // Added
+
   const [configAddress, setConfigAddress] = useState(initialConfigAddress || "");
   const [poolName, setPoolName] = useState("Test Pool");
   const [poolSymbol, setPoolSymbol] = useState("TESTP");
@@ -52,10 +57,14 @@ const CreatePoolForm: React.FC<CreatePoolFormProps> = ({ initialConfigAddress })
   }, [initialConfigAddress]);
 
   const handleCreatePool = async () => {
-    if (!payerPrivateKey) {
-      setError("Payer private key is required.");
+    if (!connected || !publicKey || !signTransaction) {
+      setError("Wallet not connected or signTransaction not available.");
       return;
     }
+    // if (!payerPrivateKey) { // Removed private key check
+    //   setError("Payer private key is required.");
+    //   return;
+    // }
     if (!configAddress) {
       setError("Config address is required.");
       return;
@@ -67,61 +76,57 @@ const CreatePoolForm: React.FC<CreatePoolFormProps> = ({ initialConfigAddress })
     setBaseMintAddress("");
 
     try {
-      const payerSecretKey = bs58.decode(payerPrivateKey);
-      const payer = Keypair.fromSecretKey(payerSecretKey);
-      const poolCreator = payer; // Using payer as poolCreator as in the script
+      // Step 1: Call API to prepare the transaction
+      console.log("Requesting pool transaction from API...");
+      const prepareResponse = await api.pools["prepare-create"].post({
+        configAddress,
+        poolName,
+        poolSymbol,
+        poolUri,
+      });
 
-      const connection = new Connection(
-        "https://devnet.helius-rpc.com/?api-key=81b1290d-9852-4dcc-9c9c-4a4be7ddf3e3",
-        "confirmed"
-      );
+      if (prepareResponse.error || !prepareResponse.data || !prepareResponse.data.serializedTransaction) {
+         const errorMessage = prepareResponse.error instanceof Error ? prepareResponse.error.message : JSON.stringify(prepareResponse.error);
+         throw new Error(`Failed to prepare pool transaction: ${errorMessage}`);
+      }
 
-      const configPubKey = new PublicKey(configAddress);
-      const baseMintKeypair = Keypair.generate();
-      setBaseMintAddress(baseMintKeypair.publicKey.toString());
-      console.log(`Generated base mint for pool: ${baseMintKeypair.publicKey.toString()}`);
+      const { serializedTransaction, baseMintAddress: generatedBaseMintAddress } = prepareResponse.data;
+      setBaseMintAddress(generatedBaseMintAddress || "N/A");
+      console.log(`API generated base mint: ${generatedBaseMintAddress}`);
 
-      const createPoolParam = {
-        quoteMint: NATIVE_MINT,
-        baseMint: baseMintKeypair.publicKey,
-        config: configPubKey,
-        baseTokenType: TokenType.SPL, // Assuming SPL, adjust if Token2022 is needed for base
-        quoteTokenType: TokenType.SPL, // NATIVE_MINT is SPL
-        name: poolName,
-        symbol: poolSymbol,
-        uri: poolUri,
-        payer: payer.publicKey,
-        poolCreator: poolCreator.publicKey,
-      };
+      // Step 2: Deserialize, sign with user's wallet, and re-serialize
+      const transaction = Transaction.from(Buffer.from(serializedTransaction, 'base64'));
+      
+      console.log("Requesting user to sign transaction...");
+      const signedTransaction = await signTransaction(transaction as any);
+      const signedSerializedTx = Buffer.from(signedTransaction.serialize()).toString('base64');
 
-      const client = new DynamicBondingCurveClient(connection as any, "confirmed");
+      // Step 3: Send the signed transaction to the API to submit
+      console.log("Submitting signed transaction to API...");
+      const submitResponse = await api.pools["submit-signed"].post({
+        signedSerializedTransaction: signedSerializedTx,
+        baseMintAddress: generatedBaseMintAddress,
+        configAddress: configAddress,
+        poolName: poolName,
+        poolSymbol: poolSymbol,
+        poolUri: poolUri,
+      });
 
-      console.log("Creating pool transaction...");
-      const poolTransaction = await client.pool.createPool(createPoolParam);
-      poolTransaction.feePayer = payer.publicKey; // Ensure fee payer is set
-      // The SDK should handle recentBlockhash, but if not, uncomment below
-      // const { blockhash } = await connection.getLatestBlockhash("confirmed");
-      // poolTransaction.recentBlockhash = blockhash;
+      if (submitResponse.error || !submitResponse.data || !submitResponse.data.transactionSignature) {
+        const errorMessage = submitResponse.error instanceof Error ? submitResponse.error.message : JSON.stringify(submitResponse.error);
+        throw new Error(`Failed to submit signed pool transaction: ${errorMessage}`);
+      }
 
-      const signature = await sendAndConfirmTransaction(
-        connection,
-        poolTransaction as any,
-        [payer, baseMintKeypair, poolCreator], // poolCreator might not need to sign if it's the same as payer & payer is signer
-        {
-          commitment: "confirmed",
-          skipPreflight: true,
-        }
-      );
+      setTransactionSignature(submitResponse.data.transactionSignature);
+      console.log("Transaction confirmed by API!");
+      console.log(`Pool created: https://solscan.io/tx/${submitResponse.data.transactionSignature}?cluster=devnet`);
 
-      setTransactionSignature(signature);
-      console.log("Transaction confirmed!");
-      console.log(`Pool created: https://solscan.io/tx/${signature}`);
     } catch (err: any) {
       console.error("Failed to create pool:", err);
-      setError(`Failed to create pool: ${err.message} - ${err.stack}`);
-      // Log more details if possible
-      if (err.logs) {
-        console.error("Transaction logs:", err.logs);
+      setError(`Failed to create pool: ${err.message}${err.stack ? ` - Stack: ${err.stack}` : ''}`);
+      // Log more details if possible from the error object, e.g., if it has a `response` field from an API error
+      if (err.response && err.response.data) {
+        console.error("API Error details:", err.response.data);
       }
     } finally {
       setIsLoading(false);
@@ -131,11 +136,14 @@ const CreatePoolForm: React.FC<CreatePoolFormProps> = ({ initialConfigAddress })
   return (
     <Card className="w-full max-w-2xl mx-auto">
       <CardHeader>
-        <CardTitle>Create DBC Pool</CardTitle>
-        <CardDescription>Configure and create a new Dynamic Bonding Curve pool.</CardDescription>
+        <CardTitle>Create DBC Pool (Server Signed)</CardTitle>
+        <CardDescription>
+          Configure and create a new Dynamic Bonding Curve pool using server-side transaction preparation.
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="space-y-2">
+        {/* Payer Private Key Input Removed */}
+        {/* <div className="space-y-2">
           <Label htmlFor="payerPrivateKeyPool">Payer Private Key (Base58):</Label>
           <Input
             id="payerPrivateKeyPool"
@@ -145,7 +153,7 @@ const CreatePoolForm: React.FC<CreatePoolFormProps> = ({ initialConfigAddress })
             placeholder="Enter your wallet private key"
             disabled={isLoading}
           />
-        </div>
+        </div> */}
         <div className="space-y-2">
           <Label htmlFor="configAddress">Config Address:</Label>
           <Input
@@ -192,8 +200,12 @@ const CreatePoolForm: React.FC<CreatePoolFormProps> = ({ initialConfigAddress })
         </div>
       </CardContent>
       <CardFooter className="flex flex-col items-start space-y-4">
-        <Button onClick={handleCreatePool} disabled={isLoading} className="w-full">
-          {isLoading ? "Creating Pool..." : "Create Pool"}
+        <Button 
+          onClick={handleCreatePool} 
+          disabled={isLoading || !connected} 
+          className="w-full"
+        >
+          {isLoading ? "Creating Pool..." : (connected ? "Create Pool (Sign with Wallet)" : "Connect Wallet to Create Pool")}
         </Button>
         {error && (
           <Alert variant="destructive" className="w-full">
@@ -203,7 +215,7 @@ const CreatePoolForm: React.FC<CreatePoolFormProps> = ({ initialConfigAddress })
         )}
         {baseMintAddress && (
             <Alert variant="default" className="w-full">
-                <AlertTitle>Base Mint Generated</AlertTitle>
+                <AlertTitle>Base Mint Generated by Server</AlertTitle>
                 <AlertDescription>
                     <strong>{baseMintAddress}</strong>
                 </AlertDescription>
