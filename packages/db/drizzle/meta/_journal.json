@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1748290871080,
+      "tag": "0000_illegal_forge",
+      "breakpoints": true
+    }
+  ]
+}
