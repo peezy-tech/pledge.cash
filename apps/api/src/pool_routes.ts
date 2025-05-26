@@ -9,6 +9,7 @@ import {
 import {
   DynamicBondingCurveClient,
   TokenType,
+  deriveDbcPoolAddress,
 } from '@meteora-ag/dynamic-bonding-curve-sdk';
 import { NATIVE_MINT } from '@solana/spl-token';
 // import bs58 from 'bs58'; // Not directly used in this file for now
@@ -77,9 +78,17 @@ export const pool_routes = new Elysia({ prefix: '/pools' })
           verifySignatures: true,    // Verify baseMintKeypair's signature we just added
         });
 
+        // Derive the pool address
+        const poolAddress = deriveDbcPoolAddress(
+          NATIVE_MINT,
+          baseMintKeypair.publicKey,
+          configPubKey
+        );
+
         return {
           serializedTransaction: Buffer.from(serializedTransaction).toString('base64'),
           baseMintAddress: baseMintKeypair.publicKey.toString(),
+          poolAddress: poolAddress.toString(),
         };
 
       } catch (err: any) {
@@ -112,12 +121,13 @@ export const pool_routes = new Elysia({ prefix: '/pools' })
         configAddress, 
         poolName, 
         poolSymbol, 
-        poolUri 
+        poolUri,
+        poolAddress, // Added poolAddress
       } = body;
 
-       if (!signedSerializedTransaction || !baseMintAddress || !configAddress || !poolName || !poolSymbol || !poolUri) {
+       if (!signedSerializedTransaction || !baseMintAddress || !configAddress || !poolName || !poolSymbol || !poolUri || !poolAddress) { // Added poolAddress check
         set.status = 400;
-        return { error: 'Missing one or more required fields in request body for submission (signedSerializedTransaction, baseMintAddress, configAddress, poolName, poolSymbol, poolUri)' };
+        return { error: 'Missing one or more required fields in request body for submission (signedSerializedTransaction, baseMintAddress, configAddress, poolName, poolSymbol, poolUri, poolAddress)' }; // Added poolAddress to error message
       }
 
       try {
@@ -149,6 +159,7 @@ export const pool_routes = new Elysia({ prefix: '/pools' })
           configAddress: configAddress,
           baseMintAddress: baseMintAddress,
           quoteMintAddress: NATIVE_MINT.toBase58(), // Assuming quote is always NATIVE_MINT for now
+          poolAddress: poolAddress, // Added poolAddress to be saved // TODO: Add poolAddress to packages/db/src/schema/pools.ts
           creatorWalletAddress: userWalletAddress,
           userId: userId, // Can be null if userRecord not found
           transactionSignature: signature,
@@ -174,7 +185,8 @@ export const pool_routes = new Elysia({ prefix: '/pools' })
         return { 
           transactionSignature: signature, 
           poolId: poolId,
-          baseMintAddress: baseMintAddress 
+          baseMintAddress: baseMintAddress, 
+          poolAddress: poolAddress, // Added poolAddress to response
         };
 
       } catch (err: any) {
@@ -200,6 +212,7 @@ export const pool_routes = new Elysia({ prefix: '/pools' })
         poolName: t.String({ error: "Pool name is required" }),
         poolSymbol: t.String({ error: "Pool symbol is required" }),
         poolUri: t.String({ error: "Pool URI is required" }),
+        poolAddress: t.String({ error: "Pool address is required" }), // Added poolAddress validation
       }),
     }
   ); 

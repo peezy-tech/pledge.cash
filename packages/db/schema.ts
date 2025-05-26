@@ -43,6 +43,7 @@ export const pools = table("pools", {
   quoteMintAddress: t.text().notNull(),
   creatorWalletAddress: t.text().notNull(),
   userId: t.text().references(() => users.id),
+  poolAddress: t.text().notNull().unique(),
   transactionSignature: t.text().unique(),
   createdAt: t.integer().default(Date.now()).notNull(),
 });
