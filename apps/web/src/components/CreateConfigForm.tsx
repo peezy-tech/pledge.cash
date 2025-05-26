@@ -1,11 +1,15 @@
 import { useState } from "react";
 import {
-  Connection,
-  Keypair,
-  sendAndConfirmTransaction,
+  // Connection, // No longer used directly
+  // Keypair, // No longer used directly for payer or config keypair generation client-side
+  // sendAndConfirmTransaction, // Replaced by API calls
+  Transaction, // For deserializing from API
+  PublicKey,
 } from "@solana/web3.js";
+import { useWallet } from "@solana/wallet-adapter-react"; // Added
+import { api } from "@/utils/api"; // Added
 import {
-  DynamicBondingCurveClient,
+  // DynamicBondingCurveClient, // SDK usage moved to backend
   CollectFeeMode,
   TokenType,
   ActivationType,
@@ -15,8 +19,8 @@ import {
   TokenDecimal,
 } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { NATIVE_MINT } from "@solana/spl-token";
-import BN from "bn.js";
-import bs58 from "bs58";
+// import BN from "bn.js"; // BN conversion handled by backend
+// import bs58 from "bs58"; // Private key decoding removed
 import { Buffer } from 'buffer';
 
 import { Button } from "@/components/ui/button";
@@ -57,8 +61,9 @@ const CreateConfigForm = ({
 }: {
   onConfigCreated: (configAddress: string) => void;
 }) => {
-  const [payerPrivateKey, setPayerPrivateKey] = useState("");
-  const [configAddress, setConfigAddress] = useState("");
+  const { publicKey: payerPublicKey, signTransaction, connected } = useWallet(); // Added
+  // const [payerPrivateKey, setPayerPrivateKey] = useState(""); // Removed
+  const [configAddress, setConfigAddress] = useState(""); // This will be set by API response
   const [transactionSignature, setTransactionSignature] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -125,113 +130,117 @@ const CreateConfigForm = ({
   };
 
   const handleCreateConfig = async () => {
-    if (!payerPrivateKey) {
-      setError("Payer private key is required.");
+    if (!connected || !payerPublicKey || !signTransaction) {
+      setError("Wallet not connected or signing function not available.");
       return;
     }
+    // if (!payerPrivateKey) { // Removed private key check
+    //   setError("Payer private key is required.");
+    //   return;
+    // }
 
     setIsLoading(true);
     setError("");
     setConfigAddress("");
     setTransactionSignature("");
 
+    // Collect all parameters into an object matching the API schema
+    const configParams = {
+      feeClaimer: payerPublicKey.toBase58(), // Default to payer
+      leftoverReceiver: payerPublicKey.toBase58(), // Default to payer
+      quoteMint: NATIVE_MINT.toBase58(),
+      poolFees: {
+        baseFee: {
+          cliffFeeNumerator,
+          numberOfPeriod: baseFeeNumberOfPeriod,
+          reductionFactor,
+          periodFrequency,
+          feeSchedulerMode,
+        },
+        dynamicFee: {
+          binStep: dynamicFeeBinStep,
+          binStepU128: dynamicFeeBinStepU128,
+          filterPeriod: dynamicFeeFilterPeriod,
+          decayPeriod: dynamicFeeDecayPeriod,
+          reductionFactor: dynamicFeeReductionFactor,
+          maxVolatilityAccumulator: dynamicFeeMaxVolatilityAccumulator,
+          variableFeeControl: dynamicFeeVariableFeeControl,
+        },
+      },
+      activationType,
+      collectFeeMode,
+      migrationOption,
+      tokenType,
+      tokenDecimal,
+      migrationQuoteThreshold,
+      partnerLpPercentage,
+      creatorLpPercentage,
+      partnerLockedLpPercentage,
+      creatorLockedLpPercentage,
+      sqrtStartPrice,
+      lockedVesting: {
+        amountPerPeriod: lvAmountPerPeriod,
+        cliffDurationFromMigrationTime: lvCliffDuration,
+        frequency: lvFrequency,
+        numberOfPeriod: lvNumberOfPeriod,
+        cliffUnlockAmount: lvCliffUnlockAmount,
+      },
+      migrationFeeOption,
+      tokenSupply: {
+        preMigrationTokenSupply,
+        postMigrationTokenSupply,
+      },
+      creatorTradingFeePercentage,
+      padding0: [], // Default to empty, API handles optional
+      padding1: [], // Default to empty, API handles optional
+      curve: [
+        {
+          sqrtPrice: curve0SqrtPrice,
+          liquidity: curve0Liquidity,
+        },
+      ],
+    };
+
     try {
-      const payerSecretKey = bs58.decode(payerPrivateKey);
-      const payer = Keypair.fromSecretKey(payerSecretKey);
-      const owner = payer; 
+      console.log("Requesting config transaction preparation from API...", configParams);
+      const prepareResponse = await api.configs["prepare-create"].post(configParams as any);
 
-      const connection = new Connection(
-        "https://devnet.helius-rpc.com/?api-key=81b1290d-9852-4dcc-9c9c-4a4be7ddf3e3",
-        "confirmed"
-      );
+      if (prepareResponse.error || !prepareResponse.data || !prepareResponse.data.serializedTransaction || !prepareResponse.data.configAddress) {
+        const errorMessage = prepareResponse.error instanceof Error ? prepareResponse.error.message : JSON.stringify(prepareResponse.error);
+        throw new Error(`Failed to prepare config transaction: ${errorMessage}`);
+      }
 
-      const configKeypair = Keypair.generate();
-      console.log(`New Config account: ${configKeypair.publicKey.toString()}`);
+      const { serializedTransaction, configAddress: generatedConfigAddress } = prepareResponse.data;
+      setConfigAddress(generatedConfigAddress); // Set the generated config address for display
+      console.log(`API generated config address: ${generatedConfigAddress}`);
 
-      const feeClaimer = owner.publicKey;
+      const transaction = Transaction.from(Buffer.from(serializedTransaction, 'base64'));
+      console.log("Requesting user to sign config transaction...");
+      const signedTransaction = await signTransaction(transaction as any); // Cast to any to avoid type issues
+      const signedSerializedTx = Buffer.from(signedTransaction.serialize()).toString('base64');
 
-      const createConfigParam = {
-        config: configKeypair.publicKey,
-        feeClaimer,
-        leftoverReceiver: feeClaimer,
-        quoteMint: NATIVE_MINT,
-        payer: payer.publicKey,
-        poolFees: {
-          baseFee: {
-            cliffFeeNumerator: new BN(cliffFeeNumerator),
-            numberOfPeriod: parseInt(baseFeeNumberOfPeriod,10),
-            reductionFactor: new BN(reductionFactor),
-            periodFrequency: new BN(periodFrequency),
-            feeSchedulerMode: feeSchedulerMode,
-          },
-          dynamicFee: {
-            binStep: parseInt(dynamicFeeBinStep, 10),
-            binStepU128: new BN(dynamicFeeBinStepU128),
-            filterPeriod: parseInt(dynamicFeeFilterPeriod, 10),
-            decayPeriod: parseInt(dynamicFeeDecayPeriod, 10),
-            reductionFactor: parseInt(dynamicFeeReductionFactor, 10),
-            maxVolatilityAccumulator: parseInt(dynamicFeeMaxVolatilityAccumulator, 10),
-            variableFeeControl: parseInt(dynamicFeeVariableFeeControl, 10),
-          },
-        },
-        activationType: activationType,
-        collectFeeMode: collectFeeMode,
-        migrationOption: migrationOption,
-        tokenType: tokenType,
-        tokenDecimal: tokenDecimal,
-        migrationQuoteThreshold: new BN(migrationQuoteThreshold),
-        partnerLpPercentage: parseInt(partnerLpPercentage, 10),
-        creatorLpPercentage: parseInt(creatorLpPercentage, 10),
-        partnerLockedLpPercentage: parseInt(partnerLockedLpPercentage, 10),
-        creatorLockedLpPercentage: parseInt(creatorLockedLpPercentage, 10),
-        sqrtStartPrice: new BN(sqrtStartPrice),
-        lockedVesting: {
-          amountPerPeriod: new BN(lvAmountPerPeriod),
-          cliffDurationFromMigrationTime: new BN(lvCliffDuration),
-          frequency: new BN(lvFrequency),
-          numberOfPeriod: new BN(lvNumberOfPeriod),
-          cliffUnlockAmount: new BN(lvCliffUnlockAmount),
-        },
-        migrationFeeOption: migrationFeeOption,
-        tokenSupply: {
-          preMigrationTokenSupply: new BN(preMigrationTokenSupply),
-          postMigrationTokenSupply: new BN(postMigrationTokenSupply),
-        },
-        creatorTradingFeePercentage: parseInt(creatorTradingFeePercentage, 10),
-        padding0: [],
-        padding1: [],
-        curve: [
-          {
-            sqrtPrice: new BN(curve0SqrtPrice),
-            liquidity: new BN(curve0Liquidity),
-          },
-        ],
-      };
-      
-      const client = new DynamicBondingCurveClient(connection as any, "confirmed");
-      const transaction = await client.partner.createConfig(createConfigParam);
+      console.log("Submitting signed config transaction to API...");
+      const submitResponse = await api.configs["submit-signed"].post({
+        signedSerializedTransaction: signedSerializedTx,
+        configAddress: generatedConfigAddress,
+        configParams: configParams, // Pass original params for DB storage
+      } as any ); // Cast to any to match expected body type if there are slight mismatches with generated client
 
-      const { blockhash } = await connection.getLatestBlockhash("confirmed");
-      transaction.recentBlockhash = blockhash;
-      transaction.feePayer = payer.publicKey;
+      if (submitResponse.error || !submitResponse.data || !submitResponse.data.transactionSignature) {
+        const errorMessage = submitResponse.error instanceof Error ? submitResponse.error.message : JSON.stringify(submitResponse.error);
+        throw new Error(`Failed to submit signed config transaction: ${errorMessage}`);
+      }
 
-      transaction.partialSign(configKeypair);
+      setTransactionSignature(submitResponse.data.transactionSignature);
+      onConfigCreated(generatedConfigAddress);
+      console.log(`Config created successfully! Tx: ${submitResponse.data.transactionSignature}`);
 
-      const signature = await sendAndConfirmTransaction(
-        connection as any,
-        transaction as any,
-        [payer, configKeypair],
-        { commitment: "confirmed", skipPreflight: true }
-      );
-
-      const newConfigAddress = configKeypair.publicKey.toString();
-      setConfigAddress(newConfigAddress);
-      setTransactionSignature(signature);
-      onConfigCreated(newConfigAddress);
-      console.log(`Config created successfully! Tx: ${signature}`);
     } catch (err: any) {
-      console.error("Failed to create config:", err);
-      setError(`Failed to create config: ${err.message} ${err.stack ? '- Stack: ' + err.stack : ''}`);
+      console.error("Failed to create config:", err, err.stack);
+      setError(`Failed to create config: ${err.message}${err.response?.data?.error ? ` - API: ${err.response.data.error}` : ''}${err.stack ? ` - Stack: ${err.stack}` : ''}`);
+      if (err.response && err.response.data) {
+        console.error("API Error details:", err.response.data);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -249,11 +258,12 @@ const CreateConfigForm = ({
   return (
     <Card className="w-full max-w-3xl mx-auto">
       <CardHeader>
-        <CardTitle>Create DBC Config</CardTitle>
-        <CardDescription>Configure and deploy a new Dynamic Bonding Curve configuration. {isFormLocked ? "Unlock to customize parameters." : "Parameters unlocked."}</CardDescription>
+        <CardTitle>Create DBC Config (Server Signed)</CardTitle>
+        <CardDescription>Configure and deploy a new Dynamic Bonding Curve configuration using server-side transaction preparation. {isFormLocked ? "Unlock to customize parameters." : "Parameters unlocked."}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="space-y-2">
+        {/* Payer Private Key Input Removed */}
+        {/* <div className="space-y-2">
           <Label htmlFor="payerPrivateKeyConfig">Payer Private Key (Base58):</Label>
           <Input
             id="payerPrivateKeyConfig"
@@ -263,7 +273,7 @@ const CreateConfigForm = ({
             placeholder="Enter your wallet private key"
             disabled={isLoading}
           />
-        </div>
+        </div> */}
 
         <Button onClick={handleToggleLock} disabled={isLoading} variant="outline" className="w-full">
           {isFormLocked ? "Unlock to Customize Parameters" : "Lock Parameters"}
@@ -523,8 +533,12 @@ const CreateConfigForm = ({
         </Card>
       </CardContent>
       <CardFooter className="flex flex-col items-start space-y-4">
-        <Button onClick={handleCreateConfig} disabled={isLoading} className="w-full">
-          {isLoading ? "Creating Config..." : "Create Config"}
+        <Button 
+            onClick={handleCreateConfig} 
+            disabled={isLoading || !connected} 
+            className="w-full"
+        >
+          {isLoading ? "Creating Config..." : (connected ? "Create Config (Sign with Wallet)" : "Connect Wallet to Create Config")}
         </Button>
         {error && (
           <Alert variant="destructive" className="w-full">

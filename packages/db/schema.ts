@@ -44,7 +44,7 @@ export const pools = table("pools", {
   creatorWalletAddress: t.text().notNull(),
   userId: t.text().references(() => users.id),
   transactionSignature: t.text().unique(),
-  createdAt: t.integer().default(() => Date.now()).notNull(),
+  createdAt: t.integer().default(Date.now()).notNull(),
 });
 
 export const tokens = table("tokens", {
@@ -54,7 +54,35 @@ export const tokens = table("tokens", {
   symbol: t.text().notNull(),
   uri: t.text().notNull(),
   type: t.text().$type<"SPL" | "Token2022">().default("SPL").notNull(),
-  createdAt: t.integer().default(() => Date.now()).notNull(),
+  createdAt: t.integer().default(Date.now()).notNull(),
+});
+
+export const configs = table("configs", {
+  id: t.text().primaryKey(),
+  feeClaimer: t.text().notNull(),
+  leftoverReceiver: t.text().notNull(),
+  quoteMint: t.text().notNull(),
+  poolFees: t.text().$type<Record<string, any>>().notNull(),
+  activationType: t.text().notNull(),
+  collectFeeMode: t.text().notNull(),
+  migrationOption: t.text().notNull(),
+  tokenType: t.text().notNull(),
+  tokenDecimal: t.text().notNull(),
+  migrationQuoteThreshold: t.text().notNull(),
+  partnerLpPercentage: t.integer().notNull(),
+  creatorLpPercentage: t.integer().notNull(),
+  partnerLockedLpPercentage: t.integer().notNull(),
+  creatorLockedLpPercentage: t.integer().notNull(),
+  sqrtStartPrice: t.text().notNull(),
+  lockedVesting: t.text().$type<Record<string, any>>().notNull(),
+  migrationFeeOption: t.text().notNull(),
+  tokenSupply: t.text().$type<Record<string, any>>().notNull(),
+  creatorTradingFeePercentage: t.integer().notNull(),
+  curve: t.text().$type<Array<Record<string, any>>>().notNull(),
+  creatorWalletAddress: t.text().notNull(),
+  userId: t.text().references(() => users.id),
+  transactionSignature: t.text().unique(),
+  createdAt: t.integer().default(Date.now()).notNull(),
 });
 
 function generateUniqueString(length: number = 12): string {
