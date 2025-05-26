@@ -1,10 +1,12 @@
 import { Elysia, t, type Context, type Cookie } from "elysia";
 import { cors } from "@elysiajs/cors";
-import { db, orm } from "@repo/db";
+import { db, orm, migrate } from "@repo/db";
 import * as schemaImport from "@repo/db/schema";
 import { staticPlugin } from "@elysiajs/static";
 import serverManager from "./docker_client";
 import { auth_routes, AUTH_TOKEN_COOKIE } from "./auth";
+
+migrate();
 
 type DbType = typeof db;
 type OrmType = typeof orm;

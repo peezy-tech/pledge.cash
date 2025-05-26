@@ -25,6 +25,22 @@ export const avatars = table("avatars", {
   url: t.text(),
 });
 
+export const worlds = table("worlds", {
+  id: t.text().primaryKey(),
+  name: t.text(),
+  description: t.text(),
+  url: t.text(),
+  created_at: t.integer().default(Date.now()),
+});
+
+export const coins = table("coins", {
+  id: t.text().primaryKey(),
+  name: t.text(),
+  description: t.text(),
+  url: t.text(),
+  created_at: t.integer().default(Date.now()),
+});
+
 function generateUniqueString(length: number = 12): string {
   const characters =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
