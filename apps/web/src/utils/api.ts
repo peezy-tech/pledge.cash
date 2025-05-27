@@ -2,7 +2,7 @@ import { edenTreaty } from '@elysiajs/eden'
 import type { App } from 'api'
 
 // API configuration
-export const API_BASE_URL = 'http://localhost:3000/';
+export const API_BASE_URL = import.meta.env.VITE_BASE_DOMAIN ? `https://${import.meta.env.VITE_BASE_DOMAIN}` : 'http://localhost:3000/';
 
 export const api = edenTreaty<App>(API_BASE_URL, { $fetch: { credentials: 'include' } })
 

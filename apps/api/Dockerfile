@@ -16,13 +16,15 @@ COPY apps/web ./apps/web
 
 # build web
 WORKDIR /app/apps/web
+ARG VITE_BASE_DOMAIN
+ENV VITE_BASE_DOMAIN=${VITE_BASE_DOMAIN}
 RUN bun run build
 
 # ---------- runtime stage ----------
 FROM oven/bun:1 AS runtime
 WORKDIR /app
 
-# pull compiled server + deps
+# pull compiled server + depsw
 # COPY --from=build /app/server        ./server
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/bun.lock     ./bun.lock
