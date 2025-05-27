@@ -58,6 +58,8 @@ interface PoolDetails {
   feeMetrics: FetchedFeeMetrics | null;
   baseDecimals: number | null;
   quoteDecimals: number | null;
+  migrationQuoteThreshold: BN | null;
+  curveProgress: number | null;
 }
 
 const CreateSwapForm: React.FC = () => {
@@ -76,13 +78,17 @@ const CreateSwapForm: React.FC = () => {
   const [isFetchingPoolInfo, setIsFetchingPoolInfo] = useState(false);
   const [error, setError] = useState("");
 
-  const [poolDetails, setPoolDetails] = useState<PoolDetails>({
+  const initialPoolDetailsState: PoolDetails = {
     poolData: null,
     poolConfig: null,
     feeMetrics: null,
     baseDecimals: null,
     quoteDecimals: null,
-  });
+    migrationQuoteThreshold: null,
+    curveProgress: null,
+  };
+
+  const [poolDetails, setPoolDetails] = useState<PoolDetails>(initialPoolDetailsState);
 
   const RPC_URL = "https://devnet.helius-rpc.com/?api-key=81b1290d-9852-4dcc-9c9c-4a4be7ddf3e3";
 
@@ -91,7 +97,7 @@ const CreateSwapForm: React.FC = () => {
     const fetchPoolInformation = async () => {
       if (!poolAddress) {
         console.log("CreateSwapForm: No poolAddress, clearing poolDetails.");
-        setPoolDetails({ poolData: null, poolConfig: null, feeMetrics: null, baseDecimals: null, quoteDecimals: null });
+        setPoolDetails(initialPoolDetailsState);
         return;
       }
       let parsedPoolPubKey;
@@ -101,7 +107,7 @@ const CreateSwapForm: React.FC = () => {
       } catch (e) {
         console.error("CreateSwapForm: Invalid pool address format:", poolAddress, e);
         setError("Invalid pool address format.");
-        setPoolDetails({ poolData: null, poolConfig: null, feeMetrics: null, baseDecimals: null, quoteDecimals: null });
+        setPoolDetails(initialPoolDetailsState);
         return;
       }
 
@@ -127,7 +133,7 @@ const CreateSwapForm: React.FC = () => {
         if (!fetchedPoolData) {
           console.warn("CreateSwapForm: client.state.getPool returned null or undefined.");
           setError("Pool not found or could not be fetched.");
-          setPoolDetails({ poolData: null, poolConfig: null, feeMetrics: null, baseDecimals: null, quoteDecimals: null });
+          setPoolDetails(initialPoolDetailsState);
           setIsFetchingPoolInfo(false);
           return;
         }
@@ -138,7 +144,15 @@ const CreateSwapForm: React.FC = () => {
         if (!fetchedConfigData) {
           console.warn("CreateSwapForm: client.state.getPoolConfig returned null or undefined.");
           setError("Pool configuration not found or could not be fetched. This is critical for determining mints.");
-          setPoolDetails({ ...poolDetails, poolData: fetchedPoolData, poolConfig: null });
+          setPoolDetails({
+            poolData: fetchedPoolData,
+            poolConfig: null,
+            feeMetrics: null, 
+            baseDecimals: poolDetails.baseDecimals,
+            quoteDecimals: null,
+            migrationQuoteThreshold: null,
+            curveProgress: null,
+          });
           setIsFetchingPoolInfo(false);
           return;
         }
@@ -151,7 +165,15 @@ const CreateSwapForm: React.FC = () => {
         if (!baseMint || !quoteMint) {
             console.error("CreateSwapForm: Critical error: baseMint or quoteMint is missing after checking poolData and configData.", { baseMint, quoteMint, fetchedPoolData, fetchedConfigData });
             setError("Critical: baseMint or quoteMint missing. Check console.");
-            setPoolDetails({ poolData: fetchedPoolData, poolConfig: fetchedConfigData, feeMetrics: null, baseDecimals: null, quoteDecimals: null }); 
+            setPoolDetails({
+                poolData: fetchedPoolData,
+                poolConfig: fetchedConfigData,
+                feeMetrics: null,
+                baseDecimals: null,
+                quoteDecimals: null,
+                migrationQuoteThreshold: null,
+                curveProgress: null,
+            });
             setIsFetchingPoolInfo(false);
             return;
         }
@@ -192,18 +214,43 @@ const CreateSwapForm: React.FC = () => {
         }
 
         console.log("CreateSwapForm: Successfully fetched all pool details. Updating state.");
-        setPoolDetails({
+        let newPoolDetailsUpdate: PoolDetails = {
           poolData: fetchedPoolData,
           poolConfig: fetchedConfigData,
-          feeMetrics: fetchedFeeMetrics, 
+          feeMetrics: fetchedFeeMetrics,
           baseDecimals: baseMintDecimals,
-          quoteDecimals: quoteMintDecimals
-        });
+          quoteDecimals: quoteMintDecimals,
+          migrationQuoteThreshold: null,
+          curveProgress: null,
+        };
+
+        try {
+            console.log(`CreateSwapForm: Fetching migration quote threshold for pool: ${parsedPoolPubKey.toBase58()}`);
+            const threshold = await client.state.getPoolMigrationQuoteThreshold(parsedPoolPubKey);
+            console.log("CreateSwapForm: Fetched Migration Quote Threshold:", threshold);
+            newPoolDetailsUpdate.migrationQuoteThreshold = threshold;
+
+            console.log(`CreateSwapForm: Fetching curve progress for pool: ${parsedPoolPubKey.toBase58()}`);
+            const progress = await client.state.getPoolCurveProgress(parsedPoolPubKey);
+            console.log("CreateSwapForm: Fetched Curve Progress:", progress);
+            newPoolDetailsUpdate.curveProgress = progress;
+            
+            if (fetchedPoolData) {
+                 console.log("CreateSwapForm: Pool Name from fetchedPoolData:", (fetchedPoolData as any).name || "N/A");
+                 console.log("CreateSwapForm: Pool Symbol from fetchedPoolData:", (fetchedPoolData as any).symbol || "N/A");
+                 console.log("CreateSwapForm: Pool URI from fetchedPoolData:", (fetchedPoolData as any).uri || "N/A");
+            }
+
+        } catch (additionalInfoError: any) {
+            console.warn("CreateSwapForm: Error fetching additional pool details (threshold/progress):", additionalInfoError);
+        }
+        
+        setPoolDetails(newPoolDetailsUpdate);
 
       } catch (err: any) {
         console.error("CreateSwapForm: Error during fetchPoolInformation process:", err);
         setError(`Failed to fetch pool info: ${err.message}`);
-        setPoolDetails({ poolData: null, poolConfig: null, feeMetrics: null, baseDecimals: null, quoteDecimals: null });
+        setPoolDetails(initialPoolDetailsState);
       } finally {
         console.log("CreateSwapForm: fetchPoolInformation finished.");
         setIsFetchingPoolInfo(false);
@@ -441,10 +488,17 @@ const CreateSwapForm: React.FC = () => {
         {poolDetails.poolData && poolDetails.poolConfig && poolDetails.poolData.baseMint && poolDetails.poolConfig.quoteMint && (
             <Card className="mt-4 bg-slate-50">
                 <CardHeader>
-                    <CardTitle className="text-lg">Pool Information</CardTitle>
+                    <CardTitle className="text-lg">
+                        Pool Information
+                        { (poolDetails.poolData as any)?.name && ` - ${(poolDetails.poolData as any).name}` }
+                        { (poolDetails.poolData as any)?.symbol && ` (${(poolDetails.poolData as any).symbol})` }
+                    </CardTitle>
                     <CardDescription>
-                        Base: {poolDetails.poolData.baseMint.toBase58()} ({poolDetails.baseDecimals !== null ? `${poolDetails.baseDecimals} dec` : 'N/A dec'}) <br/>
-                        Quote: {poolDetails.poolConfig.quoteMint.toBase58()} ({poolDetails.quoteDecimals !== null ? `${poolDetails.quoteDecimals} dec` : 'N/A dec'})
+                        Base Mint: {poolDetails.poolData.baseMint.toBase58()} ({poolDetails.baseDecimals !== null ? `${poolDetails.baseDecimals} dec` : 'N/A dec'}) <br/>
+                        Quote Mint: {(poolDetails.poolConfig.quoteMint as PublicKey).toBase58()} ({poolDetails.quoteDecimals !== null ? `${poolDetails.quoteDecimals} dec` : 'N/A dec'})
+                        { (poolDetails.poolData as any)?.uri &&
+                          <><br/>URI: <a href={(poolDetails.poolData as any).uri} target="_blank" rel="noopener noreferrer" className="text-primary underline hover:text-primary/80 transition-colors">View Details</a></>
+                        }
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
@@ -467,6 +521,8 @@ const CreateSwapForm: React.FC = () => {
                         </>
                     )}
                      <p><strong>Migration Option:</strong> {poolDetails.poolConfig.migrationOption}</p> 
+                     <p><strong>Migration Quote Threshold:</strong> {formatBnWithDecimals(poolDetails.migrationQuoteThreshold, poolDetails.quoteDecimals)}</p>
+                     <p><strong>Curve Progress:</strong> {poolDetails.curveProgress !== null ? (poolDetails.curveProgress * 100).toFixed(2) + '%' : 'N/A'}</p>
                 </CardContent>
             </Card>
         )}
