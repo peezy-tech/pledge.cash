@@ -29,7 +29,7 @@ COPY --from=build /app/bun.lock     ./bun.lock
 COPY --from=build /app/node_modules  ./node_modules
 COPY --from=build /app/apps/api      ./apps/api
 COPY --from=build /app/packages/db   ./packages/db
-COPY --from=build /app/apps/web/dist ./apps/api/public
+COPY --from=build /app/apps/web/dist ./public
 
 ENV NODE_ENV=production
 EXPOSE 3000
