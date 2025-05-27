@@ -32,6 +32,7 @@ COPY --from=build /app/node_modules  ./node_modules
 COPY --from=build /app/apps/api      ./apps/api
 COPY --from=build /app/packages/db   ./packages/db
 COPY --from=build /app/apps/web/dist ./public
+COPY --from=build /app/apps/web/dist ./apps/api/public
 
 ENV NODE_ENV=production
 EXPOSE 3000
