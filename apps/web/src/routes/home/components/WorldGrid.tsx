@@ -25,7 +25,7 @@ export interface WorldCardProps {
 }
 
 // Placeholder - Replace with your actual configuration address
-const DEFAULT_CONFIG_ADDRESS = "8kpYdu6mL8TpWXHL5mvoAz6897ras1dMJFEdABG61BcM";
+const DEFAULT_CONFIG_ADDRESS = "BHMiRzpd8B2D1cbUYMea3FdgAWv5gh6ZvbKyzUdqLmwW";
 const RPC_URL = "https://devnet.helius-rpc.com/?api-key=81b1290d-9852-4dcc-9c9c-4a4be7ddf3e3"; // Reusing RPC from CreateSwapForm
 
 // Helper to fetch metadata and extract image
