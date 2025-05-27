@@ -62,7 +62,14 @@ const app = new Elysia({
       .use(pool_routes)
       .use(config_routes)
   )
-  .use(staticPlugin({ prefix: "/", indexHTML: true }))
+  .use(
+    staticPlugin({
+      prefix: "/",
+      alwaysStatic: true,
+      indexHTML: true,
+    })
+  )
+  .get("/*", () => Bun.file(`public/index.html`))
   .use(serverManager)
   .listen(3000);
 
