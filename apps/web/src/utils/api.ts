@@ -6,6 +6,8 @@ export const API_BASE_URL = location.origin === "http://localhost:5173" ? "http:
 
 export const api = edenTreaty<App>(API_BASE_URL, { $fetch: { credentials: 'include' } })
 
+console.log(API_BASE_URL);
+
 // Helper function for making authenticated API calls
 export const apiCall = async (endpoint: string, options: RequestInit = {}) => {
   const url = `${API_BASE_URL}${endpoint}`;
