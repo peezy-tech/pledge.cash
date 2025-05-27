@@ -1,4 +1,4 @@
-import { Elysia, t, type Context, type Cookie } from "elysia";
+import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
 import { db, orm, migrate } from "@repo/db";
 import * as schemaImport from "@repo/db/schema";
@@ -10,10 +10,6 @@ import { config_routes } from "./config_routes";
 
 migrate();
 
-type DbType = typeof db;
-type OrmType = typeof orm;
-type SchemaType = typeof schemaImport;
-
 const app = new Elysia({
   // Cookie config handled by auth_routes or specific JWT setups
 })
@@ -24,7 +20,7 @@ const app = new Elysia({
   })
   .use(
     cors({
-      origin: (req) => true,
+      origin: () => true,
       methods: ["GET", "PUT", "POST", "DELETE"],
       allowedHeaders: ["Content-Type", "Authorization", "sec-fetch-site"],
       credentials: true,

@@ -41,7 +41,7 @@ export const auth_routes = new Elysia({ name: "auth" })
   )
   .get(
     AUTH_TOKEN_COOKIE,
-    async ({ [AUTH_TOKEN_COOKIE]: auth, set, cookie }) => {
+    async ({ [AUTH_TOKEN_COOKIE]: auth, cookie }) => {
       const authTokenCookie = cookie[AUTH_TOKEN_COOKIE];
       const profile = await auth.verify(authTokenCookie?.value);
 
@@ -54,7 +54,7 @@ export const auth_routes = new Elysia({ name: "auth" })
   )
   .put(
     AUTH_TOKEN_COOKIE,
-    async ({ [AUTH_TOKEN_COOKIE]: auth, set, cookie }) => {
+    async ({ [AUTH_TOKEN_COOKIE]: auth, cookie }) => {
       const authTokenCookie = cookie[AUTH_TOKEN_COOKIE];
       const profile = await auth.verify(authTokenCookie?.value);
 
@@ -110,7 +110,7 @@ export const auth_routes = new Elysia({ name: "auth" })
           .then((result) => result[0]);
 
         if (!user) {
-          const newUser = await db.insert(users).values({
+          await db.insert(users).values({
             solana_account: walletAddress,
           });
         }

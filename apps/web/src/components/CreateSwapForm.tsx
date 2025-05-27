@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import {
   Connection,
   PublicKey,
-  Transaction,
 } from "@solana/web3.js";
 import { useWallet } from "@solana/wallet-adapter-react";
 import {

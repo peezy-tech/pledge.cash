@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import {
   // Connection, // No longer directly used for sending tx
   // Keypair, // No longer generating keypairs client-side for payer or base mint
-  PublicKey,
   Transaction,
   // sendAndConfirmTransaction, // Replaced by API calls
 } from "@solana/web3.js";

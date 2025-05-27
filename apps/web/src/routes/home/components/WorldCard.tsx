@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   Connection,
   PublicKey,
@@ -6,8 +6,7 @@ import {
 } from "@solana/web3.js";
 import { useWallet } from "@solana/wallet-adapter-react";
 import {
-  DynamicBondingCurveClient,
-  TokenType, // Assuming TokenType might be needed, e.g. for token decimals
+  DynamicBondingCurveClient
 } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import type { 
   VirtualPool,
@@ -68,7 +67,6 @@ export function WorldCard({
   id, 
   title, 
   imageUrl, 
-  price, 
   poolData, 
   poolConfig,
   baseDecimals,

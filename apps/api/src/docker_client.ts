@@ -61,9 +61,9 @@ class GameServerManager {
     usedPorts.delete(port);
   }
 
-  async createGameServer(): Promise<GameServer> {
+  async createGameServer(id?: string): Promise<GameServer> {
     console.log("[GameServerManager] createGameServer called");
-    const serverId = randomUUID();
+    const serverId = id || randomUUID();
     const port = this.getAvailablePort();
     console.log(
       `[GameServerManager] Creating game server ${serverId} on port ${port}`
@@ -230,7 +230,7 @@ class GameServerManager {
       gameServer.status = "stopped";
 
       // Optionally cleanup volume (be careful!)
-      // await this.cleanupVolume(serverId)
+      await this.cleanupVolume(serverId)
 
       console.log(`[GameServerManager] Stopped game server ${serverId}`);
     } catch (error) {
@@ -291,7 +291,7 @@ class GameServerManager {
   async listGameServers(): Promise<GameServer[]> {
     console.log("[GameServerManager] listGameServers called");
     // Update statuses before returning
-    for (const [id, server] of gameServers.entries()) {
+    for (const [id, _] of gameServers.entries()) {
       console.log(
         `[GameServerManager] Updating status for server ${id} in listGameServers`
       );
@@ -467,3 +467,4 @@ const app = new Elysia()
   });
 
 export default app;
+export { serverManager }; // Export serverManager

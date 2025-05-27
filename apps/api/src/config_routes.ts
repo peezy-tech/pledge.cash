@@ -2,8 +2,7 @@ import { Elysia, t } from 'elysia';
 import {
   Connection,
   Keypair,
-  PublicKey,
-  Transaction,
+  PublicKey
 } from '@solana/web3.js';
 import {
   DynamicBondingCurveClient,
@@ -16,7 +15,6 @@ import {
   TokenDecimal,
   type CreateConfigParam, // Import the type
 } from '@meteora-ag/dynamic-bonding-curve-sdk';
-import { NATIVE_MINT } from '@solana/spl-token';
 import BN from 'bn.js';
 import { Buffer } from 'buffer';
 import { configs, users } from '@repo/db/schema'; // Added schema imports

@@ -1,10 +1,6 @@
 import { useState } from "react";
 import {
-  // Connection, // No longer used directly
-  // Keypair, // No longer used directly for payer or config keypair generation client-side
-  // sendAndConfirmTransaction, // Replaced by API calls
   Transaction, // For deserializing from API
-  PublicKey,
 } from "@solana/web3.js";
 import { useWallet } from "@solana/wallet-adapter-react"; // Added
 import { api } from "@/utils/api"; // Added

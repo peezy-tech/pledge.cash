@@ -1,6 +1,5 @@
 import {
   sqliteTable as table,
-  type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import * as t from "drizzle-orm/sqlite-core";
 

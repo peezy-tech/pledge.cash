@@ -3,7 +3,6 @@ import {
   Connection,
   Keypair,
   PublicKey,
-  Transaction,
   // sendAndConfirmRawTransaction, // Using sendRawTransaction and confirmTransaction separately
 } from '@solana/web3.js';
 import {
@@ -16,6 +15,8 @@ import { NATIVE_MINT } from '@solana/spl-token';
 import { Buffer } from 'buffer';
 import { pools, tokens, users } from '@repo/db/schema'; // Added schema imports
 import { eq } from 'drizzle-orm'; // Added for querying
+import { serverManager } from './docker_client'; // Corrected import path
+import { db } from '@repo/db';
 
 // Ensure Buffer is available if running in an environment where it might not be global
 if (typeof globalThis.Buffer === 'undefined') {
@@ -29,7 +30,7 @@ const connection = new Connection(SOLANA_RPC_URL, "confirmed");
 export const pool_routes = new Elysia({ prefix: '/pools' })
   .post(
     '/prepare-create',
-    async ({ body, currentUser, set, db }: { body: any, currentUser: { walletAddress?: string } | undefined, set: any, db: any }) => {
+    async ({ body, currentUser, set }: { body: any, currentUser: { walletAddress?: string } | undefined, set: any }) => {
       if (!currentUser || !currentUser.walletAddress) {
         set.status = 401;
         return { error: 'Unauthorized' };
@@ -108,7 +109,7 @@ export const pool_routes = new Elysia({ prefix: '/pools' })
   )
   .post(
     '/submit-signed',
-    async ({ body, currentUser, set, db }: { body: any, currentUser: { walletAddress?: string } | undefined, set: any, db: any }) => {
+    async ({ body, currentUser, set }: { body: any, currentUser: { walletAddress?: string } | undefined, set: any }) => {
       if (!currentUser || !currentUser.walletAddress) {
         set.status = 401;
         return { error: 'Unauthorized' };
@@ -182,11 +183,29 @@ export const pool_routes = new Elysia({ prefix: '/pools' })
           createdAt: Date.now(),
         }).execute();
 
+        // Spawn game server
+        let gameServerDetails = null;
+        try {
+          console.log(`Attempting to spawn game server with ID: ${baseMintAddress}`);
+          const gameServer = await serverManager.createGameServer(baseMintAddress);
+          gameServerDetails = {
+            id: gameServer.id,
+            status: gameServer.status,
+            port: gameServer.port,
+          };
+          console.log(`Game server ${baseMintAddress} spawned successfully:`, gameServerDetails);
+        } catch (gameServerError: any) {
+          console.error(`Failed to spawn game server ${baseMintAddress}:`, gameServerError);
+          // Decide if this should be a critical error or just a warning
+          // For now, we'll log it and continue, but not include it in the success response if it fails
+        }
+
         return { 
           transactionSignature: signature, 
           poolId: poolId,
           baseMintAddress: baseMintAddress, 
           poolAddress: poolAddress, // Added poolAddress to response
+          gameServer: gameServerDetails, // Add game server details to response
         };
 
       } catch (err: any) {
