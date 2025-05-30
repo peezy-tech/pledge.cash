@@ -13,15 +13,15 @@ import type {
   VirtualPool,
   PoolConfig,
   QuoteResult,
-  // SwapQuoteParam, // Not directly used in state, but in function calls
-  // SwapParam, // Not directly used in state, but in function calls
 } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import BN from "bn.js";
-import { Buffer } from 'buffer'; // Required if transactions are serialized/deserialized client-side
+import { Buffer } from 'buffer';
+// Import React Query and api helper for mutations
+import { useMutation } from '@tanstack/react-query';
+import { api } from '@/utils/api'; // Assuming api helper path
 
-// Assuming WorldGrid passes these, based on previous steps
 interface WorldCardProps {
-  id: string; // This is the poolAddress / baseMintAddress / game server ID
+  id: string; 
   title: string;
   imageUrl: string;
   price: number; 
@@ -29,23 +29,19 @@ interface WorldCardProps {
   poolConfig: PoolConfig;
   baseDecimals: number | null;
   quoteDecimals: number | null;
-  gameServerStatus?: "starting" | "running" | "stopping" | "stopped"; // Explicitly list statuses
+  gameServerStatus?: "starting" | "running" | "stopping" | "stopped";
   gameServerUrl?: string;
 }
 
-// Define GameServer type for API response typing
 interface GameServerDataFromApi {
     id: string;
     port: number;
     url: string;
     status: "starting" | "running" | "stopping" | "stopped";
-    // other fields like containerId, createdAt might be present
 }
 
-// Re-define or import if available globally
 const RPC_URL = "https://devnet.helius-rpc.com/?api-key=81b1290d-9852-4dcc-9c9c-4a4be7ddf3e3";
 
-// Helper function from CreateSwapForm / WorldGrid
 const formatBnWithDecimals = (bn: BN | undefined | null, decimals: number | null): string => {
   if (!bn || decimals === null) return "N/A";
   const bnString = bn.toString();
@@ -70,10 +66,33 @@ const formatBnWithDecimals = (bn: BN | undefined | null, decimals: number | null
   return (isNegative ? '-' : '') + wholePart + "." + fractionalPart;
 };
 
-// Buffer polyfill for browser environment if not already global
 if (typeof window !== 'undefined') {
   window.Buffer = window.Buffer || Buffer;
 }
+
+// Define the mutation hook for ensuring/launching a game server
+const useEnsureGameServerMutation = () => {
+  return useMutation<GameServerDataFromApi, Error, string>({ // Result type, Error type, Variables type (serverId)
+    mutationFn: async (serverId: string) => {
+      // Assuming path is /api/game-servers/ensure/:serverId and it's a POST request
+      // The body for POST might be empty or specific; assuming empty based on original fetch.
+      // If api helper requires a body for post even if empty, pass {}.
+      const response = await api['game-servers'].ensure[serverId].post({}); 
+
+      if (response.error) {
+        const errorValue = response.error.value as { error?: string; message?: string };
+        throw new Error(errorValue?.error || errorValue?.message || `API Error ${response.error.status} ensuring server ${serverId}`);
+      }
+
+      if (response.data && (response.data as any).success && (response.data as any).data) {
+        return (response.data as any).data as GameServerDataFromApi;
+      }
+      const detailMessage = (response.data as any)?.error || 'Invalid data structure or failed to ensure server.';
+      throw new Error(detailMessage);
+    },
+    // onSuccess, onError, onSettled callbacks can be used here if needed
+  });
+};
 
 export function WorldCard({ 
   id, 
@@ -83,34 +102,43 @@ export function WorldCard({
   poolConfig,
   baseDecimals,
   quoteDecimals,
-  gameServerStatus: initialServerStatus, // Renamed for clarity
-  gameServerUrl: initialServerUrl     // Renamed for clarity
+  gameServerStatus: initialServerStatus, 
+  gameServerUrl: initialServerUrl     
 }: WorldCardProps) {
   const { publicKey: ownerPublicKey, signTransaction, connected } = useWallet();
   const navigate = useNavigate();
+  const ensureGameServerMutation = useEnsureGameServerMutation();
 
   const [isFlipped, setIsFlipped] = useState(false);
-  const [amountIn, setAmountIn] = useState("1"); // Default to 1, user can change
+  const [amountIn, setAmountIn] = useState("1");
   const [swapDirection, setSwapDirection] = useState<"quote_to_base" | "base_to_quote">("quote_to_base");
-  // Referral account - can be added as an input if needed
-  // const [referralAccount, setReferralAccount] = useState(""); 
-
   const [quote, setQuoteResult] = useState<QuoteResult | null>(null);
   const [minimumAmountOutToDisplay, setMinimumAmountOutToDisplay] = useState<BN | null>(null);
   const [transactionSignature, setTransactionSignature] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [isLoadingSwap, setIsLoadingSwap] = useState(false); // Renamed from isLoading to avoid conflict
+  const [swapError, setSwapError] = useState(""); // Renamed from error
 
-  // New state for game server interaction
   const [currentServerStatus, setCurrentServerStatus] = useState(initialServerStatus);
   const [currentServerUrl, setCurrentServerUrl] = useState(initialServerUrl);
-  const [isInitializingWorld, setIsInitializingWorld] = useState(false);
-  const [connectError, setConnectError] = useState<string | null>(null);
+  // isInitializingWorld will be ensureGameServerMutation.isPending
+  // connectError will be ensureGameServerMutation.error
 
   useEffect(() => {
     setCurrentServerStatus(initialServerStatus);
     setCurrentServerUrl(initialServerUrl);
   }, [initialServerStatus, initialServerUrl]);
+
+  // Update local state when mutation is successful
+  useEffect(() => {
+    if (ensureGameServerMutation.isSuccess && ensureGameServerMutation.data) {
+      const serverData = ensureGameServerMutation.data;
+      setCurrentServerStatus(serverData.status);
+      setCurrentServerUrl(serverData.url);
+      if (serverData.status === 'running' && serverData.url) {
+        navigate({ to: '/play-game', search: { url: serverData.url } });
+      }
+    }
+  }, [ensureGameServerMutation.isSuccess, ensureGameServerMutation.data, navigate]);
 
   const calculateCurveProgress = () => {
     if (!poolData || !poolConfig || !poolConfig.migrationQuoteThreshold || poolConfig.migrationQuoteThreshold.isZero()) {
@@ -130,11 +158,10 @@ export function WorldCard({
 
   const handleFlip = () => {
     setIsFlipped(!isFlipped);
-    // Reset swap-specific state when flipping away from the back
     if (isFlipped) {
         setQuoteResult(null);
         setMinimumAmountOutToDisplay(null);
-        setError("");
+        setSwapError("");
         setTransactionSignature("");
     }
   };
@@ -145,20 +172,20 @@ export function WorldCard({
 
   const handleGetQuote = async () => {
     if (!connected || !ownerPublicKey) {
-      setError("Wallet not connected.");
+      setSwapError("Wallet not connected.");
       return;
     }
     if (!poolData || !poolConfig || baseDecimals === null || quoteDecimals === null) {
-      setError("Pool details or token decimals are missing for this card.");
+      setSwapError("Pool details or token decimals are missing for this card.");
       return;
     }
     if (!amountIn) {
-      setError("Amount in is required.");
+      setSwapError("Amount in is required.");
       return;
     }
     
-    setIsLoading(true);
-    setError("");
+    setIsLoadingSwap(true);
+    setSwapError("");
     setQuoteResult(null);
     setMinimumAmountOutToDisplay(null);
     setTransactionSignature("");
@@ -170,8 +197,8 @@ export function WorldCard({
       const currentDecimals = swapDirection === "quote_to_base" ? quoteDecimals : baseDecimals;
       const parsedAmountIn = parseFloat(amountIn);
       if (isNaN(parsedAmountIn) || parsedAmountIn <= 0) {
-        setError("Invalid amount. Please enter a positive number.");
-        setIsLoading(false);
+        setSwapError("Invalid amount. Please enter a positive number.");
+        setIsLoadingSwap(false);
         return;
       }
       const amountInBn = new BN(parsedAmountIn * Math.pow(10, currentDecimals));
@@ -204,41 +231,40 @@ export function WorldCard({
 
     } catch (err: any) {
       console.error("Error getting quote:", err);
-      setError(`Failed to get quote: ${err.message}`);
+      setSwapError(`Failed to get quote: ${err.message}`);
     } finally {
-      setIsLoading(false);
+      setIsLoadingSwap(false);
     }
   };
 
   const handleSwap = async () => {
     if (!connected || !ownerPublicKey || !signTransaction) {
-      setError("Wallet not connected or signing function unavailable.");
+      setSwapError("Wallet not connected or signing function unavailable.");
       return;
     }
     if (!poolData || baseDecimals === null || quoteDecimals === null) { 
-      setError("Pool details or token decimals are missing.");
+      setSwapError("Pool details or token decimals are missing.");
       return;
     }
     if (!amountIn) {
-      setError("Amount in is required.");
+      setSwapError("Amount in is required.");
       return;
     }
     if (!quote || !minimumAmountOutToDisplay) {
-      setError("Please get a quote first, or quote is missing minimum amount out.");
+      setSwapError("Please get a quote first, or quote is missing minimum amount out.");
       return;
     }
     
     const currentDecimals = swapDirection === "quote_to_base" ? quoteDecimals : baseDecimals;
     const parsedAmountIn = parseFloat(amountIn);
-    // Redundant check, but good for safety
     if (isNaN(parsedAmountIn) || parsedAmountIn <= 0) {
-      setError("Invalid amount for swapping.");
+      setSwapError("Invalid amount for swapping.");
       return;
     }
     const amountInBn = new BN(parsedAmountIn * Math.pow(10, currentDecimals));
 
-    setIsLoading(true);
-    setError("");
+    setIsLoadingSwap(true);
+    setSwapError("");
     setTransactionSignature("");
 
     try {
@@ -262,8 +288,8 @@ export function WorldCard({
       
       // Ensure feePayer and recentBlockhash are set on sdkTransaction BEFORE serialization
       if (!ownerPublicKey) {
-        setError("Wallet owner public key not found. Cannot set fee payer.");
-        setIsLoading(false);
+        setSwapError("Wallet owner public key not found. Cannot set fee payer.");
+        setIsLoadingSwap(false);
         return;
       }
       sdkTransaction.feePayer = ownerPublicKey;
@@ -299,14 +325,14 @@ export function WorldCard({
 
     } catch (err: any) {
       console.error("Error executing swap:", err);
-      setError(`Failed to execute swap: ${err.message} - ${err.stack ? err.stack : ''}`);
+      setSwapError(`Failed to execute swap: ${err.message} - ${err.stack ? err.stack : ''}`);
     } finally {
-      setIsLoading(false);
+      setIsLoadingSwap(false);
     }
   };
 
   const handleConnectOrLaunchWorld = async () => {
-    setConnectError(null);
+    ensureGameServerMutation.reset(); // Clear previous error states from the mutation
     const baseMintForServerId = poolData.baseMint.toBase58();
 
     if (currentServerStatus === 'running' && currentServerUrl) {
@@ -314,38 +340,17 @@ export function WorldCard({
       return;
     }
 
-    setIsInitializingWorld(true);
     try {
       console.log(`Attempting to ensure/launch server for baseMint: ${baseMintForServerId}`);
-      const response = await fetch(`/api/game-servers/ensure/${baseMintForServerId}`, {
-        method: 'POST',
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Failed to ensure server and parse error json' }));
-        throw new Error(errorData.error || `Server error: ${response.status}`);
-      }
-
-      const result: { success: boolean; data?: GameServerDataFromApi; error?: string } = await response.json();
-
-      if (result.success && result.data && result.data.url) {
-        setCurrentServerStatus(result.data.status);
-        setCurrentServerUrl(result.data.url);
-        // If it's now running (or was already but URL was missing), navigate
-        if (result.data.status === 'running') {
-            navigate({ to: '/play-game', search: { url: result.data.url } });
-        } else {
-            // It might be 'starting', user will see "Initializing World..." or similar updated status
-            console.log("Server is starting, user will see updated status.");
-        }
-      } else {
-        throw new Error(result.error || 'Failed to get server details after ensuring.');
-      }
-    } catch (err: any) {
-      console.error("Error connecting or launching world:", err);
-      setConnectError(err.message || "Could not connect or launch the world.");
-    } finally {
-      setIsInitializingWorld(false);
+      // The actual call and state updates are handled by the mutation hook and its useEffect
+      await ensureGameServerMutation.mutateAsync(baseMintForServerId);
+      // Success and navigation are handled in the useEffect listening to ensureGameServerMutation.isSuccess
+    } catch (err) {
+      // Error is already captured by ensureGameServerMutation.error
+      // The useEffect for isError could update a local error state if needed for display,
+      // or the error can be directly accessed from ensureGameServerMutation.error for rendering.
+      console.error("Error caught by handleConnectOrLaunchWorld after mutateAsync:", err);
+      // No need to set local error here if it's derived from mutation.error
     }
   };
 
@@ -396,7 +401,7 @@ export function WorldCard({
   
   const inputStyle: React.CSSProperties = {
     width: '100%', 
-    padding: '8px 12px', 
+    padding: '8px 12px',
     backgroundColor: 'rgba(55, 65, 81, 0.8)', 
     borderRadius: '4px', 
     color: 'white',
@@ -443,18 +448,21 @@ export function WorldCard({
 
   const connectButtonStyle: React.CSSProperties = {
     ...buttonStyleBase,
-    backgroundColor: '#10b981', // Green color for connect
+    backgroundColor: '#10b981', 
     marginTop: '10px',
-    width: 'calc(100% - 32px)', // Full width minus padding
+    width: 'calc(100% - 32px)', 
     margin: '10px auto 0 auto',
     display: 'block'
   };
 
   const disabledConnectButtonStyle: React.CSSProperties = {
     ...connectButtonStyle,
-    backgroundColor: '#6b7280', // Gray color for disabled
+    backgroundColor: '#6b7280', 
     cursor: 'not-allowed',
   };
+  
+  const isInitializingWorld = ensureGameServerMutation.isPending;
+  const connectError = ensureGameServerMutation.error?.message || null;
 
   return (
     <div style={containerStyle}>
@@ -492,7 +500,7 @@ export function WorldCard({
             
             <button 
               onClick={handleConnectOrLaunchWorld} 
-              style={isInitializingWorld ? disabledConnectButtonStyle : connectButtonStyle} // Style might need adjustment
+              style={isInitializingWorld ? disabledConnectButtonStyle : connectButtonStyle} 
               disabled={isInitializingWorld}
             >
               {isInitializingWorld 
@@ -523,14 +531,14 @@ export function WorldCard({
             <input
               id={`amount-${id}`}
               type="number"
-              min="0.000001" // Allow small decimal inputs
+              min="0.000001" 
               step="any"
               value={amountIn}
               onChange={handleAmountChange}
               style={inputStyle}
               placeholder={`Amount of ${swapDirection === "quote_to_base" ? "Quote" : "Base"}`}
-              onClick={(e) => e.stopPropagation()} // Prevent card flip on input click
-              disabled={isLoading}
+              onClick={(e) => e.stopPropagation()} 
+              disabled={isLoadingSwap || ensureGameServerMutation.isPending} // Disable if initializing world too
             />
           </div>
 
@@ -545,7 +553,7 @@ export function WorldCard({
                         checked={swapDirection === "quote_to_base"}
                         onChange={() => setSwapDirection("quote_to_base")}
                         style={RadioInputStyle}
-                        disabled={isLoading}
+                        disabled={isLoadingSwap || ensureGameServerMutation.isPending}
                     /> Buy Base (Quote to Base)
                 </label>
                 <label style={RadioLabelStyle} onClick={(e) => e.stopPropagation()}>
@@ -556,7 +564,7 @@ export function WorldCard({
                         checked={swapDirection === "base_to_quote"}
                         onChange={() => setSwapDirection("base_to_quote")}
                         style={RadioInputStyle}
-                        disabled={isLoading}
+                        disabled={isLoadingSwap || ensureGameServerMutation.isPending}
                     /> Sell Base (Base to Quote)
                 </label>
             </div>
@@ -565,39 +573,38 @@ export function WorldCard({
           <button 
             style={{ 
                 ...buttonStyleBase, 
-                backgroundColor: isLoading && !transactionSignature ? '#fbbf24' : '#38bdf8', // amber for loading, sky for default
+                backgroundColor: isLoadingSwap && !transactionSignature ? '#fbbf24' : '#38bdf8', // amber for loading, sky for default
                 marginBottom: '8px',
                 width: '100%'
             }}
             onClick={(e) => { e.stopPropagation(); handleGetQuote(); }}
-            disabled={isLoading || !connected || !poolData || baseDecimals === null || quoteDecimals === null}
+            disabled={isLoadingSwap || !connected || !poolData || baseDecimals === null || quoteDecimals === null || ensureGameServerMutation.isPending}
           >
-            {isLoading && !quote && !error ? "Getting Quote..." : "Get Quote"}
+            {isLoadingSwap && !quote && !swapError ? "Getting Quote..." : "Get Quote"}
           </button>
 
           {quote && baseDecimals !== null && quoteDecimals !== null && (
             <div style={{ fontSize: '0.75rem', marginBottom: '8px', padding: '6px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '4px' }}>
               <p><strong>Est. Amount Out:</strong> {formatBnWithDecimals(quote.amountOut, swapDirection === 'quote_to_base' ? baseDecimals : quoteDecimals)}</p>
               {minimumAmountOutToDisplay && <p><strong>Min. Amount Out:</strong> {formatBnWithDecimals(minimumAmountOutToDisplay, swapDirection === 'quote_to_base' ? baseDecimals : quoteDecimals)}</p>}
-              {/* Add more quote details if needed, e.g., price impact, fees */}
             </div>
           )}
 
           <button 
             style={{ 
                 ...buttonStyleBase, 
-                backgroundColor: isLoading && quote ? '#fbbf24' : (quote ? '#22c55e' : '#6b7280'), // amber for loading, green for ready, gray for disabled
+                backgroundColor: isLoadingSwap && quote ? '#fbbf24' : (quote ? '#22c55e' : '#6b7280'), 
                 width: '100%'
             }}
             onClick={(e) => { e.stopPropagation(); handleSwap(); }}
-            disabled={isLoading || !quote || !minimumAmountOutToDisplay || !connected}
+            disabled={isLoadingSwap || !quote || !minimumAmountOutToDisplay || !connected || ensureGameServerMutation.isPending}
           >
-            {isLoading && quote ? "Swapping..." : (connected ? "Execute Swap" : "Connect Wallet")}
+            {isLoadingSwap && quote ? "Swapping..." : (connected ? "Execute Swap" : "Connect Wallet")}
           </button>
 
-          {error && (
+          {swapError && (
             <div style={{ color: '#f87171', fontSize: '0.75rem', marginTop: '8px', textAlign:'center', wordBreak: 'break-word' }}>
-              Error: {error}
+              Error: {swapError}
             </div>
           )}
           {transactionSignature && (

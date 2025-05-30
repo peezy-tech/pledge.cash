@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useNavigate } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/utils/api';
 
 interface GameServer {
   id: string;
@@ -11,44 +13,41 @@ interface GameServer {
   // Add other fields if the API returns more
 }
 
-interface ApiResponse {
-  success: boolean;
-  data?: GameServer[];
-  error?: string;
-}
+// React Query keys for game servers list
+const gameServersKeys = {
+  all: ['gameServers'] as const,
+  list: () => [...gameServersKeys.all, 'list'] as const,
+};
+
+// Custom hook to fetch all game servers
+const useGameServersQuery = () => {
+  return useQuery<GameServer[], Error>({
+    queryKey: gameServersKeys.list(),
+    queryFn: async () => {
+      // Assuming the path for all game servers is api['game-servers'].get()
+      const response = await api['game-servers'].get();
+
+      if (response.error) {
+        const errorValue = response.error.value as { error?: string; message?: string };
+        throw new Error(errorValue?.error || errorValue?.message || `API Error ${response.error.status} fetching game servers list`);
+      }
+
+      if (response.data && (response.data as any).success && Array.isArray((response.data as any).data)) {
+        return (response.data as any).data as GameServer[];
+      }
+      // Handle cases where response.data is not in the expected { success: true, data: [] } format
+      // or success is false in the payload
+      const detailMessage = (response.data as any)?.error || 'Invalid data structure received for game servers list.';
+      throw new Error(detailMessage);
+    },
+    // Optional: staleTime, cacheTime, retry policies can be configured here
+    staleTime: 1000 * 60 * 1, // 1 minute
+  });
+};
 
 const AdminGameServers: React.FC = () => {
-  const [servers, setServers] = useState<GameServer[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    const fetchGameServers = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        // Assuming API is on localhost:3000 and web app is proxied or has CORS configured
-        // In a real setup, this URL should come from a config
-        const response = await fetch('/api/game-servers'); 
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const result: ApiResponse = await response.json();
-        if (result.success && result.data) {
-          setServers(result.data);
-        } else {
-          setError(result.error || 'Failed to fetch game servers');
-        }
-      } catch (e: any) {
-        setError(e.message || 'An unexpected error occurred');
-        console.error("Fetch error:", e);
-      }
-      setLoading(false);
-    };
-
-    fetchGameServers();
-  }, []);
+  const { data: servers, isLoading: loading, error } = useGameServersQuery();
 
   const handleConnectClick = (server: GameServer) => {
     if (server.url) {
@@ -63,10 +62,10 @@ const AdminGameServers: React.FC = () => {
   }
 
   if (error) {
-    return <div>Error fetching game servers: {error}</div>;
+    return <div>Error fetching game servers: {error.message}</div>;
   }
 
-  if (servers.length === 0) {
+  if (!servers || servers.length === 0) {
     return <div>No game servers found.</div>;
   }
 
