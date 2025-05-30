@@ -1,10 +1,8 @@
-import { Elysia, t } from "elysia";
+import { Elysia } from "elysia";
 import Docker from "dockerode";
 import { randomUUID } from "crypto";
 import path from "path";
 import fs from "fs/promises";
-import { pools } from "@repo/db/schema";
-import { eq } from "drizzle-orm";
 
 // const VOLUME_PATH = './media' //process.env.GAME_SERVER_VOLUME_PATH || '/media'
 const VOLUME_PATH = path.resolve(__dirname, "media");
@@ -422,7 +420,7 @@ const app = new Elysia()
     }
   })
 
-  .get("/game-servers", async (context) => {
+  .get("/game-servers", async () => {
     console.log("[Elysia] GET /game-servers endpoint called", {
     });
     const servers = await serverManager.listGameServers();
