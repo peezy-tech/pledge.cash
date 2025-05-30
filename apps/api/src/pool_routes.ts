@@ -192,8 +192,19 @@ export const pool_routes = new Elysia({ prefix: '/pools' })
             id: gameServer.id,
             status: gameServer.status,
             port: gameServer.port,
+            url: gameServer.url,
           };
           console.log(`Game server ${baseMintAddress} spawned successfully:`, gameServerDetails);
+
+          // Update the pool record with the gameServerUrl
+          if (gameServer.url) {
+            await db.update(pools)
+              .set({ gameServerUrl: gameServer.url })
+              .where(eq(pools.id, poolId))
+              .execute();
+            console.log(`Updated pool ${poolId} with gameServerUrl: ${gameServer.url}`);
+          }
+
         } catch (gameServerError: any) {
           console.error(`Failed to spawn game server ${baseMintAddress}:`, gameServerError);
           // Decide if this should be a critical error or just a warning

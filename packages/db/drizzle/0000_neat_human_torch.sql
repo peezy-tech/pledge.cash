@@ -28,7 +28,7 @@ CREATE TABLE `configs` (
 	`creatorWalletAddress` text NOT NULL,
 	`userId` text,
 	`transactionSignature` text,
-	`createdAt` integer DEFAULT 1748290871073 NOT NULL,
+	`createdAt` integer DEFAULT 1748632025852 NOT NULL,
 	FOREIGN KEY (`userId`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
@@ -45,7 +45,8 @@ CREATE TABLE `pools` (
 	`userId` text,
 	`poolAddress` text NOT NULL,
 	`transactionSignature` text,
-	`createdAt` integer DEFAULT 1748290871073 NOT NULL,
+	`gameServerUrl` text,
+	`createdAt` integer DEFAULT 1748632025851 NOT NULL,
 	FOREIGN KEY (`userId`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
@@ -59,7 +60,7 @@ CREATE TABLE `tokens` (
 	`symbol` text NOT NULL,
 	`uri` text NOT NULL,
 	`type` text DEFAULT 'SPL' NOT NULL,
-	`createdAt` integer DEFAULT 1748290871073 NOT NULL,
+	`createdAt` integer DEFAULT 1748632025851 NOT NULL,
 	FOREIGN KEY (`poolId`) REFERENCES `pools`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
@@ -80,5 +81,5 @@ CREATE TABLE `worlds` (
 	`name` text,
 	`description` text,
 	`url` text,
-	`created_at` integer DEFAULT 1748290871073
+	`created_at` integer DEFAULT 1748632025851
 );

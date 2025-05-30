@@ -44,6 +44,7 @@ export const pools = table("pools", {
   userId: t.text().references(() => users.id),
   poolAddress: t.text().notNull().unique(),
   transactionSignature: t.text().unique(),
+  gameServerUrl: t.text(),
   createdAt: t.integer().default(Date.now()).notNull(),
 });
 

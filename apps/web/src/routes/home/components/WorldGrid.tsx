@@ -11,10 +11,19 @@ interface ProgramAccount<T = any> {
     account: T;
 }
 
+// Define GameServer type (similar to one in AdminGameServers.tsx)
+interface GameServer {
+  id: string;
+  port: number; // Port might still be useful for display or other contexts
+  url: string; // Expect the full URL from the API
+  status: "starting" | "running" | "stopping" | "stopped";
+  // Add other fields if needed, like createdAt, containerId
+}
+
 // Define the props for WorldCard, assuming it's not exported from WorldCard.tsx
 // If WorldCard.tsx exports its props, import it instead.
 export interface WorldCardProps {
-  id: string; // Pool address
+  id: string; // Pool address (which is also the baseMintAddress and game server ID)
   title: string;
   imageUrl: string;
   price: number;
@@ -22,6 +31,8 @@ export interface WorldCardProps {
   poolConfig: PoolConfig;
   baseDecimals: number | null; 
   quoteDecimals: number | null;
+  gameServerStatus?: GameServer['status'];
+  gameServerUrl?: string; 
 }
 
 // Placeholder - Replace with your actual configuration address
@@ -171,7 +182,39 @@ export function WorldGrid() {
         });
         
         const resolvedWorlds = await Promise.all(detailedWorldsPromises);
-        setWorlds(resolvedWorlds);
+
+        // Fetch game server statuses for each world
+        const worldsWithServerStatus = await Promise.all(resolvedWorlds.map(async (world) => {
+          // world.id is the poolAddress. We need baseMintAddress for game server ID.
+          if (!world.poolData || !world.poolData.baseMint) {
+            console.warn(`World ${world.id} is missing poolData or baseMint, cannot fetch server status.`);
+            return world; // Return original world if essential data for serverId is missing
+          }
+
+          try {
+            const serverId = world.poolData.baseMint.toBase58(); // Use baseMintAddress as serverId
+            const response = await fetch(`/api/game-servers/${serverId}`);
+            if (response.ok) {
+              const serverResult: { success: boolean; data?: GameServer; error?: string } = await response.json();
+              if (serverResult.success && serverResult.data) {
+                return {
+                  ...world,
+                  gameServerStatus: serverResult.data.status,
+                  gameServerUrl: serverResult.data.url, 
+                };
+              }
+            } else {
+              if (response.status !== 404) {
+                 console.warn(`Failed to fetch game server status for ${serverId} (baseMint: ${world.poolData.baseMint.toBase58()}): ${response.status}`);
+              }
+            }
+          } catch (e) {
+            console.error(`Error fetching game server status for baseMint ${world.poolData.baseMint.toBase58()}:`, e);
+          }
+          return world; 
+        }));
+
+        setWorlds(worldsWithServerStatus);
 
       } catch (err: any) {
         console.error("Failed to fetch or process worlds:", err);
@@ -209,6 +252,8 @@ export function WorldGrid() {
           poolConfig={world.poolConfig}
           baseDecimals={world.baseDecimals}
           quoteDecimals={world.quoteDecimals}
+          gameServerStatus={world.gameServerStatus}
+          gameServerUrl={world.gameServerUrl}
         />
       ))}
     </div>

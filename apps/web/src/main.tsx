@@ -19,6 +19,8 @@ import TokenAdmin from './routes/token-admin.tsx'
 import { HomePage } from './routes/home.tsx'
 import ProfilePage from './routes/profile.tsx'
 import LaunchPage from './routes/launch.tsx'
+import createAdminGameServersRoute from './routes/admin-game-servers.tsx';
+import createPlayGameRoute from './routes/play-game.tsx';
 
 import Header from './components/Header'
 import ShowroomBackground from './components/ShowroomBackground'
@@ -76,6 +78,8 @@ const routeTree = rootRoute.addChildren([
   TokenAdmin(rootRoute),
   ProfilePage(rootRoute),
   LaunchPage(rootRoute),
+  createAdminGameServersRoute(rootRoute),
+  createPlayGameRoute(rootRoute),
 ])
 
 const router = createRouter({

@@ -1,8 +1,10 @@
-import { Elysia } from "elysia";
+import { Elysia, t } from "elysia";
 import Docker from "dockerode";
 import { randomUUID } from "crypto";
 import path from "path";
 import fs from "fs/promises";
+import { pools } from "@repo/db/schema";
+import { eq } from "drizzle-orm";
 
 // const VOLUME_PATH = './media' //process.env.GAME_SERVER_VOLUME_PATH || '/media'
 const VOLUME_PATH = path.resolve(__dirname, "media");
@@ -27,6 +29,7 @@ interface GameServer {
   id: string;
   containerId: string;
   port: number;
+  url: string;
   status: "starting" | "running" | "stopping" | "stopped";
   createdAt: Date;
 }
@@ -65,8 +68,10 @@ class GameServerManager {
     console.log("[GameServerManager] createGameServer called");
     const serverId = id || randomUUID();
     const port = this.getAvailablePort();
+    // Construct the game server URL based on environment
+    const gameUrl = isProd ? `https://${serverId}.${baseDomain}` : `http://localhost:${port}`;
     console.log(
-      `[GameServerManager] Creating game server ${serverId} on port ${port}`
+      `[GameServerManager] Creating game server ${serverId} on port ${port} with URL ${gameUrl}`
     );
 
     const router = `0-${serverId}`; // must be unique
@@ -117,6 +122,7 @@ class GameServerManager {
       id: serverId,
       containerId: "",
       port,
+      url: gameUrl,
       status: "starting",
       createdAt: new Date(),
     };
@@ -390,6 +396,7 @@ serverManager.cleanup();
 
 // Create Elysia app
 const app = new Elysia()
+
   .get("/health", () => {
     console.log("[Elysia] /health endpoint called");
     return { status: "ok", timestamp: new Date() };
@@ -398,8 +405,6 @@ const app = new Elysia()
   .post("/game-servers", async (context) => {
     console.log("[Elysia] POST /game-servers endpoint called", {
       body: context.body,
-      query: context.query,
-      params: context.params,
     });
     try {
       const gameServer = await serverManager.createGameServer();
@@ -419,7 +424,6 @@ const app = new Elysia()
 
   .get("/game-servers", async (context) => {
     console.log("[Elysia] GET /game-servers endpoint called", {
-      query: context.query,
     });
     const servers = await serverManager.listGameServers();
     console.log("[Elysia] GET /game-servers success:", servers);
@@ -467,4 +471,4 @@ const app = new Elysia()
   });
 
 export default app;
-export { serverManager }; // Export serverManager
+export { serverManager };

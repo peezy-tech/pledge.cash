@@ -1,12 +1,14 @@
-import { Elysia } from "elysia";
+import { Elysia, t } from "elysia";
 import { cors } from "@elysiajs/cors";
 import { db, orm, migrate } from "@repo/db";
 import * as schemaImport from "@repo/db/schema";
 import { staticPlugin } from "@elysiajs/static";
-import serverManager from "./docker_client";
+import serverManagerApp, { serverManager } from "./docker_client";
 import { auth_routes, AUTH_TOKEN_COOKIE } from "./auth";
 import { pool_routes } from "./pool_routes";
 import { config_routes } from "./config_routes";
+import { pools } from "@repo/db/schema";
+import { eq } from "drizzle-orm";
 
 migrate();
 
@@ -17,6 +19,7 @@ const app = new Elysia({
     db,
     orm,
     schema: schemaImport,
+    serverManager: serverManager
   })
   .use(
     cors({
@@ -27,8 +30,48 @@ const app = new Elysia({
     })
   )
   .use(auth_routes)
-  .guard((app) =>
-    app
+  .post("/game-servers/ensure/:id", async ({ params: { id }, db: currentDb, serverManager: currentSm, set }) => {
+    console.log(`[API Index] POST /game-servers/ensure/${id} called`);
+    try {
+      let gameServer = await currentSm.getGameServer(id);
+
+      if (gameServer && gameServer.status === 'running') {
+        console.log(`[API Index] Server ${id} already running:`, gameServer);
+        return { success: true, data: gameServer };
+      }
+
+      console.log(`[API Index] Server ${id} not running or not found. Attempting to (re)create...`);
+      gameServer = await currentSm.createGameServer(id);
+
+      if (gameServer.url) {
+        console.log(`[API Index] Updating pool with baseMintAddress ${id} with gameServerUrl: ${gameServer.url}`);
+        await currentDb.update(pools)
+          .set({ gameServerUrl: gameServer.url })
+          .where(eq(pools.baseMintAddress, id))
+          .execute();
+        console.log(`[API Index] Pool ${id} DB update successful.`);
+      } else {
+        console.warn(`[API Index] Game server ${id} created but missing URL. DB not updated.`);
+      }
+      
+      console.log(`[API Index] Server ${id} ensured/created:`, gameServer);
+      return { success: true, data: gameServer };
+
+    } catch (error) {
+      console.error(`[API Index] POST /game-servers/ensure/${id} error:`, error);
+      set.status = 500;
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to ensure game server",
+      };
+    }
+  }, {
+    params: t.Object({
+        id: t.String()
+    })
+  })
+  .guard((appInstance) =>
+    appInstance
       .resolve(async (ctx) => {
         const { cookie } = ctx;
         const jwtInstance = ctx[AUTH_TOKEN_COOKIE];
@@ -70,7 +113,7 @@ const app = new Elysia({
     })
   )
   .get("/*", () => Bun.file(`public/index.html`))
-  .use(serverManager)
+  .use(serverManagerApp)
   .listen(3000);
 
 export type App = typeof app;

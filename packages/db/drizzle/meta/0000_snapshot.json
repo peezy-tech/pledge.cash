@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "80655cea-a231-484d-a1a1-dc46c42b2328",
+  "id": "a9e2da66-1fb3-4944-97e9-4050ea04038e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "avatars": {
@@ -205,7 +205,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1748290871073
+          "default": 1748632025852
         }
       },
       "indexes": {
@@ -316,13 +316,20 @@
           "notNull": false,
           "autoincrement": false
         },
+        "gameServerUrl": {
+          "name": "gameServerUrl",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "createdAt": {
           "name": "createdAt",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1748290871073
+          "default": 1748632025851
         }
       },
       "indexes": {
@@ -419,7 +426,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1748290871073
+          "default": 1748632025851
         }
       },
       "indexes": {},
@@ -561,7 +568,7 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false,
-          "default": 1748290871073
+          "default": 1748632025851
         }
       },
       "indexes": {},

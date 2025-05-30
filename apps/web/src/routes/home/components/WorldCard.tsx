@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Connection,
   PublicKey,
   Transaction,
 } from "@solana/web3.js";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { useNavigate } from '@tanstack/react-router';
 import {
   DynamicBondingCurveClient
 } from "@meteora-ag/dynamic-bonding-curve-sdk";
@@ -20,14 +21,25 @@ import { Buffer } from 'buffer'; // Required if transactions are serialized/dese
 
 // Assuming WorldGrid passes these, based on previous steps
 interface WorldCardProps {
-  id: string; // This is the poolAddress
+  id: string; // This is the poolAddress / baseMintAddress / game server ID
   title: string;
   imageUrl: string;
-  price: number; // This might be the spot price, actual swap price comes from quote
+  price: number; 
   poolData: VirtualPool;
   poolConfig: PoolConfig;
   baseDecimals: number | null;
   quoteDecimals: number | null;
+  gameServerStatus?: "starting" | "running" | "stopping" | "stopped"; // Explicitly list statuses
+  gameServerUrl?: string;
+}
+
+// Define GameServer type for API response typing
+interface GameServerDataFromApi {
+    id: string;
+    port: number;
+    url: string;
+    status: "starting" | "running" | "stopping" | "stopped";
+    // other fields like containerId, createdAt might be present
 }
 
 // Re-define or import if available globally
@@ -70,9 +82,12 @@ export function WorldCard({
   poolData, 
   poolConfig,
   baseDecimals,
-  quoteDecimals
+  quoteDecimals,
+  gameServerStatus: initialServerStatus, // Renamed for clarity
+  gameServerUrl: initialServerUrl     // Renamed for clarity
 }: WorldCardProps) {
   const { publicKey: ownerPublicKey, signTransaction, connected } = useWallet();
+  const navigate = useNavigate();
 
   const [isFlipped, setIsFlipped] = useState(false);
   const [amountIn, setAmountIn] = useState("1"); // Default to 1, user can change
@@ -85,6 +100,17 @@ export function WorldCard({
   const [transactionSignature, setTransactionSignature] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // New state for game server interaction
+  const [currentServerStatus, setCurrentServerStatus] = useState(initialServerStatus);
+  const [currentServerUrl, setCurrentServerUrl] = useState(initialServerUrl);
+  const [isInitializingWorld, setIsInitializingWorld] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCurrentServerStatus(initialServerStatus);
+    setCurrentServerUrl(initialServerUrl);
+  }, [initialServerStatus, initialServerUrl]);
 
   const calculateCurveProgress = () => {
     if (!poolData || !poolConfig || !poolConfig.migrationQuoteThreshold || poolConfig.migrationQuoteThreshold.isZero()) {
@@ -279,6 +305,50 @@ export function WorldCard({
     }
   };
 
+  const handleConnectOrLaunchWorld = async () => {
+    setConnectError(null);
+    const baseMintForServerId = poolData.baseMint.toBase58();
+
+    if (currentServerStatus === 'running' && currentServerUrl) {
+      navigate({ to: '/play-game', search: { url: currentServerUrl } });
+      return;
+    }
+
+    setIsInitializingWorld(true);
+    try {
+      console.log(`Attempting to ensure/launch server for baseMint: ${baseMintForServerId}`);
+      const response = await fetch(`/api/game-servers/ensure/${baseMintForServerId}`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Failed to ensure server and parse error json' }));
+        throw new Error(errorData.error || `Server error: ${response.status}`);
+      }
+
+      const result: { success: boolean; data?: GameServerDataFromApi; error?: string } = await response.json();
+
+      if (result.success && result.data && result.data.url) {
+        setCurrentServerStatus(result.data.status);
+        setCurrentServerUrl(result.data.url);
+        // If it's now running (or was already but URL was missing), navigate
+        if (result.data.status === 'running') {
+            navigate({ to: '/play-game', search: { url: result.data.url } });
+        } else {
+            // It might be 'starting', user will see "Initializing World..." or similar updated status
+            console.log("Server is starting, user will see updated status.");
+        }
+      } else {
+        throw new Error(result.error || 'Failed to get server details after ensuring.');
+      }
+    } catch (err: any) {
+      console.error("Error connecting or launching world:", err);
+      setConnectError(err.message || "Could not connect or launch the world.");
+    } finally {
+      setIsInitializingWorld(false);
+    }
+  };
+
   const containerStyle: React.CSSProperties = {
     width: '256px',
     height: '380px', // Increased height for swap form elements
@@ -371,6 +441,21 @@ export function WorldCard({
     accentColor: '#4ade80'
   };
 
+  const connectButtonStyle: React.CSSProperties = {
+    ...buttonStyleBase,
+    backgroundColor: '#10b981', // Green color for connect
+    marginTop: '10px',
+    width: 'calc(100% - 32px)', // Full width minus padding
+    margin: '10px auto 0 auto',
+    display: 'block'
+  };
+
+  const disabledConnectButtonStyle: React.CSSProperties = {
+    ...connectButtonStyle,
+    backgroundColor: '#6b7280', // Gray color for disabled
+    cursor: 'not-allowed',
+  };
+
   return (
     <div style={containerStyle}>
       <div style={cardInnerStyle}>
@@ -399,12 +484,25 @@ export function WorldCard({
               <img src="/flip.png" alt="Flip card" style={{ width: '70%', height: '70%' }} />
             </div>
           </div>
-          <div style={{ padding: '16px', flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '8px', textAlign: 'center' }}>{title}</h3>
-            <p style={{ color: '#4ade80', fontSize: '1.1rem', textAlign: 'center' }}>
-              {/* Spot Price: ${price.toFixed(4)} */} {/* Comment out old price display */}
-              Curve Progress: {calculateCurveProgress().toFixed(2)}% {/* Display new curve progress */}
+          <div style={{ padding: '16px', flexGrow: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-around' }}>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '4px', textAlign: 'center' }}>{title}</h3>
+            <p style={{ color: '#4ade80', fontSize: '1.0rem', textAlign: 'center', marginBottom: '8px' }}>
+              Curve Progress: {calculateCurveProgress().toFixed(2)}%
             </p>
+            
+            <button 
+              onClick={handleConnectOrLaunchWorld} 
+              style={isInitializingWorld ? disabledConnectButtonStyle : connectButtonStyle} // Style might need adjustment
+              disabled={isInitializingWorld}
+            >
+              {isInitializingWorld 
+                ? 'Initializing World...' 
+                : (currentServerStatus === 'running' && currentServerUrl) 
+                  ? 'Connect to World' 
+                  : 'Launch World'}
+            </button>
+            {connectError && <p style={{color: 'red', fontSize: '0.8rem', textAlign: 'center', marginTop: '5px'}}>{connectError}</p>}
+
           </div>
         </div>
 
