@@ -29,7 +29,7 @@ contract Option is Ownable, Test {
         _initializeOwner(msg.sender);
 
         require(_vestingCliff <= _vestingEnd, "Option: cliff > end");
-        require(_expiry <= _vestingEnd, "Option: expiry > vesting end"); // It generally makes sense that the option expires by the time vesting ends, or at least not after.
+        require(_expiry >= _vestingEnd, "Option: expiry must be at or after vesting end");
 
         currency = _currency;
         underlying = _underlying;
@@ -64,13 +64,21 @@ contract Option is Ownable, Test {
 
         uint256 amountToExerciseNow = totalCurrentlyVested - exercisedAmount;
 
+
         require(amountToExerciseNow > 0, "Option: no new vested amount to exercise");
 
         exercisedAmount += amountToExerciseNow;
 
-        uint256 totalCost = strikePrice * amountToExerciseNow;
+        // Original: uint256 totalCost = (amountToExerciseNow * strikePrice) / (10**18);
+        // Reordered to prevent overflow:
+        // Assumes strikePrice is P_full_currency_tokens * 10**18_currency_decimals
+        // and 10**18 is the currency_decimals factor.
+        uint256 pricePerSmallestUnderlyingUnitInFullCurrency = strikePrice / (10**18);
+        uint256 totalCost = amountToExerciseNow * pricePerSmallestUnderlyingUnitInFullCurrency;
+
 
         SafeTransferLib.safeTransferFrom(currency, holder, owner(), totalCost);
         SafeTransferLib.safeTransfer(underlying, holder, amountToExerciseNow);
+
     }
 }

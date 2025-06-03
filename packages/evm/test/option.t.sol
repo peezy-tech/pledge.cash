@@ -3,15 +3,17 @@ pragma solidity ^0.8.4;
 
 import "forge-std/Test.sol";
 import "../src/option.sol"; // Assuming Option.sol is in ../src/
-import {MockERC20} from "solady/test/utils/mocks/MockERC20.sol"; // Adjusted path based on common Solady usage
+
+import {MockERC20} from "solady/../test/utils/mocks/MockERC20.sol";
+import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 
 contract OptionTest is Test {
     Option public optionContract;
     MockERC20 public currencyToken;
     MockERC20 public underlyingToken;
 
-    address public deployer; // Will also be the owner of the Option contract
-    address public holder;
+    address public deployer; // Will be address(this) - the OptionTest contract itself
+    address public holder; // Will be an EOA for holding the option
     address public otherUser = address(0x3); // For testing unauthorized access
 
     uint256 public constant INITIAL_CURRENCY_BALANCE = 1_000_000 * 10**18;
@@ -30,176 +32,46 @@ contract OptionTest is Test {
     event Exercise(address indexed _holder, uint256 _amountExercised, uint256 _costPaid); // Custom event for easier testing
 
     function setUp() public {
-        deployer = address(this); // Test contract itself deploys the Option
-        holder = address(0x123); // A distinct holder address
+        deployer = address(this); // OptionTest contract is the deployer
 
         // 1. Deploy mock tokens
         currencyToken = new MockERC20("MockCurrency", "MCUR", 18);
         underlyingToken = new MockERC20("MockUnderlying", "MUND", 18);
 
+        // Create a dedicated EOA for the option holder and other user
+        holder = makeAddr("Holder");
+        // otherUser is already defined as address(0x3) but can be labeled if needed for clarity in traces
+        // vm.label(otherUser, "Other User"); // Already address(0x3)
+
+        vm.label(deployer, "Deployer (OptionTest Contract)");
+        vm.label(holder, "Option Holder");
+        vm.label(address(currencyToken), "CurrencyToken (MCUR)");
+        vm.label(address(underlyingToken), "UnderlyingToken (MUND)");
+
         // 2. Mint initial balances
+        // Deployer (OptionTest contract) gets underlying tokens to fund the Option contract
         underlyingToken.mint(deployer, INITIAL_UNDERLYING_BALANCE);
+        // Holder (EOA) gets currency tokens to exercise the option
         currencyToken.mint(holder, INITIAL_CURRENCY_BALANCE);
 
         // Define time parameters for the option based on current block timestamp
         startTime = block.timestamp;
         optVestingCliff = startTime + 1 weeks;
         optVestingEnd = optVestingCliff + 3 weeks; // Total 4 weeks vesting period
-        optExpiry = optVestingEnd; // Option expires when fully vested
+        optExpiry = optVestingEnd + 1 weeks; // MODIFIED: Option expires 1 week after full vesting
 
-        // 3. Deployer (this contract) approves underlying tokens to be taken by Option contract constructor
-        // The Option contract will pull 'optAmount' of 'underlyingToken' from 'deployer'
-        vm.prank(deployer);
-        underlyingToken.approve(address(this), optAmount); // Approve this contract to then pass to Option
+        // 3. Deployer (OptionTest contract) approves the predicted Option contract address
+        // The Option constructor will pull 'optAmount' of 'underlyingToken' from 'msg.sender' (which will be 'deployer')
+        address predictedOptionAddress = vm.computeCreateAddress(deployer, vm.getNonce(deployer)); // MODIFIED
 
-        // Deploy the Option contract
-        // The Option constructor will transfer underlyingToken from deployer (address(this)) to itself.
-        // We need to ensure `deployer` has approved `address(this)` (test contract) to pull,
-        // and then the test contract (as msg.sender to Option constructor) has the tokens.
-        // A simpler way for testing: predict the address or approve a temporary deployer contract.
-        // Or, make deployer of Option contract `msg.sender` of `setUp`.
-        // Let's use `address(this)` as deployer directly.
-        // The `Option` constructor's `safeTransferFrom` is `_underlying, msg.sender, address(this), _amount`
-        // So `msg.sender` (which is `deployer` = `address(this)`) needs `_amount` of `_underlying`
-        // and must have approved `address(optionContract)` for this transfer.
-        // This is tricky. Let's adjust the approval logic.
-        // The deployer of Option is `address(this)`.
-        // So underlyingToken.safeTransferFrom(token, deployer, optionContract, amount) will be called.
-        // `deployer` needs to approve `optionContract`. We don't know its address yet.
-
-        // Alternative: The user who calls `new Option(...)` is msg.sender.
-        // In `setUp`, `msg.sender` is `address(this)`. So `address(this)` is the initial owner.
-        // `address(this)` needs to own `optAmount` of `underlyingToken`.
-        // `address(this)` (as deployer) must approve the `Option` contract to take `optAmount`.
-        // This is a common pattern: deployer approves itself to setup the contract which pulls funds.
-
-        // Let's assume `deployer` funds the option.
-        // The Option contract takes `_underlying` from `msg.sender` (the deployer).
-        // So, `deployer` (address(this) in setUp) must have `optAmount` of `underlyingToken`. (Done)
-        // And `deployer` (address(this)) must approve the `Option` contract to take these tokens.
-        // This is a circular dependency if we approve before getting optionContract address.
-        // The `Option` contract takes from `msg.sender`.
-        // So `msg.sender` = `deployer` must approve `address(optionContract)`.
-
-        // Simplest for test: `deployer` is `address(this)`.
-        // `underlyingToken` is minted to `deployer`.
-        // When `new Option(...)` is called by `deployer`, the constructor will attempt:
-        // `SafeTransferLib.safeTransferFrom(underlyingToken, deployer, address(optionContract), optAmount);`
-        // This requires `deployer` to have called `underlyingToken.approve(address(optionContract), optAmount);`
-
-        // We can't approve the option contract before it's deployed if we need its address for approval.
-        // However, the `Option` contract's constructor is pulling from `msg.sender` to `address(this)` (i.e. to itself).
-        // `SafeTransferLib.safeTransferFrom(_underlying, msg.sender, address(this), _amount);`
-        // This means `msg.sender` (our `deployer`) must approve the `Option` contract (`address(this)` within Option.sol)
-        // for the transfer.
-
-        // Let's re-verify `Option.sol` constructor:
-        // `SafeTransferLib.safeTransferFrom(_underlying, msg.sender, address(this), _amount);`
-        // Here `msg.sender` is the deployer of the Option contract. `address(this)` is the Option contract's address.
-        // So, `deployer` must approve `Option contract address` to pull `_amount` of `_underlying`.
-        // This is the standard way.
-
-        // To do this in `setUp`:
-        // 1. Create `deployer` and `holder` addresses.
-        // 2. Deploy tokens, mint to `deployer` (underlying) and `holder` (currency).
-        // 3. `vm.startPrank(deployer)`.
-        // 4. `underlyingToken.approve(predictedOptionContractAddress, optAmount)` OR deploy option contract first.
-        //    It's easier to deploy first, then have the deployer approve and call a "fund" function.
-        //    But the current constructor *requires* the transfer.
-        //
-        // If `deployer = address(this)` for the test, then `address(this)` must approve `optionContractAddress`.
-        // The `Option` contract is deployed by `address(this)`.
-        vm.prank(deployer); // `deployer` is `address(this)`
-        optionContract = new Option(
-            address(currencyToken),
-            holder,
-            address(underlyingToken),
-            optAmount,
-            optStrikePrice,
-            optExpiry,
-            optVestingCliff,
-            optVestingEnd
-        );
-        // The line above will fail if `deployer` hasn't approved `address(optionContract)`.
-        // We need to approve `address(optionContract)` *by the deployer* for `underlyingToken`.
-        // This must happen *before* `new Option` if `underlyingToken.transferFrom` is used in constructor.
-        // And it is: `SafeTransferLib.safeTransferFrom(_underlying, msg.sender, address(this), _amount);`
-        // `msg.sender` is `deployer`. `address(this)` is `optionContract`.
-        // So, `deployer` must approve `optionContract`.
-
-        // This is a common pattern: the entity calling `new ContractThatTakesFunds()` must have pre-approved
-        // the `ContractThatTakesFunds` to `transferFrom` `msg.sender`.
-        // So, the `deployer` (address(this)) must approve `address(optionContract)`.
-        // We can't get `address(optionContract)` before it's deployed.
-        // This implies that either:
-        //  a) The constructor doesn't pull funds, but an init/fund function does (common).
-        //  b) The `msg.sender` sends tokens directly to the contract, not via `transferFrom msg.sender`.
-        //  c) The test needs to predict the address of the option contract for approval.
-
-        // Given the current Option.sol, `msg.sender` (deployer) is the source in `transferFrom`.
-        // `SafeTransferLib.safeTransferFrom(token, from, to, amount)`
-        // `SafeTransferLib.safeTransferFrom(_underlying, msg.sender, address(this) /*option contract*/, _amount)`
-        // This is correct. `msg.sender` (the deployer) must have approved the Option Contract.
-
-        // Let's try predicting or using a two-step deployment for tests if direct approval is hard.
-        // For Forge tests, `address(this)` is often the deployer. If so, `address(this)` needs to approve
-        // the future Option contract address.
-        // Or, `deployer` is a separate EOA.
-
-        // Let's stick to `deployer = address(this)`.
-        // `address(this)` mints underlying to itself.
-        // `address(this)` must call `underlyingToken.approve(address(optionContract), optAmount)`.
-        // This means `optionContract` must be deployed first to get its address.
-        // This contradicts the constructor transferring funds.
-
-        // What if `msg.sender` of `new Option` is `alice` (a test EOA), and `alice` owns the underlying?
-        // `vm.startPrank(alice)`
-        // `underlyingToken.approve(computedAddress, amount)`
-        // `new Option(...)`
-        // `vm.stopPrank()`
-
-        // The issue is `_underlying, msg.sender, address(this), _amount`
-        // `msg.sender` is the account calling `new Option`.
-        // `address(this)` inside Option.sol is the option contract's own address.
-        // So `msg.sender` must approve `optionContract.address`.
-        // This is a classic setup. The `deployer` (who calls `new Option`) must have called
-        // `underlyingToken.approve(THE_OPTION_CONTRACT_ADDRESS, optAmount)` beforehand.
-
-        // We can get the "next deployed address" in Forge.
-        // address predictedOptionAddress = predictAddress(deployer, nonce);
-        // `address predictedAddress = computeCreateAddress(deployer, vm.getNonce(deployer));`
-
-        // Let `deployer = address(this)` to keep it simple for now.
-        // The test contract (`address(this)`) is msg.sender for `new Option`.
-        // So, `address(this)` needs to approve the `optionContract` address.
-        // Let's assume `deployer` is actually `makeAddr("deployer")`.
-
-        deployer = makeAddr("Deployer");
-        holder = makeAddr("Holder");
-        vm.label(deployer, "Deployer (Option Owner)");
-        vm.label(holder, "Option Holder");
-        vm.label(otherUser, "Other User");
-        vm.label(address(currencyToken), "CurrencyToken (MCUR)");
-        vm.label(address(underlyingToken), "UnderlyingToken (MUND)");
-
-
-        // Mint tokens
-        underlyingToken.mint(deployer, INITIAL_UNDERLYING_BALANCE);
-        currencyToken.mint(holder, INITIAL_CURRENCY_BALANCE);
-
-        // Deployer needs to approve the Option contract to take underlying tokens
-        // We need the Option contract's address. This has to be done in steps or by prediction.
-
-        // Step 1: Deployer approves a pre-calculated address
-        address predictedOptionAddress = computeCreateAddress(deployer, vm.getNonce(deployer));
-        vm.prank(deployer);
+        vm.prank(deployer); // Set msg.sender to OptionTest contract for the approval call
         underlyingToken.approve(predictedOptionAddress, optAmount);
 
-        // Step 2: Deployer deploys the Option contract
-        vm.prank(deployer);
+        // 4. Deployer (OptionTest contract) deploys the Option contract
+        vm.prank(deployer); // Set msg.sender to OptionTest contract for the constructor call
         optionContract = new Option(
             address(currencyToken),
-            holder,
+            holder, // The EOA holder
             address(underlyingToken),
             optAmount,
             optStrikePrice,
@@ -209,11 +81,10 @@ contract OptionTest is Test {
         );
         vm.label(address(optionContract), "OptionContract");
 
-        // Check if prediction was correct (optional, but good for sanity)
-        assertEq(address(optionContract), predictedOptionAddress);
+        // Check if prediction was correct (good for sanity)
+        assertEq(address(optionContract), predictedOptionAddress, "Predicted Option contract address mismatch");
 
-
-        // Holder approves Option contract for currency token transfer
+        // 5. Holder (EOA) approves Option contract for currency token transfer during exercise
         vm.prank(holder);
         currencyToken.approve(address(optionContract), type(uint256).max); // Approve max for simplicity in tests
     }
@@ -238,39 +109,52 @@ contract OptionTest is Test {
     }
 
     function test_Revert_Deploy_CliffAfterEnd() public {
-        vm.expectRevert("Option: cliff > end");
-        vm.prank(deployer); // Need to approve again for this new predicted address
-        address predicted = computeCreateAddress(deployer, vm.getNonce(deployer));
-        underlyingToken.approve(predicted, optAmount);
+        vm.startPrank(deployer); // Prank as deployer for the following operations
 
+        // Predict address for the Option contract that will be created.
+        // The nonce used by new Option() will be the deployer's current nonce + 1 (due to the upcoming approve call).
+        address predictedOptionAddr = vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1);
+
+        // Approve this predicted address for the underlying token transfer.
+        // This is deployer's 1st transaction in this sequence, nonce increments.
+        underlyingToken.approve(predictedOptionAddr, optAmount);
+
+        // Now, expect the specific revert from the Option constructor.
+        vm.expectRevert(bytes("Option: cliff > end"));
+
+        // Deploy the Option contract. This is deployer's 2nd transaction, uses the incremented nonce.
+        // Its address should match predictedOptionAddr.
         new Option(
             address(currencyToken),
             holder,
             address(underlyingToken),
             optAmount,
             optStrikePrice,
-            optExpiry, // Expiry can be <= vestingEnd
-            optVestingEnd + 1, // Cliff after end
+            optExpiry,           // optExpiry from setUp is optVestingEnd + 1 weeks, which is valid.
+            optVestingEnd + 1,   // Cliff after end - THIS IS THE INVALID PARAMETER.
             optVestingEnd
         );
+        vm.stopPrank();
     }
 
     function test_Revert_Deploy_ExpiryAfterVestingEnd() public {
-        vm.expectRevert("Option: expiry > vesting end");
-        vm.prank(deployer);
-        address predicted = computeCreateAddress(deployer, vm.getNonce(deployer));
-        underlyingToken.approve(predicted, optAmount);
+        vm.startPrank(deployer);
 
+        address predictedOptionAddr = vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1);
+        underlyingToken.approve(predictedOptionAddr, optAmount);
+
+        vm.expectRevert(bytes("Option: expiry must be at or after vesting end"));
         new Option(
             address(currencyToken),
             holder,
             address(underlyingToken),
             optAmount,
             optStrikePrice,
-            optVestingEnd + 1 days, // Expiry after vesting end
-            optVestingCliff,
+            optVestingEnd - 1 days, // Expiry before vesting end - THIS IS THE INVALID PARAMETER.
+            optVestingCliff,        // optVestingCliff from setUp is valid relative to optVestingEnd.
             optVestingEnd
         );
+        vm.stopPrank();
     }
 
     // --- Test Exercise Functionality ---
@@ -308,10 +192,10 @@ contract OptionTest is Test {
         vm.prank(holder);
         currencyToken.burn(holder, currencyToken.balanceOf(holder)); // Burn all currency
 
-        vm.warp(optVestingCliff); // Valid time, some amount should vest
+        vm.warp(optVestingCliff + 1 days); // MODIFIED: Valid time, some amount should vest
         vm.prank(holder);
         // Exact revert message depends on SafeTransferLib, usually no specific message or "transfer amount exceeds balance"
-        vm.expectRevert(); // ERC20: transfer amount exceeds balance (or similar)
+        vm.expectRevert(); // ERC20: transfer amount exceeds balance (or similar) // TODO: Be more specific if SafeTransferLib has a standard error
         optionContract.exercise();
     }
 
@@ -331,14 +215,25 @@ contract OptionTest is Test {
         expectedVested = getExpectedVestedAmount(optVestingCliff + 1);
         assertTrue(expectedVested > 0, "Expected vested should be > 0 just after cliff");
 
-        uint256 cost = expectedVested * optStrikePrice;
+        uint256 cost = (expectedVested * optStrikePrice) / (10**18);
 
         vm.prank(holder);
         optionContract.exercise();
 
+        console.log("optionContract.exercisedAmount()", optionContract.exercisedAmount());
         assertEq(optionContract.exercisedAmount(), expectedVested, "Exercised amount mismatch at cliff");
+
+        console.log("underlyingToken.balanceOf(holder)", underlyingToken.balanceOf(holder));
+        console.log("expectedVested", expectedVested);
         assertEq(underlyingToken.balanceOf(holder), expectedVested, "Holder underlying balance mismatch");
+
+        console.log("currencyToken.balanceOf(holder)", currencyToken.balanceOf(holder));
+        console.log("INITIAL_CURRENCY_BALANCE", INITIAL_CURRENCY_BALANCE);
+        console.log("cost", cost);
         assertEq(currencyToken.balanceOf(holder), INITIAL_CURRENCY_BALANCE - cost, "Holder currency balance mismatch");
+
+        console.log("currencyToken.balanceOf(deployer)", currencyToken.balanceOf(deployer));
+        console.log("cost", cost);
         assertEq(currencyToken.balanceOf(deployer), cost, "Deployer currency balance mismatch"); // Owner gets payment
     }
 
@@ -349,7 +244,7 @@ contract OptionTest is Test {
 
         uint256 expectedVested = getExpectedVestedAmount(midTime);
         assertTrue(expectedVested > 0 && expectedVested < optAmount, "Expected vested should be partial");
-        uint256 cost = expectedVested * optStrikePrice;
+        uint256 cost = (expectedVested * optStrikePrice) / (10**18);
 
         vm.startPrank(holder);
         optionContract.exercise();
@@ -367,7 +262,7 @@ contract OptionTest is Test {
         vm.warp(time1);
 
         uint256 expectedVested1 = getExpectedVestedAmount(time1);
-        uint256 cost1 = expectedVested1 * optStrikePrice;
+        uint256 cost1 = (expectedVested1 * optStrikePrice) / (10**18);
 
         vm.prank(holder);
         optionContract.exercise();
@@ -384,7 +279,7 @@ contract OptionTest is Test {
         uint256 totalVestedAtTime2 = getExpectedVestedAmount(time2);
         uint256 expectedToExerciseNow = totalVestedAtTime2 - expectedVested1; // amount from this exercise call
         assertTrue(expectedToExerciseNow > 0, "Should have new amount to exercise at time2");
-        uint256 cost2 = expectedToExerciseNow * optStrikePrice;
+        uint256 cost2 = (expectedToExerciseNow * optStrikePrice) / (10**18);
 
         vm.prank(holder);
         optionContract.exercise();
@@ -399,7 +294,7 @@ contract OptionTest is Test {
         vm.warp(optVestingEnd);
 
         uint256 expectedVested = optAmount; // Should be fully vested
-        uint256 cost = expectedVested * optStrikePrice;
+        uint256 cost = (expectedVested * optStrikePrice) / (10**18);
 
         vm.prank(holder);
         optionContract.exercise();
@@ -414,7 +309,7 @@ contract OptionTest is Test {
         vm.warp(optVestingEnd + 1 weeks); // Sometime after full vesting
 
         uint256 expectedVested = optAmount;
-        uint256 cost = expectedVested * optStrikePrice;
+        uint256 cost = (expectedVested * optStrikePrice) / (10**18);
 
         vm.prank(holder);
         optionContract.exercise();
@@ -435,7 +330,7 @@ contract OptionTest is Test {
         optionContract.exercise(); // First exercise
 
         // Warp to same time or just slightly after, but not enough for new integer vested amount
-        vm.warp(time1 + 1); // if division by (end-cliff) is large, 1s might not be enough
+        // vm.warp(time1 + 1); // MODIFIED: Removed warp to test immediate re-exercise
                            // or more simply, call exercise again without warping time
         vm.prank(holder);
         vm.expectRevert("Option: no new vested amount to exercise");
@@ -456,9 +351,10 @@ contract OptionTest is Test {
 
     function test_Exercise_FullAmount_IfCliffIsZeroAndVestingEndReached() public {
         // Re-deploy with cliff = startTime
+        // Deployer is address(this)
         vm.prank(deployer);
-        address predicted = computeCreateAddress(deployer, vm.getNonce(deployer));
-        underlyingToken.approve(predicted, optAmount);
+        address predicted = vm.computeCreateAddress(deployer, vm.getNonce(deployer)); // MODIFIED
+        underlyingToken.approve(predicted, optAmount); // address(this) approves
 
         uint256 newCliff = startTime;
         uint256 newEnd = startTime + 1 weeks;
@@ -484,7 +380,7 @@ contract OptionTest is Test {
 
         vm.warp(newEnd); // Warp to its vesting end
 
-        uint256 cost = optAmount * optStrikePrice;
+        uint256 cost = (optAmount * optStrikePrice) / (10**18);
 
         vm.prank(holder);
         localOption.exercise();
@@ -494,7 +390,7 @@ contract OptionTest is Test {
         assertEq(currencyToken.balanceOf(holder), INITIAL_CURRENCY_BALANCE - cost);
         // deployer's currency balance should increase from this specific option contract's exercise
         // Note: deployer here is the global test deployer, not owner of localOption if different.
-        // Owner of localOption is also `deployer` due to vm.prank(deployer) during `new Option`.
+        // Owner of localOption is also `deployer` (address(this)) due to vm.prank(deployer) during `new Option`.
         assertEq(currencyToken.balanceOf(deployer), cost);
     }
 
