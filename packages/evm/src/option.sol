@@ -48,10 +48,14 @@ contract Option is Ownable, Test {
         );
     }
 
-    function exercise() external {
+    function exercise(uint256 _amountToExercise) external {
         require(block.timestamp <= expiry, "Option: expired");
         require(msg.sender == holder, "Option: only holder can exercise");
-        require(exercisedAmount < amount, "Option: already fully exercised");
+        require(_amountToExercise > 0, "Option: amount must be > 0");
+        // Ensures that the sum of already exercised amount and the amount to exercise now
+        // does not exceed the total option amount. This also implicitly handles
+        // the case where the option might have been fully exercised already.
+        require(exercisedAmount + _amountToExercise <= amount, "Option: request exceeds total available option amount");
         require(block.timestamp >= vestingCliff, "Option: still in cliff period");
 
         uint256 totalCurrentlyVested;
@@ -62,23 +66,28 @@ contract Option is Ownable, Test {
             totalCurrentlyVested = (amount * (block.timestamp - vestingCliff)) / (vestingEnd - vestingCliff);
         }
 
-        uint256 amountToExerciseNow = totalCurrentlyVested - exercisedAmount;
+        // Calculate the amount that is vested and not yet exercised
+        uint256 availableVestedAmount = totalCurrentlyVested - exercisedAmount;
+
+        require(_amountToExercise <= availableVestedAmount, "Option: insufficient vested amount for request");
+
+        // No longer need amountToExerciseNow based on total vested, we use the parameter
+        // uint256 amountToExerciseNow = totalCurrentlyVested - exercisedAmount;
+        // require(amountToExerciseNow > 0, "Option: no new vested amount to exercise");
 
 
-        require(amountToExerciseNow > 0, "Option: no new vested amount to exercise");
-
-        exercisedAmount += amountToExerciseNow;
+        exercisedAmount += _amountToExercise;
 
         // Original: uint256 totalCost = (amountToExerciseNow * strikePrice) / (10**18);
         // Reordered to prevent overflow:
         // Assumes strikePrice is P_full_currency_tokens * 10**18_currency_decimals
         // and 10**18 is the currency_decimals factor.
         uint256 pricePerSmallestUnderlyingUnitInFullCurrency = strikePrice / (10**18);
-        uint256 totalCost = amountToExerciseNow * pricePerSmallestUnderlyingUnitInFullCurrency;
+        uint256 totalCost = _amountToExercise * pricePerSmallestUnderlyingUnitInFullCurrency;
 
 
         SafeTransferLib.safeTransferFrom(currency, holder, owner(), totalCost);
-        SafeTransferLib.safeTransfer(underlying, holder, amountToExerciseNow);
+        SafeTransferLib.safeTransfer(underlying, holder, _amountToExercise);
 
     }
 }

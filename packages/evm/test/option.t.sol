@@ -170,21 +170,21 @@ contract OptionTest is Test {
         vm.warp(optVestingCliff - 1 days); // Time before cliff
         vm.prank(holder);
         vm.expectRevert("Option: still in cliff period");
-        optionContract.exercise();
+        optionContract.exercise(1); // Pass a dummy amount
     }
 
     function test_Revert_Exercise_AfterExpiry() public {
         vm.warp(optExpiry + 1 days); // Time after expiry
         vm.prank(holder);
         vm.expectRevert("Option: expired");
-        optionContract.exercise();
+        optionContract.exercise(1); // Pass a dummy amount
     }
 
     function test_Revert_Exercise_NotHolder() public {
         vm.warp(optVestingCliff); // Valid time
         vm.prank(otherUser); // Not the holder
         vm.expectRevert("Option: only holder can exercise");
-        optionContract.exercise();
+        optionContract.exercise(1); // Pass a dummy amount
     }
 
     function test_Revert_Exercise_InsufficientCurrency() public {
@@ -192,48 +192,33 @@ contract OptionTest is Test {
         vm.prank(holder);
         currencyToken.burn(holder, currencyToken.balanceOf(holder)); // Burn all currency
 
-        vm.warp(optVestingCliff + 1 days); // MODIFIED: Valid time, some amount should vest
+        vm.warp(optVestingCliff + 1 days); // Valid time, some amount should vest
+        uint256 vestedAmount = getExpectedVestedAmount(optVestingCliff + 1 days);
+        assertTrue(vestedAmount > 0, "Should have vested amount");
+
         vm.prank(holder);
         // Exact revert message depends on SafeTransferLib, usually no specific message or "transfer amount exceeds balance"
-        vm.expectRevert(); // ERC20: transfer amount exceeds balance (or similar) // TODO: Be more specific if SafeTransferLib has a standard error
-        optionContract.exercise();
+        vm.expectRevert(); // ERC20: transfer amount exceeds balance (or similar)
+        optionContract.exercise(vestedAmount);
     }
 
     function test_Exercise_AtCliff_Exactly() public {
-        vm.warp(optVestingCliff);
-
-        uint256 expectedVested = getExpectedVestedAmount(optVestingCliff);
-        // At the exact cliff moment, (block.timestamp - vestingCliff) is 0, so vested is 0.
-        // This means you can only exercise *after* the cliff has passed by some time.
-        // Or, if cliff = 0, then it's just vestedAmount = (amount * block.timestamp) / vestingEnd.
         // The logic is `(amount * (timestamp - cliff)) / (end - cliff)`.
         // If timestamp == cliff, then numerator is 0, so vested is 0.
-        // This leads to "no new vested amount to exercise" if called exactly at cliff start, unless cliff duration is 0.
+        // "Option: insufficient vested amount for request" will be triggered if trying to exercise >0.
         // Let's test exercising 1 second after cliff start.
-
         vm.warp(optVestingCliff + 1); // 1 second into vesting period after cliff
-        expectedVested = getExpectedVestedAmount(optVestingCliff + 1);
+        uint256 expectedVested = getExpectedVestedAmount(optVestingCliff + 1);
         assertTrue(expectedVested > 0, "Expected vested should be > 0 just after cliff");
 
         uint256 cost = (expectedVested * optStrikePrice) / (10**18);
 
         vm.prank(holder);
-        optionContract.exercise();
+        optionContract.exercise(expectedVested);
 
-        console.log("optionContract.exercisedAmount()", optionContract.exercisedAmount());
         assertEq(optionContract.exercisedAmount(), expectedVested, "Exercised amount mismatch at cliff");
-
-        console.log("underlyingToken.balanceOf(holder)", underlyingToken.balanceOf(holder));
-        console.log("expectedVested", expectedVested);
         assertEq(underlyingToken.balanceOf(holder), expectedVested, "Holder underlying balance mismatch");
-
-        console.log("currencyToken.balanceOf(holder)", currencyToken.balanceOf(holder));
-        console.log("INITIAL_CURRENCY_BALANCE", INITIAL_CURRENCY_BALANCE);
-        console.log("cost", cost);
         assertEq(currencyToken.balanceOf(holder), INITIAL_CURRENCY_BALANCE - cost, "Holder currency balance mismatch");
-
-        console.log("currencyToken.balanceOf(deployer)", currencyToken.balanceOf(deployer));
-        console.log("cost", cost);
         assertEq(currencyToken.balanceOf(deployer), cost, "Deployer currency balance mismatch"); // Owner gets payment
     }
 
@@ -247,7 +232,7 @@ contract OptionTest is Test {
         uint256 cost = (expectedVested * optStrikePrice) / (10**18);
 
         vm.startPrank(holder);
-        optionContract.exercise();
+        optionContract.exercise(expectedVested);
         vm.stopPrank();
 
         assertEq(optionContract.exercisedAmount(), expectedVested, "Exercised amount mismatch mid-vesting");
@@ -256,19 +241,20 @@ contract OptionTest is Test {
         assertEq(currencyToken.balanceOf(deployer), cost, "Deployer currency balance mismatch");
     }
 
-    function test_Exercise_MultiplePartials() public {
+    function test_Exercise_MultiplePartials_ExactVestedAmounts() public {
         // Time 1: 25% into vesting period (after cliff)
         uint256 time1 = optVestingCliff + (optVestingEnd - optVestingCliff) / 4;
         vm.warp(time1);
 
-        uint256 expectedVested1 = getExpectedVestedAmount(time1);
-        uint256 cost1 = (expectedVested1 * optStrikePrice) / (10**18);
+        uint256 vestedAtTime1 = getExpectedVestedAmount(time1);
+        uint256 amountToExercise1 = vestedAtTime1; // Exercise all currently vested
+        uint256 cost1 = (amountToExercise1 * optStrikePrice) / (10**18);
 
         vm.prank(holder);
-        optionContract.exercise();
+        optionContract.exercise(amountToExercise1);
 
-        assertEq(optionContract.exercisedAmount(), expectedVested1, "Exercised amount mismatch time1");
-        assertEq(underlyingToken.balanceOf(holder), expectedVested1, "Holder underlying time1");
+        assertEq(optionContract.exercisedAmount(), vestedAtTime1, "Exercised amount mismatch time1");
+        assertEq(underlyingToken.balanceOf(holder), vestedAtTime1, "Holder underlying time1");
         assertEq(currencyToken.balanceOf(holder), INITIAL_CURRENCY_BALANCE - cost1, "Holder currency time1");
         assertEq(currencyToken.balanceOf(deployer), cost1, "Deployer currency time1");
 
@@ -277,12 +263,13 @@ contract OptionTest is Test {
         vm.warp(time2);
 
         uint256 totalVestedAtTime2 = getExpectedVestedAmount(time2);
-        uint256 expectedToExerciseNow = totalVestedAtTime2 - expectedVested1; // amount from this exercise call
-        assertTrue(expectedToExerciseNow > 0, "Should have new amount to exercise at time2");
-        uint256 cost2 = (expectedToExerciseNow * optStrikePrice) / (10**18);
+        uint256 alreadyExercised = optionContract.exercisedAmount();
+        uint256 amountToExercise2 = totalVestedAtTime2 - alreadyExercised; // Exercise newly vested
+        assertTrue(amountToExercise2 > 0, "Should have new amount to exercise at time2");
+        uint256 cost2 = (amountToExercise2 * optStrikePrice) / (10**18);
 
         vm.prank(holder);
-        optionContract.exercise();
+        optionContract.exercise(amountToExercise2);
 
         assertEq(optionContract.exercisedAmount(), totalVestedAtTime2, "Exercised amount mismatch time2");
         assertEq(underlyingToken.balanceOf(holder), totalVestedAtTime2, "Holder underlying time2");
@@ -293,14 +280,14 @@ contract OptionTest is Test {
     function test_Exercise_AtVestingEnd_FullAmount() public {
         vm.warp(optVestingEnd);
 
-        uint256 expectedVested = optAmount; // Should be fully vested
-        uint256 cost = (expectedVested * optStrikePrice) / (10**18);
+        uint256 amountToExercise = optAmount; // Should be fully vested
+        uint256 cost = (amountToExercise * optStrikePrice) / (10**18);
 
         vm.prank(holder);
-        optionContract.exercise();
+        optionContract.exercise(amountToExercise);
 
-        assertEq(optionContract.exercisedAmount(), expectedVested, "Exercised amount mismatch at vesting end");
-        assertEq(underlyingToken.balanceOf(holder), expectedVested, "Holder underlying balance at vesting end");
+        assertEq(optionContract.exercisedAmount(), amountToExercise, "Exercised amount mismatch at vesting end");
+        assertEq(underlyingToken.balanceOf(holder), amountToExercise, "Holder underlying balance at vesting end");
         assertEq(currencyToken.balanceOf(holder), INITIAL_CURRENCY_BALANCE - cost, "Holder currency balance at vesting end");
         assertEq(currencyToken.balanceOf(deployer), cost, "Deployer currency balance at vesting end");
     }
@@ -308,53 +295,58 @@ contract OptionTest is Test {
      function test_Exercise_AfterVestingEnd_FullAmount() public {
         vm.warp(optVestingEnd + 1 weeks); // Sometime after full vesting
 
-        uint256 expectedVested = optAmount;
-        uint256 cost = (expectedVested * optStrikePrice) / (10**18);
+        uint256 amountToExercise = optAmount;
+        uint256 cost = (amountToExercise * optStrikePrice) / (10**18);
 
         vm.prank(holder);
-        optionContract.exercise();
+        optionContract.exercise(amountToExercise);
 
-        assertEq(optionContract.exercisedAmount(), expectedVested, "Exercised amount mismatch after vesting end");
-        // ... rest of assertions same as AtVestingEnd
-        assertEq(underlyingToken.balanceOf(holder), expectedVested);
+        assertEq(optionContract.exercisedAmount(), amountToExercise, "Exercised amount mismatch after vesting end");
+        assertEq(underlyingToken.balanceOf(holder), amountToExercise);
         assertEq(currencyToken.balanceOf(holder), INITIAL_CURRENCY_BALANCE - cost);
         assertEq(currencyToken.balanceOf(deployer), cost);
     }
 
-
-    function test_Revert_Exercise_NoNewVestedAmount() public {
+    // Renaming and repurposing test_Revert_Exercise_NoNewVestedAmount
+    function test_Revert_Exercise_InsufficientVested_IfTryToExerciseMoreThanAvailable() public {
         uint256 time1 = optVestingCliff + (optVestingEnd - optVestingCliff) / 2;
         vm.warp(time1);
 
-        vm.prank(holder);
-        optionContract.exercise(); // First exercise
+        uint256 vestedAtTime1 = getExpectedVestedAmount(time1);
+        uint256 amountToExercise1 = vestedAtTime1 / 2; // Exercise half of it
+        assertTrue(amountToExercise1 > 0, "Amount to exercise should be > 0");
 
-        // Warp to same time or just slightly after, but not enough for new integer vested amount
-        // vm.warp(time1 + 1); // MODIFIED: Removed warp to test immediate re-exercise
-                           // or more simply, call exercise again without warping time
         vm.prank(holder);
-        vm.expectRevert("Option: no new vested amount to exercise");
-        optionContract.exercise();
+        optionContract.exercise(amountToExercise1);
+
+        uint256 remainingVested = vestedAtTime1 - amountToExercise1;
+        assertTrue(remainingVested > 0, "Should have some vested amount remaining");
+
+        vm.prank(holder);
+        vm.expectRevert("Option: insufficient vested amount for request");
+        optionContract.exercise(remainingVested + 1); // Try to exercise more than remaining vested
     }
 
-    function test_Revert_Exercise_AlreadyFullyExercised() public {
+    function test_Revert_Exercise_RequestExceedsTotal_AfterFullExercise() public {
         vm.warp(optVestingEnd); // Fully vested
 
         vm.prank(holder);
-        optionContract.exercise(); // Exercise all
+        optionContract.exercise(optAmount); // Exercise all
 
-        // Try to exercise again
+        // Try to exercise again, even 1 wei
         vm.prank(holder);
-        vm.expectRevert("Option: already fully exercised");
-        optionContract.exercise();
+        // This revert comes from: require(exercisedAmount + _amountToExercise <= amount, "Option: request exceeds total available option amount");
+        // Since exercisedAmount is optAmount, (optAmount + 1 <= optAmount) is false.
+        vm.expectRevert("Option: request exceeds total available option amount");
+        optionContract.exercise(1);
     }
+
 
     function test_Exercise_FullAmount_IfCliffIsZeroAndVestingEndReached() public {
         // Re-deploy with cliff = startTime
-        // Deployer is address(this)
         vm.prank(deployer);
-        address predicted = vm.computeCreateAddress(deployer, vm.getNonce(deployer)); // MODIFIED
-        underlyingToken.approve(predicted, optAmount); // address(this) approves
+        address predicted = vm.computeCreateAddress(deployer, vm.getNonce(deployer));
+        underlyingToken.approve(predicted, optAmount);
 
         uint256 newCliff = startTime;
         uint256 newEnd = startTime + 1 weeks;
@@ -372,27 +364,185 @@ contract OptionTest is Test {
         );
         vm.label(address(localOption), "LocalOption_ZeroCliff");
 
-
-        // Holder needs to approve this new contract instance too
         vm.prank(holder);
         currencyToken.approve(address(localOption), type(uint256).max);
 
-
         vm.warp(newEnd); // Warp to its vesting end
 
-        uint256 cost = (optAmount * optStrikePrice) / (10**18);
+        uint256 amountToExercise = optAmount;
+        uint256 cost = (amountToExercise * optStrikePrice) / (10**18);
 
         vm.prank(holder);
-        localOption.exercise();
+        localOption.exercise(amountToExercise);
 
-        assertEq(localOption.exercisedAmount(), optAmount);
-        assertEq(underlyingToken.balanceOf(holder), optAmount); // Assuming holder had 0 underlying before
+        assertEq(localOption.exercisedAmount(), amountToExercise);
+        assertEq(underlyingToken.balanceOf(holder), amountToExercise);
         assertEq(currencyToken.balanceOf(holder), INITIAL_CURRENCY_BALANCE - cost);
-        // deployer's currency balance should increase from this specific option contract's exercise
-        // Note: deployer here is the global test deployer, not owner of localOption if different.
-        // Owner of localOption is also `deployer` (address(this)) due to vm.prank(deployer) during `new Option`.
         assertEq(currencyToken.balanceOf(deployer), cost);
     }
+
+    // --- New Tests for _amountToExercise parameter ---
+
+    function test_Revert_Exercise_ZeroAmount() public {
+        vm.warp(optVestingCliff + 1 days); // Valid time
+        vm.prank(holder);
+        vm.expectRevert("Option: amount must be > 0");
+        optionContract.exercise(0);
+    }
+
+    function test_Revert_Exercise_AmountExceedsCurrentlyVested() public {
+        uint256 midTime = optVestingCliff + (optVestingEnd - optVestingCliff) / 2;
+        vm.warp(midTime);
+
+        uint256 currentlyVested = getExpectedVestedAmount(midTime);
+        assertTrue(currentlyVested < optAmount, "Vested amount should be less than total option amount");
+
+        vm.prank(holder);
+        vm.expectRevert("Option: insufficient vested amount for request");
+        optionContract.exercise(currentlyVested + 1); // Try to exercise 1 more than vested
+    }
+    
+    function test_Revert_Exercise_AmountExceedsTotalOptionAmount() public {
+        vm.warp(optVestingEnd); // Fully vested, so all optAmount is available
+        vm.prank(holder);
+        vm.expectRevert("Option: request exceeds total available option amount");
+        optionContract.exercise(optAmount + 1);
+    }
+
+    function test_Exercise_Partial_LessThanVested_ThenRemaining() public {
+        uint256 midTime = optVestingCliff + (optVestingEnd - optVestingCliff) / 2;
+        vm.warp(midTime);
+
+        uint256 totalVestedAtMidTime = getExpectedVestedAmount(midTime);
+        uint256 firstExerciseAmount = totalVestedAtMidTime / 2;
+        assertTrue(firstExerciseAmount > 0, "First exercise amount should be > 0");
+
+        uint256 cost1 = (firstExerciseAmount * optStrikePrice) / (10**18);
+
+        // First partial exercise
+        vm.prank(holder);
+        optionContract.exercise(firstExerciseAmount);
+
+        assertEq(optionContract.exercisedAmount(), firstExerciseAmount, "Exercised amount after first partial");
+        assertEq(underlyingToken.balanceOf(holder), firstExerciseAmount, "Holder underlying after first partial");
+        assertEq(currencyToken.balanceOf(holder), INITIAL_CURRENCY_BALANCE - cost1, "Holder currency after first partial");
+        assertEq(currencyToken.balanceOf(deployer), cost1, "Deployer currency after first partial");
+
+        uint256 remainingVestedAmount = totalVestedAtMidTime - firstExerciseAmount;
+        assertTrue(remainingVestedAmount > 0, "Remaining vested amount should be > 0");
+        uint256 cost2 = (remainingVestedAmount * optStrikePrice) / (10**18);
+
+        // Second partial exercise (remaining of currently vested)
+        vm.prank(holder);
+        optionContract.exercise(remainingVestedAmount);
+
+        assertEq(optionContract.exercisedAmount(), totalVestedAtMidTime, "Exercised amount after second partial");
+        assertEq(underlyingToken.balanceOf(holder), totalVestedAtMidTime, "Holder underlying after second partial");
+        assertEq(currencyToken.balanceOf(holder), INITIAL_CURRENCY_BALANCE - cost1 - cost2, "Holder currency after second partial");
+        uint256 deployerBalanceAfter2 = cost1 + cost2;
+        assertEq(currencyToken.balanceOf(deployer), deployerBalanceAfter2, "Deployer currency after second partial");
+    }
+
+    // test_Exercise_MultiplePartials_ArbitraryAmounts_WithinVestedLimits will be replaced by the following three tests:
+
+    // Test 1: Simulates the first part of the original multi-stage test.
+    function test_Exercise_FirstPartial_ArbitraryAmount() public {
+        // Time 1: 30% into vesting period (after cliff)
+        uint256 time1 = optVestingCliff + (optVestingEnd - optVestingCliff) * 3 / 10;
+        vm.warp(time1);
+
+        uint256 vestedAtTime1 = getExpectedVestedAmount(time1);
+        uint256 amountToExercise1 = vestedAtTime1 / 2; // Exercise less than fully vested
+        assertTrue(amountToExercise1 > 0, "Amount to exercise1 should be > 0");
+        uint256 cost1 = (amountToExercise1 * optStrikePrice) / (10**18);
+
+        vm.prank(holder);
+        optionContract.exercise(amountToExercise1);
+
+        assertEq(optionContract.exercisedAmount(), amountToExercise1, "Exercised amount after 1st part");
+        assertEq(underlyingToken.balanceOf(holder), amountToExercise1, "Holder underlying after 1st part");
+        assertEq(currencyToken.balanceOf(holder), INITIAL_CURRENCY_BALANCE - cost1, "Holder currency after 1st part");
+        assertEq(currencyToken.balanceOf(deployer), cost1, "Deployer currency after 1st part");
+    }
+
+    // Test 2: Simulates the first two parts of the original multi-stage test.
+    function test_Exercise_SecondPartial_ArbitraryAmount_AfterFirst() public {
+        // ---- Setup first exercise ----
+        uint256 time1 = optVestingCliff + (optVestingEnd - optVestingCliff) * 3 / 10;
+        vm.warp(time1);
+        uint256 vestedAtTime1 = getExpectedVestedAmount(time1);
+        uint256 amountToExercise1 = vestedAtTime1 / 2;
+        assertTrue(amountToExercise1 > 0);
+        uint256 cost1 = (amountToExercise1 * optStrikePrice) / (10**18);
+        vm.prank(holder);
+        optionContract.exercise(amountToExercise1);
+        // ---- End of first exercise setup ----
+
+        // Time 2: 60% into vesting period (after cliff)
+        uint256 time2 = optVestingCliff + (optVestingEnd - optVestingCliff) * 6 / 10;
+        vm.warp(time2);
+
+        uint256 totalVestedAtTime2 = getExpectedVestedAmount(time2);
+        uint256 alreadyExercised = optionContract.exercisedAmount(); // Should be amountToExercise1
+        uint256 availableToExerciseAtTime2 = totalVestedAtTime2 - alreadyExercised;
+        uint256 amountToExercise2 = availableToExerciseAtTime2 / 2; // Exercise half of newly available
+        assertTrue(amountToExercise2 > 0, "Amount to exercise2 should be > 0");
+        uint256 cost2 = (amountToExercise2 * optStrikePrice) / (10**18);
+
+        vm.prank(holder);
+        optionContract.exercise(amountToExercise2);
+
+        uint256 totalExercisedAfter2 = amountToExercise1 + amountToExercise2;
+        assertEq(optionContract.exercisedAmount(), totalExercisedAfter2, "Exercised amount after 2nd part");
+        assertEq(underlyingToken.balanceOf(holder), totalExercisedAfter2, "Holder underlying after 2nd part");
+        assertEq(currencyToken.balanceOf(holder), INITIAL_CURRENCY_BALANCE - cost1 - cost2, "Holder currency after 2nd part");
+        assertEq(currencyToken.balanceOf(deployer), cost1 + cost2, "Deployer currency after 2nd part");
+    }
+
+    // Test 3: Simulates all three parts, exercising fully at the end.
+    function test_Exercise_FinalPartial_ArbitraryAmount_ToFullExercise() public {
+        // ---- Setup first exercise ----
+        uint256 time1 = optVestingCliff + (optVestingEnd - optVestingCliff) * 3 / 10;
+        vm.warp(time1);
+        uint256 vestedAtTime1 = getExpectedVestedAmount(time1);
+        uint256 amountToExercise1 = vestedAtTime1 / 2;
+        assertTrue(amountToExercise1 > 0);
+        uint256 cost1 = (amountToExercise1 * optStrikePrice) / (10**18);
+        vm.prank(holder);
+        optionContract.exercise(amountToExercise1);
+        // ---- End of first exercise setup ----
+
+        // ---- Setup second exercise ----
+        uint256 time2 = optVestingCliff + (optVestingEnd - optVestingCliff) * 6 / 10;
+        vm.warp(time2);
+        uint256 totalVestedAtTime2 = getExpectedVestedAmount(time2);
+        uint256 alreadyExercisedAfter1 = optionContract.exercisedAmount();
+        uint256 availableToExerciseAtTime2 = totalVestedAtTime2 - alreadyExercisedAfter1;
+        uint256 amountToExercise2 = availableToExerciseAtTime2 / 2;
+        assertTrue(amountToExercise2 > 0);
+        uint256 cost2 = (amountToExercise2 * optStrikePrice) / (10**18);
+        vm.prank(holder);
+        optionContract.exercise(amountToExercise2);
+        // ---- End of second exercise setup ----
+
+        // Time 3: Fully Vested (at optVestingEnd)
+        vm.warp(optVestingEnd);
+        uint256 totalVestedAtTime3 = getExpectedVestedAmount(optVestingEnd); // should be optAmount
+        uint256 alreadyExercisedAfter2 = optionContract.exercisedAmount();
+        uint256 amountToExercise3 = totalVestedAtTime3 - alreadyExercisedAfter2; // Exercise all remaining
+        assertTrue(amountToExercise3 > 0, "Amount to exercise3 should be > 0");
+        uint256 cost3 = (amountToExercise3 * optStrikePrice) / (10**18);
+
+        vm.prank(holder);
+        optionContract.exercise(amountToExercise3);
+
+        assertEq(optionContract.exercisedAmount(), optAmount, "Should be fully exercised");
+        assertEq(underlyingToken.balanceOf(holder), optAmount, "Holder underlying should be full optAmount");
+        // Corrected typo from user's diff: It should be subtraction of all costs
+        assertEq(currencyToken.balanceOf(holder), INITIAL_CURRENCY_BALANCE - cost1 - cost2 - cost3, "Holder currency after full exercise");
+        assertEq(currencyToken.balanceOf(deployer), cost1 + cost2 + cost3, "Deployer currency after full exercise");
+    }
+
 
     // NOTE: The Solidity helper function computeCreateAddress was removed from here as it's not used.
     // The Forge cheatcode `vm.computeCreateAddress(address, uint256)` is used directly in tests like setUp and test_Revert_Deploy_CliffAfterEnd.
