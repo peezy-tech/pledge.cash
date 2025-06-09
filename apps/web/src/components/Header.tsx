@@ -1,17 +1,22 @@
 import { Link } from '@tanstack/react-router'
-import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
-import { useWallet } from '@solana/wallet-adapter-react';
-import { useAuth } from '../hooks/useAuth';
+// import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'; // Removed Solana's WalletMultiButton
+// import { useWallet } from '@solana/wallet-adapter-react'; // Removed Solana's useWallet
+import { useAuth } from '../contexts/AuthContext';
+import { useAccount, useConnect, useDisconnect } from 'wagmi'; // Added Wagmi hooks
+import { ConnectKitButton } from 'connectkit';
 
 export default function Header() {
-  const { connected, publicKey } = useWallet();
-  const { isAuthenticated, isLoading, error, login, logout, clearError } = useAuth();
+  // useWallet() from Solana is replaced by relying on useAuth and useAccount from Wagmi
+  const { isAuthenticated, isLoading, error, login, logout, clearError, walletAddress } = useAuth();
+  const { isConnected } = useAccount(); // Use isConnected to decide whether to show ConnectWalletButton
 
   const handleLogin = async () => {
+    // `login` from useAuth is now Wagmi/SIWE compatible
     await login();
   };
 
   const handleLogout = async () => {
+    // `logout` from useAuth is now Wagmi/SIWE compatible (includes disconnect)
     await logout();
   };
 
@@ -44,7 +49,7 @@ export default function Header() {
         </Link>
       </nav>
       <div className="flex items-center gap-2">
-        {connected && publicKey ? (
+        {isConnected ? (
           <div className="flex items-center gap-2">
             {isAuthenticated ? (
               <button 
@@ -65,7 +70,7 @@ export default function Header() {
             )}
           </div>
         ) : (
-          <WalletMultiButton />
+          <ConnectKitButton />
         )}
         {error && (
           <div className="flex items-center gap-2">

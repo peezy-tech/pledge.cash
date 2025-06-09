@@ -1,4 +1,4 @@
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '../contexts/AuthContext';
 
 export const AuthStatus: React.FC = () => {
   const { isAuthenticated, walletAddress, isLoading, error } = useAuth();

@@ -1,4 +1,5 @@
 import { createContext } from 'react';
+import { useContext } from 'react';
 
 export interface AuthState {
   isAuthenticated: boolean;
@@ -7,7 +8,7 @@ export interface AuthState {
   error: string | null;
 }
 
-export interface AuthContextType extends AuthState {
+interface AuthContextType extends AuthState {
   login: () => Promise<void>;
   logout: () => Promise<void>;
   checkAuthStatus: () => Promise<void>;
@@ -15,3 +16,13 @@ export interface AuthContextType extends AuthState {
 }
 
 export const AuthContext = createContext<AuthContextType | null>(null); 
+
+export const useAuth = (): AuthContextType => {
+  const context = useContext(AuthContext);
+  
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  
+  return context;
+}; 

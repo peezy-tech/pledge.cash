@@ -1,6 +1,5 @@
 import { createRoute } from '@tanstack/react-router'
 import type { RootRoute } from '@tanstack/react-router'
-import { WorldGrid } from './home/components/WorldGrid'
 import { PageLayout } from './PageLayout'
 
 export function HomePage() {
@@ -8,7 +7,9 @@ export function HomePage() {
     <PageLayout 
       title="Explore"
     >
-      <WorldGrid />
+      <div>
+        <h1>Home</h1>
+      </div>
     </PageLayout>
   )
 }

@@ -19,6 +19,7 @@
     "elysia": "latest",
     "elysia-oauth2": "^2.1.0",
     "jsonwebtoken": "^9.0.2",
+    "siwe": "^3.0.0",
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {

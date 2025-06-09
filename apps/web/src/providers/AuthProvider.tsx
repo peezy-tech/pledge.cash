@@ -1,13 +1,12 @@
 import React, { useCallback, useEffect } from 'react';
 import type { ReactNode } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
-import bs58 from 'bs58';
+import { useAccount, useSignMessage, useDisconnect } from 'wagmi'; 
+import { SiweMessage } from 'siwe'; 
 import { AuthContext } from '../contexts/AuthContext';
 import type { AuthState } from '../contexts/AuthContext';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/utils/api';
 
-// Query keys for auth operations
 export const authKeys = {
   status: ['auth', 'status'] as const,
   nonce: ['auth', 'nonce'] as const,
@@ -18,8 +17,8 @@ export const useAuthStatusQuery = () => {
   return useQuery({
     queryKey: authKeys.status,
     queryFn: async () => {
-      const result = await api.auth_token.get();
-      return result.data;
+      const result = await api.siwe.get(); 
+      return result.data as { address: string | null } | null;
     },
     retry: false,
     staleTime: 1000 * 60 * 5, // 5 minutes
@@ -30,8 +29,8 @@ export const useAuthStatusQuery = () => {
 export const useRequestNonceMutation = () => {
   return useMutation({
     mutationFn: async () => {
-      const result = await api.auth_token.put();
-      return result.data;
+      const result = await api.siwe.put(undefined);
+      return result.data as { nonce: string } | null;
     },
   });
 };
@@ -42,11 +41,11 @@ export const useLoginMutation = () => {
   
   return useMutation({
     mutationFn: async ({ message, signature, walletAddress }: {
-      message: string;
-      signature: string;
-      walletAddress: string;
+      message: SiweMessage | string; 
+      signature: `0x${string}`;
+      walletAddress: `0x${string}`;
     }) => {
-      const result = await api.auth_token.post({
+      const result = await api.siwe.post({
         message,
         signature,
         walletAddress,
@@ -54,7 +53,6 @@ export const useLoginMutation = () => {
       return result.data;
     },
     onSuccess: () => {
-      // Invalidate auth status query to refetch user data
       queryClient.invalidateQueries({ queryKey: authKeys.status });
     },
   });
@@ -66,11 +64,10 @@ export const useLogoutMutation = () => {
   
   return useMutation({
     mutationFn: async () => {
-      const result = await api.auth_token.delete();
+      const result = await api.siwe.delete();
       return result.data;
     },
     onSuccess: () => {
-      // Clear all auth-related queries
       queryClient.removeQueries({ queryKey: authKeys.status });
       queryClient.removeQueries({ queryKey: authKeys.nonce });
     },
@@ -82,18 +79,18 @@ interface AuthProviderProps {
 }
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
-  const { connected, publicKey, signMessage } = useWallet();
+  const { address, chain, isConnected } = useAccount(); 
+  const { signMessageAsync } = useSignMessage(); 
+  const { disconnect } = useDisconnect(); 
   
-  // React Query hooks
   const authStatusQuery = useAuthStatusQuery();
   const requestNonceMutation = useRequestNonceMutation();
   const loginMutation = useLoginMutation();
   const logoutMutation = useLogoutMutation();
 
-  // Derive auth state from React Query states
   const authState: AuthState = {
-    isAuthenticated: !!(authStatusQuery.data && 'walletAddress' in authStatusQuery.data && authStatusQuery.data.walletAddress),
-    walletAddress: (authStatusQuery.data && 'walletAddress' in authStatusQuery.data) ? (authStatusQuery.data.walletAddress || null) : null,
+    isAuthenticated: !!(authStatusQuery.data && 'address' in authStatusQuery.data && authStatusQuery.data.address),
+    walletAddress: (authStatusQuery.data && 'address' in authStatusQuery.data && authStatusQuery.data.address) ? authStatusQuery.data.address : null,
     isLoading: authStatusQuery.isLoading || requestNonceMutation.isPending || loginMutation.isPending || logoutMutation.isPending,
     error: authStatusQuery.error?.message || 
            requestNonceMutation.error?.message || 
@@ -114,66 +111,70 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, [authStatusQuery]);
 
   const login = useCallback(async () => {
-    if (!publicKey || !signMessage) {
-      // We can't easily set a custom error with React Query mutations
-      // So we'll throw an error that will be caught by the mutation
-      throw new Error('Wallet not connected or signMessage not available.');
+    if (!isConnected || !address || !chain) {
+      throw new Error('Wallet not connected, address or chainId not available.');
     }
 
     try {
-      // Step 1: Fetch nonce
       const nonceResult = await requestNonceMutation.mutateAsync();
-      
-      if (!nonceResult || !('nonce' in nonceResult) || !nonceResult.nonce) {
+      if (!nonceResult || !nonceResult.nonce) {
         throw new Error('Nonce not received from server');
       }
 
-      // Step 2: Prepare and sign message
-      const message = `Sign this message to log in to DramaSystem. Nonce: ${nonceResult.nonce}`;
-      const messageBytes = new TextEncoder().encode(message);
-      const signature = await signMessage(messageBytes);
+      const siweMessage = new SiweMessage({
+        domain: window.location.host,
+        address: address as `0x${string}`,
+        statement: 'Sign in with Ethereum to the app.', 
+        uri: window.location.origin,
+        version: '1',
+        chainId: chain.id,
+        nonce: nonceResult.nonce,
+      });
+
+      const messageToSign = siweMessage.prepareMessage();
+      const signature = await signMessageAsync({ message: messageToSign });
       
       if (!signature) {
         throw new Error('Failed to sign message. User may have cancelled.');
       }
-
-      // Step 3: Send signature to backend for verification
+      
       const loginResult = await loginMutation.mutateAsync({
-        message,
-        signature: bs58.encode(signature),
-        walletAddress: publicKey.toBase58(),
+        message: siweMessage.toMessage(), 
+        signature,
+        walletAddress: address as `0x${string}`,
       });
 
-      console.log('loginResult', loginResult);
-
-      if (!loginResult || typeof loginResult !== 'object' || !('success' in loginResult) || !loginResult.success) {
+      // Ensure success field is checked correctly, even if type is 'any' or 'unknown'
+      if (!loginResult || typeof loginResult !== 'object' || !('success' in (loginResult as object)) || !(loginResult as { success: boolean }).success) {
         throw new Error('Login failed after verification');
       }
 
       console.log('Login successful!');
+      await authStatusQuery.refetch(); 
 
     } catch (err: any) {
       console.error('Login error:', err);
-      throw err; // Re-throw to let React Query handle the error state
+      throw err; 
     }
-  }, [publicKey, signMessage, requestNonceMutation, loginMutation]);
+  }, [isConnected, address, chain, signMessageAsync, requestNonceMutation, loginMutation, authStatusQuery]);
 
   const logout = useCallback(async () => {
     try {
       await logoutMutation.mutateAsync();
+      disconnect(); 
       console.log('Logout successful!');
     } catch (err: any) {
       console.error('Logout error:', err);
-      throw err; // Re-throw to let React Query handle the error state
+      throw err;
     }
-  }, [logoutMutation]);
+  }, [logoutMutation, disconnect]);
 
-  // Check auth status when wallet connection changes
   useEffect(() => {
-    if (connected && publicKey) {
+    if (isConnected && address) {
       checkAuthStatus();
-    }
-  }, [connected, publicKey, checkAuthStatus]);
+    } 
+    // Basic effect, more complex state synchronization (e.g., auto-logout on disconnect) can be added if needed.
+  }, [isConnected, address, checkAuthStatus]);
 
   const contextValue = {
     ...authState,

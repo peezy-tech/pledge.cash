@@ -2,16 +2,3 @@
 
 @plugin "tailwindcss-animate";
 
-.container-style {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 1rem; /* p-4 */
-}
-
-.section-style {
-  @apply mb-8 bg-gray-800 p-6 rounded-lg;
-}
-
-.page-title {
-  @apply text-white mb-6 text-center;
-}

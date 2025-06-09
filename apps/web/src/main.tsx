@@ -1,5 +1,5 @@
 import 'ses'
-import { StrictMode, useMemo } from 'react'
+import { StrictMode } from 'react'
 import ReactDOM from 'react-dom/client'
 import {
   Outlet,
@@ -9,59 +9,37 @@ import {
   createRouter,
 } from '@tanstack/react-router'
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
-import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
-import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
-import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
-import { clusterApiUrl } from '@solana/web3.js';
-import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
-import TanStackQueryDemo from './routes/demo.tanstack-query.tsx'
+import { WagmiProvider } from 'wagmi'
+import { config } from './wagmiConfig'
 import TokenAdmin from './routes/token-admin.tsx'
 import { HomePage } from './routes/home.tsx'
 import ProfilePage from './routes/profile.tsx'
 import LaunchPage from './routes/launch.tsx'
-import createAdminGameServersRoute from './routes/admin-game-servers.tsx';
-import createPlayGameRoute from './routes/play-game.tsx';
+import createAdminGameServersRoute from './routes/admin-game-servers.tsx'
+import createPlayGameRoute from './routes/play-game.tsx'
 
-import Header from './components/Header'
-import ShowroomBackground from './components/ShowroomBackground'
 import { AuthProvider } from './providers/AuthProvider'
+import { ConnectKitProvider } from 'connectkit'
+import Header from './components/Header.tsx'
 
-import TanStackQueryLayout from './integrations/tanstack-query/layout.tsx'
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
+import * as TanStackQueryProvider from './providers/QueryClientProvider.tsx'
 
-import * as TanStackQueryProvider from './integrations/tanstack-query/root-provider.tsx'
 
 import './styles.css'
-import '@solana/wallet-adapter-react-ui/styles.css';
 import reportWebVitals from './reportWebVitals.ts'
 
 const rootRoute = createRootRoute({
   component: () => {
-    const network = WalletAdapterNetwork.Mainnet;
-    const endpoint = useMemo(() => clusterApiUrl(network), [network]);
-    const wallets = useMemo(
-      () => [
-        new PhantomWalletAdapter(),
-        new SolflareWalletAdapter(),
-      ],
-      [network]
-    );
-
     return (
-      <ConnectionProvider endpoint={endpoint}>
-        <WalletProvider wallets={wallets} autoConnect>
-          <WalletModalProvider>
-            <AuthProvider>
-              <div style={{ backgroundColor: 'transparent', minHeight: '100vh' }}>
-                <ShowroomBackground />
-                <Header />
-                <Outlet />
-                <TanStackRouterDevtools />
-                <TanStackQueryLayout />
-              </div>
-            </AuthProvider>
-          </WalletModalProvider>
-        </WalletProvider>
-      </ConnectionProvider>
+      <AuthProvider>
+        <div style={{ backgroundColor: 'transparent', minHeight: '100vh' }}>
+          <Header />
+          <Outlet />
+          <TanStackRouterDevtools />
+          <ReactQueryDevtools buttonPosition="bottom-right" />
+        </div>
+      </AuthProvider>
     )
   },
 })
@@ -74,7 +52,6 @@ const indexRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
-  TanStackQueryDemo(rootRoute),
   TokenAdmin(rootRoute),
   ProfilePage(rootRoute),
   LaunchPage(rootRoute),
@@ -82,31 +59,31 @@ const routeTree = rootRoute.addChildren([
   createPlayGameRoute(rootRoute),
 ])
 
+const routerContext = { ...TanStackQueryProvider.getContext() }
+
 const router = createRouter({
   routeTree,
-  context: {
-    ...TanStackQueryProvider.getContext(),
-  },
+  context: routerContext,
   defaultPreload: 'intent',
   scrollRestoration: true,
   defaultStructuralSharing: true,
   defaultPreloadStaleTime: 0,
 })
 
-declare module '@tanstack/react-router' {
-  interface Register {
-    router: typeof router
-  }
-}
+
 
 const rootElement = document.getElementById('app')
 if (rootElement && !rootElement.innerHTML) {
   const root = ReactDOM.createRoot(rootElement)
   root.render(
     <StrictMode>
-      <TanStackQueryProvider.Provider>
-        <RouterProvider router={router} />
-      </TanStackQueryProvider.Provider>
+      <WagmiProvider config={config}>
+        <TanStackQueryProvider.Provider>
+          <ConnectKitProvider>
+            <RouterProvider router={router} />
+          </ConnectKitProvider>
+        </TanStackQueryProvider.Provider>
+      </WagmiProvider>
     </StrictMode>,
   )
 }
