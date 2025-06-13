@@ -1,6 +1,7 @@
 import { createRoute } from '@tanstack/react-router'
 import type { RootRoute } from '@tanstack/react-router'
 import { PageLayout } from './PageLayout'
+import OptionContract from '@/components/evm/OptionContract'
 
 export function HomePage() {
   return (
@@ -8,7 +9,7 @@ export function HomePage() {
       title="Explore"
     >
       <div>
-        <h1>Home</h1>
+        <OptionContract />
       </div>
     </PageLayout>
   )

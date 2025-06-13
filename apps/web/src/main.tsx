@@ -34,12 +34,10 @@ const rootRoute = createRootRoute({
     return (
       <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
         <AuthProvider>
-          <div style={{ backgroundColor: 'transparent', minHeight: '100vh' }}>
-            <Header />
-            <Outlet />
-            <TanStackRouterDevtools />
-            <ReactQueryDevtools buttonPosition="bottom-right" />
-          </div>
+          <Header />
+          <Outlet />
+          <TanStackRouterDevtools />
+          <ReactQueryDevtools buttonPosition="bottom-right" />
         </AuthProvider>
       </ThemeProvider>
     )

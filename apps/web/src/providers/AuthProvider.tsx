@@ -7,7 +7,7 @@ import type { AuthState } from '../contexts/AuthContext';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/utils/api';
 
-export const authKeys = {
+const authKeys = {
   status: ['auth', 'status'] as const,
   nonce: ['auth', 'nonce'] as const,
 };

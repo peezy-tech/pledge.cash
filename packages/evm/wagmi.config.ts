@@ -19,6 +19,9 @@ export default defineConfig({
         "EIP712.sol/**",
         "Test.sol/**",
         "Initializable.sol/**",
+        "IERC20.sol/**",
+        "Ownable.sol/**",
+        "ERC20.sol/**",
 
         // the following patterns are excluded by default
         "Common.sol/**",
@@ -39,6 +42,9 @@ export default defineConfig({
         "**.s.sol/*.json",
         "**.t.sol/*.json",
       ],
+      include: [
+        "option.sol/**"
+      ]
     }),
   ],
 });
