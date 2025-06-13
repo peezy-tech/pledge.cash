@@ -19,12 +19,12 @@ import createAdminGameServersRoute from './routes/admin-game-servers.tsx'
 import createPlayGameRoute from './routes/play-game.tsx'
 
 import { AuthProvider } from './providers/AuthProvider'
+import { ThemeProvider } from './providers/ThemeProvider'
 import { ConnectKitProvider } from 'connectkit'
 import Header from './components/Header.tsx'
 
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import * as TanStackQueryProvider from './providers/QueryClientProvider.tsx'
-
 
 import './styles.css'
 import reportWebVitals from './reportWebVitals.ts'
@@ -32,14 +32,16 @@ import reportWebVitals from './reportWebVitals.ts'
 const rootRoute = createRootRoute({
   component: () => {
     return (
-      <AuthProvider>
-        <div style={{ backgroundColor: 'transparent', minHeight: '100vh' }}>
-          <Header />
-          <Outlet />
-          <TanStackRouterDevtools />
-          <ReactQueryDevtools buttonPosition="bottom-right" />
-        </div>
-      </AuthProvider>
+      <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
+        <AuthProvider>
+          <div style={{ backgroundColor: 'transparent', minHeight: '100vh' }}>
+            <Header />
+            <Outlet />
+            <TanStackRouterDevtools />
+            <ReactQueryDevtools buttonPosition="bottom-right" />
+          </div>
+        </AuthProvider>
+      </ThemeProvider>
     )
   },
 })
@@ -69,8 +71,6 @@ const router = createRouter({
   defaultStructuralSharing: true,
   defaultPreloadStaleTime: 0,
 })
-
-
 
 const rootElement = document.getElementById('app')
 if (rootElement && !rootElement.innerHTML) {

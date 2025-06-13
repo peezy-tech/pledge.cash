@@ -4,6 +4,43 @@ import { Link } from '@tanstack/react-router'
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount, useConnect, useDisconnect } from 'wagmi'; // Added Wagmi hooks
 import { ConnectKitButton } from 'connectkit';
+import ThemeSwitch from '@/components/ThemeSwitch';
+
+interface AuthButtonProps {
+  isConnected: boolean;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  onLogin: () => Promise<void>;
+  onLogout: () => Promise<void>;
+}
+
+function AuthButton({ isConnected, isAuthenticated, isLoading, onLogin, onLogout }: AuthButtonProps) {
+  if (!isConnected) {
+    return <ConnectKitButton />;
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      {isAuthenticated ? (
+        <button 
+          onClick={onLogout} 
+          disabled={isLoading}
+          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-md transition-colors disabled:opacity-50"
+        >
+          {isLoading ? 'Logging out...' : 'Logout'}
+        </button>
+      ) : (
+        <button 
+          onClick={onLogin} 
+          disabled={isLoading}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-md transition-colors disabled:opacity-50"
+        >
+          {isLoading ? 'Logging in...' : 'Login with Wallet'}
+        </button>
+      )}
+    </div>
+  );
+}
 
 export default function Header() {
   // useWallet() from Solana is replaced by relying on useAuth and useAccount from Wagmi
@@ -49,29 +86,14 @@ export default function Header() {
         </Link>
       </nav>
       <div className="flex items-center gap-2">
-        {isConnected ? (
-          <div className="flex items-center gap-2">
-            {isAuthenticated ? (
-              <button 
-                onClick={handleLogout} 
-                disabled={isLoading}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-md transition-colors disabled:opacity-50"
-              >
-                {isLoading ? 'Logging out...' : 'Logout'}
-              </button>
-            ) : (
-              <button 
-                onClick={handleLogin} 
-                disabled={isLoading}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-md transition-colors disabled:opacity-50"
-              >
-                {isLoading ? 'Logging in...' : 'Login with Wallet'}
-              </button>
-            )}
-          </div>
-        ) : (
-          <ConnectKitButton />
-        )}
+        <ThemeSwitch />
+        <AuthButton 
+          isConnected={isConnected}
+          isAuthenticated={isAuthenticated}
+          isLoading={isLoading}
+          onLogin={handleLogin}
+          onLogout={handleLogout}
+        />
         {error && (
           <div className="flex items-center gap-2">
             <p className="text-red-500 text-sm">Error: {error}</p>
