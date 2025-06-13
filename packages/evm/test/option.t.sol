@@ -18,12 +18,12 @@ contract OptionTest is Test {
     address public holder; // Will be an EOA for holding the option
     address public otherUser = address(0x3); // For testing unauthorized access
 
-    uint256 public constant INITIAL_CURRENCY_BALANCE = 1_000_000 * 10**18;
-    uint256 public constant INITIAL_UNDERLYING_BALANCE = 1_000_000 * 10**18;
+    uint256 public constant INITIAL_CURRENCY_BALANCE = 200 * 10**6;
+    uint256 public constant INITIAL_UNDERLYING_BALANCE = 1_000_000 * 10**6;
 
     // Option Parameters
-    uint256 public optAmount = 100 * 10**18; // 100 tokens (this will be originalAmount)
-    uint256 public optStrikePrice = 2 * 10**18; // 2 currency units per underlying
+    uint256 public optAmount = 100 * 10**6; // 100 tokens (this will be originalAmount)
+    uint256 public optStrikePrice = 2 * 10**6; // 2 currency units per underlying
     // uint256 public optTotalCost = optAmount * optStrikePrice; // Calculated for convenience - careful if optAmount changes conceptually
 
     uint256 public startTime;
@@ -41,8 +41,8 @@ contract OptionTest is Test {
         deployer = address(this); // OptionTest contract is the deployer
 
         // 1. Deploy mock tokens
-        currencyToken = new MockERC20("MockCurrency", "MCUR", 18);
-        underlyingToken = new MockERC20("MockUnderlying", "MUND", 18);
+        currencyToken = new MockERC20("MockCurrency", "MCUR", 6);
+        underlyingToken = new MockERC20("MockUnderlying", "MUND", 6);
 
         holder = makeAddr("Holder");
 
@@ -204,7 +204,7 @@ contract OptionTest is Test {
         expectedVested = getExpectedVestedSnapshot(optVestingCliff + 1);
         assertTrue(expectedVested > 0, "Expected vested should be > 0 just after cliff");
 
-        uint256 cost = (expectedVested * optStrikePrice) / (10**18);
+        uint256 cost = (expectedVested * optStrikePrice) / (10**6);
 
         vm.prank(holder);
         optionContract.exercise(expectedVested);
@@ -221,7 +221,7 @@ contract OptionTest is Test {
 
         uint256 expectedVested = getExpectedVestedSnapshot(midTime);
         assertTrue(expectedVested > 0 && expectedVested < optionContract.originalAmount(), "Expected vested should be partial");
-        uint256 cost = (expectedVested * optStrikePrice) / (10**18);
+        uint256 cost = (expectedVested * optStrikePrice) / (10**6);
 
         vm.startPrank(holder);
         optionContract.exercise(expectedVested);
@@ -239,14 +239,21 @@ contract OptionTest is Test {
 
         uint256 vestedAtTime1 = getExpectedVestedSnapshot(time1);
         uint256 amountToExercise1 = vestedAtTime1;
-        uint256 cost1 = (amountToExercise1 * optStrikePrice) / (10**18);
+        uint256 cost1 = (amountToExercise1 * optStrikePrice) / (10**6);
 
         vm.prank(holder);
         optionContract.exercise(amountToExercise1);
 
+        console.log("Assert: exercisedAmount at time1. Expected:", vestedAtTime1, "Actual:", optionContract.exercisedAmount());
         assertEq(optionContract.exercisedAmount(), vestedAtTime1, "Exercised amount mismatch time1");
+
+        console.log("Assert: holder underlying at time1. Expected:", vestedAtTime1, "Actual:", underlyingToken.balanceOf(holder));
         assertEq(underlyingToken.balanceOf(holder), vestedAtTime1, "Holder underlying time1");
+
+        console.log("Assert: holder currency at time1. Expected:", INITIAL_CURRENCY_BALANCE - cost1, "Actual:", currencyToken.balanceOf(holder));
         assertEq(currencyToken.balanceOf(holder), INITIAL_CURRENCY_BALANCE - cost1, "Holder currency time1");
+
+        console.log("Assert: deployer currency at time1. Expected:", cost1, "Actual:", currencyToken.balanceOf(deployer));
         assertEq(currencyToken.balanceOf(deployer), cost1, "Deployer currency time1");
 
         uint256 time2 = optVestingCliff + (optVestingEnd - optVestingCliff) * 3 / 4;
@@ -255,15 +262,23 @@ contract OptionTest is Test {
         uint256 totalVestedAtTime2_snapshot = getExpectedVestedSnapshot(time2);
         uint256 alreadyExercised = optionContract.exercisedAmount();
         uint256 amountToExercise2 = totalVestedAtTime2_snapshot - alreadyExercised;
+        console.log("Assert: amountToExercise2 > 0. Actual:", amountToExercise2);
         assertTrue(amountToExercise2 > 0, "Should have new amount to exercise at time2");
-        uint256 cost2 = (amountToExercise2 * optStrikePrice) / (10**18);
+        uint256 cost2 = (amountToExercise2 * optStrikePrice) / (10**6);
 
         vm.prank(holder);
         optionContract.exercise(amountToExercise2);
 
+        console.log("Assert: exercisedAmount at time2. Expected:", totalVestedAtTime2_snapshot, "Actual:", optionContract.exercisedAmount());
         assertEq(optionContract.exercisedAmount(), totalVestedAtTime2_snapshot, "Exercised amount mismatch time2");
+
+        console.log("Assert: holder underlying at time2. Expected:", totalVestedAtTime2_snapshot, "Actual:", underlyingToken.balanceOf(holder));
         assertEq(underlyingToken.balanceOf(holder), totalVestedAtTime2_snapshot, "Holder underlying time2");
+
+        console.log("Assert: holder currency at time2. Expected:", INITIAL_CURRENCY_BALANCE - cost1 - cost2, "Actual:", currencyToken.balanceOf(holder));
         assertEq(currencyToken.balanceOf(holder), INITIAL_CURRENCY_BALANCE - cost1 - cost2, "Holder currency time2");
+
+        console.log("Assert: deployer currency at time2. Expected:", cost1 + cost2, "Actual:", currencyToken.balanceOf(deployer));
         assertEq(currencyToken.balanceOf(deployer), cost1 + cost2, "Deployer currency time2");
     }
 
@@ -271,7 +286,7 @@ contract OptionTest is Test {
         vm.warp(optVestingEnd);
 
         uint256 amountToExercise = optionContract.originalAmount();
-        uint256 cost = (amountToExercise * optStrikePrice) / (10**18);
+        uint256 cost = (amountToExercise * optStrikePrice) / (10**6);
 
         vm.prank(holder);
         optionContract.exercise(amountToExercise);
@@ -286,7 +301,7 @@ contract OptionTest is Test {
         vm.warp(optVestingEnd + 1 weeks);
 
         uint256 amountToExercise = optionContract.originalAmount();
-        uint256 cost = (amountToExercise * optStrikePrice) / (10**18);
+        uint256 cost = (amountToExercise * optStrikePrice) / (10**6);
 
         vm.prank(holder);
         optionContract.exercise(amountToExercise);
@@ -346,7 +361,7 @@ contract OptionTest is Test {
         uint256 firstExerciseAmount = totalVestedAtMidTime_snapshot / 2;
         assertTrue(firstExerciseAmount > 0, "First exercise amount should be > 0");
 
-        uint256 cost1 = (firstExerciseAmount * optStrikePrice) / (10**18);
+        uint256 cost1 = (firstExerciseAmount * optStrikePrice) / (10**6);
 
         vm.prank(holder);
         optionContract.exercise(firstExerciseAmount);
@@ -358,7 +373,7 @@ contract OptionTest is Test {
 
         uint256 remainingVestedAmount_snapshot = totalVestedAtMidTime_snapshot - firstExerciseAmount;
         assertTrue(remainingVestedAmount_snapshot > 0, "Remaining vested amount from snapshot should be > 0");
-        uint256 cost2 = (remainingVestedAmount_snapshot * optStrikePrice) / (10**18);
+        uint256 cost2 = (remainingVestedAmount_snapshot * optStrikePrice) / (10**6);
 
         vm.prank(holder);
         optionContract.exercise(remainingVestedAmount_snapshot);
@@ -377,7 +392,7 @@ contract OptionTest is Test {
         uint256 vestedAtTime1_snapshot = getExpectedVestedSnapshot(time1);
         uint256 amountToExercise1 = vestedAtTime1_snapshot / 2;
         assertTrue(amountToExercise1 > 0, "Amount to exercise1 should be > 0");
-        uint256 cost1 = (amountToExercise1 * optStrikePrice) / (10**18);
+        uint256 cost1 = (amountToExercise1 * optStrikePrice) / (10**6);
 
         vm.prank(holder);
         optionContract.exercise(amountToExercise1);
@@ -394,7 +409,7 @@ contract OptionTest is Test {
         uint256 vestedAtTime1_snapshot = getExpectedVestedSnapshot(time1);
         uint256 amountToExercise1 = vestedAtTime1_snapshot / 2;
         assertTrue(amountToExercise1 > 0);
-        uint256 cost1 = (amountToExercise1 * optStrikePrice) / (10**18);
+        uint256 cost1 = (amountToExercise1 * optStrikePrice) / (10**6);
         vm.prank(holder);
         optionContract.exercise(amountToExercise1);
 
@@ -406,7 +421,7 @@ contract OptionTest is Test {
         uint256 availableToExerciseAtTime2_snapshot = totalVestedAtTime2_snapshot - alreadyExercised;
         uint256 amountToExercise2 = availableToExerciseAtTime2_snapshot / 2;
         assertTrue(amountToExercise2 > 0, "Amount to exercise2 should be > 0");
-        uint256 cost2 = (amountToExercise2 * optStrikePrice) / (10**18);
+        uint256 cost2 = (amountToExercise2 * optStrikePrice) / (10**6);
 
         vm.prank(holder);
         optionContract.exercise(amountToExercise2);
@@ -424,7 +439,7 @@ contract OptionTest is Test {
         uint256 vestedAtTime1_snapshot = getExpectedVestedSnapshot(time1);
         uint256 amountToExercise1 = vestedAtTime1_snapshot / 2;
         assertTrue(amountToExercise1 > 0);
-        uint256 cost1 = (amountToExercise1 * optStrikePrice) / (10**18);
+        uint256 cost1 = (amountToExercise1 * optStrikePrice) / (10**6);
         vm.prank(holder);
         optionContract.exercise(amountToExercise1);
 
@@ -435,7 +450,7 @@ contract OptionTest is Test {
         uint256 availableToExerciseAtTime2_snapshot = totalVestedAtTime2_snapshot - alreadyExercisedAfter1;
         uint256 amountToExercise2 = availableToExerciseAtTime2_snapshot / 2;
         assertTrue(amountToExercise2 > 0);
-        uint256 cost2 = (amountToExercise2 * optStrikePrice) / (10**18);
+        uint256 cost2 = (amountToExercise2 * optStrikePrice) / (10**6);
         vm.prank(holder);
         optionContract.exercise(amountToExercise2);
 
@@ -444,7 +459,7 @@ contract OptionTest is Test {
         uint256 alreadyExercisedAfter2 = optionContract.exercisedAmount();
         uint256 amountToExercise3 = totalVestedAtTime3_snapshot - alreadyExercisedAfter2;
         assertTrue(amountToExercise3 > 0, "Amount to exercise3 should be > 0");
-        uint256 cost3 = (amountToExercise3 * optStrikePrice) / (10**18);
+        uint256 cost3 = (amountToExercise3 * optStrikePrice) / (10**6);
 
         vm.prank(holder);
         optionContract.exercise(amountToExercise3);
@@ -541,7 +556,7 @@ contract OptionTest is Test {
         // Holder tries to exercise a portion of the new (halted) amount
         uint256 amountToExercise = expectedVestedAtHalt / 2;
         assertTrue(amountToExercise > 0, "Amount to exercise should be > 0");
-        uint256 cost = (amountToExercise * optStrikePrice) / (10**18);
+        uint256 cost = (amountToExercise * optStrikePrice) / (10**6);
 
         // Warp time a bit more, but still before original vesting end (and after halt)
         vm.warp(midTime + 1 days);
@@ -576,7 +591,7 @@ contract OptionTest is Test {
 
         // Holder can still exercise fully
         uint256 amountToExercise = optionContract.originalAmount();
-        uint256 cost = (amountToExercise * optStrikePrice) / (10**18);
+        uint256 cost = (amountToExercise * optStrikePrice) / (10**6);
         vm.prank(holder);
         optionContract.exercise(amountToExercise);
         assertEq(optionContract.exercisedAmount(), amountToExercise);
@@ -620,7 +635,7 @@ contract OptionTest is Test {
         assertEq(snapshotAtExerciseTime, vestedAtHalt, "Snapshot should be capped at vestedAtHalt amount");
 
         uint256 amountToExercise = vestedAtHalt; // Try to exercise the full amount that was vested at halt
-        uint256 cost = (amountToExercise * optStrikePrice) / (10**18);
+        uint256 cost = (amountToExercise * optStrikePrice) / (10**6);
 
         vm.prank(holder);
         optionContract.exercise(amountToExercise);
@@ -686,7 +701,7 @@ contract OptionTest is Test {
         uint256 midTime = optVestingCliff + (optVestingEnd - optVestingCliff) / 2;
         vm.warp(midTime);
         uint256 amountToExercise = getExpectedVestedSnapshot(midTime) / 2;
-        uint256 cost = (amountToExercise * optStrikePrice) / (10**18);
+        uint256 cost = (amountToExercise * optStrikePrice) / (10**6);
 
         vm.prank(holder);
         optionContract.exercise(amountToExercise);
@@ -709,7 +724,7 @@ contract OptionTest is Test {
     function test_WithdrawExpired_FullExercise_VestingNotHalted() public {
         vm.warp(optVestingEnd); // Fully vested
         uint256 amountToExercise = optionContract.originalAmount();
-        uint256 cost = (amountToExercise * optStrikePrice) / (10**18);
+        uint256 cost = (amountToExercise * optStrikePrice) / (10**6);
 
         vm.prank(holder);
         optionContract.exercise(amountToExercise);
@@ -763,7 +778,7 @@ contract OptionTest is Test {
         // Holder exercises a portion of the halted amount
         uint256 amountToExercise = vestedAtHalt / 2;
         assertTrue(amountToExercise > 0);
-        uint256 cost = (amountToExercise * optStrikePrice) / (10**18);
+        uint256 cost = (amountToExercise * optStrikePrice) / (10**6);
         vm.prank(holder);
         optionContract.exercise(amountToExercise);
 

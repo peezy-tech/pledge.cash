@@ -3,8 +3,15 @@ pragma solidity ^0.8.4;
 
 import {Ownable} from "solady/auth/Ownable.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
+import "forge-std/Test.sol";
 
-contract Option is Ownable {
+interface IERC20Metadata {
+    function decimals() external view returns (uint8);
+}
+
+contract Option is Ownable, Test {
+    using SafeTransferLib for address;
+
     address public underlying;
     uint256 public amount; // Max exercisable tokens. Reduced if vesting is halted.
     uint256 public strikePrice;
@@ -105,11 +112,39 @@ contract Option is Ownable {
 
         exercisedAmount += _amountToExercise;
 
-        uint256 pricePerSmallestUnderlyingUnitInFullCurrency = strikePrice / (10**18);
-        uint256 totalCost = _amountToExercise * pricePerSmallestUnderlyingUnitInFullCurrency;
+        // Calculate total cost properly handling different decimals
+        // strikePrice is denominated per unit of underlying token
+        // We need to scale the calculation to account for decimal differences
+        uint256 underlyingDecimals = IERC20Metadata(underlying).decimals();
+        uint256 currencyDecimals = IERC20Metadata(currency).decimals();
+        
+        uint256 totalCost;
+        if (underlyingDecimals >= currencyDecimals) {
+            // Scale down the amount to match currency precision
+            totalCost = (_amountToExercise * strikePrice) / (10 ** underlyingDecimals);
+        } else {
+            // Scale up to match currency precision  
+            totalCost = (_amountToExercise * strikePrice * (10 ** (currencyDecimals - underlyingDecimals))) / (10 ** underlyingDecimals);
+        }
+        
+        console.log("totalCost", totalCost);
+        console.log("currency decimals", currencyDecimals);
+        console.log("underlying decimals", underlyingDecimals);
+
+        // Log balances before transfers
+        console.log("holder currency before", SafeTransferLib.balanceOf(currency, holder));
+        console.log("owner currency before", SafeTransferLib.balanceOf(currency, owner()));
+        console.log("holder underlying before", SafeTransferLib.balanceOf(underlying, holder));
+        console.log("contract underlying before", SafeTransferLib.balanceOf(underlying, address(this)));
 
         SafeTransferLib.safeTransferFrom(currency, holder, owner(), totalCost);
         SafeTransferLib.safeTransfer(underlying, holder, _amountToExercise);
+
+        // Log balances after transfers
+        console.log("holder currency after", SafeTransferLib.balanceOf(currency, holder));
+        console.log("owner currency after", SafeTransferLib.balanceOf(currency, owner()));
+        console.log("holder underlying after", SafeTransferLib.balanceOf(underlying, holder));
+        console.log("contract underlying after", SafeTransferLib.balanceOf(underlying, address(this)));
     }
 
     /**

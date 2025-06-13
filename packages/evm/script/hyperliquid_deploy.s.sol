@@ -49,13 +49,13 @@ contract Deploy is Script, Test {
 
         Option option = new Option(
             USDC,
-            deployer,
+            guy,
             TOKEN,
             100_000_000 ether,
-            100 * (10 ** 6),
+            1 * (10 ** 6),
             block.timestamp + 10 days,
             block.timestamp,
-            block.timestamp
+            block.timestamp + 1 seconds
         );
 
         console.log("option", address(option));
