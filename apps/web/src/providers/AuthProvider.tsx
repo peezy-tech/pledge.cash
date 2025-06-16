@@ -1,11 +1,36 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
 import { useAccount, useSignMessage, useDisconnect } from 'wagmi'; 
 import { SiweMessage } from 'siwe'; 
-import { AuthContext } from '../contexts/AuthContext';
-import type { AuthState } from '../contexts/AuthContext';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/utils/api';
+
+
+export interface AuthState {
+  isAuthenticated: boolean;
+  walletAddress: string | null;
+  isLoading: boolean;
+  error: string | null;
+}
+
+interface AuthContextType extends AuthState {
+  login: () => Promise<void>;
+  logout: () => Promise<void>;
+  checkAuthStatus: () => Promise<void>;
+  clearError: () => void;
+}
+
+export const AuthContext = createContext<AuthContextType | null>(null); 
+
+export const useAuth = (): AuthContextType => {
+  const context = useContext(AuthContext);
+  
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  
+  return context;
+}; 
 
 const authKeys = {
   status: ['auth', 'status'] as const,

@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { createRoute } from '@tanstack/react-router'
-import { PageLayout } from './PageLayout'
-import { EditName } from './profile/components/EditName'
-import { AvatarViewer } from './profile/components/AvatarViewer'
-import { AvatarUploader } from './profile/components/AvatarUploader'
-import { DefaultAvatarSelector } from './profile/components/DefaultAvatarSelector'
-import { ProtectedRoute } from '../components/ProtectedRoute'
+import { PageLayout } from '@/components/PageLayout'
+import { EditName } from './components/EditName'
+import { AvatarViewer } from './components/AvatarViewer'
+import { AvatarUploader } from './components/AvatarUploader'
+import { DefaultAvatarSelector } from './components/DefaultAvatarSelector'
+import { ProtectedRoute } from '@/components/ProtectedRoute'
 import type { RootRoute } from '@tanstack/react-router'
 
 export function ProfilePage() {

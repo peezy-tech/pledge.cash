@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { createRoute } from '@tanstack/react-router'
 import type { RootRoute } from '@tanstack/react-router'
-import { LaunchCard } from './launch/components/LaunchCard'
-import { PageLayout } from './PageLayout'
+import { LaunchCard } from './components/LaunchCard'
+import { PageLayout } from '@/components/PageLayout'
 
 export function LaunchPage() {
   const [launchStatus, setLaunchStatus] = useState<'idle' | 'success' | 'error'>('idle')

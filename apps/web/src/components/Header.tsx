@@ -1,4 +1,4 @@
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '@/providers/AuthProvider';
 import { useAccount } from 'wagmi'; // Added Wagmi hooks
 import { ConnectKitButton } from 'connectkit';
 import ThemeSwitch from '@/components/ThemeSwitch';
