@@ -41,7 +41,10 @@ contract Deploy is Script, Test {
         console.log("token balance", token.balanceOf(deployer));
 
         // Precompute the Option contract address
-        address optionAddress = vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1);
+        address optionAddress = vm.computeCreateAddress(
+            deployer,
+            vm.getNonce(deployer) + 1
+        );
         console.log("precomputed option address", optionAddress);
 
         // Give allowance to the precomputed Option contract address
@@ -67,14 +70,9 @@ contract Deploy is Script, Test {
         console.log("option strikePrice", option.strikePrice());
         console.log("option expiry", option.expiry());
 
-        SafeTransferLib.safeTransfer(
-            USDC,
-            guy,
-            100_000_000 * (10 ** 6)
-        );
+        SafeTransferLib.safeTransfer(USDC, guy, 100_000_000 * (10 ** 6));
 
         // Also transfer some ether to guy
         payable(guy).transfer(100 ether);
-        
     }
 }
