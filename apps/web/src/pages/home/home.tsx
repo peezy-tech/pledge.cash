@@ -10,7 +10,7 @@ export function HomePage() {
       title="Explore"
     >
       <div>
-        <Button>Click me</Button>
+        <Button variant="outline">Click me</Button>
         <OptionContract />
       </div>
     </PageLayout>
