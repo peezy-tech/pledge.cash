@@ -2,6 +2,7 @@ import { useAuth } from '@/providers/AuthProvider';
 import { useAccount } from 'wagmi'; // Added Wagmi hooks
 import { ConnectKitButton } from 'connectkit';
 import ThemeSwitch from '@/components/ThemeSwitch';
+import { NavUser } from './nav-user';
 
 function AuthButton() {
   const { isAuthenticated, isLoading, login, logout } = useAuth();
@@ -14,13 +15,18 @@ function AuthButton() {
   return (
     <div className="flex items-center gap-2">
       {isAuthenticated ? (
-        <button 
-          onClick={async () => await logout()} 
-          disabled={isLoading}
-          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-md transition-colors disabled:opacity-50"
-        >
-          {isLoading ? 'Logging out...' : 'Logout'}
-        </button>
+        // <button 
+        //   onClick={async () => await logout()} 
+        //   disabled={isLoading}
+        //   className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-md transition-colors disabled:opacity-50"
+        // >
+        //   {isLoading ? 'Logging out...' : 'Logout'}
+        // </button>
+        <NavUser user={{
+          name: "John Doe",
+          email: "john.doe@example.com",
+          avatar: "https://github.com/shadcn.png",
+        }} />
       ) : (
         <button 
           onClick={async () => await login()} 
