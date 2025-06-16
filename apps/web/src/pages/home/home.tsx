@@ -1,5 +1,4 @@
-import { createRoute } from '@tanstack/react-router'
-import type { RootRoute } from '@tanstack/react-router'
+import { createRoute, type RootRoute } from '@tanstack/react-router'
 import { PageLayout } from '@/components/PageLayout'
 import OptionContract from '@/components/evm/OptionContract'
 
@@ -14,6 +13,7 @@ export function HomePage() {
     </PageLayout>
   )
 }
+
 
 export default (rootRoute: RootRoute) =>
   createRoute({
