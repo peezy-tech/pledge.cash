@@ -3,6 +3,7 @@ import { useAccount } from 'wagmi'; // Added Wagmi hooks
 import { ConnectKitButton } from 'connectkit';
 import ThemeSwitch from '@/components/ThemeSwitch';
 import { NavUser } from './nav-user';
+import { Link } from '@tanstack/react-router';
 
 function AuthButton() {
   const { isAuthenticated, isLoading, login, logout } = useAuth();
@@ -45,7 +46,18 @@ export default function Header() {
   const { error, clearError } = useAuth();
 
   return (
-    <header className="p-2 flex gap-4 justify-end items-center">
+    <header className="p-2 flex gap-4 justify-between items-center">
+      <nav className="flex items-center gap-6 text-sm">
+        <Link to="/" className="font-bold">
+          Home
+        </Link>
+        <Link to="/evm/option" className="text-muted-foreground transition-colors hover:text-foreground">
+          Option
+        </Link>
+        <Link to="/evm/locked-vault" className="text-muted-foreground transition-colors hover:text-foreground">
+          Locked Vault
+        </Link>
+      </nav>
       <div className="flex items-center gap-2">
         <ThemeSwitch />
         <AuthButton />

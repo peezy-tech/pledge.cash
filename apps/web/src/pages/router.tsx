@@ -6,6 +6,8 @@ import { getContext } from '@/providers'
 import ProfilePage from './profile/profile'
 import LaunchPage from './launch/launch'
 import HomePage from './home/home'
+import OptionPage from './evm/option'
+import LockedVaultPage from './evm/locked-vault'
 
 import Header from '@/components/Header'
 
@@ -26,6 +28,8 @@ const routes = rootRoute.addChildren([
   HomePage(rootRoute),
   ProfilePage(rootRoute),
   LaunchPage(rootRoute),
+  OptionPage(rootRoute),
+  LockedVaultPage(rootRoute),
 ])
 
 export const router = createRouter({

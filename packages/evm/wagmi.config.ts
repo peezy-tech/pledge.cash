@@ -43,7 +43,8 @@ export default defineConfig({
         "**.t.sol/*.json",
       ],
       include: [
-        "option.sol/**"
+        "option.sol/**",
+        "auction.sol/**"
       ]
     }),
   ],

@@ -8,10 +8,12 @@ import {MockERC20} from "../test/mocks/mockERC20.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 
 import {Option} from "../src/option.sol";
+import {LockedVault} from "../src/auction.sol";
 
 contract Deploy is Script, Test {
     address public USDC;
     address public TOKEN;
+    address public LOCKED_VAULT;
 
     address public deployer;
     uint256 public deployerPrivateKey =
@@ -39,6 +41,10 @@ contract Deploy is Script, Test {
         token.mint(deployer, 1_000_000_000 ether);
         console.log("token", address(token));
         console.log("token balance", token.balanceOf(deployer));
+
+        LockedVault lockedVault = new LockedVault(deployer);
+        LOCKED_VAULT = address(lockedVault);
+        console.log("lockedVault", LOCKED_VAULT);
 
         // Precompute the Option contract address
         address optionAddress = vm.computeCreateAddress(

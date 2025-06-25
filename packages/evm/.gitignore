@@ -176,3 +176,5 @@ dist
 
 cache/
 broadcast/local_*
+
+*.json
