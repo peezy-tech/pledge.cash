@@ -1,7 +1,7 @@
 import * as hl from "@nktkas/hyperliquid";
 import { privateKeyToAccount } from "viem/accounts";
 
-const PRIVATE_KEY = "0xedb039c6dd464bc8c7bf21ac70b6e435e5caf8ab8771b5ddeeb0a7816f581ed4" as const;
+const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}`;
 const DESTINATION_ADDRESS = "0xE60f03D22bC1D0BFF96F31578A5744F863b6D5b0" as const;
 
 async function main() {

@@ -1,7 +1,11 @@
 {
   "name": "@repo/scripts",
   "version": "1.0.0",
-  "main": "src/index.ts",
+  "scripts": {
+    "send_spot": "bun run src/send_spot.ts",
+    "check_user_details": "bun run src/check_user_details.ts",
+    "verify_tx": "bun run src/verify_tx.ts"
+  },
   "dependencies": {
     "@nktkas/hyperliquid": "^0.23.1",
     "@repo/db": "workspace:*",
