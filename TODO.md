@@ -1,10 +1,6 @@
-# evm
 
-- [ ] OptionFactory
-    - [ ] should probably make Option be cloneproxy
+# repo
 
-
-# web
-
-- [ ] app skeleton
-- [ ] option dashboard
+- [ ] bring hyperliquid sdk to packages (examine repos.json and run sync_repos.js and packages/ subfolders)
+- [ ] make playbook more generic but not too generic
+- [ ] 

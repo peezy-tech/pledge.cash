@@ -46,6 +46,9 @@ export function usePayInvoice() {
       // Execute the spotSend transaction
       console.log(`Sending ${invoice.amount} ${invoice.token} to ${creatorAddress}`);
       
+      // Record the timestamp before sending
+      const sendTimestamp = Date.now();
+      
       const result = await exchangeClient.spotSend({
         destination: creatorAddress as `0x${string}`,
         token: invoice.token as `${string}:0x${string}`,
@@ -59,24 +62,29 @@ export function usePayInvoice() {
       console.log("Waiting for transaction to be indexed...");
       await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3s
 
-      // Get the user's recent fills to find the transaction hash
+      // Get the user's recent transaction details to find the transaction hash
       const infoClient = new hl.InfoClient({ transport });
-      const userFills = await infoClient.userFills({ user: address });
+      const userDetails = await infoClient.userDetails({ user: address });
 
-      // Find the most recent spot send fill that matches our criteria
-      const spotSendFill = userFills
-        .filter(fill => 
-          fill.dir === 'Withdraw' && 
-          fill.px === '0' && // Spot sends have a price of 0
-          Math.abs(parseFloat(fill.sz) - parseFloat(invoice.amount)) < 0.0001 // Amount matches (with small tolerance for floating point)
+      console.log("User details fetched, looking for recent spotSend...");
+
+      // Find the most recent spot send transaction that matches our criteria
+      const spotSendTx = userDetails
+        .filter(tx => 
+          tx.action.type === 'spotSend' && 
+          tx.time > sendTimestamp && // Transaction happened after we sent
+          tx.action.destination.toLowerCase() === creatorAddress.toLowerCase() &&
+          tx.action.token === invoice.token &&
+          tx.action.amount === invoice.amount &&
+          tx.error === null // Transaction was successful
         )
-        .sort((a, b) => Number(b.time) - Number(a.time))[0]; // Get the most recent one
+        .sort((a, b) => b.time - a.time)[0]; // Get the most recent one
 
-      if (!spotSendFill || !spotSendFill.tid) {
+      if (!spotSendTx || !spotSendTx.hash) {
         throw new Error("Could not find transaction hash. Please try again or verify manually.");
       }
 
-      const txHash = spotSendFill.tid;
+      const txHash = spotSendTx.hash;
       console.log(`Found transaction hash: ${txHash}`);
 
       // Confirm the payment with our backend
