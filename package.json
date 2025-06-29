@@ -21,7 +21,8 @@
   "packageManager": "bun@1.1.42",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "scripts/"
   ],
   "dependencies": {
     "@types/three": "^0.176.0",

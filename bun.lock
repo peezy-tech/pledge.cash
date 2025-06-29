@@ -136,21 +136,6 @@
         "typescript": "^5.0.0",
       },
     },
-    "packages/scripts": {
-      "name": "@repo/scripts",
-      "version": "1.0.0",
-      "dependencies": {
-        "@nktkas/hyperliquid": "^0.23.1",
-        "@repo/db": "workspace:*",
-        "bs58": "^6.0.0",
-        "elysia": "latest",
-        "tweetnacl": "^1.0.3",
-        "viem": "^2.31.4",
-      },
-      "devDependencies": {
-        "bun-types": "latest",
-      },
-    },
     "packages/shamir-secret-sharing": {
       "name": "shamir-secret-sharing",
       "version": "0.0.4",
@@ -177,6 +162,21 @@
       },
       "peerDependencies": {
         "typescript": "^5.0.0",
+      },
+    },
+    "scripts": {
+      "name": "@repo/scripts",
+      "version": "1.0.0",
+      "dependencies": {
+        "@nktkas/hyperliquid": "^0.23.1",
+        "@repo/db": "workspace:*",
+        "bs58": "^6.0.0",
+        "elysia": "latest",
+        "tweetnacl": "^1.0.3",
+        "viem": "^2.31.4",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
       },
     },
   },
@@ -947,7 +947,7 @@
 
     "@repo/db": ["@repo/db@workspace:packages/db"],
 
-    "@repo/scripts": ["@repo/scripts@workspace:packages/scripts"],
+    "@repo/scripts": ["@repo/scripts@workspace:scripts"],
 
     "@rollup/plugin-inject": ["@rollup/plugin-inject@5.0.5", "", { "dependencies": { "@rollup/pluginutils": "^5.0.1", "estree-walker": "^2.0.2", "magic-string": "^0.30.3" }, "peerDependencies": { "rollup": "^1.20.0||^2.0.0||^3.0.0||^4.0.0" }, "optionalPeers": ["rollup"] }, "sha512-2+DEJbNBoPROPkgTDNe8/1YXWcqxbN5DTjASVIOx8HS+pITXushyNiBV56RB08zuptzz8gT3YfkqriTBVycepg=="],
 
