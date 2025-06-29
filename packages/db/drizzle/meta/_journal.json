@@ -8,6 +8,13 @@
       "when": 1748632025862,
       "tag": "0000_neat_human_torch",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1751163327735,
+      "tag": "0001_chief_synch",
+      "breakpoints": true
     }
   ]
 }

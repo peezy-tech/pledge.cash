@@ -57,6 +57,9 @@ export default function Header() {
         <Link to="/evm/locked-vault" className="text-muted-foreground transition-colors hover:text-foreground">
           Locked Vault
         </Link>
+        <Link to="/invoices" className="text-muted-foreground transition-colors hover:text-foreground">
+          Invoices
+        </Link>
       </nav>
       <div className="flex items-center gap-2">
         <ThemeSwitch />

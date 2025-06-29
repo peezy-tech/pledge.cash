@@ -86,6 +86,32 @@ export const configs = table("configs", {
   createdAt: t.integer().default(Date.now()).notNull(),
 });
 
+export const hyperliquidInvoices = table("hyperliquid_invoices", {
+  id: t.text().primaryKey().$default(() => `hlinv_${generateUniqueString(16)}`),
+  
+  // The user who created the invoice
+  creatorId: t.text().references(() => users.id).notNull(), 
+  
+  // The EVM address of the user who is expected to pay the invoice
+  payerAddress: t.text().notNull(),
+
+  // The string identifier for the Hyperliquid spot asset (e.g., "USDC:0x...")
+  token: t.text().notNull(), 
+
+  // The amount to be paid, stored as a human-readable string (e.g., "1.5"). The Hyperliquid SDK is expected
+  // to handle decimal conversion for sending, but the backend will need to handle it for verification.
+  amount: t.text().notNull(),
+  description: t.text(),
+  
+  status: t.text().$type<"pending" | "paid" | "expired">().default("pending").notNull(),
+  
+  txHash: t.text().unique(), // The Hyperliquid transaction hash, unique
+  
+  createdAt: t.integer().default(Date.now()).notNull(),
+  paidAt: t.integer(),
+  expiresAt: t.integer(), // Optional: for future implementation
+});
+
 function generateUniqueString(length: number = 12): string {
   const characters =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";

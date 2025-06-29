@@ -3,6 +3,7 @@ import { cors } from "@elysiajs/cors";
 import { migrate } from "@repo/db";
 import { staticPlugin } from "@elysiajs/static";
 import { auth_routes, SIWE_COOKIE_NAME } from "./auth";
+import { hyperliquidRoutes } from "./hyperliquid_routes";
 import { ethers } from "ethers";
 
 migrate();
@@ -51,6 +52,7 @@ const app = new Elysia({
       .get("/protected/user-profile", (context) => {
         return { user: context.currentUser };
       })
+      .use(hyperliquidRoutes)
   )
   .use(
     staticPlugin({

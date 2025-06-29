@@ -8,6 +8,7 @@ import LaunchPage from './launch/launch'
 import HomePage from './home/home'
 import OptionPage from './evm/option'
 import LockedVaultPage from './evm/locked-vault'
+import InvoicesPage from './invoices/invoices'
 
 import Header from '@/components/Header'
 
@@ -30,6 +31,7 @@ const routes = rootRoute.addChildren([
   LaunchPage(rootRoute),
   OptionPage(rootRoute),
   LockedVaultPage(rootRoute),
+  InvoicesPage(rootRoute),
 ])
 
 export const router = createRouter({
