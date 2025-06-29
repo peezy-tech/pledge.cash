@@ -43,5 +43,3 @@ cache/
 *.db
 server
 media/
-
-hyperliquid-payments-poc/

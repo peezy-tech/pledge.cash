@@ -1,0 +1,16 @@
+{
+  "name": "@repo/scripts",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@nktkas/hyperliquid": "^0.23.1",
+    "@repo/db": "workspace:*",
+    "bs58": "^6.0.0",
+    "elysia": "latest",
+    "tweetnacl": "^1.0.3",
+    "viem": "^2.31.4"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  }
+}
