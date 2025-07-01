@@ -1,6 +1,8 @@
 - [x] move api scripts to own 'scripts' apps sub-folder
-- [ ] test agent spotSend (with a approveAgent frontend button and a script?)
-- [ ] unlocks: recurrent payments. every X seconds check which recurrent_invoices trigger and call them (i guess each of recurrent store a `trigger_after` column with a timestamp? and we compare against the latest block timestamp from hyperliquid sdk `blockDetails`)
+- [ ] multisig init flow ("merchant" onboarding). most methods at multisig_send_spot.ts
+- [ ] recurrent invoices: payable by multisig
+- [ ] invoice hooks -> run logic after an invoice is paid
+- [ ] invoice links: whoever clicks can send a transaction to pay for it. (checkout experience)
 
 - [ ] bring hyperliquid sdk to packages (examine repos.json and run sync_repos.js and packages/ subfolders)
 - [ ] make playbook more generic but not too generic

@@ -5,6 +5,7 @@ import { EditName } from './components/EditName'
 import { AvatarViewer } from './components/AvatarViewer'
 import { AvatarUploader } from './components/AvatarUploader'
 import { DefaultAvatarSelector } from './components/DefaultAvatarSelector'
+import { ApproveAgent } from './components/ApproveAgent'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import type { RootRoute } from '@tanstack/react-router'
 
@@ -23,11 +24,13 @@ export function ProfilePage() {
   }
 
   return (
-    <ProtectedRoute 
+    <ProtectedRoute
       fallback={
         <PageLayout title="Profile - Access Restricted">
           <div className="text-center py-12">
-            <h2 className="text-2xl font-bold text-white mb-4">Profile Access Restricted</h2>
+            <h2 className="text-2xl font-bold text-white mb-4">
+              Profile Access Restricted
+            </h2>
             <p className="text-gray-300 mb-6">
               You need to connect your wallet and login to access your profile.
             </p>
@@ -47,13 +50,10 @@ export function ProfilePage() {
           </div>
 
           <div className="md:col-span-1 space-y-8">
-            
-              <EditName />
-            
-            
-              <AvatarUploader onAvatarUpload={handleAvatarUpload} />
-              <DefaultAvatarSelector onAvatarSelect={handleDefaultAvatarSelect} />
-            
+            <EditName />
+            <ApproveAgent />
+            <AvatarUploader onAvatarUpload={handleAvatarUpload} />
+            <DefaultAvatarSelector onAvatarSelect={handleDefaultAvatarSelect} />
           </div>
         </div>
       </PageLayout>
@@ -66,4 +66,4 @@ export default (rootRoute: RootRoute) =>
     getParentRoute: () => rootRoute,
     path: '/profile',
     component: ProfilePage,
-  }) 
+  })

@@ -4,13 +4,10 @@ import { migrate } from "@repo/db";
 import { staticPlugin } from "@elysiajs/static";
 import { auth_routes, SIWE_COOKIE_NAME } from "./auth";
 import { hyperliquidRoutes } from "./hyperliquid_routes";
-import { ethers } from "ethers";
 
 migrate();
 
-const app = new Elysia({
-  // Cookie config handled by auth_routes or specific JWT setups
-})
+const app = new Elysia()
   .use(
     cors({
       origin: () => true,
@@ -22,6 +19,7 @@ const app = new Elysia({
   .use(auth_routes)
   .guard((appInstance) =>
     appInstance
+      //TODO: do this resolving on auth_routes plugin via DERIVE
       .resolve(async (ctx) => {
         const { cookie } = ctx;
         const jwtInstance = ctx[SIWE_COOKIE_NAME];
@@ -181,10 +179,10 @@ const app = new Elysia({
 //             { name: "validAfter", type: "uint256" },
 //           ],
 //         };
-        
+
 //         const lastAuctionTime = await vaultContract.lastAuctionTime();
 //         const currentNonce = await vaultContract.nonces(owner);
-        
+
 //         const validAfter = lastAuctionTime + 1n; // block.timestamp is in seconds, ensure it's after last settlement
 
 //         const permitData = {
@@ -194,7 +192,7 @@ const app = new Elysia({
 //           nonce: currentNonce, // Use BigInt directly here
 //           validAfter,   // Use BigInt directly here
 //         };
-        
+
 //         console.log(`[AuctionVault] Preparing to sign permit for owner ${owner}, token ${token}, amount ${amountStr}`);
 //         console.log("[AuctionVault] EIP712 Domain:", domain);
 //         console.log("[AuctionVault] EIP712 Types:", types);
@@ -206,7 +204,7 @@ const app = new Elysia({
 //         });
 
 //         const signature = await directorWallet.signTypedData(domain, types, permitData);
-        
+
 //         console.log(`[AuctionVault] Permit signed successfully for owner ${owner}. Signature: ${signature}`);
 
 //         return {
@@ -233,7 +231,7 @@ const app = new Elysia({
 //       body: t.Object({
 //         owner: t.String({ error: "Owner address is required and must be a string." }),
 //         token: t.String({ error: "Token address is required and must be a string." }),
-//         amount: t.String({ error: "Amount is required and must be a string representing a number." }), 
+//         amount: t.String({ error: "Amount is required and must be a string representing a number." }),
 //       }),
 //     }
 //   );
