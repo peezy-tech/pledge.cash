@@ -1,16 +1,16 @@
 import { useAuth } from '@/providers/AuthProvider';
 import { useAccount } from 'wagmi'; // Added Wagmi hooks
-import { ConnectKitButton } from 'connectkit';
 import ThemeSwitch from '@/components/ThemeSwitch';
 import { NavUser } from './nav-user';
 import { Link } from '@tanstack/react-router';
+import { ConnectWalletButton } from '@/components/evm/simplekit';
 
 function AuthButton() {
   const { isAuthenticated, isLoading, login, logout } = useAuth();
   const { isConnected } = useAccount();
 
   if (!isConnected) {
-    return <ConnectKitButton />;
+    return <ConnectWalletButton />;
   }
 
   return (
