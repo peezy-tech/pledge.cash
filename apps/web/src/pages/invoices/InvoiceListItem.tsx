@@ -1,13 +1,13 @@
 import React, { useState } from "react";
 import { useAccount } from "wagmi";
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
-import { Label } from "./ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
-import { Alert, AlertDescription } from "./ui/alert";
-import { Separator } from "./ui/separator";
-import { usePayInvoice } from "../hooks/usePayInvoice";
-import { useConfirmPaymentMutation } from "../hooks/useHyperliquid";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Separator } from "@/components/ui/separator";
+import { usePayInvoice } from "./usePayInvoice";
+import { useConfirmPaymentMutation } from "@/hooks/useHyperliquid";
 
 interface Invoice {
   id: string;

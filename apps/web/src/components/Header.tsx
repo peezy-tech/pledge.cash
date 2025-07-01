@@ -6,7 +6,7 @@ import { Link } from '@tanstack/react-router';
 import { ConnectWalletButton } from '@/components/evm/simplekit';
 
 function AuthButton() {
-  const { isAuthenticated, isLoading, login, logout } = useAuth();
+  const { isAuthenticated, isLoading, login } = useAuth();
   const { isConnected } = useAccount();
 
   if (!isConnected) {

@@ -194,7 +194,7 @@ export const auth_routes = new Elysia({ name: "auth" })
       }
       return { currentUser: { walletAddress: payload.address } };
     } catch (err) {
-      console.error("Guard Resolve Error:", err);
+      console.error("deriving error:", err);
       if (cookie[SIWE_COOKIE_NAME]) cookie[SIWE_COOKIE_NAME]?.remove();
       return { currentUser: undefined };
     }

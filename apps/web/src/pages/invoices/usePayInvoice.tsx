@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAccount } from "wagmi";
-import * as hl from "@nktkas/hyperliquid";
-import { useConfirmPaymentMutation } from "./useHyperliquid";
+import { useConfirmPaymentMutation } from "@/hooks/useHyperliquid";
+import { useHyperliquid } from "@/providers/HyperliquidProvider";
 
 interface Invoice {
   id: string;
@@ -18,30 +18,33 @@ interface Invoice {
 }
 
 export function usePayInvoice() {
-  const { address } = useAccount();
+  const account = useAccount();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const confirmPayment = useConfirmPaymentMutation();
+  const { exchangeClient, infoClient, isReady } = useHyperliquid();
 
   const pay = async (invoice: Invoice, creatorAddress: string) => {
-    if (!address) {
+    if (!account.address) {
       throw new Error("Wallet not connected");
     }
 
-    if (!window.ethereum) {
-      throw new Error("Ethereum provider not available");
+    if (!isReady) {
+      throw new Error("Hyperliquid clients not ready");
+    }
+
+    if (!exchangeClient) {
+      throw new Error("Exchange client not available - wallet may not be connected");
+    }
+
+    if (!infoClient) {
+      throw new Error("Info client not available");
     }
 
     setIsLoading(true);
     setError(null);
 
     try {
-      // Initialize Hyperliquid ExchangeClient with window.ethereum
-      const transport = new hl.HttpTransport();
-      const exchangeClient = new hl.ExchangeClient({
-        wallet: window.ethereum,
-        transport,
-      });
 
       // Execute the spotSend transaction
       console.log(`Sending ${invoice.amount} ${invoice.token} to ${creatorAddress}`);
@@ -63,22 +66,21 @@ export function usePayInvoice() {
       await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3s
 
       // Get the user's recent transaction details to find the transaction hash
-      const infoClient = new hl.InfoClient({ transport });
-      const userDetails = await infoClient.userDetails({ user: address });
+      const userDetails = await infoClient.userDetails({ user: account.address });
 
       console.log("User details fetched, looking for recent spotSend...");
 
       // Find the most recent spot send transaction that matches our criteria
       const spotSendTx = userDetails
-        .filter(tx => 
+        .filter((tx: any) => 
           tx.action.type === 'spotSend' && 
           tx.time > sendTimestamp && // Transaction happened after we sent
-          tx.action.destination.toLowerCase() === creatorAddress.toLowerCase() &&
+          tx.action.destination?.toLowerCase() === creatorAddress.toLowerCase() &&
           tx.action.token === invoice.token &&
           tx.action.amount === invoice.amount &&
           tx.error === null // Transaction was successful
         )
-        .sort((a, b) => b.time - a.time)[0]; // Get the most recent one
+        .sort((a: any, b: any) => b.time - a.time)[0]; // Get the most recent one
 
       if (!spotSendTx || !spotSendTx.hash) {
         throw new Error("Could not find transaction hash. Please try again or verify manually.");
@@ -113,15 +115,19 @@ export function usePayInvoice() {
 export function useAvailableTokens() {
   const [tokens, setTokens] = useState<Array<{ name: string; tokenId: string; identifier: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const { infoClient, isReady } = useHyperliquid();
 
   const fetchTokens = async () => {
+    if (!isReady || !infoClient) {
+      console.error("Hyperliquid clients not ready");
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const transport = new hl.HttpTransport();
-      const infoClient = new hl.InfoClient({ transport });
       const spotMeta = await infoClient.spotMeta();
       
-      const availableTokens = spotMeta.tokens.map(token => ({
+      const availableTokens = spotMeta.tokens.map((token: any) => ({
         name: token.name,
         tokenId: token.tokenId,
         identifier: `${token.name}:${token.tokenId}`,

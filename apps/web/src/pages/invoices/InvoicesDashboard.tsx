@@ -1,9 +1,9 @@
-import React, { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
-import { Button } from "./ui/button";
-import { Alert, AlertDescription } from "./ui/alert";
-import { Separator } from "./ui/separator";
-import { useHyperliquidInvoices, useHyperliquidSpotBalances } from "../hooks/useHyperliquid";
+import { useState } from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+
+import { useHyperliquidInvoices, useHyperliquidSpotBalances } from "@/hooks/useHyperliquid";
 import { CreateInvoiceForm } from "./CreateInvoiceForm";
 import { InvoiceListItem } from "./InvoiceListItem";
 

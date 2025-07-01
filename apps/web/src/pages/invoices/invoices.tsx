@@ -1,5 +1,5 @@
 import { createRoute } from '@tanstack/react-router'
-import { InvoicesDashboard } from '@/components/InvoicesDashboard'
+import { InvoicesDashboard } from './InvoicesDashboard'
 
 export default function InvoicesPage(parentRoute: any) {
   const invoicesRoute = createRoute({
