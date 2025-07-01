@@ -22,19 +22,16 @@ export const auth_routes = new Elysia({ name: "auth" })
       }),
     })
   )
-  .get(
-    SIWE_COOKIE_NAME,
-    async ({ [SIWE_COOKIE_NAME]: siweAuth, cookie }) => {
-      const authTokenCookie = cookie[SIWE_COOKIE_NAME];
-      const profile = await siweAuth.verify(authTokenCookie?.value);
+  .get(SIWE_COOKIE_NAME, async ({ [SIWE_COOKIE_NAME]: siweAuth, cookie }) => {
+    const authTokenCookie = cookie[SIWE_COOKIE_NAME];
+    const profile = await siweAuth.verify(authTokenCookie?.value);
 
-      if (!profile || !profile?.address) {
-        return { address: null };
-      }
-
-      return profile;
+    if (!profile || !profile?.address) {
+      return { address: null };
     }
-  )
+
+    return profile;
+  })
   .put(
     SIWE_COOKIE_NAME,
     async ({ [SIWE_COOKIE_NAME]: siweAuth, cookie }) => {
@@ -85,7 +82,7 @@ export const auth_routes = new Elysia({ name: "auth" })
           set.status = 422;
           return { error: "INVALID NONCE" };
         }
-        
+
         const ethAddress = fields.address as `0x${string}`;
 
         const user = await db
@@ -123,13 +120,21 @@ export const auth_routes = new Elysia({ name: "auth" })
             set.status = 422;
             return { error: "INVALID_NONCE", message: error.message };
           default:
-            if (error && error.message && Object.values(SiweErrorType).includes(error.message as SiweErrorType)) {
+            if (
+              error &&
+              error.message &&
+              Object.values(SiweErrorType).includes(
+                error.message as SiweErrorType
+              )
+            ) {
               set.status = 422;
               return { error: error.message };
             }
             set.status = 400;
-            return { error: "BAD_REQUEST", message: "An unexpected error occurred."};
-            
+            return {
+              error: "BAD_REQUEST",
+              message: "An unexpected error occurred.",
+            };
         }
       }
     },
@@ -172,4 +177,25 @@ export const auth_routes = new Elysia({ name: "auth" })
 
       return { success: true };
     }
-  );
+  )
+  .derive({ as: "global" }, async (ctx) => {
+    const { cookie } = ctx;
+    const jwtInstance = ctx[SIWE_COOKIE_NAME];
+    const tokenValue = cookie[SIWE_COOKIE_NAME]?.value;
+
+    if (!tokenValue) {
+      return { currentUser: undefined };
+    }
+    try {
+      const payload = await jwtInstance.verify(tokenValue);
+      if (!payload || typeof payload.address !== "string") {
+        if (cookie[SIWE_COOKIE_NAME]) cookie[SIWE_COOKIE_NAME]?.remove();
+        return { currentUser: undefined };
+      }
+      return { currentUser: { walletAddress: payload.address } };
+    } catch (err) {
+      console.error("Guard Resolve Error:", err);
+      if (cookie[SIWE_COOKIE_NAME]) cookie[SIWE_COOKIE_NAME]?.remove();
+      return { currentUser: undefined };
+    }
+  });

@@ -4,8 +4,11 @@ import { hyperliquidInvoices, users } from "@repo/db/schema";
 import { eq } from "drizzle-orm";
 import * as hl from "@nktkas/hyperliquid";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { auth_routes } from "./auth";
 
-const operator = privateKeyToAccount(process.env.OPERATOR_PRIVATE_KEY as `0x${string}`);
+const operator = privateKeyToAccount(
+  process.env.OPERATOR_PRIVATE_KEY as `0x${string}`
+);
 
 // Initialize Hyperliquid InfoClient for reading data
 const transport = new hl.HttpTransport();
@@ -17,10 +20,19 @@ interface AuthenticatedContext {
 }
 
 export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
-  // Create a new invoice
+  .use(auth_routes)
+  .onBeforeHandle(async (context) => {
+    if (!context.currentUser) {
+      context.set.status = 401;
+      return { error: "Unauthorized: Access denied. Please log in." };
+    }
+  })
+  .get("/protected/user-profile", (context) => {
+    return { user: context.currentUser };
+  })
   .post(
     "/invoices",
-    async ({ body, currentUser, set }: any) => {
+    async ({ body, currentUser, set }) => {
       try {
         // Get the creator's user record
         const creator = await db
@@ -78,7 +90,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
   )
 
   // Get invoices for the authenticated user
-  .get("/invoices", async ({ currentUser, set }: any) => {
+  .get("/invoices", async ({ currentUser, set }) => {
     try {
       // Get the user record
       const user = await db
@@ -136,7 +148,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
   // Confirm that an invoice has been paid
   .put(
     "/invoices/:id/confirm",
-    async ({ params, body, currentUser, set }: any) => {
+    async ({ params, body, currentUser, set }) => {
       try {
         // Get the invoice
         const invoice = await db
@@ -267,7 +279,10 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
           return { error: "Transaction destination is not a multisig account" };
         }
 
-        if (txDetails.action.token !== "USDC:0x0000000000000000000000000000000000000000") {
+        if (
+          txDetails.action.token !==
+          "USDC:0x0000000000000000000000000000000000000000"
+        ) {
           set.status = 400;
           return { error: "Transaction token is not USDC" };
         }
@@ -280,8 +295,6 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
         const user = txDetails.user;
 
         // TODO: error if user already has a multisig account or is already a multisig user
-
-
       } catch (error) {
         console.error("Error initializing multisig:", error);
       }
@@ -296,8 +309,6 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
   .get("/multisig", async ({ currentUser, set }) => {
     // todo: return multisig account of currentUser
   })
-
-
 
   // Get user's spot balances
   .get("/spot-balances", async ({ currentUser, set }: any) => {
