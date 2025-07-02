@@ -192,7 +192,12 @@ export const auth_routes = new Elysia({ name: "auth" })
         if (cookie[SIWE_COOKIE_NAME]) cookie[SIWE_COOKIE_NAME]?.remove();
         return { currentUser: undefined };
       }
-      return { currentUser: { walletAddress: payload.address } };
+      const user = await db
+        .select()
+        .from(users)
+        .where(orm.eq(users.evm_address, payload.address))
+        .then((result) => result[0]);
+      return { currentUser: { walletAddress: payload.address, id: user?.id } };
     } catch (err) {
       console.error("deriving error:", err);
       if (cookie[SIWE_COOKIE_NAME]) cookie[SIWE_COOKIE_NAME]?.remove();

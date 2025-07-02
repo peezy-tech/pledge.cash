@@ -3,22 +3,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
-import { useHyperliquidInvoices, useHyperliquidSpotBalances } from "@/hooks/useHyperliquid";
+import { useHyperliquidInvoices } from "@/hooks/useHyperliquid";
 import { CreateInvoiceForm } from "./CreateInvoiceForm";
 import { InvoiceListItem } from "./InvoiceListItem";
+import { SpotBalances } from "@/components/SpotBalances";
+import { useAccount } from "wagmi";
+
 
 export function InvoicesDashboard() {
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const { address } = useAccount();
   const { data: invoicesData, isLoading: invoicesLoading, error: invoicesError } = useHyperliquidInvoices();
-  const { data: balancesData, isLoading: balancesLoading } = useHyperliquidSpotBalances();
 
   const handleCreateSuccess = () => {
     setShowCreateForm(false);
-  };
-
-  const formatBalance = (balance: string) => {
-    const num = parseFloat(balance);
-    return num.toFixed(6).replace(/\.?0+$/, "");
   };
 
   if (invoicesLoading) {
@@ -41,7 +39,6 @@ export function InvoicesDashboard() {
 
   const createdInvoices = invoicesData?.created || [];
   const receivedInvoices = invoicesData?.received || [];
-  const balances = balancesData?.balances || [];
 
   return (
     <div className="space-y-8">
@@ -62,28 +59,7 @@ export function InvoicesDashboard() {
       </div>
 
       {/* Spot Balances */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Your Spot Balances</CardTitle>
-          <CardDescription>Available tokens in your Hyperliquid account</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {balancesLoading ? (
-            <p className="text-gray-500">Loading balances...</p>
-          ) : balances.length > 0 ? (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {balances.map((balance, index) => (
-                <div key={index} className="p-3 bg-gray-50 rounded-lg">
-                  <p className="font-medium">{balance.coin}</p>
-                  <p className="text-sm text-gray-600">{formatBalance(balance.total)}</p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-gray-500">No balances found</p>
-          )}
-        </CardContent>
-      </Card>
+      <SpotBalances address={address} />
 
       {/* Create Invoice Form */}
       {showCreateForm && (
@@ -139,7 +115,7 @@ export function InvoicesDashboard() {
                   key={invoice.id} 
                   invoice={invoice} 
                   type="received"
-                  creatorAddress={invoice.creatorAddress}
+                  creatorAddress={invoice.creatorAddress || undefined}
                 />
               ))}
             </div>

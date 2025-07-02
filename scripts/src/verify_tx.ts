@@ -3,9 +3,9 @@ import * as hl from "@nktkas/hyperliquid";
 async function main() {
   try {
     console.log("Initializing Hyperliquid InfoClient...");
-    const transport = new hl.HttpTransport();
+    const transport = new hl.HttpTransport({ isTestnet: true });
     const infoClient = new hl.InfoClient({ transport });
-    const txHash = "0x2b007758e38ad209be4e04263900e301ef00c6dacaac3b80578c0cd76d1657d9";
+    const txHash = "0x8ba756776cbd56c1d473041783df4e010f0048cdffa7b5e53a7ecb2525730d04";
     
     console.log(`Fetching transaction details for hash: ${txHash}`);
     const txDetails = await infoClient.txDetails({ hash: txHash });

@@ -1,6 +1,7 @@
-import { getDefaultConfig } from 'connectkit'
 import { http, createConfig } from 'wagmi'
 import { defineChain } from 'viem'
+
+const IS_TESTNET = true
 
 export const hyperliquid = defineChain({
   id: 9999,
@@ -12,13 +13,21 @@ export const hyperliquid = defineChain({
   },
   rpcUrls: {
     default: {
-      http: ['http://127.0.0.1:9999'],
-      webSocket: ['ws://127.0.0.1:9999'],
+      http: [IS_TESTNET ? 'http://127.0.0.1:9999' : 'https://rpc.hyperliquid.xyz'],
+      webSocket: [IS_TESTNET ? 'ws://127.0.0.1:9999' : 'wss://rpc.hyperliquid.xyz'],
     },
   },
-  // blockExplorers: {
-  //   default: { name: 'Explorer', url: 'https://explorer.hyperliquid.xyz' },
-  // },
+  blockExplorers: {
+    default: {
+      name: 'Explorer',
+      url: IS_TESTNET
+        ? 'https://app.hyperliquid-testnet.xyz/explorer/'
+        : 'https://app.hyperliquid.xyz/explorer/',
+    },
+  },
+  fees: {
+    baseFeeMultiplier: 1,
+  },
   // contracts: {
   //   multicall3: {
   //     address: '0xcA11bde05977b3631167028862bE2a173976CA11',
@@ -27,16 +36,9 @@ export const hyperliquid = defineChain({
   // },
 })
 
-export const config = createConfig(
-  getDefaultConfig({
-    appName: 'APP_NAME',
-    appIcon: 'https://mainnet.xyz/favicon.ico',
-    appDescription: 'mainnet',
-    appUrl: 'https://mainnet.xyz',
-    walletConnectProjectId: '',
-    chains: [hyperliquid],
-    transports: {
-      [hyperliquid.id]: http(),
-    },
-  }),
-)
+export const config = createConfig({
+  chains: [hyperliquid],
+  transports: {
+    [hyperliquid.id]: http(),
+  },
+})

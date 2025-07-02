@@ -1,9 +1,14 @@
 import { Elysia, t } from "elysia";
 import { db } from "@repo/db";
-import { hyperliquidInvoices, users } from "@repo/db/schema";
+import {
+  hyperliquidInvoices,
+  multisigAccounts,
+  operatorWallets,
+  users,
+} from "@repo/db/schema";
 import { eq } from "drizzle-orm";
 import * as hl from "@nktkas/hyperliquid";
-import { privateKeyToAccount } from "viem/accounts";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { auth_routes } from "./auth";
 
 const operator = privateKeyToAccount(
@@ -12,14 +17,23 @@ const operator = privateKeyToAccount(
 
 const IS_TESTNET = true;
 
-// Initialize Hyperliquid InfoClient for reading data
 const transport = new hl.HttpTransport({ isTestnet: IS_TESTNET });
 const infoClient = new hl.InfoClient({ transport });
+const exchangeClient = new hl.ExchangeClient({
+  transport,
+  wallet: operator,
+  isTestnet: IS_TESTNET,
+});
 
-// Define the context type that includes currentUser
-interface AuthenticatedContext {
-  currentUser: { walletAddress: string };
-}
+const spotTokens = (await infoClient.spotMeta()).tokens.reduce(
+  (acc, t) => {
+    acc[t.name] = t;
+    return acc;
+  },
+  {} as Record<string, hl.SpotToken>
+);
+
+console.log(spotTokens.USDC);
 
 export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
   .use(auth_routes)
@@ -194,7 +208,10 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             }
 
             // Verify transaction details
-            if (txDetails.user.toLowerCase() !== invoice.payerAddress) {
+            if (
+              txDetails.user.toLowerCase() !==
+              invoice.payerAddress.toLowerCase()
+            ) {
               set.status = 400;
               return {
                 error: "Transaction sender does not match payer address",
@@ -271,47 +288,248 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
         }
       )
 
+      .get("/operator", async () => ({ operator: operator.address }))
+
       .post(
         "/multisig",
-        async ({ body, set }) => {
+        async ({ body, set, currentUser }) => {
           try {
+            console.log(
+              "Starting multisig creation for user:",
+              currentUser?.walletAddress
+            );
             const { tx } = body;
+            console.log("Transaction hash:", tx);
+
             const txDetails = await infoClient.txDetails({ hash: tx });
+            console.log("Transaction details:", txDetails);
+
             if (!txDetails || txDetails.error) {
+              console.log("Transaction not found or invalid");
               set.status = 400;
               return { error: "Transaction not found or invalid" };
             }
 
+            console.log("Transaction action type:", txDetails.action.type);
             if (txDetails.action.type !== "spotSend") {
+              console.log("Transaction is not a spot send");
               set.status = 400;
               return { error: "Transaction is not a spot send" };
             }
 
-            if (txDetails.action.destination !== operator.address) {
+            console.log(
+              "Transaction destination:",
+              txDetails.action.destination
+            );
+            console.log("Expected operator address:", operator.address);
+            if (
+              txDetails.action.destination?.toLowerCase() !==
+              operator.address.toLowerCase()
+            ) {
+              console.log(
+                "Transaction destination does not match operator address"
+              );
               set.status = 400;
               return {
                 error: "Transaction destination is not a multisig account",
               };
             }
 
+            const expectedToken = `${spotTokens.USDC.name}:${spotTokens.USDC.tokenId}`;
+            console.log("Transaction token:", txDetails.action.token);
+            console.log("Expected token:", expectedToken);
             if (
               txDetails.action.token !==
-              "USDC:0x0000000000000000000000000000000000000000"
+              `${spotTokens.USDC.name}:${spotTokens.USDC.tokenId}`
             ) {
+              console.log("Transaction token is not USDC");
               set.status = 400;
               return { error: "Transaction token is not USDC" };
             }
 
+            console.log("Transaction amount:", txDetails.action.amount);
             if (txDetails.action.amount !== "5") {
+              console.log("Transaction amount is not 5");
               set.status = 400;
               return { error: "Transaction amount is not 5" };
             }
 
-            const user = txDetails.user;
+            console.log("Transaction user:", txDetails.user);
+            console.log(
+              "Current user wallet address:",
+              currentUser?.walletAddress
+            );
+            if (
+              txDetails.user?.toLowerCase() !==
+              currentUser?.walletAddress.toLowerCase()
+            ) {
+              console.log("Transaction user does not match current user");
+              set.status = 400;
+              return { error: "Transaction user does not match current user" };
+            }
 
-            // TODO: error if user already has a multisig account or is already a multisig user
+            console.log(
+              "Checking for existing operator wallet for user:",
+              currentUser?.walletAddress
+            );
+            // Check if user already has operator wallet or multisig account
+            const existingOperatorWallet = await db
+              .select()
+              .from(operatorWallets)
+              .where(
+                eq(operatorWallets.userAddress, currentUser?.walletAddress)
+              )
+              .get();
+
+            console.log("Existing operator wallet:", existingOperatorWallet);
+
+            console.log(
+              "Checking for existing multisig account for user:",
+              currentUser?.walletAddress
+            );
+            const existingMultisigAccount = await db
+              .select()
+              .from(multisigAccounts)
+              .where(
+                eq(multisigAccounts.userAddress, currentUser?.walletAddress)
+              )
+              .get();
+
+            console.log("Existing multisig account:", existingMultisigAccount);
+
+            if (existingOperatorWallet || existingMultisigAccount) {
+              console.log(
+                "User already has a multisig account or operator wallet"
+              );
+              set.status = 400;
+              return {
+                error: "User already has a multisig account or operator wallet",
+              };
+            }
+
+            console.log("Generating new operator wallet private key");
+            const userOperatorWalletPrivateKey = generatePrivateKey();
+            const userOperatorWallet = privateKeyToAccount(
+              userOperatorWalletPrivateKey
+            );
+            console.log(
+              "Generated operator wallet address:",
+              userOperatorWallet.address
+            );
+
+            console.log("Inserting operator wallet record into database");
+            console.log({
+              userAddress: currentUser?.walletAddress,
+              address: userOperatorWallet.address,
+              privateKey: userOperatorWalletPrivateKey,
+            });
+            const userOperatorWalletRecord = await db
+              .insert(operatorWallets)
+              .values({
+                userAddress: currentUser?.walletAddress,
+                address: userOperatorWallet.address,
+                privateKey: userOperatorWalletPrivateKey,
+              })
+              .returning()
+              .get();
+            console.log(
+              "Operator wallet record created:",
+              userOperatorWalletRecord
+            );
+
+            console.log("Generating new multisig account private key");
+            const multisigAccountPrivateKey = generatePrivateKey();
+            const multisigAccount = privateKeyToAccount(
+              multisigAccountPrivateKey
+            );
+            console.log(
+              "Generated multisig account address:",
+              multisigAccount.address
+            );
+
+            console.log("Inserting multisig account record into database");
+            const multisigAccountRecord = await db
+              .insert(multisigAccounts)
+              .values({
+                userAddress: currentUser?.walletAddress,
+                operatorAddress: userOperatorWallet.address,
+                address: multisigAccount.address,
+              })
+              .returning()
+              .get();
+            console.log(
+              "Multisig account record created:",
+              multisigAccountRecord
+            );
+
+            // send 1 usdc to operator and 1 usdc to multisig account
+            const token =
+              `${spotTokens.USDC.name}:${spotTokens.USDC.tokenId}` as const;
+            console.log(
+              "Sending 1 USDC to operator wallet:",
+              userOperatorWallet.address
+            );
+            console.log("Using token:", token);
+            const operatorTx = await exchangeClient.spotSend({
+              destination: userOperatorWallet.address,
+              token,
+              amount: "1",
+            });
+            console.log("Operator tx result:", operatorTx);
+
+            console.log(
+              "Sending 1 USDC to multisig account:",
+              multisigAccount.address
+            );
+            const multisigTx = await exchangeClient.spotSend({
+              destination: multisigAccount.address,
+              token,
+              amount: "1",
+            });
+            console.log("Multisig tx result:", multisigTx);
+
+            console.log(
+              "Creating multisig exchange client for account:",
+              multisigAccount.address
+            );
+            const multisigExchangeClient = new hl.ExchangeClient({
+              transport,
+              wallet: multisigAccount,
+              isTestnet: IS_TESTNET,
+            });
+
+            const authorizedUsers = [
+              currentUser?.walletAddress,
+              userOperatorWallet.address,
+            ];
+            console.log(
+              "Converting to multi-sig user with authorized users:",
+              authorizedUsers
+            );
+            console.log("Threshold: 1");
+            const convertTx =
+              await multisigExchangeClient.convertToMultiSigUser({
+                authorizedUsers: authorizedUsers,
+                threshold: 1,
+              });
+            console.log("Convert to multisig tx result:", convertTx);
+
+            const result = {
+              success: true,
+              multisig: multisigAccount.address,
+              operator: userOperatorWallet.address,
+            };
+            console.log("Multisig creation completed successfully:", result);
+
+            return result;
           } catch (error) {
             console.error("Error initializing multisig:", error);
+            console.error(
+              "Error stack:",
+              error instanceof Error ? error.stack : "No stack trace"
+            );
+            set.status = 500;
+            return { error: "Failed to initialize multisig" };
           }
         },
         {
@@ -322,34 +540,11 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
       )
 
       .get("/multisig", async ({ currentUser, set }) => {
-        // todo: return multisig account of currentUser
-      })
-
-      // Get user's spot balances
-      .get("/spot-balances", async ({ currentUser, set }) => {
-        try {
-          console.log(
-            `Fetching spot balances for ${currentUser.walletAddress}`
-          );
-          const spotState = await infoClient.spotClearinghouseState({
-            user: currentUser.walletAddress,
-          });
-
-          if (!spotState) {
-            return { balances: [] };
-          }
-
-          // Transform the balances to a more frontend-friendly format
-          const balances = spotState.balances.map((balance) => ({
-            coin: balance.coin,
-            total: balance.total,
-          }));
-
-          return { balances };
-        } catch (error) {
-          console.error("Error fetching spot balances:", error);
-          set.status = 500;
-          return { error: "Failed to fetch spot balances" };
-        }
+        const multisigAccount = await db
+          .select()
+          .from(multisigAccounts)
+          .where(eq(multisigAccounts.userAddress, currentUser!.walletAddress))
+          .get();
+        return multisigAccount;
       })
   );
