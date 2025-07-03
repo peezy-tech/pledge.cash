@@ -1,3 +1,13 @@
+CREATE TABLE `agent_wallets` (
+	`id` text PRIMARY KEY NOT NULL,
+	`multisigId` text NOT NULL,
+	`userId` text NOT NULL,
+	`address` text NOT NULL,
+	`createdAt` integer DEFAULT 1751585516741 NOT NULL,
+	FOREIGN KEY (`multisigId`) REFERENCES `multisig_accounts`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`userId`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
 CREATE TABLE `hyperliquid_invoices` (
 	`id` text PRIMARY KEY NOT NULL,
 	`creatorId` text NOT NULL,
@@ -7,7 +17,7 @@ CREATE TABLE `hyperliquid_invoices` (
 	`description` text,
 	`status` text DEFAULT 'pending' NOT NULL,
 	`txHash` text,
-	`createdAt` integer DEFAULT 1751406754564 NOT NULL,
+	`createdAt` integer DEFAULT 1751585516740 NOT NULL,
 	`paidAt` integer,
 	`expiresAt` integer,
 	FOREIGN KEY (`creatorId`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
@@ -18,20 +28,14 @@ CREATE TABLE `multisig_accounts` (
 	`id` text PRIMARY KEY NOT NULL,
 	`userAddress` text NOT NULL,
 	`operatorAddress` text NOT NULL,
+	`operatorPrivateKey` text NOT NULL,
 	`address` text NOT NULL,
-	`createdAt` integer DEFAULT 1751406754564 NOT NULL
+	`createdAt` integer DEFAULT 1751585516741 NOT NULL
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `multisig_accounts_userAddress_unique` ON `multisig_accounts` (`userAddress`);--> statement-breakpoint
 CREATE UNIQUE INDEX `multisig_accounts_operatorAddress_unique` ON `multisig_accounts` (`operatorAddress`);--> statement-breakpoint
-CREATE TABLE `operator_wallets` (
-	`id` text PRIMARY KEY NOT NULL,
-	`userAddress` text NOT NULL,
-	`address` text NOT NULL,
-	`privateKey` text NOT NULL,
-	`createdAt` integer DEFAULT 1751406754564 NOT NULL
-);
---> statement-breakpoint
+CREATE UNIQUE INDEX `multisig_accounts_operatorPrivateKey_unique` ON `multisig_accounts` (`operatorPrivateKey`);--> statement-breakpoint
 CREATE TABLE `users` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text,

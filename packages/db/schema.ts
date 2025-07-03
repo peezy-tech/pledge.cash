@@ -43,18 +43,19 @@ export const hyperliquidInvoices = table("hyperliquid_invoices", {
   expiresAt: t.integer(), // Optional: for future implementation
 });
 
-export const operatorWallets = table("operator_wallets", {
-  id: t.text().primaryKey().$default(() => `op_${generateUniqueString(16)}`),
-  userAddress: t.text().notNull(),
-  address: t.text().notNull(),
-  privateKey: t.text().notNull(),
-  createdAt: t.integer().default(Date.now()).notNull(),
-});
-
 export const multisigAccounts = table("multisig_accounts", {
   id: t.text().primaryKey().$default(() => `msig_${generateUniqueString(16)}`),
   userAddress: t.text().notNull().unique(),
   operatorAddress: t.text().notNull().unique(),
+  operatorPrivateKey: t.text().notNull().unique(),
+  address: t.text().notNull(),
+  createdAt: t.integer().default(Date.now()).notNull(),
+});
+
+export const agentWallets = table("agent_wallets", {
+  id: t.text().primaryKey().$default(() => `ag_${generateUniqueString(16)}`),
+  multisigId: t.text().notNull().references(() => multisigAccounts.id).notNull(),
+  userId: t.text().notNull().references(() => users.id).notNull(),
   address: t.text().notNull(),
   createdAt: t.integer().default(Date.now()).notNull(),
 });

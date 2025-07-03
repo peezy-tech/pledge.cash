@@ -31,10 +31,13 @@ export function useSpotTokens() {
     queryKey: ['spot-tokens'],
     queryFn: async () => {
       const response = await infoClient?.spotMeta()
-      return response?.tokens.reduce((acc, t) => {
-        acc[t.name] = t
-        return acc
-      }, {} as Record<string, hl.SpotToken>)
+      return response?.tokens.reduce(
+        (acc, t) => {
+          acc[t.name] = t
+          return acc
+        },
+        {} as Record<string, hl.SpotToken>,
+      )
     },
     enabled: isReady && !!infoClient,
   })
@@ -121,8 +124,17 @@ export function useMultisig() {
 
 export function useCreateMultisigMutation() {
   return useMutation({
-    mutationFn: async ({ tx }: { tx: `0x${string}` }) => {
-      const response = await api.hyperliquid.multisig.post({ tx })
+    mutationFn: async ({
+      tx,
+      agentWalletAddress,
+    }: {
+      tx: `0x${string}`
+      agentWalletAddress: `0x${string}`
+    }) => {
+      const response = await api.hyperliquid.multisig.post({
+        tx,
+        agentWalletAddress,
+      })
       if (response.error) {
         throw new Error(response.error.value as string)
       }

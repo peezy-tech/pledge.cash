@@ -1,5 +1,6 @@
 - [x] move api scripts to own 'scripts' apps sub-folder
-- [ ] multisig init flow ("merchant" onboarding). most methods at multisig_send_spot.ts
+- [x] multisig init flow ("merchant" onboarding). most methods at multisig_send_spot.ts
+- [x] generate agent wallet on client side and approve it on backend
 - [ ] recurrent invoices: payable by multisig
 - [ ] invoice hooks -> run logic after an invoice is paid
 - [ ] invoice links: whoever clicks can send a transaction to pay for it. (checkout experience)

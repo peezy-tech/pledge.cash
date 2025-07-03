@@ -287,7 +287,7 @@ export function SwapComponent() {
 
     setIsLoading(true)
     try {
-      const { client } = multisigClient
+      const { client, agentClient } = multisigClient
       const selectedTokenMeta = spotTokens[selectedToken]
       
       if (!selectedTokenMeta) {
@@ -336,7 +336,12 @@ export function SwapComponent() {
       console.log('  Token szDecimals:', selectedTokenMeta.szDecimals)
       console.log('  Order params:', orderParams)
       
-      const result = await client.order(orderParams)
+      let result: hl.OrderResponse | null = null
+      if(agentClient) {
+        result = await agentClient.order(orderParams)
+      } else {
+        result = await client.order(orderParams)
+      }
       console.log('Swap result:', result)
 
       toast.success(`Successfully ${swapDirection === 'token-to-usdc' ? 'sold' : 'bought'} ${selectedToken}`)

@@ -1,9 +1,82 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "bba44a32-3008-4f72-8ad0-ba224a40330a",
+  "id": "51a61506-4d8d-4149-b0bc-77525f91dfaf",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
+    "agent_wallets": {
+      "name": "agent_wallets",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "multisigId": {
+          "name": "multisigId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "userId": {
+          "name": "userId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "address": {
+          "name": "address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1751585516741
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "agent_wallets_multisigId_multisig_accounts_id_fk": {
+          "name": "agent_wallets_multisigId_multisig_accounts_id_fk",
+          "tableFrom": "agent_wallets",
+          "tableTo": "multisig_accounts",
+          "columnsFrom": [
+            "multisigId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agent_wallets_userId_users_id_fk": {
+          "name": "agent_wallets_userId_users_id_fk",
+          "tableFrom": "agent_wallets",
+          "tableTo": "users",
+          "columnsFrom": [
+            "userId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "hyperliquid_invoices": {
       "name": "hyperliquid_invoices",
       "columns": {
@@ -70,7 +143,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751406754564
+          "default": 1751585516740
         },
         "paidAt": {
           "name": "paidAt",
@@ -139,6 +212,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "operatorPrivateKey": {
+          "name": "operatorPrivateKey",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "address": {
           "name": "address",
           "type": "text",
@@ -152,7 +232,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751406754564
+          "default": 1751585516741
         }
       },
       "indexes": {
@@ -169,54 +249,15 @@
             "operatorAddress"
           ],
           "isUnique": true
+        },
+        "multisig_accounts_operatorPrivateKey_unique": {
+          "name": "multisig_accounts_operatorPrivateKey_unique",
+          "columns": [
+            "operatorPrivateKey"
+          ],
+          "isUnique": true
         }
       },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "operator_wallets": {
-      "name": "operator_wallets",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "userAddress": {
-          "name": "userAddress",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "address": {
-          "name": "address",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "privateKey": {
-          "name": "privateKey",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1751406754564
-        }
-      },
-      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

@@ -1,9 +1,9 @@
 import { Elysia, t } from "elysia";
 import { db } from "@repo/db";
 import {
+  agentWallets,
   hyperliquidInvoices,
   multisigAccounts,
-  operatorWallets,
   users,
 } from "@repo/db/schema";
 import { eq } from "drizzle-orm";
@@ -56,7 +56,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             const creator = await db
               .select()
               .from(users)
-              .where(eq(users.evm_address, currentUser.walletAddress))
+              .where(eq(users.evm_address, currentUser!.walletAddress))
               .get();
             if (!creator) {
               set.status = 404;
@@ -117,7 +117,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
           const user = await db
             .select()
             .from(users)
-            .where(eq(users.evm_address, currentUser.walletAddress))
+            .where(eq(users.evm_address, currentUser!.walletAddress))
             .get();
           if (!user) {
             set.status = 404;
@@ -151,7 +151,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             .where(
               eq(
                 hyperliquidInvoices.payerAddress,
-                currentUser.walletAddress.toLowerCase()
+                currentUser!.walletAddress.toLowerCase()
               )
             );
 
@@ -184,7 +184,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
 
             // Check if the current user is the payer
             if (
-              invoice.payerAddress !== currentUser.walletAddress.toLowerCase()
+              invoice.payerAddress !== currentUser!.walletAddress.toLowerCase()
             ) {
               set.status = 403;
               return { error: "Only the payer can confirm payment" };
@@ -323,7 +323,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             );
             console.log("Expected operator address:", operator.address);
             if (
-              txDetails.action.destination?.toLowerCase() !==
+              (txDetails.action as any).destination?.toLowerCase() !==
               operator.address.toLowerCase()
             ) {
               console.log(
@@ -369,21 +369,6 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             }
 
             console.log(
-              "Checking for existing operator wallet for user:",
-              currentUser?.walletAddress
-            );
-            // Check if user already has operator wallet or multisig account
-            const existingOperatorWallet = await db
-              .select()
-              .from(operatorWallets)
-              .where(
-                eq(operatorWallets.userAddress, currentUser?.walletAddress)
-              )
-              .get();
-
-            console.log("Existing operator wallet:", existingOperatorWallet);
-
-            console.log(
               "Checking for existing multisig account for user:",
               currentUser?.walletAddress
             );
@@ -391,19 +376,19 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
               .select()
               .from(multisigAccounts)
               .where(
-                eq(multisigAccounts.userAddress, currentUser?.walletAddress)
+                eq(multisigAccounts.userAddress, currentUser!.walletAddress)
               )
               .get();
 
             console.log("Existing multisig account:", existingMultisigAccount);
 
-            if (existingOperatorWallet || existingMultisigAccount) {
+            if (existingMultisigAccount) {
               console.log(
-                "User already has a multisig account or operator wallet"
+                "User already has a multisig account"
               );
               set.status = 400;
               return {
-                error: "User already has a multisig account or operator wallet",
+                error: "User already has a multisig account",
               };
             }
 
@@ -415,26 +400,6 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             console.log(
               "Generated operator wallet address:",
               userOperatorWallet.address
-            );
-
-            console.log("Inserting operator wallet record into database");
-            console.log({
-              userAddress: currentUser?.walletAddress,
-              address: userOperatorWallet.address,
-              privateKey: userOperatorWalletPrivateKey,
-            });
-            const userOperatorWalletRecord = await db
-              .insert(operatorWallets)
-              .values({
-                userAddress: currentUser?.walletAddress,
-                address: userOperatorWallet.address,
-                privateKey: userOperatorWalletPrivateKey,
-              })
-              .returning()
-              .get();
-            console.log(
-              "Operator wallet record created:",
-              userOperatorWalletRecord
             );
 
             console.log("Generating new multisig account private key");
@@ -451,8 +416,9 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             const multisigAccountRecord = await db
               .insert(multisigAccounts)
               .values({
-                userAddress: currentUser?.walletAddress,
+                userAddress: currentUser!.walletAddress,
                 operatorAddress: userOperatorWallet.address,
+                operatorPrivateKey: userOperatorWalletPrivateKey,
                 address: multisigAccount.address,
               })
               .returning()
@@ -473,7 +439,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             const operatorTx = await exchangeClient.spotSend({
               destination: userOperatorWallet.address,
               token,
-              amount: "1",
+              amount: "0",
             });
             console.log("Operator tx result:", operatorTx);
 
@@ -484,7 +450,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             const multisigTx = await exchangeClient.spotSend({
               destination: multisigAccount.address,
               token,
-              amount: "1",
+              amount: "0",
             });
             console.log("Multisig tx result:", multisigTx);
 
@@ -497,6 +463,21 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
               wallet: multisigAccount,
               isTestnet: IS_TESTNET,
             });
+
+            const approveAgentWalletTx = await multisigExchangeClient.approveAgent({
+              agentAddress: body.agentWalletAddress,
+              agentName: "Frontend",
+            })
+
+            console.log("Approve agent wallet tx result:", approveAgentWalletTx);
+
+            const agentWalletRecord = await db.insert(agentWallets).values({
+              multisigId: multisigAccountRecord.id,
+              userId: currentUser!.id,
+              address: body.agentWalletAddress,
+            }).returning().get();
+            
+            console.log("Agent wallet record:", agentWalletRecord);
 
             const authorizedUsers = [
               currentUser?.walletAddress,
@@ -535,6 +516,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
         {
           body: t.Object({
             tx: t.TemplateLiteral("0x${string}"),
+            agentWalletAddress: t.TemplateLiteral("0x${string}"),
           }),
         }
       )

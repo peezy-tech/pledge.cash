@@ -23,6 +23,7 @@ import { toast } from 'sonner'
 import { useState } from 'react'
 import { Copy, ExternalLink, ArrowUpRight, ArrowDownLeft, Shield, AlertTriangle } from 'lucide-react'
 import { SwapComponent } from './SwapComponent'
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 
 function MultisigInfo() {
   const multisigClient = useMultisigClient()
@@ -346,8 +347,6 @@ function MultisigInfo() {
   )
 }
 
-
-
 function CreateMultisigSection() {
   const { data: operator } = useOperator()
   const { data: multisig } = useMultisig()
@@ -364,6 +363,13 @@ function CreateMultisigSection() {
 
     setIsCreating(true)
     try {
+      let agentPrivateKey = localStorage.getItem('agentPrivateKey');
+      if (!agentPrivateKey) {
+        agentPrivateKey = generatePrivateKey();
+        localStorage.setItem('agentPrivateKey', agentPrivateKey);
+      }
+      const agentAccount = privateKeyToAccount(agentPrivateKey as `0x${string}`);
+
       const tokenIdentifier = `${spotTokens.USDC.name}:${spotTokens.USDC.tokenId}` as const
       
       const tx = await exchangeClient?.spotSend({
@@ -400,7 +406,7 @@ function CreateMultisigSection() {
         throw new Error('Transaction not found')
       }
 
-      createMultisig({ tx: txHash })
+      createMultisig({ tx: txHash, agentWalletAddress: agentAccount.address })
       toast.success('Multisig created successfully!')
     } catch (error) {
       console.error('Create multisig failed:', error)

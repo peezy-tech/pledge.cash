@@ -2,17 +2,20 @@ import { createContext, useEffect, useContext, useState, useMemo } from 'react'
 import { useAccount, useChainId, useWalletClient } from 'wagmi'
 import { useMultisig } from '@/hooks/useHyperliquid'
 import * as hl from '@nktkas/hyperliquid'
+import { privateKeyToAccount } from 'viem/accounts'
 
 const IS_TESTNET = true
 
 const MultisigContext = createContext<{
   client: hl.MultiSignClient
   address: string
+  agentClient: hl.ExchangeClient | null
 } | null>(null)
 
 export const useMultisigClient = (): {
   client: hl.MultiSignClient
   address: string
+  agentClient: hl.ExchangeClient | null
 } | null => {
   const context = useContext(MultisigContext)
 
@@ -27,10 +30,11 @@ export function MultisigProvider({ children }: { children: React.ReactNode }) {
   const { data: multisig } = useMultisig()
   const { data: walletClient } = useWalletClient()
   const account = useAccount()
-  const chainId = useChainId()
 
   const [multisigClient, setMultisigClient] =
     useState<hl.MultiSignClient | null>(null)
+  const [agentClient, setAgentClient] = useState<hl.ExchangeClient | null>(null)
+  // const chainId = useChainId()
 
   useEffect(() => {
     if (!multisig || !walletClient || !account.address) return
@@ -76,13 +80,29 @@ export function MultisigProvider({ children }: { children: React.ReactNode }) {
     })
 
     setMultisigClient(multisigClient)
+
+    const agentPrivateKey = localStorage.getItem('agentPrivateKey')
+    if (agentPrivateKey) {
+      const agentAccount = privateKeyToAccount(agentPrivateKey as `0x${string}`)
+      const agentClient = new hl.ExchangeClient({
+        transport: new hl.HttpTransport({ isTestnet: IS_TESTNET }),
+        wallet: agentPrivateKey as `0x${string}`,
+        isTestnet: IS_TESTNET,
+      })
+
+      setAgentClient(agentClient)
+    }
   }, [multisig, walletClient])
 
   const value = useMemo(
     () =>
       multisigClient &&
-      multisig && { client: multisigClient, address: multisig.address },
-    [multisigClient, multisig],
+      multisig && {
+        client: multisigClient,
+        address: multisig.address,
+        agentClient,
+      },
+    [multisigClient, multisig, agentClient],
   )
 
   return (
