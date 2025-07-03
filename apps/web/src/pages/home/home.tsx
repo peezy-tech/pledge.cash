@@ -13,6 +13,7 @@ import { createContext, useEffect, useContext, useState, useMemo } from 'react'
 import * as hl from '@nktkas/hyperliquid'
 import { useAccount, useWalletClient } from 'wagmi'
 import { SpotBalances } from '@/components/SpotBalances'
+import type { SignTypedDataParameters } from 'viem'
 
 const IS_TESTNET = true
 
@@ -37,17 +38,39 @@ export const useMultisigClient = (): {
 function MultisigProvider({ children }: { children: React.ReactNode }) {
   const { data: multisig } = useMultisig()
   const { data: walletClient } = useWalletClient()
-  
+  const account = useAccount()
+
   const [multisigClient, setMultisigClient] =
     useState<hl.MultiSignClient | null>(null)
 
   useEffect(() => {
-    if (!multisig || !walletClient) return
-
+    if (!multisig || !walletClient || !account.address) return
+    // console.log(walletClient.address)
     const multisigClient = new hl.MultiSignClient({
       transport: new hl.HttpTransport({ isTestnet: IS_TESTNET }),
       multiSignAddress: multisig.address as `0x${string}`,
-      signers: [walletClient],
+      signatureChainId: IS_TESTNET ? '0x270f' : '0x3e7',
+      signers: [
+        {
+          address: account.address,
+          signTypedData: async (params: {
+            domain: {
+              name: string
+              version: string
+              chainId: number
+              verifyingContract: hl.Hex
+            }
+            types: {
+              [key: string]: {
+                name: string
+                type: string
+              }[]
+            }
+            primaryType: string
+            message: Record<string, unknown>
+          }) => await walletClient.signTypedData(params),
+        },
+      ],
       isTestnet: IS_TESTNET,
     })
 
@@ -79,7 +102,8 @@ function Multisig() {
     const TransferToMultisigButton = () => {
       const { exchangeClient } = useHyperliquid()
       const { data: spotTokens } = useSpotTokens()
-      const { data: spotBalances } = useHyperliquidSpotBalances()
+      const { address: userAddress } = useAccount()
+      const { data: spotBalances } = useHyperliquidSpotBalances(userAddress)
 
       if (!exchangeClient || !spotTokens || !spotBalances) return
 
