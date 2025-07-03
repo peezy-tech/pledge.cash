@@ -1,254 +1,127 @@
 import { createRoute, type RootRoute } from '@tanstack/react-router'
 import { PageLayout } from '@/components/PageLayout'
-import {
-  useOperator,
-  useMultisig,
-  useCreateMultisigMutation,
-  useSpotTokens,
-  useHyperliquidSpotBalances,
-} from '@/hooks/useHyperliquid'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { useHyperliquid } from '@/providers/HyperliquidProvider'
-import { createContext, useEffect, useContext, useState, useMemo } from 'react'
-import * as hl from '@nktkas/hyperliquid'
-import { useAccount, useWalletClient } from 'wagmi'
-import { SpotBalances } from '@/components/SpotBalances'
-import type { SignTypedDataParameters } from 'viem'
+import { BarChart3, DollarSign, TrendingUp, Users, Activity } from 'lucide-react'
 
-const IS_TESTNET = true
-
-const MultisigContext = createContext<{
-  client: hl.MultiSignClient
-  address: string
-} | null>(null)
-
-export const useMultisigClient = (): {
-  client: hl.MultiSignClient
-  address: string
-} | null => {
-  const context = useContext(MultisigContext)
-
-  if (context === undefined) {
-    throw new Error('useMultisigClient must be used within a MultisigProvider')
-  }
-
-  return context
-}
-
-function MultisigProvider({ children }: { children: React.ReactNode }) {
-  const { data: multisig } = useMultisig()
-  const { data: walletClient } = useWalletClient()
-  const account = useAccount()
-
-  const [multisigClient, setMultisigClient] =
-    useState<hl.MultiSignClient | null>(null)
-
-  useEffect(() => {
-    if (!multisig || !walletClient || !account.address) return
-    // console.log(walletClient.address)
-    const multisigClient = new hl.MultiSignClient({
-      transport: new hl.HttpTransport({ isTestnet: IS_TESTNET }),
-      multiSignAddress: multisig.address as `0x${string}`,
-      signatureChainId: IS_TESTNET ? '0x270f' : '0x3e7',
-      signers: [
-        {
-          address: account.address,
-          signTypedData: async (params: {
-            domain: {
-              name: string
-              version: string
-              chainId: number
-              verifyingContract: hl.Hex
-            }
-            types: {
-              [key: string]: {
-                name: string
-                type: string
-              }[]
-            }
-            primaryType: string
-            message: Record<string, unknown>
-          }) => await walletClient.signTypedData(params),
-        },
-      ],
-      isTestnet: IS_TESTNET,
-    })
-
-    setMultisigClient(multisigClient)
-  }, [multisig, walletClient])
-
-  const value = useMemo(
-    () =>
-      multisigClient &&
-      multisig && { client: multisigClient, address: multisig.address },
-    [multisigClient, multisig],
-  )
-
+function DashboardCard({ title, value, description, icon: Icon }: {
+  title: string
+  value: string
+  description: string
+  icon: React.ElementType
+}) {
   return (
-    <MultisigContext.Provider value={value ?? null}>
-      {children}
-    </MultisigContext.Provider>
-  )
-}
-
-function Multisig() {
-  const MultiSigComponent = () => {
-    const multisigClient = useMultisigClient()
-
-    if (!multisigClient) return
-
-    const { client, address } = multisigClient
-
-    const TransferToMultisigButton = () => {
-      const { exchangeClient } = useHyperliquid()
-      const { data: spotTokens } = useSpotTokens()
-      const { address: userAddress } = useAccount()
-      const { data: spotBalances } = useHyperliquidSpotBalances(userAddress)
-
-      if (!exchangeClient || !spotTokens || !spotBalances) return
-
-      return (
-        <Button
-          onClick={() =>
-            exchangeClient?.spotSend({
-              destination: address as `0x${string}`,
-              token: `${spotTokens?.USDC.name}:${spotTokens?.USDC.tokenId}`,
-              amount: '10',
-            })
-          }
-        >
-          Transfer
-        </Button>
-      )
-    }
-
-    const MultisigBalances = () => (
-      <SpotBalances address={address as `0x${string}`} />
-    )
-
-    const WithdrawFromMultisigButton = () => {
-      const { address: userAddress } = useAccount()
-      const { data: spotTokens } = useSpotTokens()
-
-      if (!userAddress || !spotTokens?.USDC) return
-
-      return (
-        <Button
-          onClick={() => {
-            const params = {
-              destination: userAddress,
-              token: `${spotTokens?.USDC.name}:${spotTokens?.USDC.tokenId}`,
-              amount: '10',
-            } as const
-
-            console.log(params)
-            client.spotSend(params)
-          }}
-        >
-          Withdraw
-        </Button>
-      )
-    }
-
-    return (
-      <div>
-        <MultisigBalances />
-        <p>Multisig address: {address}</p>
-        <TransferToMultisigButton />
-        <WithdrawFromMultisigButton />
-      </div>
-    )
-  }
-
-  return (
-    <MultisigProvider>
-      <MultiSigComponent />
-    </MultisigProvider>
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        <Icon className="h-4 w-4 text-muted-foreground" />
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold">{value}</div>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </CardContent>
+    </Card>
   )
 }
 
 export function HomePage() {
-  const { data: operator } = useOperator()
-  const { data: multisig } = useMultisig()
-  const { mutate: createMultisig } = useCreateMultisigMutation()
-  const { data: spotTokens } = useSpotTokens()
-  const { exchangeClient, infoClient } = useHyperliquid()
-
-  const sendSeedTx = async () => {
-    console.log('Starting sendSeedTx function')
-    console.log('Operator:', operator?.operator)
-    console.log('USDC token:', spotTokens?.USDC)
-
-    if (!operator?.operator || !spotTokens?.USDC) {
-      console.log('Missing operator or USDC token, returning early')
-      return
-    }
-
-    const tokenIdentifier =
-      `${spotTokens?.USDC.name}:${spotTokens?.USDC.tokenId}` as const
-    console.log('Token identifier:', tokenIdentifier)
-    console.log('Sending 5 USDC to operator:', operator?.operator)
-
-    const tx = await exchangeClient?.spotSend({
-      destination: operator?.operator,
-      token: tokenIdentifier,
-      amount: '5',
-    })
-
-    console.log('SpotSend result:', tx)
-    console.log('Waiting 1 second for transaction to be indexed...')
-
-    // wait for tx to be indexed
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-
-    console.log('Fetching user details for operator:', operator?.operator)
-    const userDetails = await infoClient?.userDetails({
-      user: operator?.operator,
-    })
-
-    console.log('User details received, filtering transactions...')
-    console.log('Total transactions:', userDetails?.length)
-
-    console.log('User details:', userDetails)
-
-    const txHash = userDetails
-      ?.filter((tx) => {
-        const matches =
-          tx.action.type === 'spotSend' &&
-          tx.action.destination?.toLowerCase() ===
-            operator?.operator?.toLowerCase() &&
-          tx.action.token === tokenIdentifier &&
-          tx.action.amount === '5' &&
-          tx.error === null
-
-        if (matches) {
-          console.log('Found matching transaction:', tx)
-        }
-        return matches
-      })
-      ?.sort((a, b) => b.time - a.time)[0]?.hash
-
-    console.log('Final transaction hash:', txHash)
-    return txHash
-  }
-
   return (
-    <PageLayout title="Explore">
-      <div>
-        <div>
-          <h1>Operator</h1>
-          <p>{operator?.operator}</p>
+    <PageLayout title="Dashboard">
+      <div className="space-y-6">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <DashboardCard
+            title="Total Balance"
+            value="$45,231.89"
+            description="+20.1% from last month"
+            icon={DollarSign}
+          />
+          <DashboardCard
+            title="Active Positions"
+            value="12"
+            description="+3 from last week"
+            icon={TrendingUp}
+          />
+          <DashboardCard
+            title="Multisig Wallets"
+            value="3"
+            description="+1 new this month"
+            icon={Users}
+          />
+          <DashboardCard
+            title="Total Transactions"
+            value="2,350"
+            description="+15% from last month"
+            icon={Activity}
+          />
         </div>
-        <Button
-          onClick={async () => {
-            const txHash = await sendSeedTx()
-            if (!txHash) return
-            createMultisig({ tx: txHash })
-          }}
-        >
-          Create Multisig
-        </Button>
-        {multisig?.address && <Multisig />}
+        
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+          <Card className="col-span-4">
+            <CardHeader>
+              <CardTitle>Portfolio Overview</CardTitle>
+              <CardDescription>
+                Your trading performance over the last 30 days
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pl-2">
+              <div className="h-[200px] flex items-center justify-center text-muted-foreground">
+                <BarChart3 className="h-16 w-16 mb-2" />
+                <p>Chart visualization would go here</p>
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card className="col-span-3">
+            <CardHeader>
+              <CardTitle>Recent Activity</CardTitle>
+              <CardDescription>
+                Latest transactions and updates
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="flex items-center space-x-4">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                  <div className="flex-1 space-y-1">
+                    <p className="text-sm font-medium">Multisig created</p>
+                    <p className="text-xs text-muted-foreground">2 hours ago</p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-4">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <div className="flex-1 space-y-1">
+                    <p className="text-sm font-medium">Position opened</p>
+                    <p className="text-xs text-muted-foreground">5 hours ago</p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-4">
+                  <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
+                  <div className="flex-1 space-y-1">
+                    <p className="text-sm font-medium">Funds transferred</p>
+                    <p className="text-xs text-muted-foreground">1 day ago</p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+        
+        <Card>
+          <CardHeader>
+            <CardTitle>Quick Actions</CardTitle>
+            <CardDescription>
+              Frequently used features and tools
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline">Create Position</Button>
+              <Button variant="outline">Transfer Funds</Button>
+              <Button variant="outline">View Analytics</Button>
+              <Button variant="outline">Export Data</Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </PageLayout>
   )

@@ -8,6 +8,7 @@ import { router } from '@/pages/router'
 import { queryClient } from './QueryClientProvider'
 import { EvmProvider } from './EvmProvider'
 import { HyperliquidProvider } from './HyperliquidProvider'
+import { MultisigProvider } from './MultisigProvider'
 
 export function getContext() {
   return {
@@ -22,7 +23,9 @@ export function Providers() {
         <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
           <AuthProvider>
             <HyperliquidProvider>
-              <RouterProvider router={router} />
+              <MultisigProvider>
+                <RouterProvider router={router} />
+              </MultisigProvider>
             </HyperliquidProvider>
           </AuthProvider>
         </ThemeProvider>

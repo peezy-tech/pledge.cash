@@ -51,6 +51,9 @@ export default function Header() {
         <Link to="/" className="font-bold">
           Home
         </Link>
+        <Link to="/multisig" className="text-muted-foreground transition-colors hover:text-foreground">
+          Multisig
+        </Link>
         <Link to="/evm/option" className="text-muted-foreground transition-colors hover:text-foreground">
           Option
         </Link>
