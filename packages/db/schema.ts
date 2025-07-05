@@ -1,5 +1,6 @@
 import { sqliteTable as table } from "drizzle-orm/sqlite-core";
 import * as t from "drizzle-orm/sqlite-core";
+import { relations } from "drizzle-orm";
 
 export const users = table("users", {
   id: t
@@ -42,8 +43,40 @@ export const hyperliquidInvoices = table("hyperliquid_invoices", {
   createdAt: t.integer().default(Date.now()).notNull(),
   paidAt: t.integer(),
   expiresAt: t.integer(), // Optional: for future implementation
-  webhookUrl: t.text(),
 });
+
+export const hyperliquidInvoicesRelations = relations(
+  hyperliquidInvoices,
+  ({ one, many }) => ({
+    creator: one(users, {
+      fields: [hyperliquidInvoices.creatorId],
+      references: [users.id],
+    }),
+    hooks: many(invoiceHooks),
+  })
+);
+
+export const invoiceHooks = table("invoice_hooks", {
+  id: t
+    .text()
+    .primaryKey()
+    .$default(() => `hook_${generateUniqueString(16)}`),
+  invoiceId: t
+    .text()
+    .notNull()
+    .references(() => hyperliquidInvoices.id),
+  event: t.text().$type<"invoice.paid" | "invoice.created">().notNull(),
+  type: t.text().$type<"discord" | "webhook">().notNull(),
+  url: t.text().notNull(),
+  createdAt: t.integer().default(Date.now()).notNull(),
+});
+
+export const invoiceHooksRelations = relations(invoiceHooks, ({ one }) => ({
+  invoice: one(hyperliquidInvoices, {
+    fields: [invoiceHooks.invoiceId],
+    references: [hyperliquidInvoices.id],
+  }),
+}));
 
 export const multisigAccounts = table("multisig_accounts", {
   id: t

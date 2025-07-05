@@ -94,14 +94,21 @@ export function useInvoiceById(invoiceId: string | undefined) {
 export function useCreateInvoiceMutation() {
   const queryClient = useQueryClient()
 
+  type Hook = {
+    event: "invoice.paid" | "invoice.created";
+    type: "discord" | "webhook";
+    url: string;
+  };
+
   return useMutation({
     mutationFn: async (invoiceData: {
       payerAddress?: string
       token: string
-      amount: string
+      amount:string
       description?: string
-      webhookUrl?: string
+      hooks?: Hook[]
     }) => {
+      // @ts-ignore - The api type is not yet updated with the new hooks property
       const response = await api.hyperliquid.invoices.post(invoiceData)
       if (response.error) {
         const errorMessage = typeof response.error.value === 'object' 

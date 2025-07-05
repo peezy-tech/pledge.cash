@@ -2,8 +2,12 @@
 - [x] multisig init flow ("merchant" onboarding). most methods at multisig_send_spot.ts
 - [x] generate agent wallet on client side and approve it on backend
 - [x] invoice links: whoever clicks can send a transaction to pay for it. (checkout experience)
-- [ ] invoice hooks -> run logic after an invoice is paid
-- [ ] recurrent invoices: payable by multisig
+- [x] invoice hooks -> run logic after an invoice is paid
+
+- [ ] invoices can be paid by multisig and user is considered payer: its like address abstraction. a given user id is the payer of an invoice if the sender of the tx is the user address or its multisig address
+- [ ] websocket client on backend that frontend can GET request some info (spot tokens list)
+
+- [ ] recurrent invoices: payable only by multisig
 - [ ] (HUMAN ONLY) approve builder code for swaps and add to frontend swaps 
 
 - [ ] add_repo.js that clones link. if --gh-fork will attempt to fork (or find existing) using gh cli and add the fork url to repos.json instead of original
