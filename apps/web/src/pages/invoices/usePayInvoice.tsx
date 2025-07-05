@@ -6,7 +6,10 @@ import { useHyperliquid } from "@/providers/HyperliquidProvider";
 interface Invoice {
   id: string;
   creatorId: string;
-  payerAddress: string;
+  payerAddress: string | null;
+  payerUserId?: string | null;
+  paymentType?: "personal" | "multisig" | null;
+  actualPayerAddress?: string | null;
   token: string;
   amount: string;
   description?: string | null;
@@ -15,6 +18,7 @@ interface Invoice {
   createdAt: number;
   paidAt?: number | null;
   expiresAt?: number | null;
+  creatorAddress?: string | null;
 }
 
 export function usePayInvoice() {

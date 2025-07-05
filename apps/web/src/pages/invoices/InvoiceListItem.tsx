@@ -14,6 +14,9 @@ interface Invoice {
   id: string;
   creatorId: string;
   payerAddress: string;
+  payerUserId?: string | null;
+  paymentType?: "personal" | "multisig" | null;
+  actualPayerAddress?: string | null;
   token: string;
   amount: string;
   description?: string | null;
@@ -28,10 +31,9 @@ interface Invoice {
 interface InvoiceListItemProps {
   invoice: Invoice;
   type: "created" | "received";
-  creatorAddress?: string; // Required for received invoices to enable payment
 }
 
-export function InvoiceListItem({ invoice, type, creatorAddress }: InvoiceListItemProps) {
+export function InvoiceListItem({ invoice, type }: InvoiceListItemProps) {
   const { address } = useAccount();
   const { pay, isLoading, error, clearError } = usePayInvoice();
   const confirmPayment = useConfirmPaymentMutation();
@@ -43,17 +45,17 @@ export function InvoiceListItem({ invoice, type, creatorAddress }: InvoiceListIt
 
   const canPay = type === "received" && 
                  invoice.status === "pending" && 
-                 address?.toLowerCase() === invoice.payerAddress.toLowerCase() &&
-                 creatorAddress;
+                 address?.toLowerCase() === invoice.payerAddress?.toLowerCase() &&
+                 invoice.creatorAddress;
 
   const canManualConfirm = invoice.status === "pending";
 
   const handlePay = async () => {
-    if (!creatorAddress) return;
+    if (!invoice.creatorAddress) return;
 
     try {
       clearError();
-      await pay(invoice, creatorAddress);
+      await pay(invoice, invoice.creatorAddress);
       setShowPaymentDetails(false);
     } catch (error) {
       console.error("Payment failed:", error);
@@ -129,16 +131,10 @@ export function InvoiceListItem({ invoice, type, creatorAddress }: InvoiceListIt
             </CardTitle>
             <CardDescription>
               {type === 'created'
-                ? invoice.payerAddress
-                  ? `Invoice to ${invoice.payerAddress.slice(
-                      0,
-                      6,
-                    )}...${invoice.payerAddress.slice(-4)}`
+                ? invoice.payerUserId
+                  ? `Invoice to ${invoice.payerUserId}`
                   : 'Payable by link (no specific payer)'
-                : `Invoice from ${creatorAddress?.slice(
-                    0,
-                    6,
-                  )}...${creatorAddress?.slice(-4)}`}
+                : `Invoice from ${invoice.creatorId}`}
             </CardDescription>
           </div>
           <div className="flex flex-col items-end space-y-2">
@@ -189,6 +185,36 @@ export function InvoiceListItem({ invoice, type, creatorAddress }: InvoiceListIt
           <div className="text-sm">
             <p className="font-medium text-gray-700">Transaction Hash:</p>
             <p className="text-gray-600 font-mono break-all">{invoice.txHash}</p>
+          </div>
+        )}
+
+        {/* NEW: Payment method information for paid invoices */}
+        {invoice.status === 'paid' && (invoice.paymentType || invoice.actualPayerAddress) && (
+          <div className="text-sm border-t pt-3">
+            <p className="font-medium text-gray-700 mb-2">Payment Details:</p>
+            <div className="grid grid-cols-1 gap-2">
+              {invoice.paymentType && (
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-600">Method:</span>
+                  <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                    invoice.paymentType === 'multisig' 
+                      ? 'bg-blue-100 text-blue-800' 
+                      : 'bg-green-100 text-green-800'
+                  }`}>
+                    {invoice.paymentType === 'multisig' ? '🔒' : '👤'} 
+                    {invoice.paymentType === 'multisig' ? 'Multisig' : 'Personal'}
+                  </span>
+                </div>
+              )}
+              {invoice.actualPayerAddress && (
+                <div>
+                  <span className="text-gray-600">Paid from:</span>{' '}
+                  <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">
+                    {invoice.actualPayerAddress.slice(0, 6)}...{invoice.actualPayerAddress.slice(-4)}
+                  </code>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -280,7 +306,7 @@ export function InvoiceListItem({ invoice, type, creatorAddress }: InvoiceListIt
                   <Alert>
                     <AlertDescription>
                       You are about to pay {invoice.amount} {parseTokenName(invoice.token)} to{" "}
-                      {creatorAddress?.slice(0, 6)}...{creatorAddress?.slice(-4)}.
+                      {invoice.creatorAddress?.slice(0, 6)}...{invoice.creatorAddress?.slice(-4)}.
                       This action cannot be undone.
                     </AlertDescription>
                   </Alert>

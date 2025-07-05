@@ -1,18 +1,19 @@
 import { Elysia, t } from "elysia";
-import { db } from "@repo/db";
-import {
-  agentWallets,
-  hyperliquidInvoices,
-  invoiceHooks,
-  multisigAccounts,
-  txHashes,
-  users,
-} from "@repo/db/schema";
-import { eq } from "drizzle-orm";
 import * as hl from "@nktkas/hyperliquid";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { auth_routes } from "./auth";
+import { db } from "db";
+import {
+  hyperliquidInvoices,
+  users,
+  multisigAccounts,
+  agentWallets,
+  invoiceHooks,
+  txHashes,
+} from "db/schema";
+import { eq, and, desc, or } from "drizzle-orm";
 import { executeHooks } from "./execute_hooks";
+import { auth_routes } from "./auth";
+import { resolveAddressToUser, isAddressAuthorizedForUser, getUserAddresses, resolvePaymentWithEdgeCases } from "./address_resolver";
 
 const operator = privateKeyToAccount(
   process.env.OPERATOR_PRIVATE_KEY as `0x${string}`
@@ -48,6 +49,10 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             id: hyperliquidInvoices.id,
             creatorId: hyperliquidInvoices.creatorId,
             payerAddress: hyperliquidInvoices.payerAddress,
+            // NEW: Address abstraction fields
+            payerUserId: hyperliquidInvoices.payerUserId,
+            paymentType: hyperliquidInvoices.paymentType,
+            actualPayerAddress: hyperliquidInvoices.actualPayerAddress,
             token: hyperliquidInvoices.token,
             amount: hyperliquidInvoices.amount,
             description: hyperliquidInvoices.description,
@@ -144,18 +149,35 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
         const creatorAddress = creator.evm_address.toLowerCase();
         // --- END GATHER DATA ---
 
-        // --- TRANSACTION VALIDATION ---
-        // If invoice was for a specific payer, ensure the on-chain tx was from them.
-        if (
-          invoice.payerAddress &&
-          invoice.payerAddress.toLowerCase() !== onChainPayerAddress
-        ) {
-          set.status = 400; // Bad request, wrong payer
+        // --- TRANSACTION VALIDATION WITH ADDRESS ABSTRACTION ---
+        // Resolve the on-chain payer address with edge case handling
+        const paymentAnalysis = await resolvePaymentWithEdgeCases(
+          onChainPayerAddress,
+          invoice.payerAddress
+        );
+        
+        // Check if the payment is valid based on edge case analysis
+        if (!paymentAnalysis.edgeCases.isValidPayment) {
+          set.status = 400;
           return {
-            error:
-              "Transaction sender does not match the designated payer for this invoice.",
+            error: paymentAnalysis.edgeCases.warningMessage || "Payment not authorized",
+            details: {
+              isOperatorPayment: paymentAnalysis.edgeCases.isOperatorPayment,
+              isUnauthorizedPayment: paymentAnalysis.edgeCases.isUnauthorizedPayment,
+              actualPayerAddress: onChainPayerAddress,
+              designatedPayerAddress: invoice.payerAddress,
+            },
           };
         }
+        
+        // Log edge case warnings for monitoring
+        if (paymentAnalysis.edgeCases.warningMessage) {
+          console.warn(
+            `Payment warning for invoice ${invoice.id}: ${paymentAnalysis.edgeCases.warningMessage}`
+          );
+        }
+        
+        const payerResolution = paymentAnalysis.resolution;
 
         if (txDetails.action.type !== "spotSend") {
           set.status = 400;
@@ -187,31 +209,38 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
         // --- END TRANSACTION VALIDATION ---
 
         // --- REGISTRATION VIA PAYMENT ---
-        const existingUser = await db
-          .select()
-          .from(users)
-          .where(eq(users.evm_address, onChainPayerAddress))
-          .get();
-
-        if (!existingUser) {
+        let payerUserId: string;
+        
+        if (payerResolution) {
+          // Address is already associated with a user
+          payerUserId = payerResolution.userId;
+        } else {
+          // Address is not associated with any user - register via payment
+          // This only happens if the payment comes from a new personal address
+          // (multisig addresses are always tied to existing users)
           console.log(
             `No user found for address ${onChainPayerAddress}, creating a new user.`
           );
-          await db.insert(users).values({
+          const newUser = await db.insert(users).values({
             evm_address: onChainPayerAddress,
-          });
+          }).returning().get();
+          payerUserId = newUser.id;
         }
         // --- END REGISTRATION ---
 
-        // Update the invoice
+        // Update the invoice with address abstraction metadata
         const updatedInvoice = await db
           .update(hyperliquidInvoices)
           .set({
             status: "paid",
             txHash: body.txHash,
             paidAt: Date.now(),
-            // Set the payer address to the on-chain payer
-            payerAddress: onChainPayerAddress,
+            // Set the payer address to the on-chain payer if not already set
+            payerAddress: invoice.payerAddress || onChainPayerAddress,
+            // NEW: Add address abstraction metadata
+            payerUserId: payerUserId,
+            paymentType: payerResolution?.paymentType || "personal",
+            actualPayerAddress: onChainPayerAddress,
           })
           .where(eq(hyperliquidInvoices.id, params.id))
           .returning()
@@ -308,6 +337,10 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
               );
             }
 
+            // --- WEBHOOK ---
+            await executeHooks("invoice.created", invoice.id);
+            // --- END WEBHOOK ---
+
             return invoice;
           } catch (error) {
             console.error("Error creating invoice:", error);
@@ -365,18 +398,16 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             return { error: "User not found" };
           }
 
-          // Get invoices where user is either creator or payer
+          // Get invoices where user is either creator or payer (including via multisig)
           const invoicesAsCreator = await db
-            .select()
-            .from(hyperliquidInvoices)
-            .where(eq(hyperliquidInvoices.creatorId, user.id));
-
-          // For received invoices, we need to join with users to get creator's address
-          const invoicesAsPayer = await db
             .select({
               id: hyperliquidInvoices.id,
               creatorId: hyperliquidInvoices.creatorId,
               payerAddress: hyperliquidInvoices.payerAddress,
+              // Address abstraction fields
+              payerUserId: hyperliquidInvoices.payerUserId,
+              paymentType: hyperliquidInvoices.paymentType,
+              actualPayerAddress: hyperliquidInvoices.actualPayerAddress,
               token: hyperliquidInvoices.token,
               amount: hyperliquidInvoices.amount,
               description: hyperliquidInvoices.description,
@@ -385,14 +416,40 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
               createdAt: hyperliquidInvoices.createdAt,
               paidAt: hyperliquidInvoices.paidAt,
               expiresAt: hyperliquidInvoices.expiresAt,
+              // For created invoices, the creator address is the current user's address
+              creatorAddress: users.evm_address,
+            })
+            .from(hyperliquidInvoices)
+            .innerJoin(users, eq(hyperliquidInvoices.creatorId, users.id))
+            .where(eq(hyperliquidInvoices.creatorId, user.id));
+
+          // For received invoices, we need to check both designated payer and actual payer
+          const invoicesAsPayer = await db
+            .select({
+              id: hyperliquidInvoices.id,
+              creatorId: hyperliquidInvoices.creatorId,
+              payerAddress: hyperliquidInvoices.payerAddress,
+              // Address abstraction fields
+              payerUserId: hyperliquidInvoices.payerUserId,
+              paymentType: hyperliquidInvoices.paymentType,
+              actualPayerAddress: hyperliquidInvoices.actualPayerAddress,
+              token: hyperliquidInvoices.token,
+              amount: hyperliquidInvoices.amount,
+              description: hyperliquidInvoices.description,
+              status: hyperliquidInvoices.status,
+              txHash: hyperliquidInvoices.txHash,
+              createdAt: hyperliquidInvoices.createdAt,
+              paidAt: hyperliquidInvoices.paidAt,
+              expiresAt: hyperliquidInvoices.expiresAt,
+              // For received invoices, get the actual creator's personal address
               creatorAddress: users.evm_address,
             })
             .from(hyperliquidInvoices)
             .innerJoin(users, eq(hyperliquidInvoices.creatorId, users.id))
             .where(
-              eq(
-                hyperliquidInvoices.payerAddress,
-                currentUser!.walletAddress.toLowerCase()
+              or(
+                eq(hyperliquidInvoices.payerAddress, currentUser!.walletAddress.toLowerCase()),
+                eq(hyperliquidInvoices.payerUserId, user.id)
               )
             );
 
@@ -653,5 +710,34 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
           .where(eq(multisigAccounts.userAddress, currentUser!.walletAddress))
           .get();
         return multisigAccount;
+      })
+      
+      // NEW: Get all addresses associated with the authenticated user
+      .get("/user/addresses", async ({ currentUser, set }) => {
+        try {
+          const user = await db
+            .select()
+            .from(users)
+            .where(eq(users.evm_address, currentUser!.walletAddress))
+            .get();
+          
+          if (!user) {
+            set.status = 404;
+            return { error: "User not found" };
+          }
+          
+          const addresses = await getUserAddresses(user.id);
+          
+          return {
+            userId: user.id,
+            personalAddress: addresses.personalAddress,
+            multisigAddresses: addresses.multisigAddresses,
+            totalAddresses: 1 + addresses.multisigAddresses.length, // personal + multisig count
+          };
+        } catch (error) {
+          console.error("Error fetching user addresses:", error);
+          set.status = 500;
+          return { error: "Failed to fetch user addresses" };
+        }
       })
   );

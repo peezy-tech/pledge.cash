@@ -3,7 +3,7 @@ CREATE TABLE `agent_wallets` (
 	`multisigId` text NOT NULL,
 	`userId` text NOT NULL,
 	`address` text NOT NULL,
-	`createdAt` integer DEFAULT 1751703951113 NOT NULL,
+	`createdAt` integer DEFAULT 1751725881105 NOT NULL,
 	FOREIGN KEY (`multisigId`) REFERENCES `multisig_accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`userId`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
 );
@@ -12,17 +12,30 @@ CREATE TABLE `hyperliquid_invoices` (
 	`id` text PRIMARY KEY NOT NULL,
 	`creatorId` text NOT NULL,
 	`payerAddress` text,
+	`payerUserId` text,
+	`paymentType` text,
+	`actualPayerAddress` text,
 	`token` text NOT NULL,
 	`amount` text NOT NULL,
 	`description` text,
 	`status` text DEFAULT 'pending' NOT NULL,
 	`txHash` text,
-	`createdAt` integer DEFAULT 1751703951113 NOT NULL,
+	`createdAt` integer DEFAULT 1751725881105 NOT NULL,
 	`paidAt` integer,
 	`expiresAt` integer,
-	`webhookUrl` text,
 	FOREIGN KEY (`creatorId`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`payerUserId`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`txHash`) REFERENCES `tx_hashes`(`hash`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE TABLE `invoice_hooks` (
+	`id` text PRIMARY KEY NOT NULL,
+	`invoiceId` text NOT NULL,
+	`event` text NOT NULL,
+	`type` text NOT NULL,
+	`url` text NOT NULL,
+	`createdAt` integer DEFAULT 1751725881105 NOT NULL,
+	FOREIGN KEY (`invoiceId`) REFERENCES `hyperliquid_invoices`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
 CREATE TABLE `multisig_accounts` (
@@ -31,7 +44,7 @@ CREATE TABLE `multisig_accounts` (
 	`operatorAddress` text NOT NULL,
 	`operatorPrivateKey` text NOT NULL,
 	`address` text NOT NULL,
-	`createdAt` integer DEFAULT 1751703951113 NOT NULL
+	`createdAt` integer DEFAULT 1751725881105 NOT NULL
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `multisig_accounts_userAddress_unique` ON `multisig_accounts` (`userAddress`);--> statement-breakpoint
@@ -39,7 +52,7 @@ CREATE UNIQUE INDEX `multisig_accounts_operatorAddress_unique` ON `multisig_acco
 CREATE UNIQUE INDEX `multisig_accounts_operatorPrivateKey_unique` ON `multisig_accounts` (`operatorPrivateKey`);--> statement-breakpoint
 CREATE TABLE `tx_hashes` (
 	`hash` text PRIMARY KEY NOT NULL,
-	`createdAt` integer DEFAULT 1751703951113 NOT NULL,
+	`createdAt` integer DEFAULT 1751725881104 NOT NULL,
 	`metadata` text
 );
 --> statement-breakpoint

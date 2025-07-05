@@ -115,7 +115,6 @@ export function InvoicesDashboard() {
                   key={invoice.id} 
                   invoice={invoice} 
                   type="received"
-                  creatorAddress={invoice.creatorAddress || undefined}
                 />
               ))}
             </div>

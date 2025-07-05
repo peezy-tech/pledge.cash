@@ -18,7 +18,7 @@ async function getInvoice(invoiceId: string) {
   };
 }
 
-export async function executeHooks(event: "invoice.paid", invoiceId: string) {
+export async function executeHooks(event: "invoice.paid" | "invoice.created", invoiceId: string) {
   const invoice = await getInvoice(invoiceId);
   if (!invoice) {
     console.error(`executeHooks: Invoice ${invoiceId} not found.`);
@@ -92,50 +92,97 @@ async function executeDiscordWebhook(
 ) {
   console.log(`Executing Discord webhook for hook ${hook.id} to ${hook.url}`);
 
-  if (!invoice.paidAt || !invoice.payerAddress || !invoice.txHash) {
-    console.error(
-      `Cannot send Discord webhook for unpaid invoice ${invoice.id}.`
-    );
+  const tokenName = invoice.token.split(":")[0];
+  const IS_TESTNET = process.env.NODE_ENV !== "production";
+
+  let discordPayload;
+
+  if (hook.event === "invoice.created") {
+    discordPayload = {
+      embeds: [
+        {
+          title: "Invoice Created",
+          description: `A new invoice \`${invoice.id}\` has been created.`,
+          color: 3447003, // Blue
+          fields: [
+            {
+              name: "Amount",
+              value: `\`${invoice.amount} ${tokenName}\``,
+              inline: true,
+            },
+            {
+              name: "Description",
+              value: invoice.description || "N/A",
+              inline: true,
+            },
+            {
+              name: "Creator",
+              value: `\`${invoice.creator?.evm_address || "Unknown"}\``,
+              inline: false,
+            },
+            {
+              name: "Payer",
+              value: invoice.payerAddress ? `\`${invoice.payerAddress}\`` : "Any address",
+              inline: false,
+            },
+            {
+              name: "Status",
+              value: `\`${invoice.status}\``,
+              inline: true,
+            },
+          ],
+                     timestamp: new Date(invoice.createdAt || Date.now()).toISOString(),
+          footer: { text: "pledge.cash Invoicing" },
+        },
+      ],
+    };
+  } else if (hook.event === "invoice.paid") {
+    if (!invoice.paidAt || !invoice.payerAddress || !invoice.txHash) {
+      console.error(
+        `Cannot send Discord webhook for unpaid invoice ${invoice.id}.`
+      );
+      return;
+    }
+
+    const explorerUrl = `${IS_TESTNET ? "https://testnet.hyperliquid.xyz" : "https://app.hyperliquid.xyz"}/tx/${invoice.txHash}`;
+
+    discordPayload = {
+      embeds: [
+        {
+          title: "Invoice Paid",
+          description: `Invoice \`${invoice.id}\` has been successfully paid.`,
+          color: 5763719, // Green
+          fields: [
+            {
+              name: "Amount",
+              value: `\`${invoice.amount} ${tokenName}\``,
+              inline: true,
+            },
+            {
+              name: "Description",
+              value: invoice.description || "N/A",
+              inline: true,
+            },
+            {
+              name: "Payer",
+              value: `\`${invoice.payerAddress}\``,
+              inline: false,
+            },
+            {
+              name: "Transaction",
+              value: `[View on Hyperliquid](${explorerUrl})`,
+              inline: false,
+            },
+          ],
+          timestamp: new Date(invoice.paidAt).toISOString(),
+          footer: { text: "pledge.cash Invoicing" },
+        },
+      ],
+    };
+  } else {
+    console.error(`Unknown Discord webhook event: ${hook.event}`);
     return;
   }
-
-  const tokenName = invoice.token.split(":")[0];
-  const IS_TESTNET = process.env.NODE_ENV !== "production"; // A simple way to check
-  const explorerUrl = `${IS_TESTNET ? "https://testnet.hyperliquid.xyz" : "https://app.hyperliquid.xyz"}/tx/${invoice.txHash}`;
-
-  const discordPayload = {
-    embeds: [
-      {
-        title: "Invoice Paid",
-        description: `Invoice \`${invoice.id}\` has been successfully paid.`,
-        color: 5763719, // Green
-        fields: [
-          {
-            name: "Amount",
-            value: `\`${invoice.amount} ${tokenName}\``,
-            inline: true,
-          },
-          {
-            name: "Description",
-            value: invoice.description || "N/A",
-            inline: true,
-          },
-          {
-            name: "Payer",
-            value: `\`${invoice.payerAddress}\``,
-            inline: false,
-          },
-          {
-            name: "Transaction",
-            value: `[View on Hyperliquid](${explorerUrl})`,
-            inline: false,
-          },
-        ],
-        timestamp: new Date(invoice.paidAt).toISOString(),
-        footer: { text: "pledge.cash Invoicing" },
-      },
-    ],
-  };
 
   const response = await fetch(hook.url, {
     method: "POST",

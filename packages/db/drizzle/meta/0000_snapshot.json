@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "15fe698d-5417-4345-b112-ed7c7f5a9807",
+  "id": "8d0e0172-2cdf-4772-b38f-9c57f106469b",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "agent_wallets": {
@@ -41,7 +41,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751703951113
+          "default": 1751725881105
         }
       },
       "indexes": {},
@@ -101,6 +101,27 @@
           "notNull": false,
           "autoincrement": false
         },
+        "payerUserId": {
+          "name": "payerUserId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "paymentType": {
+          "name": "paymentType",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "actualPayerAddress": {
+          "name": "actualPayerAddress",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "token": {
           "name": "token",
           "type": "text",
@@ -143,7 +164,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751703951113
+          "default": 1751725881105
         },
         "paidAt": {
           "name": "paidAt",
@@ -155,13 +176,6 @@
         "expiresAt": {
           "name": "expiresAt",
           "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "webhookUrl": {
-          "name": "webhookUrl",
-          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -182,6 +196,19 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "hyperliquid_invoices_payerUserId_users_id_fk": {
+          "name": "hyperliquid_invoices_payerUserId_users_id_fk",
+          "tableFrom": "hyperliquid_invoices",
+          "tableTo": "users",
+          "columnsFrom": [
+            "payerUserId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "hyperliquid_invoices_txHash_tx_hashes_hash_fk": {
           "name": "hyperliquid_invoices_txHash_tx_hashes_hash_fk",
           "tableFrom": "hyperliquid_invoices",
@@ -191,6 +218,73 @@
           ],
           "columnsTo": [
             "hash"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "invoice_hooks": {
+      "name": "invoice_hooks",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "invoiceId": {
+          "name": "invoiceId",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "event": {
+          "name": "event",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1751725881105
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "invoice_hooks_invoiceId_hyperliquid_invoices_id_fk": {
+          "name": "invoice_hooks_invoiceId_hyperliquid_invoices_id_fk",
+          "tableFrom": "invoice_hooks",
+          "tableTo": "hyperliquid_invoices",
+          "columnsFrom": [
+            "invoiceId"
+          ],
+          "columnsTo": [
+            "id"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -244,7 +338,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751703951113
+          "default": 1751725881105
         }
       },
       "indexes": {
@@ -291,7 +385,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751703951113
+          "default": 1751725881104
         },
         "metadata": {
           "name": "metadata",
