@@ -100,11 +100,12 @@ export function useCreateInvoiceMutation() {
       token: string
       amount: string
       description?: string
+      webhookUrl?: string
     }) => {
       const response = await api.hyperliquid.invoices.post(invoiceData)
       if (response.error) {
-        const errorMessage = typeof response.error.value === 'object'
-          ? JSON.stringify(response.error.value)
+        const errorMessage = typeof response.error.value === 'object' 
+          ? JSON.stringify(response.error.value) 
           : response.error.value as string;
         throw new Error(errorMessage || 'Failed to create invoice')
       }

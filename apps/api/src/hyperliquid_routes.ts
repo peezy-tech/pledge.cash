@@ -215,6 +215,80 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
           .returning()
           .get();
 
+        // --- WEBHOOK ---
+        if (updatedInvoice.webhookUrl) {
+          console.log(
+            `Sending webhook for invoice ${updatedInvoice.id} to ${updatedInvoice.webhookUrl}`
+          );
+
+          const tokenName = updatedInvoice.token.split(":")[0];
+
+          const discordPayload = {
+            embeds: [
+              {
+                title: `Invoice Paid`,
+                description: `Invoice \`${updatedInvoice.id}\` has been paid.`,
+                color: 5763719, // Green
+                fields: [
+                  {
+                    name: "Amount",
+                    value: `\`${updatedInvoice.amount} ${tokenName}\``,
+                    inline: true,
+                  },
+                  {
+                    name: "Description",
+                    value: updatedInvoice.description || "N/A",
+                    inline: true,
+                  },
+                  {
+                    name: "Payer",
+                    value: `\`${updatedInvoice.payerAddress}\``,
+                    inline: false,
+                  },
+                  {
+                    name: "Transaction",
+                    value: `[View on Hyperliquid](${IS_TESTNET ? "https://testnet.hyperliquid.xyz" : "https://app.hyperliquid.xyz"}/tx/${updatedInvoice.txHash})`,
+                    inline: false,
+                  },
+                ],
+                timestamp: updatedInvoice.paidAt
+                  ? new Date(updatedInvoice.paidAt).toISOString()
+                  : new Date().toISOString(),
+                footer: {
+                  text: "pledge.cash Invoicing",
+                },
+              },
+            ],
+          };
+
+          // Fire-and-forget the webhook
+          fetch(updatedInvoice.webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(discordPayload),
+          })
+            .then(async (response) => {
+              if (response.ok) {
+                console.log(
+                  `Webhook sent successfully for invoice ${updatedInvoice.id}`
+                );
+              } else {
+                const errorBody = await response.json();
+                console.error(
+                  `Failed to send webhook for invoice ${updatedInvoice.id}. Status: ${response.status}`,
+                  errorBody
+                );
+              }
+            })
+            .catch((error) => {
+              console.error(
+                `Failed to send webhook for invoice ${updatedInvoice.id}:`,
+                error
+              );
+            });
+        }
+        // --- END WEBHOOK ---
+
         return updatedInvoice;
       } catch (error) {
         console.error("Error confirming payment:", error);
@@ -283,6 +357,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
                 token: body.token,
                 amount: body.amount,
                 description: body.description,
+                webhookUrl: body.webhookUrl,
               })
               .returning()
               .get();
@@ -300,6 +375,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             token: t.String({ error: "Token is required" }),
             amount: t.String({ error: "Amount is required" }),
             description: t.Optional(t.String()),
+            webhookUrl: t.Optional(t.String()),
           }),
         }
       )

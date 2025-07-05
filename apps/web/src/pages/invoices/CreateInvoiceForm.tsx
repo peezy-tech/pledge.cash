@@ -17,6 +17,7 @@ export function CreateInvoiceForm({ onSuccess }: CreateInvoiceFormProps) {
   const [selectedToken, setSelectedToken] = useState("");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
+  const [webhookUrl, setWebhookUrl] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const createInvoice = useCreateInvoiceMutation();
@@ -60,6 +61,7 @@ export function CreateInvoiceForm({ onSuccess }: CreateInvoiceFormProps) {
         token: selectedToken,
         amount: amount.trim(),
         description: description.trim() || undefined,
+        webhookUrl: webhookUrl.trim() || undefined,
       });
 
       // Reset form
@@ -67,6 +69,7 @@ export function CreateInvoiceForm({ onSuccess }: CreateInvoiceFormProps) {
       setSelectedToken("");
       setAmount("");
       setDescription("");
+      setWebhookUrl("");
       setErrors({});
 
       onSuccess?.();
@@ -159,6 +162,20 @@ export function CreateInvoiceForm({ onSuccess }: CreateInvoiceFormProps) {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="webhookUrl">Webhook URL (Optional)</Label>
+            <Input
+              id="webhookUrl"
+              type="url"
+              placeholder="https://... your endpoint for success notifications"
+              value={webhookUrl}
+              onChange={(e) => setWebhookUrl(e.target.value)}
+            />
+             <p className="text-xs text-gray-500">
+              If provided, we will send a POST request with the invoice details upon successful payment.
+            </p>
           </div>
 
           <Button 

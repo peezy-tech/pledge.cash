@@ -3,7 +3,7 @@ CREATE TABLE `agent_wallets` (
 	`multisigId` text NOT NULL,
 	`userId` text NOT NULL,
 	`address` text NOT NULL,
-	`createdAt` integer DEFAULT 1751645179689 NOT NULL,
+	`createdAt` integer DEFAULT 1751703951113 NOT NULL,
 	FOREIGN KEY (`multisigId`) REFERENCES `multisig_accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`userId`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
 );
@@ -17,25 +17,32 @@ CREATE TABLE `hyperliquid_invoices` (
 	`description` text,
 	`status` text DEFAULT 'pending' NOT NULL,
 	`txHash` text,
-	`createdAt` integer DEFAULT 1751645179688 NOT NULL,
+	`createdAt` integer DEFAULT 1751703951113 NOT NULL,
 	`paidAt` integer,
 	`expiresAt` integer,
-	FOREIGN KEY (`creatorId`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
+	`webhookUrl` text,
+	FOREIGN KEY (`creatorId`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`txHash`) REFERENCES `tx_hashes`(`hash`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `hyperliquid_invoices_txHash_unique` ON `hyperliquid_invoices` (`txHash`);--> statement-breakpoint
 CREATE TABLE `multisig_accounts` (
 	`id` text PRIMARY KEY NOT NULL,
 	`userAddress` text NOT NULL,
 	`operatorAddress` text NOT NULL,
 	`operatorPrivateKey` text NOT NULL,
 	`address` text NOT NULL,
-	`createdAt` integer DEFAULT 1751645179689 NOT NULL
+	`createdAt` integer DEFAULT 1751703951113 NOT NULL
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `multisig_accounts_userAddress_unique` ON `multisig_accounts` (`userAddress`);--> statement-breakpoint
 CREATE UNIQUE INDEX `multisig_accounts_operatorAddress_unique` ON `multisig_accounts` (`operatorAddress`);--> statement-breakpoint
 CREATE UNIQUE INDEX `multisig_accounts_operatorPrivateKey_unique` ON `multisig_accounts` (`operatorPrivateKey`);--> statement-breakpoint
+CREATE TABLE `tx_hashes` (
+	`hash` text PRIMARY KEY NOT NULL,
+	`createdAt` integer DEFAULT 1751703951113 NOT NULL,
+	`metadata` text
+);
+--> statement-breakpoint
 CREATE TABLE `users` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text,

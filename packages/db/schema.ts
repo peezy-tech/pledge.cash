@@ -42,6 +42,7 @@ export const hyperliquidInvoices = table("hyperliquid_invoices", {
   createdAt: t.integer().default(Date.now()).notNull(),
   paidAt: t.integer(),
   expiresAt: t.integer(), // Optional: for future implementation
+  webhookUrl: t.text(),
 });
 
 export const multisigAccounts = table("multisig_accounts", {
