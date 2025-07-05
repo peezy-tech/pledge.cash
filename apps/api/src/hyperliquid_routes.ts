@@ -4,6 +4,7 @@ import {
   agentWallets,
   hyperliquidInvoices,
   multisigAccounts,
+  txHashes,
   users,
 } from "@repo/db/schema";
 import { eq } from "drizzle-orm";
@@ -36,6 +37,197 @@ const spotTokens = (await infoClient.spotMeta()).tokens.reduce(
 console.log(spotTokens.USDC);
 
 export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
+  .get(
+    "/invoices/:id",
+    async ({ params, set }) => {
+      try {
+        const invoiceDetails = await db
+          .select({
+            id: hyperliquidInvoices.id,
+            creatorId: hyperliquidInvoices.creatorId,
+            payerAddress: hyperliquidInvoices.payerAddress,
+            token: hyperliquidInvoices.token,
+            amount: hyperliquidInvoices.amount,
+            description: hyperliquidInvoices.description,
+            status: hyperliquidInvoices.status,
+            txHash: hyperliquidInvoices.txHash,
+            createdAt: hyperliquidInvoices.createdAt,
+            paidAt: hyperliquidInvoices.paidAt,
+            expiresAt: hyperliquidInvoices.expiresAt,
+            creatorAddress: users.evm_address,
+          })
+          .from(hyperliquidInvoices)
+          .innerJoin(users, eq(hyperliquidInvoices.creatorId, users.id))
+          .where(eq(hyperliquidInvoices.id, params.id))
+          .get();
+
+        if (!invoiceDetails) {
+          set.status = 404;
+          return { error: "Invoice not found" };
+        }
+
+        return invoiceDetails;
+      } catch (error) {
+        console.error(`Error fetching invoice ${params.id}:`, error);
+        set.status = 500;
+        return { error: "Failed to fetch invoice" };
+      }
+    },
+    {
+      params: t.Object({
+        id: t.String(),
+      }),
+    }
+  )
+  // Confirm that an invoice has been paid
+  .put(
+    "/invoices/:id/confirm",
+    async ({ params, body, set }) => {
+      try {
+        // --- GATHER DATA ---
+        const invoice = await db
+          .select()
+          .from(hyperliquidInvoices)
+          .where(eq(hyperliquidInvoices.id, params.id))
+          .get();
+
+        if (!invoice) {
+          set.status = 404;
+          return { error: "Invoice not found" };
+        }
+
+        if (invoice.status === "paid") {
+          set.status = 400;
+          return { error: "Invoice is already paid" };
+        }
+
+        // Check if txHash is already in the db
+        const txHash = await db
+          .select()
+          .from(txHashes)
+          .where(eq(txHashes.hash, body.txHash))
+          .get();
+        if (txHash) {
+          set.status = 400; // Bad request, txHash already exists
+          return { error: "Transaction hash already exists" };
+        }
+
+        const txDetails = await infoClient.txDetails({
+          hash: body.txHash as `0x${string}`,
+        });
+
+        if (!txDetails || txDetails.error) {
+          set.status = 400;
+          return { error: "Transaction not found or invalid" };
+        }
+
+        // Insert txHash into the db
+        await db.insert(txHashes).values({
+          hash: body.txHash,
+          metadata: txDetails,
+        });
+
+        const creator = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, invoice.creatorId))
+          .get();
+
+        if (!creator || !creator.evm_address) {
+          set.status = 500;
+          return { error: "Invoice creator could not be found" };
+        }
+
+        const onChainPayerAddress = txDetails.user.toLowerCase();
+        const creatorAddress = creator.evm_address.toLowerCase();
+        // --- END GATHER DATA ---
+
+        // --- TRANSACTION VALIDATION ---
+        // If invoice was for a specific payer, ensure the on-chain tx was from them.
+        if (
+          invoice.payerAddress &&
+          invoice.payerAddress.toLowerCase() !== onChainPayerAddress
+        ) {
+          set.status = 400; // Bad request, wrong payer
+          return {
+            error:
+              "Transaction sender does not match the designated payer for this invoice.",
+          };
+        }
+
+        if (txDetails.action.type !== "spotSend") {
+          set.status = 400;
+          return { error: "Transaction is not a spot send" };
+        }
+
+        const action = txDetails.action as any;
+
+        if (action.destination?.toLowerCase() !== creatorAddress) {
+          set.status = 400;
+          return {
+            error: "Transaction destination does not match creator address",
+          };
+        }
+
+        if (action.token !== invoice.token) {
+          set.status = 400;
+          return {
+            error: "Transaction token does not match invoice token",
+          };
+        }
+
+        if (parseFloat(action.amount) !== parseFloat(invoice.amount)) {
+          set.status = 400;
+          return {
+            error: `Transaction amount (${action.amount}) does not match invoice amount (${invoice.amount})`,
+          };
+        }
+        // --- END TRANSACTION VALIDATION ---
+
+        // --- REGISTRATION VIA PAYMENT ---
+        const existingUser = await db
+          .select()
+          .from(users)
+          .where(eq(users.evm_address, onChainPayerAddress))
+          .get();
+
+        if (!existingUser) {
+          console.log(
+            `No user found for address ${onChainPayerAddress}, creating a new user.`
+          );
+          await db.insert(users).values({
+            evm_address: onChainPayerAddress,
+          });
+        }
+        // --- END REGISTRATION ---
+
+        // Update the invoice
+        const updatedInvoice = await db
+          .update(hyperliquidInvoices)
+          .set({
+            status: "paid",
+            txHash: body.txHash,
+            paidAt: Date.now(),
+            // Set the payer address to the on-chain payer
+            payerAddress: onChainPayerAddress,
+          })
+          .where(eq(hyperliquidInvoices.id, params.id))
+          .returning()
+          .get();
+
+        return updatedInvoice;
+      } catch (error) {
+        console.error("Error confirming payment:", error);
+        set.status = 500;
+        return { error: "Failed to confirm payment" };
+      }
+    },
+    {
+      body: t.Object({
+        txHash: t.String({ error: "Transaction hash is required" }),
+      }),
+    }
+  )
   .use(auth_routes)
   .guard((app) =>
     app
@@ -85,7 +277,9 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
               .insert(hyperliquidInvoices)
               .values({
                 creatorId: creator.id,
-                payerAddress: body.payerAddress.toLowerCase(),
+                payerAddress: body.payerAddress
+                  ? body.payerAddress.toLowerCase()
+                  : null,
                 token: body.token,
                 amount: body.amount,
                 description: body.description,
@@ -102,7 +296,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
         },
         {
           body: t.Object({
-            payerAddress: t.String({ error: "Payer address is required" }),
+            payerAddress: t.Optional(t.String()),
             token: t.String({ error: "Token is required" }),
             amount: t.String({ error: "Amount is required" }),
             description: t.Optional(t.String()),
@@ -165,128 +359,6 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
           return { error: "Failed to fetch invoices" };
         }
       })
-
-      // Confirm that an invoice has been paid
-      .put(
-        "/invoices/:id/confirm",
-        async ({ params, body, currentUser, set }) => {
-          try {
-            // Get the invoice
-            const invoice = await db
-              .select()
-              .from(hyperliquidInvoices)
-              .where(eq(hyperliquidInvoices.id, params.id))
-              .get();
-            if (!invoice) {
-              set.status = 404;
-              return { error: "Invoice not found" };
-            }
-
-            // Check if the current user is the payer
-            if (
-              invoice.payerAddress !== currentUser!.walletAddress.toLowerCase()
-            ) {
-              set.status = 403;
-              return { error: "Only the payer can confirm payment" };
-            }
-
-            // Check if already paid
-            if (invoice.status === "paid") {
-              set.status = 400;
-              return { error: "Invoice is already paid" };
-            }
-
-            // Verify the transaction on-chain
-            console.log(`Verifying transaction: ${body.txHash}`);
-            const txDetails = await infoClient.txDetails({
-              hash: body.txHash as `0x${string}`,
-            });
-
-            if (!txDetails || txDetails.error) {
-              set.status = 400;
-              return { error: "Transaction not found or invalid" };
-            }
-
-            // Verify transaction details
-            if (
-              txDetails.user.toLowerCase() !==
-              invoice.payerAddress.toLowerCase()
-            ) {
-              set.status = 400;
-              return {
-                error: "Transaction sender does not match payer address",
-              };
-            }
-
-            if (txDetails.action.type !== "spotSend") {
-              set.status = 400;
-              return { error: "Transaction is not a spot send" };
-            }
-
-            // Get creator's address for verification
-            const creator = await db
-              .select()
-              .from(users)
-              .where(eq(users.id, invoice.creatorId))
-              .get();
-            if (!creator || !creator.evm_address) {
-              set.status = 500;
-              return { error: "Creator not found or missing EVM address" };
-            }
-
-            // Type assertion for action properties since they're unknown
-            const action = txDetails.action as any;
-
-            if (
-              action.destination?.toLowerCase() !==
-              creator.evm_address.toLowerCase()
-            ) {
-              set.status = 400;
-              return {
-                error: "Transaction destination does not match creator address",
-              };
-            }
-
-            if (action.token !== invoice.token) {
-              set.status = 400;
-              return {
-                error: "Transaction token does not match invoice token",
-              };
-            }
-
-            // Verify amount - this is a simplified version, real implementation would need to handle decimals properly
-            if (parseFloat(action.amount) !== parseFloat(invoice.amount)) {
-              set.status = 400;
-              return {
-                error: `Transaction amount (${action.amount}) does not match invoice amount (${invoice.amount})`,
-              };
-            }
-
-            // Update the invoice
-            const updatedInvoice = await db
-              .update(hyperliquidInvoices)
-              .set({
-                status: "paid",
-                txHash: body.txHash,
-                paidAt: Date.now(),
-              })
-              .where(eq(hyperliquidInvoices.id, params.id))
-              .returning()
-              .get();
-
-            return updatedInvoice;
-          } catch (error) {
-            console.error("Error confirming payment:", error);
-            set.status = 500;
-            return { error: "Failed to confirm payment" };
-          }
-        },
-        {
-          body: t.Object({
-            txHash: t.String({ error: "Transaction hash is required" }),
-          }),
-        }
-      )
 
       .get("/operator", async () => ({ operator: operator.address }))
 
@@ -383,9 +455,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             console.log("Existing multisig account:", existingMultisigAccount);
 
             if (existingMultisigAccount) {
-              console.log(
-                "User already has a multisig account"
-              );
+              console.log("User already has a multisig account");
               set.status = 400;
               return {
                 error: "User already has a multisig account",
@@ -464,19 +534,27 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
               isTestnet: IS_TESTNET,
             });
 
-            const approveAgentWalletTx = await multisigExchangeClient.approveAgent({
-              agentAddress: body.agentWalletAddress,
-              agentName: "Frontend",
-            })
+            const approveAgentWalletTx =
+              await multisigExchangeClient.approveAgent({
+                agentAddress: body.agentWalletAddress,
+                agentName: "Frontend",
+              });
 
-            console.log("Approve agent wallet tx result:", approveAgentWalletTx);
+            console.log(
+              "Approve agent wallet tx result:",
+              approveAgentWalletTx
+            );
 
-            const agentWalletRecord = await db.insert(agentWallets).values({
-              multisigId: multisigAccountRecord.id,
-              userId: currentUser!.id,
-              address: body.agentWalletAddress,
-            }).returning().get();
-            
+            const agentWalletRecord = await db
+              .insert(agentWallets)
+              .values({
+                multisigId: multisigAccountRecord.id,
+                userId: currentUser!.id,
+                address: body.agentWalletAddress,
+              })
+              .returning()
+              .get();
+
             console.log("Agent wallet record:", agentWalletRecord);
 
             const authorizedUsers = [

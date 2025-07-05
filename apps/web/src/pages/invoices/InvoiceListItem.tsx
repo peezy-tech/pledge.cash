@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { usePayInvoice } from "./usePayInvoice";
 import { useConfirmPaymentMutation } from "@/hooks/useHyperliquid";
+import { ClipboardCopy } from "lucide-react";
 
 interface Invoice {
   id: string;
@@ -38,6 +39,7 @@ export function InvoiceListItem({ invoice, type, creatorAddress }: InvoiceListIt
   const [showManualConfirm, setShowManualConfirm] = useState(false);
   const [txHashInput, setTxHashInput] = useState("");
   const [manualConfirmError, setManualConfirmError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const canPay = type === "received" && 
                  invoice.status === "pending" && 
@@ -83,6 +85,13 @@ export function InvoiceListItem({ invoice, type, creatorAddress }: InvoiceListIt
     }
   };
 
+  const handleCopyLink = () => {
+    const link = `${window.location.origin}/invoices/${invoice.id}`;
+    navigator.clipboard.writeText(link);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000); // Reset after 2 seconds
+  };
+
   const formatDate = (timestamp: number) => {
     return new Date(timestamp).toLocaleDateString("en-US", {
       year: "numeric",
@@ -119,15 +128,39 @@ export function InvoiceListItem({ invoice, type, creatorAddress }: InvoiceListIt
               {parseTokenName(invoice.token)} {invoice.amount}
             </CardTitle>
             <CardDescription>
-              {type === "created" 
-                ? `Invoice to ${invoice.payerAddress.slice(0, 6)}...${invoice.payerAddress.slice(-4)}`
-                : `Invoice from ${creatorAddress?.slice(0, 6)}...${creatorAddress?.slice(-4)}`
-              }
+              {type === 'created'
+                ? invoice.payerAddress
+                  ? `Invoice to ${invoice.payerAddress.slice(
+                      0,
+                      6,
+                    )}...${invoice.payerAddress.slice(-4)}`
+                  : 'Payable by link (no specific payer)'
+                : `Invoice from ${creatorAddress?.slice(
+                    0,
+                    6,
+                  )}...${creatorAddress?.slice(-4)}`}
             </CardDescription>
           </div>
-          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(invoice.status)}`}>
-            {invoice.status.toUpperCase()}
-          </span>
+          <div className="flex flex-col items-end space-y-2">
+            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(invoice.status)}`}>
+              {invoice.status.toUpperCase()}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCopyLink}
+              className="text-xs h-8"
+            >
+              {copied ? (
+                'Copied!'
+              ) : (
+                <>
+                  <ClipboardCopy className="mr-1 h-3 w-3" />
+                  Copy Link
+                </>
+              )}
+            </Button>
+          </div>
         </div>
       </CardHeader>
       

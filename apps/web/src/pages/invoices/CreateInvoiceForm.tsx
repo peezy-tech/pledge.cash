@@ -29,9 +29,7 @@ export function CreateInvoiceForm({ onSuccess }: CreateInvoiceFormProps) {
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
 
-    if (!payerAddress.trim()) {
-      newErrors.payerAddress = "Payer address is required";
-    } else if (!payerAddress.match(/^0x[a-fA-F0-9]{40}$/)) {
+    if (payerAddress.trim() && !payerAddress.match(/^0x[a-fA-F0-9]{40}$/)) {
       newErrors.payerAddress = "Invalid Ethereum address format";
     }
 
@@ -58,7 +56,7 @@ export function CreateInvoiceForm({ onSuccess }: CreateInvoiceFormProps) {
 
     try {
       await createInvoice.mutateAsync({
-        payerAddress: payerAddress.toLowerCase(),
+        payerAddress: payerAddress.trim() ? payerAddress.toLowerCase() : undefined,
         token: selectedToken,
         amount: amount.trim(),
         description: description.trim() || undefined,
@@ -96,11 +94,11 @@ export function CreateInvoiceForm({ onSuccess }: CreateInvoiceFormProps) {
           )}
 
           <div className="space-y-2">
-            <Label htmlFor="payerAddress">Payer Address</Label>
+            <Label htmlFor="payerAddress">Payer Address (Optional)</Label>
             <Input
               id="payerAddress"
               type="text"
-              placeholder="0x..."
+              placeholder="0x... (leave blank for a shareable link)"
               value={payerAddress}
               onChange={(e) => setPayerAddress(e.target.value)}
               className={errors.payerAddress ? "border-red-500" : ""}
@@ -108,6 +106,9 @@ export function CreateInvoiceForm({ onSuccess }: CreateInvoiceFormProps) {
             {errors.payerAddress && (
               <p className="text-sm text-red-500">{errors.payerAddress}</p>
             )}
+            <p className="text-xs text-gray-500">
+              If you leave this blank, anyone with the link can pay the invoice.
+            </p>
           </div>
 
           <div className="space-y-2">

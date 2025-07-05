@@ -50,9 +50,42 @@ export function useHyperliquidInvoices() {
     queryFn: async () => {
       const response = await api.hyperliquid.invoices.get()
       if (response.error) {
+        const errorMessage = typeof response.error.value === 'object' 
+          ? JSON.stringify(response.error.value) 
+          : response.error.value as string;
+        throw new Error(errorMessage || 'Failed to fetch invoices')
+      }
+      return response.data
+    },
+  })
+}
+
+// Hook to get a single invoice by ID
+export function useInvoiceById(invoiceId: string | undefined) {
+  return useQuery({
+    queryKey: ['invoices', invoiceId],
+    queryFn: async () => {
+      if (!invoiceId) {
+        // Return a promise that resolves to null or throws,
+        // but it shouldn't be called due to `enabled` flag.
+        return Promise.resolve(null)
+      }
+      const response = await api.hyperliquid.invoices[invoiceId].get()
+      if (response.error) {
+        if (response.status === 404) {
+          return null // Treat 404 as data not found, not an error
+        }
         throw new Error(response.error.value as string)
       }
       return response.data
+    },
+    enabled: !!invoiceId, // Only run the query if invoiceId is available
+    retry: (failureCount, error: any) => {
+      // Don't retry on 404s
+      if (error?.status === 404) {
+        return false
+      }
+      return failureCount < 3
     },
   })
 }
@@ -63,14 +96,17 @@ export function useCreateInvoiceMutation() {
 
   return useMutation({
     mutationFn: async (invoiceData: {
-      payerAddress: string
+      payerAddress?: string
       token: string
       amount: string
       description?: string
     }) => {
       const response = await api.hyperliquid.invoices.post(invoiceData)
       if (response.error) {
-        throw new Error(response.error.value as string)
+        const errorMessage = typeof response.error.value === 'object'
+          ? JSON.stringify(response.error.value)
+          : response.error.value as string;
+        throw new Error(errorMessage || 'Failed to create invoice')
       }
       return response.data
     },
@@ -91,7 +127,10 @@ export function useConfirmPaymentMutation() {
         txHash,
       })
       if (response.error) {
-        throw new Error(response.error.value as string)
+        const errorMessage = typeof response.error.value === 'object'
+          ? JSON.stringify(response.error.value)
+          : response.error.value as string;
+        throw new Error(errorMessage || 'Failed to confirm payment')
       }
       return response.data
     },
@@ -136,7 +175,10 @@ export function useCreateMultisigMutation() {
         agentWalletAddress,
       })
       if (response.error) {
-        throw new Error(response.error.value as string)
+        const errorMessage = typeof response.error.value === 'object'
+          ? JSON.stringify(response.error.value)
+          : response.error.value as string;
+        throw new Error(errorMessage || 'Failed to create multisig')
       }
       return response.data
     },

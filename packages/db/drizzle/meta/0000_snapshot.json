@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "51a61506-4d8d-4149-b0bc-77525f91dfaf",
+  "id": "a3b751df-b955-4798-9914-17263873c1a8",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "agent_wallets": {
@@ -41,7 +41,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751585516741
+          "default": 1751645179689
         }
       },
       "indexes": {},
@@ -98,7 +98,7 @@
           "name": "payerAddress",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "token": {
@@ -143,7 +143,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751585516740
+          "default": 1751645179688
         },
         "paidAt": {
           "name": "paidAt",
@@ -232,7 +232,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751585516741
+          "default": 1751645179689
         }
       },
       "indexes": {

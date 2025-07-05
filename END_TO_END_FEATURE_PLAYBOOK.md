@@ -278,30 +278,57 @@ Use the hooks in your React components to display data and handle user actions.
 
 ### 6. Frontend: Add a Route (TanStack Router)
 
-Expose your new feature component on a dedicated page.
+Expose your new feature component on a dedicated page. Our project uses a programmatic route definition pattern instead of file-based routing.
 
-1.  **Create a new route file**: In `apps/web/src/routes/`.
+1.  **Create a new route file**: In `apps/web/src/pages/`, create a new directory and file for your feature. For example: `apps/web/src/pages/feature/feature.tsx`.
 
     ```tsx
-    // apps/web/src/routes/feature.tsx
-    import { createFileRoute } from "@tanstack/react-router";
-    import { FeatureList } from "../components/features/FeatureList";
+    // apps/web/src/pages/feature/feature.tsx
+    import { createRoute, type RootRoute } from '@tanstack/react-router'
+    import { FeatureList } from '@/components/features/FeatureList' // Assuming this component exists
 
-    export const Route = createFileRoute("/feature")({
-      component: FeaturePage,
-    });
-
+    // The main component for your feature page
     function FeaturePage() {
       return (
         <div>
           <h1>My New Feature</h1>
           <FeatureList />
         </div>
-      );
+      )
     }
-    ```
 
-    _TanStack Router will automatically pick up this new route file and generate the necessary types for the route tree._
+    // Route definition
+    export default (rootRoute: RootRoute) =>
+      createRoute({
+        getParentRoute: () => rootRoute,
+        path: '/feature', // URL path for the new page
+        component: FeaturePage,
+      })
+    ```
+    _Note: The `@` alias typically points to `apps/web/src/`._
+
+2.  **Integrate the new route**: Mount your new route in `apps/web/src/pages/router.tsx`.
+
+    ```typescript
+    // apps/web/src/pages/router.tsx
+    import { Outlet, createRootRoute, createRouter } from '@tanstack/react-router'
+    // ... other imports like HomePage, etc.
+    import MultisigPage from './multisig/multisig'
+    import FeaturePageRoute from './feature/feature' // 1. Import your new route module
+
+    // ... rootRoute definition
+
+    const routes = rootRoute.addChildren([
+      // ... other routes
+      MultisigPage(rootRoute),
+      FeaturePageRoute(rootRoute), // 2. Add your new route to the array
+    ])
+
+    export const router = createRouter({
+      routeTree: routes,
+      // ... other router config
+    })
+    ```
 
 ---
 
@@ -316,5 +343,5 @@ Expose your new feature component on a dedicated page.
 - [ ] Query keys are managed in a structured way.
 - [ ] Mutations correctly invalidate relevant queries on success.
 - [ ] UI component uses the hooks to handle loading, error, and success states.
-- [ ] A new route is created using TanStack Router to display the component.
+- [ ] A new route module is created in `apps/web/src/pages/` and linked in `router.tsx`.
 - [ ] All code passes linting (`bun lint`) and type-checking (`bun check`).

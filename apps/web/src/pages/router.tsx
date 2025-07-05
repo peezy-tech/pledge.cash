@@ -7,6 +7,7 @@ import HomePage from './home/home'
 import OptionPage from './evm/option'
 import LockedVaultPage from './evm/locked-vault'
 import InvoicesPage from './invoices/invoices'
+import InvoicePage from './invoices/invoice'
 import MultisigPage from './multisig/multisig'
 
 import Header from '@/components/Header'
@@ -29,6 +30,7 @@ const routes = rootRoute.addChildren([
   OptionPage(rootRoute),
   LockedVaultPage(rootRoute),
   InvoicesPage(rootRoute),
+  InvoicePage(rootRoute),
   MultisigPage(rootRoute),
 ])
 
