@@ -117,6 +117,64 @@ export const agentWallets = table("agent_wallets", {
   createdAt: t.integer().default(Date.now()).notNull(),
 });
 
+// Spot tokens metadata table
+export const spotTokensMetadata = table("spot_tokens_metadata", {
+  id: t
+    .text()
+    .primaryKey()
+    .$default(() => `st_${generateUniqueString(16)}`),
+  tokenName: t.text().notNull().unique(),
+  szDecimals: t.integer().notNull(),
+  weiDecimals: t.integer().notNull(),
+  tokenId: t.text().notNull(),
+  isCanonical: t.integer({ mode: "boolean" }).default(false).notNull(),
+  fullName: t.text(),
+  evmContract: t.text({ mode: "json" }), // Store as JSON for EvmContract data
+  index: t.integer().notNull(),
+  createdAt: t.integer().default(Date.now()).notNull(),
+  updatedAt: t.integer().default(Date.now()).notNull(),
+});
+
+// Spot tokens mid prices table (real-time data from WebSocket)
+export const spotTokensMidPrices = table("spot_tokens_mid_prices", {
+  id: t
+    .text()
+    .primaryKey()
+    .$default(() => `mid_${generateUniqueString(16)}`),
+  tokenName: t.text().notNull(),
+  midPrice: t.text().notNull(), // Store as string to maintain precision
+  timestamp: t.integer().default(Date.now()).notNull(),
+  source: t.text().$type<"websocket" | "rest">().default("websocket").notNull(),
+});
+
+// Cache metadata table for managing cache invalidation
+export const spotTokensCache = table("spot_tokens_cache", {
+  id: t
+    .text()
+    .primaryKey()
+    .$default(() => `cache_${generateUniqueString(16)}`),
+  cacheKey: t.text().notNull().unique(), // e.g., "spot_tokens_metadata", "spot_tokens_mids"
+  lastUpdated: t.integer().default(Date.now()).notNull(),
+  lastUpdateSource: t.text().$type<"websocket" | "rest" | "manual">().default("rest").notNull(),
+  dataCount: t.integer().default(0).notNull(), // Number of records in the cache
+  isValid: t.integer({ mode: "boolean" }).default(true).notNull(),
+  expiresAt: t.integer(), // Optional expiration time
+  metadata: t.text({ mode: "json" }), // Additional metadata as JSON
+});
+
+// Relations for spot tokens
+export const spotTokensMetadataRelations = relations(spotTokensMetadata, ({ many }) => ({
+  midPrices: many(spotTokensMidPrices),
+}));
+
+// Indexes for better query performance
+export const spotTokensMidPricesIndexes = {
+  tokenTimestamp: t.index("mid_prices_token_timestamp_idx")
+    .on(spotTokensMidPrices.tokenName, spotTokensMidPrices.timestamp),
+  timestamp: t.index("mid_prices_timestamp_idx")
+    .on(spotTokensMidPrices.timestamp),
+};
+
 function generateUniqueString(length: number = 12): string {
   const characters =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";

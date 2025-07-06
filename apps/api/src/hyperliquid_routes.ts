@@ -14,6 +14,7 @@ import { eq, and, desc, or } from "drizzle-orm";
 import { executeHooks } from "./execute_hooks";
 import { auth_routes } from "./auth";
 import { resolveAddressToUser, isAddressAuthorizedForUser, getUserAddresses, resolvePaymentWithEdgeCases } from "./address_resolver";
+import { getWebSocketClient } from "./websocket_client";
 
 const operator = privateKeyToAccount(
   process.env.OPERATOR_PRIVATE_KEY as `0x${string}`
@@ -738,6 +739,60 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
           console.error("Error fetching user addresses:", error);
           set.status = 500;
           return { error: "Failed to fetch user addresses" };
+        }
+      })
+
+      // New endpoint for cached spot tokens data
+      .get("/spot-tokens", async ({ set }) => {
+        try {
+          const wsClient = getWebSocketClient(IS_TESTNET);
+          const spotTokensData = wsClient.getSpotTokensData();
+          
+          if (!spotTokensData) {
+            set.status = 503;
+            return { 
+              error: "Spot tokens data not available", 
+              message: "WebSocket client may not be connected or data not yet loaded" 
+            };
+          }
+          
+          return {
+            success: true,
+            data: {
+              tokens: spotTokensData.tokens,
+              mids: spotTokensData.mids,
+              lastUpdated: spotTokensData.lastUpdated,
+              source: spotTokensData.source,
+              count: Object.keys(spotTokensData.tokens).length
+            }
+          };
+        } catch (error) {
+          console.error("Error fetching cached spot tokens:", error);
+          set.status = 500;
+          return { 
+            error: "Failed to fetch cached spot tokens", 
+            message: error instanceof Error ? error.message : "Unknown error" 
+          };
+        }
+      })
+
+      // WebSocket client status endpoint
+      .get("/ws-status", async ({ set }) => {
+        try {
+          const wsClient = getWebSocketClient(IS_TESTNET);
+          const status = wsClient.getStatus();
+          
+          return {
+            success: true,
+            data: status
+          };
+        } catch (error) {
+          console.error("Error fetching WebSocket status:", error);
+          set.status = 500;
+          return { 
+            error: "Failed to fetch WebSocket status", 
+            message: error instanceof Error ? error.message : "Unknown error" 
+          };
         }
       })
   );

@@ -1,11 +1,11 @@
 - [x] move api scripts to own 'scripts' apps sub-folder
 - [x] multisig init flow ("merchant" onboarding). most methods at multisig_send_spot.ts
-- [x] generate agent wallet on client side and approve it on backend
+- [x] generate api wallet on client side and approve it on backend
 - [x] invoice links: whoever clicks can send a transaction to pay for it. (checkout experience)
 - [x] invoice hooks -> run logic after an invoice is paid
 
 - [x] invoices can be paid by multisig and user is considered payer: its like address abstraction. a given user id is the payer of an invoice if the sender of the tx is the user address or its multisig address
-- [ ] websocket client on backend that frontend can GET request some info (spot tokens list)
+- [x] websocket client on backend that frontend can GET request some info (spot tokens list)
 
 - [ ] recurrent invoices: payable only by multisig
 - [ ] (HUMAN ONLY) approve builder code for swaps and add to frontend swaps 

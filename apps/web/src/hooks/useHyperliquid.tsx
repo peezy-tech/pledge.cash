@@ -30,16 +30,54 @@ export function useSpotTokens() {
   return useQuery({
     queryKey: ['spot-tokens'],
     queryFn: async () => {
-      const response = await infoClient?.spotMeta()
-      return response?.tokens.reduce(
-        (acc, t) => {
-          acc[t.name] = t
-          return acc
-        },
-        {} as Record<string, hl.SpotToken>,
-      )
+      try {
+        // First try to fetch from our cached endpoint
+        const cachedResponse = await api.hyperliquid['spot-tokens'].get()
+        
+        if (cachedResponse.data?.success && cachedResponse.data?.data?.tokens) {
+          console.log('Using cached spot tokens from backend:', {
+            count: cachedResponse.data.data.count,
+            lastUpdated: new Date(cachedResponse.data.data.lastUpdated),
+            source: cachedResponse.data.data.source
+          })
+          return cachedResponse.data.data.tokens
+        }
+        
+        // Fallback to direct API call if cache is not available
+        console.log('Cache not available, falling back to direct Hyperliquid API')
+        if (!infoClient) {
+          throw new Error('Neither cached data nor info client is available')
+        }
+        
+        const response = await infoClient.spotMeta()
+        return response?.tokens.reduce(
+          (acc, t) => {
+            acc[t.name] = t
+            return acc
+          },
+          {} as Record<string, hl.SpotToken>,
+        )
+      } catch (error) {
+        console.error('Error fetching spot tokens from cache, trying direct API:', error)
+        
+        // Final fallback to direct API call
+        if (!infoClient) {
+          throw new Error('Failed to fetch cached spot tokens and info client not available')
+        }
+        
+        const response = await infoClient.spotMeta()
+        return response?.tokens.reduce(
+          (acc, t) => {
+            acc[t.name] = t
+            return acc
+          },
+          {} as Record<string, hl.SpotToken>,
+        )
+      }
     },
-    enabled: isReady && !!infoClient,
+    enabled: true, // Always enabled since we have fallback mechanisms
+    staleTime: 5 * 60 * 1000, // Consider data stale after 5 minutes
+    refetchInterval: 5 * 60 * 1000, // Refetch every 5 minutes
   })
 }
 
@@ -52,7 +90,7 @@ export function useHyperliquidInvoices() {
       if (response.error) {
         const errorMessage = typeof response.error.value === 'object' 
           ? JSON.stringify(response.error.value) 
-          : response.error.value as string;
+          : String(response.error.value);
         throw new Error(errorMessage || 'Failed to fetch invoices')
       }
       return response.data
@@ -75,7 +113,7 @@ export function useInvoiceById(invoiceId: string | undefined) {
         if (response.status === 404) {
           return null // Treat 404 as data not found, not an error
         }
-        throw new Error(response.error.value as string)
+        throw new Error(String(response.error.value))
       }
       return response.data
     },
@@ -113,7 +151,7 @@ export function useCreateInvoiceMutation() {
       if (response.error) {
         const errorMessage = typeof response.error.value === 'object' 
           ? JSON.stringify(response.error.value) 
-          : response.error.value as string;
+          : String(response.error.value);
         throw new Error(errorMessage || 'Failed to create invoice')
       }
       return response.data
@@ -137,7 +175,7 @@ export function useConfirmPaymentMutation() {
       if (response.error) {
         const errorMessage = typeof response.error.value === 'object'
           ? JSON.stringify(response.error.value)
-          : response.error.value as string;
+          : String(response.error.value);
         throw new Error(errorMessage || 'Failed to confirm payment')
       }
       return response.data
@@ -185,10 +223,61 @@ export function useCreateMultisigMutation() {
       if (response.error) {
         const errorMessage = typeof response.error.value === 'object'
           ? JSON.stringify(response.error.value)
-          : response.error.value as string;
+          : String(response.error.value);
         throw new Error(errorMessage || 'Failed to create multisig')
       }
       return response.data
     },
+  })
+}
+
+// Hook to get WebSocket client status
+export function useWebSocketStatus() {
+  return useQuery({
+    queryKey: ['websocket-status'],
+    queryFn: async () => {
+      const response = await api.hyperliquid['ws-status'].get()
+      if (response.error) {
+        const errorMessage = typeof response.error.value === 'object' 
+          ? JSON.stringify(response.error.value) 
+          : String(response.error.value);
+        throw new Error(errorMessage || 'Failed to fetch WebSocket status')
+      }
+      return response.data
+    },
+    refetchInterval: 30 * 1000, // Check status every 30 seconds
+    staleTime: 15 * 1000, // Consider data stale after 15 seconds
+  })
+}
+
+// Enhanced hook to get spot tokens with mid prices and metadata
+export function useSpotTokensWithPrices() {
+  return useQuery({
+    queryKey: ['spot-tokens-with-prices'],
+    queryFn: async () => {
+      const response = await api.hyperliquid['spot-tokens'].get()
+      
+      if (response.error) {
+        const errorMessage = typeof response.error.value === 'object' 
+          ? JSON.stringify(response.error.value) 
+          : String(response.error.value);
+        throw new Error(errorMessage || 'Failed to fetch spot tokens with prices')
+      }
+      
+      if (!response.data?.success || !response.data?.data) {
+        throw new Error('Invalid response format from spot tokens endpoint')
+      }
+      
+      return {
+        tokens: response.data.data.tokens,
+        mids: response.data.data.mids,
+        lastUpdated: response.data.data.lastUpdated,
+        source: response.data.data.source,
+        count: response.data.data.count,
+      }
+    },
+    enabled: true,
+    staleTime: 2 * 60 * 1000, // Consider data stale after 2 minutes (mid prices update frequently)
+    refetchInterval: 2 * 60 * 1000, // Refetch every 2 minutes for real-time prices
   })
 }
