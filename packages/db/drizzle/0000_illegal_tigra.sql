@@ -3,7 +3,7 @@ CREATE TABLE `agent_wallets` (
 	`multisigId` text NOT NULL,
 	`userId` text NOT NULL,
 	`address` text NOT NULL,
-	`createdAt` integer DEFAULT 1751738692466 NOT NULL,
+	`createdAt` integer DEFAULT 1751983936253 NOT NULL,
 	FOREIGN KEY (`multisigId`) REFERENCES `multisig_accounts`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`userId`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
 );
@@ -20,7 +20,7 @@ CREATE TABLE `hyperliquid_invoices` (
 	`description` text,
 	`status` text DEFAULT 'pending' NOT NULL,
 	`txHash` text,
-	`createdAt` integer DEFAULT 1751738692464 NOT NULL,
+	`createdAt` integer DEFAULT 1751983936252 NOT NULL,
 	`paidAt` integer,
 	`expiresAt` integer,
 	FOREIGN KEY (`creatorId`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action,
@@ -34,7 +34,7 @@ CREATE TABLE `invoice_hooks` (
 	`event` text NOT NULL,
 	`type` text NOT NULL,
 	`url` text NOT NULL,
-	`createdAt` integer DEFAULT 1751738692466 NOT NULL,
+	`createdAt` integer DEFAULT 1751983936253 NOT NULL,
 	FOREIGN KEY (`invoiceId`) REFERENCES `hyperliquid_invoices`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
@@ -44,7 +44,7 @@ CREATE TABLE `multisig_accounts` (
 	`operatorAddress` text NOT NULL,
 	`operatorPrivateKey` text NOT NULL,
 	`address` text NOT NULL,
-	`createdAt` integer DEFAULT 1751738692466 NOT NULL
+	`createdAt` integer DEFAULT 1751983936253 NOT NULL
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `multisig_accounts_userAddress_unique` ON `multisig_accounts` (`userAddress`);--> statement-breakpoint
@@ -53,7 +53,7 @@ CREATE UNIQUE INDEX `multisig_accounts_operatorPrivateKey_unique` ON `multisig_a
 CREATE TABLE `spot_tokens_cache` (
 	`id` text PRIMARY KEY NOT NULL,
 	`cacheKey` text NOT NULL,
-	`lastUpdated` integer DEFAULT 1751738692466 NOT NULL,
+	`lastUpdated` integer DEFAULT 1751983936254 NOT NULL,
 	`lastUpdateSource` text DEFAULT 'rest' NOT NULL,
 	`dataCount` integer DEFAULT 0 NOT NULL,
 	`isValid` integer DEFAULT true NOT NULL,
@@ -72,8 +72,8 @@ CREATE TABLE `spot_tokens_metadata` (
 	`fullName` text,
 	`evmContract` text,
 	`index` integer NOT NULL,
-	`createdAt` integer DEFAULT 1751738692466 NOT NULL,
-	`updatedAt` integer DEFAULT 1751738692466 NOT NULL
+	`createdAt` integer DEFAULT 1751983936253 NOT NULL,
+	`updatedAt` integer DEFAULT 1751983936253 NOT NULL
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `spot_tokens_metadata_tokenName_unique` ON `spot_tokens_metadata` (`tokenName`);--> statement-breakpoint
@@ -81,13 +81,13 @@ CREATE TABLE `spot_tokens_mid_prices` (
 	`id` text PRIMARY KEY NOT NULL,
 	`tokenName` text NOT NULL,
 	`midPrice` text NOT NULL,
-	`timestamp` integer DEFAULT 1751738692466 NOT NULL,
+	`timestamp` integer DEFAULT 1751983936254 NOT NULL,
 	`source` text DEFAULT 'websocket' NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE `tx_hashes` (
 	`hash` text PRIMARY KEY NOT NULL,
-	`createdAt` integer DEFAULT 1751738692463 NOT NULL,
+	`createdAt` integer DEFAULT 1751983936252 NOT NULL,
 	`metadata` text
 );
 --> statement-breakpoint

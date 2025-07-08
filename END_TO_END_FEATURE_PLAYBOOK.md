@@ -276,6 +276,8 @@ Use the hooks in your React components to display data and handle user actions.
     }
     ```
 
+If you ever need a Toaster component, thats `sonner.tsx`
+
 ### 6. Frontend: Add a Route (TanStack Router)
 
 Expose your new feature component on a dedicated page. Our project uses a programmatic route definition pattern instead of file-based routing.

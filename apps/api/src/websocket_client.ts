@@ -1,8 +1,5 @@
 import * as hl from "@nktkas/hyperliquid";
 import { EventEmitter } from "events";
-import { db } from "db";
-import { spotTokensMetadata, spotTokensMidPrices, spotTokensCache } from "db/schema";
-import { eq, desc } from "drizzle-orm";
 
 export interface SpotTokensData {
   tokens: Record<string, hl.SpotToken>;
@@ -35,8 +32,6 @@ export class HyperliquidWebSocketClient extends EventEmitter {
   private subscriptions: Set<string> = new Set();
   private refreshInterval: NodeJS.Timeout | null = null;
   private isTestnet: boolean;
-  private lastDatabaseSync: number | null = null;
-  private databaseSyncInterval: NodeJS.Timeout | null = null;
 
   constructor(isTestnet = false) {
     super();
@@ -58,17 +53,14 @@ export class HyperliquidWebSocketClient extends EventEmitter {
       this.transport = new hl.WebSocketTransport();
       this.subsClient = new hl.SubscriptionClient({ transport: this.transport });
 
-      // Load initial spot tokens data from database or API
-      await this.loadInitialSpotTokens();
+      // Load initial spot tokens data from API
+      await this.refreshSpotTokens();
 
       // Subscribe to allMids for real-time updates
       await this.subscribeToAllMids();
 
       // Set up periodic refresh of spot metadata
       this.setupPeriodicRefresh();
-
-      // Set up periodic database sync
-      this.setupDatabaseSync();
 
       this.isConnected = true;
       this.lastConnected = Date.now();
@@ -97,14 +89,6 @@ export class HyperliquidWebSocketClient extends EventEmitter {
       clearInterval(this.refreshInterval);
       this.refreshInterval = null;
     }
-
-    if (this.databaseSyncInterval) {
-      clearInterval(this.databaseSyncInterval);
-      this.databaseSyncInterval = null;
-    }
-
-    // Perform final database sync before disconnecting
-    await this.syncToDatabase();
 
     // Clean up subscriptions
     this.subscriptions.clear();
@@ -167,38 +151,11 @@ export class HyperliquidWebSocketClient extends EventEmitter {
         };
 
         console.log(`Refreshed ${Object.keys(tokens).length} spot tokens`);
-        
-        // Persist to database
-        await this.persistSpotTokensMetadata(spotMeta.tokens);
-        
         this.emit("spotTokensUpdated", this.spotTokensCache);
       }
     } catch (error) {
       console.error("Error refreshing spot tokens:", error);
       this.emit("error", error);
-    }
-  }
-
-  /**
-   * Load initial spot tokens data from database or API
-   */
-  private async loadInitialSpotTokens(): Promise<void> {
-    try {
-      // First try to load from database
-      const cachedData = await this.loadFromDatabase();
-      
-      if (cachedData && this.isCacheValid(cachedData)) {
-        console.log("Loaded spot tokens from database cache");
-        this.spotTokensCache = cachedData;
-        this.emit("spotTokensUpdated", this.spotTokensCache);
-      }
-      
-      // Always refresh from API to ensure we have latest data
-      await this.refreshSpotTokens();
-    } catch (error) {
-      console.error("Error loading initial spot tokens:", error);
-      // Fallback to API only
-      await this.refreshSpotTokens();
     }
   }
 
@@ -277,237 +234,6 @@ export class HyperliquidWebSocketClient extends EventEmitter {
     } else {
       console.error("Max reconnection attempts reached");
       this.emit("maxReconnectAttemptsReached");
-    }
-  }
-
-  /**
-   * Load spot tokens data from database
-   */
-  private async loadFromDatabase(): Promise<SpotTokensData | null> {
-    try {
-      // Load metadata from database
-      const tokensFromDb = await db.select().from(spotTokensMetadata);
-      
-      if (tokensFromDb.length === 0) {
-        return null;
-      }
-
-      // Convert to the expected format
-      const tokens = tokensFromDb.reduce((acc, token) => {
-        const spotToken: any = {
-          name: token.tokenName,
-          szDecimals: token.szDecimals,
-          weiDecimals: token.weiDecimals,
-          index: token.index,
-          tokenId: token.tokenId as `0x${string}`,
-          isCanonical: token.isCanonical,
-        };
-        
-        if (token.fullName) {
-          spotToken.fullName = token.fullName;
-        }
-        
-        if (token.evmContract && typeof token.evmContract === 'string') {
-          try {
-            spotToken.evmContract = JSON.parse(token.evmContract);
-          } catch (error) {
-            console.warn("Failed to parse evmContract JSON:", error);
-          }
-        }
-        
-        acc[token.tokenName] = spotToken as hl.SpotToken;
-        return acc;
-      }, {} as Record<string, hl.SpotToken>);
-
-      // Load latest mid prices
-      const mids: Record<string, string> = {};
-      for (const tokenName of Object.keys(tokens)) {
-        const latestPrice = await db
-          .select()
-          .from(spotTokensMidPrices)
-          .where(eq(spotTokensMidPrices.tokenName, tokenName))
-          .orderBy(desc(spotTokensMidPrices.timestamp))
-          .limit(1)
-          .get();
-        
-        if (latestPrice) {
-          mids[tokenName] = latestPrice.midPrice;
-        }
-      }
-
-      // Get cache metadata
-      const cacheInfo = await db
-        .select()
-        .from(spotTokensCache)
-        .where(eq(spotTokensCache.cacheKey, "spot_tokens_metadata"))
-        .get();
-
-      return {
-        tokens,
-        mids,
-        lastUpdated: cacheInfo?.lastUpdated || Date.now(),
-        source: "cache",
-      };
-    } catch (error) {
-      console.error("Error loading from database:", error);
-      return null;
-    }
-  }
-
-  /**
-   * Check if cached data is still valid
-   */
-  private isCacheValid(cachedData: SpotTokensData): boolean {
-    const maxAge = 30 * 60 * 1000; // 30 minutes
-    return Date.now() - cachedData.lastUpdated < maxAge;
-  }
-
-  /**
-   * Persist spot tokens metadata to database
-   */
-  private async persistSpotTokensMetadata(tokens: hl.SpotToken[]): Promise<void> {
-    try {
-      const now = Date.now();
-      
-      // Upsert tokens metadata
-      for (const token of tokens) {
-        const existingToken = await db
-          .select()
-          .from(spotTokensMetadata)
-          .where(eq(spotTokensMetadata.tokenName, token.name))
-          .get();
-
-        const tokenData = {
-          tokenName: token.name,
-          szDecimals: token.szDecimals,
-          weiDecimals: token.weiDecimals,
-          tokenId: token.tokenId,
-          isCanonical: token.isCanonical,
-          fullName: token.fullName || null,
-          evmContract: token.evmContract ? JSON.stringify(token.evmContract) : null,
-          index: token.index,
-          updatedAt: now,
-        };
-
-        if (existingToken) {
-          await db
-            .update(spotTokensMetadata)
-            .set(tokenData)
-            .where(eq(spotTokensMetadata.tokenName, token.name));
-        } else {
-          await db.insert(spotTokensMetadata).values({
-            ...tokenData,
-            createdAt: now,
-          });
-        }
-      }
-
-      // Update cache metadata
-      await this.updateCacheMetadata("spot_tokens_metadata", tokens.length, "rest");
-      
-      console.log(`Persisted ${tokens.length} spot tokens to database`);
-    } catch (error) {
-      console.error("Error persisting spot tokens metadata:", error);
-    }
-  }
-
-  /**
-   * Persist mid prices to database
-   */
-  private async persistMidPrices(mids: Record<string, string>): Promise<void> {
-    try {
-      const now = Date.now();
-      
-      // Insert new mid prices
-      const midPriceEntries = Object.entries(mids).map(([tokenName, midPrice]) => ({
-        tokenName,
-        midPrice,
-        timestamp: now,
-        source: "websocket" as const,
-      }));
-
-      if (midPriceEntries.length > 0) {
-        await db.insert(spotTokensMidPrices).values(midPriceEntries);
-        
-        // Clean up old entries (keep only last 24 hours)
-        const cutoffTime = now - (24 * 60 * 60 * 1000);
-        
-        // Note: We'll keep the cleanup simple for now
-        // In production, you might want a more sophisticated cleanup strategy
-        console.log(`Persisted ${midPriceEntries.length} mid prices to database`);
-      }
-
-      // Update cache metadata
-      await this.updateCacheMetadata("spot_tokens_mids", Object.keys(mids).length, "websocket");
-    } catch (error) {
-      console.error("Error persisting mid prices:", error);
-    }
-  }
-
-  /**
-   * Update cache metadata
-   */
-  private async updateCacheMetadata(
-    cacheKey: string, 
-    dataCount: number, 
-    source: "websocket" | "rest" | "manual"
-  ): Promise<void> {
-    try {
-      const now = Date.now();
-      
-      const existingCache = await db
-        .select()
-        .from(spotTokensCache)
-        .where(eq(spotTokensCache.cacheKey, cacheKey))
-        .get();
-
-      const cacheData = {
-        cacheKey,
-        lastUpdated: now,
-        lastUpdateSource: source,
-        dataCount,
-        isValid: true,
-      };
-
-      if (existingCache) {
-        await db
-          .update(spotTokensCache)
-          .set(cacheData)
-          .where(eq(spotTokensCache.cacheKey, cacheKey));
-      } else {
-        await db.insert(spotTokensCache).values(cacheData);
-      }
-    } catch (error) {
-      console.error("Error updating cache metadata:", error);
-    }
-  }
-
-  /**
-   * Set up periodic database sync
-   */
-  private setupDatabaseSync(): void {
-    // Sync to database every 2 minutes
-    this.databaseSyncInterval = setInterval(() => {
-      this.syncToDatabase();
-    }, 2 * 60 * 1000);
-  }
-
-  /**
-   * Sync current data to database
-   */
-  private async syncToDatabase(): Promise<void> {
-    if (!this.spotTokensCache) {
-      return;
-    }
-
-    try {
-      // Only persist mid prices (metadata is handled in refreshSpotTokens)
-      if (this.spotTokensCache.mids && Object.keys(this.spotTokensCache.mids).length > 0) {
-        await this.persistMidPrices(this.spotTokensCache.mids);
-        this.lastDatabaseSync = Date.now();
-      }
-    } catch (error) {
-      console.error("Error syncing to database:", error);
     }
   }
 }

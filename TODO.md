@@ -7,8 +7,15 @@
 - [x] invoices can be paid by multisig and user is considered payer: its like address abstraction. a given user id is the payer of an invoice if the sender of the tx is the user address or its multisig address
 - [x] websocket client on backend that frontend can GET request some info (spot tokens list)
 
-- [ ] recurrent invoices: payable only by multisig
+- [ ] recurrent invoices: payable only by multisig, we trigger the recurrent payment on the backend using `operatorPrivateKey` stored on multisig table
+
+- [ ] test suite for backend: we want to be able to test recurrent invoices
+- [ ] discord role management hook
+- [ ] deploy to testnet.pledge.cash
+
 - [ ] (HUMAN ONLY) approve builder code for swaps and add to frontend swaps 
+- [ ] denominateIn: choose a token that is the base for all payments: auto-swap usdc payments to btc
+
 
 - [ ] add_repo.js that clones link. if --gh-fork will attempt to fork (or find existing) using gh cli and add the fork url to repos.json instead of original
 

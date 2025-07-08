@@ -9,6 +9,7 @@ import LockedVaultPage from './evm/locked-vault'
 import InvoicesPage from './invoices/invoices'
 import InvoicePage from './invoices/invoice'
 import MultisigPage from './multisig/multisig'
+import MultisigRecoveryPage from './multisig/recovery'
 
 import Header from '@/components/Header'
 
@@ -32,6 +33,7 @@ const routes = rootRoute.addChildren([
   InvoicesPage(rootRoute),
   InvoicePage(rootRoute),
   MultisigPage(rootRoute),
+  MultisigRecoveryPage(rootRoute),
 ])
 
 export const router = createRouter({

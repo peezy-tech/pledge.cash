@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "be92ad61-7265-4be4-a74c-cfd00bf07173",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "cecb2ead-583d-4b7f-aa61-3d774b2e2380",
+  "prevId": "be92ad61-7265-4be4-a74c-cfd00bf07173",
   "tables": {
     "agent_wallets": {
       "name": "agent_wallets",
@@ -41,7 +41,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751983936253
+          "default": 1751984857993
         }
       },
       "indexes": {},
@@ -164,7 +164,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751983936252
+          "default": 1751984857993
         },
         "paidAt": {
           "name": "paidAt",
@@ -271,7 +271,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751983936253
+          "default": 1751984857993
         }
       },
       "indexes": {},
@@ -338,7 +338,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751983936253
+          "default": 1751984857993
         }
       },
       "indexes": {
@@ -369,229 +369,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "spot_tokens_cache": {
-      "name": "spot_tokens_cache",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "cacheKey": {
-          "name": "cacheKey",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "lastUpdated": {
-          "name": "lastUpdated",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1751983936254
-        },
-        "lastUpdateSource": {
-          "name": "lastUpdateSource",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'rest'"
-        },
-        "dataCount": {
-          "name": "dataCount",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "isValid": {
-          "name": "isValid",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": true
-        },
-        "expiresAt": {
-          "name": "expiresAt",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "metadata": {
-          "name": "metadata",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "spot_tokens_cache_cacheKey_unique": {
-          "name": "spot_tokens_cache_cacheKey_unique",
-          "columns": [
-            "cacheKey"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "spot_tokens_metadata": {
-      "name": "spot_tokens_metadata",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tokenName": {
-          "name": "tokenName",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "szDecimals": {
-          "name": "szDecimals",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "weiDecimals": {
-          "name": "weiDecimals",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tokenId": {
-          "name": "tokenId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "isCanonical": {
-          "name": "isCanonical",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "fullName": {
-          "name": "fullName",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "evmContract": {
-          "name": "evmContract",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "index": {
-          "name": "index",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1751983936253
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1751983936253
-        }
-      },
-      "indexes": {
-        "spot_tokens_metadata_tokenName_unique": {
-          "name": "spot_tokens_metadata_tokenName_unique",
-          "columns": [
-            "tokenName"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "spot_tokens_mid_prices": {
-      "name": "spot_tokens_mid_prices",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tokenName": {
-          "name": "tokenName",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "midPrice": {
-          "name": "midPrice",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "timestamp": {
-          "name": "timestamp",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1751983936254
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'websocket'"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "tx_hashes": {
       "name": "tx_hashes",
       "columns": {
@@ -608,7 +385,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751983936252
+          "default": 1751984857992
         },
         "metadata": {
           "name": "metadata",
