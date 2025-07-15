@@ -10,7 +10,9 @@
     "db:up": "drizzle-kit up",
     "db:introspect": "drizzle-kit introspect",
     "db:drop": "drizzle-kit drop",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "extract-data": "bun run extract-data.ts",
+    "import-data": "bun run import-data.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

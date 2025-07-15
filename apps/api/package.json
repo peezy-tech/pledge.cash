@@ -17,8 +17,6 @@
     "@repo/db": "workspace:*",
     "@types/jsonwebtoken": "^9.0.9",
     "arctic": "^3.6.1",
-    "bs58": "^6.0.0",
-    "dockerode": "^4.0.6",
     "elysia": "latest",
     "elysia-oauth2": "^2.1.0",
     "jsonwebtoken": "^9.0.2",

@@ -147,36 +147,148 @@ With the database schema updated, you can now create the API endpoint.
     export type App = typeof app; // Export the app type for Treaty
     ```
 
-### 2. Type Generation: Sync Backend and Frontend (Elysia Treaty)
+### 2. Backend: Testing Setup (Elysia + Eden Treaty)
 
-Generate the client-side types so the frontend knows the API's contract.
+Before moving to the frontend, ensure your backend API is properly tested. Our API uses a comprehensive testing setup with Bun Test and Eden Treaty.
 
-1.  **Run the type generation script**: This command consumes the exported `App` type from `apps/api/src/index.ts` and generates a typed client for the frontend.
+#### 2.1. Read the Testing Documentation
 
-    ```bash
-    # This command is typically run from the root or web app directory
-    # It connects to the API's entrypoint and outputs a typed client
-    bun --bun apps/api/src/index.ts --out apps/web/src/utils/api-client.ts
+**📖 IMPORTANT**: Before writing tests, read the comprehensive testing guide:
+
+```bash
+# Read the complete testing setup documentation
+cat apps/api/test/README.md
+```
+
+This README covers:
+- Testing architecture and best practices
+- How to use the test utilities
+- Examples of authentication and endpoint testing
+- Type-safe testing with Eden Treaty
+- Common testing patterns and utilities
+
+#### 2.2. Write Tests for Your New Feature
+
+1. **Create feature-specific test file**: Create a test file for your new feature routes.
+
+    ```typescript
+    // apps/api/test/feature.test.ts
+    import { describe, expect, it, beforeEach } from 'bun:test';
+    import { treaty } from '@elysiajs/eden';
+    import { createTestApp, type TestApp } from './setup';
+    import { requestUtils, assertUtils, mockAuth } from './test-utils';
+
+    describe('Feature Routes', () => {
+      let app: TestApp;
+      let api: ReturnType<typeof treaty<TestApp>>;
+
+      beforeEach(() => {
+        app = createTestApp();
+        api = treaty(app);
+      });
+
+      describe('GET /feature - List Items', () => {
+        it('should return empty array initially', async () => {
+          const response = await app.handle(
+            requestUtils.createGetRequest('/feature')
+          );
+          
+          const data = await assertUtils.assertJsonResponse(response, 200);
+          expect(Array.isArray(data)).toBe(true);
+          expect(data.length).toBe(0);
+        });
+
+        it('should work with Eden Treaty', async () => {
+          const { data, error } = await api.feature.get();
+          expect(error).toBeNull();
+          expect(data).toBeDefined();
+          expect(Array.isArray(data)).toBe(true);
+        });
+      });
+
+      describe('POST /feature - Create Item', () => {
+        it('should create new item with valid data', async () => {
+          const itemData = { name: 'Test Item' };
+          
+          const response = await app.handle(
+            requestUtils.createPostRequest('/feature', itemData)
+          );
+          
+          const data = await assertUtils.assertJsonResponse(response, 200);
+          expect(data.name).toBe(itemData.name);
+          expect(data.id).toBeDefined();
+        });
+
+        it('should validate required fields', async () => {
+          const response = await app.handle(
+            requestUtils.createPostRequest('/feature', {})
+          );
+          
+          await assertUtils.assertValidationError(response);
+        });
+      });
+    });
     ```
 
-    _Note: You may want to add this as a `sync:api` script in `apps/web/package.json` for convenience._
+2. **Test protected routes**: If your feature has authentication requirements, use the auth utilities.
+
+    ```typescript
+    describe('Protected Feature Routes', () => {
+      it('should require authentication', async () => {
+        const response = await app.handle(
+          requestUtils.createGetRequest('/feature/protected')
+        );
+        
+        expect(response.status).toBe(401);
+      });
+
+      // Note: For full auth testing, you'd need to mock the JWT verification
+      // See apps/api/test/auth.test.ts for examples
+    });
+    ```
+
+3. **Run your tests**: Ensure your new tests pass.
+
+    ```bash
+    # Run your specific test file
+    cd apps/api && bun test feature.test.ts
+
+    # Run all tests
+    cd apps/api && bun test
+
+    # Run tests in watch mode while developing
+    cd apps/api && bun test --watch
+    ```
+
+#### 2.3. Test Coverage Guidelines
+
+Follow these testing principles from the test README:
+
+- **Test both success and error cases**
+- **Use descriptive test names**
+- **Group related tests in describe blocks**
+- **Test validation and error handling**
+- **Use Eden Treaty for type-safe testing**
+- **Test authentication and authorization**
 
 ### 3. Frontend: Create the API Client (Eden Treaty)
 
-Set up the type-safe client in the `apps/web` workspace.
+Set up the type-safe client in the `apps/web` workspace. Eden Treaty provides automatic type safety without code generation.
 
 1.  **Create the client instance**: In `apps/web/src/utils/api.ts`, use `edenTreaty` to create the client.
 
     ```typescript
     // apps/web/src/utils/api.ts
     import { edenTreaty } from "@elysiajs/eden";
-    import type { App } from "../../../api/src/index"; // Import the App type
+    import type { App } from "api"; // Import the App type from the API workspace
 
-    // The URL should come from environment variables
-    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3005";
+    // API configuration
+    export const API_BASE_URL = location.origin === "http://localhost:5173" ? "http://localhost:3000" : location.origin;
 
-    export const api = edenTreaty<App>(API_URL);
+    export const api = edenTreaty<App>(API_BASE_URL, { $fetch: { credentials: 'include' } });
     ```
+
+    _Note: Eden Treaty automatically provides end-to-end type safety without any code generation step. The `App` type is imported directly from the `api` workspace, and TypeScript handles the rest._
 
 ### 4. Frontend: Data Fetching Hooks (TanStack Query)
 
@@ -336,14 +448,26 @@ Expose your new feature component on a dedicated page. Our project uses a progra
 
 ## ✅ Definition of Done Checklist
 
+### Backend & Testing
 - [ ] Backend route is created in its own `[feature]_routes.ts` file.
 - [ ] Route includes validation schemas for `body`, `params`, and `response`.
 - [ ] New route module is imported and used in `apps/api/src/index.ts`.
 - [ ] `export type App = typeof app;` is present in `index.ts`.
+- [ ] **Testing documentation has been read** (`apps/api/test/README.md`).
+- [ ] **Feature-specific test file is created** (`apps/api/test/[feature].test.ts`).
+- [ ] **Tests cover both success and error cases** for all endpoints.
+- [ ] **Tests use Eden Treaty for type-safe testing**.
+- [ ] **Authentication/authorization is tested** if applicable.
+- [ ] **All tests pass** (`bun test` from `apps/api/`).
+
+### Frontend
 - [ ] Type-safe client has been regenerated via the sync script.
 - [ ] Custom `useQuery` and/or `useMutation` hooks are created for the endpoint.
 - [ ] Query keys are managed in a structured way.
 - [ ] Mutations correctly invalidate relevant queries on success.
 - [ ] UI component uses the hooks to handle loading, error, and success states.
 - [ ] A new route module is created in `apps/web/src/pages/` and linked in `router.tsx`.
+
+### Final Validation
 - [ ] All code passes linting (`bun lint`) and type-checking (`bun check`).
+- [ ] Feature works end-to-end from API to UI.
