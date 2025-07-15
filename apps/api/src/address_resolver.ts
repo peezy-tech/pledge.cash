@@ -176,8 +176,24 @@ export async function resolvePaymentWithEdgeCases(
   // Handle case where address cannot be resolved to any user
   if (!resolution) {
     edgeCases.isUnauthorizedPayment = true;
-    edgeCases.isValidPayment = !invoicePayerAddress; // Only valid if invoice allows any payer
-    edgeCases.warningMessage = "Payment address is not associated with any known user";
+    
+    // Allow registration via payment if:
+    // 1. Invoice has no designated payer (open to anyone), OR
+    // 2. The actual payer address matches the designated payer address (even if not in system yet)
+    if (!invoicePayerAddress) {
+      // Open invoice - any address can pay and get registered
+      edgeCases.isValidPayment = true;
+      edgeCases.warningMessage = "Payment address is not associated with any known user - will register via payment";
+    } else if (invoicePayerAddress.toLowerCase() === normalizedAddress) {
+      // Designated payer matches actual payer - allow registration via payment
+      edgeCases.isValidPayment = true;
+      edgeCases.warningMessage = "Payment address is not associated with any known user - will register via payment";
+    } else {
+      // Wrong address paying - reject
+      edgeCases.isValidPayment = false;
+      edgeCases.warningMessage = "Payment address is not associated with any known user and does not match designated payer";
+    }
+    
     return { resolution, edgeCases };
   }
 
