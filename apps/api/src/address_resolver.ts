@@ -1,5 +1,5 @@
-import { db } from "db";
-import { users, multisigAccounts } from "db/schema";
+import { db } from "@repo/db";
+import { users, multisigAccounts } from "@repo/db/schema";
 import { eq } from "drizzle-orm";
 import { getAddress } from "viem";
 import { privateKeyToAccount } from "viem/accounts";

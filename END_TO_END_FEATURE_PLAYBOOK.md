@@ -68,8 +68,8 @@ With the database schema updated, you can now create the API endpoint.
     ```typescript
     // apps/api/src/feature_routes.ts
     import { Elysia, t } from "elysia";
-    import { db, orm } from "db"; // Import drizzle db and orm helpers
-    import { featureItems } from "db/schema"; // Import your new table schema
+    import { db, orm } from "@repo/db"; // Import drizzle db and orm helpers
+    import { featureItems } from "@repo/db/schema"; // Import your new table schema
 
     // Define the data structures for API responses
     const FeatureItem = t.Object({

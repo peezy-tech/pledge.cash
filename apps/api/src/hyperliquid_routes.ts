@@ -1,7 +1,7 @@
 import { Elysia, t } from "elysia";
 import * as hl from "@nktkas/hyperliquid";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { db } from "db";
+import { db } from "@repo/db";
 import {
   hyperliquidInvoices,
   users,
@@ -9,7 +9,7 @@ import {
   agentWallets,
   invoiceHooks,
   txHashes,
-} from "db/schema";
+} from "@repo/db/schema";
 import { eq, or } from "drizzle-orm";
 import { executeHooks } from "./execute_hooks";
 import { auth_routes } from "./auth";
