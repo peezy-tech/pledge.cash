@@ -3,6 +3,8 @@ import { PageLayout } from '@/components/PageLayout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { BarChart3, DollarSign, TrendingUp, Users, Activity } from 'lucide-react'
+import PieChart from '@/components/PieChart3'
+
 
 function DashboardCard({ title, value, description, icon: Icon }: {
   title: string
@@ -27,6 +29,7 @@ function DashboardCard({ title, value, description, icon: Icon }: {
 export function HomePage() {
   return (
     <PageLayout title="Dashboard">
+      <PieChart/>
       <div className="space-y-6">
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <DashboardCard

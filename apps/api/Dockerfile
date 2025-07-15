@@ -7,12 +7,14 @@ COPY package.json bun.lock ./
 COPY apps/api/package.json ./apps/api/package.json
 COPY packages/db/package.json ./packages/db/package.json
 COPY apps/web/package.json ./apps/web/package.json
+COPY scripts/package.json ./scripts/package.json
 RUN bun install
 
 # copy sources
 COPY apps/api ./apps/api
 COPY packages/db ./packages/db
 COPY apps/web ./apps/web
+COPY scripts ./scripts
 
 # build web
 WORKDIR /app/apps/web
@@ -33,6 +35,7 @@ COPY --from=build /app/apps/api      ./apps/api
 COPY --from=build /app/packages/db   ./packages/db
 COPY --from=build /app/apps/web/dist ./public
 COPY --from=build /app/apps/web/dist ./apps/api/public
+COPY --from=build /app/scripts ./scripts
 
 ENV NODE_ENV=production
 EXPOSE 3000
