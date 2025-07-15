@@ -1,4 +1,4 @@
-import { useReadContracts, useWriteContract, useWaitForTransactionReceipt, useAccount, useTransaction } from 'wagmi'
+import { useReadContracts, useWriteContract, useWaitForTransactionReceipt, useTransaction } from 'wagmi'
 import { formatUnits, parseUnits } from 'viem'
 import { useState } from 'react'
 import { TokenBalances } from './TokenBalances'
@@ -494,8 +494,8 @@ export default function OptionContract() {
       
       {/* Token Balances */}
       <TokenBalances 
-        currencyAddress={option?.[5]?.result as string}
-        underlyingAddress={option?.[6]?.result as string}
+        currencyAddress={option?.[5]?.result as `0x${string}`}
+        underlyingAddress={option?.[6]?.result as `0x${string}`}
       />
       
       {/* Transaction Inspector */}

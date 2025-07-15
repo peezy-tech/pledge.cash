@@ -2,7 +2,7 @@ import { createRoute, type RootRoute } from '@tanstack/react-router'
 import { PageLayout } from '@/components/PageLayout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { BarChart3, DollarSign, TrendingUp, Users, Activity } from 'lucide-react'
+import { BarChart3, DollarSign, TrendingUp, Users, Activity, type LucideProps } from 'lucide-react'
 import PieChart from '@/components/PieChart3'
 
 
@@ -10,7 +10,7 @@ function DashboardCard({ title, value, description, icon: Icon }: {
   title: string
   value: string
   description: string
-  icon: React.ElementType
+  icon: React.ForwardRefExoticComponent<Omit<LucideProps, "ref"> & React.RefAttributes<SVGSVGElement>>
 }) {
   return (
     <Card>

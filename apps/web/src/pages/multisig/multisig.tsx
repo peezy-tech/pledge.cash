@@ -378,6 +378,8 @@ function CreateMultisigSection() {
         amount: '5',
       })
 
+      console.log('tx', tx)
+
       toast.success('Seed transaction sent, creating multisig...')
       
       // Wait for tx to be indexed
@@ -459,8 +461,6 @@ function CreateMultisigSection() {
 }
 
 export function MultisigPage() {
-  const { data: multisig } = useMultisig()
-
   return (
     <PageLayout title="Multisig">
       <div className="space-y-6">

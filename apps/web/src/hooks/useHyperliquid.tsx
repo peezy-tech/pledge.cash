@@ -1,5 +1,4 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useAccount } from 'wagmi'
 import { api } from '../utils/api'
 import { useHyperliquid } from '../providers/HyperliquidProvider'
 import * as hl from '@nktkas/hyperliquid'
@@ -25,7 +24,7 @@ export function useHyperliquidSpotBalances(address?: `0x${string}`) {
 }
 
 export function useSpotTokens() {
-  const { infoClient, isReady } = useHyperliquid()
+  const { infoClient } = useHyperliquid()
 
   return useQuery({
     queryKey: ['spot-tokens'],

@@ -10,10 +10,10 @@ import {
   invoiceHooks,
   txHashes,
 } from "db/schema";
-import { eq, and, desc, or } from "drizzle-orm";
+import { eq, or } from "drizzle-orm";
 import { executeHooks } from "./execute_hooks";
 import { auth_routes } from "./auth";
-import { resolveAddressToUser, isAddressAuthorizedForUser, getUserAddresses, resolvePaymentWithEdgeCases } from "./address_resolver";
+import { getUserAddresses, resolvePaymentWithEdgeCases } from "./address_resolver";
 import { getWebSocketClient } from "./websocket_client";
 
 const operator = privateKeyToAccount(
@@ -704,7 +704,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
         }
       )
 
-      .get("/multisig", async ({ currentUser, set }) => {
+      .get("/multisig", async ({ currentUser }) => {
         const multisigAccount = await db
           .select()
           .from(multisigAccounts)

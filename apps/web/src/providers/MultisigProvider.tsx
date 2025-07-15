@@ -1,5 +1,5 @@
 import { createContext, useEffect, useContext, useState, useMemo } from 'react'
-import { useAccount, useChainId, useWalletClient } from 'wagmi'
+import { useAccount, useWalletClient } from 'wagmi'
 import { useMultisig } from '@/hooks/useHyperliquid'
 import * as hl from '@nktkas/hyperliquid'
 import { privateKeyToAccount } from 'viem/accounts'
@@ -84,6 +84,7 @@ export function MultisigProvider({ children }: { children: React.ReactNode }) {
     const agentPrivateKey = localStorage.getItem('agentPrivateKey')
     if (agentPrivateKey) {
       const agentAccount = privateKeyToAccount(agentPrivateKey as `0x${string}`)
+      console.log('agentAccount', agentAccount.address)
       const agentClient = new hl.ExchangeClient({
         transport: new hl.HttpTransport({ isTestnet: IS_TESTNET }),
         wallet: agentPrivateKey as `0x${string}`,

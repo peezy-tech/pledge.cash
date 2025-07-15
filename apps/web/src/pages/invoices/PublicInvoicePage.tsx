@@ -118,7 +118,7 @@ export function PublicInvoicePage() {
       await new Promise(resolve => setTimeout(resolve, 3000))
       
       // Get the multisig transaction details to find the transaction hash
-      const multisigDetails = await infoClient.userDetails({ user: multisigClient.address })
+      const multisigDetails = await infoClient.userDetails({ user: multisigClient.address as `0x${string}` })
       
       // Find the most recent spot send transaction that matches our criteria
       const spotSendTx = multisigDetails
@@ -285,7 +285,7 @@ export function PublicInvoicePage() {
                 {/* Regular payment button */}
                 <Button onClick={handlePayment} disabled={isPaying} className="w-full">
                   <Wallet className="h-4 w-4 mr-2" />
-                  {isPaying ? 'Processing Payment...' : `Pay ${invoice.amount} ${tokenSymbol}`}
+                  {isPaying ? 'Processing Payment...' : `Pay ${typedInvoice?.amount} ${tokenSymbol}`}
                 </Button>
                 
                 {/* Multisig payment button */}
@@ -314,16 +314,16 @@ export function PublicInvoicePage() {
                         <div className="space-y-2">
                           <Label>To (Invoice Creator)</Label>
                           <code className="text-sm bg-muted px-2 py-1 rounded block truncate">
-                            {invoice.creatorAddress}
+                            {typedInvoice?.creatorAddress}
                           </code>
                         </div>
                         <div className="space-y-2">
                           <Label>Amount</Label>
-                          <p className="text-lg font-semibold">{invoice.amount} {tokenSymbol}</p>
+                          <p className="text-lg font-semibold">{typedInvoice?.amount} {tokenSymbol}</p>
                         </div>
                         <div className="space-y-2">
                           <Label>Token</Label>
-                          <p className="text-sm">{invoice.token}</p>
+                          <p className="text-sm">{typedInvoice?.token}</p>
                         </div>
                       </div>
                       <DialogFooter>

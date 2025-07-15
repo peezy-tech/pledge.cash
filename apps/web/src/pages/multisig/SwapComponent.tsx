@@ -13,7 +13,6 @@ import { toast } from 'sonner'
 import { ArrowUpDown, TrendingUp, AlertTriangle } from 'lucide-react'
 import { TokenCombobox, type TokenOption } from '@/components/TokenCombobox'
 import * as hl from '@nktkas/hyperliquid'
-import { useChainId } from 'wagmi'
 
 interface TokenPrice {
   token: string
@@ -113,7 +112,6 @@ export function SwapComponent() {
   const [quote, setQuote] = useState<SwapQuote | null>(null)
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
   const [spotMeta, setSpotMeta] = useState<hl.SpotMeta | null>(null)
-  const chainId = useChainId()
 
   // Get available tokens (exclude USDC) 
   const availableTokens = spotTokens ? Object.values(spotTokens).filter(token => token.name !== 'USDC') : []

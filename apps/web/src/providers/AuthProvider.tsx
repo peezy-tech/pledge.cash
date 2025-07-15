@@ -65,15 +65,13 @@ export const useLoginMutation = () => {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: async ({ message, signature, walletAddress }: {
-      message: SiweMessage | string; 
+    mutationFn: async ({ message, signature }: {
+      message: SiweMessage; 
       signature: `0x${string}`;
-      walletAddress: `0x${string}`;
     }) => {
       const result = await api.siwe.post({
-        message,
+        message: message.toMessage(),
         signature,
-        walletAddress,
       });
       return result.data;
     },
@@ -164,9 +162,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
       
       const loginResult = await loginMutation.mutateAsync({
-        message: siweMessage.toMessage(), 
+        message: siweMessage, 
         signature,
-        walletAddress: address as `0x${string}`,
       });
 
       // Ensure success field is checked correctly, even if type is 'any' or 'unknown'

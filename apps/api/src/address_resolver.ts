@@ -1,7 +1,8 @@
 import { db } from "db";
 import { users, multisigAccounts } from "db/schema";
-import { eq, or } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getAddress } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 
 export interface AddressResolution {
   userId: string;
@@ -130,12 +131,13 @@ export async function getUserAddresses(userId: string): Promise<{
  * @returns boolean indicating if this is an operator address
  */
 export function isOperatorAddress(address: string): boolean {
-  const operatorAddress = process.env.OPERATOR_PRIVATE_KEY;
+  if (!process.env.OPERATOR_PRIVATE_KEY) return false;
+  const operatorPrivateKey = getAddress(process.env.OPERATOR_PRIVATE_KEY);
+  if (!operatorPrivateKey) return false;
+  const operatorAddress = privateKeyToAccount(operatorPrivateKey).address;
   if (!operatorAddress) return false;
   
-  // You would need to derive the address from the private key
-  // For now, we'll return false and handle this case separately
-  return false;
+  return address === operatorAddress;
 }
 
 /**

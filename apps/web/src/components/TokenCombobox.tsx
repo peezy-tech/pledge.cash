@@ -21,7 +21,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { ChevronDown, Search } from "lucide-react"
+import { ChevronDown } from "lucide-react"
 
 export interface TokenOption {
   name: string
@@ -122,7 +122,6 @@ export function TokenCombobox({
 
 function TokenList({
   tokens,
-  selectedToken,
   setOpen,
   onTokenSelect,
 }: {

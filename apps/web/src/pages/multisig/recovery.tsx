@@ -1,7 +1,6 @@
 import { createRoute, type RootRoute } from '@tanstack/react-router'
 import { PageLayout } from '@/components/PageLayout'
 import { useHyperliquidSpotBalances, useSpotTokens } from '@/hooks/useHyperliquid'
-import { useHyperliquid } from '@/providers/HyperliquidProvider'
 import { useAccount, useWalletClient } from 'wagmi'
 import { useState, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
@@ -197,6 +196,8 @@ function MultisigRecoveryInfo({ multisigAddress }: { multisigAddress: string }) 
         authorizedUsers: [],
         threshold: 1,
       })
+
+      console.log('convertTx', convertTx)
       
       toast.success('Successfully converted multisig to regular wallet!')
       setShowConvertDialog(false)

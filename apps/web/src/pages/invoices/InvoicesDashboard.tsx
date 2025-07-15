@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
@@ -8,6 +8,7 @@ import { CreateInvoiceForm } from "./CreateInvoiceForm";
 import { InvoiceListItem } from "./InvoiceListItem";
 import { SpotBalances } from "@/components/SpotBalances";
 import { useAccount } from "wagmi";
+import type { Invoice } from "./interfaces";
 
 
 export function InvoicesDashboard() {
@@ -79,7 +80,7 @@ export function InvoicesDashboard() {
               {createdInvoices.map((invoice) => (
                 <InvoiceListItem 
                   key={invoice.id} 
-                  invoice={invoice} 
+                  invoice={invoice as Invoice} 
                   type="created"
                 />
               ))}
@@ -113,7 +114,7 @@ export function InvoicesDashboard() {
               {receivedInvoices.map((invoice) => (
                 <InvoiceListItem 
                   key={invoice.id} 
-                  invoice={invoice} 
+                  invoice={invoice as Invoice} 
                   type="received"
                 />
               ))}

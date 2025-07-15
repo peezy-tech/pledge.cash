@@ -1,5 +1,5 @@
-import { useReadContracts, useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi'
-import { formatUnits, parseUnits } from 'viem'
+import { useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
+import { parseUnits } from 'viem'
 import { useState } from 'react'
 import { lockedVaultAbi, lockedVaultAddress } from 'evm/contracts'
 

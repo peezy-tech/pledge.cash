@@ -2,7 +2,6 @@
 
 import {
   IconCreditCard,
-  IconDotsVertical,
   IconLogout,
   IconNotification,
   IconUserCircle,
@@ -41,8 +40,6 @@ export function NavUser({
   }
 }) {
     const { logout } = useAuth();
-//   const { isMobile } = useSidebar()
-    const isMobile = false
 
   return (
     // <SidebarMenu>

@@ -36,6 +36,8 @@ export class HyperliquidWebSocketClient extends EventEmitter {
   constructor(isTestnet = false) {
     super();
     this.isTestnet = isTestnet;
+
+    console.log('isTestnet', this.isTestnet)
     
     // Initialize REST client for fallback
     const httpTransport = new hl.HttpTransport({ isTestnet });

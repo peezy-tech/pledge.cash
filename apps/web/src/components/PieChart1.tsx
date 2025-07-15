@@ -172,7 +172,7 @@ export default function EditablePieChart() {
               </div>
 
               <div className="space-y-3 max-h-[400px] overflow-y-auto">
-                {sections.map((section, index) => (
+                {sections.map((section) => (
                   <Card key={section.id} className="p-4">
                     <div className="space-y-3">
                       <div className="flex items-center gap-2">

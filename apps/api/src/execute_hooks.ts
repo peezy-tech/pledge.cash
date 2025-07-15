@@ -92,7 +92,7 @@ async function executeDiscordWebhook(
 ) {
   console.log(`Executing Discord webhook for hook ${hook.id} to ${hook.url}`);
 
-  const tokenName = invoice.token.split(":")[0];
+  const tokenName = invoice.token?.split(":")[0];
   const IS_TESTNET = process.env.NODE_ENV !== "production";
 
   let discordPayload;

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { useAccount } from "wagmi";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,24 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { usePayInvoice } from "./usePayInvoice";
 import { useConfirmPaymentMutation } from "@/hooks/useHyperliquid";
 import { ClipboardCopy } from "lucide-react";
-
-interface Invoice {
-  id: string;
-  creatorId: string;
-  payerAddress: string;
-  payerUserId?: string | null;
-  paymentType?: "personal" | "multisig" | null;
-  actualPayerAddress?: string | null;
-  token: string;
-  amount: string;
-  description?: string | null;
-  status: "pending" | "paid" | "expired";
-  txHash?: string | null;
-  createdAt: number;
-  paidAt?: number | null;
-  expiresAt?: number | null;
-  creatorAddress?: string | null;
-}
+import type { Invoice } from "./interfaces";
 
 interface InvoiceListItemProps {
   invoice: Invoice;
