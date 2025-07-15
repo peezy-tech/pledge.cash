@@ -4,19 +4,23 @@ WORKDIR /app
 
 # install deps
 COPY package.json bun.lock ./
-COPY apps/api/package.json ./apps/api/package.json
 COPY packages/db/package.json ./packages/db/package.json
 COPY packages/evm/package.json ./packages/evm/package.json
-COPY apps/web/package.json ./apps/web/package.json
+
 COPY scripts/package.json ./scripts/package.json
+
+COPY apps/api/package.json ./apps/api/package.json
+COPY apps/web/package.json ./apps/web/package.json
 RUN bun install
 
 # copy sources
-COPY apps/api ./apps/api
 COPY packages/db ./packages/db
 COPY packages/evm ./packages/evm
-COPY apps/web ./apps/web
+
 COPY scripts ./scripts
+
+COPY apps/api ./apps/api
+COPY apps/web ./apps/web
 
 # build web
 WORKDIR /app/apps/web
