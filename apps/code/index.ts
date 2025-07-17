@@ -100,36 +100,96 @@ interface SessionData {
   turnCount: number;
   totalCost: number;
   lastActivity: string;
+  topicId?: number;
+  topicName?: string;
 }
 
-let currentSession: SessionData = {
+interface TopicSessionMap {
+  [topicId: number]: SessionData;
+}
+
+// Topic-based session storage
+let topicSessions: TopicSessionMap = {};
+let defaultSession: SessionData = {
   sessionId: null,
   turnCount: 0,
   totalCost: 0,
   lastActivity: new Date().toISOString(),
 };
 
-// Load session on startup
-async function loadSession(): Promise<void> {
+// Load sessions on startup
+async function loadSessions(): Promise<void> {
   try {
-    console.log('📂 Loading session from file...');
+    console.log('📂 Loading sessions from file...');
     const data = await fs.readFile(SESSION_FILE, "utf-8");
-    currentSession = JSON.parse(data);
-    console.log('✅ Session loaded successfully:', currentSession.sessionId?.substring(0, 8) || 'No session ID');
+    const parsed = JSON.parse(data);
+    
+    // Handle migration from old single session format
+    if (parsed.sessionId && !parsed.topicSessions) {
+      console.log('🔄 Migrating from old session format...');
+      defaultSession = parsed;
+      topicSessions = {};
+    } else {
+      topicSessions = parsed.topicSessions || {};
+      defaultSession = parsed.defaultSession || defaultSession;
+    }
+    
+    console.log('✅ Sessions loaded successfully. Topics:', Object.keys(topicSessions).length);
   } catch (error) {
-    console.log('⚠️  Session file not found or corrupted, creating new session');
-    // File doesn't exist or is corrupted, use default session
-    await saveSession();
+    console.log('⚠️  Session file not found or corrupted, creating new sessions');
+    await saveSessions();
   }
 }
 
-async function saveSession(): Promise<void> {
+async function saveSessions(): Promise<void> {
   try {
-    console.log('💾 Saving session to file...');
-    await fs.writeFile(SESSION_FILE, JSON.stringify(currentSession, null, 2));
-    console.log('✅ Session saved successfully');
+    console.log('💾 Saving sessions to file...');
+    const data = {
+      topicSessions,
+      defaultSession,
+      lastUpdated: new Date().toISOString()
+    };
+    await fs.writeFile(SESSION_FILE, JSON.stringify(data, null, 2));
+    console.log('✅ Sessions saved successfully');
   } catch (error) {
-    console.error("❌ Error saving session:", error);
+    console.error("❌ Error saving sessions:", error);
+  }
+}
+
+// Helper functions for topic and session management
+function getSessionForTopic(topicId?: number): SessionData {
+  if (topicId && topicSessions[topicId]) {
+    return topicSessions[topicId];
+  }
+  return defaultSession;
+}
+
+function setSessionForTopic(session: SessionData, topicId?: number): void {
+  if (topicId) {
+    topicSessions[topicId] = session;
+  } else {
+    defaultSession = session;
+  }
+}
+
+async function createTopicForSession(ctx: any, prompt: string): Promise<number | null> {
+  try {
+    // Extract first few words from prompt for topic name
+    const firstWords = prompt.split(' ').slice(0, 6).join(' ');
+    const truncated = firstWords.length > 30 ? firstWords.substring(0, 27) + '...' : firstWords;
+    const topicName = `Claude: ${truncated}`;
+    
+    console.log('🏷️ Creating forum topic:', topicName);
+    
+    const topic = await telegramWithBackoff(() =>
+      ctx.api.createForumTopic(ctx.chat.id, topicName)
+    );
+    
+    console.log('✅ Topic created with ID:', topic.message_thread_id);
+    return topic.message_thread_id;
+  } catch (error) {
+    console.error('❌ Error creating forum topic:', error);
+    return null;
   }
 }
 
@@ -150,20 +210,25 @@ async function startTurnInMarkdown(sessionId: string, turnNumber: number, userMe
   await appendToMarkdown(sessionId, content);
 }
 
-async function resetSession(): Promise<void> {
-  console.log('🔄 Resetting session...');
-  currentSession = {
+async function resetSession(topicId?: number): Promise<void> {
+  console.log('🔄 Resetting session...', topicId ? `for topic ${topicId}` : 'default');
+  
+  const newSession: SessionData = {
     sessionId: null,
     turnCount: 0,
     totalCost: 0,
     lastActivity: new Date().toISOString(),
+    topicId,
   };
-  await saveSession();
+  
+  setSessionForTopic(newSession, topicId);
+  await saveSessions();
   console.log('✅ Session reset complete');
 }
 
 async function runClaudePrompt(
   prompt: string,
+  topicId?: number,
   onProgress?: (status: string) => void,
   onStream?: (chunk: string) => void,
   onToolUsage?: (toolName: string, input?: any) => void,
@@ -179,8 +244,11 @@ async function runClaudePrompt(
   let currentTurn = 0;
   let turnStarted = false;
   
+  // Get the current session for this topic
+  const currentSession = getSessionForTopic(topicId);
+  
   try {
-    console.log('🤖 Starting Claude prompt processing...');
+    console.log('🤖 Starting Claude prompt processing...', topicId ? `for topic ${topicId}` : 'default');
     onProgress?.("🤖 Initializing Claude...");
     
     let queryOptions = {
@@ -310,13 +378,18 @@ async function runClaudePrompt(
     
     // Update session data
     console.log('📊 Updating session data...');
-    currentSession.sessionId = sessionId;
-    currentSession.turnCount += turns;
-    currentSession.totalCost += cost;
-    currentSession.lastActivity = new Date().toISOString();
-    await saveSession();
+    const updatedSession: SessionData = {
+      ...currentSession,
+      sessionId,
+      turnCount: currentSession.turnCount + turns,
+      totalCost: currentSession.totalCost + cost,
+      lastActivity: new Date().toISOString(),
+      topicId,
+    };
+    setSessionForTopic(updatedSession, topicId);
+    await saveSessions();
     
-    console.log('✅ Claude processing complete. Total cost:', currentSession.totalCost.toFixed(4));
+    console.log('✅ Claude processing complete. Total cost:', updatedSession.totalCost.toFixed(4));
     onProgress?.("✅ Response complete");
     
     return {
@@ -363,9 +436,9 @@ bot.command("start", async (ctx) => {
   }
   
   console.log('🚀 /start command received from user:', ctx.from?.username || ctx.from?.id);
-  await loadSession();
+  await loadSessions();
   await telegramWithBackoff(() => 
-    ctx.reply("Hello! I'm a Claude-powered bot with session management. Send me any prompt and I'll process it using Claude Code SDK.")
+    ctx.reply("Hello! I'm a Claude-powered bot with topic-based session management. Send me any prompt and I'll create a new topic for our conversation, or reply to an existing topic to continue that session.")
   );
 });
 
@@ -380,11 +453,14 @@ bot.command("help", async (ctx) => {
       "Available commands:\n" +
       "/start - Start the bot\n" +
       "/help - Show this help message\n" +
-      "/newsession - Start a new conversation session\n" +
-      "/continue - Continue current session\n" +
-      "/reset - Reset current session\n" +
-      "/session - Show session information\n" +
-      "\nOr just send me any message and I'll process it as a prompt!"
+      "/newsession - Start a new conversation topic\n" +
+      "/reset - Reset session for current topic\n" +
+      "/session - Show session information for current topic\n" +
+      "/sessions - List all active sessions\n" +
+      "\nTopic-based sessions:\n" +
+      "• Send a message to the main chat to create a new topic\n" +
+      "• Reply to an existing topic to continue that conversation\n" +
+      "• Each topic maintains its own Claude session"
     )
   );
 });
@@ -396,37 +472,13 @@ bot.command("newsession", async (ctx) => {
   }
   
   console.log('🆕 /newsession command received from user:', ctx.from?.username || ctx.from?.id);
-  await resetSession();
+  const topicId = ctx.message?.message_thread_id;
+  await resetSession(topicId);
   await telegramWithBackoff(() => 
-    ctx.reply("🆕 New session started! Previous conversation history cleared.")
+    ctx.reply("🆕 New session started! Previous conversation history cleared for this topic.")
   );
 });
 
-bot.command("continue", async (ctx) => {
-  if (!isFromAllowedGroup(ctx)) {
-    console.log('⚠️ Command ignored - not from allowed group. Chat ID:', ctx.chat.id);
-    return;
-  }
-  
-  console.log('🔄 /continue command received from user:', ctx.from?.username || ctx.from?.id);
-  if (!currentSession.sessionId) {
-    console.log('❌ No active session to continue');
-    await telegramWithBackoff(() => 
-      ctx.reply("❌ No active session to continue. Start a new conversation first.")
-    );
-    return;
-  }
-  
-  console.log('✅ Showing session info for continuation');
-  await telegramWithBackoff(() => 
-    ctx.reply(
-      `🔄 Continuing session: ${currentSession.sessionId!.substring(0, 8)}...\n` +
-      `Turn count: ${currentSession.turnCount}\n` +
-      `Total cost: $${currentSession.totalCost.toFixed(4)}\n` +
-      "Send me a message to continue the conversation."
-    )
-  );
-});
 
 bot.command("reset", async (ctx) => {
   if (!isFromAllowedGroup(ctx)) {
@@ -435,9 +487,10 @@ bot.command("reset", async (ctx) => {
   }
   
   console.log('🔄 /reset command received from user:', ctx.from?.username || ctx.from?.id);
-  await resetSession();
+  const topicId = ctx.message?.message_thread_id;
+  await resetSession(topicId);
   await telegramWithBackoff(() => 
-    ctx.reply("🔄 Session reset! Starting fresh.")
+    ctx.reply("🔄 Session reset! Starting fresh for this topic.")
   );
 });
 
@@ -448,10 +501,13 @@ bot.command("session", async (ctx) => {
   }
   
   console.log('📊 /session command received from user:', ctx.from?.username || ctx.from?.id);
+  const topicId = ctx.message?.message_thread_id;
+  const currentSession = getSessionForTopic(topicId);
+  
   if (!currentSession.sessionId) {
     console.log('❌ No active session to show');
     await telegramWithBackoff(() => 
-      ctx.reply("❌ No active session. Send a message to start one.")
+      ctx.reply("❌ No active session for this topic. Send a message to start one.")
     );
     return;
   }
@@ -460,12 +516,50 @@ bot.command("session", async (ctx) => {
   await telegramWithBackoff(() => 
     ctx.reply(
       `📊 **Session Information**\n` +
+      `Topic ID: ${topicId || 'Main chat'}\n` +
       `Session ID: \`${currentSession.sessionId!}\`\n` +
       `Turn count: ${currentSession.turnCount}\n` +
       `Total cost: $${currentSession.totalCost.toFixed(4)}\n` +
       `Last activity: ${new Date(currentSession.lastActivity).toLocaleString()}`
     )
   );
+});
+
+bot.command("sessions", async (ctx) => {
+  if (!isFromAllowedGroup(ctx)) {
+    console.log('⚠️ Command ignored - not from allowed group. Chat ID:', ctx.chat.id);
+    return;
+  }
+  
+  console.log('📊 /sessions command received from user:', ctx.from?.username || ctx.from?.id);
+  
+  const allSessions = Object.entries(topicSessions).filter(([_, session]) => session.sessionId);
+  const hasDefaultSession = defaultSession.sessionId;
+  
+  if (allSessions.length === 0 && !hasDefaultSession) {
+    await telegramWithBackoff(() => 
+      ctx.reply("❌ No active sessions found.")
+    );
+    return;
+  }
+  
+  let message = "📊 **Active Sessions**\n\n";
+  
+  if (hasDefaultSession) {
+    message += `🏠 **Main Chat**\n` +
+      `Session ID: \`${defaultSession.sessionId!.substring(0, 8)}...\`\n` +
+      `Turns: ${defaultSession.turnCount}, Cost: $${defaultSession.totalCost.toFixed(4)}\n` +
+      `Last: ${new Date(defaultSession.lastActivity).toLocaleString()}\n\n`;
+  }
+  
+  allSessions.forEach(([topicId, session]) => {
+    message += `🏷️ **Topic ${topicId}**\n` +
+      `Session ID: \`${session.sessionId!.substring(0, 8)}...\`\n` +
+      `Turns: ${session.turnCount}, Cost: $${session.totalCost.toFixed(4)}\n` +
+      `Last: ${new Date(session.lastActivity).toLocaleString()}\n\n`;
+  });
+  
+  await telegramWithBackoff(() => ctx.reply(message));
 });
 
 bot.on("message:text", async (ctx) => {
@@ -484,6 +578,128 @@ bot.on("message:text", async (ctx) => {
   console.log('💬 New message received from user:', ctx.from?.username || ctx.from?.id);
   console.log('📝 Message preview:', prompt.substring(0, 100) + (prompt.length > 100 ? '...' : ''));
   
+  // Get topic ID from message
+  let topicId = ctx.message?.message_thread_id;
+  const currentSession = getSessionForTopic(topicId);
+  
+  // If this is a new conversation in main chat and there's no existing session, create a topic
+  if (!topicId && !currentSession.sessionId) {
+    console.log('🏷️ Creating new topic for conversation...');
+    topicId = await createTopicForSession(ctx, prompt);
+    if (topicId) {
+      // Reply to the new topic instead of main chat
+      const newTopicMessage = await telegramWithBackoff(() => 
+        ctx.api.sendMessage(
+          ctx.chat.id, 
+          "🤖 Processing your prompt...",
+          { message_thread_id: topicId }
+        )
+      );
+      
+      try {
+        const result = await runClaudePrompt(
+          prompt,
+          topicId,
+          // Progress callback
+          async (status: string) => {
+            try {
+              await telegramWithBackoff(() => 
+                ctx.api.editMessageText(
+                  ctx.chat.id,
+                  newTopicMessage.message_id,
+                  status,
+                  { message_thread_id: topicId }
+                )
+              );
+            } catch (error) {
+              // Ignore edit errors
+            }
+          },
+          // Stream callback
+          async (chunk: string) => {
+            // Just collect the response
+          },
+          // Tool usage callback
+          async (toolName: string, input?: any) => {
+            await telegramWithBackoff(() => 
+              ctx.api.sendMessage(
+                ctx.chat.id,
+                `🔧 **Using Tool:** ${toolName}${input ? `\n\`\`\`json\n${JSON.stringify(input, null, 2)}\n\`\`\`` : ''}`,
+                { message_thread_id: topicId }
+              )
+            );
+          },
+          // Tool result callback
+          async (isError: boolean, content?: string) => {
+            if (isError) {
+              await telegramWithBackoff(() => 
+                ctx.api.sendMessage(
+                  ctx.chat.id,
+                  `❌ **Tool Error:** ${content || 'Unknown error'}`,
+                  { message_thread_id: topicId }
+                )
+              );
+            } else {
+              await telegramWithBackoff(() => 
+                ctx.api.sendMessage(
+                  ctx.chat.id,
+                  `✅ **Tool Completed**${content ? `\n${content.substring(0, 200)}${content.length > 200 ? '...' : ''}` : ''}`,
+                  { message_thread_id: topicId }
+                )
+              );
+            }
+          },
+          // Thinking callback
+          async (content: string) => {
+            await telegramWithBackoff(() => 
+              ctx.api.sendMessage(
+                ctx.chat.id,
+                `🤖 **Thinking...**\n\n${content.substring(0, 300)}${content.length > 300 ? "..." : ""}`,
+                { message_thread_id: topicId }
+              )
+            );
+          }
+        );
+        
+        // Send final response
+        await telegramWithBackoff(() => 
+          ctx.api.editMessageText(
+            ctx.chat.id,
+            newTopicMessage.message_id,
+            `✅ **Response Complete**\n\n${result.response}`,
+            { message_thread_id: topicId }
+          )
+        );
+        
+        // Send session info
+        const updatedSession = getSessionForTopic(topicId);
+        await telegramWithBackoff(() => 
+          ctx.api.sendMessage(
+            ctx.chat.id,
+            `📊 **Session Stats**\n` +
+            `Turn cost: $${result.cost.toFixed(4)}\n` +
+            `Total cost: $${updatedSession.totalCost.toFixed(4)}\n` +
+            `Session turns: ${updatedSession.turnCount}`,
+            { message_thread_id: topicId }
+          )
+        );
+        
+      } catch (error) {
+        console.error("❌ Error processing message:", error);
+        await telegramWithBackoff(() => 
+          ctx.api.editMessageText(
+            ctx.chat.id,
+            newTopicMessage.message_id,
+            `❌ **Error**\n\n${error instanceof Error ? error.message : "Unknown error occurred"}`,
+            { message_thread_id: topicId }
+          )
+        );
+      }
+      return;
+    }
+  }
+  
+  // Handle existing topic or fallback to main chat
   let statusMessage = await telegramWithBackoff(() => 
     ctx.reply("🤖 Processing your prompt...")
   );
@@ -492,6 +708,7 @@ bot.on("message:text", async (ctx) => {
   try {
     const result = await runClaudePrompt(
       prompt,
+      topicId,
       // Progress callback - keep status message for high-level progress only
       async (status: string) => {
         try {
@@ -547,12 +764,13 @@ bot.on("message:text", async (ctx) => {
     
     
     // Send session info
+    const updatedSession = getSessionForTopic(topicId);
     await telegramWithBackoff(() => 
       ctx.reply(
         `📊 **Session Stats**\n` +
         `Turn cost: $${result.cost.toFixed(4)}\n` +
-        `Total cost: $${currentSession.totalCost.toFixed(4)}\n` +
-        `Session turns: ${currentSession.turnCount}`
+        `Total cost: $${updatedSession.totalCost.toFixed(4)}\n` +
+        `Session turns: ${updatedSession.turnCount}`
       )
     );
     
@@ -569,14 +787,20 @@ bot.on("message:text", async (ctx) => {
   }
 });
 
-// Initialize session on startup
-loadSession().then(() => {
+// Initialize sessions on startup
+loadSessions().then(() => {
   bot.start();
   console.log("🤖 Telegram bot is running...");
-  if (currentSession.sessionId) {
-    console.log(`📊 Loaded session: ${currentSession.sessionId.substring(0, 8)}... (${currentSession.turnCount} turns, $${currentSession.totalCost.toFixed(4)})`);
+  
+  const allSessions = Object.values(topicSessions).filter(session => session.sessionId);
+  const totalSessions = allSessions.length + (defaultSession.sessionId ? 1 : 0);
+  
+  if (totalSessions > 0) {
+    const totalCost = allSessions.reduce((sum, session) => sum + session.totalCost, 0) + defaultSession.totalCost;
+    const totalTurns = allSessions.reduce((sum, session) => sum + session.turnCount, 0) + defaultSession.turnCount;
+    console.log(`📊 Loaded ${totalSessions} active sessions (${totalTurns} turns, $${totalCost.toFixed(4)} total cost)`);
   }
-}).catch((error) => {
+}).catch((error: Error) => {
   console.error("Failed to initialize bot:", error);
   process.exit(1);
 });
