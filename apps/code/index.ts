@@ -165,7 +165,10 @@ async function resetSession(): Promise<void> {
 async function runClaudePrompt(
   prompt: string,
   onProgress?: (status: string) => void,
-  onStream?: (chunk: string) => void
+  onStream?: (chunk: string) => void,
+  onToolUsage?: (toolName: string, input?: any) => void,
+  onToolResult?: (isError: boolean, content?: string) => void,
+  onThinking?: (content: string) => void
 ): Promise<{ response: string; sessionId: string; cost: number; turns: number }> {
   const messages: SDKMessage[] = [];
   let streamedResponse = "";
@@ -235,9 +238,15 @@ async function runClaudePrompt(
               const chunk = item.text;
               streamedResponse += chunk;
               onStream?.(chunk);
+              
+              // Trigger thinking callback for longer responses
+              if (streamedResponse.length > 0 && streamedResponse.length % 200 === 0) {
+                onThinking?.(streamedResponse);
+              }
             } else if (item.type === "tool_use") {
               console.log('🔧 Tool called:', item.name);
               onProgress?.(`🔧 Using tool: ${item.name}`);
+              onToolUsage?.(item.name, item.input);
               if (sessionId) {
                 await appendToMarkdown(sessionId, `🔧 **Tool Used:** ${item.name}\n`);
                 if (item.input) {
@@ -258,11 +267,13 @@ async function runClaudePrompt(
               if (item.is_error) {
                 console.error('❌ Tool error:', item.content);
                 onProgress?.(`❌ Tool error: ${item.content}`);
+                onToolResult?.(true, typeof item.content === 'string' ? item.content : JSON.stringify(item.content));
                 if (sessionId) {
                   await appendToMarkdown(sessionId, `❌ **Tool Error:** ${item.content}\\n\\n`);
                 }
               } else {
                 onProgress?.(`✅ Tool completed`);
+                onToolResult?.(false, typeof item.content === 'string' ? item.content : JSON.stringify(item.content));
                 if (sessionId) {
                   await appendToMarkdown(sessionId, `✅ **Tool Completed**\\n\\n`);
                 }
@@ -477,12 +488,11 @@ bot.on("message:text", async (ctx) => {
     ctx.reply("🤖 Processing your prompt...")
   );
   let currentResponse = "";
-  let lastUpdateTime = Date.now();
   
   try {
     const result = await runClaudePrompt(
       prompt,
-      // Progress callback
+      // Progress callback - keep status message for high-level progress only
       async (status: string) => {
         try {
           await telegramWithBackoff(() => 
@@ -496,26 +506,33 @@ bot.on("message:text", async (ctx) => {
           // Ignore edit errors (message might be too old)
         }
       },
-      // Stream callback
+      // Stream callback - removed thinking updates from here
       async (chunk: string) => {
         currentResponse += chunk;
-        const now = Date.now();
-        
-        // Update every 2 seconds to avoid rate limiting
-        if (now - lastUpdateTime > 2000) {
-          try {
-            await telegramWithBackoff(() => 
-              ctx.api.editMessageText(
-                ctx.chat.id,
-                statusMessage.message_id,
-                `🤖 **Thinking...**\n\n${currentResponse.substring(0, 500)}${currentResponse.length > 500 ? "..." : ""}`
-              )
-            );
-            lastUpdateTime = now;
-          } catch (error) {
-            // Ignore edit errors
-          }
+      },
+      // Tool usage callback - send new messages for tool usage
+      async (toolName: string, input?: any) => {
+        await telegramWithBackoff(() => 
+          ctx.reply(`🔧 **Using Tool:** ${toolName}${input ? `\n\`\`\`json\n${JSON.stringify(input, null, 2)}\n\`\`\`` : ''}`)
+        );
+      },
+      // Tool result callback - send new messages for tool results
+      async (isError: boolean, content?: string) => {
+        if (isError) {
+          await telegramWithBackoff(() => 
+            ctx.reply(`❌ **Tool Error:** ${content || 'Unknown error'}`)
+          );
+        } else {
+          await telegramWithBackoff(() => 
+            ctx.reply(`✅ **Tool Completed**${content ? `\n${content.substring(0, 200)}${content.length > 200 ? '...' : ''}` : ''}`)
+          );
         }
+      },
+      // Thinking callback - send thinking updates as separate messages
+      async (content: string) => {
+        await telegramWithBackoff(() => 
+          ctx.reply(`🤖 **Thinking...**\n\n${content.substring(0, 300)}${content.length > 300 ? "..." : ""}`)
+        );
       }
     );
     
