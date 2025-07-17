@@ -3,6 +3,71 @@ import { query, type SDKMessage, type Props } from "@anthropic-ai/claude-code";
 import { promises as fs } from "fs";
 import path from "path";
 
+// Exponential backoff utility
+async function exponentialBackoff<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 5,
+  baseDelay: number = 1000,
+  maxDelay: number = 30000
+): Promise<T> {
+  let lastError: Error;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error as Error;
+      
+      // Check if it's a rate limit error
+      const isRateLimit = error instanceof Error && (
+        error.message.includes('rate limit') ||
+        error.message.includes('too many requests') ||
+        error.message.includes('429') ||
+        error.message.includes('Too Many Requests')
+      );
+      
+      if (!isRateLimit || attempt === maxRetries) {
+        if (isRateLimit) {
+          console.error(`🚫 Rate limit exceeded after ${maxRetries + 1} attempts`);
+        }
+        throw error;
+      }
+      
+      // Extract retry_after from Telegram error if available
+      let retryAfter = 0;
+      if (error.message.includes('retry after')) {
+        const match = error.message.match(/retry after (\d+)/);
+        if (match) {
+          retryAfter = parseInt(match[1], 10);
+        }
+      }
+      
+      // Use retry_after as base delay if provided, otherwise use exponential backoff
+      let delay: number;
+      if (retryAfter > 0) {
+        // Use retry_after as base and add exponential component for subsequent attempts
+        delay = Math.min(
+          (retryAfter * 1000) + (baseDelay * Math.pow(2, attempt)) + Math.random() * 1000,
+          maxDelay
+        );
+        // console.log(`Retry after: delay: ${delay} | retryAfter: ${retryAfter}`)
+      } else {
+        // Standard exponential backoff
+        delay = Math.min(
+          baseDelay * Math.pow(2, attempt) + Math.random() * 1000,
+          maxDelay
+        );
+        // console.log(`Standard: delay: ${delay} | retryAfter: ${retryAfter}`)
+      }
+      
+      console.log(`⏱️ Rate limit detected${retryAfter > 0 ? ` (retry_after: ${retryAfter}s)` : ''}, retrying in ${(delay/1000).toFixed(1)}s (attempt ${attempt + 1}/${maxRetries + 1})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw lastError!;
+}
+
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ALLOWED_GROUP_ID = process.env.ALLOWED_GROUP_ID;
 
@@ -15,6 +80,11 @@ if (!ALLOWED_GROUP_ID) {
 }
 
 const bot = new Bot(BOT_TOKEN);
+
+// Telegram API wrapper with exponential backoff
+async function telegramWithBackoff<T>(operation: () => Promise<T>): Promise<T> {
+  return exponentialBackoff(operation, 3, 1000, 60000);
+}
 
 // Helper function to check if message is from allowed group
 function isFromAllowedGroup(ctx: any): boolean {
@@ -114,7 +184,7 @@ async function runClaudePrompt(
       prompt,
       abortController: new AbortController(),
       options: {
-        maxTurns: 5,
+        maxTurns: 50,
         ...(currentSession.sessionId && { resume: currentSession.sessionId })
       },
     } satisfies Props;
@@ -283,24 +353,28 @@ bot.command("start", async (ctx) => {
   
   console.log('🚀 /start command received from user:', ctx.from?.username || ctx.from?.id);
   await loadSession();
-  ctx.reply("Hello! I'm a Claude-powered bot with session management. Send me any prompt and I'll process it using Claude Code SDK.");
+  await telegramWithBackoff(() => 
+    ctx.reply("Hello! I'm a Claude-powered bot with session management. Send me any prompt and I'll process it using Claude Code SDK.")
+  );
 });
 
-bot.command("help", (ctx) => {
+bot.command("help", async (ctx) => {
   if (!isFromAllowedGroup(ctx)) {
     console.log('⚠️ Command ignored - not from allowed group. Chat ID:', ctx.chat.id);
     return;
   }
   
-  ctx.reply(
-    "Available commands:\n" +
-    "/start - Start the bot\n" +
-    "/help - Show this help message\n" +
-    "/newsession - Start a new conversation session\n" +
-    "/continue - Continue current session\n" +
-    "/reset - Reset current session\n" +
-    "/session - Show session information\n" +
-    "\nOr just send me any message and I'll process it as a prompt!"
+  await telegramWithBackoff(() => 
+    ctx.reply(
+      "Available commands:\n" +
+      "/start - Start the bot\n" +
+      "/help - Show this help message\n" +
+      "/newsession - Start a new conversation session\n" +
+      "/continue - Continue current session\n" +
+      "/reset - Reset current session\n" +
+      "/session - Show session information\n" +
+      "\nOr just send me any message and I'll process it as a prompt!"
+    )
   );
 });
 
@@ -312,7 +386,9 @@ bot.command("newsession", async (ctx) => {
   
   console.log('🆕 /newsession command received from user:', ctx.from?.username || ctx.from?.id);
   await resetSession();
-  ctx.reply("🆕 New session started! Previous conversation history cleared.");
+  await telegramWithBackoff(() => 
+    ctx.reply("🆕 New session started! Previous conversation history cleared.")
+  );
 });
 
 bot.command("continue", async (ctx) => {
@@ -324,16 +400,20 @@ bot.command("continue", async (ctx) => {
   console.log('🔄 /continue command received from user:', ctx.from?.username || ctx.from?.id);
   if (!currentSession.sessionId) {
     console.log('❌ No active session to continue');
-    ctx.reply("❌ No active session to continue. Start a new conversation first.");
+    await telegramWithBackoff(() => 
+      ctx.reply("❌ No active session to continue. Start a new conversation first.")
+    );
     return;
   }
   
   console.log('✅ Showing session info for continuation');
-  ctx.reply(
-    `🔄 Continuing session: ${currentSession.sessionId.substring(0, 8)}...\n` +
-    `Turn count: ${currentSession.turnCount}\n` +
-    `Total cost: $${currentSession.totalCost.toFixed(4)}\n` +
-    "Send me a message to continue the conversation."
+  await telegramWithBackoff(() => 
+    ctx.reply(
+      `🔄 Continuing session: ${currentSession.sessionId!.substring(0, 8)}...\n` +
+      `Turn count: ${currentSession.turnCount}\n` +
+      `Total cost: $${currentSession.totalCost.toFixed(4)}\n` +
+      "Send me a message to continue the conversation."
+    )
   );
 });
 
@@ -345,10 +425,12 @@ bot.command("reset", async (ctx) => {
   
   console.log('🔄 /reset command received from user:', ctx.from?.username || ctx.from?.id);
   await resetSession();
-  ctx.reply("🔄 Session reset! Starting fresh.");
+  await telegramWithBackoff(() => 
+    ctx.reply("🔄 Session reset! Starting fresh.")
+  );
 });
 
-bot.command("session", (ctx) => {
+bot.command("session", async (ctx) => {
   if (!isFromAllowedGroup(ctx)) {
     console.log('⚠️ Command ignored - not from allowed group. Chat ID:', ctx.chat.id);
     return;
@@ -357,17 +439,21 @@ bot.command("session", (ctx) => {
   console.log('📊 /session command received from user:', ctx.from?.username || ctx.from?.id);
   if (!currentSession.sessionId) {
     console.log('❌ No active session to show');
-    ctx.reply("❌ No active session. Send a message to start one.");
+    await telegramWithBackoff(() => 
+      ctx.reply("❌ No active session. Send a message to start one.")
+    );
     return;
   }
   
   console.log('✅ Showing session information');
-  ctx.reply(
-    `📊 **Session Information**\n` +
-    `Session ID: \`${currentSession.sessionId}\`\n` +
-    `Turn count: ${currentSession.turnCount}\n` +
-    `Total cost: $${currentSession.totalCost.toFixed(4)}\n` +
-    `Last activity: ${new Date(currentSession.lastActivity).toLocaleString()}`
+  await telegramWithBackoff(() => 
+    ctx.reply(
+      `📊 **Session Information**\n` +
+      `Session ID: \`${currentSession.sessionId!}\`\n` +
+      `Turn count: ${currentSession.turnCount}\n` +
+      `Total cost: $${currentSession.totalCost.toFixed(4)}\n` +
+      `Last activity: ${new Date(currentSession.lastActivity).toLocaleString()}`
+    )
   );
 });
 
@@ -387,7 +473,9 @@ bot.on("message:text", async (ctx) => {
   console.log('💬 New message received from user:', ctx.from?.username || ctx.from?.id);
   console.log('📝 Message preview:', prompt.substring(0, 100) + (prompt.length > 100 ? '...' : ''));
   
-  let statusMessage = await ctx.reply("🤖 Processing your prompt...");
+  let statusMessage = await telegramWithBackoff(() => 
+    ctx.reply("🤖 Processing your prompt...")
+  );
   let currentResponse = "";
   let lastUpdateTime = Date.now();
   
@@ -397,10 +485,12 @@ bot.on("message:text", async (ctx) => {
       // Progress callback
       async (status: string) => {
         try {
-          await ctx.api.editMessageText(
-            ctx.chat.id,
-            statusMessage.message_id,
-            status
+          await telegramWithBackoff(() => 
+            ctx.api.editMessageText(
+              ctx.chat.id,
+              statusMessage.message_id,
+              status
+            )
           );
         } catch (error) {
           // Ignore edit errors (message might be too old)
@@ -414,10 +504,12 @@ bot.on("message:text", async (ctx) => {
         // Update every 2 seconds to avoid rate limiting
         if (now - lastUpdateTime > 2000) {
           try {
-            await ctx.api.editMessageText(
-              ctx.chat.id,
-              statusMessage.message_id,
-              `🤖 **Thinking...**\n\n${currentResponse.substring(0, 500)}${currentResponse.length > 500 ? "..." : ""}`
+            await telegramWithBackoff(() => 
+              ctx.api.editMessageText(
+                ctx.chat.id,
+                statusMessage.message_id,
+                `🤖 **Thinking...**\n\n${currentResponse.substring(0, 500)}${currentResponse.length > 500 ? "..." : ""}`
+              )
             );
             lastUpdateTime = now;
           } catch (error) {
@@ -428,28 +520,34 @@ bot.on("message:text", async (ctx) => {
     );
     
     // Send final response
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      statusMessage.message_id,
-      `✅ **Response Complete**\n\n${result.response}`
+    await telegramWithBackoff(() => 
+      ctx.api.editMessageText(
+        ctx.chat.id,
+        statusMessage.message_id,
+        `✅ **Response Complete**\n\n${result.response}`
+      )
     );
     
     
     // Send session info
-    await ctx.reply(
-      `📊 **Session Stats**\n` +
-      `Turn cost: $${result.cost.toFixed(4)}\n` +
-      `Total cost: $${currentSession.totalCost.toFixed(4)}\n` +
-      `Session turns: ${currentSession.turnCount}`
+    await telegramWithBackoff(() => 
+      ctx.reply(
+        `📊 **Session Stats**\n` +
+        `Turn cost: $${result.cost.toFixed(4)}\n` +
+        `Total cost: $${currentSession.totalCost.toFixed(4)}\n` +
+        `Session turns: ${currentSession.turnCount}`
+      )
     );
     
   } catch (error) {
     console.error("❌ Error processing message:", error);
     
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      statusMessage.message_id,
-      `❌ **Error**\n\n${error instanceof Error ? error.message : "Unknown error occurred"}`
+    await telegramWithBackoff(() => 
+      ctx.api.editMessageText(
+        ctx.chat.id,
+        statusMessage.message_id,
+        `❌ **Error**\n\n${error instanceof Error ? error.message : "Unknown error occurred"}`
+      )
     );
   }
 });
