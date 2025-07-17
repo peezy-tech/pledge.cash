@@ -94,3 +94,6 @@ Both apps serve static files from their `public/` directories, including:
 - GLB 3D environments
 - HDR lighting files
 - UI assets
+
+## Claude Development Session Memory
+- Let me spin up the app server if needed, because it will affect the current claude code session
