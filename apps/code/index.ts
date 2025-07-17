@@ -4,11 +4,23 @@ import { promises as fs } from "fs";
 import path from "path";
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
+const ALLOWED_GROUP_ID = process.env.ALLOWED_GROUP_ID;
+
 if (!BOT_TOKEN) {
   throw new Error("BOT_TOKEN environment variable is required");
 }
 
+if (!ALLOWED_GROUP_ID) {
+  throw new Error("ALLOWED_GROUP_ID environment variable is required");
+}
+
 const bot = new Bot(BOT_TOKEN);
+
+// Helper function to check if message is from allowed group
+function isFromAllowedGroup(ctx: any): boolean {
+  const chatId = ctx.chat.id.toString();
+  return chatId === ALLOWED_GROUP_ID;
+}
 
 // Session management
 const SESSION_FILE = path.join(process.cwd(), "bot-session.json");
@@ -264,12 +276,22 @@ async function runClaudePrompt(
 }
 
 bot.command("start", async (ctx) => {
+  if (!isFromAllowedGroup(ctx)) {
+    console.log('⚠️ Command ignored - not from allowed group. Chat ID:', ctx.chat.id);
+    return;
+  }
+  
   console.log('🚀 /start command received from user:', ctx.from?.username || ctx.from?.id);
   await loadSession();
   ctx.reply("Hello! I'm a Claude-powered bot with session management. Send me any prompt and I'll process it using Claude Code SDK.");
 });
 
 bot.command("help", (ctx) => {
+  if (!isFromAllowedGroup(ctx)) {
+    console.log('⚠️ Command ignored - not from allowed group. Chat ID:', ctx.chat.id);
+    return;
+  }
+  
   ctx.reply(
     "Available commands:\n" +
     "/start - Start the bot\n" +
@@ -283,12 +305,22 @@ bot.command("help", (ctx) => {
 });
 
 bot.command("newsession", async (ctx) => {
+  if (!isFromAllowedGroup(ctx)) {
+    console.log('⚠️ Command ignored - not from allowed group. Chat ID:', ctx.chat.id);
+    return;
+  }
+  
   console.log('🆕 /newsession command received from user:', ctx.from?.username || ctx.from?.id);
   await resetSession();
   ctx.reply("🆕 New session started! Previous conversation history cleared.");
 });
 
 bot.command("continue", async (ctx) => {
+  if (!isFromAllowedGroup(ctx)) {
+    console.log('⚠️ Command ignored - not from allowed group. Chat ID:', ctx.chat.id);
+    return;
+  }
+  
   console.log('🔄 /continue command received from user:', ctx.from?.username || ctx.from?.id);
   if (!currentSession.sessionId) {
     console.log('❌ No active session to continue');
@@ -306,12 +338,22 @@ bot.command("continue", async (ctx) => {
 });
 
 bot.command("reset", async (ctx) => {
+  if (!isFromAllowedGroup(ctx)) {
+    console.log('⚠️ Command ignored - not from allowed group. Chat ID:', ctx.chat.id);
+    return;
+  }
+  
   console.log('🔄 /reset command received from user:', ctx.from?.username || ctx.from?.id);
   await resetSession();
   ctx.reply("🔄 Session reset! Starting fresh.");
 });
 
 bot.command("session", (ctx) => {
+  if (!isFromAllowedGroup(ctx)) {
+    console.log('⚠️ Command ignored - not from allowed group. Chat ID:', ctx.chat.id);
+    return;
+  }
+  
   console.log('📊 /session command received from user:', ctx.from?.username || ctx.from?.id);
   if (!currentSession.sessionId) {
     console.log('❌ No active session to show');
@@ -333,6 +375,12 @@ bot.on("message:text", async (ctx) => {
   const prompt = ctx.message.text;
   
   if (prompt.startsWith("/")) {
+    return;
+  }
+  
+  // Check if message is from allowed group
+  if (!isFromAllowedGroup(ctx)) {
+    console.log('⚠️ Message ignored - not from allowed group. Chat ID:', ctx.chat.id);
     return;
   }
   
