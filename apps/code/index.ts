@@ -1,5 +1,5 @@
 import { Bot } from "grammy";
-import { query, type SDKMessage } from "@anthropic-ai/claude-code";
+import { query, type SDKMessage, type Props } from "@anthropic-ai/claude-code";
 import { promises as fs } from "fs";
 import path from "path";
 
@@ -18,14 +18,6 @@ interface SessionData {
   turnCount: number;
   totalCost: number;
   lastActivity: string;
-}
-
-interface ConversationTurn {
-  timestamp: string;
-  userMessage: string;
-  claudeResponse: string;
-  cost: number;
-  turns: number;
 }
 
 let currentSession: SessionData = {
@@ -59,22 +51,21 @@ async function saveSession(): Promise<void> {
   }
 }
 
-async function saveConversationTurn(sessionId: string, turn: ConversationTurn): Promise<void> {
+async function appendToMarkdown(sessionId: string, content: string): Promise<void> {
   try {
     const filename = `${sessionId}.md`;
     const filepath = path.join(process.cwd(), filename);
-    
-    const turnEntry = `## Turn ${turn.turns} - ${new Date(turn.timestamp).toLocaleString()}\n\n` +
-      `**User:** ${turn.userMessage}\n\n` +
-      `**Claude:** ${turn.claudeResponse}\n\n` +
-      `*Cost: $${turn.cost.toFixed(4)}*\n\n---\n\n`;
-    
-    // Append to existing file or create new one
-    await fs.appendFile(filepath, turnEntry);
-    console.log(`📝 Conversation turn saved to ${filename}`);
+    await fs.appendFile(filepath, content);
   } catch (error) {
-    console.error("❌ Error saving conversation turn:", error);
+    console.error("❌ Error appending to markdown:", error);
   }
+}
+
+async function startTurnInMarkdown(sessionId: string, turnNumber: number, userMessage: string): Promise<void> {
+  const content = `## Turn ${turnNumber} - ${new Date().toLocaleString()}\n\n` +
+    `**User:** ${userMessage}\n\n` +
+    `**Claude Processing:**\n\n`;
+  await appendToMarkdown(sessionId, content);
 }
 
 async function resetSession(): Promise<void> {
@@ -100,24 +91,25 @@ async function runClaudePrompt(
   let sessionId = "";
   let cost = 0;
   let turns = 0;
+  let currentTurn = 0;
+  let turnStarted = false;
   
   try {
     console.log('🤖 Starting Claude prompt processing...');
     onProgress?.("🤖 Initializing Claude...");
     
-    const queryOptions: any = {
+    let queryOptions = {
       prompt,
       abortController: new AbortController(),
       options: {
         maxTurns: 5,
-        outputFormat: "stream-json",
+        ...(currentSession.sessionId && { resume: currentSession.sessionId })
       },
-    };
+    } satisfies Props;
     
-    // Use resume if we have an active session
+    // Log session status
     if (currentSession.sessionId) {
       console.log('🔄 Resuming existing session:', currentSession.sessionId.substring(0, 8));
-      queryOptions.options.resume = currentSession.sessionId;
       onProgress?.("🔄 Continuing conversation...");
     } else {
       console.log('🆕 Starting new Claude session...');
@@ -131,6 +123,26 @@ async function runClaudePrompt(
         sessionId = message.session_id;
         console.log('✅ Claude session initialized:', sessionId.substring(0, 8));
         onProgress?.("✅ Session initialized");
+        
+        // Start the turn in markdown immediately after session init
+        if (!turnStarted) {
+          await startTurnInMarkdown(sessionId, currentSession.turnCount + 1, prompt);
+          turnStarted = true;
+        }
+      }
+      
+      if (message.type === "result" && message.subtype.startsWith("error")) {
+        console.error('❌ System error:', message);
+        onProgress?.("❌ System error occurred");
+        if (sessionId) {
+          await appendToMarkdown(sessionId, `❌ **System Error:** ${JSON.stringify(message)}\n\n`);
+        }
+      }
+      
+      if (message.type === "user") {
+        currentTurn++;
+        console.log(`📝 Turn ${currentTurn} started`);
+        onProgress?.(`📝 Turn ${currentTurn} processing...`);
       }
       
       if (message.type === "assistant" && 'message' in message && message.message?.content) {
@@ -141,6 +153,38 @@ async function runClaudePrompt(
               const chunk = item.text;
               streamedResponse += chunk;
               onStream?.(chunk);
+            } else if (item.type === "tool_use") {
+              console.log('🔧 Tool called:', item.name);
+              onProgress?.(`🔧 Using tool: ${item.name}`);
+              if (sessionId) {
+                await appendToMarkdown(sessionId, `🔧 **Tool Used:** ${item.name}\n`);
+                if (item.input) {
+                  await appendToMarkdown(sessionId, `\`\`\`json\n${JSON.stringify(item.input, null, 2)}\n\`\`\`\n\n`);
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      if (message.type === "user" && message.message?.content) {
+        const content = message.message.content;
+        if (Array.isArray(content)) {
+          for (const item of content) {
+            if (item.type === "tool_result") {
+              console.log('🔧 Tool result received');
+              if (item.is_error) {
+                console.error('❌ Tool error:', item.content);
+                onProgress?.(`❌ Tool error: ${item.content}`);
+                if (sessionId) {
+                  await appendToMarkdown(sessionId, `❌ **Tool Error:** ${item.content}\\n\\n`);
+                }
+              } else {
+                onProgress?.(`✅ Tool completed`);
+                if (sessionId) {
+                  await appendToMarkdown(sessionId, `✅ **Tool Completed**\\n\\n`);
+                }
+              }
             }
           }
         }
@@ -161,6 +205,12 @@ async function runClaudePrompt(
         }
         if ('session_id' in message && typeof message.session_id === 'string') {
           sessionId = message.session_id;
+        }
+        
+        // Add final response to markdown
+        if (sessionId && finalResponse) {
+          await appendToMarkdown(sessionId, `\n**Claude Response:**\n${finalResponse}\n\n`);
+          await appendToMarkdown(sessionId, `*Cost: $${cost.toFixed(4)} | Turns: ${turns}*\n\n---\n\n`);
         }
       }
     }
@@ -199,6 +249,12 @@ async function runClaudePrompt(
       }
       if (error.message.includes('network')) {
         throw new Error('🌐 Network error. Please check your connection and try again.');
+      }
+      if (error.message.includes('quota')) {
+        throw new Error('💰 Usage quota exceeded. Please check your account limits.');
+      }
+      if (error.message.includes('server')) {
+        throw new Error('🔥 Server error. Please try again in a moment.');
       }
       throw new Error(`❌ Claude processing failed: ${error.message}`);
     }
@@ -330,16 +386,6 @@ bot.on("message:text", async (ctx) => {
       `✅ **Response Complete**\n\n${result.response}`
     );
     
-    // Save conversation turn to markdown file
-    if (result.sessionId) {
-      await saveConversationTurn(result.sessionId, {
-        timestamp: new Date().toISOString(),
-        userMessage: prompt,
-        claudeResponse: result.response,
-        cost: result.cost,
-        turns: result.turns
-      });
-    }
     
     // Send session info
     await ctx.reply(
