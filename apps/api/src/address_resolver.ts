@@ -1,20 +1,20 @@
 import { db } from "@repo/db";
-import { users, multisigAccounts } from "@repo/db/schema";
+import { users, pledgeWalletAccounts } from "@repo/db/schema";
 import { eq } from "drizzle-orm";
 import { getAddress } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
 export interface AddressResolution {
   userId: string;
-  paymentType: "personal" | "multisig";
+  paymentType: "personal" | "pledge-wallet";
   resolvedAddress: string; // The original address that was resolved
   userPersonalAddress: string; // The user's personal wallet address
-  multisigAddress?: string; // The multisig address if payment came from multisig
+  pledgeWalletAddress?: string; // The pledge wallet address if payment came from pledge wallet
 }
 
 /**
- * Resolves any address (personal or multisig) to a user ID and payment context
- * @param address - The address to resolve (can be personal wallet or multisig)
+ * Resolves any address (personal or pledge wallet) to a user ID and payment context
+ * @param address - The address to resolve (can be personal wallet or pledge wallet)
  * @returns AddressResolution if found, null if no user can be determined
  */
 export async function resolveAddressToUser(
@@ -38,32 +38,32 @@ export async function resolveAddressToUser(
     };
   }
 
-  // If not found directly, check if this is a multisig address
-  const multisigMatch = await db
+  // If not found directly, check if this is a pledge wallet address
+  const pledgeWalletMatch = await db
     .select({
-      multisigId: multisigAccounts.id,
-      multisigAddress: multisigAccounts.address,
-      userAddress: multisigAccounts.userAddress,
+      pledgeWalletId: pledgeWalletAccounts.id,
+      pledgeWalletAddress: pledgeWalletAccounts.address,
+      userAddress: pledgeWalletAccounts.userAddress,
     })
-    .from(multisigAccounts)
-    .where(eq(multisigAccounts.address, normalizedAddress))
+    .from(pledgeWalletAccounts)
+    .where(eq(pledgeWalletAccounts.address, normalizedAddress))
     .get();
 
-  if (multisigMatch) {
-    // Found a multisig match, now get the user associated with it
-    const userFromMultisig = await db
+  if (pledgeWalletMatch) {
+    // Found a pledge wallet match, now get the user associated with it
+    const userFromPledgeWallet = await db
       .select()
       .from(users)
-      .where(eq(users.evm_address, multisigMatch.userAddress))
+      .where(eq(users.evm_address, pledgeWalletMatch.userAddress))
       .get();
 
-    if (userFromMultisig) {
+    if (userFromPledgeWallet) {
       return {
-        userId: userFromMultisig.id,
-        paymentType: "multisig",
+        userId: userFromPledgeWallet.id,
+        paymentType: "pledge-wallet",
         resolvedAddress: normalizedAddress,
-        userPersonalAddress: userFromMultisig.evm_address!,
-        multisigAddress: multisigMatch.multisigAddress,
+        userPersonalAddress: userFromPledgeWallet.evm_address!,
+        pledgeWalletAddress: pledgeWalletMatch.pledgeWalletAddress,
       };
     }
   }
@@ -87,13 +87,13 @@ export async function isAddressAuthorizedForUser(
 }
 
 /**
- * Gets all addresses (personal + multisig) associated with a user
+ * Gets all addresses (personal + pledge wallet) associated with a user
  * @param userId - The user ID to get addresses for
  * @returns Array of addresses associated with the user
  */
 export async function getUserAddresses(userId: string): Promise<{
   personalAddress: string | null;
-  multisigAddresses: string[];
+  pledgeWalletAddresses: string[];
 }> {
   // Get user's personal address
   const user = await db
@@ -103,21 +103,21 @@ export async function getUserAddresses(userId: string): Promise<{
     .get();
 
   if (!user) {
-    return { personalAddress: null, multisigAddresses: [] };
+    return { personalAddress: null, pledgeWalletAddresses: [] };
   }
 
-  // Get user's multisig addresses
-  const multisigAddresses = await db
+  // Get user's pledge wallet addresses
+  const pledgeWalletAddresses = await db
     .select({
-      address: multisigAccounts.address,
+      address: pledgeWalletAccounts.address,
     })
-    .from(multisigAccounts)
-    .where(eq(multisigAccounts.userAddress, user.evm_address || ""))
+    .from(pledgeWalletAccounts)
+    .where(eq(pledgeWalletAccounts.userAddress, user.evm_address || ""))
     .all();
 
   return {
     personalAddress: user.evm_address,
-    multisigAddresses: multisigAddresses.map((m) => m.address),
+    pledgeWalletAddresses: pledgeWalletAddresses.map((m) => m.address),
   };
 }
 
@@ -225,34 +225,34 @@ export async function resolvePaymentWithEdgeCases(
 }
 
 /**
- * Gets detailed information about a multisig account including all authorized users
- * @param multisigAddress - The multisig address to analyze
- * @returns Information about the multisig account
+ * Gets detailed information about a pledge wallet account including all authorized users
+ * @param pledgeWalletAddress - The pledge wallet address to analyze
+ * @returns Information about the pledge wallet account
  */
-export async function getMultisigDetails(multisigAddress: string): Promise<{
-  multisigAccount: any | null;
+export async function getPledgeWalletDetails(pledgeWalletAddress: string): Promise<{
+  pledgeWalletAccount: any | null;
   primaryUser: any | null;
   operatorAddress: string | null;
 }> {
-  const multisigAccount = await db
+  const pledgeWalletAccount = await db
     .select()
-    .from(multisigAccounts)
-    .where(eq(multisigAccounts.address, multisigAddress.toLowerCase()))
+    .from(pledgeWalletAccounts)
+    .where(eq(pledgeWalletAccounts.address, pledgeWalletAddress.toLowerCase()))
     .get();
 
-  if (!multisigAccount) {
-    return { multisigAccount: null, primaryUser: null, operatorAddress: null };
+  if (!pledgeWalletAccount) {
+    return { pledgeWalletAccount: null, primaryUser: null, operatorAddress: null };
   }
 
   const primaryUser = await db
     .select()
     .from(users)
-    .where(eq(users.evm_address, multisigAccount.userAddress))
+    .where(eq(users.evm_address, pledgeWalletAccount.userAddress))
     .get();
 
   return {
-    multisigAccount,
+    pledgeWalletAccount,
     primaryUser,
-    operatorAddress: multisigAccount.operatorAddress,
+    operatorAddress: pledgeWalletAccount.operatorAddress,
   };
 } 

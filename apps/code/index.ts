@@ -91,6 +91,9 @@ async function telegramWithBackoff<T>(operation: () => Promise<T>): Promise<T> {
   return exponentialBackoff(operation, 3, 1000, 60000);
 }
 
+// System prompt management
+let customSystemPrompt: string | null = null;
+
 // Typing indicator management
 async function startTyping(chatId: number, topicId?: number): Promise<void> {
   try {
@@ -337,6 +340,17 @@ function setSessionForTopic(session: SessionData, topicId?: number): void {
   }
 }
 
+// Get the last valid session ID for resumption, checking topic first then default
+function getLastValidSessionId(topicId?: number): string | null {
+  if (topicId && topicSessions[topicId]?.sessionId) {
+    return topicSessions[topicId].sessionId;
+  }
+  if (defaultSession.sessionId) {
+    return defaultSession.sessionId;
+  }
+  return null;
+}
+
 async function createTopicForSession(ctx: any, prompt: string): Promise<number | null> {
   try {
     // Extract first few words from prompt for topic name
@@ -424,19 +438,23 @@ async function runClaudePrompt(
     }
     await startTyping(chatId, topicId);
     
+    // Get the best session ID for resumption
+    const resumeSessionId = getLastValidSessionId(topicId);
+    
     let queryOptions = {
       prompt,
       abortController: new AbortController(),
       options: {
         maxTurns: 50,
-        ...(currentSession.sessionId && { resume: currentSession.sessionId }),
-        ...(currentAllowedTools.length > 0 && { allowedTools: currentAllowedTools })
+        ...(resumeSessionId && { resume: resumeSessionId }),
+        ...(currentAllowedTools.length > 0 && { allowedTools: currentAllowedTools }),
+        ...(customSystemPrompt && { systemPrompt: customSystemPrompt })
       },
     } satisfies Props;
     
     // Log session status
-    if (currentSession.sessionId) {
-      console.log('🔄 Resuming existing session:', currentSession.sessionId.substring(0, 8));
+    if (resumeSessionId) {
+      console.log('🔄 Resuming existing session:', resumeSessionId.substring(0, 8));
     } else {
       console.log('🆕 Starting new Claude session...');
     }
@@ -702,6 +720,8 @@ bot.command("help", async (ctx) => {
       "/reset - Reset session for current topic\n" +
       "/session - Show session information for current topic\n" +
       "/sessions - List all active sessions\n" +
+      "/systemcheck - Check current system prompt\n" +
+      "/systemset <prompt> - Set custom system prompt (use 'reset' to restore default)\n" +
       "\nTopic-based sessions:\n" +
       "• Send a message to the main chat to create a new topic\n" +
       "• Reply to an existing topic to continue that conversation\n" +
@@ -805,6 +825,56 @@ bot.command("sessions", async (ctx) => {
   });
   
   await telegramWithBackoff(() => ctx.reply(message));
+});
+
+bot.command("systemcheck", async (ctx) => {
+  if (!isFromAllowedGroup(ctx)) {
+    console.log('⚠️ Command ignored - not from allowed group. Chat ID:', ctx.chat.id);
+    return;
+  }
+  
+  console.log('🔍 /systemcheck command received from user:', ctx.from?.username || ctx.from?.id);
+  
+  if (!customSystemPrompt) {
+    await telegramWithBackoff(() => 
+      ctx.reply("📋 **System Prompt Status**\n\nCurrently using default Claude Code system prompt. No custom prompt is set.")
+    );
+  } else {
+    await telegramWithBackoff(() => 
+      ctx.reply(`📋 **Current System Prompt**\n\n${customSystemPrompt}`)
+    );
+  }
+});
+
+bot.command("systemset", async (ctx) => {
+  if (!isFromAllowedGroup(ctx)) {
+    console.log('⚠️ Command ignored - not from allowed group. Chat ID:', ctx.chat.id);
+    return;
+  }
+  
+  console.log('⚙️ /systemset command received from user:', ctx.from?.username || ctx.from?.id);
+  
+  const message = ctx.message.text;
+  const args = message.split(' ').slice(1).join(' ').trim();
+  
+  if (!args) {
+    await telegramWithBackoff(() => 
+      ctx.reply("⚠️ **Usage:** /systemset <prompt>\n\nExample: /systemset You are a helpful coding assistant focused on security.")
+    );
+    return;
+  }
+  
+  if (args.toLowerCase() === "reset" || args.toLowerCase() === "default") {
+    customSystemPrompt = null;
+    await telegramWithBackoff(() => 
+      ctx.reply("✅ System prompt reset to default Claude Code prompt.")
+    );
+  } else {
+    customSystemPrompt = args;
+    await telegramWithBackoff(() => 
+      ctx.reply(`✅ **System prompt updated**\n\nNew prompt: ${customSystemPrompt}`)
+    );
+  }
 });
 
 bot.on("message:text", async (ctx) => {

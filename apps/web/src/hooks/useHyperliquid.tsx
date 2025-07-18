@@ -32,22 +32,24 @@ export function useSpotTokens() {
       try {
         // First try to fetch from our cached endpoint
         const cachedResponse = await api.hyperliquid['spot-tokens'].get()
-        
+
         if (cachedResponse.data?.success && cachedResponse.data?.data?.tokens) {
           console.log('Using cached spot tokens from backend:', {
             count: cachedResponse.data.data.count,
             lastUpdated: new Date(cachedResponse.data.data.lastUpdated),
-            source: cachedResponse.data.data.source
+            source: cachedResponse.data.data.source,
           })
           return cachedResponse.data.data.tokens
         }
-        
+
         // Fallback to direct API call if cache is not available
-        console.log('Cache not available, falling back to direct Hyperliquid API')
+        console.log(
+          'Cache not available, falling back to direct Hyperliquid API',
+        )
         if (!infoClient) {
           throw new Error('Neither cached data nor info client is available')
         }
-        
+
         const response = await infoClient.spotMeta()
         return response?.tokens.reduce(
           (acc, t) => {
@@ -57,13 +59,18 @@ export function useSpotTokens() {
           {} as Record<string, hl.SpotToken>,
         )
       } catch (error) {
-        console.error('Error fetching spot tokens from cache, trying direct API:', error)
-        
+        console.error(
+          'Error fetching spot tokens from cache, trying direct API:',
+          error,
+        )
+
         // Final fallback to direct API call
         if (!infoClient) {
-          throw new Error('Failed to fetch cached spot tokens and info client not available')
+          throw new Error(
+            'Failed to fetch cached spot tokens and info client not available',
+          )
         }
-        
+
         const response = await infoClient.spotMeta()
         return response?.tokens.reduce(
           (acc, t) => {
@@ -87,9 +94,10 @@ export function useHyperliquidInvoices() {
     queryFn: async () => {
       const response = await api.hyperliquid.invoices.get()
       if (response.error) {
-        const errorMessage = typeof response.error.value === 'object' 
-          ? JSON.stringify(response.error.value) 
-          : String(response.error.value);
+        const errorMessage =
+          typeof response.error.value === 'object'
+            ? JSON.stringify(response.error.value)
+            : String(response.error.value)
         throw new Error(errorMessage || 'Failed to fetch invoices')
       }
       return response.data
@@ -132,25 +140,26 @@ export function useCreateInvoiceMutation() {
   const queryClient = useQueryClient()
 
   type Hook = {
-    event: "invoice.paid" | "invoice.created";
-    type: "discord" | "webhook";
-    url: string;
-  };
+    event: 'invoice.paid' | 'invoice.created'
+    type: 'discord' | 'webhook'
+    url: string
+  }
 
   return useMutation({
     mutationFn: async (invoiceData: {
       payerAddress?: string
       token: string
-      amount:string
+      amount: string
       description?: string
       hooks?: Hook[]
     }) => {
       // @ts-ignore - The api type is not yet updated with the new hooks property
       const response = await api.hyperliquid.invoices.post(invoiceData)
       if (response.error) {
-        const errorMessage = typeof response.error.value === 'object' 
-          ? JSON.stringify(response.error.value) 
-          : String(response.error.value);
+        const errorMessage =
+          typeof response.error.value === 'object'
+            ? JSON.stringify(response.error.value)
+            : String(response.error.value)
         throw new Error(errorMessage || 'Failed to create invoice')
       }
       return response.data
@@ -172,9 +181,10 @@ export function useConfirmPaymentMutation() {
         txHash,
       })
       if (response.error) {
-        const errorMessage = typeof response.error.value === 'object'
-          ? JSON.stringify(response.error.value)
-          : String(response.error.value);
+        const errorMessage =
+          typeof response.error.value === 'object'
+            ? JSON.stringify(response.error.value)
+            : String(response.error.value)
         throw new Error(errorMessage || 'Failed to confirm payment')
       }
       return response.data
@@ -196,17 +206,17 @@ export function useOperator() {
   })
 }
 
-export function useMultisig() {
+export function usePledgeWallet() {
   return useQuery({
-    queryKey: ['multisig'],
+    queryKey: ['pledge-wallet'],
     queryFn: async () => {
-      const response = await api.hyperliquid.multisig.get()
+      const response = await api.hyperliquid['pledge-wallet'].get()
       return response.data
     },
   })
 }
 
-export function useCreateMultisigMutation() {
+export function useCreatePledgeWalletMutation() {
   return useMutation({
     mutationFn: async ({
       tx,
@@ -215,15 +225,16 @@ export function useCreateMultisigMutation() {
       tx: `0x${string}`
       agentWalletAddress: `0x${string}`
     }) => {
-      const response = await api.hyperliquid.multisig.post({
+      const response = await api.hyperliquid['pledge-wallet'].post({
         tx,
         agentWalletAddress,
       })
       if (response.error) {
-        const errorMessage = typeof response.error.value === 'object'
-          ? JSON.stringify(response.error.value)
-          : String(response.error.value);
-        throw new Error(errorMessage || 'Failed to create multisig')
+        const errorMessage =
+          typeof response.error.value === 'object'
+            ? JSON.stringify(response.error.value)
+            : String(response.error.value)
+        throw new Error(errorMessage || 'Failed to create pledge wallet')
       }
       return response.data
     },
@@ -237,9 +248,10 @@ export function useWebSocketStatus() {
     queryFn: async () => {
       const response = await api.hyperliquid['ws-status'].get()
       if (response.error) {
-        const errorMessage = typeof response.error.value === 'object' 
-          ? JSON.stringify(response.error.value) 
-          : String(response.error.value);
+        const errorMessage =
+          typeof response.error.value === 'object'
+            ? JSON.stringify(response.error.value)
+            : String(response.error.value)
         throw new Error(errorMessage || 'Failed to fetch WebSocket status')
       }
       return response.data
@@ -255,18 +267,21 @@ export function useSpotTokensWithPrices() {
     queryKey: ['spot-tokens-with-prices'],
     queryFn: async () => {
       const response = await api.hyperliquid['spot-tokens'].get()
-      
+
       if (response.error) {
-        const errorMessage = typeof response.error.value === 'object' 
-          ? JSON.stringify(response.error.value) 
-          : String(response.error.value);
-        throw new Error(errorMessage || 'Failed to fetch spot tokens with prices')
+        const errorMessage =
+          typeof response.error.value === 'object'
+            ? JSON.stringify(response.error.value)
+            : String(response.error.value)
+        throw new Error(
+          errorMessage || 'Failed to fetch spot tokens with prices',
+        )
       }
-      
+
       if (!response.data?.success || !response.data?.data) {
         throw new Error('Invalid response format from spot tokens endpoint')
       }
-      
+
       return {
         tokens: response.data.data.tokens,
         mids: response.data.data.mids,

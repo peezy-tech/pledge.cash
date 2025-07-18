@@ -1,153 +1,165 @@
-import { useState } from "react";
-import { useAccount } from "wagmi";
-import { useConfirmPaymentMutation } from "@/hooks/useHyperliquid";
-import { useHyperliquid } from "@/providers/HyperliquidProvider";
+import { useState } from 'react'
+import { useAccount } from 'wagmi'
+import { useConfirmPaymentMutation } from '@/hooks/useHyperliquid'
+import { useHyperliquid } from '@/providers/HyperliquidProvider'
 
 interface Invoice {
-  id: string;
-  creatorId: string;
-  payerAddress: string | null;
-  payerUserId?: string | null;
-  paymentType?: "personal" | "multisig" | null;
-  actualPayerAddress?: string | null;
-  token: string;
-  amount: string;
-  description?: string | null;
-  status: "pending" | "paid" | "expired";
-  txHash?: string | null;
-  createdAt: number;
-  paidAt?: number | null;
-  expiresAt?: number | null;
-  creatorAddress?: string | null;
+  id: string
+  creatorId: string
+  payerAddress: string | null
+  payerUserId?: string | null
+  paymentType?: 'personal' | 'pledge-wallet' | null
+  actualPayerAddress?: string | null
+  token: string
+  amount: string
+  description?: string | null
+  status: 'pending' | 'paid' | 'expired'
+  txHash?: string | null
+  createdAt: number
+  paidAt?: number | null
+  expiresAt?: number | null
+  creatorAddress?: string | null
 }
 
 export function usePayInvoice() {
-  const account = useAccount();
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const confirmPayment = useConfirmPaymentMutation();
-  const { exchangeClient, infoClient, isReady } = useHyperliquid();
+  const account = useAccount()
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const confirmPayment = useConfirmPaymentMutation()
+  const { exchangeClient, infoClient, isReady } = useHyperliquid()
 
   const pay = async (invoice: Invoice, creatorAddress: string) => {
     if (!account.address) {
-      throw new Error("Wallet not connected");
+      throw new Error('Wallet not connected')
     }
 
     if (!isReady) {
-      throw new Error("Hyperliquid clients not ready");
+      throw new Error('Hyperliquid clients not ready')
     }
 
     if (!exchangeClient) {
-      throw new Error("Exchange client not available - wallet may not be connected");
+      throw new Error(
+        'Exchange client not available - wallet may not be connected',
+      )
     }
 
     if (!infoClient) {
-      throw new Error("Info client not available");
+      throw new Error('Info client not available')
     }
 
-    setIsLoading(true);
-    setError(null);
+    setIsLoading(true)
+    setError(null)
 
     try {
-
       // Execute the spotSend transaction
-      console.log(`Sending ${invoice.amount} ${invoice.token} to ${creatorAddress}`);
-      
+      console.log(
+        `Sending ${invoice.amount} ${invoice.token} to ${creatorAddress}`,
+      )
+
       // Record the timestamp before sending
-      const sendTimestamp = Date.now();
-      
+      const sendTimestamp = Date.now()
+
       const result = await exchangeClient.spotSend({
         destination: creatorAddress as `0x${string}`,
         token: invoice.token as `${string}:0x${string}`,
         amount: invoice.amount,
-      });
+      })
 
-      console.log("Spot send result:", result);
+      console.log('Spot send result:', result)
 
       // The spotSend doesn't directly return a txHash, so we need to find it
       // by querying the user's recent transactions
-      console.log("Waiting for transaction to be indexed...");
-      await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3s
+      console.log('Waiting for transaction to be indexed...')
+      await new Promise((resolve) => setTimeout(resolve, 3000)) // Wait 3s
 
       // Get the user's recent transaction details to find the transaction hash
-      const userDetails = await infoClient.userDetails({ user: account.address });
+      const userDetails = await infoClient.userDetails({
+        user: account.address,
+      })
 
-      console.log("User details fetched, looking for recent spotSend...");
+      console.log('User details fetched, looking for recent spotSend...')
 
       // Find the most recent spot send transaction that matches our criteria
       const spotSendTx = userDetails
-        .filter((tx: any) => 
-          tx.action.type === 'spotSend' && 
-          tx.time > sendTimestamp && // Transaction happened after we sent
-          tx.action.destination?.toLowerCase() === creatorAddress.toLowerCase() &&
-          tx.action.token === invoice.token &&
-          tx.action.amount === invoice.amount &&
-          tx.error === null // Transaction was successful
+        .filter(
+          (tx: any) =>
+            tx.action.type === 'spotSend' &&
+            tx.time > sendTimestamp && // Transaction happened after we sent
+            tx.action.destination?.toLowerCase() ===
+              creatorAddress.toLowerCase() &&
+            tx.action.token === invoice.token &&
+            tx.action.amount === invoice.amount &&
+            tx.error === null, // Transaction was successful
         )
-        .sort((a: any, b: any) => b.time - a.time)[0]; // Get the most recent one
+        .sort((a: any, b: any) => b.time - a.time)[0] // Get the most recent one
 
       if (!spotSendTx || !spotSendTx.hash) {
-        throw new Error("Could not find transaction hash. Please try again or verify manually.");
+        throw new Error(
+          'Could not find transaction hash. Please try again or verify manually.',
+        )
       }
 
-      const txHash = spotSendTx.hash;
-      console.log(`Found transaction hash: ${txHash}`);
+      const txHash = spotSendTx.hash
+      console.log(`Found transaction hash: ${txHash}`)
 
       // Confirm the payment with our backend
-      await confirmPayment.mutateAsync({ id: invoice.id, txHash });
+      await confirmPayment.mutateAsync({ id: invoice.id, txHash })
 
-      return { txHash };
+      return { txHash }
     } catch (error) {
-      console.error("Error paying invoice:", error);
-      const errorMessage = error instanceof Error ? error.message : "Failed to pay invoice";
-      setError(errorMessage);
-      throw error;
+      console.error('Error paying invoice:', error)
+      const errorMessage =
+        error instanceof Error ? error.message : 'Failed to pay invoice'
+      setError(errorMessage)
+      throw error
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }
 
   return {
     pay,
     isLoading,
     error,
     clearError: () => setError(null),
-  };
+  }
 }
 
 // Utility hook to get available tokens for payment
 export function useAvailableTokens() {
-  const [tokens, setTokens] = useState<Array<{ name: string; tokenId: string; identifier: string }>>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const { infoClient, isReady } = useHyperliquid();
+  const [tokens, setTokens] = useState<
+    Array<{ name: string; tokenId: string; identifier: string }>
+  >([])
+  const [isLoading, setIsLoading] = useState(false)
+  const { infoClient, isReady } = useHyperliquid()
 
   const fetchTokens = async () => {
     if (!isReady || !infoClient) {
-      console.error("Hyperliquid clients not ready");
-      return;
+      console.error('Hyperliquid clients not ready')
+      return
     }
 
-    setIsLoading(true);
+    setIsLoading(true)
     try {
-      const spotMeta = await infoClient.spotMeta();
-      
+      const spotMeta = await infoClient.spotMeta()
+
       const availableTokens = spotMeta.tokens.map((token: any) => ({
         name: token.name,
         tokenId: token.tokenId,
         identifier: `${token.name}:${token.tokenId}`,
-      }));
-      
-      setTokens(availableTokens);
+      }))
+
+      setTokens(availableTokens)
     } catch (error) {
-      console.error("Error fetching available tokens:", error);
+      console.error('Error fetching available tokens:', error)
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }
 
   return {
     tokens,
     isLoading,
     fetchTokens,
-  };
-} 
+  }
+}

@@ -1,36 +1,38 @@
-import { useAuth } from '@/providers/AuthProvider';
-import { useAccount } from 'wagmi'; // Added Wagmi hooks
-import ThemeSwitch from '@/components/ThemeSwitch';
-import { NavUser } from './nav-user';
-import { Link } from '@tanstack/react-router';
-import { ConnectWalletButton } from '@/components/evm/simplekit';
+import { useAuth } from '@/providers/AuthProvider'
+import { useAccount } from 'wagmi' // Added Wagmi hooks
+import ThemeSwitch from '@/components/ThemeSwitch'
+import { NavUser } from './nav-user'
+import { Link } from '@tanstack/react-router'
+import { ConnectWalletButton } from '@/components/evm/simplekit'
 
 function AuthButton() {
-  const { isAuthenticated, isLoading, login } = useAuth();
-  const { isConnected } = useAccount();
+  const { isAuthenticated, isLoading, login } = useAuth()
+  const { isConnected } = useAccount()
 
   if (!isConnected) {
-    return <ConnectWalletButton />;
+    return <ConnectWalletButton />
   }
 
   return (
     <div className="flex items-center gap-2">
       {isAuthenticated ? (
-        // <button 
-        //   onClick={async () => await logout()} 
+        // <button
+        //   onClick={async () => await logout()}
         //   disabled={isLoading}
         //   className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-md transition-colors disabled:opacity-50"
         // >
         //   {isLoading ? 'Logging out...' : 'Logout'}
         // </button>
-        <NavUser user={{
-          name: "John Doe",
-          email: "john.doe@example.com",
-          avatar: "https://github.com/shadcn.png",
-        }} />
+        <NavUser
+          user={{
+            name: 'John Doe',
+            email: 'john.doe@example.com',
+            avatar: 'https://github.com/shadcn.png',
+          }}
+        />
       ) : (
-        <button 
-          onClick={async () => await login()} 
+        <button
+          onClick={async () => await login()}
           disabled={isLoading}
           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-md transition-colors disabled:opacity-50"
         >
@@ -38,12 +40,12 @@ function AuthButton() {
         </button>
       )}
     </div>
-  );
+  )
 }
 
 export default function Header() {
   // useWallet() from Solana is replaced by relying on useAuth and useAccount from Wagmi
-  const { error, clearError } = useAuth();
+  const { error, clearError } = useAuth()
 
   return (
     <header className="p-2 flex gap-4 justify-between items-center">
@@ -51,16 +53,28 @@ export default function Header() {
         <Link to="/" className="font-bold">
           Home
         </Link>
-        <Link to="/multisig" className="text-muted-foreground transition-colors hover:text-foreground">
-          Multisig
+        <Link
+          to="/pledge-wallet"
+          className="text-muted-foreground transition-colors hover:text-foreground"
+        >
+          Pledge Wallet
         </Link>
-        <Link to="/evm/option" className="text-muted-foreground transition-colors hover:text-foreground">
+        <Link
+          to="/evm/option"
+          className="text-muted-foreground transition-colors hover:text-foreground"
+        >
           Option
         </Link>
-        <Link to="/evm/locked-vault" className="text-muted-foreground transition-colors hover:text-foreground">
+        <Link
+          to="/evm/locked-vault"
+          className="text-muted-foreground transition-colors hover:text-foreground"
+        >
           Locked Vault
         </Link>
-        <Link to="/invoices" className="text-muted-foreground transition-colors hover:text-foreground">
+        <Link
+          to="/invoices"
+          className="text-muted-foreground transition-colors hover:text-foreground"
+        >
           Invoices
         </Link>
       </nav>
@@ -70,7 +84,7 @@ export default function Header() {
         {error && (
           <div className="flex items-center gap-2">
             <p className="text-red-500 text-sm">Error: {error}</p>
-            <button 
+            <button
               onClick={clearError}
               className="text-red-400 hover:text-red-300 text-sm underline"
             >

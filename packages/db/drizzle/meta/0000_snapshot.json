@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "be92ad61-7265-4be4-a74c-cfd00bf07173",
+  "id": "da273b93-b692-4c5a-9b14-7408934a8433",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "agent_wallets": {
@@ -14,8 +14,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "multisigId": {
-          "name": "multisigId",
+        "pledgeWalletId": {
+          "name": "pledgeWalletId",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -41,17 +41,17 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751983936253
+          "default": 1752849040934
         }
       },
       "indexes": {},
       "foreignKeys": {
-        "agent_wallets_multisigId_multisig_accounts_id_fk": {
-          "name": "agent_wallets_multisigId_multisig_accounts_id_fk",
+        "agent_wallets_pledgeWalletId_pledge_wallet_accounts_id_fk": {
+          "name": "agent_wallets_pledgeWalletId_pledge_wallet_accounts_id_fk",
           "tableFrom": "agent_wallets",
-          "tableTo": "multisig_accounts",
+          "tableTo": "pledge_wallet_accounts",
           "columnsFrom": [
-            "multisigId"
+            "pledgeWalletId"
           ],
           "columnsTo": [
             "id"
@@ -164,7 +164,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751983936252
+          "default": 1752849040934
         },
         "paidAt": {
           "name": "paidAt",
@@ -271,7 +271,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751983936253
+          "default": 1752849040934
         }
       },
       "indexes": {},
@@ -294,8 +294,8 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "multisig_accounts": {
-      "name": "multisig_accounts",
+    "pledge_wallet_accounts": {
+      "name": "pledge_wallet_accounts",
       "columns": {
         "id": {
           "name": "id",
@@ -338,255 +338,32 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751983936253
+          "default": 1752849040934
         }
       },
       "indexes": {
-        "multisig_accounts_userAddress_unique": {
-          "name": "multisig_accounts_userAddress_unique",
+        "pledge_wallet_accounts_userAddress_unique": {
+          "name": "pledge_wallet_accounts_userAddress_unique",
           "columns": [
             "userAddress"
           ],
           "isUnique": true
         },
-        "multisig_accounts_operatorAddress_unique": {
-          "name": "multisig_accounts_operatorAddress_unique",
+        "pledge_wallet_accounts_operatorAddress_unique": {
+          "name": "pledge_wallet_accounts_operatorAddress_unique",
           "columns": [
             "operatorAddress"
           ],
           "isUnique": true
         },
-        "multisig_accounts_operatorPrivateKey_unique": {
-          "name": "multisig_accounts_operatorPrivateKey_unique",
+        "pledge_wallet_accounts_operatorPrivateKey_unique": {
+          "name": "pledge_wallet_accounts_operatorPrivateKey_unique",
           "columns": [
             "operatorPrivateKey"
           ],
           "isUnique": true
         }
       },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "spot_tokens_cache": {
-      "name": "spot_tokens_cache",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "cacheKey": {
-          "name": "cacheKey",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "lastUpdated": {
-          "name": "lastUpdated",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1751983936254
-        },
-        "lastUpdateSource": {
-          "name": "lastUpdateSource",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'rest'"
-        },
-        "dataCount": {
-          "name": "dataCount",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "isValid": {
-          "name": "isValid",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": true
-        },
-        "expiresAt": {
-          "name": "expiresAt",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "metadata": {
-          "name": "metadata",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "spot_tokens_cache_cacheKey_unique": {
-          "name": "spot_tokens_cache_cacheKey_unique",
-          "columns": [
-            "cacheKey"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "spot_tokens_metadata": {
-      "name": "spot_tokens_metadata",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tokenName": {
-          "name": "tokenName",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "szDecimals": {
-          "name": "szDecimals",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "weiDecimals": {
-          "name": "weiDecimals",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tokenId": {
-          "name": "tokenId",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "isCanonical": {
-          "name": "isCanonical",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "fullName": {
-          "name": "fullName",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "evmContract": {
-          "name": "evmContract",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "index": {
-          "name": "index",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "createdAt": {
-          "name": "createdAt",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1751983936253
-        },
-        "updatedAt": {
-          "name": "updatedAt",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1751983936253
-        }
-      },
-      "indexes": {
-        "spot_tokens_metadata_tokenName_unique": {
-          "name": "spot_tokens_metadata_tokenName_unique",
-          "columns": [
-            "tokenName"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "spot_tokens_mid_prices": {
-      "name": "spot_tokens_mid_prices",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "tokenName": {
-          "name": "tokenName",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "midPrice": {
-          "name": "midPrice",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "timestamp": {
-          "name": "timestamp",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1751983936254
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'websocket'"
-        }
-      },
-      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -608,7 +385,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": 1751983936252
+          "default": 1752849040934
         },
         "metadata": {
           "name": "metadata",

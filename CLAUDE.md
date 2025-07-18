@@ -19,8 +19,8 @@ bun install
 bun dev
 
 # Start specific app
-cd apps/web && bun dev    # Web on http://localhost:3000
-cd apps/api && bun dev    # API on http://localhost:3005
+cd apps/web && bun dev    # Web on http://localhost:5173
+cd apps/api && bun dev    # API on http://localhost:3000
 
 # Build all apps
 bun build
@@ -51,7 +51,6 @@ bun docker:push   # Push to Docker Hub
 - **State**: TanStack Query for server state management
 - **UI Components**: Shadcn UI pattern in `/src/components/ui/`
   - Add new components: `bun shadcn@latest add <component>`
-- **3D/VRM**: Avatar system using Three.js and React Three Fiber
 - **API Communication**: Uses `/src/utils/api.ts` for backend calls
 - **Path Alias**: `@/*` maps to `./src/*`
 
@@ -64,8 +63,7 @@ bun docker:push   # Push to Docker Hub
 ### Key Dependencies
 - **Runtime**: Bun 1.1.42
 - **Monorepo**: Turborepo for task orchestration
-- **Blockchain**: Solana wallet adapters and Meteora SDK
-- **3D**: Three.js ecosystem for avatar rendering
+- **Blockchain**: EVM wallet adapters and Hyperliquid SDK
 
 ## Development Patterns
 
@@ -89,11 +87,7 @@ Follow existing patterns in the codebase:
 - API requires JWT_SECRET and other auth tokens
 
 ## Static Assets
-Both apps serve static files from their `public/` directories, including:
-- VRM avatar models
-- GLB 3D environments
-- HDR lighting files
-- UI assets
+Both apps serve static files from their `public/` directories
 
 ## Claude Development Session Memory
 - Let me spin up the app server if needed, because it will affect the current claude code session

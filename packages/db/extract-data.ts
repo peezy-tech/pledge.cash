@@ -66,14 +66,14 @@ async function extractData() {
     );
     console.log(`✓ Extracted ${invoiceHooks.length} invoice hooks`);
 
-    // Extract multisigAccounts
-    console.log("Extracting multisig accounts...");
-    const multisigAccounts = await db.select().from(schema.multisigAccounts);
+    // Extract pledgeWalletAccounts
+    console.log("Extracting pledge wallet accounts...");
+    const pledgeWalletAccounts = await db.select().from(schema.pledgeWalletAccounts);
     writeFileSync(
-      path.join(outputDir, "multisigAccounts.json"),
-      JSON.stringify(multisigAccounts, null, 2)
+      path.join(outputDir, "pledgeWalletAccounts.json"),
+      JSON.stringify(pledgeWalletAccounts, null, 2)
     );
-    console.log(`✓ Extracted ${multisigAccounts.length} multisig accounts`);
+    console.log(`✓ Extracted ${pledgeWalletAccounts.length} pledge wallet accounts`);
 
     // Extract agentWallets
     console.log("Extracting agent wallets...");
@@ -93,11 +93,11 @@ async function extractData() {
         txHashes: txHashes.length,
         hyperliquidInvoices: hyperliquidInvoices.length,
         invoiceHooks: invoiceHooks.length,
-        multisigAccounts: multisigAccounts.length,
+        pledgeWalletAccounts: pledgeWalletAccounts.length,
         agentWallets: agentWallets.length,
       },
       totalRecords: users.length + txHashes.length + hyperliquidInvoices.length + 
-                   invoiceHooks.length + multisigAccounts.length + agentWallets.length,
+                   invoiceHooks.length + pledgeWalletAccounts.length + agentWallets.length,
     };
 
     writeFileSync(
@@ -113,7 +113,7 @@ async function extractData() {
     console.log("  - txHashes.json");
     console.log("  - hyperliquidInvoices.json");
     console.log("  - invoiceHooks.json");
-    console.log("  - multisigAccounts.json");
+    console.log("  - pledgeWalletAccounts.json");
     console.log("  - agentWallets.json");
     console.log("  - extraction-summary.json");
 

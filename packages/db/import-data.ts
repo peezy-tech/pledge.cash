@@ -69,14 +69,14 @@ async function importData(targetDbName: string = "imported.db") {
       console.log("⊝ No transaction hashes to import");
     }
 
-    // Import multisigAccounts
-    console.log("Importing multisig accounts...");
-    const multisigAccounts = readJsonFile("multisigAccounts.json");
-    if (multisigAccounts.length > 0) {
-      await db.insert(schema.multisigAccounts).values(multisigAccounts);
-      console.log(`✓ Imported ${multisigAccounts.length} multisig accounts`);
+    // Import pledgeWalletAccounts
+    console.log("Importing pledge wallet accounts...");
+    const pledgeWalletAccounts = readJsonFile("pledgeWalletAccounts.json");
+    if (pledgeWalletAccounts.length > 0) {
+      await db.insert(schema.pledgeWalletAccounts).values(pledgeWalletAccounts);
+      console.log(`✓ Imported ${pledgeWalletAccounts.length} pledge wallet accounts`);
     } else {
-      console.log("⊝ No multisig accounts to import");
+      console.log("⊝ No pledge wallet accounts to import");
     }
 
     // Import hyperliquidInvoices
@@ -110,7 +110,7 @@ async function importData(targetDbName: string = "imported.db") {
     }
 
     // Calculate totals
-    const totalRecords = users.length + txHashes.length + multisigAccounts.length + 
+    const totalRecords = users.length + txHashes.length + pledgeWalletAccounts.length + 
                         hyperliquidInvoices.length + invoiceHooks.length + agentWallets.length;
 
     console.log("\n🎉 Database migration and data import completed successfully!");
@@ -122,7 +122,7 @@ async function importData(targetDbName: string = "imported.db") {
     const verification = {
       users: (await db.select().from(schema.users)).length,
       txHashes: (await db.select().from(schema.txHashes)).length,
-      multisigAccounts: (await db.select().from(schema.multisigAccounts)).length,
+      pledgeWalletAccounts: (await db.select().from(schema.pledgeWalletAccounts)).length,
       hyperliquidInvoices: (await db.select().from(schema.hyperliquidInvoices)).length,
       invoiceHooks: (await db.select().from(schema.invoiceHooks)).length,
       agentWallets: (await db.select().from(schema.agentWallets)).length,

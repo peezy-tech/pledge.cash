@@ -32,7 +32,7 @@ export const hyperliquidInvoices = table("hyperliquid_invoices", {
     .notNull(),
   payerAddress: t.text(),
   payerUserId: t.text().references(() => users.id),
-  paymentType: t.text().$type<"personal" | "multisig">(),
+  paymentType: t.text().$type<"personal" | "pledge-wallet">(),
   actualPayerAddress: t.text(),
   token: t.text().notNull(),
   amount: t.text().notNull(),
@@ -85,11 +85,11 @@ export const invoiceHooksRelations = relations(invoiceHooks, ({ one }) => ({
   }),
 }));
 
-export const multisigAccounts = table("multisig_accounts", {
+export const pledgeWalletAccounts = table("pledge_wallet_accounts", {
   id: t
     .text()
     .primaryKey()
-    .$default(() => `msig_${generateUniqueString(16)}`),
+    .$default(() => `pwlt_${generateUniqueString(16)}`),
   userAddress: t.text().notNull().unique(),
   operatorAddress: t.text().notNull().unique(),
   operatorPrivateKey: t.text().notNull().unique(),
@@ -102,9 +102,9 @@ export const agentWallets = table("agent_wallets", {
     .text()
     .primaryKey()
     .$default(() => `ag_${generateUniqueString(16)}`),
-  multisigId: t
+  pledgeWalletId: t
     .text()
-    .references(() => multisigAccounts.id, {
+    .references(() => pledgeWalletAccounts.id, {
       onDelete: "cascade",
     })
     .notNull(),

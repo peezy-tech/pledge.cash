@@ -1,47 +1,53 @@
 import { createContext, useEffect, useContext, useState, useMemo } from 'react'
 import { useAccount, useWalletClient } from 'wagmi'
-import { useMultisig } from '@/hooks/useHyperliquid'
+import { usePledgeWallet } from '@/hooks/useHyperliquid'
 import * as hl from '@nktkas/hyperliquid'
 import { privateKeyToAccount } from 'viem/accounts'
 
 const IS_TESTNET = true
 
-const MultisigContext = createContext<{
+const PledgeWalletContext = createContext<{
   client: hl.MultiSignClient
   address: string
   agentClient: hl.ExchangeClient | null
 } | null>(null)
 
-export const useMultisigClient = (): {
+export const usePledgeWalletClient = (): {
   client: hl.MultiSignClient
   address: string
   agentClient: hl.ExchangeClient | null
 } | null => {
-  const context = useContext(MultisigContext)
+  const context = useContext(PledgeWalletContext)
 
   if (context === undefined) {
-    throw new Error('useMultisigClient must be used within a MultisigProvider')
+    throw new Error(
+      'usePledgeWalletClient must be used within a PledgeWalletProvider',
+    )
   }
 
   return context
 }
 
-export function MultisigProvider({ children }: { children: React.ReactNode }) {
-  const { data: multisig } = useMultisig()
+export function PledgeWalletProvider({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const { data: pledgeWallet } = usePledgeWallet()
   const { data: walletClient } = useWalletClient()
   const account = useAccount()
 
-  const [multisigClient, setMultisigClient] =
+  const [pledgeWalletClient, setPledgeWalletClient] =
     useState<hl.MultiSignClient | null>(null)
   const [agentClient, setAgentClient] = useState<hl.ExchangeClient | null>(null)
   // const chainId = useChainId()
 
   useEffect(() => {
-    if (!multisig || !walletClient || !account.address) return
+    if (!pledgeWallet || !walletClient || !account.address) return
     // console.log(walletClient.address)
-    const multisigClient = new hl.MultiSignClient({
+    const pledgeWalletClient = new hl.MultiSignClient({
       transport: new hl.HttpTransport({ isTestnet: IS_TESTNET }),
-      multiSignAddress: multisig.address as `0x${string}`,
+      multiSignAddress: pledgeWallet.address as `0x${string}`,
       signatureChainId: `0x${(1337).toString(16)}` as `0x${string}`,
       signers: [
         {
@@ -79,7 +85,7 @@ export function MultisigProvider({ children }: { children: React.ReactNode }) {
       isTestnet: IS_TESTNET,
     })
 
-    setMultisigClient(multisigClient)
+    setPledgeWalletClient(pledgeWalletClient)
 
     const agentPrivateKey = localStorage.getItem('agentPrivateKey')
     if (agentPrivateKey) {
@@ -93,22 +99,22 @@ export function MultisigProvider({ children }: { children: React.ReactNode }) {
 
       setAgentClient(agentClient)
     }
-  }, [multisig, walletClient])
+  }, [pledgeWallet, walletClient])
 
   const value = useMemo(
     () =>
-      multisigClient &&
-      multisig && {
-        client: multisigClient,
-        address: multisig.address,
+      pledgeWalletClient &&
+      pledgeWallet && {
+        client: pledgeWalletClient,
+        address: pledgeWallet.address,
         agentClient,
       },
-    [multisigClient, multisig, agentClient],
+    [pledgeWalletClient, pledgeWallet, agentClient],
   )
 
   return (
-    <MultisigContext.Provider value={value ?? null}>
+    <PledgeWalletContext.Provider value={value ?? null}>
       {children}
-    </MultisigContext.Provider>
+    </PledgeWalletContext.Provider>
   )
 }

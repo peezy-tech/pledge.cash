@@ -2,8 +2,7 @@
     "name": "@repo/code",
     "version": "1.0.0",
     "scripts": {
-        "start": "bun index.ts",
-        "dev": "bun --watch index.ts"
+        "start": "bun --watch index.ts"
     },
     "dependencies": {
         "@anthropic-ai/claude-code": "latest",

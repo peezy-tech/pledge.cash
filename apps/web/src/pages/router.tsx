@@ -8,8 +8,8 @@ import OptionPage from './evm/option'
 import LockedVaultPage from './evm/locked-vault'
 import InvoicesPage from './invoices/invoices'
 import InvoicePage from './invoices/invoice'
-import MultisigPage from './multisig/multisig'
-import MultisigRecoveryPage from './multisig/recovery'
+import PledgeWalletPage from './pledge-wallet/pledge-wallet'
+import PledgeWalletRecoveryPage from './pledge-wallet/recovery'
 
 import Header from '@/components/Header'
 
@@ -32,8 +32,8 @@ const routes = rootRoute.addChildren([
   LockedVaultPage(rootRoute),
   InvoicesPage(rootRoute),
   InvoicePage(rootRoute),
-  MultisigPage(rootRoute),
-  MultisigRecoveryPage(rootRoute),
+  PledgeWalletPage(rootRoute),
+  PledgeWalletRecoveryPage(rootRoute),
 ])
 
 export const router = createRouter({

@@ -40,7 +40,7 @@ This creates an `extracted-data/` directory with:
 - `txHashes.json`
 - `hyperliquidInvoices.json`
 - `invoiceHooks.json`
-- `multisigAccounts.json`
+- `pledgeWalletAccounts.json`
 - `agentWallets.json`
 - `extraction-summary.json`
 

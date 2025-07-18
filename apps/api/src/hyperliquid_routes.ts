@@ -5,7 +5,7 @@ import { db } from "@repo/db";
 import {
   hyperliquidInvoices,
   users,
-  multisigAccounts,
+  pledgeWalletAccounts,
   agentWallets,
   invoiceHooks,
   txHashes,
@@ -218,7 +218,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
         } else {
           // Address is not associated with any user - register via payment
           // This only happens if the payment comes from a new personal address
-          // (multisig addresses are always tied to existing users)
+          // (pledge wallet addresses are always tied to existing users)
           console.log(
             `No user found for address ${onChainPayerAddress}, creating a new user.`
           );
@@ -399,7 +399,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             return { error: "User not found" };
           }
 
-          // Get invoices where user is either creator or payer (including via multisig)
+          // Get invoices where user is either creator or payer (including via pledge wallet)
           const invoicesAsCreator = await db
             .select({
               id: hyperliquidInvoices.id,
@@ -468,11 +468,11 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
       .get("/operator", async () => ({ operator: operator.address }))
 
       .post(
-        "/multisig",
+        "/pledge-wallet",
         async ({ body, set, currentUser }) => {
           try {
             console.log(
-              "Starting multisig creation for user:",
+              "Starting pledge wallet creation for user:",
               currentUser?.walletAddress
             );
             const { tx } = body;
@@ -508,7 +508,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
               );
               set.status = 400;
               return {
-                error: "Transaction destination is not a multisig account",
+                error: "Transaction destination is not a pledge wallet account",
               };
             }
 
@@ -546,24 +546,24 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             }
 
             console.log(
-              "Checking for existing multisig account for user:",
+              "Checking for existing pledge wallet account for user:",
               currentUser?.walletAddress
             );
-            const existingMultisigAccount = await db
+            const existingPledgeWalletAccount = await db
               .select()
-              .from(multisigAccounts)
+              .from(pledgeWalletAccounts)
               .where(
-                eq(multisigAccounts.userAddress, currentUser!.walletAddress)
+                eq(pledgeWalletAccounts.userAddress, currentUser!.walletAddress)
               )
               .get();
 
-            console.log("Existing multisig account:", existingMultisigAccount);
+            console.log("Existing pledge wallet account:", existingPledgeWalletAccount);
 
-            if (existingMultisigAccount) {
-              console.log("User already has a multisig account");
+            if (existingPledgeWalletAccount) {
+              console.log("User already has a pledge wallet account");
               set.status = 400;
               return {
-                error: "User already has a multisig account",
+                error: "User already has a pledge wallet account",
               };
             }
 
@@ -577,33 +577,33 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
               userOperatorWallet.address
             );
 
-            console.log("Generating new multisig account private key");
-            const multisigAccountPrivateKey = generatePrivateKey();
-            const multisigAccount = privateKeyToAccount(
-              multisigAccountPrivateKey
+            console.log("Generating new pledge wallet account private key");
+            const pledgeWalletAccountPrivateKey = generatePrivateKey();
+            const pledgeWalletAccount = privateKeyToAccount(
+              pledgeWalletAccountPrivateKey
             );
             console.log(
-              "Generated multisig account address:",
-              multisigAccount.address
+              "Generated pledge wallet account address:",
+              pledgeWalletAccount.address
             );
 
-            console.log("Inserting multisig account record into database");
-            const multisigAccountRecord = await db
-              .insert(multisigAccounts)
+            console.log("Inserting pledge wallet account record into database");
+            const pledgeWalletAccountRecord = await db
+              .insert(pledgeWalletAccounts)
               .values({
                 userAddress: currentUser!.walletAddress,
                 operatorAddress: userOperatorWallet.address,
                 operatorPrivateKey: userOperatorWalletPrivateKey,
-                address: multisigAccount.address,
+                address: pledgeWalletAccount.address,
               })
               .returning()
               .get();
             console.log(
               "Multisig account record created:",
-              multisigAccountRecord
+              pledgeWalletAccountRecord
             );
 
-            // send 1 usdc to operator and 1 usdc to multisig account
+            // send 1 usdc to operator and 1 usdc to pledge wallet account
             const token =
               `${spotTokens.USDC.name}:${spotTokens.USDC.tokenId}` as const;
             console.log(
@@ -619,28 +619,28 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             console.log("Operator tx result:", operatorTx);
 
             console.log(
-              "Sending 1 USDC to multisig account:",
-              multisigAccount.address
+              "Sending 1 USDC to pledge wallet account:",
+              pledgeWalletAccount.address
             );
-            const multisigTx = await exchangeClient.spotSend({
-              destination: multisigAccount.address,
+            const pledgeWalletTx = await exchangeClient.spotSend({
+              destination: pledgeWalletAccount.address,
               token,
               amount: "0",
             });
-            console.log("Multisig tx result:", multisigTx);
+            console.log("Pledge wallet tx result:", pledgeWalletTx);
 
             console.log(
-              "Creating multisig exchange client for account:",
-              multisigAccount.address
+              "Creating pledge wallet exchange client for account:",
+              pledgeWalletAccount.address
             );
-            const multisigExchangeClient = new hl.ExchangeClient({
+            const pledgeWalletExchangeClient = new hl.ExchangeClient({
               transport,
-              wallet: multisigAccount,
+              wallet: pledgeWalletAccount,
               isTestnet: IS_TESTNET,
             });
 
             const approveAgentWalletTx =
-              await multisigExchangeClient.approveAgent({
+              await pledgeWalletExchangeClient.approveAgent({
                 agentAddress: body.agentWalletAddress,
                 agentName: "Frontend",
               });
@@ -653,7 +653,7 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             const agentWalletRecord = await db
               .insert(agentWallets)
               .values({
-                multisigId: multisigAccountRecord.id,
+                pledgeWalletId: pledgeWalletAccountRecord.id,
                 userId: currentUser!.id,
                 address: body.agentWalletAddress,
               })
@@ -672,28 +672,28 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
             );
             console.log("Threshold: 1");
             const convertTx =
-              await multisigExchangeClient.convertToMultiSigUser({
+              await pledgeWalletExchangeClient.convertToMultiSigUser({
                 authorizedUsers: authorizedUsers,
                 threshold: 1,
               });
-            console.log("Convert to multisig tx result:", convertTx);
+            console.log("Convert to pledge wallet tx result:", convertTx);
 
             const result = {
               success: true,
-              multisig: multisigAccount.address,
+              pledgeWallet: pledgeWalletAccount.address,
               operator: userOperatorWallet.address,
             };
             console.log("Multisig creation completed successfully:", result);
 
             return result;
           } catch (error) {
-            console.error("Error initializing multisig:", error);
+            console.error("Error initializing pledge wallet:", error);
             console.error(
               "Error stack:",
               error instanceof Error ? error.stack : "No stack trace"
             );
             set.status = 500;
-            return { error: "Failed to initialize multisig" };
+            return { error: "Failed to initialize pledge wallet" };
           }
         },
         {
@@ -704,13 +704,13 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
         }
       )
 
-      .get("/multisig", async ({ currentUser }) => {
-        const multisigAccount = await db
+      .get("/pledge-wallet", async ({ currentUser }) => {
+        const pledgeWalletAccount = await db
           .select()
-          .from(multisigAccounts)
-          .where(eq(multisigAccounts.userAddress, currentUser!.walletAddress))
+          .from(pledgeWalletAccounts)
+          .where(eq(pledgeWalletAccounts.userAddress, currentUser!.walletAddress))
           .get();
-        return multisigAccount;
+        return pledgeWalletAccount;
       })
       
       // NEW: Get all addresses associated with the authenticated user
@@ -732,8 +732,8 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
           return {
             userId: user.id,
             personalAddress: addresses.personalAddress,
-            multisigAddresses: addresses.multisigAddresses,
-            totalAddresses: 1 + addresses.multisigAddresses.length, // personal + multisig count
+            pledgeWalletAddresses: addresses.pledgeWalletAddresses,
+            totalAddresses: 1 + addresses.pledgeWalletAddresses.length, // personal + pledge wallet count
           };
         } catch (error) {
           console.error("Error fetching user addresses:", error);

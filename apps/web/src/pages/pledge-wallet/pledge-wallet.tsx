@@ -2,38 +2,63 @@ import { createRoute, type RootRoute } from '@tanstack/react-router'
 import { PageLayout } from '@/components/PageLayout'
 import {
   useOperator,
-  useMultisig,
-  useCreateMultisigMutation,
+  usePledgeWallet,
+  useCreatePledgeWalletMutation,
   useSpotTokens,
   useHyperliquidSpotBalances,
 } from '@/hooks/useHyperliquid'
 import { Button } from '@/components/ui/button'
 import { useHyperliquid } from '@/providers/HyperliquidProvider'
-import { useMultisigClient } from '@/providers/MultisigProvider'
+import { usePledgeWalletClient } from '@/providers/PledgeWalletProvider'
 import { useAccount } from 'wagmi'
 import { SpotBalances } from '@/components/SpotBalances'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import { Toaster } from '@/components/ui/sonner'
 import { toast } from 'sonner'
 import { useState } from 'react'
-import { Copy, ExternalLink, ArrowUpRight, ArrowDownLeft, Shield, AlertTriangle } from 'lucide-react'
+import {
+  Copy,
+  ExternalLink,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Shield,
+  AlertTriangle,
+} from 'lucide-react'
 import { SwapComponent } from './SwapComponent'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 
-function MultisigInfo() {
-  const multisigClient = useMultisigClient()
-  const { data: multisig } = useMultisig()
+function PledgeWalletInfo() {
+  const pledgeWalletClient = usePledgeWalletClient()
+  const { data: pledgeWallet } = usePledgeWallet()
   const { exchangeClient } = useHyperliquid()
   const { data: spotTokens } = useSpotTokens()
   const { address: userAddress } = useAccount()
   const { data: userBalances } = useHyperliquidSpotBalances(userAddress)
-  const { data: multisigBalances } = useHyperliquidSpotBalances(multisigClient?.address ? multisigClient.address as `0x${string}` : undefined)
-  
+  const { data: pledgeWalletBalances } = useHyperliquidSpotBalances(
+    pledgeWalletClient?.address
+      ? (pledgeWalletClient.address as `0x${string}`)
+      : undefined,
+  )
+
   const [transferAmount, setTransferAmount] = useState('')
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [isTransferring, setIsTransferring] = useState(false)
@@ -43,25 +68,27 @@ function MultisigInfo() {
   const [showTransferConfirm, setShowTransferConfirm] = useState(false)
   const [showWithdrawConfirm, setShowWithdrawConfirm] = useState(false)
 
-  if (!multisigClient || !multisig) {
+  if (!pledgeWalletClient || !pledgeWallet) {
     return (
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Shield className="h-5 w-5" />
-            Multisig Wallet
+            Pledge Wallet
           </CardTitle>
           <CardDescription>
-            No multisig wallet found. Create one to get started.
+            No pledge wallet found. Create one to get started.
           </CardDescription>
         </CardHeader>
       </Card>
     )
   }
 
-  const { address, client } = multisigClient
-  const userUsdcBalance = userBalances?.balances.find(b => b.coin === 'USDC')
-  const multisigUsdcBalance = multisigBalances?.balances.find(b => b.coin === 'USDC')
+  const { address, client } = pledgeWalletClient
+  const userUsdcBalance = userBalances?.balances.find((b) => b.coin === 'USDC')
+  const pledgeWalletUsdcBalance = pledgeWalletBalances?.balances.find(
+    (b) => b.coin === 'USDC',
+  )
 
   const copyAddress = () => {
     navigator.clipboard.writeText(address)
@@ -98,8 +125,10 @@ function MultisigInfo() {
         token: `${spotTokens.USDC.name}:${spotTokens.USDC.tokenId}`,
         amount: transferAmount,
       })
-      
-      toast.success(`Successfully transferred ${transferAmount} USDC to multisig`)
+
+      toast.success(
+        `Successfully transferred ${transferAmount} USDC to pledge wallet`,
+      )
       setTransferAmount('')
       setShowTransferDialog(false)
       setShowTransferConfirm(false)
@@ -126,7 +155,7 @@ function MultisigInfo() {
     const availableBalance = Number(multisigUsdcBalance?.total || 0)
 
     if (numAmount > availableBalance) {
-      toast.error('Insufficient multisig balance')
+      toast.error('Insufficient pledge wallet balance')
       return
     }
 
@@ -137,8 +166,10 @@ function MultisigInfo() {
         token: `${spotTokens.USDC.name}:${spotTokens.USDC.tokenId}`,
         amount: withdrawAmount,
       })
-      
-      toast.success(`Successfully withdrew ${withdrawAmount} USDC from multisig`)
+
+      toast.success(
+        `Successfully withdrew ${withdrawAmount} USDC from pledge wallet`,
+      )
       setWithdrawAmount('')
       setShowWithdrawDialog(false)
       setShowWithdrawConfirm(false)
@@ -155,11 +186,11 @@ function MultisigInfo() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Shield className="h-5 w-5" />
-          Multisig Wallet
+          Pledge Wallet
           <Badge variant="secondary">Active</Badge>
         </CardTitle>
         <CardDescription>
-          Your multisig wallet for secure transactions
+          Your pledge wallet for secure transactions
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -176,9 +207,12 @@ function MultisigInfo() {
           </Button>
         </div>
         <SpotBalances address={address as `0x${string}`} />
-        
+
         <div className="flex gap-2">
-          <Dialog open={showTransferDialog} onOpenChange={setShowTransferDialog}>
+          <Dialog
+            open={showTransferDialog}
+            onOpenChange={setShowTransferDialog}
+          >
             <DialogTrigger asChild>
               <Button className="flex-1" variant="outline">
                 <ArrowUpRight className="h-4 w-4 mr-2" />
@@ -187,9 +221,9 @@ function MultisigInfo() {
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Transfer to Multisig</DialogTitle>
+                <DialogTitle>Transfer to Pledge Wallet</DialogTitle>
                 <DialogDescription>
-                  Send USDC from your wallet to the multisig
+                  Send USDC from your wallet to the pledge wallet
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
@@ -210,13 +244,23 @@ function MultisigInfo() {
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setShowTransferDialog(false)}>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowTransferDialog(false)}
+                >
                   Cancel
                 </Button>
-                <Dialog open={showTransferConfirm} onOpenChange={setShowTransferConfirm}>
+                <Dialog
+                  open={showTransferConfirm}
+                  onOpenChange={setShowTransferConfirm}
+                >
                   <DialogTrigger asChild>
-                    <Button 
-                      disabled={!transferAmount || isNaN(Number(transferAmount)) || Number(transferAmount) <= 0}
+                    <Button
+                      disabled={
+                        !transferAmount ||
+                        isNaN(Number(transferAmount)) ||
+                        Number(transferAmount) <= 0
+                      }
                     >
                       Review Transfer
                     </Button>
@@ -225,7 +269,8 @@ function MultisigInfo() {
                     <DialogHeader>
                       <DialogTitle>Confirm Transfer</DialogTitle>
                       <DialogDescription>
-                        Are you sure you want to transfer {transferAmount} USDC to the multisig wallet?
+                        Are you sure you want to transfer {transferAmount} USDC
+                        to the pledge wallet?
                       </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
@@ -236,22 +281,32 @@ function MultisigInfo() {
                         </code>
                       </div>
                       <div className="space-y-2">
-                        <Label>To (Multisig)</Label>
+                        <Label>To (Pledge Wallet)</Label>
                         <code className="text-sm bg-muted px-2 py-1 rounded block truncate">
                           {address}
                         </code>
                       </div>
                       <div className="space-y-2">
                         <Label>Amount</Label>
-                        <p className="text-lg font-semibold">{transferAmount} USDC</p>
+                        <p className="text-lg font-semibold">
+                          {transferAmount} USDC
+                        </p>
                       </div>
                     </div>
                     <DialogFooter>
-                      <Button variant="outline" onClick={() => setShowTransferConfirm(false)}>
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowTransferConfirm(false)}
+                      >
                         Cancel
                       </Button>
-                      <Button onClick={handleTransfer} disabled={isTransferring}>
-                        {isTransferring ? 'Transferring...' : 'Confirm Transfer'}
+                      <Button
+                        onClick={handleTransfer}
+                        disabled={isTransferring}
+                      >
+                        {isTransferring
+                          ? 'Transferring...'
+                          : 'Confirm Transfer'}
                       </Button>
                     </DialogFooter>
                   </DialogContent>
@@ -260,7 +315,10 @@ function MultisigInfo() {
             </DialogContent>
           </Dialog>
 
-          <Dialog open={showWithdrawDialog} onOpenChange={setShowWithdrawDialog}>
+          <Dialog
+            open={showWithdrawDialog}
+            onOpenChange={setShowWithdrawDialog}
+          >
             <DialogTrigger asChild>
               <Button className="flex-1" variant="outline">
                 <ArrowDownLeft className="h-4 w-4 mr-2" />
@@ -269,9 +327,9 @@ function MultisigInfo() {
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Withdraw from Multisig</DialogTitle>
+                <DialogTitle>Withdraw from Pledge Wallet</DialogTitle>
                 <DialogDescription>
-                  Send USDC from the multisig to your wallet
+                  Send USDC from the pledge wallet to your wallet
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">
@@ -287,18 +345,28 @@ function MultisigInfo() {
                     step="0.01"
                   />
                   <p className="text-sm text-muted-foreground">
-                    Available: {multisigUsdcBalance?.total || '0'} USDC
+                    Available: {pledgeWalletUsdcBalance?.total || '0'} USDC
                   </p>
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="outline" onClick={() => setShowWithdrawDialog(false)}>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowWithdrawDialog(false)}
+                >
                   Cancel
                 </Button>
-                <Dialog open={showWithdrawConfirm} onOpenChange={setShowWithdrawConfirm}>
+                <Dialog
+                  open={showWithdrawConfirm}
+                  onOpenChange={setShowWithdrawConfirm}
+                >
                   <DialogTrigger asChild>
-                    <Button 
-                      disabled={!withdrawAmount || isNaN(Number(withdrawAmount)) || Number(withdrawAmount) <= 0}
+                    <Button
+                      disabled={
+                        !withdrawAmount ||
+                        isNaN(Number(withdrawAmount)) ||
+                        Number(withdrawAmount) <= 0
+                      }
                     >
                       Review Withdrawal
                     </Button>
@@ -307,12 +375,13 @@ function MultisigInfo() {
                     <DialogHeader>
                       <DialogTitle>Confirm Withdrawal</DialogTitle>
                       <DialogDescription>
-                        Are you sure you want to withdraw {withdrawAmount} USDC from the multisig wallet?
+                        Are you sure you want to withdraw {withdrawAmount} USDC
+                        from the pledge wallet?
                       </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
                       <div className="space-y-2">
-                        <Label>From (Multisig)</Label>
+                        <Label>From (Pledge Wallet)</Label>
                         <code className="text-sm bg-muted px-2 py-1 rounded block truncate">
                           {address}
                         </code>
@@ -325,15 +394,22 @@ function MultisigInfo() {
                       </div>
                       <div className="space-y-2">
                         <Label>Amount</Label>
-                        <p className="text-lg font-semibold">{withdrawAmount} USDC</p>
+                        <p className="text-lg font-semibold">
+                          {withdrawAmount} USDC
+                        </p>
                       </div>
                     </div>
                     <DialogFooter>
-                      <Button variant="outline" onClick={() => setShowWithdrawConfirm(false)}>
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowWithdrawConfirm(false)}
+                      >
                         Cancel
                       </Button>
                       <Button onClick={handleWithdraw} disabled={isWithdrawing}>
-                        {isWithdrawing ? 'Withdrawing...' : 'Confirm Withdrawal'}
+                        {isWithdrawing
+                          ? 'Withdrawing...'
+                          : 'Confirm Withdrawal'}
                       </Button>
                     </DialogFooter>
                   </DialogContent>
@@ -347,10 +423,10 @@ function MultisigInfo() {
   )
 }
 
-function CreateMultisigSection() {
+function CreatePledgeWalletSection() {
   const { data: operator } = useOperator()
-  const { data: multisig } = useMultisig()
-  const { mutate: createMultisig } = useCreateMultisigMutation()
+  const { data: pledgeWallet } = usePledgeWallet()
+  const { mutate: createPledgeWallet } = useCreatePledgeWalletMutation()
   const { data: spotTokens } = useSpotTokens()
   const { exchangeClient, infoClient } = useHyperliquid()
   const [isCreating, setIsCreating] = useState(false)
@@ -363,15 +439,16 @@ function CreateMultisigSection() {
 
     setIsCreating(true)
     try {
-      let agentPrivateKey = localStorage.getItem('agentPrivateKey');
+      let agentPrivateKey = localStorage.getItem('agentPrivateKey')
       if (!agentPrivateKey) {
-        agentPrivateKey = generatePrivateKey();
-        localStorage.setItem('agentPrivateKey', agentPrivateKey);
+        agentPrivateKey = generatePrivateKey()
+        localStorage.setItem('agentPrivateKey', agentPrivateKey)
       }
-      const agentAccount = privateKeyToAccount(agentPrivateKey as `0x${string}`);
+      const agentAccount = privateKeyToAccount(agentPrivateKey as `0x${string}`)
 
-      const tokenIdentifier = `${spotTokens.USDC.name}:${spotTokens.USDC.tokenId}` as const
-      
+      const tokenIdentifier =
+        `${spotTokens.USDC.name}:${spotTokens.USDC.tokenId}` as const
+
       const tx = await exchangeClient?.spotSend({
         destination: operator.operator,
         token: tokenIdentifier,
@@ -380,8 +457,8 @@ function CreateMultisigSection() {
 
       console.log('tx', tx)
 
-      toast.success('Seed transaction sent, creating multisig...')
-      
+      toast.success('Seed transaction sent, creating pledge wallet...')
+
       // Wait for tx to be indexed
       await new Promise((resolve) => setTimeout(resolve, 1000))
 
@@ -395,7 +472,8 @@ function CreateMultisigSection() {
             tx.action.type === 'spotSend' &&
             tx.action.destination &&
             typeof tx.action.destination === 'string' &&
-            tx.action.destination.toLowerCase() === operator.operator?.toLowerCase() &&
+            tx.action.destination.toLowerCase() ===
+              operator.operator?.toLowerCase() &&
             tx.action.token === tokenIdentifier &&
             tx.action.amount === '5' &&
             tx.error === null
@@ -408,18 +486,21 @@ function CreateMultisigSection() {
         throw new Error('Transaction not found')
       }
 
-      createMultisig({ tx: txHash, agentWalletAddress: agentAccount.address })
-      toast.success('Multisig created successfully!')
+      createPledgeWallet({
+        tx: txHash,
+        agentWalletAddress: agentAccount.address,
+      })
+      toast.success('Pledge wallet created successfully!')
     } catch (error) {
       console.error('Create multisig failed:', error)
-      toast.error('Failed to create multisig. Please try again.')
+      toast.error('Failed to create pledge wallet. Please try again.')
     } finally {
       setIsCreating(false)
     }
   }
 
-  if (multisig?.address) {
-    return null // Don't show create section if multisig already exists
+  if (pledgeWallet?.address) {
+    return null // Don't show create section if pledge wallet already exists
   }
 
   return (
@@ -427,47 +508,50 @@ function CreateMultisigSection() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Shield className="h-5 w-5" />
-          Create Multisig Wallet
+          Create Pledge Wallet
         </CardTitle>
         <CardDescription>
-          Initialize a new multisig wallet for secure transactions
+          Initialize a new pledge wallet for secure transactions
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <Alert>
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
-            Creating a multisig requires a 5 USDC seed transaction to the operator.
+            Creating a pledge wallet requires a 5 USDC seed transaction to the
+            operator.
           </AlertDescription>
         </Alert>
-        
+
         <div className="space-y-2">
           <Label>Operator Address</Label>
           <code className="text-sm bg-muted px-2 py-1 rounded block truncate">
             {operator?.operator || 'Loading...'}
           </code>
         </div>
-        
-        <Button 
-          onClick={sendSeedTx} 
+
+        <Button
+          onClick={sendSeedTx}
           disabled={isCreating || !operator?.operator}
           className="w-full"
         >
-          {isCreating ? 'Creating Multisig...' : 'Create Multisig (5 USDC)'}
+          {isCreating
+            ? 'Creating Pledge Wallet...'
+            : 'Create Pledge Wallet (5 USDC)'}
         </Button>
       </CardContent>
     </Card>
   )
 }
 
-export function MultisigPage() {
+export function PledgeWalletPage() {
   return (
-    <PageLayout title="Multisig">
+    <PageLayout title="Pledge Wallet">
       <div className="space-y-6">
         <div className="grid gap-6 md:grid-cols-2">
           <div className="space-y-6">
-            <MultisigInfo />
-            <CreateMultisigSection />
+            <PledgeWalletInfo />
+            <CreatePledgeWalletSection />
           </div>
           <div className="space-y-6">
             <SwapComponent />
@@ -482,6 +566,6 @@ export function MultisigPage() {
 export default (rootRoute: RootRoute) =>
   createRoute({
     getParentRoute: () => rootRoute,
-    path: '/multisig',
-    component: MultisigPage,
+    path: '/pledge-wallet',
+    component: PledgeWalletPage,
   })

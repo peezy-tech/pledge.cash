@@ -1,12 +1,29 @@
 import { useState, useEffect } from 'react'
-import { useMultisigClient } from '@/providers/MultisigProvider'
+import { usePledgeWalletClient } from '@/providers/PledgeWalletProvider'
 import { useHyperliquid } from '@/providers/HyperliquidProvider'
-import { useSpotTokens, useHyperliquidSpotBalances } from '@/hooks/useHyperliquid'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  useSpotTokens,
+  useHyperliquidSpotBalances,
+} from '@/hooks/useHyperliquid'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { toast } from 'sonner'
@@ -45,25 +62,31 @@ function formatSpotPrice(price: number, szDecimals: number): string {
   // Count significant figures for additional validation
   const priceStr = price.toString()
   const significantFigures = priceStr
-    .replace(/^0\.0*/, "")
-    .replace(".", "").length
+    .replace(/^0\.0*/, '')
+    .replace('.', '').length
 
   // If we have more than 5 significant figures, we need to round more aggressively
   if (significantFigures > 5) {
-    const decimalIndex = formattedPrice.indexOf(".")
+    const decimalIndex = formattedPrice.indexOf('.')
     if (decimalIndex !== -1) {
       const integerPart = formattedPrice.substring(0, decimalIndex)
-      const nonZeroIntegerDigits = integerPart.replace(/^0+/, "").length
+      const nonZeroIntegerDigits = integerPart.replace(/^0+/, '').length
 
       if (nonZeroIntegerDigits > 0) {
         const allowedDecimalDigits = Math.max(0, 5 - nonZeroIntegerDigits)
-        const maxAllowedDecimals = Math.min(allowedDecimalDigits, maxDecimalPlaces)
+        const maxAllowedDecimals = Math.min(
+          allowedDecimalDigits,
+          maxDecimalPlaces,
+        )
         formattedPrice = price.toFixed(maxAllowedDecimals)
       } else {
         const match = formattedPrice.match(/^0\.0*([1-9])/)
         if (match) {
           const firstNonZeroIndex = formattedPrice.indexOf(match[1])
-          const allowedDecimals = Math.min(firstNonZeroIndex - 1 + 5, maxDecimalPlaces)
+          const allowedDecimals = Math.min(
+            firstNonZeroIndex - 1 + 5,
+            maxDecimalPlaces,
+          )
           formattedPrice = price.toFixed(allowedDecimals)
         }
       }
@@ -71,39 +94,43 @@ function formatSpotPrice(price: number, szDecimals: number): string {
   }
 
   // Remove trailing zeros as required for signing
-  formattedPrice = formattedPrice.replace(/\.?0+$/, "")
+  formattedPrice = formattedPrice.replace(/\.?0+$/, '')
   return formattedPrice
 }
 
 // Helper function to format amount according to szDecimals
 function formatSpotAmount(amount: string | number, szDecimals: number): string {
   const amountNum = typeof amount === 'string' ? parseFloat(amount) : amount
-  
+
   if (isNaN(amountNum)) {
     throw new Error('Invalid amount provided')
   }
 
   // Format to szDecimals precision
   let formattedAmount = amountNum.toFixed(szDecimals)
-  
+
   // Remove trailing zeros
-  formattedAmount = formattedAmount.replace(/\.?0+$/, "")
-  
+  formattedAmount = formattedAmount.replace(/\.?0+$/, '')
+
   // If the result is empty or just a decimal point, return "0"
-  if (formattedAmount === "" || formattedAmount === ".") {
-    return "0"
+  if (formattedAmount === '' || formattedAmount === '.') {
+    return '0'
   }
-  
+
   return formattedAmount
 }
 
 export function SwapComponent() {
-  const multisigClient = useMultisigClient()
+  const pledgeWalletClient = usePledgeWalletClient()
   const { infoClient } = useHyperliquid()
   const { data: spotTokens } = useSpotTokens()
-  const { data: multisigBalances } = useHyperliquidSpotBalances(multisigClient?.address as `0x${string}`)
+  const { data: pledgeWalletBalances } = useHyperliquidSpotBalances(
+    pledgeWalletClient?.address as `0x${string}`,
+  )
 
-  const [swapDirection, setSwapDirection] = useState<'token-to-usdc' | 'usdc-to-token'>('token-to-usdc')
+  const [swapDirection, setSwapDirection] = useState<
+    'token-to-usdc' | 'usdc-to-token'
+  >('token-to-usdc')
   const [selectedToken, setSelectedToken] = useState('')
   const [inputAmount, setInputAmount] = useState('')
   const [slippage, setSlippage] = useState(0.5) // 0.5% default slippage
@@ -113,19 +140,21 @@ export function SwapComponent() {
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
   const [spotMeta, setSpotMeta] = useState<hl.SpotMeta | null>(null)
 
-  // Get available tokens (exclude USDC) 
-  const availableTokens = spotTokens ? Object.values(spotTokens).filter(token => token.name !== 'USDC') : []
+  // Get available tokens (exclude USDC)
+  const availableTokens = spotTokens
+    ? Object.values(spotTokens).filter((token) => token.name !== 'USDC')
+    : []
 
   // Get current balances
-  const balances = multisigBalances?.balances || []
+  const balances = pledgeWalletBalances?.balances || []
 
   // Prepare token options for combobox
-  const tokenOptions: TokenOption[] = availableTokens.map(token => ({
+  const tokenOptions: TokenOption[] = availableTokens.map((token) => ({
     name: token.name,
-    balance: balances.find(b => b.coin === token.name)?.total || '0'
+    balance: balances.find((b) => b.coin === token.name)?.total || '0',
   }))
-  const usdcBalance = balances.find(b => b.coin === 'USDC')
-  const selectedTokenBalance = balances.find(b => b.coin === selectedToken)
+  const usdcBalance = balances.find((b) => b.coin === 'USDC')
+  const selectedTokenBalance = balances.find((b) => b.coin === selectedToken)
 
   // Fetch market data
   useEffect(() => {
@@ -136,21 +165,21 @@ export function SwapComponent() {
         const [allMids, l2Book, meta] = await Promise.all([
           infoClient.allMids(),
           infoClient.l2Book({ coin: selectedToken }),
-          infoClient.spotMeta()
+          infoClient.spotMeta(),
         ])
 
         setSpotMeta(meta)
 
         const mid = allMids[selectedToken]
         if (mid && l2Book.levels[0]?.[0] && l2Book.levels[1]?.[0]) {
-          setPrices(prev => ({
+          setPrices((prev) => ({
             ...prev,
             [selectedToken]: {
               token: selectedToken,
               bid: l2Book.levels[0][0].px,
               ask: l2Book.levels[1][0].px,
-              mid: mid
-            }
+              mid: mid,
+            },
           }))
         }
       } catch (error) {
@@ -164,14 +193,19 @@ export function SwapComponent() {
 
   // Calculate quote
   useEffect(() => {
-    if (!inputAmount || !selectedToken || !prices[selectedToken] || !spotTokens) {
+    if (
+      !inputAmount ||
+      !selectedToken ||
+      !prices[selectedToken] ||
+      !spotTokens
+    ) {
       setQuote(null)
       return
     }
 
     const price = prices[selectedToken]
     const inputAmountNum = parseFloat(inputAmount)
-    
+
     if (isNaN(inputAmountNum) || inputAmountNum <= 0) {
       setQuote(null)
       return
@@ -180,7 +214,7 @@ export function SwapComponent() {
     try {
       let outputAmount: number
       let executionPrice: string
-      
+
       if (swapDirection === 'token-to-usdc') {
         // Selling token for USDC, use bid price with slippage
         const bidPrice = parseFloat(price.bid)
@@ -196,37 +230,54 @@ export function SwapComponent() {
       }
 
       const midPrice = parseFloat(price.mid)
-      const priceImpact = Math.abs((parseFloat(executionPrice) - midPrice) / midPrice * 100)
+      const priceImpact = Math.abs(
+        ((parseFloat(executionPrice) - midPrice) / midPrice) * 100,
+      )
 
       // Apply formatting to show what will actually be executed
       const selectedTokenMeta = spotTokens[selectedToken]
       const usdcMeta = spotTokens['USDC']
       if (selectedTokenMeta && usdcMeta) {
-        const formattedPrice = formatSpotPrice(parseFloat(executionPrice), selectedTokenMeta.szDecimals)
-        
+        const formattedPrice = formatSpotPrice(
+          parseFloat(executionPrice),
+          selectedTokenMeta.szDecimals,
+        )
+
         if (swapDirection === 'token-to-usdc') {
           // Selling token for USDC: format token amount, keep USDC output as calculated
-          const formattedTokenAmount = formatSpotAmount(inputAmount, selectedTokenMeta.szDecimals)
-          const formattedUsdcAmount = formatSpotAmount(outputAmount, usdcMeta.szDecimals)
-          
+          const formattedTokenAmount = formatSpotAmount(
+            inputAmount,
+            selectedTokenMeta.szDecimals,
+          )
+          const formattedUsdcAmount = formatSpotAmount(
+            outputAmount,
+            usdcMeta.szDecimals,
+          )
+
           setQuote({
             inputAmount: formattedTokenAmount,
             outputAmount: formattedUsdcAmount,
             price: formattedPrice,
             slippage,
-            priceImpact: priceImpact.toFixed(2)
+            priceImpact: priceImpact.toFixed(2),
           })
         } else {
           // Buying token with USDC: format USDC input and token output
-          const formattedUsdcAmount = formatSpotAmount(inputAmount, usdcMeta.szDecimals)
-          const formattedTokenAmount = formatSpotAmount(outputAmount, selectedTokenMeta.szDecimals)
-          
+          const formattedUsdcAmount = formatSpotAmount(
+            inputAmount,
+            usdcMeta.szDecimals,
+          )
+          const formattedTokenAmount = formatSpotAmount(
+            outputAmount,
+            selectedTokenMeta.szDecimals,
+          )
+
           setQuote({
             inputAmount: formattedUsdcAmount,
             outputAmount: formattedTokenAmount,
             price: formattedPrice,
             slippage,
-            priceImpact: priceImpact.toFixed(2)
+            priceImpact: priceImpact.toFixed(2),
           })
         }
       } else {
@@ -235,7 +286,7 @@ export function SwapComponent() {
           outputAmount: outputAmount.toString(),
           price: executionPrice,
           slippage,
-          priceImpact: priceImpact.toFixed(2)
+          priceImpact: priceImpact.toFixed(2),
         })
       }
     } catch (error) {
@@ -245,7 +296,9 @@ export function SwapComponent() {
   }, [inputAmount, selectedToken, prices, swapDirection, slippage, spotTokens])
 
   const handleSwapDirectionToggle = () => {
-    setSwapDirection(prev => prev === 'token-to-usdc' ? 'usdc-to-token' : 'token-to-usdc')
+    setSwapDirection((prev) =>
+      prev === 'token-to-usdc' ? 'usdc-to-token' : 'token-to-usdc',
+    )
     setInputAmount('')
     setQuote(null)
   }
@@ -257,7 +310,7 @@ export function SwapComponent() {
     }
 
     const inputAmountNum = parseFloat(inputAmount)
-    
+
     if (swapDirection === 'token-to-usdc') {
       const availableBalance = parseFloat(selectedTokenBalance?.total || '0')
       if (inputAmountNum > availableBalance) {
@@ -276,7 +329,7 @@ export function SwapComponent() {
   }
 
   const executeSwap = async () => {
-    if (!multisigClient || !quote || !spotMeta || !spotTokens) {
+    if (!pledgeWalletClient || !quote || !spotMeta || !spotTokens) {
       toast.error('Missing required data')
       return
     }
@@ -285,16 +338,16 @@ export function SwapComponent() {
 
     setIsLoading(true)
     try {
-      const { client, agentClient } = multisigClient
+      const { client, agentClient } = pledgeWalletClient
       const selectedTokenMeta = spotTokens[selectedToken]
-      
+
       if (!selectedTokenMeta) {
         throw new Error('Token metadata not found')
       }
 
       // Find the spot market for this token
       const spotTokenMarket = spotMeta.universe.find(
-        u => u.tokens[0] === selectedTokenMeta.index && u.tokens[1] === 0
+        (u) => u.tokens[0] === selectedTokenMeta.index && u.tokens[1] === 0,
       )
 
       if (!spotTokenMarket) {
@@ -302,14 +355,19 @@ export function SwapComponent() {
       }
 
       const isBuy = swapDirection === 'usdc-to-token'
-      
+
       // Use the already formatted amounts and price from the quote
-      const formattedAmount = swapDirection === 'token-to-usdc' ? quote.inputAmount : quote.outputAmount
+      const formattedAmount =
+        swapDirection === 'token-to-usdc'
+          ? quote.inputAmount
+          : quote.outputAmount
       const formattedPrice = quote.price
 
       // Validate formatted amount
       if (parseFloat(formattedAmount) <= 0) {
-        throw new Error(`Invalid formatted amount: ${formattedAmount}. Check token decimals and input amount.`)
+        throw new Error(
+          `Invalid formatted amount: ${formattedAmount}. Check token decimals and input amount.`,
+        )
       }
 
       const orderParams = {
@@ -320,10 +378,10 @@ export function SwapComponent() {
             p: formattedPrice,
             s: formattedAmount,
             r: false,
-            t: { limit: { tif: "FrontendMarket" as const } },
+            t: { limit: { tif: 'FrontendMarket' as const } },
           },
         ],
-        grouping: "na" as const,
+        grouping: 'na' as const,
       }
 
       console.log('Swap execution details:')
@@ -333,22 +391,23 @@ export function SwapComponent() {
       console.log('  Formatted price:', formattedPrice)
       console.log('  Token szDecimals:', selectedTokenMeta.szDecimals)
       console.log('  Order params:', orderParams)
-      
+
       let result: hl.OrderResponse | null = null
-      if(agentClient) {
+      if (agentClient) {
         result = await agentClient.order(orderParams)
       } else {
         result = await client.order(orderParams)
       }
       console.log('Swap result:', result)
 
-      toast.success(`Successfully ${swapDirection === 'token-to-usdc' ? 'sold' : 'bought'} ${selectedToken}`)
-      
+      toast.success(
+        `Successfully ${swapDirection === 'token-to-usdc' ? 'sold' : 'bought'} ${selectedToken}`,
+      )
+
       // Reset form
       setInputAmount('')
       setQuote(null)
       setShowConfirmDialog(false)
-      
     } catch (error) {
       console.error('Swap failed:', error)
       toast.error('Swap failed. Please try again.')
@@ -357,7 +416,7 @@ export function SwapComponent() {
     }
   }
 
-  if (!multisigClient) {
+  if (!pledgeWalletClient) {
     return (
       <Card>
         <CardHeader>
@@ -366,7 +425,7 @@ export function SwapComponent() {
             Spot Token Swap
           </CardTitle>
           <CardDescription>
-            No multisig wallet found. Create one to start trading.
+            No pledge wallet found. Create one to start trading.
           </CardDescription>
         </CardHeader>
       </Card>
@@ -381,7 +440,7 @@ export function SwapComponent() {
           Spot Token Swap
         </CardTitle>
         <CardDescription>
-          Trade spot tokens to and from USDC with your multisig
+          Trade spot tokens to and from USDC with your pledge wallet
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -393,7 +452,9 @@ export function SwapComponent() {
             className="flex items-center gap-2"
           >
             <ArrowUpDown className="h-4 w-4" />
-            {swapDirection === 'token-to-usdc' ? 'Sell Token for USDC' : 'Buy Token with USDC'}
+            {swapDirection === 'token-to-usdc'
+              ? 'Sell Token for USDC'
+              : 'Buy Token with USDC'}
           </Button>
         </div>
 
@@ -411,7 +472,11 @@ export function SwapComponent() {
         {/* Amount Input */}
         <div className="space-y-2">
           <Label>
-            Amount ({swapDirection === 'token-to-usdc' ? selectedToken || 'Token' : 'USDC'})
+            Amount (
+            {swapDirection === 'token-to-usdc'
+              ? selectedToken || 'Token'
+              : 'USDC'}
+            )
           </Label>
           <div className="space-y-1">
             <Input
@@ -423,10 +488,11 @@ export function SwapComponent() {
               step="any"
             />
             <p className="text-sm text-muted-foreground">
-              Available: {swapDirection === 'token-to-usdc' 
+              Available:{' '}
+              {swapDirection === 'token-to-usdc'
                 ? selectedTokenBalance?.total || '0'
-                : usdcBalance?.total || '0'
-              } {swapDirection === 'token-to-usdc' ? selectedToken : 'USDC'}
+                : usdcBalance?.total || '0'}{' '}
+              {swapDirection === 'token-to-usdc' ? selectedToken : 'USDC'}
             </p>
           </div>
         </div>
@@ -439,7 +505,7 @@ export function SwapComponent() {
               <Button
                 key={value}
                 size="sm"
-                variant={slippage === value ? "default" : "outline"}
+                variant={slippage === value ? 'default' : 'outline'}
                 onClick={() => setSlippage(value)}
               >
                 {value}%
@@ -489,16 +555,21 @@ export function SwapComponent() {
             <div className="flex items-center justify-between">
               <span className="font-medium">Estimated Output:</span>
               <span className="font-mono text-lg">
-                {parseFloat(quote.outputAmount).toFixed(6)} {swapDirection === 'token-to-usdc' ? 'USDC' : selectedToken}
+                {parseFloat(quote.outputAmount).toFixed(6)}{' '}
+                {swapDirection === 'token-to-usdc' ? 'USDC' : selectedToken}
               </span>
             </div>
             <div className="flex items-center justify-between text-sm text-muted-foreground">
               <span>Execution Price:</span>
-              <span className="font-mono">{parseFloat(quote.price).toFixed(6)}</span>
+              <span className="font-mono">
+                {parseFloat(quote.price).toFixed(6)}
+              </span>
             </div>
             <div className="flex items-center justify-between text-sm text-muted-foreground">
               <span>Price Impact:</span>
-              <span className={`font-mono ${parseFloat(quote.priceImpact) > 2 ? 'text-red-500' : 'text-green-500'}`}>
+              <span
+                className={`font-mono ${parseFloat(quote.priceImpact) > 2 ? 'text-red-500' : 'text-green-500'}`}
+              >
                 {quote.priceImpact}%
               </span>
             </div>
@@ -511,7 +582,8 @@ export function SwapComponent() {
               </Alert>
             )}
             <p className="text-xs text-muted-foreground">
-              * Amounts and prices are formatted according to {selectedToken} precision rules
+              * Amounts and prices are formatted according to {selectedToken}{' '}
+              precision rules
             </p>
           </div>
         )}
@@ -519,12 +591,13 @@ export function SwapComponent() {
         {/* Swap Button */}
         <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
           <DialogTrigger asChild>
-            <Button 
-              className="w-full" 
+            <Button
+              className="w-full"
               disabled={!quote || !selectedToken || !inputAmount}
               size="lg"
             >
-              {swapDirection === 'token-to-usdc' ? 'Sell' : 'Buy'} {selectedToken}
+              {swapDirection === 'token-to-usdc' ? 'Sell' : 'Buy'}{' '}
+              {selectedToken}
             </Button>
           </DialogTrigger>
           <DialogContent>
@@ -537,20 +610,35 @@ export function SwapComponent() {
             {quote && (
               <div className="space-y-4 py-4">
                 <div className="space-y-2">
-                  <Label>You're {swapDirection === 'token-to-usdc' ? 'selling' : 'buying'}</Label>
+                  <Label>
+                    You're{' '}
+                    {swapDirection === 'token-to-usdc' ? 'selling' : 'buying'}
+                  </Label>
                   <p className="text-lg font-semibold">
-                    {swapDirection === 'token-to-usdc' ? quote.inputAmount : quote.outputAmount} {selectedToken}
+                    {swapDirection === 'token-to-usdc'
+                      ? quote.inputAmount
+                      : quote.outputAmount}{' '}
+                    {selectedToken}
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <Label>You'll {swapDirection === 'token-to-usdc' ? 'receive' : 'pay'}</Label>
+                  <Label>
+                    You'll{' '}
+                    {swapDirection === 'token-to-usdc' ? 'receive' : 'pay'}
+                  </Label>
                   <p className="text-lg font-semibold">
-                    {swapDirection === 'token-to-usdc' ? quote.outputAmount : quote.inputAmount} USDC
+                    {swapDirection === 'token-to-usdc'
+                      ? quote.outputAmount
+                      : quote.inputAmount}{' '}
+                    USDC
                   </p>
                 </div>
                 <div className="space-y-2">
                   <Label>Execution Price</Label>
-                  <p className="font-mono">{parseFloat(quote.price).toFixed(6)} USDC per {selectedToken}</p>
+                  <p className="font-mono">
+                    {parseFloat(quote.price).toFixed(6)} USDC per{' '}
+                    {selectedToken}
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label>Slippage Tolerance</Label>
@@ -559,7 +647,10 @@ export function SwapComponent() {
               </div>
             )}
             <DialogFooter>
-              <Button variant="outline" onClick={() => setShowConfirmDialog(false)}>
+              <Button
+                variant="outline"
+                onClick={() => setShowConfirmDialog(false)}
+              >
                 Cancel
               </Button>
               <Button onClick={executeSwap} disabled={isLoading}>
@@ -571,4 +662,4 @@ export function SwapComponent() {
       </CardContent>
     </Card>
   )
-} 
+}

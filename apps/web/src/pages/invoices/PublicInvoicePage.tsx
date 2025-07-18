@@ -1,7 +1,11 @@
 import { useParams } from '@tanstack/react-router'
-import { useInvoiceById, useMultisig, useConfirmPaymentMutation } from '@/hooks/useHyperliquid'
+import {
+  useInvoiceById,
+  usePledgeWallet,
+  useConfirmPaymentMutation,
+} from '@/hooks/useHyperliquid'
 import { usePayInvoice } from './usePayInvoice'
-import { useMultisigClient } from '@/providers/MultisigProvider'
+import { usePledgeWalletClient } from '@/providers/PledgeWalletProvider'
 import { useHyperliquid } from '@/providers/HyperliquidProvider'
 import { Button } from '@/components/ui/button'
 import {
@@ -15,7 +19,15 @@ import {
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import { useAccount } from 'wagmi'
 import { useState } from 'react'
 import { Shield, Wallet } from 'lucide-react'
@@ -24,21 +36,21 @@ import { Toaster } from '@/components/ui/sonner'
 
 // Enhanced Invoice type to match the new API response
 interface ExtendedInvoice {
-  id: string;
-  creatorId: string;
-  payerAddress: string | null;
-  payerUserId?: string | null;
-  paymentType?: "personal" | "multisig" | null;
-  actualPayerAddress?: string | null;
-  token: string;
-  amount: string;
-  description?: string | null;
-  status: "pending" | "paid" | "expired";
-  txHash?: string | null;
-  createdAt: number;
-  paidAt?: number | null;
-  expiresAt?: number | null;
-  creatorAddress?: string | null;
+  id: string
+  creatorId: string
+  payerAddress: string | null
+  payerUserId?: string | null
+  paymentType?: 'personal' | 'pledge-wallet' | null
+  actualPayerAddress?: string | null
+  token: string
+  amount: string
+  description?: string | null
+  status: 'pending' | 'paid' | 'expired'
+  txHash?: string | null
+  createdAt: number
+  paidAt?: number | null
+  expiresAt?: number | null
+  creatorAddress?: string | null
 }
 
 function formatDate(timestamp: number | null | undefined) {
@@ -62,21 +74,20 @@ function getStatusColor(status: string) {
 export function PublicInvoicePage() {
   const { invoiceId } = useParams({ from: '/invoices/$invoiceId' })
   const { data: invoice, isLoading, isError, error } = useInvoiceById(invoiceId)
-  const {
-    pay,
-    isLoading: isPaying,
-    error: paymentError,
-  } = usePayInvoice()
+  const { pay, isLoading: isPaying, error: paymentError } = usePayInvoice()
   const { isConnected, address: userAddress } = useAccount()
-  
-  // Multisig related hooks and state
-  const { data: multisig } = useMultisig()
-  const multisigClient = useMultisigClient()
+
+  // Pledge wallet related hooks and state
+  const { data: pledgeWallet } = usePledgeWallet()
+  const pledgeWalletClient = usePledgeWalletClient()
   const { infoClient } = useHyperliquid()
   const confirmPayment = useConfirmPaymentMutation()
-  const [isPayingWithMultisig, setIsPayingWithMultisig] = useState(false)
-  const [showMultisigConfirm, setShowMultisigConfirm] = useState(false)
-  const [multisigPaymentError, setMultisigPaymentError] = useState<string | null>(null)
+  const [isPayingWithPledgeWallet, setIsPayingWithPledgeWallet] =
+    useState(false)
+  const [showPledgeWalletConfirm, setShowPledgeWalletConfirm] = useState(false)
+  const [pledgeWalletPaymentError, setPledgeWalletPaymentError] = useState<
+    string | null
+  >(null)
 
   // Type assertion for invoice to handle API type mismatch
   const typedInvoice = invoice as ExtendedInvoice | null
@@ -92,66 +103,74 @@ export function PublicInvoicePage() {
     }
   }
 
-  const handleMultisigPayment = async () => {
-    if (!typedInvoice || !multisigClient || !userAddress || !infoClient) {
-      toast.error('Missing required data for multisig payment')
+  const handlePledgeWalletPayment = async () => {
+    if (!typedInvoice || !pledgeWalletClient || !userAddress || !infoClient) {
+      toast.error('Missing required data for pledge wallet payment')
       return
     }
 
-    setIsPayingWithMultisig(true)
-    setMultisigPaymentError(null)
-    
+    setIsPayingWithPledgeWallet(true)
+    setPledgeWalletPaymentError(null)
+
     try {
       // Record the timestamp before sending
       const sendTimestamp = Date.now()
-      
-      // Execute the multisig payment
-      await multisigClient.client.spotSend({
+
+      // Execute the pledge wallet payment
+      await pledgeWalletClient.client.spotSend({
         destination: typedInvoice.creatorAddress as `0x${string}`,
         token: typedInvoice.token as `${string}:0x${string}`,
         amount: typedInvoice.amount,
       })
-      
-      toast.success('Multisig payment sent, confirming...')
-      
+
+      toast.success('Pledge wallet payment sent, confirming...')
+
       // Wait for transaction to be indexed
-      await new Promise(resolve => setTimeout(resolve, 3000))
-      
-      // Get the multisig transaction details to find the transaction hash
-      const multisigDetails = await infoClient.userDetails({ user: multisigClient.address as `0x${string}` })
-      
+      await new Promise((resolve) => setTimeout(resolve, 3000))
+
+      // Get the pledge wallet transaction details to find the transaction hash
+      const pledgeWalletDetails = await infoClient.userDetails({
+        user: pledgeWalletClient.address as `0x${string}`,
+      })
+
       // Find the most recent spot send transaction that matches our criteria
-      const spotSendTx = multisigDetails
-        .filter((tx: any) => 
-          tx.action.type === 'spotSend' && 
-          tx.time > sendTimestamp && // Transaction happened after we sent
-          tx.action.destination?.toLowerCase() === typedInvoice.creatorAddress?.toLowerCase() &&
-          tx.action.token === typedInvoice.token &&
-          tx.action.amount === typedInvoice.amount &&
-          tx.error === null // Transaction was successful
+      const spotSendTx = pledgeWalletDetails
+        .filter(
+          (tx: any) =>
+            tx.action.type === 'spotSend' &&
+            tx.time > sendTimestamp && // Transaction happened after we sent
+            tx.action.destination?.toLowerCase() ===
+              typedInvoice.creatorAddress?.toLowerCase() &&
+            tx.action.token === typedInvoice.token &&
+            tx.action.amount === typedInvoice.amount &&
+            tx.error === null, // Transaction was successful
         )
         .sort((a: any, b: any) => b.time - a.time)[0] // Get the most recent one
 
       if (!spotSendTx || !spotSendTx.hash) {
-        throw new Error("Could not find multisig transaction hash. Please try again or verify manually.")
+        throw new Error(
+          'Could not find pledge wallet transaction hash. Please try again or verify manually.',
+        )
       }
 
       const txHash = spotSendTx.hash
-      console.log(`Found multisig transaction hash: ${txHash}`)
+      console.log(`Found pledge wallet transaction hash: ${txHash}`)
 
       // Confirm the payment with our backend
       await confirmPayment.mutateAsync({ id: typedInvoice.id, txHash })
-      
-      toast.success(`Successfully paid ${typedInvoice.amount} ${typedInvoice.token.split(':')[0]} from multisig`)
-      setShowMultisigConfirm(false)
-      
+
+      toast.success(
+        `Successfully paid ${typedInvoice.amount} ${typedInvoice.token.split(':')[0]} from pledge wallet`,
+      )
+      setShowPledgeWalletConfirm(false)
     } catch (error) {
-      console.error('Multisig payment failed:', error)
-      const errorMessage = error instanceof Error ? error.message : 'Multisig payment failed'
-      setMultisigPaymentError(errorMessage)
+      console.error('Pledge wallet payment failed:', error)
+      const errorMessage =
+        error instanceof Error ? error.message : 'Pledge wallet payment failed'
+      setPledgeWalletPaymentError(errorMessage)
       toast.error(errorMessage)
     } finally {
-      setIsPayingWithMultisig(false)
+      setIsPayingWithPledgeWallet(false)
     }
   }
 
@@ -182,7 +201,8 @@ export function PublicInvoicePage() {
         <Alert>
           <AlertTitle>Invoice Not Found</AlertTitle>
           <AlertDescription>
-            The invoice you are looking for does not exist or could not be found.
+            The invoice you are looking for does not exist or could not be
+            found.
           </AlertDescription>
         </Alert>
       </div>
@@ -190,7 +210,7 @@ export function PublicInvoicePage() {
   }
 
   const canPay = typedInvoice && typedInvoice.status === 'pending'
-  const hasMultisig = multisig?.address && multisigClient?.address
+  const hasPledgeWallet = pledgeWallet?.address && pledgeWalletClient?.address
   const tokenSymbol = typedInvoice ? typedInvoice.token.split(':')[0] : ''
 
   return (
@@ -199,7 +219,9 @@ export function PublicInvoicePage() {
         <CardHeader>
           <div className="flex justify-between items-center">
             <CardTitle>Invoice #{typedInvoice?.id.slice(0, 8)}</CardTitle>
-            <Badge className={getStatusColor(typedInvoice?.status || 'pending')}>
+            <Badge
+              className={getStatusColor(typedInvoice?.status || 'pending')}
+            >
               {(typedInvoice?.status || 'pending').toUpperCase()}
             </Badge>
           </div>
@@ -238,77 +260,104 @@ export function PublicInvoicePage() {
               </div>
             )}
           </div>
-          
+
           {/* NEW: Address abstraction info */}
-          {typedInvoice?.status === 'paid' && (typedInvoice?.paymentType || typedInvoice?.actualPayerAddress) && (
-            <div className="border-t pt-4">
-              <p className="text-sm font-medium text-gray-500 mb-2">Payment Details</p>
-              <div className="grid grid-cols-2 gap-4">
-                {typedInvoice.paymentType && (
-                  <div>
-                    <p className="text-sm font-medium text-gray-500">Payment Type</p>
-                    <div className="flex items-center gap-2">
-                      {typedInvoice.paymentType === 'multisig' ? (
-                        <Shield className="h-4 w-4 text-blue-500" />
-                      ) : (
-                        <Wallet className="h-4 w-4 text-green-500" />
-                      )}
-                      <span className="text-sm capitalize">{typedInvoice.paymentType}</span>
+          {typedInvoice?.status === 'paid' &&
+            (typedInvoice?.paymentType || typedInvoice?.actualPayerAddress) && (
+              <div className="border-t pt-4">
+                <p className="text-sm font-medium text-gray-500 mb-2">
+                  Payment Details
+                </p>
+                <div className="grid grid-cols-2 gap-4">
+                  {typedInvoice.paymentType && (
+                    <div>
+                      <p className="text-sm font-medium text-gray-500">
+                        Payment Type
+                      </p>
+                      <div className="flex items-center gap-2">
+                        {typedInvoice.paymentType === 'pledge-wallet' ? (
+                          <Shield className="h-4 w-4 text-blue-500" />
+                        ) : (
+                          <Wallet className="h-4 w-4 text-green-500" />
+                        )}
+                        <span className="text-sm capitalize">
+                          {typedInvoice.paymentType === 'pledge-wallet'
+                            ? 'Pledge Wallet'
+                            : typedInvoice.paymentType}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                )}
-                {typedInvoice.actualPayerAddress && (
-                  <div>
-                    <p className="text-sm font-medium text-gray-500">Actual Payer</p>
-                    <p className="text-sm font-mono break-all">{typedInvoice.actualPayerAddress}</p>
-                  </div>
-                )}
+                  )}
+                  {typedInvoice.actualPayerAddress && (
+                    <div>
+                      <p className="text-sm font-medium text-gray-500">
+                        Actual Payer
+                      </p>
+                      <p className="text-sm font-mono break-all">
+                        {typedInvoice.actualPayerAddress}
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
-          
+            )}
+
           {typedInvoice?.txHash && (
             <div>
               <p className="text-sm font-medium text-gray-500">
                 Transaction Hash
               </p>
-              <p className="text-sm font-mono break-all">{typedInvoice.txHash}</p>
+              <p className="text-sm font-mono break-all">
+                {typedInvoice.txHash}
+              </p>
             </div>
           )}
         </CardContent>
         {canPay && (
           <CardFooter className="flex flex-col items-stretch space-y-3">
             {!isConnected ? (
-              <p className="text-center text-sm text-red-500 mt-2">Please connect your wallet to pay.</p>
+              <p className="text-center text-sm text-red-500 mt-2">
+                Please connect your wallet to pay.
+              </p>
             ) : (
               <>
                 {/* Regular payment button */}
-                <Button onClick={handlePayment} disabled={isPaying} className="w-full">
+                <Button
+                  onClick={handlePayment}
+                  disabled={isPaying}
+                  className="w-full"
+                >
                   <Wallet className="h-4 w-4 mr-2" />
-                  {isPaying ? 'Processing Payment...' : `Pay ${typedInvoice?.amount} ${tokenSymbol}`}
+                  {isPaying
+                    ? 'Processing Payment...'
+                    : `Pay ${typedInvoice?.amount} ${tokenSymbol}`}
                 </Button>
-                
-                {/* Multisig payment button */}
-                {hasMultisig && (
-                  <Dialog open={showMultisigConfirm} onOpenChange={setShowMultisigConfirm}>
+
+                {/* Pledge wallet payment button */}
+                {hasPledgeWallet && (
+                  <Dialog
+                    open={showPledgeWalletConfirm}
+                    onOpenChange={setShowPledgeWalletConfirm}
+                  >
                     <DialogTrigger asChild>
                       <Button variant="outline" className="w-full">
                         <Shield className="h-4 w-4 mr-2" />
-                        Pay with Multisig
+                        Pay with Pledge Wallet
                       </Button>
                     </DialogTrigger>
                     <DialogContent>
                       <DialogHeader>
-                        <DialogTitle>Confirm Multisig Payment</DialogTitle>
+                        <DialogTitle>Confirm Pledge Wallet Payment</DialogTitle>
                         <DialogDescription>
-                          Are you sure you want to pay this invoice from your multisig wallet?
+                          Are you sure you want to pay this invoice from your
+                          pledge wallet?
                         </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4 py-4">
                         <div className="space-y-2">
-                          <Label>From (Multisig)</Label>
+                          <Label>From (Pledge Wallet)</Label>
                           <code className="text-sm bg-muted px-2 py-1 rounded block truncate">
-                            {multisigClient?.address}
+                            {pledgeWalletClient?.address}
                           </code>
                         </div>
                         <div className="space-y-2">
@@ -319,7 +368,9 @@ export function PublicInvoicePage() {
                         </div>
                         <div className="space-y-2">
                           <Label>Amount</Label>
-                          <p className="text-lg font-semibold">{typedInvoice?.amount} {tokenSymbol}</p>
+                          <p className="text-lg font-semibold">
+                            {typedInvoice?.amount} {tokenSymbol}
+                          </p>
                         </div>
                         <div className="space-y-2">
                           <Label>Token</Label>
@@ -327,25 +378,33 @@ export function PublicInvoicePage() {
                         </div>
                       </div>
                       <DialogFooter>
-                        <Button variant="outline" onClick={() => setShowMultisigConfirm(false)}>
+                        <Button
+                          variant="outline"
+                          onClick={() => setShowMultisigConfirm(false)}
+                        >
                           Cancel
                         </Button>
-                        <Button onClick={handleMultisigPayment} disabled={isPayingWithMultisig}>
-                          {isPayingWithMultisig ? 'Processing...' : 'Confirm Payment'}
+                        <Button
+                          onClick={handlePledgeWalletPayment}
+                          disabled={isPayingWithPledgeWallet}
+                        >
+                          {isPayingWithPledgeWallet
+                            ? 'Processing...'
+                            : 'Confirm Payment'}
                         </Button>
                       </DialogFooter>
                     </DialogContent>
                   </Dialog>
                 )}
-                
-                {!hasMultisig && (
+
+                {!hasPledgeWallet && (
                   <p className="text-center text-sm text-muted-foreground">
-                    Create a multisig wallet to enable multisig payments
+                    Create a pledge wallet to enable pledge wallet payments
                   </p>
                 )}
               </>
             )}
-            
+
             {/* Error messages */}
             {paymentError && (
               <Alert variant="destructive" className="mt-4">
@@ -353,11 +412,11 @@ export function PublicInvoicePage() {
                 <AlertDescription>{paymentError}</AlertDescription>
               </Alert>
             )}
-            
-            {multisigPaymentError && (
+
+            {pledgeWalletPaymentError && (
               <Alert variant="destructive" className="mt-4">
-                <AlertTitle>Multisig Payment Failed</AlertTitle>
-                <AlertDescription>{multisigPaymentError}</AlertDescription>
+                <AlertTitle>Pledge Wallet Payment Failed</AlertTitle>
+                <AlertDescription>{pledgeWalletPaymentError}</AlertDescription>
               </Alert>
             )}
           </CardFooter>
@@ -366,4 +425,4 @@ export function PublicInvoicePage() {
       <Toaster />
     </div>
   )
-} 
+}
