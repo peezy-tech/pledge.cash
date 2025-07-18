@@ -70,6 +70,7 @@ async function exponentialBackoff<T>(
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ALLOWED_GROUP_ID = process.env.ALLOWED_GROUP_ID;
+const DEV_MODE = process.env.DEV_MODE === 'true' || process.env.NODE_ENV === 'development';
 
 if (!BOT_TOKEN) {
   throw new Error("BOT_TOKEN environment variable is required");
@@ -77,6 +78,10 @@ if (!BOT_TOKEN) {
 
 if (!ALLOWED_GROUP_ID) {
   throw new Error("ALLOWED_GROUP_ID environment variable is required");
+}
+
+if (DEV_MODE) {
+  console.log('🔧 DEV MODE enabled - automatic tool permissions will be granted');
 }
 
 const bot = new Bot(BOT_TOKEN);
@@ -112,6 +117,47 @@ async function stopTyping(chatId: number, topicId?: number): Promise<void> {
 function isFromAllowedGroup(ctx: any): boolean {
   const chatId = ctx.chat.id.toString();
   return chatId === ALLOWED_GROUP_ID;
+}
+
+// Helper function to detect tool permission errors
+function isToolPermissionError(error: string): { isPermissionError: boolean; toolName?: string } {
+  // Pattern: "Claude requested permissions to use [ToolName], but you haven't granted it yet."
+  const permissionMatch = error.match(/Claude requested permissions to use (\w+), but you haven't granted it yet/);
+  
+  if (permissionMatch) {
+    return {
+      isPermissionError: true,
+      toolName: permissionMatch[1]
+    };
+  }
+  
+  return { isPermissionError: false };
+}
+
+// Helper function to extract tools from error messages in DEV MODE
+function extractToolsFromErrors(messages: SDKMessage[]): string[] {
+  const tools = new Set<string>();
+  
+  messages.forEach(message => {
+    if (message.type === "user" && message.message?.content) {
+      const content = message.message.content;
+      if (Array.isArray(content)) {
+        content.forEach(item => {
+          if (item.type === "tool_result" && item.is_error && typeof item.content === "string") {
+            const { isPermissionError, toolName } = isToolPermissionError(item.content);
+            if (isPermissionError && toolName) {
+              tools.add(toolName);
+              if (DEV_MODE) {
+                console.log(`🔧 DEV MODE: Detected permission error for tool: ${toolName}`);
+              }
+            }
+          }
+        });
+      }
+    }
+  });
+  
+  return Array.from(tools);
 }
 
 // Session management
@@ -251,7 +297,8 @@ async function resetSession(topicId?: number): Promise<void> {
 async function runClaudePrompt(
   prompt: string,
   chatId: number,
-  topicId?: number
+  topicId?: number,
+  allowedTools: string[] = []
 ): Promise<{ response: string; sessionId: string; cost: number; turns: number }> {
   const messages: SDKMessage[] = [];
   let streamedResponse = "";
@@ -261,12 +308,23 @@ async function runClaudePrompt(
   let turns = 0;
   let currentTurn = 0;
   let turnStarted = false;
+  let retryCount = 0;
+  const maxRetries = DEV_MODE ? 2 : 0; // Allow retries only in DEV MODE
   
   // Get the current session for this topic
   const currentSession = getSessionForTopic(topicId);
   
-  try {
+  const attemptQuery = async (currentAllowedTools: string[] = []): Promise<{
+    response: string;
+    sessionId: string;
+    cost: number;
+    turns: number;
+    messages: SDKMessage[];
+  }> => {
     console.log('🤖 Starting Claude prompt processing...', topicId ? `for topic ${topicId}` : 'default');
+    if (currentAllowedTools.length > 0) {
+      console.log('🔧 Using allowed tools:', currentAllowedTools.join(', '));
+    }
     await startTyping(chatId, topicId);
     
     let queryOptions = {
@@ -274,7 +332,8 @@ async function runClaudePrompt(
       abortController: new AbortController(),
       options: {
         maxTurns: 50,
-        ...(currentSession.sessionId && { resume: currentSession.sessionId })
+        ...(currentSession.sessionId && { resume: currentSession.sessionId }),
+        ...(currentAllowedTools.length > 0 && { allowedTools: currentAllowedTools })
       },
     } satisfies Props;
     
@@ -284,6 +343,16 @@ async function runClaudePrompt(
     } else {
       console.log('🆕 Starting new Claude session...');
     }
+    
+    // Reset variables for retry attempts
+    messages.length = 0;
+    streamedResponse = "";
+    finalResponse = "";
+    sessionId = "";
+    cost = 0;
+    turns = 0;
+    currentTurn = 0;
+    turnStarted = false;
     
     for await (const message of query(queryOptions)) {
       messages.push(message);
@@ -386,29 +455,87 @@ async function runClaudePrompt(
       }
     }
     
-    // Update session data
-    console.log('📊 Updating session data...');
-    const updatedSession: SessionData = {
-      ...currentSession,
-      sessionId,
-      turnCount: currentSession.turnCount + turns,
-      totalCost: currentSession.totalCost + cost,
-      lastActivity: new Date().toISOString(),
-      topicId,
-    };
-    setSessionForTopic(updatedSession, topicId);
-    await saveSessions();
-    
-    console.log('✅ Claude processing complete. Total cost:', updatedSession.totalCost.toFixed(4));
-    
     return {
       response: finalResponse || streamedResponse || "No response received",
       sessionId,
       cost,
       turns,
+      messages: messages // Keep messages for error analysis
     };
+  };
+
+  // Main execution with retry logic
+  let currentAllowedTools = [...allowedTools];
+  
+  try {
+    while (retryCount <= maxRetries) {
+      try {
+        const result = await attemptQuery(currentAllowedTools);
+        
+        // Check for tool permission errors in DEV MODE
+        if (DEV_MODE && retryCount < maxRetries) {
+          const toolsNeedingPermission = extractToolsFromErrors(result.messages);
+          
+          if (toolsNeedingPermission.length > 0) {
+            retryCount++;
+            console.log(`🔧 DEV MODE: Retry ${retryCount}/${maxRetries} - Adding tool permissions:`, toolsNeedingPermission.join(', '));
+            
+            // Add the new tools to allowed tools
+            toolsNeedingPermission.forEach(tool => {
+              if (!currentAllowedTools.includes(tool)) {
+                currentAllowedTools.push(tool);
+              }
+            });
+            
+            // Continue the loop to retry
+            continue;
+          }
+        }
+        
+        // Success! Update session data
+        console.log('📊 Updating session data...');
+        const updatedSession: SessionData = {
+          ...currentSession,
+          sessionId: result.sessionId,
+          turnCount: currentSession.turnCount + result.turns,
+          totalCost: currentSession.totalCost + result.cost,
+          lastActivity: new Date().toISOString(),
+          topicId,
+        };
+        setSessionForTopic(updatedSession, topicId);
+        await saveSessions();
+        
+        console.log('✅ Claude processing complete. Total cost:', updatedSession.totalCost.toFixed(4));
+        
+        return {
+          response: result.response,
+          sessionId: result.sessionId,
+          cost: result.cost,
+          turns: result.turns,
+        };
+        
+      } catch (queryError) {
+        // If this is the last retry or DEV MODE is disabled, throw the error
+        if (retryCount >= maxRetries || !DEV_MODE) {
+          throw queryError;
+        }
+        
+        // In DEV MODE, try to extract tool permissions from error and retry
+        retryCount++;
+        console.log(`🔧 DEV MODE: Query failed, attempting retry ${retryCount}/${maxRetries}`);
+        console.error('Query error:', queryError);
+      }
+    }
+    
+    throw new Error('Max retries exceeded in DEV MODE');
+    
   } catch (error) {
     console.error("Error running Claude prompt:", error);
+    
+    if (DEV_MODE) {
+      console.log('🔧 DEV MODE: Error occurred after', retryCount, 'retries');
+      console.log('🔧 DEV MODE: Final allowed tools:', currentAllowedTools.join(', '));
+    }
     
     // Provide more specific error messages based on error type
     if (error instanceof Error) {
