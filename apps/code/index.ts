@@ -160,6 +160,102 @@ function extractToolsFromErrors(messages: SDKMessage[]): string[] {
   return Array.from(tools);
 }
 
+// TODO status management
+interface TodoItem {
+  id: string;
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  priority: "high" | "medium" | "low";
+}
+
+interface TodoWriteInput {
+  todos: TodoItem[];
+}
+
+function generateTodoStatusMessage(todoInput: TodoWriteInput): string {
+  const { todos } = todoInput;
+  
+  if (todos.length === 0) {
+    return "📋 **TODO Status**: No active tasks";
+  }
+  
+  // Count by status
+  const pending = todos.filter(t => t.status === "pending").length;
+  const inProgress = todos.filter(t => t.status === "in_progress").length;
+  const completed = todos.filter(t => t.status === "completed").length;
+  
+  // Get next high priority pending tasks (max 3)
+  const nextTasks = todos
+    .filter(t => t.status === "pending" && t.priority === "high")
+    .slice(0, 3);
+  
+  // Get current in-progress task
+  const currentTask = todos.find(t => t.status === "in_progress");
+  
+  let message = `📋 **TODO Status** (${todos.length} total)\n`;
+  message += `⏳ ${pending} pending • 🔄 ${inProgress} in progress • ✅ ${completed} completed\n\n`;
+  
+  if (currentTask) {
+    message += `🔄 **Current**: ${currentTask.content}\n\n`;
+  }
+  
+  if (nextTasks.length > 0) {
+    message += `🔥 **Next High Priority**:\n`;
+    nextTasks.forEach((task, idx) => {
+      message += `${idx + 1}. ${task.content}\n`;
+    });
+  }
+  
+  return message.trim();
+}
+
+async function updateTopicStatusMessage(
+  chatId: number, 
+  topicId: number, 
+  statusMessage: string, 
+  currentSession: SessionData
+): Promise<void> {
+  try {
+    if (currentSession.statusMessageId) {
+      // Update existing status message
+      await telegramWithBackoff(() =>
+        bot.api.editMessageText(
+          chatId,
+          currentSession.statusMessageId!,
+          statusMessage,
+          { message_thread_id: topicId, parse_mode: "Markdown" }
+        )
+      );
+    } else {
+      // Create new status message and pin it
+      const message = await telegramWithBackoff(() =>
+        bot.api.sendMessage(chatId, statusMessage, {
+          message_thread_id: topicId,
+          parse_mode: "Markdown"
+        })
+      );
+      
+      // Update session with status message ID
+      currentSession.statusMessageId = message.message_id;
+      setSessionForTopic(currentSession, topicId);
+      await saveSessions();
+      
+      // Try to pin the message (may fail if bot doesn't have permissions)
+      try {
+        await telegramWithBackoff(() =>
+          bot.api.pinChatMessage(chatId, message.message_id, {
+            disable_notification: true
+          })
+        );
+      } catch (error) {
+        console.log('⚠️ Could not pin status message (missing permissions)');
+      }
+    }
+  } catch (error) {
+    console.error('❌ Error updating topic status message:', error);
+  }
+}
+
 // Session management
 const SESSION_FILE = path.join(process.cwd(), "bot-session.json");
 
@@ -170,6 +266,7 @@ interface SessionData {
   lastActivity: string;
   topicId?: number;
   topicName?: string;
+  statusMessageId?: number;
 }
 
 interface TopicSessionMap {
@@ -400,6 +497,19 @@ async function runClaudePrompt(
                 await appendToMarkdown(sessionId, `🔧 **Tool Used:** ${item.name}\n`);
                 if (item.input) {
                   await appendToMarkdown(sessionId, `\`\`\`json\n${JSON.stringify(item.input, null, 2)}\n\`\`\`\n\n`);
+                }
+              }
+              
+              // Handle TodoWrite tool specifically for status updates
+              if (item.name === "TodoWrite" && item.input && topicId) {
+                try {
+                  const todoInput = item.input as TodoWriteInput;
+                  const statusMessage = generateTodoStatusMessage(todoInput);
+                  const currentSession = getSessionForTopic(topicId);
+                  await updateTopicStatusMessage(chatId, topicId, statusMessage, currentSession);
+                  console.log('✅ Updated TODO status message for topic', topicId);
+                } catch (error) {
+                  console.error('❌ Error updating TODO status:', error);
                 }
               }
             }
@@ -775,7 +885,9 @@ bot.on("message:text", async (ctx) => {
   
   // Handle existing topic or fallback to main chat
   let statusMessage = await telegramWithBackoff(() => 
-    ctx.reply("🤖 Processing your prompt...")
+    topicId 
+      ? ctx.api.sendMessage(ctx.chat.id, "🤖 Processing your prompt...", { message_thread_id: topicId })
+      : ctx.reply("🤖 Processing your prompt...")
   );
   
   try {
@@ -794,12 +906,21 @@ bot.on("message:text", async (ctx) => {
     // Send session info
     const updatedSession = getSessionForTopic(topicId);
     await telegramWithBackoff(() => 
-      ctx.reply(
-        `📊 **Session Stats**\n` +
-        `Turn cost: $${result.cost.toFixed(4)}\n` +
-        `Total cost: $${updatedSession.totalCost.toFixed(4)}\n` +
-        `Session turns: ${updatedSession.turnCount}`
-      )
+      topicId
+        ? ctx.api.sendMessage(
+            ctx.chat.id,
+            `📊 **Session Stats**\n` +
+            `Turn cost: $${result.cost.toFixed(4)}\n` +
+            `Total cost: $${updatedSession.totalCost.toFixed(4)}\n` +
+            `Session turns: ${updatedSession.turnCount}`,
+            { message_thread_id: topicId }
+          )
+        : ctx.reply(
+            `📊 **Session Stats**\n` +
+            `Turn cost: $${result.cost.toFixed(4)}\n` +
+            `Total cost: $${updatedSession.totalCost.toFixed(4)}\n` +
+            `Session turns: ${updatedSession.turnCount}`
+          )
     );
     
   } catch (error) {
