@@ -86,6 +86,28 @@ async function telegramWithBackoff<T>(operation: () => Promise<T>): Promise<T> {
   return exponentialBackoff(operation, 3, 1000, 60000);
 }
 
+// Typing indicator management
+async function startTyping(chatId: number, topicId?: number): Promise<void> {
+  try {
+    await telegramWithBackoff(() => 
+      bot.api.sendChatAction(chatId, "typing", topicId ? { message_thread_id: topicId } : {})
+    );
+  } catch (error) {
+    // Ignore typing errors to avoid rate limits
+  }
+}
+
+async function stopTyping(chatId: number, topicId?: number): Promise<void> {
+  // Typing automatically stops when we send a message, so this is just for explicit stopping
+  try {
+    await telegramWithBackoff(() => 
+      bot.api.sendChatAction(chatId, "typing", topicId ? { message_thread_id: topicId } : {})
+    );
+  } catch (error) {
+    // Ignore typing errors to avoid rate limits
+  }
+}
+
 // Helper function to check if message is from allowed group
 function isFromAllowedGroup(ctx: any): boolean {
   const chatId = ctx.chat.id.toString();
@@ -228,12 +250,8 @@ async function resetSession(topicId?: number): Promise<void> {
 
 async function runClaudePrompt(
   prompt: string,
-  topicId?: number,
-  onProgress?: (status: string) => void,
-  onStream?: (chunk: string) => void,
-  onToolUsage?: (toolName: string, input?: any) => void,
-  onToolResult?: (isError: boolean, content?: string) => void,
-  onThinking?: (content: string) => void
+  chatId: number,
+  topicId?: number
 ): Promise<{ response: string; sessionId: string; cost: number; turns: number }> {
   const messages: SDKMessage[] = [];
   let streamedResponse = "";
@@ -249,7 +267,7 @@ async function runClaudePrompt(
   
   try {
     console.log('🤖 Starting Claude prompt processing...', topicId ? `for topic ${topicId}` : 'default');
-    onProgress?.("🤖 Initializing Claude...");
+    await startTyping(chatId, topicId);
     
     let queryOptions = {
       prompt,
@@ -263,10 +281,8 @@ async function runClaudePrompt(
     // Log session status
     if (currentSession.sessionId) {
       console.log('🔄 Resuming existing session:', currentSession.sessionId.substring(0, 8));
-      onProgress?.("🔄 Continuing conversation...");
     } else {
       console.log('🆕 Starting new Claude session...');
-      onProgress?.("🆕 Starting new conversation...");
     }
     
     for await (const message of query(queryOptions)) {
@@ -275,7 +291,6 @@ async function runClaudePrompt(
       if (message.type === "system" && message.subtype === "init") {
         sessionId = message.session_id;
         console.log('✅ Claude session initialized:', sessionId.substring(0, 8));
-        onProgress?.("✅ Session initialized");
         
         // Start the turn in markdown immediately after session init
         if (!turnStarted) {
@@ -286,7 +301,6 @@ async function runClaudePrompt(
       
       if (message.type === "result" && message.subtype.startsWith("error")) {
         console.error('❌ System error:', message);
-        onProgress?.("❌ System error occurred");
         if (sessionId) {
           await appendToMarkdown(sessionId, `❌ **System Error:** ${JSON.stringify(message)}\n\n`);
         }
@@ -295,7 +309,7 @@ async function runClaudePrompt(
       if (message.type === "user") {
         currentTurn++;
         console.log(`📝 Turn ${currentTurn} started`);
-        onProgress?.(`📝 Turn ${currentTurn} processing...`);
+        await startTyping(chatId, topicId);
       }
       
       if (message.type === "assistant" && 'message' in message && message.message?.content) {
@@ -305,16 +319,14 @@ async function runClaudePrompt(
             if (item.type === "text" && typeof item.text === "string") {
               const chunk = item.text;
               streamedResponse += chunk;
-              onStream?.(chunk);
               
-              // Trigger thinking callback for longer responses
-              if (streamedResponse.length > 0 && streamedResponse.length % 200 === 0) {
-                onThinking?.(streamedResponse);
+              // Keep typing during response
+              if (streamedResponse.length > 0 && streamedResponse.length % 1000 === 0) {
+                await startTyping(chatId, topicId);
               }
             } else if (item.type === "tool_use") {
               console.log('🔧 Tool called:', item.name);
-              onProgress?.(`🔧 Using tool: ${item.name}`);
-              onToolUsage?.(item.name, item.input);
+              await startTyping(chatId, topicId);
               if (sessionId) {
                 await appendToMarkdown(sessionId, `🔧 **Tool Used:** ${item.name}\n`);
                 if (item.input) {
@@ -334,14 +346,12 @@ async function runClaudePrompt(
               console.log('🔧 Tool result received');
               if (item.is_error) {
                 console.error('❌ Tool error:', item.content);
-                onProgress?.(`❌ Tool error: ${item.content}`);
-                onToolResult?.(true, typeof item.content === 'string' ? item.content : JSON.stringify(item.content));
+                await startTyping(chatId, topicId);
                 if (sessionId) {
                   await appendToMarkdown(sessionId, `❌ **Tool Error:** ${item.content}\\n\\n`);
                 }
               } else {
-                onProgress?.(`✅ Tool completed`);
-                onToolResult?.(false, typeof item.content === 'string' ? item.content : JSON.stringify(item.content));
+                await startTyping(chatId, topicId);
                 if (sessionId) {
                   await appendToMarkdown(sessionId, `✅ **Tool Completed**\\n\\n`);
                 }
@@ -390,7 +400,6 @@ async function runClaudePrompt(
     await saveSessions();
     
     console.log('✅ Claude processing complete. Total cost:', updatedSession.totalCost.toFixed(4));
-    onProgress?.("✅ Response complete");
     
     return {
       response: finalResponse || streamedResponse || "No response received",
@@ -400,7 +409,6 @@ async function runClaudePrompt(
     };
   } catch (error) {
     console.error("Error running Claude prompt:", error);
-    onProgress?.("❌ Error occurred");
     
     // Provide more specific error messages based on error type
     if (error instanceof Error) {
@@ -585,8 +593,9 @@ bot.on("message:text", async (ctx) => {
   // If this is a new conversation in main chat and there's no existing session, create a topic
   if (!topicId && !currentSession.sessionId) {
     console.log('🏷️ Creating new topic for conversation...');
-    topicId = await createTopicForSession(ctx, prompt);
-    if (topicId) {
+    const newTopicId = await createTopicForSession(ctx, prompt);
+    if (newTopicId) {
+      topicId = newTopicId;
       // Reply to the new topic instead of main chat
       const newTopicMessage = await telegramWithBackoff(() => 
         ctx.api.sendMessage(
@@ -597,69 +606,7 @@ bot.on("message:text", async (ctx) => {
       );
       
       try {
-        const result = await runClaudePrompt(
-          prompt,
-          topicId,
-          // Progress callback
-          async (status: string) => {
-            try {
-              await telegramWithBackoff(() => 
-                ctx.api.editMessageText(
-                  ctx.chat.id,
-                  newTopicMessage.message_id,
-                  status,
-                  { message_thread_id: topicId }
-                )
-              );
-            } catch (error) {
-              // Ignore edit errors
-            }
-          },
-          // Stream callback
-          async (chunk: string) => {
-            // Just collect the response
-          },
-          // Tool usage callback
-          async (toolName: string, input?: any) => {
-            await telegramWithBackoff(() => 
-              ctx.api.sendMessage(
-                ctx.chat.id,
-                `🔧 **Using Tool:** ${toolName}${input ? `\n\`\`\`json\n${JSON.stringify(input, null, 2)}\n\`\`\`` : ''}`,
-                { message_thread_id: topicId }
-              )
-            );
-          },
-          // Tool result callback
-          async (isError: boolean, content?: string) => {
-            if (isError) {
-              await telegramWithBackoff(() => 
-                ctx.api.sendMessage(
-                  ctx.chat.id,
-                  `❌ **Tool Error:** ${content || 'Unknown error'}`,
-                  { message_thread_id: topicId }
-                )
-              );
-            } else {
-              await telegramWithBackoff(() => 
-                ctx.api.sendMessage(
-                  ctx.chat.id,
-                  `✅ **Tool Completed**${content ? `\n${content.substring(0, 200)}${content.length > 200 ? '...' : ''}` : ''}`,
-                  { message_thread_id: topicId }
-                )
-              );
-            }
-          },
-          // Thinking callback
-          async (content: string) => {
-            await telegramWithBackoff(() => 
-              ctx.api.sendMessage(
-                ctx.chat.id,
-                `🤖 **Thinking...**\n\n${content.substring(0, 300)}${content.length > 300 ? "..." : ""}`,
-                { message_thread_id: topicId }
-              )
-            );
-          }
-        );
+        const result = await runClaudePrompt(prompt, ctx.chat.id, topicId);
         
         // Send final response
         await telegramWithBackoff(() => 
@@ -703,55 +650,9 @@ bot.on("message:text", async (ctx) => {
   let statusMessage = await telegramWithBackoff(() => 
     ctx.reply("🤖 Processing your prompt...")
   );
-  let currentResponse = "";
   
   try {
-    const result = await runClaudePrompt(
-      prompt,
-      topicId,
-      // Progress callback - keep status message for high-level progress only
-      async (status: string) => {
-        try {
-          await telegramWithBackoff(() => 
-            ctx.api.editMessageText(
-              ctx.chat.id,
-              statusMessage.message_id,
-              status
-            )
-          );
-        } catch (error) {
-          // Ignore edit errors (message might be too old)
-        }
-      },
-      // Stream callback - removed thinking updates from here
-      async (chunk: string) => {
-        currentResponse += chunk;
-      },
-      // Tool usage callback - send new messages for tool usage
-      async (toolName: string, input?: any) => {
-        await telegramWithBackoff(() => 
-          ctx.reply(`🔧 **Using Tool:** ${toolName}${input ? `\n\`\`\`json\n${JSON.stringify(input, null, 2)}\n\`\`\`` : ''}`)
-        );
-      },
-      // Tool result callback - send new messages for tool results
-      async (isError: boolean, content?: string) => {
-        if (isError) {
-          await telegramWithBackoff(() => 
-            ctx.reply(`❌ **Tool Error:** ${content || 'Unknown error'}`)
-          );
-        } else {
-          await telegramWithBackoff(() => 
-            ctx.reply(`✅ **Tool Completed**${content ? `\n${content.substring(0, 200)}${content.length > 200 ? '...' : ''}` : ''}`)
-          );
-        }
-      },
-      // Thinking callback - send thinking updates as separate messages
-      async (content: string) => {
-        await telegramWithBackoff(() => 
-          ctx.reply(`🤖 **Thinking...**\n\n${content.substring(0, 300)}${content.length > 300 ? "..." : ""}`)
-        );
-      }
-    );
+    const result = await runClaudePrompt(prompt, ctx.chat.id, topicId);
     
     // Send final response
     await telegramWithBackoff(() => 
@@ -797,11 +698,12 @@ loadSessions().then(async () => {
   const lastUpdate = updates[updates.length - 1]
 
   // clear updates
-  const nextUpdates = await bot.api.getUpdates({
-    offset: lastUpdate.update_id + 1,
-  })
-  console.log(nextUpdates)
-
+  if(lastUpdate?.update_id) {
+    const nextUpdates = await bot.api.getUpdates({
+        offset: lastUpdate.update_id + 1,
+    })
+    console.log(nextUpdates)
+  }
   bot.start();
 
   
