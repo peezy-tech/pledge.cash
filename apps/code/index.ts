@@ -788,9 +788,22 @@ bot.on("message:text", async (ctx) => {
 });
 
 // Initialize sessions on startup
-loadSessions().then(() => {
-  bot.start();
+loadSessions().then(async () => {
   console.log("🤖 Telegram bot is running...");
+
+  // get unprocessed messages
+  const updates = await bot.api.getUpdates()
+  console.log(updates)
+  const lastUpdate = updates[updates.length - 1]
+
+  // clear updates
+  const nextUpdates = await bot.api.getUpdates({
+    offset: lastUpdate.update_id + 1,
+  })
+  console.log(nextUpdates)
+
+  bot.start();
+
   
   const allSessions = Object.values(topicSessions).filter(session => session.sessionId);
   const totalSessions = allSessions.length + (defaultSession.sessionId ? 1 : 0);
