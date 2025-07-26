@@ -5,6 +5,12 @@
       "upstreamUrl": "~/repos/github/shamir-secret-sharing",
       "localPath": "packages/shamir-secret-sharing",
       "branch": "main"
+    },
+    {
+      "name": "claude-sdk",
+      "upstreamUrl": "https://github.com/s-soroosh/claude-code-js",
+      "localPath": "packages/claude-sdk",
+      "branch": "main"
     }
   ]
 }

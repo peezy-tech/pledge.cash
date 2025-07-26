@@ -41,7 +41,7 @@
       "name": "@repo/code",
       "version": "1.0.0",
       "dependencies": {
-        "@anthropic-ai/claude-code": "latest",
+        "@anthropic-ai/claude-code": "^1.0.53",
         "grammy": "^1.37.0",
       },
       "devDependencies": {
