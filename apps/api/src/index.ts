@@ -5,6 +5,7 @@ import { staticPlugin } from "@elysiajs/static";
 import { auth_routes } from "./auth";
 import { hyperliquidRoutes } from "./hyperliquid_routes";
 import { initializeWebSocketClient, cleanupWebSocketClient } from "./websocket_client";
+import { startPaymentsProcessor } from "./payments_processor";
 
 migrate();
 
@@ -45,14 +46,17 @@ const app = new Elysia()
 export type App = typeof app;
 
 // Graceful shutdown handling
+const stopPayments = startPaymentsProcessor();
 process.on("SIGTERM", async () => {
   console.log("Received SIGTERM signal, shutting down gracefully...");
+  if (stopPayments) stopPayments();
   await cleanupWebSocketClient();
   process.exit(0);
 });
 
 process.on("SIGINT", async () => {
   console.log("Received SIGINT signal, shutting down gracefully...");
+  if (stopPayments) stopPayments();
   await cleanupWebSocketClient();
   process.exit(0);
 });
@@ -63,3 +67,7 @@ console.log("WebSocket client will connect in the background and cache spot toke
 console.log("Available endpoints:");
 console.log("  - GET /hyperliquid/spot-tokens - Get cached spot tokens data");
 console.log("  - GET /hyperliquid/ws-status - Get WebSocket client status");
+console.log("  - POST/GET /hyperliquid/recurring - Recurring plans");
+console.log("  - POST /hyperliquid/recurring/:id/run - Run a plan now");
+console.log("  - POST/GET /hyperliquid/pledge-campaigns, /pledges - Pledges");
+console.log("  - POST /hyperliquid/donations/record - Record a donation");

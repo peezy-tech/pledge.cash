@@ -10,6 +10,10 @@ import InvoicesPage from './invoices/invoices'
 import InvoicePage from './invoices/invoice'
 import PledgeWalletPage from './pledge-wallet/pledge-wallet'
 import PledgeWalletRecoveryPage from './pledge-wallet/recovery'
+import RecurringPage from './recurring/recurring'
+import PledgesPage from './pledges/pledges'
+import DonationsPage from './donations/donations'
+import PaymentsPage from './payments/payments'
 
 import Header from '@/components/Header'
 
@@ -34,6 +38,10 @@ const routes = rootRoute.addChildren([
   InvoicePage(rootRoute),
   PledgeWalletPage(rootRoute),
   PledgeWalletRecoveryPage(rootRoute),
+  RecurringPage(rootRoute),
+  PledgesPage(rootRoute),
+  DonationsPage(rootRoute),
+  PaymentsPage(rootRoute),
 ])
 
 export const router = createRouter({

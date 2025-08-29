@@ -28,6 +28,33 @@ bun run db:studio
 
 ### Data Management
 
+#### Seed Sample Data
+Create a fresh, valid dataset across all tables:
+
+```bash
+# fresh rebuild (migrate + clear tables + seed)
+bun run seed --fresh
+
+# or seed into existing DB (clears tables only)
+bun run seed
+```
+
+From the repo root, you can also run:
+
+```bash
+bun run db:seed --fresh
+```
+
+The seed includes:
+- Users (admin + users with unique EVM addresses)
+- Transaction hashes
+- Hyperliquid invoices (pending, paid, expired) + hooks
+- Pledge wallet + agent wallets
+- Recurring plans + charges
+- Pledge campaigns, pledges + contributions
+- Donations
+- Normalized payments corresponding to the above
+
 #### Extract Data to JSON
 Extract all data from `seed.db` to individual JSON files:
 
@@ -75,6 +102,27 @@ bun run import-data production.db
 # 3. Verify the new database has the correct data
 bun run db:studio
 ```
+
+#### On-Chain Testnet Seed (Hyperliquid)
+Use real Hyperliquid L1 testnet transactions to populate the DB with live tx hashes:
+
+```bash
+# Required env
+# HL_SEED_FROM_PRIVATE_KEY=0x<funded_testnet_key>
+# HL_SEED_TO_PRIVATE_KEY=0x<receiver_key>  # or set HL_SEED_TO_ADDRESS=0x...
+# Optional: HL_SEED_INVOICE_AMOUNT=5, HL_SEED_DONATION_AMOUNT=2, HL_SEED_RECURRING_AMOUNT=1
+
+# Run from repo root
+bun run db:seed:onchain
+```
+
+This script will:
+- Discover USDC testnet token via Hyperliquid `spotMeta`
+- Send three spot transfers (invoice, donation, recurring charge)
+- Insert `tx_hashes` with full metadata from `txDetails`
+- Create/mark entities as paid and add normalized `payments`
+
+Note: Requires network access and funded testnet USDC on the `HL_SEED_FROM_PRIVATE_KEY` account.
 
 ---
 

@@ -295,3 +295,211 @@ export function useSpotTokensWithPrices() {
     refetchInterval: 2 * 60 * 1000, // Refetch every 2 minutes for real-time prices
   })
 }
+
+// ================================
+// Recurring Plans
+// ================================
+export function useRecurringPlans() {
+  return useQuery({
+    queryKey: ['recurring-plans'],
+    queryFn: async () => {
+      const response = await api.hyperliquid.recurring.get()
+      if (response.error) throw new Error(String(response.error.value))
+      return response.data
+    },
+  })
+}
+
+export function useRecurringCharges(planId: string | undefined) {
+  return useQuery({
+    queryKey: ['recurring-charges', planId],
+    queryFn: async () => {
+      if (!planId) return []
+      const response = await api.hyperliquid.recurring[planId].charges.get()
+      if (response.error) throw new Error(String(response.error.value))
+      return response.data
+    },
+    enabled: !!planId,
+  })
+}
+
+export function useCreateRecurringPlanMutation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (data: {
+      payerUserId?: string
+      payerAddress?: string
+      token: string
+      amount: string
+      cadence: 'daily' | 'weekly' | 'monthly'
+      startAt?: number
+      endAt?: number
+      autopayEnabled?: boolean
+    }) => {
+      const response = await api.hyperliquid.recurring.post(data as any)
+      if (response.error) throw new Error(String(response.error.value))
+      return response.data
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['recurring-plans'] }),
+  })
+}
+
+export function useUpdateRecurringPlanMutation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      id,
+      status,
+      autopayEnabled,
+      endAt,
+    }: {
+      id: string
+      status?: 'active' | 'paused' | 'cancelled'
+      autopayEnabled?: boolean
+      endAt?: number
+    }) => {
+      const response = await api.hyperliquid.recurring[id].patch({
+        status,
+        autopayEnabled,
+        endAt,
+      } as any)
+      if (response.error) throw new Error(String(response.error.value))
+      return response.data
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['recurring-plans'] }),
+  })
+}
+
+export function useRunRecurringPlanMutation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id }: { id: string }) => {
+      const response = await api.hyperliquid.recurring[id].run.post()
+      if (response.error) throw new Error(String(response.error.value))
+      return response.data
+    },
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['recurring-charges', variables.id] })
+    },
+  })
+}
+
+// ================================
+// Pledges & Campaigns
+// ================================
+export function usePledgeCampaigns() {
+  return useQuery({
+    queryKey: ['pledge-campaigns'],
+    queryFn: async () => {
+      const response = await api.hyperliquid['pledge-campaigns'].get()
+      if (response.error) throw new Error(String(response.error.value))
+      return response.data
+    },
+  })
+}
+
+export function useDiscoverPledgeCampaigns() {
+  return useQuery({
+    queryKey: ['pledge-campaigns-discover'],
+    queryFn: async () => {
+      const response = await api.hyperliquid['pledge-campaigns'].discover.get()
+      if (response.error) throw new Error(String(response.error.value))
+      return response.data
+    },
+  })
+}
+
+export function useMyPledges() {
+  return useQuery({
+    queryKey: ['my-pledges'],
+    queryFn: async () => {
+      const response = await api.hyperliquid.pledges.get()
+      if (response.error) throw new Error(String(response.error.value))
+      return response.data
+    },
+  })
+}
+
+export function useCreatePledgeCampaignMutation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (data: {
+      name: string
+      description?: string
+      goalToken: string
+      goalAmount: string
+    }) => {
+      const response = await api.hyperliquid['pledge-campaigns'].post(data)
+      if (response.error) throw new Error(String(response.error.value))
+      return response.data
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['pledge-campaigns'] }),
+  })
+}
+
+export function useCreatePledgeMutation() {
+  return useMutation({
+    mutationFn: async (data: {
+      campaignId: string
+      pledgerUserId?: string
+      pledgerAddress?: string
+      token: string
+      amountPerCadence: string
+      cadence: 'daily' | 'weekly' | 'monthly'
+      startAt?: number
+      autopayEnabled?: boolean
+    }) => {
+      const response = await api.hyperliquid.pledges.post(data)
+      if (response.error) throw new Error(String(response.error.value))
+      return response.data
+    },
+  })
+}
+
+export function usePayPledgeMutation() {
+  return useMutation({
+    mutationFn: async ({ id }: { id: string }) => {
+      const response = await api.hyperliquid.pledges[id].pay.post()
+      if (response.error) throw new Error(String(response.error.value))
+      return response.data
+    },
+  })
+}
+
+export function useConfirmContributionMutation() {
+  return useMutation({
+    mutationFn: async ({ id, txHash }: { id: string; txHash: `0x${string}` }) => {
+      const response = await api.hyperliquid['pledge-contributions'][id].confirm.put({
+        txHash,
+      })
+      if (response.error) throw new Error(String(response.error.value))
+      return response.data
+    },
+  })
+}
+
+// ================================
+// Donations & Payments
+// ================================
+export function useDonations() {
+  return useQuery({
+    queryKey: ['donations'],
+    queryFn: async () => {
+      const response = await api.hyperliquid.donations.get()
+      if (response.error) throw new Error(String(response.error.value))
+      return response.data
+    },
+  })
+}
+
+export function usePayments() {
+  return useQuery({
+    queryKey: ['payments'],
+    queryFn: async () => {
+      const response = await api.hyperliquid.payments.get()
+      if (response.error) throw new Error(String(response.error.value))
+      return response.data
+    },
+    refetchInterval: 30_000,
+  })
+}

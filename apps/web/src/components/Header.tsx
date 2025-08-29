@@ -77,6 +77,30 @@ export default function Header() {
         >
           Invoices
         </Link>
+        <Link
+          to="/recurring"
+          className="text-muted-foreground transition-colors hover:text-foreground"
+        >
+          Recurring
+        </Link>
+        <Link
+          to="/pledges"
+          className="text-muted-foreground transition-colors hover:text-foreground"
+        >
+          Pledges
+        </Link>
+        <Link
+          to="/donations"
+          className="text-muted-foreground transition-colors hover:text-foreground"
+        >
+          Donations
+        </Link>
+        <Link
+          to="/payments"
+          className="text-muted-foreground transition-colors hover:text-foreground"
+        >
+          Payments
+        </Link>
       </nav>
       <div className="flex items-center gap-2">
         <ThemeSwitch />

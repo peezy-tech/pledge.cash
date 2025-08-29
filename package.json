@@ -12,7 +12,10 @@
     "db:generate": "cd packages/db && bun db:generate",
     "db:migrate": "cd packages/db && bun db:migrate",
     "db:studio": "cd packages/db && bun db:studio",
-    "db:push": "cd packages/db && bun db:push"
+    "db:push": "cd packages/db && bun db:push",
+    "db:seed": "cd packages/db && bun seed.ts",
+    "db:seed:onchain": "bun scripts/src/seed_onchain.ts",
+    "db:seed:onchain:update": "bun scripts/src/update_cache_from_db.ts"
   },
   "devDependencies": {
     "prettier": "^3.4.2",

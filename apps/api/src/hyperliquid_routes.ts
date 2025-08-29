@@ -9,12 +9,30 @@ import {
   agentWallets,
   invoiceHooks,
   txHashes,
+  payments,
 } from "@repo/db/schema";
 import { eq, or } from "drizzle-orm";
 import { executeHooks } from "./execute_hooks";
 import { auth_routes } from "./auth";
 import { getUserAddresses, resolvePaymentWithEdgeCases } from "./address_resolver";
 import { getWebSocketClient } from "./websocket_client";
+import {
+  recurringPlans,
+  recurringCharges,
+  pledgeCampaigns,
+  pledges,
+  pledgeContributions,
+  donations,
+} from "@repo/db/schema";
+import { privateKeyToAccount as viemPrivateKeyToAccount } from "viem/accounts";
+
+function addCadence(from: number, cadence: "daily" | "weekly" | "monthly"): number {
+  const d = new Date(from);
+  if (cadence === "daily") d.setDate(d.getDate() + 1);
+  else if (cadence === "weekly") d.setDate(d.getDate() + 7);
+  else d.setMonth(d.getMonth() + 1);
+  return d.getTime();
+}
 
 const operator = privateKeyToAccount(
   process.env.OPERATOR_PRIVATE_KEY as `0x${string}`
@@ -247,6 +265,43 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
           .returning()
           .get();
 
+        // Upsert normalized payment record
+        try {
+          const existingPayment = await db
+            .select()
+            .from(payments)
+            .where(eq(payments.sourceId, updatedInvoice.id))
+            .get();
+
+          if (existingPayment) {
+            await db
+              .update(payments)
+              .set({
+                status: "paid",
+                txHash: body.txHash,
+                paidAt: Date.now(),
+                payerUserId: payerUserId,
+                payerAddress: updatedInvoice.actualPayerAddress || updatedInvoice.payerAddress,
+              })
+              .where(eq(payments.id, existingPayment.id));
+          } else {
+            await db.insert(payments).values({
+              type: "invoice",
+              sourceId: updatedInvoice.id,
+              creatorId: updatedInvoice.creatorId,
+              payerUserId: payerUserId,
+              payerAddress: updatedInvoice.actualPayerAddress || updatedInvoice.payerAddress,
+              token: updatedInvoice.token,
+              amount: updatedInvoice.amount,
+              status: "paid",
+              txHash: body.txHash,
+              paidAt: Date.now(),
+            });
+          }
+        } catch (e) {
+          console.error("Failed to upsert normalized payment for invoice:", e);
+        }
+
         // --- WEBHOOK ---
         await executeHooks("invoice.paid", updatedInvoice.id);
         // --- END WEBHOOK ---
@@ -321,6 +376,18 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
               })
               .returning()
               .get();
+
+            // Create normalized payment record (pending)
+            await db.insert(payments).values({
+              type: "invoice",
+              sourceId: invoice.id,
+              creatorId: invoice.creatorId,
+              payerUserId: null,
+              payerAddress: invoice.payerAddress,
+              token: invoice.token,
+              amount: invoice.amount,
+              status: "pending",
+            });
 
             // Create hooks if any are provided
             if (body.hooks && body.hooks.length > 0) {
@@ -710,6 +777,751 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
           .where(eq(pledgeWalletAccounts.userAddress, currentUser!.walletAddress))
           .get();
         return pledgeWalletAccount;
+      })
+      
+      // ================================
+      // Recurring Plans
+      // ================================
+      .post(
+        "/recurring",
+        async ({ body, currentUser, set }) => {
+          try {
+            const creator = await db
+              .select()
+              .from(users)
+              .where(eq(users.evm_address, currentUser!.walletAddress))
+              .get();
+            if (!creator) {
+              set.status = 404;
+              return { error: "User not found" };
+            }
+
+            const nextRunAt = body.startAt ?? Date.now();
+            const plan = await db
+              .insert(recurringPlans)
+              .values({
+                creatorId: creator.id,
+                payerUserId: body.payerUserId ?? null,
+                payerAddress: body.payerAddress?.toLowerCase() ?? null,
+                token: body.token,
+                amount: body.amount,
+                cadence: body.cadence,
+                startAt: nextRunAt,
+                endAt: body.endAt ?? null,
+                autopayEnabled: body.autopayEnabled ?? true,
+                nextRunAt,
+              })
+              .returning()
+              .get();
+
+            return plan;
+          } catch (error) {
+            console.error("Error creating recurring plan:", error);
+            set.status = 500;
+            return { error: "Failed to create recurring plan" };
+          }
+        },
+        {
+          body: t.Object({
+            payerUserId: t.Optional(t.String()),
+            payerAddress: t.Optional(t.String()),
+            token: t.String(),
+            amount: t.String(),
+            cadence: t.Enum({ daily: "daily", weekly: "weekly", monthly: "monthly" }),
+            startAt: t.Optional(t.Number()),
+            endAt: t.Optional(t.Number()),
+            autopayEnabled: t.Optional(t.Boolean()),
+          }),
+        }
+      )
+      .get("/recurring", async ({ currentUser, set }) => {
+        try {
+          const me = await db
+            .select()
+            .from(users)
+            .where(eq(users.evm_address, currentUser!.walletAddress))
+            .get();
+          if (!me) {
+            set.status = 404;
+            return { error: "User not found" };
+          }
+
+          const created = await db
+            .select()
+            .from(recurringPlans)
+            .where(eq(recurringPlans.creatorId, me.id));
+
+          const asPayer = await db
+            .select()
+            .from(recurringPlans)
+            .where(
+              or(
+                eq(recurringPlans.payerUserId, me.id),
+                eq(recurringPlans.payerAddress, currentUser!.walletAddress.toLowerCase())
+              )
+            );
+
+          return { created, asPayer };
+        } catch (error) {
+          console.error("Error listing recurring plans:", error);
+          set.status = 500;
+          return { error: "Failed to list recurring plans" };
+        }
+      })
+      .patch(
+        "/recurring/:id",
+        async ({ params, body, currentUser, set }) => {
+          try {
+            const me = await db
+              .select()
+              .from(users)
+              .where(eq(users.evm_address, currentUser!.walletAddress))
+              .get();
+            if (!me) {
+              set.status = 404;
+              return { error: "User not found" };
+            }
+
+            const plan = await db
+              .select()
+              .from(recurringPlans)
+              .where(eq(recurringPlans.id, params.id))
+              .get();
+            if (!plan || plan.creatorId !== me.id) {
+              set.status = 404;
+              return { error: "Plan not found" };
+            }
+
+            const updated = await db
+              .update(recurringPlans)
+              .set({
+                status: body.status ?? plan.status,
+                autopayEnabled:
+                  typeof body.autopayEnabled === "boolean"
+                    ? body.autopayEnabled
+                    : plan.autopayEnabled,
+                endAt: body.endAt ?? plan.endAt,
+              })
+              .where(eq(recurringPlans.id, plan.id))
+              .returning()
+              .get();
+
+            return updated;
+          } catch (error) {
+            console.error("Error updating recurring plan:", error);
+            set.status = 500;
+            return { error: "Failed to update plan" };
+          }
+        },
+        {
+          params: t.Object({ id: t.String() }),
+          body: t.Object({
+            status: t.Optional(
+              t.Enum({ active: "active", paused: "paused", cancelled: "cancelled" })
+            ),
+            autopayEnabled: t.Optional(t.Boolean()),
+            endAt: t.Optional(t.Number()),
+          }),
+        }
+      )
+      .get(
+        "/recurring/:id/charges",
+        async ({ params, currentUser, set }) => {
+          try {
+            const plan = await db
+              .select()
+              .from(recurringPlans)
+              .where(eq(recurringPlans.id, params.id))
+              .get();
+            if (!plan) {
+              set.status = 404;
+              return { error: "Plan not found" };
+            }
+            const charges = await db
+              .select()
+              .from(recurringCharges)
+              .where(eq(recurringCharges.planId, plan.id));
+            return charges;
+          } catch (error) {
+            console.error("Error listing charges:", error);
+            set.status = 500;
+            return { error: "Failed to list charges" };
+          }
+        },
+        { params: t.Object({ id: t.String() }) }
+      )
+      .post(
+        "/recurring/:id/run",
+        async ({ params, currentUser, set }) => {
+          try {
+            const plan = await db
+              .select()
+              .from(recurringPlans)
+              .where(eq(recurringPlans.id, params.id))
+              .get();
+            if (!plan) {
+              set.status = 404;
+              return { error: "Plan not found" };
+            }
+
+            // Create a charge record
+            const charge = await db
+              .insert(recurringCharges)
+              .values({
+                planId: plan.id,
+                token: plan.token,
+                amount: plan.amount,
+                dueAt: Date.now(),
+              })
+              .returning()
+              .get();
+
+            // Attempt autopay using pledge wallet
+            let autopayExecuted = false;
+            try {
+              if (plan.autopayEnabled && plan.payerUserId) {
+                const payer = await db
+                  .select()
+                  .from(users)
+                  .where(eq(users.id, plan.payerUserId))
+                  .get();
+                const creator = await db
+                  .select()
+                  .from(users)
+                  .where(eq(users.id, plan.creatorId))
+                  .get();
+                const pw = await db
+                  .select()
+                  .from(pledgeWalletAccounts)
+                  .where(eq(pledgeWalletAccounts.userAddress, payer?.evm_address || ""))
+                  .get();
+
+                if (payer && creator && pw) {
+                  // Build signer from operator private key
+                  const operatorAccount = viemPrivateKeyToAccount(
+                    pw.operatorPrivateKey as `0x${string}`
+                  );
+
+                  const multi = new hl.MultiSignClient({
+                    transport: new hl.HttpTransport({ isTestnet: IS_TESTNET }),
+                    multiSignAddress: pw.address as `0x${string}`,
+                    signatureChainId: `0x${(1337).toString(16)}` as `0x${string}`,
+                    signers: [
+                      {
+                        address: operatorAccount.address,
+                        signTypedData: async (params: any) => {
+                          return operatorAccount.signTypedData(params);
+                        },
+                      },
+                    ],
+                    isTestnet: IS_TESTNET,
+                  });
+
+                  await multi.spotSend({
+                    destination: creator.evm_address as `0x${string}`,
+                    token: plan.token as `${string}:0x${string}`,
+                    amount: plan.amount,
+                  });
+
+                  // poll for tx hash briefly
+                  await new Promise((r) => setTimeout(r, 2000));
+                  const details = await infoClient.userDetails({
+                    user: pw.address as `0x${string}`,
+                  });
+                  const tx = details
+                    .filter((tx: any) =>
+                      tx.action.type === "spotSend" &&
+                      tx.action.destination?.toLowerCase() ===
+                        creator.evm_address?.toLowerCase() &&
+                      tx.action.token === plan.token &&
+                      tx.action.amount === plan.amount &&
+                      tx.error === null
+                    )
+                    .sort((a: any, b: any) => b.time - a.time)[0];
+
+                  await db
+                    .update(recurringCharges)
+                    .set({
+                      status: "paid",
+                      runAt: Date.now(),
+                      txHash: tx?.hash,
+                    })
+                    .where(eq(recurringCharges.id, charge.id));
+
+                  // Record normalized payment (recurring)
+                  await db.insert(payments).values({
+                    type: "recurring",
+                    sourceId: charge.id,
+                    creatorId: plan.creatorId,
+                    payerUserId: plan.payerUserId ?? null,
+                    payerAddress: pw.address,
+                    token: plan.token,
+                    amount: plan.amount,
+                    status: "paid",
+                    txHash: tx?.hash,
+                    paidAt: Date.now(),
+                  });
+
+                  // Advance schedule
+                  await db
+                    .update(recurringPlans)
+                    .set({ nextRunAt: addCadence(Date.now(), plan.cadence) })
+                    .where(eq(recurringPlans.id, plan.id));
+
+                  autopayExecuted = true;
+                }
+              }
+            } catch (e) {
+              console.error("Autopay failed:", e);
+              await db
+                .update(recurringCharges)
+                .set({ status: "failed", runAt: Date.now(), error: String(e) })
+                .where(eq(recurringCharges.id, charge.id));
+            }
+
+            if (!autopayExecuted) {
+              // Create an invoice for manual payment
+              const creator = await db
+                .select()
+                .from(users)
+                .where(eq(users.id, plan.creatorId))
+                .get();
+              const payerAddress = plan.payerAddress || (await db
+                .select()
+                .from(users)
+                .where(eq(users.id, plan.payerUserId || ""))
+                .get())?.evm_address || null;
+
+              const invoice = await db
+                .insert(hyperliquidInvoices)
+                .values({
+                  creatorId: creator!.id,
+                  payerAddress: payerAddress,
+                  token: plan.token,
+                  amount: plan.amount,
+                  description: `Recurring charge for plan ${plan.id}`,
+                })
+                .returning()
+                .get();
+
+              // payments insert is handled elsewhere for invoices; return invoice id for UI
+              return { charge, invoiceId: invoice.id };
+            }
+
+            return { charge, autopay: true };
+          } catch (error) {
+            console.error("Error running recurring plan:", error);
+            set.status = 500;
+            return { error: "Failed to run plan" };
+          }
+        },
+        { params: t.Object({ id: t.String() }) }
+      )
+
+      // ================================
+      // Pledge Campaigns & Pledges
+      // ================================
+      .post(
+        "/pledge-campaigns",
+        async ({ body, currentUser, set }) => {
+          try {
+            const me = await db
+              .select()
+              .from(users)
+              .where(eq(users.evm_address, currentUser!.walletAddress))
+              .get();
+            if (!me) {
+              set.status = 404;
+              return { error: "User not found" };
+            }
+            const campaign = await db
+              .insert(pledgeCampaigns)
+              .values({
+                creatorId: me.id,
+                name: body.name,
+                description: body.description ?? null,
+                goalToken: body.goalToken,
+                goalAmount: body.goalAmount,
+              })
+              .returning()
+              .get();
+            return campaign;
+          } catch (error) {
+            console.error("Error creating campaign:", error);
+            set.status = 500;
+            return { error: "Failed to create campaign" };
+          }
+        },
+        {
+          body: t.Object({
+            name: t.String(),
+            description: t.Optional(t.String()),
+            goalToken: t.String(),
+            goalAmount: t.String(),
+          }),
+        }
+      )
+      .get("/pledge-campaigns", async ({ currentUser, set }) => {
+        try {
+          const me = await db
+            .select()
+            .from(users)
+            .where(eq(users.evm_address, currentUser!.walletAddress))
+            .get();
+          if (!me) {
+            set.status = 404;
+            return { error: "User not found" };
+          }
+          const created = await db
+            .select()
+            .from(pledgeCampaigns)
+            .where(eq(pledgeCampaigns.creatorId, me.id));
+          return { created };
+        } catch (error) {
+          console.error("Error listing campaigns:", error);
+          set.status = 500;
+          return { error: "Failed to list campaigns" };
+        }
+      })
+      // Discover public (active) campaigns across all users
+      .get("/pledge-campaigns/discover", async ({ set }) => {
+        try {
+          const active = await db
+            .select()
+            .from(pledgeCampaigns)
+            .where(eq(pledgeCampaigns.status, "active"));
+          return { active };
+        } catch (error) {
+          console.error("Error discovering campaigns:", error);
+          set.status = 500;
+          return { error: "Failed to discover campaigns" };
+        }
+      })
+      .post(
+        "/pledges",
+        async ({ body, set }) => {
+          try {
+            const now = Date.now();
+            const nextRunAt = body.startAt ?? now;
+            const pledge = await db
+              .insert(pledges)
+              .values({
+                campaignId: body.campaignId,
+                pledgerUserId: body.pledgerUserId ?? null,
+                pledgerAddress: body.pledgerAddress?.toLowerCase() ?? null,
+                token: body.token,
+                amountPerCadence: body.amountPerCadence,
+                cadence: body.cadence,
+                autopayEnabled: body.autopayEnabled ?? true,
+                nextRunAt,
+              })
+              .returning()
+              .get();
+            return pledge;
+          } catch (error) {
+            console.error("Error creating pledge:", error);
+            set.status = 500;
+            return { error: "Failed to create pledge" };
+          }
+        },
+        {
+          body: t.Object({
+            campaignId: t.String(),
+            pledgerUserId: t.Optional(t.String()),
+            pledgerAddress: t.Optional(t.String()),
+            token: t.String(),
+            amountPerCadence: t.String(),
+            cadence: t.Enum({ daily: "daily", weekly: "weekly", monthly: "monthly" }),
+            startAt: t.Optional(t.Number()),
+            autopayEnabled: t.Optional(t.Boolean()),
+          }),
+        }
+      )
+      // List pledges where current user is pledger (by userId or address)
+      .get("/pledges", async ({ currentUser, set }) => {
+        try {
+          const me = await db
+            .select()
+            .from(users)
+            .where(eq(users.evm_address, currentUser!.walletAddress))
+            .get();
+          if (!me) {
+            set.status = 404;
+            return { error: "User not found" };
+          }
+
+          const myPledges = await db
+            .select()
+            .from(pledges)
+            .where(
+              or(
+                eq(pledges.pledgerUserId, me.id),
+                eq(pledges.pledgerAddress, currentUser!.walletAddress.toLowerCase())
+              )
+            );
+
+          return { pledges: myPledges };
+        } catch (error) {
+          console.error("Error listing pledges:", error);
+          set.status = 500;
+          return { error: "Failed to list pledges" };
+        }
+      })
+      .put(
+        "/pledge-contributions/:id/confirm",
+        async ({ params, body, set }) => {
+          try {
+            const contrib = await db
+              .select()
+              .from(pledgeContributions)
+              .where(eq(pledgeContributions.id, params.id))
+              .get();
+            if (!contrib) {
+              set.status = 404;
+              return { error: "Contribution not found" };
+            }
+
+            const campaign = await db
+              .select()
+              .from(pledgeCampaigns)
+              .where(eq(pledgeCampaigns.id, contrib.campaignId))
+              .get();
+            if (!campaign) {
+              set.status = 404;
+              return { error: "Campaign not found" };
+            }
+            const creator = await db
+              .select()
+              .from(users)
+              .where(eq(users.id, campaign.creatorId))
+              .get();
+            if (!creator?.evm_address) {
+              set.status = 500;
+              return { error: "Campaign creator missing address" };
+            }
+
+            // Validate tx
+            const tx = await infoClient.txDetails({ hash: body.txHash });
+            if (!tx || tx.error || tx.action.type !== "spotSend") {
+              set.status = 400;
+              return { error: "Invalid transaction" };
+            }
+            const action = tx.action as any;
+            if (action.destination?.toLowerCase() !== creator.evm_address.toLowerCase()) {
+              set.status = 400;
+              return { error: "Destination mismatch" };
+            }
+            if (action.token !== contrib.token) {
+              set.status = 400;
+              return { error: "Token mismatch" };
+            }
+            if (parseFloat(action.amount) !== parseFloat(contrib.amount)) {
+              set.status = 400;
+              return { error: "Amount mismatch" };
+            }
+
+            // store tx hash
+            const existing = await db
+              .select()
+              .from(txHashes)
+              .where(eq(txHashes.hash, body.txHash))
+              .get();
+            if (!existing) {
+              await db.insert(txHashes).values({ hash: body.txHash, metadata: tx });
+            }
+
+            await db
+              .update(pledgeContributions)
+              .set({ txHash: body.txHash })
+              .where(eq(pledgeContributions.id, contrib.id));
+
+            // normalized payment
+            await db.insert(payments).values({
+              type: "pledge",
+              sourceId: contrib.id,
+              creatorId: campaign.creatorId,
+              payerUserId: contrib.payerUserId ?? null,
+              payerAddress: tx.user?.toLowerCase() || contrib.fromAddress || null,
+              token: contrib.token,
+              amount: contrib.amount,
+              status: "paid",
+              txHash: body.txHash,
+              paidAt: Date.now(),
+            });
+
+            // Update campaign raised amount cache (best-effort)
+            const newRaised = (parseFloat(campaign.raisedAmount || "0") + parseFloat(contrib.amount)).toString();
+            await db
+              .update(pledgeCampaigns)
+              .set({ raisedAmount: newRaised })
+              .where(eq(pledgeCampaigns.id, campaign.id));
+
+            return { success: true };
+          } catch (error) {
+            console.error("Error confirming pledge contribution:", error);
+            set.status = 500;
+            return { error: "Failed to confirm contribution" };
+          }
+        },
+        {
+          params: t.Object({ id: t.String() }),
+          body: t.Object({ txHash: t.TemplateLiteral("0x${string}") }),
+        }
+      )
+      .post(
+        "/pledges/:id/pay",
+        async ({ params, set }) => {
+          try {
+            const pl = await db
+              .select()
+              .from(pledges)
+              .where(eq(pledges.id, params.id))
+              .get();
+            if (!pl) {
+              set.status = 404;
+              return { error: "Pledge not found" };
+            }
+            // Create a contribution record for manual payment (to be confirmed via txHash later)
+            const contribution = await db
+              .insert(pledgeContributions)
+              .values({
+                pledgeId: pl.id,
+                campaignId: pl.campaignId,
+                token: pl.token,
+                amount: pl.amountPerCadence,
+              })
+              .returning()
+              .get();
+            return contribution;
+          } catch (error) {
+            console.error("Error preparing pledge payment:", error);
+            set.status = 500;
+            return { error: "Failed to prepare pledge payment" };
+          }
+        },
+        { params: t.Object({ id: t.String() }) }
+      )
+
+      // ================================
+      // Donations
+      // ================================
+      .post(
+        "/donations/record",
+        async ({ body, set }) => {
+          try {
+            // This endpoint records a known donation by txHash; attribution/validation can be expanded
+            const creator = await db
+              .select()
+              .from(users)
+              .where(eq(users.evm_address, body.creatorAddress.toLowerCase() as `0x${string}`))
+              .get();
+            if (!creator) {
+              set.status = 404;
+              return { error: "Creator not found" };
+            }
+
+            // Prevent duplicate tx
+            const tx = await db.select().from(txHashes).where(eq(txHashes.hash, body.txHash)).get();
+            if (!tx) {
+              await db.insert(txHashes).values({ hash: body.txHash });
+            }
+
+            const donation = await db
+              .insert(donations)
+              .values({
+                creatorId: creator.id,
+                payerUserId: body.payerUserId ?? null,
+                fromAddress: body.fromAddress?.toLowerCase() ?? null,
+                token: body.token,
+                amount: body.amount,
+                txHash: body.txHash,
+                linkedInvoiceId: body.linkedInvoiceId ?? null,
+              })
+              .returning()
+              .get();
+
+            // normalized payment
+            await db.insert(payments).values({
+              type: "donation",
+              sourceId: donation.id,
+              creatorId: creator.id,
+              payerUserId: donation.payerUserId ?? null,
+              payerAddress: donation.fromAddress ?? null,
+              token: donation.token,
+              amount: donation.amount,
+              status: "paid",
+              txHash: donation.txHash ?? undefined,
+              paidAt: Date.now(),
+            });
+
+            return donation;
+          } catch (error) {
+            console.error("Error recording donation:", error);
+            set.status = 500;
+            return { error: "Failed to record donation" };
+          }
+        },
+        {
+          body: t.Object({
+            creatorAddress: t.TemplateLiteral("0x${string}"),
+            payerUserId: t.Optional(t.String()),
+            fromAddress: t.Optional(t.TemplateLiteral("0x${string}")),
+            token: t.String(),
+            amount: t.String(),
+            txHash: t.TemplateLiteral("0x${string}"),
+            linkedInvoiceId: t.Optional(t.String()),
+          }),
+        }
+      )
+      .get("/donations", async ({ currentUser, set }) => {
+        try {
+          const me = await db
+            .select()
+            .from(users)
+            .where(eq(users.evm_address, currentUser!.walletAddress))
+            .get();
+          if (!me) {
+            set.status = 404;
+            return { error: "User not found" };
+          }
+          const list = await db
+            .select()
+            .from(donations)
+            .where(eq(donations.creatorId, me.id));
+          return list;
+        } catch (error) {
+          console.error("Error listing donations:", error);
+          set.status = 500;
+          return { error: "Failed to list donations" };
+        }
+      })
+
+      // Payments listing (normalized)
+      .get("/payments", async ({ currentUser, set }) => {
+        try {
+          const me = await db
+            .select()
+            .from(users)
+            .where(eq(users.evm_address, currentUser!.walletAddress))
+            .get();
+          if (!me) {
+            set.status = 404;
+            return { error: "User not found" };
+          }
+          const asCreator = await db
+            .select()
+            .from(payments)
+            .where(eq(payments.creatorId, me.id));
+          const asPayer = await db
+            .select()
+            .from(payments)
+            .where(eq(payments.payerUserId, me.id));
+          return { asCreator, asPayer };
+        } catch (error) {
+          console.error("Error listing payments:", error);
+          set.status = 500;
+          return { error: "Failed to list payments" };
+        }
       })
       
       // NEW: Get all addresses associated with the authenticated user
