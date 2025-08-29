@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "createdAt": "2025-08-29T17:56:41.033Z",
+  "token": "USDC:0xeb62eee3685fc4c43992febcd9e75443",
+  "operator": {
+    "address": "0x79eE8E179B9d8115a5116Cc3a8B95f8d92F0A36B"
+  },
+  "creator": {
+    "address": "0xc0D9C85978112748f293E28E4a6C232bB2dF30f0"
+  },
+  "transfers": {
+    "invoice": {
+      "amount": "10",
+      "txHash": "0x95fde81ebe03289b9777041940be6e01120000045906476d39c693717d070286"
+    },
+    "donation": {
+      "amount": "1",
+      "txHash": "0x371717a47b5857cc3890041940be810110002f8a165b769edadfc2f73a5c31b6"
+    },
+    "recurring": {
+      "amount": "5",
+      "txHash": "0xb5d0ce51af5ee0fcb74a041940be8d011400e6374a51ffce599979a46e52bae7"
+    }
+  },
+  "pledgeWallet": {
+    "user": {
+      "address": "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c",
+      "privateKey": "0xc39103142d6888aafd21ac4c4df167ea25b19fc295c500b2c888c95f63e4e9ad"
+    },
+    "operator": {
+      "address": "0x1Dc104aA477F55608C8Bb32FEAFE5C497446A8e1",
+      "privateKey": "0x7dfcd96277af5834e89f4c1db984ac11a25d0778f363bd93c977b4951ed92a66"
+    },
+    "pledge": {
+      "address": "0x729EaCa4ff69a22A246d600fA8ABF80Aa5F3db87",
+      "privateKey": "0x48f3626df39718fbf61f4aa8d8839ec4529a5eda97f5b08daa65d21446d0a8fb"
+    },
+    "agent": {
+      "address": "0x2385726794e99007eC3789a465f018aC3B357FAD",
+      "privateKey": "0x387ef51563a8a501be5bb7905514163640b8647b620fe3c5a7e83916db2a9c2b"
+    }
+  }
+}

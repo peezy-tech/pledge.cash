@@ -132,12 +132,11 @@ export async function getUserAddresses(userId: string): Promise<{
  */
 export function isOperatorAddress(address: string): boolean {
   if (!process.env.OPERATOR_PRIVATE_KEY) return false;
-  const operatorPrivateKey = getAddress(process.env.OPERATOR_PRIVATE_KEY);
-  if (!operatorPrivateKey) return false;
+  const operatorPrivateKey = process.env.OPERATOR_PRIVATE_KEY as `0x${string}`;
   const operatorAddress = privateKeyToAccount(operatorPrivateKey).address;
   if (!operatorAddress) return false;
-  
-  return address === operatorAddress;
+
+  return address.toLowerCase() === operatorAddress.toLowerCase();
 }
 
 /**

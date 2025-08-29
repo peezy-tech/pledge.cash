@@ -6,6 +6,7 @@ import {
   recurringPlans,
   recurringCharges,
   payments,
+  txHashes,
 } from "@repo/db/schema";
 import { eq } from "drizzle-orm";
 import { privateKeyToAccount } from "viem/accounts";
@@ -113,6 +114,18 @@ export function startPaymentsProcessor() {
                 )
                 .sort((a: any, b: any) => b.time - a.time)[0];
 
+              // Ensure tx hash stored for FK
+              if (tx?.hash) {
+                const existingTx = await db
+                  .select()
+                  .from(txHashes)
+                  .where(eq(txHashes.hash, tx.hash))
+                  .get();
+                if (!existingTx) {
+                  await db.insert(txHashes).values({ hash: tx.hash, metadata: tx });
+                }
+              }
+
               await db
                 .update(recurringCharges)
                 .set({ status: "paid", runAt: Date.now(), txHash: tx?.hash })
@@ -156,4 +169,3 @@ export function startPaymentsProcessor() {
   console.log("Payments processor started (recurring every 60s)");
   return () => clearInterval(interval);
 }
-

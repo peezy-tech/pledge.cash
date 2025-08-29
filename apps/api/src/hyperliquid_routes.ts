@@ -16,6 +16,7 @@ import { executeHooks } from "./execute_hooks";
 import { auth_routes } from "./auth";
 import { getUserAddresses, resolvePaymentWithEdgeCases } from "./address_resolver";
 import { getWebSocketClient } from "./websocket_client";
+import { getAddress } from "viem";
 import {
   recurringPlans,
   recurringCharges,
@@ -105,6 +106,20 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
       }),
     }
   )
+  // Public discover endpoint for active pledge campaigns
+  .get("/pledge-campaigns/discover", async ({ set }) => {
+    try {
+      const active = await db
+        .select()
+        .from(pledgeCampaigns)
+        .where(eq(pledgeCampaigns.status, "active"));
+      return { active };
+    } catch (error) {
+      console.error("Error discovering campaigns:", error);
+      set.status = 500;
+      return { error: "Failed to discover campaigns" };
+    }
+  })
   // Confirm that an invoice has been paid
   .put(
     "/invoices/:id/confirm",
@@ -1039,6 +1054,18 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
                     )
                     .sort((a: any, b: any) => b.time - a.time)[0];
 
+                  // Ensure tx hash is stored for FK relations
+                  if (tx?.hash) {
+                    const existingTx = await db
+                      .select()
+                      .from(txHashes)
+                      .where(eq(txHashes.hash, tx.hash))
+                      .get();
+                    if (!existingTx) {
+                      await db.insert(txHashes).values({ hash: tx.hash, metadata: tx });
+                    }
+                  }
+
                   await db
                     .update(recurringCharges)
                     .set({
@@ -1181,20 +1208,6 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
           console.error("Error listing campaigns:", error);
           set.status = 500;
           return { error: "Failed to list campaigns" };
-        }
-      })
-      // Discover public (active) campaigns across all users
-      .get("/pledge-campaigns/discover", async ({ set }) => {
-        try {
-          const active = await db
-            .select()
-            .from(pledgeCampaigns)
-            .where(eq(pledgeCampaigns.status, "active"));
-          return { active };
-        } catch (error) {
-          console.error("Error discovering campaigns:", error);
-          set.status = 500;
-          return { error: "Failed to discover campaigns" };
         }
       })
       .post(
@@ -1410,10 +1423,11 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
         async ({ body, set }) => {
           try {
             // This endpoint records a known donation by txHash; attribution/validation can be expanded
+            const creatorAddressNormalized = getAddress(body.creatorAddress as `0x${string}`);
             const creator = await db
               .select()
               .from(users)
-              .where(eq(users.evm_address, body.creatorAddress.toLowerCase() as `0x${string}`))
+              .where(eq(users.evm_address, creatorAddressNormalized as `0x${string}`))
               .get();
             if (!creator) {
               set.status = 404;
