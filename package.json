@@ -8,7 +8,11 @@
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "docker:build": "docker build -f apps/api/Dockerfile -t hypstudio  .",
     "docker:tag": "docker tag hypstudio itspeezy/hypstudio:latest",
-    "docker:push": "docker push itspeezy/hypstudio:latest"
+    "docker:push": "docker push itspeezy/hypstudio:latest",
+    "db:generate": "cd packages/db && bun db:generate",
+    "db:migrate": "cd packages/db && bun db:migrate",
+    "db:studio": "cd packages/db && bun db:studio",
+    "db:push": "cd packages/db && bun db:push"
   },
   "devDependencies": {
     "prettier": "^3.4.2",

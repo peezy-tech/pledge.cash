@@ -275,7 +275,6 @@ export const hyperliquidRoutes = new Elysia({ prefix: "/hyperliquid" })
       .get("/protected/user-profile", ({ currentUser }) => {
         return { user: currentUser };
       })
-
       .post(
         "/invoices",
         async ({ body, currentUser, set }) => {
