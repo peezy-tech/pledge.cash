@@ -40,10 +40,17 @@ type Cache = {
   token: string;
   operator: { address: Address };
   creator: { address: Address; privateKey?: `0x${string}` };
-  transfers: {
-    invoice: { amount: string; txHash: Address };
-    donation: { amount: string; txHash: Address };
-    recurring: { amount: string; txHash: Address };
+  // Canonical single transfers kept for backward compatibility
+  transfers?: {
+    invoice?: { amount: string; txHash: Address };
+    donation?: { amount: string; txHash: Address };
+    recurring?: { amount: string; txHash: Address };
+  };
+  // New: history arrays appended by update_cache_from_db.ts
+  transfersHistory?: {
+    invoices?: Array<{ amount: string; txHash: Address }>;
+    donations?: Array<{ amount: string; txHash: Address }>;
+    recurrings?: Array<{ amount: string; txHash: Address }>;
   };
   pledgeWallet: {
     user: { address: Address; privateKey: `0x${string}` };
@@ -169,24 +176,38 @@ async function validateCache(cache: Cache) {
     }
   };
 
-  await check("invoice", cache.transfers.invoice.txHash, {
-    user: cache.operator.address,
-    destination: cache.creator.address,
-    token: cache.token,
-    amount: cache.transfers.invoice.amount,
-  });
-  await check("donation", cache.transfers.donation.txHash, {
-    user: cache.operator.address,
-    destination: cache.creator.address,
-    token: cache.token,
-    amount: cache.transfers.donation.amount,
-  });
-  await check("recurring", cache.transfers.recurring.txHash, {
-    user: cache.operator.address,
-    destination: cache.creator.address,
-    token: cache.token,
-    amount: cache.transfers.recurring.amount,
-  });
+  const invoices = cache.transfersHistory?.invoices || [];
+  const donations = cache.transfersHistory?.donations || [];
+  const recurrings = cache.transfersHistory?.recurrings || [];
+
+  if (invoices.length === 0 && donations.length === 0 && recurrings.length === 0) {
+    throw new Error("Cache has no transfersHistory entries to validate");
+  }
+
+  for (const [idx, inv] of invoices.entries()) {
+    await check(`invoice[${idx}]`, inv.txHash, {
+      user: cache.operator.address,
+      destination: cache.creator.address,
+      token: cache.token,
+      amount: inv.amount,
+    });
+  }
+  for (const [idx, d] of donations.entries()) {
+    await check(`donation[${idx}]`, d.txHash, {
+      user: cache.operator.address,
+      destination: cache.creator.address,
+      token: cache.token,
+      amount: d.amount,
+    });
+  }
+  for (const [idx, r] of recurrings.entries()) {
+    await check(`recurring[${idx}]`, r.txHash, {
+      user: cache.operator.address,
+      destination: cache.creator.address,
+      token: cache.token,
+      amount: r.amount,
+    });
+  }
 }
 
 async function seedFromCache(cache: Cache) {
@@ -198,122 +219,134 @@ async function seedFromCache(cache: Cache) {
   const creatorUser = await getOrCreateUserByAddress(cache.creator.address, "Creator");
   const pledgeUser = await getOrCreateUserByAddress(cache.pledgeWallet.user.address, "Pledge User");
 
+  const invoices = cache.transfersHistory?.invoices || [];
+  const donations = cache.transfersHistory?.donations || [];
+  const recurrings = cache.transfersHistory?.recurrings || [];
+  if (invoices.length === 0 && donations.length === 0 && recurrings.length === 0) {
+    throw new Error("Cache has no transfersHistory entries to seed");
+  }
+
   // tx hashes
-  const hashes: Address[] = [
-    cache.transfers.invoice.txHash,
-    cache.transfers.donation.txHash,
-    cache.transfers.recurring.txHash,
-  ];
-  for (const h of hashes) {
+  const hashSet = new Set<Address>();
+  for (const x of invoices) hashSet.add(x.txHash);
+  for (const x of donations) hashSet.add(x.txHash);
+  for (const x of recurrings) hashSet.add(x.txHash);
+  for (const h of hashSet) {
     const d = await infoClient.txDetails({ hash: h });
     await db.insert(schema.txHashes).values({ hash: h, metadata: d }).onConflictDoNothing?.();
   }
 
-  // Invoice (paid)
-  const invoice = await db
-    .insert(schema.hyperliquidInvoices)
-    .values({
+  // Invoices (paid)
+  for (const inv of invoices) {
+    const invoiceRow = await db
+      .insert(schema.hyperliquidInvoices)
+      .values({
+        creatorId: creatorUser.id,
+        payerUserId: operatorUser.id,
+        payerAddress: cache.operator.address,
+        token: cache.token,
+        amount: inv.amount,
+        description: "On-chain seeded invoice",
+        status: "paid",
+        txHash: inv.txHash,
+        paidAt: Date.now(),
+        actualPayerAddress: cache.operator.address,
+        paymentType: "personal",
+      })
+      .returning()
+      .get();
+
+    await db.insert(schema.payments).values({
+      type: "invoice",
+      sourceId: invoiceRow.id,
       creatorId: creatorUser.id,
       payerUserId: operatorUser.id,
       payerAddress: cache.operator.address,
       token: cache.token,
-      amount: cache.transfers.invoice.amount,
-      description: "On-chain seeded invoice",
+      amount: inv.amount,
       status: "paid",
-      txHash: cache.transfers.invoice.txHash,
+      txHash: inv.txHash,
       paidAt: Date.now(),
-      actualPayerAddress: cache.operator.address,
-      paymentType: "personal",
-    })
-    .returning()
-    .get();
-
-  await db.insert(schema.payments).values({
-    type: "invoice",
-    sourceId: invoice.id,
-    creatorId: creatorUser.id,
-    payerUserId: operatorUser.id,
-    payerAddress: cache.operator.address,
-    token: cache.token,
-    amount: cache.transfers.invoice.amount,
-    status: "paid",
-    txHash: cache.transfers.invoice.txHash,
-    paidAt: Date.now(),
-    metadata: { via: "seed_onchain_cache", context: "invoice" },
-  });
+      metadata: { via: "seed_onchain_cache", context: "invoice" },
+    });
+  }
 
   // Donation
-  const donation = await db
-    .insert(schema.donations)
-    .values({
-      creatorId: creatorUser.id,
-      payerUserId: operatorUser.id,
-      fromAddress: cache.operator.address,
-      token: cache.token,
-      amount: cache.transfers.donation.amount,
-      txHash: cache.transfers.donation.txHash,
-    })
-    .returning()
-    .get();
+  for (const d of donations) {
+    const donationRow = await db
+      .insert(schema.donations)
+      .values({
+        creatorId: creatorUser.id,
+        payerUserId: operatorUser.id,
+        fromAddress: cache.operator.address,
+        token: cache.token,
+        amount: d.amount,
+        txHash: d.txHash,
+      })
+      .returning()
+      .get();
 
-  await db.insert(schema.payments).values({
-    type: "donation",
-    sourceId: donation.id,
-    creatorId: creatorUser.id,
-    payerUserId: operatorUser.id,
-    payerAddress: cache.operator.address,
-    token: cache.token,
-    amount: cache.transfers.donation.amount,
-    status: "paid",
-    txHash: cache.transfers.donation.txHash,
-    paidAt: Date.now(),
-    metadata: { via: "seed_onchain_cache", context: "donation" },
-  });
-
-  // Recurring
-  const plan = await db
-    .insert(schema.recurringPlans)
-    .values({
+    await db.insert(schema.payments).values({
+      type: "donation",
+      sourceId: donationRow.id,
       creatorId: creatorUser.id,
       payerUserId: operatorUser.id,
       payerAddress: cache.operator.address,
       token: cache.token,
-      amount: cache.transfers.recurring.amount,
-      cadence: "monthly",
-      nextRunAt: Date.now(),
-      autopayEnabled: false,
-      status: "active",
-    })
-    .returning()
-    .get();
-
-  const charge = await db
-    .insert(schema.recurringCharges)
-    .values({
-      planId: plan.id,
-      token: cache.token,
-      amount: cache.transfers.recurring.amount,
-      dueAt: Date.now(),
-      runAt: Date.now(),
+      amount: d.amount,
       status: "paid",
-      txHash: cache.transfers.recurring.txHash,
-    })
-    .returning()
-    .get();
+      txHash: d.txHash,
+      paidAt: Date.now(),
+      metadata: { via: "seed_onchain_cache", context: "donation" },
+    });
+  }
 
-  await db.insert(schema.payments).values({
-    type: "recurring",
-    sourceId: charge.id,
-    creatorId: creatorUser.id,
-    payerUserId: operatorUser.id,
-    payerAddress: cache.operator.address,
-    token: cache.token,
-    amount: cache.transfers.recurring.amount,
-    status: "paid",
-    txHash: cache.transfers.recurring.txHash,
-    paidAt: Date.now(),
-    metadata: { via: "seed_onchain_cache", context: "recurring" },
-  });
+  // Recurring
+  for (const r of recurrings) {
+    const plan = await db
+      .insert(schema.recurringPlans)
+      .values({
+        creatorId: creatorUser.id,
+        payerUserId: operatorUser.id,
+        payerAddress: cache.operator.address,
+        token: cache.token,
+        amount: r.amount,
+        cadence: "monthly",
+        nextRunAt: Date.now(),
+        autopayEnabled: false,
+        status: "active",
+      })
+      .returning()
+      .get();
+
+    const charge = await db
+      .insert(schema.recurringCharges)
+      .values({
+        planId: plan.id,
+        token: cache.token,
+        amount: r.amount,
+        dueAt: Date.now(),
+        runAt: Date.now(),
+        status: "paid",
+        txHash: r.txHash,
+      })
+      .returning()
+      .get();
+
+    await db.insert(schema.payments).values({
+      type: "recurring",
+      sourceId: charge.id,
+      creatorId: creatorUser.id,
+      payerUserId: operatorUser.id,
+      payerAddress: cache.operator.address,
+      token: cache.token,
+      amount: r.amount,
+      status: "paid",
+      txHash: r.txHash,
+      paidAt: Date.now(),
+      metadata: { via: "seed_onchain_cache", context: "recurring" },
+    });
+  }
 
   // Pledge wallet + agent wallet
   const pw = await db
@@ -633,6 +666,11 @@ Assumptions: OPERATOR_PRIVATE_KEY is the only funded key.`);
       invoice: { amount: invoiceAmount, txHash: invTx.hash as Address },
       donation: { amount: donationAmount, txHash: donationTx.hash as Address },
       recurring: { amount: recurringAmount, txHash: chargeTx.hash as Address },
+    },
+    transfersHistory: {
+      invoices: [{ amount: invoiceAmount, txHash: invTx.hash as Address }],
+      donations: [{ amount: donationAmount, txHash: donationTx.hash as Address }],
+      recurrings: [{ amount: recurringAmount, txHash: chargeTx.hash as Address }],
     },
     pledgeWallet: {
       user: { address: pledgeUser.address as Address, privateKey: pledgeUserPk },

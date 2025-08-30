@@ -27,6 +27,12 @@ type Cache = {
     donation?: { amount: string; txHash: Address };
     recurring?: { amount: string; txHash: Address };
   };
+  // New: keep a growing list of discovered transactions instead of replacing
+  transfersHistory?: {
+    invoices?: Array<{ amount: string; txHash: Address }>;
+    donations?: Array<{ amount: string; txHash: Address }>;
+    recurrings?: Array<{ amount: string; txHash: Address }>;
+  };
   pledgeWallet?: {
     user?: { address: Address; privateKey?: `0x${string}` };
     operator?: { address: Address; privateKey?: `0x${string}` };
@@ -83,6 +89,11 @@ async function main() {
     .filter((i) => i.status === "paid" && i.txHash)
     .sort((a, b) => (b.paidAt ?? 0) - (a.paidAt ?? 0));
   let chosenInvoice: typeof paidInvoices[number] | undefined;
+  // ensure history containers exist
+  cache.transfersHistory = cache.transfersHistory ?? {};
+  cache.transfersHistory.invoices = cache.transfersHistory.invoices ?? [];
+  const hasInvoiceInHistory = (txHash: string) =>
+    cache.transfersHistory!.invoices!.some((x) => x.txHash.toLowerCase() === (txHash || "").toLowerCase());
   for (const inv of paidInvoices) {
     const creatorAddr = userById.get(inv.creatorId)?.evm_address as Address | undefined;
     if (!creatorAddr) continue;
@@ -92,14 +103,19 @@ async function main() {
       amount: inv.amount,
       user: operatorAddress, // if available
     });
-    if (ok) {
-      chosenInvoice = inv;
+    if (!ok) continue;
+    // Set the first valid invoice as the canonical one only if missing
+    if (!cache.transfers?.invoice) {
+      chosenInvoice = chosenInvoice || inv;
       cache.creator = cache.creator ?? { address: creatorAddr };
       cache.creator.address = creatorAddr;
       cache.transfers = cache.transfers ?? {};
       cache.transfers.invoice = { amount: inv.amount, txHash: inv.txHash as Address };
       cache.token = cache.token ?? inv.token;
-      break;
+    }
+    // Append to history if not present
+    if (inv.txHash && !hasInvoiceInHistory(inv.txHash)) {
+      cache.transfersHistory.invoices.push({ amount: inv.amount, txHash: inv.txHash as Address });
     }
   }
 
@@ -108,6 +124,9 @@ async function main() {
   const paidDonations = donations
     .filter((d) => !!d.txHash)
     .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  cache.transfersHistory.donations = cache.transfersHistory.donations ?? [];
+  const hasDonationInHistory = (txHash: string) =>
+    cache.transfersHistory!.donations!.some((x) => x.txHash.toLowerCase() === (txHash || "").toLowerCase());
   for (const d of paidDonations) {
     const creatorAddr = userById.get(d.creatorId)?.evm_address as Address | undefined;
     if (!creatorAddr || !d.txHash) continue;
@@ -117,11 +136,15 @@ async function main() {
       amount: d.amount,
       user: operatorAddress,
     });
-    if (ok) {
+    if (!ok) continue;
+    // Only set canonical if missing
+    if (!cache.transfers?.donation) {
       cache.transfers = cache.transfers ?? {};
       cache.transfers.donation = { amount: d.amount, txHash: d.txHash as Address };
       if (!cache.token) cache.token = d.token;
-      break;
+    }
+    if (!hasDonationInHistory(d.txHash)) {
+      cache.transfersHistory.donations.push({ amount: d.amount, txHash: d.txHash as Address });
     }
   }
 
@@ -132,6 +155,9 @@ async function main() {
   const paidCharges = charges
     .filter((c) => c.status === "paid" && c.txHash)
     .sort((a, b) => (b.runAt ?? 0) - (a.runAt ?? 0));
+  cache.transfersHistory.recurrings = cache.transfersHistory.recurrings ?? [];
+  const hasRecurringInHistory = (txHash: string) =>
+    cache.transfersHistory!.recurrings!.some((x) => x.txHash.toLowerCase() === (txHash || "").toLowerCase());
   for (const c of paidCharges) {
     const plan = plansById.get(c.planId);
     if (!plan || !c.txHash) continue;
@@ -143,11 +169,14 @@ async function main() {
       amount: c.amount,
       user: operatorAddress,
     });
-    if (ok) {
+    if (!ok) continue;
+    if (!cache.transfers?.recurring) {
       cache.transfers = cache.transfers ?? {};
       cache.transfers.recurring = { amount: c.amount, txHash: c.txHash as Address };
       if (!cache.token) cache.token = c.token;
-      break;
+    }
+    if (!hasRecurringInHistory(c.txHash)) {
+      cache.transfersHistory.recurrings.push({ amount: c.amount, txHash: c.txHash as Address });
     }
   }
 
@@ -191,4 +220,3 @@ main().catch((e) => {
   console.error("❌ Failed to update cache:", e);
   process.exit(1);
 });
-
