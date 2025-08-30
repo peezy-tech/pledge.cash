@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "createdAt": "2025-08-29T17:56:41.033Z",
+  "createdAt": "2025-08-30T02:34:23.401Z",
   "token": "USDC:0xeb62eee3685fc4c43992febcd9e75443",
   "operator": {
     "address": "0x79eE8E179B9d8115a5116Cc3a8B95f8d92F0A36B"
@@ -39,5 +39,33 @@
       "address": "0x2385726794e99007eC3789a465f018aC3B357FAD",
       "privateKey": "0x387ef51563a8a501be5bb7905514163640b8647b620fe3c5a7e83916db2a9c2b"
     }
+  },
+  "transfersHistory": {
+    "invoices": [
+      {
+        "amount": "0.5",
+        "txHash": "0x974bdc073d82699c98c504194153f2013600f3ecd885886e3b148759fc864387"
+      },
+      {
+        "amount": "10",
+        "txHash": "0x95fde81ebe03289b9777041940be6e01120000045906476d39c693717d070286"
+      }
+    ],
+    "donations": [
+      {
+        "amount": "0.1",
+        "txHash": "0x5e54a740751c72c45fce0419415419011400bf26101f9196021d529334104caf"
+      },
+      {
+        "amount": "1",
+        "txHash": "0x371717a47b5857cc3890041940be810110002f8a165b769edadfc2f73a5c31b6"
+      }
+    ],
+    "recurrings": [
+      {
+        "amount": "5",
+        "txHash": "0xb5d0ce51af5ee0fcb74a041940be8d011400e6374a51ffce599979a46e52bae7"
+      }
+    ]
   }
 }
