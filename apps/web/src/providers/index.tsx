@@ -4,6 +4,7 @@ import * as TanStackQueryProvider from './QueryClientProvider'
 import { ThemeProvider } from './ThemeProvider'
 import { AuthProvider } from './AuthProvider'
 import { router } from '@/pages/router'
+import { ConvexAppProvider } from './ConvexProvider'
 
 import { queryClient } from './QueryClientProvider'
 import { EvmProvider } from './EvmProvider'
@@ -19,17 +20,19 @@ export function getContext() {
 export function Providers() {
   return (
     <TanStackQueryProvider.Provider>
-      <EvmProvider>
-        <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
-          <AuthProvider>
-            <HyperliquidProvider>
-              <PledgeWalletProvider>
-                <RouterProvider router={router} />
-              </PledgeWalletProvider>
-            </HyperliquidProvider>
-          </AuthProvider>
-        </ThemeProvider>
-      </EvmProvider>
+      <ConvexAppProvider>
+        <EvmProvider>
+          <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
+            <AuthProvider>
+              <HyperliquidProvider>
+                <PledgeWalletProvider>
+                  <RouterProvider router={router} />
+                </PledgeWalletProvider>
+              </HyperliquidProvider>
+            </AuthProvider>
+          </ThemeProvider>
+        </EvmProvider>
+      </ConvexAppProvider>
     </TanStackQueryProvider.Provider>
   )
 }
