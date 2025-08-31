@@ -26,12 +26,11 @@ function PaymentList({ title, items }: { title: string; items: any[] }) {
 }
 
 function PaymentsPageComponent() {
-  const { data, isLoading, error } = usePayments()
+  const { data, isLoading } = usePayments()
   const convex = useConvexLatestPayments(10)
   return (
     <PageLayout title="Payments Overview">
       {isLoading && <div>Loading...</div>}
-      {error && <div className="text-red-500">{(error as any).message}</div>}
       <div className="grid md:grid-cols-3 gap-6">
         <PaymentList title="As Creator" items={data?.asCreator || []} />
         <PaymentList title="As Payer" items={data?.asPayer || []} />

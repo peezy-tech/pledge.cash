@@ -25,9 +25,11 @@ export function useConvexConfirmInvoice() {
 export function useConvexCreateInvoice() {
   const mut = useConvexMutation(api.invoices.create)
   const { user } = useConvexUser()
+  // Ensure callers cannot override creatorId; it is always derived from the authenticated user
   return async (args: { payerUserId?: string; payerAddress?: string; token: string; amount: string; description?: string }) => {
     if (!user) throw new Error('Not authenticated')
-    return mut({ creatorId: user._id, ...args } as any)
+    // Place creatorId after spread so any accidental field in args won't override it
+    return mut({ ...args, creatorId: user._id } as any)
   }
 }
 

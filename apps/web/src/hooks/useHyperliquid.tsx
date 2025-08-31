@@ -86,7 +86,8 @@ export function useCreateInvoiceMutation() {
   const create = useConvexCreateInvoice()
   return useMutation({
     mutationFn: async (invoiceData: { payerAddress?: string; token: string; amount: string; description?: string }) =>
-      create({ creatorId: undefined as any, payerUserId: undefined, payerAddress: invoiceData.payerAddress, token: invoiceData.token, amount: invoiceData.amount, description: invoiceData.description } as any),
+      // Do not pass creatorId; the wrapper derives it from the authenticated user
+      create({ payerAddress: invoiceData.payerAddress, token: invoiceData.token, amount: invoiceData.amount, description: invoiceData.description } as any),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invoices'] }),
   })
 }
