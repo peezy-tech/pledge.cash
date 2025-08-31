@@ -15,7 +15,7 @@
     "bs58": "^6.0.0",
     "elysia": "latest",
     "tweetnacl": "^1.0.3",
-    "viem": "^2.31.4"
+    "viem": "2.36.0"
   },
   "devDependencies": {
     "bun-types": "latest"

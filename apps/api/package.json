@@ -24,7 +24,7 @@
     "jsonwebtoken": "^9.0.2",
     "siwe": "^3.0.0",
     "tweetnacl": "^1.0.3",
-    "viem": "^2.31.4"
+    "viem": "2.36.0"
   },
   "devDependencies": {
     "@elysiajs/eden": "^1.3.2",

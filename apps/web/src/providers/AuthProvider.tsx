@@ -135,6 +135,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = useCallback(async () => {
     if (!isConnected || !address || !chain) {
+      console.log({ isConnected, address, chain });
       throw new Error('Wallet not connected, address or chainId not available.');
     }
 

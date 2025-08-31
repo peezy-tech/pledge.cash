@@ -18,8 +18,9 @@ export const getOperator = query({
 });
 
 export const getByUserAddress = query({
-  args: { userAddress: v.string() },
+  args: { userAddress: v.optional(v.string()) },
   handler: async (ctx, { userAddress }) => {
+    if (!userAddress) return null;
     return await ctx.db
       .query("pledgeWalletAccounts")
       .withIndex("by_user_address", (q) => q.eq("userAddress", userAddress))
