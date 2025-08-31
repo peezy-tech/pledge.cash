@@ -53,11 +53,20 @@ function parseArgs(argv: string[]): Args {
 
 function parseOwnerRepoFromRemoteUrl(url: string): string | null {
   // Supports:
-  //  - https://github.com/owner/repo.git
+  //  - https://github.com/owner/repo.git (repo may contain dots)
   //  - git@github.com:owner/repo.git
   //  - https://github.com/owner/repo
-  const httpsMatch = url.match(/github\.com[/:]([^/]+)\/([^/.]+)(?:\.git)?$/);
-  if (httpsMatch) return `${httpsMatch[1]}/${httpsMatch[2]}`;
+  try {
+    if (url.startsWith("http")) {
+      const u = new URL(url);
+      const parts = u.pathname.replace(/^\/+/, "").replace(/\.git$/, "").split("/");
+      if (parts.length >= 2) return `${parts[0]}/${parts[1]}`;
+    }
+  } catch {}
+  const scp = url.match(/github\.com:([^/]+)\/(.+?)(?:\.git)?$/);
+  if (scp) return `${scp[1]}/${scp[2]}`;
+  const generic = url.match(/github\.com[/:]([^/]+)\/(.+?)(?:\.git)?$/);
+  if (generic) return `${generic[1]}/${generic[2]}`;
   return null;
 }
 
@@ -153,4 +162,3 @@ main().catch((err) => {
   console.error("push-pr failed:", err?.message || err);
   process.exit(1);
 });
-

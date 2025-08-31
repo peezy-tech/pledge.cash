@@ -2,7 +2,7 @@
 import { query, mutation, action } from "./_generated/server";
 import { api } from "./_generated/api";
 import { v } from "convex/values";
-import { infoClient, operatorAccount, operatorExchangeClient, usdcTokenString } from "./lib/hyperliquid";
+import { infoClient, operatorAccount, operatorExchangeClient, usdcTokenString, transport, isTestnet } from "./lib/hyperliquid";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
 // NOTE: These functions provide a Convex-based surface for pledge wallet
@@ -76,11 +76,11 @@ export const init = action({
     await operatorClient.spotSend({ destination: pledgeWalletAccount.address, token, amount: "0" });
 
     // Approve agent and convert to multisig using pledge wallet account
-    const { ExchangeClient, HttpTransport } = await import("@nktkas/hyperliquid");
+    const { ExchangeClient } = await import("@nktkas/hyperliquid");
     const pledgeClient = new ExchangeClient({
-      transport: new HttpTransport({ isTestnet: true }),
+      transport: transport(),
       wallet: pledgeWalletAccount,
-      isTestnet: true,
+      isTestnet: isTestnet(),
     });
     await pledgeClient.approveAgent({ agentAddress: agentWalletAddress as `0x${string}`, agentName: "Frontend" });
     await pledgeClient.convertToMultiSigUser({ authorizedUsers: [userAddress as `0x${string}`, userOperatorWallet.address as `0x${string}`], threshold: 1 });

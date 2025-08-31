@@ -21,8 +21,20 @@ type ThreadComment = {
 };
 
 function parseOwnerRepoFromRemoteUrl(url: string): string | null {
-  const httpsMatch = url.match(/github\.com[/:]([^/]+)\/([^/.]+)(?:\.git)?$/);
-  if (httpsMatch) return `${httpsMatch[1]}/${httpsMatch[2]}`;
+  try {
+    if (url.startsWith("http")) {
+      const u = new URL(url);
+      // pathname like "/owner/repo.git" or "/owner/repo"
+      const parts = u.pathname.replace(/^\/+/, "").replace(/\.git$/, "").split("/");
+      if (parts.length >= 2) return `${parts[0]}/${parts[1]}`;
+    }
+  } catch {}
+  // git@github.com:owner/repo.git OR github.com:owner/repo
+  const scp = url.match(/github\.com:([^/]+)\/(.+?)(?:\.git)?$/);
+  if (scp) return `${scp[1]}/${scp[2]}`;
+  // fallback broad regex
+  const generic = url.match(/github\.com[/:]([^/]+)\/(.+?)(?:\.git)?$/);
+  if (generic) return `${generic[1]}/${generic[2]}`;
   return null;
 }
 
@@ -57,10 +69,10 @@ async function getPrNumber(repo: string, branch: string): Promise<number> {
 
 async function fetchUnresolvedComments(repo: string, prNumber: number): Promise<ThreadComment[]> {
   const query = `
-    query($owner: String!, $name: String!, $number: Int!, $isResolved: Boolean!) {
+    query($owner: String!, $name: String!, $number: Int!) {
       repository(owner: $owner, name: $name) {
         pullRequest(number: $number) {
-          reviewThreads(first: 100, isResolved: $isResolved) {
+          reviewThreads(first: 100) {
             nodes {
               isResolved
               comments(first: 100) {
@@ -74,10 +86,11 @@ async function fetchUnresolvedComments(repo: string, prNumber: number): Promise<
   `;
 
   const [owner, name] = repo.split("/");
-  const res = await $`gh api graphql -f query=${query} -F owner=${owner} -F name=${name} -F number=${prNumber} -F isResolved=false`.json();
+  const res = await $`gh api graphql -f query=${query} -F owner=${owner} -F name=${name} -F number=${prNumber}`.json();
   const nodes = res?.data?.repository?.pullRequest?.reviewThreads?.nodes || [];
   const comments: ThreadComment[] = [];
   for (const t of nodes) {
+    if (t?.isResolved) continue; // only unresolved
     if (t?.comments?.nodes) {
       for (const c of t.comments.nodes) {
         comments.push({ id: c.id, body: c.body, url: c.url, path: c.path, author: c.author });
@@ -140,5 +153,6 @@ async function main() {
 
 main().catch((err) => {
   console.error("fix-pr-comments failed:", err?.message || err);
+  console.error(err)
   process.exit(1);
 });
