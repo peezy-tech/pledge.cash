@@ -21,8 +21,9 @@ export const listLatest = query({
 });
 
 export const listSummaryForUser = query({
-  args: { userId: v.id("users") },
+  args: { userId: v.optional(v.id("users")) },
   handler: async (ctx, { userId }) => {
+    if (!userId) return { asCreator: [], asPayer: [] };
     const asCreator = await ctx.db
       .query("payments")
       .withIndex("by_creator", (q) => q.eq("creatorId", userId))
@@ -34,4 +35,3 @@ export const listSummaryForUser = query({
     return { asCreator, asPayer };
   },
 });
-

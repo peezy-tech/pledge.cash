@@ -52,6 +52,9 @@ export const init = action({
       return { success: false, error: "user_mismatch" };
     }
 
+    // Ensure Convex user exists for this address (idempotent)
+    await ctx.runMutation(api.users.ensure, { evmAddress: userAddress });
+
     // Ensure no existing pledge wallet
     const existing = await ctx.runQuery(api.pledgeWallet.getByUserAddress, { userAddress });
     if (existing) return { success: false, error: "already_initialized" };
@@ -73,8 +76,8 @@ export const init = action({
 
     // Seed/register via operator exchange client (0 USDC sends)
     const operatorClient = operatorExchangeClient();
-    await operatorClient.spotSend({ destination: userOperatorWallet.address, token, amount: "0" });
-    await operatorClient.spotSend({ destination: pledgeWalletAccount.address, token, amount: "0" });
+    await operatorClient.spotSend({ destination: userOperatorWallet.address, token, amount: "1" });
+    await operatorClient.spotSend({ destination: pledgeWalletAccount.address, token, amount: "1" });
 
     // Approve agent and convert to multisig using pledge wallet account
     const { ExchangeClient } = await import("@nktkas/hyperliquid");

@@ -61,20 +61,31 @@ export const updatePlan = mutation({
 });
 
 export const listPlansForUser = query({
-  args: { userId: v.id("users"), walletAddress: v.string() },
+  args: { userId: v.optional(v.id("users")), walletAddress: v.optional(v.string()) },
   handler: async (ctx, { userId, walletAddress }) => {
-    const created = await ctx.db
-      .query("recurringPlans")
-      .withIndex("by_creator", (q) => q.eq("creatorId", userId))
-      .collect();
-    const asPayerUser = await ctx.db
-      .query("recurringPlans")
-      .withIndex("by_payerUser", (q) => q.eq("payerUserId", userId))
-      .collect();
-    const asPayerAddress = await ctx.db
-      .query("recurringPlans")
-      .withIndex("by_payerAddress", (q) => q.eq("payerAddress", walletAddress.toLowerCase()))
-      .collect();
+    if (!userId && !walletAddress) return { created: [], asPayer: [] };
+
+    const created = userId
+      ? await ctx.db
+          .query("recurringPlans")
+          .withIndex("by_creator", (q) => q.eq("creatorId", userId))
+          .collect()
+      : [];
+
+    const asPayerUser = userId
+      ? await ctx.db
+          .query("recurringPlans")
+          .withIndex("by_payerUser", (q) => q.eq("payerUserId", userId))
+          .collect()
+      : [];
+
+    const asPayerAddress = walletAddress
+      ? await ctx.db
+          .query("recurringPlans")
+          .withIndex("by_payerAddress", (q) => q.eq("payerAddress", walletAddress.toLowerCase()))
+          .collect()
+      : [];
+
     return { created, asPayer: [...asPayerUser, ...asPayerAddress] };
   },
 });

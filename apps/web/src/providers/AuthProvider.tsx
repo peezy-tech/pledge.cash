@@ -3,7 +3,8 @@ import type { ReactNode } from 'react';
 import { useAccount, useSignMessage, useDisconnect } from 'wagmi'; 
 import { SiweMessage } from 'siwe'; 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/utils/api';
+import { useAction, useMutation as useConvexMutation } from 'convex/react'
+import { api as convexApi } from '../../../convex/convex/_generated/api'
 
 
 export interface AuthState {
@@ -42,8 +43,8 @@ export const useAuthStatusQuery = () => {
   return useQuery({
     queryKey: authKeys.status,
     queryFn: async () => {
-      const result = await api.siwe.get(); 
-      return result.data as { address: string | null } | null;
+      const stored = localStorage.getItem('siweAddress') as `0x${string}` | null
+      return { address: stored } as { address: string | null }
     },
     retry: false,
     staleTime: 1000 * 60 * 5, // 5 minutes
@@ -52,28 +53,40 @@ export const useAuthStatusQuery = () => {
 
 // Hook to request nonce
 export const useRequestNonceMutation = () => {
+  const getNonce = useAction(convexApi.auth.nonce)
   return useMutation({
     mutationFn: async () => {
-      const result = await api.siwe.put(undefined);
-      return result.data as { nonce: string } | null;
+      const result = await getNonce({})
+      return result as { nonce: string }
     },
-  });
+  })
 };
 
 // Hook to login with signature
 export const useLoginMutation = () => {
   const queryClient = useQueryClient();
-  
+  const verify = useAction(convexApi.auth.verify)
+  const ensureUser = useConvexMutation(convexApi.users.ensure)
   return useMutation({
-    mutationFn: async ({ message, signature }: {
+    mutationFn: async ({ message, signature, address, nonce }: {
       message: SiweMessage; 
       signature: `0x${string}`;
+      address: `0x${string}`;
+      nonce: string;
     }) => {
-      const result = await api.siwe.post({
+      const result = await verify({
         message: message.toMessage(),
         signature,
-      });
-      return result.data;
+        address,
+        nonce,
+      } as any)
+      if (result && (result as any).success) {
+        // Ensure the user exists in Convex
+        await ensureUser({ evmAddress: address })
+        // Persist a stateless session locally
+        localStorage.setItem('siweAddress', address)
+      }
+      return result
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: authKeys.status });
@@ -87,8 +100,8 @@ export const useLogoutMutation = () => {
   
   return useMutation({
     mutationFn: async () => {
-      const result = await api.siwe.delete();
-      return result.data;
+      localStorage.removeItem('siweAddress')
+      return { success: true }
     },
     onSuccess: () => {
       queryClient.removeQueries({ queryKey: authKeys.status });
@@ -135,7 +148,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = useCallback(async () => {
     if (!isConnected || !address || !chain) {
-      console.log({ isConnected, address, chain });
       throw new Error('Wallet not connected, address or chainId not available.');
     }
 
@@ -163,8 +175,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
       
       const loginResult = await loginMutation.mutateAsync({
-        message: siweMessage, 
+        message: siweMessage,
         signature,
+        address: address as `0x${string}`,
+        nonce: nonceResult.nonce,
       });
 
       // Ensure success field is checked correctly, even if type is 'any' or 'unknown'

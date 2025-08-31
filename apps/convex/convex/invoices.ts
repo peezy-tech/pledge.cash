@@ -1,6 +1,6 @@
 // convex/invoices.ts
-import { query, mutation, action } from "./_generated/server";
-import { api } from "./_generated/api";
+import { query, mutation, action, internalMutation, internalQuery } from "./_generated/server";
+import { api, internal } from "./_generated/api";
 import { infoClient } from "./lib/hyperliquid";
 import { v } from "convex/values";
 
@@ -29,7 +29,17 @@ export const create = mutation({
 
 export const get = query({
   args: { id: v.id("invoices") },
-  handler: async (ctx, { id }) => await ctx.db.get(id),
+  handler: async (ctx, { id }) => {
+    const doc = await ctx.db.get(id);
+    if (!doc) return null as any;
+    const creator = await ctx.db.get(doc.creatorId);
+    return {
+      ...doc,
+      id,
+      createdAt: (doc as any)._creationTime,
+      creatorAddress: creator?.evmAddress ?? null,
+    } as any;
+  },
 });
 
 export const listByCreator = query({
@@ -43,20 +53,41 @@ export const listByCreator = query({
 });
 
 export const listForUser = query({
-  args: { userId: v.id("users"), walletAddress: v.optional(v.string()) },
+  args: { userId: v.optional(v.id("users")), walletAddress: v.optional(v.string()) },
   handler: async (ctx, { userId, walletAddress }) => {
-    const created = await ctx.db
-      .query("invoices")
-      .withIndex("by_creator", (q) => q.eq("creatorId", userId))
-      .collect();
+    // If unauthenticated, return empty lists instead of throwing
+    if (!userId && !walletAddress) return { created: [], received: [] } as any;
+
+    const createdRaw = userId
+      ? await ctx.db
+          .query("invoices")
+          .withIndex("by_creator", (q) => q.eq("creatorId", userId))
+          .collect()
+      : [];
+
     // Filter received by userId or walletAddress
     const all = await ctx.db.query("invoices").collect();
-    const received = all.filter((i) => {
-      if (i.payerUserId && i.payerUserId === userId) return true;
+    const receivedRaw = all.filter((i) => {
+      if (userId && i.payerUserId && i.payerUserId === userId) return true;
       if (walletAddress && i.payerAddress && i.payerAddress.toLowerCase() === walletAddress.toLowerCase()) return true;
       return false;
     });
-    return { created, received };
+
+    // Map to client-friendly shape with id/createdAt and creatorAddress
+    const mapInvoice = async (i: any) => {
+      const creator = await ctx.db.get(i.creatorId);
+      return {
+        ...i,
+        id: i._id,
+        createdAt: i._creationTime,
+        creatorAddress: creator?.evmAddress ?? null,
+      } as any;
+    };
+
+    const created = await Promise.all(createdRaw.map(mapInvoice));
+    const received = await Promise.all(receivedRaw.map(mapInvoice));
+
+    return { created, received } as any;
   },
 });
 
@@ -70,8 +101,10 @@ export const confirm = action({
     if (!invoice) return { ok: false, error: "not_found" };
 
     // Load creator to validate destination
-    const creator = await ctx.db.get(invoice.creatorId);
-    if (!creator?.evmAddress) return { ok: false, error: "creator_not_found" };
+    const creatorAddress = invoice.creatorAddress
+      ? (invoice.creatorAddress as string)
+      : ((await ctx.runQuery(internal.invoices.getCreatorById, { id: invoice.creatorId }))?.evmAddress ?? null);
+    if (!creatorAddress) return { ok: false, error: "creator_not_found" };
 
     // Validate HL tx
     const ic = infoClient();
@@ -80,7 +113,7 @@ export const confirm = action({
       return { ok: false, error: "invalid_tx" };
     }
     const action: any = tx.action;
-    if (action.destination?.toLowerCase() !== creator.evmAddress.toLowerCase()) {
+    if (action.destination?.toLowerCase() !== (creatorAddress as string).toLowerCase()) {
       return { ok: false, error: "destination_mismatch" };
     }
     if (action.token !== invoice.token) {
@@ -91,13 +124,7 @@ export const confirm = action({
     }
 
     // Upsert tx hash record
-    const existing = await ctx.db
-      .query("txHashes")
-      .withIndex("by_hash", (q) => q.eq("hash", txHash))
-      .unique();
-    if (!existing) {
-      await ctx.db.insert("txHashes", { hash: txHash, metadata: tx });
-    }
+    await ctx.runMutation(internal.invoices.upsertTxHash, { hash: txHash, metadata: tx as any });
 
     const actualPayer = (tx.user ?? null) as string | null;
 
@@ -128,20 +155,20 @@ export const confirm = action({
       payerAddress = actualPayer.toLowerCase();
     }
 
-    await ctx.db.patch(id, {
-      status: "paid",
+    await ctx.runMutation(internal.invoices.markInvoicePaid, {
+      id,
       txHash,
       paidAt: Date.now(),
-      payerUserId: payerUserId ?? undefined,
+      payerUserId: (payerUserId ?? undefined) as any,
       payerAddress: payerAddress ?? undefined,
-      paymentType: paymentType ?? undefined,
+      paymentType: (paymentType ?? undefined) as any,
       actualPayerAddress: actualPayer?.toLowerCase(),
     });
 
     if (payerUserId) {
-      await ctx.db.insert("payments", {
-        userId: payerUserId,
-        creatorId: invoice.creatorId,
+      await ctx.runMutation(internal.invoices.insertPaymentRecord, {
+        userId: payerUserId as any,
+        creatorId: invoice.creatorId as any,
         type: "invoice",
         token: invoice.token,
         amount: invoice.amount,
@@ -151,6 +178,60 @@ export const confirm = action({
       });
     }
 
-    return { ok: true };
+    // Return the updated invoice so callers can reflect new state immediately
+    const updated = await ctx.runQuery(api.invoices.get, { id });
+    return { ok: true, invoice: updated };
+  },
+});
+
+// Internal helpers used by the confirm action
+export const getCreatorById = internalQuery({
+  args: { id: v.id("users") },
+  handler: async (ctx, { id }) => {
+    return await ctx.db.get(id);
+  },
+});
+
+export const upsertTxHash = internalMutation({
+  args: { hash: v.string(), metadata: v.optional(v.any()) },
+  handler: async (ctx, { hash, metadata }) => {
+    const existing = await ctx.db
+      .query("txHashes")
+      .withIndex("by_hash", (q) => q.eq("hash", hash))
+      .unique();
+    if (!existing) {
+      await ctx.db.insert("txHashes", { hash, metadata });
+    }
+  },
+});
+
+export const markInvoicePaid = internalMutation({
+  args: {
+    id: v.id("invoices"),
+    txHash: v.string(),
+    paidAt: v.number(),
+    payerUserId: v.optional(v.id("users")),
+    payerAddress: v.optional(v.string()),
+    paymentType: v.optional(v.union(v.literal("personal"), v.literal("pledge-wallet"))),
+    actualPayerAddress: v.optional(v.string()),
+  },
+  handler: async (ctx, { id, ...patch }) => {
+    await ctx.db.patch(id, { status: "paid", ...patch });
+  },
+});
+
+export const insertPaymentRecord = internalMutation({
+  args: {
+    userId: v.id("users"),
+    creatorId: v.optional(v.id("users")),
+    type: v.union(v.literal("invoice"), v.literal("donation"), v.literal("recurring"), v.literal("pledge")),
+    token: v.string(),
+    amount: v.string(),
+    status: v.union(v.literal("pending"), v.literal("paid"), v.literal("failed"), v.literal("refunded")),
+    txHash: v.optional(v.string()),
+    payerAddress: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.insert("payments", args);
   },
 });

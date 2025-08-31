@@ -37,8 +37,7 @@ export function InvoiceListItem({ invoice, type }: InvoiceListItemProps) {
   const canPay =
     type === 'received' &&
     invoice.status === 'pending' &&
-    address?.toLowerCase() === invoice.payerAddress?.toLowerCase() &&
-    invoice.creatorAddress
+    !!invoice.creatorAddress
 
   const canManualConfirm = invoice.status === 'pending'
 

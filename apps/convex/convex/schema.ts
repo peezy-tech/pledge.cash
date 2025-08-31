@@ -178,4 +178,11 @@ export default defineSchema({
     userId: v.id("users"),
     address: v.string(),
   }).index("by_pledge_wallet", ["pledgeWalletId"]).index("by_user", ["userId"]),
+
+  // SIWE nonces for Convex-based authentication handshake
+  siweNonces: defineTable({
+    nonce: v.string(),
+    used: v.boolean(),
+    createdAt: v.number(),
+  }).index("by_nonce", ["nonce"]),
 });

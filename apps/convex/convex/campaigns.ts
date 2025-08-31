@@ -39,8 +39,9 @@ export const listActiveCampaigns = query({
 });
 
 export const listCampaignsByCreator = query({
-  args: { creatorId: v.id("users") },
+  args: { creatorId: v.optional(v.id("users")) },
   handler: async (ctx, { creatorId }) => {
+    if (!creatorId) return [];
     return await ctx.db
       .query("pledgeCampaigns")
       .withIndex("by_creator", (q) => q.eq("creatorId", creatorId))
@@ -107,8 +108,9 @@ export const listPledgesByCampaign = query({
 });
 
 export const listPledgesByPledgerUser = query({
-  args: { pledgerUserId: v.id("users") },
+  args: { pledgerUserId: v.optional(v.id("users")) },
   handler: async (ctx, { pledgerUserId }) => {
+    if (!pledgerUserId) return [];
     return await ctx.db
       .query("pledges")
       .withIndex("by_pledger", (q) => q.eq("pledgerUserId", pledgerUserId))
@@ -259,8 +261,9 @@ export const recordDonation = mutation({
 });
 
 export const listDonationsByCreator = query({
-  args: { creatorId: v.id("users") },
+  args: { creatorId: v.optional(v.id("users")) },
   handler: async (ctx, { creatorId }) => {
+    if (!creatorId) return [];
     return await ctx.db
       .query("donations")
       .withIndex("by_creator", (q) => q.eq("creatorId", creatorId))

@@ -380,7 +380,7 @@ export function PublicInvoicePage() {
                       <DialogFooter>
                         <Button
                           variant="outline"
-                          onClick={() => setShowMultisigConfirm(false)}
+                          onClick={() => setShowPledgeWalletConfirm(false)}
                         >
                           Cancel
                         </Button>
