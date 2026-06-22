@@ -138,7 +138,7 @@ contract TokenGrantInvariantTest is StdInvariant, Test {
 
         vm.prank(owner);
         address grantAddress = factory.createGrant(
-            holder, address(token), address(paymentToken), GRANT_SIZE, PRICE, EXPIRY, CLIFF, VESTING_END, salt
+            holder, address(token), address(paymentToken), GRANT_SIZE, PRICE, EXPIRY, CLIFF, VESTING_END, false, 0, salt
         );
         grant = TokenGrant(grantAddress);
 
