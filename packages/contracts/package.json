@@ -1,0 +1,14 @@
+{
+  "name": "@pledge.cash/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "build": "forge build",
+    "deploy:hyperevm-testnet": "BROADCAST=1 script/hyperevm-testnet/deploy.sh",
+    "format": "forge fmt",
+    "simulate:hyperevm-testnet": "script/hyperevm-testnet/deploy.sh",
+    "test": "forge test -vvv"
+  }
+}

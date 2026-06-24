@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="pledge.cash TokenGrant contract interface for HyperEVM testnet." />
+    <title>pledge.cash</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/" aria-label="pledge.cash">
+        <span class="brand-mark" aria-hidden="true">p</span>
+        <span>pledge.cash</span>
+      </a>
+      <div class="header-actions">
+        <span class="network-label">HyperEVM testnet</span>
+        <button id="connect-wallet" type="button">Connect wallet</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="workspace">
+        <aside class="sidebar" aria-label="Contract status">
+          <section class="panel">
+            <div class="panel-heading">
+              <h1>TokenGrantFactory</h1>
+              <span id="deployment-state" class="status pending">Loading</span>
+            </div>
+            <dl id="deployment-facts" class="facts"></dl>
+          </section>
+
+          <section class="panel">
+            <h2>Wallet</h2>
+            <dl class="facts">
+              <div>
+                <dt>Address</dt>
+                <dd id="wallet-address">Not connected</dd>
+              </div>
+              <div>
+                <dt>Chain</dt>
+                <dd id="wallet-chain">Unknown</dd>
+              </div>
+            </dl>
+            <button id="switch-chain" class="secondary" type="button">Switch to 998</button>
+          </section>
+
+          <section class="panel">
+            <h2>Artifact</h2>
+            <pre id="deployment-json" class="json-block">{}</pre>
+          </section>
+        </aside>
+
+        <section class="content">
+          <section class="panel" aria-labelledby="create-title">
+            <div class="panel-heading">
+              <h2 id="create-title">Create Grant</h2>
+              <button id="new-salt" class="secondary" type="button">New salt</button>
+            </div>
+            <div class="form-grid">
+              <label>
+                Holder
+                <input id="create-holder" autocomplete="off" spellcheck="false" />
+              </label>
+              <label>
+                Grant token
+                <input id="create-token" autocomplete="off" spellcheck="false" />
+              </label>
+              <label>
+                Payment token
+                <input id="create-payment-token" autocomplete="off" spellcheck="false" value="0x0000000000000000000000000000000000000000" />
+              </label>
+              <label>
+                Amount raw units
+                <input id="create-amount" inputmode="numeric" value="1000000000000000000" />
+              </label>
+              <label>
+                Price raw units
+                <input id="create-price" inputmode="numeric" value="0" />
+              </label>
+              <label>
+                Vesting cliff timestamp
+                <input id="create-cliff" inputmode="numeric" />
+              </label>
+              <label>
+                Vesting end timestamp
+                <input id="create-end" inputmode="numeric" />
+              </label>
+              <label>
+                Expiry timestamp
+                <input id="create-expiry" inputmode="numeric" />
+              </label>
+              <label class="wide">
+                Salt
+                <input id="create-salt" autocomplete="off" spellcheck="false" />
+              </label>
+            </div>
+            <div class="button-row">
+              <button id="predict-grant" class="secondary" type="button">Predict address</button>
+              <button id="approve-escrow" class="secondary" type="button">Approve escrow</button>
+              <button id="create-grant" type="button">Create grant</button>
+            </div>
+            <dl class="facts compact">
+              <div>
+                <dt>Predicted grant</dt>
+                <dd id="predicted-grant">None</dd>
+              </div>
+              <div>
+                <dt>Creation fee</dt>
+                <dd id="creation-fee">Unknown</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="panel" aria-labelledby="inspect-title">
+            <div class="panel-heading">
+              <h2 id="inspect-title">Inspect Grant</h2>
+              <button id="load-grant" class="secondary" type="button">Load</button>
+            </div>
+            <label>
+              Grant address
+              <input id="grant-address" autocomplete="off" spellcheck="false" />
+            </label>
+            <dl id="grant-facts" class="facts grant-facts"></dl>
+          </section>
+
+          <section class="panel" aria-labelledby="actions-title">
+            <h2 id="actions-title">Grant Actions</h2>
+            <div class="form-grid">
+              <label>
+                Settle amount raw units
+                <input id="settle-amount" inputmode="numeric" value="1000000000000000000" />
+              </label>
+              <label>
+                Payment approval amount raw units
+                <input id="payment-approval" inputmode="numeric" value="0" />
+              </label>
+            </div>
+            <div class="button-row">
+              <button id="approve-payment" class="secondary" type="button">Approve payment</button>
+              <button id="settle-grant" type="button">Settle</button>
+              <button id="halt-grant" class="secondary" type="button">Halt vesting</button>
+              <button id="withdraw-expired" class="secondary" type="button">Withdraw expired</button>
+            </div>
+          </section>
+
+          <section class="panel log-panel" aria-labelledby="log-title">
+            <div class="panel-heading">
+              <h2 id="log-title">Log</h2>
+              <button id="clear-log" class="secondary" type="button">Clear</button>
+            </div>
+            <pre id="log"></pre>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <script src="/script.js" type="module"></script>
+  </body>
+</html>

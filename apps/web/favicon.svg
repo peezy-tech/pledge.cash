@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="pledge.cash">
+  <rect width="64" height="64" rx="14" fill="#10140f"/>
+  <path d="M18 40V24h17c6 0 10 3 10 8s-4 8-10 8H24v8h-6Zm6-6h11c2 0 4-1 4-2s-2-2-4-2H24v4Z" fill="#caff5a"/>
+  <path d="M23 17h26v6H23z" fill="#f4f1e8"/>
+</svg>

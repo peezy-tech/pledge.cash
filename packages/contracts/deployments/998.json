@@ -1,0 +1,9 @@
+{
+  "chainId": 998,
+  "creationFee": 0,
+  "deployer": "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c",
+  "deploymentTimestamp": 1782319062,
+  "factoryOwner": "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c",
+  "tokenGrantFactory": "0x00BcBb12c9Aed44BBaC3f3941e58F9D618C8c126",
+  "tokenGrantLogic": "0x262fB024189968668624D4Fd6540b4e5407cAEEE"
+}
