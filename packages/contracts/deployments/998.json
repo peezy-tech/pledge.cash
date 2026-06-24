@@ -1,6 +1,6 @@
 {
   "chainId": 998,
-  "creationFee": 0,
+  "creationFee": 100000000000000000,
   "deployer": "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c",
   "deploymentTimestamp": 1782319062,
   "factoryOwner": "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c",
