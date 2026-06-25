@@ -257,10 +257,9 @@ contract TokenGrantTest is Test {
         assertEq(grant.holder(), holder);
         assertEq(grant.tokenId(), tokenId);
         assertEq(factory.grantForTokenId(tokenId), grantAddress);
-        assertEq(factory.tokenIdForGrant(grantAddress), tokenId);
-        assertFalse(factory.grantTransferable(tokenId));
-        assertEq(factory.grantTransferUnlockTime(tokenId), 0);
-        assertFalse(factory.isGrantClosed(tokenId));
+        assertFalse(grant.transferable());
+        assertEq(grant.transferUnlockTime(), 0);
+        assertFalse(grant.isClosed());
         assertEq(factory.ownerOf(tokenId), holder);
         assertEq(factory.balanceOf(holder), 1);
         assertEq(grant.token(), address(token));
@@ -440,9 +439,7 @@ contract TokenGrantTest is Test {
         vm.warp(transferUnlockTime - 1);
         vm.prank(holder);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                TokenGrantFactory.GrantTransferNotUnlocked.selector, grantTokenId, transferUnlockTime
-            )
+            abi.encodeWithSelector(TokenGrant.GrantTransferNotUnlocked.selector, grantTokenId, transferUnlockTime)
         );
         factory.transferFrom(holder, newHolder, grantTokenId);
 
@@ -475,18 +472,18 @@ contract TokenGrantTest is Test {
         uint256 grantTokenId = grant.tokenId();
 
         vm.prank(holder);
-        vm.expectRevert(abi.encodeWithSelector(TokenGrantFactory.NonTransferableGrant.selector, grantTokenId));
+        vm.expectRevert(abi.encodeWithSelector(TokenGrant.NonTransferableGrant.selector, grantTokenId));
         factory.transferFrom(holder, stranger, grantTokenId);
 
         vm.prank(holder);
-        vm.expectRevert(abi.encodeWithSelector(TokenGrantFactory.NonTransferableGrant.selector, grantTokenId));
+        vm.expectRevert(abi.encodeWithSelector(TokenGrant.NonTransferableGrant.selector, grantTokenId));
         factory.approve(stranger, grantTokenId);
 
         vm.prank(holder);
         factory.setApprovalForAll(stranger, true);
 
         vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSelector(TokenGrantFactory.NonTransferableGrant.selector, grantTokenId));
+        vm.expectRevert(abi.encodeWithSelector(TokenGrant.NonTransferableGrant.selector, grantTokenId));
         factory.transferFrom(holder, stranger, grantTokenId);
     }
 
@@ -508,26 +505,35 @@ contract TokenGrantTest is Test {
         assertEq(factory.ownerOf(grantTokenId), holder);
 
         vm.prank(holder);
-        vm.expectRevert(abi.encodeWithSelector(TokenGrantFactory.GrantTokenExpired.selector, grantTokenId));
+        vm.expectRevert(TokenGrant.GrantExpired.selector);
         factory.transferFrom(holder, stranger, grantTokenId);
     }
 
-    function testOnlyLinkedGrantCanLockUnlockOrCloseGrantNft() public {
+    function testOnlyLinkedGrantCanCloseGrantNft() public {
         (TokenGrant grant,) = _createFreeGrant("factory-auth");
         uint256 grantTokenId = grant.tokenId();
-
-        vm.expectRevert(abi.encodeWithSelector(TokenGrantFactory.OnlyLinkedGrant.selector, address(this)));
-        factory.lockGrant(grantTokenId);
-
-        vm.expectRevert(abi.encodeWithSelector(TokenGrantFactory.OnlyLinkedGrant.selector, address(this)));
-        factory.unlockGrant(grantTokenId);
 
         vm.expectRevert(abi.encodeWithSelector(TokenGrantFactory.OnlyLinkedGrant.selector, address(this)));
         factory.closeGrant(grantTokenId);
 
         assertEq(factory.ownerOf(grantTokenId), holder);
-        assertFalse(factory.isGrantClosed(grantTokenId));
+        assertFalse(grant.isClosed());
         assertEq(factory.grantForTokenId(grantTokenId), address(grant));
+
+        vm.prank(address(grant));
+        vm.expectRevert(abi.encodeWithSelector(TokenGrantFactory.GrantStillOpen.selector, grantTokenId));
+        factory.closeGrant(grantTokenId);
+    }
+
+    function testOnlyFactoryCanSyncGrantHolder() public {
+        (TokenGrant grant,) = _createFreeGrant("sync-holder-auth");
+
+        vm.expectRevert(TokenGrant.OnlyFactory.selector);
+        grant.syncHolder(holder, stranger);
+
+        vm.prank(address(factory));
+        vm.expectRevert(abi.encodeWithSelector(TokenGrant.HolderSyncMismatch.selector, holder, stranger));
+        grant.syncHolder(stranger, stranger);
     }
 
     function testFullSettlementBurnsGrantNft() public {
@@ -539,9 +545,8 @@ contract TokenGrantTest is Test {
         grant.settle(GRANT_SIZE);
 
         assertEq(grant.settledAmount(), GRANT_SIZE);
-        assertTrue(factory.isGrantClosed(grantTokenId));
-        assertEq(factory.lastHolderOf(grantTokenId), holder);
-        assertEq(grant.holder(), holder);
+        assertTrue(grant.isClosed());
+        assertEq(grant.holder(), address(0));
         assertEq(factory.balanceOf(holder), 0);
         vm.expectRevert(ERC721.TokenDoesNotExist.selector);
         factory.ownerOf(grantTokenId);
@@ -554,13 +559,13 @@ contract TokenGrantTest is Test {
 
         assertEq(factory.ownerOf(grantTokenId), holder);
         assertEq(grant.holder(), holder);
-        assertFalse(factory.isGrantClosed(grantTokenId));
+        assertFalse(grant.isClosed());
 
         vm.prank(issuer);
         grant.withdrawExpiredTokens();
 
-        assertTrue(factory.isGrantClosed(grantTokenId));
-        assertEq(factory.lastHolderOf(grantTokenId), holder);
+        assertTrue(grant.isClosed());
+        assertEq(grant.holder(), address(0));
         vm.expectRevert(ERC721.TokenDoesNotExist.selector);
         factory.ownerOf(grantTokenId);
     }
@@ -575,8 +580,8 @@ contract TokenGrantTest is Test {
 
         assertTrue(grant.vestingIsHalted());
         assertEq(grant.claimable(), 0);
-        assertTrue(factory.isGrantClosed(grantTokenId));
-        assertEq(factory.lastHolderOf(grantTokenId), holder);
+        assertTrue(grant.isClosed());
+        assertEq(grant.holder(), address(0));
         assertEq(token.balanceOf(issuer), GRANT_SIZE);
         assertEq(token.balanceOf(grantAddress), 0);
         vm.expectRevert(ERC721.TokenDoesNotExist.selector);

@@ -12,8 +12,9 @@ The primitive is escrow-backed only. It does not mint tokens. Issuers must mint 
 ## Actors
 
 - Issuer: creates the grant, escrows tokens, receives paid-settlement proceeds, may halt unvested vesting, and may withdraw remaining tokens after expiry.
-- Holder: owns the factory ERC721 grant-right token and can settle vested tokens.
-- Factory: deploys deterministic token grant clones, mints grant-right ERC721 tokens, and optionally collects a native creation fee.
+- Holder: address recorded on the grant, mirrored by factory ERC721 ownership, and allowed to settle vested tokens.
+- Factory: deploys deterministic token grant clones, mints and transfers grant-right ERC721 tokens, mirrors ERC721 transfers
+  into the grant holder field, and optionally collects a native creation fee.
 - Factory owner: deployer authority that can update the native creation fee and receives paid creation fees.
 
 ## Assets
@@ -27,7 +28,7 @@ Native HYPE is not escrowed by grants. It is only used for the optional creation
 
 ## Parameters
 
-- `holder`: address allowed to settle.
+- `holder`: address initially allowed to settle and initially minted the grant-right ERC721 token.
 - `token`: ERC20 escrowed by the issuer.
 - `paymentToken`: ERC20 paid by the holder when `price > 0`, or zero when `price == 0`.
 - `grantSize`: total token amount initially escrowed.
@@ -101,7 +102,7 @@ Effects:
 - grant state is initialized once,
 - full grant is transferred into escrow,
 - when configured, the factory forwards the creation fee to the owner,
-- factory records the clone-to-token mapping,
+- factory records the token id to grant clone mapping,
 - factory mints the grant-right ERC721 token to the holder,
 - creation event is emitted by the factory.
 
@@ -110,7 +111,9 @@ reverts atomically.
 
 ### Grant Right
 
-The factory mints a grant-right ERC721 token to the holder. Settlement authority follows the current ERC721 owner while the grant is live.
+The factory mints a grant-right ERC721 token to the holder. The grant stores the protocol holder locally, and factory
+ERC721 transfers synchronize that holder after each successful live transfer. While the grant is live, the protocol
+invariant is `factory.ownerOf(tokenId) == TokenGrant(grant).holder()`.
 
 Non-transferable grants reject ERC721 transfers and per-token approvals.
 
@@ -121,7 +124,10 @@ Transferable grants can move only when:
 - the grant is not temporarily locked by a grant lifecycle transition,
 - `block.timestamp >= transferUnlockTime`.
 
-When a transferable grant-right token moves, `TokenGrant.holder()` resolves to the new ERC721 owner.
+When a transferable grant-right token moves, the factory updates `TokenGrant.holder()` to the new ERC721 owner.
+
+When a grant closes, `TokenGrant.holder()` is cleared to `address(0)` because no address retains settlement authority.
+The final holder is recorded in the factory `GrantClosed` event emitted before the ERC721 burn.
 
 ### Settle
 
@@ -139,7 +145,7 @@ Effects:
 - `settledAmount` increases by requested amount,
 - when `price > 0`, payment token transfers from holder to issuer,
 - grant token transfers from escrow to holder,
-- if the grant becomes fully settled, the factory burns the grant-right ERC721 token and marks the grant closed,
+- if the grant becomes fully settled, the grant marks itself closed and the factory burns the grant-right ERC721 token,
 - settlement event records holder, issuer, token amount, and payment amount.
 
 ### Halt Vesting
@@ -155,7 +161,7 @@ Effects:
 - vested amount is snapshotted,
 - `claimable` becomes the vested amount at halt,
 - unvested grant tokens return to issuer,
-- if no unsettled claim remains, the factory burns the grant-right ERC721 token and marks the grant closed,
+- if no unsettled claim remains, the grant marks itself closed and the factory burns the grant-right ERC721 token,
 - future vesting remains capped forever.
 
 ### Withdraw Expired
@@ -169,7 +175,7 @@ Preconditions:
 Effects:
 
 - remaining grant token escrow returns to issuer,
-- factory burns the grant-right ERC721 token and marks the grant closed.
+- grant marks itself closed and the factory burns the grant-right ERC721 token.
 
 ## Invariants
 
@@ -178,7 +184,7 @@ Effects:
 - vested amount never exceeds `claimable`.
 - settleable amount never exceeds `claimable - settledAmount`.
 - once halted, vested amount does not increase.
-- live grant-right ERC721 owner is the holder authority.
+- live grant-right ERC721 owner equals the grant-local holder authority.
 - soulbound grant-right ERC721 tokens cannot be transferred or approved per-token.
 - transferable grant-right ERC721 tokens cannot move before their transfer unlock time.
 - grant lifecycle transitions lock transferable grant-right ERC721 movement during external token calls.

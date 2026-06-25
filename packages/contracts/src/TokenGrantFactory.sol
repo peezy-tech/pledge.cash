@@ -12,20 +12,10 @@ contract TokenGrantFactory is Ownable, ERC721 {
     uint256 public creationFee;
 
     mapping(uint256 => address) public grantForTokenId;
-    mapping(address => uint256) public tokenIdForGrant;
-    mapping(uint256 => bool) public grantTransferable;
-    mapping(uint256 => uint256) public grantTransferUnlockTime;
-    mapping(uint256 => address) public lastHolderOf;
-    mapping(uint256 => bool) public isGrantClosed;
-    mapping(uint256 => bool) public grantIsLocked;
 
     error UnknownGrantToken(uint256 tokenId);
     error OnlyLinkedGrant(address caller);
-    error GrantAlreadyClosed(uint256 tokenId);
-    error NonTransferableGrant(uint256 tokenId);
-    error GrantTokenLocked(uint256 tokenId);
-    error GrantTokenExpired(uint256 tokenId);
-    error GrantTransferNotUnlocked(uint256 tokenId, uint256 unlockTime);
+    error GrantStillOpen(uint256 tokenId);
     error InvalidCreationFeePayment(uint256 expected, uint256 actual);
 
     event TokenGrantCreated(
@@ -90,11 +80,20 @@ contract TokenGrantFactory is Ownable, ERC721 {
         uint256 tokenId = uint256(uint160(grant));
 
         grantForTokenId[tokenId] = grant;
-        tokenIdForGrant[grant] = tokenId;
-        grantTransferable[tokenId] = transferable;
-        grantTransferUnlockTime[tokenId] = transferUnlockTime;
 
-        _initializeGrant(grant, holder, token, paymentToken, amount, price, expiry, vestingCliff, vestingEnd);
+        _initializeGrant(
+            grant,
+            holder,
+            token,
+            paymentToken,
+            amount,
+            price,
+            expiry,
+            vestingCliff,
+            vestingEnd,
+            transferable,
+            transferUnlockTime
+        );
         _payCreationFee();
         _mint(holder, tokenId);
         _emitTokenGrantCreated(grant, tokenId, transferable, transferUnlockTime, salt);
@@ -104,31 +103,17 @@ contract TokenGrantFactory is Ownable, ERC721 {
         return LibClone.predictDeterministicAddress(tokenGrantLogic, salt, address(this));
     }
 
-    function lockGrant(uint256 tokenId) external onlyLinkedGrant(tokenId) {
-        if (isGrantClosed[tokenId]) revert GrantAlreadyClosed(tokenId);
-        grantIsLocked[tokenId] = true;
-    }
-
-    function unlockGrant(uint256 tokenId) external onlyLinkedGrant(tokenId) {
-        if (isGrantClosed[tokenId]) revert GrantAlreadyClosed(tokenId);
-        grantIsLocked[tokenId] = false;
-    }
-
     function closeGrant(uint256 tokenId) external onlyLinkedGrant(tokenId) {
-        if (isGrantClosed[tokenId]) revert GrantAlreadyClosed(tokenId);
-
-        address holder = ownerOf(tokenId);
         address grant = grantForTokenId[tokenId];
-        lastHolderOf[tokenId] = holder;
-        isGrantClosed[tokenId] = true;
-        grantIsLocked[tokenId] = false;
+        address holder = ownerOf(tokenId);
+        if (!TokenGrant(grant).isClosed()) revert GrantStillOpen(tokenId);
 
         _burn(tokenId);
         emit GrantClosed(grant, tokenId, holder);
     }
 
     function approve(address account, uint256 id) public payable override {
-        _requireTransferable(id);
+        _requireGrantRightTransferable(id);
         super.approve(account, id);
     }
 
@@ -137,9 +122,13 @@ contract TokenGrantFactory is Ownable, ERC721 {
 
         address grant = grantForTokenId[id];
         if (grant == address(0)) revert UnknownGrantToken(id);
-        if (grantIsLocked[id]) revert GrantTokenLocked(id);
-        _requireTransferable(id);
-        if (TokenGrant(grant).isExpired(block.timestamp)) revert GrantTokenExpired(id);
+        TokenGrant(grant).requireGrantRightTransferable(block.timestamp);
+    }
+
+    function _afterTokenTransfer(address from, address to, uint256 id) internal override {
+        if (from == address(0) || to == address(0)) return;
+
+        TokenGrant(grantForTokenId[id]).syncHolder(from, to);
     }
 
     modifier onlyLinkedGrant(uint256 tokenId) {
@@ -147,11 +136,10 @@ contract TokenGrantFactory is Ownable, ERC721 {
         _;
     }
 
-    function _requireTransferable(uint256 tokenId) internal view {
-        if (!grantTransferable[tokenId]) revert NonTransferableGrant(tokenId);
-
-        uint256 unlockTime = grantTransferUnlockTime[tokenId];
-        if (block.timestamp < unlockTime) revert GrantTransferNotUnlocked(tokenId, unlockTime);
+    function _requireGrantRightTransferable(uint256 tokenId) internal view {
+        address grant = grantForTokenId[tokenId];
+        if (grant == address(0)) revert UnknownGrantToken(tokenId);
+        TokenGrant(grant).requireGrantRightTransferable(block.timestamp);
     }
 
     function _initializeGrant(
@@ -163,10 +151,22 @@ contract TokenGrantFactory is Ownable, ERC721 {
         uint256 price,
         uint256 expiry,
         uint256 vestingCliff,
-        uint256 vestingEnd
+        uint256 vestingEnd,
+        bool transferable,
+        uint256 transferUnlockTime
     ) internal {
         TokenGrant(grant).initialize(
-            msg.sender, holder, token, paymentToken, amount, price, expiry, vestingCliff, vestingEnd
+            msg.sender,
+            holder,
+            token,
+            paymentToken,
+            amount,
+            price,
+            expiry,
+            vestingCliff,
+            vestingEnd,
+            transferable,
+            transferUnlockTime
         );
     }
 
@@ -181,7 +181,7 @@ contract TokenGrantFactory is Ownable, ERC721 {
         emit TokenGrantCreated(
             grant,
             tokenGrant.issuer(),
-            ownerOf(tokenId),
+            tokenGrant.holder(),
             tokenId,
             transferable,
             transferUnlockTime,

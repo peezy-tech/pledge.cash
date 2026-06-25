@@ -10,11 +10,6 @@ interface ITokenGrantERC20Metadata {
 }
 
 interface ITokenGrantFactory {
-    function ownerOf(uint256 id) external view returns (address);
-    function lastHolderOf(uint256 tokenId) external view returns (address);
-    function isGrantClosed(uint256 tokenId) external view returns (bool);
-    function lockGrant(uint256 tokenId) external;
-    function unlockGrant(uint256 tokenId) external;
     function closeGrant(uint256 tokenId) external;
 }
 
@@ -25,6 +20,7 @@ contract TokenGrant is Initializable {
 
     address public factory;
     address public issuer;
+    address public holder;
     address public token;
     address public paymentToken;
     uint256 public tokenId;
@@ -35,7 +31,11 @@ contract TokenGrant is Initializable {
     uint256 public vestingCliff;
     uint256 public vestingEnd;
     uint256 public settledAmount;
+    bool public transferable;
+    uint256 public transferUnlockTime;
+    bool public transferLocked;
     bool public vestingIsHalted;
+    bool public isClosed;
     uint256 public vestingHaltTimestamp;
     uint8 public tokenDecimals;
     uint8 public paymentTokenDecimals;
@@ -58,6 +58,11 @@ contract TokenGrant is Initializable {
     error InsufficientVestedAmount(uint256 requested, uint256 vested);
     error VestingAlreadyHalted();
     error NotYetExpired();
+    error NonTransferableGrant(uint256 tokenId);
+    error GrantTransferLocked(uint256 tokenId);
+    error GrantTransferNotUnlocked(uint256 tokenId, uint256 unlockTime);
+    error OnlyFactory();
+    error HolderSyncMismatch(address expected, address actual);
 
     event GrantSettled(address indexed holder, address indexed issuer, uint256 tokenAmount, uint256 paymentAmount);
     event VestingHalted(address indexed issuer, uint256 vestedAtHalt, uint256 unvestedWithdrawn);
@@ -76,7 +81,9 @@ contract TokenGrant is Initializable {
         uint256 _price,
         uint256 _expiry,
         uint256 _vestingCliff,
-        uint256 _vestingEnd
+        uint256 _vestingEnd,
+        bool _transferable,
+        uint256 _transferUnlockTime
     ) external initializer {
         if (_issuer == address(0) || _holder == address(0) || _token == address(0)) {
             revert InvalidAddress();
@@ -98,6 +105,7 @@ contract TokenGrant is Initializable {
 
         factory = msg.sender;
         issuer = _issuer;
+        holder = _holder;
         token = _token;
         paymentToken = _paymentToken;
         tokenId = uint256(uint160(address(this)));
@@ -107,6 +115,8 @@ contract TokenGrant is Initializable {
         expiry = _expiry;
         vestingCliff = _vestingCliff;
         vestingEnd = _vestingEnd;
+        transferable = _transferable;
+        transferUnlockTime = _transferUnlockTime;
 
         _checkedTransferFrom(_token, _issuer, address(this), grantSize);
     }
@@ -154,12 +164,21 @@ contract TokenGrant is Initializable {
         return vestingIsHalted;
     }
 
-    function holder() public view returns (address) {
-        ITokenGrantFactory grantFactory = ITokenGrantFactory(factory);
-        if (grantFactory.isGrantClosed(tokenId)) {
-            return grantFactory.lastHolderOf(tokenId);
-        }
-        return grantFactory.ownerOf(tokenId);
+    function requireGrantRightTransferable(uint256 _currentTime) external view {
+        if (!transferable) revert NonTransferableGrant(tokenId);
+        if (transferLocked) revert GrantTransferLocked(tokenId);
+        if (_currentTime < transferUnlockTime) revert GrantTransferNotUnlocked(tokenId, transferUnlockTime);
+        if (isExpired(_currentTime)) revert GrantExpired();
+        if (isClosed) revert GrantClosed();
+    }
+
+    function syncHolder(address from, address to) external {
+        if (msg.sender != factory) revert OnlyFactory();
+        if (isClosed) revert GrantClosed();
+        if (from != holder) revert HolderSyncMismatch(holder, from);
+        if (to == address(0)) revert InvalidAddress();
+
+        holder = to;
     }
 
     function tokenUnit() public view returns (uint256) {
@@ -167,9 +186,9 @@ contract TokenGrant is Initializable {
     }
 
     function settle(uint256 _amountToSettle) external {
-        if (_isClosed()) revert GrantClosed();
+        if (isClosed) revert GrantClosed();
         if (block.timestamp > expiry) revert GrantExpired();
-        address currentHolder = holder();
+        address currentHolder = holder;
         if (msg.sender != currentHolder) revert OnlyHolder();
         if (_amountToSettle == 0) revert ZeroAmount();
 
@@ -186,7 +205,7 @@ contract TokenGrant is Initializable {
 
         settledAmount += _amountToSettle;
 
-        ITokenGrantFactory(factory).lockGrant(tokenId);
+        transferLocked = true;
         uint256 totalCost = getSettlementCost(_amountToSettle);
         if (totalCost > 0) {
             _checkedTransferFrom(paymentToken, currentHolder, issuer, totalCost);
@@ -194,16 +213,17 @@ contract TokenGrant is Initializable {
         _checkedTransfer(token, currentHolder, _amountToSettle);
 
         if (settledAmount >= claimable) {
+            _close();
             ITokenGrantFactory(factory).closeGrant(tokenId);
         } else {
-            ITokenGrantFactory(factory).unlockGrant(tokenId);
+            transferLocked = false;
         }
 
         emit GrantSettled(currentHolder, issuer, _amountToSettle, totalCost);
     }
 
     function stopVestingAndWithdrawUnvested() external onlyIssuer {
-        if (_isClosed()) revert GrantClosed();
+        if (isClosed) revert GrantClosed();
         if (vestingIsHalted) revert VestingAlreadyHalted();
 
         uint256 vestedAtHalt = getCurrentlyVestedSnapshot(block.timestamp);
@@ -213,27 +233,29 @@ contract TokenGrant is Initializable {
         vestingHaltTimestamp = block.timestamp;
         claimable = vestedAtHalt;
 
-        ITokenGrantFactory(factory).lockGrant(tokenId);
+        transferLocked = true;
         if (unvestedToWithdraw > 0) {
             SafeTransferLib.safeTransfer(token, issuer, unvestedToWithdraw);
         }
         if (settledAmount >= claimable) {
+            _close();
             ITokenGrantFactory(factory).closeGrant(tokenId);
         } else {
-            ITokenGrantFactory(factory).unlockGrant(tokenId);
+            transferLocked = false;
         }
         emit VestingHalted(issuer, vestedAtHalt, unvestedToWithdraw);
     }
 
     function withdrawExpiredTokens() external onlyIssuer {
-        if (_isClosed()) revert GrantClosed();
+        if (isClosed) revert GrantClosed();
         if (block.timestamp <= expiry) revert NotYetExpired();
 
         uint256 remainingBalance = SafeTransferLib.balanceOf(token, address(this));
-        ITokenGrantFactory(factory).lockGrant(tokenId);
+        transferLocked = true;
         if (remainingBalance > 0) {
             SafeTransferLib.safeTransfer(token, issuer, remainingBalance);
         }
+        _close();
         ITokenGrantFactory(factory).closeGrant(tokenId);
         emit ExpiredTokensWithdrawn(issuer, remainingBalance);
     }
@@ -243,8 +265,10 @@ contract TokenGrant is Initializable {
         _;
     }
 
-    function _isClosed() internal view returns (bool) {
-        return ITokenGrantFactory(factory).isGrantClosed(tokenId);
+    function _close() internal {
+        isClosed = true;
+        holder = address(0);
+        transferLocked = false;
     }
 
     function _readTokenDecimals(address token_) internal view returns (uint8) {
