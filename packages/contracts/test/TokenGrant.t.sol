@@ -557,11 +557,11 @@ contract TokenGrantTest is Test {
         (TokenGrant grant,) = _createFreeGrant("sync-holder-auth");
 
         vm.expectRevert(TokenGrant.OnlyFactory.selector);
-        grant.syncHolder(holder, stranger);
+        grant.onGrantRightTransferred(holder, stranger);
 
         vm.prank(address(factory));
         vm.expectRevert(abi.encodeWithSelector(TokenGrant.HolderSyncMismatch.selector, holder, stranger));
-        grant.syncHolder(stranger, stranger);
+        grant.onGrantRightTransferred(stranger, stranger);
     }
 
     function testFullSettlementBurnsGrantNft() public {
