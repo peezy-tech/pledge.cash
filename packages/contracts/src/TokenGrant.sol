@@ -9,15 +9,21 @@ interface ITokenGrantERC20Metadata {
     function decimals() external view returns (uint8);
 }
 
+interface ITokenGrantFactory {
+    function closeGrant(uint256 tokenId) external;
+}
+
 contract TokenGrant is Initializable {
     using SafeTransferLib for address;
 
     uint8 internal constant MAX_SUPPORTED_DECIMALS = 77;
 
+    address public factory;
     address public issuer;
     address public holder;
     address public token;
     address public paymentToken;
+    uint256 public tokenId;
     uint256 public grantSize;
     uint256 public claimable;
     uint256 public price;
@@ -25,6 +31,9 @@ contract TokenGrant is Initializable {
     uint256 public vestingCliff;
     uint256 public vestingEnd;
     uint256 public settledAmount;
+    bool public transferable;
+    uint256 public transferUnlockTime;
+    bool public transferLocked;
     bool public vestingIsHalted;
     bool public isClosed;
     uint256 public vestingHaltTimestamp;
@@ -49,6 +58,11 @@ contract TokenGrant is Initializable {
     error InsufficientVestedAmount(uint256 requested, uint256 vested);
     error VestingAlreadyHalted();
     error NotYetExpired();
+    error NonTransferableGrant(uint256 tokenId);
+    error GrantTransferLocked(uint256 tokenId);
+    error GrantTransferNotUnlocked(uint256 tokenId, uint256 unlockTime);
+    error OnlyFactory();
+    error HolderSyncMismatch(address expected, address actual);
 
     event GrantSettled(address indexed holder, address indexed issuer, uint256 tokenAmount, uint256 paymentAmount);
     event VestingHalted(address indexed issuer, uint256 vestedAtHalt, uint256 unvestedWithdrawn);
@@ -67,7 +81,9 @@ contract TokenGrant is Initializable {
         uint256 _price,
         uint256 _expiry,
         uint256 _vestingCliff,
-        uint256 _vestingEnd
+        uint256 _vestingEnd,
+        bool _transferable,
+        uint256 _transferUnlockTime
     ) external initializer {
         if (_issuer == address(0) || _holder == address(0) || _token == address(0)) {
             revert InvalidAddress();
@@ -87,16 +103,20 @@ contract TokenGrant is Initializable {
             paymentTokenDecimals = _readTokenDecimals(_paymentToken);
         }
 
+        factory = msg.sender;
         issuer = _issuer;
         holder = _holder;
         token = _token;
         paymentToken = _paymentToken;
+        tokenId = uint256(uint160(address(this)));
         grantSize = _amount;
         claimable = _amount;
         price = _price;
         expiry = _expiry;
         vestingCliff = _vestingCliff;
         vestingEnd = _vestingEnd;
+        transferable = _transferable;
+        transferUnlockTime = _transferUnlockTime;
 
         _checkedTransferFrom(_token, _issuer, address(this), grantSize);
     }
@@ -136,6 +156,31 @@ contract TokenGrant is Initializable {
         return claimable - settledAmount;
     }
 
+    function isExpired(uint256 _currentTime) public view returns (bool) {
+        return _currentTime > expiry;
+    }
+
+    function isHalted() public view returns (bool) {
+        return vestingIsHalted;
+    }
+
+    function requireGrantRightTransferable(uint256 _currentTime) external view {
+        if (!transferable) revert NonTransferableGrant(tokenId);
+        if (transferLocked) revert GrantTransferLocked(tokenId);
+        if (_currentTime < transferUnlockTime) revert GrantTransferNotUnlocked(tokenId, transferUnlockTime);
+        if (isExpired(_currentTime)) revert GrantExpired();
+        if (isClosed) revert GrantClosed();
+    }
+
+    function syncHolder(address from, address to) external {
+        if (msg.sender != factory) revert OnlyFactory();
+        if (isClosed) revert GrantClosed();
+        if (from != holder) revert HolderSyncMismatch(holder, from);
+        if (to == address(0)) revert InvalidAddress();
+
+        holder = to;
+    }
+
     function tokenUnit() public view returns (uint256) {
         return 10 ** uint256(tokenDecimals);
     }
@@ -160,6 +205,7 @@ contract TokenGrant is Initializable {
 
         settledAmount += _amountToSettle;
 
+        transferLocked = true;
         uint256 totalCost = getSettlementCost(_amountToSettle);
         if (totalCost > 0) {
             _checkedTransferFrom(paymentToken, currentHolder, issuer, totalCost);
@@ -167,7 +213,10 @@ contract TokenGrant is Initializable {
         _checkedTransfer(token, currentHolder, _amountToSettle);
 
         if (settledAmount >= claimable) {
-            isClosed = true;
+            _close();
+            ITokenGrantFactory(factory).closeGrant(tokenId);
+        } else {
+            transferLocked = false;
         }
 
         emit GrantSettled(currentHolder, issuer, _amountToSettle, totalCost);
@@ -184,11 +233,15 @@ contract TokenGrant is Initializable {
         vestingHaltTimestamp = block.timestamp;
         claimable = vestedAtHalt;
 
+        transferLocked = true;
         if (unvestedToWithdraw > 0) {
             SafeTransferLib.safeTransfer(token, issuer, unvestedToWithdraw);
         }
         if (settledAmount >= claimable) {
-            isClosed = true;
+            _close();
+            ITokenGrantFactory(factory).closeGrant(tokenId);
+        } else {
+            transferLocked = false;
         }
         emit VestingHalted(issuer, vestedAtHalt, unvestedToWithdraw);
     }
@@ -198,16 +251,24 @@ contract TokenGrant is Initializable {
         if (block.timestamp <= expiry) revert NotYetExpired();
 
         uint256 remainingBalance = SafeTransferLib.balanceOf(token, address(this));
+        transferLocked = true;
         if (remainingBalance > 0) {
             SafeTransferLib.safeTransfer(token, issuer, remainingBalance);
         }
-        isClosed = true;
+        _close();
+        ITokenGrantFactory(factory).closeGrant(tokenId);
         emit ExpiredTokensWithdrawn(issuer, remainingBalance);
     }
 
     modifier onlyIssuer() {
         if (msg.sender != issuer) revert OnlyIssuer();
         _;
+    }
+
+    function _close() internal {
+        isClosed = true;
+        holder = address(0);
+        transferLocked = false;
     }
 
     function _readTokenDecimals(address token_) internal view returns (uint8) {

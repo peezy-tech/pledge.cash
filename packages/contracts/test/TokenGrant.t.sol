@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
+import {ERC721} from "solady/tokens/ERC721.sol";
 import {TokenGrant} from "../src/TokenGrant.sol";
 import {TokenGrantFactory} from "../src/TokenGrantFactory.sol";
 
@@ -175,6 +176,10 @@ contract ReentrantPaymentERC20 is GrantERC20 {
     }
 }
 
+interface IERC721Transfer {
+    function transferFrom(address from, address to, uint256 tokenId) external;
+}
+
 contract TokenGrantTest is Test {
     struct GrantCreate {
         bytes32 salt;
@@ -182,6 +187,8 @@ contract TokenGrantTest is Test {
         address token;
         address paymentToken;
         uint256[5] terms;
+        bool transferable;
+        uint256 transferUnlockTime;
     }
 
     TokenGrantFactory internal factory;
@@ -203,6 +210,9 @@ contract TokenGrantTest is Test {
         address indexed grantAddress,
         address indexed issuer,
         address indexed holder,
+        uint256 tokenId,
+        bool transferable,
+        uint256 transferUnlockTime,
         address token,
         address paymentToken,
         uint256 amount,
@@ -232,23 +242,26 @@ contract TokenGrantTest is Test {
     function testCreateFreeClaimGrantEscrowsTokenAndInitializes() public {
         bytes32 salt = keccak256("free-create");
         address grantAddress = factory.predictGrantAddress(salt);
+        uint256 tokenId = uint256(uint160(grantAddress));
 
         _approve(address(token), issuer, grantAddress, GRANT_SIZE);
 
-        vm.expectEmit(true, true, true, true, address(factory));
-        emit TokenGrantCreated(
-            grantAddress, issuer, holder, address(token), address(0), GRANT_SIZE, 0, EXPIRY, CLIFF, VESTING_END, salt
-        );
-
         vm.prank(issuer);
-        address created =
-            factory.createGrant(holder, address(token), address(0), GRANT_SIZE, 0, EXPIRY, CLIFF, VESTING_END, salt);
+        address created = factory.createGrant(
+            holder, address(token), address(0), GRANT_SIZE, 0, EXPIRY, CLIFF, VESTING_END, false, 0, salt
+        );
         TokenGrant grant = TokenGrant(created);
 
         assertEq(address(grant), grantAddress);
         assertEq(grant.issuer(), issuer);
         assertEq(grant.holder(), holder);
+        assertEq(grant.tokenId(), tokenId);
+        assertEq(factory.grantForTokenId(tokenId), grantAddress);
+        assertFalse(grant.transferable());
+        assertEq(grant.transferUnlockTime(), 0);
         assertFalse(grant.isClosed());
+        assertEq(factory.ownerOf(tokenId), holder);
+        assertEq(factory.balanceOf(holder), 1);
         assertEq(grant.token(), address(token));
         assertEq(grant.paymentToken(), address(0));
         assertEq(grant.price(), 0);
@@ -297,9 +310,7 @@ contract TokenGrantTest is Test {
         vm.expectEmit(true, true, false, true, address(factory));
         emit CreationFeePaid(issuer, address(this), fee);
         uint256 ownerBalanceBefore = address(this).balance;
-        address created = factory.createGrant{value: fee}(
-            holder, address(token), address(0), GRANT_SIZE, 0, EXPIRY, CLIFF, VESTING_END, salt
-        );
+        address created = _createFreeGrantWithValue(salt, fee);
 
         assertEq(created, grantAddress);
         assertEq(address(this).balance, ownerBalanceBefore + fee);
@@ -315,7 +326,17 @@ contract TokenGrantTest is Test {
         vm.prank(issuer);
         vm.expectRevert(abi.encodeWithSelector(TokenGrantFactory.InvalidCreationFeePayment.selector, fee, fee - 1));
         factory.createGrant{value: fee - 1}(
-            holder, address(token), address(0), GRANT_SIZE, 0, EXPIRY, CLIFF, VESTING_END, keccak256("wrong-native-fee")
+            holder,
+            address(token),
+            address(0),
+            GRANT_SIZE,
+            0,
+            EXPIRY,
+            CLIFF,
+            VESTING_END,
+            false,
+            0,
+            keccak256("wrong-native-fee")
         );
     }
 
@@ -336,6 +357,8 @@ contract TokenGrantTest is Test {
             EXPIRY,
             CLIFF,
             VESTING_END,
+            false,
+            0,
             keccak256("unexpected-native-fee")
         );
     }
@@ -396,8 +419,126 @@ contract TokenGrantTest is Test {
         assertEq(grant.getSettleableAmount(1_500), 50 ether);
     }
 
-    function testFullSettlementClosesGrant() public {
+    function testTransferableGrantNftTransfersSettlementAuthorityAfterUnlock() public {
+        address newHolder = address(0xD00D);
+        uint256 transferUnlockTime = 1_200;
+        paymentToken.mint(newHolder, 1_000_000000);
+        TokenGrant grant = _createGrant(
+            _grantCreate(
+                keccak256("transferable-paid"),
+                holder,
+                address(token),
+                address(paymentToken),
+                _terms(GRANT_SIZE, PRICE, EXPIRY, CLIFF, VESTING_END),
+                true,
+                transferUnlockTime
+            )
+        );
+        uint256 grantTokenId = grant.tokenId();
+
+        vm.warp(transferUnlockTime - 1);
+        vm.prank(holder);
+        vm.expectRevert(
+            abi.encodeWithSelector(TokenGrant.GrantTransferNotUnlocked.selector, grantTokenId, transferUnlockTime)
+        );
+        factory.transferFrom(holder, newHolder, grantTokenId);
+
+        vm.warp(transferUnlockTime);
+        vm.prank(holder);
+        factory.transferFrom(holder, newHolder, grantTokenId);
+
+        assertEq(factory.ownerOf(grantTokenId), newHolder);
+        assertEq(grant.holder(), newHolder);
+        assertEq(factory.balanceOf(holder), 0);
+        assertEq(factory.balanceOf(newHolder), 1);
+
+        vm.warp(VESTING_END);
+        vm.prank(holder);
+        vm.expectRevert(TokenGrant.OnlyHolder.selector);
+        grant.settle(1 ether);
+
+        vm.prank(newHolder);
+        paymentToken.approve(address(grant), PRICE);
+
+        vm.prank(newHolder);
+        grant.settle(1 ether);
+
+        assertEq(token.balanceOf(newHolder), 1 ether);
+        assertEq(paymentToken.balanceOf(issuer), PRICE);
+    }
+
+    function testSoulboundGrantRejectsTransferAndApproval() public {
+        (TokenGrant grant,) = _createFreeGrant("soulbound");
+        uint256 grantTokenId = grant.tokenId();
+
+        vm.prank(holder);
+        vm.expectRevert(abi.encodeWithSelector(TokenGrant.NonTransferableGrant.selector, grantTokenId));
+        factory.transferFrom(holder, stranger, grantTokenId);
+
+        vm.prank(holder);
+        vm.expectRevert(abi.encodeWithSelector(TokenGrant.NonTransferableGrant.selector, grantTokenId));
+        factory.approve(stranger, grantTokenId);
+
+        vm.prank(holder);
+        factory.setApprovalForAll(stranger, true);
+
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(TokenGrant.NonTransferableGrant.selector, grantTokenId));
+        factory.transferFrom(holder, stranger, grantTokenId);
+    }
+
+    function testTransferableGrantRejectsTransferAfterExpiry() public {
+        TokenGrant grant = _createGrant(
+            _grantCreate(
+                keccak256("transfer-expired"),
+                holder,
+                address(token),
+                address(0),
+                _terms(GRANT_SIZE, 0, EXPIRY, CLIFF, VESTING_END),
+                true,
+                CLIFF
+            )
+        );
+        uint256 grantTokenId = grant.tokenId();
+        vm.warp(EXPIRY + 1);
+
+        assertEq(factory.ownerOf(grantTokenId), holder);
+
+        vm.prank(holder);
+        vm.expectRevert(TokenGrant.GrantExpired.selector);
+        factory.transferFrom(holder, stranger, grantTokenId);
+    }
+
+    function testOnlyLinkedGrantCanCloseGrantNft() public {
+        (TokenGrant grant,) = _createFreeGrant("factory-auth");
+        uint256 grantTokenId = grant.tokenId();
+
+        vm.expectRevert(abi.encodeWithSelector(TokenGrantFactory.OnlyLinkedGrant.selector, address(this)));
+        factory.closeGrant(grantTokenId);
+
+        assertEq(factory.ownerOf(grantTokenId), holder);
+        assertFalse(grant.isClosed());
+        assertEq(factory.grantForTokenId(grantTokenId), address(grant));
+
+        vm.prank(address(grant));
+        vm.expectRevert(abi.encodeWithSelector(TokenGrantFactory.GrantStillOpen.selector, grantTokenId));
+        factory.closeGrant(grantTokenId);
+    }
+
+    function testOnlyFactoryCanSyncGrantHolder() public {
+        (TokenGrant grant,) = _createFreeGrant("sync-holder-auth");
+
+        vm.expectRevert(TokenGrant.OnlyFactory.selector);
+        grant.syncHolder(holder, stranger);
+
+        vm.prank(address(factory));
+        vm.expectRevert(abi.encodeWithSelector(TokenGrant.HolderSyncMismatch.selector, holder, stranger));
+        grant.syncHolder(stranger, stranger);
+    }
+
+    function testFullSettlementBurnsGrantNft() public {
         (TokenGrant grant,) = _createFreeGrant("full-settle-burn");
+        uint256 grantTokenId = grant.tokenId();
         vm.warp(VESTING_END);
 
         vm.prank(holder);
@@ -405,13 +546,18 @@ contract TokenGrantTest is Test {
 
         assertEq(grant.settledAmount(), GRANT_SIZE);
         assertTrue(grant.isClosed());
-        assertEq(grant.holder(), holder);
+        assertEq(grant.holder(), address(0));
+        assertEq(factory.balanceOf(holder), 0);
+        vm.expectRevert(ERC721.TokenDoesNotExist.selector);
+        factory.ownerOf(grantTokenId);
     }
 
-    function testExpiryDoesNotCloseUntilWithdrawal() public {
+    function testExpiryDoesNotBurnUntilWithdrawal() public {
         (TokenGrant grant,) = _createFreeGrant("expiry-ownerof");
+        uint256 grantTokenId = grant.tokenId();
         vm.warp(EXPIRY + 1);
 
+        assertEq(factory.ownerOf(grantTokenId), holder);
         assertEq(grant.holder(), holder);
         assertFalse(grant.isClosed());
 
@@ -419,10 +565,14 @@ contract TokenGrantTest is Test {
         grant.withdrawExpiredTokens();
 
         assertTrue(grant.isClosed());
+        assertEq(grant.holder(), address(0));
+        vm.expectRevert(ERC721.TokenDoesNotExist.selector);
+        factory.ownerOf(grantTokenId);
     }
 
-    function testIssuerHaltBeforeCliffClosesGrant() public {
+    function testIssuerHaltBeforeCliffBurnsGrantNft() public {
         (TokenGrant grant, address grantAddress) = _createFreeGrant("halt-before-cliff-burn");
+        uint256 grantTokenId = grant.tokenId();
         vm.warp(CLIFF - 1);
 
         vm.prank(issuer);
@@ -431,8 +581,49 @@ contract TokenGrantTest is Test {
         assertTrue(grant.vestingIsHalted());
         assertEq(grant.claimable(), 0);
         assertTrue(grant.isClosed());
+        assertEq(grant.holder(), address(0));
         assertEq(token.balanceOf(issuer), GRANT_SIZE);
         assertEq(token.balanceOf(grantAddress), 0);
+        vm.expectRevert(ERC721.TokenDoesNotExist.selector);
+        factory.ownerOf(grantTokenId);
+    }
+
+    function testPaymentTokenReentryCannotTransferGrantNftDuringSettlement() public {
+        ReentrantPaymentERC20 reentrantPayment = new ReentrantPaymentERC20();
+        reentrantPayment.mint(holder, 1_000_000000);
+        TokenGrant grant = _createGrant(
+            _grantCreate(
+                keccak256("reentrant-transfer-grant-nft"),
+                holder,
+                address(token),
+                address(reentrantPayment),
+                _terms(GRANT_SIZE, PRICE, EXPIRY, CLIFF, VESTING_END),
+                true,
+                0
+            )
+        );
+        uint256 grantTokenId = grant.tokenId();
+
+        vm.prank(holder);
+        factory.approve(address(reentrantPayment), grantTokenId);
+
+        vm.warp(VESTING_END);
+        uint256 settleAmount = 10 ether;
+        uint256 expectedCost = grant.getSettlementCost(settleAmount);
+        reentrantPayment.setReentry(
+            address(factory), abi.encodeCall(IERC721Transfer.transferFrom, (holder, stranger, grantTokenId))
+        );
+
+        vm.prank(holder);
+        reentrantPayment.approve(address(grant), expectedCost);
+
+        vm.prank(holder);
+        grant.settle(settleAmount);
+
+        assertTrue(reentrantPayment.reentered());
+        assertFalse(reentrantPayment.reenteredOk());
+        assertEq(factory.ownerOf(grantTokenId), holder);
+        assertEq(grant.holder(), holder);
     }
 
     function testCannotSettleBeforeCliff() public {
@@ -721,9 +912,7 @@ contract TokenGrantTest is Test {
         GrantERC20 highDecimalPayment = new GrantERC20("High Payment", "HPAY", 78);
 
         _createGrantExpectRevert(
-            abi.encodeWithSelector(
-                TokenGrant.UnsupportedTokenDecimals.selector, address(highDecimalPayment), uint8(78)
-            ),
+            abi.encodeWithSelector(TokenGrant.UnsupportedTokenDecimals.selector, address(highDecimalPayment), uint8(78)),
             "high-payment",
             address(token),
             holder,
@@ -799,7 +988,9 @@ contract TokenGrantTest is Test {
 
         vm.prank(issuer);
         vm.expectRevert();
-        factory.createGrant(holder, address(falseToken), address(0), GRANT_SIZE, 0, EXPIRY, CLIFF, VESTING_END, salt);
+        factory.createGrant(
+            holder, address(falseToken), address(0), GRANT_SIZE, 0, EXPIRY, CLIFF, VESTING_END, false, 0, salt
+        );
     }
 
     function testRejectsFalseReturnPaymentTokenAtSettlement() public {
@@ -973,6 +1164,12 @@ contract TokenGrantTest is Test {
         grantAddress = address(grant);
     }
 
+    function _createFreeGrantWithValue(bytes32 salt, uint256 value) internal returns (address) {
+        return factory.createGrant{value: value}(
+            holder, address(token), address(0), GRANT_SIZE, 0, EXPIRY, CLIFF, VESTING_END, false, 0, salt
+        );
+    }
+
     function _createPaidGrant(string memory saltLabel) internal returns (TokenGrant grant, address grantAddress) {
         bytes32 salt = keccak256(bytes(saltLabel));
         grant = _createGrant(
@@ -1001,6 +1198,8 @@ contract TokenGrantTest is Test {
             create.terms[2],
             create.terms[3],
             create.terms[4],
+            create.transferable,
+            create.transferUnlockTime,
             create.salt
         );
 
@@ -1022,7 +1221,9 @@ contract TokenGrantTest is Test {
 
         vm.prank(issuer);
         vm.expectRevert(expectedRevertData);
-        factory.createGrant(holder_, token_, paymentToken_, terms[0], terms[1], terms[2], terms[3], terms[4], salt);
+        factory.createGrant(
+            holder_, token_, paymentToken_, terms[0], terms[1], terms[2], terms[3], terms[4], false, 0, salt
+        );
     }
 
     function _terms(uint256 amount_, uint256 price_, uint256 expiry_, uint256 vestingCliff_, uint256 vestingEnd_)
@@ -1042,11 +1243,25 @@ contract TokenGrantTest is Test {
         pure
         returns (GrantCreate memory create)
     {
+        create = _grantCreate(salt, holder_, token_, paymentToken_, terms, false, 0);
+    }
+
+    function _grantCreate(
+        bytes32 salt,
+        address holder_,
+        address token_,
+        address paymentToken_,
+        uint256[5] memory terms,
+        bool transferable,
+        uint256 transferUnlockTime
+    ) internal pure returns (GrantCreate memory create) {
         create.salt = salt;
         create.holder = holder_;
         create.token = token_;
         create.paymentToken = paymentToken_;
         create.terms = terms;
+        create.transferable = transferable;
+        create.transferUnlockTime = transferUnlockTime;
     }
 
     function _approve(address token_, address tokenOwner, address spender, uint256 amount_) internal {

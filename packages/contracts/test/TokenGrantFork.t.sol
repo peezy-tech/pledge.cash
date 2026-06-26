@@ -54,7 +54,9 @@ contract TokenGrantForkTest is Test {
 
         vm.prank(issuer);
         grant = TokenGrant(
-            factory.createGrant(holder, WETH, paymentToken, grantSize, price, start + 30 days, start, start, salt)
+            factory.createGrant(
+                holder, WETH, paymentToken, grantSize, price, start + 30 days, start, start, false, 0, salt
+            )
         );
 
         assertEq(address(grant), grantAddress);
