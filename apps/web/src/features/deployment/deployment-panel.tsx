@@ -12,6 +12,10 @@ type DeploymentPanelProps = {
 };
 
 export function DeploymentPanel({ creationFee, deployment, factorySnapshot }: DeploymentPanelProps): React.JSX.Element {
+  const boardroomState = deployment?.boardroomFactory ? "Ready" : deployment?.boardroomStatus === "pending" ? "Pending" : "Not in artifact";
+  const tokenGrantLogic = factorySnapshot.tokenGrantLogic ?? deployment?.tokenGrantLogic;
+  const factoryOwner = factorySnapshot.owner ?? deployment?.factoryOwner;
+
   return (
     <Panel
       title="Deployment"
@@ -27,16 +31,17 @@ export function DeploymentPanel({ creationFee, deployment, factorySnapshot }: De
           },
           {
             label: "TokenGrantLogic",
-            value: factorySnapshot.tokenGrantLogic ? <AddressLink address={factorySnapshot.tokenGrantLogic} /> : "Unknown",
+            value: tokenGrantLogic ? <AddressLink address={tokenGrantLogic} /> : "Unknown",
           },
+          { label: "Boardroom", value: boardroomState },
           {
             label: "BoardroomFactory",
-            value: deployment?.boardroomFactory ? <AddressLink address={deployment.boardroomFactory} /> : "Not in artifact",
+            value: deployment?.boardroomFactory ? <AddressLink address={deployment.boardroomFactory} /> : deployment?.boardroomReason ?? "Not in artifact",
           },
           { label: "Creation fee", value: `${bigintString(creationFee)} wei` },
           {
             label: "Factory owner",
-            value: factorySnapshot.owner ? <AddressLink address={factorySnapshot.owner} /> : "Unknown",
+            value: factoryOwner ? <AddressLink address={factoryOwner} /> : "Unknown",
           },
         ]}
       />

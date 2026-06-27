@@ -7,6 +7,7 @@ import {
   HYPEREVM_TESTNET_CHAIN_ID,
   hyperEvmTestnet,
   isZeroAddress,
+  legacyTokenGrantFactoryAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
   type Address,
@@ -75,6 +76,7 @@ export function App(): React.JSX.Element {
   const [pendingAction, setPendingAction] = useState<string>();
 
   const creationFee = factorySnapshot.creationFee ?? deployment?.creationFee ?? 0n;
+  const usesLegacyTokenGrantFactory = deployment?.tokenGrantFactoryVersion === "legacy";
 
   const pushLog = useCallback((message: string, level: LogEntry["level"] = "info") => {
     setLogs((current) => [
@@ -255,10 +257,15 @@ export function App(): React.JSX.Element {
       : 0n;
     const salt = requireBytes32(grantForm.salt, "Salt");
 
+    if (usesLegacyTokenGrantFactory && grantForm.transferable) {
+      throw new Error("The live legacy TokenGrantFactory does not support transferable grants.");
+    }
+
     return {
       token,
       amount,
       salt,
+      legacyTuple: [holder, token, paymentToken, amount, price, expiry, vestingCliff, vestingEnd, salt] as const,
       tuple: [
         holder,
         token,
@@ -275,16 +282,30 @@ export function App(): React.JSX.Element {
     };
   };
 
-  const predictGrant = async (): Promise<void> => {
+  const predictDirectGrantAddress = async (): Promise<Address> => {
     if (!wallet.account) throw new Error("Connect wallet to predict a direct grant.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
     const { salt } = grantArgs();
-    const predicted = await publicClient.readContract({
+
+    if (usesLegacyTokenGrantFactory) {
+      return await publicClient.readContract({
+        address: factory,
+        abi: legacyTokenGrantFactoryAbi,
+        functionName: "predictGrantAddress",
+        args: [salt],
+      });
+    }
+
+    return await publicClient.readContract({
       address: factory,
       abi: tokenGrantFactoryAbi,
       functionName: "predictGrantAddress",
       args: [wallet.account, salt],
     });
+  };
+
+  const predictGrant = async (): Promise<void> => {
+    const predicted = await predictDirectGrantAddress();
     setPredictedGrant(predicted);
     setGrantAddress(predicted);
     pushLog(`Predicted grant ${predicted}`, "success");
@@ -293,20 +314,40 @@ export function App(): React.JSX.Element {
   const approveEscrow = async (): Promise<void> => {
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
     const { token, amount } = grantArgs();
+    const spender = usesLegacyTokenGrantFactory ? await predictDirectGrantAddress() : factory;
+    if (usesLegacyTokenGrantFactory) {
+      setPredictedGrant(spender);
+      setGrantAddress(spender);
+    }
+
     const hash = await walletClient().writeContract({
       account: activeAccount(),
       address: token,
       abi: erc20Abi,
       chain,
       functionName: "approve",
-      args: [factory, amount],
+      args: [spender, amount],
     });
     pushLog(`Escrow approval submitted: ${hash}`, "success");
   };
 
   const createGrant = async (): Promise<void> => {
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
-    const { tuple } = grantArgs();
+    const { legacyTuple, tuple } = grantArgs();
+    if (usesLegacyTokenGrantFactory) {
+      const hash = await walletClient().writeContract({
+        account: activeAccount(),
+        address: factory,
+        abi: legacyTokenGrantFactoryAbi,
+        chain,
+        functionName: "createGrant",
+        args: legacyTuple,
+        value: creationFee,
+      });
+      pushLog(`Grant creation submitted: ${hash}`, "success");
+      return;
+    }
+
     const hash = await walletClient().writeContract({
       account: activeAccount(),
       address: factory,
@@ -502,6 +543,7 @@ export function App(): React.JSX.Element {
 
   const predictBoardroomGrantAddress = async (): Promise<void> => {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
+    if (usesLegacyTokenGrantFactory) throw new Error("Boardroom grants require a current TokenGrantFactory deployment.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
     const { salt } = boardroomGrantArgs();
     const predicted = await publicClient.readContract({
@@ -517,6 +559,7 @@ export function App(): React.JSX.Element {
 
   const boardroomApproveFactory = async (): Promise<void> => {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
+    if (usesLegacyTokenGrantFactory) throw new Error("Boardroom grants require a current TokenGrantFactory deployment.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
     const { amount } = boardroomGrantArgs();
     const data = encodeFunctionData({
@@ -544,6 +587,7 @@ export function App(): React.JSX.Element {
 
   const boardroomCreateGrant = async (): Promise<void> => {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
+    if (usesLegacyTokenGrantFactory) throw new Error("Boardroom grants require a current TokenGrantFactory deployment.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
     const { tuple } = boardroomGrantArgs();
     const data = encodeFunctionData({

@@ -1,5 +1,12 @@
 {
   "chainId": 998,
-  "status": "pending",
-  "reason": "Current Boardroom deployment has not been published for this chain."
+  "creationFee": 100000000000000000,
+  "deployer": "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c",
+  "deploymentTimestamp": 1782319062,
+  "factoryOwner": "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c",
+  "tokenGrantFactory": "0x00BcBb12c9Aed44BBaC3f3941e58F9D618C8c126",
+  "tokenGrantFactoryVersion": "legacy",
+  "tokenGrantLogic": "0x262fB024189968668624D4Fd6540b4e5407cAEEE",
+  "boardroomStatus": "pending",
+  "boardroomReason": "Current Boardroom deployment has not been published for this chain."
 }

@@ -36,9 +36,12 @@ const deploymentFields = [
   ["chainId", "number"],
   ["status", "string"],
   ["reason", "string"],
+  ["boardroomStatus", "string"],
+  ["boardroomReason", "string"],
   ["boardroomFactory", "address"],
   ["boardroomPolicyRegistry", "address"],
   ["tokenGrantFactory", "address"],
+  ["tokenGrantFactoryVersion", "string"],
   ["tokenGrantLogic", "address"],
   ["deployer", "address"],
   ["factoryOwner", "address"],
@@ -89,7 +92,18 @@ function serializeDeployment(raw: string): string | undefined {
   if (!chainId) return undefined;
 
   const missingFields = requiredCurrentDeploymentFields.filter((field) => propertyToken(raw, field) === undefined);
-  if (missingFields.length > 0) {
+  const hasTokenGrantFactory = propertyToken(raw, "tokenGrantFactory") !== undefined;
+  const hasFactoryVersion = propertyToken(raw, "tokenGrantFactoryVersion") !== undefined;
+
+  if (missingFields.length > 0 && hasTokenGrantFactory && !hasFactoryVersion) {
+    throw new Error(
+      `Deployment ${chainId} has tokenGrantFactory but is missing current fields (${missingFields.join(
+        ", ",
+      )}); add tokenGrantFactoryVersion and model missing subsystems separately.`,
+    );
+  }
+
+  if (missingFields.length > 0 && !hasTokenGrantFactory) {
     const status = typeof parsed.status === "string" ? parsed.status : "pending";
     const reason =
       typeof parsed.reason === "string"
@@ -167,9 +181,12 @@ export type PledgeCashDeployment = {
   chainId: number;
   status?: string;
   reason?: string;
+  boardroomStatus?: string;
+  boardroomReason?: string;
   boardroomFactory?: Address;
   boardroomPolicyRegistry?: Address;
   tokenGrantFactory?: Address;
+  tokenGrantFactoryVersion?: "current" | "legacy";
   tokenGrantLogic?: Address;
   deployer?: Address;
   factoryOwner?: Address;

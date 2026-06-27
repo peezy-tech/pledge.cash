@@ -114,7 +114,7 @@ export function DirectGrantPanel({
           </ActionButton>
           <ActionButton actionId="approve-escrow" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("approve-escrow", approveEscrow)}>
             <CheckCircle2 className="h-4 w-4" />
-            Approve Factory
+            Approve Escrow
           </ActionButton>
           <ActionButton actionId="create-grant" pendingAction={pendingAction} onClick={() => void runAction("create-grant", createGrant)}>
             <Send className="h-4 w-4" />

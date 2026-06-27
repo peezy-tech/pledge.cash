@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
-import { pledgeCashAbis, pledgeCashDeployments, tokenGrantFactoryAbi } from "../src";
+import { legacyTokenGrantFactoryAbi, pledgeCashAbis, pledgeCashDeployments, tokenGrantFactoryAbi } from "../src";
 
 describe("generated SDK exports", () => {
   test("includes core contract ABIs", () => {
@@ -11,9 +11,19 @@ describe("generated SDK exports", () => {
 
   test("includes checked-in deployment metadata", () => {
     expect(pledgeCashDeployments[998]?.chainId).toBe(998);
-    expect(pledgeCashDeployments[998]?.status).toBe("pending");
-    expect(pledgeCashDeployments[998]?.reason).toContain("Current Boardroom deployment has not been published");
-    expect(pledgeCashDeployments[998]?.tokenGrantFactory).toBeUndefined();
+    expect(pledgeCashDeployments[998]?.tokenGrantFactory).toBe("0x00BcBb12c9Aed44BBaC3f3941e58F9D618C8c126");
+    expect(pledgeCashDeployments[998]?.tokenGrantFactoryVersion).toBe("legacy");
+    expect(pledgeCashDeployments[998]?.creationFee).toBe(100000000000000000n);
+    expect(pledgeCashDeployments[998]?.boardroomStatus).toBe("pending");
+    expect(pledgeCashDeployments[998]?.boardroomReason).toContain("Current Boardroom deployment has not been published");
+  });
+
+  test("includes the live legacy factory ABI shape", () => {
+    const createGrant = legacyTokenGrantFactoryAbi.find((item) => item.type === "function" && item.name === "createGrant");
+    const predictGrant = legacyTokenGrantFactoryAbi.find((item) => item.type === "function" && item.name === "predictGrantAddress");
+
+    expect(createGrant && "inputs" in createGrant ? createGrant.inputs : []).toHaveLength(9);
+    expect(predictGrant && "inputs" in predictGrant ? predictGrant.inputs : []).toHaveLength(1);
   });
 
   test("marks generated source as generated", async () => {

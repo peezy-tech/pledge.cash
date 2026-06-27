@@ -7,9 +7,12 @@ export type PledgeCashDeployment = {
   chainId: number;
   status?: string;
   reason?: string;
+  boardroomStatus?: string;
+  boardroomReason?: string;
   boardroomFactory?: Address;
   boardroomPolicyRegistry?: Address;
   tokenGrantFactory?: Address;
+  tokenGrantFactoryVersion?: "current" | "legacy";
   tokenGrantLogic?: Address;
   deployer?: Address;
   factoryOwner?: Address;
@@ -3563,7 +3566,14 @@ export const pledgeCashAbis = {
 export const pledgeCashDeployments = {
   998: {
     chainId: 998,
-    status: "pending",
-    reason: "Current Boardroom deployment has not been published for this chain."
+    boardroomStatus: "pending",
+    boardroomReason: "Current Boardroom deployment has not been published for this chain.",
+    tokenGrantFactory: "0x00BcBb12c9Aed44BBaC3f3941e58F9D618C8c126" as Address,
+    tokenGrantFactoryVersion: "legacy",
+    tokenGrantLogic: "0x262fB024189968668624D4Fd6540b4e5407cAEEE" as Address,
+    deployer: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
+    factoryOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
+    creationFee: 100000000000000000n,
+    deploymentTimestamp: 1782319062n
   }
 } as const satisfies Record<number, PledgeCashDeployment>;
