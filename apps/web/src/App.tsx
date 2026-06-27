@@ -421,7 +421,7 @@ export function App(): React.JSX.Element {
       args: [owner, boardroomForm.name, boardroomForm.symbol, salt],
     });
     setPredictedBoardroom(predicted);
-    setBoardroomAddress(predicted);
+    updateBoardroomAddress(predicted);
     pushLog(`Predicted Boardroom ${predicted}`, "success");
   };
 
