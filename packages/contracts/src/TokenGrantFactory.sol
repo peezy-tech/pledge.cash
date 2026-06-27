@@ -34,9 +34,17 @@ contract TokenGrantFactory is Ownable, ERC721 {
         uint256 vestingEnd,
         bytes32 salt
     );
-    event GrantClosed(address indexed grantAddress, uint256 indexed tokenId, address indexed lastHolder);
+    event GrantClosed(
+        address indexed grantAddress,
+        uint256 indexed tokenId,
+        address indexed lastHolder
+    );
     event CreationFeeSet(uint256 amount);
-    event CreationFeePaid(address indexed payer, address indexed recipient, uint256 amount);
+    event CreationFeePaid(
+        address indexed payer,
+        address indexed recipient,
+        uint256 amount
+    );
 
     constructor() {
         _initializeOwner(msg.sender);
@@ -74,7 +82,8 @@ contract TokenGrantFactory is Ownable, ERC721 {
         uint256 transferUnlockTime,
         bytes32 salt
     ) external payable returns (address grant) {
-        if (msg.value != creationFee) revert InvalidCreationFeePayment(creationFee, msg.value);
+        if (msg.value != creationFee)
+            revert InvalidCreationFeePayment(creationFee, msg.value);
 
         grant = LibClone.cloneDeterministic(tokenGrantLogic, salt);
         uint256 tokenId = uint256(uint160(grant));
@@ -96,11 +105,22 @@ contract TokenGrantFactory is Ownable, ERC721 {
         );
         _payCreationFee();
         _mint(holder, tokenId);
-        _emitTokenGrantCreated(grant, tokenId, transferable, transferUnlockTime, salt);
+        _emitTokenGrantCreated(
+            grant,
+            tokenId,
+            transferable,
+            transferUnlockTime,
+            salt
+        );
     }
 
     function predictGrantAddress(bytes32 salt) external view returns (address) {
-        return LibClone.predictDeterministicAddress(tokenGrantLogic, salt, address(this));
+        return
+            LibClone.predictDeterministicAddress(
+                tokenGrantLogic,
+                salt,
+                address(this)
+            );
     }
 
     function closeGrant(uint256 tokenId) external onlyLinkedGrant(tokenId) {
@@ -121,7 +141,11 @@ contract TokenGrantFactory is Ownable, ERC721 {
                               ERC721 HOOKS
     //////////////////////////////////////////////////////////////*/
 
-    function _beforeTokenTransfer(address from, address to, uint256 id) internal view override {
+    function _beforeTokenTransfer(
+        address from,
+        address to,
+        uint256 id
+    ) internal view override {
         if (from == address(0) || to == address(0)) return;
 
         address grant = grantForTokenId[id];
@@ -129,7 +153,11 @@ contract TokenGrantFactory is Ownable, ERC721 {
         TokenGrant(grant).requireCanTransferGrantRight(block.timestamp);
     }
 
-    function _afterTokenTransfer(address from, address to, uint256 id) internal override {
+    function _afterTokenTransfer(
+        address from,
+        address to,
+        uint256 id
+    ) internal override {
         if (from == address(0) || to == address(0)) return;
 
         TokenGrant(grantForTokenId[id]).onGrantRightTransferred(from, to);
@@ -140,7 +168,8 @@ contract TokenGrantFactory is Ownable, ERC721 {
     //////////////////////////////////////////////////////////////*/
 
     modifier onlyLinkedGrant(uint256 tokenId) {
-        if (grantForTokenId[tokenId] != msg.sender) revert OnlyLinkedGrant(msg.sender);
+        if (grantForTokenId[tokenId] != msg.sender)
+            revert OnlyLinkedGrant(msg.sender);
         _;
     }
 
