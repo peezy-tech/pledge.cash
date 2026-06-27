@@ -62,6 +62,16 @@ export function BoardroomPanel({
   predictBoardroomGrantAddress,
   runAction,
 }: BoardroomPanelProps): React.JSX.Element {
+  const clearBoardroomPrediction = (): void => {
+    setPredictedBoardroom(undefined);
+    setBoardroomAddress("");
+  };
+
+  const setBoardroomPredictionField = <K extends keyof BoardroomForm>(key: K, value: BoardroomForm[K]): void => {
+    setBoardroomForm((current) => ({ ...current, [key]: value }));
+    clearBoardroomPrediction();
+  };
+
   return (
     <div className="grid gap-4">
       <Panel
@@ -71,7 +81,7 @@ export function BoardroomPanel({
             variant="secondary"
             onClick={() => {
               setBoardroomForm((current) => ({ ...current, salt: randomSalt() }));
-              setPredictedBoardroom(undefined);
+              clearBoardroomPrediction();
             }}
           >
             <Wand2 className="h-4 w-4" />
@@ -81,16 +91,16 @@ export function BoardroomPanel({
       >
         <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2">
           <Field label="Owner">
-            <Input value={boardroomForm.owner} onChange={(event) => setBoardroomField("owner", event.target.value, setBoardroomForm)} spellCheck={false} />
+            <Input value={boardroomForm.owner} onChange={(event) => setBoardroomPredictionField("owner", event.target.value)} spellCheck={false} />
           </Field>
           <Field label="Name">
-            <Input value={boardroomForm.name} onChange={(event) => setBoardroomField("name", event.target.value, setBoardroomForm)} />
+            <Input value={boardroomForm.name} onChange={(event) => setBoardroomPredictionField("name", event.target.value)} />
           </Field>
           <Field label="Symbol">
-            <Input value={boardroomForm.symbol} onChange={(event) => setBoardroomField("symbol", event.target.value, setBoardroomForm)} />
+            <Input value={boardroomForm.symbol} onChange={(event) => setBoardroomPredictionField("symbol", event.target.value)} />
           </Field>
           <Field label="Salt">
-            <Input value={boardroomForm.salt} onChange={(event) => setBoardroomField("salt", event.target.value, setBoardroomForm)} spellCheck={false} />
+            <Input value={boardroomForm.salt} onChange={(event) => setBoardroomPredictionField("salt", event.target.value)} spellCheck={false} />
           </Field>
         </div>
         <ActionRow>
@@ -294,14 +304,6 @@ export function BoardroomPanel({
       </Panel>
     </div>
   );
-}
-
-function setBoardroomField<K extends keyof BoardroomForm>(
-  key: K,
-  value: BoardroomForm[K],
-  setter: Dispatch<SetStateAction<BoardroomForm>>,
-): void {
-  setter((current) => ({ ...current, [key]: value }));
 }
 
 function setBoardroomGrantField<K extends keyof BoardroomGrantForm>(
