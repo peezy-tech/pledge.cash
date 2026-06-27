@@ -222,9 +222,15 @@ export function App(): React.JSX.Element {
           },
         ],
       });
+      await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId }] });
     }
 
-    setWallet((current) => ({ ...current, chainId: HYPEREVM_TESTNET_CHAIN_ID }));
+    const activeChainId = (await provider.request({ method: "eth_chainId" })) as string;
+    const parsedChainId = Number.parseInt(activeChainId, 16);
+    setWallet((current) => walletState(current.account, Number.isNaN(parsedChainId) ? undefined : parsedChainId));
+    if (parsedChainId !== HYPEREVM_TESTNET_CHAIN_ID) {
+      throw new Error(`Wallet is still on chain ${Number.isNaN(parsedChainId) ? activeChainId : parsedChainId}.`);
+    }
     pushLog("Wallet switched to HyperEVM testnet.", "success");
   };
 
