@@ -243,10 +243,10 @@ contract TokenGrantTest is Test {
 
     function testCreateFreeClaimGrantEscrowsTokenAndInitializes() public {
         bytes32 salt = keccak256("free-create");
-        address grantAddress = factory.predictGrantAddress(salt);
+        address grantAddress = factory.predictGrantAddress(issuer, salt);
         uint256 tokenId = uint256(uint160(grantAddress));
 
-        _approve(address(token), issuer, grantAddress, GRANT_SIZE);
+        _approve(address(token), issuer, address(factory), GRANT_SIZE);
 
         vm.prank(issuer);
         address created = factory.createGrant(
@@ -274,6 +274,24 @@ contract TokenGrantTest is Test {
         assertEq(grant.tokenUnit(), 1 ether);
         assertEq(token.balanceOf(grantAddress), GRANT_SIZE);
         assertEq(token.balanceOf(issuer), 0);
+    }
+
+    function testGrantSaltIsBoundToIssuer() public {
+        bytes32 salt = keccak256("shared-grant-salt");
+        address issuerPrediction = factory.predictGrantAddress(issuer, salt);
+        address strangerPrediction = factory.predictGrantAddress(stranger, salt);
+
+        assertNotEq(issuerPrediction, strangerPrediction);
+
+        token.mint(stranger, GRANT_SIZE);
+
+        address strangerGrant = _createFreeGrantForIssuer(stranger, salt);
+        address issuerGrant = _createFreeGrantForIssuer(issuer, salt);
+
+        assertEq(strangerGrant, strangerPrediction);
+        assertEq(issuerGrant, issuerPrediction);
+        assertEq(TokenGrant(strangerGrant).issuer(), stranger);
+        assertEq(TokenGrant(issuerGrant).issuer(), issuer);
     }
 
     function testFactoryOwnerIsDeployer() public view {
@@ -304,8 +322,8 @@ contract TokenGrantTest is Test {
         factory.setCreationFee(fee);
 
         bytes32 salt = keccak256("native-fee-create");
-        address grantAddress = factory.predictGrantAddress(salt);
-        _approve(address(token), issuer, grantAddress, GRANT_SIZE);
+        address grantAddress = factory.predictGrantAddress(issuer, salt);
+        _approve(address(token), issuer, address(factory), GRANT_SIZE);
 
         vm.deal(issuer, fee);
         vm.prank(issuer);
@@ -1016,9 +1034,8 @@ contract TokenGrantTest is Test {
         falseToken.mint(issuer, GRANT_SIZE);
 
         bytes32 salt = keccak256("false-token");
-        address predicted = factory.predictGrantAddress(salt);
 
-        _approve(address(falseToken), issuer, predicted, GRANT_SIZE);
+        _approve(address(falseToken), issuer, address(factory), GRANT_SIZE);
 
         vm.prank(issuer);
         vm.expectRevert();
@@ -1204,6 +1221,15 @@ contract TokenGrantTest is Test {
         );
     }
 
+    function _createFreeGrantForIssuer(address grantIssuer, bytes32 salt) internal returns (address grant) {
+        _approve(address(token), grantIssuer, address(factory), GRANT_SIZE);
+
+        vm.prank(grantIssuer);
+        grant = factory.createGrant(
+            holder, address(token), address(0), GRANT_SIZE, 0, EXPIRY, CLIFF, VESTING_END, false, 0, salt
+        );
+    }
+
     function _createPaidGrant(string memory saltLabel) internal returns (TokenGrant grant, address grantAddress) {
         bytes32 salt = keccak256(bytes(saltLabel));
         grant = _createGrant(
@@ -1219,8 +1245,8 @@ contract TokenGrantTest is Test {
     }
 
     function _createGrant(GrantCreate memory create) internal returns (TokenGrant grant) {
-        address grantAddress = factory.predictGrantAddress(create.salt);
-        _approve(create.token, issuer, grantAddress, create.terms[0]);
+        address grantAddress = factory.predictGrantAddress(issuer, create.salt);
+        _approve(create.token, issuer, address(factory), create.terms[0]);
 
         vm.prank(issuer);
         address created = factory.createGrant(
@@ -1257,8 +1283,7 @@ contract TokenGrantTest is Test {
         uint256[5] memory terms
     ) internal {
         bytes32 salt = keccak256(bytes(saltLabel));
-        address grantAddress = factory.predictGrantAddress(salt);
-        _approve(token_, issuer, grantAddress, terms[0]);
+        _approve(token_, issuer, address(factory), terms[0]);
 
         vm.prank(issuer);
         vm.expectRevert(expectedRevertData);

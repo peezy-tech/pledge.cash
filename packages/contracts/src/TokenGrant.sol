@@ -128,8 +128,6 @@ contract TokenGrant is Initializable {
         vestingEnd = _vestingEnd;
         transferable = _transferable;
         transferUnlockTime = _transferUnlockTime;
-
-        _checkedTransferFrom(_token, _issuer, address(this), grantSize);
     }
 
     /*//////////////////////////////////////////////////////////////

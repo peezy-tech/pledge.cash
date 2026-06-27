@@ -3,39 +3,57 @@ pragma solidity ^0.8.30;
 
 import {Ownable} from "solady/auth/Ownable.sol";
 import {Initializable} from "solady/utils/Initializable.sol";
+import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {BoardroomToken} from "./BoardroomToken.sol";
-import {TokenGrantFactory} from "./TokenGrantFactory.sol";
+import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
+import {IBoardroomPolicyRegistry} from "./IBoardroomPolicyRegistry.sol";
 
-contract Boardroom is Ownable, Initializable {
-    address public tokenGrantFactory;
+contract Boardroom is Ownable, Initializable, ReentrancyGuard {
+    uint256 public constant MAX_BATCH_CALLS = 16;
+
+    struct Call {
+        address policy;
+        address target;
+        uint256 value;
+        bytes data;
+    }
+
+    address public policyRegistry;
     address public shareToken;
 
     error InvalidAddress();
     error InvalidAmount();
+    error EmptyBatch();
+    error TooManyCalls(uint256 requested, uint256 maximum);
+    error PolicyNotAllowed(address policy);
+    error CallNotAllowed(address policy, address target, bytes4 selector);
+    error CallFailed(address target);
 
     event BoardroomInitialized(
-        address indexed owner, address indexed tokenGrantFactory, address indexed shareToken, string name, string symbol
+        address indexed owner, address indexed policyRegistry, address indexed shareToken, string name, string symbol
     );
     event SharesMinted(address indexed to, uint256 amount);
-    event BoardroomGrantCreated(
-        address indexed grant, address indexed holder, address indexed paymentToken, uint256 amount, uint256 price
+    event BoardroomCallExecuted(
+        address indexed policy, address indexed target, bytes4 indexed selector, uint256 value, bytes32 dataHash
     );
 
     constructor() {
         _disableInitializers();
     }
 
-    function initialize(address owner_, address tokenGrantFactory_, string calldata name_, string calldata symbol_)
+    receive() external payable {}
+
+    function initialize(address owner_, address policyRegistry_, string calldata name_, string calldata symbol_)
         external
         initializer
     {
-        if (owner_ == address(0) || tokenGrantFactory_ == address(0)) revert InvalidAddress();
+        if (owner_ == address(0) || policyRegistry_ == address(0)) revert InvalidAddress();
 
         _initializeOwner(owner_);
-        tokenGrantFactory = tokenGrantFactory_;
+        policyRegistry = policyRegistry_;
         shareToken = address(new BoardroomToken(address(this), name_, symbol_));
 
-        emit BoardroomInitialized(owner_, tokenGrantFactory_, shareToken, name_, symbol_);
+        emit BoardroomInitialized(owner_, policyRegistry_, shareToken, name_, symbol_);
     }
 
     function mint(address to, uint256 amount) external onlyOwner {
@@ -46,37 +64,57 @@ contract Boardroom is Ownable, Initializable {
         emit SharesMinted(to, amount);
     }
 
-    function createGrant(
-        address holder,
-        address paymentToken,
-        uint256 amount,
-        uint256 price,
-        uint256 expiry,
-        uint256 vestingCliff,
-        uint256 vestingEnd,
-        bool transferable,
-        uint256 transferUnlockTime,
-        bytes32 salt
-    ) external payable onlyOwner returns (address grant) {
-        if (holder == address(0)) revert InvalidAddress();
-        if (amount == 0) revert InvalidAmount();
+    function execute(Call calldata call_) external payable onlyOwner nonReentrant returns (bytes memory result) {
+        result = _execute(call_);
+    }
 
-        address grantAddress = TokenGrantFactory(tokenGrantFactory).predictGrantAddress(salt);
-        BoardroomToken(shareToken).approve(grantAddress, amount);
+    function executeBatch(Call[] calldata calls)
+        external
+        payable
+        onlyOwner
+        nonReentrant
+        returns (bytes[] memory results)
+    {
+        uint256 length = calls.length;
+        if (length == 0) revert EmptyBatch();
+        if (length > MAX_BATCH_CALLS) revert TooManyCalls(length, MAX_BATCH_CALLS);
 
-        grant = TokenGrantFactory(tokenGrantFactory).createGrant{value: msg.value}(
-            holder,
-            shareToken,
-            paymentToken,
-            amount,
-            price,
-            expiry,
-            vestingCliff,
-            vestingEnd,
-            transferable,
-            transferUnlockTime,
-            salt
-        );
-        emit BoardroomGrantCreated(grant, holder, paymentToken, amount, price);
+        results = new bytes[](length);
+        for (uint256 i; i < length; ++i) {
+            results[i] = _execute(calls[i]);
+        }
+    }
+
+    function _execute(Call calldata call_) internal returns (bytes memory result) {
+        address policy = call_.policy;
+        address target = call_.target;
+        if (policy == address(0) || target == address(0)) revert InvalidAddress();
+
+        bytes4 selector = _selector(call_.data);
+        if (!IBoardroomPolicyRegistry(policyRegistry).isPolicyAllowed(policy)) {
+            revert PolicyNotAllowed(policy);
+        }
+        if (!IBoardroomCallPolicy(policy).canCall(address(this), msg.sender, target, call_.value, call_.data)) {
+            revert CallNotAllowed(policy, target, selector);
+        }
+
+        bool success;
+        (success, result) = target.call{value: call_.value}(call_.data);
+        if (!success) _revertCall(target, result);
+
+        emit BoardroomCallExecuted(policy, target, selector, call_.value, keccak256(call_.data));
+    }
+
+    function _selector(bytes calldata data) internal pure returns (bytes4 selector) {
+        if (data.length < 4) return bytes4(0);
+        return bytes4(data[:4]);
+    }
+
+    function _revertCall(address target, bytes memory returnData) internal pure {
+        if (returnData.length == 0) revert CallFailed(target);
+
+        assembly {
+            revert(add(returnData, 0x20), mload(returnData))
+        }
     }
 }

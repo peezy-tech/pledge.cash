@@ -5,7 +5,7 @@ import {LibClone} from "solady/utils/LibClone.sol";
 import {Boardroom} from "./Boardroom.sol";
 
 contract BoardroomFactory {
-    address public immutable tokenGrantFactory;
+    address public immutable policyRegistry;
     address public immutable boardroomLogic;
 
     address[] public allBoardrooms;
@@ -16,17 +16,17 @@ contract BoardroomFactory {
     event BoardroomCreated(
         address indexed boardroom,
         address indexed owner,
-        address indexed tokenGrantFactory,
+        address indexed policyRegistry,
         address shareToken,
         string name,
         string symbol,
         bytes32 salt
     );
 
-    constructor(address tokenGrantFactory_) {
-        if (tokenGrantFactory_ == address(0)) revert InvalidAddress();
+    constructor(address policyRegistry_) {
+        if (policyRegistry_ == address(0)) revert InvalidAddress();
 
-        tokenGrantFactory = tokenGrantFactory_;
+        policyRegistry = policyRegistry_;
         boardroomLogic = address(new Boardroom());
     }
 
@@ -34,21 +34,27 @@ contract BoardroomFactory {
         external
         returns (address boardroom)
     {
-        boardroom = LibClone.cloneDeterministic(boardroomLogic, salt);
+        if (owner == address(0)) revert InvalidAddress();
+
+        boardroom = LibClone.cloneDeterministic(boardroomLogic, _deploymentSalt(owner, salt));
         Boardroom createdBoardroom = Boardroom(payable(boardroom));
-        createdBoardroom.initialize(owner, tokenGrantFactory, name, symbol);
+        createdBoardroom.initialize(owner, policyRegistry, name, symbol);
 
         allBoardrooms.push(boardroom);
         isBoardroom[boardroom] = true;
 
-        emit BoardroomCreated(boardroom, owner, tokenGrantFactory, createdBoardroom.shareToken(), name, symbol, salt);
+        emit BoardroomCreated(boardroom, owner, policyRegistry, createdBoardroom.shareToken(), name, symbol, salt);
     }
 
-    function predictBoardroomAddress(bytes32 salt) external view returns (address) {
-        return LibClone.predictDeterministicAddress(boardroomLogic, salt, address(this));
+    function predictBoardroomAddress(address owner, bytes32 salt) external view returns (address) {
+        return LibClone.predictDeterministicAddress(boardroomLogic, _deploymentSalt(owner, salt), address(this));
     }
 
     function allBoardroomsLength() external view returns (uint256) {
         return allBoardrooms.length;
+    }
+
+    function _deploymentSalt(address owner, bytes32 salt) internal pure returns (bytes32) {
+        return keccak256(abi.encode(owner, salt));
     }
 }

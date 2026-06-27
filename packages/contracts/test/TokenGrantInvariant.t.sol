@@ -131,15 +131,16 @@ contract TokenGrantInvariantTest is StdInvariant, Test {
         paymentToken.mint(holder, 1_000_000000);
 
         bytes32 salt = keccak256("invariant");
-        address predicted = factory.predictGrantAddress(salt);
+        address predicted = factory.predictGrantAddress(owner, salt);
 
         vm.prank(owner);
-        token.approve(predicted, GRANT_SIZE);
+        token.approve(address(factory), GRANT_SIZE);
 
         vm.prank(owner);
         address grantAddress = factory.createGrant(
             holder, address(token), address(paymentToken), GRANT_SIZE, PRICE, EXPIRY, CLIFF, VESTING_END, false, 0, salt
         );
+        assertEq(grantAddress, predicted);
         grant = TokenGrant(grantAddress);
 
         handler = new TokenGrantInvariantHandler(grant, paymentToken, holder, owner);
