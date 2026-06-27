@@ -12,7 +12,8 @@
   },
   "scripts": {
     "build": "bun run generate && tsc -p tsconfig.json",
-    "generate": "bun scripts/generate.ts"
+    "generate": "bun scripts/generate.ts",
+    "test": "bun test"
   },
   "dependencies": {
     "viem": "catalog:"

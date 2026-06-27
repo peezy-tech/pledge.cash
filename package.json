@@ -26,7 +26,7 @@
     "format": "bun --cwd packages/contracts format",
     "format:check": "bun --cwd packages/contracts format:check",
     "simulate:hyperevm-testnet": "bun --cwd packages/contracts simulate:hyperevm-testnet",
-    "test": "bun --cwd packages/contracts test"
+    "test": "bun --cwd packages/contracts test && bun --cwd packages/sdk test && bun --cwd apps/web test"
   },
   "devDependencies": {
     "@types/node": "catalog:",
