@@ -13,8 +13,8 @@ type DirectGrantPanelProps = {
   issuer: Address | undefined;
   pendingAction: string | undefined;
   predictedGrant: Address | undefined;
+  clearDirectGrantPrediction: () => void;
   setGrantForm: Dispatch<SetStateAction<GrantForm>>;
-  setPredictedGrant: Dispatch<SetStateAction<Address | undefined>>;
   approveEscrow: () => Promise<void>;
   createGrant: () => Promise<void>;
   predictGrant: () => Promise<void>;
@@ -27,13 +27,18 @@ export function DirectGrantPanel({
   issuer,
   pendingAction,
   predictedGrant,
+  clearDirectGrantPrediction,
   setGrantForm,
-  setPredictedGrant,
   approveEscrow,
   createGrant,
   predictGrant,
   runAction,
 }: DirectGrantPanelProps): React.JSX.Element {
+  const setGrantSalt = (salt: string): void => {
+    setGrantForm((current) => ({ ...current, salt }));
+    clearDirectGrantPrediction();
+  };
+
   return (
     <div className="grid gap-4">
       <Panel
@@ -42,8 +47,7 @@ export function DirectGrantPanel({
           <Button
             variant="secondary"
             onClick={() => {
-              setGrantForm((current) => ({ ...current, salt: randomSalt() }));
-              setPredictedGrant(undefined);
+              setGrantSalt(randomSalt());
             }}
           >
             <Wand2 className="h-4 w-4" />
@@ -104,7 +108,7 @@ export function DirectGrantPanel({
             />
           </Field>
           <Field className="md:col-span-2" label="Salt">
-            <Input value={grantForm.salt} onChange={(event) => setGrantFormField("salt", event.target.value, setGrantForm)} spellCheck={false} />
+            <Input value={grantForm.salt} onChange={(event) => setGrantSalt(event.target.value)} spellCheck={false} />
           </Field>
         </div>
         <ActionRow>

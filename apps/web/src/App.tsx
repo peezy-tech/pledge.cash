@@ -183,6 +183,13 @@ export function App(): React.JSX.Element {
     setGrantSnapshot(undefined);
   }, []);
 
+  const clearDirectGrantPrediction = useCallback((): void => {
+    if (predictedGrant && grantAddress.toLowerCase() === predictedGrant.toLowerCase()) {
+      updateGrantAddress("");
+    }
+    setPredictedGrant(undefined);
+  }, [grantAddress, predictedGrant, updateGrantAddress]);
+
   const activeAccount = (): Address => {
     if (!wallet.account) throw new Error("Connect wallet first.");
     if (wallet.chainId !== HYPEREVM_TESTNET_CHAIN_ID) throw new Error("Switch wallet to HyperEVM testnet first.");
@@ -649,12 +656,12 @@ export function App(): React.JSX.Element {
           {activeTab === "direct" ? (
             <DirectGrantPanel
               creationFee={creationFee}
+              clearDirectGrantPrediction={clearDirectGrantPrediction}
               grantForm={grantForm}
               issuer={wallet.account}
               pendingAction={pendingAction}
               predictedGrant={predictedGrant}
               setGrantForm={setGrantForm}
-              setPredictedGrant={setPredictedGrant}
               approveEscrow={approveEscrow}
               createGrant={createGrant}
               predictGrant={predictGrant}
