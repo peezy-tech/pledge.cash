@@ -169,6 +169,13 @@ export function App(): React.JSX.Element {
     }
   };
 
+  const updateBoardroomAddress = useCallback((address: string): void => {
+    setBoardroomAddress(address);
+    setBoardroomSnapshot(undefined);
+    setBoardroomMintTo("");
+    setPredictedBoardroomGrant(undefined);
+  }, []);
+
   const activeAccount = (): Address => {
     if (!wallet.account) throw new Error("Connect wallet first.");
     if (wallet.chainId !== HYPEREVM_TESTNET_CHAIN_ID) throw new Error("Switch wallet to HyperEVM testnet first.");
@@ -635,7 +642,7 @@ export function App(): React.JSX.Element {
               pendingAction={pendingAction}
               predictedBoardroom={predictedBoardroom}
               predictedBoardroomGrant={predictedBoardroomGrant}
-              setBoardroomAddress={setBoardroomAddress}
+              setBoardroomAddress={updateBoardroomAddress}
               setBoardroomForm={setBoardroomForm}
               setBoardroomGrantForm={setBoardroomGrantForm}
               setBoardroomMintAmount={setBoardroomMintAmount}

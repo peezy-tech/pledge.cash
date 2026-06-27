@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "bun --cwd ../../packages/contracts build && bun --cwd ../../packages/sdk generate && vite build && mkdir -p dist/deployments && cp CNAME .nojekyll dist/ && if [ -f ../../packages/contracts/deployments/998.json ]; then cp ../../packages/contracts/deployments/998.json dist/deployments/998.json; else printf '%s\\n' '{\"status\":\"pending\",\"reason\":\"Broadcast artifact not published yet\"}' > dist/deployments/998.json; fi",
-    "dev": "bun --cwd ../../packages/sdk generate && vite --host 0.0.0.0",
+    "dev": "bun --cwd ../../packages/contracts build && bun --cwd ../../packages/sdk generate && vite --host 0.0.0.0",
     "preview": "vite preview --host 127.0.0.1",
     "test": "bun run typecheck && bun test",
     "typecheck": "tsc -p tsconfig.json --noEmit"

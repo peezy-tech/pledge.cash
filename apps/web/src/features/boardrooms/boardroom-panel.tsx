@@ -18,7 +18,7 @@ type BoardroomPanelProps = {
   pendingAction: string | undefined;
   predictedBoardroom: Address | undefined;
   predictedBoardroomGrant: Address | undefined;
-  setBoardroomAddress: Dispatch<SetStateAction<string>>;
+  setBoardroomAddress: (address: string) => void;
   setBoardroomForm: Dispatch<SetStateAction<BoardroomForm>>;
   setBoardroomGrantForm: Dispatch<SetStateAction<BoardroomGrantForm>>;
   setBoardroomMintAmount: Dispatch<SetStateAction<string>>;
