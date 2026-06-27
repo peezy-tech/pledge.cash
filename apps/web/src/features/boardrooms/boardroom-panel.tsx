@@ -14,6 +14,7 @@ type BoardroomPanelProps = {
   boardroomMintAmount: string;
   boardroomMintTo: string;
   boardroomSnapshot: BoardroomSnapshot | undefined;
+  clearBoardroomGrantPrediction: () => void;
   deployment: PledgeCashDeployment | undefined;
   pendingAction: string | undefined;
   predictedBoardroom: Address | undefined;
@@ -24,7 +25,6 @@ type BoardroomPanelProps = {
   setBoardroomMintAmount: Dispatch<SetStateAction<string>>;
   setBoardroomMintTo: Dispatch<SetStateAction<string>>;
   setPredictedBoardroom: Dispatch<SetStateAction<Address | undefined>>;
-  setPredictedBoardroomGrant: Dispatch<SetStateAction<Address | undefined>>;
   boardroomApproveFactory: () => Promise<void>;
   boardroomCreateGrant: () => Promise<void>;
   createBoardroom: () => Promise<void>;
@@ -42,6 +42,7 @@ export function BoardroomPanel({
   boardroomMintAmount,
   boardroomMintTo,
   boardroomSnapshot,
+  clearBoardroomGrantPrediction,
   deployment,
   pendingAction,
   predictedBoardroom,
@@ -52,7 +53,6 @@ export function BoardroomPanel({
   setBoardroomMintAmount,
   setBoardroomMintTo,
   setPredictedBoardroom,
-  setPredictedBoardroomGrant,
   boardroomApproveFactory,
   boardroomCreateGrant,
   createBoardroom,
@@ -70,6 +70,11 @@ export function BoardroomPanel({
   const setBoardroomPredictionField = <K extends keyof BoardroomForm>(key: K, value: BoardroomForm[K]): void => {
     setBoardroomForm((current) => ({ ...current, [key]: value }));
     clearBoardroomPrediction();
+  };
+
+  const setBoardroomGrantSalt = (salt: string): void => {
+    setBoardroomGrantForm((current) => ({ ...current, salt }));
+    clearBoardroomGrantPrediction();
   };
 
   return (
@@ -189,8 +194,7 @@ export function BoardroomPanel({
           <Button
             variant="secondary"
             onClick={() => {
-              setBoardroomGrantForm((current) => ({ ...current, salt: randomSalt() }));
-              setPredictedBoardroomGrant(undefined);
+              setBoardroomGrantSalt(randomSalt());
             }}
           >
             <Wand2 className="h-4 w-4" />
@@ -264,7 +268,7 @@ export function BoardroomPanel({
             />
           </Field>
           <Field className="md:col-span-2" label="Salt">
-            <Input value={boardroomGrantForm.salt} onChange={(event) => setBoardroomGrantField("salt", event.target.value, setBoardroomGrantForm)} spellCheck={false} />
+            <Input value={boardroomGrantForm.salt} onChange={(event) => setBoardroomGrantSalt(event.target.value)} spellCheck={false} />
           </Field>
         </div>
         <ActionRow>

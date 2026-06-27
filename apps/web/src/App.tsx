@@ -190,6 +190,13 @@ export function App(): React.JSX.Element {
     setPredictedGrant(undefined);
   }, [grantAddress, predictedGrant, updateGrantAddress]);
 
+  const clearBoardroomGrantPrediction = useCallback((): void => {
+    if (predictedBoardroomGrant && grantAddress.toLowerCase() === predictedBoardroomGrant.toLowerCase()) {
+      updateGrantAddress("");
+    }
+    setPredictedBoardroomGrant(undefined);
+  }, [grantAddress, predictedBoardroomGrant, updateGrantAddress]);
+
   const activeAccount = (): Address => {
     if (!wallet.account) throw new Error("Connect wallet first.");
     if (wallet.chainId !== HYPEREVM_TESTNET_CHAIN_ID) throw new Error("Switch wallet to HyperEVM testnet first.");
@@ -696,6 +703,7 @@ export function App(): React.JSX.Element {
               boardroomMintAmount={boardroomMintAmount}
               boardroomMintTo={boardroomMintTo}
               boardroomSnapshot={boardroomSnapshot}
+              clearBoardroomGrantPrediction={clearBoardroomGrantPrediction}
               deployment={deployment}
               pendingAction={pendingAction}
               predictedBoardroom={predictedBoardroom}
@@ -706,7 +714,6 @@ export function App(): React.JSX.Element {
               setBoardroomMintAmount={setBoardroomMintAmount}
               setBoardroomMintTo={setBoardroomMintTo}
               setPredictedBoardroom={setPredictedBoardroom}
-              setPredictedBoardroomGrant={setPredictedBoardroomGrant}
               boardroomApproveFactory={boardroomApproveFactory}
               boardroomCreateGrant={boardroomCreateGrant}
               createBoardroom={createBoardroom}
