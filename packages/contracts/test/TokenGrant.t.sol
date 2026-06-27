@@ -944,7 +944,9 @@ contract TokenGrantTest is Test {
         GrantERC20 highDecimalPayment = new GrantERC20("High Payment", "HPAY", 78);
 
         _createGrantExpectRevert(
-            abi.encodeWithSelector(TokenGrant.UnsupportedTokenDecimals.selector, address(highDecimalPayment), uint8(78)),
+            abi.encodeWithSelector(
+                TokenGrant.UnsupportedTokenDecimals.selector, address(highDecimalPayment), uint8(78)
+            ),
             "high-payment",
             address(token),
             holder,

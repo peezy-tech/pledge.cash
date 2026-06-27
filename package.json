@@ -23,6 +23,7 @@
     "build": "bun run --workspaces --if-present --sequential build",
     "deploy:hyperevm-testnet": "bun --cwd packages/contracts deploy:hyperevm-testnet",
     "format": "bun --cwd packages/contracts format",
+    "format:check": "bun --cwd packages/contracts format:check",
     "simulate:hyperevm-testnet": "bun --cwd packages/contracts simulate:hyperevm-testnet",
     "test": "bun --cwd packages/contracts test"
   },

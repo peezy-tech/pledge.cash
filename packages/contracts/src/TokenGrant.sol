@@ -59,11 +59,7 @@ contract TokenGrant is Initializable {
     error InvalidExpiry();
     error InvalidTokenDecimals(address token);
     error UnsupportedTokenDecimals(address token, uint8 decimals);
-    error UnexpectedTokenBalanceChange(
-        address token,
-        uint256 expected,
-        uint256 actual
-    );
+    error UnexpectedTokenBalanceChange(address token, uint256 expected, uint256 actual);
     error GrantExpired();
     error GrantClosed();
     error OnlyIssuer();
@@ -79,21 +75,9 @@ contract TokenGrant is Initializable {
     error OnlyFactory();
     error HolderSyncMismatch(address expected, address actual);
 
-    event GrantSettled(
-        address indexed holder,
-        address indexed issuer,
-        uint256 tokenAmount,
-        uint256 paymentAmount
-    );
-    event VestingHalted(
-        address indexed issuer,
-        uint256 vestedAtHalt,
-        uint256 unvestedWithdrawn
-    );
-    event ExpiredTokensWithdrawn(
-        address indexed issuer,
-        uint256 amountWithdrawn
-    );
+    event GrantSettled(address indexed holder, address indexed issuer, uint256 tokenAmount, uint256 paymentAmount);
+    event VestingHalted(address indexed issuer, uint256 vestedAtHalt, uint256 unvestedWithdrawn);
+    event ExpiredTokensWithdrawn(address indexed issuer, uint256 amountWithdrawn);
 
     constructor() {
         _disableInitializers();
@@ -112,11 +96,7 @@ contract TokenGrant is Initializable {
         bool _transferable,
         uint256 _transferUnlockTime
     ) external initializer {
-        if (
-            _issuer == address(0) ||
-            _holder == address(0) ||
-            _token == address(0)
-        ) {
+        if (_issuer == address(0) || _holder == address(0) || _token == address(0)) {
             revert InvalidAddress();
         }
         if (_amount == 0) revert InvalidAmount();
@@ -156,9 +136,7 @@ contract TokenGrant is Initializable {
                                 VIEWS
     //////////////////////////////////////////////////////////////*/
 
-    function getCurrentlyVestedSnapshot(
-        uint256 _currentTime
-    ) public view returns (uint256) {
+    function getCurrentlyVestedSnapshot(uint256 _currentTime) public view returns (uint256) {
         if (_currentTime < vestingCliff) {
             return 0;
         }
@@ -175,25 +153,15 @@ contract TokenGrant is Initializable {
             return claimable;
         }
 
-        return
-            FixedPointMathLib.fullMulDiv(
-                grantSize,
-                cappedTime - vestingCliff,
-                vestingEnd - vestingCliff
-            );
+        return FixedPointMathLib.fullMulDiv(grantSize, cappedTime - vestingCliff, vestingEnd - vestingCliff);
     }
 
-    function getSettlementCost(
-        uint256 _amountToSettle
-    ) public view returns (uint256) {
+    function getSettlementCost(uint256 _amountToSettle) public view returns (uint256) {
         if (price == 0) return 0;
-        return
-            FixedPointMathLib.fullMulDivUp(_amountToSettle, price, tokenUnit());
+        return FixedPointMathLib.fullMulDivUp(_amountToSettle, price, tokenUnit());
     }
 
-    function getSettleableAmount(
-        uint256 _currentTime
-    ) public view returns (uint256) {
+    function getSettleableAmount(uint256 _currentTime) public view returns (uint256) {
         uint256 vested = getCurrentlyVestedSnapshot(_currentTime);
         if (vested <= settledAmount) return 0;
         return vested - settledAmount;
@@ -215,8 +183,9 @@ contract TokenGrant is Initializable {
         _requireOpen();
         if (!transferable) revert NonTransferableGrant(tokenId);
         if (transferLocked) revert GrantTransferLocked(tokenId);
-        if (_currentTime < transferUnlockTime)
+        if (_currentTime < transferUnlockTime) {
             revert GrantTransferNotUnlocked(tokenId, transferUnlockTime);
+        }
         if (isExpired(_currentTime)) revert GrantExpired();
     }
 
@@ -228,10 +197,7 @@ contract TokenGrant is Initializable {
                             FACTORY HOOKS
     //////////////////////////////////////////////////////////////*/
 
-    function onGrantRightTransferred(
-        address from,
-        address to
-    ) external onlyFactory {
+    function onGrantRightTransferred(address from, address to) external onlyFactory {
         _requireOpen();
         if (from != holder) revert HolderSyncMismatch(holder, from);
         if (to == address(0)) revert InvalidAddress();
@@ -252,19 +218,13 @@ contract TokenGrant is Initializable {
 
         uint256 requestedTotal = settledAmount + _amountToSettle;
         if (requestedTotal > claimable) {
-            revert AmountExceedsTotal({
-                requested: requestedTotal,
-                available: claimable
-            });
+            revert AmountExceedsTotal({requested: requestedTotal, available: claimable});
         }
 
         uint256 vested = getCurrentlyVestedSnapshot(block.timestamp);
         uint256 settleable = vested - settledAmount;
         if (_amountToSettle > settleable) {
-            revert InsufficientVestedAmount({
-                requested: _amountToSettle,
-                vested: settleable
-            });
+            revert InsufficientVestedAmount({requested: _amountToSettle, vested: settleable});
         }
 
         settledAmount += _amountToSettle;
@@ -272,23 +232,13 @@ contract TokenGrant is Initializable {
         transferLocked = true;
         uint256 totalCost = getSettlementCost(_amountToSettle);
         if (totalCost > 0) {
-            _checkedTransferFrom(
-                paymentToken,
-                currentHolder,
-                issuer,
-                totalCost
-            );
+            _checkedTransferFrom(paymentToken, currentHolder, issuer, totalCost);
         }
         _checkedTransfer(token, currentHolder, _amountToSettle);
 
         if (settledAmount >= claimable) {
             _closeAndBurnGrantRight();
-            emit GrantSettled(
-                currentHolder,
-                issuer,
-                _amountToSettle,
-                totalCost
-            );
+            emit GrantSettled(currentHolder, issuer, _amountToSettle, totalCost);
             return;
         }
 
@@ -325,10 +275,7 @@ contract TokenGrant is Initializable {
         _requireOpen();
         if (block.timestamp <= expiry) revert NotYetExpired();
 
-        uint256 remainingBalance = SafeTransferLib.balanceOf(
-            token,
-            address(this)
-        );
+        uint256 remainingBalance = SafeTransferLib.balanceOf(token, address(this));
         transferLocked = true;
         if (remainingBalance > 0) {
             SafeTransferLib.safeTransfer(token, issuer, remainingBalance);
@@ -363,9 +310,7 @@ contract TokenGrant is Initializable {
     }
 
     function _readTokenDecimals(address token_) internal view returns (uint8) {
-        (bool success, bytes memory data) = token_.staticcall(
-            abi.encodeCall(ITokenGrantERC20Metadata.decimals, ())
-        );
+        (bool success, bytes memory data) = token_.staticcall(abi.encodeCall(ITokenGrantERC20Metadata.decimals, ()));
         if (!success || data.length < 32) revert InvalidTokenDecimals(token_);
 
         uint256 decimals = abi.decode(data, (uint256));
@@ -381,12 +326,7 @@ contract TokenGrant is Initializable {
         return tokenDecimals_;
     }
 
-    function _checkedTransferFrom(
-        address token_,
-        address from,
-        address to,
-        uint256 expectedAmount
-    ) internal {
+    function _checkedTransferFrom(address token_, address from, address to, uint256 expectedAmount) internal {
         uint256 balanceBefore = SafeTransferLib.balanceOf(token_, to);
         SafeTransferLib.safeTransferFrom(token_, from, to, expectedAmount);
         uint256 balanceAfter = SafeTransferLib.balanceOf(token_, to);
@@ -395,19 +335,11 @@ contract TokenGrant is Initializable {
         }
         uint256 actualAmount = balanceAfter - balanceBefore;
         if (actualAmount != expectedAmount) {
-            revert UnexpectedTokenBalanceChange(
-                token_,
-                expectedAmount,
-                actualAmount
-            );
+            revert UnexpectedTokenBalanceChange(token_, expectedAmount, actualAmount);
         }
     }
 
-    function _checkedTransfer(
-        address token_,
-        address to,
-        uint256 expectedAmount
-    ) internal {
+    function _checkedTransfer(address token_, address to, uint256 expectedAmount) internal {
         uint256 balanceBefore = SafeTransferLib.balanceOf(token_, to);
         SafeTransferLib.safeTransfer(token_, to, expectedAmount);
         uint256 balanceAfter = SafeTransferLib.balanceOf(token_, to);
@@ -416,11 +348,7 @@ contract TokenGrant is Initializable {
         }
         uint256 actualAmount = balanceAfter - balanceBefore;
         if (actualAmount != expectedAmount) {
-            revert UnexpectedTokenBalanceChange(
-                token_,
-                expectedAmount,
-                actualAmount
-            );
+            revert UnexpectedTokenBalanceChange(token_, expectedAmount, actualAmount);
         }
     }
 }

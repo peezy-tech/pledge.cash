@@ -17,7 +17,14 @@ Prefer explicit custom errors, explicit events for state transitions, small publ
 bun run test
 bun --cwd packages/contracts test
 bun --cwd packages/contracts build
-cd packages/contracts && forge fmt --check
+bun run format:check
+```
+
+Use Foundry v1.7.1 for formatting and CI parity:
+
+```sh
+foundryup -i v1.7.1
+forge --version
 ```
 
 If a command fails because the repo is mid-prototype, report the exact failing command and first actionable error.

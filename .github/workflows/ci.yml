@@ -20,7 +20,10 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: stable
+          version: v1.7.1
+
+      - name: Foundry version
+        run: forge --version
 
       - name: Build
         working-directory: packages/contracts
