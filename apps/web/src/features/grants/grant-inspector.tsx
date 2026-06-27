@@ -12,7 +12,7 @@ type GrantInspectorProps = {
   paymentApproval: string;
   pendingAction: string | undefined;
   settleAmount: string;
-  setGrantAddress: Dispatch<SetStateAction<string>>;
+  setGrantAddress: (address: string) => void;
   setPaymentApproval: Dispatch<SetStateAction<string>>;
   setSettleAmount: Dispatch<SetStateAction<string>>;
   approvePayment: () => Promise<void>;

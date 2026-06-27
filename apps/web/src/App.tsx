@@ -178,6 +178,11 @@ export function App(): React.JSX.Element {
     setPredictedBoardroomGrant(undefined);
   }, []);
 
+  const updateGrantAddress = useCallback((address: string): void => {
+    setGrantAddress(address);
+    setGrantSnapshot(undefined);
+  }, []);
+
   const activeAccount = (): Address => {
     if (!wallet.account) throw new Error("Connect wallet first.");
     if (wallet.chainId !== HYPEREVM_TESTNET_CHAIN_ID) throw new Error("Switch wallet to HyperEVM testnet first.");
@@ -307,7 +312,7 @@ export function App(): React.JSX.Element {
   const predictGrant = async (): Promise<void> => {
     const predicted = await predictDirectGrantAddress();
     setPredictedGrant(predicted);
-    setGrantAddress(predicted);
+    updateGrantAddress(predicted);
     pushLog(`Predicted grant ${predicted}`, "success");
   };
 
@@ -317,7 +322,7 @@ export function App(): React.JSX.Element {
     const spender = usesLegacyTokenGrantFactory ? await predictDirectGrantAddress() : factory;
     if (usesLegacyTokenGrantFactory) {
       setPredictedGrant(spender);
-      setGrantAddress(spender);
+      updateGrantAddress(spender);
     }
 
     const hash = await walletClient().writeContract({
@@ -399,6 +404,8 @@ export function App(): React.JSX.Element {
 
   const approvePayment = async (): Promise<void> => {
     if (!grantSnapshot) throw new Error("Load a grant first.");
+    const grant = requireAddress(grantAddress, "Grant address");
+    if (grantSnapshot.address.toLowerCase() !== grant.toLowerCase()) throw new Error("Reload the grant after changing the address.");
     if (isZeroAddress(grantSnapshot.paymentToken)) throw new Error("Selected grant has no payment token.");
 
     const amount = uintInput(paymentApproval, "Payment approval");
@@ -553,7 +560,7 @@ export function App(): React.JSX.Element {
       args: [boardroomSnapshot.address, salt],
     });
     setPredictedBoardroomGrant(predicted);
-    setGrantAddress(predicted);
+    updateGrantAddress(predicted);
     pushLog(`Predicted Boardroom grant ${predicted}`, "success");
   };
 
@@ -662,7 +669,7 @@ export function App(): React.JSX.Element {
               paymentApproval={paymentApproval}
               pendingAction={pendingAction}
               settleAmount={settleAmount}
-              setGrantAddress={setGrantAddress}
+              setGrantAddress={updateGrantAddress}
               setPaymentApproval={setPaymentApproval}
               setSettleAmount={setSettleAmount}
               approvePayment={approvePayment}
