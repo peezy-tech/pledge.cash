@@ -9,7 +9,7 @@ describe("web app shell", () => {
     expect(html).toContain("pledge.cash");
     expect(html).toContain("Deployment");
     expect(html).toContain("TokenGrantFactory");
-    expect(html).toContain("0x00Bc...c126");
+    expect(html).toContain("Pending");
     expect(html).toContain("Direct Grant");
     expect(html).toContain("Inspect Grant");
     expect(html).toContain("Boardroom");

@@ -48,6 +48,18 @@ const deploymentFields = [
   ["deploymentTimestamp", "bigint"],
 ] as const satisfies readonly (readonly [string, DeploymentFieldKind])[];
 
+const requiredCurrentDeploymentFields = [
+  "boardroomFactory",
+  "boardroomPolicyRegistry",
+  "tokenGrantFactory",
+  "tokenGrantLogic",
+  "policyRegistryOwner",
+  "tokenGrantPolicyAllowed",
+  "factoryOwner",
+  "creationFee",
+  "deploymentTimestamp",
+] as const;
+
 function literal(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
@@ -75,6 +87,16 @@ function serializeDeployment(raw: string): string | undefined {
   const parsed = JSON.parse(raw) as Record<string, unknown>;
   const chainId = numberLiteral(raw, "chainId");
   if (!chainId) return undefined;
+
+  const missingFields = requiredCurrentDeploymentFields.filter((field) => propertyToken(raw, field) === undefined);
+  if (missingFields.length > 0) {
+    const status = typeof parsed.status === "string" ? parsed.status : "pending";
+    const reason =
+      typeof parsed.reason === "string"
+        ? parsed.reason
+        : `Deployment artifact is missing current fields: ${missingFields.join(", ")}`;
+    return `${chainId}: {\n    chainId: ${chainId},\n    status: ${literal(status)},\n    reason: ${literal(reason)}\n  }`;
+  }
 
   const lines = [`chainId: ${chainId}`];
   for (const [field, kind] of deploymentFields) {

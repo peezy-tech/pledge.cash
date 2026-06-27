@@ -3563,11 +3563,7 @@ export const pledgeCashAbis = {
 export const pledgeCashDeployments = {
   998: {
     chainId: 998,
-    tokenGrantFactory: "0x00BcBb12c9Aed44BBaC3f3941e58F9D618C8c126" as Address,
-    tokenGrantLogic: "0x262fB024189968668624D4Fd6540b4e5407cAEEE" as Address,
-    deployer: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    factoryOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    creationFee: 100000000000000000n,
-    deploymentTimestamp: 1782319062n
+    status: "pending",
+    reason: "Current Boardroom deployment has not been published for this chain."
   }
 } as const satisfies Record<number, PledgeCashDeployment>;

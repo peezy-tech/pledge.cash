@@ -11,7 +11,9 @@ describe("generated SDK exports", () => {
 
   test("includes checked-in deployment metadata", () => {
     expect(pledgeCashDeployments[998]?.chainId).toBe(998);
-    expect(pledgeCashDeployments[998]?.tokenGrantFactory).toMatch(/^0x[0-9a-fA-F]{40}$/);
+    expect(pledgeCashDeployments[998]?.status).toBe("pending");
+    expect(pledgeCashDeployments[998]?.reason).toContain("Current Boardroom deployment has not been published");
+    expect(pledgeCashDeployments[998]?.tokenGrantFactory).toBeUndefined();
   });
 
   test("marks generated source as generated", async () => {
