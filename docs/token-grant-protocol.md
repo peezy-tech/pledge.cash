@@ -7,7 +7,9 @@ This document describes the escrow-backed token grant primitive in `packages/con
 - free claim: `price == 0`, `paymentToken == address(0)`.
 - paid settlement: `price > 0`, `paymentToken` is a nonzero ERC20 distinct from the grant token.
 
-The primitive is escrow-backed only. It does not mint tokens. Issuers must mint or hold tokens first, approve the predicted grant clone, and then create the grant.
+The primitive is escrow-backed only. It does not mint tokens. Issuers must mint or hold tokens first, approve
+`TokenGrantFactory` for the grant amount, and then create the grant. The factory deploys the grant and pulls the escrow
+tokens into it.
 
 ## Actors
 
@@ -83,7 +85,7 @@ Preconditions:
 - expiry is not before vesting end,
 - expiry is after the creation timestamp,
 - grant token exposes supported `decimals()`,
-- issuer has approved the predicted grant clone to transfer the full grant,
+- issuer has approved `TokenGrantFactory` to transfer the full grant,
 - if a creation fee is configured, the issuer pays exact native value equal to the fee.
 
 For `price == 0`:
@@ -99,8 +101,9 @@ For `price > 0`:
 Effects:
 
 - factory validates exact native value equal to the configured creation fee,
+- factory deploys the grant clone at an address derived from `issuer` and `salt`,
 - grant state is initialized once,
-- full grant is transferred into escrow,
+- full grant is transferred from issuer into escrow by the factory,
 - when configured, the factory forwards the creation fee to the owner,
 - factory records the token id to grant clone mapping,
 - factory mints the grant-right ERC721 token to the holder,

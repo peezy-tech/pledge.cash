@@ -5,9 +5,12 @@ import {Ownable} from "solady/auth/Ownable.sol";
 import {ERC721} from "solady/tokens/ERC721.sol";
 import {LibClone} from "solady/utils/LibClone.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
+import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
 import {TokenGrant} from "./TokenGrant.sol";
 
-contract TokenGrantFactory is Ownable, ERC721 {
+contract TokenGrantFactory is Ownable, ERC721, IBoardroomCallPolicy {
+    bytes4 internal constant APPROVE_SELECTOR = 0x095ea7b3;
+
     address public immutable tokenGrantLogic;
     uint256 public creationFee;
 
@@ -17,6 +20,7 @@ contract TokenGrantFactory is Ownable, ERC721 {
     error OnlyLinkedGrant(address caller);
     error GrantStillOpen(uint256 tokenId);
     error InvalidCreationFeePayment(uint256 expected, uint256 actual);
+    error UnexpectedTokenBalanceChange(address token, uint256 expected, uint256 actual);
 
     event TokenGrantCreated(
         address indexed grantAddress,
@@ -78,7 +82,7 @@ contract TokenGrantFactory is Ownable, ERC721 {
             revert InvalidCreationFeePayment(creationFee, msg.value);
         }
 
-        grant = LibClone.cloneDeterministic(tokenGrantLogic, salt);
+        grant = LibClone.cloneDeterministic(tokenGrantLogic, _deploymentSalt(msg.sender, salt));
         uint256 tokenId = uint256(uint160(grant));
 
         grantForTokenId[tokenId] = grant;
@@ -96,13 +100,40 @@ contract TokenGrantFactory is Ownable, ERC721 {
             transferable,
             transferUnlockTime
         );
+        _checkedTransferFrom(token, msg.sender, grant, amount);
         _payCreationFee();
         _mint(holder, tokenId);
         _emitTokenGrantCreated(grant, tokenId, transferable, transferUnlockTime, salt);
     }
 
-    function predictGrantAddress(bytes32 salt) external view returns (address) {
-        return LibClone.predictDeterministicAddress(tokenGrantLogic, salt, address(this));
+    function predictGrantAddress(address issuer, bytes32 salt) external view returns (address) {
+        return LibClone.predictDeterministicAddress(tokenGrantLogic, _deploymentSalt(issuer, salt), address(this));
+    }
+
+    function canCall(address boardroom, address, address target, uint256 value, bytes calldata data)
+        external
+        view
+        returns (bool)
+    {
+        bytes4 selector = _selector(data);
+        if (target == address(this)) {
+            return selector == TokenGrantFactory.createGrant.selector && value == creationFee;
+        }
+
+        if (selector == APPROVE_SELECTOR) {
+            if (value != 0 || data.length != 68) return false;
+            (address spender,) = abi.decode(data[4:], (address, uint256));
+            return spender == address(this);
+        }
+
+        if (value != 0) return false;
+
+        uint256 tokenId = uint256(uint160(target));
+        if (grantForTokenId[tokenId] != target) return false;
+        if (TokenGrant(target).issuer() != boardroom) return false;
+
+        return selector == TokenGrant.stopVestingAndWithdrawUnvested.selector
+            || selector == TokenGrant.withdrawExpiredTokens.selector;
     }
 
     function closeGrant(uint256 tokenId) external onlyLinkedGrant(tokenId) {
@@ -216,5 +247,27 @@ contract TokenGrantFactory is Ownable, ERC721 {
         address recipient = owner();
         SafeTransferLib.safeTransferETH(recipient, fee);
         emit CreationFeePaid(msg.sender, recipient, fee);
+    }
+
+    function _checkedTransferFrom(address token, address from, address to, uint256 expectedAmount) internal {
+        uint256 balanceBefore = SafeTransferLib.balanceOf(token, to);
+        SafeTransferLib.safeTransferFrom(token, from, to, expectedAmount);
+        uint256 balanceAfter = SafeTransferLib.balanceOf(token, to);
+        if (balanceAfter < balanceBefore) {
+            revert UnexpectedTokenBalanceChange(token, expectedAmount, 0);
+        }
+        uint256 actualAmount = balanceAfter - balanceBefore;
+        if (actualAmount != expectedAmount) {
+            revert UnexpectedTokenBalanceChange(token, expectedAmount, actualAmount);
+        }
+    }
+
+    function _deploymentSalt(address issuer, bytes32 salt) internal pure returns (bytes32) {
+        return keccak256(abi.encode(issuer, salt));
+    }
+
+    function _selector(bytes calldata data) internal pure returns (bytes4 selector) {
+        if (data.length < 4) return bytes4(0);
+        return bytes4(data[:4]);
     }
 }

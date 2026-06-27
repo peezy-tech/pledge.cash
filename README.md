@@ -10,6 +10,7 @@ pledge.cash is a smart contract workspace for token-backed pledges and grants. T
 ## Start Here
 
 - [Token Grant Protocol](docs/token-grant-protocol.md): escrow-backed free-claim and paid-settlement token grants.
+- [Boardroom Protocol](docs/boardroom-protocol.md): owned issuer accounts with native share tokens.
 - [Deployment](docs/deployment.md): grant factory deployment and HyperEVM testnet operator flow.
 - [Contributing](CONTRIBUTING.md): local setup, PR expectations, and contract-change checklist.
 - [Security](SECURITY.md): supported scope and vulnerability reporting process.

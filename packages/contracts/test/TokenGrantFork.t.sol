@@ -47,10 +47,10 @@ contract TokenGrantForkTest is Test {
         uint256 grantSize = 10 ether;
         uint256 start = block.timestamp + 1;
         bytes32 salt = keccak256(bytes(saltSeed));
-        address grantAddress = factory.predictGrantAddress(salt);
+        address grantAddress = factory.predictGrantAddress(issuer, salt);
 
         deal(WETH, issuer, grantSize);
-        _approve(WETH, issuer, grantAddress, grantSize);
+        _approve(WETH, issuer, address(factory), grantSize);
 
         vm.prank(issuer);
         grant = TokenGrant(
