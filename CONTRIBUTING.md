@@ -12,6 +12,13 @@ Install dependencies:
 bun install
 ```
 
+Install the pinned Foundry toolchain used by CI and editor formatting:
+
+```sh
+foundryup -i v1.7.1
+forge --version
+```
+
 Run the default verifier:
 
 ```sh
@@ -23,8 +30,12 @@ Useful focused checks:
 ```sh
 bun --cwd packages/contracts build
 bun --cwd packages/contracts test
-cd packages/contracts && forge fmt --check
+bun run format:check
 ```
+
+Zed project settings in `.zed/settings.json` format Solidity on save with
+`forge fmt --root packages/contracts --raw -`, so editor saves, CLI formatting,
+and CI all use the same Foundry formatter.
 
 The mainnet-fork ERC20 smoke tests are opt-in because they depend on an
 external RPC:

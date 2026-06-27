@@ -178,6 +178,7 @@ contract ReentrantPaymentERC20 is GrantERC20 {
 
 interface IERC721Transfer {
     function transferFrom(address from, address to, uint256 tokenId) external;
+    function safeTransferFrom(address from, address to, uint256 tokenId) external;
 }
 
 contract TokenGrantTest is Test {
@@ -225,6 +226,7 @@ contract TokenGrantTest is Test {
     event GrantSettled(address indexed holder, address indexed issuer, uint256 tokenAmount, uint256 paymentAmount);
     event VestingHalted(address indexed issuer, uint256 vestedAtHalt, uint256 unvestedWithdrawn);
     event ExpiredTokensWithdrawn(address indexed issuer, uint256 amountWithdrawn);
+    event GrantClosed(address indexed grantAddress, uint256 indexed tokenId, address indexed lastHolder);
     event CreationFeeSet(uint256 amount);
     event CreationFeePaid(address indexed payer, address indexed recipient, uint256 amount);
 
@@ -260,7 +262,7 @@ contract TokenGrantTest is Test {
         assertFalse(grant.transferable());
         assertEq(grant.transferUnlockTime(), 0);
         assertFalse(grant.isClosed());
-        assertEq(factory.ownerOf(tokenId), holder);
+        _assertLiveHolderInvariant(grant);
         assertEq(factory.balanceOf(holder), 1);
         assertEq(grant.token(), address(token));
         assertEq(grant.paymentToken(), address(0));
@@ -467,6 +469,32 @@ contract TokenGrantTest is Test {
         assertEq(paymentToken.balanceOf(issuer), PRICE);
     }
 
+    function testSafeTransferFromSyncsGrantHolder() public {
+        address newHolder = address(0xD00D);
+        TokenGrant grant = _createGrant(
+            _grantCreate(
+                keccak256("safe-transfer-holder-sync"),
+                holder,
+                address(token),
+                address(0),
+                _terms(GRANT_SIZE, 0, EXPIRY, CLIFF, VESTING_END),
+                true,
+                0
+            )
+        );
+        uint256 grantTokenId = grant.tokenId();
+
+        _assertLiveHolderInvariant(grant);
+
+        vm.prank(holder);
+        factory.safeTransferFrom(holder, newHolder, grantTokenId);
+
+        _assertLiveHolderInvariant(grant);
+        assertEq(grant.holder(), newHolder);
+        assertEq(factory.balanceOf(holder), 0);
+        assertEq(factory.balanceOf(newHolder), 1);
+    }
+
     function testSoulboundGrantRejectsTransferAndApproval() public {
         (TokenGrant grant,) = _createFreeGrant("soulbound");
         uint256 grantTokenId = grant.tokenId();
@@ -529,17 +557,20 @@ contract TokenGrantTest is Test {
         (TokenGrant grant,) = _createFreeGrant("sync-holder-auth");
 
         vm.expectRevert(TokenGrant.OnlyFactory.selector);
-        grant.syncHolder(holder, stranger);
+        grant.onGrantRightTransferred(holder, stranger);
 
         vm.prank(address(factory));
         vm.expectRevert(abi.encodeWithSelector(TokenGrant.HolderSyncMismatch.selector, holder, stranger));
-        grant.syncHolder(stranger, stranger);
+        grant.onGrantRightTransferred(stranger, stranger);
     }
 
     function testFullSettlementBurnsGrantNft() public {
         (TokenGrant grant,) = _createFreeGrant("full-settle-burn");
         uint256 grantTokenId = grant.tokenId();
         vm.warp(VESTING_END);
+
+        vm.expectEmit(true, true, true, true, address(factory));
+        emit GrantClosed(address(grant), grantTokenId, holder);
 
         vm.prank(holder);
         grant.settle(GRANT_SIZE);
@@ -756,6 +787,7 @@ contract TokenGrantTest is Test {
         assertEq(token.balanceOf(holder), 10 ether);
         assertEq(token.balanceOf(issuer), 90 ether);
         assertEq(token.balanceOf(grantAddress), 0);
+        assertEq(grant.holder(), address(0));
 
         vm.prank(holder);
         vm.expectRevert(TokenGrant.GrantClosed.selector);
@@ -912,7 +944,9 @@ contract TokenGrantTest is Test {
         GrantERC20 highDecimalPayment = new GrantERC20("High Payment", "HPAY", 78);
 
         _createGrantExpectRevert(
-            abi.encodeWithSelector(TokenGrant.UnsupportedTokenDecimals.selector, address(highDecimalPayment), uint8(78)),
+            abi.encodeWithSelector(
+                TokenGrant.UnsupportedTokenDecimals.selector, address(highDecimalPayment), uint8(78)
+            ),
             "high-payment",
             address(token),
             holder,
@@ -1205,6 +1239,13 @@ contract TokenGrantTest is Test {
 
         assertEq(created, grantAddress);
         grant = TokenGrant(grantAddress);
+    }
+
+    function _assertLiveHolderInvariant(TokenGrant grant) internal view {
+        uint256 grantTokenId = grant.tokenId();
+
+        assertFalse(grant.isClosed());
+        assertEq(factory.ownerOf(grantTokenId), grant.holder());
     }
 
     function _createGrantExpectRevert(

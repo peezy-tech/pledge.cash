@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: Contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+
+      - name: Foundry version
+        run: forge --version
+
+      - name: Verify Foundry CI safety
+        working-directory: packages/contracts
+        run: |
+          forge config --json | jq -e '
+            .ffi == false and
+            (.fs_permissions | length == 1) and
+            .fs_permissions[0].access == true and
+            .fs_permissions[0].path == "./deployments"
+          '
+
+      - name: Build
+        working-directory: packages/contracts
+        run: forge build
+
+      - name: Test
+        working-directory: packages/contracts
+        run: forge test -vvv
+
+      - name: Format
+        working-directory: packages/contracts
+        run: forge fmt --check

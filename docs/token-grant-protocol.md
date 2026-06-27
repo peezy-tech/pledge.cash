@@ -124,7 +124,8 @@ Transferable grants can move only when:
 - the grant is not temporarily locked by a grant lifecycle transition,
 - `block.timestamp >= transferUnlockTime`.
 
-When a transferable grant-right token moves, the factory updates `TokenGrant.holder()` to the new ERC721 owner.
+When a transferable grant-right token moves, the factory calls `TokenGrant.onGrantRightTransferred()` to update
+`TokenGrant.holder()` to the new ERC721 owner.
 
 When a grant closes, `TokenGrant.holder()` is cleared to `address(0)` because no address retains settlement authority.
 The final holder is recorded in the factory `GrantClosed` event emitted before the ERC721 burn.

@@ -48,3 +48,18 @@ hosting, or wallet-provider services.
 This repository has no supported mainnet deployment. Treat reports against the
 current contracts as testnet-candidate findings unless a future release states
 otherwise.
+
+## GitHub Actions
+
+Pull request CI runs untrusted code on GitHub-hosted runners. Keep workflow
+tokens read-only, do not persist checkout credentials, do not use
+`pull_request_target` for build or test jobs, and do not attach secrets to PR
+checks.
+
+Repository administrators should keep these GitHub Actions settings enabled:
+
+- require approval for workflow runs from outside contributors,
+- set default workflow permissions to read-only,
+- disable GitHub Actions creating or approving pull requests,
+- reserve deployment or publishing jobs for protected branches or protected
+  environments.
