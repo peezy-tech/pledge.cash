@@ -140,23 +140,31 @@ contract BoardroomTest is Test {
         assertEq(shareToken.decimals(), 18);
     }
 
-    function testBoardroomSaltIsBoundToOwner() public {
+    function testBoardroomSaltIsBoundToOwnerAndMetadata() public {
         bytes32 salt = keccak256("shared-boardroom-salt");
-        address ownerPrediction = boardroomFactory.predictBoardroomAddress(owner, salt);
-        address strangerPrediction = boardroomFactory.predictBoardroomAddress(stranger, salt);
+        address ownerPrediction = boardroomFactory.predictBoardroomAddress(owner, "Acme Common", "ACME", salt);
+        address strangerPrediction = boardroomFactory.predictBoardroomAddress(stranger, "Acme Common", "ACME", salt);
+        address metadataPrediction = boardroomFactory.predictBoardroomAddress(owner, "Acme Preferred", "ACMP", salt);
 
         assertNotEq(ownerPrediction, strangerPrediction);
+        assertNotEq(ownerPrediction, metadataPrediction);
 
         address strangerBoardroom = boardroomFactory.createBoardroom(stranger, "Stranger Common", "STR", salt);
+        address metadataBoardroom = boardroomFactory.createBoardroom(owner, "Acme Preferred", "ACMP", salt);
         address ownerBoardroom = boardroomFactory.createBoardroom(owner, "Acme Common", "ACME", salt);
 
-        assertEq(strangerBoardroom, strangerPrediction);
+        assertEq(strangerBoardroom, boardroomFactory.predictBoardroomAddress(stranger, "Stranger Common", "STR", salt));
+        assertEq(metadataBoardroom, metadataPrediction);
         assertEq(ownerBoardroom, ownerPrediction);
         assertEq(Boardroom(payable(strangerBoardroom)).owner(), stranger);
+        assertEq(Boardroom(payable(metadataBoardroom)).owner(), owner);
         assertEq(Boardroom(payable(ownerBoardroom)).owner(), owner);
+        assertEq(BoardroomToken(Boardroom(payable(metadataBoardroom)).shareToken()).name(), "Acme Preferred");
+        assertEq(BoardroomToken(Boardroom(payable(ownerBoardroom)).shareToken()).name(), "Acme Common");
         assertTrue(boardroomFactory.isBoardroom(strangerBoardroom));
+        assertTrue(boardroomFactory.isBoardroom(metadataBoardroom));
         assertTrue(boardroomFactory.isBoardroom(ownerBoardroom));
-        assertEq(boardroomFactory.allBoardroomsLength(), 2);
+        assertEq(boardroomFactory.allBoardroomsLength(), 3);
     }
 
     function testOnlyOwnerCanMintShares() public {
@@ -414,7 +422,7 @@ contract BoardroomTest is Test {
         returns (Boardroom boardroom, address boardroomAddress)
     {
         bytes32 salt = keccak256(bytes(saltLabel));
-        boardroomAddress = boardroomFactory.predictBoardroomAddress(owner, salt);
+        boardroomAddress = boardroomFactory.predictBoardroomAddress(owner, "Acme Common", "ACME", salt);
         address created = boardroomFactory.createBoardroom(owner, "Acme Common", "ACME", salt);
 
         assertEq(created, boardroomAddress);

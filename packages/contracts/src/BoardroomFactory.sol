@@ -36,7 +36,7 @@ contract BoardroomFactory {
     {
         if (owner == address(0)) revert InvalidAddress();
 
-        boardroom = LibClone.cloneDeterministic(boardroomLogic, _deploymentSalt(owner, salt));
+        boardroom = LibClone.cloneDeterministic(boardroomLogic, _deploymentSalt(owner, name, symbol, salt));
         Boardroom createdBoardroom = Boardroom(payable(boardroom));
         createdBoardroom.initialize(owner, policyRegistry, name, symbol);
 
@@ -46,15 +46,25 @@ contract BoardroomFactory {
         emit BoardroomCreated(boardroom, owner, policyRegistry, createdBoardroom.shareToken(), name, symbol, salt);
     }
 
-    function predictBoardroomAddress(address owner, bytes32 salt) external view returns (address) {
-        return LibClone.predictDeterministicAddress(boardroomLogic, _deploymentSalt(owner, salt), address(this));
+    function predictBoardroomAddress(address owner, string calldata name, string calldata symbol, bytes32 salt)
+        external
+        view
+        returns (address)
+    {
+        return LibClone.predictDeterministicAddress(
+            boardroomLogic, _deploymentSalt(owner, name, symbol, salt), address(this)
+        );
     }
 
     function allBoardroomsLength() external view returns (uint256) {
         return allBoardrooms.length;
     }
 
-    function _deploymentSalt(address owner, bytes32 salt) internal pure returns (bytes32) {
-        return keccak256(abi.encode(owner, salt));
+    function _deploymentSalt(address owner, string calldata name, string calldata symbol, bytes32 salt)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(owner, name, symbol, salt));
     }
 }
