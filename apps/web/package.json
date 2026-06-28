@@ -5,6 +5,31 @@
   "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
-    "build": "rm -rf dist && mkdir -p dist/deployments && cp index.html styles.css script.js favicon.svg CNAME .nojekyll dist/ && if [ -f ../../packages/contracts/deployments/998.json ]; then cp ../../packages/contracts/deployments/998.json dist/deployments/998.json; else printf '%s\\n' '{\"status\":\"pending\",\"reason\":\"Broadcast artifact not published yet\"}' > dist/deployments/998.json; fi"
+    "build": "bun --cwd ../../packages/contracts build && bun --cwd ../../packages/sdk generate && bun run build:pages",
+    "build:pages": "vite build && bun run copy:pages",
+    "copy:pages": "mkdir -p dist/deployments && cp CNAME .nojekyll dist/ && if [ -f ../../packages/contracts/deployments/998.json ]; then cp ../../packages/contracts/deployments/998.json dist/deployments/998.json; else printf '%s\\n' '{\"status\":\"pending\",\"reason\":\"Broadcast artifact not published yet\"}' > dist/deployments/998.json; fi",
+    "dev": "bun --cwd ../../packages/contracts build && bun --cwd ../../packages/sdk generate && vite --host 0.0.0.0",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "bun run typecheck && bun test",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@pledge.cash/sdk": "workspace:*",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^2.5.5",
+    "viem": "catalog:"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "catalog:",
+    "vite": "^7.0.0"
   }
 }

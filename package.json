@@ -10,8 +10,9 @@
   },
   "workspaces": {
     "packages": [
-      "apps/*",
-      "packages/contracts"
+      "packages/contracts",
+      "packages/sdk",
+      "apps/*"
     ],
     "catalog": {
       "@types/node": "^25.6.1",
@@ -20,12 +21,12 @@
     }
   },
   "scripts": {
-    "build": "bun run --workspaces --if-present --sequential build",
+    "build": "bun --cwd packages/contracts build && bun --cwd packages/sdk build && bun --cwd apps/web build",
     "deploy:hyperevm-testnet": "bun --cwd packages/contracts deploy:hyperevm-testnet",
     "format": "bun --cwd packages/contracts format",
     "format:check": "bun --cwd packages/contracts format:check",
     "simulate:hyperevm-testnet": "bun --cwd packages/contracts simulate:hyperevm-testnet",
-    "test": "bun --cwd packages/contracts test"
+    "test": "bun --cwd packages/contracts test && bun --cwd packages/sdk test && bun --cwd apps/web test"
   },
   "devDependencies": {
     "@types/node": "catalog:",

@@ -39,7 +39,7 @@ jobs:
         run: bun install
 
       - name: Build site
-        run: bun --cwd apps/web build
+        run: bun --cwd apps/web build:pages
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5
