@@ -48,6 +48,8 @@ import type {
   WalletState,
 } from "./lib/types";
 
+type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
+
 export function App(): React.JSX.Element {
   const deployment = getPledgeCashDeployment(HYPEREVM_TESTNET_CHAIN_ID);
   const [activeTab, setActiveTab] = useState<Tab>("direct");
@@ -448,28 +450,62 @@ export function App(): React.JSX.Element {
     pushLog(`Settlement submitted: ${hash}`, "success");
   };
 
-  const haltGrant = async (): Promise<void> => {
+  const isBoardroomIssuer = async (issuer: Address): Promise<boolean> => {
+    try {
+      const policyRegistry = await publicClient.readContract({
+        address: issuer,
+        abi: boardroomAbi,
+        functionName: "policyRegistry",
+      });
+      return !isZeroAddress(policyRegistry);
+    } catch {
+      return false;
+    }
+  };
+
+  const runGrantIssuerAction = async (functionName: GrantIssuerAction, successMessage: string): Promise<void> => {
     const grant = requireAddress(grantAddress, "Grant address");
+    const issuer = await publicClient.readContract({ address: grant, abi: tokenGrantAbi, functionName: "issuer" });
+    const data = encodeFunctionData({ abi: tokenGrantAbi, functionName });
+
+    if (await isBoardroomIssuer(issuer)) {
+      if (usesLegacyTokenGrantFactory) throw new Error("Boardroom grant maintenance requires a current TokenGrantFactory deployment.");
+      const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
+      const hash = await walletClient().writeContract({
+        account: activeAccount(),
+        address: issuer,
+        abi: boardroomAbi,
+        chain,
+        functionName: "execute",
+        args: [
+          {
+            policy: factory,
+            target: grant,
+            value: 0n,
+            data,
+          },
+        ],
+      });
+      pushLog(`${successMessage} through Boardroom: ${hash}`, "success");
+      return;
+    }
+
     const hash = await walletClient().writeContract({
       account: activeAccount(),
       address: grant,
       abi: tokenGrantAbi,
       chain,
-      functionName: "stopVestingAndWithdrawUnvested",
+      functionName,
     });
-    pushLog(`Vesting halt submitted: ${hash}`, "success");
+    pushLog(`${successMessage}: ${hash}`, "success");
+  };
+
+  const haltGrant = async (): Promise<void> => {
+    await runGrantIssuerAction("stopVestingAndWithdrawUnvested", "Vesting halt submitted");
   };
 
   const withdrawExpired = async (): Promise<void> => {
-    const grant = requireAddress(grantAddress, "Grant address");
-    const hash = await walletClient().writeContract({
-      account: activeAccount(),
-      address: grant,
-      abi: tokenGrantAbi,
-      chain,
-      functionName: "withdrawExpiredTokens",
-    });
-    pushLog(`Expired withdrawal submitted: ${hash}`, "success");
+    await runGrantIssuerAction("withdrawExpiredTokens", "Expired withdrawal submitted");
   };
 
   const predictBoardroom = async (): Promise<void> => {
