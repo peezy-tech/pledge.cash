@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "forge build",
-    "deploy:hyperevm-testnet": "BROADCAST=1 script/hyperevm-testnet/deploy.sh",
+    "deploy:hyperevm-testnet": "BROADCAST=1 script/hyperevm-testnet/deploy.sh && bun --cwd ../sdk generate",
     "format": "forge fmt",
     "format:check": "forge fmt --check",
     "simulate:hyperevm-testnet": "script/hyperevm-testnet/deploy.sh",
