@@ -58,6 +58,9 @@ jobs:
           bun --cwd packages/sdk generate
           git diff --exit-code -- packages/sdk/src/generated.ts
 
+      - name: Verify HyperEVM testnet artifact
+        run: bun --cwd packages/contracts verify:hyperevm-testnet-artifact
+
       - name: Test
         working-directory: packages/contracts
         run: forge test -vvv

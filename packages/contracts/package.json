@@ -10,6 +10,7 @@
     "format": "forge fmt",
     "format:check": "forge fmt --check",
     "simulate:hyperevm-testnet": "script/hyperevm-testnet/deploy.sh",
-    "test": "forge test -vvv"
+    "test": "forge test -vvv",
+    "verify:hyperevm-testnet-artifact": "script/hyperevm-testnet/verify-artifact.sh"
   }
 }
