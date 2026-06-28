@@ -50,6 +50,10 @@ import type {
 
 type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
 
+function sameOptionalAddress(left: Address | undefined, right: Address | undefined): boolean {
+  return (left ?? "").toLowerCase() === (right ?? "").toLowerCase();
+}
+
 export function App(): React.JSX.Element {
   const deployment = getPledgeCashDeployment(HYPEREVM_TESTNET_CHAIN_ID);
   const [activeTab, setActiveTab] = useState<Tab>("direct");
@@ -92,6 +96,18 @@ export function App(): React.JSX.Element {
     ].slice(0, 80));
   }, []);
 
+  const updateGrantAddress = useCallback((address: string): void => {
+    setGrantAddress(address);
+    setGrantSnapshot(undefined);
+  }, []);
+
+  const clearDirectGrantPrediction = useCallback((): void => {
+    if (predictedGrant && grantAddress.toLowerCase() === predictedGrant.toLowerCase()) {
+      updateGrantAddress("");
+    }
+    setPredictedGrant(undefined);
+  }, [grantAddress, predictedGrant, updateGrantAddress]);
+
   useEffect(() => {
     if (!wallet.account || boardroomForm.owner) return;
     setBoardroomForm((current) => ({ ...current, owner: wallet.account ?? current.owner }));
@@ -103,6 +119,9 @@ export function App(): React.JSX.Element {
 
     const handleAccountsChanged = (accounts: unknown) => {
       const account = Array.isArray(accounts) && isAddress(accounts[0]) ? getAddress(accounts[0]) : undefined;
+      if (!sameOptionalAddress(wallet.account, account)) {
+        clearDirectGrantPrediction();
+      }
       setWallet((current) => walletState(account, current.chainId));
     };
     const handleChainChanged = (chainId: unknown) => {
@@ -117,7 +136,7 @@ export function App(): React.JSX.Element {
       provider.removeListener?.("accountsChanged", handleAccountsChanged);
       provider.removeListener?.("chainChanged", handleChainChanged);
     };
-  }, []);
+  }, [clearDirectGrantPrediction, wallet.account]);
 
   useEffect(() => {
     let cancelled = false;
@@ -180,18 +199,6 @@ export function App(): React.JSX.Element {
     setPredictedBoardroomGrant(undefined);
   }, []);
 
-  const updateGrantAddress = useCallback((address: string): void => {
-    setGrantAddress(address);
-    setGrantSnapshot(undefined);
-  }, []);
-
-  const clearDirectGrantPrediction = useCallback((): void => {
-    if (predictedGrant && grantAddress.toLowerCase() === predictedGrant.toLowerCase()) {
-      updateGrantAddress("");
-    }
-    setPredictedGrant(undefined);
-  }, [grantAddress, predictedGrant, updateGrantAddress]);
-
   const clearBoardroomGrantPrediction = useCallback((): void => {
     if (predictedBoardroomGrant && grantAddress.toLowerCase() === predictedBoardroomGrant.toLowerCase()) {
       updateGrantAddress("");
@@ -226,7 +233,11 @@ export function App(): React.JSX.Element {
     const chainId = (await provider.request({ method: "eth_chainId" })) as string;
     const account = accounts[0];
     if (!account || !isAddress(account)) throw new Error("Wallet did not return an EVM address.");
-    setWallet({ account: getAddress(account), chainId: Number.parseInt(chainId, 16) });
+    const nextAccount = getAddress(account);
+    if (!sameOptionalAddress(wallet.account, nextAccount)) {
+      clearDirectGrantPrediction();
+    }
+    setWallet({ account: nextAccount, chainId: Number.parseInt(chainId, 16) });
     pushLog(`Connected ${shortAddress(account)}`, "success");
   };
 
