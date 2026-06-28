@@ -1,7 +1,6 @@
 import type { Address } from "viem";
 
 export * from "./generated";
-export * from "./legacy";
 export type { Address };
 
 import { pledgeCashDeployments, type PledgeCashDeployment } from "./generated";

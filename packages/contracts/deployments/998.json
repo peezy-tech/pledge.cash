@@ -8,7 +8,6 @@
   "factoryOwner": "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c",
   "policyRegistryOwner": "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c",
   "tokenGrantFactory": "0xFCbfb61330d418f189A0594993E72BBd0b81E8aF",
-  "tokenGrantFactoryVersion": "current",
   "tokenGrantLogic": "0x51B8633989Ce5779772B8df00EEC65090cDc1889",
   "tokenGrantPolicyAllowed": true
 }

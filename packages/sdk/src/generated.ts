@@ -12,7 +12,6 @@ export type PledgeCashDeployment = {
   boardroomFactory?: Address;
   boardroomPolicyRegistry?: Address;
   tokenGrantFactory?: Address;
-  tokenGrantFactoryVersion?: "current" | "legacy";
   tokenGrantLogic?: Address;
   deployer?: Address;
   factoryOwner?: Address;
@@ -3569,7 +3568,6 @@ export const pledgeCashDeployments = {
     boardroomFactory: "0x4B79ab3D1B3737A54ab0EfD189499C15c252b4EC" as Address,
     boardroomPolicyRegistry: "0xA2a965986D3beFDe94423eF66cddA208411AeA6d" as Address,
     tokenGrantFactory: "0xFCbfb61330d418f189A0594993E72BBd0b81E8aF" as Address,
-    tokenGrantFactoryVersion: "current",
     tokenGrantLogic: "0x51B8633989Ce5779772B8df00EEC65090cDc1889" as Address,
     deployer: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
     factoryOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,

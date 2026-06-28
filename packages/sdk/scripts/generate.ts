@@ -41,7 +41,6 @@ const deploymentFields = [
   ["boardroomFactory", "address"],
   ["boardroomPolicyRegistry", "address"],
   ["tokenGrantFactory", "address"],
-  ["tokenGrantFactoryVersion", "string"],
   ["tokenGrantLogic", "address"],
   ["deployer", "address"],
   ["factoryOwner", "address"],
@@ -93,13 +92,12 @@ function serializeDeployment(raw: string): string | undefined {
 
   const missingFields = requiredCurrentDeploymentFields.filter((field) => propertyToken(raw, field) === undefined);
   const hasTokenGrantFactory = propertyToken(raw, "tokenGrantFactory") !== undefined;
-  const hasFactoryVersion = propertyToken(raw, "tokenGrantFactoryVersion") !== undefined;
 
-  if (missingFields.length > 0 && hasTokenGrantFactory && !hasFactoryVersion) {
+  if (missingFields.length > 0 && hasTokenGrantFactory) {
     throw new Error(
       `Deployment ${chainId} has tokenGrantFactory but is missing current fields (${missingFields.join(
         ", ",
-      )}); add tokenGrantFactoryVersion and model missing subsystems separately.`,
+      )}); model missing subsystems separately.`,
     );
   }
 
@@ -186,7 +184,6 @@ export type PledgeCashDeployment = {
   boardroomFactory?: Address;
   boardroomPolicyRegistry?: Address;
   tokenGrantFactory?: Address;
-  tokenGrantFactoryVersion?: "current" | "legacy";
   tokenGrantLogic?: Address;
   deployer?: Address;
   factoryOwner?: Address;
