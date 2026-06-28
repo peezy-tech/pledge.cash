@@ -13,5 +13,6 @@ describe("web app shell", () => {
     expect(html).toContain("Direct Grant");
     expect(html).toContain("Inspect Grant");
     expect(html).toContain("Boardroom");
+    expect(html).toContain("My Grants");
   });
 });

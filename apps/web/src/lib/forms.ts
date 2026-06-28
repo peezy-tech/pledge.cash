@@ -1,4 +1,4 @@
-import { ZERO_ADDRESS, type Address } from "@pledge.cash/sdk";
+import { pledgeCashErrorMessage, ZERO_ADDRESS, type Address } from "@pledge.cash/sdk";
 import { getAddress, isAddress, type Hex } from "viem";
 import type { BoardroomGrantForm, GrantForm, WalletState } from "./types";
 
@@ -56,8 +56,7 @@ export function shortAddress(address: string | undefined): string {
 }
 
 export function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
+  return pledgeCashErrorMessage(error);
 }
 
 export function bigintString(value: bigint | undefined): string {

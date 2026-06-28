@@ -7,7 +7,7 @@
   "scripts": {
     "build": "bun --cwd ../../packages/contracts build && bun --cwd ../../packages/sdk generate && bun run build:pages",
     "build:pages": "vite build && bun run copy:pages",
-    "copy:pages": "mkdir -p dist/deployments && cp CNAME .nojekyll dist/ && if [ -f ../../packages/contracts/deployments/998.json ]; then cp ../../packages/contracts/deployments/998.json dist/deployments/998.json; else printf '%s\\n' '{\"status\":\"pending\",\"reason\":\"Broadcast artifact not published yet\"}' > dist/deployments/998.json; fi",
+    "copy:pages": "mkdir -p dist/deployments && cp CNAME .nojekyll dist/ && if compgen -G '../../packages/contracts/deployments/*.json' > /dev/null; then cp ../../packages/contracts/deployments/*.json dist/deployments/; else printf '%s\\n' '{\"status\":\"pending\",\"reason\":\"Broadcast artifact not published yet\"}' > dist/deployments/998.json; fi",
     "dev": "bun --cwd ../../packages/contracts build && bun --cwd ../../packages/sdk generate && vite --host 0.0.0.0",
     "preview": "vite preview --host 127.0.0.1",
     "test": "bun run typecheck && bun test",

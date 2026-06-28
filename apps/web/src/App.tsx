@@ -1,27 +1,41 @@
 import {
   boardroomAbi,
   boardroomFactoryAbi,
-  boardroomTokenAbi,
-  erc20Abi,
+  buildBoardroomExecuteTransaction,
+  buildBoardroomGrantApprovalCall,
+  buildBoardroomGrantCreationCall,
+  buildBoardroomShareGrantIssuanceBatch,
+  buildDirectGrantCreationTransaction,
+  buildErc20Approval,
+  buildGrantIssuerBoardroomAction,
   getPledgeCashDeployment,
-  HYPEREVM_TESTNET_CHAIN_ID,
-  hyperEvmTestnet,
   isZeroAddress,
+  predictBoardroomAddress as sdkPredictBoardroomAddress,
+  predictBoardroomGrantAddress as sdkPredictBoardroomGrantAddress,
+  predictDirectGrantAddress as sdkPredictDirectGrantAddress,
+  queryGrantsHeldByAddress,
+  queryGrantsIssuedByAddress,
+  readBoardroomState,
+  readFactoryState,
+  readGrantState,
   tokenGrantAbi,
-  tokenGrantFactoryAbi,
   type Address,
+  type BoardroomShareGrantTerms,
+  type GrantCreationTerms,
+  type PledgeCashDeployment,
 } from "@pledge.cash/sdk";
 import { useCallback, useEffect, useState } from "react";
-import { createWalletClient, custom, encodeFunctionData, getAddress, isAddress, type EIP1193Provider } from "viem";
+import { createWalletClient, custom, getAddress, isAddress, type EIP1193Provider, type Hex } from "viem";
 import { TabButton } from "./components/shell";
 import { BoardroomPanel } from "./features/boardrooms/boardroom-panel";
 import { ArtifactPanel, DeploymentPanel } from "./features/deployment/deployment-panel";
 import { DirectGrantPanel } from "./features/grants/direct-grant-panel";
 import { GrantInspector } from "./features/grants/grant-inspector";
+import { MyGrantsPanel } from "./features/grants/my-grants-panel";
 import { LogPanel } from "./features/logs/log-panel";
 import { AppHeader } from "./features/wallet/app-header";
 import { WalletPanel } from "./features/wallet/wallet-panel";
-import { chain, EXPLORER_URL, publicClient, RPC_URL } from "./lib/contracts";
+import { ACTIVE_CHAIN_ID, ACTIVE_CHAIN_NAME, chain, EXPLORER_URL, publicClient, WALLET_RPC_URL } from "./lib/contracts";
 import {
   defaultBoardroomGrantForm,
   defaultGrantForm,
@@ -43,6 +57,7 @@ import type {
   GrantForm,
   GrantSnapshot,
   LogEntry,
+  MyGrantsSnapshot,
   Tab,
   WalletState,
 } from "./lib/types";
@@ -53,8 +68,53 @@ function sameOptionalAddress(left: Address | undefined, right: Address | undefin
   return (left ?? "").toLowerCase() === (right ?? "").toLowerCase();
 }
 
+function parseDeployment(json: Record<string, unknown>): PledgeCashDeployment {
+  const deployment: PledgeCashDeployment = {
+    chainId: Number(json.chainId),
+  };
+
+  for (const field of [
+    "status",
+    "reason",
+    "boardroomStatus",
+    "boardroomReason",
+  ] as const) {
+    if (typeof json[field] === "string") {
+      deployment[field] = json[field];
+    }
+  }
+
+  for (const field of [
+    "boardroomFactory",
+    "boardroomPolicyRegistry",
+    "tokenGrantFactory",
+    "tokenGrantLogic",
+    "deployer",
+    "factoryOwner",
+    "policyRegistryOwner",
+  ] as const) {
+    if (typeof json[field] === "string") {
+      deployment[field] = json[field] as Address;
+    }
+  }
+
+  if (typeof json.tokenGrantPolicyAllowed === "boolean") {
+    deployment.tokenGrantPolicyAllowed = json.tokenGrantPolicyAllowed;
+  }
+  if (typeof json.creationFee === "string" || typeof json.creationFee === "number") {
+    deployment.creationFee = BigInt(json.creationFee);
+  }
+  if (typeof json.deploymentTimestamp === "string" || typeof json.deploymentTimestamp === "number") {
+    deployment.deploymentTimestamp = BigInt(json.deploymentTimestamp);
+  }
+
+  return deployment;
+}
+
 export function App(): React.JSX.Element {
-  const deployment = getPledgeCashDeployment(HYPEREVM_TESTNET_CHAIN_ID);
+  const generatedDeployment = getPledgeCashDeployment(ACTIVE_CHAIN_ID);
+  const [runtimeDeployment, setRuntimeDeployment] = useState<PledgeCashDeployment | undefined>(generatedDeployment);
+  const deployment = runtimeDeployment;
   const [activeTab, setActiveTab] = useState<Tab>("direct");
   const [wallet, setWallet] = useState<WalletState>({});
   const [factorySnapshot, setFactorySnapshot] = useState<FactorySnapshot>({});
@@ -77,19 +137,52 @@ export function App(): React.JSX.Element {
   const [boardroomMintTo, setBoardroomMintTo] = useState("");
   const [boardroomGrantForm, setBoardroomGrantForm] = useState<BoardroomGrantForm>(() => defaultBoardroomGrantForm());
   const [predictedBoardroomGrant, setPredictedBoardroomGrant] = useState<Address>();
+  const [myGrantsFromBlock, setMyGrantsFromBlock] = useState("0");
+  const [includeClosedGrants, setIncludeClosedGrants] = useState(false);
+  const [myGrants, setMyGrants] = useState<MyGrantsSnapshot>(() => ({
+    held: [],
+    issued: [],
+    includeClosed: false,
+  }));
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [pendingAction, setPendingAction] = useState<string>();
 
   const creationFee = factorySnapshot.creationFee ?? deployment?.creationFee ?? 0n;
 
-  const pushLog = useCallback((message: string, level: LogEntry["level"] = "info") => {
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadRuntimeDeployment(): Promise<void> {
+      try {
+        const response = await fetch(`${import.meta.env.BASE_URL}deployments/${ACTIVE_CHAIN_ID}.json`, {
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const json = (await response.json()) as Record<string, unknown>;
+        if (!cancelled) {
+          setRuntimeDeployment(parseDeployment(json));
+        }
+      } catch {
+        // The generated SDK deployment remains the fallback for SSR and package consumers.
+      }
+    }
+
+    void loadRuntimeDeployment();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const pushLog = useCallback((message: string, level: LogEntry["level"] = "info", txHash?: Hex) => {
+    const entry = {
+      id: `${Date.now()}-${Math.random()}`,
+      level,
+      message,
+      time: new Date().toISOString().replace(".000Z", "Z"),
+      ...(txHash ? { txHash } : {}),
+    };
     setLogs((current) => [
-      {
-        id: `${Date.now()}-${Math.random()}`,
-        level,
-        message,
-        time: new Date().toISOString().replace(".000Z", "Z"),
-      },
+      entry,
       ...current,
     ].slice(0, 80));
   }, []);
@@ -143,29 +236,13 @@ export function App(): React.JSX.Element {
       if (!deployment?.tokenGrantFactory) return;
 
       try {
-        const [owner, tokenGrantLogic, creationFee_] = await Promise.all([
-          publicClient.readContract({
-            address: deployment.tokenGrantFactory,
-            abi: tokenGrantFactoryAbi,
-            functionName: "owner",
-          }),
-          publicClient.readContract({
-            address: deployment.tokenGrantFactory,
-            abi: tokenGrantFactoryAbi,
-            functionName: "tokenGrantLogic",
-          }),
-          publicClient.readContract({
-            address: deployment.tokenGrantFactory,
-            abi: tokenGrantFactoryAbi,
-            functionName: "creationFee",
-          }),
-        ]);
+        const snapshot = await readFactoryState(publicClient, deployment.tokenGrantFactory);
 
         if (!cancelled) {
           setFactorySnapshot({
-            owner,
-            tokenGrantLogic,
-            creationFee: creationFee_,
+            owner: snapshot.owner,
+            tokenGrantLogic: snapshot.tokenGrantLogic,
+            creationFee: snapshot.creationFee,
           });
         }
       } catch (error) {
@@ -206,7 +283,7 @@ export function App(): React.JSX.Element {
 
   const activeAccount = (): Address => {
     if (!wallet.account) throw new Error("Connect wallet first.");
-    if (wallet.chainId !== HYPEREVM_TESTNET_CHAIN_ID) throw new Error("Switch wallet to HyperEVM testnet first.");
+    if (wallet.chainId !== ACTIVE_CHAIN_ID) throw new Error(`Switch wallet to ${ACTIVE_CHAIN_NAME} first.`);
 
     return wallet.account;
   };
@@ -221,6 +298,25 @@ export function App(): React.JSX.Element {
       chain,
       transport: custom(provider as EIP1193Provider),
     });
+  };
+
+  const submitContractTransaction = async (label: string, request: Record<string, unknown>): Promise<Hex> => {
+    const client = walletClient();
+    const hash = (await client.writeContract({
+      account: activeAccount(),
+      chain,
+      ...request,
+    } as unknown as Parameters<typeof client.writeContract>[0])) as Hex;
+
+    pushLog(`${label} submitted`, "info", hash);
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    if (receipt.status !== "success") {
+      pushLog(`${label} failed`, "error", hash);
+      throw new Error(`${label} failed after submission.`);
+    }
+
+    pushLog(`${label} confirmed`, "success", hash);
+    return hash;
   };
 
   const connectWallet = async (): Promise<void> => {
@@ -243,7 +339,7 @@ export function App(): React.JSX.Element {
     const provider = window.ethereum;
     if (!provider) throw new Error("No injected wallet provider found.");
 
-    const chainId = `0x${HYPEREVM_TESTNET_CHAIN_ID.toString(16)}`;
+    const chainId = `0x${ACTIVE_CHAIN_ID.toString(16)}`;
     try {
       await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId }] });
     } catch (error) {
@@ -254,10 +350,10 @@ export function App(): React.JSX.Element {
         params: [
           {
             chainId,
-            chainName: hyperEvmTestnet.name,
-            nativeCurrency: hyperEvmTestnet.nativeCurrency,
-            rpcUrls: [RPC_URL],
-            blockExplorerUrls: [EXPLORER_URL],
+            chainName: ACTIVE_CHAIN_NAME,
+            nativeCurrency: chain.nativeCurrency,
+            rpcUrls: [WALLET_RPC_URL],
+            ...(EXPLORER_URL ? { blockExplorerUrls: [EXPLORER_URL] } : {}),
           },
         ],
       });
@@ -267,13 +363,13 @@ export function App(): React.JSX.Element {
     const activeChainId = (await provider.request({ method: "eth_chainId" })) as string;
     const parsedChainId = Number.parseInt(activeChainId, 16);
     setWallet((current) => walletState(current.account, Number.isNaN(parsedChainId) ? undefined : parsedChainId));
-    if (parsedChainId !== HYPEREVM_TESTNET_CHAIN_ID) {
+    if (parsedChainId !== ACTIVE_CHAIN_ID) {
       throw new Error(`Wallet is still on chain ${Number.isNaN(parsedChainId) ? activeChainId : parsedChainId}.`);
     }
-    pushLog("Wallet switched to HyperEVM testnet.", "success");
+    pushLog(`Wallet switched to ${ACTIVE_CHAIN_NAME}.`, "success");
   };
 
-  const grantArgs = () => {
+  const directGrantTerms = (): GrantCreationTerms => {
     const holder = requireAddress(grantForm.holder, "Holder");
     const token = requireAddress(grantForm.token, "Grant token");
     const paymentToken = optionalPaymentToken(grantForm.paymentToken);
@@ -288,36 +384,26 @@ export function App(): React.JSX.Element {
     const salt = requireBytes32(grantForm.salt, "Salt");
 
     return {
+      holder,
       token,
+      paymentToken,
       amount,
+      price,
+      expiry,
+      vestingCliff,
+      vestingEnd,
+      transferable: grantForm.transferable,
+      transferUnlockTime,
       salt,
-      tuple: [
-        holder,
-        token,
-        paymentToken,
-        amount,
-        price,
-        expiry,
-        vestingCliff,
-        vestingEnd,
-        grantForm.transferable,
-        transferUnlockTime,
-        salt,
-      ] as const,
     };
   };
 
   const predictDirectGrantAddress = async (): Promise<Address> => {
     if (!wallet.account) throw new Error("Connect wallet to predict a direct grant.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
-    const { salt } = grantArgs();
+    const { salt } = directGrantTerms();
 
-    return await publicClient.readContract({
-      address: factory,
-      abi: tokenGrantFactoryAbi,
-      functionName: "predictGrantAddress",
-      args: [wallet.account, salt],
-    });
+    return await sdkPredictDirectGrantAddress(publicClient, { factory, issuer: wallet.account, salt });
   };
 
   const predictGrant = async (): Promise<void> => {
@@ -329,67 +415,38 @@ export function App(): React.JSX.Element {
 
   const approveEscrow = async (): Promise<void> => {
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
-    const { token, amount } = grantArgs();
+    const { token, amount } = directGrantTerms();
 
-    const hash = await walletClient().writeContract({
-      account: activeAccount(),
-      address: token,
-      abi: erc20Abi,
-      chain,
-      functionName: "approve",
-      args: [factory, amount],
-    });
-    pushLog(`Escrow approval submitted: ${hash}`, "success");
+    await submitContractTransaction("Escrow approval", buildErc20Approval({ token, spender: factory, amount }));
   };
 
   const createGrant = async (): Promise<void> => {
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
-    const { tuple } = grantArgs();
-    const hash = await walletClient().writeContract({
-      account: activeAccount(),
-      address: factory,
-      abi: tokenGrantFactoryAbi,
-      chain,
-      functionName: "createGrant",
-      args: tuple,
-      value: creationFee,
-    });
-    pushLog(`Grant creation submitted: ${hash}`, "success");
+    await submitContractTransaction(
+      "Grant creation",
+      buildDirectGrantCreationTransaction({ factory, terms: directGrantTerms(), creationFee }),
+    );
   };
 
   const loadGrant = async (): Promise<void> => {
     const grant = requireAddress(grantAddress, "Grant address");
     const now = BigInt(Math.floor(Date.now() / 1000));
-    const [issuer, holder, token, paymentToken, grantSize, claimable, price, expiry, settledAmount, halted, closed, settleable] =
-      await Promise.all([
-        publicClient.readContract({ address: grant, abi: tokenGrantAbi, functionName: "issuer" }),
-        publicClient.readContract({ address: grant, abi: tokenGrantAbi, functionName: "holder" }),
-        publicClient.readContract({ address: grant, abi: tokenGrantAbi, functionName: "token" }),
-        publicClient.readContract({ address: grant, abi: tokenGrantAbi, functionName: "paymentToken" }),
-        publicClient.readContract({ address: grant, abi: tokenGrantAbi, functionName: "grantSize" }),
-        publicClient.readContract({ address: grant, abi: tokenGrantAbi, functionName: "claimable" }),
-        publicClient.readContract({ address: grant, abi: tokenGrantAbi, functionName: "price" }),
-        publicClient.readContract({ address: grant, abi: tokenGrantAbi, functionName: "expiry" }),
-        publicClient.readContract({ address: grant, abi: tokenGrantAbi, functionName: "settledAmount" }),
-        publicClient.readContract({ address: grant, abi: tokenGrantAbi, functionName: "vestingIsHalted" }),
-        publicClient.readContract({ address: grant, abi: tokenGrantAbi, functionName: "isClosed" }),
-        publicClient.readContract({ address: grant, abi: tokenGrantAbi, functionName: "getSettleableAmount", args: [now] }),
-      ]);
+    const snapshot = await readGrantState(publicClient, grant, now);
 
     setGrantSnapshot({
       address: grant,
-      issuer,
-      holder,
-      token,
-      paymentToken,
-      grantSize,
-      claimable,
-      price,
-      expiry,
-      settledAmount,
-      halted,
-      closed,
-      settleable,
+      issuer: snapshot.issuer,
+      holder: snapshot.holder,
+      token: snapshot.token,
+      paymentToken: snapshot.paymentToken,
+      grantSize: snapshot.grantSize,
+      claimable: snapshot.claimable,
+      price: snapshot.price,
+      expiry: snapshot.expiry,
+      settledAmount: snapshot.settledAmount,
+      halted: snapshot.halted,
+      closed: snapshot.closed,
+      settleable: snapshot.settleable,
     });
     pushLog(`Loaded grant ${grant}`, "success");
   };
@@ -401,39 +458,27 @@ export function App(): React.JSX.Element {
     if (isZeroAddress(grantSnapshot.paymentToken)) throw new Error("Selected grant has no payment token.");
 
     const amount = uintInput(paymentApproval, "Payment approval");
-    const hash = await walletClient().writeContract({
-      account: activeAccount(),
-      address: grantSnapshot.paymentToken,
-      abi: erc20Abi,
-      chain,
-      functionName: "approve",
-      args: [grantSnapshot.address, amount],
-    });
-    pushLog(`Payment approval submitted: ${hash}`, "success");
+    await submitContractTransaction(
+      "Payment approval",
+      buildErc20Approval({ token: grantSnapshot.paymentToken, spender: grantSnapshot.address, amount }),
+    );
   };
 
   const settleGrant = async (): Promise<void> => {
     const grant = requireAddress(grantAddress, "Grant address");
     const amount = uintInput(settleAmount, "Settle amount");
-    const hash = await walletClient().writeContract({
-      account: activeAccount(),
+    await submitContractTransaction("Grant settlement", {
       address: grant,
       abi: tokenGrantAbi,
-      chain,
       functionName: "settle",
       args: [amount],
     });
-    pushLog(`Settlement submitted: ${hash}`, "success");
   };
 
   const isBoardroomIssuer = async (issuer: Address): Promise<boolean> => {
     try {
-      const policyRegistry = await publicClient.readContract({
-        address: issuer,
-        abi: boardroomAbi,
-        functionName: "policyRegistry",
-      });
-      return !isZeroAddress(policyRegistry);
+      const snapshot = await readBoardroomState(publicClient, issuer);
+      return !isZeroAddress(snapshot.policyRegistry);
     } catch {
       return false;
     }
@@ -441,57 +486,42 @@ export function App(): React.JSX.Element {
 
   const runGrantIssuerAction = async (functionName: GrantIssuerAction, successMessage: string): Promise<void> => {
     const grant = requireAddress(grantAddress, "Grant address");
-    const issuer = await publicClient.readContract({ address: grant, abi: tokenGrantAbi, functionName: "issuer" });
-    const data = encodeFunctionData({ abi: tokenGrantAbi, functionName });
+    const { issuer } = await readGrantState(publicClient, grant);
 
     if (await isBoardroomIssuer(issuer)) {
       const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
-      const hash = await walletClient().writeContract({
-        account: activeAccount(),
-        address: issuer,
-        abi: boardroomAbi,
-        chain,
-        functionName: "execute",
-        args: [
-          {
-            policy: factory,
-            target: grant,
-            value: 0n,
-            data,
-          },
-        ],
-      });
-      pushLog(`${successMessage} through Boardroom: ${hash}`, "success");
+      await submitContractTransaction(
+        `${successMessage} through Boardroom`,
+        buildGrantIssuerBoardroomAction({ boardroom: issuer, policy: factory, grant, functionName }),
+      );
       return;
     }
 
-    const hash = await walletClient().writeContract({
-      account: activeAccount(),
+    await submitContractTransaction(successMessage, {
       address: grant,
       abi: tokenGrantAbi,
-      chain,
       functionName,
     });
-    pushLog(`${successMessage}: ${hash}`, "success");
   };
 
   const haltGrant = async (): Promise<void> => {
-    await runGrantIssuerAction("stopVestingAndWithdrawUnvested", "Vesting halt submitted");
+    await runGrantIssuerAction("stopVestingAndWithdrawUnvested", "Vesting halt");
   };
 
   const withdrawExpired = async (): Promise<void> => {
-    await runGrantIssuerAction("withdrawExpiredTokens", "Expired withdrawal submitted");
+    await runGrantIssuerAction("withdrawExpiredTokens", "Expired withdrawal");
   };
 
   const predictBoardroom = async (): Promise<void> => {
     const factory = requireDeploymentAddress(deployment?.boardroomFactory, "BoardroomFactory");
     const owner = requireAddress(boardroomForm.owner, "Boardroom owner");
     const salt = requireBytes32(boardroomForm.salt, "Boardroom salt");
-    const predicted = await publicClient.readContract({
-      address: factory,
-      abi: boardroomFactoryAbi,
-      functionName: "predictBoardroomAddress",
-      args: [owner, boardroomForm.name, boardroomForm.symbol, salt],
+    const predicted = await sdkPredictBoardroomAddress(publicClient, {
+      factory,
+      owner,
+      name: boardroomForm.name,
+      symbol: boardroomForm.symbol,
+      salt,
     });
     setPredictedBoardroom(predicted);
     updateBoardroomAddress(predicted);
@@ -502,25 +532,18 @@ export function App(): React.JSX.Element {
     const factory = requireDeploymentAddress(deployment?.boardroomFactory, "BoardroomFactory");
     const owner = requireAddress(boardroomForm.owner, "Boardroom owner");
     const salt = requireBytes32(boardroomForm.salt, "Boardroom salt");
-    const hash = await walletClient().writeContract({
-      account: activeAccount(),
+    await submitContractTransaction("Boardroom creation", {
       address: factory,
       abi: boardroomFactoryAbi,
-      chain,
       functionName: "createBoardroom",
       args: [owner, boardroomForm.name, boardroomForm.symbol, salt],
     });
-    pushLog(`Boardroom creation submitted: ${hash}`, "success");
   };
 
   const loadBoardroom = async (): Promise<void> => {
     const address = requireAddress(boardroomAddress, "Boardroom address");
-    const [owner, policyRegistry, shareToken] = await Promise.all([
-      publicClient.readContract({ address, abi: boardroomAbi, functionName: "owner" }),
-      publicClient.readContract({ address, abi: boardroomAbi, functionName: "policyRegistry" }),
-      publicClient.readContract({ address, abi: boardroomAbi, functionName: "shareToken" }),
-    ]);
-    setBoardroomSnapshot({ address, owner, policyRegistry, shareToken });
+    const snapshot = await readBoardroomState(publicClient, address);
+    setBoardroomSnapshot(snapshot);
     setBoardroomMintTo(address);
     pushLog(`Loaded Boardroom ${address}`, "success");
   };
@@ -529,18 +552,15 @@ export function App(): React.JSX.Element {
     const boardroom = boardroomSnapshot?.address ?? requireAddress(boardroomAddress, "Boardroom address");
     const to = boardroomMintTo.trim() ? requireAddress(boardroomMintTo, "Mint recipient") : boardroom;
     const amount = uintInput(boardroomMintAmount, "Mint amount");
-    const hash = await walletClient().writeContract({
-      account: activeAccount(),
+    await submitContractTransaction("Share mint", {
       address: boardroom,
       abi: boardroomAbi,
-      chain,
       functionName: "mint",
       args: [to, amount],
     });
-    pushLog(`Share mint submitted: ${hash}`, "success");
   };
 
-  const boardroomGrantArgs = () => {
+  const boardroomShareGrantTerms = (): BoardroomShareGrantTerms => {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
     const holder = requireAddress(boardroomGrantForm.holder, "Grant holder");
     const paymentToken = optionalPaymentToken(boardroomGrantForm.paymentToken);
@@ -555,33 +575,27 @@ export function App(): React.JSX.Element {
     const salt = requireBytes32(boardroomGrantForm.salt, "Grant salt");
 
     return {
+      holder,
+      paymentToken,
       amount,
+      price,
+      expiry,
+      vestingCliff,
+      vestingEnd,
+      transferable: boardroomGrantForm.transferable,
+      transferUnlockTime,
       salt,
-      tuple: [
-        holder,
-        boardroomSnapshot.shareToken,
-        paymentToken,
-        amount,
-        price,
-        expiry,
-        vestingCliff,
-        vestingEnd,
-        boardroomGrantForm.transferable,
-        transferUnlockTime,
-        salt,
-      ] as const,
     };
   };
 
   const predictBoardroomGrantAddress = async (): Promise<void> => {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
-    const { salt } = boardroomGrantArgs();
-    const predicted = await publicClient.readContract({
-      address: factory,
-      abi: tokenGrantFactoryAbi,
-      functionName: "predictGrantAddress",
-      args: [boardroomSnapshot.address, salt],
+    const { salt } = boardroomShareGrantTerms();
+    const predicted = await sdkPredictBoardroomGrantAddress(publicClient, {
+      factory,
+      boardroom: boardroomSnapshot.address,
+      salt,
     });
     setPredictedBoardroomGrant(predicted);
     updateGrantAddress(predicted);
@@ -591,65 +605,106 @@ export function App(): React.JSX.Element {
   const boardroomApproveFactory = async (): Promise<void> => {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
-    const { amount } = boardroomGrantArgs();
-    const data = encodeFunctionData({
-      abi: boardroomTokenAbi,
-      functionName: "approve",
-      args: [factory, amount],
-    });
-    const hash = await walletClient().writeContract({
-      account: activeAccount(),
-      address: boardroomSnapshot.address,
-      abi: boardroomAbi,
-      chain,
-      functionName: "execute",
-      args: [
-        {
+    const { amount } = boardroomShareGrantTerms();
+    await submitContractTransaction(
+      "Boardroom approval",
+      buildBoardroomExecuteTransaction({
+        boardroom: boardroomSnapshot.address,
+        call: buildBoardroomGrantApprovalCall({
           policy: factory,
-          target: boardroomSnapshot.shareToken,
-          value: 0n,
-          data,
-        },
-      ],
-    });
-    pushLog(`Boardroom approval submitted: ${hash}`, "success");
+          shareToken: boardroomSnapshot.shareToken,
+          factory,
+          amount,
+        }),
+      }),
+    );
   };
 
   const boardroomCreateGrant = async (): Promise<void> => {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
-    const { tuple } = boardroomGrantArgs();
-    const data = encodeFunctionData({
-      abi: tokenGrantFactoryAbi,
-      functionName: "createGrant",
-      args: tuple,
-    });
-    const hash = await walletClient().writeContract({
-      account: activeAccount(),
-      address: boardroomSnapshot.address,
-      abi: boardroomAbi,
-      chain,
-      functionName: "execute",
-      args: [
-        {
+    await submitContractTransaction(
+      "Boardroom grant creation",
+      buildBoardroomExecuteTransaction({
+        boardroom: boardroomSnapshot.address,
+        call: buildBoardroomGrantCreationCall({
           policy: factory,
-          target: factory,
-          value: creationFee,
-          data,
-        },
-      ],
-      value: creationFee,
-    });
-    pushLog(`Boardroom grant creation submitted: ${hash}`, "success");
+          factory,
+          terms: { ...boardroomShareGrantTerms(), token: boardroomSnapshot.shareToken },
+          creationFee,
+        }),
+        value: creationFee,
+      }),
+    );
   };
+
+  const boardroomCreateGrantBatch = async (): Promise<void> => {
+    if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
+    const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
+    await submitContractTransaction(
+      "Boardroom grant batch",
+      buildBoardroomShareGrantIssuanceBatch({
+        boardroom: boardroomSnapshot.address,
+        factory,
+        shareToken: boardroomSnapshot.shareToken,
+        terms: boardroomShareGrantTerms(),
+        creationFee,
+      }),
+    );
+  };
+
+  const loadMyGrants = async (): Promise<void> => {
+    if (!wallet.account) throw new Error("Connect wallet first.");
+    const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
+    const fromBlock = uintInput(myGrantsFromBlock, "From block");
+
+    const [held, issued] = await Promise.all([
+      queryGrantsHeldByAddress(publicClient, {
+        factory,
+        holder: wallet.account,
+        fromBlock,
+        includeClosed: includeClosedGrants,
+      }),
+      queryGrantsIssuedByAddress(publicClient, {
+        factory,
+        issuer: wallet.account,
+        fromBlock,
+        includeClosed: includeClosedGrants,
+      }),
+    ]);
+
+    setMyGrants({
+      held,
+      issued,
+      loadedFor: wallet.account,
+      fromBlock,
+      includeClosed: includeClosedGrants,
+    });
+    pushLog(`Loaded ${held.length} held and ${issued.length} issued grants for ${shortAddress(wallet.account)}.`, "success");
+  };
+
+  const inspectDiscoveredGrant = useCallback(
+    (grant: Address): void => {
+      updateGrantAddress(grant);
+      setActiveTab("grant");
+    },
+    [updateGrantAddress],
+  );
 
   return (
     <div className="min-h-svh text-zinc-100">
-      <AppHeader wallet={wallet} connectWallet={connectWallet} runAction={runAction} switchChain={switchChain} />
+      <AppHeader
+        wallet={wallet}
+        chainId={ACTIVE_CHAIN_ID}
+        chainName={ACTIVE_CHAIN_NAME}
+        connectWallet={connectWallet}
+        runAction={runAction}
+        switchChain={switchChain}
+      />
 
       <main className="grid min-h-[calc(100svh-64px)] grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)]">
         <aside className="grid content-start gap-4 border-b border-zinc-800 bg-zinc-950/35 p-4 lg:border-b-0 lg:border-r">
-          <DeploymentPanel creationFee={creationFee} deployment={deployment} factorySnapshot={factorySnapshot} />
+          <DeploymentPanel chainId={ACTIVE_CHAIN_ID} creationFee={creationFee} deployment={deployment} factorySnapshot={factorySnapshot} />
           <WalletPanel wallet={wallet} />
           <LogPanel logs={logs} clearLogs={() => setLogs([])} />
           <ArtifactPanel deployment={deployment} />
@@ -665,6 +720,9 @@ export function App(): React.JSX.Element {
             </TabButton>
             <TabButton active={activeTab === "boardroom"} onClick={() => setActiveTab("boardroom")}>
               Boardroom
+            </TabButton>
+            <TabButton active={activeTab === "my-grants"} onClick={() => setActiveTab("my-grants")}>
+              My Grants
             </TabButton>
           </div>
 
@@ -724,11 +782,28 @@ export function App(): React.JSX.Element {
               setPredictedBoardroom={setPredictedBoardroom}
               boardroomApproveFactory={boardroomApproveFactory}
               boardroomCreateGrant={boardroomCreateGrant}
+              boardroomCreateGrantBatch={boardroomCreateGrantBatch}
               createBoardroom={createBoardroom}
               loadBoardroom={loadBoardroom}
               mintBoardroomShares={mintBoardroomShares}
               predictBoardroom={predictBoardroom}
               predictBoardroomGrantAddress={predictBoardroomGrantAddress}
+              runAction={runAction}
+            />
+          ) : null}
+
+          {activeTab === "my-grants" ? (
+            <MyGrantsPanel
+              account={wallet.account}
+              deployment={deployment}
+              fromBlock={myGrantsFromBlock}
+              includeClosed={includeClosedGrants}
+              myGrants={myGrants}
+              pendingAction={pendingAction}
+              setFromBlock={setMyGrantsFromBlock}
+              setIncludeClosed={setIncludeClosedGrants}
+              inspectGrant={inspectDiscoveredGrant}
+              loadMyGrants={loadMyGrants}
               runAction={runAction}
             />
           ) : null}

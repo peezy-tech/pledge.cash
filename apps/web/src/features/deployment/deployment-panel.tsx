@@ -1,4 +1,4 @@
-import { HYPEREVM_TESTNET_CHAIN_ID, type PledgeCashDeployment } from "@pledge.cash/sdk";
+import type { PledgeCashDeployment } from "@pledge.cash/sdk";
 import { AddressLink, Facts, Panel } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
 import { deploymentText } from "../../lib/deployment";
@@ -6,12 +6,13 @@ import { bigintString } from "../../lib/forms";
 import type { FactorySnapshot } from "../../lib/types";
 
 type DeploymentPanelProps = {
+  chainId: number;
   creationFee: bigint;
   deployment: PledgeCashDeployment | undefined;
   factorySnapshot: FactorySnapshot;
 };
 
-export function DeploymentPanel({ creationFee, deployment, factorySnapshot }: DeploymentPanelProps): React.JSX.Element {
+export function DeploymentPanel({ chainId, creationFee, deployment, factorySnapshot }: DeploymentPanelProps): React.JSX.Element {
   const boardroomState = deployment?.boardroomFactory ? "Ready" : deployment?.boardroomStatus === "pending" ? "Pending" : "Not in artifact";
   const tokenGrantLogic = factorySnapshot.tokenGrantLogic ?? deployment?.tokenGrantLogic;
   const factoryOwner = factorySnapshot.owner ?? deployment?.factoryOwner;
@@ -24,7 +25,7 @@ export function DeploymentPanel({ creationFee, deployment, factorySnapshot }: De
       <Facts
         columns="one"
         items={[
-          { label: "Chain", value: `${HYPEREVM_TESTNET_CHAIN_ID}` },
+          { label: "Chain", value: `${chainId}` },
           {
             label: "TokenGrantFactory",
             value: deployment?.tokenGrantFactory ? <AddressLink address={deployment.tokenGrantFactory} /> : "Missing",
