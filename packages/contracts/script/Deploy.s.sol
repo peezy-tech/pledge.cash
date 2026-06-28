@@ -42,6 +42,8 @@ contract Deploy is Script {
         json.serialize("boardroomPolicyRegistry", address(boardroomPolicyRegistry));
         json.serialize("boardroomFactory", address(boardroomFactory));
         json.serialize("tokenGrantFactory", address(tokenGrantFactory));
+        string memory tokenGrantFactoryVersion = "current";
+        json.serialize("tokenGrantFactoryVersion", tokenGrantFactoryVersion);
         json.serialize("tokenGrantLogic", tokenGrantFactory.tokenGrantLogic());
         json.serialize("policyRegistryOwner", boardroomPolicyRegistry.owner());
         json.serialize("tokenGrantPolicyAllowed", boardroomPolicyRegistry.isPolicyAllowed(address(tokenGrantFactory)));
