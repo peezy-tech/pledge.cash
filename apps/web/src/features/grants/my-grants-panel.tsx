@@ -35,6 +35,12 @@ export function MyGrantsPanel({
   loadMyGrants,
   runAction,
 }: MyGrantsPanelProps): React.JSX.Element {
+  const loadedForCurrentAccount = Boolean(
+    account && myGrants.loadedFor && myGrants.loadedFor.toLowerCase() === account.toLowerCase(),
+  );
+  const heldGrants = loadedForCurrentAccount ? myGrants.held : [];
+  const issuedGrants = loadedForCurrentAccount ? myGrants.issued : [];
+
   return (
     <div className="grid gap-4">
       <Panel
@@ -80,8 +86,8 @@ export function MyGrantsPanel({
         />
       </Panel>
 
-      <GrantList grants={myGrants.held} inspectGrant={inspectGrant} title="Held Grants" />
-      <GrantList grants={myGrants.issued} inspectGrant={inspectGrant} title="Issued Grants" />
+      <GrantList grants={heldGrants} inspectGrant={inspectGrant} title="Held Grants" />
+      <GrantList grants={issuedGrants} inspectGrant={inspectGrant} title="Issued Grants" />
     </div>
   );
 }

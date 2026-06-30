@@ -113,6 +113,7 @@ contract SeedLocal is Script {
     Boardroom internal boardroom;
     SeededGrants internal grants;
     uint256 internal seedNonce;
+    uint256 internal creationFee;
 
     function run() external {
         if (block.chainid != 31337) revert("SeedLocal only targets local Anvil chain 31337");
@@ -144,10 +145,10 @@ contract SeedLocal is Script {
     function _readDeployment() internal {
         string memory path = string.concat("deployments/", vm.toString(block.chainid), ".json");
         string memory json = vm.readFile(path);
-        deployment = Deployment({
-            boardroomFactory: BoardroomFactory(json.readAddress(".boardroomFactory")),
-            tokenGrantFactory: TokenGrantFactory(json.readAddress(".tokenGrantFactory"))
-        });
+        BoardroomFactory boardroomFactory = BoardroomFactory(json.readAddress(".boardroomFactory"));
+        TokenGrantFactory tokenGrantFactory = TokenGrantFactory(json.readAddress(".tokenGrantFactory"));
+        deployment = Deployment({boardroomFactory: boardroomFactory, tokenGrantFactory: tokenGrantFactory});
+        creationFee = tokenGrantFactory.creationFee();
     }
 
     function _deploySeedTokens(uint256 deployerKey) internal {
@@ -336,27 +337,17 @@ contract SeedLocal is Script {
 
         vm.startBroadcast(spec.issuerKey);
         SeedToken(spec.token).approve(address(deployment.tokenGrantFactory), spec.amount);
-        address grantAddress = deployment.tokenGrantFactory
-            .createGrant(
-                spec.holder,
-                spec.token,
-                spec.paymentToken,
-                spec.amount,
-                spec.price,
-                spec.expiry,
-                spec.vestingCliff,
-                spec.vestingEnd,
-                spec.transferable,
-                spec.transferUnlockTime,
-                spec.salt
-            );
+        (bool success, bytes memory result) =
+            address(deployment.tokenGrantFactory).call{value: creationFee}(_createGrantData(spec));
         vm.stopBroadcast();
+        if (!success) _revertGrantCreation(result);
 
-        grant = TokenGrant(grantAddress);
+        grant = TokenGrant(abi.decode(result, (address)));
         if (grant.issuer() != issuer) revert("direct grant issuer mismatch");
     }
 
     function _createBoardroomGrant(GrantSpec memory spec) internal returns (TokenGrant grant) {
+        uint256 fee = creationFee;
         Boardroom.Call[] memory calls = new Boardroom.Call[](2);
         calls[0] = Boardroom.Call({
             policy: address(deployment.tokenGrantFactory),
@@ -369,12 +360,12 @@ contract SeedLocal is Script {
         calls[1] = Boardroom.Call({
             policy: address(deployment.tokenGrantFactory),
             target: address(deployment.tokenGrantFactory),
-            value: 0,
+            value: fee,
             data: _createGrantData(spec)
         });
 
         vm.startBroadcast(BOARDROOM_OWNER_KEY);
-        bytes[] memory results = boardroom.executeBatch(calls);
+        bytes[] memory results = boardroom.executeBatch{value: fee}(calls);
         vm.stopBroadcast();
 
         grant = TokenGrant(abi.decode(results[1], (address)));
@@ -398,6 +389,14 @@ contract SeedLocal is Script {
                 spec.salt
             )
         );
+    }
+
+    function _revertGrantCreation(bytes memory returnData) internal pure {
+        if (returnData.length == 0) revert("grant creation failed");
+
+        assembly {
+            revert(add(returnData, 0x20), mload(returnData))
+        }
     }
 
     function _writeSeedArtifact() internal {
