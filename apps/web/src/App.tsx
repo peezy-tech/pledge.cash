@@ -68,7 +68,20 @@ function sameOptionalAddress(left: Address | undefined, right: Address | undefin
   return (left ?? "").toLowerCase() === (right ?? "").toLowerCase();
 }
 
-function parseDeployment(json: Record<string, unknown>): PledgeCashDeployment {
+function propertyToken(raw: string, key: string): string | undefined {
+  const match = raw.match(new RegExp(`"${key}"\\s*:\\s*("([^"\\\\]|\\\\.)*"|-?\\d+|true|false|null)`));
+  return match?.[1];
+}
+
+function bigintField(raw: string, key: string): bigint | undefined {
+  const token = propertyToken(raw, key);
+  if (!token || token === "null") return undefined;
+  if (token.startsWith('"')) return BigInt(JSON.parse(token) as string);
+  return BigInt(token);
+}
+
+export function parseDeployment(raw: string): PledgeCashDeployment {
+  const json = JSON.parse(raw) as Record<string, unknown>;
   const deployment: PledgeCashDeployment = {
     chainId: Number(json.chainId),
   };
@@ -101,11 +114,13 @@ function parseDeployment(json: Record<string, unknown>): PledgeCashDeployment {
   if (typeof json.tokenGrantPolicyAllowed === "boolean") {
     deployment.tokenGrantPolicyAllowed = json.tokenGrantPolicyAllowed;
   }
-  if (typeof json.creationFee === "string" || typeof json.creationFee === "number") {
-    deployment.creationFee = BigInt(json.creationFee);
+  const creationFee = bigintField(raw, "creationFee");
+  if (creationFee !== undefined) {
+    deployment.creationFee = creationFee;
   }
-  if (typeof json.deploymentTimestamp === "string" || typeof json.deploymentTimestamp === "number") {
-    deployment.deploymentTimestamp = BigInt(json.deploymentTimestamp);
+  const deploymentTimestamp = bigintField(raw, "deploymentTimestamp");
+  if (deploymentTimestamp !== undefined) {
+    deployment.deploymentTimestamp = deploymentTimestamp;
   }
 
   return deployment;
@@ -158,9 +173,9 @@ export function App(): React.JSX.Element {
           cache: "no-store",
         });
         if (!response.ok) return;
-        const json = (await response.json()) as Record<string, unknown>;
+        const raw = await response.text();
         if (!cancelled) {
-          setRuntimeDeployment(parseDeployment(json));
+          setRuntimeDeployment(parseDeployment(raw));
         }
       } catch {
         // The generated SDK deployment remains the fallback for SSR and package consumers.
