@@ -251,6 +251,7 @@ contract SeedLocal is Script {
             .createBoardroom(actors.boardroomOwner, "Seed Labs Common", "SEED", _salt("seed-boardroom"));
         boardroom = Boardroom(payable(boardroomAddress));
         boardroom.mint(address(boardroom), 5_000 * PLEDGE);
+        cash.mint(address(boardroom), 25 * CASH);
         vm.stopBroadcast();
 
         _seedBoardroomShareGrant();
