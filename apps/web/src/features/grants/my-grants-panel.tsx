@@ -35,11 +35,17 @@ export function MyGrantsPanel({
   loadMyGrants,
   runAction,
 }: MyGrantsPanelProps): React.JSX.Element {
-  const loadedForCurrentAccount = Boolean(
-    account && myGrants.loadedFor && myGrants.loadedFor.toLowerCase() === account.toLowerCase(),
+  const currentFromBlock = parseUintInput(fromBlock);
+  const loadedForCurrentQuery = Boolean(
+    account
+      && myGrants.loadedFor
+      && myGrants.loadedFor.toLowerCase() === account.toLowerCase()
+      && currentFromBlock !== undefined
+      && myGrants.fromBlock === currentFromBlock
+      && myGrants.includeClosed === includeClosed,
   );
-  const heldGrants = loadedForCurrentAccount ? myGrants.held : [];
-  const issuedGrants = loadedForCurrentAccount ? myGrants.issued : [];
+  const heldGrants = loadedForCurrentQuery ? myGrants.held : [];
+  const issuedGrants = loadedForCurrentQuery ? myGrants.issued : [];
 
   return (
     <div className="grid gap-4">
@@ -90,6 +96,12 @@ export function MyGrantsPanel({
       <GrantList grants={issuedGrants} inspectGrant={inspectGrant} title="Issued Grants" />
     </div>
   );
+}
+
+function parseUintInput(value: string): bigint | undefined {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return undefined;
+  return BigInt(trimmed);
 }
 
 function GrantList({
