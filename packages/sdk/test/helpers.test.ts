@@ -246,7 +246,7 @@ function transferLog(blockNumber: bigint, logIndex: number, from: Address, to: A
   return {
     blockNumber,
     logIndex,
-    args: { from, to, tokenId },
+    args: { from, to, id: tokenId },
   };
 }
 

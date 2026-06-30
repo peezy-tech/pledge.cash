@@ -473,12 +473,13 @@ export async function queryGrantHistory(
   }
 
   for (const log of [...transferLogs].sort(compareLogs)) {
-    const tokenId = bigintArg(log.args ?? {}, "tokenId");
+    const args = log.args ?? {};
+    const tokenId = bigintArg(args, "id") ?? bigintArg(args, "tokenId");
     if (tokenId === undefined) continue;
     const grant = grants.get(tokenKey(tokenId));
     if (!grant) continue;
 
-    const to = addressArg(log.args ?? {}, "to");
+    const to = addressArg(args, "to");
     if (to) {
       grant.currentHolder = to;
       if (log.blockNumber !== undefined) {

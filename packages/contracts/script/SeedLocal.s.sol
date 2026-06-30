@@ -53,6 +53,8 @@ contract SeedToken {
 contract SeedLocal is Script {
     using stdJson for string;
 
+    error InsufficientBoardroomCash(uint256 required, uint256 available);
+
     uint256 internal constant DEPLOYER_KEY = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
     uint256 internal constant ISSUER_KEY = 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
     uint256 internal constant HOLDER_KEY = 0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a;
@@ -317,6 +319,9 @@ contract SeedLocal is Script {
         spec.transferable = false;
         spec.transferUnlockTime = 0;
         spec.salt = _salt("boardroom-payroll-grant");
+
+        uint256 boardroomCash = cash.balanceOf(address(boardroom));
+        if (boardroomCash < spec.amount) revert InsufficientBoardroomCash(spec.amount, boardroomCash);
 
         grants.boardroomPayrollGrant = _createBoardroomGrant(spec);
 
