@@ -15,6 +15,11 @@ The deploy script creates one `BoardroomPolicyRegistry`, one `TokenGrantFactory`
 `BoardroomFactory`. It allows the token grant factory and distribution factory as Boardroom policies, records the grant
 logic, and optionally sets the native grant creation fee.
 
+The checked-in HyperEVM testnet artifact may model subsystems independently while deployment history is being rebuilt.
+If an existing artifact predates a current subsystem, mark that subsystem pending instead of keeping stale partial fields.
+For example, a TokenGrant deployment without a current `DistributionFactory` should set `boardroomStatus: "pending"` and
+omit Boardroom factory fields until a full Boardroom broadcast replaces the artifact.
+
 ## Environment
 
 Start from `.env.example` and provide a funded deployment key when broadcasting:
@@ -76,6 +81,9 @@ After a broadcast, verify `packages/contracts/deployments/998.json` contains:
 - `tokenGrantLogic`
 - `creationFee`
 - `deploymentTimestamp`
+
+For a partial artifact, keep the deployed subsystem fields and add the relevant pending status/reason fields for the
+missing subsystem.
 
 The deterministic local proof for the deployment code is:
 

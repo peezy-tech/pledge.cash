@@ -15,10 +15,10 @@ describe("generated SDK exports", () => {
   test("includes checked-in deployment metadata", () => {
     expect(pledgeCashDeployments[998]?.chainId).toBe(998);
     expect(pledgeCashDeployments[998]?.tokenGrantFactory).toBe("0xFCbfb61330d418f189A0594993E72BBd0b81E8aF");
-    expect(pledgeCashDeployments[998]?.boardroomFactory).toBe("0x4B79ab3D1B3737A54ab0EfD189499C15c252b4EC");
-    expect(pledgeCashDeployments[998]?.boardroomPolicyRegistry).toBe("0xA2a965986D3beFDe94423eF66cddA208411AeA6d");
     expect(pledgeCashDeployments[998]?.creationFee).toBe(100000000000000000n);
-    expect(pledgeCashDeployments[998]?.tokenGrantPolicyAllowed).toBe(true);
+    expect(pledgeCashDeployments[998]?.boardroomStatus).toBe("pending");
+    expect(pledgeCashDeployments[998]?.boardroomFactory).toBeUndefined();
+    expect(pledgeCashDeployments[998]?.distributionFactory).toBeUndefined();
   });
 
   test("marks generated source as generated", async () => {

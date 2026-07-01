@@ -4497,14 +4497,12 @@ export const pledgeCashAbis = {
 export const pledgeCashDeployments = {
   998: {
     chainId: 998,
-    boardroomFactory: "0x4B79ab3D1B3737A54ab0EfD189499C15c252b4EC" as Address,
-    boardroomPolicyRegistry: "0xA2a965986D3beFDe94423eF66cddA208411AeA6d" as Address,
+    boardroomStatus: "pending",
+    boardroomReason: "Current artifact predates DistributionFactory; redeploy the Boardroom stack before exposing Boardroom helpers.",
     tokenGrantFactory: "0xFCbfb61330d418f189A0594993E72BBd0b81E8aF" as Address,
     tokenGrantLogic: "0x51B8633989Ce5779772B8df00EEC65090cDc1889" as Address,
     deployer: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
     factoryOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    policyRegistryOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    tokenGrantPolicyAllowed: true,
     creationFee: 100000000000000000n,
     deploymentTimestamp: 1782644854n
   }

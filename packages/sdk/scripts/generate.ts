@@ -54,17 +54,24 @@ const deploymentFields = [
   ["deploymentTimestamp", "bigint"],
 ] as const satisfies readonly (readonly [string, DeploymentFieldKind])[];
 
-const requiredCurrentDeploymentFields = [
-  "boardroomFactory",
-  "boardroomPolicyRegistry",
+const requiredTokenGrantDeploymentFields = [
   "tokenGrantFactory",
   "tokenGrantLogic",
-  "policyRegistryOwner",
-  "tokenGrantPolicyAllowed",
   "factoryOwner",
   "creationFee",
   "deploymentTimestamp",
 ] as const;
+
+const requiredBoardroomDeploymentFields = [
+  "boardroomFactory",
+  "boardroomPolicyRegistry",
+  "distributionFactory",
+  "policyRegistryOwner",
+  "tokenGrantPolicyAllowed",
+  "distributionPolicyAllowed",
+] as const;
+
+const boardroomDeploymentFields = new Set<string>(requiredBoardroomDeploymentFields);
 
 function literal(value: unknown): string {
   return JSON.stringify(value, null, 2);
@@ -94,29 +101,50 @@ function serializeDeployment(raw: string): string | undefined {
   const chainId = numberLiteral(raw, "chainId");
   if (!chainId) return undefined;
 
-  const missingFields = requiredCurrentDeploymentFields.filter((field) => propertyToken(raw, field) === undefined);
+  const missingTokenGrantFields = requiredTokenGrantDeploymentFields.filter(
+    (field) => propertyToken(raw, field) === undefined,
+  );
   const hasTokenGrantFactory = propertyToken(raw, "tokenGrantFactory") !== undefined;
 
-  if (missingFields.length > 0 && hasTokenGrantFactory) {
+  if (missingTokenGrantFields.length > 0 && hasTokenGrantFactory) {
     throw new Error(
-      `Deployment ${chainId} has tokenGrantFactory but is missing current fields (${missingFields.join(
+      `Deployment ${chainId} has tokenGrantFactory but is missing current fields (${missingTokenGrantFields.join(
         ", ",
-      )}); model missing subsystems separately.`,
+      )}).`,
     );
   }
 
-  if (missingFields.length > 0 && !hasTokenGrantFactory) {
+  if (missingTokenGrantFields.length > 0 && !hasTokenGrantFactory) {
     const status = typeof parsed.status === "string" ? parsed.status : "pending";
     const reason =
       typeof parsed.reason === "string"
         ? parsed.reason
-        : `Deployment artifact is missing current fields: ${missingFields.join(", ")}`;
+        : `Deployment artifact is missing current fields: ${missingTokenGrantFields.join(", ")}`;
     return `${chainId}: {\n    chainId: ${chainId},\n    status: ${literal(status)},\n    reason: ${literal(reason)}\n  }`;
   }
 
+  const missingBoardroomFields = requiredBoardroomDeploymentFields.filter(
+    (field) => propertyToken(raw, field) === undefined,
+  );
+  const hasBoardroomField = requiredBoardroomDeploymentFields.some((field) => propertyToken(raw, field) !== undefined);
+  const boardroomStatus = typeof parsed.boardroomStatus === "string" ? parsed.boardroomStatus : undefined;
+  const shouldEmitBoardroom = boardroomStatus !== "pending" && missingBoardroomFields.length === 0;
+  const shouldEmitBoardroomPending = !shouldEmitBoardroom && (boardroomStatus === "pending" || hasBoardroomField);
+
   const lines = [`chainId: ${chainId}`];
+  if (shouldEmitBoardroomPending) {
+    const boardroomReason =
+      typeof parsed.boardroomReason === "string"
+        ? parsed.boardroomReason
+        : `Boardroom artifact is missing current fields: ${missingBoardroomFields.join(", ")}`;
+    lines.push(`boardroomStatus: ${literal("pending")}`);
+    lines.push(`boardroomReason: ${literal(boardroomReason)}`);
+  }
+
   for (const [field, kind] of deploymentFields) {
     if (field === "chainId") continue;
+    if (field === "boardroomStatus" || field === "boardroomReason") continue;
+    if (boardroomDeploymentFields.has(field) && !shouldEmitBoardroom) continue;
     if (propertyToken(raw, field) === undefined) continue;
 
     if (kind === "address") {

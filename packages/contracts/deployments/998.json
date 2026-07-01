@@ -1,13 +1,11 @@
 {
-  "boardroomFactory": "0x4B79ab3D1B3737A54ab0EfD189499C15c252b4EC",
-  "boardroomPolicyRegistry": "0xA2a965986D3beFDe94423eF66cddA208411AeA6d",
+  "boardroomReason": "Current artifact predates DistributionFactory; redeploy the Boardroom stack before exposing Boardroom helpers.",
+  "boardroomStatus": "pending",
   "chainId": 998,
   "creationFee": 100000000000000000,
   "deployer": "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c",
   "deploymentTimestamp": 1782644854,
   "factoryOwner": "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c",
-  "policyRegistryOwner": "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c",
   "tokenGrantFactory": "0xFCbfb61330d418f189A0594993E72BBd0b81E8aF",
-  "tokenGrantLogic": "0x51B8633989Ce5779772B8df00EEC65090cDc1889",
-  "tokenGrantPolicyAllowed": true
+  "tokenGrantLogic": "0x51B8633989Ce5779772B8df00EEC65090cDc1889"
 }
