@@ -469,6 +469,40 @@ contract BoardroomTest is Test {
         assertEq(shareToken.totalSupply(), 0);
     }
 
+    function testBoardroomRedeemBurnsSharesSentToTreasuryAfterRedemptionsOpen() public {
+        (Boardroom boardroom,) = _createBoardroom("wind-down-post-open-treasury-shares");
+        BoardroomCurrency redeemable = new BoardroomCurrency("Redeemable", "RDM", 6);
+        uint256 holderShares = 100 ether;
+        uint256 strangerShares = 300 ether;
+        uint256 redeemableAmount = 400_000000;
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, holderShares);
+        boardroom.mint(stranger, strangerShares);
+        boardroom.registerRedeemableAsset(address(redeemable));
+        boardroom.startWindDown();
+        boardroom.openRedemptions();
+        vm.stopPrank();
+
+        redeemable.mint(address(boardroom), redeemableAmount);
+
+        BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
+        vm.prank(holder);
+        shareToken.transfer(address(boardroom), holderShares);
+
+        uint256[] memory minimums = new uint256[](1);
+        minimums[0] = redeemableAmount;
+
+        vm.prank(stranger);
+        uint256[] memory amounts = boardroom.redeem(strangerShares, stranger, minimums);
+
+        assertEq(amounts[0], redeemableAmount);
+        assertEq(redeemable.balanceOf(stranger), redeemableAmount);
+        assertEq(redeemable.balanceOf(address(boardroom)), 0);
+        assertEq(shareToken.balanceOf(address(boardroom)), 0);
+        assertEq(shareToken.totalSupply(), 0);
+    }
+
     function testBoardroomRejectsMintAndNewGrantAfterWindDown() public {
         (Boardroom boardroom,) = _createBoardroom("wind-down-no-new-obligations");
 

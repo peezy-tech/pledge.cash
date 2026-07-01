@@ -106,7 +106,8 @@ and later create free USDC payroll grants through the same policy-gated batch ex
 5. `openRedemptions` verifies no recorded grants or distributions are still open, burns treasury-held shares, and moves
    the Boardroom to `RedemptionsOpen`.
 6. A share holder calls `redeem(shares, recipient, minAmountsOut)`.
-7. The Boardroom calculates each asset amount from current Boardroom balances and total share supply before burning.
+7. The Boardroom burns any shares currently held by the Boardroom, then calculates each asset amount from current
+   Boardroom balances and total share supply.
 8. The Boardroom burns the holder's shares and transfers each registered asset to the recipient with exact
    recipient-balance checks.
 
@@ -131,6 +132,7 @@ Redemption loops are bounded by `MAX_REDEEMABLE_ASSETS`. Wind-down gates are bou
 - Only the Boardroom that created a sale can close or cancel it through the distribution policy.
 - Redemptions cannot open while a recorded grant or distribution is still open.
 - Treasury-held shares are burned before redemptions open.
+- Shares sent to the Boardroom after redemptions open are burned before the next redemption is priced.
 - Share redemption burns shares before transferring redeemable assets.
 - Fee-on-transfer redeemable assets fail safely through exact recipient balance-delta checks.
 

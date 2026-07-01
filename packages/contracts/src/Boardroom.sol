@@ -180,6 +180,8 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         if (minAmountsOut.length != assetsLength) revert InvalidRedemptionInput();
 
         BoardroomToken shares_ = BoardroomToken(shareToken);
+        _burnTreasuryShares();
+
         uint256 supplyBeforeBurn = shares_.totalSupply();
         if (supplyBeforeBurn == 0 || shares > shares_.balanceOf(msg.sender)) revert InvalidRedemptionInput();
 
