@@ -137,6 +137,22 @@ contract DistributionTest is Test {
         assertEq(sale.purchasedBy(buyer), BUY_SHARES);
     }
 
+    function testFixedPriceSaleRoundsPaymentUpForDustPurchase() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("fixed-sale-dust");
+        FixedPriceSale sale = _createFixedPriceSale(boardroom, shareToken, paymentToken, "fixed-sale-dust-create");
+
+        vm.prank(buyer);
+        paymentToken.approve(address(sale), 1);
+
+        vm.prank(buyer);
+        uint256 payment = sale.buy(1, buyer, 1, block.timestamp);
+
+        assertEq(payment, 1);
+        assertEq(shareToken.balanceOf(buyer), 1);
+        assertEq(paymentToken.balanceOf(address(boardroom)), 1);
+        assertEq(sale.remainingShares(), SALE_SHARES - 1);
+    }
+
     function testBoardroomCanCloseFixedPriceSaleAndRecoverUnsoldShares() public {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("fixed-sale-close");
         FixedPriceSale sale = _createFixedPriceSale(boardroom, shareToken, paymentToken, "fixed-sale-close-create");

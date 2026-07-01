@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {ERC20} from "solady/tokens/ERC20.sol";
+import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Initializable} from "solady/utils/Initializable.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
@@ -157,7 +158,7 @@ contract FixedPriceSale is Initializable, ReentrancyGuard {
     }
 
     function getPaymentAmount(uint256 shareAmount) public view returns (uint256) {
-        return price * shareAmount / 1e18;
+        return FixedPointMathLib.fullMulDivUp(price, shareAmount, 1e18);
     }
 
     modifier onlyBoardroom() {

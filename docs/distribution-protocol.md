@@ -87,7 +87,7 @@ Preconditions:
 - deadline has not passed,
 - recipient is nonzero,
 - requested share amount is nonzero and not above remaining inventory,
-- payment is not above the buyer-provided maximum,
+- payment, rounded up to the payment token's smallest unit, is not above the buyer-provided maximum,
 - buyer cap is not exceeded.
 
 Effects:
