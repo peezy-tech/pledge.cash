@@ -125,6 +125,10 @@ export type BoardroomState = {
   owner: Address;
   policyRegistry: Address;
   shareToken: Address;
+  status: number;
+  redeemableAssets: Address[];
+  issuedGrants: Address[];
+  issuedDistributions: Address[];
 };
 
 export type GrantDiscoveryRange = {
@@ -262,17 +266,26 @@ export async function readGrantState(
 }
 
 export async function readBoardroomState(client: PledgeCashReadClient, boardroom: Address): Promise<BoardroomState> {
-  const [owner, policyRegistry, shareToken] = await Promise.all([
-    client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "owner" }),
-    client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "policyRegistry" }),
-    client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "shareToken" }),
-  ]);
+  const [owner, policyRegistry, shareToken, status, redeemableAssets, issuedGrants, issuedDistributions] =
+    await Promise.all([
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "owner" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "policyRegistry" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "shareToken" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "status" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "getRedeemableAssets" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "getIssuedGrants" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "getIssuedDistributions" }),
+    ]);
 
   return {
     address: boardroom,
     owner: owner as Address,
     policyRegistry: policyRegistry as Address,
     shareToken: shareToken as Address,
+    status: Number(status),
+    redeemableAssets: redeemableAssets as Address[],
+    issuedGrants: issuedGrants as Address[],
+    issuedDistributions: issuedDistributions as Address[],
   };
 }
 

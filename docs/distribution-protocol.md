@@ -83,6 +83,7 @@ If initialization or escrow transfer fails, the transaction reverts atomically.
 Preconditions:
 
 - sale is active,
+- creating Boardroom is still active,
 - current time is inside the sale window,
 - deadline has not passed,
 - recipient is nonzero,
@@ -110,11 +111,15 @@ Effects:
 - remaining share inventory is returned to the Boardroom,
 - future buys fail.
 
+Future buys also fail as soon as the creating Boardroom starts wind-down, even before the Boardroom closes or cancels the
+sale.
+
 ## Invariants
 
 - Sale escrow inventory plus sold shares equals original sale supply.
 - Buyer payments go to the Boardroom, not the factory or sale.
 - Only the creating Boardroom can close or cancel its sale.
+- Fixed-price sales cannot keep selling shares after the creating Boardroom starts wind-down.
 - A Boardroom policy call cannot create a sale for another share token.
 - Fee-on-transfer share or payment tokens fail safely through exact balance-delta checks.
 - Distribution lists are bounded by `MAX_DISTRIBUTIONS_PER_BOARDROOM`.

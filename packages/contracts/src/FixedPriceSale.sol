@@ -7,8 +7,14 @@ import {Initializable} from "solady/utils/Initializable.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 
+interface IFixedPriceSaleBoardroom {
+    function status() external view returns (uint8);
+}
+
 contract FixedPriceSale is Initializable, ReentrancyGuard {
     using SafeTransferLib for address;
+
+    uint8 internal constant BOARDROOM_STATUS_ACTIVE = 0;
 
     enum SaleStatus {
         Active,
@@ -172,6 +178,7 @@ contract FixedPriceSale is Initializable, ReentrancyGuard {
 
     function _requireOpen(uint256 deadline) internal view {
         _requireActive();
+        if (IFixedPriceSaleBoardroom(boardroom).status() != BOARDROOM_STATUS_ACTIVE) revert SaleNotOpen();
         if (deadline < block.timestamp) revert Expired();
         if (block.timestamp < startTime || (endTime != 0 && block.timestamp > endTime)) revert SaleNotOpen();
     }

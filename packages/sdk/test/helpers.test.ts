@@ -78,6 +78,10 @@ describe("SDK action and query helpers", () => {
       getSettleableAmount: 500n,
       policyRegistry: "0x0000000000000000000000000000000000000777",
       shareToken,
+      status: 1,
+      getRedeemableAssets: [paymentToken],
+      getIssuedGrants: [boardroom],
+      getIssuedDistributions: [sale],
       factory,
       boardroom,
       saleSupply: 1000n,
@@ -103,6 +107,9 @@ describe("SDK action and query helpers", () => {
       address: boardroom,
       owner: issuer,
       shareToken,
+      status: 1,
+      redeemableAssets: [paymentToken],
+      issuedDistributions: [sale],
     });
     await expect(readFixedPriceSaleState(client, sale)).resolves.toMatchObject({
       address: sale,
