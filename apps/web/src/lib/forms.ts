@@ -1,6 +1,16 @@
 import { pledgeCashErrorMessage, ZERO_ADDRESS, type Address } from "@pledge.cash/sdk";
 import { getAddress, isAddress, type Hex } from "viem";
-import type { BoardroomGrantForm, GrantForm, WalletState } from "./types";
+import type {
+  CurveMigrationForm,
+  FixedPriceSaleForm,
+  GrantForm,
+  LockedLiquidityExitForm,
+  LockedLiquidityForm,
+  MigratingCurveForm,
+  BoardroomGrantForm,
+  WalletState,
+  WindDownForm,
+} from "./types";
 
 export function randomSalt(): Hex {
   const bytes = new Uint8Array(32);
@@ -21,6 +31,18 @@ export function defaultTimes(): Pick<GrantForm, "vestingCliff" | "vestingEnd" | 
     vestingEnd: String(now + 3600),
     expiry: String(now + 7200),
   };
+}
+
+export function defaultWorkflowWindow(): { startTime: string; endTime: string } {
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    startTime: String(now),
+    endTime: String(now + 7200),
+  };
+}
+
+export function defaultDeadline(): string {
+  return String(Math.floor(Date.now() / 1000) + 900);
 }
 
 export function defaultGrantForm(): GrantForm {
@@ -47,6 +69,70 @@ export function defaultBoardroomGrantForm(): BoardroomGrantForm {
     transferable: false,
     transferUnlockTime: "0",
     salt: randomSalt(),
+  };
+}
+
+export function defaultFixedPriceSaleForm(): FixedPriceSaleForm {
+  return {
+    paymentToken: "",
+    shareAmount: "1000000000000000000",
+    price: "1000000000000000000",
+    maxPerBuyer: "0",
+    ...defaultWorkflowWindow(),
+    salt: randomSalt(),
+  };
+}
+
+export function defaultMigratingCurveForm(): MigratingCurveForm {
+  return {
+    quoteToken: "",
+    saleSupply: "1000000000000000000",
+    migrationSupply: "1000000000000000000",
+    basePrice: "1000000000000000000",
+    slope: "0",
+    graduationQuoteTarget: "1000000000000000000",
+    quoteToLpBps: "5000",
+    ...defaultWorkflowWindow(),
+    migrationSalt: randomSalt(),
+    salt: randomSalt(),
+  };
+}
+
+export function defaultLockedLiquidityForm(): LockedLiquidityForm {
+  return {
+    quoteToken: "",
+    shareAmountDesired: "1000000000000000000",
+    quoteAmountDesired: "1000000000000000000",
+    shareAmountMin: "0",
+    quoteAmountMin: "0",
+    deadline: defaultDeadline(),
+    salt: randomSalt(),
+    shareTokenSide: "tokenA",
+  };
+}
+
+export function defaultCurveMigrationForm(): CurveMigrationForm {
+  return {
+    minShareLiquidity: "0",
+    minQuoteLiquidity: "0",
+    deadline: defaultDeadline(),
+  };
+}
+
+export function defaultLockedLiquidityExitForm(): LockedLiquidityExitForm {
+  return {
+    amountAMin: "0",
+    amountBMin: "0",
+    deadline: defaultDeadline(),
+  };
+}
+
+export function defaultWindDownForm(): WindDownForm {
+  return {
+    redeemableAsset: "",
+    redeemShares: "0",
+    redeemRecipient: "",
+    minAmountsOut: "",
   };
 }
 

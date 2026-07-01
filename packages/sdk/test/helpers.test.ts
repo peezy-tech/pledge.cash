@@ -5,19 +5,28 @@ import {
   ammRouterAbi,
   boardroomAbi,
   boardroomTokenAbi,
+  buildBoardroomFixedPriceSaleCancelAction,
+  buildBoardroomFixedPriceSaleCloseAction,
   buildBoardroomFixedPriceSaleBatch,
   buildBoardroomLockedLiquidityBatch,
   buildBoardroomLockedLiquidityExitTransaction,
   buildBoardroomLockedLiquidityFeeClaimAction,
+  buildBoardroomBurnTreasurySharesTransaction,
+  buildBoardroomMintTransaction,
   buildBoardroomMigratingCurveBatch,
   buildBoardroomMigratingCurveCancelAction,
   buildBoardroomMigratingCurveMigrationAction,
+  buildBoardroomOpenRedemptionsTransaction,
+  buildBoardroomRedeemTransaction,
+  buildBoardroomRegisterRedeemableAssetTransaction,
   buildBoardroomShareGrantIssuanceBatch,
+  buildBoardroomStartWindDownTransaction,
   buildDirectGrantCreationTransaction,
   buildErc20Approval,
   decodeKnownPledgeCashError,
   distributionFactoryAbi,
   erc20Abi,
+  fixedPriceSaleAbi,
   lockedLiquidityAbi,
   lockedLiquidityFactoryAbi,
   migratingBondingCurveAbi,
@@ -31,6 +40,7 @@ import {
   readFactoryState,
   readFixedPriceSaleState,
   readGrantState,
+  readLockedLiquidityState,
   readMigratingBondingCurveState,
   tokenGrantFactoryAbi,
   type BoardroomLockedLiquidityTerms,
@@ -153,6 +163,11 @@ describe("SDK action and query helpers", () => {
       soldShares: 200n,
       quoteReserve: 5_000n,
       canMigrate: false,
+      router: "0x0000000000000000000000000000000000000a0a",
+      tokenA: shareToken,
+      tokenB: paymentToken,
+      seeded: true,
+      lockedLiquidity: 777n,
     });
 
     await expect(readFactoryState(client, factory)).resolves.toMatchObject({
@@ -192,6 +207,15 @@ describe("SDK action and query helpers", () => {
       quoteToLpBps: 5000,
       canMigrate: false,
       closed: false,
+    });
+    await expect(readLockedLiquidityState(client, locker)).resolves.toMatchObject({
+      address: locker,
+      boardroom,
+      tokenA: shareToken,
+      tokenB: paymentToken,
+      pool: "0x0000000000000000000000000000000000000a00",
+      seeded: true,
+      lockedLiquidity: 777n,
     });
   });
 
@@ -261,6 +285,37 @@ describe("SDK action and query helpers", () => {
     );
   });
 
+  test("builds Boardroom direct transaction inputs", () => {
+    expect(buildBoardroomMintTransaction({ boardroom, to: holder, amount: 1000n })).toMatchObject({
+      address: boardroom,
+      abi: boardroomAbi,
+      functionName: "mint",
+      args: [holder, 1000n],
+    });
+    expect(buildBoardroomStartWindDownTransaction({ boardroom })).toMatchObject({
+      address: boardroom,
+      functionName: "startWindDown",
+    });
+    expect(buildBoardroomBurnTreasurySharesTransaction({ boardroom })).toMatchObject({
+      address: boardroom,
+      functionName: "burnTreasuryShares",
+    });
+    expect(buildBoardroomOpenRedemptionsTransaction({ boardroom })).toMatchObject({
+      address: boardroom,
+      functionName: "openRedemptions",
+    });
+    expect(buildBoardroomRegisterRedeemableAssetTransaction({ boardroom, asset: paymentToken })).toMatchObject({
+      address: boardroom,
+      functionName: "registerRedeemableAsset",
+      args: [paymentToken],
+    });
+    expect(buildBoardroomRedeemTransaction({ boardroom, shares: 10n, recipient: holder, minAmountsOut: [1n, 2n] })).toMatchObject({
+      address: boardroom,
+      functionName: "redeem",
+      args: [10n, holder, [1n, 2n]],
+    });
+  });
+
   test("builds Boardroom fixed-price sale batch transaction inputs", () => {
     const batch = buildBoardroomFixedPriceSaleBatch({
       boardroom,
@@ -303,6 +358,28 @@ describe("SDK action and query helpers", () => {
         ],
       }),
     );
+
+    const close = buildBoardroomFixedPriceSaleCloseAction({
+      boardroom,
+      policy: distributionFactory,
+      sale,
+    });
+    expect(close.address).toBe(boardroom);
+    expect(close.abi).toBe(boardroomAbi);
+    expect(close.functionName).toBe("execute");
+    expect(close.args[0]).toMatchObject({ policy: distributionFactory, target: sale, value: 0n });
+    expect(close.args[0].data).toBe(encodeFunctionData({ abi: fixedPriceSaleAbi, functionName: "close" }));
+
+    const cancel = buildBoardroomFixedPriceSaleCancelAction({
+      boardroom,
+      policy: distributionFactory,
+      sale,
+    });
+    expect(cancel.address).toBe(boardroom);
+    expect(cancel.abi).toBe(boardroomAbi);
+    expect(cancel.functionName).toBe("execute");
+    expect(cancel.args[0]).toMatchObject({ policy: distributionFactory, target: sale, value: 0n });
+    expect(cancel.args[0].data).toBe(encodeFunctionData({ abi: fixedPriceSaleAbi, functionName: "cancel" }));
   });
 
   test("builds Boardroom migrating bonding curve transaction inputs", () => {

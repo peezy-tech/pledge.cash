@@ -1,10 +1,24 @@
 import {
-  boardroomAbi,
   boardroomFactoryAbi,
+  buildBoardroomBurnTreasurySharesTransaction,
   buildBoardroomExecuteTransaction,
+  buildBoardroomFixedPriceSaleBatch,
+  buildBoardroomFixedPriceSaleCancelAction,
+  buildBoardroomFixedPriceSaleCloseAction,
   buildBoardroomGrantApprovalCall,
   buildBoardroomGrantCreationCall,
+  buildBoardroomLockedLiquidityBatch,
+  buildBoardroomLockedLiquidityExitTransaction,
+  buildBoardroomLockedLiquidityFeeClaimAction,
+  buildBoardroomMigratingCurveBatch,
+  buildBoardroomMigratingCurveCancelAction,
+  buildBoardroomMigratingCurveMigrationAction,
+  buildBoardroomMintTransaction,
+  buildBoardroomOpenRedemptionsTransaction,
+  buildBoardroomRedeemTransaction,
+  buildBoardroomRegisterRedeemableAssetTransaction,
   buildBoardroomShareGrantIssuanceBatch,
+  buildBoardroomStartWindDownTransaction,
   buildDirectGrantCreationTransaction,
   buildErc20Approval,
   buildGrantIssuerBoardroomAction,
@@ -13,19 +27,31 @@ import {
   predictBoardroomAddress as sdkPredictBoardroomAddress,
   predictBoardroomGrantAddress as sdkPredictBoardroomGrantAddress,
   predictDirectGrantAddress as sdkPredictDirectGrantAddress,
+  predictFixedPriceSaleAddress as sdkPredictFixedPriceSaleAddress,
+  predictLockedLiquidityAddress as sdkPredictLockedLiquidityAddress,
+  predictMigratingBondingCurveAddress as sdkPredictMigratingBondingCurveAddress,
   queryGrantsHeldByAddress,
   queryGrantsIssuedByAddress,
   readBoardroomState,
   readFactoryState,
+  readFixedPriceSaleState,
   readGrantState,
+  readLockedLiquidityState,
+  readMigratingBondingCurveState,
   tokenGrantAbi,
   type Address,
+  type BoardroomFixedPriceSaleTerms,
+  type BoardroomLockedLiquidityTerms,
+  type BoardroomMigratingBondingCurveTerms,
   type BoardroomShareGrantTerms,
+  type FixedPriceSaleState,
   type GrantCreationTerms,
+  type LockedLiquidityState,
+  type MigratingBondingCurveState,
   type PledgeCashDeployment,
 } from "@pledge.cash/sdk";
 import { useCallback, useEffect, useState } from "react";
-import { createWalletClient, custom, getAddress, isAddress, type EIP1193Provider, type Hex } from "viem";
+import { createWalletClient, custom, encodeFunctionData, getAddress, isAddress, type EIP1193Provider, type Hex } from "viem";
 import { TabButton } from "./components/shell";
 import { BoardroomPanel } from "./features/boardrooms/boardroom-panel";
 import { ArtifactPanel, DeploymentPanel } from "./features/deployment/deployment-panel";
@@ -38,7 +64,13 @@ import { WalletPanel } from "./features/wallet/wallet-panel";
 import { ACTIVE_CHAIN_ID, ACTIVE_CHAIN_NAME, chain, EXPLORER_URL, publicClient, WALLET_RPC_URL } from "./lib/contracts";
 import {
   defaultBoardroomGrantForm,
+  defaultCurveMigrationForm,
+  defaultFixedPriceSaleForm,
   defaultGrantForm,
+  defaultLockedLiquidityExitForm,
+  defaultLockedLiquidityForm,
+  defaultMigratingCurveForm,
+  defaultWindDownForm,
   errorMessage,
   optionalPaymentToken,
   randomSalt,
@@ -53,13 +85,19 @@ import type {
   BoardroomForm,
   BoardroomGrantForm,
   BoardroomSnapshot,
+  CurveMigrationForm,
   FactorySnapshot,
+  FixedPriceSaleForm,
   GrantForm,
   GrantSnapshot,
+  LockedLiquidityExitForm,
+  LockedLiquidityForm,
   LogEntry,
+  MigratingCurveForm,
   MyGrantsSnapshot,
   Tab,
   WalletState,
+  WindDownForm,
 } from "./lib/types";
 
 type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
@@ -78,6 +116,47 @@ function bigintField(raw: string, key: string): bigint | undefined {
   if (!token || token === "null") return undefined;
   if (token.startsWith('"')) return BigInt(JSON.parse(token) as string);
   return BigInt(token);
+}
+
+function contractCallPreview(label: string, request: Record<string, unknown>): string {
+  const target = typeof request.address === "string" ? request.address : "unknown";
+  const functionName = typeof request.functionName === "string" ? request.functionName : "unknown";
+  const value = typeof request.value === "bigint" ? request.value : 0n;
+  let data = "unavailable";
+
+  try {
+    if (request.abi && typeof request.functionName === "string") {
+      const encode = encodeFunctionData as unknown as (parameters: {
+        abi: readonly unknown[];
+        functionName: string;
+        args?: readonly unknown[];
+      }) => Hex;
+      data = encode({
+        abi: request.abi as readonly unknown[],
+        functionName: request.functionName,
+        args: Array.isArray(request.args) ? request.args : [],
+      });
+    }
+  } catch {
+    data = "unavailable";
+  }
+
+  return `${label} call target=${target} function=${functionName} value=${value.toString()} data=${data}`;
+}
+
+function parseMinAmountsOut(value: string, expectedLength: number): bigint[] {
+  const trimmed = value.trim();
+  if (!trimmed) return Array.from({ length: expectedLength }, () => 0n);
+
+  const values = trimmed.split(",").map((part) => part.trim()).filter(Boolean);
+  if (values.length !== expectedLength) {
+    throw new Error(`Minimum amounts must include ${expectedLength} comma-separated values.`);
+  }
+
+  return values.map((part) => {
+    if (!/^\d+$/.test(part)) throw new Error("Minimum amounts must be unsigned integers.");
+    return BigInt(part);
+  });
 }
 
 export function parseDeployment(raw: string): PledgeCashDeployment {
@@ -164,6 +243,21 @@ export function App(): React.JSX.Element {
   const [boardroomMintTo, setBoardroomMintTo] = useState("");
   const [boardroomGrantForm, setBoardroomGrantForm] = useState<BoardroomGrantForm>(() => defaultBoardroomGrantForm());
   const [predictedBoardroomGrant, setPredictedBoardroomGrant] = useState<Address>();
+  const [fixedPriceSaleForm, setFixedPriceSaleForm] = useState<FixedPriceSaleForm>(() => defaultFixedPriceSaleForm());
+  const [fixedPriceSaleAddress, setFixedPriceSaleAddress] = useState("");
+  const [fixedPriceSaleSnapshot, setFixedPriceSaleSnapshot] = useState<FixedPriceSaleState>();
+  const [predictedFixedPriceSale, setPredictedFixedPriceSale] = useState<Address>();
+  const [migratingCurveForm, setMigratingCurveForm] = useState<MigratingCurveForm>(() => defaultMigratingCurveForm());
+  const [migratingCurveAddress, setMigratingCurveAddress] = useState("");
+  const [migratingCurveSnapshot, setMigratingCurveSnapshot] = useState<MigratingBondingCurveState>();
+  const [predictedMigratingCurve, setPredictedMigratingCurve] = useState<Address>();
+  const [curveMigrationForm, setCurveMigrationForm] = useState<CurveMigrationForm>(() => defaultCurveMigrationForm());
+  const [lockedLiquidityForm, setLockedLiquidityForm] = useState<LockedLiquidityForm>(() => defaultLockedLiquidityForm());
+  const [lockedLiquidityAddress, setLockedLiquidityAddress] = useState("");
+  const [lockedLiquiditySnapshot, setLockedLiquiditySnapshot] = useState<LockedLiquidityState>();
+  const [predictedLockedLiquidity, setPredictedLockedLiquidity] = useState<Address>();
+  const [lockedLiquidityExitForm, setLockedLiquidityExitForm] = useState<LockedLiquidityExitForm>(() => defaultLockedLiquidityExitForm());
+  const [windDownForm, setWindDownForm] = useState<WindDownForm>(() => defaultWindDownForm());
   const [myGrantsFromBlock, setMyGrantsFromBlock] = useState("0");
   const [includeClosedGrants, setIncludeClosedGrants] = useState(false);
   const [myGrants, setMyGrants] = useState<MyGrantsSnapshot>(() => ({
@@ -299,6 +393,24 @@ export function App(): React.JSX.Element {
     setBoardroomSnapshot(undefined);
     setBoardroomMintTo("");
     setPredictedBoardroomGrant(undefined);
+    setPredictedFixedPriceSale(undefined);
+    setPredictedMigratingCurve(undefined);
+    setPredictedLockedLiquidity(undefined);
+  }, []);
+
+  const updateFixedPriceSaleAddress = useCallback((address: string): void => {
+    setFixedPriceSaleAddress(address);
+    setFixedPriceSaleSnapshot(undefined);
+  }, []);
+
+  const updateMigratingCurveAddress = useCallback((address: string): void => {
+    setMigratingCurveAddress(address);
+    setMigratingCurveSnapshot(undefined);
+  }, []);
+
+  const updateLockedLiquidityAddress = useCallback((address: string): void => {
+    setLockedLiquidityAddress(address);
+    setLockedLiquiditySnapshot(undefined);
   }, []);
 
   const clearBoardroomGrantPrediction = useCallback((): void => {
@@ -307,6 +419,70 @@ export function App(): React.JSX.Element {
     }
     setPredictedBoardroomGrant(undefined);
   }, [grantAddress, predictedBoardroomGrant, updateGrantAddress]);
+
+  const readBoardroomSnapshot = async (address: Address): Promise<BoardroomSnapshot> => {
+    const state = await readBoardroomState(publicClient, address);
+    const [grantSummaries, distributionSummaries, lockedLiquiditySummaries] = await Promise.all([
+      Promise.all(
+        state.issuedGrants.map(async (grant) => {
+          try {
+            return { address: grant, state: await readGrantState(publicClient, grant) };
+          } catch (error) {
+            return { address: grant, error: errorMessage(error) };
+          }
+        }),
+      ),
+      Promise.all(
+        state.issuedDistributions.map(async (distribution) => {
+          try {
+            return {
+              address: distribution,
+              kind: "fixed-price-sale" as const,
+              state: await readFixedPriceSaleState(publicClient, distribution),
+            };
+          } catch (fixedPriceError) {
+            try {
+              return {
+                address: distribution,
+                kind: "migrating-bonding-curve" as const,
+                state: await readMigratingBondingCurveState(publicClient, distribution),
+              };
+            } catch (curveError) {
+              return {
+                address: distribution,
+                kind: "unknown" as const,
+                error: `${errorMessage(fixedPriceError)}; ${errorMessage(curveError)}`,
+              };
+            }
+          }
+        }),
+      ),
+      Promise.all(
+        state.lockedLiquidityPositions.map(async (locker) => {
+          try {
+            return { address: locker, state: await readLockedLiquidityState(publicClient, locker) };
+          } catch (error) {
+            return { address: locker, error: errorMessage(error) };
+          }
+        }),
+      ),
+    ]);
+
+    return {
+      ...state,
+      grantSummaries,
+      distributionSummaries,
+      lockedLiquiditySummaries,
+    };
+  };
+
+  const refreshBoardroom = async (address?: Address): Promise<BoardroomSnapshot> => {
+    const boardroom = address ?? boardroomSnapshot?.address ?? requireAddress(boardroomAddress, "Boardroom address");
+    const snapshot = await readBoardroomSnapshot(boardroom);
+    setBoardroomSnapshot(snapshot);
+    setBoardroomMintTo((current) => current || snapshot.address);
+    return snapshot;
+  };
 
   const activeAccount = (): Address => {
     if (!wallet.account) throw new Error("Connect wallet first.");
@@ -329,6 +505,7 @@ export function App(): React.JSX.Element {
 
   const submitContractTransaction = async (label: string, request: Record<string, unknown>): Promise<Hex> => {
     const client = walletClient();
+    pushLog(contractCallPreview(label, request), "info");
     const hash = (await client.writeContract({
       account: activeAccount(),
       chain,
@@ -559,19 +736,27 @@ export function App(): React.JSX.Element {
     const factory = requireDeploymentAddress(deployment?.boardroomFactory, "BoardroomFactory");
     const owner = requireAddress(boardroomForm.owner, "Boardroom owner");
     const salt = requireBytes32(boardroomForm.salt, "Boardroom salt");
+    const predicted = await sdkPredictBoardroomAddress(publicClient, {
+      factory,
+      owner,
+      name: boardroomForm.name,
+      symbol: boardroomForm.symbol,
+      salt,
+    });
     await submitContractTransaction("Boardroom creation", {
       address: factory,
       abi: boardroomFactoryAbi,
       functionName: "createBoardroom",
       args: [owner, boardroomForm.name, boardroomForm.symbol, salt],
     });
+    setPredictedBoardroom(predicted);
+    setBoardroomAddress(predicted);
+    await refreshBoardroom(predicted);
   };
 
   const loadBoardroom = async (): Promise<void> => {
     const address = requireAddress(boardroomAddress, "Boardroom address");
-    const snapshot = await readBoardroomState(publicClient, address);
-    setBoardroomSnapshot(snapshot);
-    setBoardroomMintTo(address);
+    await refreshBoardroom(address);
     pushLog(`Loaded Boardroom ${address}`, "success");
   };
 
@@ -579,12 +764,8 @@ export function App(): React.JSX.Element {
     const boardroom = boardroomSnapshot?.address ?? requireAddress(boardroomAddress, "Boardroom address");
     const to = boardroomMintTo.trim() ? requireAddress(boardroomMintTo, "Mint recipient") : boardroom;
     const amount = uintInput(boardroomMintAmount, "Mint amount");
-    await submitContractTransaction("Share mint", {
-      address: boardroom,
-      abi: boardroomAbi,
-      functionName: "mint",
-      args: [to, amount],
-    });
+    await submitContractTransaction("Share mint", buildBoardroomMintTransaction({ boardroom, to, amount }));
+    await refreshBoardroom(boardroom);
   };
 
   const boardroomShareGrantTerms = (): BoardroomShareGrantTerms => {
@@ -645,11 +826,17 @@ export function App(): React.JSX.Element {
         }),
       }),
     );
+    await refreshBoardroom(boardroomSnapshot.address);
   };
 
   const boardroomCreateGrant = async (): Promise<void> => {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
+    const predicted = await sdkPredictBoardroomGrantAddress(publicClient, {
+      factory,
+      boardroom: boardroomSnapshot.address,
+      salt: boardroomShareGrantTerms().salt,
+    });
     await submitContractTransaction(
       "Boardroom grant creation",
       buildBoardroomExecuteTransaction({
@@ -663,21 +850,331 @@ export function App(): React.JSX.Element {
         value: creationFee,
       }),
     );
+    setPredictedBoardroomGrant(predicted);
+    updateGrantAddress(predicted);
+    await refreshBoardroom(boardroomSnapshot.address);
   };
 
   const boardroomCreateGrantBatch = async (): Promise<void> => {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
+    const terms = boardroomShareGrantTerms();
+    const predicted = await sdkPredictBoardroomGrantAddress(publicClient, {
+      factory,
+      boardroom: boardroomSnapshot.address,
+      salt: terms.salt,
+    });
     await submitContractTransaction(
       "Boardroom grant batch",
       buildBoardroomShareGrantIssuanceBatch({
         boardroom: boardroomSnapshot.address,
         factory,
         shareToken: boardroomSnapshot.shareToken,
-        terms: boardroomShareGrantTerms(),
+        terms,
         creationFee,
       }),
     );
+    setPredictedBoardroomGrant(predicted);
+    updateGrantAddress(predicted);
+    await refreshBoardroom(boardroomSnapshot.address);
+  };
+
+  const requireLoadedBoardroom = (): BoardroomSnapshot => {
+    if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
+    return boardroomSnapshot;
+  };
+
+  const fixedPriceSaleTerms = (): BoardroomFixedPriceSaleTerms => ({
+    paymentToken: requireAddress(fixedPriceSaleForm.paymentToken, "Payment token"),
+    shareAmount: uintInput(fixedPriceSaleForm.shareAmount, "Sale share amount"),
+    price: uintInput(fixedPriceSaleForm.price, "Sale price"),
+    maxPerBuyer: uintInput(fixedPriceSaleForm.maxPerBuyer, "Max per buyer"),
+    startTime: uintInput(fixedPriceSaleForm.startTime, "Sale start time"),
+    endTime: uintInput(fixedPriceSaleForm.endTime, "Sale end time"),
+    salt: requireBytes32(fixedPriceSaleForm.salt, "Sale salt"),
+  });
+
+  const predictFixedPriceSale = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
+    const { salt } = fixedPriceSaleTerms();
+    const predicted = await sdkPredictFixedPriceSaleAddress(publicClient, { factory, boardroom: boardroom.address, salt });
+    setPredictedFixedPriceSale(predicted);
+    updateFixedPriceSaleAddress(predicted);
+    pushLog(`Predicted fixed-price sale ${predicted}`, "success");
+  };
+
+  const loadFixedPriceSaleAddress = async (address?: Address): Promise<FixedPriceSaleState> => {
+    const sale = address ?? requireAddress(fixedPriceSaleAddress, "Fixed-price sale address");
+    const snapshot = await readFixedPriceSaleState(publicClient, sale);
+    setFixedPriceSaleSnapshot(snapshot);
+    setFixedPriceSaleAddress(sale);
+    return snapshot;
+  };
+
+  const loadFixedPriceSale = async (): Promise<void> => {
+    const sale = requireAddress(fixedPriceSaleAddress, "Fixed-price sale address");
+    await loadFixedPriceSaleAddress(sale);
+    pushLog(`Loaded fixed-price sale ${sale}`, "success");
+  };
+
+  const createFixedPriceSale = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
+    const terms = fixedPriceSaleTerms();
+    const predicted = await sdkPredictFixedPriceSaleAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
+    await submitContractTransaction(
+      "Fixed-price sale creation",
+      buildBoardroomFixedPriceSaleBatch({
+        boardroom: boardroom.address,
+        factory,
+        shareToken: boardroom.shareToken,
+        terms,
+      }),
+    );
+    setPredictedFixedPriceSale(predicted);
+    updateFixedPriceSaleAddress(predicted);
+    await Promise.all([refreshBoardroom(boardroom.address), loadFixedPriceSaleAddress(predicted)]);
+  };
+
+  const closeFixedPriceSale = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
+    const sale = requireAddress(fixedPriceSaleAddress, "Fixed-price sale address");
+    await submitContractTransaction(
+      "Fixed-price sale close",
+      buildBoardroomFixedPriceSaleCloseAction({ boardroom: boardroom.address, policy: factory, sale }),
+    );
+    await Promise.all([refreshBoardroom(boardroom.address), loadFixedPriceSaleAddress(sale)]);
+  };
+
+  const cancelFixedPriceSale = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
+    const sale = requireAddress(fixedPriceSaleAddress, "Fixed-price sale address");
+    await submitContractTransaction(
+      "Fixed-price sale cancel",
+      buildBoardroomFixedPriceSaleCancelAction({ boardroom: boardroom.address, policy: factory, sale }),
+    );
+    await Promise.all([refreshBoardroom(boardroom.address), loadFixedPriceSaleAddress(sale)]);
+  };
+
+  const migratingCurveTerms = (): BoardroomMigratingBondingCurveTerms => {
+    const quoteToLpBps = uintInput(migratingCurveForm.quoteToLpBps, "Quote-to-LP bps");
+    if (quoteToLpBps > 10_000n) throw new Error("Quote-to-LP bps must be at most 10000.");
+
+    return {
+      quoteToken: requireAddress(migratingCurveForm.quoteToken, "Quote token"),
+      saleSupply: uintInput(migratingCurveForm.saleSupply, "Curve sale supply"),
+      migrationSupply: uintInput(migratingCurveForm.migrationSupply, "Curve migration supply"),
+      basePrice: uintInput(migratingCurveForm.basePrice, "Curve base price"),
+      slope: uintInput(migratingCurveForm.slope, "Curve slope"),
+      graduationQuoteTarget: uintInput(migratingCurveForm.graduationQuoteTarget, "Graduation quote target"),
+      quoteToLpBps: Number(quoteToLpBps),
+      startTime: uintInput(migratingCurveForm.startTime, "Curve start time"),
+      endTime: uintInput(migratingCurveForm.endTime, "Curve end time"),
+      migrationSalt: requireBytes32(migratingCurveForm.migrationSalt, "Migration salt"),
+      salt: requireBytes32(migratingCurveForm.salt, "Curve salt"),
+    };
+  };
+
+  const predictMigratingCurve = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
+    const { salt } = migratingCurveTerms();
+    const predicted = await sdkPredictMigratingBondingCurveAddress(publicClient, { factory, boardroom: boardroom.address, salt });
+    setPredictedMigratingCurve(predicted);
+    updateMigratingCurveAddress(predicted);
+    pushLog(`Predicted migrating curve ${predicted}`, "success");
+  };
+
+  const loadMigratingCurveAddress = async (address?: Address): Promise<MigratingBondingCurveState> => {
+    const curve = address ?? requireAddress(migratingCurveAddress, "Migrating curve address");
+    const snapshot = await readMigratingBondingCurveState(publicClient, curve);
+    setMigratingCurveSnapshot(snapshot);
+    setMigratingCurveAddress(curve);
+    return snapshot;
+  };
+
+  const loadMigratingCurve = async (): Promise<void> => {
+    const curve = requireAddress(migratingCurveAddress, "Migrating curve address");
+    await loadMigratingCurveAddress(curve);
+    pushLog(`Loaded migrating curve ${curve}`, "success");
+  };
+
+  const createMigratingCurve = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
+    const terms = migratingCurveTerms();
+    const predicted = await sdkPredictMigratingBondingCurveAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
+    await submitContractTransaction(
+      "Migrating curve creation",
+      buildBoardroomMigratingCurveBatch({
+        boardroom: boardroom.address,
+        factory,
+        shareToken: boardroom.shareToken,
+        terms,
+      }),
+    );
+    setPredictedMigratingCurve(predicted);
+    updateMigratingCurveAddress(predicted);
+    await Promise.all([refreshBoardroom(boardroom.address), loadMigratingCurveAddress(predicted)]);
+  };
+
+  const cancelMigratingCurve = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
+    const curve = requireAddress(migratingCurveAddress, "Migrating curve address");
+    await submitContractTransaction(
+      "Migrating curve cancel",
+      buildBoardroomMigratingCurveCancelAction({ boardroom: boardroom.address, policy: factory, curve }),
+    );
+    await Promise.all([refreshBoardroom(boardroom.address), loadMigratingCurveAddress(curve)]);
+  };
+
+  const migrateCurve = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
+    const curve = requireAddress(migratingCurveAddress, "Migrating curve address");
+    await submitContractTransaction(
+      "Migrating curve migration",
+      buildBoardroomMigratingCurveMigrationAction({
+        boardroom: boardroom.address,
+        policy: factory,
+        curve,
+        minShareLiquidity: uintInput(curveMigrationForm.minShareLiquidity, "Minimum share liquidity"),
+        minQuoteLiquidity: uintInput(curveMigrationForm.minQuoteLiquidity, "Minimum quote liquidity"),
+        deadline: uintInput(curveMigrationForm.deadline, "Migration deadline"),
+      }),
+    );
+    await Promise.all([refreshBoardroom(boardroom.address), loadMigratingCurveAddress(curve)]);
+  };
+
+  const lockedLiquidityTerms = (): BoardroomLockedLiquidityTerms => ({
+    quoteToken: requireAddress(lockedLiquidityForm.quoteToken, "Quote token"),
+    shareAmountDesired: uintInput(lockedLiquidityForm.shareAmountDesired, "Share amount desired"),
+    quoteAmountDesired: uintInput(lockedLiquidityForm.quoteAmountDesired, "Quote amount desired"),
+    shareAmountMin: uintInput(lockedLiquidityForm.shareAmountMin, "Share amount minimum"),
+    quoteAmountMin: uintInput(lockedLiquidityForm.quoteAmountMin, "Quote amount minimum"),
+    deadline: uintInput(lockedLiquidityForm.deadline, "Locked-liquidity deadline"),
+    salt: requireBytes32(lockedLiquidityForm.salt, "Locked-liquidity salt"),
+    shareTokenSide: lockedLiquidityForm.shareTokenSide,
+  });
+
+  const predictLockedLiquidity = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
+    const { salt } = lockedLiquidityTerms();
+    const predicted = await sdkPredictLockedLiquidityAddress(publicClient, { factory, boardroom: boardroom.address, salt });
+    setPredictedLockedLiquidity(predicted);
+    updateLockedLiquidityAddress(predicted);
+    pushLog(`Predicted locked-liquidity position ${predicted}`, "success");
+  };
+
+  const loadLockedLiquidityAddress = async (address?: Address): Promise<LockedLiquidityState> => {
+    const locker = address ?? requireAddress(lockedLiquidityAddress, "Locked-liquidity address");
+    const snapshot = await readLockedLiquidityState(publicClient, locker);
+    setLockedLiquiditySnapshot(snapshot);
+    setLockedLiquidityAddress(locker);
+    return snapshot;
+  };
+
+  const loadLockedLiquidity = async (): Promise<void> => {
+    const locker = requireAddress(lockedLiquidityAddress, "Locked-liquidity address");
+    await loadLockedLiquidityAddress(locker);
+    pushLog(`Loaded locked-liquidity position ${locker}`, "success");
+  };
+
+  const createLockedLiquidity = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
+    const terms = lockedLiquidityTerms();
+    const predicted = await sdkPredictLockedLiquidityAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
+    await submitContractTransaction(
+      "Locked-liquidity creation",
+      buildBoardroomLockedLiquidityBatch({
+        boardroom: boardroom.address,
+        factory,
+        shareToken: boardroom.shareToken,
+        terms,
+      }),
+    );
+    setPredictedLockedLiquidity(predicted);
+    updateLockedLiquidityAddress(predicted);
+    await Promise.all([refreshBoardroom(boardroom.address), loadLockedLiquidityAddress(predicted)]);
+  };
+
+  const claimLockedLiquidityFees = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
+    const locker = requireAddress(lockedLiquidityAddress, "Locked-liquidity address");
+    await submitContractTransaction(
+      "Locked-liquidity fee claim",
+      buildBoardroomLockedLiquidityFeeClaimAction({ boardroom: boardroom.address, policy: factory, locker }),
+    );
+    await Promise.all([refreshBoardroom(boardroom.address), loadLockedLiquidityAddress(locker)]);
+  };
+
+  const exitLockedLiquidity = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const locker = requireAddress(lockedLiquidityAddress, "Locked-liquidity address");
+    await submitContractTransaction(
+      "Locked-liquidity exit",
+      buildBoardroomLockedLiquidityExitTransaction({
+        boardroom: boardroom.address,
+        locker,
+        amountAMin: uintInput(lockedLiquidityExitForm.amountAMin, "Exit amount A minimum"),
+        amountBMin: uintInput(lockedLiquidityExitForm.amountBMin, "Exit amount B minimum"),
+        deadline: uintInput(lockedLiquidityExitForm.deadline, "Exit deadline"),
+      }),
+    );
+    await Promise.all([refreshBoardroom(boardroom.address), loadLockedLiquidityAddress(locker)]);
+  };
+
+  const startWindDown = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    await submitContractTransaction("Boardroom wind-down start", buildBoardroomStartWindDownTransaction({ boardroom: boardroom.address }));
+    await refreshBoardroom(boardroom.address);
+  };
+
+  const burnTreasuryShares = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    await submitContractTransaction("Treasury share burn", buildBoardroomBurnTreasurySharesTransaction({ boardroom: boardroom.address }));
+    await refreshBoardroom(boardroom.address);
+  };
+
+  const registerRedeemableAsset = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const asset = requireAddress(windDownForm.redeemableAsset, "Redeemable asset");
+    await submitContractTransaction(
+      "Redeemable asset registration",
+      buildBoardroomRegisterRedeemableAssetTransaction({ boardroom: boardroom.address, asset }),
+    );
+    await refreshBoardroom(boardroom.address);
+  };
+
+  const openRedemptions = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    await submitContractTransaction("Boardroom redemptions open", buildBoardroomOpenRedemptionsTransaction({ boardroom: boardroom.address }));
+    await refreshBoardroom(boardroom.address);
+  };
+
+  const redeemBoardroomShares = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const recipient = windDownForm.redeemRecipient.trim()
+      ? requireAddress(windDownForm.redeemRecipient, "Redemption recipient")
+      : activeAccount();
+    const minAmountsOut = parseMinAmountsOut(windDownForm.minAmountsOut, boardroom.redeemableAssets.length);
+    await submitContractTransaction(
+      "Boardroom share redemption",
+      buildBoardroomRedeemTransaction({
+        boardroom: boardroom.address,
+        shares: uintInput(windDownForm.redeemShares, "Redeem shares"),
+        recipient,
+        minAmountsOut,
+      }),
+    );
+    await refreshBoardroom(boardroom.address);
   };
 
   const loadMyGrants = async (): Promise<void> => {
@@ -797,25 +1294,69 @@ export function App(): React.JSX.Element {
               boardroomMintTo={boardroomMintTo}
               boardroomSnapshot={boardroomSnapshot}
               clearBoardroomGrantPrediction={clearBoardroomGrantPrediction}
+              curveMigrationForm={curveMigrationForm}
               deployment={deployment}
+              fixedPriceSaleAddress={fixedPriceSaleAddress}
+              fixedPriceSaleForm={fixedPriceSaleForm}
+              fixedPriceSaleSnapshot={fixedPriceSaleSnapshot}
+              lockedLiquidityAddress={lockedLiquidityAddress}
+              lockedLiquidityExitForm={lockedLiquidityExitForm}
+              lockedLiquidityForm={lockedLiquidityForm}
+              lockedLiquiditySnapshot={lockedLiquiditySnapshot}
+              migratingCurveAddress={migratingCurveAddress}
+              migratingCurveForm={migratingCurveForm}
+              migratingCurveSnapshot={migratingCurveSnapshot}
               pendingAction={pendingAction}
               predictedBoardroom={predictedBoardroom}
               predictedBoardroomGrant={predictedBoardroomGrant}
+              predictedFixedPriceSale={predictedFixedPriceSale}
+              predictedLockedLiquidity={predictedLockedLiquidity}
+              predictedMigratingCurve={predictedMigratingCurve}
               setBoardroomAddress={updateBoardroomAddress}
               setBoardroomForm={setBoardroomForm}
               setBoardroomGrantForm={setBoardroomGrantForm}
               setBoardroomMintAmount={setBoardroomMintAmount}
               setBoardroomMintTo={setBoardroomMintTo}
+              setCurveMigrationForm={setCurveMigrationForm}
+              setFixedPriceSaleAddress={updateFixedPriceSaleAddress}
+              setFixedPriceSaleForm={setFixedPriceSaleForm}
+              setLockedLiquidityAddress={updateLockedLiquidityAddress}
+              setLockedLiquidityExitForm={setLockedLiquidityExitForm}
+              setLockedLiquidityForm={setLockedLiquidityForm}
+              setMigratingCurveAddress={updateMigratingCurveAddress}
+              setMigratingCurveForm={setMigratingCurveForm}
               setPredictedBoardroom={setPredictedBoardroom}
+              setWindDownForm={setWindDownForm}
+              windDownForm={windDownForm}
               boardroomApproveFactory={boardroomApproveFactory}
               boardroomCreateGrant={boardroomCreateGrant}
               boardroomCreateGrantBatch={boardroomCreateGrantBatch}
+              burnTreasuryShares={burnTreasuryShares}
+              cancelFixedPriceSale={cancelFixedPriceSale}
+              cancelMigratingCurve={cancelMigratingCurve}
+              claimLockedLiquidityFees={claimLockedLiquidityFees}
+              closeFixedPriceSale={closeFixedPriceSale}
               createBoardroom={createBoardroom}
+              createFixedPriceSale={createFixedPriceSale}
+              createLockedLiquidity={createLockedLiquidity}
+              createMigratingCurve={createMigratingCurve}
+              exitLockedLiquidity={exitLockedLiquidity}
+              loadFixedPriceSale={loadFixedPriceSale}
+              loadLockedLiquidity={loadLockedLiquidity}
+              loadMigratingCurve={loadMigratingCurve}
               loadBoardroom={loadBoardroom}
+              migrateCurve={migrateCurve}
               mintBoardroomShares={mintBoardroomShares}
+              openRedemptions={openRedemptions}
               predictBoardroom={predictBoardroom}
               predictBoardroomGrantAddress={predictBoardroomGrantAddress}
+              predictFixedPriceSale={predictFixedPriceSale}
+              predictLockedLiquidity={predictLockedLiquidity}
+              predictMigratingCurve={predictMigratingCurve}
+              redeemBoardroomShares={redeemBoardroomShares}
+              registerRedeemableAsset={registerRedeemableAsset}
               runAction={runAction}
+              startWindDown={startWindDown}
             />
           ) : null}
 
