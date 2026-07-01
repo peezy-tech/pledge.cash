@@ -13,7 +13,7 @@ Boardroom call policies.
 - Boardroom: owns assets, creates its share token, and acts as grant issuer.
 - Policy registry: protocol-controlled allowlist of policy contracts that Boardrooms may use.
 - Policy contract: validates whether a Boardroom may call a target contract with specific calldata.
-- Share holder: receives Boardroom share tokens directly or through grants.
+- Share holder: receives Boardroom share tokens directly or through grants, and can redeem shares after wind-down.
 - Grant holder: receives settlement authority over a Boardroom-issued grant.
 - Distribution buyer: buys Boardroom shares through a Boardroom-created distribution.
 
@@ -23,6 +23,7 @@ Boardroom call policies.
 - Grant token escrow: ERC20 tokens held by the Boardroom and transferred into a `TokenGrant`.
 - Payment token: optional ERC20 paid to the Boardroom when settling a paid grant.
 - Distribution payment token: ERC20 paid to the Boardroom when buyers purchase shares from a distribution.
+- Redeemable asset: ERC20 registered by the Boardroom owner for pro-rata redemption after wind-down.
 - Native creation fee: optional fee forwarded through the Boardroom to `TokenGrantFactory`.
 
 ## State Machines
@@ -41,21 +42,34 @@ State:
 
 ### Boardroom
 
-`Boardroom` has one owner, one policy registry, and one share token.
+`Boardroom` has one owner, one policy registry, one share token, and a wind-down status.
 
 State:
 
 - `policyRegistry`: protocol-controlled registry of allowed call policies.
 - `shareToken`: ERC20 minted only by this Boardroom.
+- `status`: `Active`, `WindingDown`, or `RedemptionsOpen`.
+- `redeemableAssets`: bounded list of ERC20 assets redeemed pro-rata by share holders.
+- `issuedGrants`: bounded list of Boardroom-issued token grants created through `TokenGrantFactory`.
+- `issuedDistributions`: bounded list of Boardroom-created distributions created through `DistributionFactory`.
 
 The owner can mint shares through `Boardroom.mint`. The owner can also call `Boardroom.execute` or
 `Boardroom.executeBatch`. Each call names a policy, target, native value, and calldata. The Boardroom first checks that
 the registry allows the policy, then asks the policy whether the target call is allowed. If both checks pass, the
-Boardroom performs the external call and emits a generic execution event.
+Boardroom performs the external call and emits a generic execution event. When active execution creates a grant or
+fixed-price distribution, the Boardroom records the returned obligation address so redemptions can later wait for it to
+close.
+
+Wind-down transitions are one-way:
+
+1. `Active`: owner can mint shares, create grants, create distributions, and register redeemable assets.
+2. `WindingDown`: owner cannot mint shares or create new grants/distributions. Owner may close recorded obligations,
+   register final redeemable assets, and burn treasury-held shares.
+3. `RedemptionsOpen`: share holders can burn shares to redeem registered assets pro-rata. Owner execution is closed.
 
 ### BoardroomToken
 
-`BoardroomToken` is a standard ERC20 with immutable `boardroom` authority. Only the Boardroom can mint it.
+`BoardroomToken` is a standard ERC20 with immutable `boardroom` authority. Only the Boardroom can mint or burn it.
 
 ## Grant Issuance Flow
 
@@ -83,12 +97,31 @@ and later create free USDC payroll grants through the same policy-gated batch ex
 8. Buyers pay the configured ERC20 payment token directly to the Boardroom and receive shares from sale escrow.
 9. The Boardroom can close or cancel its own sale through the same policy-gated execution surface.
 
+## Wind-Down And Redemption Flow
+
+1. Owner registers ERC20 assets that should be redeemable.
+2. Owner calls `startWindDown`, moving the Boardroom from `Active` to `WindingDown`.
+3. Owner closes or cancels every recorded distribution and halts or expires every recorded grant.
+4. Owner calls `openRedemptions`.
+5. `openRedemptions` verifies no recorded grants or distributions are still open, burns treasury-held shares, and moves
+   the Boardroom to `RedemptionsOpen`.
+6. A share holder calls `redeem(shares, recipient, minAmountsOut)`.
+7. The Boardroom calculates each asset amount from current Boardroom balances and total share supply before burning.
+8. The Boardroom burns the holder's shares and transfers each registered asset to the recipient with exact
+   recipient-balance checks.
+
+Redemption loops are bounded by `MAX_REDEEMABLE_ASSETS`. Wind-down gates are bounded by `MAX_ISSUED_GRANTS` and
+`MAX_ISSUED_DISTRIBUTIONS`.
+
 ## Invariants
 
 - Only the Boardroom can mint its share token.
+- Only the Boardroom can burn its share token.
 - Only the Boardroom owner can mint shares through the Boardroom.
+- Shares cannot be minted after wind-down starts.
 - Boardroom execution requires a policy allowed by the central registry.
 - Boardroom execution requires the selected policy to allow the target, value, and calldata.
+- Boardroom execution cannot create new obligations after wind-down starts.
 - Boardroom-created grants approve `TokenGrantFactory` as spender for the requested grant amount.
 - A Boardroom-issued grant must have `issuer == boardroom`.
 - Boardroom-issued grants escrow tokens from the Boardroom before holders can settle.
@@ -96,6 +129,10 @@ and later create free USDC payroll grants through the same policy-gated batch ex
 - Boardroom-created fixed-price sales can only sell the Boardroom's own share token.
 - Fixed-price sale payments are transferred directly to the Boardroom treasury.
 - Only the Boardroom that created a sale can close or cancel it through the distribution policy.
+- Redemptions cannot open while a recorded grant or distribution is still open.
+- Treasury-held shares are burned before redemptions open.
+- Share redemption burns shares before transferring redeemable assets.
+- Fee-on-transfer redeemable assets fail safely through exact recipient balance-delta checks.
 
 ## Deterministic Proof
 

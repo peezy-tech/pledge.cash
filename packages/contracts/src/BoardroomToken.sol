@@ -36,4 +36,12 @@ contract BoardroomToken is ERC20 {
 
         _mint(to, amount);
     }
+
+    function burn(address from, uint256 amount) external {
+        if (msg.sender != boardroom) revert OnlyBoardroom();
+        if (from == address(0)) revert InvalidAddress();
+        if (amount == 0) revert InvalidAmount();
+
+        _burn(from, amount);
+    }
 }

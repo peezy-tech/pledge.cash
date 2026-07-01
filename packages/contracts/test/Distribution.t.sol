@@ -191,6 +191,34 @@ contract DistributionTest is Test {
         assertEq(shareToken.balanceOf(address(boardroom)), SALE_SHARES);
     }
 
+    function testBoardroomRedemptionsWaitForFixedPriceSaleToClose() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("fixed-sale-wind-down");
+        FixedPriceSale sale = _createFixedPriceSale(boardroom, shareToken, paymentToken, "fixed-sale-wind-down-create");
+
+        assertEq(boardroom.issuedDistributionCount(), 1);
+        assertEq(boardroom.issuedDistributionAt(0), address(sale));
+        assertTrue(boardroom.isIssuedDistribution(address(sale)));
+
+        vm.prank(owner);
+        boardroom.startWindDown();
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.IssuedDistributionStillOpen.selector, address(sale)));
+        boardroom.openRedemptions();
+
+        vm.prank(owner);
+        boardroom.execute(
+            _policyCall(address(distributionFactory), address(sale), 0, abi.encodeCall(FixedPriceSale.close, ()))
+        );
+
+        assertTrue(sale.isClosed());
+
+        vm.prank(owner);
+        boardroom.openRedemptions();
+
+        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
+    }
+
     function testFixedPriceSaleRejectsFeeOnTransferPaymentToken() public {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("fixed-fee-token");
         FeeOnTransferDistributionCurrency feeToken = new FeeOnTransferDistributionCurrency("Fee USD", "FUSD", 6, 100);
