@@ -120,15 +120,16 @@ if field_exists tokenGrantLogic; then
 fi
 
 boardroom_status="$(field boardroomStatus)"
+skip_boardroom_verification=0
 if [[ "$boardroom_status" == "pending" ]]; then
   if [[ "$REQUIRE_BOARDROOM_DEPLOYMENT" == "1" ]]; then
     fail "Boardroom deployment is still marked pending"
   fi
   echo "Skipping Boardroom verification: artifact marks Boardroom deployment pending"
-  exit 0
+  skip_boardroom_verification=1
 fi
 
-if field_exists boardroomFactory || field_exists boardroomPolicyRegistry; then
+if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactory || field_exists boardroomPolicyRegistry; }; then
   require_field boardroomFactory
   require_field boardroomPolicyRegistry
   require_field policyRegistryOwner
@@ -155,4 +156,40 @@ elif [[ "$REQUIRE_BOARDROOM_DEPLOYMENT" == "1" ]]; then
   fail "Boardroom deployment fields are required but missing"
 else
   echo "Skipping Boardroom verification: no Boardroom deployment fields in artifact"
+fi
+
+if field_exists ammFactory; then
+  amm_factory="$(field ammFactory)"
+  require_code "AmmFactory" "$amm_factory"
+fi
+
+if field_exists ammRouter || field_exists lockedLiquidityFactory; then
+  require_field ammFactory
+  require_field wrappedNative
+  require_field ammRouter
+  require_field lockedLiquidityFactory
+  require_field boardroomPolicyRegistry
+  require_field lockedLiquidityPolicyAllowed
+
+  amm_factory="$(field ammFactory)"
+  wrapped_native="$(field wrappedNative)"
+  amm_router="$(field ammRouter)"
+  locked_liquidity_factory="$(field lockedLiquidityFactory)"
+  policy_registry="$(field boardroomPolicyRegistry)"
+
+  require_code "AmmFactory" "$amm_factory"
+  require_code "AmmRouter" "$amm_router"
+  require_code "LockedLiquidityFactory" "$locked_liquidity_factory"
+
+  actual_router_factory="$(call_address "$amm_router" "factory()(address)")"
+  expect_address_equal "AmmRouter factory" "$amm_factory" "$actual_router_factory"
+
+  actual_wrapped_native="$(call_address "$amm_router" "wrappedNative()(address)")"
+  expect_address_equal "AmmRouter wrappedNative" "$wrapped_native" "$actual_wrapped_native"
+
+  actual_locker_router="$(call_address "$locked_liquidity_factory" "ammRouter()(address)")"
+  expect_address_equal "LockedLiquidityFactory ammRouter" "$amm_router" "$actual_locker_router"
+
+  actual_locked_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$locked_liquidity_factory")"
+  expect_equal "Locked liquidity policy allowance" "$(field lockedLiquidityPolicyAllowed)" "$actual_locked_policy_allowed"
 fi

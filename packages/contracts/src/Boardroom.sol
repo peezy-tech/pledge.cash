@@ -10,6 +10,8 @@ import {DistributionFactory} from "./DistributionFactory.sol";
 import {FixedPriceSale} from "./FixedPriceSale.sol";
 import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
 import {IBoardroomPolicyRegistry} from "./IBoardroomPolicyRegistry.sol";
+import {LockedLiquidity} from "./LockedLiquidity.sol";
+import {LockedLiquidityFactory} from "./LockedLiquidityFactory.sol";
 import {TokenGrant} from "./TokenGrant.sol";
 import {TokenGrantFactory} from "./TokenGrantFactory.sol";
 
@@ -26,6 +28,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     uint256 public constant MAX_REDEEMABLE_ASSETS = 32;
     uint256 public constant MAX_ISSUED_GRANTS = 128;
     uint256 public constant MAX_ISSUED_DISTRIBUTIONS = 128;
+    uint256 public constant MAX_LOCKED_LIQUIDITY_POSITIONS = 32;
 
     enum BoardroomStatus {
         Active,
@@ -47,10 +50,12 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     address[] internal redeemableAssets;
     address[] internal issuedGrants;
     address[] internal issuedDistributions;
+    address[] internal lockedLiquidityPositions;
 
     mapping(address => bool) public isRedeemableAsset;
     mapping(address => bool) public isIssuedGrant;
     mapping(address => bool) public isIssuedDistribution;
+    mapping(address => bool) public isLockedLiquidity;
 
     error InvalidAddress();
     error InvalidAmount();
@@ -60,11 +65,14 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     error TooManyRedeemableAssets();
     error TooManyIssuedGrants();
     error TooManyIssuedDistributions();
+    error TooManyLockedLiquidityPositions();
     error InvalidRedeemableAsset(address asset);
     error InvalidIssuedGrant(address grant);
     error InvalidIssuedDistribution(address distribution);
+    error InvalidLockedLiquidity(address locker);
     error IssuedGrantStillOpen(address grant);
     error IssuedDistributionStillOpen(address distribution);
+    error LockedLiquidityStillOpen(address locker);
     error InsufficientRedemptionAmount(address asset, uint256 amountOut, uint256 minAmountOut);
     error UnexpectedRedeemableAssetBalanceChange(address asset, uint256 expected, uint256 actual);
     error EmptyBatch();
@@ -83,6 +91,10 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     event TreasurySharesBurned(uint256 amount);
     event BoardroomGrantRecorded(address indexed grant);
     event BoardroomDistributionRecorded(address indexed distribution);
+    event BoardroomLockedLiquidityRecorded(address indexed locker);
+    event BoardroomLockedLiquidityExited(
+        address indexed locker, address indexed pool, uint256 liquidity, uint256 amountA, uint256 amountB
+    );
     event SharesRedeemed(
         address indexed holder, address indexed recipient, uint256 shares, address[] assets, uint256[] amounts
     );
@@ -159,10 +171,34 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         burned = _burnTreasuryShares();
     }
 
+    function exitLockedLiquidity(address locker, uint256 amountAMin, uint256 amountBMin, uint256 deadline)
+        external
+        onlyOwner
+        nonReentrant
+        returns (uint256 amountA, uint256 amountB, uint256 liquidity)
+    {
+        _requireStatus(BoardroomStatus.WindingDown);
+        if (!isLockedLiquidity[locker]) revert InvalidLockedLiquidity(locker);
+
+        LockedLiquidity position = LockedLiquidity(locker);
+        address tokenA = position.tokenA();
+        address tokenB = position.tokenB();
+        address pool = position.pool();
+
+        (amountA, amountB, liquidity) = position.exitToBoardroom(amountAMin, amountBMin, deadline);
+
+        _registerRedeemableAssetIfNeeded(tokenA);
+        _registerRedeemableAssetIfNeeded(tokenB);
+        _burnTreasuryShares();
+
+        emit BoardroomLockedLiquidityExited(locker, pool, liquidity, amountA, amountB);
+    }
+
     function openRedemptions() external onlyOwner {
         _requireStatus(BoardroomStatus.WindingDown);
         _requireNoOpenIssuedGrants();
         _requireNoOpenIssuedDistributions();
+        _requireNoLockedLiquidity();
 
         _burnTreasuryShares();
         status = BoardroomStatus.RedemptionsOpen;
@@ -244,6 +280,22 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         return issuedDistributions;
     }
 
+    function lockedLiquidityCount() external view returns (uint256) {
+        return lockedLiquidityPositions.length;
+    }
+
+    function lockedLiquidityAt(uint256 index) external view returns (address) {
+        return lockedLiquidityPositions[index];
+    }
+
+    function getLockedLiquidityPositions() external view returns (address[] memory) {
+        return lockedLiquidityPositions;
+    }
+
+    function lockedLiquidityExitAllowed() external view returns (bool) {
+        return status == BoardroomStatus.WindingDown;
+    }
+
     function _execute(Call calldata call_) internal returns (bytes memory result) {
         address policy = call_.policy;
         address target = call_.target;
@@ -282,6 +334,9 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         if (isIssuedDistribution[target]) {
             return selector == FixedPriceSale.close.selector || selector == FixedPriceSale.cancel.selector;
         }
+        if (isLockedLiquidity[target]) {
+            return selector == LockedLiquidity.claimFees.selector;
+        }
         return false;
     }
 
@@ -293,6 +348,11 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
         if (selector == DistributionFactory.createFixedPriceSale.selector) {
             _recordIssuedDistribution(target, result);
+            return;
+        }
+
+        if (selector == LockedLiquidityFactory.createLockedLiquidity.selector) {
+            _recordLockedLiquidity(target, result);
         }
     }
 
@@ -329,6 +389,30 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         emit BoardroomDistributionRecorded(distribution);
     }
 
+    function _recordLockedLiquidity(address factory, bytes memory result) internal {
+        if (lockedLiquidityPositions.length >= MAX_LOCKED_LIQUIDITY_POSITIONS) {
+            revert TooManyLockedLiquidityPositions();
+        }
+
+        (address locker, address pool,,,) = abi.decode(result, (address, address, uint256, uint256, uint256));
+        if (locker == address(0) || isLockedLiquidity[locker]) revert InvalidLockedLiquidity(locker);
+
+        LockedLiquidity position = LockedLiquidity(locker);
+        if (
+            position.boardroom() != address(this) || position.factory() != factory || position.pool() != pool
+                || !LockedLiquidityFactory(factory).isLocker(locker)
+        ) {
+            revert InvalidLockedLiquidity(locker);
+        }
+
+        _registerRedeemableAssetIfNeeded(position.tokenA());
+        _registerRedeemableAssetIfNeeded(position.tokenB());
+
+        isLockedLiquidity[locker] = true;
+        lockedLiquidityPositions.push(locker);
+        emit BoardroomLockedLiquidityRecorded(locker);
+    }
+
     function _registerRedeemableAsset(address asset) internal {
         if (asset == address(0) || asset == shareToken) revert InvalidRedeemableAsset(asset);
         if (isRedeemableAsset[asset]) revert RedeemableAssetAlreadyRegistered(asset);
@@ -339,11 +423,24 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         emit RedeemableAssetRegistered(asset);
     }
 
+    function _registerRedeemableAssetIfNeeded(address asset) internal {
+        if (asset == address(0) || asset == shareToken || isRedeemableAsset[asset]) return;
+        _registerRedeemableAsset(asset);
+    }
+
     function _requireNoOpenIssuedGrants() internal view {
         uint256 grantCount = issuedGrants.length;
         for (uint256 i; i < grantCount; ++i) {
             address grant = issuedGrants[i];
             if (!TokenGrant(grant).isClosed()) revert IssuedGrantStillOpen(grant);
+        }
+    }
+
+    function _requireNoLockedLiquidity() internal view {
+        uint256 lockerCount = lockedLiquidityPositions.length;
+        for (uint256 i; i < lockerCount; ++i) {
+            address locker = lockedLiquidityPositions[i];
+            if (LockedLiquidity(locker).lockedLiquidity() != 0) revert LockedLiquidityStillOpen(locker);
         }
     }
 

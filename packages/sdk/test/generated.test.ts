@@ -1,15 +1,35 @@
 import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
-import { distributionFactoryAbi, fixedPriceSaleAbi, pledgeCashAbis, pledgeCashDeployments, tokenGrantFactoryAbi } from "../src";
+import {
+  ammFactoryAbi,
+  ammPoolAbi,
+  ammRouterAbi,
+  distributionFactoryAbi,
+  fixedPriceSaleAbi,
+  lockedLiquidityAbi,
+  lockedLiquidityFactoryAbi,
+  pledgeCashAbis,
+  pledgeCashDeployments,
+  poolFeesAbi,
+  tokenGrantFactoryAbi,
+} from "../src";
 
 describe("generated SDK exports", () => {
   test("includes core contract ABIs", () => {
     expect(pledgeCashAbis.TokenGrantFactory).toBe(tokenGrantFactoryAbi);
     expect(pledgeCashAbis.DistributionFactory).toBe(distributionFactoryAbi);
+    expect(pledgeCashAbis.AmmFactory).toBe(ammFactoryAbi);
+    expect(pledgeCashAbis.AmmPool).toBe(ammPoolAbi);
+    expect(pledgeCashAbis.AmmRouter).toBe(ammRouterAbi);
+    expect(pledgeCashAbis.LockedLiquidity).toBe(lockedLiquidityAbi);
+    expect(pledgeCashAbis.LockedLiquidityFactory).toBe(lockedLiquidityFactoryAbi);
+    expect(pledgeCashAbis.PoolFees).toBe(poolFeesAbi);
     expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "createGrant")).toBe(true);
     expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "predictGrantAddress")).toBe(true);
     expect(distributionFactoryAbi.some((item) => item.type === "function" && item.name === "createFixedPriceSale")).toBe(true);
     expect(fixedPriceSaleAbi.some((item) => item.type === "function" && item.name === "buy")).toBe(true);
+    expect(ammRouterAbi.some((item) => item.type === "function" && item.name === "swapExactTokensForTokens")).toBe(true);
+    expect(lockedLiquidityFactoryAbi.some((item) => item.type === "function" && item.name === "createLockedLiquidity")).toBe(true);
   });
 
   test("includes checked-in deployment metadata", () => {

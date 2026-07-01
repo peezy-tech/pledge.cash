@@ -9,6 +9,9 @@ import {
   type PublicClient,
 } from "viem";
 import {
+  ammFactoryAbi,
+  ammPoolAbi,
+  ammRouterAbi,
   boardroomAbi,
   boardroomFactoryAbi,
   boardroomPolicyRegistryAbi,
@@ -16,6 +19,9 @@ import {
   distributionFactoryAbi,
   erc20Abi,
   fixedPriceSaleAbi,
+  lockedLiquidityAbi,
+  lockedLiquidityFactoryAbi,
+  poolFeesAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
 } from "./generated";
@@ -59,6 +65,28 @@ export type FixedPriceSaleTerms = {
 };
 
 export type BoardroomFixedPriceSaleTerms = Omit<FixedPriceSaleTerms, "shareToken">;
+
+export type LockedLiquidityTerms = {
+  tokenA: Address;
+  tokenB: Address;
+  amountADesired: bigint;
+  amountBDesired: bigint;
+  amountAMin: bigint;
+  amountBMin: bigint;
+  deadline: bigint;
+  salt: Hex;
+};
+
+export type BoardroomLockedLiquidityTerms = {
+  quoteToken: Address;
+  shareAmountDesired: bigint;
+  quoteAmountDesired: bigint;
+  shareAmountMin: bigint;
+  quoteAmountMin: bigint;
+  deadline: bigint;
+  salt: Hex;
+  shareTokenSide?: "tokenA" | "tokenB";
+};
 
 export type GrantCreationArgs = readonly [
   Address,
@@ -129,6 +157,7 @@ export type BoardroomState = {
   redeemableAssets: Address[];
   issuedGrants: Address[];
   issuedDistributions: Address[];
+  lockedLiquidityPositions: Address[];
 };
 
 export type GrantDiscoveryRange = {
@@ -174,12 +203,18 @@ const grantClosedEvent = getAbiItem({ abi: tokenGrantFactoryAbi, name: "GrantClo
 const transferEvent = getAbiItem({ abi: tokenGrantFactoryAbi, name: "Transfer" });
 
 const pledgeCashErrorAbi = [
+  ...ammFactoryAbi,
+  ...ammPoolAbi,
+  ...ammRouterAbi,
   ...boardroomAbi,
   ...boardroomFactoryAbi,
   ...boardroomPolicyRegistryAbi,
   ...boardroomTokenAbi,
   ...distributionFactoryAbi,
   ...fixedPriceSaleAbi,
+  ...lockedLiquidityAbi,
+  ...lockedLiquidityFactoryAbi,
+  ...poolFeesAbi,
   ...tokenGrantAbi,
   ...tokenGrantFactoryAbi,
 ].filter((item) => item.type === "error") as Abi;
@@ -266,7 +301,16 @@ export async function readGrantState(
 }
 
 export async function readBoardroomState(client: PledgeCashReadClient, boardroom: Address): Promise<BoardroomState> {
-  const [owner, policyRegistry, shareToken, status, redeemableAssets, issuedGrants, issuedDistributions] =
+  const [
+    owner,
+    policyRegistry,
+    shareToken,
+    status,
+    redeemableAssets,
+    issuedGrants,
+    issuedDistributions,
+    lockedLiquidityPositions,
+  ] =
     await Promise.all([
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "owner" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "policyRegistry" }),
@@ -275,6 +319,7 @@ export async function readBoardroomState(client: PledgeCashReadClient, boardroom
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "getRedeemableAssets" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "getIssuedGrants" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "getIssuedDistributions" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "getLockedLiquidityPositions" }),
     ]);
 
   return {
@@ -286,6 +331,7 @@ export async function readBoardroomState(client: PledgeCashReadClient, boardroom
     redeemableAssets: redeemableAssets as Address[],
     issuedGrants: issuedGrants as Address[],
     issuedDistributions: issuedDistributions as Address[],
+    lockedLiquidityPositions: lockedLiquidityPositions as Address[],
   };
 }
 
@@ -335,6 +381,30 @@ export async function predictFixedPriceSaleAddress(
     address: input.factory,
     abi: distributionFactoryAbi,
     functionName: "predictFixedPriceSaleAddress",
+    args: [input.boardroom, input.salt],
+  })) as Address;
+}
+
+export async function predictAmmPoolAddress(
+  client: PledgeCashReadClient,
+  input: { factory: Address; tokenA: Address; tokenB: Address },
+): Promise<Address> {
+  return (await client.readContract({
+    address: input.factory,
+    abi: ammFactoryAbi,
+    functionName: "predictPoolAddress",
+    args: [input.tokenA, input.tokenB],
+  })) as Address;
+}
+
+export async function predictLockedLiquidityAddress(
+  client: PledgeCashReadClient,
+  input: { factory: Address; boardroom: Address; salt: Hex },
+): Promise<Address> {
+  return (await client.readContract({
+    address: input.factory,
+    abi: lockedLiquidityFactoryAbi,
+    functionName: "predictLockedLiquidityAddress",
     args: [input.boardroom, input.salt],
   })) as Address;
 }
@@ -481,6 +551,21 @@ export function fixedPriceSaleArgs(terms: FixedPriceSaleTerms) {
   ] as const;
 }
 
+export function lockedLiquidityArgs(terms: LockedLiquidityTerms) {
+  return [
+    {
+      tokenA: terms.tokenA,
+      tokenB: terms.tokenB,
+      amountADesired: terms.amountADesired,
+      amountBDesired: terms.amountBDesired,
+      amountAMin: terms.amountAMin,
+      amountBMin: terms.amountBMin,
+      deadline: terms.deadline,
+      salt: terms.salt,
+    },
+  ] as const;
+}
+
 export function buildBoardroomFixedPriceSaleApprovalCall(input: {
   policy: Address;
   shareToken: Address;
@@ -540,6 +625,126 @@ export function buildBoardroomFixedPriceSaleBatch(input: {
   return buildBoardroomExecuteBatchTransaction({
     boardroom: input.boardroom,
     calls,
+  });
+}
+
+export function buildBoardroomLockedLiquidityApprovalCall(input: {
+  policy: Address;
+  token: Address;
+  factory: Address;
+  amount: bigint;
+}): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.token,
+    data: encodeFunctionData({
+      abi: erc20Abi,
+      functionName: "approve",
+      args: [input.factory, input.amount],
+    }),
+  });
+}
+
+export function buildBoardroomLockedLiquidityCreationCall(input: {
+  policy: Address;
+  factory: Address;
+  terms: LockedLiquidityTerms;
+}): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.factory,
+    data: encodeFunctionData({
+      abi: lockedLiquidityFactoryAbi,
+      functionName: "createLockedLiquidity",
+      args: lockedLiquidityArgs(input.terms),
+    }),
+  });
+}
+
+export function buildBoardroomLockedLiquidityBatch(input: {
+  boardroom: Address;
+  factory: Address;
+  shareToken: Address;
+  terms: BoardroomLockedLiquidityTerms;
+  policy?: Address;
+}) {
+  const policy = input.policy ?? input.factory;
+  const shareTokenSide = input.terms.shareTokenSide ?? "tokenA";
+  const terms =
+    shareTokenSide === "tokenA"
+      ? ({
+          tokenA: input.shareToken,
+          tokenB: input.terms.quoteToken,
+          amountADesired: input.terms.shareAmountDesired,
+          amountBDesired: input.terms.quoteAmountDesired,
+          amountAMin: input.terms.shareAmountMin,
+          amountBMin: input.terms.quoteAmountMin,
+          deadline: input.terms.deadline,
+          salt: input.terms.salt,
+        } satisfies LockedLiquidityTerms)
+      : ({
+          tokenA: input.terms.quoteToken,
+          tokenB: input.shareToken,
+          amountADesired: input.terms.quoteAmountDesired,
+          amountBDesired: input.terms.shareAmountDesired,
+          amountAMin: input.terms.quoteAmountMin,
+          amountBMin: input.terms.shareAmountMin,
+          deadline: input.terms.deadline,
+          salt: input.terms.salt,
+        } satisfies LockedLiquidityTerms);
+  const calls = [
+    buildBoardroomLockedLiquidityApprovalCall({
+      policy,
+      token: input.shareToken,
+      factory: input.factory,
+      amount: input.terms.shareAmountDesired,
+    }),
+    buildBoardroomLockedLiquidityApprovalCall({
+      policy,
+      token: input.terms.quoteToken,
+      factory: input.factory,
+      amount: input.terms.quoteAmountDesired,
+    }),
+    buildBoardroomLockedLiquidityCreationCall({
+      policy,
+      factory: input.factory,
+      terms,
+    }),
+  ] as const;
+
+  return buildBoardroomExecuteBatchTransaction({
+    boardroom: input.boardroom,
+    calls,
+  });
+}
+
+export function buildBoardroomLockedLiquidityExitTransaction(input: {
+  boardroom: Address;
+  locker: Address;
+  amountAMin: bigint;
+  amountBMin: bigint;
+  deadline: bigint;
+}) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "exitLockedLiquidity",
+    args: [input.locker, input.amountAMin, input.amountBMin, input.deadline] as const,
+  };
+}
+
+export function buildBoardroomLockedLiquidityFeeClaimAction(input: {
+  boardroom: Address;
+  policy: Address;
+  locker: Address;
+}) {
+  return buildBoardroomExecuteTransaction({
+    boardroom: input.boardroom,
+    call: buildBoardroomCall({
+      policy: input.policy,
+      target: input.locker,
+      data: encodeFunctionData({ abi: lockedLiquidityAbi, functionName: "claimFees" }),
+    }),
   });
 }
 

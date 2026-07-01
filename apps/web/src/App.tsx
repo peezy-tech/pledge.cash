@@ -100,8 +100,13 @@ export function parseDeployment(raw: string): PledgeCashDeployment {
   for (const field of [
     "boardroomFactory",
     "boardroomPolicyRegistry",
+    "distributionFactory",
+    "ammFactory",
+    "ammRouter",
+    "lockedLiquidityFactory",
     "tokenGrantFactory",
     "tokenGrantLogic",
+    "wrappedNative",
     "deployer",
     "factoryOwner",
     "policyRegistryOwner",
@@ -113,6 +118,12 @@ export function parseDeployment(raw: string): PledgeCashDeployment {
 
   if (typeof json.tokenGrantPolicyAllowed === "boolean") {
     deployment.tokenGrantPolicyAllowed = json.tokenGrantPolicyAllowed;
+  }
+  if (typeof json.distributionPolicyAllowed === "boolean") {
+    deployment.distributionPolicyAllowed = json.distributionPolicyAllowed;
+  }
+  if (typeof json.lockedLiquidityPolicyAllowed === "boolean") {
+    deployment.lockedLiquidityPolicyAllowed = json.lockedLiquidityPolicyAllowed;
   }
   const creationFee = bigintField(raw, "creationFee");
   if (creationFee !== undefined) {

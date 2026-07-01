@@ -13,6 +13,9 @@ const repoRoot = resolve(scriptDir, "../../..");
 const outFile = join(repoRoot, "packages/sdk/src/generated.ts");
 
 const contracts = [
+  ["AmmFactory", "packages/contracts/out/AmmFactory.sol/AmmFactory.json", "ammFactoryAbi"],
+  ["AmmPool", "packages/contracts/out/AmmPool.sol/AmmPool.json", "ammPoolAbi"],
+  ["AmmRouter", "packages/contracts/out/AmmRouter.sol/AmmRouter.json", "ammRouterAbi"],
   ["Boardroom", "packages/contracts/out/Boardroom.sol/Boardroom.json", "boardroomAbi"],
   ["BoardroomFactory", "packages/contracts/out/BoardroomFactory.sol/BoardroomFactory.json", "boardroomFactoryAbi"],
   [
@@ -30,6 +33,13 @@ const contracts = [
     "packages/contracts/out/IBoardroomPolicyRegistry.sol/IBoardroomPolicyRegistry.json",
     "boardroomPolicyRegistryInterfaceAbi",
   ],
+  ["LockedLiquidity", "packages/contracts/out/LockedLiquidity.sol/LockedLiquidity.json", "lockedLiquidityAbi"],
+  [
+    "LockedLiquidityFactory",
+    "packages/contracts/out/LockedLiquidityFactory.sol/LockedLiquidityFactory.json",
+    "lockedLiquidityFactoryAbi",
+  ],
+  ["PoolFees", "packages/contracts/out/PoolFees.sol/PoolFees.json", "poolFeesAbi"],
   ["TokenGrant", "packages/contracts/out/TokenGrant.sol/TokenGrant.json", "tokenGrantAbi"],
   ["TokenGrantFactory", "packages/contracts/out/TokenGrantFactory.sol/TokenGrantFactory.json", "tokenGrantFactoryAbi"],
 ] as const;
@@ -43,12 +53,17 @@ const deploymentFields = [
   ["boardroomFactory", "address"],
   ["boardroomPolicyRegistry", "address"],
   ["distributionFactory", "address"],
+  ["ammFactory", "address"],
+  ["ammRouter", "address"],
+  ["lockedLiquidityFactory", "address"],
   ["tokenGrantFactory", "address"],
   ["tokenGrantLogic", "address"],
+  ["wrappedNative", "address"],
   ["deployer", "address"],
   ["factoryOwner", "address"],
   ["policyRegistryOwner", "address"],
   ["distributionPolicyAllowed", "boolean"],
+  ["lockedLiquidityPolicyAllowed", "boolean"],
   ["tokenGrantPolicyAllowed", "boolean"],
   ["creationFee", "bigint"],
   ["deploymentTimestamp", "bigint"],
@@ -216,12 +231,17 @@ export type PledgeCashDeployment = {
   boardroomFactory?: Address;
   boardroomPolicyRegistry?: Address;
   distributionFactory?: Address;
+  ammFactory?: Address;
+  ammRouter?: Address;
+  lockedLiquidityFactory?: Address;
   tokenGrantFactory?: Address;
   tokenGrantLogic?: Address;
+  wrappedNative?: Address;
   deployer?: Address;
   factoryOwner?: Address;
   policyRegistryOwner?: Address;
   distributionPolicyAllowed?: boolean;
+  lockedLiquidityPolicyAllowed?: boolean;
   tokenGrantPolicyAllowed?: boolean;
   creationFee?: bigint;
   deploymentTimestamp?: bigint;
