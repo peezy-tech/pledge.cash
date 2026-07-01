@@ -133,11 +133,15 @@ if field_exists boardroomFactory || field_exists boardroomPolicyRegistry; then
   require_field boardroomPolicyRegistry
   require_field policyRegistryOwner
   require_field tokenGrantPolicyAllowed
+  require_field distributionFactory
+  require_field distributionPolicyAllowed
 
   boardroom_factory="$(field boardroomFactory)"
   policy_registry="$(field boardroomPolicyRegistry)"
+  distribution_factory="$(field distributionFactory)"
   require_code "BoardroomFactory" "$boardroom_factory"
   require_code "BoardroomPolicyRegistry" "$policy_registry"
+  require_code "DistributionFactory" "$distribution_factory"
 
   actual_registry_owner="$(call_address "$policy_registry" "owner()(address)")"
   expect_address_equal "BoardroomPolicyRegistry owner" "$(field policyRegistryOwner)" "$actual_registry_owner"
@@ -145,15 +149,8 @@ if field_exists boardroomFactory || field_exists boardroomPolicyRegistry; then
   actual_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$token_grant_factory")"
   expect_equal "Boardroom policy allowance" "$(field tokenGrantPolicyAllowed)" "$actual_policy_allowed"
 
-  if field_exists distributionFactory; then
-    require_field distributionPolicyAllowed
-
-    distribution_factory="$(field distributionFactory)"
-    require_code "DistributionFactory" "$distribution_factory"
-
-    actual_distribution_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$distribution_factory")"
-    expect_equal "Distribution policy allowance" "$(field distributionPolicyAllowed)" "$actual_distribution_policy_allowed"
-  fi
+  actual_distribution_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$distribution_factory")"
+  expect_equal "Distribution policy allowance" "$(field distributionPolicyAllowed)" "$actual_distribution_policy_allowed"
 elif [[ "$REQUIRE_BOARDROOM_DEPLOYMENT" == "1" ]]; then
   fail "Boardroom deployment fields are required but missing"
 else
