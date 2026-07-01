@@ -12,6 +12,7 @@ import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
 import {IBoardroomPolicyRegistry} from "./IBoardroomPolicyRegistry.sol";
 import {LockedLiquidity} from "./LockedLiquidity.sol";
 import {LockedLiquidityFactory} from "./LockedLiquidityFactory.sol";
+import {MigratingBondingCurve} from "./MigratingBondingCurve.sol";
 import {TokenGrant} from "./TokenGrant.sol";
 import {TokenGrantFactory} from "./TokenGrantFactory.sol";
 
@@ -296,6 +297,16 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         return status == BoardroomStatus.WindingDown;
     }
 
+    function recordLockedLiquidityFromDistribution(address locker, address pool) external {
+        BoardroomStatus currentStatus = status;
+        if (currentStatus == BoardroomStatus.RedemptionsOpen) {
+            revert InvalidStatus(BoardroomStatus.Active, currentStatus);
+        }
+        if (!isIssuedDistribution[msg.sender]) revert InvalidIssuedDistribution(msg.sender);
+
+        _recordLockedLiquidityPosition(locker, pool, address(0));
+    }
+
     function _execute(Call calldata call_) internal returns (bytes memory result) {
         address policy = call_.policy;
         address target = call_.target;
@@ -332,7 +343,9 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
                 || selector == TokenGrant.withdrawExpiredTokens.selector;
         }
         if (isIssuedDistribution[target]) {
-            return selector == FixedPriceSale.close.selector || selector == FixedPriceSale.cancel.selector;
+            return selector == FixedPriceSale.close.selector || selector == FixedPriceSale.cancel.selector
+                || selector == MigratingBondingCurve.cancel.selector
+                || selector == MigratingBondingCurve.migrate.selector;
         }
         if (isLockedLiquidity[target]) {
             return selector == LockedLiquidity.claimFees.selector;
@@ -347,6 +360,11 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         }
 
         if (selector == DistributionFactory.createFixedPriceSale.selector) {
+            _recordIssuedDistribution(target, result);
+            return;
+        }
+
+        if (selector == DistributionFactory.createMigratingBondingCurve.selector) {
             _recordIssuedDistribution(target, result);
             return;
         }
@@ -390,16 +408,22 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     }
 
     function _recordLockedLiquidity(address factory, bytes memory result) internal {
+        (address locker, address pool,,,) = abi.decode(result, (address, address, uint256, uint256, uint256));
+        _recordLockedLiquidityPosition(locker, pool, factory);
+    }
+
+    function _recordLockedLiquidityPosition(address locker, address pool, address expectedFactory) internal {
         if (lockedLiquidityPositions.length >= MAX_LOCKED_LIQUIDITY_POSITIONS) {
             revert TooManyLockedLiquidityPositions();
         }
 
-        (address locker, address pool,,,) = abi.decode(result, (address, address, uint256, uint256, uint256));
         if (locker == address(0) || isLockedLiquidity[locker]) revert InvalidLockedLiquidity(locker);
 
         LockedLiquidity position = LockedLiquidity(locker);
+        address factory = position.factory();
+        if (expectedFactory != address(0) && factory != expectedFactory) revert InvalidLockedLiquidity(locker);
         if (
-            position.boardroom() != address(this) || position.factory() != factory || position.pool() != pool
+            position.boardroom() != address(this) || position.pool() != pool
                 || !LockedLiquidityFactory(factory).isLocker(locker)
         ) {
             revert InvalidLockedLiquidity(locker);

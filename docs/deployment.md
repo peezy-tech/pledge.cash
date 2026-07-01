@@ -1,7 +1,7 @@
 # Deployment
 
-This document covers the current contract deployment surface for TokenGrant, Boardroom, fixed-price distribution, AMM,
-and locked-liquidity primitives.
+This document covers the current contract deployment surface for TokenGrant, Boardroom, fixed-price distribution,
+migrating bonding curve, AMM, and locked-liquidity primitives.
 
 ## HyperEVM Testnet
 
@@ -18,7 +18,8 @@ policies, records the grant logic, and optionally sets the native grant creation
 If `WRAPPED_NATIVE_ADDRESS` is set, the deploy script also creates one `AmmRouter` and one `LockedLiquidityFactory`,
 then allows the locked-liquidity factory as a Boardroom policy. If `WRAPPED_NATIVE_ADDRESS` is not set, AMM pools can
 still be deployed through `AmmFactory`, but router native-token paths and Boardroom locked-liquidity creation are not
-published in the deployment artifact.
+published in the deployment artifact. In that mode, fixed-price distributions remain usable, but migrating bonding curve
+creation is rejected because migration requires locked-liquidity support.
 
 The checked-in HyperEVM testnet artifact may model subsystems independently while deployment history is being rebuilt.
 If an existing artifact predates a current subsystem, mark that subsystem pending instead of keeping stale partial fields.

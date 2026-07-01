@@ -11,6 +11,7 @@ import {LockedLiquidity} from "./LockedLiquidity.sol";
 interface ILockedLiquidityFactoryBoardroom {
     function shareToken() external view returns (address);
     function lockedLiquidityExitAllowed() external view returns (bool);
+    function isIssuedDistribution(address distribution) external view returns (bool);
 }
 
 contract LockedLiquidityFactory is IBoardroomCallPolicy, ReentrancyGuard {
@@ -43,6 +44,7 @@ contract LockedLiquidityFactory is IBoardroomCallPolicy, ReentrancyGuard {
     error InvalidAmount();
     error InvalidBoardroom(address boardroom);
     error MissingBoardroomShareToken(address tokenA, address tokenB, address shareToken);
+    error UnauthorizedBoardroomPayer(address boardroom, address payer);
     error LockerAlreadyExists(address boardroom, address pool);
     error TooManyBoardroomLockers(address boardroom);
     error TransferAmountMismatch(address token, uint256 expected, uint256 actual);
@@ -71,6 +73,15 @@ contract LockedLiquidityFactory is IBoardroomCallPolicy, ReentrancyGuard {
         returns (address locker, address pool, uint256 amountA, uint256 amountB, uint256 liquidity)
     {
         return _createLockedLiquidity(msg.sender, msg.sender, params);
+    }
+
+    function createLockedLiquidityForBoardroom(address boardroom, CreateParams calldata params)
+        external
+        nonReentrant
+        returns (address locker, address pool, uint256 amountA, uint256 amountB, uint256 liquidity)
+    {
+        _requireIssuedDistribution(boardroom, msg.sender);
+        return _createLockedLiquidity(boardroom, msg.sender, params);
     }
 
     function canCall(address boardroom, address, address target, uint256 value, bytes calldata data)
@@ -173,6 +184,18 @@ contract LockedLiquidityFactory is IBoardroomCallPolicy, ReentrancyGuard {
     function _boardroomShareToken(address boardroom) internal view returns (address shareToken) {
         shareToken = _tryBoardroomShareToken(boardroom);
         if (shareToken == address(0)) revert InvalidBoardroom(boardroom);
+    }
+
+    function _requireIssuedDistribution(address boardroom, address payer) internal view {
+        if (boardroom == address(0) || payer == address(0) || boardroom.code.length == 0) {
+            revert UnauthorizedBoardroomPayer(boardroom, payer);
+        }
+
+        (bool success, bytes memory data) =
+            boardroom.staticcall(abi.encodeCall(ILockedLiquidityFactoryBoardroom.isIssuedDistribution, (payer)));
+        if (!success || data.length != 32 || !abi.decode(data, (bool))) {
+            revert UnauthorizedBoardroomPayer(boardroom, payer);
+        }
     }
 
     function _tryBoardroomShareToken(address boardroom) internal view returns (address shareToken) {

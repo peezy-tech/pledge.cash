@@ -52,20 +52,21 @@ State:
 - `redeemableAssets`: bounded list of ERC20 assets redeemed pro-rata by share holders.
 - `issuedGrants`: bounded list of Boardroom-issued token grants created through `TokenGrantFactory`.
 - `issuedDistributions`: bounded list of Boardroom-created distributions created through `DistributionFactory`.
+- `lockedLiquidityPositions`: bounded list of Boardroom-owned locked AMM liquidity positions.
 
 The owner can mint shares through `Boardroom.mint`. The owner can also call `Boardroom.execute` or
 `Boardroom.executeBatch`. Each call names a policy, target, native value, and calldata. The Boardroom first checks that
 the registry allows the policy, then asks the policy whether the target call is allowed. If both checks pass, the
-Boardroom performs the external call and emits a generic execution event. When active execution creates a grant or
-fixed-price distribution, the Boardroom records the returned obligation address so redemptions can later wait for it to
-close.
+Boardroom performs the external call and emits a generic execution event. When active execution creates a grant,
+distribution, or locked-liquidity position, the Boardroom records the returned obligation address so redemptions can
+later wait for it to close.
 
 Wind-down transitions are one-way:
 
 1. `Active`: owner can mint shares, create grants, create distributions, and register redeemable assets.
 2. `WindingDown`: owner cannot mint shares or create new grants/distributions. Owner may close recorded obligations,
-   register final redeemable assets, and burn treasury-held shares. Active fixed-price sales stop accepting purchases as
-   soon as their Boardroom enters this state.
+   exit locked liquidity, register final redeemable assets, and burn treasury-held shares. Active fixed-price sales and
+   migrating bonding curves stop accepting trades as soon as their Boardroom enters this state.
 3. `RedemptionsOpen`: share holders can burn shares to redeem registered assets pro-rata. Owner execution is closed.
 
 ### BoardroomToken
@@ -98,22 +99,36 @@ and later create free USDC payroll grants through the same policy-gated batch ex
 8. Buyers pay the configured ERC20 payment token directly to the Boardroom and receive shares from sale escrow.
 9. The Boardroom can close or cancel its own sale through the same policy-gated execution surface.
 
+## Migrating Bonding Curve Flow
+
+1. Owner mints Boardroom shares to the Boardroom treasury.
+2. Owner builds a `Boardroom.executeBatch` that approves `DistributionFactory` and calls
+   `createMigratingBondingCurve`.
+3. Buyers buy shares from the curve while the Boardroom is active. Sellers can sell curve-issued shares back while the
+   Boardroom is active.
+4. Once the quote reserve reaches the graduation target or sellable inventory is gone, the owner can migrate the curve
+   through `Boardroom.execute`.
+5. Migration creates Boardroom-owned locked AMM liquidity through `LockedLiquidityFactory` and records the locker on the
+   Boardroom. The Boardroom-controlled call supplies the AMM slippage bounds.
+6. Any quote or share remainder returns to the Boardroom treasury.
+
 ## Wind-Down And Redemption Flow
 
 1. Owner registers ERC20 assets that should be redeemable.
 2. Owner calls `startWindDown`, moving the Boardroom from `Active` to `WindingDown`.
-3. Owner closes or cancels every recorded distribution and halts or expires every recorded grant.
-4. Owner calls `openRedemptions`.
-5. `openRedemptions` verifies no recorded grants or distributions are still open, burns treasury-held shares, and moves
-   the Boardroom to `RedemptionsOpen`.
-6. A share holder calls `redeem(shares, recipient, minAmountsOut)`.
-7. The Boardroom burns any shares currently held by the Boardroom, then calculates each asset amount from current
+3. Owner closes, cancels, or migrates every recorded distribution and halts or expires every recorded grant.
+4. Owner exits every recorded locked-liquidity position.
+5. Owner calls `openRedemptions`.
+6. `openRedemptions` verifies no recorded grants, distributions, or locked-liquidity positions are still open, burns
+   treasury-held shares, and moves the Boardroom to `RedemptionsOpen`.
+7. A share holder calls `redeem(shares, recipient, minAmountsOut)`.
+8. The Boardroom burns any shares currently held by the Boardroom, then calculates each asset amount from current
    Boardroom balances and total share supply.
-8. The Boardroom burns the holder's shares and transfers each registered asset to the recipient with exact Boardroom and
+9. The Boardroom burns the holder's shares and transfers each registered asset to the recipient with exact Boardroom and
    recipient balance-delta checks.
 
-Redemption loops are bounded by `MAX_REDEEMABLE_ASSETS`. Wind-down gates are bounded by `MAX_ISSUED_GRANTS` and
-`MAX_ISSUED_DISTRIBUTIONS`.
+Redemption loops are bounded by `MAX_REDEEMABLE_ASSETS`. Wind-down gates are bounded by `MAX_ISSUED_GRANTS`,
+`MAX_ISSUED_DISTRIBUTIONS`, and `MAX_LOCKED_LIQUIDITY_POSITIONS`.
 
 ## Invariants
 
@@ -129,10 +144,14 @@ Redemption loops are bounded by `MAX_REDEEMABLE_ASSETS`. Wind-down gates are bou
 - Boardroom-issued grants escrow tokens from the Boardroom before holders can settle.
 - Native grant creation fees can be forwarded, but the Boardroom should not retain them.
 - Boardroom-created fixed-price sales can only sell the Boardroom's own share token.
+- Boardroom-created migrating curves can only sell the Boardroom's own share token.
 - Fixed-price sale payments are transferred directly to the Boardroom treasury.
 - Fixed-price sale purchases stop once the creating Boardroom starts wind-down.
-- Only the Boardroom that created a sale can close or cancel it through the distribution policy.
+- Migrating curves stop buy and sell trades once the creating Boardroom starts wind-down.
+- Curve migration can only record locked liquidity for a Boardroom that issued that curve.
+- Only the Boardroom that created a distribution can close, cancel, or migrate it through the distribution policy.
 - Redemptions cannot open while a recorded grant or distribution is still open.
+- Redemptions cannot open while a recorded locked-liquidity position still holds LP principal.
 - Treasury-held shares are burned before redemptions open.
 - Shares sent to the Boardroom after redemptions open are burned before the next redemption is priced.
 - Share redemption burns shares before transferring redeemable assets.
