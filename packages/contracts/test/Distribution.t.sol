@@ -209,6 +209,13 @@ contract DistributionTest is Test {
         vm.prank(owner);
         boardroom.startWindDown();
 
+        vm.prank(buyer);
+        paymentToken.approve(address(sale), BUY_PAYMENT);
+
+        vm.prank(buyer);
+        vm.expectRevert(FixedPriceSale.SaleNotOpen.selector);
+        sale.buy(BUY_SHARES, buyer, BUY_PAYMENT, block.timestamp);
+
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(Boardroom.IssuedDistributionStillOpen.selector, address(sale)));
         boardroom.openRedemptions();

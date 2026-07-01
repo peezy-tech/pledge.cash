@@ -53,6 +53,36 @@ contract BoardroomCurrency {
     }
 }
 
+contract SenderFeeRedeemableCurrency {
+    string public name;
+    string public symbol;
+    uint8 public immutable decimals;
+    uint256 public totalSupply;
+    uint256 public immutable fee;
+
+    mapping(address => uint256) public balanceOf;
+
+    constructor(string memory name_, string memory symbol_, uint8 decimals_, uint256 fee_) {
+        name = name_;
+        symbol = symbol_;
+        decimals = decimals_;
+        fee = fee_;
+    }
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+        totalSupply += amount;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        uint256 debit = amount + fee;
+        balanceOf[msg.sender] -= debit;
+        balanceOf[to] += amount;
+        totalSupply -= fee;
+        return true;
+    }
+}
+
 contract BoardroomTestAllowAllPolicy is IBoardroomCallPolicy {
     function canCall(address, address, address, uint256, bytes calldata) external pure returns (bool) {
         return true;
@@ -508,6 +538,33 @@ contract BoardroomTest is Test {
         assertEq(redeemable.balanceOf(address(boardroom)), 0);
         assertEq(shareToken.balanceOf(address(boardroom)), 0);
         assertEq(shareToken.totalSupply(), 0);
+    }
+
+    function testBoardroomRedeemRejectsSenderFeeRedeemableAsset() public {
+        (Boardroom boardroom,) = _createBoardroom("wind-down-sender-fee-asset");
+        SenderFeeRedeemableCurrency redeemable = new SenderFeeRedeemableCurrency("Redeemable", "RDM", 6, 1);
+        uint256 holderShares = 50 ether;
+        uint256 strangerShares = 50 ether;
+        uint256 redeemableAmount = 100_000000;
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, holderShares);
+        boardroom.mint(stranger, strangerShares);
+        boardroom.registerRedeemableAsset(address(redeemable));
+        boardroom.startWindDown();
+        boardroom.openRedemptions();
+        vm.stopPrank();
+
+        redeemable.mint(address(boardroom), redeemableAmount);
+
+        uint256[] memory minimums = new uint256[](1);
+        vm.prank(holder);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Boardroom.UnexpectedRedeemableAssetBalanceChange.selector, address(redeemable), 50_000000, 50_000001
+            )
+        );
+        boardroom.redeem(holderShares, holder, minimums);
     }
 
     function testBoardroomRejectsMintAndNewGrantAfterWindDown() public {

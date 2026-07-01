@@ -64,7 +64,8 @@ Wind-down transitions are one-way:
 
 1. `Active`: owner can mint shares, create grants, create distributions, and register redeemable assets.
 2. `WindingDown`: owner cannot mint shares or create new grants/distributions. Owner may close recorded obligations,
-   register final redeemable assets, and burn treasury-held shares.
+   register final redeemable assets, and burn treasury-held shares. Active fixed-price sales stop accepting purchases as
+   soon as their Boardroom enters this state.
 3. `RedemptionsOpen`: share holders can burn shares to redeem registered assets pro-rata. Owner execution is closed.
 
 ### BoardroomToken
@@ -108,8 +109,8 @@ and later create free USDC payroll grants through the same policy-gated batch ex
 6. A share holder calls `redeem(shares, recipient, minAmountsOut)`.
 7. The Boardroom burns any shares currently held by the Boardroom, then calculates each asset amount from current
    Boardroom balances and total share supply.
-8. The Boardroom burns the holder's shares and transfers each registered asset to the recipient with exact
-   recipient-balance checks.
+8. The Boardroom burns the holder's shares and transfers each registered asset to the recipient with exact Boardroom and
+   recipient balance-delta checks.
 
 Redemption loops are bounded by `MAX_REDEEMABLE_ASSETS`. Wind-down gates are bounded by `MAX_ISSUED_GRANTS` and
 `MAX_ISSUED_DISTRIBUTIONS`.
@@ -129,12 +130,13 @@ Redemption loops are bounded by `MAX_REDEEMABLE_ASSETS`. Wind-down gates are bou
 - Native grant creation fees can be forwarded, but the Boardroom should not retain them.
 - Boardroom-created fixed-price sales can only sell the Boardroom's own share token.
 - Fixed-price sale payments are transferred directly to the Boardroom treasury.
+- Fixed-price sale purchases stop once the creating Boardroom starts wind-down.
 - Only the Boardroom that created a sale can close or cancel it through the distribution policy.
 - Redemptions cannot open while a recorded grant or distribution is still open.
 - Treasury-held shares are burned before redemptions open.
 - Shares sent to the Boardroom after redemptions open are burned before the next redemption is priced.
 - Share redemption burns shares before transferring redeemable assets.
-- Fee-on-transfer redeemable assets fail safely through exact recipient balance-delta checks.
+- Fee-on-transfer redeemable assets fail safely through exact Boardroom and recipient balance-delta checks.
 
 ## Deterministic Proof
 

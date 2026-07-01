@@ -363,16 +363,28 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     }
 
     function _checkedRedeemableAssetTransfer(address asset, address recipient, uint256 expectedAmount) internal {
-        uint256 balanceBefore = SafeTransferLib.balanceOf(asset, recipient);
+        uint256 boardroomBalanceBefore = SafeTransferLib.balanceOf(asset, address(this));
+        uint256 recipientBalanceBefore = SafeTransferLib.balanceOf(asset, recipient);
         asset.safeTransfer(recipient, expectedAmount);
-        uint256 balanceAfter = SafeTransferLib.balanceOf(asset, recipient);
-        if (balanceAfter < balanceBefore) {
+
+        uint256 boardroomBalanceAfter = SafeTransferLib.balanceOf(asset, address(this));
+        if (boardroomBalanceAfter > boardroomBalanceBefore) {
             revert UnexpectedRedeemableAssetBalanceChange(asset, expectedAmount, 0);
         }
 
-        uint256 actualAmount = balanceAfter - balanceBefore;
-        if (actualAmount != expectedAmount) {
-            revert UnexpectedRedeemableAssetBalanceChange(asset, expectedAmount, actualAmount);
+        uint256 boardroomSpent = boardroomBalanceBefore - boardroomBalanceAfter;
+        if (boardroomSpent != expectedAmount) {
+            revert UnexpectedRedeemableAssetBalanceChange(asset, expectedAmount, boardroomSpent);
+        }
+
+        uint256 recipientBalanceAfter = SafeTransferLib.balanceOf(asset, recipient);
+        if (recipientBalanceAfter < recipientBalanceBefore) {
+            revert UnexpectedRedeemableAssetBalanceChange(asset, expectedAmount, 0);
+        }
+
+        uint256 recipientReceived = recipientBalanceAfter - recipientBalanceBefore;
+        if (recipientReceived != expectedAmount) {
+            revert UnexpectedRedeemableAssetBalanceChange(asset, expectedAmount, recipientReceived);
         }
     }
 
