@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -125,6 +126,13 @@ function numberLiteral(raw: string, key: string): string | undefined {
   return token;
 }
 
+function isIgnoredDeploymentFile(file: string): boolean {
+  const result = spawnSync("git", ["check-ignore", "--quiet", "--", join("packages/contracts/deployments", file)], {
+    cwd: repoRoot,
+  });
+  return result.status === 0;
+}
+
 function serializeDeployment(raw: string): string | undefined {
   const parsed = JSON.parse(raw) as Record<string, unknown>;
   const chainId = numberLiteral(raw, "chainId");
@@ -211,7 +219,8 @@ async function deploymentEntries(): Promise<string[]> {
   const entries: string[] = [];
 
   for (const file of files.sort()) {
-    if (!file.endsWith(".json")) continue;
+    if (!/^\d+\.json$/.test(file)) continue;
+    if (isIgnoredDeploymentFile(file)) continue;
     const raw = await readFile(join(deploymentDir, file), "utf8");
     const entry = serializeDeployment(raw);
     if (entry) entries.push(entry);
