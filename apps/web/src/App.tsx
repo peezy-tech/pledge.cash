@@ -22,6 +22,11 @@ import {
   buildDirectGrantCreationTransaction,
   buildErc20Approval,
   buildGrantIssuerBoardroomAction,
+  discoverBoardroomDistributions,
+  discoverBoardroomLockedLiquidity,
+  discoverBoardrooms,
+  discoverGrantHistory,
+  discoverPools,
   getPledgeCashDeployment,
   isZeroAddress,
   predictBoardroomAddress as sdkPredictBoardroomAddress,
@@ -30,8 +35,6 @@ import {
   predictFixedPriceSaleAddress as sdkPredictFixedPriceSaleAddress,
   predictLockedLiquidityAddress as sdkPredictLockedLiquidityAddress,
   predictMigratingBondingCurveAddress as sdkPredictMigratingBondingCurveAddress,
-  queryGrantsHeldByAddress,
-  queryGrantsIssuedByAddress,
   readBoardroomState,
   readFactoryState,
   readFixedPriceSaleState,
@@ -44,6 +47,12 @@ import {
   type BoardroomLockedLiquidityTerms,
   type BoardroomMigratingBondingCurveTerms,
   type BoardroomShareGrantTerms,
+  type DiscoveredBoardroom,
+  type DiscoveredDistribution,
+  type DiscoveredGrant,
+  type DiscoveredLockedLiquidity,
+  type DiscoveredPool,
+  type DiscoveryResult,
   type FixedPriceSaleState,
   type GrantCreationTerms,
   type LockedLiquidityState,
@@ -55,13 +64,21 @@ import { createWalletClient, custom, encodeFunctionData, getAddress, isAddress, 
 import { TabButton } from "./components/shell";
 import { BoardroomPanel } from "./features/boardrooms/boardroom-panel";
 import { ArtifactPanel, DeploymentPanel } from "./features/deployment/deployment-panel";
+import { DiscoveryPanel } from "./features/discovery/discovery-panel";
 import { DirectGrantPanel } from "./features/grants/direct-grant-panel";
 import { GrantInspector } from "./features/grants/grant-inspector";
-import { MyGrantsPanel } from "./features/grants/my-grants-panel";
 import { LogPanel } from "./features/logs/log-panel";
 import { AppHeader } from "./features/wallet/app-header";
 import { WalletPanel } from "./features/wallet/wallet-panel";
 import { ACTIVE_CHAIN_ID, ACTIVE_CHAIN_NAME, chain, EXPLORER_URL, publicClient, WALLET_RPC_URL } from "./lib/contracts";
+import {
+  addressMapKey,
+  clearDiscoverySnapshot,
+  discoveryStorageKey,
+  emptyDiscoverySnapshot,
+  loadDiscoverySnapshot,
+  saveDiscoverySnapshot,
+} from "./lib/discovery";
 import {
   defaultBoardroomGrantForm,
   defaultCurveMigrationForm,
@@ -86,6 +103,8 @@ import type {
   BoardroomGrantForm,
   BoardroomSnapshot,
   CurveMigrationForm,
+  DiscoveryForm,
+  DiscoverySnapshot,
   FactorySnapshot,
   FixedPriceSaleForm,
   GrantForm,
@@ -94,7 +113,6 @@ import type {
   LockedLiquidityForm,
   LogEntry,
   MigratingCurveForm,
-  MyGrantsSnapshot,
   Tab,
   WalletState,
   WindDownForm,
@@ -157,6 +175,58 @@ function parseMinAmountsOut(value: string, expectedLength: number): bigint[] {
     if (!/^\d+$/.test(part)) throw new Error("Minimum amounts must be unsigned integers.");
     return BigInt(part);
   });
+}
+
+function defaultDiscoveryForm(): DiscoveryForm {
+  return {
+    fromBlock: "0",
+    toBlock: "",
+    chunkSize: "5000",
+    includeClosedGrants: false,
+  };
+}
+
+function parseDiscoveryToBlock(value: string): bigint | "latest" {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.toLowerCase() === "latest") return "latest";
+  if (!/^\d+$/.test(trimmed)) throw new Error("To block must be an unsigned integer or latest.");
+  return BigInt(trimmed);
+}
+
+function mergeAddressMap<T>(
+  current: Record<string, T>,
+  items: readonly T[],
+  key: (item: T) => Address,
+): Record<string, T> {
+  const next = { ...current };
+  for (const item of items) {
+    next[addressMapKey(key(item))] = item;
+  }
+  return next;
+}
+
+function discoveryItems<T>(items: Record<string, T>): T[] {
+  return Object.values(items);
+}
+
+function combineDiscoveryLastScanned(results: readonly DiscoveryResult<unknown>[]): bigint | undefined {
+  const scanned = results.map((result) => result.lastScannedBlock).filter((block): block is bigint => block !== undefined);
+  if (scanned.length === 0) return undefined;
+  return scanned.reduce((minimum, block) => (block < minimum ? block : minimum));
+}
+
+function discoveryErrors(results: readonly DiscoveryResult<unknown>[]): string[] {
+  return results.flatMap((result) => result.errors.map((error) => error.message));
+}
+
+function emptyDiscoveryResult<T>(items: T[] = []): DiscoveryResult<T> {
+  return {
+    items,
+    fromBlock: 0n,
+    toBlock: undefined,
+    complete: true,
+    errors: [],
+  };
 }
 
 export function parseDeployment(raw: string): PledgeCashDeployment {
@@ -258,17 +328,13 @@ export function App(): React.JSX.Element {
   const [predictedLockedLiquidity, setPredictedLockedLiquidity] = useState<Address>();
   const [lockedLiquidityExitForm, setLockedLiquidityExitForm] = useState<LockedLiquidityExitForm>(() => defaultLockedLiquidityExitForm());
   const [windDownForm, setWindDownForm] = useState<WindDownForm>(() => defaultWindDownForm());
-  const [myGrantsFromBlock, setMyGrantsFromBlock] = useState("0");
-  const [includeClosedGrants, setIncludeClosedGrants] = useState(false);
-  const [myGrants, setMyGrants] = useState<MyGrantsSnapshot>(() => ({
-    held: [],
-    issued: [],
-    includeClosed: false,
-  }));
+  const [discoveryForm, setDiscoveryForm] = useState<DiscoveryForm>(() => defaultDiscoveryForm());
+  const [discovery, setDiscovery] = useState<DiscoverySnapshot>(() => emptyDiscoverySnapshot());
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [pendingAction, setPendingAction] = useState<string>();
 
   const creationFee = factorySnapshot.creationFee ?? deployment?.creationFee ?? 0n;
+  const discoveryKey = discoveryStorageKey(ACTIVE_CHAIN_ID, wallet.account);
 
   useEffect(() => {
     let cancelled = false;
@@ -293,6 +359,10 @@ export function App(): React.JSX.Element {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    setDiscovery(loadDiscoverySnapshot(discoveryKey));
+  }, [discoveryKey]);
 
   const pushLog = useCallback((message: string, level: LogEntry["level"] = "info", txHash?: Hex) => {
     const entry = {
@@ -1177,34 +1247,104 @@ export function App(): React.JSX.Element {
     await refreshBoardroom(boardroom.address);
   };
 
-  const loadMyGrants = async (): Promise<void> => {
+  const scanDiscoveryFrom = async (fromBlock: bigint): Promise<void> => {
     if (!wallet.account) throw new Error("Connect wallet first.");
-    const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
-    const fromBlock = uintInput(myGrantsFromBlock, "From block");
+    if (!deployment) throw new Error("Load a deployment artifact first.");
 
-    const [held, issued] = await Promise.all([
-      queryGrantsHeldByAddress(publicClient, {
-        factory,
-        holder: wallet.account,
-        fromBlock,
-        includeClosed: includeClosedGrants,
-      }),
-      queryGrantsIssuedByAddress(publicClient, {
-        factory,
-        issuer: wallet.account,
-        fromBlock,
-        includeClosed: includeClosedGrants,
-      }),
+    const toBlock = parseDiscoveryToBlock(discoveryForm.toBlock);
+    const chunkSize = uintInput(discoveryForm.chunkSize, "Chunk size");
+    const range = { fromBlock, toBlock, chunkSize };
+    const knownGrants = discoveryItems(discovery.grantsByAddress);
+
+    const [boardroomResult, grantResult] = await Promise.all([
+      deployment.boardroomFactory
+        ? discoverBoardrooms(publicClient, {
+            ...range,
+            factory: deployment.boardroomFactory,
+            owner: wallet.account,
+          })
+        : emptyDiscoveryResult<DiscoveredBoardroom>(),
+      deployment.tokenGrantFactory
+        ? discoverGrantHistory(publicClient, {
+            ...range,
+            factory: deployment.tokenGrantFactory,
+            knownGrants,
+          })
+        : emptyDiscoveryResult<DiscoveredGrant>(knownGrants),
     ]);
 
-    setMyGrants({
-      held,
-      issued,
+    const boardroomsByAddress = mergeAddressMap(discovery.boardroomsByAddress, boardroomResult.items, (item) => item.boardroom);
+    const discoveredBoardrooms = discoveryItems(boardroomsByAddress);
+    const boardroomKeys = new Set(discoveredBoardrooms.map((boardroom) => addressMapKey(boardroom.boardroom)));
+    const shareTokenKeys = new Set(discoveredBoardrooms.map((boardroom) => addressMapKey(boardroom.shareToken)));
+
+    const [distributionResult, lockerResult, poolResult] = await Promise.all([
+      deployment.distributionFactory
+        ? discoverBoardroomDistributions(publicClient, { ...range, factory: deployment.distributionFactory })
+        : emptyDiscoveryResult<DiscoveredDistribution>(),
+      deployment.lockedLiquidityFactory
+        ? discoverBoardroomLockedLiquidity(publicClient, { ...range, factory: deployment.lockedLiquidityFactory })
+        : emptyDiscoveryResult<DiscoveredLockedLiquidity>(),
+      deployment.ammFactory
+        ? discoverPools(publicClient, { ...range, factory: deployment.ammFactory })
+        : emptyDiscoveryResult<DiscoveredPool>(),
+    ]);
+
+    const relevantDistributions = distributionResult.items.filter((distribution) =>
+      boardroomKeys.has(addressMapKey(distribution.boardroom)),
+    );
+    const relevantLockers = lockerResult.items.filter((locker) => boardroomKeys.has(addressMapKey(locker.boardroom)));
+    const lockerPoolKeys = new Set(relevantLockers.map((locker) => addressMapKey(locker.pool)));
+    const relevantPools = poolResult.items.filter(
+      (pool) =>
+        shareTokenKeys.has(addressMapKey(pool.token0))
+        || shareTokenKeys.has(addressMapKey(pool.token1))
+        || lockerPoolKeys.has(addressMapKey(pool.pool)),
+    );
+
+    const results = [boardroomResult, grantResult, distributionResult, lockerResult, poolResult] satisfies DiscoveryResult<unknown>[];
+    const next: DiscoverySnapshot = {
+      chainId: ACTIVE_CHAIN_ID,
       loadedFor: wallet.account,
-      fromBlock,
-      includeClosed: includeClosedGrants,
-    });
-    pushLog(`Loaded ${held.length} held and ${issued.length} issued grants for ${shortAddress(wallet.account)}.`, "success");
+      fromBlock: discovery.fromBlock !== undefined && discovery.fromBlock < fromBlock ? discovery.fromBlock : fromBlock,
+      toBlock,
+      chunkSize,
+      complete: results.every((result) => result.complete),
+      errors: discoveryErrors(results),
+      boardroomsByAddress,
+      grantsByAddress: mergeAddressMap(discovery.grantsByAddress, grantResult.items, (item) => item.grantAddress),
+      distributionsByAddress: mergeAddressMap(discovery.distributionsByAddress, relevantDistributions, (item) => item.distribution),
+      lockersByAddress: mergeAddressMap(discovery.lockersByAddress, relevantLockers, (item) => item.locker),
+      poolsByAddress: mergeAddressMap(discovery.poolsByAddress, relevantPools, (item) => item.pool),
+    };
+    const lastScannedBlock = combineDiscoveryLastScanned(results);
+    if (lastScannedBlock !== undefined) {
+      next.lastScannedBlock = lastScannedBlock;
+    }
+
+    setDiscovery(next);
+    saveDiscoverySnapshot(discoveryKey, next);
+    pushLog(
+      `Discovery scanned ${shortAddress(wallet.account)}: ${boardroomResult.items.length} boardrooms, ${grantResult.items.length} grants, ${relevantDistributions.length} distributions, ${relevantLockers.length} lockers.`,
+      next.complete ? "success" : "error",
+    );
+  };
+
+  const scanDiscovery = async (): Promise<void> => {
+    await scanDiscoveryFrom(uintInput(discoveryForm.fromBlock, "From block"));
+  };
+
+  const resumeDiscovery = async (): Promise<void> => {
+    if (discovery.lastScannedBlock === undefined) throw new Error("No cached discovery range to resume.");
+    const nextFromBlock = discovery.lastScannedBlock + 1n;
+    setDiscoveryForm((current) => ({ ...current, fromBlock: nextFromBlock.toString() }));
+    await scanDiscoveryFrom(nextFromBlock);
+  };
+
+  const clearDiscovery = (): void => {
+    clearDiscoverySnapshot(discoveryKey);
+    setDiscovery(emptyDiscoverySnapshot());
+    pushLog("Cleared discovery cache.", "success");
   };
 
   const inspectDiscoveredGrant = useCallback(
@@ -1213,6 +1353,36 @@ export function App(): React.JSX.Element {
       setActiveTab("grant");
     },
     [updateGrantAddress],
+  );
+
+  const useDiscoveredBoardroom = useCallback(
+    (boardroom: Address): void => {
+      updateBoardroomAddress(boardroom);
+      setActiveTab("boardroom");
+    },
+    [updateBoardroomAddress],
+  );
+
+  const useDiscoveredDistribution = useCallback(
+    (distribution: DiscoveredDistribution): void => {
+      updateBoardroomAddress(distribution.boardroom);
+      if (distribution.kind === "migrating-bonding-curve") {
+        updateMigratingCurveAddress(distribution.distribution);
+      } else {
+        updateFixedPriceSaleAddress(distribution.distribution);
+      }
+      setActiveTab("boardroom");
+    },
+    [updateBoardroomAddress, updateFixedPriceSaleAddress, updateMigratingCurveAddress],
+  );
+
+  const useDiscoveredLockedLiquidity = useCallback(
+    (locker: DiscoveredLockedLiquidity): void => {
+      updateBoardroomAddress(locker.boardroom);
+      updateLockedLiquidityAddress(locker.locker);
+      setActiveTab("boardroom");
+    },
+    [updateBoardroomAddress, updateLockedLiquidityAddress],
   );
 
   return (
@@ -1246,7 +1416,7 @@ export function App(): React.JSX.Element {
               Boardroom
             </TabButton>
             <TabButton active={activeTab === "my-grants"} onClick={() => setActiveTab("my-grants")}>
-              My Grants
+              Discovery
             </TabButton>
           </div>
 
@@ -1361,17 +1531,20 @@ export function App(): React.JSX.Element {
           ) : null}
 
           {activeTab === "my-grants" ? (
-            <MyGrantsPanel
+            <DiscoveryPanel
               account={wallet.account}
               deployment={deployment}
-              fromBlock={myGrantsFromBlock}
-              includeClosed={includeClosedGrants}
-              myGrants={myGrants}
+              discovery={discovery}
+              discoveryForm={discoveryForm}
               pendingAction={pendingAction}
-              setFromBlock={setMyGrantsFromBlock}
-              setIncludeClosed={setIncludeClosedGrants}
+              setDiscoveryForm={setDiscoveryForm}
+              clearDiscovery={clearDiscovery}
               inspectGrant={inspectDiscoveredGrant}
-              loadMyGrants={loadMyGrants}
+              scanDiscovery={scanDiscovery}
+              resumeDiscovery={resumeDiscovery}
+              useBoardroom={useDiscoveredBoardroom}
+              useDistribution={useDiscoveredDistribution}
+              useLockedLiquidity={useDiscoveredLockedLiquidity}
               runAction={runAction}
             />
           ) : null}

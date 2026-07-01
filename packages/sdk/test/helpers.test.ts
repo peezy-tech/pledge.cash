@@ -24,6 +24,11 @@ import {
   buildDirectGrantCreationTransaction,
   buildErc20Approval,
   decodeKnownPledgeCashError,
+  discoverBoardroomDistributions,
+  discoverBoardroomLockedLiquidity,
+  discoverBoardrooms,
+  discoverGrantHistory,
+  discoverPools,
   distributionFactoryAbi,
   erc20Abi,
   fixedPriceSaleAbi,
@@ -65,6 +70,7 @@ const curve = "0x0000000000000000000000000000000000000c0e" as Address;
 const ammFactory = "0x0000000000000000000000000000000000000aee" as Address;
 const lockedLiquidityFactory = "0x00000000000000000000000000000000000010cc" as Address;
 const locker = "0x00000000000000000000000000000000000010cd" as Address;
+const pool = "0x0000000000000000000000000000000000000a00" as Address;
 const salt = "0x1111111111111111111111111111111111111111111111111111111111111111" as Hex;
 
 const terms = {
@@ -578,6 +584,98 @@ describe("SDK action and query helpers", () => {
     expect(heldWithClosed.find((grant) => grant.tokenId === 1n)?.lastHolder).toBe(holder);
   });
 
+  test("discovers boardrooms, distributions, lockers, and pools from logs", async () => {
+    const client = mockLogClient({
+      BoardroomCreated: [
+        boardroomCreatedLog(20n, 0, boardroom, issuer),
+        boardroomCreatedLog(20n, 0, boardroom, issuer),
+        boardroomCreatedLog(21n, 0, other, holder),
+      ],
+      DistributionCreated: [
+        distributionCreatedLog(22n, 0, sale, boardroom, 0n),
+        distributionCreatedLog(23n, 0, curve, boardroom, 1n),
+        distributionCreatedLog(24n, 0, other, holder, 1n),
+      ],
+      LockedLiquidityCreated: [
+        lockedLiquidityCreatedLog(25n, 0, locker, boardroom),
+        lockedLiquidityCreatedLog(26n, 0, other, holder),
+      ],
+      PoolCreated: [
+        poolCreatedLog(19n, 0, pool, shareToken, paymentToken),
+        poolCreatedLog(27n, 0, other, grantToken, paymentToken),
+      ],
+    });
+
+    const boardrooms = await discoverBoardrooms(client, { factory, owner: issuer, fromBlock: 19n });
+    expect(boardrooms.complete).toBe(true);
+    expect(boardrooms.items).toHaveLength(1);
+    expect(boardrooms.items[0]).toMatchObject({ boardroom, owner: issuer, shareToken, name: "Pledge Common" });
+
+    const distributions = await discoverBoardroomDistributions(client, { factory: distributionFactory, boardroom });
+    expect(distributions.items.map((item) => item.kind)).toEqual(["migrating-bonding-curve", "fixed-price-sale"]);
+    expect(distributions.items.map((item) => item.distribution)).toEqual([curve, sale]);
+
+    const lockers = await discoverBoardroomLockedLiquidity(client, { factory: lockedLiquidityFactory, boardroom });
+    expect(lockers.items).toHaveLength(1);
+    expect(lockers.items[0]).toMatchObject({ locker, boardroom, pool });
+
+    const pools = await discoverPools(client, { factory: ammFactory, token: shareToken });
+    expect(pools.items).toHaveLength(1);
+    expect(pools.items[0]).toMatchObject({ pool, token0: shareToken, token1: paymentToken });
+  });
+
+  test("returns partial discovery results when a chunked log range fails", async () => {
+    const calls: [bigint, bigint | "latest" | undefined][] = [];
+    const client: PledgeCashLogClient = {
+      async getBlockNumber() {
+        return 20n;
+      },
+      async getLogs(parameters) {
+        calls.push([parameters.fromBlock as bigint, parameters.toBlock as bigint]);
+        if (parameters.fromBlock === 15n) throw new Error("range too wide");
+        return [boardroomCreatedLog(parameters.fromBlock as bigint, 0, boardroom, issuer)] as never;
+      },
+    };
+
+    const result = await discoverBoardrooms(client, {
+      factory,
+      owner: issuer,
+      fromBlock: 10n,
+      toBlock: "latest",
+      chunkSize: 5n,
+    });
+
+    expect(calls).toEqual([[10n, 14n], [15n, 19n]]);
+    expect(result.complete).toBe(false);
+    expect(result.lastScannedBlock).toBe(14n);
+    expect(result.errors[0]?.message).toContain("Try a smaller chunk size");
+    expect(result.items).toHaveLength(1);
+  });
+
+  test("applies transfer and close logs to known grants during resumed discovery", async () => {
+    const knownGrant = (await queryGrantsIssuedByAddress(
+      mockLogClient({ TokenGrantCreated: [createdLog(10n, 0, sale, 7n, issuer, holder)] }),
+      { factory, issuer, fromBlock: 10n, includeClosed: true },
+    ))[0];
+
+    const resumed = await discoverGrantHistory(
+      mockLogClient({
+        Transfer: [transferLog(12n, 0, holder, other, 7n)],
+        GrantClosed: [closedLog(13n, 0, sale, 7n, other)],
+      }),
+      { factory, fromBlock: 11n, knownGrants: [knownGrant] },
+    );
+
+    expect(resumed.items).toHaveLength(1);
+    expect(resumed.items[0]).toMatchObject({
+      tokenId: 7n,
+      currentHolder: "0x0000000000000000000000000000000000000000",
+      lastHolder: other,
+      closed: true,
+      updatedBlock: 13n,
+    });
+  });
+
   test("decodes known custom errors from shipped ABIs", () => {
     const data = encodeErrorResult({
       abi: tokenGrantFactoryAbi,
@@ -640,7 +738,7 @@ function mockLogClient(logs: Record<string, readonly unknown[]>): PledgeCashLogC
   return {
     async getLogs(parameters) {
       const eventName = (parameters.event as { name?: string }).name;
-      return (eventName ? logs[eventName] : []) as never;
+      return (eventName ? logs[eventName] ?? [] : []) as never;
     },
   };
 }
@@ -689,5 +787,83 @@ function closedLog(blockNumber: bigint, logIndex: number, grantAddress: Address,
     blockNumber,
     logIndex,
     args: { grantAddress, tokenId, lastHolder },
+  };
+}
+
+function boardroomCreatedLog(blockNumber: bigint, logIndex: number, discoveredBoardroom: Address, owner: Address) {
+  return {
+    blockNumber,
+    logIndex,
+    transactionHash: `0x${blockNumber.toString(16).padStart(64, "0")}` as Hex,
+    args: {
+      boardroom: discoveredBoardroom,
+      owner,
+      policyRegistry: factory,
+      shareToken,
+      name: "Pledge Common",
+      symbol: "PLDG",
+      salt,
+    },
+  };
+}
+
+function distributionCreatedLog(
+  blockNumber: bigint,
+  logIndex: number,
+  distribution: Address,
+  distributionBoardroom: Address,
+  kind: bigint,
+) {
+  return {
+    blockNumber,
+    logIndex,
+    transactionHash: `0x${(blockNumber + 100n).toString(16).padStart(64, "0")}` as Hex,
+    args: {
+      distribution,
+      boardroom: distributionBoardroom,
+      kind,
+      shareToken,
+      paymentToken,
+      shareAmount: 1000n,
+      salt,
+    },
+  };
+}
+
+function lockedLiquidityCreatedLog(
+  blockNumber: bigint,
+  logIndex: number,
+  discoveredLocker: Address,
+  discoveredBoardroom: Address,
+) {
+  return {
+    blockNumber,
+    logIndex,
+    transactionHash: `0x${(blockNumber + 200n).toString(16).padStart(64, "0")}` as Hex,
+    args: {
+      locker: discoveredLocker,
+      boardroom: discoveredBoardroom,
+      pool,
+      tokenA: shareToken,
+      tokenB: paymentToken,
+      amountA: 1000n,
+      amountB: 2000n,
+      liquidity: 3000n,
+      salt,
+    },
+  };
+}
+
+function poolCreatedLog(blockNumber: bigint, logIndex: number, discoveredPool: Address, token0: Address, token1: Address) {
+  return {
+    blockNumber,
+    logIndex,
+    transactionHash: `0x${(blockNumber + 300n).toString(16).padStart(64, "0")}` as Hex,
+    args: {
+      pool: discoveredPool,
+      token0,
+      token1,
+      poolCount: 1n,
+    },
   };
 }

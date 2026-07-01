@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type { Address, DiscoveredGrant } from "@pledge.cash/sdk";
+import type { Address, DiscoveredBoardroom, DiscoveredDistribution, DiscoveredGrant, DiscoveredLockedLiquidity, DiscoveredPool } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
 import { App, parseDeployment } from "../src/App";
 import { BoardroomPanel } from "../src/features/boardrooms/boardroom-panel";
+import { DiscoveryPanel } from "../src/features/discovery/discovery-panel";
 import { MyGrantsPanel } from "../src/features/grants/my-grants-panel";
 import {
   defaultBoardroomGrantForm,
@@ -13,7 +14,7 @@ import {
   defaultMigratingCurveForm,
   defaultWindDownForm,
 } from "../src/lib/forms";
-import type { BoardroomSnapshot } from "../src/lib/types";
+import type { BoardroomSnapshot, DiscoverySnapshot } from "../src/lib/types";
 
 const oldGrant: DiscoveredGrant = {
   grantAddress: "0x1000000000000000000000000000000000000000",
@@ -110,6 +111,72 @@ const boardroomSnapshot: BoardroomSnapshot = {
   ],
 };
 
+const discoveredBoardroom: DiscoveredBoardroom = {
+  boardroom,
+  owner: oldGrant.issuer,
+  policyRegistry,
+  shareToken,
+  name: "Pledge Common",
+  symbol: "PLDG",
+  salt: oldGrant.salt,
+  createdAtBlock: 10n,
+  transactionHash: "0x000000000000000000000000000000000000000000000000000000000000000a",
+};
+
+const discoveredDistribution: DiscoveredDistribution = {
+  distribution: sale,
+  boardroom,
+  factory: "0x7600000000000000000000000000000000000000" as Address,
+  kind: "fixed-price-sale",
+  shareToken,
+  paymentToken: oldGrant.paymentToken,
+  shareAmount: 1000n,
+  salt: oldGrant.salt,
+  createdAtBlock: 11n,
+  transactionHash: "0x000000000000000000000000000000000000000000000000000000000000000b",
+};
+
+const discoveredLocker: DiscoveredLockedLiquidity = {
+  locker,
+  boardroom,
+  factory: "0x7700000000000000000000000000000000000000" as Address,
+  pool,
+  tokenA: shareToken,
+  tokenB: oldGrant.paymentToken,
+  amountA: 1000n,
+  amountB: 2000n,
+  liquidity: 3000n,
+  salt: oldGrant.salt,
+  createdAtBlock: 12n,
+  transactionHash: "0x000000000000000000000000000000000000000000000000000000000000000c",
+};
+
+const discoveredPool: DiscoveredPool = {
+  pool,
+  factory: "0x7800000000000000000000000000000000000000" as Address,
+  token0: shareToken,
+  token1: oldGrant.paymentToken,
+  poolCount: 1n,
+  createdAtBlock: 9n,
+  transactionHash: "0x0000000000000000000000000000000000000000000000000000000000000009",
+};
+
+const discoverySnapshot: DiscoverySnapshot = {
+  chainId: 31337,
+  loadedFor: oldGrant.currentHolder,
+  fromBlock: 0n,
+  toBlock: 20n,
+  chunkSize: 5000n,
+  lastScannedBlock: 20n,
+  complete: true,
+  errors: [],
+  boardroomsByAddress: { [boardroom.toLowerCase()]: discoveredBoardroom },
+  grantsByAddress: { [oldGrant.grantAddress.toLowerCase()]: oldGrant },
+  distributionsByAddress: { [sale.toLowerCase()]: discoveredDistribution },
+  lockersByAddress: { [locker.toLowerCase()]: discoveredLocker },
+  poolsByAddress: { [pool.toLowerCase()]: discoveredPool },
+};
+
 describe("web app shell", () => {
   test("renders core protocol sections without a browser", () => {
     const html = renderToString(<App />);
@@ -121,7 +188,64 @@ describe("web app shell", () => {
     expect(html).toContain("Direct Grant");
     expect(html).toContain("Inspect Grant");
     expect(html).toContain("Boardroom");
+    expect(html).toContain("Discovery");
+  });
+
+  test("renders discovery lists and cached scan status", () => {
+    const noop = async () => undefined;
+    const html = renderToString(
+      <DiscoveryPanel
+        account={oldGrant.currentHolder}
+        deployment={{ chainId: 31337 }}
+        discovery={discoverySnapshot}
+        discoveryForm={{ fromBlock: "0", toBlock: "20", chunkSize: "5000", includeClosedGrants: false }}
+        pendingAction={undefined}
+        clearDiscovery={() => undefined}
+        inspectGrant={() => undefined}
+        resumeDiscovery={noop}
+        runAction={async (_label, action) => action()}
+        scanDiscovery={noop}
+        setDiscoveryForm={() => undefined}
+        useBoardroom={() => undefined}
+        useDistribution={() => undefined}
+        useLockedLiquidity={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Discovery Scan");
+    expect(html).toContain("My Boardrooms");
     expect(html).toContain("My Grants");
+    expect(html).toContain("Boardroom Obligations");
+    expect(html).toContain("Pools And Liquidity");
+    expect(html).toContain("Pledge Common");
+    expect(html).toContain("Use Distribution");
+    expect(html).toContain("Use Locker");
+  });
+
+  test("hides cached discovery rows after the wallet changes", () => {
+    const noop = async () => undefined;
+    const html = renderToString(
+      <DiscoveryPanel
+        account="0x5000000000000000000000000000000000000000"
+        deployment={{ chainId: 31337 }}
+        discovery={discoverySnapshot}
+        discoveryForm={{ fromBlock: "0", toBlock: "20", chunkSize: "5000", includeClosedGrants: false }}
+        pendingAction={undefined}
+        clearDiscovery={() => undefined}
+        inspectGrant={() => undefined}
+        resumeDiscovery={noop}
+        runAction={async (_label, action) => action()}
+        scanDiscovery={noop}
+        setDiscoveryForm={() => undefined}
+        useBoardroom={() => undefined}
+        useDistribution={() => undefined}
+        useLockedLiquidity={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("My Boardrooms");
+    expect(html).not.toContain("Pledge Common");
+    expect(html).not.toContain("0x1000...0000");
   });
 
   test("renders Boardroom workflow sections and wind-down blockers", () => {
