@@ -3,16 +3,20 @@ import { encodeErrorResult, encodeFunctionData, type Address, type Hex } from "v
 import {
   boardroomAbi,
   boardroomTokenAbi,
+  buildBoardroomFixedPriceSaleBatch,
   buildBoardroomShareGrantIssuanceBatch,
   buildDirectGrantCreationTransaction,
   buildErc20Approval,
   decodeKnownPledgeCashError,
+  distributionFactoryAbi,
   queryGrantsHeldByAddress,
   queryGrantsIssuedByAddress,
   readBoardroomState,
   readFactoryState,
+  readFixedPriceSaleState,
   readGrantState,
   tokenGrantFactoryAbi,
+  type BoardroomFixedPriceSaleTerms,
   type GrantCreationTerms,
   type PledgeCashLogClient,
   type PledgeCashReadClient,
@@ -26,6 +30,8 @@ const issuer = "0x00000000000000000000000000000000000a11ce" as Address;
 const other = "0x000000000000000000000000000000000000cafe" as Address;
 const grantToken = "0x0000000000000000000000000000000000000123" as Address;
 const paymentToken = "0x0000000000000000000000000000000000000456" as Address;
+const distributionFactory = "0x0000000000000000000000000000000000000d15" as Address;
+const sale = "0x0000000000000000000000000000000000000a1e" as Address;
 const salt = "0x1111111111111111111111111111111111111111111111111111111111111111" as Hex;
 
 const terms = {
@@ -41,6 +47,16 @@ const terms = {
   transferUnlockTime: 1200n,
   salt,
 } satisfies GrantCreationTerms;
+
+const saleTerms = {
+  paymentToken,
+  shareAmount: 1000n,
+  price: 25n,
+  maxPerBuyer: 500n,
+  startTime: 100n,
+  endTime: 1000n,
+  salt,
+} satisfies BoardroomFixedPriceSaleTerms;
 
 describe("SDK action and query helpers", () => {
   test("reads factory, grant, and Boardroom state through standard viem calls", async () => {
@@ -62,6 +78,14 @@ describe("SDK action and query helpers", () => {
       getSettleableAmount: 500n,
       policyRegistry: "0x0000000000000000000000000000000000000777",
       shareToken,
+      factory,
+      boardroom,
+      saleSupply: 1000n,
+      remainingShares: 900n,
+      maxPerBuyer: 500n,
+      startTime: 100n,
+      endTime: 1000n,
+      saleStatus: 0,
     });
 
     await expect(readFactoryState(client, factory)).resolves.toMatchObject({
@@ -79,6 +103,14 @@ describe("SDK action and query helpers", () => {
       address: boardroom,
       owner: issuer,
       shareToken,
+    });
+    await expect(readFixedPriceSaleState(client, sale)).resolves.toMatchObject({
+      address: sale,
+      boardroom,
+      shareToken,
+      paymentToken,
+      remainingShares: 900n,
+      closed: false,
     });
   });
 
@@ -144,6 +176,50 @@ describe("SDK action and query helpers", () => {
         abi: tokenGrantFactoryAbi,
         functionName: "createGrant",
         args: [holder, shareToken, paymentToken, 1000n, 25n, 3000n, 1000n, 2000n, true, 1200n, salt],
+      }),
+    );
+  });
+
+  test("builds Boardroom fixed-price sale batch transaction inputs", () => {
+    const batch = buildBoardroomFixedPriceSaleBatch({
+      boardroom,
+      factory: distributionFactory,
+      shareToken,
+      terms: saleTerms,
+    });
+
+    expect(batch.address).toBe(boardroom);
+    expect(batch.abi).toBe(boardroomAbi);
+    expect(batch.functionName).toBe("executeBatch");
+    expect(batch.value).toBe(0n);
+
+    const calls = batch.args[0];
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ policy: distributionFactory, target: shareToken, value: 0n });
+    expect(calls[0]?.data).toBe(
+      encodeFunctionData({
+        abi: boardroomTokenAbi,
+        functionName: "approve",
+        args: [distributionFactory, saleTerms.shareAmount],
+      }),
+    );
+    expect(calls[1]).toMatchObject({ policy: distributionFactory, target: distributionFactory, value: 0n });
+    expect(calls[1]?.data).toBe(
+      encodeFunctionData({
+        abi: distributionFactoryAbi,
+        functionName: "createFixedPriceSale",
+        args: [
+          {
+            shareToken,
+            paymentToken,
+            shareAmount: 1000n,
+            price: 25n,
+            maxPerBuyer: 500n,
+            startTime: 100n,
+            endTime: 1000n,
+            salt,
+          },
+        ],
       }),
     );
   });

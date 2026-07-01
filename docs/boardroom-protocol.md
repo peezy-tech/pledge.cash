@@ -4,7 +4,8 @@ This document describes the first Boardroom primitive in `packages/contracts/src
 `BoardroomFactory.sol`, and `BoardroomToken.sol`.
 
 A Boardroom is an owned on-chain treasury and issuer account with its own ERC20 share token. It can mint shares and
-execute calls through centrally approved policy contracts. `TokenGrantFactory` is the first Boardroom call policy.
+execute calls through centrally approved policy contracts. `TokenGrantFactory` and `DistributionFactory` are the first
+Boardroom call policies.
 
 ## Actors
 
@@ -14,12 +15,14 @@ execute calls through centrally approved policy contracts. `TokenGrantFactory` i
 - Policy contract: validates whether a Boardroom may call a target contract with specific calldata.
 - Share holder: receives Boardroom share tokens directly or through grants.
 - Grant holder: receives settlement authority over a Boardroom-issued grant.
+- Distribution buyer: buys Boardroom shares through a Boardroom-created distribution.
 
 ## Assets
 
 - Boardroom share token: ERC20 minted only by its Boardroom.
 - Grant token escrow: ERC20 tokens held by the Boardroom and transferred into a `TokenGrant`.
 - Payment token: optional ERC20 paid to the Boardroom when settling a paid grant.
+- Distribution payment token: ERC20 paid to the Boardroom when buyers purchase shares from a distribution.
 - Native creation fee: optional fee forwarded through the Boardroom to `TokenGrantFactory`.
 
 ## State Machines
@@ -68,6 +71,18 @@ For paid grants, settlement payment tokens are transferred to the Boardroom. The
 registry-approved policies to deploy or spend those proceeds. For example, the Boardroom can sell share grants for USDC
 and later create free USDC payroll grants through the same policy-gated batch execution surface.
 
+## Fixed-Price Share Sale Flow
+
+1. Owner mints Boardroom shares to the Boardroom treasury.
+2. Owner builds a `Boardroom.executeBatch` with two policy-checked calls.
+3. The first call targets the share token and approves `DistributionFactory` for the sale inventory.
+4. The second call targets `DistributionFactory.createFixedPriceSale(...)`.
+5. `DistributionFactory` verifies the sale uses the Boardroom's own share token.
+6. The factory deploys and records a `FixedPriceSale`.
+7. The factory transfers sale inventory from the Boardroom into sale escrow.
+8. Buyers pay the configured ERC20 payment token directly to the Boardroom and receive shares from sale escrow.
+9. The Boardroom can close or cancel its own sale through the same policy-gated execution surface.
+
 ## Invariants
 
 - Only the Boardroom can mint its share token.
@@ -78,6 +93,9 @@ and later create free USDC payroll grants through the same policy-gated batch ex
 - A Boardroom-issued grant must have `issuer == boardroom`.
 - Boardroom-issued grants escrow tokens from the Boardroom before holders can settle.
 - Native grant creation fees can be forwarded, but the Boardroom should not retain them.
+- Boardroom-created fixed-price sales can only sell the Boardroom's own share token.
+- Fixed-price sale payments are transferred directly to the Boardroom treasury.
+- Only the Boardroom that created a sale can close or cancel it through the distribution policy.
 
 ## Deterministic Proof
 
