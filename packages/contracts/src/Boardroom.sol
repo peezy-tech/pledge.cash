@@ -14,6 +14,7 @@ import {TokenGrant} from "./TokenGrant.sol";
 import {TokenGrantFactory} from "./TokenGrantFactory.sol";
 
 interface IBoardroomDistribution {
+    function factory() external view returns (address);
     function boardroom() external view returns (address);
     function isClosed() external view returns (bool);
 }
@@ -284,41 +285,42 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         return false;
     }
 
-    function _recordIssuedObligation(address policy, address target, bytes4 selector, bytes memory result) internal {
-        if (target != policy) return;
-
+    function _recordIssuedObligation(address, address target, bytes4 selector, bytes memory result) internal {
         if (selector == TokenGrantFactory.createGrant.selector) {
-            _recordIssuedGrant(policy, result);
+            _recordIssuedGrant(target, result);
             return;
         }
 
         if (selector == DistributionFactory.createFixedPriceSale.selector) {
-            _recordIssuedDistribution(result);
+            _recordIssuedDistribution(target, result);
         }
     }
 
-    function _recordIssuedGrant(address policy, bytes memory result) internal {
+    function _recordIssuedGrant(address factory, bytes memory result) internal {
         if (issuedGrants.length >= MAX_ISSUED_GRANTS) revert TooManyIssuedGrants();
 
         address grant = abi.decode(result, (address));
         if (grant == address(0) || isIssuedGrant[grant]) revert InvalidIssuedGrant(grant);
 
         TokenGrant tokenGrant = TokenGrant(grant);
-        if (tokenGrant.issuer() != address(this) || tokenGrant.factory() != policy) revert InvalidIssuedGrant(grant);
+        if (tokenGrant.issuer() != address(this) || tokenGrant.factory() != factory) revert InvalidIssuedGrant(grant);
 
         isIssuedGrant[grant] = true;
         issuedGrants.push(grant);
         emit BoardroomGrantRecorded(grant);
     }
 
-    function _recordIssuedDistribution(bytes memory result) internal {
+    function _recordIssuedDistribution(address factory, bytes memory result) internal {
         if (issuedDistributions.length >= MAX_ISSUED_DISTRIBUTIONS) revert TooManyIssuedDistributions();
 
         address distribution = abi.decode(result, (address));
         if (distribution == address(0) || isIssuedDistribution[distribution]) {
             revert InvalidIssuedDistribution(distribution);
         }
-        if (IBoardroomDistribution(distribution).boardroom() != address(this)) {
+        if (
+            IBoardroomDistribution(distribution).boardroom() != address(this)
+                || IBoardroomDistribution(distribution).factory() != factory
+        ) {
             revert InvalidIssuedDistribution(distribution);
         }
 

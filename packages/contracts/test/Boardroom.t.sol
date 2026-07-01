@@ -7,6 +7,7 @@ import {Boardroom} from "../src/Boardroom.sol";
 import {BoardroomFactory} from "../src/BoardroomFactory.sol";
 import {BoardroomPolicyRegistry} from "../src/BoardroomPolicyRegistry.sol";
 import {BoardroomToken} from "../src/BoardroomToken.sol";
+import {IBoardroomCallPolicy} from "../src/IBoardroomCallPolicy.sol";
 import {TokenGrant} from "../src/TokenGrant.sol";
 import {TokenGrantFactory} from "../src/TokenGrantFactory.sol";
 
@@ -48,6 +49,12 @@ contract BoardroomCurrency {
         }
         balanceOf[from] -= amount;
         balanceOf[to] += amount;
+        return true;
+    }
+}
+
+contract BoardroomTestAllowAllPolicy is IBoardroomCallPolicy {
+    function canCall(address, address, address, uint256, bytes calldata) external pure returns (bool) {
         return true;
     }
 }
@@ -569,6 +576,47 @@ contract BoardroomTest is Test {
         boardroom.openRedemptions();
 
         assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
+    }
+
+    function testBoardroomRecordsGrantCreatedThroughWrapperPolicy() public {
+        BoardroomTestAllowAllPolicy wrapperPolicy = new BoardroomTestAllowAllPolicy();
+        policyRegistry.setPolicyAllowed(address(wrapperPolicy), true);
+
+        (Boardroom boardroom,) = _createBoardroom("wrapper-policy-grant");
+        BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
+
+        vm.prank(owner);
+        boardroom.mint(address(boardroom), GRANT_SIZE);
+
+        bytes32 salt = keccak256("wrapper-policy-grant-create");
+        BoardroomGrantCreate memory create =
+            _boardroomGrantCreate(address(shareToken), holder, address(0), GRANT_SIZE, 0, salt, 0);
+
+        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        calls[0] = Boardroom.Call({
+            policy: address(wrapperPolicy),
+            target: address(shareToken),
+            value: 0,
+            data: abi.encodeWithSignature("approve(address,uint256)", address(tokenGrantFactory), GRANT_SIZE)
+        });
+        calls[1] = Boardroom.Call({
+            policy: address(wrapperPolicy), target: address(tokenGrantFactory), value: 0, data: _createGrantData(create)
+        });
+
+        vm.prank(owner);
+        bytes[] memory results = boardroom.executeBatch(calls);
+        address grant = abi.decode(results[1], (address));
+
+        assertEq(boardroom.issuedGrantCount(), 1);
+        assertEq(boardroom.issuedGrantAt(0), grant);
+        assertTrue(boardroom.isIssuedGrant(grant));
+
+        vm.prank(owner);
+        boardroom.startWindDown();
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.IssuedGrantStillOpen.selector, grant));
+        boardroom.openRedemptions();
     }
 
     function testBoardroomRejectsInvalidRedeemableAssets() public {

@@ -8,6 +8,7 @@ import {BoardroomPolicyRegistry} from "../src/BoardroomPolicyRegistry.sol";
 import {BoardroomToken} from "../src/BoardroomToken.sol";
 import {DistributionFactory} from "../src/DistributionFactory.sol";
 import {FixedPriceSale} from "../src/FixedPriceSale.sol";
+import {IBoardroomCallPolicy} from "../src/IBoardroomCallPolicy.sol";
 
 contract DistributionCurrency {
     string public name;
@@ -79,6 +80,12 @@ contract FeeOnTransferDistributionCurrency is DistributionCurrency {
         balanceOf[from] -= amount;
         balanceOf[to] += amount - fee;
         totalSupply -= fee;
+        return true;
+    }
+}
+
+contract DistributionTestAllowAllPolicy is IBoardroomCallPolicy {
+    function canCall(address, address, address, uint256, bytes calldata) external pure returns (bool) {
         return true;
     }
 }
@@ -217,6 +224,50 @@ contract DistributionTest is Test {
         boardroom.openRedemptions();
 
         assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
+    }
+
+    function testBoardroomRecordsFixedPriceSaleCreatedThroughWrapperPolicy() public {
+        DistributionTestAllowAllPolicy wrapperPolicy = new DistributionTestAllowAllPolicy();
+        policyRegistry.setPolicyAllowed(address(wrapperPolicy), true);
+
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("fixed-sale-wrapper-policy");
+
+        vm.startPrank(owner);
+        boardroom.mint(address(boardroom), SALE_SHARES);
+
+        bytes32 salt = keccak256("fixed-sale-wrapper-policy-create");
+        FixedPriceSale.CreateParams memory params =
+            _saleParams(address(shareToken), address(paymentToken), SALE_SHARES, PRICE, salt);
+
+        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        calls[0] = Boardroom.Call({
+            policy: address(wrapperPolicy),
+            target: address(shareToken),
+            value: 0,
+            data: abi.encodeWithSignature("approve(address,uint256)", address(distributionFactory), SALE_SHARES)
+        });
+        calls[1] = Boardroom.Call({
+            policy: address(wrapperPolicy),
+            target: address(distributionFactory),
+            value: 0,
+            data: abi.encodeCall(DistributionFactory.createFixedPriceSale, (params))
+        });
+
+        bytes[] memory results = boardroom.executeBatch(calls);
+        vm.stopPrank();
+
+        address sale = abi.decode(results[1], (address));
+
+        assertEq(boardroom.issuedDistributionCount(), 1);
+        assertEq(boardroom.issuedDistributionAt(0), sale);
+        assertTrue(boardroom.isIssuedDistribution(sale));
+
+        vm.prank(owner);
+        boardroom.startWindDown();
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.IssuedDistributionStillOpen.selector, sale));
+        boardroom.openRedemptions();
     }
 
     function testFixedPriceSaleRejectsFeeOnTransferPaymentToken() public {
