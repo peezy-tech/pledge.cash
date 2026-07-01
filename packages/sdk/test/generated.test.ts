@@ -1,12 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
-import { pledgeCashAbis, pledgeCashDeployments, tokenGrantFactoryAbi } from "../src";
+import { distributionFactoryAbi, fixedPriceSaleAbi, pledgeCashAbis, pledgeCashDeployments, tokenGrantFactoryAbi } from "../src";
 
 describe("generated SDK exports", () => {
   test("includes core contract ABIs", () => {
     expect(pledgeCashAbis.TokenGrantFactory).toBe(tokenGrantFactoryAbi);
+    expect(pledgeCashAbis.DistributionFactory).toBe(distributionFactoryAbi);
     expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "createGrant")).toBe(true);
     expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "predictGrantAddress")).toBe(true);
+    expect(distributionFactoryAbi.some((item) => item.type === "function" && item.name === "createFixedPriceSale")).toBe(true);
+    expect(fixedPriceSaleAbi.some((item) => item.type === "function" && item.name === "buy")).toBe(true);
   });
 
   test("includes checked-in deployment metadata", () => {

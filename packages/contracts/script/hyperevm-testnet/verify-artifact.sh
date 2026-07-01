@@ -144,6 +144,16 @@ if field_exists boardroomFactory || field_exists boardroomPolicyRegistry; then
 
   actual_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$token_grant_factory")"
   expect_equal "Boardroom policy allowance" "$(field tokenGrantPolicyAllowed)" "$actual_policy_allowed"
+
+  if field_exists distributionFactory; then
+    require_field distributionPolicyAllowed
+
+    distribution_factory="$(field distributionFactory)"
+    require_code "DistributionFactory" "$distribution_factory"
+
+    actual_distribution_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$distribution_factory")"
+    expect_equal "Distribution policy allowance" "$(field distributionPolicyAllowed)" "$actual_distribution_policy_allowed"
+  fi
 elif [[ "$REQUIRE_BOARDROOM_DEPLOYMENT" == "1" ]]; then
   fail "Boardroom deployment fields are required but missing"
 else

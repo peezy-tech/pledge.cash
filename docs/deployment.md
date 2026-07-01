@@ -1,7 +1,7 @@
 # Deployment
 
-This document covers the current contract deployment surface for TokenGrant and Boardroom primitives. AMM, SDK, and
-website deployment flows should get their own sections when those products are reintroduced.
+This document covers the current contract deployment surface for TokenGrant, Boardroom, and fixed-price distribution
+primitives. AMM, SDK, and website deployment flows should get their own sections when those products are reintroduced.
 
 ## HyperEVM Testnet
 
@@ -11,9 +11,9 @@ website deployment flows should get their own sections when those products are r
 - Wrapper: `packages/contracts/script/hyperevm-testnet/deploy.sh`
 - Artifact: `packages/contracts/deployments/998.json`
 
-The deploy script creates one `BoardroomPolicyRegistry`, one `TokenGrantFactory`, and one `BoardroomFactory`. It allows
-the token grant factory as the first Boardroom policy, records the grant logic, and optionally sets the native grant
-creation fee.
+The deploy script creates one `BoardroomPolicyRegistry`, one `TokenGrantFactory`, one `DistributionFactory`, and one
+`BoardroomFactory`. It allows the token grant factory and distribution factory as Boardroom policies, records the grant
+logic, and optionally sets the native grant creation fee.
 
 ## Environment
 
@@ -67,8 +67,10 @@ After a broadcast, verify `packages/contracts/deployments/998.json` contains:
 - `deployer`
 - `boardroomPolicyRegistry`
 - `boardroomFactory`
+- `distributionFactory`
 - `policyRegistryOwner`
 - `tokenGrantPolicyAllowed`
+- `distributionPolicyAllowed`
 - `factoryOwner`
 - `tokenGrantFactory`
 - `tokenGrantLogic`

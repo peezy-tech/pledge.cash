@@ -5,6 +5,7 @@ import {Script, console2} from "forge-std/Script.sol";
 import {stdJson} from "forge-std/StdJson.sol";
 import {BoardroomFactory} from "../src/BoardroomFactory.sol";
 import {BoardroomPolicyRegistry} from "../src/BoardroomPolicyRegistry.sol";
+import {DistributionFactory} from "../src/DistributionFactory.sol";
 import {TokenGrantFactory} from "../src/TokenGrantFactory.sol";
 
 contract Deploy is Script {
@@ -22,9 +23,11 @@ contract Deploy is Script {
 
         BoardroomPolicyRegistry boardroomPolicyRegistry = new BoardroomPolicyRegistry(deployer);
         TokenGrantFactory tokenGrantFactory = new TokenGrantFactory();
+        DistributionFactory distributionFactory = new DistributionFactory();
         BoardroomFactory boardroomFactory = new BoardroomFactory(address(boardroomPolicyRegistry));
 
         boardroomPolicyRegistry.setPolicyAllowed(address(tokenGrantFactory), true);
+        boardroomPolicyRegistry.setPolicyAllowed(address(distributionFactory), true);
 
         uint256 creationFee = vm.envOr("TOKEN_GRANT_CREATION_FEE_WEI", uint256(0));
         if (creationFee == 0) {
@@ -41,10 +44,14 @@ contract Deploy is Script {
         json.serialize("chainId", chainId);
         json.serialize("boardroomPolicyRegistry", address(boardroomPolicyRegistry));
         json.serialize("boardroomFactory", address(boardroomFactory));
+        json.serialize("distributionFactory", address(distributionFactory));
         json.serialize("tokenGrantFactory", address(tokenGrantFactory));
         json.serialize("tokenGrantLogic", tokenGrantFactory.tokenGrantLogic());
         json.serialize("policyRegistryOwner", boardroomPolicyRegistry.owner());
         json.serialize("tokenGrantPolicyAllowed", boardroomPolicyRegistry.isPolicyAllowed(address(tokenGrantFactory)));
+        json.serialize(
+            "distributionPolicyAllowed", boardroomPolicyRegistry.isPolicyAllowed(address(distributionFactory))
+        );
         json.serialize("factoryOwner", tokenGrantFactory.owner());
         json.serialize("creationFee", tokenGrantFactory.creationFee());
         json.serialize("deploymentTimestamp", block.timestamp);
@@ -57,10 +64,12 @@ contract Deploy is Script {
 
         console2.log("BoardroomPolicyRegistry", address(boardroomPolicyRegistry));
         console2.log("BoardroomFactory", address(boardroomFactory));
+        console2.log("DistributionFactory", address(distributionFactory));
         console2.log("TokenGrantFactory", address(tokenGrantFactory));
         console2.log("TokenGrantLogic", tokenGrantFactory.tokenGrantLogic());
         console2.log("PolicyRegistryOwner", boardroomPolicyRegistry.owner());
         console2.log("TokenGrantPolicyAllowed", boardroomPolicyRegistry.isPolicyAllowed(address(tokenGrantFactory)));
+        console2.log("DistributionPolicyAllowed", boardroomPolicyRegistry.isPolicyAllowed(address(distributionFactory)));
         console2.log("FactoryOwner", tokenGrantFactory.owner());
         console2.log("CreationFee", tokenGrantFactory.creationFee());
         console2.log("Deployment chain", chainId);

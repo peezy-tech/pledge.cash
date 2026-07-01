@@ -13,7 +13,9 @@ import {
   boardroomFactoryAbi,
   boardroomPolicyRegistryAbi,
   boardroomTokenAbi,
+  distributionFactoryAbi,
   erc20Abi,
+  fixedPriceSaleAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
 } from "./generated";
@@ -45,6 +47,19 @@ export type GrantCreationTerms = {
 
 export type BoardroomShareGrantTerms = Omit<GrantCreationTerms, "token">;
 
+export type FixedPriceSaleTerms = {
+  shareToken: Address;
+  paymentToken: Address;
+  shareAmount: bigint;
+  price: bigint;
+  maxPerBuyer: bigint;
+  startTime: bigint;
+  endTime: bigint;
+  salt: Hex;
+};
+
+export type BoardroomFixedPriceSaleTerms = Omit<FixedPriceSaleTerms, "shareToken">;
+
 export type GrantCreationArgs = readonly [
   Address,
   Address,
@@ -64,6 +79,22 @@ export type BoardroomCall = {
   target: Address;
   value: bigint;
   data: Hex;
+};
+
+export type FixedPriceSaleState = {
+  address: Address;
+  factory: Address;
+  boardroom: Address;
+  shareToken: Address;
+  paymentToken: Address;
+  saleSupply: bigint;
+  remainingShares: bigint;
+  price: bigint;
+  maxPerBuyer: bigint;
+  startTime: bigint;
+  endTime: bigint;
+  saleStatus: number;
+  closed: boolean;
 };
 
 export type FactoryState = {
@@ -143,6 +174,8 @@ const pledgeCashErrorAbi = [
   ...boardroomFactoryAbi,
   ...boardroomPolicyRegistryAbi,
   ...boardroomTokenAbi,
+  ...distributionFactoryAbi,
+  ...fixedPriceSaleAbi,
   ...tokenGrantAbi,
   ...tokenGrantFactoryAbi,
 ].filter((item) => item.type === "error") as Abi;
@@ -281,6 +314,67 @@ export async function predictBoardroomAddress(
   })) as Address;
 }
 
+export async function predictFixedPriceSaleAddress(
+  client: PledgeCashReadClient,
+  input: { factory: Address; boardroom: Address; salt: Hex },
+): Promise<Address> {
+  return (await client.readContract({
+    address: input.factory,
+    abi: distributionFactoryAbi,
+    functionName: "predictFixedPriceSaleAddress",
+    args: [input.boardroom, input.salt],
+  })) as Address;
+}
+
+export async function readFixedPriceSaleState(
+  client: PledgeCashReadClient,
+  sale: Address,
+): Promise<FixedPriceSaleState> {
+  const [
+    factory,
+    boardroom,
+    shareToken,
+    paymentToken,
+    saleSupply,
+    remainingShares,
+    price,
+    maxPerBuyer,
+    startTime,
+    endTime,
+    saleStatus,
+    closed,
+  ] = await Promise.all([
+    client.readContract({ address: sale, abi: fixedPriceSaleAbi, functionName: "factory" }),
+    client.readContract({ address: sale, abi: fixedPriceSaleAbi, functionName: "boardroom" }),
+    client.readContract({ address: sale, abi: fixedPriceSaleAbi, functionName: "shareToken" }),
+    client.readContract({ address: sale, abi: fixedPriceSaleAbi, functionName: "paymentToken" }),
+    client.readContract({ address: sale, abi: fixedPriceSaleAbi, functionName: "saleSupply" }),
+    client.readContract({ address: sale, abi: fixedPriceSaleAbi, functionName: "remainingShares" }),
+    client.readContract({ address: sale, abi: fixedPriceSaleAbi, functionName: "price" }),
+    client.readContract({ address: sale, abi: fixedPriceSaleAbi, functionName: "maxPerBuyer" }),
+    client.readContract({ address: sale, abi: fixedPriceSaleAbi, functionName: "startTime" }),
+    client.readContract({ address: sale, abi: fixedPriceSaleAbi, functionName: "endTime" }),
+    client.readContract({ address: sale, abi: fixedPriceSaleAbi, functionName: "saleStatus" }),
+    client.readContract({ address: sale, abi: fixedPriceSaleAbi, functionName: "isClosed" }),
+  ]);
+
+  return {
+    address: sale,
+    factory: factory as Address,
+    boardroom: boardroom as Address,
+    shareToken: shareToken as Address,
+    paymentToken: paymentToken as Address,
+    saleSupply: saleSupply as bigint,
+    remainingShares: remainingShares as bigint,
+    price: price as bigint,
+    maxPerBuyer: maxPerBuyer as bigint,
+    startTime: startTime as bigint,
+    endTime: endTime as bigint,
+    saleStatus: Number(saleStatus),
+    closed: closed as boolean,
+  };
+}
+
 export function buildErc20Approval(input: { token: Address; spender: Address; amount: bigint }) {
   return {
     address: input.token,
@@ -356,6 +450,83 @@ export function buildBoardroomGrantApprovalCall(input: {
       functionName: "approve",
       args: [input.factory, input.amount],
     }),
+  });
+}
+
+export function fixedPriceSaleArgs(terms: FixedPriceSaleTerms) {
+  return [
+    {
+      shareToken: terms.shareToken,
+      paymentToken: terms.paymentToken,
+      shareAmount: terms.shareAmount,
+      price: terms.price,
+      maxPerBuyer: terms.maxPerBuyer,
+      startTime: terms.startTime,
+      endTime: terms.endTime,
+      salt: terms.salt,
+    },
+  ] as const;
+}
+
+export function buildBoardroomFixedPriceSaleApprovalCall(input: {
+  policy: Address;
+  shareToken: Address;
+  factory: Address;
+  amount: bigint;
+}): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.shareToken,
+    data: encodeFunctionData({
+      abi: boardroomTokenAbi,
+      functionName: "approve",
+      args: [input.factory, input.amount],
+    }),
+  });
+}
+
+export function buildBoardroomFixedPriceSaleCreationCall(input: {
+  policy: Address;
+  factory: Address;
+  terms: FixedPriceSaleTerms;
+}): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.factory,
+    data: encodeFunctionData({
+      abi: distributionFactoryAbi,
+      functionName: "createFixedPriceSale",
+      args: fixedPriceSaleArgs(input.terms),
+    }),
+  });
+}
+
+export function buildBoardroomFixedPriceSaleBatch(input: {
+  boardroom: Address;
+  factory: Address;
+  shareToken: Address;
+  terms: BoardroomFixedPriceSaleTerms;
+  policy?: Address;
+}) {
+  const policy = input.policy ?? input.factory;
+  const terms = { ...input.terms, shareToken: input.shareToken } satisfies FixedPriceSaleTerms;
+  const calls = [
+    buildBoardroomFixedPriceSaleApprovalCall({
+      policy,
+      shareToken: input.shareToken,
+      factory: input.factory,
+      amount: input.terms.shareAmount,
+    }),
+    buildBoardroomFixedPriceSaleCreationCall({
+      policy,
+      factory: input.factory,
+      terms,
+    }),
+  ] as const;
+
+  return buildBoardroomExecuteBatchTransaction({
+    boardroom: input.boardroom,
+    calls,
   });
 }
 

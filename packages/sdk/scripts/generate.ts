@@ -21,7 +21,9 @@ const contracts = [
     "boardroomPolicyRegistryAbi",
   ],
   ["BoardroomToken", "packages/contracts/out/BoardroomToken.sol/BoardroomToken.json", "boardroomTokenAbi"],
+  ["DistributionFactory", "packages/contracts/out/DistributionFactory.sol/DistributionFactory.json", "distributionFactoryAbi"],
   ["ERC20", "packages/contracts/out/ERC20.sol/ERC20.json", "erc20Abi"],
+  ["FixedPriceSale", "packages/contracts/out/FixedPriceSale.sol/FixedPriceSale.json", "fixedPriceSaleAbi"],
   ["IBoardroomCallPolicy", "packages/contracts/out/IBoardroomCallPolicy.sol/IBoardroomCallPolicy.json", "boardroomCallPolicyAbi"],
   [
     "IBoardroomPolicyRegistry",
@@ -40,11 +42,13 @@ const deploymentFields = [
   ["boardroomReason", "string"],
   ["boardroomFactory", "address"],
   ["boardroomPolicyRegistry", "address"],
+  ["distributionFactory", "address"],
   ["tokenGrantFactory", "address"],
   ["tokenGrantLogic", "address"],
   ["deployer", "address"],
   ["factoryOwner", "address"],
   ["policyRegistryOwner", "address"],
+  ["distributionPolicyAllowed", "boolean"],
   ["tokenGrantPolicyAllowed", "boolean"],
   ["creationFee", "bigint"],
   ["deploymentTimestamp", "bigint"],
@@ -183,11 +187,13 @@ export type PledgeCashDeployment = {
   boardroomReason?: string;
   boardroomFactory?: Address;
   boardroomPolicyRegistry?: Address;
+  distributionFactory?: Address;
   tokenGrantFactory?: Address;
   tokenGrantLogic?: Address;
   deployer?: Address;
   factoryOwner?: Address;
   policyRegistryOwner?: Address;
+  distributionPolicyAllowed?: boolean;
   tokenGrantPolicyAllowed?: boolean;
   creationFee?: bigint;
   deploymentTimestamp?: bigint;
