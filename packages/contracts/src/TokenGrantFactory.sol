@@ -3,7 +3,9 @@ pragma solidity ^0.8.30;
 
 import {Ownable} from "solady/auth/Ownable.sol";
 import {ERC721} from "solady/tokens/ERC721.sol";
+import {Base64} from "solady/utils/Base64.sol";
 import {LibClone} from "solady/utils/LibClone.sol";
+import {LibString} from "solady/utils/LibString.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
 import {TokenGrant} from "./TokenGrant.sol";
@@ -56,8 +58,18 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomCallPolicy {
     }
 
     function tokenURI(uint256 id) public view override returns (string memory) {
-        ownerOf(id);
-        return "";
+        address holder = ownerOf(id);
+        address grant = grantForTokenId[id];
+        if (grant == address(0)) revert UnknownGrantToken(id);
+
+        string memory json = string.concat(
+            _metadataIdentity(id, grant, holder),
+            _metadataEconomics(grant),
+            _metadataSchedule(grant),
+            _metadataStatus(grant)
+        );
+
+        return string.concat("data:application/json;base64,", Base64.encode(bytes(json)));
     }
 
     function setCreationFee(uint256 amount) external onlyOwner {
@@ -264,6 +276,73 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomCallPolicy {
 
     function _deploymentSalt(address issuer, bytes32 salt) internal pure returns (bytes32) {
         return keccak256(abi.encode(issuer, salt));
+    }
+
+    function _metadataIdentity(uint256 id, address grant, address holder) internal view returns (string memory) {
+        TokenGrant tokenGrant = TokenGrant(grant);
+        return string.concat(
+            '{"name":"Token Grant #',
+            LibString.toString(id),
+            '","description":"pledge.cash escrow-backed grant right",',
+            '"external_url":"https://pledge.cash",',
+            '"properties":{',
+            '"grantAddress":"',
+            LibString.toHexString(grant),
+            '","issuer":"',
+            LibString.toHexString(tokenGrant.issuer()),
+            '","holder":"',
+            LibString.toHexString(holder),
+            '","token":"',
+            LibString.toHexString(tokenGrant.token()),
+            '","paymentToken":"',
+            LibString.toHexString(tokenGrant.paymentToken()),
+            '",'
+        );
+    }
+
+    function _metadataEconomics(address grant) internal view returns (string memory) {
+        TokenGrant tokenGrant = TokenGrant(grant);
+        return string.concat(
+            '"amount":"',
+            LibString.toString(tokenGrant.grantSize()),
+            '","claimable":"',
+            LibString.toString(tokenGrant.claimable()),
+            '","settledAmount":"',
+            LibString.toString(tokenGrant.settledAmount()),
+            '","price":"',
+            LibString.toString(tokenGrant.price()),
+            '",'
+        );
+    }
+
+    function _metadataSchedule(address grant) internal view returns (string memory) {
+        TokenGrant tokenGrant = TokenGrant(grant);
+        return string.concat(
+            '"expiry":"',
+            LibString.toString(tokenGrant.expiry()),
+            '","vestingCliff":"',
+            LibString.toString(tokenGrant.vestingCliff()),
+            '","vestingEnd":"',
+            LibString.toString(tokenGrant.vestingEnd()),
+            '",'
+        );
+    }
+
+    function _metadataStatus(address grant) internal view returns (string memory) {
+        TokenGrant tokenGrant = TokenGrant(grant);
+        return string.concat(
+            '"transferable":',
+            _boolString(tokenGrant.transferable()),
+            ',"transferUnlockTime":"',
+            LibString.toString(tokenGrant.transferUnlockTime()),
+            '","closed":',
+            _boolString(tokenGrant.isClosed()),
+            "}}"
+        );
+    }
+
+    function _boolString(bool value) internal pure returns (string memory) {
+        return value ? "true" : "false";
     }
 
     function _selector(bytes calldata data) internal pure returns (bytes4 selector) {

@@ -27,6 +27,7 @@ type BoardroomPanelProps = {
   setPredictedBoardroom: Dispatch<SetStateAction<Address | undefined>>;
   boardroomApproveFactory: () => Promise<void>;
   boardroomCreateGrant: () => Promise<void>;
+  boardroomCreateGrantBatch: () => Promise<void>;
   createBoardroom: () => Promise<void>;
   loadBoardroom: () => Promise<void>;
   mintBoardroomShares: () => Promise<void>;
@@ -55,6 +56,7 @@ export function BoardroomPanel({
   setPredictedBoardroom,
   boardroomApproveFactory,
   boardroomCreateGrant,
+  boardroomCreateGrantBatch,
   createBoardroom,
   loadBoardroom,
   mintBoardroomShares,
@@ -288,11 +290,24 @@ export function BoardroomPanel({
             onClick={() => void runAction("boardroom-approve-factory", boardroomApproveFactory)}
           >
             <CheckCircle2 className="h-4 w-4" />
-            Approve Factory
+            Approve Only
           </ActionButton>
-          <ActionButton actionId="boardroom-create-grant" pendingAction={pendingAction} onClick={() => void runAction("boardroom-create-grant", boardroomCreateGrant)}>
+          <ActionButton
+            actionId="boardroom-create-grant-batch"
+            pendingAction={pendingAction}
+            onClick={() => void runAction("boardroom-create-grant-batch", boardroomCreateGrantBatch)}
+          >
             <Send className="h-4 w-4" />
             Create Grant
+          </ActionButton>
+          <ActionButton
+            actionId="boardroom-create-grant"
+            pendingAction={pendingAction}
+            variant="secondary"
+            onClick={() => void runAction("boardroom-create-grant", boardroomCreateGrant)}
+          >
+            <Send className="h-4 w-4" />
+            Create Only
           </ActionButton>
         </ActionRow>
         <Facts

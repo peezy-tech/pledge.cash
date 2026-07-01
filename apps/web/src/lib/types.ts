@@ -1,6 +1,7 @@
-import type { Address } from "@pledge.cash/sdk";
+import type { Address, DiscoveredGrant } from "@pledge.cash/sdk";
+import type { Hex } from "viem";
 
-export type Tab = "direct" | "grant" | "boardroom";
+export type Tab = "direct" | "grant" | "boardroom" | "my-grants";
 
 export type WalletState = {
   account?: Address;
@@ -75,4 +76,13 @@ export type LogEntry = {
   level: "info" | "error" | "success";
   message: string;
   time: string;
+  txHash?: Hex;
+};
+
+export type MyGrantsSnapshot = {
+  held: DiscoveredGrant[];
+  issued: DiscoveredGrant[];
+  loadedFor?: Address;
+  fromBlock?: bigint;
+  includeClosed: boolean;
 };

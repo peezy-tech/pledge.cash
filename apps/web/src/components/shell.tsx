@@ -124,6 +124,7 @@ export function TabButton({
 
 export function AddressLink({ address }: { address: Address }): React.JSX.Element {
   const [copied, setCopied] = useState(false);
+  const explorerUrl = addressUrl(address);
 
   const copyAddress = async (): Promise<void> => {
     await navigator.clipboard.writeText(address);
@@ -133,15 +134,21 @@ export function AddressLink({ address }: { address: Address }): React.JSX.Elemen
 
   return (
     <span className="inline-flex max-w-full items-center gap-1.5 align-middle">
-      <a
-        className="min-w-0 truncate text-lime-200 hover:text-lime-100"
-        href={addressUrl(address)}
-        rel="noreferrer"
-        target="_blank"
-        title={address}
-      >
-        {shortAddress(address)}
-      </a>
+      {explorerUrl ? (
+        <a
+          className="min-w-0 truncate text-lime-200 hover:text-lime-100"
+          href={explorerUrl}
+          rel="noreferrer"
+          target="_blank"
+          title={address}
+        >
+          {shortAddress(address)}
+        </a>
+      ) : (
+        <span className="min-w-0 truncate text-lime-200" title={address}>
+          {shortAddress(address)}
+        </span>
+      )}
       <button
         aria-label="Copy address"
         className="grid h-6 w-6 shrink-0 place-items-center rounded border border-zinc-800 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
@@ -150,23 +157,24 @@ export function AddressLink({ address }: { address: Address }): React.JSX.Elemen
       >
         {copied ? <CheckCircle2 className="h-3.5 w-3.5 text-lime-300" /> : <Copy className="h-3.5 w-3.5" />}
       </button>
-      <a
-        aria-label="Open in explorer"
-        className="grid h-6 w-6 shrink-0 place-items-center rounded border border-zinc-800 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
-        href={addressUrl(address)}
-        rel="noreferrer"
-        target="_blank"
-      >
-        <ExternalLink className="h-3.5 w-3.5" />
-      </a>
+      {explorerUrl ? (
+        <a
+          aria-label="Open in explorer"
+          className="grid h-6 w-6 shrink-0 place-items-center rounded border border-zinc-800 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+          href={explorerUrl}
+          rel="noreferrer"
+          target="_blank"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+        </a>
+      ) : null}
     </span>
   );
 }
 
 export function TransactionLink({ hash }: { hash: Hex }): React.JSX.Element {
-  return (
-    <a className="text-lime-200 hover:text-lime-100" href={transactionUrl(hash)} rel="noreferrer" target="_blank">
-      {shortAddress(hash)}
-    </a>
-  );
+  const explorerUrl = transactionUrl(hash);
+  if (!explorerUrl) return <span className="text-lime-200">{shortAddress(hash)}</span>;
+
+  return <a className="text-lime-200 hover:text-lime-100" href={explorerUrl} rel="noreferrer" target="_blank">{shortAddress(hash)}</a>;
 }

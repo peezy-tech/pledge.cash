@@ -82,3 +82,31 @@ bun --cwd packages/contracts build
 bun --cwd packages/contracts test
 cd packages/contracts && forge fmt --check
 ```
+
+## Local Anvil Seed
+
+For a semi-persistent local deployment, run Anvil on chain id `31337`, broadcast
+`Deploy.s.sol`, then seed demo tokens, direct grants, Boardroom grants, partial
+settlements, one transferred grant right, and one halted grant:
+
+```sh
+cd packages/contracts
+PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+WRITE_DEPLOYMENT_STATE=true \
+forge script script/Deploy.s.sol:Deploy \
+  --rpc-url http://127.0.0.1:8547 \
+  --chain 31337 \
+  --broadcast
+
+LOCAL_SEED_NONCE=1 \
+forge script script/SeedLocal.s.sol:SeedLocal \
+  --rpc-url http://127.0.0.1:8547 \
+  --chain 31337 \
+  --broadcast
+```
+
+`SeedLocal` uses Anvil's public development keys only. Change
+`LOCAL_SEED_NONCE` to add another batch of scenarios to an existing local chain,
+or reset the Anvil state file before replaying the same nonce. The local
+artifacts `packages/contracts/deployments/31337.json` and
+`packages/contracts/deployments/31337.seed.json` are intentionally ignored.

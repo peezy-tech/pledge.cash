@@ -3,6 +3,8 @@ pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC721} from "solady/tokens/ERC721.sol";
+import {Base64} from "solady/utils/Base64.sol";
+import {LibString} from "solady/utils/LibString.sol";
 import {TokenGrant} from "../src/TokenGrant.sol";
 import {TokenGrantFactory} from "../src/TokenGrantFactory.sol";
 
@@ -182,6 +184,8 @@ interface IERC721Transfer {
 }
 
 contract TokenGrantTest is Test {
+    string internal constant TOKEN_URI_PREFIX = "data:application/json;base64,";
+
     struct GrantCreate {
         bytes32 salt;
         address holder;
@@ -511,6 +515,61 @@ contract TokenGrantTest is Test {
         assertEq(grant.holder(), newHolder);
         assertEq(factory.balanceOf(holder), 0);
         assertEq(factory.balanceOf(newHolder), 1);
+    }
+
+    function testTokenUriReturnsMetadataForLiveGrant() public {
+        (TokenGrant grant,) = _createFreeGrant("token-uri-live");
+        uint256 grantTokenId = grant.tokenId();
+
+        string memory json = _tokenUriJson(grantTokenId);
+
+        assertTrue(_contains(json, string.concat('"name":"Token Grant #', LibString.toString(grantTokenId), '"')));
+        assertTrue(_contains(json, string.concat('"grantAddress":"', LibString.toHexString(address(grant)), '"')));
+        assertTrue(_contains(json, string.concat('"issuer":"', LibString.toHexString(issuer), '"')));
+        assertTrue(_contains(json, string.concat('"holder":"', LibString.toHexString(holder), '"')));
+        assertTrue(_contains(json, string.concat('"token":"', LibString.toHexString(address(token)), '"')));
+        assertTrue(_contains(json, string.concat('"paymentToken":"', LibString.toHexString(address(0)), '"')));
+        assertTrue(_contains(json, string.concat('"amount":"', LibString.toString(GRANT_SIZE), '"')));
+        assertTrue(_contains(json, '"transferable":false'));
+        assertTrue(_contains(json, '"closed":false'));
+    }
+
+    function testTokenUriReflectsTransferredHolder() public {
+        address newHolder = address(0xD00D);
+        TokenGrant grant = _createGrant(
+            _grantCreate(
+                keccak256("token-uri-transfer"),
+                holder,
+                address(token),
+                address(0),
+                _terms(GRANT_SIZE, 0, EXPIRY, CLIFF, VESTING_END),
+                true,
+                0
+            )
+        );
+        uint256 grantTokenId = grant.tokenId();
+
+        vm.prank(holder);
+        factory.transferFrom(holder, newHolder, grantTokenId);
+
+        string memory json = _tokenUriJson(grantTokenId);
+        assertTrue(_contains(json, string.concat('"holder":"', LibString.toHexString(newHolder), '"')));
+        assertTrue(_contains(json, '"transferable":true'));
+    }
+
+    function testTokenUriRevertsForUnknownAndBurnedGrantRights() public {
+        vm.expectRevert(ERC721.TokenDoesNotExist.selector);
+        factory.tokenURI(1);
+
+        (TokenGrant grant,) = _createFreeGrant("token-uri-burned");
+        uint256 grantTokenId = grant.tokenId();
+        vm.warp(VESTING_END);
+
+        vm.prank(holder);
+        grant.settle(GRANT_SIZE);
+
+        vm.expectRevert(ERC721.TokenDoesNotExist.selector);
+        factory.tokenURI(grantTokenId);
     }
 
     function testSoulboundGrantRejectsTransferAndApproval() public {
@@ -1272,6 +1331,53 @@ contract TokenGrantTest is Test {
 
         assertFalse(grant.isClosed());
         assertEq(factory.ownerOf(grantTokenId), grant.holder());
+    }
+
+    function _tokenUriJson(uint256 tokenId) internal view returns (string memory) {
+        string memory uri = factory.tokenURI(tokenId);
+        assertTrue(_startsWith(uri, TOKEN_URI_PREFIX));
+        return string(Base64.decode(_slice(uri, bytes(TOKEN_URI_PREFIX).length)));
+    }
+
+    function _startsWith(string memory value, string memory prefix) internal pure returns (bool) {
+        bytes memory valueBytes = bytes(value);
+        bytes memory prefixBytes = bytes(prefix);
+        if (valueBytes.length < prefixBytes.length) return false;
+
+        for (uint256 i; i < prefixBytes.length; ++i) {
+            if (valueBytes[i] != prefixBytes[i]) return false;
+        }
+
+        return true;
+    }
+
+    function _contains(string memory haystack, string memory needle) internal pure returns (bool) {
+        bytes memory haystackBytes = bytes(haystack);
+        bytes memory needleBytes = bytes(needle);
+        if (needleBytes.length == 0) return true;
+        if (needleBytes.length > haystackBytes.length) return false;
+
+        for (uint256 i; i <= haystackBytes.length - needleBytes.length; ++i) {
+            bool matched = true;
+            for (uint256 j; j < needleBytes.length; ++j) {
+                if (haystackBytes[i + j] != needleBytes[j]) {
+                    matched = false;
+                    break;
+                }
+            }
+            if (matched) return true;
+        }
+
+        return false;
+    }
+
+    function _slice(string memory value, uint256 start) internal pure returns (string memory) {
+        bytes memory valueBytes = bytes(value);
+        bytes memory result = new bytes(valueBytes.length - start);
+        for (uint256 i; i < result.length; ++i) {
+            result[i] = valueBytes[start + i];
+        }
+        return string(result);
     }
 
     function _createGrantExpectRevert(

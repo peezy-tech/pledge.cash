@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
-import { Panel } from "../../components/shell";
+import { Panel, TransactionLink } from "../../components/shell";
 import { Button } from "../../components/ui/button";
 import type { LogEntry } from "../../lib/types";
 
@@ -27,6 +27,11 @@ export function LogPanel({ logs, clearLogs }: LogPanelProps): React.JSX.Element 
                   <span>{entry.time}</span>
                 </div>
                 <p className="m-0 break-words text-sm text-zinc-200">{entry.message}</p>
+                {entry.txHash ? (
+                  <p className="m-0 mt-1 text-xs text-zinc-500">
+                    Explorer: <TransactionLink hash={entry.txHash} />
+                  </p>
+                ) : null}
               </li>
             ))}
           </ol>
