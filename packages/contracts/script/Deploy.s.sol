@@ -26,12 +26,7 @@ contract Deploy is Script {
 
         BoardroomPolicyRegistry boardroomPolicyRegistry = new BoardroomPolicyRegistry(deployer);
         TokenGrantFactory tokenGrantFactory = new TokenGrantFactory();
-        DistributionFactory distributionFactory = new DistributionFactory();
         AmmFactory ammFactory = new AmmFactory();
-        BoardroomFactory boardroomFactory = new BoardroomFactory(address(boardroomPolicyRegistry));
-
-        boardroomPolicyRegistry.setPolicyAllowed(address(tokenGrantFactory), true);
-        boardroomPolicyRegistry.setPolicyAllowed(address(distributionFactory), true);
 
         address wrappedNative = vm.envOr("WRAPPED_NATIVE_ADDRESS", address(0));
         AmmRouter ammRouter;
@@ -41,6 +36,12 @@ contract Deploy is Script {
             lockedLiquidityFactory = new LockedLiquidityFactory(address(ammRouter));
             boardroomPolicyRegistry.setPolicyAllowed(address(lockedLiquidityFactory), true);
         }
+
+        DistributionFactory distributionFactory = new DistributionFactory(address(lockedLiquidityFactory));
+        BoardroomFactory boardroomFactory = new BoardroomFactory(address(boardroomPolicyRegistry));
+
+        boardroomPolicyRegistry.setPolicyAllowed(address(tokenGrantFactory), true);
+        boardroomPolicyRegistry.setPolicyAllowed(address(distributionFactory), true);
 
         uint256 creationFee = vm.envOr("TOKEN_GRANT_CREATION_FEE_WEI", uint256(0));
         if (creationFee == 0) {

@@ -39,6 +39,11 @@ const contracts = [
     "packages/contracts/out/LockedLiquidityFactory.sol/LockedLiquidityFactory.json",
     "lockedLiquidityFactoryAbi",
   ],
+  [
+    "MigratingBondingCurve",
+    "packages/contracts/out/MigratingBondingCurve.sol/MigratingBondingCurve.json",
+    "migratingBondingCurveAbi",
+  ],
   ["PoolFees", "packages/contracts/out/PoolFees.sol/PoolFees.json", "poolFeesAbi"],
   ["TokenGrant", "packages/contracts/out/TokenGrant.sol/TokenGrant.json", "tokenGrantAbi"],
   ["TokenGrantFactory", "packages/contracts/out/TokenGrantFactory.sol/TokenGrantFactory.json", "tokenGrantFactoryAbi"],

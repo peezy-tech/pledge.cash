@@ -9,6 +9,9 @@ import {
   buildBoardroomLockedLiquidityBatch,
   buildBoardroomLockedLiquidityExitTransaction,
   buildBoardroomLockedLiquidityFeeClaimAction,
+  buildBoardroomMigratingCurveBatch,
+  buildBoardroomMigratingCurveCancelAction,
+  buildBoardroomMigratingCurveMigrationAction,
   buildBoardroomShareGrantIssuanceBatch,
   buildDirectGrantCreationTransaction,
   buildErc20Approval,
@@ -17,18 +20,22 @@ import {
   erc20Abi,
   lockedLiquidityAbi,
   lockedLiquidityFactoryAbi,
+  migratingBondingCurveAbi,
   poolFeesAbi,
   predictAmmPoolAddress,
   predictLockedLiquidityAddress,
+  predictMigratingBondingCurveAddress,
   queryGrantsHeldByAddress,
   queryGrantsIssuedByAddress,
   readBoardroomState,
   readFactoryState,
   readFixedPriceSaleState,
   readGrantState,
+  readMigratingBondingCurveState,
   tokenGrantFactoryAbi,
   type BoardroomLockedLiquidityTerms,
   type BoardroomFixedPriceSaleTerms,
+  type BoardroomMigratingBondingCurveTerms,
   type GrantCreationTerms,
   type PledgeCashLogClient,
   type PledgeCashReadClient,
@@ -44,6 +51,7 @@ const grantToken = "0x0000000000000000000000000000000000000123" as Address;
 const paymentToken = "0x0000000000000000000000000000000000000456" as Address;
 const distributionFactory = "0x0000000000000000000000000000000000000d15" as Address;
 const sale = "0x0000000000000000000000000000000000000a1e" as Address;
+const curve = "0x0000000000000000000000000000000000000c0e" as Address;
 const ammFactory = "0x0000000000000000000000000000000000000aee" as Address;
 const lockedLiquidityFactory = "0x00000000000000000000000000000000000010cc" as Address;
 const locker = "0x00000000000000000000000000000000000010cd" as Address;
@@ -72,6 +80,20 @@ const saleTerms = {
   endTime: 1000n,
   salt,
 } satisfies BoardroomFixedPriceSaleTerms;
+
+const curveTerms = {
+  quoteToken: paymentToken,
+  saleSupply: 1000n,
+  migrationSupply: 500n,
+  basePrice: 25n,
+  slope: 2n,
+  graduationQuoteTarget: 10_000n,
+  quoteToLpBps: 5_000,
+  startTime: 100n,
+  endTime: 1000n,
+  migrationSalt: "0x2222222222222222222222222222222222222222222222222222222222222222" as Hex,
+  salt,
+} satisfies BoardroomMigratingBondingCurveTerms;
 
 const lockedLiquidityTerms = {
   quoteToken: paymentToken,
@@ -116,6 +138,21 @@ describe("SDK action and query helpers", () => {
       startTime: 100n,
       endTime: 1000n,
       saleStatus: 0,
+      lockedLiquidityFactory,
+      quoteToken: paymentToken,
+      locker,
+      pool: "0x0000000000000000000000000000000000000a00",
+      migrationSupply: 500n,
+      remainingSaleShares: 800n,
+      basePrice: 25n,
+      slope: 2n,
+      graduationQuoteTarget: 10_000n,
+      quoteToLpBps: 5_000,
+      migrationSalt: curveTerms.migrationSalt,
+      curveStatus: 0,
+      soldShares: 200n,
+      quoteReserve: 5_000n,
+      canMigrate: false,
     });
 
     await expect(readFactoryState(client, factory)).resolves.toMatchObject({
@@ -144,6 +181,16 @@ describe("SDK action and query helpers", () => {
       shareToken,
       paymentToken,
       remainingShares: 900n,
+      closed: false,
+    });
+    await expect(readMigratingBondingCurveState(client, curve)).resolves.toMatchObject({
+      address: curve,
+      boardroom,
+      shareToken,
+      quoteToken: paymentToken,
+      remainingSaleShares: 800n,
+      quoteToLpBps: 5000,
+      canMigrate: false,
       closed: false,
     });
   });
@@ -258,6 +305,85 @@ describe("SDK action and query helpers", () => {
     );
   });
 
+  test("builds Boardroom migrating bonding curve transaction inputs", () => {
+    const batch = buildBoardroomMigratingCurveBatch({
+      boardroom,
+      factory: distributionFactory,
+      shareToken,
+      terms: curveTerms,
+    });
+
+    expect(batch.address).toBe(boardroom);
+    expect(batch.abi).toBe(boardroomAbi);
+    expect(batch.functionName).toBe("executeBatch");
+    expect(batch.value).toBe(0n);
+
+    const calls = batch.args[0];
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ policy: distributionFactory, target: shareToken, value: 0n });
+    expect(calls[0]?.data).toBe(
+      encodeFunctionData({
+        abi: boardroomTokenAbi,
+        functionName: "approve",
+        args: [distributionFactory, curveTerms.saleSupply + curveTerms.migrationSupply],
+      }),
+    );
+    expect(calls[1]).toMatchObject({ policy: distributionFactory, target: distributionFactory, value: 0n });
+    expect(calls[1]?.data).toBe(
+      encodeFunctionData({
+        abi: distributionFactoryAbi,
+        functionName: "createMigratingBondingCurve",
+        args: [
+          {
+            shareToken,
+            quoteToken: paymentToken,
+            saleSupply: 1000n,
+            migrationSupply: 500n,
+            basePrice: 25n,
+            slope: 2n,
+            graduationQuoteTarget: 10_000n,
+            quoteToLpBps: 5_000,
+            startTime: 100n,
+            endTime: 1000n,
+            migrationSalt: curveTerms.migrationSalt,
+            salt,
+          },
+        ],
+      }),
+    );
+
+    const cancel = buildBoardroomMigratingCurveCancelAction({
+      boardroom,
+      policy: distributionFactory,
+      curve,
+    });
+    expect(cancel.address).toBe(boardroom);
+    expect(cancel.abi).toBe(boardroomAbi);
+    expect(cancel.functionName).toBe("execute");
+    expect(cancel.args[0]).toMatchObject({ policy: distributionFactory, target: curve, value: 0n });
+    expect(cancel.args[0].data).toBe(encodeFunctionData({ abi: migratingBondingCurveAbi, functionName: "cancel" }));
+
+    const migrate = buildBoardroomMigratingCurveMigrationAction({
+      boardroom,
+      policy: distributionFactory,
+      curve,
+      minShareLiquidity: 1n,
+      minQuoteLiquidity: 2n,
+      deadline: 12345n,
+    });
+    expect(migrate.address).toBe(boardroom);
+    expect(migrate.abi).toBe(boardroomAbi);
+    expect(migrate.functionName).toBe("execute");
+    expect(migrate.args[0]).toMatchObject({ policy: distributionFactory, target: curve, value: 0n });
+    expect(migrate.args[0].data).toBe(
+      encodeFunctionData({
+        abi: migratingBondingCurveAbi,
+        functionName: "migrate",
+        args: [1n, 2n, 12345n],
+      }),
+    );
+  });
+
   test("builds Boardroom locked-liquidity transaction inputs", () => {
     const batch = buildBoardroomLockedLiquidityBatch({
       boardroom,
@@ -338,10 +464,12 @@ describe("SDK action and query helpers", () => {
     const client = mockReadClient({
       predictPoolAddress: pool,
       predictLockedLiquidityAddress: locker,
+      predictMigratingBondingCurveAddress: curve,
     });
 
     await expect(predictAmmPoolAddress(client, { factory: ammFactory, tokenA: shareToken, tokenB: paymentToken })).resolves.toBe(pool);
     await expect(predictLockedLiquidityAddress(client, { factory: lockedLiquidityFactory, boardroom, salt })).resolves.toBe(locker);
+    await expect(predictMigratingBondingCurveAddress(client, { factory: distributionFactory, boardroom, salt })).resolves.toBe(curve);
   });
 
   test("folds creation, transfer, and close logs into issued and held grants", async () => {
@@ -408,6 +536,16 @@ describe("SDK action and query helpers", () => {
 
     const feeVaultData = encodeErrorResult({ abi: poolFeesAbi, errorName: "OnlyPool" });
     expect(decodeKnownPledgeCashError(feeVaultData)).toMatchObject({ name: "OnlyPool", args: [] });
+
+    const curveData = encodeErrorResult({
+      abi: migratingBondingCurveAbi,
+      errorName: "MigrationNotReady",
+      args: [1n, 2n, 3n],
+    });
+    expect(decodeKnownPledgeCashError(curveData)).toMatchObject({
+      name: "MigrationNotReady",
+      args: [1n, 2n, 3n],
+    });
   });
 });
 

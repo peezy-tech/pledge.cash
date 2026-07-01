@@ -6,6 +6,7 @@ import {LibClone} from "solady/utils/LibClone.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {FixedPriceSale} from "./FixedPriceSale.sol";
 import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
+import {MigratingBondingCurve} from "./MigratingBondingCurve.sol";
 
 interface IDistributionBoardroom {
     function shareToken() external view returns (address);
@@ -16,13 +17,19 @@ contract DistributionFactory is IBoardroomCallPolicy {
 
     bytes4 internal constant APPROVE_SELECTOR = 0x095ea7b3;
     uint256 internal constant FIXED_PRICE_SALE_CREATE_DATA_LENGTH = 4 + 32 * 8;
+    uint256 internal constant MIGRATING_CURVE_CREATE_DATA_LENGTH = 4 + 32 * 12;
+    uint256 internal constant BPS = 10_000;
+    uint256 internal constant MAX_CURVE_SUPPLY = 1e36;
     uint256 public constant MAX_DISTRIBUTIONS_PER_BOARDROOM = 128;
 
     enum DistributionKind {
-        FixedPriceSale
+        FixedPriceSale,
+        MigratingBondingCurve
     }
 
+    address public immutable lockedLiquidityFactory;
     address public immutable fixedPriceSaleLogic;
+    address public immutable migratingBondingCurveLogic;
 
     mapping(address => bool) public isDistribution;
     mapping(address => address) public distributionBoardroom;
@@ -43,8 +50,10 @@ contract DistributionFactory is IBoardroomCallPolicy {
         bytes32 salt
     );
 
-    constructor() {
+    constructor(address lockedLiquidityFactory_) {
+        lockedLiquidityFactory = lockedLiquidityFactory_;
         fixedPriceSaleLogic = address(new FixedPriceSale());
+        migratingBondingCurveLogic = address(new MigratingBondingCurve());
     }
 
     function createFixedPriceSale(FixedPriceSale.CreateParams calldata params) external returns (address sale) {
@@ -62,6 +71,27 @@ contract DistributionFactory is IBoardroomCallPolicy {
         _checkedTransferFrom(params.shareToken, msg.sender, sale, params.shareAmount);
     }
 
+    function createMigratingBondingCurve(MigratingBondingCurve.CreateParams calldata params)
+        external
+        returns (address curve)
+    {
+        if (lockedLiquidityFactory == address(0)) revert InvalidAddress();
+
+        uint256 shareAmount = params.saleSupply + params.migrationSupply;
+        curve = _createDistribution(
+            migratingBondingCurveLogic,
+            msg.sender,
+            params.shareToken,
+            params.quoteToken,
+            shareAmount,
+            params.salt,
+            DistributionKind.MigratingBondingCurve
+        );
+
+        MigratingBondingCurve(curve).initialize(msg.sender, lockedLiquidityFactory, params);
+        _checkedTransferFrom(params.shareToken, msg.sender, curve, shareAmount);
+    }
+
     function canCall(address boardroom, address, address target, uint256 value, bytes calldata data)
         external
         view
@@ -71,6 +101,10 @@ contract DistributionFactory is IBoardroomCallPolicy {
 
         bytes4 selector = _selector(data);
         if (target == address(this)) {
+            if (selector == DistributionFactory.createMigratingBondingCurve.selector) {
+                return _canCreateMigratingBondingCurve(boardroom, data);
+            }
+
             return
                 selector == DistributionFactory.createFixedPriceSale.selector
                     && _canCreateFixedPriceSale(boardroom, data);
@@ -82,7 +116,16 @@ contract DistributionFactory is IBoardroomCallPolicy {
 
         if (distributionBoardroom[target] != boardroom) return false;
 
-        return selector == FixedPriceSale.close.selector || selector == FixedPriceSale.cancel.selector;
+        DistributionKind kind = distributionKind[target];
+        if (kind == DistributionKind.FixedPriceSale) {
+            return selector == FixedPriceSale.close.selector || selector == FixedPriceSale.cancel.selector;
+        }
+        if (kind == DistributionKind.MigratingBondingCurve) {
+            return
+                selector == MigratingBondingCurve.cancel.selector || selector == MigratingBondingCurve.migrate.selector;
+        }
+
+        return false;
     }
 
     function distributionCountForBoardroom(address boardroom) external view returns (uint256) {
@@ -103,6 +146,14 @@ contract DistributionFactory is IBoardroomCallPolicy {
         );
     }
 
+    function predictMigratingBondingCurveAddress(address boardroom, bytes32 salt) external view returns (address) {
+        return LibClone.predictDeterministicAddress(
+            migratingBondingCurveLogic,
+            _cloneSalt(boardroom, DistributionKind.MigratingBondingCurve, salt),
+            address(this)
+        );
+    }
+
     function _canCreateFixedPriceSale(address boardroom, bytes calldata data) internal view returns (bool) {
         if (data.length != FIXED_PRICE_SALE_CREATE_DATA_LENGTH) return false;
 
@@ -110,6 +161,22 @@ contract DistributionFactory is IBoardroomCallPolicy {
         return params.shareToken == IDistributionBoardroom(boardroom).shareToken() && params.paymentToken != address(0)
             && params.shareAmount != 0 && params.price != 0
             && (params.endTime == 0 || params.endTime >= params.startTime);
+    }
+
+    function _canCreateMigratingBondingCurve(address boardroom, bytes calldata data) internal view returns (bool) {
+        if (lockedLiquidityFactory == address(0)) return false;
+        if (data.length != MIGRATING_CURVE_CREATE_DATA_LENGTH) return false;
+
+        MigratingBondingCurve.CreateParams memory params = abi.decode(data[4:], (MigratingBondingCurve.CreateParams));
+        if (params.shareToken != IDistributionBoardroom(boardroom).shareToken()) return false;
+        if (params.quoteToken == address(0) || params.quoteToken == params.shareToken) return false;
+        if (params.saleSupply == 0 || params.migrationSupply == 0) return false;
+        if (params.saleSupply > MAX_CURVE_SUPPLY || params.migrationSupply > MAX_CURVE_SUPPLY - params.saleSupply) {
+            return false;
+        }
+        if (params.basePrice == 0 || params.graduationQuoteTarget == 0) return false;
+        if (params.quoteToLpBps == 0 || params.quoteToLpBps > BPS) return false;
+        return params.endTime == 0 || params.endTime >= params.startTime;
     }
 
     function _canApproveDistributionFactory(address boardroom, address token, bytes calldata data)

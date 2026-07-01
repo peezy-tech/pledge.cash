@@ -21,6 +21,7 @@ import {
   fixedPriceSaleAbi,
   lockedLiquidityAbi,
   lockedLiquidityFactoryAbi,
+  migratingBondingCurveAbi,
   poolFeesAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
@@ -65,6 +66,23 @@ export type FixedPriceSaleTerms = {
 };
 
 export type BoardroomFixedPriceSaleTerms = Omit<FixedPriceSaleTerms, "shareToken">;
+
+export type MigratingBondingCurveTerms = {
+  shareToken: Address;
+  quoteToken: Address;
+  saleSupply: bigint;
+  migrationSupply: bigint;
+  basePrice: bigint;
+  slope: bigint;
+  graduationQuoteTarget: bigint;
+  quoteToLpBps: number;
+  startTime: bigint;
+  endTime: bigint;
+  migrationSalt: Hex;
+  salt: Hex;
+};
+
+export type BoardroomMigratingBondingCurveTerms = Omit<MigratingBondingCurveTerms, "shareToken">;
 
 export type LockedLiquidityTerms = {
   tokenA: Address;
@@ -122,6 +140,32 @@ export type FixedPriceSaleState = {
   startTime: bigint;
   endTime: bigint;
   saleStatus: number;
+  closed: boolean;
+};
+
+export type MigratingBondingCurveState = {
+  address: Address;
+  factory: Address;
+  boardroom: Address;
+  lockedLiquidityFactory: Address;
+  shareToken: Address;
+  quoteToken: Address;
+  locker: Address;
+  pool: Address;
+  saleSupply: bigint;
+  migrationSupply: bigint;
+  remainingSaleShares: bigint;
+  basePrice: bigint;
+  slope: bigint;
+  graduationQuoteTarget: bigint;
+  quoteToLpBps: number;
+  startTime: bigint;
+  endTime: bigint;
+  migrationSalt: Hex;
+  curveStatus: number;
+  soldShares: bigint;
+  quoteReserve: bigint;
+  canMigrate: boolean;
   closed: boolean;
 };
 
@@ -214,6 +258,7 @@ const pledgeCashErrorAbi = [
   ...fixedPriceSaleAbi,
   ...lockedLiquidityAbi,
   ...lockedLiquidityFactoryAbi,
+  ...migratingBondingCurveAbi,
   ...poolFeesAbi,
   ...tokenGrantAbi,
   ...tokenGrantFactoryAbi,
@@ -385,6 +430,18 @@ export async function predictFixedPriceSaleAddress(
   })) as Address;
 }
 
+export async function predictMigratingBondingCurveAddress(
+  client: PledgeCashReadClient,
+  input: { factory: Address; boardroom: Address; salt: Hex },
+): Promise<Address> {
+  return (await client.readContract({
+    address: input.factory,
+    abi: distributionFactoryAbi,
+    functionName: "predictMigratingBondingCurveAddress",
+    args: [input.boardroom, input.salt],
+  })) as Address;
+}
+
 export async function predictAmmPoolAddress(
   client: PledgeCashReadClient,
   input: { factory: Address; tokenA: Address; tokenB: Address },
@@ -454,6 +511,85 @@ export async function readFixedPriceSaleState(
     startTime: startTime as bigint,
     endTime: endTime as bigint,
     saleStatus: Number(saleStatus),
+    closed: closed as boolean,
+  };
+}
+
+export async function readMigratingBondingCurveState(
+  client: PledgeCashReadClient,
+  curve: Address,
+): Promise<MigratingBondingCurveState> {
+  const [
+    factory,
+    boardroom,
+    lockedLiquidityFactory,
+    shareToken,
+    quoteToken,
+    locker,
+    pool,
+    saleSupply,
+    migrationSupply,
+    remainingSaleShares,
+    basePrice,
+    slope,
+    graduationQuoteTarget,
+    quoteToLpBps,
+    startTime,
+    endTime,
+    migrationSalt,
+    curveStatus,
+    soldShares,
+    quoteReserve,
+    canMigrate,
+    closed,
+  ] = await Promise.all([
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "factory" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "boardroom" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "lockedLiquidityFactory" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "shareToken" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "quoteToken" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "locker" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "pool" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "saleSupply" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "migrationSupply" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "remainingSaleShares" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "basePrice" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "slope" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "graduationQuoteTarget" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "quoteToLpBps" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "startTime" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "endTime" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "migrationSalt" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "curveStatus" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "soldShares" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "quoteReserve" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "canMigrate" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "isClosed" }),
+  ]);
+
+  return {
+    address: curve,
+    factory: factory as Address,
+    boardroom: boardroom as Address,
+    lockedLiquidityFactory: lockedLiquidityFactory as Address,
+    shareToken: shareToken as Address,
+    quoteToken: quoteToken as Address,
+    locker: locker as Address,
+    pool: pool as Address,
+    saleSupply: saleSupply as bigint,
+    migrationSupply: migrationSupply as bigint,
+    remainingSaleShares: remainingSaleShares as bigint,
+    basePrice: basePrice as bigint,
+    slope: slope as bigint,
+    graduationQuoteTarget: graduationQuoteTarget as bigint,
+    quoteToLpBps: Number(quoteToLpBps),
+    startTime: startTime as bigint,
+    endTime: endTime as bigint,
+    migrationSalt: migrationSalt as Hex,
+    curveStatus: Number(curveStatus),
+    soldShares: soldShares as bigint,
+    quoteReserve: quoteReserve as bigint,
+    canMigrate: canMigrate as boolean,
     closed: closed as boolean,
   };
 }
@@ -551,6 +687,25 @@ export function fixedPriceSaleArgs(terms: FixedPriceSaleTerms) {
   ] as const;
 }
 
+export function migratingBondingCurveArgs(terms: MigratingBondingCurveTerms) {
+  return [
+    {
+      shareToken: terms.shareToken,
+      quoteToken: terms.quoteToken,
+      saleSupply: terms.saleSupply,
+      migrationSupply: terms.migrationSupply,
+      basePrice: terms.basePrice,
+      slope: terms.slope,
+      graduationQuoteTarget: terms.graduationQuoteTarget,
+      quoteToLpBps: terms.quoteToLpBps,
+      startTime: terms.startTime,
+      endTime: terms.endTime,
+      migrationSalt: terms.migrationSalt,
+      salt: terms.salt,
+    },
+  ] as const;
+}
+
 export function lockedLiquidityArgs(terms: LockedLiquidityTerms) {
   return [
     {
@@ -625,6 +780,107 @@ export function buildBoardroomFixedPriceSaleBatch(input: {
   return buildBoardroomExecuteBatchTransaction({
     boardroom: input.boardroom,
     calls,
+  });
+}
+
+export function buildBoardroomMigratingCurveApprovalCall(input: {
+  policy: Address;
+  shareToken: Address;
+  factory: Address;
+  saleSupply: bigint;
+  migrationSupply: bigint;
+}): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.shareToken,
+    data: encodeFunctionData({
+      abi: boardroomTokenAbi,
+      functionName: "approve",
+      args: [input.factory, input.saleSupply + input.migrationSupply],
+    }),
+  });
+}
+
+export function buildBoardroomMigratingCurveCreationCall(input: {
+  policy: Address;
+  factory: Address;
+  terms: MigratingBondingCurveTerms;
+}): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.factory,
+    data: encodeFunctionData({
+      abi: distributionFactoryAbi,
+      functionName: "createMigratingBondingCurve",
+      args: migratingBondingCurveArgs(input.terms),
+    }),
+  });
+}
+
+export function buildBoardroomMigratingCurveBatch(input: {
+  boardroom: Address;
+  factory: Address;
+  shareToken: Address;
+  terms: BoardroomMigratingBondingCurveTerms;
+  policy?: Address;
+}) {
+  const policy = input.policy ?? input.factory;
+  const terms = { ...input.terms, shareToken: input.shareToken } satisfies MigratingBondingCurveTerms;
+  const calls = [
+    buildBoardroomMigratingCurveApprovalCall({
+      policy,
+      shareToken: input.shareToken,
+      factory: input.factory,
+      saleSupply: input.terms.saleSupply,
+      migrationSupply: input.terms.migrationSupply,
+    }),
+    buildBoardroomMigratingCurveCreationCall({
+      policy,
+      factory: input.factory,
+      terms,
+    }),
+  ] as const;
+
+  return buildBoardroomExecuteBatchTransaction({
+    boardroom: input.boardroom,
+    calls,
+  });
+}
+
+export function buildBoardroomMigratingCurveCancelAction(input: {
+  boardroom: Address;
+  policy: Address;
+  curve: Address;
+}) {
+  return buildBoardroomExecuteTransaction({
+    boardroom: input.boardroom,
+    call: buildBoardroomCall({
+      policy: input.policy,
+      target: input.curve,
+      data: encodeFunctionData({ abi: migratingBondingCurveAbi, functionName: "cancel" }),
+    }),
+  });
+}
+
+export function buildBoardroomMigratingCurveMigrationAction(input: {
+  boardroom: Address;
+  policy: Address;
+  curve: Address;
+  minShareLiquidity: bigint;
+  minQuoteLiquidity: bigint;
+  deadline: bigint;
+}) {
+  return buildBoardroomExecuteTransaction({
+    boardroom: input.boardroom,
+    call: buildBoardroomCall({
+      policy: input.policy,
+      target: input.curve,
+      data: encodeFunctionData({
+        abi: migratingBondingCurveAbi,
+        functionName: "migrate",
+        args: [input.minShareLiquidity, input.minQuoteLiquidity, input.deadline],
+      }),
+    }),
   });
 }
 
