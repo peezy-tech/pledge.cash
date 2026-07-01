@@ -25,6 +25,8 @@
     "deploy:hyperevm-testnet": "bun --cwd packages/contracts deploy:hyperevm-testnet",
     "format": "bun --cwd packages/contracts format",
     "format:check": "bun --cwd packages/contracts format:check",
+    "scenario:project-token:dry-run": "bun --cwd packages/contracts scenario:project-token:dry-run",
+    "scenario:project-token:local": "bun --cwd packages/contracts scenario:project-token:local",
     "simulate:hyperevm-testnet": "bun --cwd packages/contracts simulate:hyperevm-testnet",
     "test": "bun --cwd packages/contracts test && bun --cwd packages/sdk test && bun --cwd apps/web test"
   },
