@@ -1,7 +1,7 @@
 # Deployment
 
-This document covers the current contract deployment surface for TokenGrant, Boardroom, and fixed-price distribution
-primitives. AMM, SDK, and website deployment flows should get their own sections when those products are reintroduced.
+This document covers the current contract deployment surface for TokenGrant, Boardroom, fixed-price distribution, AMM,
+and locked-liquidity primitives.
 
 ## HyperEVM Testnet
 
@@ -11,9 +11,14 @@ primitives. AMM, SDK, and website deployment flows should get their own sections
 - Wrapper: `packages/contracts/script/hyperevm-testnet/deploy.sh`
 - Artifact: `packages/contracts/deployments/998.json`
 
-The deploy script creates one `BoardroomPolicyRegistry`, one `TokenGrantFactory`, one `DistributionFactory`, and one
-`BoardroomFactory`. It allows the token grant factory and distribution factory as Boardroom policies, records the grant
-logic, and optionally sets the native grant creation fee.
+The deploy script creates one `BoardroomPolicyRegistry`, one `TokenGrantFactory`, one `DistributionFactory`, one
+`AmmFactory`, and one `BoardroomFactory`. It allows the token grant factory and distribution factory as Boardroom
+policies, records the grant logic, and optionally sets the native grant creation fee.
+
+If `WRAPPED_NATIVE_ADDRESS` is set, the deploy script also creates one `AmmRouter` and one `LockedLiquidityFactory`,
+then allows the locked-liquidity factory as a Boardroom policy. If `WRAPPED_NATIVE_ADDRESS` is not set, AMM pools can
+still be deployed through `AmmFactory`, but router native-token paths and Boardroom locked-liquidity creation are not
+published in the deployment artifact.
 
 The checked-in HyperEVM testnet artifact may model subsystems independently while deployment history is being rebuilt.
 If an existing artifact predates a current subsystem, mark that subsystem pending instead of keeping stale partial fields.
@@ -39,6 +44,7 @@ Optional:
 ```sh
 HYPEREVM_TESTNET_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
 TOKEN_GRANT_CREATION_FEE_WEI=100000000000000000
+WRAPPED_NATIVE_ADDRESS=
 HYPEREVM_GAS_PRICE_WEI=
 GAS_ESTIMATE_MULTIPLIER=200
 ```
@@ -73,6 +79,7 @@ After a broadcast, verify `packages/contracts/deployments/998.json` contains:
 - `boardroomPolicyRegistry`
 - `boardroomFactory`
 - `distributionFactory`
+- `ammFactory`
 - `policyRegistryOwner`
 - `tokenGrantPolicyAllowed`
 - `distributionPolicyAllowed`
@@ -81,6 +88,13 @@ After a broadcast, verify `packages/contracts/deployments/998.json` contains:
 - `tokenGrantLogic`
 - `creationFee`
 - `deploymentTimestamp`
+
+If `WRAPPED_NATIVE_ADDRESS` was configured, the artifact should also contain:
+
+- `wrappedNative`
+- `ammRouter`
+- `lockedLiquidityFactory`
+- `lockedLiquidityPolicyAllowed`
 
 For a partial artifact, keep the deployed subsystem fields and add the relevant pending status/reason fields for the
 missing subsystem.

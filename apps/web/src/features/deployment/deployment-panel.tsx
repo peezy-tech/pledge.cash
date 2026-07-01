@@ -14,6 +14,7 @@ type DeploymentPanelProps = {
 
 export function DeploymentPanel({ chainId, creationFee, deployment, factorySnapshot }: DeploymentPanelProps): React.JSX.Element {
   const boardroomState = deployment?.boardroomFactory ? "Ready" : deployment?.boardroomStatus === "pending" ? "Pending" : "Not in artifact";
+  const ammState = deployment?.ammRouter ? "Router ready" : deployment?.ammFactory ? "Factory only" : "Not in artifact";
   const tokenGrantLogic = factorySnapshot.tokenGrantLogic ?? deployment?.tokenGrantLogic;
   const factoryOwner = factorySnapshot.owner ?? deployment?.factoryOwner;
 
@@ -38,6 +39,15 @@ export function DeploymentPanel({ chainId, creationFee, deployment, factorySnaps
           {
             label: "BoardroomFactory",
             value: deployment?.boardroomFactory ? <AddressLink address={deployment.boardroomFactory} /> : deployment?.boardroomReason ?? "Not in artifact",
+          },
+          { label: "AMM", value: ammState },
+          {
+            label: "AmmFactory",
+            value: deployment?.ammFactory ? <AddressLink address={deployment.ammFactory} /> : "Not in artifact",
+          },
+          {
+            label: "LockedLiquidityFactory",
+            value: deployment?.lockedLiquidityFactory ? <AddressLink address={deployment.lockedLiquidityFactory} /> : "Not in artifact",
           },
           { label: "Creation fee", value: `${bigintString(creationFee)} wei` },
           {

@@ -1,14 +1,25 @@
 import { describe, expect, test } from "bun:test";
 import { encodeErrorResult, encodeFunctionData, type Address, type Hex } from "viem";
 import {
+  ammPoolAbi,
+  ammRouterAbi,
   boardroomAbi,
   boardroomTokenAbi,
   buildBoardroomFixedPriceSaleBatch,
+  buildBoardroomLockedLiquidityBatch,
+  buildBoardroomLockedLiquidityExitTransaction,
+  buildBoardroomLockedLiquidityFeeClaimAction,
   buildBoardroomShareGrantIssuanceBatch,
   buildDirectGrantCreationTransaction,
   buildErc20Approval,
   decodeKnownPledgeCashError,
   distributionFactoryAbi,
+  erc20Abi,
+  lockedLiquidityAbi,
+  lockedLiquidityFactoryAbi,
+  poolFeesAbi,
+  predictAmmPoolAddress,
+  predictLockedLiquidityAddress,
   queryGrantsHeldByAddress,
   queryGrantsIssuedByAddress,
   readBoardroomState,
@@ -16,6 +27,7 @@ import {
   readFixedPriceSaleState,
   readGrantState,
   tokenGrantFactoryAbi,
+  type BoardroomLockedLiquidityTerms,
   type BoardroomFixedPriceSaleTerms,
   type GrantCreationTerms,
   type PledgeCashLogClient,
@@ -32,6 +44,9 @@ const grantToken = "0x0000000000000000000000000000000000000123" as Address;
 const paymentToken = "0x0000000000000000000000000000000000000456" as Address;
 const distributionFactory = "0x0000000000000000000000000000000000000d15" as Address;
 const sale = "0x0000000000000000000000000000000000000a1e" as Address;
+const ammFactory = "0x0000000000000000000000000000000000000aee" as Address;
+const lockedLiquidityFactory = "0x00000000000000000000000000000000000010cc" as Address;
+const locker = "0x00000000000000000000000000000000000010cd" as Address;
 const salt = "0x1111111111111111111111111111111111111111111111111111111111111111" as Hex;
 
 const terms = {
@@ -58,6 +73,16 @@ const saleTerms = {
   salt,
 } satisfies BoardroomFixedPriceSaleTerms;
 
+const lockedLiquidityTerms = {
+  quoteToken: paymentToken,
+  shareAmountDesired: 1000n,
+  quoteAmountDesired: 2000n,
+  shareAmountMin: 900n,
+  quoteAmountMin: 1900n,
+  deadline: 12345n,
+  salt,
+} satisfies BoardroomLockedLiquidityTerms;
+
 describe("SDK action and query helpers", () => {
   test("reads factory, grant, and Boardroom state through standard viem calls", async () => {
     const client = mockReadClient({
@@ -82,6 +107,7 @@ describe("SDK action and query helpers", () => {
       getRedeemableAssets: [paymentToken],
       getIssuedGrants: [boardroom],
       getIssuedDistributions: [sale],
+      getLockedLiquidityPositions: [locker],
       factory,
       boardroom,
       saleSupply: 1000n,
@@ -110,6 +136,7 @@ describe("SDK action and query helpers", () => {
       status: 1,
       redeemableAssets: [paymentToken],
       issuedDistributions: [sale],
+      lockedLiquidityPositions: [locker],
     });
     await expect(readFixedPriceSaleState(client, sale)).resolves.toMatchObject({
       address: sale,
@@ -231,6 +258,92 @@ describe("SDK action and query helpers", () => {
     );
   });
 
+  test("builds Boardroom locked-liquidity transaction inputs", () => {
+    const batch = buildBoardroomLockedLiquidityBatch({
+      boardroom,
+      factory: lockedLiquidityFactory,
+      shareToken,
+      terms: lockedLiquidityTerms,
+    });
+
+    expect(batch.address).toBe(boardroom);
+    expect(batch.abi).toBe(boardroomAbi);
+    expect(batch.functionName).toBe("executeBatch");
+    expect(batch.value).toBe(0n);
+
+    const calls = batch.args[0];
+    expect(calls).toHaveLength(3);
+    expect(calls[0]).toMatchObject({ policy: lockedLiquidityFactory, target: shareToken, value: 0n });
+    expect(calls[0]?.data).toBe(
+      encodeFunctionData({
+        abi: erc20Abi,
+        functionName: "approve",
+        args: [lockedLiquidityFactory, lockedLiquidityTerms.shareAmountDesired],
+      }),
+    );
+    expect(calls[1]).toMatchObject({ policy: lockedLiquidityFactory, target: paymentToken, value: 0n });
+    expect(calls[1]?.data).toBe(
+      encodeFunctionData({
+        abi: erc20Abi,
+        functionName: "approve",
+        args: [lockedLiquidityFactory, lockedLiquidityTerms.quoteAmountDesired],
+      }),
+    );
+    expect(calls[2]).toMatchObject({ policy: lockedLiquidityFactory, target: lockedLiquidityFactory, value: 0n });
+    expect(calls[2]?.data).toBe(
+      encodeFunctionData({
+        abi: lockedLiquidityFactoryAbi,
+        functionName: "createLockedLiquidity",
+        args: [
+          {
+            tokenA: shareToken,
+            tokenB: paymentToken,
+            amountADesired: 1000n,
+            amountBDesired: 2000n,
+            amountAMin: 900n,
+            amountBMin: 1900n,
+            deadline: 12345n,
+            salt,
+          },
+        ],
+      }),
+    );
+
+    const exit = buildBoardroomLockedLiquidityExitTransaction({
+      boardroom,
+      locker,
+      amountAMin: 1n,
+      amountBMin: 2n,
+      deadline: 12345n,
+    });
+    expect(exit.address).toBe(boardroom);
+    expect(exit.abi).toBe(boardroomAbi);
+    expect(exit.functionName).toBe("exitLockedLiquidity");
+    expect(exit.args).toEqual([locker, 1n, 2n, 12345n]);
+
+    const claim = buildBoardroomLockedLiquidityFeeClaimAction({
+      boardroom,
+      policy: lockedLiquidityFactory,
+      locker,
+    });
+    expect(claim.address).toBe(boardroom);
+    expect(claim.abi).toBe(boardroomAbi);
+    expect(claim.functionName).toBe("execute");
+    expect(claim.args[0]).toMatchObject({ policy: lockedLiquidityFactory, target: locker, value: 0n });
+    expect(claim.args[0].data).toBe(encodeFunctionData({ abi: lockedLiquidityAbi, functionName: "claimFees" }));
+  });
+
+  test("predicts AMM pool and locked-liquidity addresses", async () => {
+    const pool = "0x0000000000000000000000000000000000000a00" as Address;
+    const client = mockReadClient({
+      predictPoolAddress: pool,
+      predictLockedLiquidityAddress: locker,
+    });
+
+    await expect(predictAmmPoolAddress(client, { factory: ammFactory, tokenA: shareToken, tokenB: paymentToken })).resolves.toBe(pool);
+    await expect(predictLockedLiquidityAddress(client, { factory: lockedLiquidityFactory, boardroom, salt })).resolves.toBe(locker);
+  });
+
   test("folds creation, transfer, and close logs into issued and held grants", async () => {
     const firstGrant = "0x0000000000000000000000000000000000001001" as Address;
     const secondGrant = "0x0000000000000000000000000000000000001002" as Address;
@@ -272,6 +385,29 @@ describe("SDK action and query helpers", () => {
     expect(decoded?.name).toBe("InvalidCreationFeePayment");
     expect(decoded?.args).toEqual([10n, 0n]);
     expect(decoded?.message).toBe("Invalid creation fee payment: expected 10, received 0.");
+
+    const routerData = encodeErrorResult({
+      abi: ammRouterAbi,
+      errorName: "TransferAmountMismatch",
+      args: [paymentToken, 10n, 9n],
+    });
+    expect(decodeKnownPledgeCashError(routerData)).toMatchObject({
+      name: "TransferAmountMismatch",
+      args: [paymentToken, 10n, 9n],
+    });
+
+    const poolData = encodeErrorResult({
+      abi: ammPoolAbi,
+      errorName: "TooManySamplePoints",
+      args: [33n, 32n],
+    });
+    expect(decodeKnownPledgeCashError(poolData)).toMatchObject({
+      name: "TooManySamplePoints",
+      args: [33n, 32n],
+    });
+
+    const feeVaultData = encodeErrorResult({ abi: poolFeesAbi, errorName: "OnlyPool" });
+    expect(decodeKnownPledgeCashError(feeVaultData)).toMatchObject({ name: "OnlyPool", args: [] });
   });
 });
 
