@@ -19,11 +19,14 @@ This document describes the AMM and Boardroom-owned locked liquidity primitives 
 ## Assets
 
 - Pool reserves: the two ERC20 tokens held by `AmmPool`.
-- LP swap fees: `30 bps` of swap input, segregated into the pool's `PoolFees` vault and indexed to LP token holders.
+- LP swap fees: the LP share of the `30 bps` swap input fee, segregated into the pool's `PoolFees` vault and indexed to LP token holders.
+- Protocol swap fees: optional protocol share of the swap fee, paid directly to the factory's one-way protocol fee recipient.
 - LP principal: ERC20 LP tokens minted by the pool. Boardroom-owned principal sits inside a `LockedLiquidity` clone.
 - Native gas token: supported only through `AmmRouter` and its immutable wrapped-native token.
 
-Protocol fee routing is intentionally not part of this slice. Fee-recipient plumbing belongs to the later fee-management slice.
+`AmmFactory.setProtocolFeeRecipient` can be called once by the deploying fee manager. When unset, all swap fees accrue
+to LPs. When set, `PROTOCOL_FEE_SHARE_BPS` of each nominal swap fee is transferred directly to the protocol recipient,
+and the remainder is transferred to `PoolFees` for LP claims.
 
 ## State Machines
 
@@ -92,8 +95,10 @@ Effects:
 - pool optimistically transfers output,
 - optional callback runs,
 - pool measures input by balance delta,
-- `30 bps` fee is removed from reserves and moved to `PoolFees`,
-- LP fee index for the input token advances,
+- `30 bps` fee is removed from reserves,
+- the protocol share, if configured, is transferred to the protocol fee recipient,
+- the LP share is moved to `PoolFees`,
+- LP fee index for the input token advances by the actual amount received by `PoolFees`,
 - adjusted reserves must preserve or increase `x*y`,
 - reserve and cumulative price state update.
 
@@ -136,8 +141,9 @@ Redemptions can open only after all recorded lockers report zero locked LP. Firs
 ## Invariants
 
 - one pool exists per sorted token pair,
-- pool reserves equal pool token balances after fees are moved to `PoolFees`,
+- pool reserves equal pool token balances after fees are moved to `PoolFees` and the protocol recipient,
 - LP fee claims cannot exceed `PoolFees` balances,
+- protocol fee routing can only be configured once by the factory fee manager,
 - LP transfers update sender and recipient fee indexes before balances move,
 - locked Boardroom LP principal remains in the locker while the Boardroom is active,
 - Boardroom redemptions cannot open while any recorded locker still holds LP,

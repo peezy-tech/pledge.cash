@@ -84,6 +84,7 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     );
     event Sync(uint112 reserve0, uint112 reserve1);
     event FeesClaimed(address indexed owner, uint256 amount0, uint256 amount1);
+    event ProtocolFeesAccrued(address indexed recipient, address indexed token, uint256 amount);
 
     constructor() {
         _disableInitializers();
@@ -292,16 +293,32 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     function _accrueFee(address token, uint256 amountIn, bool zeroForOne) internal returns (uint256 debitedFee) {
         if (amountIn == 0) return 0;
 
-        uint256 denominator = AmmFactory(factory).FEE_DENOMINATOR();
-        debitedFee = amountIn * AmmFactory(factory).SWAP_FEE_BPS() / denominator;
+        AmmFactory factory_ = AmmFactory(factory);
+        uint256 denominator = factory_.FEE_DENOMINATOR();
+        debitedFee = amountIn * factory_.SWAP_FEE_BPS() / denominator;
         if (debitedFee == 0) return 0;
 
-        uint256 feeBalanceBefore = ERC20(token).balanceOf(poolFees);
-        token.safeTransfer(poolFees, debitedFee);
-        uint256 feeBalanceAfter = ERC20(token).balanceOf(poolFees);
-        if (feeBalanceAfter < feeBalanceBefore) revert UnexpectedFeeTransfer(token, debitedFee, 0);
+        address protocolFeeRecipient = factory_.protocolFeeRecipient();
+        uint256 protocolFee;
+        if (protocolFeeRecipient != address(0)) {
+            protocolFee = debitedFee * factory_.PROTOCOL_FEE_SHARE_BPS() / denominator;
+        }
 
-        uint256 receivedFee = feeBalanceAfter - feeBalanceBefore;
+        uint256 lpFee = debitedFee - protocolFee;
+        uint256 receivedFee;
+        if (lpFee != 0) {
+            (uint256 spent, uint256 received) = _transferFee(token, poolFees, lpFee);
+            debitedFee = spent;
+            receivedFee = received;
+        } else {
+            debitedFee = 0;
+        }
+        if (protocolFee != 0) {
+            (uint256 spent, uint256 received) = _transferFee(token, protocolFeeRecipient, protocolFee);
+            debitedFee += spent;
+            if (received != 0) emit ProtocolFeesAccrued(protocolFeeRecipient, token, received);
+        }
+
         uint256 supply = totalSupply();
         if (supply != 0 && receivedFee != 0) {
             if (zeroForOne) {
@@ -310,6 +327,23 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
                 index1 += receivedFee * FEE_INDEX_SCALE / supply;
             }
         }
+    }
+
+    function _transferFee(address token, address recipient, uint256 amount)
+        internal
+        returns (uint256 spent, uint256 received)
+    {
+        uint256 poolBalanceBefore = ERC20(token).balanceOf(address(this));
+        uint256 recipientBalanceBefore = ERC20(token).balanceOf(recipient);
+        token.safeTransfer(recipient, amount);
+
+        uint256 poolBalanceAfter = ERC20(token).balanceOf(address(this));
+        if (poolBalanceAfter > poolBalanceBefore) revert UnexpectedFeeTransfer(token, amount, 0);
+        spent = poolBalanceBefore - poolBalanceAfter;
+
+        uint256 recipientBalanceAfter = ERC20(token).balanceOf(recipient);
+        if (recipientBalanceAfter < recipientBalanceBefore) revert UnexpectedFeeTransfer(token, amount, 0);
+        received = recipientBalanceAfter - recipientBalanceBefore;
     }
 
     function _update(uint256 balance0, uint256 balance1, uint112 reserve0_, uint112 reserve1_) internal {

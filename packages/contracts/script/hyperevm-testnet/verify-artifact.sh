@@ -161,6 +161,11 @@ fi
 if field_exists ammFactory; then
   amm_factory="$(field ammFactory)"
   require_code "AmmFactory" "$amm_factory"
+
+  if field_exists ammProtocolFeeRecipient; then
+    actual_amm_protocol_fee_recipient="$(call_address "$amm_factory" "protocolFeeRecipient()(address)")"
+    expect_address_equal "AmmFactory protocolFeeRecipient" "$(field ammProtocolFeeRecipient)" "$actual_amm_protocol_fee_recipient"
+  fi
 fi
 
 if field_exists ammRouter || field_exists lockedLiquidityFactory; then

@@ -13,6 +13,7 @@ export type PledgeCashDeployment = {
   boardroomPolicyRegistry?: Address;
   distributionFactory?: Address;
   ammFactory?: Address;
+  ammProtocolFeeRecipient?: Address;
   ammRouter?: Address;
   lockedLiquidityFactory?: Address;
   tokenGrantFactory?: Address;
@@ -37,6 +38,19 @@ export const ammFactoryAbi = [
   {
     "type": "function",
     "name": "FEE_DENOMINATOR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "PROTOCOL_FEE_SHARE_BPS",
     "inputs": [],
     "outputs": [
       {
@@ -115,6 +129,19 @@ export const ammFactoryAbi = [
       }
     ],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "feeManager",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -198,6 +225,32 @@ export const ammFactoryAbi = [
   },
   {
     "type": "function",
+    "name": "protocolFeeRecipient",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "setProtocolFeeRecipient",
+    "inputs": [
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "sortTokens",
     "inputs": [
       {
@@ -257,8 +310,26 @@ export const ammFactoryAbi = [
     "anonymous": false
   },
   {
+    "type": "event",
+    "name": "ProtocolFeeRecipientSet",
+    "inputs": [
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
     "type": "error",
     "name": "IdenticalTokens",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyFeeManager",
     "inputs": []
   },
   {
@@ -267,6 +338,17 @@ export const ammFactoryAbi = [
     "inputs": [
       {
         "name": "pool",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ProtocolFeeRecipientAlreadySet",
+    "inputs": [
+      {
+        "name": "recipient",
         "type": "address",
         "internalType": "address"
       }
@@ -1131,6 +1213,31 @@ export const ammPoolAbi = [
       },
       {
         "name": "amount1",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProtocolFeesAccrued",
+    "inputs": [
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
