@@ -1,7 +1,11 @@
 import type {
   Address,
   BoardroomState,
+  DiscoveredBoardroom,
+  DiscoveredDistribution,
   DiscoveredGrant,
+  DiscoveredLockedLiquidity,
+  DiscoveredPool,
   FixedPriceSaleState,
   GrantState,
   LockedLiquidityState,
@@ -165,4 +169,27 @@ export type MyGrantsSnapshot = {
   loadedFor?: Address;
   fromBlock?: bigint;
   includeClosed: boolean;
+};
+
+export type DiscoveryForm = {
+  fromBlock: string;
+  toBlock: string;
+  chunkSize: string;
+  includeClosedGrants: boolean;
+};
+
+export type DiscoverySnapshot = {
+  chainId?: number;
+  loadedFor?: Address;
+  fromBlock?: bigint;
+  toBlock?: bigint | "latest";
+  chunkSize?: bigint;
+  lastScannedBlock?: bigint;
+  complete: boolean;
+  errors: string[];
+  boardroomsByAddress: Record<string, DiscoveredBoardroom>;
+  grantsByAddress: Record<string, DiscoveredGrant>;
+  distributionsByAddress: Record<string, DiscoveredDistribution>;
+  lockersByAddress: Record<string, DiscoveredLockedLiquidity>;
+  poolsByAddress: Record<string, DiscoveredPool>;
 };
