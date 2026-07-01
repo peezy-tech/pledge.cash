@@ -6,9 +6,12 @@ import {AmmPool} from "./AmmPool.sol";
 
 contract AmmFactory {
     uint256 public constant SWAP_FEE_BPS = 30;
+    uint256 public constant PROTOCOL_FEE_SHARE_BPS = 500;
     uint256 public constant FEE_DENOMINATOR = 10_000;
 
+    address public immutable feeManager;
     address public immutable poolImplementation;
+    address public protocolFeeRecipient;
     address[] public allPools;
 
     mapping(address => mapping(address => address)) public getPool;
@@ -17,11 +20,24 @@ contract AmmFactory {
     error IdenticalTokens();
     error ZeroAddress();
     error PoolAlreadyExists(address pool);
+    error OnlyFeeManager();
+    error ProtocolFeeRecipientAlreadySet(address recipient);
 
     event PoolCreated(address indexed token0, address indexed token1, address indexed pool, uint256 poolCount);
+    event ProtocolFeeRecipientSet(address indexed recipient);
 
     constructor() {
+        feeManager = msg.sender;
         poolImplementation = address(new AmmPool());
+    }
+
+    function setProtocolFeeRecipient(address recipient) external {
+        if (msg.sender != feeManager) revert OnlyFeeManager();
+        if (recipient == address(0)) revert ZeroAddress();
+        if (protocolFeeRecipient != address(0)) revert ProtocolFeeRecipientAlreadySet(protocolFeeRecipient);
+
+        protocolFeeRecipient = recipient;
+        emit ProtocolFeeRecipientSet(recipient);
     }
 
     function createPool(address tokenA, address tokenB) external returns (address pool) {

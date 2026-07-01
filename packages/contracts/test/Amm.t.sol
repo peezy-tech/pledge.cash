@@ -132,6 +132,7 @@ contract AmmTest is Test {
     address internal lp = address(0xA11CE);
     address internal trader = address(0xB0B);
     address internal receiver = address(0xCAFE);
+    address internal protocolFeeRecipient = address(0xFEE);
 
     function setUp() public {
         factory = new AmmFactory();
@@ -166,6 +167,25 @@ contract AmmTest is Test {
 
         vm.expectRevert(AmmFactory.ZeroAddress.selector);
         factory.createPool(address(0), address(tokenA));
+    }
+
+    function testFactorySetsProtocolFeeRecipientOnce() public {
+        assertEq(factory.feeManager(), address(this));
+
+        vm.prank(trader);
+        vm.expectRevert(AmmFactory.OnlyFeeManager.selector);
+        factory.setProtocolFeeRecipient(protocolFeeRecipient);
+
+        vm.expectRevert(AmmFactory.ZeroAddress.selector);
+        factory.setProtocolFeeRecipient(address(0));
+
+        factory.setProtocolFeeRecipient(protocolFeeRecipient);
+        assertEq(factory.protocolFeeRecipient(), protocolFeeRecipient);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(AmmFactory.ProtocolFeeRecipientAlreadySet.selector, protocolFeeRecipient)
+        );
+        factory.setProtocolFeeRecipient(receiver);
     }
 
     function testRouterRejectsNonContractDependencies() public {
@@ -234,6 +254,28 @@ contract AmmTest is Test {
         vm.prank(lp);
         AmmPool(pool).claimFees();
         assertGt(tokenA.balanceOf(lp), beforeClaim);
+    }
+
+    function testSwapSplitsProtocolFeesFromLpFees() public {
+        factory.setProtocolFeeRecipient(protocolFeeRecipient);
+        (address pool,) = _seedTokenPool(1_000 ether, 1_000 ether);
+        address fees = AmmPool(pool).poolFees();
+
+        uint256 nominalFee = 100 ether * factory.SWAP_FEE_BPS() / factory.FEE_DENOMINATOR();
+        uint256 protocolFee = nominalFee * factory.PROTOCOL_FEE_SHARE_BPS() / factory.FEE_DENOMINATOR();
+        uint256 lpFee = nominalFee - protocolFee;
+
+        _swapTokenAToTokenB(100 ether, trader);
+
+        assertEq(tokenA.balanceOf(protocolFeeRecipient), protocolFee);
+        assertEq(tokenA.balanceOf(fees), lpFee);
+        assertEq(tokenA.balanceOf(pool), 1_100 ether - nominalFee);
+
+        uint256 beforeClaim = tokenA.balanceOf(lp);
+        vm.prank(lp);
+        AmmPool(pool).claimFees();
+        assertGt(tokenA.balanceOf(lp), beforeClaim);
+        assertLt(tokenA.balanceOf(fees), lpFee);
     }
 
     function testLpTransferUpdatesFeeIndexes() public {

@@ -102,6 +102,7 @@ export function parseDeployment(raw: string): PledgeCashDeployment {
     "boardroomPolicyRegistry",
     "distributionFactory",
     "ammFactory",
+    "ammProtocolFeeRecipient",
     "ammRouter",
     "lockedLiquidityFactory",
     "tokenGrantFactory",

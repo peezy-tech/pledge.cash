@@ -13,7 +13,8 @@ migrating bonding curve, AMM, and locked-liquidity primitives.
 
 The deploy script creates one `BoardroomPolicyRegistry`, one `TokenGrantFactory`, one `DistributionFactory`, one
 `AmmFactory`, and one `BoardroomFactory`. It allows the token grant factory and distribution factory as Boardroom
-policies, records the grant logic, and optionally sets the native grant creation fee.
+policies, records the grant logic, optionally sets the native grant creation fee, and can set the one-way AMM protocol
+fee recipient.
 
 If `WRAPPED_NATIVE_ADDRESS` is set, the deploy script also creates one `AmmRouter` and one `LockedLiquidityFactory`,
 then allows the locked-liquidity factory as a Boardroom policy. If `WRAPPED_NATIVE_ADDRESS` is not set, AMM pools can
@@ -45,6 +46,7 @@ Optional:
 ```sh
 HYPEREVM_TESTNET_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
 TOKEN_GRANT_CREATION_FEE_WEI=100000000000000000
+AMM_PROTOCOL_FEE_RECIPIENT=
 WRAPPED_NATIVE_ADDRESS=
 HYPEREVM_GAS_PRICE_WEI=
 GAS_ESTIMATE_MULTIPLIER=200
@@ -96,6 +98,10 @@ If `WRAPPED_NATIVE_ADDRESS` was configured, the artifact should also contain:
 - `ammRouter`
 - `lockedLiquidityFactory`
 - `lockedLiquidityPolicyAllowed`
+
+If `AMM_PROTOCOL_FEE_RECIPIENT` was configured, the artifact should also contain:
+
+- `ammProtocolFeeRecipient`
 
 For a partial artifact, keep the deployed subsystem fields and add the relevant pending status/reason fields for the
 missing subsystem.

@@ -46,6 +46,10 @@ export function DeploymentPanel({ chainId, creationFee, deployment, factorySnaps
             value: deployment?.ammFactory ? <AddressLink address={deployment.ammFactory} /> : "Not in artifact",
           },
           {
+            label: "AMM protocol fees",
+            value: deployment?.ammProtocolFeeRecipient ? <AddressLink address={deployment.ammProtocolFeeRecipient} /> : "Not configured",
+          },
+          {
             label: "LockedLiquidityFactory",
             value: deployment?.lockedLiquidityFactory ? <AddressLink address={deployment.lockedLiquidityFactory} /> : "Not in artifact",
           },

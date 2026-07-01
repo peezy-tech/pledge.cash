@@ -27,6 +27,10 @@ contract Deploy is Script {
         BoardroomPolicyRegistry boardroomPolicyRegistry = new BoardroomPolicyRegistry(deployer);
         TokenGrantFactory tokenGrantFactory = new TokenGrantFactory();
         AmmFactory ammFactory = new AmmFactory();
+        address ammProtocolFeeRecipient = vm.envOr("AMM_PROTOCOL_FEE_RECIPIENT", address(0));
+        if (ammProtocolFeeRecipient != address(0)) {
+            ammFactory.setProtocolFeeRecipient(ammProtocolFeeRecipient);
+        }
 
         address wrappedNative = vm.envOr("WRAPPED_NATIVE_ADDRESS", address(0));
         AmmRouter ammRouter;
@@ -60,6 +64,9 @@ contract Deploy is Script {
         json.serialize("boardroomFactory", address(boardroomFactory));
         json.serialize("distributionFactory", address(distributionFactory));
         json.serialize("ammFactory", address(ammFactory));
+        if (ammProtocolFeeRecipient != address(0)) {
+            json.serialize("ammProtocolFeeRecipient", ammFactory.protocolFeeRecipient());
+        }
         if (wrappedNative != address(0)) {
             json.serialize("wrappedNative", wrappedNative);
             json.serialize("ammRouter", address(ammRouter));
@@ -89,6 +96,9 @@ contract Deploy is Script {
         console2.log("BoardroomFactory", address(boardroomFactory));
         console2.log("DistributionFactory", address(distributionFactory));
         console2.log("AmmFactory", address(ammFactory));
+        if (ammProtocolFeeRecipient != address(0)) {
+            console2.log("AmmProtocolFeeRecipient", ammFactory.protocolFeeRecipient());
+        }
         if (wrappedNative != address(0)) {
             console2.log("WrappedNative", wrappedNative);
             console2.log("AmmRouter", address(ammRouter));
