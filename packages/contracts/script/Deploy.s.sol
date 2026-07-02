@@ -82,10 +82,10 @@ contract Deploy is Script {
 
     function _configurePolicies(DeployState memory state) internal {
         state.protocolPolicy.setProtocolTargetAllowed(address(state.tokenGrantFactory), true);
+        state.protocolPolicy.setProtocolValueTargetAllowed(address(state.tokenGrantFactory), true);
         state.protocolPolicy.setProtocolTargetAllowed(address(state.distributionFactory), true);
         state.protocolPolicy.setProtocolTargetAllowed(address(state.lockedLiquidityFactory), true);
         state.protocolPolicy.setProtocolTargetAllowed(address(state.ammFactory), true);
-        state.protocolPolicy.setProtocolTargetAllowed(address(state.ammRouter), true);
         state.assetPolicy.setApprovalSpenderAllowed(address(state.tokenGrantFactory), true);
         state.assetPolicy.setApprovalSpenderAllowed(address(state.distributionFactory), true);
         state.assetPolicy.setApprovalSpenderAllowed(address(state.lockedLiquidityFactory), true);
@@ -142,6 +142,10 @@ contract Deploy is Script {
         json.serialize(
             "protocolTokenGrantFactoryAllowed",
             state.protocolPolicy.isProtocolTargetAllowed(address(state.tokenGrantFactory))
+        );
+        json.serialize(
+            "protocolTokenGrantFactoryValueAllowed",
+            state.protocolPolicy.isProtocolValueTargetAllowed(address(state.tokenGrantFactory))
         );
         json.serialize(
             "protocolDistributionFactoryAllowed",
@@ -230,6 +234,10 @@ contract Deploy is Script {
         console2.log(
             "ProtocolTokenGrantFactoryAllowed",
             state.protocolPolicy.isProtocolTargetAllowed(address(state.tokenGrantFactory))
+        );
+        console2.log(
+            "ProtocolTokenGrantFactoryValueAllowed",
+            state.protocolPolicy.isProtocolValueTargetAllowed(address(state.tokenGrantFactory))
         );
         console2.log(
             "ProtocolDistributionFactoryAllowed",

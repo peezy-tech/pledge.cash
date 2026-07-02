@@ -32,6 +32,7 @@ export type PledgeCashDeployment = {
   lockedLiquidityPolicyAllowed?: boolean;
   tokenGrantPolicyAllowed?: boolean;
   protocolTokenGrantFactoryAllowed?: boolean;
+  protocolTokenGrantFactoryValueAllowed?: boolean;
   protocolDistributionFactoryAllowed?: boolean;
   protocolLockedLiquidityFactoryAllowed?: boolean;
   protocolAmmFactoryAllowed?: boolean;
@@ -8205,7 +8206,7 @@ export const protocolPolicyAbi = [
         "internalType": "address"
       },
       {
-        "name": "",
+        "name": "value",
         "type": "uint256",
         "internalType": "uint256"
       },
@@ -8247,6 +8248,25 @@ export const protocolPolicyAbi = [
   {
     "type": "function",
     "name": "isProtocolTargetAllowed",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isProtocolValueTargetAllowed",
     "inputs": [
       {
         "name": "",
@@ -8329,6 +8349,24 @@ export const protocolPolicyAbi = [
   },
   {
     "type": "function",
+    "name": "setProtocolValueTargetAllowed",
+    "inputs": [
+      {
+        "name": "target",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "allowed",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "transferOwnership",
     "inputs": [
       {
@@ -8388,6 +8426,25 @@ export const protocolPolicyAbi = [
   {
     "type": "event",
     "name": "ProtocolTargetAllowedSet",
+    "inputs": [
+      {
+        "name": "target",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "allowed",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProtocolValueTargetAllowedSet",
     "inputs": [
       {
         "name": "target",

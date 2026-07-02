@@ -92,6 +92,7 @@ contract ProjectTokenLaunchScenario is Script {
         state.boardroomFactory = new BoardroomFactory(address(state.policyRegistry), address(state.wrappedHype));
 
         state.protocolPolicy.setProtocolTargetAllowed(address(state.tokenGrantFactory), true);
+        state.protocolPolicy.setProtocolValueTargetAllowed(address(state.tokenGrantFactory), true);
         state.protocolPolicy.setProtocolTargetAllowed(address(state.lockedLiquidityFactory), true);
         state.assetPolicy.setApprovalSpenderAllowed(address(state.lockedLiquidityFactory), true);
         state.policyRegistry.setPolicyAllowed(address(state.protocolPolicy), true);

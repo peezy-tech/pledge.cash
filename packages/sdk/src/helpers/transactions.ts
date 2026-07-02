@@ -24,6 +24,13 @@ import type {
   MigratingBondingCurveTerms,
 } from "./types";
 
+function requireAssetPolicy(assetPolicy: Address | undefined): Address {
+  if (!assetPolicy) {
+    throw new Error("assetPolicy is required for Boardroom approval calls.");
+  }
+  return assetPolicy;
+}
+
 export function grantCreationArgs(terms: GrantCreationTerms): GrantCreationArgs {
   return [
     terms.holder,
@@ -265,7 +272,7 @@ export function buildBoardroomFixedPriceSaleBatch(input: {
   assetPolicy?: Address;
 }) {
   const policy = input.policy ?? input.factory;
-  const assetPolicy = input.assetPolicy ?? policy;
+  const assetPolicy = requireAssetPolicy(input.assetPolicy);
   const terms = { ...input.terms, shareToken: input.shareToken } satisfies FixedPriceSaleTerms;
   const calls = [
     buildBoardroomFixedPriceSaleApprovalCall({
@@ -360,7 +367,7 @@ export function buildBoardroomMigratingCurveBatch(input: {
   assetPolicy?: Address;
 }) {
   const policy = input.policy ?? input.factory;
-  const assetPolicy = input.assetPolicy ?? policy;
+  const assetPolicy = requireAssetPolicy(input.assetPolicy);
   const terms = { ...input.terms, shareToken: input.shareToken } satisfies MigratingBondingCurveTerms;
   const calls = [
     buildBoardroomMigratingCurveApprovalCall({
@@ -462,7 +469,7 @@ export function buildBoardroomLockedLiquidityBatch(input: {
   assetPolicy?: Address;
 }) {
   const policy = input.policy ?? input.factory;
-  const assetPolicy = input.assetPolicy ?? policy;
+  const assetPolicy = requireAssetPolicy(input.assetPolicy);
   const shareTokenSide = input.terms.shareTokenSide ?? "tokenA";
   const terms =
     shareTokenSide === "tokenA"
@@ -570,7 +577,7 @@ export function buildBoardroomShareGrantIssuanceBatch(input: {
   assetPolicy?: Address;
 }) {
   const policy = input.policy ?? input.factory;
-  const assetPolicy = input.assetPolicy ?? policy;
+  const assetPolicy = requireAssetPolicy(input.assetPolicy);
   const terms = { ...input.terms, token: input.shareToken } satisfies GrantCreationTerms;
   const calls = [
     buildBoardroomGrantApprovalCall({

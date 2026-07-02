@@ -134,6 +134,7 @@ contract BoardroomTest is Test {
         paymentToken = new BoardroomCurrency("Payment", "PAY", 6);
 
         protocolPolicy.setProtocolTargetAllowed(address(tokenGrantFactory), true);
+        protocolPolicy.setProtocolValueTargetAllowed(address(tokenGrantFactory), true);
         assetPolicy.setAssetAllowed(address(paymentToken), true);
         assetPolicy.setApprovalSpenderAllowed(address(tokenGrantFactory), true);
 

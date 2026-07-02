@@ -522,7 +522,7 @@ export function App(): React.JSX.Element {
   const boardroomApproveFactory = async (): Promise<void> => {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
-    const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy ?? factory, "AssetPolicy");
+    const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const { amount } = boardroomShareGrantTerms();
     await submitContractTransaction(
       "Boardroom approval",
@@ -570,7 +570,7 @@ export function App(): React.JSX.Element {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
     const protocolPolicy = requireDeploymentAddress(deployment?.protocolPolicy ?? factory, "ProtocolPolicy");
-    const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy ?? factory, "AssetPolicy");
+    const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const terms = boardroomShareGrantTerms();
     const predicted = await sdkPredictBoardroomGrantAddress(publicClient, {
       factory,
@@ -637,7 +637,7 @@ export function App(): React.JSX.Element {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
     const protocolPolicy = requireDeploymentAddress(deployment?.protocolPolicy ?? factory, "ProtocolPolicy");
-    const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy ?? factory, "AssetPolicy");
+    const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const terms = fixedPriceSaleTerms();
     const predicted = await sdkPredictFixedPriceSaleAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
     await submitContractTransaction(
@@ -725,7 +725,7 @@ export function App(): React.JSX.Element {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
     const protocolPolicy = requireDeploymentAddress(deployment?.protocolPolicy ?? factory, "ProtocolPolicy");
-    const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy ?? factory, "AssetPolicy");
+    const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const terms = migratingCurveTerms();
     const predicted = await sdkPredictMigratingBondingCurveAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
     await submitContractTransaction(
@@ -812,7 +812,7 @@ export function App(): React.JSX.Element {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
     const protocolPolicy = requireDeploymentAddress(deployment?.protocolPolicy ?? factory, "ProtocolPolicy");
-    const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy ?? factory, "AssetPolicy");
+    const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const terms = lockedLiquidityTerms();
     const predicted = await sdkPredictLockedLiquidityAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
     await submitContractTransaction(

@@ -144,6 +144,7 @@ if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactor
   require_field distributionFactory
   require_field distributionPolicyAllowed
   require_field protocolTokenGrantFactoryAllowed
+  require_field protocolTokenGrantFactoryValueAllowed
   require_field protocolDistributionFactoryAllowed
   require_field assetWrappedNativeAllowed
   require_field assetTokenGrantSpenderAllowed
@@ -190,6 +191,9 @@ if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactor
 
   actual_protocol_token_grant_allowed="$(call_bool "$protocol_policy" "isProtocolTargetAllowed(address)(bool)" "$token_grant_factory")"
   expect_equal "ProtocolPolicy TokenGrantFactory allowance" "$(field protocolTokenGrantFactoryAllowed)" "$actual_protocol_token_grant_allowed"
+
+  actual_protocol_token_grant_value_allowed="$(call_bool "$protocol_policy" "isProtocolValueTargetAllowed(address)(bool)" "$token_grant_factory")"
+  expect_equal "ProtocolPolicy TokenGrantFactory value allowance" "$(field protocolTokenGrantFactoryValueAllowed)" "$actual_protocol_token_grant_value_allowed"
 
   actual_protocol_distribution_allowed="$(call_bool "$protocol_policy" "isProtocolTargetAllowed(address)(bool)" "$distribution_factory")"
   expect_equal "ProtocolPolicy DistributionFactory allowance" "$(field protocolDistributionFactoryAllowed)" "$actual_protocol_distribution_allowed"

@@ -17,10 +17,12 @@ The deploy script creates one `BoardroomPolicyRegistry`, one `ProtocolPolicy`, o
 native HYPE before wind-down redemptions.
 
 The registry allows `ProtocolPolicy` for registered pledge.cash protocol targets and `AssetPolicy` for external asset
-operations. The deploy script registers the token grant, distribution, locked-liquidity, AMM factory, and AMM router
-targets in `ProtocolPolicy`; it also registers the token grant, distribution, and locked-liquidity factories as allowed
-approval spenders in `AssetPolicy`. Boardroom-created share tokens and other project-specific assets still need to be
-registered in `AssetPolicy` before their approvals can be executed through a Boardroom.
+operations. The deploy script registers the token grant, distribution, locked-liquidity, and AMM factory targets in
+`ProtocolPolicy`; only the token grant factory is separately allowed to receive native value for exact creation-fee
+payments. `AmmRouter` is deployed for user and protocol flows but is not a Boardroom-callable protocol-policy target.
+The deploy script also registers the token grant, distribution, and locked-liquidity factories as allowed approval
+spenders in `AssetPolicy`. Boardroom-created share tokens and other project-specific assets still need to be registered
+in `AssetPolicy` before their approvals can be executed through a Boardroom.
 
 The checked-in HyperEVM testnet artifact may model subsystems independently while deployment history is being rebuilt.
 If an existing artifact predates a current subsystem, mark that subsystem pending instead of keeping stale partial fields.
@@ -97,6 +99,7 @@ After a broadcast, verify `packages/contracts/deployments/998.json` contains:
 - `distributionPolicyAllowed`
 - `lockedLiquidityPolicyAllowed`
 - `protocolTokenGrantFactoryAllowed`
+- `protocolTokenGrantFactoryValueAllowed`
 - `protocolDistributionFactoryAllowed`
 - `protocolLockedLiquidityFactoryAllowed`
 - `protocolAmmFactoryAllowed`

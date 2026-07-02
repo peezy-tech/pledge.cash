@@ -90,6 +90,19 @@ const terms = {
   salt,
 } satisfies GrantCreationTerms;
 
+const shareGrantTerms = {
+  holder: terms.holder,
+  paymentToken: terms.paymentToken,
+  amount: terms.amount,
+  price: terms.price,
+  expiry: terms.expiry,
+  vestingCliff: terms.vestingCliff,
+  vestingEnd: terms.vestingEnd,
+  transferable: terms.transferable,
+  transferUnlockTime: terms.transferUnlockTime,
+  salt: terms.salt,
+};
+
 const saleTerms = {
   paymentToken,
   shareAmount: 1000n,
@@ -231,18 +244,6 @@ describe("SDK action and query helpers", () => {
   });
 
   test("builds direct grant and Boardroom batch transaction inputs", () => {
-    const shareGrantTerms = {
-      holder: terms.holder,
-      paymentToken: terms.paymentToken,
-      amount: terms.amount,
-      price: terms.price,
-      expiry: terms.expiry,
-      vestingCliff: terms.vestingCliff,
-      vestingEnd: terms.vestingEnd,
-      transferable: terms.transferable,
-      transferUnlockTime: terms.transferUnlockTime,
-      salt: terms.salt,
-    };
     const direct = buildDirectGrantCreationTransaction({ factory, terms, creationFee: 10n });
 
     expect(direct.address).toBe(factory);
@@ -553,6 +554,50 @@ describe("SDK action and query helpers", () => {
     expect(claim.functionName).toBe("execute");
     expect(claim.args[0]).toMatchObject({ policy: lockedLiquidityFactory, target: locker, value: 0n });
     expect(claim.args[0].data).toBe(encodeFunctionData({ abi: lockedLiquidityAbi, functionName: "claimFees" }));
+  });
+
+  test("requires assetPolicy for Boardroom approval batches", () => {
+    const error = /assetPolicy is required for Boardroom approval calls/;
+
+    expect(() =>
+      buildBoardroomShareGrantIssuanceBatch({
+        boardroom,
+        factory,
+        shareToken,
+        terms: shareGrantTerms,
+        policy: protocolPolicy,
+      }),
+    ).toThrow(error);
+
+    expect(() =>
+      buildBoardroomFixedPriceSaleBatch({
+        boardroom,
+        factory: distributionFactory,
+        shareToken,
+        terms: saleTerms,
+        policy: protocolPolicy,
+      }),
+    ).toThrow(error);
+
+    expect(() =>
+      buildBoardroomMigratingCurveBatch({
+        boardroom,
+        factory: distributionFactory,
+        shareToken,
+        terms: curveTerms,
+        policy: protocolPolicy,
+      }),
+    ).toThrow(error);
+
+    expect(() =>
+      buildBoardroomLockedLiquidityBatch({
+        boardroom,
+        factory: lockedLiquidityFactory,
+        shareToken,
+        terms: lockedLiquidityTerms,
+        policy: protocolPolicy,
+      }),
+    ).toThrow(error);
   });
 
   test("predicts AMM pool and locked-liquidity addresses", async () => {

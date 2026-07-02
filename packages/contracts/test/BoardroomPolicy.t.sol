@@ -26,7 +26,7 @@ contract BoardroomPolicyTest is Test {
         assetPolicy = new AssetPolicy(owner, address(wrappedNative));
     }
 
-    function testProtocolPolicyAllowsOnlyRegisteredProtocolTargets() public {
+    function testProtocolPolicyAllowsOnlyRegisteredProtocolTargetsAndValueTargets() public {
         bytes memory data = abi.encodeWithSignature("setCreationFee(uint256)", 1 ether);
 
         assertFalse(protocolPolicy.canCall(boardroom, caller, protocolTarget, 0, data));
@@ -34,6 +34,11 @@ contract BoardroomPolicyTest is Test {
         protocolPolicy.setProtocolTargetAllowed(protocolTarget, true);
 
         assertTrue(protocolPolicy.canCall(boardroom, caller, protocolTarget, 0, data));
+        assertFalse(protocolPolicy.canCall(boardroom, caller, protocolTarget, 1 ether, data));
+
+        protocolPolicy.setProtocolValueTargetAllowed(protocolTarget, true);
+
+        assertTrue(protocolPolicy.canCall(boardroom, caller, protocolTarget, 1 ether, data));
         assertFalse(protocolPolicy.canCall(boardroom, caller, stranger, 0, data));
     }
 
@@ -42,8 +47,15 @@ contract BoardroomPolicyTest is Test {
         vm.expectRevert(Ownable.Unauthorized.selector);
         protocolPolicy.setProtocolTargetAllowed(protocolTarget, true);
 
+        vm.prank(stranger);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        protocolPolicy.setProtocolValueTargetAllowed(protocolTarget, true);
+
         vm.expectRevert(ProtocolPolicy.InvalidAddress.selector);
         protocolPolicy.setProtocolTargetAllowed(address(0), true);
+
+        vm.expectRevert(ProtocolPolicy.InvalidAddress.selector);
+        protocolPolicy.setProtocolValueTargetAllowed(address(0), true);
     }
 
     function testAssetPolicyAllowsWrappedNativeDepositOnly() public view {

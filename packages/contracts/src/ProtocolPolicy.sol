@@ -6,10 +6,12 @@ import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
 
 contract ProtocolPolicy is Ownable, IBoardroomCallPolicy {
     mapping(address => bool) public isProtocolTargetAllowed;
+    mapping(address => bool) public isProtocolValueTargetAllowed;
 
     error InvalidAddress();
 
     event ProtocolTargetAllowedSet(address indexed target, bool allowed);
+    event ProtocolValueTargetAllowedSet(address indexed target, bool allowed);
 
     constructor(address owner_) {
         if (owner_ == address(0)) revert InvalidAddress();
@@ -23,7 +25,15 @@ contract ProtocolPolicy is Ownable, IBoardroomCallPolicy {
         emit ProtocolTargetAllowedSet(target, allowed);
     }
 
-    function canCall(address, address, address target, uint256, bytes calldata) external view returns (bool) {
-        return isProtocolTargetAllowed[target];
+    function setProtocolValueTargetAllowed(address target, bool allowed) external onlyOwner {
+        if (target == address(0)) revert InvalidAddress();
+
+        isProtocolValueTargetAllowed[target] = allowed;
+        emit ProtocolValueTargetAllowedSet(target, allowed);
+    }
+
+    function canCall(address, address, address target, uint256 value, bytes calldata) external view returns (bool) {
+        if (!isProtocolTargetAllowed[target]) return false;
+        return value == 0 || isProtocolValueTargetAllowed[target];
     }
 }

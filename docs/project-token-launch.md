@@ -20,7 +20,8 @@ starts, the Boardroom wraps that raw HYPE into WHYPE before entering `WindingDow
 
 1. Deploy `BoardroomPolicyRegistry`, `ProtocolPolicy`, `AssetPolicy`, `BoardroomFactory`, `TokenGrantFactory`,
    `AmmFactory`, `AmmRouter`, `LockedLiquidityFactory`, and wrapped HYPE.
-2. Allow `ProtocolPolicy` for protocol targets and `AssetPolicy` for supported asset approvals.
+2. Allow `ProtocolPolicy` for protocol targets, value-enable `TokenGrantFactory` for exact creation fees, and use
+   `AssetPolicy` for supported asset approvals.
 3. Create the project Boardroom and use its share token as `PLEDGE`.
 4. Set the AMM protocol fee recipient to the project Boardroom.
 5. Set the native token grant creation fee to `0.1 HYPE` and transfer `TokenGrantFactory` ownership to the Boardroom.

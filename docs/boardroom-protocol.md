@@ -12,7 +12,8 @@ targets, while `AssetPolicy` covers supported external assets and spender approv
 - Boardroom owner: controls share minting and policy-authorized treasury execution.
 - Boardroom: owns assets, creates its share token, and acts as grant issuer.
 - Policy registry: protocol-controlled allowlist of policy contracts that Boardrooms may use.
-- Protocol policy: owner-managed allowlist of pledge.cash protocol targets.
+- Protocol policy: owner-managed allowlist of pledge.cash protocol targets, with a separate allowlist for targets that
+  may receive native value.
 - Asset policy: owner-managed allowlist of supported assets and approval spenders.
 - Share holder: receives Boardroom share tokens directly or through grants, and can redeem shares after wind-down.
 - Grant holder: receives settlement authority over a Boardroom-issued grant.
@@ -85,7 +86,8 @@ Wind-down transitions are one-way:
 2. Owner builds a `Boardroom.executeBatch` with two policy-checked calls.
 3. The first call targets the grant token and approves `TokenGrantFactory` for the grant amount through `AssetPolicy`.
 4. The second call targets `TokenGrantFactory.createGrant(...)` through a protocol policy, optionally forwarding the
-   exact native creation fee.
+   exact native creation fee. `TokenGrantFactory` is the only deployment-default protocol target allowed to receive
+   native value.
 5. `TokenGrantFactory` creates a grant where `issuer == boardroom`.
 6. `TokenGrantFactory` transfers the grant tokens from the Boardroom into the grant escrow.
 7. The factory mints the grant-right ERC721 token to the grant holder.
@@ -150,6 +152,7 @@ Redemption loops are bounded by `MAX_REDEEMABLE_ASSETS`. Wind-down gates are bou
 - Boardroom execution requires the selected policy to allow the target, value, and calldata.
 - Boardroom execution cannot create new obligations after wind-down starts.
 - `ProtocolPolicy` never authorizes calls to unregistered protocol targets.
+- `ProtocolPolicy` never authorizes nonzero native value unless the target is explicitly value-enabled.
 - `AssetPolicy` never authorizes arbitrary token calls.
 - Asset approvals are limited to allowed assets and allowed protocol spenders.
 - Boardroom-created grants approve `TokenGrantFactory` as spender for the requested grant amount through `AssetPolicy`.

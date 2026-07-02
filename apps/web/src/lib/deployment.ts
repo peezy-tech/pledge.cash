@@ -61,6 +61,7 @@ function applyBooleanFields(deployment: PledgeCashDeployment, json: Record<strin
     "protocolPolicyAllowed",
     "assetPolicyAllowed",
     "protocolTokenGrantFactoryAllowed",
+    "protocolTokenGrantFactoryValueAllowed",
     "protocolDistributionFactoryAllowed",
     "protocolLockedLiquidityFactoryAllowed",
     "protocolAmmFactoryAllowed",
