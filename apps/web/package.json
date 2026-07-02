@@ -8,7 +8,7 @@
     "build": "bun --cwd ../../packages/contracts build && bun --cwd ../../packages/sdk generate && bun run build:pages",
     "build:local": "VITE_OUT_DIR=dist-local VITE_BASE_PATH=/pledge-cash/ VITE_PLEDGE_CASH_CHAIN_ID=31337 VITE_PLEDGE_CASH_CHAIN_NAME='pledge.cash local' VITE_PLEDGE_CASH_RPC_URL=/pledge-cash/rpc VITE_PLEDGE_CASH_EXPLORER_URL= VITE_PLEDGE_CASH_EXPLORER_NAME=Local bun run build",
     "build:pages": "vite build && bun run copy:pages",
-    "copy:pages": "OUT_DIR=\"${VITE_OUT_DIR:-dist}\"; mkdir -p \"$OUT_DIR/deployments\" && cp CNAME .nojekyll \"$OUT_DIR/\" && if compgen -G '../../packages/contracts/deployments/*.json' > /dev/null; then cp ../../packages/contracts/deployments/*.json \"$OUT_DIR/deployments/\"; else printf '%s\\n' '{\"status\":\"pending\",\"reason\":\"Broadcast artifact not published yet\"}' > \"$OUT_DIR/deployments/998.json\"; fi",
+    "copy:pages": "OUT_DIR=\"${VITE_OUT_DIR:-dist}\"; mkdir -p \"$OUT_DIR/deployments\" && cp CNAME .nojekyll \"$OUT_DIR/\" && cp \"$OUT_DIR/index.html\" \"$OUT_DIR/404.html\" && if compgen -G '../../packages/contracts/deployments/*.json' > /dev/null; then cp ../../packages/contracts/deployments/*.json \"$OUT_DIR/deployments/\"; else printf '%s\\n' '{\"status\":\"pending\",\"reason\":\"Broadcast artifact not published yet\"}' > \"$OUT_DIR/deployments/998.json\"; fi",
     "dev": "bun --cwd ../../packages/contracts build && bun --cwd ../../packages/sdk generate && vite --host 0.0.0.0",
     "preview": "vite preview --host 127.0.0.1",
     "preview:local": "vite preview --host 127.0.0.1 --base /pledge-cash/ --outDir dist-local",
