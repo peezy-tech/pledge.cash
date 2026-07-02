@@ -116,11 +116,27 @@ import {
   type ProductBoardroomSeed,
 } from "./lib/product-boardroom";
 import {
+  buildAddLiquidityTransaction,
+  buildClaimAmmFeesTransaction,
+  buildRemoveLiquidityTransaction,
   buildSwapTransaction,
+  defaultLiquidityForm,
+  defaultRemoveLiquidityForm,
   defaultSwapForm,
+  pairHasWrappedNative,
+  readAmmPosition,
+  readLiquidityQuote,
+  readRemoveLiquidityQuote,
   readSwapTokenList,
   readSwapQuote,
+  swapNativeMode,
+  withLiquiditySeedDefaults,
   withSwapSeedDefaults,
+  type AmmPositionState,
+  type LiquidityForm,
+  type LiquidityQuoteState,
+  type RemoveLiquidityForm,
+  type RemoveLiquidityQuoteState,
   type SwapForm,
   type SwapQuoteState,
   type SwapTokenListState,
@@ -267,6 +283,11 @@ export function App(): React.JSX.Element {
   const [productBoardroomLoading, setProductBoardroomLoading] = useState(false);
   const [swapForm, setSwapForm] = useState<SwapForm>(() => defaultSwapForm());
   const [swapQuote, setSwapQuote] = useState<SwapQuoteState>();
+  const [liquidityForm, setLiquidityForm] = useState<LiquidityForm>(() => defaultLiquidityForm());
+  const [liquidityQuote, setLiquidityQuote] = useState<LiquidityQuoteState>();
+  const [removeLiquidityForm, setRemoveLiquidityForm] = useState<RemoveLiquidityForm>(() => defaultRemoveLiquidityForm());
+  const [removeLiquidityQuote, setRemoveLiquidityQuote] = useState<RemoveLiquidityQuoteState>();
+  const [ammPosition, setAmmPosition] = useState<AmmPositionState>();
   const [swapTokenList, setSwapTokenList] = useState<SwapTokenListState>(() => ({ tokens: [], pools: [], loaded: false }));
   const [swapTokenListLoading, setSwapTokenListLoading] = useState(false);
   const [swapSeedLoaded, setSwapSeedLoaded] = useState(false);
@@ -341,6 +362,7 @@ export function App(): React.JSX.Element {
     if (activeView !== "swap" || swapSeedLoaded) return;
     if (productSeed) {
       setSwapForm((current) => withSwapSeedDefaults(current, productSeed, deployment));
+      setLiquidityForm((current) => withLiquiditySeedDefaults(current, productSeed, deployment));
       setSwapSeedLoaded(true);
       return;
     }
@@ -351,6 +373,7 @@ export function App(): React.JSX.Element {
         if (cancelled) return;
         setProductSeed(seed);
         setSwapForm((current) => withSwapSeedDefaults(current, seed, deployment));
+        setLiquidityForm((current) => withLiquiditySeedDefaults(current, seed, deployment));
       })
       .catch((error) => pushLog(errorMessage(error), "error"))
       .finally(() => {
@@ -366,6 +389,28 @@ export function App(): React.JSX.Element {
     setSwapQuote(undefined);
   }, [swapForm]);
 
+  useEffect(() => {
+    setLiquidityQuote(undefined);
+    setRemoveLiquidityQuote(undefined);
+  }, [liquidityForm]);
+
+  useEffect(() => {
+    setRemoveLiquidityQuote(undefined);
+  }, [removeLiquidityForm]);
+
+  useEffect(() => {
+    if (!pairHasWrappedNative(deployment, swapForm.tokenIn, swapForm.tokenOut) && swapForm.useNative) {
+      setSwapForm((current) => ({ ...current, useNative: false }));
+    }
+    if (pairHasWrappedNative(deployment, liquidityForm.tokenA, liquidityForm.tokenB)) return;
+    if (liquidityForm.useNative) {
+      setLiquidityForm((current) => ({ ...current, useNative: false }));
+    }
+    if (removeLiquidityForm.useNative) {
+      setRemoveLiquidityForm((current) => ({ ...current, useNative: false }));
+    }
+  }, [deployment, liquidityForm.tokenA, liquidityForm.tokenB, liquidityForm.useNative, removeLiquidityForm.useNative, swapForm.tokenIn, swapForm.tokenOut, swapForm.useNative]);
+
   const loadSwapTokens = useCallback(async (): Promise<void> => {
     setSwapTokenListLoading(true);
     try {
@@ -374,6 +419,7 @@ export function App(): React.JSX.Element {
       const next = await readSwapTokenList(publicClient, deployment, seed, wallet.account);
       setSwapTokenList(next);
       setSwapForm((current) => withSwapSeedDefaults(current, seed, deployment));
+      setLiquidityForm((current) => withLiquiditySeedDefaults(current, seed, deployment));
       if (next.error) {
         pushLog(`Swap token list: ${next.error}`, next.tokens.length > 0 ? "info" : "error");
       } else {
@@ -480,6 +526,7 @@ export function App(): React.JSX.Element {
     const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
     const quote = await requireFreshSwapQuote();
     if (!quote.tokenIn || quote.amountIn === undefined) throw new Error("Refresh the swap quote before approving.");
+    if (swapNativeMode(deployment, swapForm) === "input") throw new Error("Native swap input does not need ERC20 approval.");
 
     await submitContractTransaction("Swap input approval", buildErc20Approval({ token: quote.tokenIn.address, spender: router, amount: quote.amountIn }));
   };
@@ -489,6 +536,100 @@ export function App(): React.JSX.Element {
     const quote = await requireFreshSwapQuote();
     await submitContractTransaction("Swap", buildSwapTransaction({ deployment, form: swapForm, quote, account }));
     await refreshSwapQuote();
+  };
+
+  const refreshLiquidityQuote = async (): Promise<void> => {
+    const next = await readLiquidityQuote(publicClient, deployment, liquidityForm, wallet.account);
+    setLiquidityQuote(next);
+    const position = await readAmmPosition(publicClient, deployment, liquidityForm.tokenA, liquidityForm.tokenB, wallet.account);
+    setAmmPosition(position);
+    if (next.error) {
+      pushLog(next.error, next.error.includes("No AMM pool") ? "info" : "error");
+      return;
+    }
+    pushLog("Loaded liquidity quote", "success");
+  };
+
+  const requireFreshLiquidityQuote = async (): Promise<LiquidityQuoteState> => {
+    const next = await readLiquidityQuote(publicClient, deployment, liquidityForm, wallet.account);
+    setLiquidityQuote(next);
+    if (next.error) throw new Error(next.error);
+    return next;
+  };
+
+  const approveLiquidityTokenA = async (): Promise<void> => {
+    activeAccount();
+    const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
+    const quote = await requireFreshLiquidityQuote();
+    if (!quote.tokenA || quote.amountA === undefined) throw new Error("Refresh the liquidity quote before approving token A.");
+    await submitContractTransaction("Liquidity token A approval", buildErc20Approval({ token: quote.tokenA.address, spender: router, amount: quote.amountA }));
+  };
+
+  const approveLiquidityTokenB = async (): Promise<void> => {
+    activeAccount();
+    const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
+    const quote = await requireFreshLiquidityQuote();
+    if (!quote.tokenB || quote.amountB === undefined) throw new Error("Refresh the liquidity quote before approving token B.");
+    await submitContractTransaction("Liquidity token B approval", buildErc20Approval({ token: quote.tokenB.address, spender: router, amount: quote.amountB }));
+  };
+
+  const addLiquidity = async (): Promise<void> => {
+    const account = activeAccount();
+    const quote = await requireFreshLiquidityQuote();
+    await submitContractTransaction("Add liquidity", buildAddLiquidityTransaction({ deployment, form: liquidityForm, quote, account }));
+    await Promise.all([refreshLiquidityQuote(), loadSwapTokens()]);
+  };
+
+  const refreshAmmPosition = async (): Promise<void> => {
+    const next = await readAmmPosition(publicClient, deployment, liquidityForm.tokenA, liquidityForm.tokenB, wallet.account);
+    setAmmPosition(next);
+    if (next?.error) {
+      pushLog(next.error, "error");
+      return;
+    }
+    pushLog("Loaded AMM LP position", "success");
+  };
+
+  const refreshRemoveLiquidityQuote = async (): Promise<void> => {
+    const next = await readRemoveLiquidityQuote(publicClient, deployment, liquidityForm, removeLiquidityForm, wallet.account);
+    setRemoveLiquidityQuote(next);
+    if (next.position) setAmmPosition(next.position);
+    if (next.error) {
+      pushLog(next.error, next.error.includes("No AMM pool") ? "info" : "error");
+      return;
+    }
+    pushLog("Loaded remove-liquidity quote", "success");
+  };
+
+  const requireFreshRemoveLiquidityQuote = async (): Promise<RemoveLiquidityQuoteState> => {
+    const next = await readRemoveLiquidityQuote(publicClient, deployment, liquidityForm, removeLiquidityForm, wallet.account);
+    setRemoveLiquidityQuote(next);
+    if (next.position) setAmmPosition(next.position);
+    if (next.error) throw new Error(next.error);
+    return next;
+  };
+
+  const approveLpToken = async (): Promise<void> => {
+    activeAccount();
+    const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
+    const quote = await requireFreshRemoveLiquidityQuote();
+    if (!quote.position?.pool || quote.liquidity === undefined) throw new Error("Refresh the remove-liquidity quote before approving LP.");
+    await submitContractTransaction("LP token approval", buildErc20Approval({ token: quote.position.pool.address, spender: router, amount: quote.liquidity }));
+  };
+
+  const removeLiquidity = async (): Promise<void> => {
+    const account = activeAccount();
+    const quote = await requireFreshRemoveLiquidityQuote();
+    await submitContractTransaction("Remove liquidity", buildRemoveLiquidityTransaction({ deployment, form: removeLiquidityForm, quote, account }));
+    await Promise.all([refreshAmmPosition(), refreshLiquidityQuote()]);
+  };
+
+  const claimAmmFees = async (): Promise<void> => {
+    activeAccount();
+    const position = await readAmmPosition(publicClient, deployment, liquidityForm.tokenA, liquidityForm.tokenB, wallet.account);
+    if (!position) throw new Error("Select a pool before claiming fees.");
+    await submitContractTransaction("AMM fee claim", buildClaimAmmFeesTransaction(position));
+    await refreshAmmPosition();
   };
 
   const directGrantTerms = async (): Promise<GrantCreationTerms> => {
@@ -1329,7 +1470,13 @@ export function App(): React.JSX.Element {
 
       <main className="grid min-h-[calc(100svh-64px)] grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)]">
         <aside className="grid content-start gap-4 border-b border-zinc-800 bg-zinc-950/35 p-4 lg:border-b-0 lg:border-r">
-          <DeploymentPanel chainId={ACTIVE_CHAIN_ID} creationFee={creationFee} deployment={deployment} factorySnapshot={factorySnapshot} />
+          <DeploymentPanel
+            chainId={ACTIVE_CHAIN_ID}
+            creationFee={creationFee}
+            deployment={deployment}
+            factorySnapshot={factorySnapshot}
+            localAmmProtocolFeeRecipient={productSeed?.boardroom}
+          />
           <WalletPanel wallet={wallet} />
           <LogPanel logs={logs} clearLogs={clearLogs} />
           <ArtifactPanel deployment={deployment} />
@@ -1379,15 +1526,31 @@ export function App(): React.JSX.Element {
               account={wallet.account}
               deployment={deployment}
               form={swapForm}
+              liquidityForm={liquidityForm}
+              liquidityQuote={liquidityQuote}
+              position={ammPosition}
               pendingAction={pendingAction}
               quote={swapQuote}
+              removeLiquidityForm={removeLiquidityForm}
+              removeLiquidityQuote={removeLiquidityQuote}
+              setLiquidityForm={setLiquidityForm}
+              setRemoveLiquidityForm={setRemoveLiquidityForm}
               setForm={setSwapForm}
               tokenList={swapTokenList}
               tokenListLoading={swapTokenListLoading}
+              addLiquidity={addLiquidity}
+              approveLiquidityTokenA={approveLiquidityTokenA}
+              approveLiquidityTokenB={approveLiquidityTokenB}
+              approveLpToken={approveLpToken}
               approveInput={approveSwapInput}
+              claimAmmFees={claimAmmFees}
               executeSwap={executeSwap}
+              refreshLiquidityQuote={refreshLiquidityQuote}
+              refreshPosition={refreshAmmPosition}
               refreshQuote={refreshSwapQuote}
+              refreshRemoveLiquidityQuote={refreshRemoveLiquidityQuote}
               refreshTokens={loadSwapTokens}
+              removeLiquidity={removeLiquidity}
               runAction={runAction}
             />
           ) : null}

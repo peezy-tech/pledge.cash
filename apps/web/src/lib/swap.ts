@@ -20,6 +20,26 @@ export type SwapForm = {
   slippageBps: string;
   recipient: string;
   deadline: string;
+  useNative: boolean;
+};
+
+export type LiquidityForm = {
+  tokenA: string;
+  tokenB: string;
+  amountA: string;
+  amountB: string;
+  slippageBps: string;
+  recipient: string;
+  deadline: string;
+  useNative: boolean;
+};
+
+export type RemoveLiquidityForm = {
+  liquidity: string;
+  slippageBps: string;
+  recipient: string;
+  deadline: string;
+  useNative: boolean;
 };
 
 export type SwapTokenMetadata = {
@@ -58,6 +78,18 @@ export type SwapPoolState = {
   reserveOut: bigint;
 };
 
+export type LiquidityPoolState = {
+  address: Address;
+  exists: boolean;
+  token0: Address;
+  token1: Address;
+  reserve0: bigint;
+  reserve1: bigint;
+  reserveA: bigint;
+  reserveB: bigint;
+  totalSupply: bigint;
+};
+
 export type SwapQuoteState = {
   tokenIn?: SwapTokenMetadata;
   tokenOut?: SwapTokenMetadata;
@@ -69,6 +101,43 @@ export type SwapQuoteState = {
   feeBps?: bigint;
   feeDenominator?: bigint;
   protocolFeeShareBps?: bigint;
+  error?: string;
+};
+
+export type LiquidityQuoteState = {
+  tokenA?: SwapTokenMetadata;
+  tokenB?: SwapTokenMetadata;
+  pool?: LiquidityPoolState;
+  amountA?: bigint;
+  amountB?: bigint;
+  amountAMin?: bigint;
+  amountBMin?: bigint;
+  liquidityOut?: bigint;
+  slippageBps: number;
+  error?: string;
+};
+
+export type AmmPositionState = {
+  tokenA: SwapTokenMetadata;
+  tokenB: SwapTokenMetadata;
+  pool?: LiquidityPoolState;
+  lpToken?: SwapTokenMetadata;
+  lpBalance?: bigint;
+  lpAllowance?: bigint;
+  poolShareBps?: bigint;
+  claimableA?: bigint;
+  claimableB?: bigint;
+  error?: string;
+};
+
+export type RemoveLiquidityQuoteState = {
+  position?: AmmPositionState;
+  liquidity?: bigint;
+  amountA?: bigint;
+  amountB?: bigint;
+  amountAMin?: bigint;
+  amountBMin?: bigint;
+  slippageBps: number;
   error?: string;
 };
 
@@ -88,6 +157,35 @@ type ExecutableSwapQuote = SwapQuoteState & {
   amountOutMin: bigint;
 };
 
+type ExecutableLiquidityQuote = LiquidityQuoteState & {
+  tokenA: SwapTokenMetadata & { decimals: number };
+  tokenB: SwapTokenMetadata & { decimals: number };
+  pool: LiquidityPoolState;
+  amountA: bigint;
+  amountB: bigint;
+  amountAMin: bigint;
+  amountBMin: bigint;
+  liquidityOut: bigint;
+};
+
+type ExecutableRemoveLiquidityQuote = RemoveLiquidityQuoteState & {
+  position: AmmPositionState & {
+    tokenA: SwapTokenMetadata & { decimals: number };
+    tokenB: SwapTokenMetadata & { decimals: number };
+    pool: LiquidityPoolState;
+    lpToken: SwapTokenMetadata & { decimals: number };
+    lpBalance: bigint;
+  };
+  liquidity: bigint;
+  amountA: bigint;
+  amountB: bigint;
+  amountAMin: bigint;
+  amountBMin: bigint;
+};
+
+const AMM_MINIMUM_LIQUIDITY = 1_000n;
+const FEE_INDEX_SCALE = 1_000_000_000_000_000_000n;
+
 export function defaultSwapForm(seed?: ProductBoardroomSeed | undefined): SwapForm {
   return {
     tokenIn: seed?.cashToken ?? "",
@@ -96,6 +194,32 @@ export function defaultSwapForm(seed?: ProductBoardroomSeed | undefined): SwapFo
     slippageBps: "50",
     recipient: "",
     deadline: defaultSwapDeadline(),
+    useNative: false,
+  };
+}
+
+export function defaultLiquidityForm(seed?: ProductBoardroomSeed | undefined, deployment?: PledgeCashDeployment | undefined): LiquidityForm {
+  const tokenA = deployment?.wrappedNative && !isZeroAddress(deployment.wrappedNative) ? deployment.wrappedNative : seed?.cashToken ?? "";
+  const tokenB = tokenA && seed?.cashToken && !sameAddress(tokenA, seed.cashToken) ? seed.cashToken : seed?.boardroomShareToken ?? "";
+  return {
+    tokenA,
+    tokenB,
+    amountA: "1",
+    amountB: "1",
+    slippageBps: "50",
+    recipient: "",
+    deadline: defaultSwapDeadline(),
+    useNative: false,
+  };
+}
+
+export function defaultRemoveLiquidityForm(): RemoveLiquidityForm {
+  return {
+    liquidity: "",
+    slippageBps: "50",
+    recipient: "",
+    deadline: defaultSwapDeadline(),
+    useNative: false,
   };
 }
 
@@ -114,6 +238,23 @@ export function withSwapSeedDefaults(form: SwapForm, seed: ProductBoardroomSeed 
     ...form,
     tokenIn,
     tokenOut,
+    useNative: form.useNative && pairHasWrappedNative(deployment, tokenIn, tokenOut),
+  };
+}
+
+export function withLiquiditySeedDefaults(form: LiquidityForm, seed: ProductBoardroomSeed | undefined, deployment?: PledgeCashDeployment | undefined): LiquidityForm {
+  const defaults = defaultLiquidityForm(seed, deployment);
+  const tokenA = form.tokenA || defaults.tokenA;
+  let tokenB = form.tokenB || defaults.tokenB;
+  if (tokenA && tokenB && sameAddress(tokenA, tokenB)) {
+    tokenB = seed?.boardroomShareToken && !sameAddress(tokenA, seed.boardroomShareToken) ? seed.boardroomShareToken : "";
+  }
+
+  return {
+    ...form,
+    tokenA,
+    tokenB,
+    useNative: form.useNative && pairHasWrappedNative(deployment, tokenA, tokenB),
   };
 }
 
@@ -251,6 +392,138 @@ export async function readSwapQuote(
   }
 }
 
+export async function readLiquidityQuote(
+  client: PledgeCashReadClient,
+  deployment: PledgeCashDeployment | undefined,
+  form: LiquidityForm,
+  account?: Address | undefined,
+): Promise<LiquidityQuoteState> {
+  const slippageBps = parseSlippageBpsSafe(form.slippageBps);
+
+  try {
+    const factory = requireDeploymentAddress(deployment?.ammFactory, "AMM factory");
+    const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
+    const tokenA = requireTokenAddress(form.tokenA, "Token A");
+    const tokenB = requireTokenAddress(form.tokenB, "Token B");
+    if (sameAddress(tokenA, tokenB)) throw new Error("Choose two different tokens.");
+
+    const [tokenAMetadata, tokenBMetadata, pool] = await Promise.all([
+      readTokenMetadata(client, tokenA, account, router),
+      readTokenMetadata(client, tokenB, account, router),
+      readLiquidityPool(client, factory, tokenA, tokenB),
+    ]);
+
+    if (tokenAMetadata.decimals === undefined) return baseLiquidityQuote({ tokenA: tokenAMetadata, tokenB: tokenBMetadata, pool, slippageBps, error: "Token A decimals could not be read." });
+    if (tokenBMetadata.decimals === undefined) return baseLiquidityQuote({ tokenA: tokenAMetadata, tokenB: tokenBMetadata, pool, slippageBps, error: "Token B decimals could not be read." });
+
+    const amountADesired = parseTokenAmountInput(form.amountA, tokenAMetadata, "Token A amount");
+    const amountBDesired = parseTokenAmountInput(form.amountB, tokenBMetadata, "Token B amount");
+    if (amountADesired === 0n || amountBDesired === 0n) {
+      return baseLiquidityQuote({ tokenA: tokenAMetadata, tokenB: tokenBMetadata, pool, slippageBps, error: "Enter positive amounts for both tokens." });
+    }
+
+    const [amountA, amountB] = optimalLiquidityAmounts(pool, amountADesired, amountBDesired);
+    const amountAMin = applySlippage(amountA, slippageBps);
+    const amountBMin = applySlippage(amountB, slippageBps);
+    const liquidityOut = estimateLiquidityOut(pool, amountA, amountB);
+    if (liquidityOut === 0n) {
+      return baseLiquidityQuote({ tokenA: tokenAMetadata, tokenB: tokenBMetadata, pool, amountA, amountB, amountAMin, amountBMin, slippageBps, error: "Liquidity output would be zero." });
+    }
+
+    return {
+      tokenA: tokenAMetadata,
+      tokenB: tokenBMetadata,
+      pool,
+      amountA,
+      amountB,
+      amountAMin,
+      amountBMin,
+      liquidityOut,
+      slippageBps,
+    };
+  } catch (error) {
+    return { slippageBps, error: errorMessage(error) };
+  }
+}
+
+export async function readAmmPosition(
+  client: PledgeCashReadClient,
+  deployment: PledgeCashDeployment | undefined,
+  tokenAInput: string,
+  tokenBInput: string,
+  account?: Address | undefined,
+): Promise<AmmPositionState | undefined> {
+  try {
+    const factory = requireDeploymentAddress(deployment?.ammFactory, "AMM factory");
+    const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
+    const tokenA = requireTokenAddress(tokenAInput, "Token A");
+    const tokenB = requireTokenAddress(tokenBInput, "Token B");
+    if (sameAddress(tokenA, tokenB)) throw new Error("Choose two different tokens.");
+
+    const [tokenAMetadata, tokenBMetadata, pool] = await Promise.all([
+      readTokenMetadata(client, tokenA, account),
+      readTokenMetadata(client, tokenB, account),
+      readLiquidityPool(client, factory, tokenA, tokenB),
+    ]);
+    const base: AmmPositionState = { tokenA: tokenAMetadata, tokenB: tokenBMetadata, pool };
+    if (!pool.exists) return base;
+
+    const lpToken = await readTokenMetadata(client, pool.address, account, router);
+    const lpBalance = lpToken.balance ?? 0n;
+    const result: AmmPositionState = {
+      ...base,
+      lpToken,
+      lpBalance,
+      lpAllowance: lpToken.allowance ?? 0n,
+      poolShareBps: pool.totalSupply === 0n ? 0n : (lpBalance * 10_000n) / pool.totalSupply,
+    };
+
+    if (account) {
+      const claimable = await readEffectiveClaimable(client, pool, tokenA, account);
+      result.claimableA = claimable.claimableA;
+      result.claimableB = claimable.claimableB;
+    }
+
+    return result;
+  } catch (error) {
+    if (!isAddress(tokenAInput) || !isAddress(tokenBInput)) return undefined;
+    const tokenA = { address: tokenAInput } as SwapTokenMetadata;
+    const tokenB = { address: tokenBInput } as SwapTokenMetadata;
+    return { tokenA, tokenB, error: errorMessage(error) };
+  }
+}
+
+export async function readRemoveLiquidityQuote(
+  client: PledgeCashReadClient,
+  deployment: PledgeCashDeployment | undefined,
+  pairForm: LiquidityForm,
+  removeForm: RemoveLiquidityForm,
+  account?: Address | undefined,
+): Promise<RemoveLiquidityQuoteState> {
+  const slippageBps = parseSlippageBpsSafe(removeForm.slippageBps);
+
+  try {
+    const position = await readAmmPosition(client, deployment, pairForm.tokenA, pairForm.tokenB, account);
+    if (!position) return { slippageBps, error: "No AMM pool exists for this pair yet." };
+    if (!position.pool || !position.pool.exists || !position.lpToken) return { position, slippageBps, error: "No AMM pool exists for this pair yet." };
+    if (position.lpToken.decimals === undefined) return { position, slippageBps, error: "LP token decimals could not be read." };
+
+    const liquidity = parseTokenAmountInput(removeForm.liquidity, position.lpToken, "LP amount");
+    if (liquidity === 0n) return { position, liquidity, slippageBps, error: "Enter a positive LP amount." };
+    if (position.lpBalance !== undefined && liquidity > position.lpBalance) return { position, liquidity, slippageBps, error: "LP amount exceeds your balance." };
+    if (position.pool.totalSupply === 0n) return { position, liquidity, slippageBps, error: "Pool supply is zero." };
+
+    const amountA = (liquidity * position.pool.reserveA) / position.pool.totalSupply;
+    const amountB = (liquidity * position.pool.reserveB) / position.pool.totalSupply;
+    const amountAMin = applySlippage(amountA, slippageBps);
+    const amountBMin = applySlippage(amountB, slippageBps);
+
+    return { position, liquidity, amountA, amountB, amountAMin, amountBMin, slippageBps };
+  } catch (error) {
+    return { slippageBps, error: errorMessage(error) };
+  }
+}
+
 export function buildSwapTransaction(input: {
   deployment: PledgeCashDeployment | undefined;
   form: SwapForm;
@@ -261,17 +534,148 @@ export function buildSwapTransaction(input: {
   const quote = requireExecutableQuote(input.quote);
   const recipient = input.form.recipient.trim() ? requireTokenAddress(input.form.recipient, "Recipient") : input.account;
   const deadline = parseSwapDeadline(input.form.deadline);
+  const path = [quote.tokenIn.address, quote.tokenOut.address] as const;
+  const nativeMode = input.form.useNative ? requireSwapNativeMode(input.deployment, quote.tokenIn.address, quote.tokenOut.address) : undefined;
+
+  if (nativeMode === "input") {
+    return {
+      address: router,
+      abi: ammRouterAbi,
+      functionName: "swapExactNativeForTokens",
+      value: quote.amountIn,
+      args: [quote.amountOutMin, path, recipient, deadline] as const,
+    };
+  }
+
+  if (nativeMode === "output") {
+    return {
+      address: router,
+      abi: ammRouterAbi,
+      functionName: "swapExactTokensForNative",
+      args: [quote.amountIn, quote.amountOutMin, path, recipient, deadline] as const,
+    };
+  }
 
   return {
     address: router,
     abi: ammRouterAbi,
     functionName: "swapExactTokensForTokens",
-    args: [quote.amountIn, quote.amountOutMin, [quote.tokenIn.address, quote.tokenOut.address] as const, recipient, deadline] as const,
+    args: [quote.amountIn, quote.amountOutMin, path, recipient, deadline] as const,
+  };
+}
+
+export function buildAddLiquidityTransaction(input: {
+  deployment: PledgeCashDeployment | undefined;
+  form: LiquidityForm;
+  quote: LiquidityQuoteState;
+  account: Address;
+}) {
+  const router = requireDeploymentAddress(input.deployment?.ammRouter, "AMM router");
+  const quote = requireExecutableLiquidityQuote(input.quote);
+  const recipient = input.form.recipient.trim() ? requireTokenAddress(input.form.recipient, "Recipient") : input.account;
+  const deadline = parseSwapDeadline(input.form.deadline);
+  const nativeSide = input.form.useNative ? requireWrappedNativeSide(input.deployment, quote.tokenA.address, quote.tokenB.address) : undefined;
+
+  if (nativeSide) {
+    const token = nativeSide === "tokenA" ? quote.tokenB : quote.tokenA;
+    const amountToken = nativeSide === "tokenA" ? quote.amountB : quote.amountA;
+    const amountTokenMin = nativeSide === "tokenA" ? quote.amountBMin : quote.amountAMin;
+    const amountNative = nativeSide === "tokenA" ? quote.amountA : quote.amountB;
+    const amountNativeMin = nativeSide === "tokenA" ? quote.amountAMin : quote.amountBMin;
+
+    return {
+      address: router,
+      abi: ammRouterAbi,
+      functionName: "addLiquidityNative",
+      value: amountNative,
+      args: [token.address, amountToken, amountTokenMin, amountNativeMin, recipient, deadline] as const,
+    };
+  }
+
+  return {
+    address: router,
+    abi: ammRouterAbi,
+    functionName: "addLiquidity",
+    args: [quote.tokenA.address, quote.tokenB.address, quote.amountA, quote.amountB, quote.amountAMin, quote.amountBMin, recipient, deadline] as const,
+  };
+}
+
+export function buildRemoveLiquidityTransaction(input: {
+  deployment: PledgeCashDeployment | undefined;
+  form: RemoveLiquidityForm;
+  quote: RemoveLiquidityQuoteState;
+  account: Address;
+}) {
+  const router = requireDeploymentAddress(input.deployment?.ammRouter, "AMM router");
+  const quote = requireExecutableRemoveLiquidityQuote(input.quote);
+  const recipient = input.form.recipient.trim() ? requireTokenAddress(input.form.recipient, "Recipient") : input.account;
+  const deadline = parseSwapDeadline(input.form.deadline);
+  const nativeSide = input.form.useNative
+    ? requireWrappedNativeSide(input.deployment, quote.position.tokenA.address, quote.position.tokenB.address)
+    : undefined;
+
+  if (nativeSide) {
+    const token = nativeSide === "tokenA" ? quote.position.tokenB : quote.position.tokenA;
+    const amountTokenMin = nativeSide === "tokenA" ? quote.amountBMin : quote.amountAMin;
+    const amountNativeMin = nativeSide === "tokenA" ? quote.amountAMin : quote.amountBMin;
+
+    return {
+      address: router,
+      abi: ammRouterAbi,
+      functionName: "removeLiquidityNative",
+      args: [token.address, quote.liquidity, amountTokenMin, amountNativeMin, recipient, deadline] as const,
+    };
+  }
+
+  return {
+    address: router,
+    abi: ammRouterAbi,
+    functionName: "removeLiquidity",
+    args: [quote.position.tokenA.address, quote.position.tokenB.address, quote.liquidity, quote.amountAMin, quote.amountBMin, recipient, deadline] as const,
+  };
+}
+
+export function buildClaimAmmFeesTransaction(position: AmmPositionState) {
+  if (!position.pool?.exists) throw new Error("No AMM pool exists for this pair yet.");
+  return {
+    address: position.pool.address,
+    abi: ammPoolAbi,
+    functionName: "claimFees",
   };
 }
 
 export function formatSwapAmount(amount: bigint | undefined, token: SwapTokenMetadata | undefined): string {
   return formatTokenAmount(amount, token);
+}
+
+export function formatPoolShareBps(poolShareBps: bigint | undefined): string {
+  if (poolShareBps === undefined) return "Unknown";
+  if (poolShareBps === 0n) return "0%";
+  const whole = poolShareBps / 100n;
+  const fraction = poolShareBps % 100n;
+  return `${whole.toString()}.${fraction.toString().padStart(2, "0")}%`;
+}
+
+export function pairHasWrappedNative(deployment: PledgeCashDeployment | undefined, tokenA: string, tokenB: string): boolean {
+  const wrappedNative = deployment?.wrappedNative;
+  return Boolean(wrappedNative && !isZeroAddress(wrappedNative) && (sameAddress(tokenA, wrappedNative) || sameAddress(tokenB, wrappedNative)));
+}
+
+export function wrappedNativeSide(deployment: PledgeCashDeployment | undefined, tokenA: string, tokenB: string): "tokenA" | "tokenB" | undefined {
+  const wrappedNative = deployment?.wrappedNative;
+  if (!wrappedNative || isZeroAddress(wrappedNative)) return undefined;
+  if (sameAddress(tokenA, wrappedNative)) return "tokenA";
+  if (sameAddress(tokenB, wrappedNative)) return "tokenB";
+  return undefined;
+}
+
+export function swapNativeMode(deployment: PledgeCashDeployment | undefined, form: SwapForm): "input" | "output" | undefined {
+  if (!form.useNative) return undefined;
+  const wrappedNative = deployment?.wrappedNative;
+  if (!wrappedNative || isZeroAddress(wrappedNative)) return undefined;
+  if (sameAddress(form.tokenIn, wrappedNative)) return "input";
+  if (sameAddress(form.tokenOut, wrappedNative)) return "output";
+  return undefined;
 }
 
 export function swapPairLabel(quote: SwapQuoteState | undefined, form: SwapForm): string {
@@ -304,6 +708,52 @@ function requireExecutableQuote(quote: SwapQuoteState): ExecutableSwapQuote {
   return quote;
 }
 
+function requireExecutableLiquidityQuote(quote: LiquidityQuoteState): ExecutableLiquidityQuote {
+  if (!liquidityQuoteReady(quote)) {
+    throw new Error(quote.error ?? "Refresh the liquidity quote before submitting.");
+  }
+  return quote;
+}
+
+function requireExecutableRemoveLiquidityQuote(quote: RemoveLiquidityQuoteState): ExecutableRemoveLiquidityQuote {
+  if (!removeLiquidityQuoteReady(quote)) {
+    throw new Error(quote.error ?? "Refresh the remove-liquidity quote before submitting.");
+  }
+  return quote;
+}
+
+export function liquidityQuoteReady(quote: LiquidityQuoteState | undefined): quote is ExecutableLiquidityQuote {
+  return Boolean(
+    quote &&
+      !quote.error &&
+      quote.tokenA?.decimals !== undefined &&
+      quote.tokenB?.decimals !== undefined &&
+      quote.pool &&
+      quote.amountA !== undefined &&
+      quote.amountB !== undefined &&
+      quote.amountAMin !== undefined &&
+      quote.amountBMin !== undefined &&
+      quote.liquidityOut !== undefined,
+  );
+}
+
+export function removeLiquidityQuoteReady(quote: RemoveLiquidityQuoteState | undefined): quote is ExecutableRemoveLiquidityQuote {
+  return Boolean(
+    quote &&
+      !quote.error &&
+      quote.position?.tokenA.decimals !== undefined &&
+      quote.position.tokenB.decimals !== undefined &&
+      quote.position.pool &&
+      quote.position.lpToken?.decimals !== undefined &&
+      quote.position.lpBalance !== undefined &&
+      quote.liquidity !== undefined &&
+      quote.amountA !== undefined &&
+      quote.amountB !== undefined &&
+      quote.amountAMin !== undefined &&
+      quote.amountBMin !== undefined,
+  );
+}
+
 function baseQuote(input: {
   inputToken: SwapTokenMetadata;
   outputToken: SwapTokenMetadata;
@@ -324,6 +774,31 @@ function baseQuote(input: {
   if (input.feeBps !== undefined) quote.feeBps = input.feeBps;
   if (input.feeDenominator !== undefined) quote.feeDenominator = input.feeDenominator;
   if (input.protocolFeeShareBps !== undefined) quote.protocolFeeShareBps = input.protocolFeeShareBps;
+  return quote;
+}
+
+function baseLiquidityQuote(input: {
+  tokenA: SwapTokenMetadata;
+  tokenB: SwapTokenMetadata;
+  pool?: LiquidityPoolState | undefined;
+  slippageBps: number;
+  amountA?: bigint;
+  amountB?: bigint;
+  amountAMin?: bigint;
+  amountBMin?: bigint;
+  error: string;
+}): LiquidityQuoteState {
+  const quote: LiquidityQuoteState = {
+    tokenA: input.tokenA,
+    tokenB: input.tokenB,
+    slippageBps: input.slippageBps,
+    error: input.error,
+  };
+  if (input.pool) quote.pool = input.pool;
+  if (input.amountA !== undefined) quote.amountA = input.amountA;
+  if (input.amountB !== undefined) quote.amountB = input.amountB;
+  if (input.amountAMin !== undefined) quote.amountAMin = input.amountAMin;
+  if (input.amountBMin !== undefined) quote.amountBMin = input.amountBMin;
   return quote;
 }
 
@@ -366,9 +841,92 @@ async function readTokenMetadata(
   return token;
 }
 
+async function readLiquidityPool(client: PledgeCashReadClient, factory: Address, tokenA: Address, tokenB: Address): Promise<LiquidityPoolState> {
+  const poolAddress = await client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "getPool", args: [tokenA, tokenB] }) as Address;
+  if (isZeroAddress(poolAddress)) {
+    const predicted = await client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "predictPoolAddress", args: [tokenA, tokenB] }) as Address;
+    const [token0, token1] = sortTokenAddresses(tokenA, tokenB);
+    return {
+      address: predicted,
+      exists: false,
+      token0,
+      token1,
+      reserve0: 0n,
+      reserve1: 0n,
+      reserveA: 0n,
+      reserveB: 0n,
+      totalSupply: 0n,
+    };
+  }
+
+  const [token0, token1, reserves, totalSupply] = await Promise.all([
+    client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "token0" }) as Promise<Address>,
+    client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "token1" }) as Promise<Address>,
+    client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "getReserves" }) as Promise<readonly [bigint, bigint, number]>,
+    client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "totalSupply" }) as Promise<bigint>,
+  ]);
+  const [reserve0, reserve1] = reserves;
+  const tokenAIsToken0 = sameAddress(tokenA, token0);
+
+  return {
+    address: poolAddress,
+    exists: true,
+    token0,
+    token1,
+    reserve0,
+    reserve1,
+    reserveA: tokenAIsToken0 ? reserve0 : reserve1,
+    reserveB: tokenAIsToken0 ? reserve1 : reserve0,
+    totalSupply,
+  };
+}
+
+async function readEffectiveClaimable(
+  client: PledgeCashReadClient,
+  pool: LiquidityPoolState,
+  tokenA: Address,
+  account: Address,
+): Promise<{ claimableA: bigint; claimableB: bigint }> {
+  const [balance, stored0, stored1, index0, index1, supplyIndex0, supplyIndex1] = await Promise.all([
+    client.readContract({ address: pool.address, abi: erc20Abi, functionName: "balanceOf", args: [account] }) as Promise<bigint>,
+    client.readContract({ address: pool.address, abi: ammPoolAbi, functionName: "claimable0", args: [account] }) as Promise<bigint>,
+    client.readContract({ address: pool.address, abi: ammPoolAbi, functionName: "claimable1", args: [account] }) as Promise<bigint>,
+    client.readContract({ address: pool.address, abi: ammPoolAbi, functionName: "index0" }) as Promise<bigint>,
+    client.readContract({ address: pool.address, abi: ammPoolAbi, functionName: "index1" }) as Promise<bigint>,
+    client.readContract({ address: pool.address, abi: ammPoolAbi, functionName: "supplyIndex0", args: [account] }) as Promise<bigint>,
+    client.readContract({ address: pool.address, abi: ammPoolAbi, functionName: "supplyIndex1", args: [account] }) as Promise<bigint>,
+  ]);
+
+  const claimable0 = stored0 + pendingFee(balance, index0, supplyIndex0);
+  const claimable1 = stored1 + pendingFee(balance, index1, supplyIndex1);
+  return sameAddress(pool.token0, tokenA)
+    ? { claimableA: claimable0, claimableB: claimable1 }
+    : { claimableA: claimable1, claimableB: claimable0 };
+}
+
 function requireDeploymentAddress(address: Address | undefined, label: string): Address {
   if (!address || isZeroAddress(address)) throw new Error(`${label} is not configured for this chain.`);
   return address;
+}
+
+function requireWrappedNativeSide(deployment: PledgeCashDeployment | undefined, tokenA: Address, tokenB: Address): "tokenA" | "tokenB" {
+  const side = wrappedNativeSide(deployment, tokenA, tokenB);
+  if (!side) throw new Error("Native mode requires one side to be the configured wrapped-native token.");
+  return side;
+}
+
+function requireSwapNativeMode(deployment: PledgeCashDeployment | undefined, tokenIn: Address, tokenOut: Address): "input" | "output" {
+  const mode = swapNativeMode(deployment, {
+    tokenIn,
+    tokenOut,
+    amountIn: "0",
+    slippageBps: "0",
+    recipient: "",
+    deadline: "0",
+    useNative: true,
+  });
+  if (!mode) throw new Error("Native swap mode requires the input or output token to be the configured wrapped-native token.");
+  return mode;
 }
 
 function requireTokenAddress(value: string, label: string): Address {
@@ -395,6 +953,50 @@ function parseSlippageBps(value: string): number {
 
 function applySlippage(amount: bigint, bps: number): bigint {
   return (amount * BigInt(10_000 - bps)) / 10_000n;
+}
+
+function optimalLiquidityAmounts(pool: LiquidityPoolState, amountADesired: bigint, amountBDesired: bigint): readonly [bigint, bigint] {
+  if (pool.reserveA === 0n && pool.reserveB === 0n) return [amountADesired, amountBDesired];
+
+  const amountBOptimal = quoteAmount(amountADesired, pool.reserveA, pool.reserveB);
+  if (amountBOptimal <= amountBDesired) return [amountADesired, amountBOptimal];
+  return [quoteAmount(amountBDesired, pool.reserveB, pool.reserveA), amountBDesired];
+}
+
+function quoteAmount(amountA: bigint, reserveA: bigint, reserveB: bigint): bigint {
+  if (amountA === 0n || reserveA === 0n || reserveB === 0n) return 0n;
+  return (amountA * reserveB) / reserveA;
+}
+
+function estimateLiquidityOut(pool: LiquidityPoolState, amountA: bigint, amountB: bigint): bigint {
+  if (pool.totalSupply === 0n) {
+    const root = bigintSqrt(amountA * amountB);
+    return root > AMM_MINIMUM_LIQUIDITY ? root - AMM_MINIMUM_LIQUIDITY : 0n;
+  }
+
+  const liquidityA = (amountA * pool.totalSupply) / pool.reserveA;
+  const liquidityB = (amountB * pool.totalSupply) / pool.reserveB;
+  return liquidityA < liquidityB ? liquidityA : liquidityB;
+}
+
+function pendingFee(balance: bigint, currentIndex: bigint, suppliedIndex: bigint): bigint {
+  if (balance === 0n || currentIndex <= suppliedIndex) return 0n;
+  return (balance * (currentIndex - suppliedIndex)) / FEE_INDEX_SCALE;
+}
+
+function bigintSqrt(value: bigint): bigint {
+  if (value < 2n) return value;
+  let left = 1n;
+  let right = value;
+  while (right - left > 1n) {
+    const mid = (left + right) / 2n;
+    if (mid * mid <= value) {
+      left = mid;
+    } else {
+      right = mid;
+    }
+  }
+  return left;
 }
 
 function parseSwapDeadline(value: string): bigint {
@@ -486,6 +1088,10 @@ function tokenRank(token: SwapTokenOption): number {
 
 function tokenName(token: SwapTokenOption): string {
   return token.symbol || token.label || token.address;
+}
+
+function sortTokenAddresses(tokenA: Address, tokenB: Address): readonly [Address, Address] {
+  return BigInt(tokenA) < BigInt(tokenB) ? [tokenA, tokenB] : [tokenB, tokenA];
 }
 
 function sameAddress(left: string, right: string): boolean {
