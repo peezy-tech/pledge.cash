@@ -11,7 +11,7 @@
     "copy:pages": "OUT_DIR=\"${VITE_OUT_DIR:-dist}\"; mkdir -p \"$OUT_DIR/deployments\" && cp CNAME .nojekyll \"$OUT_DIR/\" && if compgen -G '../../packages/contracts/deployments/*.json' > /dev/null; then cp ../../packages/contracts/deployments/*.json \"$OUT_DIR/deployments/\"; else printf '%s\\n' '{\"status\":\"pending\",\"reason\":\"Broadcast artifact not published yet\"}' > \"$OUT_DIR/deployments/998.json\"; fi",
     "dev": "bun --cwd ../../packages/contracts build && bun --cwd ../../packages/sdk generate && vite --host 0.0.0.0",
     "preview": "vite preview --host 127.0.0.1",
-    "preview:local": "vite preview --host 127.0.0.1 --outDir dist-local",
+    "preview:local": "vite preview --host 127.0.0.1 --base /pledge-cash/ --outDir dist-local",
     "smoke:amm:local": "bun scripts/amm-write-smoke.ts",
     "test": "bun run typecheck && bun test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
