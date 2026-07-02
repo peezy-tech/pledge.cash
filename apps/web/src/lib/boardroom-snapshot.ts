@@ -8,6 +8,7 @@ import {
   type PledgeCashReadClient,
 } from "@pledge.cash/sdk";
 import { errorMessage } from "./forms";
+import { readTokenMetadataMap, tokenMetadataFor } from "./token-amounts";
 import type { BoardroomDistributionSnapshot, BoardroomGrantSnapshot, BoardroomLockedLiquiditySnapshot, BoardroomSnapshot } from "./types";
 
 export async function readBoardroomSnapshot(client: PledgeCashReadClient, address: Address): Promise<BoardroomSnapshot> {
@@ -17,12 +18,39 @@ export async function readBoardroomSnapshot(client: PledgeCashReadClient, addres
     Promise.all(state.issuedDistributions.map((distribution) => readDistributionSummary(client, distribution))),
     Promise.all(state.lockedLiquidityPositions.map((locker) => readLockedLiquiditySummary(client, locker))),
   ]);
+  const metadataByAddress = await readTokenMetadataMap(client, [
+    state.shareToken,
+    ...grantSummaries.flatMap((grant) => [grant.state?.token, grant.state?.paymentToken]),
+    ...distributionSummaries.flatMap((distribution) => distributionTokenAddresses(distribution)),
+    ...lockedLiquiditySummaries.flatMap((locker) => [locker.state?.tokenA, locker.state?.tokenB, locker.state?.pool]),
+  ]);
 
   return {
     ...state,
-    grantSummaries,
-    distributionSummaries,
-    lockedLiquiditySummaries,
+    shareTokenMetadata: tokenMetadataFor(metadataByAddress, state.shareToken),
+    grantSummaries: grantSummaries.map((grant) => ({
+      ...grant,
+      tokenMetadata: tokenMetadataFor(metadataByAddress, grant.state?.token),
+      paymentTokenMetadata: tokenMetadataFor(metadataByAddress, grant.state?.paymentToken),
+    })),
+    distributionSummaries: distributionSummaries.map((distribution) => ({
+      ...distribution,
+      shareTokenMetadata: tokenMetadataFor(metadataByAddress, distribution.state?.shareToken),
+      paymentTokenMetadata: tokenMetadataFor(
+        metadataByAddress,
+        distribution.state && "paymentToken" in distribution.state ? distribution.state.paymentToken : undefined,
+      ),
+      quoteTokenMetadata: tokenMetadataFor(
+        metadataByAddress,
+        distribution.state && "quoteToken" in distribution.state ? distribution.state.quoteToken : undefined,
+      ),
+    })),
+    lockedLiquiditySummaries: lockedLiquiditySummaries.map((locker) => ({
+      ...locker,
+      tokenAMetadata: tokenMetadataFor(metadataByAddress, locker.state?.tokenA),
+      tokenBMetadata: tokenMetadataFor(metadataByAddress, locker.state?.tokenB),
+      liquidityMetadata: tokenMetadataFor(metadataByAddress, locker.state?.pool),
+    })),
   };
 }
 
@@ -78,4 +106,11 @@ async function readLockedLiquiditySummary(
   } catch (error) {
     return { address: locker, error: errorMessage(error) };
   }
+}
+
+function distributionTokenAddresses(distribution: BoardroomDistributionSnapshot): (Address | undefined)[] {
+  if (!distribution.state) return [];
+  if ("paymentToken" in distribution.state) return [distribution.state.shareToken, distribution.state.paymentToken];
+  if ("quoteToken" in distribution.state) return [distribution.state.shareToken, distribution.state.quoteToken];
+  return [];
 }

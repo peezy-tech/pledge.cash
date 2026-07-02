@@ -4,6 +4,7 @@
 
 node_modules
 dist
+dist-local
 out
 cache
 broadcast

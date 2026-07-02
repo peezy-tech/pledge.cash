@@ -50,7 +50,7 @@ export function defaultGrantForm(): GrantForm {
     holder: "",
     token: "",
     paymentToken: ZERO_ADDRESS,
-    amount: "1000000000000000000",
+    amount: "1",
     price: "0",
     ...defaultTimes(),
     transferable: false,
@@ -63,7 +63,7 @@ export function defaultBoardroomGrantForm(): BoardroomGrantForm {
   return {
     holder: "",
     paymentToken: ZERO_ADDRESS,
-    amount: "1000000000000000000",
+    amount: "1",
     price: "0",
     ...defaultTimes(),
     transferable: false,
@@ -75,8 +75,8 @@ export function defaultBoardroomGrantForm(): BoardroomGrantForm {
 export function defaultFixedPriceSaleForm(): FixedPriceSaleForm {
   return {
     paymentToken: "",
-    shareAmount: "1000000000000000000",
-    price: "1000000000000000000",
+    shareAmount: "1",
+    price: "1",
     maxPerBuyer: "0",
     ...defaultWorkflowWindow(),
     salt: randomSalt(),
@@ -86,11 +86,11 @@ export function defaultFixedPriceSaleForm(): FixedPriceSaleForm {
 export function defaultMigratingCurveForm(): MigratingCurveForm {
   return {
     quoteToken: "",
-    saleSupply: "1000000000000000000",
-    migrationSupply: "1000000000000000000",
-    basePrice: "1000000000000000000",
+    saleSupply: "1",
+    migrationSupply: "1",
+    basePrice: "1",
     slope: "0",
-    graduationQuoteTarget: "1000000000000000000",
+    graduationQuoteTarget: "1",
     quoteToLpBps: "5000",
     ...defaultWorkflowWindow(),
     migrationSalt: randomSalt(),
@@ -101,8 +101,8 @@ export function defaultMigratingCurveForm(): MigratingCurveForm {
 export function defaultLockedLiquidityForm(): LockedLiquidityForm {
   return {
     quoteToken: "",
-    shareAmountDesired: "1000000000000000000",
-    quoteAmountDesired: "1000000000000000000",
+    shareAmountDesired: "1",
+    quoteAmountDesired: "1",
     shareAmountMin: "0",
     quoteAmountMin: "0",
     deadline: defaultDeadline(),
@@ -150,11 +150,31 @@ export function bigintString(value: bigint | undefined): string {
   return value.toString();
 }
 
-export function dateString(timestamp: bigint | undefined): string {
+export function dateString(timestamp: bigint | undefined, nowMilliseconds = Date.now()): string {
   if (timestamp === undefined) return "Unknown";
   const milliseconds = Number(timestamp) * 1000;
   if (!Number.isSafeInteger(milliseconds)) return timestamp.toString();
-  return `${timestamp.toString()} (${new Date(milliseconds).toLocaleString()})`;
+  return `${relativeTimeString(milliseconds, nowMilliseconds)} (${timestamp.toString()}, ${new Date(milliseconds).toLocaleString()})`;
+}
+
+function relativeTimeString(milliseconds: number, nowMilliseconds: number): string {
+  const deltaSeconds = Math.round((milliseconds - nowMilliseconds) / 1000);
+  const absoluteSeconds = Math.abs(deltaSeconds);
+  const { unit, value } = relativeTimeUnit(deltaSeconds, absoluteSeconds);
+  return new Intl.RelativeTimeFormat("en", { numeric: "auto" }).format(value, unit);
+}
+
+function relativeTimeUnit(
+  deltaSeconds: number,
+  absoluteSeconds: number,
+): { unit: Intl.RelativeTimeFormatUnit; value: number } {
+  if (absoluteSeconds < 60) return { unit: "second", value: deltaSeconds };
+  if (absoluteSeconds < 3600) return { unit: "minute", value: Math.round(deltaSeconds / 60) };
+  if (absoluteSeconds < 86_400) return { unit: "hour", value: Math.round(deltaSeconds / 3600) };
+  if (absoluteSeconds < 604_800) return { unit: "day", value: Math.round(deltaSeconds / 86_400) };
+  if (absoluteSeconds < 2_629_800) return { unit: "week", value: Math.round(deltaSeconds / 604_800) };
+  if (absoluteSeconds < 31_557_600) return { unit: "month", value: Math.round(deltaSeconds / 2_629_800) };
+  return { unit: "year", value: Math.round(deltaSeconds / 31_557_600) };
 }
 
 export function requireAddress(value: string, label: string): Address {

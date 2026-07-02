@@ -4,10 +4,12 @@ import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 
 const allowedHosts = process.env.VITE_ALLOWED_HOSTS?.split(",").filter(Boolean);
+const outDir = process.env.VITE_OUT_DIR ?? "dist";
 
 export default defineConfig({
   base: process.env.VITE_BASE_PATH ?? "/",
   build: {
+    outDir,
     rollupOptions: {
       output: {
         manualChunks: {

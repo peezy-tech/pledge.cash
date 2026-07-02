@@ -61,11 +61,13 @@ import { useCallback, useEffect, useState } from "react";
 import type { Hex } from "viem";
 import { TabButton } from "./components/shell";
 import { BoardroomPanel } from "./features/boardrooms/boardroom-panel";
+import { ProductBoardroomDashboard } from "./features/boardrooms/product-boardroom-dashboard";
 import { ArtifactPanel, DeploymentPanel } from "./features/deployment/deployment-panel";
 import { DiscoveryPanel } from "./features/discovery/discovery-panel";
 import { DirectGrantPanel } from "./features/grants/direct-grant-panel";
 import { GrantInspector } from "./features/grants/grant-inspector";
 import { LogPanel } from "./features/logs/log-panel";
+import { SwapPanel } from "./features/swap/swap-panel";
 import { AppHeader } from "./features/wallet/app-header";
 import { WalletPanel } from "./features/wallet/wallet-panel";
 import { useActionRunner } from "./hooks/use-action-runner";
@@ -97,6 +99,7 @@ import {
   defaultLockedLiquidityForm,
   defaultMigratingCurveForm,
   defaultWindDownForm,
+  errorMessage,
   optionalPaymentToken,
   randomSalt,
   requireAddress,
@@ -105,6 +108,40 @@ import {
   shortAddress,
   uintInput,
 } from "./lib/forms";
+import {
+  loadProductBoardroomSeed,
+  readProductBoardroomDashboard,
+  resolveProductBoardroomAddress,
+  type ProductBoardroomDashboardState,
+  type ProductBoardroomSeed,
+} from "./lib/product-boardroom";
+import {
+  buildAddLiquidityTransaction,
+  buildClaimAmmFeesTransaction,
+  buildRemoveLiquidityTransaction,
+  buildSwapTransaction,
+  defaultLiquidityForm,
+  defaultRemoveLiquidityForm,
+  defaultSwapForm,
+  pairHasWrappedNative,
+  readAmmPosition,
+  readLiquidityQuote,
+  readRemoveLiquidityQuote,
+  readSwapTokenList,
+  readSwapQuote,
+  swapNativeMode,
+  withLiquiditySeedDefaults,
+  withSwapSeedDefaults,
+  type AmmPositionState,
+  type LiquidityForm,
+  type LiquidityQuoteState,
+  type RemoveLiquidityForm,
+  type RemoveLiquidityQuoteState,
+  type SwapForm,
+  type SwapQuoteState,
+  type SwapTokenListState,
+} from "./lib/swap";
+import { parseTokenAmountInput, readTokenMetadata, type TokenMetadata } from "./lib/token-amounts";
 import { contractCallPreview } from "./lib/transaction-preview";
 import type {
   BoardroomForm,
@@ -126,20 +163,24 @@ import type {
 export { parseDeployment } from "./lib/deployment";
 
 type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
+type AppView = Tab | "product-boardroom" | "swap";
 
-function parseMinAmountsOut(value: string, expectedLength: number): bigint[] {
+async function parseMinAmountsOut(value: string, assets: readonly Address[]): Promise<bigint[]> {
   const trimmed = value.trim();
-  if (!trimmed) return Array.from({ length: expectedLength }, () => 0n);
+  if (!trimmed) return Array.from({ length: assets.length }, () => 0n);
 
   const values = trimmed.split(",").map((part) => part.trim()).filter(Boolean);
-  if (values.length !== expectedLength) {
-    throw new Error(`Minimum amounts must include ${expectedLength} comma-separated values.`);
+  if (values.length !== assets.length) {
+    throw new Error(`Minimum amounts must include ${assets.length} comma-separated values.`);
   }
 
-  return values.map((part) => {
-    if (!/^\d+$/.test(part)) throw new Error("Minimum amounts must be unsigned integers.");
-    return BigInt(part);
-  });
+  return await Promise.all(
+    values.map(async (part, index) => {
+      const asset = assets[index];
+      if (!asset) throw new Error(`Missing redeemable asset for minimum amount ${index + 1}.`);
+      return parseErc20Amount(part, asset, `Minimum amount ${index + 1}`);
+    }),
+  );
 }
 
 function defaultDiscoveryForm(): DiscoveryForm {
@@ -151,16 +192,60 @@ function defaultDiscoveryForm(): DiscoveryForm {
   };
 }
 
+function initialView(): AppView {
+  if (typeof window === "undefined") return "direct";
+  return viewFromPath(window.location.pathname);
+}
+
+function viewFromPath(pathname: string): AppView {
+  const base = import.meta.env.BASE_URL || "/";
+  const relative = pathname.startsWith(base) ? pathname.slice(base.length) : pathname.replace(/^\/+/, "");
+  if (relative === "boardroom" || relative.startsWith("boardroom/")) return "product-boardroom";
+  if (relative === "swap" || relative.startsWith("swap/")) return "swap";
+  return "direct";
+}
+
+function viewHref(view: AppView): string {
+  const base = import.meta.env.BASE_URL || "/";
+  if (view === "product-boardroom") return `${base}boardroom`;
+  if (view === "swap") return `${base}swap`;
+  return base;
+}
+
+async function parseErc20Amount(value: string, token: Address, label: string): Promise<bigint> {
+  return parseTokenAmountInput(value, await readRequiredTokenMetadata(token, label), label);
+}
+
+async function parsePaymentAmount(value: string, token: Address, label: string): Promise<bigint> {
+  if (isZeroDecimalInput(value)) return 0n;
+  if (isZeroAddress(token)) throw new Error(`${label} requires a payment token.`);
+  return await parseErc20Amount(value, token, label);
+}
+
+async function readRequiredTokenMetadata(token: Address, label: string): Promise<TokenMetadata> {
+  const metadata = await readTokenMetadata(publicClient, token);
+  if (metadata.decimals === undefined) {
+    const reason = metadata.error ? ` ${metadata.error}` : "";
+    throw new Error(`${label} token decimals could not be read.${reason}`);
+  }
+  return metadata;
+}
+
+function isZeroDecimalInput(value: string): boolean {
+  const normalized = value.trim().replace(/,/g, "");
+  return normalized === "" || /^0+(?:\.0*)?$/.test(normalized);
+}
+
 export function App(): React.JSX.Element {
   const generatedDeployment = getPledgeCashDeployment(ACTIVE_CHAIN_ID);
   const deployment = useRuntimeDeployment(ACTIVE_CHAIN_ID, generatedDeployment);
   const { clearLogs, logs, pendingAction, pushLog, runAction } = useActionRunner();
-  const [activeTab, setActiveTab] = useState<Tab>("direct");
+  const [activeView, setActiveView] = useState<AppView>(() => initialView());
   const [grantForm, setGrantForm] = useState<GrantForm>(() => defaultGrantForm());
   const [predictedGrant, setPredictedGrant] = useState<Address>();
   const [grantAddress, setGrantAddress] = useState("");
   const [grantSnapshot, setGrantSnapshot] = useState<GrantSnapshot>();
-  const [settleAmount, setSettleAmount] = useState("1000000000000000000");
+  const [settleAmount, setSettleAmount] = useState("1");
   const [paymentApproval, setPaymentApproval] = useState("0");
   const [boardroomForm, setBoardroomForm] = useState<BoardroomForm>(() => ({
     owner: "",
@@ -171,7 +256,7 @@ export function App(): React.JSX.Element {
   const [predictedBoardroom, setPredictedBoardroom] = useState<Address>();
   const [boardroomAddress, setBoardroomAddress] = useState("");
   const [boardroomSnapshot, setBoardroomSnapshot] = useState<BoardroomSnapshot>();
-  const [boardroomMintAmount, setBoardroomMintAmount] = useState("1000000000000000000");
+  const [boardroomMintAmount, setBoardroomMintAmount] = useState("1");
   const [boardroomMintTo, setBoardroomMintTo] = useState("");
   const [boardroomGrantForm, setBoardroomGrantForm] = useState<BoardroomGrantForm>(() => defaultBoardroomGrantForm());
   const [predictedBoardroomGrant, setPredictedBoardroomGrant] = useState<Address>();
@@ -192,6 +277,35 @@ export function App(): React.JSX.Element {
   const [windDownForm, setWindDownForm] = useState<WindDownForm>(() => defaultWindDownForm());
   const [discoveryForm, setDiscoveryForm] = useState<DiscoveryForm>(() => defaultDiscoveryForm());
   const [discovery, setDiscovery] = useState<DiscoverySnapshot>(() => emptyDiscoverySnapshot());
+  const [productBoardroom, setProductBoardroom] = useState<ProductBoardroomDashboardState>();
+  const [productSeed, setProductSeed] = useState<ProductBoardroomSeed>();
+  const [productBoardroomError, setProductBoardroomError] = useState<string>();
+  const [productBoardroomLoading, setProductBoardroomLoading] = useState(false);
+  const [swapForm, setSwapForm] = useState<SwapForm>(() => defaultSwapForm());
+  const [swapQuote, setSwapQuote] = useState<SwapQuoteState>();
+  const [liquidityForm, setLiquidityForm] = useState<LiquidityForm>(() => defaultLiquidityForm());
+  const [liquidityQuote, setLiquidityQuote] = useState<LiquidityQuoteState>();
+  const [removeLiquidityForm, setRemoveLiquidityForm] = useState<RemoveLiquidityForm>(() => defaultRemoveLiquidityForm());
+  const [removeLiquidityQuote, setRemoveLiquidityQuote] = useState<RemoveLiquidityQuoteState>();
+  const [ammPosition, setAmmPosition] = useState<AmmPositionState>();
+  const [swapTokenList, setSwapTokenList] = useState<SwapTokenListState>(() => ({ tokens: [], pools: [], loaded: false }));
+  const [swapTokenListLoading, setSwapTokenListLoading] = useState(false);
+  const [swapSeedLoaded, setSwapSeedLoaded] = useState(false);
+
+  useEffect(() => {
+    const syncView = (): void => setActiveView(viewFromPath(window.location.pathname));
+    window.addEventListener("popstate", syncView);
+    return () => window.removeEventListener("popstate", syncView);
+  }, []);
+
+  const navigateView = useCallback((view: AppView): void => {
+    setActiveView(view);
+    if (typeof window === "undefined") return;
+    const href = viewHref(view);
+    if (window.location.pathname !== href) {
+      window.history.pushState({}, "", href);
+    }
+  }, []);
 
   const updateGrantAddress = useCallback((address: string): void => {
     setGrantAddress(address);
@@ -213,9 +327,117 @@ export function App(): React.JSX.Element {
   const creationFee = factorySnapshot.creationFee ?? deployment?.creationFee ?? 0n;
   const discoveryKey = discoveryStorageKey(ACTIVE_CHAIN_ID, wallet.account);
 
+  const loadProductBoardroom = useCallback(async (): Promise<void> => {
+    setProductBoardroomLoading(true);
+    setProductBoardroomError(undefined);
+    try {
+      const seed = await loadProductBoardroomSeed(ACTIVE_CHAIN_ID);
+      setProductSeed(seed);
+      const address = resolveProductBoardroomAddress(seed);
+      if (!address) {
+        throw new Error("No product Boardroom address is configured for this chain.");
+      }
+      const next = await readProductBoardroomDashboard(publicClient, { address, seed });
+      setProductBoardroom(next);
+      pushLog(`Loaded product Boardroom ${address}`, "success");
+    } catch (error) {
+      const message = errorMessage(error);
+      setProductBoardroomError(message);
+      pushLog(message, "error");
+    } finally {
+      setProductBoardroomLoading(false);
+    }
+  }, [pushLog]);
+
   useEffect(() => {
     setDiscovery(loadDiscoverySnapshot(discoveryKey));
   }, [discoveryKey]);
+
+  useEffect(() => {
+    if (activeView !== "product-boardroom" || productBoardroom || productBoardroomError || productBoardroomLoading) return;
+    void loadProductBoardroom();
+  }, [activeView, loadProductBoardroom, productBoardroom, productBoardroomError, productBoardroomLoading]);
+
+  useEffect(() => {
+    if (activeView !== "swap" || swapSeedLoaded) return;
+    if (productSeed) {
+      setSwapForm((current) => withSwapSeedDefaults(current, productSeed, deployment));
+      setLiquidityForm((current) => withLiquiditySeedDefaults(current, productSeed, deployment));
+      setSwapSeedLoaded(true);
+      return;
+    }
+
+    let cancelled = false;
+    void loadProductBoardroomSeed(ACTIVE_CHAIN_ID)
+      .then((seed) => {
+        if (cancelled) return;
+        setProductSeed(seed);
+        setSwapForm((current) => withSwapSeedDefaults(current, seed, deployment));
+        setLiquidityForm((current) => withLiquiditySeedDefaults(current, seed, deployment));
+      })
+      .catch((error) => pushLog(errorMessage(error), "error"))
+      .finally(() => {
+        if (!cancelled) setSwapSeedLoaded(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeView, deployment, productSeed, pushLog, swapSeedLoaded]);
+
+  useEffect(() => {
+    setSwapQuote(undefined);
+  }, [swapForm]);
+
+  useEffect(() => {
+    setLiquidityQuote(undefined);
+    setRemoveLiquidityQuote(undefined);
+  }, [liquidityForm]);
+
+  useEffect(() => {
+    setRemoveLiquidityQuote(undefined);
+  }, [removeLiquidityForm]);
+
+  useEffect(() => {
+    if (!pairHasWrappedNative(deployment, swapForm.tokenIn, swapForm.tokenOut) && swapForm.useNative) {
+      setSwapForm((current) => ({ ...current, useNative: false }));
+    }
+    if (pairHasWrappedNative(deployment, liquidityForm.tokenA, liquidityForm.tokenB)) return;
+    if (liquidityForm.useNative) {
+      setLiquidityForm((current) => ({ ...current, useNative: false }));
+    }
+    if (removeLiquidityForm.useNative) {
+      setRemoveLiquidityForm((current) => ({ ...current, useNative: false }));
+    }
+  }, [deployment, liquidityForm.tokenA, liquidityForm.tokenB, liquidityForm.useNative, removeLiquidityForm.useNative, swapForm.tokenIn, swapForm.tokenOut, swapForm.useNative]);
+
+  const loadSwapTokens = useCallback(async (): Promise<void> => {
+    setSwapTokenListLoading(true);
+    try {
+      const seed = productSeed ?? await loadProductBoardroomSeed(ACTIVE_CHAIN_ID);
+      if (!productSeed) setProductSeed(seed);
+      const next = await readSwapTokenList(publicClient, deployment, seed, wallet.account);
+      setSwapTokenList(next);
+      setSwapForm((current) => withSwapSeedDefaults(current, seed, deployment));
+      setLiquidityForm((current) => withLiquiditySeedDefaults(current, seed, deployment));
+      if (next.error) {
+        pushLog(`Swap token list: ${next.error}`, next.tokens.length > 0 ? "info" : "error");
+      } else {
+        pushLog(`Loaded ${next.tokens.length.toString()} swap tokens across ${next.pools.length.toString()} pools`, "success");
+      }
+    } catch (error) {
+      const message = errorMessage(error);
+      setSwapTokenList({ tokens: [], pools: [], loaded: true, error: message });
+      pushLog(message, "error");
+    } finally {
+      setSwapTokenListLoading(false);
+    }
+  }, [deployment, productSeed, pushLog, wallet.account]);
+
+  useEffect(() => {
+    if (activeView !== "swap" || !swapSeedLoaded) return;
+    void loadSwapTokens();
+  }, [activeView, loadSwapTokens, swapSeedLoaded]);
 
   useEffect(() => {
     if (!wallet.account || boardroomForm.owner) return;
@@ -282,12 +504,162 @@ export function App(): React.JSX.Element {
     return hash;
   };
 
-  const directGrantTerms = (): GrantCreationTerms => {
+  const refreshSwapQuote = async (): Promise<void> => {
+    const next = await readSwapQuote(publicClient, deployment, swapForm, wallet.account);
+    setSwapQuote(next);
+    if (next.error) {
+      pushLog(next.error, next.error.startsWith("No AMM pool") ? "info" : "error");
+      return;
+    }
+    pushLog("Loaded swap quote", "success");
+  };
+
+  const requireFreshSwapQuote = async (): Promise<SwapQuoteState> => {
+    const next = await readSwapQuote(publicClient, deployment, swapForm, wallet.account);
+    setSwapQuote(next);
+    if (next.error) throw new Error(next.error);
+    return next;
+  };
+
+  const requireFreshAllowance = (label: string, allowance: bigint | undefined, amount: bigint | undefined): void => {
+    if (amount === undefined) throw new Error(`Refresh the ${label} quote before submitting.`);
+    if (allowance === undefined || allowance < amount) {
+      throw new Error(`${label} approval is below the latest quote. Approve again before submitting.`);
+    }
+  };
+
+  const liquidityTokenUsesNative = (token: Address | undefined): boolean =>
+    Boolean(liquidityForm.useNative && deployment?.wrappedNative && token && token.toLowerCase() === deployment.wrappedNative.toLowerCase());
+
+  const approveSwapInput = async (): Promise<void> => {
+    activeAccount();
+    const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
+    const quote = await requireFreshSwapQuote();
+    if (!quote.tokenIn || quote.amountIn === undefined) throw new Error("Refresh the swap quote before approving.");
+    if (swapNativeMode(deployment, swapForm) === "input") throw new Error("Native swap input does not need ERC20 approval.");
+
+    await submitContractTransaction("Swap input approval", buildErc20Approval({ token: quote.tokenIn.address, spender: router, amount: quote.amountIn }));
+  };
+
+  const executeSwap = async (): Promise<void> => {
+    const account = activeAccount();
+    const quote = await requireFreshSwapQuote();
+    if (swapNativeMode(deployment, swapForm) !== "input") {
+      requireFreshAllowance("Swap input", quote.tokenIn?.allowance, quote.amountIn);
+    }
+    await submitContractTransaction("Swap", buildSwapTransaction({ deployment, form: swapForm, quote, account }));
+    await refreshSwapQuote();
+  };
+
+  const refreshLiquidityQuote = async (): Promise<void> => {
+    const next = await readLiquidityQuote(publicClient, deployment, liquidityForm, wallet.account);
+    setLiquidityQuote(next);
+    const position = await readAmmPosition(publicClient, deployment, liquidityForm.tokenA, liquidityForm.tokenB, wallet.account);
+    setAmmPosition(position);
+    if (next.error) {
+      pushLog(next.error, next.error.includes("No AMM pool") ? "info" : "error");
+      return;
+    }
+    pushLog("Loaded liquidity quote", "success");
+  };
+
+  const requireFreshLiquidityQuote = async (): Promise<LiquidityQuoteState> => {
+    const next = await readLiquidityQuote(publicClient, deployment, liquidityForm, wallet.account);
+    setLiquidityQuote(next);
+    if (next.error) throw new Error(next.error);
+    return next;
+  };
+
+  const approveLiquidityTokenA = async (): Promise<void> => {
+    activeAccount();
+    const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
+    const quote = await requireFreshLiquidityQuote();
+    if (!quote.tokenA || quote.amountA === undefined) throw new Error("Refresh the liquidity quote before approving token A.");
+    await submitContractTransaction("Liquidity token A approval", buildErc20Approval({ token: quote.tokenA.address, spender: router, amount: quote.amountA }));
+  };
+
+  const approveLiquidityTokenB = async (): Promise<void> => {
+    activeAccount();
+    const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
+    const quote = await requireFreshLiquidityQuote();
+    if (!quote.tokenB || quote.amountB === undefined) throw new Error("Refresh the liquidity quote before approving token B.");
+    await submitContractTransaction("Liquidity token B approval", buildErc20Approval({ token: quote.tokenB.address, spender: router, amount: quote.amountB }));
+  };
+
+  const addLiquidity = async (): Promise<void> => {
+    const account = activeAccount();
+    const quote = await requireFreshLiquidityQuote();
+    if (!liquidityTokenUsesNative(quote.tokenA?.address)) {
+      requireFreshAllowance("Liquidity token A", quote.tokenA?.allowance, quote.amountA);
+    }
+    if (!liquidityTokenUsesNative(quote.tokenB?.address)) {
+      requireFreshAllowance("Liquidity token B", quote.tokenB?.allowance, quote.amountB);
+    }
+    await submitContractTransaction("Add liquidity", buildAddLiquidityTransaction({ deployment, form: liquidityForm, quote, account }));
+    await Promise.all([refreshLiquidityQuote(), loadSwapTokens()]);
+  };
+
+  const refreshAmmPosition = async (): Promise<void> => {
+    const next = await readAmmPosition(publicClient, deployment, liquidityForm.tokenA, liquidityForm.tokenB, wallet.account);
+    setAmmPosition(next);
+    if (next?.error) {
+      pushLog(next.error, "error");
+      return;
+    }
+    pushLog("Loaded AMM LP position", "success");
+  };
+
+  const refreshRemoveLiquidityQuote = async (): Promise<void> => {
+    const next = await readRemoveLiquidityQuote(publicClient, deployment, liquidityForm, removeLiquidityForm, wallet.account);
+    setRemoveLiquidityQuote(next);
+    if (next.position) setAmmPosition(next.position);
+    if (next.error) {
+      pushLog(next.error, next.error.includes("No AMM pool") ? "info" : "error");
+      return;
+    }
+    pushLog("Loaded remove-liquidity quote", "success");
+  };
+
+  const requireFreshRemoveLiquidityQuote = async (): Promise<RemoveLiquidityQuoteState> => {
+    const next = await readRemoveLiquidityQuote(publicClient, deployment, liquidityForm, removeLiquidityForm, wallet.account);
+    setRemoveLiquidityQuote(next);
+    if (next.position) setAmmPosition(next.position);
+    if (next.error) throw new Error(next.error);
+    return next;
+  };
+
+  const approveLpToken = async (): Promise<void> => {
+    activeAccount();
+    const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
+    const quote = await requireFreshRemoveLiquidityQuote();
+    if (!quote.position?.pool || quote.liquidity === undefined) throw new Error("Refresh the remove-liquidity quote before approving LP.");
+    await submitContractTransaction("LP token approval", buildErc20Approval({ token: quote.position.pool.address, spender: router, amount: quote.liquidity }));
+  };
+
+  const removeLiquidity = async (): Promise<void> => {
+    const account = activeAccount();
+    const quote = await requireFreshRemoveLiquidityQuote();
+    requireFreshAllowance("LP token", quote.position?.lpAllowance, quote.liquidity);
+    await submitContractTransaction("Remove liquidity", buildRemoveLiquidityTransaction({ deployment, form: removeLiquidityForm, quote, account }));
+    await Promise.all([refreshAmmPosition(), refreshLiquidityQuote()]);
+  };
+
+  const claimAmmFees = async (): Promise<void> => {
+    activeAccount();
+    const position = await readAmmPosition(publicClient, deployment, liquidityForm.tokenA, liquidityForm.tokenB, wallet.account);
+    if (!position) throw new Error("Select a pool before claiming fees.");
+    await submitContractTransaction("AMM fee claim", buildClaimAmmFeesTransaction(position));
+    await refreshAmmPosition();
+  };
+
+  const directGrantTerms = async (): Promise<GrantCreationTerms> => {
     const holder = requireAddress(grantForm.holder, "Holder");
     const token = requireAddress(grantForm.token, "Grant token");
     const paymentToken = optionalPaymentToken(grantForm.paymentToken);
-    const amount = uintInput(grantForm.amount, "Amount");
-    const price = uintInput(grantForm.price, "Price");
+    const [amount, price] = await Promise.all([
+      parseErc20Amount(grantForm.amount, token, "Amount"),
+      parsePaymentAmount(grantForm.price, paymentToken, "Price"),
+    ]);
     const expiry = uintInput(grantForm.expiry, "Expiry");
     const vestingCliff = uintInput(grantForm.vestingCliff, "Vesting cliff");
     const vestingEnd = uintInput(grantForm.vestingEnd, "Vesting end");
@@ -314,7 +686,7 @@ export function App(): React.JSX.Element {
   const predictDirectGrantAddress = async (): Promise<Address> => {
     if (!wallet.account) throw new Error("Connect wallet to predict a direct grant.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
-    const { salt } = directGrantTerms();
+    const { salt } = await directGrantTerms();
 
     return await sdkPredictDirectGrantAddress(publicClient, { factory, issuer: wallet.account, salt });
   };
@@ -328,16 +700,17 @@ export function App(): React.JSX.Element {
 
   const approveEscrow = async (): Promise<void> => {
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
-    const { token, amount } = directGrantTerms();
+    const { token, amount } = await directGrantTerms();
 
     await submitContractTransaction("Escrow approval", buildErc20Approval({ token, spender: factory, amount }));
   };
 
   const createGrant = async (): Promise<void> => {
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
+    const terms = await directGrantTerms();
     await submitContractTransaction(
       "Grant creation",
-      buildDirectGrantCreationTransaction({ factory, terms: directGrantTerms(), creationFee }),
+      buildDirectGrantCreationTransaction({ factory, terms, creationFee }),
     );
   };
 
@@ -345,6 +718,10 @@ export function App(): React.JSX.Element {
     const grant = requireAddress(grantAddress, "Grant address");
     const now = BigInt(Math.floor(Date.now() / 1000));
     const snapshot = await readGrantState(publicClient, grant, now);
+    const [tokenMetadata, paymentTokenMetadata] = await Promise.all([
+      readTokenMetadata(publicClient, snapshot.token),
+      isZeroAddress(snapshot.paymentToken) ? undefined : readTokenMetadata(publicClient, snapshot.paymentToken),
+    ]);
 
     setGrantSnapshot({
       address: grant,
@@ -360,6 +737,8 @@ export function App(): React.JSX.Element {
       halted: snapshot.halted,
       closed: snapshot.closed,
       settleable: snapshot.settleable,
+      tokenMetadata,
+      paymentTokenMetadata,
     });
     pushLog(`Loaded grant ${grant}`, "success");
   };
@@ -370,7 +749,7 @@ export function App(): React.JSX.Element {
     if (grantSnapshot.address.toLowerCase() !== grant.toLowerCase()) throw new Error("Reload the grant after changing the address.");
     if (isZeroAddress(grantSnapshot.paymentToken)) throw new Error("Selected grant has no payment token.");
 
-    const amount = uintInput(paymentApproval, "Payment approval");
+    const amount = await parseErc20Amount(paymentApproval, grantSnapshot.paymentToken, "Payment approval");
     await submitContractTransaction(
       "Payment approval",
       buildErc20Approval({ token: grantSnapshot.paymentToken, spender: grantSnapshot.address, amount }),
@@ -379,7 +758,11 @@ export function App(): React.JSX.Element {
 
   const settleGrant = async (): Promise<void> => {
     const grant = requireAddress(grantAddress, "Grant address");
-    const amount = uintInput(settleAmount, "Settle amount");
+    const snapshot =
+      grantSnapshot && grantSnapshot.address.toLowerCase() === grant.toLowerCase()
+        ? grantSnapshot
+        : await readGrantState(publicClient, grant);
+    const amount = await parseErc20Amount(settleAmount, snapshot.token, "Settle amount");
     await submitContractTransaction("Grant settlement", {
       address: grant,
       abi: tokenGrantAbi,
@@ -472,17 +855,22 @@ export function App(): React.JSX.Element {
   const mintBoardroomShares = async (): Promise<void> => {
     const boardroom = boardroomSnapshot?.address ?? requireAddress(boardroomAddress, "Boardroom address");
     const to = boardroomMintTo.trim() ? requireAddress(boardroomMintTo, "Mint recipient") : boardroom;
-    const amount = uintInput(boardroomMintAmount, "Mint amount");
+    const shareToken = boardroomSnapshot?.address.toLowerCase() === boardroom.toLowerCase()
+      ? boardroomSnapshot.shareToken
+      : (await readBoardroomState(publicClient, boardroom)).shareToken;
+    const amount = await parseErc20Amount(boardroomMintAmount, shareToken, "Mint amount");
     await submitContractTransaction("Share mint", buildBoardroomMintTransaction({ boardroom, to, amount }));
     await refreshBoardroom(boardroom);
   };
 
-  const boardroomShareGrantTerms = (): BoardroomShareGrantTerms => {
+  const boardroomShareGrantTerms = async (): Promise<BoardroomShareGrantTerms> => {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
     const holder = requireAddress(boardroomGrantForm.holder, "Grant holder");
     const paymentToken = optionalPaymentToken(boardroomGrantForm.paymentToken);
-    const amount = uintInput(boardroomGrantForm.amount, "Grant amount");
-    const price = uintInput(boardroomGrantForm.price, "Grant price");
+    const [amount, price] = await Promise.all([
+      parseErc20Amount(boardroomGrantForm.amount, boardroomSnapshot.shareToken, "Grant amount"),
+      parsePaymentAmount(boardroomGrantForm.price, paymentToken, "Grant price"),
+    ]);
     const expiry = uintInput(boardroomGrantForm.expiry, "Grant expiry");
     const vestingCliff = uintInput(boardroomGrantForm.vestingCliff, "Grant vesting cliff");
     const vestingEnd = uintInput(boardroomGrantForm.vestingEnd, "Grant vesting end");
@@ -508,7 +896,7 @@ export function App(): React.JSX.Element {
   const predictBoardroomGrantAddress = async (): Promise<void> => {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
-    const { salt } = boardroomShareGrantTerms();
+    const { salt } = await boardroomShareGrantTerms();
     const predicted = await sdkPredictBoardroomGrantAddress(publicClient, {
       factory,
       boardroom: boardroomSnapshot.address,
@@ -523,7 +911,7 @@ export function App(): React.JSX.Element {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
-    const { amount } = boardroomShareGrantTerms();
+    const { amount } = await boardroomShareGrantTerms();
     await submitContractTransaction(
       "Boardroom approval",
       buildBoardroomExecuteTransaction({
@@ -543,10 +931,11 @@ export function App(): React.JSX.Element {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
     const protocolPolicy = requireDeploymentAddress(deployment?.protocolPolicy ?? factory, "ProtocolPolicy");
+    const terms = await boardroomShareGrantTerms();
     const predicted = await sdkPredictBoardroomGrantAddress(publicClient, {
       factory,
       boardroom: boardroomSnapshot.address,
-      salt: boardroomShareGrantTerms().salt,
+      salt: terms.salt,
     });
     await submitContractTransaction(
       "Boardroom grant creation",
@@ -555,7 +944,7 @@ export function App(): React.JSX.Element {
         call: buildBoardroomGrantCreationCall({
           policy: protocolPolicy,
           factory,
-          terms: { ...boardroomShareGrantTerms(), token: boardroomSnapshot.shareToken },
+          terms: { ...terms, token: boardroomSnapshot.shareToken },
           creationFee,
         }),
         value: creationFee,
@@ -571,7 +960,7 @@ export function App(): React.JSX.Element {
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
     const protocolPolicy = requireDeploymentAddress(deployment?.protocolPolicy ?? factory, "ProtocolPolicy");
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
-    const terms = boardroomShareGrantTerms();
+    const terms = await boardroomShareGrantTerms();
     const predicted = await sdkPredictBoardroomGrantAddress(publicClient, {
       factory,
       boardroom: boardroomSnapshot.address,
@@ -599,20 +988,29 @@ export function App(): React.JSX.Element {
     return boardroomSnapshot;
   };
 
-  const fixedPriceSaleTerms = (): BoardroomFixedPriceSaleTerms => ({
-    paymentToken: requireAddress(fixedPriceSaleForm.paymentToken, "Payment token"),
-    shareAmount: uintInput(fixedPriceSaleForm.shareAmount, "Sale share amount"),
-    price: uintInput(fixedPriceSaleForm.price, "Sale price"),
-    maxPerBuyer: uintInput(fixedPriceSaleForm.maxPerBuyer, "Max per buyer"),
-    startTime: uintInput(fixedPriceSaleForm.startTime, "Sale start time"),
-    endTime: uintInput(fixedPriceSaleForm.endTime, "Sale end time"),
-    salt: requireBytes32(fixedPriceSaleForm.salt, "Sale salt"),
-  });
+  const fixedPriceSaleTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomFixedPriceSaleTerms> => {
+    const paymentToken = requireAddress(fixedPriceSaleForm.paymentToken, "Payment token");
+    const [shareAmount, price, maxPerBuyer] = await Promise.all([
+      parseErc20Amount(fixedPriceSaleForm.shareAmount, boardroom.shareToken, "Sale share amount"),
+      parseErc20Amount(fixedPriceSaleForm.price, paymentToken, "Sale price"),
+      parseErc20Amount(fixedPriceSaleForm.maxPerBuyer, boardroom.shareToken, "Max per buyer"),
+    ]);
+
+    return {
+      paymentToken,
+      shareAmount,
+      price,
+      maxPerBuyer,
+      startTime: uintInput(fixedPriceSaleForm.startTime, "Sale start time"),
+      endTime: uintInput(fixedPriceSaleForm.endTime, "Sale end time"),
+      salt: requireBytes32(fixedPriceSaleForm.salt, "Sale salt"),
+    };
+  };
 
   const predictFixedPriceSale = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
-    const { salt } = fixedPriceSaleTerms();
+    const { salt } = await fixedPriceSaleTerms(boardroom);
     const predicted = await sdkPredictFixedPriceSaleAddress(publicClient, { factory, boardroom: boardroom.address, salt });
     setPredictedFixedPriceSale(predicted);
     updateFixedPriceSaleAddress(predicted);
@@ -638,7 +1036,7 @@ export function App(): React.JSX.Element {
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
     const protocolPolicy = requireDeploymentAddress(deployment?.protocolPolicy ?? factory, "ProtocolPolicy");
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
-    const terms = fixedPriceSaleTerms();
+    const terms = await fixedPriceSaleTerms(boardroom);
     const predicted = await sdkPredictFixedPriceSaleAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
     await submitContractTransaction(
       "Fixed-price sale creation",
@@ -678,17 +1076,25 @@ export function App(): React.JSX.Element {
     await Promise.all([refreshBoardroom(boardroom.address), loadFixedPriceSaleAddress(sale)]);
   };
 
-  const migratingCurveTerms = (): BoardroomMigratingBondingCurveTerms => {
+  const migratingCurveTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomMigratingBondingCurveTerms> => {
+    const quoteToken = requireAddress(migratingCurveForm.quoteToken, "Quote token");
     const quoteToLpBps = uintInput(migratingCurveForm.quoteToLpBps, "Quote-to-LP bps");
     if (quoteToLpBps > 10_000n) throw new Error("Quote-to-LP bps must be at most 10000.");
+    const [saleSupply, migrationSupply, basePrice, slope, graduationQuoteTarget] = await Promise.all([
+      parseErc20Amount(migratingCurveForm.saleSupply, boardroom.shareToken, "Curve sale supply"),
+      parseErc20Amount(migratingCurveForm.migrationSupply, boardroom.shareToken, "Curve migration supply"),
+      parseErc20Amount(migratingCurveForm.basePrice, quoteToken, "Curve base price"),
+      parseErc20Amount(migratingCurveForm.slope, quoteToken, "Curve slope"),
+      parseErc20Amount(migratingCurveForm.graduationQuoteTarget, quoteToken, "Graduation quote target"),
+    ]);
 
     return {
-      quoteToken: requireAddress(migratingCurveForm.quoteToken, "Quote token"),
-      saleSupply: uintInput(migratingCurveForm.saleSupply, "Curve sale supply"),
-      migrationSupply: uintInput(migratingCurveForm.migrationSupply, "Curve migration supply"),
-      basePrice: uintInput(migratingCurveForm.basePrice, "Curve base price"),
-      slope: uintInput(migratingCurveForm.slope, "Curve slope"),
-      graduationQuoteTarget: uintInput(migratingCurveForm.graduationQuoteTarget, "Graduation quote target"),
+      quoteToken,
+      saleSupply,
+      migrationSupply,
+      basePrice,
+      slope,
+      graduationQuoteTarget,
       quoteToLpBps: Number(quoteToLpBps),
       startTime: uintInput(migratingCurveForm.startTime, "Curve start time"),
       endTime: uintInput(migratingCurveForm.endTime, "Curve end time"),
@@ -700,7 +1106,7 @@ export function App(): React.JSX.Element {
   const predictMigratingCurve = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
-    const { salt } = migratingCurveTerms();
+    const { salt } = await migratingCurveTerms(boardroom);
     const predicted = await sdkPredictMigratingBondingCurveAddress(publicClient, { factory, boardroom: boardroom.address, salt });
     setPredictedMigratingCurve(predicted);
     updateMigratingCurveAddress(predicted);
@@ -726,7 +1132,7 @@ export function App(): React.JSX.Element {
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
     const protocolPolicy = requireDeploymentAddress(deployment?.protocolPolicy ?? factory, "ProtocolPolicy");
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
-    const terms = migratingCurveTerms();
+    const terms = await migratingCurveTerms(boardroom);
     const predicted = await sdkPredictMigratingBondingCurveAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
     await submitContractTransaction(
       "Migrating curve creation",
@@ -759,35 +1165,53 @@ export function App(): React.JSX.Element {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
     const curve = requireAddress(migratingCurveAddress, "Migrating curve address");
+    const curveState =
+      migratingCurveSnapshot && migratingCurveSnapshot.address.toLowerCase() === curve.toLowerCase()
+        ? migratingCurveSnapshot
+        : await readMigratingBondingCurveState(publicClient, curve);
+    const [minShareLiquidity, minQuoteLiquidity] = await Promise.all([
+      parseErc20Amount(curveMigrationForm.minShareLiquidity, curveState.shareToken, "Minimum share liquidity"),
+      parseErc20Amount(curveMigrationForm.minQuoteLiquidity, curveState.quoteToken, "Minimum quote liquidity"),
+    ]);
     await submitContractTransaction(
       "Migrating curve migration",
       buildBoardroomMigratingCurveMigrationAction({
         boardroom: boardroom.address,
         policy: factory,
         curve,
-        minShareLiquidity: uintInput(curveMigrationForm.minShareLiquidity, "Minimum share liquidity"),
-        minQuoteLiquidity: uintInput(curveMigrationForm.minQuoteLiquidity, "Minimum quote liquidity"),
+        minShareLiquidity,
+        minQuoteLiquidity,
         deadline: uintInput(curveMigrationForm.deadline, "Migration deadline"),
       }),
     );
     await Promise.all([refreshBoardroom(boardroom.address), loadMigratingCurveAddress(curve)]);
   };
 
-  const lockedLiquidityTerms = (): BoardroomLockedLiquidityTerms => ({
-    quoteToken: requireAddress(lockedLiquidityForm.quoteToken, "Quote token"),
-    shareAmountDesired: uintInput(lockedLiquidityForm.shareAmountDesired, "Share amount desired"),
-    quoteAmountDesired: uintInput(lockedLiquidityForm.quoteAmountDesired, "Quote amount desired"),
-    shareAmountMin: uintInput(lockedLiquidityForm.shareAmountMin, "Share amount minimum"),
-    quoteAmountMin: uintInput(lockedLiquidityForm.quoteAmountMin, "Quote amount minimum"),
-    deadline: uintInput(lockedLiquidityForm.deadline, "Locked-liquidity deadline"),
-    salt: requireBytes32(lockedLiquidityForm.salt, "Locked-liquidity salt"),
-    shareTokenSide: lockedLiquidityForm.shareTokenSide,
-  });
+  const lockedLiquidityTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomLockedLiquidityTerms> => {
+    const quoteToken = requireAddress(lockedLiquidityForm.quoteToken, "Quote token");
+    const [shareAmountDesired, quoteAmountDesired, shareAmountMin, quoteAmountMin] = await Promise.all([
+      parseErc20Amount(lockedLiquidityForm.shareAmountDesired, boardroom.shareToken, "Share amount desired"),
+      parseErc20Amount(lockedLiquidityForm.quoteAmountDesired, quoteToken, "Quote amount desired"),
+      parseErc20Amount(lockedLiquidityForm.shareAmountMin, boardroom.shareToken, "Share amount minimum"),
+      parseErc20Amount(lockedLiquidityForm.quoteAmountMin, quoteToken, "Quote amount minimum"),
+    ]);
+
+    return {
+      quoteToken,
+      shareAmountDesired,
+      quoteAmountDesired,
+      shareAmountMin,
+      quoteAmountMin,
+      deadline: uintInput(lockedLiquidityForm.deadline, "Locked-liquidity deadline"),
+      salt: requireBytes32(lockedLiquidityForm.salt, "Locked-liquidity salt"),
+      shareTokenSide: lockedLiquidityForm.shareTokenSide,
+    };
+  };
 
   const predictLockedLiquidity = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
-    const { salt } = lockedLiquidityTerms();
+    const { salt } = await lockedLiquidityTerms(boardroom);
     const predicted = await sdkPredictLockedLiquidityAddress(publicClient, { factory, boardroom: boardroom.address, salt });
     setPredictedLockedLiquidity(predicted);
     updateLockedLiquidityAddress(predicted);
@@ -813,7 +1237,7 @@ export function App(): React.JSX.Element {
     const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
     const protocolPolicy = requireDeploymentAddress(deployment?.protocolPolicy ?? factory, "ProtocolPolicy");
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
-    const terms = lockedLiquidityTerms();
+    const terms = await lockedLiquidityTerms(boardroom);
     const predicted = await sdkPredictLockedLiquidityAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
     await submitContractTransaction(
       "Locked-liquidity creation",
@@ -845,13 +1269,21 @@ export function App(): React.JSX.Element {
   const exitLockedLiquidity = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const locker = requireAddress(lockedLiquidityAddress, "Locked-liquidity address");
+    const lockerState =
+      lockedLiquiditySnapshot && lockedLiquiditySnapshot.address.toLowerCase() === locker.toLowerCase()
+        ? lockedLiquiditySnapshot
+        : await readLockedLiquidityState(publicClient, locker);
+    const [amountAMin, amountBMin] = await Promise.all([
+      parseErc20Amount(lockedLiquidityExitForm.amountAMin, lockerState.tokenA, "Exit amount A minimum"),
+      parseErc20Amount(lockedLiquidityExitForm.amountBMin, lockerState.tokenB, "Exit amount B minimum"),
+    ]);
     await submitContractTransaction(
       "Locked-liquidity exit",
       buildBoardroomLockedLiquidityExitTransaction({
         boardroom: boardroom.address,
         locker,
-        amountAMin: uintInput(lockedLiquidityExitForm.amountAMin, "Exit amount A minimum"),
-        amountBMin: uintInput(lockedLiquidityExitForm.amountBMin, "Exit amount B minimum"),
+        amountAMin,
+        amountBMin,
         deadline: uintInput(lockedLiquidityExitForm.deadline, "Exit deadline"),
       }),
     );
@@ -891,12 +1323,15 @@ export function App(): React.JSX.Element {
     const recipient = windDownForm.redeemRecipient.trim()
       ? requireAddress(windDownForm.redeemRecipient, "Redemption recipient")
       : activeAccount();
-    const minAmountsOut = parseMinAmountsOut(windDownForm.minAmountsOut, boardroom.redeemableAssets.length);
+    const [shares, minAmountsOut] = await Promise.all([
+      parseErc20Amount(windDownForm.redeemShares, boardroom.shareToken, "Redeem shares"),
+      parseMinAmountsOut(windDownForm.minAmountsOut, boardroom.redeemableAssets),
+    ]);
     await submitContractTransaction(
       "Boardroom share redemption",
       buildBoardroomRedeemTransaction({
         boardroom: boardroom.address,
-        shares: uintInput(windDownForm.redeemShares, "Redeem shares"),
+        shares,
         recipient,
         minAmountsOut,
       }),
@@ -1007,17 +1442,17 @@ export function App(): React.JSX.Element {
   const inspectDiscoveredGrant = useCallback(
     (grant: Address): void => {
       updateGrantAddress(grant);
-      setActiveTab("grant");
+      navigateView("grant");
     },
-    [updateGrantAddress],
+    [navigateView, updateGrantAddress],
   );
 
   const useDiscoveredBoardroom = useCallback(
     (boardroom: Address): void => {
       updateBoardroomAddress(boardroom);
-      setActiveTab("boardroom");
+      navigateView("boardroom");
     },
-    [updateBoardroomAddress],
+    [navigateView, updateBoardroomAddress],
   );
 
   const useDiscoveredDistribution = useCallback(
@@ -1028,18 +1463,18 @@ export function App(): React.JSX.Element {
       } else {
         updateFixedPriceSaleAddress(distribution.distribution);
       }
-      setActiveTab("boardroom");
+      navigateView("boardroom");
     },
-    [updateBoardroomAddress, updateFixedPriceSaleAddress, updateMigratingCurveAddress],
+    [navigateView, updateBoardroomAddress, updateFixedPriceSaleAddress, updateMigratingCurveAddress],
   );
 
   const useDiscoveredLockedLiquidity = useCallback(
     (locker: DiscoveredLockedLiquidity): void => {
       updateBoardroomAddress(locker.boardroom);
       updateLockedLiquidityAddress(locker.locker);
-      setActiveTab("boardroom");
+      navigateView("boardroom");
     },
-    [updateBoardroomAddress, updateLockedLiquidityAddress],
+    [navigateView, updateBoardroomAddress, updateLockedLiquidityAddress],
   );
 
   return (
@@ -1055,7 +1490,13 @@ export function App(): React.JSX.Element {
 
       <main className="grid min-h-[calc(100svh-64px)] grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)]">
         <aside className="grid content-start gap-4 border-b border-zinc-800 bg-zinc-950/35 p-4 lg:border-b-0 lg:border-r">
-          <DeploymentPanel chainId={ACTIVE_CHAIN_ID} creationFee={creationFee} deployment={deployment} factorySnapshot={factorySnapshot} />
+          <DeploymentPanel
+            chainId={ACTIVE_CHAIN_ID}
+            creationFee={creationFee}
+            deployment={deployment}
+            factorySnapshot={factorySnapshot}
+            localAmmProtocolFeeRecipient={productSeed?.boardroom}
+          />
           <WalletPanel wallet={wallet} />
           <LogPanel logs={logs} clearLogs={clearLogs} />
           <ArtifactPanel deployment={deployment} />
@@ -1063,21 +1504,78 @@ export function App(): React.JSX.Element {
 
         <section className="min-w-0 p-4 sm:p-5">
           <div className="mb-4 flex flex-wrap items-center gap-2">
-            <TabButton active={activeTab === "direct"} onClick={() => setActiveTab("direct")}>
+            <TabButton active={activeView === "product-boardroom"} onClick={() => navigateView("product-boardroom")}>
+              Product Boardroom
+            </TabButton>
+            <TabButton active={activeView === "swap"} onClick={() => navigateView("swap")}>
+              Swap
+            </TabButton>
+            <TabButton active={activeView === "direct"} onClick={() => navigateView("direct")}>
               Direct Grant
             </TabButton>
-            <TabButton active={activeTab === "grant"} onClick={() => setActiveTab("grant")}>
+            <TabButton active={activeView === "grant"} onClick={() => navigateView("grant")}>
               Inspect Grant
             </TabButton>
-            <TabButton active={activeTab === "boardroom"} onClick={() => setActiveTab("boardroom")}>
-              Boardroom
+            <TabButton active={activeView === "boardroom"} onClick={() => navigateView("boardroom")}>
+              Boardroom Tools
             </TabButton>
-            <TabButton active={activeTab === "discovery"} onClick={() => setActiveTab("discovery")}>
+            <TabButton active={activeView === "discovery"} onClick={() => navigateView("discovery")}>
               Discovery
             </TabButton>
           </div>
 
-          {activeTab === "direct" ? (
+          {activeView === "product-boardroom" ? (
+            <ProductBoardroomDashboard
+              dashboard={productBoardroom}
+              error={productBoardroomError}
+              loading={productBoardroomLoading}
+              pendingAction={pendingAction}
+              inspectGrant={inspectDiscoveredGrant}
+              openTools={(boardroom) => {
+                updateBoardroomAddress(boardroom);
+                void refreshBoardroom(boardroom);
+                navigateView("boardroom");
+              }}
+              refresh={loadProductBoardroom}
+              runAction={runAction}
+            />
+          ) : null}
+
+          {activeView === "swap" ? (
+            <SwapPanel
+              account={wallet.account}
+              deployment={deployment}
+              form={swapForm}
+              liquidityForm={liquidityForm}
+              liquidityQuote={liquidityQuote}
+              position={ammPosition}
+              pendingAction={pendingAction}
+              quote={swapQuote}
+              removeLiquidityForm={removeLiquidityForm}
+              removeLiquidityQuote={removeLiquidityQuote}
+              setLiquidityForm={setLiquidityForm}
+              setRemoveLiquidityForm={setRemoveLiquidityForm}
+              setForm={setSwapForm}
+              tokenList={swapTokenList}
+              tokenListLoading={swapTokenListLoading}
+              addLiquidity={addLiquidity}
+              approveLiquidityTokenA={approveLiquidityTokenA}
+              approveLiquidityTokenB={approveLiquidityTokenB}
+              approveLpToken={approveLpToken}
+              approveInput={approveSwapInput}
+              claimAmmFees={claimAmmFees}
+              executeSwap={executeSwap}
+              refreshLiquidityQuote={refreshLiquidityQuote}
+              refreshPosition={refreshAmmPosition}
+              refreshQuote={refreshSwapQuote}
+              refreshRemoveLiquidityQuote={refreshRemoveLiquidityQuote}
+              refreshTokens={loadSwapTokens}
+              removeLiquidity={removeLiquidity}
+              runAction={runAction}
+            />
+          ) : null}
+
+          {activeView === "direct" ? (
             <DirectGrantPanel
               creationFee={creationFee}
               clearDirectGrantPrediction={clearDirectGrantPrediction}
@@ -1093,7 +1591,7 @@ export function App(): React.JSX.Element {
             />
           ) : null}
 
-          {activeTab === "grant" ? (
+          {activeView === "grant" ? (
             <GrantInspector
               grantAddress={grantAddress}
               grantSnapshot={grantSnapshot}
@@ -1112,7 +1610,7 @@ export function App(): React.JSX.Element {
             />
           ) : null}
 
-          {activeTab === "boardroom" ? (
+          {activeView === "boardroom" ? (
             <BoardroomPanel
               boardroom={{
                 address: boardroomAddress,
@@ -1197,7 +1695,7 @@ export function App(): React.JSX.Element {
             />
           ) : null}
 
-          {activeTab === "discovery" ? (
+          {activeView === "discovery" ? (
             <DiscoveryPanel
               account={wallet.account}
               deployment={deployment}

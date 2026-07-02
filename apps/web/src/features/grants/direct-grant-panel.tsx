@@ -5,6 +5,7 @@ import { ActionButton, ActionRow, AddressLink, Facts, Field, Panel } from "../..
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { randomSalt } from "../../lib/forms";
+import { formatNativeTokenAmount } from "../../lib/token-amounts";
 import type { GrantForm } from "../../lib/types";
 
 type DirectGrantPanelProps = {
@@ -69,11 +70,11 @@ export function DirectGrantPanel({
               spellCheck={false}
             />
           </Field>
-          <Field label="Amount raw units">
-            <Input value={grantForm.amount} inputMode="numeric" onChange={(event) => setGrantFormField("amount", event.target.value, setGrantForm)} />
+          <Field label="Amount">
+            <Input value={grantForm.amount} inputMode="decimal" onChange={(event) => setGrantFormField("amount", event.target.value, setGrantForm)} />
           </Field>
-          <Field label="Price raw units">
-            <Input value={grantForm.price} inputMode="numeric" onChange={(event) => setGrantFormField("price", event.target.value, setGrantForm)} />
+          <Field label="Price">
+            <Input value={grantForm.price} inputMode="decimal" onChange={(event) => setGrantFormField("price", event.target.value, setGrantForm)} />
           </Field>
           <Field label="Vesting cliff timestamp">
             <Input
@@ -130,7 +131,7 @@ export function DirectGrantPanel({
           items={[
             { label: "Predicted grant", value: predictedGrant ? <AddressLink address={predictedGrant} /> : "None" },
             { label: "Issuer", value: issuer ? <AddressLink address={issuer} /> : "Connect wallet" },
-            { label: "Creation fee", value: `${creationFee.toString()} wei` },
+            { label: "Creation fee", value: formatNativeTokenAmount(creationFee) },
           ]}
         />
       </Panel>
