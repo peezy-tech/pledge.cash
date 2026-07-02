@@ -3106,6 +3106,13 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "wrapNativeBalance",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "wrappedNative",
     "inputs": [],
     "outputs": [

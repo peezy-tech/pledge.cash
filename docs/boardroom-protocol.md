@@ -72,8 +72,9 @@ Wind-down transitions are one-way:
 1. `Active`: owner can mint shares, create grants, create distributions, and register redeemable assets.
 2. `WindingDown`: entered only after `startWindDown()` wraps the Boardroom's full native HYPE balance into WHYPE. Owner
    cannot mint shares or create new grants/distributions. Owner may close recorded obligations,
-   exit locked liquidity, register final redeemable assets, and burn treasury-held shares. Active fixed-price sales and
-   migrating bonding curves stop accepting trades as soon as their Boardroom enters this state.
+   exit locked liquidity, register final redeemable assets, wrap any late native balance, and burn treasury-held shares.
+   Active fixed-price sales and migrating bonding curves stop accepting trades as soon as their Boardroom enters this
+   state.
 3. `RedemptionsOpen`: share holders can burn shares to redeem registered assets pro-rata. Owner execution is closed.
 
 ### BoardroomToken
@@ -130,12 +131,12 @@ and later create free USDC payroll grants through the same policy-gated batch ex
    `Active` to `WindingDown`.
 3. Owner closes, cancels, or migrates every recorded distribution and halts or expires every recorded grant.
 4. Owner exits every recorded locked-liquidity position.
-5. Owner calls `openRedemptions`.
+5. Owner calls `openRedemptions`, which wraps any native HYPE received after wind-down started.
 6. `openRedemptions` verifies no recorded grants, distributions, or locked-liquidity positions are still open, burns
    treasury-held shares, and moves the Boardroom to `RedemptionsOpen`.
 7. A share holder calls `redeem(shares, recipient, minAmountsOut)`.
-8. The Boardroom burns any shares currently held by the Boardroom, then calculates each asset amount from current
-   Boardroom balances and total share supply.
+8. The Boardroom wraps any late native HYPE balance, burns any shares currently held by the Boardroom, then calculates
+   each asset amount from current Boardroom balances and total share supply.
 9. The Boardroom burns the holder's shares and transfers each registered asset to the recipient with exact Boardroom and
    recipient balance-delta checks.
 
@@ -171,6 +172,7 @@ Redemption loops are bounded by `MAX_REDEEMABLE_ASSETS`. Wind-down gates are bou
 - Redemptions cannot open while a recorded locked-liquidity position still holds LP principal.
 - Raw native HYPE is never redeemed directly.
 - `startWindDown()` wraps native HYPE before `status` changes to `WindingDown`.
+- `openRedemptions()` and `redeem()` wrap any late native HYPE balance before redemption pricing.
 - Treasury-held shares are burned before redemptions open.
 - Shares sent to the Boardroom after redemptions open are burned before the next redemption is priced.
 - Share redemption burns shares before transferring redeemable assets.

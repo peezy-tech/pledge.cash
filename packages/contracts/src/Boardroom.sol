@@ -179,6 +179,10 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         emit BoardroomWindDownStarted(msg.sender);
     }
 
+    function wrapNativeBalance() external onlyOwner nonReentrant {
+        _wrapNativeBalanceForWindDown();
+    }
+
     function registerRedeemableAsset(address asset) external onlyOwner {
         BoardroomStatus currentStatus = status;
         if (currentStatus == BoardroomStatus.RedemptionsOpen) {
@@ -221,6 +225,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         _requireNoOpenIssuedDistributions();
         _requireNoLockedLiquidity();
 
+        _wrapNativeBalanceForWindDown();
         _burnTreasuryShares();
         status = BoardroomStatus.RedemptionsOpen;
         emit BoardroomRedemptionsOpened(msg.sender);
@@ -238,6 +243,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         if (minAmountsOut.length != assetsLength) revert InvalidRedemptionInput();
 
         BoardroomToken shares_ = BoardroomToken(shareToken);
+        _wrapNativeBalanceForWindDown();
         _burnTreasuryShares();
 
         uint256 supplyBeforeBurn = shares_.totalSupply();

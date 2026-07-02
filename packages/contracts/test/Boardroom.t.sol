@@ -505,6 +505,51 @@ contract BoardroomTest is Test {
         assertEq(wrappedNative.balanceOf(address(boardroom)), 0);
     }
 
+    function testOpenRedemptionsWrapsNativeReceivedAfterWindDownStarts() public {
+        (Boardroom boardroom,) = _createBoardroom("wind-down-late-native");
+        uint256 initialNativeAmount = 1 ether;
+        uint256 lateNativeAmount = 2 ether;
+
+        vm.deal(address(boardroom), initialNativeAmount);
+
+        vm.prank(owner);
+        boardroom.startWindDown();
+
+        _sendNative(address(boardroom), lateNativeAmount);
+
+        vm.prank(owner);
+        boardroom.openRedemptions();
+
+        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
+        assertEq(address(boardroom).balance, 0);
+        assertEq(wrappedNative.balanceOf(address(boardroom)), initialNativeAmount + lateNativeAmount);
+    }
+
+    function testRedeemWrapsNativeReceivedAfterRedemptionsOpen() public {
+        (Boardroom boardroom,) = _createBoardroom("redemptions-late-native");
+        uint256 holderShares = 100 ether;
+        uint256 lateNativeAmount = 5 ether;
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, holderShares);
+        boardroom.registerRedeemableAsset(address(wrappedNative));
+        boardroom.startWindDown();
+        boardroom.openRedemptions();
+        vm.stopPrank();
+
+        _sendNative(address(boardroom), lateNativeAmount);
+
+        uint256[] memory minimums = new uint256[](1);
+        minimums[0] = lateNativeAmount;
+
+        vm.prank(holder);
+        uint256[] memory amounts = boardroom.redeem(holderShares, holder, minimums);
+
+        assertEq(amounts[0], lateNativeAmount);
+        assertEq(wrappedNative.balanceOf(holder), lateNativeAmount);
+        assertEq(address(boardroom).balance, 0);
+    }
+
     function testBoardroomCanRedeemWrappedNativeAfterWindDownWrap() public {
         (Boardroom boardroom,) = _createBoardroom("wind-down-redeem-whype");
         uint256 holderShares = 100 ether;
@@ -818,6 +863,12 @@ contract BoardroomTest is Test {
         assertEq(created, boardroomAddress);
         boardroom = Boardroom(payable(boardroomAddress));
         assetPolicy.setAssetAllowed(boardroom.shareToken(), true);
+    }
+
+    function _sendNative(address to, uint256 amount) internal {
+        vm.deal(address(this), amount);
+        (bool success,) = to.call{value: amount}("");
+        assertTrue(success);
     }
 
     function _createBoardroomGrant(Boardroom boardroom, BoardroomGrantCreate memory create)

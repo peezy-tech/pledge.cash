@@ -87,6 +87,14 @@ export function buildBoardroomStartWindDownTransaction(input: { boardroom: Addre
   };
 }
 
+export function buildBoardroomWrapNativeBalanceTransaction(input: { boardroom: Address }) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "wrapNativeBalance",
+  };
+}
+
 export function buildBoardroomBurnTreasurySharesTransaction(input: { boardroom: Address }) {
   return {
     address: input.boardroom,

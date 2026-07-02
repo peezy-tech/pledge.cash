@@ -21,6 +21,7 @@ import {
   buildBoardroomRegisterRedeemableAssetTransaction,
   buildBoardroomShareGrantIssuanceBatch,
   buildBoardroomStartWindDownTransaction,
+  buildBoardroomWrapNativeBalanceTransaction,
   buildDirectGrantCreationTransaction,
   buildErc20Approval,
   decodeKnownPledgeCashError,
@@ -309,6 +310,10 @@ describe("SDK action and query helpers", () => {
     expect(buildBoardroomStartWindDownTransaction({ boardroom })).toMatchObject({
       address: boardroom,
       functionName: "startWindDown",
+    });
+    expect(buildBoardroomWrapNativeBalanceTransaction({ boardroom })).toMatchObject({
+      address: boardroom,
+      functionName: "wrapNativeBalance",
     });
     expect(buildBoardroomBurnTreasurySharesTransaction({ boardroom })).toMatchObject({
       address: boardroom,

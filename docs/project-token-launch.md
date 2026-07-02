@@ -49,6 +49,7 @@ starts, the Boardroom wraps that raw HYPE into WHYPE before entering `WindingDow
 - The launch trade increases the Boardroom wrapped-HYPE balance by the exact configured protocol fee share.
 - The grant creation increases the Boardroom native HYPE balance by exactly `0.1 HYPE`.
 - `startWindDown()` wraps the Boardroom native HYPE balance into WHYPE before the Boardroom enters `WindingDown`.
+- Late native HYPE received after wind-down starts is wrapped before redemptions open or before redemption pricing.
 - The created grant escrows the full project-token grant amount for the contributor.
 
 ## Commands
