@@ -1,4 +1,4 @@
-import type { PledgeCashDeployment } from "@pledge.cash/sdk";
+import type { Address, PledgeCashDeployment } from "@pledge.cash/sdk";
 import { AddressLink, Facts, Panel } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
 import { deploymentText } from "../../lib/deployment";
@@ -10,11 +10,19 @@ type DeploymentPanelProps = {
   creationFee: bigint;
   deployment: PledgeCashDeployment | undefined;
   factorySnapshot: FactorySnapshot;
+  localAmmProtocolFeeRecipient?: Address | undefined;
 };
 
-export function DeploymentPanel({ chainId, creationFee, deployment, factorySnapshot }: DeploymentPanelProps): React.JSX.Element {
+export function DeploymentPanel({
+  chainId,
+  creationFee,
+  deployment,
+  factorySnapshot,
+  localAmmProtocolFeeRecipient,
+}: DeploymentPanelProps): React.JSX.Element {
   const boardroomState = deployment?.boardroomFactory ? "Ready" : deployment?.boardroomStatus === "pending" ? "Pending" : "Not in artifact";
   const ammState = deployment?.ammRouter ? "Router ready" : deployment?.ammFactory ? "Factory only" : "Not in artifact";
+  const ammProtocolFeeRecipient = deployment?.ammProtocolFeeRecipient ?? localAmmProtocolFeeRecipient;
   const tokenGrantLogic = factorySnapshot.tokenGrantLogic ?? deployment?.tokenGrantLogic;
   const factoryOwner = factorySnapshot.owner ?? deployment?.factoryOwner;
 
@@ -47,7 +55,7 @@ export function DeploymentPanel({ chainId, creationFee, deployment, factorySnaps
           },
           {
             label: "AMM protocol fees",
-            value: deployment?.ammProtocolFeeRecipient ? <AddressLink address={deployment.ammProtocolFeeRecipient} /> : "Not configured",
+            value: ammProtocolFeeRecipient ? <AddressLink address={ammProtocolFeeRecipient} /> : "Not configured",
           },
           {
             label: "LockedLiquidityFactory",

@@ -366,19 +366,36 @@ export async function readSwapQuote(
     const amountOutMin = applySlippage(amountOut, slippageBps);
     const [reserve0, reserve1] = reserves;
     const tokenInIsToken0 = token0.toLowerCase() === tokenIn.toLowerCase();
+    const pool = {
+      address: poolAddress,
+      token0,
+      token1,
+      reserve0,
+      reserve1,
+      reserveIn: tokenInIsToken0 ? reserve0 : reserve1,
+      reserveOut: tokenInIsToken0 ? reserve1 : reserve0,
+    };
+
+    if (amountOut === 0n) {
+      return {
+        tokenIn: inputToken,
+        tokenOut: outputToken,
+        pool,
+        amountIn,
+        amountOut,
+        amountOutMin,
+        slippageBps,
+        feeBps,
+        feeDenominator,
+        protocolFeeShareBps,
+        error: "Swap output would be zero.",
+      };
+    }
 
     return {
       tokenIn: inputToken,
       tokenOut: outputToken,
-      pool: {
-        address: poolAddress,
-        token0,
-        token1,
-        reserve0,
-        reserve1,
-        reserveIn: tokenInIsToken0 ? reserve0 : reserve1,
-        reserveOut: tokenInIsToken0 ? reserve1 : reserve0,
-      },
+      pool,
       amountIn,
       amountOut,
       amountOutMin,
@@ -517,6 +534,18 @@ export async function readRemoveLiquidityQuote(
     const amountB = (liquidity * position.pool.reserveB) / position.pool.totalSupply;
     const amountAMin = applySlippage(amountA, slippageBps);
     const amountBMin = applySlippage(amountB, slippageBps);
+    if (amountA === 0n || amountB === 0n) {
+      return {
+        position,
+        liquidity,
+        amountA,
+        amountB,
+        amountAMin,
+        amountBMin,
+        slippageBps,
+        error: "LP amount is too small for this pool.",
+      };
+    }
 
     return { position, liquidity, amountA, amountB, amountAMin, amountBMin, slippageBps };
   } catch (error) {

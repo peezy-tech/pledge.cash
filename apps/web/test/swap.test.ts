@@ -97,6 +97,22 @@ describe("AMM liquidity helpers", () => {
     expect(nativeOutputTransaction.args[3]).toBe(account);
   });
 
+  test("rejects swap quotes that round down to zero output", async () => {
+    const quote = await readSwapQuote(fakeReadClient(), deployment, {
+      tokenIn: share,
+      tokenOut: whype,
+      amountIn: "0.000000000000000001",
+      slippageBps: "50",
+      recipient: "",
+      deadline: "1700000000",
+      useNative: true,
+    }, account);
+
+    expect(quote.amountIn).toBe(1n);
+    expect(quote.amountOut).toBe(0n);
+    expect(quote.error).toBe("Swap output would be zero.");
+  });
+
   test("quotes balanced add liquidity amounts and builds add transaction", async () => {
     const quote = await readLiquidityQuote(fakeReadClient(), deployment, {
       tokenA: usdc,
@@ -168,6 +184,30 @@ describe("AMM liquidity helpers", () => {
     expect(transaction.functionName).toBe("removeLiquidity");
     expect(transaction.args[2]).toBe(5_000_000_000_000_000_000n);
     expect(transaction.args[6]).toBe(1_700_000_100n);
+  });
+
+  test("rejects dust LP removal quotes that round down to zero token output", async () => {
+    const quote = await readRemoveLiquidityQuote(fakeReadClient(), deployment, {
+      tokenA: usdc,
+      tokenB: share,
+      amountA: "1",
+      amountB: "1",
+      slippageBps: "50",
+      recipient: "",
+      deadline: "1700000000",
+      useNative: false,
+    }, {
+      liquidity: "0.000000000000000001",
+      slippageBps: "100",
+      recipient: "",
+      deadline: "1700000100",
+      useNative: false,
+    }, account);
+
+    expect(quote.liquidity).toBe(1n);
+    expect(quote.amountA).toBe(0n);
+    expect(quote.amountB).toBe(0n);
+    expect(quote.error).toBe("LP amount is too small for this pool.");
   });
 
   test("builds native add and remove liquidity router calls when wrapped native is selected", async () => {
