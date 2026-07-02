@@ -17,7 +17,8 @@ tokens into it.
 - Holder: address recorded on the grant, mirrored by factory ERC721 ownership, and allowed to settle vested tokens.
 - Factory: deploys deterministic token grant clones, mints and transfers grant-right ERC721 tokens, mirrors ERC721 transfers
   into the grant holder field, and optionally collects a native creation fee.
-- Factory owner: deployer authority that can update the native creation fee and receives paid creation fees.
+- Factory owner: authority that can update the native creation fee and receives paid creation fees. In the
+  Boardroom-owned protocol flow this owner is the pledge.cash Boardroom.
 
 ## Assets
 
@@ -42,8 +43,8 @@ Native HYPE is not escrowed by grants. It is only used for the optional creation
 - `transferable`: whether the factory ERC721 holder right may be transferred before expiry and close.
 - `transferUnlockTime`: timestamp before which a transferable grant-right token cannot be transferred.
 
-The initial project-token launch scenario uses a `0.1 HYPE` creation fee,
-sent to the factory owner.
+The initial project-token launch scenario uses a `0.1 HYPE` creation fee. After ownership handoff, fees are sent to the
+project Boardroom and wrapped into WHYPE when wind-down starts.
 
 ## HyperEVM Testnet
 

@@ -3,11 +3,14 @@ pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
+import {WETH} from "solady/tokens/WETH.sol";
+import {AssetPolicy} from "../src/AssetPolicy.sol";
 import {Boardroom} from "../src/Boardroom.sol";
 import {BoardroomFactory} from "../src/BoardroomFactory.sol";
 import {BoardroomPolicyRegistry} from "../src/BoardroomPolicyRegistry.sol";
 import {BoardroomToken} from "../src/BoardroomToken.sol";
 import {IBoardroomCallPolicy} from "../src/IBoardroomCallPolicy.sol";
+import {ProtocolPolicy} from "../src/ProtocolPolicy.sol";
 import {TokenGrant} from "../src/TokenGrant.sol";
 import {TokenGrantFactory} from "../src/TokenGrantFactory.sol";
 
@@ -101,9 +104,12 @@ contract BoardroomTest is Test {
     }
 
     BoardroomPolicyRegistry internal policyRegistry;
+    ProtocolPolicy internal protocolPolicy;
+    AssetPolicy internal assetPolicy;
     TokenGrantFactory internal tokenGrantFactory;
     BoardroomFactory internal boardroomFactory;
     BoardroomCurrency internal paymentToken;
+    WETH internal wrappedNative;
 
     address internal owner = address(0xA11CE);
     address internal holder = address(0xB0B);
@@ -119,11 +125,20 @@ contract BoardroomTest is Test {
     event PolicyAllowedSet(address indexed policy, bool allowed);
 
     function setUp() public {
+        wrappedNative = new WETH();
         policyRegistry = new BoardroomPolicyRegistry(address(this));
+        protocolPolicy = new ProtocolPolicy(address(this));
+        assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
         tokenGrantFactory = new TokenGrantFactory();
-        boardroomFactory = new BoardroomFactory(address(policyRegistry));
+        boardroomFactory = new BoardroomFactory(address(policyRegistry), address(wrappedNative));
         paymentToken = new BoardroomCurrency("Payment", "PAY", 6);
 
+        protocolPolicy.setProtocolTargetAllowed(address(tokenGrantFactory), true);
+        assetPolicy.setAssetAllowed(address(paymentToken), true);
+        assetPolicy.setApprovalSpenderAllowed(address(tokenGrantFactory), true);
+
+        policyRegistry.setPolicyAllowed(address(protocolPolicy), true);
+        policyRegistry.setPolicyAllowed(address(assetPolicy), true);
         policyRegistry.setPolicyAllowed(address(tokenGrantFactory), true);
 
         paymentToken.mint(holder, 1_000_000000);
@@ -152,7 +167,10 @@ contract BoardroomTest is Test {
 
     function testFactoryRejectsZeroPolicyRegistry() public {
         vm.expectRevert(BoardroomFactory.InvalidAddress.selector);
-        new BoardroomFactory(address(0));
+        new BoardroomFactory(address(0), address(wrappedNative));
+
+        vm.expectRevert(BoardroomFactory.InvalidAddress.selector);
+        new BoardroomFactory(address(policyRegistry), address(0));
     }
 
     function testCreateBoardroomRejectsZeroOwner() public {
@@ -169,6 +187,8 @@ contract BoardroomTest is Test {
         assertEq(boardroomFactory.allBoardroomsLength(), 1);
         assertEq(boardroom.owner(), owner);
         assertEq(boardroom.policyRegistry(), address(policyRegistry));
+        assertEq(boardroom.wrappedNative(), address(wrappedNative));
+        assertEq(boardroomFactory.wrappedNative(), address(wrappedNative));
 
         BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
         assertEq(shareToken.boardroom(), boardroomAddress);
@@ -249,7 +269,7 @@ contract BoardroomTest is Test {
         vm.prank(stranger);
         vm.expectRevert(Ownable.Unauthorized.selector);
         boardroom.execute(
-            _policyCall(
+            _assetCall(
                 address(shareToken),
                 0,
                 abi.encodeWithSignature("approve(address,uint256)", address(tokenGrantFactory), GRANT_SIZE)
@@ -259,12 +279,12 @@ contract BoardroomTest is Test {
 
     function testExecuteRejectsUnregisteredPolicy() public {
         (Boardroom boardroom,) = _createBoardroom("execute-policy");
-        policyRegistry.setPolicyAllowed(address(tokenGrantFactory), false);
+        policyRegistry.setPolicyAllowed(address(assetPolicy), false);
 
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(Boardroom.PolicyNotAllowed.selector, address(tokenGrantFactory)));
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.PolicyNotAllowed.selector, address(assetPolicy)));
         boardroom.execute(
-            _policyCall(
+            _assetCall(
                 address(paymentToken),
                 0,
                 abi.encodeWithSignature("approve(address,uint256)", address(tokenGrantFactory), PAYROLL_AMOUNT)
@@ -281,12 +301,12 @@ contract BoardroomTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(
                 Boardroom.CallNotAllowed.selector,
-                address(tokenGrantFactory),
+                address(assetPolicy),
                 address(paymentToken),
                 BoardroomCurrency.transfer.selector
             )
         );
-        boardroom.execute(_policyCall(address(paymentToken), 0, data));
+        boardroom.execute(_assetCall(address(paymentToken), 0, data));
     }
 
     function testExecuteBatchRejectsEmptyAndTooManyCalls() public {
@@ -397,7 +417,9 @@ contract BoardroomTest is Test {
 
         vm.warp(CLIFF - 1);
         vm.prank(owner);
-        boardroom.execute(_policyCall(address(grant), 0, abi.encodeCall(TokenGrant.stopVestingAndWithdrawUnvested, ())));
+        boardroom.execute(
+            _tokenGrantFactoryCall(address(grant), 0, abi.encodeCall(TokenGrant.stopVestingAndWithdrawUnvested, ()))
+        );
 
         assertTrue(grant.isClosed());
         assertEq(grant.claimable(), 0);
@@ -431,7 +453,7 @@ contract BoardroomTest is Test {
                 TokenGrant.stopVestingAndWithdrawUnvested.selector
             )
         );
-        boardroom.execute(_policyCall(grantAddress, 0, data));
+        boardroom.execute(_tokenGrantFactoryCall(grantAddress, 0, data));
     }
 
     function testBoardroomForwardsGrantCreationFee() public {
@@ -455,6 +477,89 @@ contract BoardroomTest is Test {
         assertEq(address(grant), grantAddress);
         assertEq(address(this).balance, recipientBalanceBefore + fee);
         assertEq(address(boardroom).balance, 0);
+    }
+
+    function testBoardroomWrapsNativeBalanceWhenWindDownStarts() public {
+        (Boardroom boardroom,) = _createBoardroom("wind-down-wrap-native");
+        uint256 nativeAmount = 3 ether;
+
+        vm.deal(address(boardroom), nativeAmount);
+
+        vm.prank(owner);
+        boardroom.startWindDown();
+
+        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.WindingDown));
+        assertEq(address(boardroom).balance, 0);
+        assertEq(wrappedNative.balanceOf(address(boardroom)), nativeAmount);
+    }
+
+    function testBoardroomStartWindDownWorksWithZeroNativeBalance() public {
+        (Boardroom boardroom,) = _createBoardroom("wind-down-zero-native");
+
+        vm.prank(owner);
+        boardroom.startWindDown();
+
+        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.WindingDown));
+        assertEq(address(boardroom).balance, 0);
+        assertEq(wrappedNative.balanceOf(address(boardroom)), 0);
+    }
+
+    function testBoardroomCanRedeemWrappedNativeAfterWindDownWrap() public {
+        (Boardroom boardroom,) = _createBoardroom("wind-down-redeem-whype");
+        uint256 holderShares = 100 ether;
+        uint256 strangerShares = 300 ether;
+        uint256 nativeAmount = 4 ether;
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, holderShares);
+        boardroom.mint(stranger, strangerShares);
+        boardroom.registerRedeemableAsset(address(wrappedNative));
+        vm.stopPrank();
+
+        vm.deal(address(boardroom), nativeAmount);
+
+        vm.startPrank(owner);
+        boardroom.startWindDown();
+        boardroom.openRedemptions();
+        vm.stopPrank();
+
+        uint256[] memory minimums = new uint256[](1);
+        minimums[0] = 1 ether;
+
+        vm.prank(holder);
+        uint256[] memory amounts = boardroom.redeem(holderShares, holder, minimums);
+
+        assertEq(amounts[0], 1 ether);
+        assertEq(wrappedNative.balanceOf(holder), 1 ether);
+        assertEq(wrappedNative.balanceOf(address(boardroom)), 3 ether);
+        assertEq(address(boardroom).balance, 0);
+    }
+
+    function testCreationFeeReachesBoardroomAfterFactoryOwnershipTransfer() public {
+        uint256 fee = 0.01 ether;
+        tokenGrantFactory.setCreationFee(fee);
+
+        (Boardroom boardroom,) = _createBoardroom("issue-fee-grant-owned-factory");
+        tokenGrantFactory.transferOwnership(address(boardroom));
+
+        vm.prank(owner);
+        boardroom.mint(address(boardroom), GRANT_SIZE);
+
+        bytes32 grantSalt = keccak256("boardroom-owned-factory-fee-grant");
+        vm.deal(owner, fee);
+        TokenGrant grant = _createBoardroomGrant(
+            boardroom, _boardroomGrantCreate(boardroom.shareToken(), holder, address(0), GRANT_SIZE, 0, grantSalt, fee)
+        );
+
+        assertEq(grant.issuer(), address(boardroom));
+        assertEq(address(boardroom).balance, fee);
+        assertEq(tokenGrantFactory.owner(), address(boardroom));
+
+        vm.prank(owner);
+        boardroom.startWindDown();
+
+        assertEq(address(boardroom).balance, 0);
+        assertEq(wrappedNative.balanceOf(address(boardroom)), fee);
     }
 
     function testBoardroomWindDownBurnsTreasurySharesAndRedeemsProRata() public {
@@ -591,12 +696,12 @@ contract BoardroomTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(
                 Boardroom.CallNotAllowed.selector,
-                address(tokenGrantFactory),
+                address(protocolPolicy),
                 address(tokenGrantFactory),
                 TokenGrantFactory.createGrant.selector
             )
         );
-        boardroom.execute(_policyCall(address(tokenGrantFactory), 0, _createGrantData(create)));
+        boardroom.execute(_protocolCall(address(tokenGrantFactory), 0, _createGrantData(create)));
     }
 
     function testBoardroomRedemptionsWaitForIssuedGrantToClose() public {
@@ -625,7 +730,9 @@ contract BoardroomTest is Test {
         boardroom.openRedemptions();
 
         vm.prank(owner);
-        boardroom.execute(_policyCall(address(grant), 0, abi.encodeCall(TokenGrant.stopVestingAndWithdrawUnvested, ())));
+        boardroom.execute(
+            _tokenGrantFactoryCall(address(grant), 0, abi.encodeCall(TokenGrant.stopVestingAndWithdrawUnvested, ()))
+        );
 
         assertTrue(grant.isClosed());
 
@@ -687,6 +794,9 @@ contract BoardroomTest is Test {
         vm.expectRevert(abi.encodeWithSelector(Boardroom.InvalidRedeemableAsset.selector, shareToken));
         boardroom.registerRedeemableAsset(shareToken);
 
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.InvalidRedeemableAsset.selector, address(boardroom)));
+        boardroom.registerRedeemableAsset(address(boardroom));
+
         boardroom.registerRedeemableAsset(address(paymentToken));
 
         vm.expectRevert(
@@ -706,6 +816,7 @@ contract BoardroomTest is Test {
 
         assertEq(created, boardroomAddress);
         boardroom = Boardroom(payable(boardroomAddress));
+        assetPolicy.setAssetAllowed(boardroom.shareToken(), true);
     }
 
     function _createBoardroomGrant(Boardroom boardroom, BoardroomGrantCreate memory create)
@@ -715,12 +826,12 @@ contract BoardroomTest is Test {
         address grantAddress = tokenGrantFactory.predictGrantAddress(address(boardroom), create.salt);
 
         Boardroom.Call[] memory calls = new Boardroom.Call[](2);
-        calls[0] = _policyCall(
+        calls[0] = _assetCall(
             create.token,
             0,
             abi.encodeWithSignature("approve(address,uint256)", address(tokenGrantFactory), create.amount)
         );
-        calls[1] = _policyCall(address(tokenGrantFactory), create.value, _createGrantData(create));
+        calls[1] = _protocolCall(address(tokenGrantFactory), create.value, _createGrantData(create));
 
         vm.prank(owner);
         bytes[] memory results = boardroom.executeBatch{value: create.value}(calls);
@@ -769,7 +880,23 @@ contract BoardroomTest is Test {
         );
     }
 
-    function _policyCall(address target, uint256 value, bytes memory data)
+    function _assetCall(address target, uint256 value, bytes memory data)
+        internal
+        view
+        returns (Boardroom.Call memory call_)
+    {
+        call_ = Boardroom.Call({policy: address(assetPolicy), target: target, value: value, data: data});
+    }
+
+    function _protocolCall(address target, uint256 value, bytes memory data)
+        internal
+        view
+        returns (Boardroom.Call memory call_)
+    {
+        call_ = Boardroom.Call({policy: address(protocolPolicy), target: target, value: value, data: data});
+    }
+
+    function _tokenGrantFactoryCall(address target, uint256 value, bytes memory data)
         internal
         view
         returns (Boardroom.Call memory call_)

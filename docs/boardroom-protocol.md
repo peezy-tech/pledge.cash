@@ -4,15 +4,16 @@ This document describes the first Boardroom primitive in `packages/contracts/src
 `BoardroomFactory.sol`, and `BoardroomToken.sol`.
 
 A Boardroom is an owned on-chain treasury and issuer account with its own ERC20 share token. It can mint shares and
-execute calls through centrally approved policy contracts. `TokenGrantFactory` and `DistributionFactory` are the first
-Boardroom call policies.
+execute calls through centrally approved policy contracts. `ProtocolPolicy` covers explicit pledge.cash protocol
+targets, while `AssetPolicy` covers supported external assets and spender approvals.
 
 ## Actors
 
 - Boardroom owner: controls share minting and policy-authorized treasury execution.
 - Boardroom: owns assets, creates its share token, and acts as grant issuer.
 - Policy registry: protocol-controlled allowlist of policy contracts that Boardrooms may use.
-- Policy contract: validates whether a Boardroom may call a target contract with specific calldata.
+- Protocol policy: owner-managed allowlist of pledge.cash protocol targets.
+- Asset policy: owner-managed allowlist of supported assets and approval spenders.
 - Share holder: receives Boardroom share tokens directly or through grants, and can redeem shares after wind-down.
 - Grant holder: receives settlement authority over a Boardroom-issued grant.
 - Distribution buyer: buys Boardroom shares through a Boardroom-created distribution.
@@ -24,7 +25,9 @@ Boardroom call policies.
 - Payment token: optional ERC20 paid to the Boardroom when settling a paid grant.
 - Distribution payment token: ERC20 paid to the Boardroom when buyers purchase shares from a distribution.
 - Redeemable asset: ERC20 registered by the Boardroom owner for pro-rata redemption after wind-down.
-- Native creation fee: optional fee forwarded through the Boardroom to `TokenGrantFactory`.
+- Native HYPE: never redeemable directly. Any native balance held by the Boardroom is wrapped into canonical WHYPE when
+  wind-down starts.
+- WHYPE: canonical wrapped representation of native HYPE for treasury accounting and redemptions.
 
 ## State Machines
 
@@ -42,11 +45,13 @@ State:
 
 ### Boardroom
 
-`Boardroom` has one owner, one policy registry, one share token, and a wind-down status.
+`Boardroom` has one owner, one policy registry, one canonical wrapped-native token, one share token, and a wind-down
+status.
 
 State:
 
 - `policyRegistry`: protocol-controlled registry of allowed call policies.
+- `wrappedNative`: canonical WHYPE contract used to normalize raw native HYPE before redemptions.
 - `shareToken`: ERC20 minted only by this Boardroom.
 - `status`: `Active`, `WindingDown`, or `RedemptionsOpen`.
 - `redeemableAssets`: bounded list of ERC20 assets redeemed pro-rata by share holders.
@@ -64,7 +69,8 @@ later wait for it to close.
 Wind-down transitions are one-way:
 
 1. `Active`: owner can mint shares, create grants, create distributions, and register redeemable assets.
-2. `WindingDown`: owner cannot mint shares or create new grants/distributions. Owner may close recorded obligations,
+2. `WindingDown`: entered only after `startWindDown()` wraps the Boardroom's full native HYPE balance into WHYPE. Owner
+   cannot mint shares or create new grants/distributions. Owner may close recorded obligations,
    exit locked liquidity, register final redeemable assets, and burn treasury-held shares. Active fixed-price sales and
    migrating bonding curves stop accepting trades as soon as their Boardroom enters this state.
 3. `RedemptionsOpen`: share holders can burn shares to redeem registered assets pro-rata. Owner execution is closed.
@@ -77,8 +83,9 @@ Wind-down transitions are one-way:
 
 1. Owner ensures the Boardroom holds the ERC20 token to be granted.
 2. Owner builds a `Boardroom.executeBatch` with two policy-checked calls.
-3. The first call targets the grant token and approves `TokenGrantFactory` for the grant amount.
-4. The second call targets `TokenGrantFactory.createGrant(...)`, optionally forwarding the exact native creation fee.
+3. The first call targets the grant token and approves `TokenGrantFactory` for the grant amount through `AssetPolicy`.
+4. The second call targets `TokenGrantFactory.createGrant(...)` through a protocol policy, optionally forwarding the
+   exact native creation fee.
 5. `TokenGrantFactory` creates a grant where `issuer == boardroom`.
 6. `TokenGrantFactory` transfers the grant tokens from the Boardroom into the grant escrow.
 7. The factory mints the grant-right ERC721 token to the grant holder.
@@ -91,7 +98,8 @@ and later create free USDC payroll grants through the same policy-gated batch ex
 
 1. Owner mints Boardroom shares to the Boardroom treasury.
 2. Owner builds a `Boardroom.executeBatch` with two policy-checked calls.
-3. The first call targets the share token and approves `DistributionFactory` for the sale inventory.
+3. The first call targets the share token and approves `DistributionFactory` for the sale inventory through
+   `AssetPolicy`.
 4. The second call targets `DistributionFactory.createFixedPriceSale(...)`.
 5. `DistributionFactory` verifies the sale uses the Boardroom's own share token.
 6. The factory deploys and records a `FixedPriceSale`.
@@ -114,8 +122,10 @@ and later create free USDC payroll grants through the same policy-gated batch ex
 
 ## Wind-Down And Redemption Flow
 
-1. Owner registers ERC20 assets that should be redeemable.
-2. Owner calls `startWindDown`, moving the Boardroom from `Active` to `WindingDown`.
+1. Owner registers ERC20 assets that should be redeemable. Raw native HYPE is not a redeemable asset; register WHYPE
+   instead when native value should be claimable.
+2. Owner calls `startWindDown`, which wraps the Boardroom's full native HYPE balance into WHYPE before moving from
+   `Active` to `WindingDown`.
 3. Owner closes, cancels, or migrates every recorded distribution and halts or expires every recorded grant.
 4. Owner exits every recorded locked-liquidity position.
 5. Owner calls `openRedemptions`.
@@ -139,10 +149,14 @@ Redemption loops are bounded by `MAX_REDEEMABLE_ASSETS`. Wind-down gates are bou
 - Boardroom execution requires a policy allowed by the central registry.
 - Boardroom execution requires the selected policy to allow the target, value, and calldata.
 - Boardroom execution cannot create new obligations after wind-down starts.
-- Boardroom-created grants approve `TokenGrantFactory` as spender for the requested grant amount.
+- `ProtocolPolicy` never authorizes calls to unregistered protocol targets.
+- `AssetPolicy` never authorizes arbitrary token calls.
+- Asset approvals are limited to allowed assets and allowed protocol spenders.
+- Boardroom-created grants approve `TokenGrantFactory` as spender for the requested grant amount through `AssetPolicy`.
 - A Boardroom-issued grant must have `issuer == boardroom`.
 - Boardroom-issued grants escrow tokens from the Boardroom before holders can settle.
-- Native grant creation fees can be forwarded, but the Boardroom should not retain them.
+- Native grant creation fees flow to `TokenGrantFactory.owner()`. If that owner is the Boardroom, the raw native balance
+  is normalized into WHYPE on wind-down.
 - Boardroom-created fixed-price sales can only sell the Boardroom's own share token.
 - Boardroom-created migrating curves can only sell the Boardroom's own share token.
 - Fixed-price sale payments are transferred directly to the Boardroom treasury.
@@ -152,6 +166,8 @@ Redemption loops are bounded by `MAX_REDEEMABLE_ASSETS`. Wind-down gates are bou
 - Only the Boardroom that created a distribution can close, cancel, or migrate it through the distribution policy.
 - Redemptions cannot open while a recorded grant or distribution is still open.
 - Redemptions cannot open while a recorded locked-liquidity position still holds LP principal.
+- Raw native HYPE is never redeemed directly.
+- `startWindDown()` wraps native HYPE before `status` changes to `WindingDown`.
 - Treasury-held shares are burned before redemptions open.
 - Shares sent to the Boardroom after redemptions open are burned before the next redemption is priced.
 - Share redemption burns shares before transferring redeemable assets.

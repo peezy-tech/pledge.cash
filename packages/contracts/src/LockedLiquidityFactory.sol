@@ -14,7 +14,6 @@ interface ILockedLiquidityFactoryBoardroom {
 }
 
 contract LockedLiquidityFactory is IBoardroomCallPolicy, ReentrancyGuard {
-    bytes4 internal constant APPROVE_SELECTOR = 0x095ea7b3;
     uint256 internal constant CREATE_LOCKED_LIQUIDITY_DATA_LENGTH = 4 + 32 * 8;
     uint256 public constant MAX_LOCKERS_PER_BOARDROOM = 32;
 
@@ -89,8 +88,6 @@ contract LockedLiquidityFactory is IBoardroomCallPolicy, ReentrancyGuard {
         if (value != 0) return false;
 
         bytes4 selector = _selector(data);
-        if (selector == APPROVE_SELECTOR) return _canApproveFactory(target, data);
-
         if (target == address(this)) {
             return selector == LockedLiquidityFactory.createLockedLiquidity.selector
                 && _canCreateLockedLiquidity(boardroom, data);
@@ -157,13 +154,6 @@ contract LockedLiquidityFactory is IBoardroomCallPolicy, ReentrancyGuard {
         emit LockedLiquidityCreated(
             locker, boardroom, pool, params.tokenA, params.tokenB, amountA, amountB, liquidity, params.salt
         );
-    }
-
-    function _canApproveFactory(address token, bytes calldata data) internal view returns (bool) {
-        if (token == address(0) || data.length != 68) return false;
-
-        (address spender,) = abi.decode(data[4:], (address, uint256));
-        return spender == address(this);
     }
 
     function _canCreateLockedLiquidity(address boardroom, bytes calldata data) internal view returns (bool) {

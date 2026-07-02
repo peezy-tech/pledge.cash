@@ -17,6 +17,10 @@ import {MigratingBondingCurve} from "./MigratingBondingCurve.sol";
 import {TokenGrant} from "./TokenGrant.sol";
 import {TokenGrantFactory} from "./TokenGrantFactory.sol";
 
+interface IBoardroomWrappedNative {
+    function deposit() external payable;
+}
+
 interface IBoardroomDistribution {
     function factory() external view returns (address);
     function boardroom() external view returns (address);
@@ -47,6 +51,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
     address public policyRegistry;
     address public shareToken;
+    address public wrappedNative;
     BoardroomStatus public status;
 
     address[] internal redeemableAssets;
@@ -82,11 +87,18 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     error PolicyNotAllowed(address policy);
     error CallNotAllowed(address policy, address target, bytes4 selector);
     error CallFailed(address target);
+    error UnexpectedWrappedNativeBalanceChange(uint256 expected, uint256 actual);
 
     event BoardroomInitialized(
-        address indexed owner, address indexed policyRegistry, address indexed shareToken, string name, string symbol
+        address indexed owner,
+        address indexed policyRegistry,
+        address indexed shareToken,
+        address wrappedNative,
+        string name,
+        string symbol
     );
     event SharesMinted(address indexed to, uint256 amount);
+    event NativeWrappedForWindDown(address indexed wrappedNative, uint256 amount);
     event BoardroomWindDownStarted(address indexed owner);
     event BoardroomRedemptionsOpened(address indexed owner);
     event RedeemableAssetRegistered(address indexed asset);
@@ -110,17 +122,23 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
     receive() external payable {}
 
-    function initialize(address owner_, address policyRegistry_, string calldata name_, string calldata symbol_)
-        external
-        initializer
-    {
-        if (owner_ == address(0) || policyRegistry_ == address(0)) revert InvalidAddress();
+    function initialize(
+        address owner_,
+        address policyRegistry_,
+        address wrappedNative_,
+        string calldata name_,
+        string calldata symbol_
+    ) external initializer {
+        if (owner_ == address(0) || policyRegistry_ == address(0) || wrappedNative_ == address(0)) {
+            revert InvalidAddress();
+        }
 
         _initializeOwner(owner_);
         policyRegistry = policyRegistry_;
+        wrappedNative = wrappedNative_;
         shareToken = address(new BoardroomToken(address(this), name_, symbol_));
 
-        emit BoardroomInitialized(owner_, policyRegistry_, shareToken, name_, symbol_);
+        emit BoardroomInitialized(owner_, policyRegistry_, shareToken, wrappedNative_, name_, symbol_);
     }
 
     function mint(address to, uint256 amount) external onlyOwner {
@@ -153,9 +171,10 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         }
     }
 
-    function startWindDown() external onlyOwner {
+    function startWindDown() external onlyOwner nonReentrant {
         _requireStatus(BoardroomStatus.Active);
 
+        _wrapNativeBalanceForWindDown();
         status = BoardroomStatus.WindingDown;
         emit BoardroomWindDownStarted(msg.sender);
     }
@@ -439,7 +458,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     }
 
     function _registerRedeemableAsset(address asset) internal {
-        if (asset == address(0) || asset == shareToken) revert InvalidRedeemableAsset(asset);
+        if (asset == address(0) || asset == shareToken || asset == address(this)) revert InvalidRedeemableAsset(asset);
         if (isRedeemableAsset[asset]) revert RedeemableAssetAlreadyRegistered(asset);
         if (redeemableAssets.length >= MAX_REDEEMABLE_ASSETS) revert TooManyRedeemableAssets();
 
@@ -449,8 +468,24 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     }
 
     function _registerRedeemableAssetIfNeeded(address asset) internal {
-        if (asset == address(0) || asset == shareToken || isRedeemableAsset[asset]) return;
+        if (asset == address(0) || asset == shareToken || asset == address(this) || isRedeemableAsset[asset]) return;
         _registerRedeemableAsset(asset);
+    }
+
+    function _wrapNativeBalanceForWindDown() internal {
+        uint256 nativeBalance = address(this).balance;
+        if (nativeBalance == 0) return;
+
+        address wrappedNative_ = wrappedNative;
+        uint256 balanceBefore = SafeTransferLib.balanceOf(wrappedNative_, address(this));
+        IBoardroomWrappedNative(wrappedNative_).deposit{value: nativeBalance}();
+        uint256 balanceAfter = SafeTransferLib.balanceOf(wrappedNative_, address(this));
+        uint256 expectedBalance = balanceBefore + nativeBalance;
+        if (balanceAfter != expectedBalance) {
+            revert UnexpectedWrappedNativeBalanceChange(expectedBalance, balanceAfter);
+        }
+
+        emit NativeWrappedForWindDown(wrappedNative_, nativeBalance);
     }
 
     function _requireNoOpenIssuedGrants() internal view {

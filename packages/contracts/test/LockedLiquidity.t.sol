@@ -6,6 +6,7 @@ import {ERC20} from "solady/tokens/ERC20.sol";
 import {WETH} from "solady/tokens/WETH.sol";
 import {AmmFactory} from "../src/AmmFactory.sol";
 import {AmmRouter} from "../src/AmmRouter.sol";
+import {AssetPolicy} from "../src/AssetPolicy.sol";
 import {Boardroom} from "../src/Boardroom.sol";
 import {BoardroomFactory} from "../src/BoardroomFactory.sol";
 import {BoardroomPolicyRegistry} from "../src/BoardroomPolicyRegistry.sol";
@@ -141,6 +142,7 @@ contract LockedLiquidityTest is Test {
     }
 
     BoardroomPolicyRegistry internal policyRegistry;
+    AssetPolicy internal assetPolicy;
     BoardroomFactory internal boardroomFactory;
     AmmFactory internal ammFactory;
     WETH internal wrappedNative;
@@ -157,14 +159,18 @@ contract LockedLiquidityTest is Test {
     uint256 internal constant HOLDER_SHARES = 100 ether;
 
     function setUp() public {
-        policyRegistry = new BoardroomPolicyRegistry(address(this));
-        boardroomFactory = new BoardroomFactory(address(policyRegistry));
         ammFactory = new AmmFactory();
         wrappedNative = new WETH();
+        policyRegistry = new BoardroomPolicyRegistry(address(this));
+        assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
+        boardroomFactory = new BoardroomFactory(address(policyRegistry), address(wrappedNative));
         router = new AmmRouter(address(ammFactory), address(wrappedNative));
         lockedLiquidityFactory = new LockedLiquidityFactory(address(router));
         quoteToken = new LockedLiquidityTestERC20("Quote", "QUOTE", 18);
 
+        assetPolicy.setAssetAllowed(address(quoteToken), true);
+        assetPolicy.setApprovalSpenderAllowed(address(lockedLiquidityFactory), true);
+        policyRegistry.setPolicyAllowed(address(assetPolicy), true);
         policyRegistry.setPolicyAllowed(address(lockedLiquidityFactory), true);
     }
 
@@ -297,8 +303,8 @@ contract LockedLiquidityTest is Test {
         });
 
         Boardroom.Call[] memory calls = new Boardroom.Call[](3);
-        calls[0] = _approvalCall(address(lockedLiquidityFactory), address(shareToken), SHARE_SEED);
-        calls[1] = _approvalCall(address(lockedLiquidityFactory), address(quoteToken), QUOTE_SEED);
+        calls[0] = _approvalCall(address(shareToken), SHARE_SEED);
+        calls[1] = _approvalCall(address(quoteToken), QUOTE_SEED);
         calls[2] = _policyCall(
             address(lockedLiquidityFactory),
             address(lockedLiquidityFactory),
@@ -415,8 +421,9 @@ contract LockedLiquidityTest is Test {
         });
 
         Boardroom.Call[] memory calls = new Boardroom.Call[](3);
-        calls[0] = _approvalCall(address(lockedLiquidityFactory), address(shareToken), SHARE_SEED);
-        calls[1] = _approvalCall(address(lockedLiquidityFactory), address(feeToken), QUOTE_SEED);
+        assetPolicy.setAssetAllowed(address(feeToken), true);
+        calls[0] = _approvalCall(address(shareToken), SHARE_SEED);
+        calls[1] = _approvalCall(address(feeToken), QUOTE_SEED);
         calls[2] = _policyCall(
             address(lockedLiquidityFactory),
             address(lockedLiquidityFactory),
@@ -443,6 +450,7 @@ contract LockedLiquidityTest is Test {
             boardroomFactory.createBoardroom(owner, "Locked Common", "LOCK", keccak256(bytes(saltLabel)));
         boardroom = Boardroom(payable(boardroomAddress));
         shareToken = BoardroomToken(boardroom.shareToken());
+        assetPolicy.setAssetAllowed(address(shareToken), true);
     }
 
     function _createLockedLiquidity(
@@ -468,6 +476,7 @@ contract LockedLiquidityTest is Test {
     ) internal returns (CreatedLocker memory created) {
         bytes32 salt = keccak256(bytes(saltLabel));
         address predictedLocker = lockedLiquidityFactory.predictLockedLiquidityAddress(address(boardroom), salt);
+        assetPolicy.setAssetAllowed(quote, true);
         LockedLiquidityFactory.CreateParams memory params = LockedLiquidityFactory.CreateParams({
             tokenA: address(shareToken),
             tokenB: quote,
@@ -480,8 +489,8 @@ contract LockedLiquidityTest is Test {
         });
 
         Boardroom.Call[] memory calls = new Boardroom.Call[](3);
-        calls[0] = _approvalCall(policy, address(shareToken), SHARE_SEED);
-        calls[1] = _approvalCall(policy, quote, QUOTE_SEED);
+        calls[0] = _approvalCall(address(shareToken), SHARE_SEED);
+        calls[1] = _approvalCall(quote, QUOTE_SEED);
         calls[2] = _policyCall(
             policy,
             address(lockedLiquidityFactory),
@@ -496,13 +505,11 @@ contract LockedLiquidityTest is Test {
         assertEq(created.locker, predictedLocker);
     }
 
-    function _approvalCall(address policy, address token, uint256 amount)
-        internal
-        view
-        returns (Boardroom.Call memory)
-    {
+    function _approvalCall(address token, uint256 amount) internal view returns (Boardroom.Call memory) {
         return _policyCall(
-            policy, token, abi.encodeWithSignature("approve(address,uint256)", address(lockedLiquidityFactory), amount)
+            address(assetPolicy),
+            token,
+            abi.encodeWithSignature("approve(address,uint256)", address(lockedLiquidityFactory), amount)
         );
     }
 

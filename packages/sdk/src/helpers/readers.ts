@@ -90,6 +90,7 @@ export async function readBoardroomState(client: PledgeCashReadClient, boardroom
   const [
     owner,
     policyRegistry,
+    wrappedNative,
     shareToken,
     status,
     redeemableAssets,
@@ -100,6 +101,7 @@ export async function readBoardroomState(client: PledgeCashReadClient, boardroom
     await Promise.all([
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "owner" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "policyRegistry" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "wrappedNative" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "shareToken" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "status" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "getRedeemableAssets" }),
@@ -112,6 +114,7 @@ export async function readBoardroomState(client: PledgeCashReadClient, boardroom
     address: boardroom,
     owner: owner as Address,
     policyRegistry: policyRegistry as Address,
+    wrappedNative: wrappedNative as Address,
     shareToken: shareToken as Address,
     status: Number(status),
     redeemableAssets: redeemableAssets as Address[],

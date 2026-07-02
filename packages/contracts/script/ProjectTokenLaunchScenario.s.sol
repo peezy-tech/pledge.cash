@@ -6,12 +6,14 @@ import {WETH} from "solady/tokens/WETH.sol";
 import {AmmFactory} from "../src/AmmFactory.sol";
 import {AmmPool} from "../src/AmmPool.sol";
 import {AmmRouter} from "../src/AmmRouter.sol";
+import {AssetPolicy} from "../src/AssetPolicy.sol";
 import {Boardroom} from "../src/Boardroom.sol";
 import {BoardroomFactory} from "../src/BoardroomFactory.sol";
 import {BoardroomPolicyRegistry} from "../src/BoardroomPolicyRegistry.sol";
 import {BoardroomToken} from "../src/BoardroomToken.sol";
 import {LockedLiquidity} from "../src/LockedLiquidity.sol";
 import {LockedLiquidityFactory} from "../src/LockedLiquidityFactory.sol";
+import {ProtocolPolicy} from "../src/ProtocolPolicy.sol";
 import {TokenGrant} from "../src/TokenGrant.sol";
 import {TokenGrantFactory} from "../src/TokenGrantFactory.sol";
 
@@ -21,6 +23,8 @@ contract ProjectTokenLaunchScenario is Script {
     struct ScenarioState {
         uint256 nonce;
         BoardroomPolicyRegistry policyRegistry;
+        ProtocolPolicy protocolPolicy;
+        AssetPolicy assetPolicy;
         BoardroomFactory boardroomFactory;
         TokenGrantFactory tokenGrantFactory;
         AmmFactory ammFactory;
@@ -35,6 +39,7 @@ contract ProjectTokenLaunchScenario is Script {
         address grant;
         uint256 expectedSwapProtocolFee;
         uint256 grantCreationFeeRevenue;
+        uint256 wrappedGrantCreationFeeRevenue;
     }
 
     uint256 internal constant ANVIL_OWNER_KEY = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
@@ -70,30 +75,38 @@ contract ProjectTokenLaunchScenario is Script {
 
         _swapIntoProjectToken(state, traderKey, trader);
         _createProjectTokenGrant(state, grantIssuerKey, grantIssuer, contributor);
+        _windDownAndWrapNativeRevenue(state, ownerKey);
         _log(state, owner, trader, grantIssuer, contributor);
     }
 
     function _deployProject(address owner, uint256 nonce) internal returns (ScenarioState memory state) {
         state.nonce = nonce;
         state.policyRegistry = new BoardroomPolicyRegistry(owner);
+        state.protocolPolicy = new ProtocolPolicy(owner);
         state.tokenGrantFactory = new TokenGrantFactory();
         state.ammFactory = new AmmFactory();
         state.wrappedHype = new WETH();
+        state.assetPolicy = new AssetPolicy(owner, address(state.wrappedHype));
         state.ammRouter = new AmmRouter(address(state.ammFactory), address(state.wrappedHype));
         state.lockedLiquidityFactory = new LockedLiquidityFactory(address(state.ammRouter));
-        state.boardroomFactory = new BoardroomFactory(address(state.policyRegistry));
+        state.boardroomFactory = new BoardroomFactory(address(state.policyRegistry), address(state.wrappedHype));
 
-        state.policyRegistry.setPolicyAllowed(address(state.tokenGrantFactory), true);
-        state.policyRegistry.setPolicyAllowed(address(state.lockedLiquidityFactory), true);
+        state.protocolPolicy.setProtocolTargetAllowed(address(state.tokenGrantFactory), true);
+        state.protocolPolicy.setProtocolTargetAllowed(address(state.lockedLiquidityFactory), true);
+        state.assetPolicy.setApprovalSpenderAllowed(address(state.lockedLiquidityFactory), true);
+        state.policyRegistry.setPolicyAllowed(address(state.protocolPolicy), true);
+        state.policyRegistry.setPolicyAllowed(address(state.assetPolicy), true);
 
         address boardroomAddress = state.boardroomFactory
             .createBoardroom(owner, "pledge.cash Project Token", "PLEDGE", _salt(nonce, "project-boardroom"));
         state.boardroom = Boardroom(payable(boardroomAddress));
         state.projectToken = BoardroomToken(state.boardroom.shareToken());
-        state.grantFeeRecipient = owner;
+        state.grantFeeRecipient = address(state.boardroom);
+        state.assetPolicy.setAssetAllowed(address(state.projectToken), true);
 
         state.ammFactory.setProtocolFeeRecipient(address(state.boardroom));
         state.tokenGrantFactory.setCreationFee(GRANT_CREATION_FEE);
+        state.tokenGrantFactory.transferOwnership(address(state.boardroom));
 
         _check(state.ammFactory.protocolFeeRecipient() == address(state.boardroom), "protocol-fee-recipient");
         _check(state.tokenGrantFactory.creationFee() == GRANT_CREATION_FEE, "grant-creation-fee");
@@ -131,7 +144,7 @@ contract ProjectTokenLaunchScenario is Script {
         calls[0] = _approvalCall(state, address(state.projectToken), PROJECT_LP_SUPPLY);
         calls[1] = _approvalCall(state, address(state.wrappedHype), HYPE_LIQUIDITY);
         calls[2] = Boardroom.Call({
-            policy: address(state.lockedLiquidityFactory),
+            policy: address(state.protocolPolicy),
             target: address(state.lockedLiquidityFactory),
             value: 0,
             data: abi.encodeCall(LockedLiquidityFactory.createLockedLiquidity, (params))
@@ -201,9 +214,24 @@ contract ProjectTokenLaunchScenario is Script {
         TokenGrant grant = TokenGrant(state.grant);
         _check(state.grant == predictedGrant, "project-grant-predicted");
         _check(state.grantCreationFeeRevenue == GRANT_CREATION_FEE, "grant-fee-revenue");
+        _check(address(state.boardroom).balance == GRANT_CREATION_FEE, "boardroom-native-fee-balance");
         _check(state.projectToken.balanceOf(state.grant) == PROJECT_GRANT_SUPPLY, "project-grant-escrow");
         _check(grant.issuer() == grantIssuer, "project-grant-issuer");
         _check(grant.holder() == contributor, "project-grant-holder");
+    }
+
+    function _windDownAndWrapNativeRevenue(ScenarioState memory state, uint256 ownerKey) internal {
+        uint256 nativeBefore = address(state.boardroom).balance;
+        uint256 wrappedBefore = state.wrappedHype.balanceOf(address(state.boardroom));
+
+        vm.startBroadcast(ownerKey);
+        state.boardroom.startWindDown();
+        vm.stopBroadcast();
+
+        state.wrappedGrantCreationFeeRevenue = state.wrappedHype.balanceOf(address(state.boardroom)) - wrappedBefore;
+        _check(nativeBefore == GRANT_CREATION_FEE, "native-fee-before-wind-down");
+        _check(address(state.boardroom).balance == 0, "native-fee-wrapped");
+        _check(state.wrappedGrantCreationFeeRevenue == nativeBefore, "wrapped-fee-revenue");
     }
 
     function _approvalCall(ScenarioState memory state, address token, uint256 amount)
@@ -212,7 +240,7 @@ contract ProjectTokenLaunchScenario is Script {
         returns (Boardroom.Call memory)
     {
         return Boardroom.Call({
-            policy: address(state.lockedLiquidityFactory),
+            policy: address(state.assetPolicy),
             target: token,
             value: 0,
             data: abi.encodeWithSignature("approve(address,uint256)", address(state.lockedLiquidityFactory), amount)
@@ -229,6 +257,8 @@ contract ProjectTokenLaunchScenario is Script {
         console2.log("grantIssuer", grantIssuer);
         console2.log("contributor", contributor);
         console2.log("policyRegistry", address(state.policyRegistry));
+        console2.log("protocolPolicy", address(state.protocolPolicy));
+        console2.log("assetPolicy", address(state.assetPolicy));
         console2.log("boardroomFactory", address(state.boardroomFactory));
         console2.log("tokenGrantFactory", address(state.tokenGrantFactory));
         console2.log("ammFactory", address(state.ammFactory));
@@ -245,6 +275,7 @@ contract ProjectTokenLaunchScenario is Script {
         console2.log("boardroomWrappedHypeRevenueBalance", state.wrappedHype.balanceOf(address(state.boardroom)));
         console2.log("expectedSwapProtocolFee", state.expectedSwapProtocolFee);
         console2.log("grantCreationFeeRevenue", state.grantCreationFeeRevenue);
+        console2.log("wrappedGrantCreationFeeRevenue", state.wrappedGrantCreationFeeRevenue);
         console2.log("grantFeeRecipientNativeBalance", state.grantFeeRecipient.balance);
         console2.log("grantCreationFee", GRANT_CREATION_FEE);
         console2.log("lockedLp", LockedLiquidity(state.locker).lockedLiquidity());

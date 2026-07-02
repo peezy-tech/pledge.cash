@@ -12,7 +12,6 @@ interface IDistributionBoardroom {
 }
 
 contract DistributionFactory is IBoardroomCallPolicy {
-    bytes4 internal constant APPROVE_SELECTOR = 0x095ea7b3;
     uint256 internal constant FIXED_PRICE_SALE_CREATE_DATA_LENGTH = 4 + 32 * 8;
     uint256 internal constant MIGRATING_CURVE_CREATE_DATA_LENGTH = 4 + 32 * 12;
     uint256 internal constant BPS = 10_000;
@@ -107,10 +106,6 @@ contract DistributionFactory is IBoardroomCallPolicy {
                     && _canCreateFixedPriceSale(boardroom, data);
         }
 
-        if (selector == APPROVE_SELECTOR) {
-            return _canApproveDistributionFactory(boardroom, target, data);
-        }
-
         if (distributionBoardroom[target] != boardroom) return false;
 
         DistributionKind kind = distributionKind[target];
@@ -175,18 +170,6 @@ contract DistributionFactory is IBoardroomCallPolicy {
         if (params.basePrice == 0 || params.graduationQuoteTarget == 0) return false;
         if (params.quoteToLpBps == 0 || params.quoteToLpBps > BPS) return false;
         return _hasValidTimeWindow(params.startTime, params.endTime);
-    }
-
-    function _canApproveDistributionFactory(address boardroom, address token, bytes calldata data)
-        internal
-        view
-        returns (bool)
-    {
-        if (data.length != 68) return false;
-        if (token != IDistributionBoardroom(boardroom).shareToken()) return false;
-
-        (address spender,) = abi.decode(data[4:], (address, uint256));
-        return spender == address(this);
     }
 
     function _createDistribution(

@@ -6,6 +6,7 @@ import {Boardroom} from "./Boardroom.sol";
 
 contract BoardroomFactory {
     address public immutable policyRegistry;
+    address public immutable wrappedNative;
     address public immutable boardroomLogic;
 
     address[] public allBoardrooms;
@@ -18,15 +19,17 @@ contract BoardroomFactory {
         address indexed owner,
         address indexed policyRegistry,
         address shareToken,
+        address wrappedNative,
         string name,
         string symbol,
         bytes32 salt
     );
 
-    constructor(address policyRegistry_) {
-        if (policyRegistry_ == address(0)) revert InvalidAddress();
+    constructor(address policyRegistry_, address wrappedNative_) {
+        if (policyRegistry_ == address(0) || wrappedNative_ == address(0)) revert InvalidAddress();
 
         policyRegistry = policyRegistry_;
+        wrappedNative = wrappedNative_;
         boardroomLogic = address(new Boardroom());
     }
 
@@ -38,12 +41,14 @@ contract BoardroomFactory {
 
         boardroom = LibClone.cloneDeterministic(boardroomLogic, _deploymentSalt(owner, name, symbol, salt));
         Boardroom createdBoardroom = Boardroom(payable(boardroom));
-        createdBoardroom.initialize(owner, policyRegistry, name, symbol);
+        createdBoardroom.initialize(owner, policyRegistry, wrappedNative, name, symbol);
 
         allBoardrooms.push(boardroom);
         isBoardroom[boardroom] = true;
 
-        emit BoardroomCreated(boardroom, owner, policyRegistry, createdBoardroom.shareToken(), name, symbol, salt);
+        emit BoardroomCreated(
+            boardroom, owner, policyRegistry, createdBoardroom.shareToken(), wrappedNative, name, symbol, salt
+        );
     }
 
     function predictBoardroomAddress(address owner, string calldata name, string calldata symbol, bytes32 salt)

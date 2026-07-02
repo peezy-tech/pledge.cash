@@ -12,8 +12,6 @@ import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
 import {TokenGrant} from "./TokenGrant.sol";
 
 contract TokenGrantFactory is Ownable, ERC721, IBoardroomCallPolicy {
-    bytes4 internal constant APPROVE_SELECTOR = 0x095ea7b3;
-
     address public immutable tokenGrantLogic;
     uint256 public creationFee;
 
@@ -131,12 +129,6 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomCallPolicy {
         bytes4 selector = _selector(data);
         if (target == address(this)) {
             return selector == TokenGrantFactory.createGrant.selector && value == creationFee;
-        }
-
-        if (selector == APPROVE_SELECTOR) {
-            if (value != 0 || data.length != 68) return false;
-            (address spender,) = abi.decode(data[4:], (address, uint256));
-            return spender == address(this);
         }
 
         if (value != 0) return false;

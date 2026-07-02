@@ -4,6 +4,7 @@ pragma solidity ^0.8.30;
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
+import {WETH} from "solady/tokens/WETH.sol";
 import {Boardroom} from "../src/Boardroom.sol";
 import {BoardroomFactory} from "../src/BoardroomFactory.sol";
 import {BoardroomPolicyRegistry} from "../src/BoardroomPolicyRegistry.sol";
@@ -54,7 +55,8 @@ contract BoardroomWindDownInvariantHandler is Test {
 
     constructor() {
         BoardroomPolicyRegistry policyRegistry = new BoardroomPolicyRegistry(address(this));
-        BoardroomFactory boardroomFactory = new BoardroomFactory(address(policyRegistry));
+        WETH wrappedNative = new WETH();
+        BoardroomFactory boardroomFactory = new BoardroomFactory(address(policyRegistry), address(wrappedNative));
 
         boardroom = Boardroom(
             payable(boardroomFactory.createBoardroom(
