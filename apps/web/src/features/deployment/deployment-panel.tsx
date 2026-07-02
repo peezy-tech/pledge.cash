@@ -2,7 +2,7 @@ import type { PledgeCashDeployment } from "@pledge.cash/sdk";
 import { AddressLink, Facts, Panel } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
 import { deploymentText } from "../../lib/deployment";
-import { bigintString } from "../../lib/forms";
+import { formatNativeTokenAmount } from "../../lib/token-amounts";
 import type { FactorySnapshot } from "../../lib/types";
 
 type DeploymentPanelProps = {
@@ -53,7 +53,7 @@ export function DeploymentPanel({ chainId, creationFee, deployment, factorySnaps
             label: "LockedLiquidityFactory",
             value: deployment?.lockedLiquidityFactory ? <AddressLink address={deployment.lockedLiquidityFactory} /> : "Not in artifact",
           },
-          { label: "Creation fee", value: `${bigintString(creationFee)} wei` },
+          { label: "Creation fee", value: formatNativeTokenAmount(creationFee) },
           {
             label: "Factory owner",
             value: factoryOwner ? <AddressLink address={factoryOwner} /> : "Unknown",

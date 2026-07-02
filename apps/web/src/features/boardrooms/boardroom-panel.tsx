@@ -24,7 +24,8 @@ import { ActionButton, ActionRow, AddressLink, Facts, Field, Panel } from "../..
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
-import { bigintString, dateString, randomSalt } from "../../lib/forms";
+import { dateString, randomSalt } from "../../lib/forms";
+import { formatTokenAmount } from "../../lib/token-amounts";
 import type {
   BoardroomDistributionSnapshot,
   BoardroomForm,
@@ -324,8 +325,8 @@ export function BoardroomPanel({
           <Field label="Mint recipient">
             <Input value={boardroomMintTo} onChange={(event) => setBoardroomMintTo(event.target.value)} spellCheck={false} />
           </Field>
-          <Field label="Mint amount raw units">
-            <Input value={boardroomMintAmount} inputMode="numeric" onChange={(event) => setBoardroomMintAmount(event.target.value)} />
+          <Field label="Mint amount">
+            <Input value={boardroomMintAmount} inputMode="decimal" onChange={(event) => setBoardroomMintAmount(event.target.value)} />
           </Field>
         </div>
         <ActionRow>
@@ -351,6 +352,7 @@ export function BoardroomPanel({
       />
 
       <FixedPriceSalePanel
+        boardroomSnapshot={boardroomSnapshot}
         deployment={deployment}
         fixedPriceSaleAddress={fixedPriceSaleAddress}
         fixedPriceSaleForm={fixedPriceSaleForm}
@@ -368,6 +370,7 @@ export function BoardroomPanel({
       />
 
       <MigratingCurvePanel
+        boardroomSnapshot={boardroomSnapshot}
         curveMigrationForm={curveMigrationForm}
         deployment={deployment}
         migratingCurveAddress={migratingCurveAddress}
@@ -387,6 +390,7 @@ export function BoardroomPanel({
       />
 
       <LockedLiquidityPanel
+        boardroomSnapshot={boardroomSnapshot}
         deployment={deployment}
         lockedLiquidityAddress={lockedLiquidityAddress}
         lockedLiquidityExitForm={lockedLiquidityExitForm}
@@ -522,8 +526,8 @@ function BoardroomGrantPanel({
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2">
         <TextField form={boardroomGrantForm} field="holder" label="Holder" setForm={setBoardroomGrantForm} />
         <TextField form={boardroomGrantForm} field="paymentToken" label="Payment token" setForm={setBoardroomGrantForm} />
-        <TextField form={boardroomGrantForm} field="amount" inputMode="numeric" label="Amount raw units" setForm={setBoardroomGrantForm} />
-        <TextField form={boardroomGrantForm} field="price" inputMode="numeric" label="Price raw units" setForm={setBoardroomGrantForm} />
+        <TextField form={boardroomGrantForm} field="amount" inputMode="decimal" label="Amount" setForm={setBoardroomGrantForm} />
+        <TextField form={boardroomGrantForm} field="price" inputMode="decimal" label="Price" setForm={setBoardroomGrantForm} />
         <TextField form={boardroomGrantForm} field="vestingCliff" inputMode="numeric" label="Vesting cliff timestamp" setForm={setBoardroomGrantForm} />
         <TextField form={boardroomGrantForm} field="vestingEnd" inputMode="numeric" label="Vesting end timestamp" setForm={setBoardroomGrantForm} />
         <TextField form={boardroomGrantForm} field="expiry" inputMode="numeric" label="Expiry timestamp" setForm={setBoardroomGrantForm} />
@@ -597,6 +601,7 @@ function BoardroomGrantPanel({
 }
 
 function FixedPriceSalePanel({
+  boardroomSnapshot,
   deployment,
   fixedPriceSaleAddress,
   fixedPriceSaleForm,
@@ -612,6 +617,7 @@ function FixedPriceSalePanel({
   predictFixedPriceSale,
   runAction,
 }: {
+  boardroomSnapshot: BoardroomSnapshot | undefined;
   deployment: PledgeCashDeployment | undefined;
   fixedPriceSaleAddress: string;
   fixedPriceSaleForm: FixedPriceSaleForm;
@@ -627,6 +633,8 @@ function FixedPriceSalePanel({
   predictFixedPriceSale: () => Promise<void>;
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
 }): React.JSX.Element {
+  const distributionSummary = distributionSummaryFor(boardroomSnapshot, fixedPriceSaleSnapshot?.address ?? fixedPriceSaleAddress);
+
   return (
     <Panel
       title="Fixed-Price Sale"
@@ -639,9 +647,9 @@ function FixedPriceSalePanel({
     >
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2">
         <TextField form={fixedPriceSaleForm} field="paymentToken" label="Payment token" setForm={setFixedPriceSaleForm} />
-        <TextField form={fixedPriceSaleForm} field="shareAmount" inputMode="numeric" label="Share amount raw units" setForm={setFixedPriceSaleForm} />
-        <TextField form={fixedPriceSaleForm} field="price" inputMode="numeric" label="Price raw units" setForm={setFixedPriceSaleForm} />
-        <TextField form={fixedPriceSaleForm} field="maxPerBuyer" inputMode="numeric" label="Max per buyer" setForm={setFixedPriceSaleForm} />
+        <TextField form={fixedPriceSaleForm} field="shareAmount" inputMode="decimal" label="Share amount" setForm={setFixedPriceSaleForm} />
+        <TextField form={fixedPriceSaleForm} field="price" inputMode="decimal" label="Price" setForm={setFixedPriceSaleForm} />
+        <TextField form={fixedPriceSaleForm} field="maxPerBuyer" inputMode="decimal" label="Max per buyer" setForm={setFixedPriceSaleForm} />
         <TextField form={fixedPriceSaleForm} field="startTime" inputMode="numeric" label="Start timestamp" setForm={setFixedPriceSaleForm} />
         <TextField form={fixedPriceSaleForm} field="endTime" inputMode="numeric" label="End timestamp" setForm={setFixedPriceSaleForm} />
         <TextField form={fixedPriceSaleForm} field="salt" label="Salt" setForm={setFixedPriceSaleForm} className="md:col-span-2" />
@@ -691,9 +699,9 @@ function FixedPriceSalePanel({
         items={[
           { label: "Predicted sale", value: predictedFixedPriceSale ? <AddressLink address={predictedFixedPriceSale} /> : "None" },
           { label: "Status", value: fixedPriceSaleSnapshot ? <StatusBadge label={saleStatusLabel(fixedPriceSaleSnapshot.saleStatus)} tone={fixedPriceSaleSnapshot.closed ? "warning" : "default"} /> : "Not loaded" },
-          { label: "Remaining shares", value: bigintString(fixedPriceSaleSnapshot?.remainingShares) },
+          { label: "Remaining shares", value: formatTokenAmount(fixedPriceSaleSnapshot?.remainingShares, distributionSummary?.shareTokenMetadata) },
           { label: "Payment token", value: fixedPriceSaleSnapshot ? <AddressLink address={fixedPriceSaleSnapshot.paymentToken} /> : "Unknown" },
-          { label: "Price", value: bigintString(fixedPriceSaleSnapshot?.price) },
+          { label: "Price", value: formatTokenAmount(fixedPriceSaleSnapshot?.price, distributionSummary?.paymentTokenMetadata) },
           { label: "Window", value: fixedPriceSaleSnapshot ? `${dateString(fixedPriceSaleSnapshot.startTime)} -> ${dateString(fixedPriceSaleSnapshot.endTime)}` : "Unknown" },
         ]}
       />
@@ -702,6 +710,7 @@ function FixedPriceSalePanel({
 }
 
 function MigratingCurvePanel({
+  boardroomSnapshot,
   curveMigrationForm,
   deployment,
   migratingCurveAddress,
@@ -719,6 +728,7 @@ function MigratingCurvePanel({
   predictMigratingCurve,
   runAction,
 }: {
+  boardroomSnapshot: BoardroomSnapshot | undefined;
   curveMigrationForm: CurveMigrationForm;
   deployment: PledgeCashDeployment | undefined;
   migratingCurveAddress: string;
@@ -736,6 +746,8 @@ function MigratingCurvePanel({
   predictMigratingCurve: () => Promise<void>;
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
 }): React.JSX.Element {
+  const distributionSummary = distributionSummaryFor(boardroomSnapshot, migratingCurveSnapshot?.address ?? migratingCurveAddress);
+
   return (
     <Panel
       title="Migrating Bonding Curve"
@@ -751,11 +763,11 @@ function MigratingCurvePanel({
     >
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2 xl:grid-cols-3">
         <TextField form={migratingCurveForm} field="quoteToken" label="Quote token" setForm={setMigratingCurveForm} />
-        <TextField form={migratingCurveForm} field="saleSupply" inputMode="numeric" label="Sale supply" setForm={setMigratingCurveForm} />
-        <TextField form={migratingCurveForm} field="migrationSupply" inputMode="numeric" label="Migration supply" setForm={setMigratingCurveForm} />
-        <TextField form={migratingCurveForm} field="basePrice" inputMode="numeric" label="Base price" setForm={setMigratingCurveForm} />
-        <TextField form={migratingCurveForm} field="slope" inputMode="numeric" label="Slope" setForm={setMigratingCurveForm} />
-        <TextField form={migratingCurveForm} field="graduationQuoteTarget" inputMode="numeric" label="Graduation target" setForm={setMigratingCurveForm} />
+        <TextField form={migratingCurveForm} field="saleSupply" inputMode="decimal" label="Sale supply" setForm={setMigratingCurveForm} />
+        <TextField form={migratingCurveForm} field="migrationSupply" inputMode="decimal" label="Migration supply" setForm={setMigratingCurveForm} />
+        <TextField form={migratingCurveForm} field="basePrice" inputMode="decimal" label="Base price" setForm={setMigratingCurveForm} />
+        <TextField form={migratingCurveForm} field="slope" inputMode="decimal" label="Slope" setForm={setMigratingCurveForm} />
+        <TextField form={migratingCurveForm} field="graduationQuoteTarget" inputMode="decimal" label="Graduation target" setForm={setMigratingCurveForm} />
         <TextField form={migratingCurveForm} field="quoteToLpBps" inputMode="numeric" label="Quote to LP bps" setForm={setMigratingCurveForm} />
         <TextField form={migratingCurveForm} field="startTime" inputMode="numeric" label="Start timestamp" setForm={setMigratingCurveForm} />
         <TextField form={migratingCurveForm} field="endTime" inputMode="numeric" label="End timestamp" setForm={setMigratingCurveForm} />
@@ -804,17 +816,17 @@ function MigratingCurvePanel({
           { label: "Predicted curve", value: predictedMigratingCurve ? <AddressLink address={predictedMigratingCurve} /> : "None" },
           { label: "Status", value: migratingCurveSnapshot ? <StatusBadge label={curveStatusLabel(migratingCurveSnapshot.curveStatus)} tone={migratingCurveSnapshot.closed ? "warning" : "default"} /> : "Not loaded" },
           { label: "Can migrate", value: migratingCurveSnapshot ? String(migratingCurveSnapshot.canMigrate) : "Unknown" },
-          { label: "Remaining sale shares", value: bigintString(migratingCurveSnapshot?.remainingSaleShares) },
-          { label: "Sold shares", value: bigintString(migratingCurveSnapshot?.soldShares) },
-          { label: "Quote reserve", value: bigintString(migratingCurveSnapshot?.quoteReserve) },
+          { label: "Remaining sale shares", value: formatTokenAmount(migratingCurveSnapshot?.remainingSaleShares, distributionSummary?.shareTokenMetadata) },
+          { label: "Sold shares", value: formatTokenAmount(migratingCurveSnapshot?.soldShares, distributionSummary?.shareTokenMetadata) },
+          { label: "Quote reserve", value: formatTokenAmount(migratingCurveSnapshot?.quoteReserve, distributionSummary?.quoteTokenMetadata) },
           { label: "Quote token", value: migratingCurveSnapshot ? <AddressLink address={migratingCurveSnapshot.quoteToken} /> : "Unknown" },
           { label: "Locker", value: migratingCurveSnapshot?.locker ? <AddressLink address={migratingCurveSnapshot.locker} /> : "Unknown" },
           { label: "Pool", value: migratingCurveSnapshot?.pool ? <AddressLink address={migratingCurveSnapshot.pool} /> : "Unknown" },
         ]}
       />
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-3">
-        <TextField form={curveMigrationForm} field="minShareLiquidity" inputMode="numeric" label="Min share liquidity" setForm={setCurveMigrationForm} />
-        <TextField form={curveMigrationForm} field="minQuoteLiquidity" inputMode="numeric" label="Min quote liquidity" setForm={setCurveMigrationForm} />
+        <TextField form={curveMigrationForm} field="minShareLiquidity" inputMode="decimal" label="Min share liquidity" setForm={setCurveMigrationForm} />
+        <TextField form={curveMigrationForm} field="minQuoteLiquidity" inputMode="decimal" label="Min quote liquidity" setForm={setCurveMigrationForm} />
         <TextField form={curveMigrationForm} field="deadline" inputMode="numeric" label="Migration deadline" setForm={setCurveMigrationForm} />
       </div>
       <ActionRow>
@@ -828,6 +840,7 @@ function MigratingCurvePanel({
 }
 
 function LockedLiquidityPanel({
+  boardroomSnapshot,
   deployment,
   lockedLiquidityAddress,
   lockedLiquidityExitForm,
@@ -845,6 +858,7 @@ function LockedLiquidityPanel({
   predictLockedLiquidity,
   runAction,
 }: {
+  boardroomSnapshot: BoardroomSnapshot | undefined;
   deployment: PledgeCashDeployment | undefined;
   lockedLiquidityAddress: string;
   lockedLiquidityExitForm: LockedLiquidityExitForm;
@@ -862,6 +876,8 @@ function LockedLiquidityPanel({
   predictLockedLiquidity: () => Promise<void>;
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
 }): React.JSX.Element {
+  const lockerSummary = lockerSummaryFor(boardroomSnapshot, lockedLiquiditySnapshot?.address ?? lockedLiquidityAddress);
+
   return (
     <Panel
       title="Locked Liquidity"
@@ -874,10 +890,10 @@ function LockedLiquidityPanel({
     >
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2 xl:grid-cols-3">
         <TextField form={lockedLiquidityForm} field="quoteToken" label="Quote token" setForm={setLockedLiquidityForm} />
-        <TextField form={lockedLiquidityForm} field="shareAmountDesired" inputMode="numeric" label="Share desired" setForm={setLockedLiquidityForm} />
-        <TextField form={lockedLiquidityForm} field="quoteAmountDesired" inputMode="numeric" label="Quote desired" setForm={setLockedLiquidityForm} />
-        <TextField form={lockedLiquidityForm} field="shareAmountMin" inputMode="numeric" label="Share minimum" setForm={setLockedLiquidityForm} />
-        <TextField form={lockedLiquidityForm} field="quoteAmountMin" inputMode="numeric" label="Quote minimum" setForm={setLockedLiquidityForm} />
+        <TextField form={lockedLiquidityForm} field="shareAmountDesired" inputMode="decimal" label="Share desired" setForm={setLockedLiquidityForm} />
+        <TextField form={lockedLiquidityForm} field="quoteAmountDesired" inputMode="decimal" label="Quote desired" setForm={setLockedLiquidityForm} />
+        <TextField form={lockedLiquidityForm} field="shareAmountMin" inputMode="decimal" label="Share minimum" setForm={setLockedLiquidityForm} />
+        <TextField form={lockedLiquidityForm} field="quoteAmountMin" inputMode="decimal" label="Quote minimum" setForm={setLockedLiquidityForm} />
         <TextField form={lockedLiquidityForm} field="deadline" inputMode="numeric" label="Deadline" setForm={setLockedLiquidityForm} />
         <Field label="Share token side">
           <label className="flex h-10 items-center gap-4 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-200">
@@ -946,15 +962,15 @@ function LockedLiquidityPanel({
         items={[
           { label: "Predicted locker", value: predictedLockedLiquidity ? <AddressLink address={predictedLockedLiquidity} /> : "None" },
           { label: "Seeded", value: lockedLiquiditySnapshot ? String(lockedLiquiditySnapshot.seeded) : "Unknown" },
-          { label: "Locked LP", value: bigintString(lockedLiquiditySnapshot?.lockedLiquidity) },
+          { label: "Locked LP", value: formatTokenAmount(lockedLiquiditySnapshot?.lockedLiquidity, lockerSummary?.liquidityMetadata) },
           { label: "Token A", value: lockedLiquiditySnapshot ? <AddressLink address={lockedLiquiditySnapshot.tokenA} /> : "Unknown" },
           { label: "Token B", value: lockedLiquiditySnapshot ? <AddressLink address={lockedLiquiditySnapshot.tokenB} /> : "Unknown" },
           { label: "Pool", value: lockedLiquiditySnapshot?.pool ? <AddressLink address={lockedLiquiditySnapshot.pool} /> : "Unknown" },
         ]}
       />
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-3">
-        <TextField form={lockedLiquidityExitForm} field="amountAMin" inputMode="numeric" label="Exit amount A min" setForm={setLockedLiquidityExitForm} />
-        <TextField form={lockedLiquidityExitForm} field="amountBMin" inputMode="numeric" label="Exit amount B min" setForm={setLockedLiquidityExitForm} />
+        <TextField form={lockedLiquidityExitForm} field="amountAMin" inputMode="decimal" label="Exit amount A min" setForm={setLockedLiquidityExitForm} />
+        <TextField form={lockedLiquidityExitForm} field="amountBMin" inputMode="decimal" label="Exit amount B min" setForm={setLockedLiquidityExitForm} />
         <TextField form={lockedLiquidityExitForm} field="deadline" inputMode="numeric" label="Exit deadline" setForm={setLockedLiquidityExitForm} />
       </div>
       <ActionRow>
@@ -1050,7 +1066,7 @@ function WindDownPanel({
         </ActionButton>
       </ActionRow>
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-3">
-        <TextField form={windDownForm} field="redeemShares" inputMode="numeric" label="Redeem shares" setForm={setWindDownForm} />
+        <TextField form={windDownForm} field="redeemShares" inputMode="decimal" label="Redeem shares" setForm={setWindDownForm} />
         <TextField form={windDownForm} field="redeemRecipient" label="Recipient" setForm={setWindDownForm} />
         <TextField form={windDownForm} field="minAmountsOut" label="Min amounts out" setForm={setWindDownForm} />
       </div>
@@ -1131,8 +1147,8 @@ function GrantRow({ grant }: { grant: BoardroomGrantSnapshot }): React.JSX.Eleme
         columns="one"
         items={[
           { label: "Holder", value: grant.state ? <AddressLink address={grant.state.holder} /> : "Unknown" },
-          { label: "Grant size", value: bigintString(grant.state?.grantSize) },
-          { label: "Claimable", value: bigintString(grant.state?.claimable) },
+          { label: "Grant size", value: formatTokenAmount(grant.state?.grantSize, grant.tokenMetadata) },
+          { label: "Claimable", value: formatTokenAmount(grant.state?.claimable, grant.tokenMetadata) },
         ]}
       />
     </div>
@@ -1196,7 +1212,7 @@ function LockerRow({ locker, setLockedLiquidityAddress }: { locker: BoardroomLoc
         columns="one"
         items={[
           { label: "Pool", value: locker.state?.pool ? <AddressLink address={locker.state.pool} /> : "Unknown" },
-          { label: "Locked LP", value: bigintString(locker.state?.lockedLiquidity) },
+          { label: "Locked LP", value: formatTokenAmount(locker.state?.lockedLiquidity, locker.liquidityMetadata) },
           { label: "Token pair", value: locker.state ? `${locker.state.tokenA} / ${locker.state.tokenB}` : "Unknown" },
         ]}
       />
@@ -1270,20 +1286,36 @@ function curveStatusLabel(status: number | undefined): string {
   return "Unknown";
 }
 
+function distributionSummaryFor(
+  boardroomSnapshot: BoardroomSnapshot | undefined,
+  address: string | undefined,
+): BoardroomDistributionSnapshot | undefined {
+  if (!boardroomSnapshot || !address) return undefined;
+  return boardroomSnapshot.distributionSummaries.find((distribution) => distribution.address.toLowerCase() === address.toLowerCase());
+}
+
+function lockerSummaryFor(
+  boardroomSnapshot: BoardroomSnapshot | undefined,
+  address: string | undefined,
+): BoardroomLockedLiquiditySnapshot | undefined {
+  if (!boardroomSnapshot || !address) return undefined;
+  return boardroomSnapshot.lockedLiquiditySummaries.find((locker) => locker.address.toLowerCase() === address.toLowerCase());
+}
+
 function distributionFacts(distribution: BoardroomDistributionSnapshot): { label: string; value: React.ReactNode }[] {
   if (distribution.kind === "fixed-price-sale") {
     const state = distribution.state as FixedPriceSaleState | undefined;
     return [
-      { label: "Remaining shares", value: bigintString(state?.remainingShares) },
+      { label: "Remaining shares", value: formatTokenAmount(state?.remainingShares, distribution.shareTokenMetadata) },
       { label: "Payment token", value: state ? <AddressLink address={state.paymentToken} /> : "Unknown" },
-      { label: "Price", value: bigintString(state?.price) },
+      { label: "Price", value: formatTokenAmount(state?.price, distribution.paymentTokenMetadata) },
     ];
   }
   if (distribution.kind === "migrating-bonding-curve") {
     const state = distribution.state as MigratingBondingCurveState | undefined;
     return [
-      { label: "Remaining shares", value: bigintString(state?.remainingSaleShares) },
-      { label: "Quote reserve", value: bigintString(state?.quoteReserve) },
+      { label: "Remaining shares", value: formatTokenAmount(state?.remainingSaleShares, distribution.shareTokenMetadata) },
+      { label: "Quote reserve", value: formatTokenAmount(state?.quoteReserve, distribution.quoteTokenMetadata) },
       { label: "Can migrate", value: state ? String(state.canMigrate) : "Unknown" },
     ];
   }

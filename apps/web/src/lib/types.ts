@@ -12,6 +12,7 @@ import type {
   MigratingBondingCurveState,
 } from "@pledge.cash/sdk";
 import type { Hex } from "viem";
+import type { TokenMetadata } from "./token-amounts";
 
 export type Tab = "direct" | "grant" | "boardroom" | "discovery";
 
@@ -54,6 +55,8 @@ export type GrantSnapshot = {
   settleable: bigint;
   halted: boolean;
   closed: boolean;
+  tokenMetadata?: TokenMetadata | undefined;
+  paymentTokenMetadata?: TokenMetadata | undefined;
 };
 
 export type BoardroomForm = {
@@ -67,6 +70,8 @@ export type BoardroomGrantSnapshot = {
   address: Address;
   state?: GrantState;
   error?: string;
+  tokenMetadata?: TokenMetadata | undefined;
+  paymentTokenMetadata?: TokenMetadata | undefined;
 };
 
 export type BoardroomDistributionSnapshot = {
@@ -74,15 +79,22 @@ export type BoardroomDistributionSnapshot = {
   kind: "fixed-price-sale" | "migrating-bonding-curve" | "unknown";
   state?: FixedPriceSaleState | MigratingBondingCurveState;
   error?: string;
+  shareTokenMetadata?: TokenMetadata | undefined;
+  paymentTokenMetadata?: TokenMetadata | undefined;
+  quoteTokenMetadata?: TokenMetadata | undefined;
 };
 
 export type BoardroomLockedLiquiditySnapshot = {
   address: Address;
   state?: LockedLiquidityState;
   error?: string;
+  tokenAMetadata?: TokenMetadata | undefined;
+  tokenBMetadata?: TokenMetadata | undefined;
+  liquidityMetadata?: TokenMetadata | undefined;
 };
 
 export type BoardroomSnapshot = BoardroomState & {
+  shareTokenMetadata?: TokenMetadata | undefined;
   grantSummaries: BoardroomGrantSnapshot[];
   distributionSummaries: BoardroomDistributionSnapshot[];
   lockedLiquiditySummaries: BoardroomLockedLiquiditySnapshot[];
