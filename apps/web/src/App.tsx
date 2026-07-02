@@ -36,7 +36,6 @@ import {
   predictLockedLiquidityAddress as sdkPredictLockedLiquidityAddress,
   predictMigratingBondingCurveAddress as sdkPredictMigratingBondingCurveAddress,
   readBoardroomState,
-  readFactoryState,
   readFixedPriceSaleState,
   readGrantState,
   readLockedLiquidityState,
@@ -57,10 +56,9 @@ import {
   type GrantCreationTerms,
   type LockedLiquidityState,
   type MigratingBondingCurveState,
-  type PledgeCashDeployment,
 } from "@pledge.cash/sdk";
 import { useCallback, useEffect, useState } from "react";
-import { createWalletClient, custom, encodeFunctionData, getAddress, isAddress, type EIP1193Provider, type Hex } from "viem";
+import type { Hex } from "viem";
 import { TabButton } from "./components/shell";
 import { BoardroomPanel } from "./features/boardrooms/boardroom-panel";
 import { ArtifactPanel, DeploymentPanel } from "./features/deployment/deployment-panel";
@@ -70,13 +68,24 @@ import { GrantInspector } from "./features/grants/grant-inspector";
 import { LogPanel } from "./features/logs/log-panel";
 import { AppHeader } from "./features/wallet/app-header";
 import { WalletPanel } from "./features/wallet/wallet-panel";
-import { ACTIVE_CHAIN_ID, ACTIVE_CHAIN_NAME, chain, EXPLORER_URL, publicClient, WALLET_RPC_URL } from "./lib/contracts";
+import { useActionRunner } from "./hooks/use-action-runner";
+import { useFactorySnapshot } from "./hooks/use-factory-snapshot";
+import { useRuntimeDeployment } from "./hooks/use-runtime-deployment";
+import { useWalletConnection } from "./hooks/use-wallet-connection";
+import { readBoardroomSnapshot } from "./lib/boardroom-snapshot";
+import { ACTIVE_CHAIN_ID, ACTIVE_CHAIN_NAME, chain, publicClient } from "./lib/contracts";
 import {
   addressMapKey,
   clearDiscoverySnapshot,
+  combineDiscoveryLastScanned,
+  discoveryErrors,
+  discoveryItems,
   discoveryStorageKey,
   emptyDiscoverySnapshot,
+  emptyDiscoveryResult,
   loadDiscoverySnapshot,
+  mergeAddressMap,
+  parseDiscoveryToBlock,
   saveDiscoverySnapshot,
 } from "./lib/discovery";
 import {
@@ -88,7 +97,6 @@ import {
   defaultLockedLiquidityForm,
   defaultMigratingCurveForm,
   defaultWindDownForm,
-  errorMessage,
   optionalPaymentToken,
   randomSalt,
   requireAddress,
@@ -96,8 +104,8 @@ import {
   requireDeploymentAddress,
   shortAddress,
   uintInput,
-  walletState,
 } from "./lib/forms";
+import { contractCallPreview } from "./lib/transaction-preview";
 import type {
   BoardroomForm,
   BoardroomGrantForm,
@@ -105,62 +113,19 @@ import type {
   CurveMigrationForm,
   DiscoveryForm,
   DiscoverySnapshot,
-  FactorySnapshot,
   FixedPriceSaleForm,
   GrantForm,
   GrantSnapshot,
   LockedLiquidityExitForm,
   LockedLiquidityForm,
-  LogEntry,
   MigratingCurveForm,
   Tab,
-  WalletState,
   WindDownForm,
 } from "./lib/types";
 
+export { parseDeployment } from "./lib/deployment";
+
 type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
-
-function sameOptionalAddress(left: Address | undefined, right: Address | undefined): boolean {
-  return (left ?? "").toLowerCase() === (right ?? "").toLowerCase();
-}
-
-function propertyToken(raw: string, key: string): string | undefined {
-  const match = raw.match(new RegExp(`"${key}"\\s*:\\s*("([^"\\\\]|\\\\.)*"|-?\\d+|true|false|null)`));
-  return match?.[1];
-}
-
-function bigintField(raw: string, key: string): bigint | undefined {
-  const token = propertyToken(raw, key);
-  if (!token || token === "null") return undefined;
-  if (token.startsWith('"')) return BigInt(JSON.parse(token) as string);
-  return BigInt(token);
-}
-
-function contractCallPreview(label: string, request: Record<string, unknown>): string {
-  const target = typeof request.address === "string" ? request.address : "unknown";
-  const functionName = typeof request.functionName === "string" ? request.functionName : "unknown";
-  const value = typeof request.value === "bigint" ? request.value : 0n;
-  let data = "unavailable";
-
-  try {
-    if (request.abi && typeof request.functionName === "string") {
-      const encode = encodeFunctionData as unknown as (parameters: {
-        abi: readonly unknown[];
-        functionName: string;
-        args?: readonly unknown[];
-      }) => Hex;
-      data = encode({
-        abi: request.abi as readonly unknown[],
-        functionName: request.functionName,
-        args: Array.isArray(request.args) ? request.args : [],
-      });
-    }
-  } catch {
-    data = "unavailable";
-  }
-
-  return `${label} call target=${target} function=${functionName} value=${value.toString()} data=${data}`;
-}
 
 function parseMinAmountsOut(value: string, expectedLength: number): bigint[] {
   const trimmed = value.trim();
@@ -186,114 +151,11 @@ function defaultDiscoveryForm(): DiscoveryForm {
   };
 }
 
-function parseDiscoveryToBlock(value: string): bigint | "latest" {
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.toLowerCase() === "latest") return "latest";
-  if (!/^\d+$/.test(trimmed)) throw new Error("To block must be an unsigned integer or latest.");
-  return BigInt(trimmed);
-}
-
-function mergeAddressMap<T>(
-  current: Record<string, T>,
-  items: readonly T[],
-  key: (item: T) => Address,
-): Record<string, T> {
-  const next = { ...current };
-  for (const item of items) {
-    next[addressMapKey(key(item))] = item;
-  }
-  return next;
-}
-
-function discoveryItems<T>(items: Record<string, T>): T[] {
-  return Object.values(items);
-}
-
-function combineDiscoveryLastScanned(results: readonly DiscoveryResult<unknown>[]): bigint | undefined {
-  const scanned = results.map((result) => result.lastScannedBlock).filter((block): block is bigint => block !== undefined);
-  if (scanned.length === 0) return undefined;
-  return scanned.reduce((minimum, block) => (block < minimum ? block : minimum));
-}
-
-function discoveryErrors(results: readonly DiscoveryResult<unknown>[]): string[] {
-  return results.flatMap((result) => result.errors.map((error) => error.message));
-}
-
-function emptyDiscoveryResult<T>(items: T[] = []): DiscoveryResult<T> {
-  return {
-    items,
-    fromBlock: 0n,
-    toBlock: undefined,
-    complete: true,
-    errors: [],
-  };
-}
-
-export function parseDeployment(raw: string): PledgeCashDeployment {
-  const json = JSON.parse(raw) as Record<string, unknown>;
-  const deployment: PledgeCashDeployment = {
-    chainId: Number(json.chainId),
-  };
-
-  for (const field of [
-    "status",
-    "reason",
-    "boardroomStatus",
-    "boardroomReason",
-  ] as const) {
-    if (typeof json[field] === "string") {
-      deployment[field] = json[field];
-    }
-  }
-
-  for (const field of [
-    "boardroomFactory",
-    "boardroomPolicyRegistry",
-    "distributionFactory",
-    "ammFactory",
-    "ammProtocolFeeRecipient",
-    "ammRouter",
-    "lockedLiquidityFactory",
-    "tokenGrantFactory",
-    "tokenGrantLogic",
-    "wrappedNative",
-    "deployer",
-    "factoryOwner",
-    "policyRegistryOwner",
-  ] as const) {
-    if (typeof json[field] === "string") {
-      deployment[field] = json[field] as Address;
-    }
-  }
-
-  if (typeof json.tokenGrantPolicyAllowed === "boolean") {
-    deployment.tokenGrantPolicyAllowed = json.tokenGrantPolicyAllowed;
-  }
-  if (typeof json.distributionPolicyAllowed === "boolean") {
-    deployment.distributionPolicyAllowed = json.distributionPolicyAllowed;
-  }
-  if (typeof json.lockedLiquidityPolicyAllowed === "boolean") {
-    deployment.lockedLiquidityPolicyAllowed = json.lockedLiquidityPolicyAllowed;
-  }
-  const creationFee = bigintField(raw, "creationFee");
-  if (creationFee !== undefined) {
-    deployment.creationFee = creationFee;
-  }
-  const deploymentTimestamp = bigintField(raw, "deploymentTimestamp");
-  if (deploymentTimestamp !== undefined) {
-    deployment.deploymentTimestamp = deploymentTimestamp;
-  }
-
-  return deployment;
-}
-
 export function App(): React.JSX.Element {
   const generatedDeployment = getPledgeCashDeployment(ACTIVE_CHAIN_ID);
-  const [runtimeDeployment, setRuntimeDeployment] = useState<PledgeCashDeployment | undefined>(generatedDeployment);
-  const deployment = runtimeDeployment;
+  const deployment = useRuntimeDeployment(ACTIVE_CHAIN_ID, generatedDeployment);
+  const { clearLogs, logs, pendingAction, pushLog, runAction } = useActionRunner();
   const [activeTab, setActiveTab] = useState<Tab>("direct");
-  const [wallet, setWallet] = useState<WalletState>({});
-  const [factorySnapshot, setFactorySnapshot] = useState<FactorySnapshot>({});
   const [grantForm, setGrantForm] = useState<GrantForm>(() => defaultGrantForm());
   const [predictedGrant, setPredictedGrant] = useState<Address>();
   const [grantAddress, setGrantAddress] = useState("");
@@ -330,53 +192,6 @@ export function App(): React.JSX.Element {
   const [windDownForm, setWindDownForm] = useState<WindDownForm>(() => defaultWindDownForm());
   const [discoveryForm, setDiscoveryForm] = useState<DiscoveryForm>(() => defaultDiscoveryForm());
   const [discovery, setDiscovery] = useState<DiscoverySnapshot>(() => emptyDiscoverySnapshot());
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [pendingAction, setPendingAction] = useState<string>();
-
-  const creationFee = factorySnapshot.creationFee ?? deployment?.creationFee ?? 0n;
-  const discoveryKey = discoveryStorageKey(ACTIVE_CHAIN_ID, wallet.account);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadRuntimeDeployment(): Promise<void> {
-      try {
-        const response = await fetch(`${import.meta.env.BASE_URL}deployments/${ACTIVE_CHAIN_ID}.json`, {
-          cache: "no-store",
-        });
-        if (!response.ok) return;
-        const raw = await response.text();
-        if (!cancelled) {
-          setRuntimeDeployment(parseDeployment(raw));
-        }
-      } catch {
-        // The generated SDK deployment remains the fallback for SSR and package consumers.
-      }
-    }
-
-    void loadRuntimeDeployment();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    setDiscovery(loadDiscoverySnapshot(discoveryKey));
-  }, [discoveryKey]);
-
-  const pushLog = useCallback((message: string, level: LogEntry["level"] = "info", txHash?: Hex) => {
-    const entry = {
-      id: `${Date.now()}-${Math.random()}`,
-      level,
-      message,
-      time: new Date().toISOString().replace(".000Z", "Z"),
-      ...(txHash ? { txHash } : {}),
-    };
-    setLogs((current) => [
-      entry,
-      ...current,
-    ].slice(0, 80));
-  }, []);
 
   const updateGrantAddress = useCallback((address: string): void => {
     setGrantAddress(address);
@@ -390,73 +205,22 @@ export function App(): React.JSX.Element {
     setPredictedGrant(undefined);
   }, [grantAddress, predictedGrant, updateGrantAddress]);
 
+  const { activeAccount, connectWallet, switchChain, wallet, walletClient } = useWalletConnection({
+    onAccountChanged: clearDirectGrantPrediction,
+    pushLog,
+  });
+  const factorySnapshot = useFactorySnapshot(deployment, pushLog);
+  const creationFee = factorySnapshot.creationFee ?? deployment?.creationFee ?? 0n;
+  const discoveryKey = discoveryStorageKey(ACTIVE_CHAIN_ID, wallet.account);
+
+  useEffect(() => {
+    setDiscovery(loadDiscoverySnapshot(discoveryKey));
+  }, [discoveryKey]);
+
   useEffect(() => {
     if (!wallet.account || boardroomForm.owner) return;
     setBoardroomForm((current) => ({ ...current, owner: wallet.account ?? current.owner }));
   }, [boardroomForm.owner, wallet.account]);
-
-  useEffect(() => {
-    const provider = window.ethereum;
-    if (!provider) return;
-
-    const handleAccountsChanged = (accounts: unknown) => {
-      const account = Array.isArray(accounts) && isAddress(accounts[0]) ? getAddress(accounts[0]) : undefined;
-      if (!sameOptionalAddress(wallet.account, account)) {
-        clearDirectGrantPrediction();
-      }
-      setWallet((current) => walletState(account, current.chainId));
-    };
-    const handleChainChanged = (chainId: unknown) => {
-      const parsedChainId = typeof chainId === "string" ? Number.parseInt(chainId, 16) : undefined;
-      setWallet((current) => walletState(current.account, parsedChainId));
-    };
-
-    provider.on?.("accountsChanged", handleAccountsChanged);
-    provider.on?.("chainChanged", handleChainChanged);
-
-    return () => {
-      provider.removeListener?.("accountsChanged", handleAccountsChanged);
-      provider.removeListener?.("chainChanged", handleChainChanged);
-    };
-  }, [clearDirectGrantPrediction, wallet.account]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadFactory(): Promise<void> {
-      if (!deployment?.tokenGrantFactory) return;
-
-      try {
-        const snapshot = await readFactoryState(publicClient, deployment.tokenGrantFactory);
-
-        if (!cancelled) {
-          setFactorySnapshot({
-            owner: snapshot.owner,
-            tokenGrantLogic: snapshot.tokenGrantLogic,
-            creationFee: snapshot.creationFee,
-          });
-        }
-      } catch (error) {
-        pushLog(`Factory reads failed: ${errorMessage(error)}`, "error");
-      }
-    }
-
-    void loadFactory();
-    return () => {
-      cancelled = true;
-    };
-  }, [deployment?.tokenGrantFactory, pushLog]);
-
-  const runAction = async (label: string, action: () => Promise<void>): Promise<void> => {
-    setPendingAction(label);
-    try {
-      await action();
-    } catch (error) {
-      pushLog(errorMessage(error), "error");
-    } finally {
-      setPendingAction(undefined);
-    }
-  };
 
   const updateBoardroomAddress = useCallback((address: string): void => {
     setBoardroomAddress(address);
@@ -490,87 +254,12 @@ export function App(): React.JSX.Element {
     setPredictedBoardroomGrant(undefined);
   }, [grantAddress, predictedBoardroomGrant, updateGrantAddress]);
 
-  const readBoardroomSnapshot = async (address: Address): Promise<BoardroomSnapshot> => {
-    const state = await readBoardroomState(publicClient, address);
-    const [grantSummaries, distributionSummaries, lockedLiquiditySummaries] = await Promise.all([
-      Promise.all(
-        state.issuedGrants.map(async (grant) => {
-          try {
-            return { address: grant, state: await readGrantState(publicClient, grant) };
-          } catch (error) {
-            return { address: grant, error: errorMessage(error) };
-          }
-        }),
-      ),
-      Promise.all(
-        state.issuedDistributions.map(async (distribution) => {
-          try {
-            return {
-              address: distribution,
-              kind: "fixed-price-sale" as const,
-              state: await readFixedPriceSaleState(publicClient, distribution),
-            };
-          } catch (fixedPriceError) {
-            try {
-              return {
-                address: distribution,
-                kind: "migrating-bonding-curve" as const,
-                state: await readMigratingBondingCurveState(publicClient, distribution),
-              };
-            } catch (curveError) {
-              return {
-                address: distribution,
-                kind: "unknown" as const,
-                error: `${errorMessage(fixedPriceError)}; ${errorMessage(curveError)}`,
-              };
-            }
-          }
-        }),
-      ),
-      Promise.all(
-        state.lockedLiquidityPositions.map(async (locker) => {
-          try {
-            return { address: locker, state: await readLockedLiquidityState(publicClient, locker) };
-          } catch (error) {
-            return { address: locker, error: errorMessage(error) };
-          }
-        }),
-      ),
-    ]);
-
-    return {
-      ...state,
-      grantSummaries,
-      distributionSummaries,
-      lockedLiquiditySummaries,
-    };
-  };
-
   const refreshBoardroom = async (address?: Address): Promise<BoardroomSnapshot> => {
     const boardroom = address ?? boardroomSnapshot?.address ?? requireAddress(boardroomAddress, "Boardroom address");
-    const snapshot = await readBoardroomSnapshot(boardroom);
+    const snapshot = await readBoardroomSnapshot(publicClient, boardroom);
     setBoardroomSnapshot(snapshot);
     setBoardroomMintTo((current) => current || snapshot.address);
     return snapshot;
-  };
-
-  const activeAccount = (): Address => {
-    if (!wallet.account) throw new Error("Connect wallet first.");
-    if (wallet.chainId !== ACTIVE_CHAIN_ID) throw new Error(`Switch wallet to ${ACTIVE_CHAIN_NAME} first.`);
-
-    return wallet.account;
-  };
-
-  const walletClient = (): ReturnType<typeof createWalletClient> => {
-    const provider = window.ethereum;
-    if (!provider) throw new Error("No injected wallet provider found.");
-    const account = activeAccount();
-
-    return createWalletClient({
-      account,
-      chain,
-      transport: custom(provider as EIP1193Provider),
-    });
   };
 
   const submitContractTransaction = async (label: string, request: Record<string, unknown>): Promise<Hex> => {
@@ -591,56 +280,6 @@ export function App(): React.JSX.Element {
 
     pushLog(`${label} confirmed`, "success", hash);
     return hash;
-  };
-
-  const connectWallet = async (): Promise<void> => {
-    const provider = window.ethereum;
-    if (!provider) throw new Error("No injected wallet provider found.");
-
-    const accounts = (await provider.request({ method: "eth_requestAccounts" })) as string[];
-    const chainId = (await provider.request({ method: "eth_chainId" })) as string;
-    const account = accounts[0];
-    if (!account || !isAddress(account)) throw new Error("Wallet did not return an EVM address.");
-    const nextAccount = getAddress(account);
-    if (!sameOptionalAddress(wallet.account, nextAccount)) {
-      clearDirectGrantPrediction();
-    }
-    setWallet({ account: nextAccount, chainId: Number.parseInt(chainId, 16) });
-    pushLog(`Connected ${shortAddress(account)}`, "success");
-  };
-
-  const switchChain = async (): Promise<void> => {
-    const provider = window.ethereum;
-    if (!provider) throw new Error("No injected wallet provider found.");
-
-    const chainId = `0x${ACTIVE_CHAIN_ID.toString(16)}`;
-    try {
-      await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId }] });
-    } catch (error) {
-      const code = typeof error === "object" && error !== null && "code" in error ? Number(error.code) : undefined;
-      if (code !== 4902) throw error;
-      await provider.request({
-        method: "wallet_addEthereumChain",
-        params: [
-          {
-            chainId,
-            chainName: ACTIVE_CHAIN_NAME,
-            nativeCurrency: chain.nativeCurrency,
-            rpcUrls: [WALLET_RPC_URL],
-            ...(EXPLORER_URL ? { blockExplorerUrls: [EXPLORER_URL] } : {}),
-          },
-        ],
-      });
-      await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId }] });
-    }
-
-    const activeChainId = (await provider.request({ method: "eth_chainId" })) as string;
-    const parsedChainId = Number.parseInt(activeChainId, 16);
-    setWallet((current) => walletState(current.account, Number.isNaN(parsedChainId) ? undefined : parsedChainId));
-    if (parsedChainId !== ACTIVE_CHAIN_ID) {
-      throw new Error(`Wallet is still on chain ${Number.isNaN(parsedChainId) ? activeChainId : parsedChainId}.`);
-    }
-    pushLog(`Wallet switched to ${ACTIVE_CHAIN_NAME}.`, "success");
   };
 
   const directGrantTerms = (): GrantCreationTerms => {
@@ -1400,7 +1039,7 @@ export function App(): React.JSX.Element {
         <aside className="grid content-start gap-4 border-b border-zinc-800 bg-zinc-950/35 p-4 lg:border-b-0 lg:border-r">
           <DeploymentPanel chainId={ACTIVE_CHAIN_ID} creationFee={creationFee} deployment={deployment} factorySnapshot={factorySnapshot} />
           <WalletPanel wallet={wallet} />
-          <LogPanel logs={logs} clearLogs={() => setLogs([])} />
+          <LogPanel logs={logs} clearLogs={clearLogs} />
           <ArtifactPanel deployment={deployment} />
         </aside>
 
@@ -1415,7 +1054,7 @@ export function App(): React.JSX.Element {
             <TabButton active={activeTab === "boardroom"} onClick={() => setActiveTab("boardroom")}>
               Boardroom
             </TabButton>
-            <TabButton active={activeTab === "my-grants"} onClick={() => setActiveTab("my-grants")}>
+            <TabButton active={activeTab === "discovery"} onClick={() => setActiveTab("discovery")}>
               Discovery
             </TabButton>
           </div>
@@ -1457,80 +1096,90 @@ export function App(): React.JSX.Element {
 
           {activeTab === "boardroom" ? (
             <BoardroomPanel
-              boardroomAddress={boardroomAddress}
-              boardroomForm={boardroomForm}
-              boardroomGrantForm={boardroomGrantForm}
-              boardroomMintAmount={boardroomMintAmount}
-              boardroomMintTo={boardroomMintTo}
-              boardroomSnapshot={boardroomSnapshot}
-              clearBoardroomGrantPrediction={clearBoardroomGrantPrediction}
-              curveMigrationForm={curveMigrationForm}
-              deployment={deployment}
-              fixedPriceSaleAddress={fixedPriceSaleAddress}
-              fixedPriceSaleForm={fixedPriceSaleForm}
-              fixedPriceSaleSnapshot={fixedPriceSaleSnapshot}
-              lockedLiquidityAddress={lockedLiquidityAddress}
-              lockedLiquidityExitForm={lockedLiquidityExitForm}
-              lockedLiquidityForm={lockedLiquidityForm}
-              lockedLiquiditySnapshot={lockedLiquiditySnapshot}
-              migratingCurveAddress={migratingCurveAddress}
-              migratingCurveForm={migratingCurveForm}
-              migratingCurveSnapshot={migratingCurveSnapshot}
-              pendingAction={pendingAction}
-              predictedBoardroom={predictedBoardroom}
-              predictedBoardroomGrant={predictedBoardroomGrant}
-              predictedFixedPriceSale={predictedFixedPriceSale}
-              predictedLockedLiquidity={predictedLockedLiquidity}
-              predictedMigratingCurve={predictedMigratingCurve}
-              setBoardroomAddress={updateBoardroomAddress}
-              setBoardroomForm={setBoardroomForm}
-              setBoardroomGrantForm={setBoardroomGrantForm}
-              setBoardroomMintAmount={setBoardroomMintAmount}
-              setBoardroomMintTo={setBoardroomMintTo}
-              setCurveMigrationForm={setCurveMigrationForm}
-              setFixedPriceSaleAddress={updateFixedPriceSaleAddress}
-              setFixedPriceSaleForm={setFixedPriceSaleForm}
-              setLockedLiquidityAddress={updateLockedLiquidityAddress}
-              setLockedLiquidityExitForm={setLockedLiquidityExitForm}
-              setLockedLiquidityForm={setLockedLiquidityForm}
-              setMigratingCurveAddress={updateMigratingCurveAddress}
-              setMigratingCurveForm={setMigratingCurveForm}
-              setPredictedBoardroom={setPredictedBoardroom}
-              setWindDownForm={setWindDownForm}
-              windDownForm={windDownForm}
-              boardroomApproveFactory={boardroomApproveFactory}
-              boardroomCreateGrant={boardroomCreateGrant}
-              boardroomCreateGrantBatch={boardroomCreateGrantBatch}
-              burnTreasuryShares={burnTreasuryShares}
-              cancelFixedPriceSale={cancelFixedPriceSale}
-              cancelMigratingCurve={cancelMigratingCurve}
-              claimLockedLiquidityFees={claimLockedLiquidityFees}
-              closeFixedPriceSale={closeFixedPriceSale}
-              createBoardroom={createBoardroom}
-              createFixedPriceSale={createFixedPriceSale}
-              createLockedLiquidity={createLockedLiquidity}
-              createMigratingCurve={createMigratingCurve}
-              exitLockedLiquidity={exitLockedLiquidity}
-              loadFixedPriceSale={loadFixedPriceSale}
-              loadLockedLiquidity={loadLockedLiquidity}
-              loadMigratingCurve={loadMigratingCurve}
-              loadBoardroom={loadBoardroom}
-              migrateCurve={migrateCurve}
-              mintBoardroomShares={mintBoardroomShares}
-              openRedemptions={openRedemptions}
-              predictBoardroom={predictBoardroom}
-              predictBoardroomGrantAddress={predictBoardroomGrantAddress}
-              predictFixedPriceSale={predictFixedPriceSale}
-              predictLockedLiquidity={predictLockedLiquidity}
-              predictMigratingCurve={predictMigratingCurve}
-              redeemBoardroomShares={redeemBoardroomShares}
-              registerRedeemableAsset={registerRedeemableAsset}
-              runAction={runAction}
-              startWindDown={startWindDown}
+              boardroom={{
+                address: boardroomAddress,
+                form: boardroomForm,
+                mintAmount: boardroomMintAmount,
+                mintTo: boardroomMintTo,
+                predicted: predictedBoardroom,
+                snapshot: boardroomSnapshot,
+                create: createBoardroom,
+                load: loadBoardroom,
+                mintShares: mintBoardroomShares,
+                predict: predictBoardroom,
+                setBoardroomAddress: updateBoardroomAddress,
+                setBoardroomForm,
+                setBoardroomMintAmount,
+                setBoardroomMintTo,
+                setPredictedBoardroom,
+              }}
+              fixedPriceSale={{
+                address: fixedPriceSaleAddress,
+                form: fixedPriceSaleForm,
+                predicted: predictedFixedPriceSale,
+                snapshot: fixedPriceSaleSnapshot,
+                cancel: cancelFixedPriceSale,
+                close: closeFixedPriceSale,
+                create: createFixedPriceSale,
+                load: loadFixedPriceSale,
+                predict: predictFixedPriceSale,
+                setFixedPriceSaleAddress: updateFixedPriceSaleAddress,
+                setFixedPriceSaleForm,
+              }}
+              grant={{
+                form: boardroomGrantForm,
+                predicted: predictedBoardroomGrant,
+                approveFactory: boardroomApproveFactory,
+                clearPrediction: clearBoardroomGrantPrediction,
+                create: boardroomCreateGrant,
+                createBatch: boardroomCreateGrantBatch,
+                predict: predictBoardroomGrantAddress,
+                setForm: setBoardroomGrantForm,
+              }}
+              lockedLiquidity={{
+                address: lockedLiquidityAddress,
+                exitForm: lockedLiquidityExitForm,
+                form: lockedLiquidityForm,
+                predicted: predictedLockedLiquidity,
+                snapshot: lockedLiquiditySnapshot,
+                claimFees: claimLockedLiquidityFees,
+                create: createLockedLiquidity,
+                exit: exitLockedLiquidity,
+                load: loadLockedLiquidity,
+                predict: predictLockedLiquidity,
+                setLockedLiquidityAddress: updateLockedLiquidityAddress,
+                setLockedLiquidityExitForm,
+                setLockedLiquidityForm,
+              }}
+              migratingCurve={{
+                address: migratingCurveAddress,
+                form: migratingCurveForm,
+                migrationForm: curveMigrationForm,
+                predicted: predictedMigratingCurve,
+                snapshot: migratingCurveSnapshot,
+                cancel: cancelMigratingCurve,
+                create: createMigratingCurve,
+                load: loadMigratingCurve,
+                migrate: migrateCurve,
+                predict: predictMigratingCurve,
+                setCurveMigrationForm,
+                setMigratingCurveAddress: updateMigratingCurveAddress,
+                setMigratingCurveForm,
+              }}
+              windDown={{
+                form: windDownForm,
+                burnTreasuryShares,
+                openRedemptions,
+                redeemShares: redeemBoardroomShares,
+                registerRedeemableAsset,
+                setForm: setWindDownForm,
+                start: startWindDown,
+              }}
+              workflow={{ deployment, pendingAction, runAction }}
             />
           ) : null}
 
-          {activeTab === "my-grants" ? (
+          {activeTab === "discovery" ? (
             <DiscoveryPanel
               account={wallet.account}
               deployment={deployment}

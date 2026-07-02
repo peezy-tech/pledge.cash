@@ -13,7 +13,7 @@ import type {
 } from "@pledge.cash/sdk";
 import type { Hex } from "viem";
 
-export type Tab = "direct" | "grant" | "boardroom" | "my-grants";
+export type Tab = "direct" | "grant" | "boardroom" | "discovery";
 
 export type WalletState = {
   account?: Address;
@@ -161,14 +161,6 @@ export type LogEntry = {
   message: string;
   time: string;
   txHash?: Hex;
-};
-
-export type MyGrantsSnapshot = {
-  held: DiscoveredGrant[];
-  issued: DiscoveredGrant[];
-  loadedFor?: Address;
-  fromBlock?: bigint;
-  includeClosed: boolean;
 };
 
 export type DiscoveryForm = {

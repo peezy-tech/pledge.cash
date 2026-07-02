@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
+import {ExactTransferLib} from "./ExactTransferLib.sol";
 import {Initializable} from "solady/utils/Initializable.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 
@@ -325,28 +326,22 @@ contract TokenGrant is Initializable {
     }
 
     function _checkedTransferFrom(address token_, address from, address to, uint256 expectedAmount) internal {
-        uint256 balanceBefore = SafeTransferLib.balanceOf(token_, to);
-        SafeTransferLib.safeTransferFrom(token_, from, to, expectedAmount);
-        uint256 balanceAfter = SafeTransferLib.balanceOf(token_, to);
-        if (balanceAfter < balanceBefore) {
-            revert UnexpectedTokenBalanceChange(token_, expectedAmount, 0);
-        }
-        uint256 actualAmount = balanceAfter - balanceBefore;
-        if (actualAmount != expectedAmount) {
-            revert UnexpectedTokenBalanceChange(token_, expectedAmount, actualAmount);
-        }
+        _requireExactReceived(token_, expectedAmount, ExactTransferLib.pullTo(token_, from, to, expectedAmount));
     }
 
     function _checkedTransfer(address token_, address to, uint256 expectedAmount) internal {
-        uint256 balanceBefore = SafeTransferLib.balanceOf(token_, to);
-        SafeTransferLib.safeTransfer(token_, to, expectedAmount);
-        uint256 balanceAfter = SafeTransferLib.balanceOf(token_, to);
-        if (balanceAfter < balanceBefore) {
+        _requireExactReceived(token_, expectedAmount, ExactTransferLib.sendTo(token_, to, expectedAmount));
+    }
+
+    function _requireExactReceived(address token_, uint256 expectedAmount, ExactTransferLib.RecipientDelta memory delta)
+        internal
+        pure
+    {
+        if (delta.balanceDecreased) {
             revert UnexpectedTokenBalanceChange(token_, expectedAmount, 0);
         }
-        uint256 actualAmount = balanceAfter - balanceBefore;
-        if (actualAmount != expectedAmount) {
-            revert UnexpectedTokenBalanceChange(token_, expectedAmount, actualAmount);
+        if (delta.received != expectedAmount) {
+            revert UnexpectedTokenBalanceChange(token_, expectedAmount, delta.received);
         }
     }
 }

@@ -6,6 +6,7 @@ import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Initializable} from "solady/utils/Initializable.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
+import {ExactTransferLib} from "./ExactTransferLib.sol";
 import {LockedLiquidityFactory} from "./LockedLiquidityFactory.sol";
 
 interface IMigratingBondingCurveBoardroom {
@@ -353,45 +354,31 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     }
 
     function _checkedTransfer(address token, address to, uint256 expectedAmount) internal {
-        uint256 senderBalanceBefore = ERC20(token).balanceOf(address(this));
-        uint256 recipientBalanceBefore = ERC20(token).balanceOf(to);
-        token.safeTransfer(to, expectedAmount);
-        _checkBalanceChanges(token, address(this), senderBalanceBefore, to, recipientBalanceBefore, expectedAmount);
+        _requireExactBalanceChanges(token, expectedAmount, ExactTransferLib.sendFromSelfTo(token, to, expectedAmount));
     }
 
     function _checkedTransferFrom(address token, address from, address to, uint256 expectedAmount) internal {
-        uint256 senderBalanceBefore = ERC20(token).balanceOf(from);
-        uint256 recipientBalanceBefore = ERC20(token).balanceOf(to);
-        token.safeTransferFrom(from, to, expectedAmount);
-        _checkBalanceChanges(token, from, senderBalanceBefore, to, recipientBalanceBefore, expectedAmount);
+        _requireExactBalanceChanges(
+            token, expectedAmount, ExactTransferLib.pullBetween(token, from, to, expectedAmount)
+        );
     }
 
-    function _checkBalanceChanges(
+    function _requireExactBalanceChanges(
         address token,
-        address sender,
-        uint256 senderBalanceBefore,
-        address recipient,
-        uint256 recipientBalanceBefore,
-        uint256 expectedAmount
-    ) internal view {
-        uint256 senderBalanceAfter = ERC20(token).balanceOf(sender);
-        if (senderBalanceAfter > senderBalanceBefore) {
+        uint256 expectedAmount,
+        ExactTransferLib.ExactDelta memory delta
+    ) internal pure {
+        if (delta.senderBalanceIncreased) {
             revert UnexpectedTokenBalanceChange(token, expectedAmount, 0);
         }
-
-        uint256 senderSpent = senderBalanceBefore - senderBalanceAfter;
-        if (senderSpent != expectedAmount) {
-            revert UnexpectedTokenBalanceChange(token, expectedAmount, senderSpent);
+        if (delta.senderSpent != expectedAmount) {
+            revert UnexpectedTokenBalanceChange(token, expectedAmount, delta.senderSpent);
         }
-
-        uint256 recipientBalanceAfter = ERC20(token).balanceOf(recipient);
-        if (recipientBalanceAfter < recipientBalanceBefore) {
+        if (delta.recipientBalanceDecreased) {
             revert UnexpectedTokenBalanceChange(token, expectedAmount, 0);
         }
-
-        uint256 recipientReceived = recipientBalanceAfter - recipientBalanceBefore;
-        if (recipientReceived != expectedAmount) {
-            revert UnexpectedTokenBalanceChange(token, expectedAmount, recipientReceived);
+        if (delta.recipientReceived != expectedAmount) {
+            revert UnexpectedTokenBalanceChange(token, expectedAmount, delta.recipientReceived);
         }
     }
 }

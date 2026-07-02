@@ -7,6 +7,7 @@ import {Base64} from "solady/utils/Base64.sol";
 import {LibClone} from "solady/utils/LibClone.sol";
 import {LibString} from "solady/utils/LibString.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
+import {ExactTransferLib} from "./ExactTransferLib.sol";
 import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
 import {TokenGrant} from "./TokenGrant.sol";
 
@@ -262,15 +263,12 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomCallPolicy {
     }
 
     function _checkedTransferFrom(address token, address from, address to, uint256 expectedAmount) internal {
-        uint256 balanceBefore = SafeTransferLib.balanceOf(token, to);
-        SafeTransferLib.safeTransferFrom(token, from, to, expectedAmount);
-        uint256 balanceAfter = SafeTransferLib.balanceOf(token, to);
-        if (balanceAfter < balanceBefore) {
+        ExactTransferLib.RecipientDelta memory delta = ExactTransferLib.pullTo(token, from, to, expectedAmount);
+        if (delta.balanceDecreased) {
             revert UnexpectedTokenBalanceChange(token, expectedAmount, 0);
         }
-        uint256 actualAmount = balanceAfter - balanceBefore;
-        if (actualAmount != expectedAmount) {
-            revert UnexpectedTokenBalanceChange(token, expectedAmount, actualAmount);
+        if (delta.received != expectedAmount) {
+            revert UnexpectedTokenBalanceChange(token, expectedAmount, delta.received);
         }
     }
 

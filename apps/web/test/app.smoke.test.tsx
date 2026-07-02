@@ -4,7 +4,6 @@ import { renderToString } from "react-dom/server";
 import { App, parseDeployment } from "../src/App";
 import { BoardroomPanel } from "../src/features/boardrooms/boardroom-panel";
 import { DiscoveryPanel } from "../src/features/discovery/discovery-panel";
-import { MyGrantsPanel } from "../src/features/grants/my-grants-panel";
 import {
   defaultBoardroomGrantForm,
   defaultCurveMigrationForm,
@@ -253,81 +252,95 @@ describe("web app shell", () => {
     const noopSetter = () => undefined;
     const html = renderToString(
       <BoardroomPanel
-        boardroomAddress={boardroom}
-        boardroomForm={{ owner: oldGrant.issuer, name: "Pledge Common", symbol: "PLDG", salt: oldGrant.salt }}
-        boardroomGrantForm={defaultBoardroomGrantForm()}
-        boardroomMintAmount="1000"
-        boardroomMintTo={boardroom}
-        boardroomSnapshot={boardroomSnapshot}
-        clearBoardroomGrantPrediction={noopSetter}
-        curveMigrationForm={defaultCurveMigrationForm()}
-        deployment={{
-          chainId: 31337,
-          boardroomFactory: "0x7900000000000000000000000000000000000000",
-          distributionFactory: "0x7600000000000000000000000000000000000000",
-          lockedLiquidityFactory: "0x7700000000000000000000000000000000000000",
+        boardroom={{
+          address: boardroom,
+          form: { owner: oldGrant.issuer, name: "Pledge Common", symbol: "PLDG", salt: oldGrant.salt },
+          mintAmount: "1000",
+          mintTo: boardroom,
+          predicted: boardroom,
+          snapshot: boardroomSnapshot,
+          create: noop,
+          load: noop,
+          mintShares: noop,
+          predict: noop,
+          setBoardroomAddress: noopSetter,
+          setBoardroomForm: noopSetter,
+          setBoardroomMintAmount: noopSetter,
+          setBoardroomMintTo: noopSetter,
+          setPredictedBoardroom: noopSetter,
         }}
-        fixedPriceSaleAddress={sale}
-        fixedPriceSaleForm={defaultFixedPriceSaleForm()}
-        fixedPriceSaleSnapshot={boardroomSnapshot.distributionSummaries[0].state}
-        lockedLiquidityAddress={locker}
-        lockedLiquidityExitForm={defaultLockedLiquidityExitForm()}
-        lockedLiquidityForm={defaultLockedLiquidityForm()}
-        lockedLiquiditySnapshot={boardroomSnapshot.lockedLiquiditySummaries[0].state}
-        migratingCurveAddress=""
-        migratingCurveForm={defaultMigratingCurveForm()}
-        migratingCurveSnapshot={undefined}
-        pendingAction={undefined}
-        predictedBoardroom={boardroom}
-        predictedBoardroomGrant={oldGrant.grantAddress}
-        predictedFixedPriceSale={sale}
-        predictedLockedLiquidity={locker}
-        predictedMigratingCurve={undefined}
-        setBoardroomAddress={noopSetter}
-        setBoardroomForm={noopSetter}
-        setBoardroomGrantForm={noopSetter}
-        setBoardroomMintAmount={noopSetter}
-        setBoardroomMintTo={noopSetter}
-        setCurveMigrationForm={noopSetter}
-        setFixedPriceSaleAddress={noopSetter}
-        setFixedPriceSaleForm={noopSetter}
-        setLockedLiquidityAddress={noopSetter}
-        setLockedLiquidityExitForm={noopSetter}
-        setLockedLiquidityForm={noopSetter}
-        setMigratingCurveAddress={noopSetter}
-        setMigratingCurveForm={noopSetter}
-        setPredictedBoardroom={noopSetter}
-        setWindDownForm={noopSetter}
-        windDownForm={defaultWindDownForm()}
-        boardroomApproveFactory={noop}
-        boardroomCreateGrant={noop}
-        boardroomCreateGrantBatch={noop}
-        burnTreasuryShares={noop}
-        cancelFixedPriceSale={noop}
-        cancelMigratingCurve={noop}
-        claimLockedLiquidityFees={noop}
-        closeFixedPriceSale={noop}
-        createBoardroom={noop}
-        createFixedPriceSale={noop}
-        createLockedLiquidity={noop}
-        createMigratingCurve={noop}
-        exitLockedLiquidity={noop}
-        loadBoardroom={noop}
-        loadFixedPriceSale={noop}
-        loadLockedLiquidity={noop}
-        loadMigratingCurve={noop}
-        migrateCurve={noop}
-        mintBoardroomShares={noop}
-        openRedemptions={noop}
-        predictBoardroom={noop}
-        predictBoardroomGrantAddress={noop}
-        predictFixedPriceSale={noop}
-        predictLockedLiquidity={noop}
-        predictMigratingCurve={noop}
-        redeemBoardroomShares={noop}
-        registerRedeemableAsset={noop}
-        runAction={async (_label, action) => action()}
-        startWindDown={noop}
+        fixedPriceSale={{
+          address: sale,
+          form: defaultFixedPriceSaleForm(),
+          predicted: sale,
+          snapshot: boardroomSnapshot.distributionSummaries[0].state,
+          cancel: noop,
+          close: noop,
+          create: noop,
+          load: noop,
+          predict: noop,
+          setFixedPriceSaleAddress: noopSetter,
+          setFixedPriceSaleForm: noopSetter,
+        }}
+        grant={{
+          form: defaultBoardroomGrantForm(),
+          predicted: oldGrant.grantAddress,
+          approveFactory: noop,
+          clearPrediction: noopSetter,
+          create: noop,
+          createBatch: noop,
+          predict: noop,
+          setForm: noopSetter,
+        }}
+        lockedLiquidity={{
+          address: locker,
+          exitForm: defaultLockedLiquidityExitForm(),
+          form: defaultLockedLiquidityForm(),
+          predicted: locker,
+          snapshot: boardroomSnapshot.lockedLiquiditySummaries[0].state,
+          claimFees: noop,
+          create: noop,
+          exit: noop,
+          load: noop,
+          predict: noop,
+          setLockedLiquidityAddress: noopSetter,
+          setLockedLiquidityExitForm: noopSetter,
+          setLockedLiquidityForm: noopSetter,
+        }}
+        migratingCurve={{
+          address: "",
+          form: defaultMigratingCurveForm(),
+          migrationForm: defaultCurveMigrationForm(),
+          predicted: undefined,
+          snapshot: undefined,
+          cancel: noop,
+          create: noop,
+          load: noop,
+          migrate: noop,
+          predict: noop,
+          setCurveMigrationForm: noopSetter,
+          setMigratingCurveAddress: noopSetter,
+          setMigratingCurveForm: noopSetter,
+        }}
+        windDown={{
+          form: defaultWindDownForm(),
+          burnTreasuryShares: noop,
+          openRedemptions: noop,
+          redeemShares: noop,
+          registerRedeemableAsset: noop,
+          setForm: noopSetter,
+          start: noop,
+        }}
+        workflow={{
+          deployment: {
+            chainId: 31337,
+            boardroomFactory: "0x7900000000000000000000000000000000000000",
+            distributionFactory: "0x7600000000000000000000000000000000000000",
+            lockedLiquidityFactory: "0x7700000000000000000000000000000000000000",
+          },
+          pendingAction: undefined,
+          runAction: async (_label, action) => action(),
+        }}
       />,
     );
 
@@ -352,57 +365,4 @@ describe("web app shell", () => {
     expect(deployment.deploymentTimestamp).toBe(178264485400000000001n);
   });
 
-  test("hides previously loaded grants after the wallet changes", () => {
-    const html = renderToString(
-      <MyGrantsPanel
-        account="0x5000000000000000000000000000000000000000"
-        deployment={{ chainId: 31337, tokenGrantFactory: "0x6000000000000000000000000000000000000000" }}
-        fromBlock="0"
-        includeClosed={false}
-        inspectGrant={() => undefined}
-        loadMyGrants={async () => undefined}
-        myGrants={{
-          held: [oldGrant],
-          issued: [],
-          loadedFor: "0x3000000000000000000000000000000000000000",
-          fromBlock: 0n,
-          includeClosed: false,
-        }}
-        pendingAction={undefined}
-        runAction={async () => undefined}
-        setFromBlock={() => undefined}
-        setIncludeClosed={() => undefined}
-      />,
-    );
-
-    expect(html).toContain("Held Grants");
-    expect(html).not.toContain("0x1000...0000");
-  });
-
-  test("hides loaded grants after the query filters change", () => {
-    const html = renderToString(
-      <MyGrantsPanel
-        account="0x3000000000000000000000000000000000000000"
-        deployment={{ chainId: 31337, tokenGrantFactory: "0x6000000000000000000000000000000000000000" }}
-        fromBlock="1"
-        includeClosed={false}
-        inspectGrant={() => undefined}
-        loadMyGrants={async () => undefined}
-        myGrants={{
-          held: [oldGrant],
-          issued: [],
-          loadedFor: "0x3000000000000000000000000000000000000000",
-          fromBlock: 0n,
-          includeClosed: true,
-        }}
-        pendingAction={undefined}
-        runAction={async () => undefined}
-        setFromBlock={() => undefined}
-        setIncludeClosed={() => undefined}
-      />,
-    );
-
-    expect(html).toContain("Held Grants");
-    expect(html).not.toContain("0x1000...0000");
-  });
 });

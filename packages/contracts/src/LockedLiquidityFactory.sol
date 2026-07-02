@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {ERC20} from "solady/tokens/ERC20.sol";
 import {LibClone} from "solady/utils/LibClone.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
-import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
+import {ExactTransferLib} from "./ExactTransferLib.sol";
 import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
 import {LockedLiquidity} from "./LockedLiquidity.sol";
 
@@ -15,8 +14,6 @@ interface ILockedLiquidityFactoryBoardroom {
 }
 
 contract LockedLiquidityFactory is IBoardroomCallPolicy, ReentrancyGuard {
-    using SafeTransferLib for address;
-
     bytes4 internal constant APPROVE_SELECTOR = 0x095ea7b3;
     uint256 internal constant CREATE_LOCKED_LIQUIDITY_DATA_LENGTH = 4 + 32 * 8;
     uint256 public constant MAX_LOCKERS_PER_BOARDROOM = 32;
@@ -176,13 +173,13 @@ contract LockedLiquidityFactory is IBoardroomCallPolicy, ReentrancyGuard {
         if (params.tokenA == address(0) || params.tokenB == address(0) || params.tokenA == params.tokenB) return false;
         if (params.amountADesired == 0 || params.amountBDesired == 0) return false;
 
-        address shareToken = _tryBoardroomShareToken(boardroom);
+        address shareToken = _verifiedBoardroomShareToken(boardroom);
         if (shareToken == address(0)) return false;
-        return params.tokenA == shareToken || params.tokenB == shareToken;
+        return _containsShareToken(params, shareToken);
     }
 
     function _boardroomShareToken(address boardroom) internal view returns (address shareToken) {
-        shareToken = _tryBoardroomShareToken(boardroom);
+        shareToken = _verifiedBoardroomShareToken(boardroom);
         if (shareToken == address(0)) revert InvalidBoardroom(boardroom);
     }
 
@@ -198,19 +195,30 @@ contract LockedLiquidityFactory is IBoardroomCallPolicy, ReentrancyGuard {
         }
     }
 
-    function _tryBoardroomShareToken(address boardroom) internal view returns (address shareToken) {
+    function _verifiedBoardroomShareToken(address boardroom) internal view returns (address shareToken) {
         if (boardroom.code.length == 0) return address(0);
 
+        shareToken = _readBoardroomShareToken(boardroom);
+        if (shareToken == address(0)) return address(0);
+        if (!_hasLockedLiquidityExitHook(boardroom)) return address(0);
+    }
+
+    function _readBoardroomShareToken(address boardroom) internal view returns (address shareToken) {
         (bool success, bytes memory data) =
             boardroom.staticcall(abi.encodeCall(ILockedLiquidityFactoryBoardroom.shareToken, ()));
         if (!success || data.length != 32) return address(0);
 
         shareToken = abi.decode(data, (address));
-        if (shareToken == address(0)) return address(0);
+    }
 
-        (success, data) =
+    function _hasLockedLiquidityExitHook(address boardroom) internal view returns (bool) {
+        (bool success, bytes memory data) =
             boardroom.staticcall(abi.encodeCall(ILockedLiquidityFactoryBoardroom.lockedLiquidityExitAllowed, ()));
-        if (!success || data.length != 32) return address(0);
+        return success && data.length == 32;
+    }
+
+    function _containsShareToken(CreateParams memory params, address shareToken) internal pure returns (bool) {
+        return params.tokenA == shareToken || params.tokenB == shareToken;
     }
 
     function _pullSeedTokens(address locker, address payer, CreateParams calldata params) internal {
@@ -219,15 +227,10 @@ contract LockedLiquidityFactory is IBoardroomCallPolicy, ReentrancyGuard {
     }
 
     function _checkedTransferFrom(address token, address from, address to, uint256 expectedAmount) internal {
-        uint256 balanceBefore = ERC20(token).balanceOf(to);
-        token.safeTransferFrom(from, to, expectedAmount);
-
-        uint256 balanceAfter = ERC20(token).balanceOf(to);
-        if (balanceAfter < balanceBefore) revert TransferAmountMismatch(token, expectedAmount, 0);
-
-        uint256 actualAmount = balanceAfter - balanceBefore;
-        if (actualAmount != expectedAmount) {
-            revert TransferAmountMismatch(token, expectedAmount, actualAmount);
+        ExactTransferLib.RecipientDelta memory delta = ExactTransferLib.pullTo(token, from, to, expectedAmount);
+        if (delta.balanceDecreased) revert TransferAmountMismatch(token, expectedAmount, 0);
+        if (delta.received != expectedAmount) {
+            revert TransferAmountMismatch(token, expectedAmount, delta.received);
         }
     }
 
