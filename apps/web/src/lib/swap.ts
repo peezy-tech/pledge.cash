@@ -310,9 +310,10 @@ export async function readSwapQuote(
   form: SwapForm,
   account?: Address | undefined,
 ): Promise<SwapQuoteState> {
-  const slippageBps = parseSlippageBpsSafe(form.slippageBps);
+  let slippageBps = 50;
 
   try {
+    slippageBps = parseSlippageBps(form.slippageBps);
     const factory = requireDeploymentAddress(deployment?.ammFactory, "AMM factory");
     const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
     const tokenIn = requireTokenAddress(form.tokenIn, "From token");
@@ -415,9 +416,10 @@ export async function readLiquidityQuote(
   form: LiquidityForm,
   account?: Address | undefined,
 ): Promise<LiquidityQuoteState> {
-  const slippageBps = parseSlippageBpsSafe(form.slippageBps);
+  let slippageBps = 50;
 
   try {
+    slippageBps = parseSlippageBps(form.slippageBps);
     const factory = requireDeploymentAddress(deployment?.ammFactory, "AMM factory");
     const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
     const tokenA = requireTokenAddress(form.tokenA, "Token A");
@@ -517,9 +519,10 @@ export async function readRemoveLiquidityQuote(
   removeForm: RemoveLiquidityForm,
   account?: Address | undefined,
 ): Promise<RemoveLiquidityQuoteState> {
-  const slippageBps = parseSlippageBpsSafe(removeForm.slippageBps);
+  let slippageBps = 50;
 
   try {
+    slippageBps = parseSlippageBps(removeForm.slippageBps);
     const position = await readAmmPosition(client, deployment, pairForm.tokenA, pairForm.tokenB, account);
     if (!position) return { slippageBps, error: "No AMM pool exists for this pair yet." };
     if (!position.pool || !position.pool.exists || !position.lpToken) return { position, slippageBps, error: "No AMM pool exists for this pair yet." };
@@ -962,14 +965,6 @@ function requireTokenAddress(value: string, label: string): Address {
   const trimmed = value.trim();
   if (!isAddress(trimmed)) throw new Error(`${label} must be a valid address.`);
   return trimmed;
-}
-
-function parseSlippageBpsSafe(value: string): number {
-  try {
-    return parseSlippageBps(value);
-  } catch {
-    return 50;
-  }
 }
 
 function parseSlippageBps(value: string): number {

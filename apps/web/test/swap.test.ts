@@ -210,6 +210,55 @@ describe("AMM liquidity helpers", () => {
     expect(quote.error).toBe("LP amount is too small for this pool.");
   });
 
+  test("rejects invalid slippage before executable quotes are produced", async () => {
+    const swapQuote = await readSwapQuote(fakeReadClient(), deployment, {
+      tokenIn: share,
+      tokenOut: whype,
+      amountIn: "2",
+      slippageBps: "abc",
+      recipient: "",
+      deadline: "1700000000",
+      useNative: true,
+    }, account);
+
+    expect(swapQuote.amountOut).toBeUndefined();
+    expect(swapQuote.error).toBe("Slippage must be whole basis points.");
+
+    const addQuote = await readLiquidityQuote(fakeReadClient(), deployment, {
+      tokenA: usdc,
+      tokenB: share,
+      amountA: "1",
+      amountB: "3",
+      slippageBps: "10000",
+      recipient: "",
+      deadline: "1700000000",
+      useNative: false,
+    }, account);
+
+    expect(addQuote.liquidityOut).toBeUndefined();
+    expect(addQuote.error).toBe("Slippage must be between 0 and 9999 bps.");
+
+    const removeQuote = await readRemoveLiquidityQuote(fakeReadClient(), deployment, {
+      tokenA: usdc,
+      tokenB: share,
+      amountA: "1",
+      amountB: "1",
+      slippageBps: "50",
+      recipient: "",
+      deadline: "1700000000",
+      useNative: false,
+    }, {
+      liquidity: "5",
+      slippageBps: "0.5",
+      recipient: "",
+      deadline: "1700000100",
+      useNative: false,
+    }, account);
+
+    expect(removeQuote.amountA).toBeUndefined();
+    expect(removeQuote.error).toBe("Slippage must be whole basis points.");
+  });
+
   test("builds native add and remove liquidity router calls when wrapped native is selected", async () => {
     const addQuote = await readLiquidityQuote(fakeReadClient(), deployment, {
       tokenA: whype,
