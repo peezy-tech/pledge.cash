@@ -11,16 +11,18 @@ migrating bonding curve, AMM, and locked-liquidity primitives.
 - Wrapper: `packages/contracts/script/hyperevm-testnet/deploy.sh`
 - Artifact: `packages/contracts/deployments/998.json`
 
-The deploy script creates one `BoardroomPolicyRegistry`, one `TokenGrantFactory`, one `DistributionFactory`, one
-`AmmFactory`, and one `BoardroomFactory`. It allows the token grant factory and distribution factory as Boardroom
-policies, records the grant logic, optionally sets the native grant creation fee, and can set the one-way AMM protocol
-fee recipient.
+The deploy script creates one `BoardroomPolicyRegistry`, one `ProtocolPolicy`, one `AssetPolicy`, one
+`TokenGrantFactory`, one `DistributionFactory`, one `AmmFactory`, one `AmmRouter`, one `LockedLiquidityFactory`, and one
+`BoardroomFactory`. `WRAPPED_NATIVE_ADDRESS` is required because every Boardroom stores canonical WHYPE and wraps raw
+native HYPE before wind-down redemptions.
 
-If `WRAPPED_NATIVE_ADDRESS` is set, the deploy script also creates one `AmmRouter` and one `LockedLiquidityFactory`,
-then allows the locked-liquidity factory as a Boardroom policy. If `WRAPPED_NATIVE_ADDRESS` is not set, AMM pools can
-still be deployed through `AmmFactory`, but router native-token paths and Boardroom locked-liquidity creation are not
-published in the deployment artifact. In that mode, fixed-price distributions remain usable, but migrating bonding curve
-creation is rejected because migration requires locked-liquidity support.
+The registry allows `ProtocolPolicy` for registered pledge.cash protocol targets and `AssetPolicy` for external asset
+operations. The deploy script registers the token grant, distribution, locked-liquidity, and AMM factory targets in
+`ProtocolPolicy`; only the token grant factory is separately allowed to receive native value for exact creation-fee
+payments. `AmmRouter` is deployed for user and protocol flows but is not a Boardroom-callable protocol-policy target.
+The deploy script also registers the token grant, distribution, and locked-liquidity factories as allowed approval
+spenders in `AssetPolicy`. Boardroom-created share tokens and other project-specific assets still need to be registered
+in `AssetPolicy` before their approvals can be executed through a Boardroom.
 
 The checked-in HyperEVM testnet artifact may model subsystems independently while deployment history is being rebuilt.
 If an existing artifact predates a current subsystem, mark that subsystem pending instead of keeping stale partial fields.
@@ -47,7 +49,7 @@ Optional:
 HYPEREVM_TESTNET_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
 TOKEN_GRANT_CREATION_FEE_WEI=100000000000000000
 AMM_PROTOCOL_FEE_RECIPIENT=
-WRAPPED_NATIVE_ADDRESS=
+WRAPPED_NATIVE_ADDRESS=0x...
 HYPEREVM_GAS_PRICE_WEI=
 GAS_ESTIMATE_MULTIPLIER=200
 ```
@@ -80,24 +82,37 @@ After a broadcast, verify `packages/contracts/deployments/998.json` contains:
 - `chainId`
 - `deployer`
 - `boardroomPolicyRegistry`
+- `protocolPolicy`
+- `assetPolicy`
 - `boardroomFactory`
 - `distributionFactory`
 - `ammFactory`
+- `wrappedNative`
+- `ammRouter`
+- `lockedLiquidityFactory`
 - `policyRegistryOwner`
+- `protocolPolicyOwner`
+- `assetPolicyOwner`
+- `protocolPolicyAllowed`
+- `assetPolicyAllowed`
 - `tokenGrantPolicyAllowed`
 - `distributionPolicyAllowed`
+- `lockedLiquidityPolicyAllowed`
+- `protocolTokenGrantFactoryAllowed`
+- `protocolTokenGrantFactoryValueAllowed`
+- `protocolDistributionFactoryAllowed`
+- `protocolLockedLiquidityFactoryAllowed`
+- `protocolAmmFactoryAllowed`
+- `protocolAmmRouterAllowed`
+- `assetWrappedNativeAllowed`
+- `assetTokenGrantSpenderAllowed`
+- `assetDistributionSpenderAllowed`
+- `assetLockedLiquiditySpenderAllowed`
 - `factoryOwner`
 - `tokenGrantFactory`
 - `tokenGrantLogic`
 - `creationFee`
 - `deploymentTimestamp`
-
-If `WRAPPED_NATIVE_ADDRESS` was configured, the artifact should also contain:
-
-- `wrappedNative`
-- `ammRouter`
-- `lockedLiquidityFactory`
-- `lockedLiquidityPolicyAllowed`
 
 If `AMM_PROTOCOL_FEE_RECIPIENT` was configured, the artifact should also contain:
 
@@ -117,12 +132,14 @@ cd packages/contracts && forge fmt --check
 ## Local Anvil Seed
 
 For a semi-persistent local deployment, run Anvil on chain id `31337`, broadcast
-`Deploy.s.sol`, then seed demo tokens, direct grants, Boardroom grants, partial
-settlements, one transferred grant right, and one halted grant:
+`Deploy.s.sol` with a predeployed wrapped-native contract, then seed demo tokens,
+direct grants, Boardroom grants, partial settlements, one transferred grant right,
+and one halted grant:
 
 ```sh
 cd packages/contracts
 PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+WRAPPED_NATIVE_ADDRESS=0x... \
 WRITE_DEPLOYMENT_STATE=true \
 forge script script/Deploy.s.sol:Deploy \
   --rpc-url http://127.0.0.1:8547 \

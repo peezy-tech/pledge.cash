@@ -168,6 +168,7 @@ export async function discoverBoardrooms(
       boardroom,
       owner,
       policyRegistry: addressArg(args, "policyRegistry") ?? ZERO_ADDRESS,
+      wrappedNative: addressArg(args, "wrappedNative") ?? ZERO_ADDRESS,
       shareToken: addressArg(args, "shareToken") ?? ZERO_ADDRESS,
       name: stringArg(args, "name") ?? "",
       symbol: stringArg(args, "symbol") ?? "",

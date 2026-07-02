@@ -24,6 +24,13 @@ import type {
   MigratingBondingCurveTerms,
 } from "./types";
 
+function requireAssetPolicy(assetPolicy: Address | undefined): Address {
+  if (!assetPolicy) {
+    throw new Error("assetPolicy is required for Boardroom approval calls.");
+  }
+  return assetPolicy;
+}
+
 export function grantCreationArgs(terms: GrantCreationTerms): GrantCreationArgs {
   return [
     terms.holder,
@@ -77,6 +84,14 @@ export function buildBoardroomStartWindDownTransaction(input: { boardroom: Addre
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "startWindDown",
+  };
+}
+
+export function buildBoardroomWrapNativeBalanceTransaction(input: { boardroom: Address }) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "wrapNativeBalance",
   };
 }
 
@@ -262,12 +277,14 @@ export function buildBoardroomFixedPriceSaleBatch(input: {
   shareToken: Address;
   terms: BoardroomFixedPriceSaleTerms;
   policy?: Address;
+  assetPolicy?: Address;
 }) {
   const policy = input.policy ?? input.factory;
+  const assetPolicy = requireAssetPolicy(input.assetPolicy);
   const terms = { ...input.terms, shareToken: input.shareToken } satisfies FixedPriceSaleTerms;
   const calls = [
     buildBoardroomFixedPriceSaleApprovalCall({
-      policy,
+      policy: assetPolicy,
       shareToken: input.shareToken,
       factory: input.factory,
       amount: input.terms.shareAmount,
@@ -355,12 +372,14 @@ export function buildBoardroomMigratingCurveBatch(input: {
   shareToken: Address;
   terms: BoardroomMigratingBondingCurveTerms;
   policy?: Address;
+  assetPolicy?: Address;
 }) {
   const policy = input.policy ?? input.factory;
+  const assetPolicy = requireAssetPolicy(input.assetPolicy);
   const terms = { ...input.terms, shareToken: input.shareToken } satisfies MigratingBondingCurveTerms;
   const calls = [
     buildBoardroomMigratingCurveApprovalCall({
-      policy,
+      policy: assetPolicy,
       shareToken: input.shareToken,
       factory: input.factory,
       saleSupply: input.terms.saleSupply,
@@ -455,8 +474,10 @@ export function buildBoardroomLockedLiquidityBatch(input: {
   shareToken: Address;
   terms: BoardroomLockedLiquidityTerms;
   policy?: Address;
+  assetPolicy?: Address;
 }) {
   const policy = input.policy ?? input.factory;
+  const assetPolicy = requireAssetPolicy(input.assetPolicy);
   const shareTokenSide = input.terms.shareTokenSide ?? "tokenA";
   const terms =
     shareTokenSide === "tokenA"
@@ -482,13 +503,13 @@ export function buildBoardroomLockedLiquidityBatch(input: {
         } satisfies LockedLiquidityTerms);
   const calls = [
     buildBoardroomLockedLiquidityApprovalCall({
-      policy,
+      policy: assetPolicy,
       token: input.shareToken,
       factory: input.factory,
       amount: input.terms.shareAmountDesired,
     }),
     buildBoardroomLockedLiquidityApprovalCall({
-      policy,
+      policy: assetPolicy,
       token: input.terms.quoteToken,
       factory: input.factory,
       amount: input.terms.quoteAmountDesired,
@@ -561,12 +582,14 @@ export function buildBoardroomShareGrantIssuanceBatch(input: {
   terms: BoardroomShareGrantTerms;
   creationFee?: bigint;
   policy?: Address;
+  assetPolicy?: Address;
 }) {
   const policy = input.policy ?? input.factory;
+  const assetPolicy = requireAssetPolicy(input.assetPolicy);
   const terms = { ...input.terms, token: input.shareToken } satisfies GrantCreationTerms;
   const calls = [
     buildBoardroomGrantApprovalCall({
-      policy,
+      policy: assetPolicy,
       shareToken: input.shareToken,
       factory: input.factory,
       amount: input.terms.amount,

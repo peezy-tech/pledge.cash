@@ -3,8 +3,10 @@ pragma solidity ^0.8.30;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {stdJson} from "forge-std/StdJson.sol";
+import {AssetPolicy} from "../src/AssetPolicy.sol";
 import {Boardroom} from "../src/Boardroom.sol";
 import {BoardroomFactory} from "../src/BoardroomFactory.sol";
+import {ProtocolPolicy} from "../src/ProtocolPolicy.sol";
 import {TokenGrant} from "../src/TokenGrant.sol";
 import {TokenGrantFactory} from "../src/TokenGrantFactory.sol";
 
@@ -69,6 +71,8 @@ contract SeedLocal is Script {
 
     struct Deployment {
         BoardroomFactory boardroomFactory;
+        ProtocolPolicy protocolPolicy;
+        AssetPolicy assetPolicy;
         TokenGrantFactory tokenGrantFactory;
     }
 
@@ -113,12 +117,13 @@ contract SeedLocal is Script {
     Boardroom internal boardroom;
     SeededGrants internal grants;
     uint256 internal seedNonce;
+    uint256 internal deployerKey;
     uint256 internal creationFee;
 
     function run() external {
         if (block.chainid != 31337) revert("SeedLocal only targets local Anvil chain 31337");
 
-        uint256 deployerKey = vm.envOr("PRIVATE_KEY", DEPLOYER_KEY);
+        deployerKey = vm.envOr("PRIVATE_KEY", DEPLOYER_KEY);
         seedNonce = vm.envOr("LOCAL_SEED_NONCE", block.number);
 
         _setActors(deployerKey);
@@ -130,9 +135,9 @@ contract SeedLocal is Script {
         _logSeed();
     }
 
-    function _setActors(uint256 deployerKey) internal {
+    function _setActors(uint256 deployerKey_) internal {
         actors = Actors({
-            deployer: vm.addr(deployerKey),
+            deployer: vm.addr(deployerKey_),
             issuer: vm.addr(ISSUER_KEY),
             holder: vm.addr(HOLDER_KEY),
             newHolder: vm.addr(NEW_HOLDER_KEY),
@@ -146,13 +151,20 @@ contract SeedLocal is Script {
         string memory path = string.concat("deployments/", vm.toString(block.chainid), ".json");
         string memory json = vm.readFile(path);
         BoardroomFactory boardroomFactory = BoardroomFactory(json.readAddress(".boardroomFactory"));
+        ProtocolPolicy protocolPolicy = ProtocolPolicy(json.readAddress(".protocolPolicy"));
+        AssetPolicy assetPolicy = AssetPolicy(json.readAddress(".assetPolicy"));
         TokenGrantFactory tokenGrantFactory = TokenGrantFactory(json.readAddress(".tokenGrantFactory"));
-        deployment = Deployment({boardroomFactory: boardroomFactory, tokenGrantFactory: tokenGrantFactory});
+        deployment = Deployment({
+            boardroomFactory: boardroomFactory,
+            protocolPolicy: protocolPolicy,
+            assetPolicy: assetPolicy,
+            tokenGrantFactory: tokenGrantFactory
+        });
         creationFee = tokenGrantFactory.creationFee();
     }
 
-    function _deploySeedTokens(uint256 deployerKey) internal {
-        vm.startBroadcast(deployerKey);
+    function _deploySeedTokens(uint256 deployerKey_) internal {
+        vm.startBroadcast(deployerKey_);
         equity = new SeedToken("Seed Equity Token", "EQTY", 18);
         cash = new SeedToken("Seed Cash", "CASH", 6);
 
@@ -255,6 +267,11 @@ contract SeedLocal is Script {
         cash.mint(address(boardroom), 25 * CASH);
         vm.stopBroadcast();
 
+        vm.startBroadcast(deployerKey);
+        deployment.assetPolicy.setAssetAllowed(boardroom.shareToken(), true);
+        deployment.assetPolicy.setAssetAllowed(address(cash), true);
+        vm.stopBroadcast();
+
         _seedBoardroomShareGrant();
         _seedBoardroomShareSale();
         _seedBoardroomPayrollGrant();
@@ -350,7 +367,7 @@ contract SeedLocal is Script {
         uint256 fee = creationFee;
         Boardroom.Call[] memory calls = new Boardroom.Call[](2);
         calls[0] = Boardroom.Call({
-            policy: address(deployment.tokenGrantFactory),
+            policy: address(deployment.assetPolicy),
             target: spec.token,
             value: 0,
             data: abi.encodeWithSignature(
@@ -358,7 +375,7 @@ contract SeedLocal is Script {
             )
         });
         calls[1] = Boardroom.Call({
-            policy: address(deployment.tokenGrantFactory),
+            policy: address(deployment.protocolPolicy),
             target: address(deployment.tokenGrantFactory),
             value: fee,
             data: _createGrantData(spec)

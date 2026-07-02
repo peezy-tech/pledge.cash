@@ -12,7 +12,6 @@ interface IDistributionBoardroom {
 }
 
 contract DistributionFactory is IBoardroomCallPolicy {
-    bytes4 internal constant APPROVE_SELECTOR = 0x095ea7b3;
     uint256 internal constant FIXED_PRICE_SALE_CREATE_DATA_LENGTH = 4 + 32 * 8;
     uint256 internal constant MIGRATING_CURVE_CREATE_DATA_LENGTH = 4 + 32 * 12;
     uint256 internal constant BPS = 10_000;
@@ -34,6 +33,8 @@ contract DistributionFactory is IBoardroomCallPolicy {
     mapping(address => address[]) internal distributionsForBoardroom;
 
     error InvalidAddress();
+    error InvalidBoardroom(address boardroom);
+    error InvalidShareToken(address expected, address actual);
     error TooManyBoardroomDistributions(address boardroom);
     error UnexpectedTokenBalanceChange(address token, uint256 expected, uint256 actual);
 
@@ -54,6 +55,8 @@ contract DistributionFactory is IBoardroomCallPolicy {
     }
 
     function createFixedPriceSale(FixedPriceSale.CreateParams calldata params) external returns (address sale) {
+        _requireBoardroomShareToken(msg.sender, params.shareToken);
+
         sale = _createDistribution(
             fixedPriceSaleLogic,
             msg.sender,
@@ -73,6 +76,7 @@ contract DistributionFactory is IBoardroomCallPolicy {
         returns (address curve)
     {
         if (lockedLiquidityFactory == address(0)) revert InvalidAddress();
+        _requireBoardroomShareToken(msg.sender, params.shareToken);
 
         uint256 shareAmount = params.saleSupply + params.migrationSupply;
         curve = _createDistribution(
@@ -105,10 +109,6 @@ contract DistributionFactory is IBoardroomCallPolicy {
             return
                 selector == DistributionFactory.createFixedPriceSale.selector
                     && _canCreateFixedPriceSale(boardroom, data);
-        }
-
-        if (selector == APPROVE_SELECTOR) {
-            return _canApproveDistributionFactory(boardroom, target, data);
         }
 
         if (distributionBoardroom[target] != boardroom) return false;
@@ -177,18 +177,6 @@ contract DistributionFactory is IBoardroomCallPolicy {
         return _hasValidTimeWindow(params.startTime, params.endTime);
     }
 
-    function _canApproveDistributionFactory(address boardroom, address token, bytes calldata data)
-        internal
-        view
-        returns (bool)
-    {
-        if (data.length != 68) return false;
-        if (token != IDistributionBoardroom(boardroom).shareToken()) return false;
-
-        (address spender,) = abi.decode(data[4:], (address, uint256));
-        return spender == address(this);
-    }
-
     function _createDistribution(
         address implementation,
         address boardroom,
@@ -226,6 +214,14 @@ contract DistributionFactory is IBoardroomCallPolicy {
 
     function _hasValidTimeWindow(uint64 startTime, uint64 endTime) internal pure returns (bool) {
         return endTime == 0 || endTime >= startTime;
+    }
+
+    function _requireBoardroomShareToken(address boardroom, address shareToken) internal view {
+        try IDistributionBoardroom(boardroom).shareToken() returns (address expectedShareToken) {
+            if (shareToken != expectedShareToken) revert InvalidShareToken(expectedShareToken, shareToken);
+        } catch {
+            revert InvalidBoardroom(boardroom);
+        }
     }
 
     function _cloneSalt(address boardroom, DistributionKind kind, bytes32 salt) internal pure returns (bytes32) {

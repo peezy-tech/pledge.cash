@@ -6,6 +6,7 @@ import {WETH} from "solady/tokens/WETH.sol";
 import {AmmFactory} from "../src/AmmFactory.sol";
 import {AmmPool} from "../src/AmmPool.sol";
 import {AmmRouter} from "../src/AmmRouter.sol";
+import {AssetPolicy} from "../src/AssetPolicy.sol";
 import {Boardroom} from "../src/Boardroom.sol";
 import {BoardroomFactory} from "../src/BoardroomFactory.sol";
 import {BoardroomPolicyRegistry} from "../src/BoardroomPolicyRegistry.sol";
@@ -16,6 +17,7 @@ import {IBoardroomCallPolicy} from "../src/IBoardroomCallPolicy.sol";
 import {LockedLiquidity} from "../src/LockedLiquidity.sol";
 import {LockedLiquidityFactory} from "../src/LockedLiquidityFactory.sol";
 import {MigratingBondingCurve} from "../src/MigratingBondingCurve.sol";
+import {ProtocolPolicy} from "../src/ProtocolPolicy.sol";
 
 contract DistributionCurrency {
     string public name;
@@ -99,8 +101,11 @@ contract DistributionTestAllowAllPolicy is IBoardroomCallPolicy {
 
 contract DistributionTest is Test {
     BoardroomPolicyRegistry internal policyRegistry;
+    ProtocolPolicy internal protocolPolicy;
+    AssetPolicy internal assetPolicy;
     BoardroomFactory internal boardroomFactory;
     AmmFactory internal ammFactory;
+    WETH internal wrappedNative;
     AmmRouter internal ammRouter;
     LockedLiquidityFactory internal lockedLiquidityFactory;
     DistributionFactory internal distributionFactory;
@@ -123,14 +128,21 @@ contract DistributionTest is Test {
     uint256 internal constant CURVE_GRADUATION_TARGET = 300_000000;
 
     function setUp() public {
+        wrappedNative = new WETH();
         policyRegistry = new BoardroomPolicyRegistry(address(this));
-        boardroomFactory = new BoardroomFactory(address(policyRegistry));
+        protocolPolicy = new ProtocolPolicy(address(this));
+        assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
+        boardroomFactory = new BoardroomFactory(address(policyRegistry), address(wrappedNative));
         ammFactory = new AmmFactory();
-        ammRouter = new AmmRouter(address(ammFactory), address(new WETH()));
+        ammRouter = new AmmRouter(address(ammFactory), address(wrappedNative));
         lockedLiquidityFactory = new LockedLiquidityFactory(address(ammRouter));
         distributionFactory = new DistributionFactory(address(lockedLiquidityFactory));
         paymentToken = new DistributionCurrency("USD Coin", "USDC", 6);
 
+        protocolPolicy.setProtocolTargetAllowed(address(distributionFactory), true);
+        assetPolicy.setApprovalSpenderAllowed(address(distributionFactory), true);
+        policyRegistry.setPolicyAllowed(address(protocolPolicy), true);
+        policyRegistry.setPolicyAllowed(address(assetPolicy), true);
         policyRegistry.setPolicyAllowed(address(distributionFactory), true);
         policyRegistry.setPolicyAllowed(address(lockedLiquidityFactory), true);
         paymentToken.mint(buyer, 10_000_000000);
@@ -541,9 +553,63 @@ contract DistributionTest is Test {
         );
     }
 
+    function testProtocolPolicyCannotBypassDistributionShareTokenValidation() public {
+        (Boardroom boardroom,) = _createBoardroom("protocol-policy-wrong-share-token");
+        uint256 amount = 1 ether;
+
+        vm.deal(address(this), amount);
+        wrappedNative.deposit{value: amount}();
+        assertTrue(wrappedNative.transfer(address(boardroom), amount));
+
+        vm.startPrank(owner);
+        boardroom.execute(
+            _policyCall(
+                address(assetPolicy),
+                address(wrappedNative),
+                0,
+                abi.encodeWithSignature("approve(address,uint256)", address(distributionFactory), amount)
+            )
+        );
+
+        FixedPriceSale.CreateParams memory saleParams = _saleParams(
+            address(wrappedNative), address(paymentToken), amount, PRICE, keccak256("protocol-policy-wrong-share-sale")
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DistributionFactory.InvalidShareToken.selector, boardroom.shareToken(), address(wrappedNative)
+            )
+        );
+        boardroom.execute(
+            _policyCall(
+                address(protocolPolicy),
+                address(distributionFactory),
+                0,
+                abi.encodeCall(DistributionFactory.createFixedPriceSale, (saleParams))
+            )
+        );
+
+        MigratingBondingCurve.CreateParams memory curveParams =
+            _curveParams(address(wrappedNative), address(paymentToken), keccak256("protocol-policy-wrong-share-curve"));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DistributionFactory.InvalidShareToken.selector, boardroom.shareToken(), address(wrappedNative)
+            )
+        );
+        boardroom.execute(
+            _policyCall(
+                address(protocolPolicy),
+                address(distributionFactory),
+                0,
+                abi.encodeCall(DistributionFactory.createMigratingBondingCurve, (curveParams))
+            )
+        );
+        vm.stopPrank();
+    }
+
     function testDistributionPolicyRejectsMigratingCurveWithoutLockedLiquidityFactory() public {
         DistributionFactory factoryWithoutLocker = new DistributionFactory(address(0));
         policyRegistry.setPolicyAllowed(address(factoryWithoutLocker), true);
+        assetPolicy.setApprovalSpenderAllowed(address(factoryWithoutLocker), true);
 
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("curve-no-locker");
         uint256 totalShares = CURVE_SALE_SHARES + CURVE_MIGRATION_SHARES;
@@ -552,7 +618,7 @@ contract DistributionTest is Test {
         boardroom.mint(address(boardroom), totalShares);
         boardroom.execute(
             _policyCall(
-                address(factoryWithoutLocker),
+                address(assetPolicy),
                 address(shareToken),
                 0,
                 abi.encodeWithSignature("approve(address,uint256)", address(factoryWithoutLocker), totalShares)
@@ -589,6 +655,7 @@ contract DistributionTest is Test {
             boardroomFactory.createBoardroom(owner, "Distribution Common", "DIST", keccak256(bytes(saltLabel)));
         boardroom = Boardroom(payable(boardroomAddress));
         shareToken = BoardroomToken(boardroom.shareToken());
+        assetPolicy.setAssetAllowed(address(shareToken), true);
     }
 
     function _createFixedPriceSale(
@@ -607,7 +674,7 @@ contract DistributionTest is Test {
 
         Boardroom.Call[] memory calls = new Boardroom.Call[](2);
         calls[0] = _policyCall(
-            address(distributionFactory),
+            address(assetPolicy),
             address(shareToken),
             0,
             abi.encodeWithSignature("approve(address,uint256)", address(distributionFactory), SALE_SHARES)
@@ -651,7 +718,7 @@ contract DistributionTest is Test {
 
         Boardroom.Call[] memory calls = new Boardroom.Call[](2);
         calls[0] = _policyCall(
-            address(distributionFactory),
+            address(assetPolicy),
             address(shareToken),
             0,
             abi.encodeWithSignature("approve(address,uint256)", address(distributionFactory), totalShares)

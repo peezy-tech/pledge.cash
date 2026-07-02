@@ -31,6 +31,8 @@ function applyAddressFields(deployment: PledgeCashDeployment, json: Record<strin
   for (const field of [
     "boardroomFactory",
     "boardroomPolicyRegistry",
+    "protocolPolicy",
+    "assetPolicy",
     "distributionFactory",
     "ammFactory",
     "ammProtocolFeeRecipient",
@@ -42,6 +44,8 @@ function applyAddressFields(deployment: PledgeCashDeployment, json: Record<strin
     "deployer",
     "factoryOwner",
     "policyRegistryOwner",
+    "protocolPolicyOwner",
+    "assetPolicyOwner",
   ] as const) {
     if (typeof json[field] === "string") {
       deployment[field] = json[field] as Address;
@@ -50,7 +54,23 @@ function applyAddressFields(deployment: PledgeCashDeployment, json: Record<strin
 }
 
 function applyBooleanFields(deployment: PledgeCashDeployment, json: Record<string, unknown>): void {
-  for (const field of ["tokenGrantPolicyAllowed", "distributionPolicyAllowed", "lockedLiquidityPolicyAllowed"] as const) {
+  for (const field of [
+    "tokenGrantPolicyAllowed",
+    "distributionPolicyAllowed",
+    "lockedLiquidityPolicyAllowed",
+    "protocolPolicyAllowed",
+    "assetPolicyAllowed",
+    "protocolTokenGrantFactoryAllowed",
+    "protocolTokenGrantFactoryValueAllowed",
+    "protocolDistributionFactoryAllowed",
+    "protocolLockedLiquidityFactoryAllowed",
+    "protocolAmmFactoryAllowed",
+    "protocolAmmRouterAllowed",
+    "assetWrappedNativeAllowed",
+    "assetTokenGrantSpenderAllowed",
+    "assetDistributionSpenderAllowed",
+    "assetLockedLiquiditySpenderAllowed",
+  ] as const) {
     if (typeof json[field] === "boolean") {
       deployment[field] = json[field];
     }

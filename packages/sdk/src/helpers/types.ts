@@ -180,6 +180,7 @@ export type BoardroomState = {
   address: Address;
   owner: Address;
   policyRegistry: Address;
+  wrappedNative: Address;
   shareToken: Address;
   status: number;
   redeemableAssets: Address[];
@@ -220,6 +221,7 @@ export type DiscoveredBoardroom = {
   boardroom: Address;
   owner: Address;
   policyRegistry: Address;
+  wrappedNative: Address;
   shareToken: Address;
   name: string;
   symbol: string;
