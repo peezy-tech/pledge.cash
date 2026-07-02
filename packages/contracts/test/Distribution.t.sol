@@ -17,6 +17,7 @@ import {IBoardroomCallPolicy} from "../src/IBoardroomCallPolicy.sol";
 import {LockedLiquidity} from "../src/LockedLiquidity.sol";
 import {LockedLiquidityFactory} from "../src/LockedLiquidityFactory.sol";
 import {MigratingBondingCurve} from "../src/MigratingBondingCurve.sol";
+import {ProtocolPolicy} from "../src/ProtocolPolicy.sol";
 
 contract DistributionCurrency {
     string public name;
@@ -100,6 +101,7 @@ contract DistributionTestAllowAllPolicy is IBoardroomCallPolicy {
 
 contract DistributionTest is Test {
     BoardroomPolicyRegistry internal policyRegistry;
+    ProtocolPolicy internal protocolPolicy;
     AssetPolicy internal assetPolicy;
     BoardroomFactory internal boardroomFactory;
     AmmFactory internal ammFactory;
@@ -128,6 +130,7 @@ contract DistributionTest is Test {
     function setUp() public {
         wrappedNative = new WETH();
         policyRegistry = new BoardroomPolicyRegistry(address(this));
+        protocolPolicy = new ProtocolPolicy(address(this));
         assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
         boardroomFactory = new BoardroomFactory(address(policyRegistry), address(wrappedNative));
         ammFactory = new AmmFactory();
@@ -136,7 +139,9 @@ contract DistributionTest is Test {
         distributionFactory = new DistributionFactory(address(lockedLiquidityFactory));
         paymentToken = new DistributionCurrency("USD Coin", "USDC", 6);
 
+        protocolPolicy.setProtocolTargetAllowed(address(distributionFactory), true);
         assetPolicy.setApprovalSpenderAllowed(address(distributionFactory), true);
+        policyRegistry.setPolicyAllowed(address(protocolPolicy), true);
         policyRegistry.setPolicyAllowed(address(assetPolicy), true);
         policyRegistry.setPolicyAllowed(address(distributionFactory), true);
         policyRegistry.setPolicyAllowed(address(lockedLiquidityFactory), true);
@@ -546,6 +551,59 @@ contract DistributionTest is Test {
                 abi.encodeCall(DistributionFactory.createFixedPriceSale, (params))
             )
         );
+    }
+
+    function testProtocolPolicyCannotBypassDistributionShareTokenValidation() public {
+        (Boardroom boardroom,) = _createBoardroom("protocol-policy-wrong-share-token");
+        uint256 amount = 1 ether;
+
+        vm.deal(address(this), amount);
+        wrappedNative.deposit{value: amount}();
+        assertTrue(wrappedNative.transfer(address(boardroom), amount));
+
+        vm.startPrank(owner);
+        boardroom.execute(
+            _policyCall(
+                address(assetPolicy),
+                address(wrappedNative),
+                0,
+                abi.encodeWithSignature("approve(address,uint256)", address(distributionFactory), amount)
+            )
+        );
+
+        FixedPriceSale.CreateParams memory saleParams = _saleParams(
+            address(wrappedNative), address(paymentToken), amount, PRICE, keccak256("protocol-policy-wrong-share-sale")
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DistributionFactory.InvalidShareToken.selector, boardroom.shareToken(), address(wrappedNative)
+            )
+        );
+        boardroom.execute(
+            _policyCall(
+                address(protocolPolicy),
+                address(distributionFactory),
+                0,
+                abi.encodeCall(DistributionFactory.createFixedPriceSale, (saleParams))
+            )
+        );
+
+        MigratingBondingCurve.CreateParams memory curveParams =
+            _curveParams(address(wrappedNative), address(paymentToken), keccak256("protocol-policy-wrong-share-curve"));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DistributionFactory.InvalidShareToken.selector, boardroom.shareToken(), address(wrappedNative)
+            )
+        );
+        boardroom.execute(
+            _policyCall(
+                address(protocolPolicy),
+                address(distributionFactory),
+                0,
+                abi.encodeCall(DistributionFactory.createMigratingBondingCurve, (curveParams))
+            )
+        );
+        vm.stopPrank();
     }
 
     function testDistributionPolicyRejectsMigratingCurveWithoutLockedLiquidityFactory() public {

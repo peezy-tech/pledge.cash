@@ -33,6 +33,8 @@ contract DistributionFactory is IBoardroomCallPolicy {
     mapping(address => address[]) internal distributionsForBoardroom;
 
     error InvalidAddress();
+    error InvalidBoardroom(address boardroom);
+    error InvalidShareToken(address expected, address actual);
     error TooManyBoardroomDistributions(address boardroom);
     error UnexpectedTokenBalanceChange(address token, uint256 expected, uint256 actual);
 
@@ -53,6 +55,8 @@ contract DistributionFactory is IBoardroomCallPolicy {
     }
 
     function createFixedPriceSale(FixedPriceSale.CreateParams calldata params) external returns (address sale) {
+        _requireBoardroomShareToken(msg.sender, params.shareToken);
+
         sale = _createDistribution(
             fixedPriceSaleLogic,
             msg.sender,
@@ -72,6 +76,7 @@ contract DistributionFactory is IBoardroomCallPolicy {
         returns (address curve)
     {
         if (lockedLiquidityFactory == address(0)) revert InvalidAddress();
+        _requireBoardroomShareToken(msg.sender, params.shareToken);
 
         uint256 shareAmount = params.saleSupply + params.migrationSupply;
         curve = _createDistribution(
@@ -209,6 +214,14 @@ contract DistributionFactory is IBoardroomCallPolicy {
 
     function _hasValidTimeWindow(uint64 startTime, uint64 endTime) internal pure returns (bool) {
         return endTime == 0 || endTime >= startTime;
+    }
+
+    function _requireBoardroomShareToken(address boardroom, address shareToken) internal view {
+        try IDistributionBoardroom(boardroom).shareToken() returns (address expectedShareToken) {
+            if (shareToken != expectedShareToken) revert InvalidShareToken(expectedShareToken, shareToken);
+        } catch {
+            revert InvalidBoardroom(boardroom);
+        }
     }
 
     function _cloneSalt(address boardroom, DistributionKind kind, bytes32 salt) internal pure returns (bytes32) {
