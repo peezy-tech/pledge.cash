@@ -7,6 +7,7 @@ import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {BoardroomToken} from "./BoardroomToken.sol";
 import {DistributionFactory} from "./DistributionFactory.sol";
+import {ExactTransferLib} from "./ExactTransferLib.sol";
 import {FixedPriceSale} from "./FixedPriceSale.sol";
 import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
 import {IBoardroomPolicyRegistry} from "./IBoardroomPolicyRegistry.sol";
@@ -484,28 +485,18 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     }
 
     function _checkedRedeemableAssetTransfer(address asset, address recipient, uint256 expectedAmount) internal {
-        uint256 boardroomBalanceBefore = SafeTransferLib.balanceOf(asset, address(this));
-        uint256 recipientBalanceBefore = SafeTransferLib.balanceOf(asset, recipient);
-        asset.safeTransfer(recipient, expectedAmount);
-
-        uint256 boardroomBalanceAfter = SafeTransferLib.balanceOf(asset, address(this));
-        if (boardroomBalanceAfter > boardroomBalanceBefore) {
+        ExactTransferLib.ExactDelta memory delta = ExactTransferLib.sendFromSelfTo(asset, recipient, expectedAmount);
+        if (delta.senderBalanceIncreased) {
             revert UnexpectedRedeemableAssetBalanceChange(asset, expectedAmount, 0);
         }
-
-        uint256 boardroomSpent = boardroomBalanceBefore - boardroomBalanceAfter;
-        if (boardroomSpent != expectedAmount) {
-            revert UnexpectedRedeemableAssetBalanceChange(asset, expectedAmount, boardroomSpent);
+        if (delta.senderSpent != expectedAmount) {
+            revert UnexpectedRedeemableAssetBalanceChange(asset, expectedAmount, delta.senderSpent);
         }
-
-        uint256 recipientBalanceAfter = SafeTransferLib.balanceOf(asset, recipient);
-        if (recipientBalanceAfter < recipientBalanceBefore) {
+        if (delta.recipientBalanceDecreased) {
             revert UnexpectedRedeemableAssetBalanceChange(asset, expectedAmount, 0);
         }
-
-        uint256 recipientReceived = recipientBalanceAfter - recipientBalanceBefore;
-        if (recipientReceived != expectedAmount) {
-            revert UnexpectedRedeemableAssetBalanceChange(asset, expectedAmount, recipientReceived);
+        if (delta.recipientReceived != expectedAmount) {
+            revert UnexpectedRedeemableAssetBalanceChange(asset, expectedAmount, delta.recipientReceived);
         }
     }
 

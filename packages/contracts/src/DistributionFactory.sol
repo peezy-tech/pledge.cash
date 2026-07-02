@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {ERC20} from "solady/tokens/ERC20.sol";
 import {LibClone} from "solady/utils/LibClone.sol";
-import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
+import {ExactTransferLib} from "./ExactTransferLib.sol";
 import {FixedPriceSale} from "./FixedPriceSale.sol";
 import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
 import {MigratingBondingCurve} from "./MigratingBondingCurve.sol";
@@ -13,8 +12,6 @@ interface IDistributionBoardroom {
 }
 
 contract DistributionFactory is IBoardroomCallPolicy {
-    using SafeTransferLib for address;
-
     bytes4 internal constant APPROVE_SELECTOR = 0x095ea7b3;
     uint256 internal constant FIXED_PRICE_SALE_CREATE_DATA_LENGTH = 4 + 32 * 8;
     uint256 internal constant MIGRATING_CURVE_CREATE_DATA_LENGTH = 4 + 32 * 12;
@@ -158,9 +155,10 @@ contract DistributionFactory is IBoardroomCallPolicy {
         if (data.length != FIXED_PRICE_SALE_CREATE_DATA_LENGTH) return false;
 
         FixedPriceSale.CreateParams memory params = abi.decode(data[4:], (FixedPriceSale.CreateParams));
-        return params.shareToken == IDistributionBoardroom(boardroom).shareToken() && params.paymentToken != address(0)
-            && params.shareAmount != 0 && params.price != 0
-            && (params.endTime == 0 || params.endTime >= params.startTime);
+        if (params.shareToken != IDistributionBoardroom(boardroom).shareToken()) return false;
+        if (params.paymentToken == address(0)) return false;
+        if (params.shareAmount == 0 || params.price == 0) return false;
+        return _hasValidTimeWindow(params.startTime, params.endTime);
     }
 
     function _canCreateMigratingBondingCurve(address boardroom, bytes calldata data) internal view returns (bool) {
@@ -176,7 +174,7 @@ contract DistributionFactory is IBoardroomCallPolicy {
         }
         if (params.basePrice == 0 || params.graduationQuoteTarget == 0) return false;
         if (params.quoteToLpBps == 0 || params.quoteToLpBps > BPS) return false;
-        return params.endTime == 0 || params.endTime >= params.startTime;
+        return _hasValidTimeWindow(params.startTime, params.endTime);
     }
 
     function _canApproveDistributionFactory(address boardroom, address token, bytes calldata data)
@@ -217,18 +215,17 @@ contract DistributionFactory is IBoardroomCallPolicy {
     }
 
     function _checkedTransferFrom(address token, address from, address to, uint256 expectedAmount) internal {
-        uint256 balanceBefore = ERC20(token).balanceOf(to);
-        token.safeTransferFrom(from, to, expectedAmount);
-
-        uint256 balanceAfter = ERC20(token).balanceOf(to);
-        if (balanceAfter < balanceBefore) {
+        ExactTransferLib.RecipientDelta memory delta = ExactTransferLib.pullTo(token, from, to, expectedAmount);
+        if (delta.balanceDecreased) {
             revert UnexpectedTokenBalanceChange(token, expectedAmount, 0);
         }
-
-        uint256 actualAmount = balanceAfter - balanceBefore;
-        if (actualAmount != expectedAmount) {
-            revert UnexpectedTokenBalanceChange(token, expectedAmount, actualAmount);
+        if (delta.received != expectedAmount) {
+            revert UnexpectedTokenBalanceChange(token, expectedAmount, delta.received);
         }
+    }
+
+    function _hasValidTimeWindow(uint64 startTime, uint64 endTime) internal pure returns (bool) {
+        return endTime == 0 || endTime >= startTime;
     }
 
     function _cloneSalt(address boardroom, DistributionKind kind, bytes32 salt) internal pure returns (bytes32) {

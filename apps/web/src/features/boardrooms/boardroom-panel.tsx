@@ -41,150 +41,196 @@ import type {
 } from "../../lib/types";
 
 type BoardroomPanelProps = {
-  boardroomAddress: string;
-  boardroomForm: BoardroomForm;
-  boardroomGrantForm: BoardroomGrantForm;
-  boardroomMintAmount: string;
-  boardroomMintTo: string;
-  boardroomSnapshot: BoardroomSnapshot | undefined;
-  clearBoardroomGrantPrediction: () => void;
-  curveMigrationForm: CurveMigrationForm;
+  boardroom: BoardroomPanelState;
+  fixedPriceSale: FixedPriceSalePanelState;
+  grant: BoardroomGrantPanelState;
+  lockedLiquidity: LockedLiquidityPanelState;
+  migratingCurve: MigratingCurvePanelState;
+  windDown: WindDownPanelState;
+  workflow: BoardroomWorkflow;
+};
+
+type BoardroomWorkflow = {
   deployment: PledgeCashDeployment | undefined;
-  fixedPriceSaleAddress: string;
-  fixedPriceSaleForm: FixedPriceSaleForm;
-  fixedPriceSaleSnapshot: FixedPriceSaleState | undefined;
-  lockedLiquidityAddress: string;
-  lockedLiquidityExitForm: LockedLiquidityExitForm;
-  lockedLiquidityForm: LockedLiquidityForm;
-  lockedLiquiditySnapshot: LockedLiquidityState | undefined;
-  migratingCurveAddress: string;
-  migratingCurveForm: MigratingCurveForm;
-  migratingCurveSnapshot: MigratingBondingCurveState | undefined;
   pendingAction: string | undefined;
-  predictedBoardroom: Address | undefined;
-  predictedBoardroomGrant: Address | undefined;
-  predictedFixedPriceSale: Address | undefined;
-  predictedLockedLiquidity: Address | undefined;
-  predictedMigratingCurve: Address | undefined;
+  runAction: (label: string, action: () => Promise<void>) => Promise<void>;
+};
+
+type BoardroomPanelState = {
+  address: string;
+  form: BoardroomForm;
+  mintAmount: string;
+  mintTo: string;
+  predicted: Address | undefined;
+  snapshot: BoardroomSnapshot | undefined;
+  create: () => Promise<void>;
+  load: () => Promise<void>;
+  mintShares: () => Promise<void>;
+  predict: () => Promise<void>;
   setBoardroomAddress: (address: string) => void;
   setBoardroomForm: Dispatch<SetStateAction<BoardroomForm>>;
-  setBoardroomGrantForm: Dispatch<SetStateAction<BoardroomGrantForm>>;
   setBoardroomMintAmount: Dispatch<SetStateAction<string>>;
   setBoardroomMintTo: Dispatch<SetStateAction<string>>;
-  setCurveMigrationForm: Dispatch<SetStateAction<CurveMigrationForm>>;
+  setPredictedBoardroom: Dispatch<SetStateAction<Address | undefined>>;
+};
+
+type BoardroomGrantPanelState = {
+  form: BoardroomGrantForm;
+  predicted: Address | undefined;
+  approveFactory: () => Promise<void>;
+  clearPrediction: () => void;
+  create: () => Promise<void>;
+  createBatch: () => Promise<void>;
+  predict: () => Promise<void>;
+  setForm: Dispatch<SetStateAction<BoardroomGrantForm>>;
+};
+
+type FixedPriceSalePanelState = {
+  address: string;
+  form: FixedPriceSaleForm;
+  predicted: Address | undefined;
+  snapshot: FixedPriceSaleState | undefined;
+  cancel: () => Promise<void>;
+  close: () => Promise<void>;
+  create: () => Promise<void>;
+  load: () => Promise<void>;
+  predict: () => Promise<void>;
   setFixedPriceSaleAddress: (address: string) => void;
   setFixedPriceSaleForm: Dispatch<SetStateAction<FixedPriceSaleForm>>;
+};
+
+type MigratingCurvePanelState = {
+  address: string;
+  form: MigratingCurveForm;
+  migrationForm: CurveMigrationForm;
+  predicted: Address | undefined;
+  snapshot: MigratingBondingCurveState | undefined;
+  cancel: () => Promise<void>;
+  create: () => Promise<void>;
+  load: () => Promise<void>;
+  migrate: () => Promise<void>;
+  predict: () => Promise<void>;
+  setCurveMigrationForm: Dispatch<SetStateAction<CurveMigrationForm>>;
+  setMigratingCurveAddress: (address: string) => void;
+  setMigratingCurveForm: Dispatch<SetStateAction<MigratingCurveForm>>;
+};
+
+type LockedLiquidityPanelState = {
+  address: string;
+  exitForm: LockedLiquidityExitForm;
+  form: LockedLiquidityForm;
+  predicted: Address | undefined;
+  snapshot: LockedLiquidityState | undefined;
+  claimFees: () => Promise<void>;
+  create: () => Promise<void>;
+  exit: () => Promise<void>;
+  load: () => Promise<void>;
+  predict: () => Promise<void>;
   setLockedLiquidityAddress: (address: string) => void;
   setLockedLiquidityExitForm: Dispatch<SetStateAction<LockedLiquidityExitForm>>;
   setLockedLiquidityForm: Dispatch<SetStateAction<LockedLiquidityForm>>;
-  setMigratingCurveAddress: (address: string) => void;
-  setMigratingCurveForm: Dispatch<SetStateAction<MigratingCurveForm>>;
-  setPredictedBoardroom: Dispatch<SetStateAction<Address | undefined>>;
-  setWindDownForm: Dispatch<SetStateAction<WindDownForm>>;
-  windDownForm: WindDownForm;
-  boardroomApproveFactory: () => Promise<void>;
-  boardroomCreateGrant: () => Promise<void>;
-  boardroomCreateGrantBatch: () => Promise<void>;
+};
+
+type WindDownPanelState = {
+  form: WindDownForm;
   burnTreasuryShares: () => Promise<void>;
-  cancelFixedPriceSale: () => Promise<void>;
-  cancelMigratingCurve: () => Promise<void>;
-  claimLockedLiquidityFees: () => Promise<void>;
-  closeFixedPriceSale: () => Promise<void>;
-  createBoardroom: () => Promise<void>;
-  createFixedPriceSale: () => Promise<void>;
-  createLockedLiquidity: () => Promise<void>;
-  createMigratingCurve: () => Promise<void>;
-  exitLockedLiquidity: () => Promise<void>;
-  loadBoardroom: () => Promise<void>;
-  loadFixedPriceSale: () => Promise<void>;
-  loadLockedLiquidity: () => Promise<void>;
-  loadMigratingCurve: () => Promise<void>;
-  migrateCurve: () => Promise<void>;
-  mintBoardroomShares: () => Promise<void>;
   openRedemptions: () => Promise<void>;
-  predictBoardroom: () => Promise<void>;
-  predictBoardroomGrantAddress: () => Promise<void>;
-  predictFixedPriceSale: () => Promise<void>;
-  predictLockedLiquidity: () => Promise<void>;
-  predictMigratingCurve: () => Promise<void>;
-  redeemBoardroomShares: () => Promise<void>;
+  redeemShares: () => Promise<void>;
   registerRedeemableAsset: () => Promise<void>;
-  runAction: (label: string, action: () => Promise<void>) => Promise<void>;
-  startWindDown: () => Promise<void>;
+  setForm: Dispatch<SetStateAction<WindDownForm>>;
+  start: () => Promise<void>;
 };
 
 export function BoardroomPanel({
-  boardroomAddress,
-  boardroomForm,
-  boardroomGrantForm,
-  boardroomMintAmount,
-  boardroomMintTo,
-  boardroomSnapshot,
-  clearBoardroomGrantPrediction,
-  curveMigrationForm,
-  deployment,
-  fixedPriceSaleAddress,
-  fixedPriceSaleForm,
-  fixedPriceSaleSnapshot,
-  lockedLiquidityAddress,
-  lockedLiquidityExitForm,
-  lockedLiquidityForm,
-  lockedLiquiditySnapshot,
-  migratingCurveAddress,
-  migratingCurveForm,
-  migratingCurveSnapshot,
-  pendingAction,
-  predictedBoardroom,
-  predictedBoardroomGrant,
-  predictedFixedPriceSale,
-  predictedLockedLiquidity,
-  predictedMigratingCurve,
-  setBoardroomAddress,
-  setBoardroomForm,
-  setBoardroomGrantForm,
-  setBoardroomMintAmount,
-  setBoardroomMintTo,
-  setCurveMigrationForm,
-  setFixedPriceSaleAddress,
-  setFixedPriceSaleForm,
-  setLockedLiquidityAddress,
-  setLockedLiquidityExitForm,
-  setLockedLiquidityForm,
-  setMigratingCurveAddress,
-  setMigratingCurveForm,
-  setPredictedBoardroom,
-  setWindDownForm,
-  windDownForm,
-  boardroomApproveFactory,
-  boardroomCreateGrant,
-  boardroomCreateGrantBatch,
-  burnTreasuryShares,
-  cancelFixedPriceSale,
-  cancelMigratingCurve,
-  claimLockedLiquidityFees,
-  closeFixedPriceSale,
-  createBoardroom,
-  createFixedPriceSale,
-  createLockedLiquidity,
-  createMigratingCurve,
-  exitLockedLiquidity,
-  loadBoardroom,
-  loadFixedPriceSale,
-  loadLockedLiquidity,
-  loadMigratingCurve,
-  migrateCurve,
-  mintBoardroomShares,
-  openRedemptions,
-  predictBoardroom,
-  predictBoardroomGrantAddress,
-  predictFixedPriceSale,
-  predictLockedLiquidity,
-  predictMigratingCurve,
-  redeemBoardroomShares,
-  registerRedeemableAsset,
-  runAction,
-  startWindDown,
+  boardroom,
+  fixedPriceSale,
+  grant,
+  lockedLiquidity,
+  migratingCurve,
+  windDown,
+  workflow,
 }: BoardroomPanelProps): React.JSX.Element {
+  const { deployment, pendingAction, runAction } = workflow;
+  const {
+    address: boardroomAddress,
+    form: boardroomForm,
+    mintAmount: boardroomMintAmount,
+    mintTo: boardroomMintTo,
+    predicted: predictedBoardroom,
+    snapshot: boardroomSnapshot,
+    create: createBoardroom,
+    load: loadBoardroom,
+    mintShares: mintBoardroomShares,
+    predict: predictBoardroom,
+    setBoardroomAddress,
+    setBoardroomForm,
+    setBoardroomMintAmount,
+    setBoardroomMintTo,
+    setPredictedBoardroom,
+  } = boardroom;
+  const {
+    form: boardroomGrantForm,
+    predicted: predictedBoardroomGrant,
+    approveFactory: boardroomApproveFactory,
+    clearPrediction: clearBoardroomGrantPrediction,
+    create: boardroomCreateGrant,
+    createBatch: boardroomCreateGrantBatch,
+    predict: predictBoardroomGrantAddress,
+    setForm: setBoardroomGrantForm,
+  } = grant;
+  const {
+    address: fixedPriceSaleAddress,
+    form: fixedPriceSaleForm,
+    predicted: predictedFixedPriceSale,
+    snapshot: fixedPriceSaleSnapshot,
+    cancel: cancelFixedPriceSale,
+    close: closeFixedPriceSale,
+    create: createFixedPriceSale,
+    load: loadFixedPriceSale,
+    predict: predictFixedPriceSale,
+    setFixedPriceSaleAddress,
+    setFixedPriceSaleForm,
+  } = fixedPriceSale;
+  const {
+    address: migratingCurveAddress,
+    form: migratingCurveForm,
+    migrationForm: curveMigrationForm,
+    predicted: predictedMigratingCurve,
+    snapshot: migratingCurveSnapshot,
+    cancel: cancelMigratingCurve,
+    create: createMigratingCurve,
+    load: loadMigratingCurve,
+    migrate: migrateCurve,
+    predict: predictMigratingCurve,
+    setCurveMigrationForm,
+    setMigratingCurveAddress,
+    setMigratingCurveForm,
+  } = migratingCurve;
+  const {
+    address: lockedLiquidityAddress,
+    exitForm: lockedLiquidityExitForm,
+    form: lockedLiquidityForm,
+    predicted: predictedLockedLiquidity,
+    snapshot: lockedLiquiditySnapshot,
+    claimFees: claimLockedLiquidityFees,
+    create: createLockedLiquidity,
+    exit: exitLockedLiquidity,
+    load: loadLockedLiquidity,
+    predict: predictLockedLiquidity,
+    setLockedLiquidityAddress,
+    setLockedLiquidityExitForm,
+    setLockedLiquidityForm,
+  } = lockedLiquidity;
+  const {
+    form: windDownForm,
+    burnTreasuryShares,
+    openRedemptions,
+    redeemShares: redeemBoardroomShares,
+    registerRedeemableAsset,
+    setForm: setWindDownForm,
+    start: startWindDown,
+  } = windDown;
+
   const clearBoardroomPrediction = (): void => {
     setPredictedBoardroom(undefined);
     setBoardroomAddress("");

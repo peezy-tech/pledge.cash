@@ -6,6 +6,7 @@ import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {AmmFactory} from "./AmmFactory.sol";
 import {AmmPool} from "./AmmPool.sol";
+import {ExactTransferLib} from "./ExactTransferLib.sol";
 
 interface IWrappedNative {
     function deposit() external payable;
@@ -275,30 +276,28 @@ contract AmmRouter is ReentrancyGuard {
     }
 
     function _checkedTransferFrom(address token, address from, address to, uint256 expectedAmount) internal {
-        uint256 balanceBefore = ERC20(token).balanceOf(to);
-        token.safeTransferFrom(from, to, expectedAmount);
-
-        uint256 actualAmount = _received(token, to, balanceBefore);
-        if (actualAmount != expectedAmount) {
-            revert TransferAmountMismatch(token, expectedAmount, actualAmount);
-        }
+        _requireExactReceived(token, expectedAmount, ExactTransferLib.pullTo(token, from, to, expectedAmount));
     }
 
     function _checkedTransfer(address token, address to, uint256 expectedAmount) internal {
-        uint256 balanceBefore = ERC20(token).balanceOf(to);
-        token.safeTransfer(to, expectedAmount);
-
-        uint256 actualAmount = _received(token, to, balanceBefore);
-        if (actualAmount != expectedAmount) {
-            revert TransferAmountMismatch(token, expectedAmount, actualAmount);
-        }
+        _requireExactReceived(token, expectedAmount, ExactTransferLib.sendTo(token, to, expectedAmount));
     }
 
     function _received(address token, address account, uint256 balanceBefore) internal view returns (uint256) {
-        uint256 balanceAfter = ERC20(token).balanceOf(account);
-        if (balanceAfter < balanceBefore) revert BalanceDecreased(token, account);
+        ExactTransferLib.RecipientDelta memory delta = ExactTransferLib.received(token, account, balanceBefore);
+        if (delta.balanceDecreased) revert BalanceDecreased(token, account);
 
-        return balanceAfter - balanceBefore;
+        return delta.received;
+    }
+
+    function _requireExactReceived(address token, uint256 expectedAmount, ExactTransferLib.RecipientDelta memory delta)
+        internal
+        pure
+    {
+        if (delta.balanceDecreased) revert TransferAmountMismatch(token, expectedAmount, 0);
+        if (delta.received != expectedAmount) {
+            revert TransferAmountMismatch(token, expectedAmount, delta.received);
+        }
     }
 
     function _requireValidPath(address[] memory path) internal pure {

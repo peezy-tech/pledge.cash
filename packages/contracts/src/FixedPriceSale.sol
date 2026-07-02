@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {ERC20} from "solady/tokens/ERC20.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Initializable} from "solady/utils/Initializable.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
+import {ExactTransferLib} from "./ExactTransferLib.sol";
 
 interface IFixedPriceSaleBoardroom {
     function status() external view returns (uint8);
@@ -184,29 +184,22 @@ contract FixedPriceSale is Initializable, ReentrancyGuard {
     }
 
     function _checkedTransfer(address token, address to, uint256 expectedAmount) internal {
-        uint256 balanceBefore = ERC20(token).balanceOf(to);
-        token.safeTransfer(to, expectedAmount);
-        _checkBalanceChange(token, to, expectedAmount, balanceBefore);
+        _requireExactReceived(token, expectedAmount, ExactTransferLib.sendTo(token, to, expectedAmount));
     }
 
     function _checkedTransferFrom(address token, address from, address to, uint256 expectedAmount) internal {
-        uint256 balanceBefore = ERC20(token).balanceOf(to);
-        token.safeTransferFrom(from, to, expectedAmount);
-        _checkBalanceChange(token, to, expectedAmount, balanceBefore);
+        _requireExactReceived(token, expectedAmount, ExactTransferLib.pullTo(token, from, to, expectedAmount));
     }
 
-    function _checkBalanceChange(address token, address account, uint256 expectedAmount, uint256 balanceBefore)
+    function _requireExactReceived(address token, uint256 expectedAmount, ExactTransferLib.RecipientDelta memory delta)
         internal
-        view
+        pure
     {
-        uint256 balanceAfter = ERC20(token).balanceOf(account);
-        if (balanceAfter < balanceBefore) {
+        if (delta.balanceDecreased) {
             revert UnexpectedTokenBalanceChange(token, expectedAmount, 0);
         }
-
-        uint256 actualAmount = balanceAfter - balanceBefore;
-        if (actualAmount != expectedAmount) {
-            revert UnexpectedTokenBalanceChange(token, expectedAmount, actualAmount);
+        if (delta.received != expectedAmount) {
+            revert UnexpectedTokenBalanceChange(token, expectedAmount, delta.received);
         }
     }
 }
