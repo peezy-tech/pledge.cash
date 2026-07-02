@@ -521,6 +521,16 @@ export function App(): React.JSX.Element {
     return next;
   };
 
+  const requireFreshAllowance = (label: string, allowance: bigint | undefined, amount: bigint | undefined): void => {
+    if (amount === undefined) throw new Error(`Refresh the ${label} quote before submitting.`);
+    if (allowance === undefined || allowance < amount) {
+      throw new Error(`${label} approval is below the latest quote. Approve again before submitting.`);
+    }
+  };
+
+  const liquidityTokenUsesNative = (token: Address | undefined): boolean =>
+    Boolean(liquidityForm.useNative && deployment?.wrappedNative && token && token.toLowerCase() === deployment.wrappedNative.toLowerCase());
+
   const approveSwapInput = async (): Promise<void> => {
     activeAccount();
     const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
@@ -534,6 +544,9 @@ export function App(): React.JSX.Element {
   const executeSwap = async (): Promise<void> => {
     const account = activeAccount();
     const quote = await requireFreshSwapQuote();
+    if (swapNativeMode(deployment, swapForm) !== "input") {
+      requireFreshAllowance("Swap input", quote.tokenIn?.allowance, quote.amountIn);
+    }
     await submitContractTransaction("Swap", buildSwapTransaction({ deployment, form: swapForm, quote, account }));
     await refreshSwapQuote();
   };
@@ -576,6 +589,12 @@ export function App(): React.JSX.Element {
   const addLiquidity = async (): Promise<void> => {
     const account = activeAccount();
     const quote = await requireFreshLiquidityQuote();
+    if (!liquidityTokenUsesNative(quote.tokenA?.address)) {
+      requireFreshAllowance("Liquidity token A", quote.tokenA?.allowance, quote.amountA);
+    }
+    if (!liquidityTokenUsesNative(quote.tokenB?.address)) {
+      requireFreshAllowance("Liquidity token B", quote.tokenB?.allowance, quote.amountB);
+    }
     await submitContractTransaction("Add liquidity", buildAddLiquidityTransaction({ deployment, form: liquidityForm, quote, account }));
     await Promise.all([refreshLiquidityQuote(), loadSwapTokens()]);
   };
@@ -620,6 +639,7 @@ export function App(): React.JSX.Element {
   const removeLiquidity = async (): Promise<void> => {
     const account = activeAccount();
     const quote = await requireFreshRemoveLiquidityQuote();
+    requireFreshAllowance("LP token", quote.position?.lpAllowance, quote.liquidity);
     await submitContractTransaction("Remove liquidity", buildRemoveLiquidityTransaction({ deployment, form: removeLiquidityForm, quote, account }));
     await Promise.all([refreshAmmPosition(), refreshLiquidityQuote()]);
   };
