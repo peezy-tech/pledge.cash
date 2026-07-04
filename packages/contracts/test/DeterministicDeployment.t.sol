@@ -168,6 +168,25 @@ contract DeterministicDeploymentTest is Test {
         assertEq(second, predicted);
     }
 
+    function testRepeatedDeployRejectsMismatchedInitCode() public {
+        bytes memory initCode = abi.encodePacked(type(TokenGrantFactory).creationCode, abi.encode(owner));
+        bytes memory mismatchedInitCode = abi.encodePacked(type(TokenGrantFactory).creationCode, abi.encode(stranger));
+        bytes32 salt = PledgeCashDeploymentSalts.tokenGrantFactory();
+
+        _deploy(salt, initCode);
+
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                PledgeCashDeterministicDeployer.InitCodeHashMismatch.selector,
+                salt,
+                keccak256(initCode),
+                keccak256(mismatchedInitCode)
+            )
+        );
+        deployer.deploy(salt, mismatchedInitCode);
+    }
+
     function _deploy(bytes32 salt, bytes memory initCode) internal returns (address deployed) {
         address predicted = deployer.predict(salt);
 
@@ -175,6 +194,7 @@ contract DeterministicDeploymentTest is Test {
         deployed = deployer.deploy(salt, initCode);
 
         assertEq(deployed, predicted);
+        assertEq(deployer.initCodeHashForSalt(salt), keccak256(initCode));
         assertGt(deployed.code.length, 0);
     }
 }
