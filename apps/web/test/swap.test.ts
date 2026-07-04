@@ -23,10 +23,16 @@ const deployment: PledgeCashDeployment = { chainId: 31337, ammFactory: factory, 
 
 describe("swap token discovery", () => {
   test("lists AMM pool tokens plus pinned seed tokens", async () => {
-    const state = await readSwapTokenList(fakeReadClient(), deployment, {
-      cashToken: usdc,
-      boardroomShareToken: share,
-    }, account);
+    const state = await readSwapTokenList(
+      fakeReadClient(),
+      deployment,
+      {
+        cashToken: usdc,
+        boardroomShareToken: share,
+      },
+      account,
+      { wrappedNativeLabel: "WHYPE" },
+    );
 
     expect(state.error).toBeUndefined();
     expect(state.pools).toHaveLength(1);
@@ -40,7 +46,25 @@ describe("swap token discovery", () => {
 
     const wrappedNative = state.tokens.find((token) => token.address === whype);
     expect(wrappedNative?.label).toBe("WHYPE");
+    expect(wrappedNative?.sources).toEqual(["deployment"]);
     expect(wrappedNative?.pools).toHaveLength(0);
+  });
+
+  test("uses the active-chain wrapped native label", async () => {
+    const state = await readSwapTokenList(
+      fakeReadClient(),
+      deployment,
+      {
+        cashToken: usdc,
+        boardroomShareToken: share,
+      },
+      account,
+      { wrappedNativeLabel: "WMON" },
+    );
+
+    const wrappedNative = state.tokens.find((token) => token.address === whype);
+    expect(wrappedNative?.label).toBe("WMON");
+    expect(wrappedNative?.sources).toEqual(["deployment"]);
   });
 });
 

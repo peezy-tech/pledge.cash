@@ -10,11 +10,11 @@
   "assetWrappedNativeAllowed": true,
   "boardroomFactory": "0x4302Aa261B4416722413ea482dC3B70eb410F95c",
   "boardroomPolicyRegistry": "0x5F381b61b5cAf8ef99f744557BD0f36D73320130",
-  "chainId": 998,
+  "chainId": 10143,
   "create2Factory": "0x4e59b44847b379578588920cA78FbF26c0B4956C",
   "creationFee": 100000000000000000,
   "deployer": "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c",
-  "deploymentTimestamp": 1783185799,
+  "deploymentTimestamp": 1783187184,
   "deterministicDeployer": "0xa3bb8CD1442f3B373af5418E68bd2Af15445eC12",
   "deterministicDeployerOwner": "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c",
   "deterministicDeployment": true,
@@ -37,5 +37,5 @@
   "tokenGrantFactory": "0xa8c1590492c30d205704f0733E788C3900F283af",
   "tokenGrantLogic": "0xa6148C7da5BB924Ae442dFDEE0B2F6Fc17e9Ae59",
   "tokenGrantPolicyAllowed": true,
-  "wrappedNative": "0x5555555555555555555555555555555555555555"
+  "wrappedNative": "0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541"
 }

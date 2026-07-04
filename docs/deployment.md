@@ -3,19 +3,18 @@
 This document covers the current contract deployment surface for TokenGrant, Boardroom, fixed-price distribution,
 migrating bonding curve, AMM, and locked-liquidity primitives.
 
-## HyperEVM Testnet
+## Testnet Targets
 
-- Chain id: `998`
-- Default RPC: `https://rpc.hyperliquid-testnet.xyz/evm`
-- Deployment script: `packages/contracts/script/Deploy.s.sol`
-- Wrapper: `packages/contracts/script/hyperevm-testnet/deploy.sh`
-- Artifact: `packages/contracts/deployments/998.json`
+| Network | Chain id | Default RPC | Wrapped native | Wrapper | Artifact |
+| --- | ---: | --- | --- | --- | --- |
+| HyperEVM Testnet | `998` | `https://rpc.hyperliquid-testnet.xyz/evm` | `0x5555555555555555555555555555555555555555` | `packages/contracts/script/hyperevm-testnet/deploy.sh` | `packages/contracts/deployments/998.json` |
+| Monad Testnet | `10143` | `https://testnet-rpc.monad.xyz` | `0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541` | `packages/contracts/script/monad-testnet/deploy.sh` | `packages/contracts/deployments/10143.json` |
 
 The deploy script creates or reuses one `PledgeCashDeterministicDeployer`, then creates one
 `BoardroomPolicyRegistry`, one `ProtocolPolicy`, one `AssetPolicy`, one
 `TokenGrantFactory`, one `DistributionFactory`, one `AmmFactory`, one `AmmRouter`, one `LockedLiquidityFactory`, and one
-`BoardroomFactory`. `WRAPPED_NATIVE_ADDRESS` is required because every Boardroom stores canonical WHYPE and wraps raw
-native HYPE before wind-down redemptions.
+`BoardroomFactory`. A wrapped-native address is required because every Boardroom stores the canonical wrapped native
+token and wraps raw native funds before wind-down redemptions.
 
 Root protocol contracts are deployed through CREATE3 salts from `PledgeCashDeploymentSalts`. As long as the same
 `PledgeCashDeterministicDeployer` address is used on each chain, the root protocol addresses are the same even when
@@ -49,30 +48,54 @@ cp .env.example .env
 Required for dry runs and broadcasts:
 
 ```sh
-WRAPPED_NATIVE_ADDRESS=0x...
 PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0x...
+HYPEREVM_WRAPPED_NATIVE_ADDRESS=0x5555555555555555555555555555555555555555
 ```
 
 Required for broadcast:
 
 ```sh
 HYPEREVM_TESTNET_PRIVATE_KEY=...
+MONAD_TESTNET_PRIVATE_KEY=...
 ```
 
 Optional:
 
 ```sh
 HYPEREVM_TESTNET_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
+MONAD_TESTNET_RPC_URL=https://testnet-rpc.monad.xyz
+MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS=0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541
 TOKEN_GRANT_CREATION_FEE_WEI=100000000000000000
 AMM_PROTOCOL_FEE_RECIPIENT=
 HYPEREVM_GAS_PRICE_WEI=
-GAS_ESTIMATE_MULTIPLIER=200
+HYPEREVM_GAS_ESTIMATE_MULTIPLIER=100
+MONAD_GAS_ESTIMATE_MULTIPLIER=100
 CREATE2_FACTORY_ADDRESS=0x4e59b44847b379578588920cA78FbF26c0B4956C
 PLEDGE_CASH_DETERMINISTIC_DEPLOYER=
 ```
 
 `TOKEN_GRANT_CREATION_FEE_WEI` is the preferred variable. `GRANT_CREATION_FEE_WEI` remains supported by the Foundry
 script as a legacy fallback.
+`WRAPPED_NATIVE_ADDRESS` remains supported as a legacy HyperEVM fallback. The Monad wrapper uses
+`MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS` or the canonical WMON default so an older HyperEVM env cannot leak into Monad.
+Both testnet wrappers default their gas estimate multipliers to `100`. Monad charges the full transaction gas limit
+rather than post-execution gas used, and the HyperEVM deployment has transactions that must fit large-block limits.
+
+For Monad broadcasts, install Monad Foundry before running the wrapper:
+
+```sh
+foundryup --network monad
+```
+
+For HyperEVM broadcasts, route the deployment account to big blocks before deploying because several root-contract
+transactions exceed the small-block `2M` gas limit. HyperEVM big blocks are slower, so a full broadcast can take many
+minutes. Switch back to small blocks after the deployment:
+
+```sh
+npx -y @layerzerolabs/hyperliquid-composer set-block --size big --network testnet --ci --private-key "$HYPEREVM_TESTNET_PRIVATE_KEY"
+bun run deploy:hyperevm-testnet
+npx -y @layerzerolabs/hyperliquid-composer set-block --size small --network testnet --ci --private-key "$HYPEREVM_TESTNET_PRIVATE_KEY"
+```
 
 `CREATE2_FACTORY_ADDRESS` must name the same CREATE2 factory on every deterministic target chain. If a chain does not
 already have the factory deployed, bootstrap or select that factory before broadcasting.
@@ -85,23 +108,28 @@ pledge.cash deterministic deployer already exists at the intended cross-chain ad
 
 ```sh
 bun run simulate:hyperevm-testnet
+bun run simulate:monad-testnet
+bun run simulate:testnets
 ```
 
-The wrapper refuses any RPC that does not report chain id `998`. Dry runs set `WRITE_DEPLOYMENT_STATE=false`, so local
-artifacts are not rewritten.
+Each wrapper refuses RPCs that do not report the expected chain id. Dry runs set `WRITE_DEPLOYMENT_STATE=false`, so local
+artifacts are not rewritten. Dry runs still require the deployment private key so the simulated broadcaster matches
+`PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER`.
 
 ## Broadcast
 
 ```sh
-BROADCAST=1 bun --cwd packages/contracts deploy:hyperevm-testnet
+bun run deploy:hyperevm-testnet
+bun run deploy:monad-testnet
+bun run deploy:testnets
 ```
 
-Broadcasts require `HYPEREVM_TESTNET_PRIVATE_KEY` or `PRIVATE_KEY`. The wrapper copies
-`HYPEREVM_TESTNET_PRIVATE_KEY` into `PRIVATE_KEY` for Foundry.
+Broadcasts require the chain-specific private key or `PRIVATE_KEY`. The wrappers copy the chain-specific key into
+`PRIVATE_KEY` for Foundry.
 
 ## Artifact Checks
 
-After a broadcast, verify `packages/contracts/deployments/998.json` contains:
+After a broadcast, verify each chain artifact contains:
 
 - `chainId`
 - `deployer`

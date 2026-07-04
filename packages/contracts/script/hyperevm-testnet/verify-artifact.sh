@@ -3,7 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ARTIFACT="${ARTIFACT:-deployments/998.json}"
-RPC_URL="${HYPEREVM_TESTNET_RPC_URL:-https://rpc.hyperliquid-testnet.xyz/evm}"
+RPC_URL="${RPC_URL:-${HYPEREVM_TESTNET_RPC_URL:-https://rpc.hyperliquid-testnet.xyz/evm}}"
+REQUIRE_DEPLOYMENT="${REQUIRE_DEPLOYMENT:-0}"
 REQUIRE_BOARDROOM_DEPLOYMENT="${REQUIRE_BOARDROOM_DEPLOYMENT:-0}"
 
 cd "$ROOT_DIR"
@@ -18,7 +19,7 @@ field_exists() {
 }
 
 field() {
-  jq -r --arg key "$1" '.[$key] // empty' "$ARTIFACT"
+  jq -r --arg key "$1" '.[$key] | if . == null then empty else . end' "$ARTIFACT"
 }
 
 lower() {
@@ -94,6 +95,15 @@ call_bool() {
 }
 
 [[ -f "$ARTIFACT" ]] || fail "missing artifact $ARTIFACT"
+
+artifact_status="$(field status)"
+if [[ "$artifact_status" == "pending" ]]; then
+  if [[ "$REQUIRE_DEPLOYMENT" == "1" ]]; then
+    fail "Deployment artifact is still marked pending"
+  fi
+  echo "Skipping artifact verification: $ARTIFACT is marked pending"
+  exit 0
+fi
 
 chain_id="$(cast_retry cast chain-id --rpc-url "$RPC_URL" | first_token)"
 expect_equal "chain id" "$(field chainId)" "$chain_id"

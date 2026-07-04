@@ -13,13 +13,11 @@ for env_file in "$HOME/.env" "$HOME/.env.local" "$REPO_DIR/.env" "$ROOT_DIR/.env
   fi
 done
 
-if [[ -z "${HYPEREVM_TESTNET_PRIVATE_KEY:-}" && -n "${PRIVATE_KEY:-}" ]]; then
-  export HYPEREVM_TESTNET_PRIVATE_KEY="$PRIVATE_KEY"
+if [[ -z "${MONAD_TESTNET_PRIVATE_KEY:-}" && -n "${PRIVATE_KEY:-}" ]]; then
+  export MONAD_TESTNET_PRIVATE_KEY="$PRIVATE_KEY"
 fi
 
-if [[ -n "${HYPEREVM_WRAPPED_NATIVE_ADDRESS:-}" ]]; then
-  export WRAPPED_NATIVE_ADDRESS="$HYPEREVM_WRAPPED_NATIVE_ADDRESS"
-fi
+export WRAPPED_NATIVE_ADDRESS="${MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS:-0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541}"
 
 require_address() {
   local name="$1"
@@ -30,10 +28,9 @@ require_address() {
   fi
 }
 
-RPC_URL="${HYPEREVM_TESTNET_RPC_URL:-https://rpc.hyperliquid-testnet.xyz/evm}"
+RPC_URL="${MONAD_TESTNET_RPC_URL:-https://testnet-rpc.monad.xyz}"
 BROADCAST="${BROADCAST:-0}"
-GAS_ESTIMATE_MULTIPLIER="${HYPEREVM_GAS_ESTIMATE_MULTIPLIER:-${GAS_ESTIMATE_MULTIPLIER:-100}}"
-GAS_PRICE_WEI="${HYPEREVM_GAS_PRICE_WEI:-}"
+GAS_ESTIMATE_MULTIPLIER="${MONAD_GAS_ESTIMATE_MULTIPLIER:-100}"
 CREATE2_FACTORY_ADDRESS="${CREATE2_FACTORY_ADDRESS:-0x4e59b44847b379578588920cA78FbF26c0B4956C}"
 export CREATE2_FACTORY_ADDRESS
 
@@ -46,46 +43,35 @@ require_address PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER "$PLEDGE_CASH_DETERMINI
 if [[ -n "${PLEDGE_CASH_DETERMINISTIC_DEPLOYER:-}" ]]; then
   require_address PLEDGE_CASH_DETERMINISTIC_DEPLOYER "$PLEDGE_CASH_DETERMINISTIC_DEPLOYER"
 fi
-
-if [[ -z "${WRAPPED_NATIVE_ADDRESS:-}" ]]; then
-  echo "Set HYPEREVM_WRAPPED_NATIVE_ADDRESS or WRAPPED_NATIVE_ADDRESS to the canonical WHYPE address." >&2
-  exit 1
-fi
 require_address WRAPPED_NATIVE_ADDRESS "$WRAPPED_NATIVE_ADDRESS"
 
-if [[ -z "${HYPEREVM_TESTNET_PRIVATE_KEY:-}" ]]; then
-  echo "Set HYPEREVM_TESTNET_PRIVATE_KEY or PRIVATE_KEY before dry-running or broadcasting." >&2
+if [[ -z "${MONAD_TESTNET_PRIVATE_KEY:-}" ]]; then
+  echo "Set MONAD_TESTNET_PRIVATE_KEY or PRIVATE_KEY before dry-running or broadcasting." >&2
   exit 1
 fi
 
-actual_deployer="$(cast wallet address --private-key "$HYPEREVM_TESTNET_PRIVATE_KEY")"
+actual_deployer="$(cast wallet address --private-key "$MONAD_TESTNET_PRIVATE_KEY")"
 if [[ "${actual_deployer,,}" != "${PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER,,}" ]]; then
-  echo "PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER must match HYPEREVM_TESTNET_PRIVATE_KEY address $actual_deployer." >&2
+  echo "PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER must match MONAD_TESTNET_PRIVATE_KEY address $actual_deployer." >&2
   exit 1
 fi
 
 CHAIN_ID="$(cast chain-id --rpc-url "$RPC_URL")"
-if [[ "$CHAIN_ID" != "998" ]]; then
-  echo "Refusing to deploy: RPC $RPC_URL reported chain id $CHAIN_ID, expected 998." >&2
+if [[ "$CHAIN_ID" != "10143" ]]; then
+  echo "Refusing to deploy: RPC $RPC_URL reported chain id $CHAIN_ID, expected 10143." >&2
   exit 1
 fi
 
-export PRIVATE_KEY="$HYPEREVM_TESTNET_PRIVATE_KEY"
-
-if [[ -z "$GAS_PRICE_WEI" ]]; then
-  GAS_PRICE_WEI="$(cast gas-price --rpc-url "$RPC_URL")"
-fi
+export PRIVATE_KEY="$MONAD_TESTNET_PRIVATE_KEY"
 
 args=(
   forge script
   script/Deploy.s.sol:Deploy
   --rpc-url "$RPC_URL"
-  --chain 998
-  --legacy
+  --chain 10143
   --always-use-create-2-factory
   --create2-deployer "$CREATE2_FACTORY_ADDRESS"
   --gas-estimate-multiplier "$GAS_ESTIMATE_MULTIPLIER"
-  --with-gas-price "$GAS_PRICE_WEI"
 )
 
 if [[ "$BROADCAST" == "1" ]]; then
@@ -93,7 +79,7 @@ if [[ "$BROADCAST" == "1" ]]; then
   args+=(--broadcast --slow)
 else
   export WRITE_DEPLOYMENT_STATE=false
-  echo "Running HyperEVM dry-run simulation. Set BROADCAST=1 to send transactions."
+  echo "Running Monad testnet dry-run simulation. Set BROADCAST=1 to send transactions."
 fi
 
 cd "$ROOT_DIR"

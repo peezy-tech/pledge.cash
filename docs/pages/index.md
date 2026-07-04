@@ -41,4 +41,4 @@ Then use the concept pages when you need to understand a specific primitive:
 
 ## Current Status
 
-The public app and docs are early. The protocol is being built around HyperEVM testnet deployments, local scenarios, and contract-level verification. Treat mainnet use, unsupported deployments, and claims made outside the contracts as separate risk.
+The public app and docs are early. The protocol is being built around HyperEVM and Monad testnet deployments, local scenarios, and contract-level verification. Treat mainnet use, unsupported deployments, and claims made outside the contracts as separate risk.

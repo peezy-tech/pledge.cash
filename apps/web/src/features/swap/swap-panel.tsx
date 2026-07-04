@@ -6,6 +6,7 @@ import { ActionButton, ActionRow, AddressLink, Facts, Field, Panel } from "../..
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { WRAPPED_NATIVE_SYMBOL } from "../../lib/contracts";
 import {
   defaultSwapDeadline,
   formatPoolShareBps,
@@ -818,7 +819,7 @@ function sortedTokensForSelection(tokens: SwapTokenOption[], otherToken: string)
 
 function tokenSelectionRank(token: SwapTokenOption, otherToken: string): number {
   if (hasDirectPool(token, otherToken)) return 0;
-  if (token.label === "WHYPE") return 1;
+  if (token.sources.includes("deployment")) return 1;
   if (token.label === "USDC / cash") return 2;
   if (token.sources.includes("seed")) return 3;
   if (token.sources.includes("pool")) return 4;
@@ -840,7 +841,7 @@ function tokenTitle(option: SwapTokenOption | undefined, value: string): string 
 function tokenSubtitle(option: SwapTokenOption | undefined, value: string): string {
   if (option?.label && option.symbol && option.label !== option.symbol) return option.label;
   if (isAddress(value)) return shortTokenAddress(value);
-  return "Pools, WHYPE, USDC, or address";
+  return `Pools, ${WRAPPED_NATIVE_SYMBOL}, USDC, or address`;
 }
 
 function tokenRowSubtitle(token: SwapTokenOption): string {

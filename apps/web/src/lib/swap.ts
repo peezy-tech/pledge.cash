@@ -51,7 +51,11 @@ export type SwapTokenMetadata = {
   error?: string;
 };
 
-export type SwapTokenSource = "pool" | "seed" | "custom";
+export type SwapTokenSource = "pool" | "seed" | "deployment" | "custom";
+
+export type SwapTokenListOptions = {
+  wrappedNativeLabel?: string;
+};
 
 export type SwapTokenOption = SwapTokenMetadata & {
   label?: string;
@@ -263,9 +267,11 @@ export async function readSwapTokenList(
   deployment: PledgeCashDeployment | undefined,
   seed: ProductBoardroomSeed | undefined,
   account?: Address | undefined,
+  listOptions: SwapTokenListOptions = {},
 ): Promise<SwapTokenListState> {
   const tokens = new Map<string, TokenAccumulator>();
-  addTokenAccumulator(tokens, deployment?.wrappedNative, { label: "WHYPE", source: "seed", rank: 0 });
+  const wrappedNativeLabel = listOptions.wrappedNativeLabel || "Wrapped native";
+  addTokenAccumulator(tokens, deployment?.wrappedNative, { label: wrappedNativeLabel, source: "deployment", rank: 0 });
   addTokenAccumulator(tokens, seed?.cashToken, { label: "USDC / cash", source: "seed", rank: 1 });
   addTokenAccumulator(tokens, seed?.boardroomShareToken, { label: "Boardroom shares", source: "seed", rank: 2 });
   addTokenAccumulator(tokens, seed?.equityToken, { label: "Equity token", source: "seed", rank: 3 });
@@ -1104,7 +1110,7 @@ function compareTokenOptions(left: SwapTokenOption, right: SwapTokenOption): num
 }
 
 function tokenRank(token: SwapTokenOption): number {
-  if (token.label === "WHYPE") return 0;
+  if (token.sources.includes("deployment")) return 0;
   if (token.label === "USDC / cash") return 1;
   if (token.sources.includes("seed")) return 5;
   return 20;
