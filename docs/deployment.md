@@ -11,10 +11,19 @@ migrating bonding curve, AMM, and locked-liquidity primitives.
 - Wrapper: `packages/contracts/script/hyperevm-testnet/deploy.sh`
 - Artifact: `packages/contracts/deployments/998.json`
 
-The deploy script creates one `BoardroomPolicyRegistry`, one `ProtocolPolicy`, one `AssetPolicy`, one
+The deploy script creates or reuses one `PledgeCashDeterministicDeployer`, then creates one
+`BoardroomPolicyRegistry`, one `ProtocolPolicy`, one `AssetPolicy`, one
 `TokenGrantFactory`, one `DistributionFactory`, one `AmmFactory`, one `AmmRouter`, one `LockedLiquidityFactory`, and one
 `BoardroomFactory`. `WRAPPED_NATIVE_ADDRESS` is required because every Boardroom stores canonical WHYPE and wraps raw
 native HYPE before wind-down redemptions.
+
+Root protocol contracts are deployed through CREATE3 salts from `PledgeCashDeploymentSalts`. As long as the same
+`PledgeCashDeterministicDeployer` address is used on each chain, the root protocol addresses are the same even when
+constructor arguments differ by chain, such as the wrapped-native token. The deploy script can deploy the deterministic
+deployer through Foundry's default Arachnid CREATE2 factory (`0x4e59b44847b379578588920cA78FbF26c0B4956C`) or reuse an
+existing deployer from `PLEDGE_CASH_DETERMINISTIC_DEPLOYER`. The deterministic deployer owner is encoded in constructor
+arguments, so it cannot be captured by the first account to deploy the public salt. Use the same
+`PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER` on every chain that should share deterministic root addresses.
 
 The registry allows `ProtocolPolicy` for registered pledge.cash protocol targets and `AssetPolicy` for external asset
 operations. The deploy script registers the token grant, distribution, locked-liquidity, and AMM factory targets in
@@ -37,6 +46,13 @@ Start from `.env.example` and provide a funded deployment key when broadcasting:
 cp .env.example .env
 ```
 
+Required for dry runs and broadcasts:
+
+```sh
+WRAPPED_NATIVE_ADDRESS=0x...
+PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0x...
+```
+
 Required for broadcast:
 
 ```sh
@@ -49,13 +65,21 @@ Optional:
 HYPEREVM_TESTNET_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
 TOKEN_GRANT_CREATION_FEE_WEI=100000000000000000
 AMM_PROTOCOL_FEE_RECIPIENT=
-WRAPPED_NATIVE_ADDRESS=0x...
 HYPEREVM_GAS_PRICE_WEI=
 GAS_ESTIMATE_MULTIPLIER=200
+CREATE2_FACTORY_ADDRESS=0x4e59b44847b379578588920cA78FbF26c0B4956C
+PLEDGE_CASH_DETERMINISTIC_DEPLOYER=
 ```
 
 `TOKEN_GRANT_CREATION_FEE_WEI` is the preferred variable. `GRANT_CREATION_FEE_WEI` remains supported by the Foundry
 script as a legacy fallback.
+
+`CREATE2_FACTORY_ADDRESS` must name the same CREATE2 factory on every deterministic target chain. If a chain does not
+already have the factory deployed, bootstrap or select that factory before broadcasting.
+`PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER` must name the same owner on every chain that should share root addresses, and
+the current script requires it to match the broadcaster. Set `PLEDGE_CASH_DETERMINISTIC_DEPLOYER` only when a
+pledge.cash deterministic deployer already exists at the intended cross-chain address and its owner matches
+`PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER`.
 
 ## Dry Run
 
@@ -81,6 +105,11 @@ After a broadcast, verify `packages/contracts/deployments/998.json` contains:
 
 - `chainId`
 - `deployer`
+- `deterministicDeployment`
+- `deterministicDeploymentVersion`
+- `create2Factory`
+- `deterministicDeployer`
+- `deterministicDeployerOwner`
 - `boardroomPolicyRegistry`
 - `protocolPolicy`
 - `assetPolicy`
@@ -139,11 +168,14 @@ and one halted grant:
 ```sh
 cd packages/contracts
 PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
 WRAPPED_NATIVE_ADDRESS=0x... \
 WRITE_DEPLOYMENT_STATE=true \
 forge script script/Deploy.s.sol:Deploy \
   --rpc-url http://127.0.0.1:8547 \
   --chain 31337 \
+  --always-use-create-2-factory \
+  --create2-deployer 0x4e59b44847b379578588920cA78FbF26c0B4956C \
   --broadcast
 
 LOCAL_SEED_NONCE=1 \

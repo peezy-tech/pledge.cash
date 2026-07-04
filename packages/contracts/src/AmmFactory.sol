@@ -26,8 +26,9 @@ contract AmmFactory {
     event PoolCreated(address indexed token0, address indexed token1, address indexed pool, uint256 poolCount);
     event ProtocolFeeRecipientSet(address indexed recipient);
 
-    constructor() {
-        feeManager = msg.sender;
+    constructor(address feeManager_) {
+        if (feeManager_ == address(0)) revert ZeroAddress();
+        feeManager = feeManager_;
         poolImplementation = address(new AmmPool());
     }
 

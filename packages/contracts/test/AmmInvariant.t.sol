@@ -156,7 +156,7 @@ contract AmmInvariantTest is StdInvariant, Test {
     address internal initialLp = address(0xA11CE);
 
     function setUp() public {
-        factory = new AmmFactory();
+        factory = new AmmFactory(address(this));
         wrappedNative = new WETH();
         router = new AmmRouter(address(factory), address(wrappedNative));
         token0 = new AmmInvariantERC20("Invariant A", "INVA", 18);

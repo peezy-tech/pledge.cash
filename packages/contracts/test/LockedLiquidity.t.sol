@@ -159,7 +159,7 @@ contract LockedLiquidityTest is Test {
     uint256 internal constant HOLDER_SHARES = 100 ether;
 
     function setUp() public {
-        ammFactory = new AmmFactory();
+        ammFactory = new AmmFactory(address(this));
         wrappedNative = new WETH();
         policyRegistry = new BoardroomPolicyRegistry(address(this));
         assetPolicy = new AssetPolicy(address(this), address(wrappedNative));

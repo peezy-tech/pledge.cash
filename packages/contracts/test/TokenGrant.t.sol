@@ -235,7 +235,7 @@ contract TokenGrantTest is Test {
     event CreationFeePaid(address indexed payer, address indexed recipient, uint256 amount);
 
     function setUp() public {
-        factory = new TokenGrantFactory();
+        factory = new TokenGrantFactory(address(this));
         token = new GrantERC20("Grant Token", "GRANT", 18);
         paymentToken = new GrantERC20("Payment", "PAY", 6);
 
@@ -300,6 +300,11 @@ contract TokenGrantTest is Test {
 
     function testFactoryOwnerIsDeployer() public view {
         assertEq(factory.owner(), address(this));
+    }
+
+    function testFactoryRejectsZeroOwner() public {
+        vm.expectRevert(TokenGrantFactory.InvalidOwner.selector);
+        new TokenGrantFactory(address(0));
     }
 
     function testOwnerCanSetUpdateAndClearCreationFee() public {
