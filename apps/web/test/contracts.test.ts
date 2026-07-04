@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   LOCAL_ANVIL_CHAIN_ID,
   PLEDGE_CASH_NETWORKS,
+  createPledgeCashNetworks,
   initialSelectedNetwork,
   networkForChainId,
   persistSelectedNetwork,
@@ -21,6 +22,29 @@ describe("web network profiles", () => {
 
   test("keeps HyperEVM, Monad, and local selectable", () => {
     expect(PLEDGE_CASH_NETWORKS.map((network) => network.chainId)).toEqual([998, 10143, 31337]);
+  });
+
+  test("preserves custom legacy env chain IDs as selectable profiles", () => {
+    const networks = createPledgeCashNetworks({
+      VITE_PLEDGE_CASH_CHAIN_ID: "424242",
+      VITE_PLEDGE_CASH_CHAIN_NAME: "Custom Testnet",
+      VITE_PLEDGE_CASH_RPC_URL: "https://rpc.custom.test",
+      VITE_PLEDGE_CASH_EXPLORER_NAME: "CustomScan",
+      VITE_PLEDGE_CASH_EXPLORER_URL: "https://explorer.custom.test",
+      VITE_PLEDGE_CASH_WRAPPED_NATIVE_SYMBOL: "WCUSTOM",
+    });
+    const custom = networks.find((network) => network.chainId === 424242);
+
+    expect(networks.map((network) => network.chainId)).toEqual([998, 10143, 31337, 424242]);
+    expect(custom?.key).toBe("custom");
+    expect(custom?.name).toBe("Custom Testnet");
+    expect(custom?.rpcUrl).toBe("https://rpc.custom.test");
+    expect(custom?.explorerName).toBe("CustomScan");
+    expect(custom?.explorerUrl).toBe("https://explorer.custom.test");
+    expect(custom?.wrappedNativeSymbol).toBe("WCUSTOM");
+    expect(custom?.chain.id).toBe(424242);
+    expect(custom?.chain.rpcUrls.default.http).toEqual(["https://rpc.custom.test"]);
+    expect(custom?.chain.blockExplorers?.default.url).toBe("https://explorer.custom.test");
   });
 
   test("can resolve transaction links against the originating chain", () => {

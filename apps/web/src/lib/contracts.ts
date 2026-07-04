@@ -6,7 +6,7 @@ const SELECTED_NETWORK_STORAGE_KEY = "pledge.cash.selectedNetwork";
 
 export type PledgeCashNetwork = {
   chainId: number;
-  key: "hyperevm-testnet" | "monad-testnet" | "local-anvil";
+  key: "hyperevm-testnet" | "monad-testnet" | "local-anvil" | "custom";
   name: string;
   rpcUrl: string;
   explorerName?: string | undefined;
@@ -15,74 +15,35 @@ export type PledgeCashNetwork = {
   chain: Chain;
 };
 
-const initialChainIdFromEnv = numericEnv(import.meta.env.VITE_PLEDGE_CASH_CHAIN_ID);
-const legacyRpcUrl = import.meta.env.VITE_PLEDGE_CASH_RPC_URL;
-const legacyChainName = import.meta.env.VITE_PLEDGE_CASH_CHAIN_NAME;
-const legacyExplorerUrl = blankToUndefined(import.meta.env.VITE_PLEDGE_CASH_EXPLORER_URL);
-const legacyExplorerName = import.meta.env.VITE_PLEDGE_CASH_EXPLORER_NAME;
-const legacyWrappedNativeSymbol = import.meta.env.VITE_PLEDGE_CASH_WRAPPED_NATIVE_SYMBOL;
-const legacyProfileChainId = initialChainIdFromEnv ?? hyperEvmTestnet.id;
+export type PledgeCashNetworkEnv = Partial<
+  Record<
+    | "BASE_URL"
+    | "VITE_PLEDGE_CASH_CHAIN_ID"
+    | "VITE_PLEDGE_CASH_CHAIN_NAME"
+    | "VITE_PLEDGE_CASH_EXPLORER_NAME"
+    | "VITE_PLEDGE_CASH_EXPLORER_URL"
+    | "VITE_PLEDGE_CASH_HYPEREVM_EXPLORER_NAME"
+    | "VITE_PLEDGE_CASH_HYPEREVM_EXPLORER_URL"
+    | "VITE_PLEDGE_CASH_HYPEREVM_RPC_URL"
+    | "VITE_PLEDGE_CASH_HYPEREVM_WRAPPED_NATIVE_SYMBOL"
+    | "VITE_PLEDGE_CASH_LOCAL_EXPLORER_NAME"
+    | "VITE_PLEDGE_CASH_LOCAL_EXPLORER_URL"
+    | "VITE_PLEDGE_CASH_LOCAL_RPC_URL"
+    | "VITE_PLEDGE_CASH_LOCAL_WRAPPED_NATIVE_SYMBOL"
+    | "VITE_PLEDGE_CASH_MONAD_EXPLORER_NAME"
+    | "VITE_PLEDGE_CASH_MONAD_EXPLORER_URL"
+    | "VITE_PLEDGE_CASH_MONAD_RPC_URL"
+    | "VITE_PLEDGE_CASH_MONAD_WRAPPED_NATIVE_SYMBOL"
+    | "VITE_PLEDGE_CASH_RPC_URL"
+    | "VITE_PLEDGE_CASH_WRAPPED_NATIVE_SYMBOL",
+    string | undefined
+  >
+>;
 
-export const PLEDGE_CASH_NETWORKS: PledgeCashNetwork[] = [
-  createNetwork({
-    chainId: hyperEvmTestnet.id,
-    key: "hyperevm-testnet",
-    name: legacyProfileChainId === hyperEvmTestnet.id && legacyChainName ? legacyChainName : hyperEvmTestnet.name,
-    nativeCurrency: hyperEvmTestnet.nativeCurrency,
-    rpcUrl: import.meta.env.VITE_PLEDGE_CASH_HYPEREVM_RPC_URL
-      ?? (legacyProfileChainId === hyperEvmTestnet.id ? legacyRpcUrl : undefined)
-      ?? hyperEvmTestnet.rpcUrls.default.http[0],
-    explorerName: import.meta.env.VITE_PLEDGE_CASH_HYPEREVM_EXPLORER_NAME
-      ?? (legacyProfileChainId === hyperEvmTestnet.id ? legacyExplorerName : undefined)
-      ?? hyperEvmTestnet.blockExplorers.default.name,
-    explorerUrl: import.meta.env.VITE_PLEDGE_CASH_HYPEREVM_EXPLORER_URL
-      ?? (legacyProfileChainId === hyperEvmTestnet.id ? legacyExplorerUrl : undefined)
-      ?? hyperEvmTestnet.blockExplorers.default.url,
-    wrappedNativeSymbol: import.meta.env.VITE_PLEDGE_CASH_HYPEREVM_WRAPPED_NATIVE_SYMBOL
-      ?? (legacyProfileChainId === hyperEvmTestnet.id ? legacyWrappedNativeSymbol : undefined)
-      ?? `W${hyperEvmTestnet.nativeCurrency.symbol}`,
-  }),
-  createNetwork({
-    chainId: monadTestnet.id,
-    key: "monad-testnet",
-    name: legacyProfileChainId === monadTestnet.id && legacyChainName ? legacyChainName : monadTestnet.name,
-    nativeCurrency: monadTestnet.nativeCurrency,
-    rpcUrl: import.meta.env.VITE_PLEDGE_CASH_MONAD_RPC_URL
-      ?? (legacyProfileChainId === monadTestnet.id ? legacyRpcUrl : undefined)
-      ?? monadTestnet.rpcUrls.default.http[0],
-    explorerName: import.meta.env.VITE_PLEDGE_CASH_MONAD_EXPLORER_NAME
-      ?? (legacyProfileChainId === monadTestnet.id ? legacyExplorerName : undefined)
-      ?? monadTestnet.blockExplorers.default.name,
-    explorerUrl: import.meta.env.VITE_PLEDGE_CASH_MONAD_EXPLORER_URL
-      ?? (legacyProfileChainId === monadTestnet.id ? legacyExplorerUrl : undefined)
-      ?? monadTestnet.blockExplorers.default.url,
-    wrappedNativeSymbol: import.meta.env.VITE_PLEDGE_CASH_MONAD_WRAPPED_NATIVE_SYMBOL
-      ?? (legacyProfileChainId === monadTestnet.id ? legacyWrappedNativeSymbol : undefined)
-      ?? `W${monadTestnet.nativeCurrency.symbol}`,
-  }),
-  createNetwork({
-    chainId: LOCAL_ANVIL_CHAIN_ID,
-    key: "local-anvil",
-    name: legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID && legacyChainName ? legacyChainName : "Local Anvil",
-    nativeCurrency: {
-      decimals: 18,
-      name: "HYPE",
-      symbol: "HYPE",
-    },
-    rpcUrl: import.meta.env.VITE_PLEDGE_CASH_LOCAL_RPC_URL
-      ?? (legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID ? legacyRpcUrl : undefined)
-      ?? defaultLocalRpcUrl(),
-    explorerName: import.meta.env.VITE_PLEDGE_CASH_LOCAL_EXPLORER_NAME
-      ?? (legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID ? legacyExplorerName : undefined)
-      ?? undefined,
-    explorerUrl: import.meta.env.VITE_PLEDGE_CASH_LOCAL_EXPLORER_URL
-      ?? (legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID ? legacyExplorerUrl : undefined)
-      ?? undefined,
-    wrappedNativeSymbol: import.meta.env.VITE_PLEDGE_CASH_LOCAL_WRAPPED_NATIVE_SYMBOL
-      ?? (legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID ? legacyWrappedNativeSymbol : undefined)
-      ?? "WHYPE",
-  }),
-];
+const pledgeCashEnv = import.meta.env;
+const initialChainIdFromEnv = numericEnv(pledgeCashEnv.VITE_PLEDGE_CASH_CHAIN_ID);
+
+export const PLEDGE_CASH_NETWORKS: PledgeCashNetwork[] = createPledgeCashNetworks(pledgeCashEnv);
 
 export const DEFAULT_NETWORK = networkForChainId(initialChainIdFromEnv ?? hyperEvmTestnet.id);
 
@@ -133,6 +94,110 @@ export function walletRpcUrl(network: PledgeCashNetwork): string {
   if (!network.rpcUrl.startsWith("/")) return network.rpcUrl;
   if (typeof window === "undefined") return network.rpcUrl;
   return new URL(network.rpcUrl, window.location.origin).toString();
+}
+
+export function createPledgeCashNetworks(env: PledgeCashNetworkEnv): PledgeCashNetwork[] {
+  const initialChainId = numericEnv(env.VITE_PLEDGE_CASH_CHAIN_ID);
+  const legacyRpcUrl = env.VITE_PLEDGE_CASH_RPC_URL;
+  const legacyChainName = env.VITE_PLEDGE_CASH_CHAIN_NAME;
+  const legacyExplorerUrl = blankToUndefined(env.VITE_PLEDGE_CASH_EXPLORER_URL);
+  const legacyExplorerName = env.VITE_PLEDGE_CASH_EXPLORER_NAME;
+  const legacyWrappedNativeSymbol = env.VITE_PLEDGE_CASH_WRAPPED_NATIVE_SYMBOL;
+  const legacyProfileChainId = initialChainId ?? hyperEvmTestnet.id;
+
+  const networks: PledgeCashNetwork[] = [
+    createNetwork({
+      chainId: hyperEvmTestnet.id,
+      key: "hyperevm-testnet",
+      name: legacyProfileChainId === hyperEvmTestnet.id && legacyChainName ? legacyChainName : hyperEvmTestnet.name,
+      nativeCurrency: hyperEvmTestnet.nativeCurrency,
+      rpcUrl:
+        env.VITE_PLEDGE_CASH_HYPEREVM_RPC_URL
+        ?? (legacyProfileChainId === hyperEvmTestnet.id ? legacyRpcUrl : undefined)
+        ?? hyperEvmTestnet.rpcUrls.default.http[0],
+      explorerName:
+        env.VITE_PLEDGE_CASH_HYPEREVM_EXPLORER_NAME
+        ?? (legacyProfileChainId === hyperEvmTestnet.id ? legacyExplorerName : undefined)
+        ?? hyperEvmTestnet.blockExplorers.default.name,
+      explorerUrl:
+        env.VITE_PLEDGE_CASH_HYPEREVM_EXPLORER_URL
+        ?? (legacyProfileChainId === hyperEvmTestnet.id ? legacyExplorerUrl : undefined)
+        ?? hyperEvmTestnet.blockExplorers.default.url,
+      wrappedNativeSymbol:
+        env.VITE_PLEDGE_CASH_HYPEREVM_WRAPPED_NATIVE_SYMBOL
+        ?? (legacyProfileChainId === hyperEvmTestnet.id ? legacyWrappedNativeSymbol : undefined)
+        ?? `W${hyperEvmTestnet.nativeCurrency.symbol}`,
+    }),
+    createNetwork({
+      chainId: monadTestnet.id,
+      key: "monad-testnet",
+      name: legacyProfileChainId === monadTestnet.id && legacyChainName ? legacyChainName : monadTestnet.name,
+      nativeCurrency: monadTestnet.nativeCurrency,
+      rpcUrl:
+        env.VITE_PLEDGE_CASH_MONAD_RPC_URL
+        ?? (legacyProfileChainId === monadTestnet.id ? legacyRpcUrl : undefined)
+        ?? monadTestnet.rpcUrls.default.http[0],
+      explorerName:
+        env.VITE_PLEDGE_CASH_MONAD_EXPLORER_NAME
+        ?? (legacyProfileChainId === monadTestnet.id ? legacyExplorerName : undefined)
+        ?? monadTestnet.blockExplorers.default.name,
+      explorerUrl:
+        env.VITE_PLEDGE_CASH_MONAD_EXPLORER_URL
+        ?? (legacyProfileChainId === monadTestnet.id ? legacyExplorerUrl : undefined)
+        ?? monadTestnet.blockExplorers.default.url,
+      wrappedNativeSymbol:
+        env.VITE_PLEDGE_CASH_MONAD_WRAPPED_NATIVE_SYMBOL
+        ?? (legacyProfileChainId === monadTestnet.id ? legacyWrappedNativeSymbol : undefined)
+        ?? `W${monadTestnet.nativeCurrency.symbol}`,
+    }),
+    createNetwork({
+      chainId: LOCAL_ANVIL_CHAIN_ID,
+      key: "local-anvil",
+      name: legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID && legacyChainName ? legacyChainName : "Local Anvil",
+      nativeCurrency: {
+        decimals: 18,
+        name: "HYPE",
+        symbol: "HYPE",
+      },
+      rpcUrl:
+        env.VITE_PLEDGE_CASH_LOCAL_RPC_URL
+        ?? (legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID ? legacyRpcUrl : undefined)
+        ?? defaultLocalRpcUrl(env.BASE_URL),
+      explorerName:
+        env.VITE_PLEDGE_CASH_LOCAL_EXPLORER_NAME
+        ?? (legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID ? legacyExplorerName : undefined)
+        ?? undefined,
+      explorerUrl:
+        env.VITE_PLEDGE_CASH_LOCAL_EXPLORER_URL
+        ?? (legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID ? legacyExplorerUrl : undefined)
+        ?? undefined,
+      wrappedNativeSymbol:
+        env.VITE_PLEDGE_CASH_LOCAL_WRAPPED_NATIVE_SYMBOL
+        ?? (legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID ? legacyWrappedNativeSymbol : undefined)
+        ?? "WHYPE",
+    }),
+  ];
+
+  if (initialChainId !== undefined && !networks.some((network) => network.chainId === initialChainId)) {
+    const legacyDefaultChain = initialChainId === monadTestnet.id ? monadTestnet : hyperEvmTestnet;
+    networks.push(
+      createNetwork({
+        chainId: initialChainId,
+        key: "custom",
+        name: legacyChainName ?? legacyDefaultChain.name,
+        nativeCurrency: legacyDefaultChain.nativeCurrency,
+        rpcUrl:
+          legacyRpcUrl
+          ?? legacyDefaultChain.rpcUrls.default.http[0]
+          ?? hyperEvmTestnet.rpcUrls.default.http[0],
+        explorerName: legacyExplorerName ?? legacyDefaultChain.blockExplorers.default.name,
+        explorerUrl: legacyExplorerUrl ?? legacyDefaultChain.blockExplorers.default.url,
+        wrappedNativeSymbol: legacyWrappedNativeSymbol ?? `W${legacyDefaultChain.nativeCurrency.symbol}`,
+      }),
+    );
+  }
+
+  return networks;
 }
 
 function createNetwork(input: {
@@ -201,6 +266,6 @@ function blankToUndefined(value: string | undefined): string | undefined {
   return value?.trim() ? value : undefined;
 }
 
-function defaultLocalRpcUrl(): string {
-  return import.meta.env.BASE_URL === "/pledge-cash/" ? "/pledge-cash/rpc" : "http://127.0.0.1:8547";
+function defaultLocalRpcUrl(baseUrl: string | undefined): string {
+  return baseUrl === "/pledge-cash/" ? "/pledge-cash/rpc" : "http://127.0.0.1:8547";
 }
