@@ -306,7 +306,10 @@ export function App(): React.JSX.Element {
   const [swapSeedLoaded, setSwapSeedLoaded] = useState(false);
 
   useEffect(() => {
-    const syncView = (): void => setActiveView(viewFromPath(window.location.pathname));
+    const syncView = (): void => {
+      setActiveView(viewFromPath(window.location.pathname));
+      setSelectedChainId(initialSelectedNetwork().chainId);
+    };
     window.addEventListener("popstate", syncView);
     return () => window.removeEventListener("popstate", syncView);
   }, []);
