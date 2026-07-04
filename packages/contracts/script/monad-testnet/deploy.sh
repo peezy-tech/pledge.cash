@@ -19,6 +19,15 @@ fi
 
 export WRAPPED_NATIVE_ADDRESS="${MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS:-0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541}"
 
+require_address() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^0x[0-9a-fA-F]{40}$ ]]; then
+    echo "$name must be a 20-byte EVM address." >&2
+    exit 1
+  fi
+}
+
 RPC_URL="${MONAD_TESTNET_RPC_URL:-https://testnet-rpc.monad.xyz}"
 BROADCAST="${BROADCAST:-0}"
 GAS_ESTIMATE_MULTIPLIER="${GAS_ESTIMATE_MULTIPLIER:-200}"
@@ -29,6 +38,12 @@ if [[ -z "${PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER:-}" ]]; then
   echo "Set PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER to the deployment key address shared across deterministic target chains." >&2
   exit 1
 fi
+require_address PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER "$PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER"
+
+if [[ -n "${PLEDGE_CASH_DETERMINISTIC_DEPLOYER:-}" ]]; then
+  require_address PLEDGE_CASH_DETERMINISTIC_DEPLOYER "$PLEDGE_CASH_DETERMINISTIC_DEPLOYER"
+fi
+require_address WRAPPED_NATIVE_ADDRESS "$WRAPPED_NATIVE_ADDRESS"
 
 if [[ -z "${MONAD_TESTNET_PRIVATE_KEY:-}" ]]; then
   echo "Set MONAD_TESTNET_PRIVATE_KEY or PRIVATE_KEY before dry-running or broadcasting." >&2
