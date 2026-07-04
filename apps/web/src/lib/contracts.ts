@@ -21,64 +21,65 @@ const legacyChainName = import.meta.env.VITE_PLEDGE_CASH_CHAIN_NAME;
 const legacyExplorerUrl = blankToUndefined(import.meta.env.VITE_PLEDGE_CASH_EXPLORER_URL);
 const legacyExplorerName = import.meta.env.VITE_PLEDGE_CASH_EXPLORER_NAME;
 const legacyWrappedNativeSymbol = import.meta.env.VITE_PLEDGE_CASH_WRAPPED_NATIVE_SYMBOL;
+const legacyProfileChainId = initialChainIdFromEnv ?? hyperEvmTestnet.id;
 
 export const PLEDGE_CASH_NETWORKS: PledgeCashNetwork[] = [
   createNetwork({
     chainId: hyperEvmTestnet.id,
     key: "hyperevm-testnet",
-    name: initialChainIdFromEnv === hyperEvmTestnet.id && legacyChainName ? legacyChainName : hyperEvmTestnet.name,
+    name: legacyProfileChainId === hyperEvmTestnet.id && legacyChainName ? legacyChainName : hyperEvmTestnet.name,
     nativeCurrency: hyperEvmTestnet.nativeCurrency,
     rpcUrl: import.meta.env.VITE_PLEDGE_CASH_HYPEREVM_RPC_URL
-      ?? (initialChainIdFromEnv === hyperEvmTestnet.id ? legacyRpcUrl : undefined)
+      ?? (legacyProfileChainId === hyperEvmTestnet.id ? legacyRpcUrl : undefined)
       ?? hyperEvmTestnet.rpcUrls.default.http[0],
     explorerName: import.meta.env.VITE_PLEDGE_CASH_HYPEREVM_EXPLORER_NAME
-      ?? (initialChainIdFromEnv === hyperEvmTestnet.id ? legacyExplorerName : undefined)
+      ?? (legacyProfileChainId === hyperEvmTestnet.id ? legacyExplorerName : undefined)
       ?? hyperEvmTestnet.blockExplorers.default.name,
     explorerUrl: import.meta.env.VITE_PLEDGE_CASH_HYPEREVM_EXPLORER_URL
-      ?? (initialChainIdFromEnv === hyperEvmTestnet.id ? legacyExplorerUrl : undefined)
+      ?? (legacyProfileChainId === hyperEvmTestnet.id ? legacyExplorerUrl : undefined)
       ?? hyperEvmTestnet.blockExplorers.default.url,
     wrappedNativeSymbol: import.meta.env.VITE_PLEDGE_CASH_HYPEREVM_WRAPPED_NATIVE_SYMBOL
-      ?? (initialChainIdFromEnv === hyperEvmTestnet.id ? legacyWrappedNativeSymbol : undefined)
+      ?? (legacyProfileChainId === hyperEvmTestnet.id ? legacyWrappedNativeSymbol : undefined)
       ?? `W${hyperEvmTestnet.nativeCurrency.symbol}`,
   }),
   createNetwork({
     chainId: monadTestnet.id,
     key: "monad-testnet",
-    name: initialChainIdFromEnv === monadTestnet.id && legacyChainName ? legacyChainName : monadTestnet.name,
+    name: legacyProfileChainId === monadTestnet.id && legacyChainName ? legacyChainName : monadTestnet.name,
     nativeCurrency: monadTestnet.nativeCurrency,
     rpcUrl: import.meta.env.VITE_PLEDGE_CASH_MONAD_RPC_URL
-      ?? (initialChainIdFromEnv === monadTestnet.id ? legacyRpcUrl : undefined)
+      ?? (legacyProfileChainId === monadTestnet.id ? legacyRpcUrl : undefined)
       ?? monadTestnet.rpcUrls.default.http[0],
     explorerName: import.meta.env.VITE_PLEDGE_CASH_MONAD_EXPLORER_NAME
-      ?? (initialChainIdFromEnv === monadTestnet.id ? legacyExplorerName : undefined)
+      ?? (legacyProfileChainId === monadTestnet.id ? legacyExplorerName : undefined)
       ?? monadTestnet.blockExplorers.default.name,
     explorerUrl: import.meta.env.VITE_PLEDGE_CASH_MONAD_EXPLORER_URL
-      ?? (initialChainIdFromEnv === monadTestnet.id ? legacyExplorerUrl : undefined)
+      ?? (legacyProfileChainId === monadTestnet.id ? legacyExplorerUrl : undefined)
       ?? monadTestnet.blockExplorers.default.url,
     wrappedNativeSymbol: import.meta.env.VITE_PLEDGE_CASH_MONAD_WRAPPED_NATIVE_SYMBOL
-      ?? (initialChainIdFromEnv === monadTestnet.id ? legacyWrappedNativeSymbol : undefined)
+      ?? (legacyProfileChainId === monadTestnet.id ? legacyWrappedNativeSymbol : undefined)
       ?? `W${monadTestnet.nativeCurrency.symbol}`,
   }),
   createNetwork({
     chainId: LOCAL_ANVIL_CHAIN_ID,
     key: "local-anvil",
-    name: initialChainIdFromEnv === LOCAL_ANVIL_CHAIN_ID && legacyChainName ? legacyChainName : "Local Anvil",
+    name: legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID && legacyChainName ? legacyChainName : "Local Anvil",
     nativeCurrency: {
       decimals: 18,
       name: "HYPE",
       symbol: "HYPE",
     },
     rpcUrl: import.meta.env.VITE_PLEDGE_CASH_LOCAL_RPC_URL
-      ?? (initialChainIdFromEnv === LOCAL_ANVIL_CHAIN_ID ? legacyRpcUrl : undefined)
+      ?? (legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID ? legacyRpcUrl : undefined)
       ?? defaultLocalRpcUrl(),
     explorerName: import.meta.env.VITE_PLEDGE_CASH_LOCAL_EXPLORER_NAME
-      ?? (initialChainIdFromEnv === LOCAL_ANVIL_CHAIN_ID ? legacyExplorerName : undefined)
+      ?? (legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID ? legacyExplorerName : undefined)
       ?? undefined,
     explorerUrl: import.meta.env.VITE_PLEDGE_CASH_LOCAL_EXPLORER_URL
-      ?? (initialChainIdFromEnv === LOCAL_ANVIL_CHAIN_ID ? legacyExplorerUrl : undefined)
+      ?? (legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID ? legacyExplorerUrl : undefined)
       ?? undefined,
     wrappedNativeSymbol: import.meta.env.VITE_PLEDGE_CASH_LOCAL_WRAPPED_NATIVE_SYMBOL
-      ?? (initialChainIdFromEnv === LOCAL_ANVIL_CHAIN_ID ? legacyWrappedNativeSymbol : undefined)
+      ?? (legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID ? legacyWrappedNativeSymbol : undefined)
       ?? "WHYPE",
   }),
 ];
