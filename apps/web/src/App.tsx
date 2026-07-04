@@ -575,6 +575,7 @@ export function App(): React.JSX.Element {
 
   const submitContractTransaction = async (label: string, request: Record<string, unknown>): Promise<Hex> => {
     const client = walletClient();
+    const txChainId = activeNetwork.chainId;
     pushLog(contractCallPreview(label, request), "info");
     const hash = (await client.writeContract({
       account: activeAccount(),
@@ -582,14 +583,14 @@ export function App(): React.JSX.Element {
       ...request,
     } as unknown as Parameters<typeof client.writeContract>[0])) as Hex;
 
-    pushLog(`${label} submitted`, "info", hash);
+    pushLog(`${label} submitted`, "info", hash, txChainId);
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
     if (receipt.status !== "success") {
-      pushLog(`${label} failed`, "error", hash);
+      pushLog(`${label} failed`, "error", hash, txChainId);
       throw new Error(`${label} failed after submission.`);
     }
 
-    pushLog(`${label} confirmed`, "success", hash);
+    pushLog(`${label} confirmed`, "success", hash, txChainId);
     return hash;
   };
 
@@ -1575,6 +1576,7 @@ export function App(): React.JSX.Element {
         networks={PLEDGE_CASH_NETWORKS}
         onNetworkChange={selectNetwork}
         connectWallet={connectWallet}
+        pendingAction={pendingAction}
         runAction={runAction}
         switchChain={switchChain}
       />

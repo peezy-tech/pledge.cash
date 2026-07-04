@@ -11,6 +11,7 @@ type AppHeaderProps = {
   chainName: string;
   networks: PledgeCashNetwork[];
   onNetworkChange: (chainId: number) => void;
+  pendingAction: string | undefined;
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
   switchChain: () => Promise<void>;
 };
@@ -22,10 +23,12 @@ export function AppHeader({
   chainName,
   networks,
   onNetworkChange,
+  pendingAction,
   runAction,
   switchChain,
 }: AppHeaderProps): React.JSX.Element {
   const walletReady = wallet.account !== undefined && wallet.chainId === chainId;
+  const actionPending = pendingAction !== undefined;
 
   return (
     <header className="sticky top-0 z-20 border-b border-zinc-800 bg-zinc-950/88 backdrop-blur">
@@ -39,7 +42,9 @@ export function AppHeader({
         <div className="flex flex-wrap items-center gap-2">
           <select
             aria-label="Network"
-            className="h-10 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm font-medium text-zinc-100 outline-none transition-colors hover:bg-zinc-900 focus:border-lime-300/70 focus:ring-2 focus:ring-lime-300/10"
+            className="h-10 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm font-medium text-zinc-100 outline-none transition-colors hover:bg-zinc-900 focus:border-lime-300/70 focus:ring-2 focus:ring-lime-300/10 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={actionPending}
+            title={actionPending ? "Network changes are disabled while an action is running" : undefined}
             value={chainId}
             onChange={(event) => onNetworkChange(Number(event.target.value))}
           >

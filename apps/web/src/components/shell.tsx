@@ -172,8 +172,8 @@ export function AddressLink({ address }: { address: Address }): React.JSX.Elemen
   );
 }
 
-export function TransactionLink({ hash }: { hash: Hex }): React.JSX.Element {
-  const explorerUrl = transactionUrl(hash);
+export function TransactionLink({ chainId, hash }: { chainId?: number | undefined; hash: Hex }): React.JSX.Element {
+  const explorerUrl = transactionUrl(hash, chainId);
   if (!explorerUrl) return <span className="text-lime-200">{shortAddress(hash)}</span>;
 
   return <a className="text-lime-200 hover:text-lime-100" href={explorerUrl} rel="noreferrer" target="_blank">{shortAddress(hash)}</a>;

@@ -119,8 +119,8 @@ export function addressUrl(address: Address): string | undefined {
   return `${explorerUrl}/address/${address}`;
 }
 
-export function transactionUrl(hash: Hex): string | undefined {
-  const explorerUrl = selectedNetworkForLinks().explorerUrl;
+export function transactionUrl(hash: Hex, chainId?: number): string | undefined {
+  const explorerUrl = (chainId === undefined ? selectedNetworkForLinks() : networkForChainId(chainId)).explorerUrl;
   if (!explorerUrl) return undefined;
   return `${explorerUrl}/tx/${hash}`;
 }
