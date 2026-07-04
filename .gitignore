@@ -17,5 +17,6 @@ output/playwright/
 .DS_Store
 
 packages/contracts/deployments/*.json
+!packages/contracts/deployments/10143.json
 !packages/contracts/deployments/998.json
 !packages/contracts/deployments/998-lifecycle.json

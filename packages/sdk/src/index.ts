@@ -7,6 +7,7 @@ export type { Address };
 import { pledgeCashDeployments, type PledgeCashDeployment } from "./generated";
 
 export const HYPEREVM_TESTNET_CHAIN_ID = 998;
+export const MONAD_TESTNET_CHAIN_ID = 10143;
 
 export const hyperEvmTestnet = {
   id: HYPEREVM_TESTNET_CHAIN_ID,
@@ -25,6 +26,27 @@ export const hyperEvmTestnet = {
     default: {
       name: "Purrsec",
       url: "https://testnet.purrsec.com",
+    },
+  },
+} as const;
+
+export const monadTestnet = {
+  id: MONAD_TESTNET_CHAIN_ID,
+  name: "Monad Testnet",
+  nativeCurrency: {
+    decimals: 18,
+    name: "MON",
+    symbol: "MON",
+  },
+  rpcUrls: {
+    default: {
+      http: ["https://testnet-rpc.monad.xyz"],
+    },
+  },
+  blockExplorers: {
+    default: {
+      name: "MonadVision",
+      url: "https://testnet.monadvision.com",
     },
   },
 } as const;

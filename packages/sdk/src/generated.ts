@@ -10336,6 +10336,11 @@ export const pledgeCashAbis = {
 } as const;
 
 export const pledgeCashDeployments = {
+  10143: {
+    chainId: 10143,
+    status: "pending",
+    reason: "Monad testnet deployment has not been broadcast yet."
+  },
   998: {
     chainId: 998,
     boardroomStatus: "pending",

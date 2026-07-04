@@ -3,19 +3,18 @@
 This document covers the current contract deployment surface for TokenGrant, Boardroom, fixed-price distribution,
 migrating bonding curve, AMM, and locked-liquidity primitives.
 
-## HyperEVM Testnet
+## Testnet Targets
 
-- Chain id: `998`
-- Default RPC: `https://rpc.hyperliquid-testnet.xyz/evm`
-- Deployment script: `packages/contracts/script/Deploy.s.sol`
-- Wrapper: `packages/contracts/script/hyperevm-testnet/deploy.sh`
-- Artifact: `packages/contracts/deployments/998.json`
+| Network | Chain id | Default RPC | Wrapped native | Wrapper | Artifact |
+| --- | ---: | --- | --- | --- | --- |
+| HyperEVM Testnet | `998` | `https://rpc.hyperliquid-testnet.xyz/evm` | `HYPEREVM_WRAPPED_NATIVE_ADDRESS` | `packages/contracts/script/hyperevm-testnet/deploy.sh` | `packages/contracts/deployments/998.json` |
+| Monad Testnet | `10143` | `https://testnet-rpc.monad.xyz` | `0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541` | `packages/contracts/script/monad-testnet/deploy.sh` | `packages/contracts/deployments/10143.json` |
 
 The deploy script creates or reuses one `PledgeCashDeterministicDeployer`, then creates one
 `BoardroomPolicyRegistry`, one `ProtocolPolicy`, one `AssetPolicy`, one
 `TokenGrantFactory`, one `DistributionFactory`, one `AmmFactory`, one `AmmRouter`, one `LockedLiquidityFactory`, and one
-`BoardroomFactory`. `WRAPPED_NATIVE_ADDRESS` is required because every Boardroom stores canonical WHYPE and wraps raw
-native HYPE before wind-down redemptions.
+`BoardroomFactory`. A wrapped-native address is required because every Boardroom stores the canonical wrapped native
+token and wraps raw native funds before wind-down redemptions.
 
 Root protocol contracts are deployed through CREATE3 salts from `PledgeCashDeploymentSalts`. As long as the same
 `PledgeCashDeterministicDeployer` address is used on each chain, the root protocol addresses are the same even when
@@ -49,20 +48,23 @@ cp .env.example .env
 Required for dry runs and broadcasts:
 
 ```sh
-WRAPPED_NATIVE_ADDRESS=0x...
 PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0x...
+HYPEREVM_WRAPPED_NATIVE_ADDRESS=0x...
 ```
 
 Required for broadcast:
 
 ```sh
 HYPEREVM_TESTNET_PRIVATE_KEY=...
+MONAD_TESTNET_PRIVATE_KEY=...
 ```
 
 Optional:
 
 ```sh
 HYPEREVM_TESTNET_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
+MONAD_TESTNET_RPC_URL=https://testnet-rpc.monad.xyz
+MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS=0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541
 TOKEN_GRANT_CREATION_FEE_WEI=100000000000000000
 AMM_PROTOCOL_FEE_RECIPIENT=
 HYPEREVM_GAS_PRICE_WEI=
@@ -73,6 +75,12 @@ PLEDGE_CASH_DETERMINISTIC_DEPLOYER=
 
 `TOKEN_GRANT_CREATION_FEE_WEI` is the preferred variable. `GRANT_CREATION_FEE_WEI` remains supported by the Foundry
 script as a legacy fallback.
+
+For Monad broadcasts, install Monad Foundry before running the wrapper:
+
+```sh
+foundryup --network monad
+```
 
 `CREATE2_FACTORY_ADDRESS` must name the same CREATE2 factory on every deterministic target chain. If a chain does not
 already have the factory deployed, bootstrap or select that factory before broadcasting.
@@ -85,23 +93,28 @@ pledge.cash deterministic deployer already exists at the intended cross-chain ad
 
 ```sh
 bun run simulate:hyperevm-testnet
+bun run simulate:monad-testnet
+bun run simulate:testnets
 ```
 
-The wrapper refuses any RPC that does not report chain id `998`. Dry runs set `WRITE_DEPLOYMENT_STATE=false`, so local
-artifacts are not rewritten.
+Each wrapper refuses RPCs that do not report the expected chain id. Dry runs set `WRITE_DEPLOYMENT_STATE=false`, so local
+artifacts are not rewritten. Dry runs still require the deployment private key so the simulated broadcaster matches
+`PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER`.
 
 ## Broadcast
 
 ```sh
-BROADCAST=1 bun --cwd packages/contracts deploy:hyperevm-testnet
+bun run deploy:hyperevm-testnet
+bun run deploy:monad-testnet
+bun run deploy:testnets
 ```
 
-Broadcasts require `HYPEREVM_TESTNET_PRIVATE_KEY` or `PRIVATE_KEY`. The wrapper copies
-`HYPEREVM_TESTNET_PRIVATE_KEY` into `PRIVATE_KEY` for Foundry.
+Broadcasts require the chain-specific private key or `PRIVATE_KEY`. The wrappers copy the chain-specific key into
+`PRIVATE_KEY` for Foundry.
 
 ## Artifact Checks
 
-After a broadcast, verify `packages/contracts/deployments/998.json` contains:
+After a broadcast, verify each chain artifact contains:
 
 - `chainId`
 - `deployer`
@@ -149,6 +162,9 @@ If `AMM_PROTOCOL_FEE_RECIPIENT` was configured, the artifact should also contain
 
 For a partial artifact, keep the deployed subsystem fields and add the relevant pending status/reason fields for the
 missing subsystem.
+
+Monad testnet is checked in as a pending artifact until the first broadcast writes
+`packages/contracts/deployments/10143.json`.
 
 The deterministic local proof for the deployment code is:
 
