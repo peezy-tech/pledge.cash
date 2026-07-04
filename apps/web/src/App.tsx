@@ -305,14 +305,24 @@ export function App(): React.JSX.Element {
   const [swapTokenListLoading, setSwapTokenListLoading] = useState(false);
   const [swapSeedLoaded, setSwapSeedLoaded] = useState(false);
 
+  const syncSelectedChainFromLocation = useCallback((): void => {
+    const nextChainId = initialSelectedNetwork().chainId;
+    setSelectedChainId((currentChainId) => (currentChainId === nextChainId ? currentChainId : nextChainId));
+  }, []);
+
+  useEffect(() => {
+    if (pendingAction) return;
+    syncSelectedChainFromLocation();
+  }, [pendingAction, syncSelectedChainFromLocation]);
+
   useEffect(() => {
     const syncView = (): void => {
       setActiveView(viewFromPath(window.location.pathname));
-      setSelectedChainId(initialSelectedNetwork().chainId);
+      if (!pendingAction) syncSelectedChainFromLocation();
     };
     window.addEventListener("popstate", syncView);
     return () => window.removeEventListener("popstate", syncView);
-  }, []);
+  }, [pendingAction, syncSelectedChainFromLocation]);
 
   const navigateView = useCallback((view: AppView): void => {
     setActiveView(view);
