@@ -63,7 +63,7 @@ const cashToken = requireAddress(seed.cashToken, "seed.cashToken");
 const shareToken = requireAddress(seed.boardroomShareToken, "seed.boardroomShareToken");
 const router = requireAddress(deployment.ammRouter, "deployment.ammRouter");
 
-const tokenList = await readSwapTokenList(publicClient, deployment, seed, account.address);
+const tokenList = await readSwapTokenList(publicClient, deployment, seed, account.address, { wrappedNativeLabel: `W${chain.nativeCurrency.symbol}` });
 if (tokenList.error) throw new Error(`Token discovery failed: ${tokenList.error}`);
 if (!tokenList.tokens.some((token) => sameAddress(token.address, cashToken)) || !tokenList.tokens.some((token) => sameAddress(token.address, shareToken))) {
   throw new Error("Token discovery did not include both CASH and boardroom share tokens.");

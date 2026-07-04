@@ -178,9 +178,6 @@ If `AMM_PROTOCOL_FEE_RECIPIENT` was configured, the artifact should also contain
 For a partial artifact, keep the deployed subsystem fields and add the relevant pending status/reason fields for the
 missing subsystem.
 
-Monad testnet is checked in as a pending artifact until the first broadcast writes
-`packages/contracts/deployments/10143.json`.
-
 The deterministic local proof for the deployment code is:
 
 ```sh

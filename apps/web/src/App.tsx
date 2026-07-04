@@ -75,7 +75,7 @@ import { useFactorySnapshot } from "./hooks/use-factory-snapshot";
 import { useRuntimeDeployment } from "./hooks/use-runtime-deployment";
 import { useWalletConnection } from "./hooks/use-wallet-connection";
 import { readBoardroomSnapshot } from "./lib/boardroom-snapshot";
-import { ACTIVE_CHAIN_ID, ACTIVE_CHAIN_NAME, chain, publicClient } from "./lib/contracts";
+import { ACTIVE_CHAIN_ID, ACTIVE_CHAIN_NAME, WRAPPED_NATIVE_SYMBOL, chain, publicClient } from "./lib/contracts";
 import {
   addressMapKey,
   clearDiscoverySnapshot,
@@ -416,7 +416,7 @@ export function App(): React.JSX.Element {
     try {
       const seed = productSeed ?? await loadProductBoardroomSeed(ACTIVE_CHAIN_ID);
       if (!productSeed) setProductSeed(seed);
-      const next = await readSwapTokenList(publicClient, deployment, seed, wallet.account);
+      const next = await readSwapTokenList(publicClient, deployment, seed, wallet.account, { wrappedNativeLabel: WRAPPED_NATIVE_SYMBOL });
       setSwapTokenList(next);
       setSwapForm((current) => withSwapSeedDefaults(current, seed, deployment));
       setLiquidityForm((current) => withLiquiditySeedDefaults(current, seed, deployment));
