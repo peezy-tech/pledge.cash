@@ -75,6 +75,8 @@ PLEDGE_CASH_DETERMINISTIC_DEPLOYER=
 
 `TOKEN_GRANT_CREATION_FEE_WEI` is the preferred variable. `GRANT_CREATION_FEE_WEI` remains supported by the Foundry
 script as a legacy fallback.
+`WRAPPED_NATIVE_ADDRESS` remains supported as a legacy HyperEVM fallback. The Monad wrapper uses
+`MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS` or the canonical WMON default so an older HyperEVM env cannot leak into Monad.
 
 For Monad broadcasts, install Monad Foundry before running the wrapper:
 
