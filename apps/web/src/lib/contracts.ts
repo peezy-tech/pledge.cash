@@ -1,53 +1,267 @@
 import { hyperEvmTestnet, monadTestnet, type Address } from "@pledge.cash/sdk";
-import { createPublicClient, defineChain, http, type Hex } from "viem";
+import { createPublicClient, defineChain, http, type Chain, type Hex, type PublicClient } from "viem";
 
-export const ACTIVE_CHAIN_ID = Number(import.meta.env.VITE_PLEDGE_CASH_CHAIN_ID ?? hyperEvmTestnet.id);
-const defaultChain = ACTIVE_CHAIN_ID === monadTestnet.id ? monadTestnet : hyperEvmTestnet;
-export const ACTIVE_CHAIN_NAME = import.meta.env.VITE_PLEDGE_CASH_CHAIN_NAME ?? defaultChain.name;
-export const WRAPPED_NATIVE_SYMBOL = import.meta.env.VITE_PLEDGE_CASH_WRAPPED_NATIVE_SYMBOL ?? `W${defaultChain.nativeCurrency.symbol}`;
-export const RPC_URL = import.meta.env.VITE_PLEDGE_CASH_RPC_URL ?? defaultChain.rpcUrls.default.http[0] ?? "https://rpc.hyperliquid-testnet.xyz/evm";
-export const EXPLORER_URL = import.meta.env.VITE_PLEDGE_CASH_EXPLORER_URL ?? defaultChain.blockExplorers.default.url;
-export const EXPLORER_NAME = import.meta.env.VITE_PLEDGE_CASH_EXPLORER_NAME ?? defaultChain.blockExplorers.default.name;
-export const WALLET_RPC_URL = absoluteUrl(RPC_URL);
+export const LOCAL_ANVIL_CHAIN_ID = 31337;
+const SELECTED_NETWORK_STORAGE_KEY = "pledge.cash.selectedNetwork";
 
-export const chain = defineChain({
-  id: ACTIVE_CHAIN_ID,
-  name: ACTIVE_CHAIN_NAME,
-  nativeCurrency: defaultChain.nativeCurrency,
-  rpcUrls: {
-    default: {
-      http: [RPC_URL],
-    },
-  },
-  ...(EXPLORER_URL
-    ? {
-        blockExplorers: {
-          default: {
-            name: EXPLORER_NAME,
-            url: EXPLORER_URL,
-          },
-        },
-      }
-    : {}),
-});
+export type PledgeCashNetwork = {
+  chainId: number;
+  key: "hyperevm-testnet" | "monad-testnet" | "local-anvil" | "custom";
+  name: string;
+  rpcUrl: string;
+  explorerName?: string | undefined;
+  explorerUrl?: string | undefined;
+  wrappedNativeSymbol: string;
+  chain: Chain;
+};
 
-export const publicClient = createPublicClient({
-  chain,
-  transport: http(RPC_URL),
-});
+export type PledgeCashNetworkEnv = Partial<
+  Record<
+    | "BASE_URL"
+    | "VITE_PLEDGE_CASH_CHAIN_ID"
+    | "VITE_PLEDGE_CASH_CHAIN_NAME"
+    | "VITE_PLEDGE_CASH_EXPLORER_NAME"
+    | "VITE_PLEDGE_CASH_EXPLORER_URL"
+    | "VITE_PLEDGE_CASH_HYPEREVM_EXPLORER_NAME"
+    | "VITE_PLEDGE_CASH_HYPEREVM_EXPLORER_URL"
+    | "VITE_PLEDGE_CASH_HYPEREVM_RPC_URL"
+    | "VITE_PLEDGE_CASH_HYPEREVM_WRAPPED_NATIVE_SYMBOL"
+    | "VITE_PLEDGE_CASH_LOCAL_EXPLORER_NAME"
+    | "VITE_PLEDGE_CASH_LOCAL_EXPLORER_URL"
+    | "VITE_PLEDGE_CASH_LOCAL_RPC_URL"
+    | "VITE_PLEDGE_CASH_LOCAL_WRAPPED_NATIVE_SYMBOL"
+    | "VITE_PLEDGE_CASH_MONAD_EXPLORER_NAME"
+    | "VITE_PLEDGE_CASH_MONAD_EXPLORER_URL"
+    | "VITE_PLEDGE_CASH_MONAD_RPC_URL"
+    | "VITE_PLEDGE_CASH_MONAD_WRAPPED_NATIVE_SYMBOL"
+    | "VITE_PLEDGE_CASH_RPC_URL"
+    | "VITE_PLEDGE_CASH_WRAPPED_NATIVE_SYMBOL",
+    string | undefined
+  >
+>;
+
+const pledgeCashEnv = import.meta.env;
+const initialChainIdFromEnv = numericEnv(pledgeCashEnv.VITE_PLEDGE_CASH_CHAIN_ID);
+
+export const PLEDGE_CASH_NETWORKS: PledgeCashNetwork[] = createPledgeCashNetworks(pledgeCashEnv);
+
+export const DEFAULT_NETWORK = networkForChainId(initialChainIdFromEnv ?? hyperEvmTestnet.id);
+
+export function initialSelectedNetwork(): PledgeCashNetwork {
+  return networkForChainId(queryNetworkId() ?? storedNetworkId() ?? DEFAULT_NETWORK.chainId);
+}
+
+export function networkForChainId(chainId: number): PledgeCashNetwork {
+  return PLEDGE_CASH_NETWORKS.find((network) => network.chainId === chainId) ?? PLEDGE_CASH_NETWORKS[0]!;
+}
+
+export function createPledgeCashPublicClient(network: PledgeCashNetwork): PublicClient {
+  return createPublicClient({
+    chain: network.chain,
+    transport: http(network.rpcUrl),
+  });
+}
+
+export function persistSelectedNetwork(chainId: number): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SELECTED_NETWORK_STORAGE_KEY, chainId.toString());
+  } catch {
+    // Network selection still works when browser storage is unavailable.
+  }
+}
+
+export function syncSelectedNetworkSearch(chainId: number): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("chain", chainId.toString());
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
 
 export function addressUrl(address: Address): string | undefined {
-  if (!EXPLORER_URL) return undefined;
-  return `${EXPLORER_URL}/address/${address}`;
+  const explorerUrl = selectedNetworkForLinks().explorerUrl;
+  if (!explorerUrl) return undefined;
+  return `${explorerUrl}/address/${address}`;
 }
 
-export function transactionUrl(hash: Hex): string | undefined {
-  if (!EXPLORER_URL) return undefined;
-  return `${EXPLORER_URL}/tx/${hash}`;
+export function transactionUrl(hash: Hex, chainId?: number): string | undefined {
+  const explorerUrl = (chainId === undefined ? selectedNetworkForLinks() : networkForChainId(chainId)).explorerUrl;
+  if (!explorerUrl) return undefined;
+  return `${explorerUrl}/tx/${hash}`;
 }
 
-function absoluteUrl(url: string): string {
-  if (!url.startsWith("/")) return url;
-  if (typeof window === "undefined") return url;
-  return new URL(url, window.location.origin).toString();
+export function walletRpcUrl(network: PledgeCashNetwork): string {
+  if (!network.rpcUrl.startsWith("/")) return network.rpcUrl;
+  if (typeof window === "undefined") return network.rpcUrl;
+  return new URL(network.rpcUrl, window.location.origin).toString();
+}
+
+export function createPledgeCashNetworks(env: PledgeCashNetworkEnv): PledgeCashNetwork[] {
+  const initialChainId = numericEnv(env.VITE_PLEDGE_CASH_CHAIN_ID);
+  const legacyRpcUrl = env.VITE_PLEDGE_CASH_RPC_URL;
+  const legacyChainName = env.VITE_PLEDGE_CASH_CHAIN_NAME;
+  const legacyExplorerUrl = env.VITE_PLEDGE_CASH_EXPLORER_URL;
+  const legacyExplorerName = env.VITE_PLEDGE_CASH_EXPLORER_NAME;
+  const legacyWrappedNativeSymbol = env.VITE_PLEDGE_CASH_WRAPPED_NATIVE_SYMBOL;
+  const legacyProfileChainId = initialChainId ?? hyperEvmTestnet.id;
+
+  const networks: PledgeCashNetwork[] = [
+    createNetwork({
+      chainId: hyperEvmTestnet.id,
+      key: "hyperevm-testnet",
+      name: legacyProfileChainId === hyperEvmTestnet.id && legacyChainName ? legacyChainName : hyperEvmTestnet.name,
+      nativeCurrency: hyperEvmTestnet.nativeCurrency,
+      rpcUrl:
+        env.VITE_PLEDGE_CASH_HYPEREVM_RPC_URL
+        ?? (legacyProfileChainId === hyperEvmTestnet.id ? legacyRpcUrl : undefined)
+        ?? hyperEvmTestnet.rpcUrls.default.http[0],
+      explorerName:
+        env.VITE_PLEDGE_CASH_HYPEREVM_EXPLORER_NAME
+        ?? (legacyProfileChainId === hyperEvmTestnet.id ? legacyExplorerName : undefined)
+        ?? hyperEvmTestnet.blockExplorers.default.name,
+      explorerUrl:
+        env.VITE_PLEDGE_CASH_HYPEREVM_EXPLORER_URL
+        ?? (legacyProfileChainId === hyperEvmTestnet.id ? legacyExplorerUrl : undefined)
+        ?? hyperEvmTestnet.blockExplorers.default.url,
+      wrappedNativeSymbol:
+        env.VITE_PLEDGE_CASH_HYPEREVM_WRAPPED_NATIVE_SYMBOL
+        ?? (legacyProfileChainId === hyperEvmTestnet.id ? legacyWrappedNativeSymbol : undefined)
+        ?? `W${hyperEvmTestnet.nativeCurrency.symbol}`,
+    }),
+    createNetwork({
+      chainId: monadTestnet.id,
+      key: "monad-testnet",
+      name: legacyProfileChainId === monadTestnet.id && legacyChainName ? legacyChainName : monadTestnet.name,
+      nativeCurrency: monadTestnet.nativeCurrency,
+      rpcUrl:
+        env.VITE_PLEDGE_CASH_MONAD_RPC_URL
+        ?? (legacyProfileChainId === monadTestnet.id ? legacyRpcUrl : undefined)
+        ?? monadTestnet.rpcUrls.default.http[0],
+      explorerName:
+        env.VITE_PLEDGE_CASH_MONAD_EXPLORER_NAME
+        ?? (legacyProfileChainId === monadTestnet.id ? legacyExplorerName : undefined)
+        ?? monadTestnet.blockExplorers.default.name,
+      explorerUrl:
+        env.VITE_PLEDGE_CASH_MONAD_EXPLORER_URL
+        ?? (legacyProfileChainId === monadTestnet.id ? legacyExplorerUrl : undefined)
+        ?? monadTestnet.blockExplorers.default.url,
+      wrappedNativeSymbol:
+        env.VITE_PLEDGE_CASH_MONAD_WRAPPED_NATIVE_SYMBOL
+        ?? (legacyProfileChainId === monadTestnet.id ? legacyWrappedNativeSymbol : undefined)
+        ?? `W${monadTestnet.nativeCurrency.symbol}`,
+    }),
+    createNetwork({
+      chainId: LOCAL_ANVIL_CHAIN_ID,
+      key: "local-anvil",
+      name: legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID && legacyChainName ? legacyChainName : "Local Anvil",
+      nativeCurrency: {
+        decimals: 18,
+        name: "HYPE",
+        symbol: "HYPE",
+      },
+      rpcUrl:
+        env.VITE_PLEDGE_CASH_LOCAL_RPC_URL
+        ?? (legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID ? legacyRpcUrl : undefined)
+        ?? defaultLocalRpcUrl(env.BASE_URL),
+      explorerName:
+        env.VITE_PLEDGE_CASH_LOCAL_EXPLORER_NAME
+        ?? (legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID ? legacyExplorerName : undefined)
+        ?? undefined,
+      explorerUrl:
+        env.VITE_PLEDGE_CASH_LOCAL_EXPLORER_URL
+        ?? (legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID ? legacyExplorerUrl : undefined)
+        ?? undefined,
+      wrappedNativeSymbol:
+        env.VITE_PLEDGE_CASH_LOCAL_WRAPPED_NATIVE_SYMBOL
+        ?? (legacyProfileChainId === LOCAL_ANVIL_CHAIN_ID ? legacyWrappedNativeSymbol : undefined)
+        ?? "WHYPE",
+    }),
+  ];
+
+  if (initialChainId !== undefined && !networks.some((network) => network.chainId === initialChainId)) {
+    const legacyDefaultChain = initialChainId === monadTestnet.id ? monadTestnet : hyperEvmTestnet;
+    networks.push(
+      createNetwork({
+        chainId: initialChainId,
+        key: "custom",
+        name: legacyChainName ?? legacyDefaultChain.name,
+        nativeCurrency: legacyDefaultChain.nativeCurrency,
+        rpcUrl:
+          legacyRpcUrl
+          ?? legacyDefaultChain.rpcUrls.default.http[0]
+          ?? hyperEvmTestnet.rpcUrls.default.http[0],
+        explorerName: legacyExplorerName ?? legacyDefaultChain.blockExplorers.default.name,
+        explorerUrl: legacyExplorerUrl ?? legacyDefaultChain.blockExplorers.default.url,
+        wrappedNativeSymbol: legacyWrappedNativeSymbol ?? `W${legacyDefaultChain.nativeCurrency.symbol}`,
+      }),
+    );
+  }
+
+  return networks;
+}
+
+function createNetwork(input: {
+  chainId: number;
+  key: PledgeCashNetwork["key"];
+  name: string;
+  nativeCurrency: Chain["nativeCurrency"];
+  rpcUrl: string;
+  explorerName?: string | undefined;
+  explorerUrl?: string | undefined;
+  wrappedNativeSymbol: string;
+}): PledgeCashNetwork {
+  const chain = defineChain({
+    id: input.chainId,
+    name: input.name,
+    nativeCurrency: input.nativeCurrency,
+    rpcUrls: {
+      default: {
+        http: [input.rpcUrl],
+      },
+    },
+    ...(input.explorerUrl
+      ? {
+          blockExplorers: {
+            default: {
+              name: input.explorerName ?? "Explorer",
+              url: input.explorerUrl,
+            },
+          },
+        }
+      : {}),
+  });
+
+  return { ...input, chain };
+}
+
+function selectedNetworkForLinks(): PledgeCashNetwork {
+  return networkForChainId(queryNetworkId() ?? storedNetworkId() ?? DEFAULT_NETWORK.chainId);
+}
+
+function queryNetworkId(): number | undefined {
+  if (typeof window === "undefined") return undefined;
+  return numericString(new URL(window.location.href).searchParams.get("chain"));
+}
+
+function storedNetworkId(): number | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    return numericString(window.localStorage.getItem(SELECTED_NETWORK_STORAGE_KEY));
+  } catch {
+    return undefined;
+  }
+}
+
+function numericEnv(value: string | undefined): number | undefined {
+  return numericString(value);
+}
+
+function numericString(value: string | null | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function defaultLocalRpcUrl(baseUrl: string | undefined): string {
+  return baseUrl === "/pledge-cash/" ? "/pledge-cash/rpc" : "http://127.0.0.1:8547";
 }

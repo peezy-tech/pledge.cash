@@ -173,6 +173,7 @@ export type LogEntry = {
   message: string;
   time: string;
   txHash?: Hex;
+  txChainId?: number;
 };
 
 export type DiscoveryForm = {

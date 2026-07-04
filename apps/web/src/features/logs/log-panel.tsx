@@ -29,7 +29,7 @@ export function LogPanel({ logs, clearLogs }: LogPanelProps): React.JSX.Element 
                 <p className="m-0 break-words text-sm text-zinc-200">{entry.message}</p>
                 {entry.txHash ? (
                   <p className="m-0 mt-1 text-xs text-zinc-500">
-                    Explorer: <TransactionLink hash={entry.txHash} />
+                    Explorer: <TransactionLink chainId={entry.txChainId} hash={entry.txHash} />
                   </p>
                 ) : null}
               </li>

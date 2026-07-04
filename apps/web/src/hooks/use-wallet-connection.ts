@@ -1,7 +1,7 @@
 import type { Address } from "@pledge.cash/sdk";
 import { useCallback, useEffect, useState } from "react";
 import { createWalletClient, custom, getAddress, isAddress, type EIP1193Provider } from "viem";
-import { ACTIVE_CHAIN_ID, ACTIVE_CHAIN_NAME, chain, EXPLORER_URL, WALLET_RPC_URL } from "../lib/contracts";
+import { walletRpcUrl, type PledgeCashNetwork } from "../lib/contracts";
 import { shortAddress, walletState } from "../lib/forms";
 import type { WalletState } from "../lib/types";
 import type { PushLog } from "./use-action-runner";
@@ -9,9 +9,11 @@ import type { PushLog } from "./use-action-runner";
 type BrowserWalletClient = ReturnType<typeof createWalletClient>;
 
 export function useWalletConnection({
+  network,
   onAccountChanged,
   pushLog,
 }: {
+  network: PledgeCashNetwork;
   onAccountChanged: () => void;
   pushLog: PushLog;
 }): {
@@ -55,10 +57,10 @@ export function useWalletConnection({
 
   const activeAccount = useCallback((): Address => {
     if (!wallet.account) throw new Error("Connect wallet first.");
-    if (wallet.chainId !== ACTIVE_CHAIN_ID) throw new Error(`Switch wallet to ${ACTIVE_CHAIN_NAME} first.`);
+    if (wallet.chainId !== network.chainId) throw new Error(`Switch wallet to ${network.name} first.`);
 
     return wallet.account;
-  }, [wallet.account, wallet.chainId]);
+  }, [network.chainId, network.name, wallet.account, wallet.chainId]);
 
   const walletClient = useCallback((): BrowserWalletClient => {
     const provider = injectedProvider();
@@ -66,10 +68,10 @@ export function useWalletConnection({
 
     return createWalletClient({
       account: activeAccount(),
-      chain,
+      chain: network.chain,
       transport: custom(provider),
     });
-  }, [activeAccount]);
+  }, [activeAccount, network.chain]);
 
   const connectWallet = useCallback(async (): Promise<void> => {
     const provider = injectedProvider();
@@ -92,38 +94,38 @@ export function useWalletConnection({
     const provider = injectedProvider();
     if (!provider) throw new Error("No injected wallet provider found.");
 
-    const chainId = `0x${ACTIVE_CHAIN_ID.toString(16)}`;
+    const chainId = `0x${network.chainId.toString(16)}`;
     try {
       await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId }] });
     } catch (error) {
       const code = typeof error === "object" && error !== null && "code" in error ? Number(error.code) : undefined;
       if (code !== 4902) throw error;
-      await addActiveChain(provider, chainId);
+      await addActiveChain(provider, network, chainId);
       await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId }] });
     }
 
     const activeChainId = (await provider.request({ method: "eth_chainId" })) as string;
     const parsedChainId = Number.parseInt(activeChainId, 16);
     setWallet((current) => walletState(current.account, Number.isNaN(parsedChainId) ? undefined : parsedChainId));
-    if (parsedChainId !== ACTIVE_CHAIN_ID) {
+    if (parsedChainId !== network.chainId) {
       throw new Error(`Wallet is still on chain ${Number.isNaN(parsedChainId) ? activeChainId : parsedChainId}.`);
     }
-    pushLog(`Wallet switched to ${ACTIVE_CHAIN_NAME}.`, "success");
-  }, [pushLog]);
+    pushLog(`Wallet switched to ${network.name}.`, "success");
+  }, [network, pushLog]);
 
   return { activeAccount, connectWallet, switchChain, wallet, walletClient };
 }
 
-async function addActiveChain(provider: EIP1193Provider, chainId: string): Promise<void> {
+async function addActiveChain(provider: EIP1193Provider, network: PledgeCashNetwork, chainId: string): Promise<void> {
   await provider.request({
     method: "wallet_addEthereumChain",
     params: [
       {
         chainId,
-        chainName: ACTIVE_CHAIN_NAME,
-        nativeCurrency: chain.nativeCurrency,
-        rpcUrls: [WALLET_RPC_URL],
-        ...(EXPLORER_URL ? { blockExplorerUrls: [EXPLORER_URL] } : {}),
+        chainName: network.name,
+        nativeCurrency: network.chain.nativeCurrency,
+        rpcUrls: [walletRpcUrl(network)],
+        ...(network.explorerUrl ? { blockExplorerUrls: [network.explorerUrl] } : {}),
       },
     ],
   });

@@ -1,6 +1,7 @@
 import { BookOpen, RefreshCw, Wallet } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
+import type { PledgeCashNetwork } from "../../lib/contracts";
 import type { WalletState } from "../../lib/types";
 
 type AppHeaderProps = {
@@ -8,12 +9,26 @@ type AppHeaderProps = {
   connectWallet: () => Promise<void>;
   chainId: number;
   chainName: string;
+  networks: PledgeCashNetwork[];
+  onNetworkChange: (chainId: number) => void;
+  pendingAction: string | undefined;
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
   switchChain: () => Promise<void>;
 };
 
-export function AppHeader({ wallet, connectWallet, chainId, chainName, runAction, switchChain }: AppHeaderProps): React.JSX.Element {
+export function AppHeader({
+  wallet,
+  connectWallet,
+  chainId,
+  chainName,
+  networks,
+  onNetworkChange,
+  pendingAction,
+  runAction,
+  switchChain,
+}: AppHeaderProps): React.JSX.Element {
   const walletReady = wallet.account !== undefined && wallet.chainId === chainId;
+  const actionPending = pendingAction !== undefined;
 
   return (
     <header className="sticky top-0 z-20 border-b border-zinc-800 bg-zinc-950/88 backdrop-blur">
@@ -25,6 +40,20 @@ export function AppHeader({ wallet, connectWallet, chainId, chainName, runAction
           <span>pledge.cash</span>
         </a>
         <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label="Network"
+            className="h-10 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm font-medium text-zinc-100 outline-none transition-colors hover:bg-zinc-900 focus:border-lime-300/70 focus:ring-2 focus:ring-lime-300/10 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={actionPending}
+            title={actionPending ? "Network changes are disabled while an action is running" : undefined}
+            value={chainId}
+            onChange={(event) => onNetworkChange(Number(event.target.value))}
+          >
+            {networks.map((network) => (
+              <option key={network.chainId} value={network.chainId}>
+                {network.name}
+              </option>
+            ))}
+          </select>
           <a
             className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-900 hover:text-zinc-50"
             href={`${import.meta.env.BASE_URL}docs/`}
@@ -33,11 +62,20 @@ export function AppHeader({ wallet, connectWallet, chainId, chainName, runAction
             Docs
           </a>
           <Badge variant={walletReady ? "default" : "warning"}>{chainName}</Badge>
-          <Button variant="secondary" onClick={() => void runAction("switch-chain", switchChain)}>
+          <Button
+            disabled={actionPending}
+            title={actionPending ? "Wallet actions are disabled while an action is running" : undefined}
+            variant="secondary"
+            onClick={() => void runAction("switch-chain", switchChain)}
+          >
             <RefreshCw className="h-4 w-4" />
             Switch
           </Button>
-          <Button onClick={() => void runAction("connect-wallet", connectWallet)}>
+          <Button
+            disabled={actionPending}
+            title={actionPending ? "Wallet actions are disabled while an action is running" : undefined}
+            onClick={() => void runAction("connect-wallet", connectWallet)}
+          >
             <Wallet className="h-4 w-4" />
             {wallet.account ? "Connected" : "Connect"}
           </Button>

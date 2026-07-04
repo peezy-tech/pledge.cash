@@ -57,8 +57,8 @@ import {
   type LockedLiquidityState,
   type MigratingBondingCurveState,
 } from "@pledge.cash/sdk";
-import { useCallback, useEffect, useState } from "react";
-import type { Hex } from "viem";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Hex, PublicClient } from "viem";
 import { TabButton } from "./components/shell";
 import { BoardroomPanel } from "./features/boardrooms/boardroom-panel";
 import { ProductBoardroomDashboard } from "./features/boardrooms/product-boardroom-dashboard";
@@ -75,7 +75,14 @@ import { useFactorySnapshot } from "./hooks/use-factory-snapshot";
 import { useRuntimeDeployment } from "./hooks/use-runtime-deployment";
 import { useWalletConnection } from "./hooks/use-wallet-connection";
 import { readBoardroomSnapshot } from "./lib/boardroom-snapshot";
-import { ACTIVE_CHAIN_ID, ACTIVE_CHAIN_NAME, WRAPPED_NATIVE_SYMBOL, chain, publicClient } from "./lib/contracts";
+import {
+  PLEDGE_CASH_NETWORKS,
+  createPledgeCashPublicClient,
+  initialSelectedNetwork,
+  networkForChainId,
+  persistSelectedNetwork,
+  syncSelectedNetworkSearch,
+} from "./lib/contracts";
 import {
   addressMapKey,
   clearDiscoverySnapshot,
@@ -164,8 +171,12 @@ export { parseDeployment } from "./lib/deployment";
 
 type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
 type AppView = Tab | "product-boardroom" | "swap";
+type ChainProductSeed = {
+  chainId: number;
+  seed: ProductBoardroomSeed | undefined;
+};
 
-async function parseMinAmountsOut(value: string, assets: readonly Address[]): Promise<bigint[]> {
+async function parseMinAmountsOut(client: PublicClient, value: string, assets: readonly Address[]): Promise<bigint[]> {
   const trimmed = value.trim();
   if (!trimmed) return Array.from({ length: assets.length }, () => 0n);
 
@@ -178,7 +189,7 @@ async function parseMinAmountsOut(value: string, assets: readonly Address[]): Pr
     values.map(async (part, index) => {
       const asset = assets[index];
       if (!asset) throw new Error(`Missing redeemable asset for minimum amount ${index + 1}.`);
-      return parseErc20Amount(part, asset, `Minimum amount ${index + 1}`);
+      return parseErc20Amount(client, part, asset, `Minimum amount ${index + 1}`);
     }),
   );
 }
@@ -207,23 +218,24 @@ function viewFromPath(pathname: string): AppView {
 
 function viewHref(view: AppView): string {
   const base = import.meta.env.BASE_URL || "/";
-  if (view === "product-boardroom") return `${base}boardroom`;
-  if (view === "swap") return `${base}swap`;
-  return base;
+  const search = typeof window === "undefined" ? "" : window.location.search;
+  if (view === "product-boardroom") return `${base}boardroom${search}`;
+  if (view === "swap") return `${base}swap${search}`;
+  return `${base}${search}`;
 }
 
-async function parseErc20Amount(value: string, token: Address, label: string): Promise<bigint> {
-  return parseTokenAmountInput(value, await readRequiredTokenMetadata(token, label), label);
+async function parseErc20Amount(client: PublicClient, value: string, token: Address, label: string): Promise<bigint> {
+  return parseTokenAmountInput(value, await readRequiredTokenMetadata(client, token, label), label);
 }
 
-async function parsePaymentAmount(value: string, token: Address, label: string): Promise<bigint> {
+async function parsePaymentAmount(client: PublicClient, value: string, token: Address, label: string): Promise<bigint> {
   if (isZeroDecimalInput(value)) return 0n;
   if (isZeroAddress(token)) throw new Error(`${label} requires a payment token.`);
-  return await parseErc20Amount(value, token, label);
+  return await parseErc20Amount(client, value, token, label);
 }
 
-async function readRequiredTokenMetadata(token: Address, label: string): Promise<TokenMetadata> {
-  const metadata = await readTokenMetadata(publicClient, token);
+async function readRequiredTokenMetadata(client: PublicClient, token: Address, label: string): Promise<TokenMetadata> {
+  const metadata = await readTokenMetadata(client, token);
   if (metadata.decimals === undefined) {
     const reason = metadata.error ? ` ${metadata.error}` : "";
     throw new Error(`${label} token decimals could not be read.${reason}`);
@@ -237,9 +249,16 @@ function isZeroDecimalInput(value: string): boolean {
 }
 
 export function App(): React.JSX.Element {
-  const generatedDeployment = getPledgeCashDeployment(ACTIVE_CHAIN_ID);
-  const deployment = useRuntimeDeployment(ACTIVE_CHAIN_ID, generatedDeployment);
   const { clearLogs, logs, pendingAction, pushLog, runAction } = useActionRunner();
+  const [selectedChainId, setSelectedChainId] = useState(() => initialSelectedNetwork().chainId);
+  const activeNetwork = useMemo(() => networkForChainId(selectedChainId), [selectedChainId]);
+  const networkRequestVersion = useRef(0);
+  const activeChainIdRef = useRef(activeNetwork.chainId);
+  activeChainIdRef.current = activeNetwork.chainId;
+  const publicClient = useMemo(() => createPledgeCashPublicClient(activeNetwork), [activeNetwork]);
+  const chain = activeNetwork.chain;
+  const generatedDeployment = getPledgeCashDeployment(activeNetwork.chainId);
+  const deployment = useRuntimeDeployment(activeNetwork.chainId, generatedDeployment);
   const [activeView, setActiveView] = useState<AppView>(() => initialView());
   const [grantForm, setGrantForm] = useState<GrantForm>(() => defaultGrantForm());
   const [predictedGrant, setPredictedGrant] = useState<Address>();
@@ -278,7 +297,7 @@ export function App(): React.JSX.Element {
   const [discoveryForm, setDiscoveryForm] = useState<DiscoveryForm>(() => defaultDiscoveryForm());
   const [discovery, setDiscovery] = useState<DiscoverySnapshot>(() => emptyDiscoverySnapshot());
   const [productBoardroom, setProductBoardroom] = useState<ProductBoardroomDashboardState>();
-  const [productSeed, setProductSeed] = useState<ProductBoardroomSeed>();
+  const [productSeedState, setProductSeedState] = useState<ChainProductSeed>();
   const [productBoardroomError, setProductBoardroomError] = useState<string>();
   const [productBoardroomLoading, setProductBoardroomLoading] = useState(false);
   const [swapForm, setSwapForm] = useState<SwapForm>(() => defaultSwapForm());
@@ -291,18 +310,32 @@ export function App(): React.JSX.Element {
   const [swapTokenList, setSwapTokenList] = useState<SwapTokenListState>(() => ({ tokens: [], pools: [], loaded: false }));
   const [swapTokenListLoading, setSwapTokenListLoading] = useState(false);
   const [swapSeedLoaded, setSwapSeedLoaded] = useState(false);
+  const productSeed = productSeedState?.chainId === activeNetwork.chainId ? productSeedState.seed : undefined;
+
+  const syncSelectedChainFromLocation = useCallback((): void => {
+    const nextChainId = initialSelectedNetwork().chainId;
+    setSelectedChainId((currentChainId) => (currentChainId === nextChainId ? currentChainId : nextChainId));
+  }, []);
 
   useEffect(() => {
-    const syncView = (): void => setActiveView(viewFromPath(window.location.pathname));
+    if (pendingAction) return;
+    syncSelectedChainFromLocation();
+  }, [pendingAction, syncSelectedChainFromLocation]);
+
+  useEffect(() => {
+    const syncView = (): void => {
+      setActiveView(viewFromPath(window.location.pathname));
+      if (!pendingAction) syncSelectedChainFromLocation();
+    };
     window.addEventListener("popstate", syncView);
     return () => window.removeEventListener("popstate", syncView);
-  }, []);
+  }, [pendingAction, syncSelectedChainFromLocation]);
 
   const navigateView = useCallback((view: AppView): void => {
     setActiveView(view);
     if (typeof window === "undefined") return;
     const href = viewHref(view);
-    if (window.location.pathname !== href) {
+    if (`${window.location.pathname}${window.location.search}` !== href) {
       window.history.pushState({}, "", href);
     }
   }, []);
@@ -319,35 +352,102 @@ export function App(): React.JSX.Element {
     setPredictedGrant(undefined);
   }, [grantAddress, predictedGrant, updateGrantAddress]);
 
+  const selectNetwork = useCallback(
+    (chainId: number): void => {
+      const nextNetwork = networkForChainId(chainId);
+      setSelectedChainId(nextNetwork.chainId);
+      persistSelectedNetwork(nextNetwork.chainId);
+      syncSelectedNetworkSearch(nextNetwork.chainId);
+      pushLog(`Selected ${nextNetwork.name}`, "info");
+    },
+    [pushLog],
+  );
+
   const { activeAccount, connectWallet, switchChain, wallet, walletClient } = useWalletConnection({
+    network: activeNetwork,
     onAccountChanged: clearDirectGrantPrediction,
     pushLog,
   });
-  const factorySnapshot = useFactorySnapshot(deployment, pushLog);
+  const factorySnapshot = useFactorySnapshot(publicClient, deployment, pushLog);
   const creationFee = factorySnapshot.creationFee ?? deployment?.creationFee ?? 0n;
-  const discoveryKey = discoveryStorageKey(ACTIVE_CHAIN_ID, wallet.account);
+  const discoveryKey = discoveryStorageKey(activeNetwork.chainId, wallet.account);
+
+  useEffect(() => {
+    networkRequestVersion.current += 1;
+  }, [activeNetwork.chainId]);
+
+  const isCurrentNetworkRequest = useCallback(
+    (version: number, chainId: number): boolean =>
+      networkRequestVersion.current === version && activeChainIdRef.current === chainId,
+    [],
+  );
+
+  useEffect(() => {
+    persistSelectedNetwork(activeNetwork.chainId);
+  }, [activeNetwork.chainId]);
+
+  useEffect(() => {
+    setPredictedGrant(undefined);
+    setGrantAddress("");
+    setGrantSnapshot(undefined);
+    setPaymentApproval("0");
+    setPredictedBoardroom(undefined);
+    setBoardroomAddress("");
+    setBoardroomSnapshot(undefined);
+    setBoardroomMintTo("");
+    setPredictedBoardroomGrant(undefined);
+    setFixedPriceSaleAddress("");
+    setFixedPriceSaleSnapshot(undefined);
+    setPredictedFixedPriceSale(undefined);
+    setMigratingCurveAddress("");
+    setMigratingCurveSnapshot(undefined);
+    setPredictedMigratingCurve(undefined);
+    setLockedLiquidityAddress("");
+    setLockedLiquiditySnapshot(undefined);
+    setPredictedLockedLiquidity(undefined);
+    setDiscovery(emptyDiscoverySnapshot());
+    setProductBoardroom(undefined);
+    setProductSeedState(undefined);
+    setProductBoardroomError(undefined);
+    setProductBoardroomLoading(false);
+    setSwapForm(defaultSwapForm());
+    setSwapQuote(undefined);
+    setLiquidityForm(defaultLiquidityForm());
+    setLiquidityQuote(undefined);
+    setRemoveLiquidityForm(defaultRemoveLiquidityForm());
+    setRemoveLiquidityQuote(undefined);
+    setAmmPosition(undefined);
+    setSwapTokenList({ tokens: [], pools: [], loaded: false });
+    setSwapTokenListLoading(false);
+    setSwapSeedLoaded(false);
+  }, [activeNetwork.chainId]);
 
   const loadProductBoardroom = useCallback(async (): Promise<void> => {
+    const requestVersion = networkRequestVersion.current;
+    const requestChainId = activeNetwork.chainId;
     setProductBoardroomLoading(true);
     setProductBoardroomError(undefined);
     try {
-      const seed = await loadProductBoardroomSeed(ACTIVE_CHAIN_ID);
-      setProductSeed(seed);
+      const seed = await loadProductBoardroomSeed(requestChainId);
+      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
+      setProductSeedState({ chainId: requestChainId, seed });
       const address = resolveProductBoardroomAddress(seed);
       if (!address) {
         throw new Error("No product Boardroom address is configured for this chain.");
       }
       const next = await readProductBoardroomDashboard(publicClient, { address, seed });
+      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
       setProductBoardroom(next);
       pushLog(`Loaded product Boardroom ${address}`, "success");
     } catch (error) {
+      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
       const message = errorMessage(error);
       setProductBoardroomError(message);
       pushLog(message, "error");
     } finally {
-      setProductBoardroomLoading(false);
+      if (isCurrentNetworkRequest(requestVersion, requestChainId)) setProductBoardroomLoading(false);
     }
-  }, [pushLog]);
+  }, [activeNetwork.chainId, isCurrentNetworkRequest, publicClient, pushLog]);
 
   useEffect(() => {
     setDiscovery(loadDiscoverySnapshot(discoveryKey));
@@ -368,22 +468,26 @@ export function App(): React.JSX.Element {
     }
 
     let cancelled = false;
-    void loadProductBoardroomSeed(ACTIVE_CHAIN_ID)
+    const requestVersion = networkRequestVersion.current;
+    const requestChainId = activeNetwork.chainId;
+    void loadProductBoardroomSeed(requestChainId)
       .then((seed) => {
-        if (cancelled) return;
-        setProductSeed(seed);
+        if (cancelled || !isCurrentNetworkRequest(requestVersion, requestChainId)) return;
+        setProductSeedState({ chainId: requestChainId, seed });
         setSwapForm((current) => withSwapSeedDefaults(current, seed, deployment));
         setLiquidityForm((current) => withLiquiditySeedDefaults(current, seed, deployment));
       })
-      .catch((error) => pushLog(errorMessage(error), "error"))
+      .catch((error) => {
+        if (!cancelled && isCurrentNetworkRequest(requestVersion, requestChainId)) pushLog(errorMessage(error), "error");
+      })
       .finally(() => {
-        if (!cancelled) setSwapSeedLoaded(true);
+        if (!cancelled && isCurrentNetworkRequest(requestVersion, requestChainId)) setSwapSeedLoaded(true);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [activeView, deployment, productSeed, pushLog, swapSeedLoaded]);
+  }, [activeNetwork.chainId, activeView, deployment, isCurrentNetworkRequest, productSeed, pushLog, swapSeedLoaded]);
 
   useEffect(() => {
     setSwapQuote(undefined);
@@ -412,11 +516,15 @@ export function App(): React.JSX.Element {
   }, [deployment, liquidityForm.tokenA, liquidityForm.tokenB, liquidityForm.useNative, removeLiquidityForm.useNative, swapForm.tokenIn, swapForm.tokenOut, swapForm.useNative]);
 
   const loadSwapTokens = useCallback(async (): Promise<void> => {
+    const requestVersion = networkRequestVersion.current;
+    const requestChainId = activeNetwork.chainId;
     setSwapTokenListLoading(true);
     try {
-      const seed = productSeed ?? await loadProductBoardroomSeed(ACTIVE_CHAIN_ID);
-      if (!productSeed) setProductSeed(seed);
-      const next = await readSwapTokenList(publicClient, deployment, seed, wallet.account, { wrappedNativeLabel: WRAPPED_NATIVE_SYMBOL });
+      const seed = await loadProductBoardroomSeed(requestChainId);
+      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
+      setProductSeedState({ chainId: requestChainId, seed });
+      const next = await readSwapTokenList(publicClient, deployment, seed, wallet.account, { wrappedNativeLabel: activeNetwork.wrappedNativeSymbol });
+      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
       setSwapTokenList(next);
       setSwapForm((current) => withSwapSeedDefaults(current, seed, deployment));
       setLiquidityForm((current) => withLiquiditySeedDefaults(current, seed, deployment));
@@ -427,12 +535,13 @@ export function App(): React.JSX.Element {
       }
     } catch (error) {
       const message = errorMessage(error);
+      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
       setSwapTokenList({ tokens: [], pools: [], loaded: true, error: message });
       pushLog(message, "error");
     } finally {
-      setSwapTokenListLoading(false);
+      if (isCurrentNetworkRequest(requestVersion, requestChainId)) setSwapTokenListLoading(false);
     }
-  }, [deployment, productSeed, pushLog, wallet.account]);
+  }, [activeNetwork.chainId, activeNetwork.wrappedNativeSymbol, deployment, isCurrentNetworkRequest, publicClient, pushLog, wallet.account]);
 
   useEffect(() => {
     if (activeView !== "swap" || !swapSeedLoaded) return;
@@ -486,6 +595,7 @@ export function App(): React.JSX.Element {
 
   const submitContractTransaction = async (label: string, request: Record<string, unknown>): Promise<Hex> => {
     const client = walletClient();
+    const txChainId = activeNetwork.chainId;
     pushLog(contractCallPreview(label, request), "info");
     const hash = (await client.writeContract({
       account: activeAccount(),
@@ -493,14 +603,14 @@ export function App(): React.JSX.Element {
       ...request,
     } as unknown as Parameters<typeof client.writeContract>[0])) as Hex;
 
-    pushLog(`${label} submitted`, "info", hash);
+    pushLog(`${label} submitted`, "info", hash, txChainId);
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
     if (receipt.status !== "success") {
-      pushLog(`${label} failed`, "error", hash);
+      pushLog(`${label} failed`, "error", hash, txChainId);
       throw new Error(`${label} failed after submission.`);
     }
 
-    pushLog(`${label} confirmed`, "success", hash);
+    pushLog(`${label} confirmed`, "success", hash, txChainId);
     return hash;
   };
 
@@ -657,8 +767,8 @@ export function App(): React.JSX.Element {
     const token = requireAddress(grantForm.token, "Grant token");
     const paymentToken = optionalPaymentToken(grantForm.paymentToken);
     const [amount, price] = await Promise.all([
-      parseErc20Amount(grantForm.amount, token, "Amount"),
-      parsePaymentAmount(grantForm.price, paymentToken, "Price"),
+      parseErc20Amount(publicClient, grantForm.amount, token, "Amount"),
+      parsePaymentAmount(publicClient, grantForm.price, paymentToken, "Price"),
     ]);
     const expiry = uintInput(grantForm.expiry, "Expiry");
     const vestingCliff = uintInput(grantForm.vestingCliff, "Vesting cliff");
@@ -749,7 +859,7 @@ export function App(): React.JSX.Element {
     if (grantSnapshot.address.toLowerCase() !== grant.toLowerCase()) throw new Error("Reload the grant after changing the address.");
     if (isZeroAddress(grantSnapshot.paymentToken)) throw new Error("Selected grant has no payment token.");
 
-    const amount = await parseErc20Amount(paymentApproval, grantSnapshot.paymentToken, "Payment approval");
+    const amount = await parseErc20Amount(publicClient, paymentApproval, grantSnapshot.paymentToken, "Payment approval");
     await submitContractTransaction(
       "Payment approval",
       buildErc20Approval({ token: grantSnapshot.paymentToken, spender: grantSnapshot.address, amount }),
@@ -762,7 +872,7 @@ export function App(): React.JSX.Element {
       grantSnapshot && grantSnapshot.address.toLowerCase() === grant.toLowerCase()
         ? grantSnapshot
         : await readGrantState(publicClient, grant);
-    const amount = await parseErc20Amount(settleAmount, snapshot.token, "Settle amount");
+    const amount = await parseErc20Amount(publicClient, settleAmount, snapshot.token, "Settle amount");
     await submitContractTransaction("Grant settlement", {
       address: grant,
       abi: tokenGrantAbi,
@@ -858,7 +968,7 @@ export function App(): React.JSX.Element {
     const shareToken = boardroomSnapshot?.address.toLowerCase() === boardroom.toLowerCase()
       ? boardroomSnapshot.shareToken
       : (await readBoardroomState(publicClient, boardroom)).shareToken;
-    const amount = await parseErc20Amount(boardroomMintAmount, shareToken, "Mint amount");
+    const amount = await parseErc20Amount(publicClient, boardroomMintAmount, shareToken, "Mint amount");
     await submitContractTransaction("Share mint", buildBoardroomMintTransaction({ boardroom, to, amount }));
     await refreshBoardroom(boardroom);
   };
@@ -868,8 +978,8 @@ export function App(): React.JSX.Element {
     const holder = requireAddress(boardroomGrantForm.holder, "Grant holder");
     const paymentToken = optionalPaymentToken(boardroomGrantForm.paymentToken);
     const [amount, price] = await Promise.all([
-      parseErc20Amount(boardroomGrantForm.amount, boardroomSnapshot.shareToken, "Grant amount"),
-      parsePaymentAmount(boardroomGrantForm.price, paymentToken, "Grant price"),
+      parseErc20Amount(publicClient, boardroomGrantForm.amount, boardroomSnapshot.shareToken, "Grant amount"),
+      parsePaymentAmount(publicClient, boardroomGrantForm.price, paymentToken, "Grant price"),
     ]);
     const expiry = uintInput(boardroomGrantForm.expiry, "Grant expiry");
     const vestingCliff = uintInput(boardroomGrantForm.vestingCliff, "Grant vesting cliff");
@@ -991,9 +1101,9 @@ export function App(): React.JSX.Element {
   const fixedPriceSaleTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomFixedPriceSaleTerms> => {
     const paymentToken = requireAddress(fixedPriceSaleForm.paymentToken, "Payment token");
     const [shareAmount, price, maxPerBuyer] = await Promise.all([
-      parseErc20Amount(fixedPriceSaleForm.shareAmount, boardroom.shareToken, "Sale share amount"),
-      parseErc20Amount(fixedPriceSaleForm.price, paymentToken, "Sale price"),
-      parseErc20Amount(fixedPriceSaleForm.maxPerBuyer, boardroom.shareToken, "Max per buyer"),
+      parseErc20Amount(publicClient, fixedPriceSaleForm.shareAmount, boardroom.shareToken, "Sale share amount"),
+      parseErc20Amount(publicClient, fixedPriceSaleForm.price, paymentToken, "Sale price"),
+      parseErc20Amount(publicClient, fixedPriceSaleForm.maxPerBuyer, boardroom.shareToken, "Max per buyer"),
     ]);
 
     return {
@@ -1081,11 +1191,11 @@ export function App(): React.JSX.Element {
     const quoteToLpBps = uintInput(migratingCurveForm.quoteToLpBps, "Quote-to-LP bps");
     if (quoteToLpBps > 10_000n) throw new Error("Quote-to-LP bps must be at most 10000.");
     const [saleSupply, migrationSupply, basePrice, slope, graduationQuoteTarget] = await Promise.all([
-      parseErc20Amount(migratingCurveForm.saleSupply, boardroom.shareToken, "Curve sale supply"),
-      parseErc20Amount(migratingCurveForm.migrationSupply, boardroom.shareToken, "Curve migration supply"),
-      parseErc20Amount(migratingCurveForm.basePrice, quoteToken, "Curve base price"),
-      parseErc20Amount(migratingCurveForm.slope, quoteToken, "Curve slope"),
-      parseErc20Amount(migratingCurveForm.graduationQuoteTarget, quoteToken, "Graduation quote target"),
+      parseErc20Amount(publicClient, migratingCurveForm.saleSupply, boardroom.shareToken, "Curve sale supply"),
+      parseErc20Amount(publicClient, migratingCurveForm.migrationSupply, boardroom.shareToken, "Curve migration supply"),
+      parseErc20Amount(publicClient, migratingCurveForm.basePrice, quoteToken, "Curve base price"),
+      parseErc20Amount(publicClient, migratingCurveForm.slope, quoteToken, "Curve slope"),
+      parseErc20Amount(publicClient, migratingCurveForm.graduationQuoteTarget, quoteToken, "Graduation quote target"),
     ]);
 
     return {
@@ -1170,8 +1280,8 @@ export function App(): React.JSX.Element {
         ? migratingCurveSnapshot
         : await readMigratingBondingCurveState(publicClient, curve);
     const [minShareLiquidity, minQuoteLiquidity] = await Promise.all([
-      parseErc20Amount(curveMigrationForm.minShareLiquidity, curveState.shareToken, "Minimum share liquidity"),
-      parseErc20Amount(curveMigrationForm.minQuoteLiquidity, curveState.quoteToken, "Minimum quote liquidity"),
+      parseErc20Amount(publicClient, curveMigrationForm.minShareLiquidity, curveState.shareToken, "Minimum share liquidity"),
+      parseErc20Amount(publicClient, curveMigrationForm.minQuoteLiquidity, curveState.quoteToken, "Minimum quote liquidity"),
     ]);
     await submitContractTransaction(
       "Migrating curve migration",
@@ -1190,10 +1300,10 @@ export function App(): React.JSX.Element {
   const lockedLiquidityTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomLockedLiquidityTerms> => {
     const quoteToken = requireAddress(lockedLiquidityForm.quoteToken, "Quote token");
     const [shareAmountDesired, quoteAmountDesired, shareAmountMin, quoteAmountMin] = await Promise.all([
-      parseErc20Amount(lockedLiquidityForm.shareAmountDesired, boardroom.shareToken, "Share amount desired"),
-      parseErc20Amount(lockedLiquidityForm.quoteAmountDesired, quoteToken, "Quote amount desired"),
-      parseErc20Amount(lockedLiquidityForm.shareAmountMin, boardroom.shareToken, "Share amount minimum"),
-      parseErc20Amount(lockedLiquidityForm.quoteAmountMin, quoteToken, "Quote amount minimum"),
+      parseErc20Amount(publicClient, lockedLiquidityForm.shareAmountDesired, boardroom.shareToken, "Share amount desired"),
+      parseErc20Amount(publicClient, lockedLiquidityForm.quoteAmountDesired, quoteToken, "Quote amount desired"),
+      parseErc20Amount(publicClient, lockedLiquidityForm.shareAmountMin, boardroom.shareToken, "Share amount minimum"),
+      parseErc20Amount(publicClient, lockedLiquidityForm.quoteAmountMin, quoteToken, "Quote amount minimum"),
     ]);
 
     return {
@@ -1274,8 +1384,8 @@ export function App(): React.JSX.Element {
         ? lockedLiquiditySnapshot
         : await readLockedLiquidityState(publicClient, locker);
     const [amountAMin, amountBMin] = await Promise.all([
-      parseErc20Amount(lockedLiquidityExitForm.amountAMin, lockerState.tokenA, "Exit amount A minimum"),
-      parseErc20Amount(lockedLiquidityExitForm.amountBMin, lockerState.tokenB, "Exit amount B minimum"),
+      parseErc20Amount(publicClient, lockedLiquidityExitForm.amountAMin, lockerState.tokenA, "Exit amount A minimum"),
+      parseErc20Amount(publicClient, lockedLiquidityExitForm.amountBMin, lockerState.tokenB, "Exit amount B minimum"),
     ]);
     await submitContractTransaction(
       "Locked-liquidity exit",
@@ -1324,8 +1434,8 @@ export function App(): React.JSX.Element {
       ? requireAddress(windDownForm.redeemRecipient, "Redemption recipient")
       : activeAccount();
     const [shares, minAmountsOut] = await Promise.all([
-      parseErc20Amount(windDownForm.redeemShares, boardroom.shareToken, "Redeem shares"),
-      parseMinAmountsOut(windDownForm.minAmountsOut, boardroom.redeemableAssets),
+      parseErc20Amount(publicClient, windDownForm.redeemShares, boardroom.shareToken, "Redeem shares"),
+      parseMinAmountsOut(publicClient, windDownForm.minAmountsOut, boardroom.redeemableAssets),
     ]);
     await submitContractTransaction(
       "Boardroom share redemption",
@@ -1396,7 +1506,7 @@ export function App(): React.JSX.Element {
 
     const results = [boardroomResult, grantResult, distributionResult, lockerResult, poolResult] satisfies DiscoveryResult<unknown>[];
     const next: DiscoverySnapshot = {
-      chainId: ACTIVE_CHAIN_ID,
+      chainId: activeNetwork.chainId,
       loadedFor: wallet.account,
       fromBlock: discovery.fromBlock !== undefined && discovery.fromBlock < fromBlock ? discovery.fromBlock : fromBlock,
       toBlock,
@@ -1481,9 +1591,12 @@ export function App(): React.JSX.Element {
     <div className="min-h-svh text-zinc-100">
       <AppHeader
         wallet={wallet}
-        chainId={ACTIVE_CHAIN_ID}
-        chainName={ACTIVE_CHAIN_NAME}
+        chainId={activeNetwork.chainId}
+        chainName={activeNetwork.name}
+        networks={PLEDGE_CASH_NETWORKS}
+        onNetworkChange={selectNetwork}
         connectWallet={connectWallet}
+        pendingAction={pendingAction}
         runAction={runAction}
         switchChain={switchChain}
       />
@@ -1491,7 +1604,7 @@ export function App(): React.JSX.Element {
       <main className="grid min-h-[calc(100svh-64px)] grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)]">
         <aside className="grid content-start gap-4 border-b border-zinc-800 bg-zinc-950/35 p-4 lg:border-b-0 lg:border-r">
           <DeploymentPanel
-            chainId={ACTIVE_CHAIN_ID}
+            chainId={activeNetwork.chainId}
             creationFee={creationFee}
             deployment={deployment}
             factorySnapshot={factorySnapshot}
@@ -1558,6 +1671,7 @@ export function App(): React.JSX.Element {
               setForm={setSwapForm}
               tokenList={swapTokenList}
               tokenListLoading={swapTokenListLoading}
+              wrappedNativeSymbol={activeNetwork.wrappedNativeSymbol}
               addLiquidity={addLiquidity}
               approveLiquidityTokenA={approveLiquidityTokenA}
               approveLiquidityTokenB={approveLiquidityTokenB}
