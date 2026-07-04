@@ -500,9 +500,9 @@ export function App(): React.JSX.Element {
     const requestChainId = activeNetwork.chainId;
     setSwapTokenListLoading(true);
     try {
-      const seed = productSeed ?? await loadProductBoardroomSeed(requestChainId);
+      const seed = await loadProductBoardroomSeed(requestChainId);
       if (!isCurrentNetworkRequest(requestVersion)) return;
-      if (!productSeed) setProductSeed(seed);
+      setProductSeed(seed);
       const next = await readSwapTokenList(publicClient, deployment, seed, wallet.account, { wrappedNativeLabel: activeNetwork.wrappedNativeSymbol });
       if (!isCurrentNetworkRequest(requestVersion)) return;
       setSwapTokenList(next);
@@ -521,7 +521,7 @@ export function App(): React.JSX.Element {
     } finally {
       if (isCurrentNetworkRequest(requestVersion)) setSwapTokenListLoading(false);
     }
-  }, [activeNetwork.chainId, activeNetwork.wrappedNativeSymbol, deployment, isCurrentNetworkRequest, productSeed, publicClient, pushLog, wallet.account]);
+  }, [activeNetwork.chainId, activeNetwork.wrappedNativeSymbol, deployment, isCurrentNetworkRequest, publicClient, pushLog, wallet.account]);
 
   useEffect(() => {
     if (activeView !== "swap" || !swapSeedLoaded) return;
