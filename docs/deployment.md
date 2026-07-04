@@ -46,6 +46,13 @@ Start from `.env.example` and provide a funded deployment key when broadcasting:
 cp .env.example .env
 ```
 
+Required for dry runs and broadcasts:
+
+```sh
+WRAPPED_NATIVE_ADDRESS=0x...
+PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0x...
+```
+
 Required for broadcast:
 
 ```sh
@@ -58,11 +65,9 @@ Optional:
 HYPEREVM_TESTNET_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
 TOKEN_GRANT_CREATION_FEE_WEI=100000000000000000
 AMM_PROTOCOL_FEE_RECIPIENT=
-WRAPPED_NATIVE_ADDRESS=0x...
 HYPEREVM_GAS_PRICE_WEI=
 GAS_ESTIMATE_MULTIPLIER=200
 CREATE2_FACTORY_ADDRESS=0x4e59b44847b379578588920cA78FbF26c0B4956C
-PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0x...
 PLEDGE_CASH_DETERMINISTIC_DEPLOYER=
 ```
 
@@ -163,6 +168,7 @@ and one halted grant:
 ```sh
 cd packages/contracts
 PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
 WRAPPED_NATIVE_ADDRESS=0x... \
 WRITE_DEPLOYMENT_STATE=true \
 forge script script/Deploy.s.sol:Deploy \
