@@ -57,7 +57,7 @@ import {
   type LockedLiquidityState,
   type MigratingBondingCurveState,
 } from "@pledge.cash/sdk";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Hex, PublicClient } from "viem";
 import { TabButton } from "./components/shell";
 import { BoardroomPanel } from "./features/boardrooms/boardroom-panel";
@@ -248,6 +248,7 @@ export function App(): React.JSX.Element {
   const { clearLogs, logs, pendingAction, pushLog, runAction } = useActionRunner();
   const [selectedChainId, setSelectedChainId] = useState(() => initialSelectedNetwork().chainId);
   const activeNetwork = useMemo(() => networkForChainId(selectedChainId), [selectedChainId]);
+  const networkRequestVersion = useRef(0);
   const publicClient = useMemo(() => createPledgeCashPublicClient(activeNetwork), [activeNetwork]);
   const chain = activeNetwork.chain;
   const generatedDeployment = getPledgeCashDeployment(activeNetwork.chainId);
@@ -352,6 +353,15 @@ export function App(): React.JSX.Element {
   const discoveryKey = discoveryStorageKey(activeNetwork.chainId, wallet.account);
 
   useEffect(() => {
+    networkRequestVersion.current += 1;
+  }, [activeNetwork.chainId]);
+
+  const isCurrentNetworkRequest = useCallback(
+    (version: number): boolean => networkRequestVersion.current === version,
+    [],
+  );
+
+  useEffect(() => {
     persistSelectedNetwork(activeNetwork.chainId);
   }, [activeNetwork.chainId]);
 
@@ -392,26 +402,31 @@ export function App(): React.JSX.Element {
   }, [activeNetwork.chainId]);
 
   const loadProductBoardroom = useCallback(async (): Promise<void> => {
+    const requestVersion = networkRequestVersion.current;
+    const requestChainId = activeNetwork.chainId;
     setProductBoardroomLoading(true);
     setProductBoardroomError(undefined);
     try {
-      const seed = await loadProductBoardroomSeed(activeNetwork.chainId);
+      const seed = await loadProductBoardroomSeed(requestChainId);
+      if (!isCurrentNetworkRequest(requestVersion)) return;
       setProductSeed(seed);
       const address = resolveProductBoardroomAddress(seed);
       if (!address) {
         throw new Error("No product Boardroom address is configured for this chain.");
       }
       const next = await readProductBoardroomDashboard(publicClient, { address, seed });
+      if (!isCurrentNetworkRequest(requestVersion)) return;
       setProductBoardroom(next);
       pushLog(`Loaded product Boardroom ${address}`, "success");
     } catch (error) {
+      if (!isCurrentNetworkRequest(requestVersion)) return;
       const message = errorMessage(error);
       setProductBoardroomError(message);
       pushLog(message, "error");
     } finally {
-      setProductBoardroomLoading(false);
+      if (isCurrentNetworkRequest(requestVersion)) setProductBoardroomLoading(false);
     }
-  }, [activeNetwork.chainId, publicClient, pushLog]);
+  }, [activeNetwork.chainId, isCurrentNetworkRequest, publicClient, pushLog]);
 
   useEffect(() => {
     setDiscovery(loadDiscoverySnapshot(discoveryKey));
@@ -439,7 +454,9 @@ export function App(): React.JSX.Element {
         setSwapForm((current) => withSwapSeedDefaults(current, seed, deployment));
         setLiquidityForm((current) => withLiquiditySeedDefaults(current, seed, deployment));
       })
-      .catch((error) => pushLog(errorMessage(error), "error"))
+      .catch((error) => {
+        if (!cancelled) pushLog(errorMessage(error), "error");
+      })
       .finally(() => {
         if (!cancelled) setSwapSeedLoaded(true);
       });
@@ -476,11 +493,15 @@ export function App(): React.JSX.Element {
   }, [deployment, liquidityForm.tokenA, liquidityForm.tokenB, liquidityForm.useNative, removeLiquidityForm.useNative, swapForm.tokenIn, swapForm.tokenOut, swapForm.useNative]);
 
   const loadSwapTokens = useCallback(async (): Promise<void> => {
+    const requestVersion = networkRequestVersion.current;
+    const requestChainId = activeNetwork.chainId;
     setSwapTokenListLoading(true);
     try {
-      const seed = productSeed ?? await loadProductBoardroomSeed(activeNetwork.chainId);
+      const seed = productSeed ?? await loadProductBoardroomSeed(requestChainId);
+      if (!isCurrentNetworkRequest(requestVersion)) return;
       if (!productSeed) setProductSeed(seed);
       const next = await readSwapTokenList(publicClient, deployment, seed, wallet.account, { wrappedNativeLabel: activeNetwork.wrappedNativeSymbol });
+      if (!isCurrentNetworkRequest(requestVersion)) return;
       setSwapTokenList(next);
       setSwapForm((current) => withSwapSeedDefaults(current, seed, deployment));
       setLiquidityForm((current) => withLiquiditySeedDefaults(current, seed, deployment));
@@ -491,12 +512,13 @@ export function App(): React.JSX.Element {
       }
     } catch (error) {
       const message = errorMessage(error);
+      if (!isCurrentNetworkRequest(requestVersion)) return;
       setSwapTokenList({ tokens: [], pools: [], loaded: true, error: message });
       pushLog(message, "error");
     } finally {
-      setSwapTokenListLoading(false);
+      if (isCurrentNetworkRequest(requestVersion)) setSwapTokenListLoading(false);
     }
-  }, [activeNetwork.chainId, activeNetwork.wrappedNativeSymbol, deployment, productSeed, publicClient, pushLog, wallet.account]);
+  }, [activeNetwork.chainId, activeNetwork.wrappedNativeSymbol, deployment, isCurrentNetworkRequest, productSeed, publicClient, pushLog, wallet.account]);
 
   useEffect(() => {
     if (activeView !== "swap" || !swapSeedLoaded) return;
