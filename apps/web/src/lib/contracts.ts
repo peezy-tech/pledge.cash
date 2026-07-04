@@ -100,7 +100,7 @@ export function createPledgeCashNetworks(env: PledgeCashNetworkEnv): PledgeCashN
   const initialChainId = numericEnv(env.VITE_PLEDGE_CASH_CHAIN_ID);
   const legacyRpcUrl = env.VITE_PLEDGE_CASH_RPC_URL;
   const legacyChainName = env.VITE_PLEDGE_CASH_CHAIN_NAME;
-  const legacyExplorerUrl = blankToUndefined(env.VITE_PLEDGE_CASH_EXPLORER_URL);
+  const legacyExplorerUrl = env.VITE_PLEDGE_CASH_EXPLORER_URL;
   const legacyExplorerName = env.VITE_PLEDGE_CASH_EXPLORER_NAME;
   const legacyWrappedNativeSymbol = env.VITE_PLEDGE_CASH_WRAPPED_NATIVE_SYMBOL;
   const legacyProfileChainId = initialChainId ?? hyperEvmTestnet.id;
@@ -260,10 +260,6 @@ function numericString(value: string | null | undefined): number | undefined {
   if (!value) return undefined;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) ? parsed : undefined;
-}
-
-function blankToUndefined(value: string | undefined): string | undefined {
-  return value?.trim() ? value : undefined;
 }
 
 function defaultLocalRpcUrl(baseUrl: string | undefined): string {

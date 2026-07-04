@@ -47,6 +47,22 @@ describe("web network profiles", () => {
     expect(custom?.chain.blockExplorers?.default.url).toBe("https://explorer.custom.test");
   });
 
+  test("preserves blank legacy explorer overrides as disabled links", () => {
+    const hyperEvm = createPledgeCashNetworks({
+      VITE_PLEDGE_CASH_EXPLORER_URL: "",
+    }).find((network) => network.chainId === 998);
+    const custom = createPledgeCashNetworks({
+      VITE_PLEDGE_CASH_CHAIN_ID: "424242",
+      VITE_PLEDGE_CASH_RPC_URL: "https://rpc.custom.test",
+      VITE_PLEDGE_CASH_EXPLORER_URL: "",
+    }).find((network) => network.chainId === 424242);
+
+    expect(hyperEvm?.explorerUrl).toBe("");
+    expect(hyperEvm?.chain.blockExplorers).toBeUndefined();
+    expect(custom?.explorerUrl).toBe("");
+    expect(custom?.chain.blockExplorers).toBeUndefined();
+  });
+
   test("can resolve transaction links against the originating chain", () => {
     const hash = "0x00000000000000000000000000000000000000000000000000000000000000aa";
     const hyperEvm = networkForChainId(998);
