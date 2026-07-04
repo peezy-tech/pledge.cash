@@ -10,6 +10,7 @@ export function useRuntimeDeployment(
 
   useEffect(() => {
     let cancelled = false;
+    setRuntimeDeployment(generatedDeployment);
 
     async function loadRuntimeDeployment(): Promise<void> {
       try {
@@ -31,7 +32,7 @@ export function useRuntimeDeployment(
     return () => {
       cancelled = true;
     };
-  }, [chainId]);
+  }, [chainId, generatedDeployment]);
 
   return runtimeDeployment;
 }

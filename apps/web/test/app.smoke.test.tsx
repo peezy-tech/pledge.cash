@@ -182,6 +182,7 @@ describe("web app shell", () => {
 
     expect(html).toContain("pledge.cash");
     expect(html).toContain("Deployment");
+    expect(html).toContain("Local Anvil");
     expect(html).toContain("TokenGrantFactory");
     expect(html).toContain("Ready");
     expect(html).toContain("Direct Grant");

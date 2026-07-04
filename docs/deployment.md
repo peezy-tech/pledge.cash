@@ -186,6 +186,35 @@ bun --cwd packages/contracts test
 cd packages/contracts && forge fmt --check
 ```
 
+## Web Network Selection
+
+The web app can switch between the checked-in HyperEVM testnet, Monad testnet, and a local Anvil profile at runtime.
+The selected chain is stored in browser local storage and can also be opened directly with `?chain=998`, `?chain=10143`,
+or `?chain=31337`.
+
+Local Anvil uses chain id `31337` and reads ignored runtime artifacts from:
+
+- `packages/contracts/deployments/31337.json`
+- `packages/contracts/deployments/31337.seed.json`
+
+Static builds copy those artifacts into the app's `deployments/` directory. Vite dev serves the same files through a
+development middleware so local chain selection works without copying ignored artifacts into `apps/web/public`.
+
+For root-path local browser development, run:
+
+```sh
+bun --cwd apps/web dev
+```
+
+The Local Anvil network defaults to `http://127.0.0.1:8547` in that mode. For a subpath or remote-browser setup where
+the app is served at `/pledge-cash/` and the RPC is reverse-proxied at `/pledge-cash/rpc`, run:
+
+```sh
+bun --cwd apps/web dev:local
+```
+
+Use `VITE_PLEDGE_CASH_LOCAL_RPC_URL` to override the Local Anvil RPC endpoint without changing the testnet profiles.
+
 ## Local Anvil Seed
 
 For a semi-persistent local deployment, run Anvil on chain id `31337`, broadcast

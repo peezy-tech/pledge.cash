@@ -6,7 +6,6 @@ import { ActionButton, ActionRow, AddressLink, Facts, Field, Panel } from "../..
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
-import { WRAPPED_NATIVE_SYMBOL } from "../../lib/contracts";
 import {
   defaultSwapDeadline,
   formatPoolShareBps,
@@ -45,6 +44,7 @@ type SwapPanelProps = {
   setForm: Dispatch<SetStateAction<SwapForm>>;
   tokenList: SwapTokenListState;
   tokenListLoading: boolean;
+  wrappedNativeSymbol: string;
   addLiquidity: () => Promise<void>;
   approveLiquidityTokenA: () => Promise<void>;
   approveLiquidityTokenB: () => Promise<void>;
@@ -79,6 +79,7 @@ export function SwapPanel({
   setForm,
   tokenList,
   tokenListLoading,
+  wrappedNativeSymbol,
   addLiquidity,
   approveLiquidityTokenA,
   approveLiquidityTokenB,
@@ -183,6 +184,7 @@ export function SwapPanel({
             otherToken={form.tokenOut}
             tokenCount={tokenList.tokens.length}
             value={form.tokenIn}
+            wrappedNativeSymbol={wrappedNativeSymbol}
             onOpen={() => openSelector("tokenIn")}
           />
           <TokenSelectField
@@ -192,6 +194,7 @@ export function SwapPanel({
             otherToken={form.tokenIn}
             tokenCount={tokenList.tokens.length}
             value={form.tokenOut}
+            wrappedNativeSymbol={wrappedNativeSymbol}
             onOpen={() => openSelector("tokenOut")}
           />
           <TextField form={form} field="amountIn" inputMode="decimal" label="Amount in" setForm={setForm} />
@@ -272,6 +275,7 @@ export function SwapPanel({
             otherToken={liquidityForm.tokenB}
             tokenCount={tokenList.tokens.length}
             value={liquidityForm.tokenA}
+            wrappedNativeSymbol={wrappedNativeSymbol}
             onOpen={() => openSelector("tokenA")}
           />
           <TokenSelectField
@@ -281,6 +285,7 @@ export function SwapPanel({
             otherToken={liquidityForm.tokenA}
             tokenCount={tokenList.tokens.length}
             value={liquidityForm.tokenB}
+            wrappedNativeSymbol={wrappedNativeSymbol}
             onOpen={() => openSelector("tokenB")}
           />
           <TextField form={liquidityForm} field="amountA" inputMode="decimal" label="Amount A" setForm={setLiquidityForm} />
@@ -439,6 +444,7 @@ function TokenSelectField({
   otherToken,
   tokenCount,
   value,
+  wrappedNativeSymbol,
   onOpen,
 }: {
   label: string;
@@ -447,10 +453,11 @@ function TokenSelectField({
   otherToken: string;
   tokenCount: number;
   value: string;
+  wrappedNativeSymbol: string;
   onOpen: () => void;
 }): React.JSX.Element {
   const title = tokenTitle(option, value);
-  const subtitle = tokenSubtitle(option, value);
+  const subtitle = tokenSubtitle(option, value, wrappedNativeSymbol);
   const route = tokenRouteLabel(option, otherToken);
 
   return (
@@ -838,10 +845,10 @@ function tokenTitle(option: SwapTokenOption | undefined, value: string): string 
   return isAddress(value) ? shortTokenAddress(value) : "Select token";
 }
 
-function tokenSubtitle(option: SwapTokenOption | undefined, value: string): string {
+function tokenSubtitle(option: SwapTokenOption | undefined, value: string, wrappedNativeSymbol: string): string {
   if (option?.label && option.symbol && option.label !== option.symbol) return option.label;
   if (isAddress(value)) return shortTokenAddress(value);
-  return `Pools, ${WRAPPED_NATIVE_SYMBOL}, USDC, or address`;
+  return `Pools, ${wrappedNativeSymbol}, USDC, or address`;
 }
 
 function tokenRowSubtitle(token: SwapTokenOption): string {

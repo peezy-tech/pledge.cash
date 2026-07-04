@@ -1,11 +1,12 @@
 import { readFactoryState, type PledgeCashDeployment } from "@pledge.cash/sdk";
 import { useEffect, useState } from "react";
-import { publicClient } from "../lib/contracts";
+import type { PublicClient } from "viem";
 import { errorMessage } from "../lib/forms";
 import type { FactorySnapshot } from "../lib/types";
 import type { PushLog } from "./use-action-runner";
 
 export function useFactorySnapshot(
+  client: PublicClient,
   deployment: PledgeCashDeployment | undefined,
   pushLog: PushLog,
 ): FactorySnapshot {
@@ -15,10 +16,11 @@ export function useFactorySnapshot(
     let cancelled = false;
 
     async function loadFactory(): Promise<void> {
+      setFactorySnapshot({});
       if (!deployment?.tokenGrantFactory) return;
 
       try {
-        const snapshot = await readFactoryState(publicClient, deployment.tokenGrantFactory);
+        const snapshot = await readFactoryState(client, deployment.tokenGrantFactory);
         if (!cancelled) {
           setFactorySnapshot({
             owner: snapshot.owner,
@@ -35,7 +37,7 @@ export function useFactorySnapshot(
     return () => {
       cancelled = true;
     };
-  }, [deployment?.tokenGrantFactory, pushLog]);
+  }, [client, deployment?.tokenGrantFactory, pushLog]);
 
   return factorySnapshot;
 }
