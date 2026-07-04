@@ -162,17 +162,13 @@ contract Deploy is Script {
             return;
         }
 
-        bytes memory initCode =
-            abi.encodePacked(type(PledgeCashDeterministicDeployer).creationCode, abi.encode(state.deployer));
+        bytes memory initCode = type(PledgeCashDeterministicDeployer).creationCode;
         address expectedDeployer = vm.computeCreate2Address(
             PledgeCashDeploymentSalts.deterministicDeployer(), keccak256(initCode), state.create2Factory
         );
         if (expectedDeployer.code.length == 0) {
-            state.deterministicDeployer = new PledgeCashDeterministicDeployer{
-                salt: PledgeCashDeploymentSalts.deterministicDeployer()
-            }(
-                state.deployer
-            );
+            state.deterministicDeployer =
+                new PledgeCashDeterministicDeployer{salt: PledgeCashDeploymentSalts.deterministicDeployer()}();
             if (address(state.deterministicDeployer) != expectedDeployer) {
                 revert DeterministicDeployerMismatch(expectedDeployer, address(state.deterministicDeployer));
             }

@@ -21,7 +21,9 @@ Root protocol contracts are deployed through CREATE3 salts from `PledgeCashDeplo
 `PledgeCashDeterministicDeployer` address is used on each chain, the root protocol addresses are the same even when
 constructor arguments differ by chain, such as the wrapped-native token. The deploy script can deploy the deterministic
 deployer through Foundry's default Arachnid CREATE2 factory (`0x4e59b44847b379578588920cA78FbF26c0B4956C`) or reuse an
-existing deployer from `PLEDGE_CASH_DETERMINISTIC_DEPLOYER`.
+existing deployer from `PLEDGE_CASH_DETERMINISTIC_DEPLOYER`. The deterministic deployer's CREATE2 init code does not
+encode the deployment key, so different funded operators can use the same deployer address on different chains. The
+deployer owner is still set to the broadcaster on each chain and is checked before any root deployment runs.
 
 The registry allows `ProtocolPolicy` for registered pledge.cash protocol targets and `AssetPolicy` for external asset
 operations. The deploy script registers the token grant, distribution, locked-liquidity, and AMM factory targets in
@@ -69,7 +71,7 @@ script as a legacy fallback.
 `CREATE2_FACTORY_ADDRESS` must name the same CREATE2 factory on every deterministic target chain. If a chain does not
 already have the factory deployed, bootstrap or select that factory before broadcasting. Set
 `PLEDGE_CASH_DETERMINISTIC_DEPLOYER` only when a pledge.cash deterministic deployer already exists at the intended
-cross-chain address.
+cross-chain address and its owner is the current broadcaster.
 
 ## Dry Run
 
