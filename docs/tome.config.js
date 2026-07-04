@@ -2,6 +2,9 @@
 export default {
   name: "pledge.cash",
   basePath: process.env.PLEDGE_CASH_DOCS_BASE_PATH ?? "/docs",
+  branding: {
+    powered: false,
+  },
   theme: {
     preset: "editorial",
     mode: "auto",
