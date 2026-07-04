@@ -38,9 +38,9 @@ Paste the grant address into `Grant address` and use `Load`. The app should show
 
 If the holder is not your wallet, your wallet cannot settle the grant unless the holder-right transfer rules move the right to you.
 
-## 3. Read The Vesting Chart
+## 3. Read The Grant Facts
 
-Use the vesting chart to compare total grant size, vested amount, settled amount, and currently settleable amount.
+Use the facts panel to compare `Grant size`, `Claimable`, `Settled`, and `Settleable now`.
 
 Do not rely on the project message alone. The grant contract controls how much can be settled now.
 
@@ -61,7 +61,7 @@ Use `Approve Payment` first, then `Settle`.
 
 ## 6. Understand Issuer Actions
 
-The issuer may be able to halt unvested vesting or withdraw expired tokens. If a grant is halted, inspect the chart and facts again before assuming future vesting will continue.
+The issuer may be able to halt unvested vesting or withdraw expired tokens. If a grant is halted, inspect the facts again before assuming future vesting will continue.
 
 ## 7. Find Grants With Discovery
 
