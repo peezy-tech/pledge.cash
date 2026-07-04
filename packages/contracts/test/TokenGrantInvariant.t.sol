@@ -123,7 +123,7 @@ contract TokenGrantInvariantTest is StdInvariant, Test {
     uint256 internal constant EXPIRY = 3_000;
 
     function setUp() public {
-        factory = new TokenGrantFactory();
+        factory = new TokenGrantFactory(address(this));
         token = new InvariantERC20("Grant Token", "GRANT", 18);
         paymentToken = new InvariantERC20("Payment", "PAY", 6);
 

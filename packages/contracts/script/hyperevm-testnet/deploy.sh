@@ -21,6 +21,8 @@ RPC_URL="${HYPEREVM_TESTNET_RPC_URL:-https://rpc.hyperliquid-testnet.xyz/evm}"
 BROADCAST="${BROADCAST:-0}"
 GAS_ESTIMATE_MULTIPLIER="${GAS_ESTIMATE_MULTIPLIER:-200}"
 GAS_PRICE_WEI="${HYPEREVM_GAS_PRICE_WEI:-}"
+CREATE2_FACTORY_ADDRESS="${CREATE2_FACTORY_ADDRESS:-0x4e59b44847b379578588920cA78FbF26c0B4956C}"
+export CREATE2_FACTORY_ADDRESS
 
 CHAIN_ID="$(cast chain-id --rpc-url "$RPC_URL")"
 if [[ "$CHAIN_ID" != "998" ]]; then
@@ -47,6 +49,8 @@ args=(
   --rpc-url "$RPC_URL"
   --chain 998
   --legacy
+  --always-use-create-2-factory
+  --create2-deployer "$CREATE2_FACTORY_ADDRESS"
   --gas-estimate-multiplier "$GAS_ESTIMATE_MULTIPLIER"
   --with-gas-price "$GAS_PRICE_WEI"
 )

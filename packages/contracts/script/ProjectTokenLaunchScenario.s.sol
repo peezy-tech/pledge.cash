@@ -83,8 +83,8 @@ contract ProjectTokenLaunchScenario is Script {
         state.nonce = nonce;
         state.policyRegistry = new BoardroomPolicyRegistry(owner);
         state.protocolPolicy = new ProtocolPolicy(owner);
-        state.tokenGrantFactory = new TokenGrantFactory();
-        state.ammFactory = new AmmFactory();
+        state.tokenGrantFactory = new TokenGrantFactory(owner);
+        state.ammFactory = new AmmFactory(owner);
         state.wrappedHype = new WETH();
         state.assetPolicy = new AssetPolicy(owner, address(state.wrappedHype));
         state.ammRouter = new AmmRouter(address(state.ammFactory), address(state.wrappedHype));

@@ -135,7 +135,7 @@ contract AmmTest is Test {
     address internal protocolFeeRecipient = address(0xFEE);
 
     function setUp() public {
-        factory = new AmmFactory();
+        factory = new AmmFactory(address(this));
         wrappedNative = new WETH();
         router = new AmmRouter(address(factory), address(wrappedNative));
         tokenA = new AmmTestERC20("Token A", "TKNA", 18);
@@ -171,6 +171,9 @@ contract AmmTest is Test {
 
     function testFactorySetsProtocolFeeRecipientOnce() public {
         assertEq(factory.feeManager(), address(this));
+
+        vm.expectRevert(AmmFactory.ZeroAddress.selector);
+        new AmmFactory(address(0));
 
         vm.prank(trader);
         vm.expectRevert(AmmFactory.OnlyFeeManager.selector);

@@ -7,6 +7,10 @@ export type PledgeCashDeployment = {
   chainId: number;
   status?: string;
   reason?: string;
+  deterministicDeployment?: boolean;
+  deterministicDeploymentVersion?: string;
+  deterministicDeployer?: Address;
+  create2Factory?: Address;
   boardroomStatus?: string;
   boardroomReason?: string;
   boardroomFactory?: Address;
@@ -48,7 +52,13 @@ export type PledgeCashDeployment = {
 export const ammFactoryAbi = [
   {
     "type": "constructor",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "feeManager_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
     "stateMutability": "nonpayable"
   },
   {
@@ -9344,7 +9354,13 @@ export const tokenGrantAbi = [
 export const tokenGrantFactoryAbi = [
   {
     "type": "constructor",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "owner_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
     "stateMutability": "nonpayable"
   },
   {
@@ -10199,6 +10215,11 @@ export const tokenGrantFactoryAbi = [
         "internalType": "uint256"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidOwner",
+    "inputs": []
   },
   {
     "type": "error",

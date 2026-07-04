@@ -119,6 +119,21 @@ if field_exists tokenGrantLogic; then
   expect_address_equal "TokenGrantFactory tokenGrantLogic" "$token_grant_logic" "$actual_logic"
 fi
 
+if field_exists deterministicDeployment; then
+  expect_equal "deterministic deployment flag" "true" "$(field deterministicDeployment)"
+  require_field deterministicDeploymentVersion
+  require_field deterministicDeployer
+  require_field create2Factory
+
+  deterministic_deployer="$(field deterministicDeployer)"
+  require_code "PledgeCashDeterministicDeployer" "$deterministic_deployer"
+
+  if field_exists deployer; then
+    actual_deterministic_owner="$(call_address "$deterministic_deployer" "owner()(address)")"
+    expect_address_equal "PledgeCashDeterministicDeployer owner" "$(field deployer)" "$actual_deterministic_owner"
+  fi
+fi
+
 boardroom_status="$(field boardroomStatus)"
 skip_boardroom_verification=0
 if [[ "$boardroom_status" == "pending" ]]; then

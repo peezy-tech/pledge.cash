@@ -10,18 +10,27 @@ import {BoardroomFactory} from "../src/BoardroomFactory.sol";
 import {BoardroomPolicyRegistry} from "../src/BoardroomPolicyRegistry.sol";
 import {DistributionFactory} from "../src/DistributionFactory.sol";
 import {LockedLiquidityFactory} from "../src/LockedLiquidityFactory.sol";
+import {PledgeCashDeploymentSalts} from "../src/PledgeCashDeploymentSalts.sol";
+import {PledgeCashDeterministicDeployer} from "../src/PledgeCashDeterministicDeployer.sol";
 import {ProtocolPolicy} from "../src/ProtocolPolicy.sol";
 import {TokenGrantFactory} from "../src/TokenGrantFactory.sol";
 
 contract Deploy is Script {
     using stdJson for string;
 
+    address internal constant DEFAULT_CREATE2_FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
+
     error MissingWrappedNativeAddress();
+    error MissingDeterministicDeployer(address deterministicDeployer);
+    error DeterministicDeployerMismatch(address expected, address actual);
+    error DeterministicDeployerOwnerMismatch(address expected, address actual);
 
     struct DeployState {
         address deployer;
+        address create2Factory;
         address wrappedNative;
         address ammProtocolFeeRecipient;
+        PledgeCashDeterministicDeployer deterministicDeployer;
         BoardroomPolicyRegistry boardroomPolicyRegistry;
         ProtocolPolicy protocolPolicy;
         AssetPolicy assetPolicy;
@@ -63,21 +72,133 @@ contract Deploy is Script {
     }
 
     function _deployContracts(DeployState memory state) internal {
-        state.boardroomPolicyRegistry = new BoardroomPolicyRegistry(state.deployer);
-        state.protocolPolicy = new ProtocolPolicy(state.deployer);
-        state.assetPolicy = new AssetPolicy(state.deployer, state.wrappedNative);
-        state.tokenGrantFactory = new TokenGrantFactory();
-        state.ammFactory = new AmmFactory();
+        _ensureDeterministicDeployer(state);
+
+        state.boardroomPolicyRegistry = BoardroomPolicyRegistry(
+            _deployDeterministic(
+                state,
+                PledgeCashDeploymentSalts.boardroomPolicyRegistry(),
+                abi.encodePacked(type(BoardroomPolicyRegistry).creationCode, abi.encode(state.deployer))
+            )
+        );
+        state.protocolPolicy = ProtocolPolicy(
+            _deployDeterministic(
+                state,
+                PledgeCashDeploymentSalts.protocolPolicy(),
+                abi.encodePacked(type(ProtocolPolicy).creationCode, abi.encode(state.deployer))
+            )
+        );
+        state.assetPolicy = AssetPolicy(
+            _deployDeterministic(
+                state,
+                PledgeCashDeploymentSalts.assetPolicy(),
+                abi.encodePacked(type(AssetPolicy).creationCode, abi.encode(state.deployer, state.wrappedNative))
+            )
+        );
+        state.tokenGrantFactory = TokenGrantFactory(
+            _deployDeterministic(
+                state,
+                PledgeCashDeploymentSalts.tokenGrantFactory(),
+                abi.encodePacked(type(TokenGrantFactory).creationCode, abi.encode(state.deployer))
+            )
+        );
+        state.ammFactory = AmmFactory(
+            _deployDeterministic(
+                state,
+                PledgeCashDeploymentSalts.ammFactory(),
+                abi.encodePacked(type(AmmFactory).creationCode, abi.encode(state.deployer))
+            )
+        );
 
         state.ammProtocolFeeRecipient = vm.envOr("AMM_PROTOCOL_FEE_RECIPIENT", address(0));
         if (state.ammProtocolFeeRecipient != address(0)) {
-            state.ammFactory.setProtocolFeeRecipient(state.ammProtocolFeeRecipient);
+            _configureAmmProtocolFeeRecipient(state.ammFactory, state.ammProtocolFeeRecipient);
         }
 
-        state.ammRouter = new AmmRouter(address(state.ammFactory), state.wrappedNative);
-        state.lockedLiquidityFactory = new LockedLiquidityFactory(address(state.ammRouter));
-        state.distributionFactory = new DistributionFactory(address(state.lockedLiquidityFactory));
-        state.boardroomFactory = new BoardroomFactory(address(state.boardroomPolicyRegistry), state.wrappedNative);
+        state.ammRouter = AmmRouter(
+            payable(_deployDeterministic(
+                    state,
+                    PledgeCashDeploymentSalts.ammRouter(),
+                    abi.encodePacked(
+                        type(AmmRouter).creationCode, abi.encode(address(state.ammFactory), state.wrappedNative)
+                    )
+                ))
+        );
+        state.lockedLiquidityFactory = LockedLiquidityFactory(
+            _deployDeterministic(
+                state,
+                PledgeCashDeploymentSalts.lockedLiquidityFactory(),
+                abi.encodePacked(type(LockedLiquidityFactory).creationCode, abi.encode(address(state.ammRouter)))
+            )
+        );
+        state.distributionFactory = DistributionFactory(
+            _deployDeterministic(
+                state,
+                PledgeCashDeploymentSalts.distributionFactory(),
+                abi.encodePacked(
+                    type(DistributionFactory).creationCode, abi.encode(address(state.lockedLiquidityFactory))
+                )
+            )
+        );
+        state.boardroomFactory = BoardroomFactory(
+            _deployDeterministic(
+                state,
+                PledgeCashDeploymentSalts.boardroomFactory(),
+                abi.encodePacked(
+                    type(BoardroomFactory).creationCode,
+                    abi.encode(address(state.boardroomPolicyRegistry), state.wrappedNative)
+                )
+            )
+        );
+    }
+
+    function _ensureDeterministicDeployer(DeployState memory state) internal {
+        state.create2Factory = vm.envOr("CREATE2_FACTORY_ADDRESS", DEFAULT_CREATE2_FACTORY);
+        address configuredDeployer = vm.envOr("PLEDGE_CASH_DETERMINISTIC_DEPLOYER", address(0));
+        if (configuredDeployer != address(0)) {
+            if (configuredDeployer.code.length == 0) revert MissingDeterministicDeployer(configuredDeployer);
+            state.deterministicDeployer = PledgeCashDeterministicDeployer(configuredDeployer);
+            _requireDeterministicDeployerOwner(state);
+            return;
+        }
+
+        bytes memory initCode =
+            abi.encodePacked(type(PledgeCashDeterministicDeployer).creationCode, abi.encode(state.deployer));
+        address expectedDeployer = vm.computeCreate2Address(
+            PledgeCashDeploymentSalts.deterministicDeployer(), keccak256(initCode), state.create2Factory
+        );
+        if (expectedDeployer.code.length == 0) {
+            state.deterministicDeployer = new PledgeCashDeterministicDeployer{
+                salt: PledgeCashDeploymentSalts.deterministicDeployer()
+            }(
+                state.deployer
+            );
+            if (address(state.deterministicDeployer) != expectedDeployer) {
+                revert DeterministicDeployerMismatch(expectedDeployer, address(state.deterministicDeployer));
+            }
+        } else {
+            state.deterministicDeployer = PledgeCashDeterministicDeployer(expectedDeployer);
+        }
+
+        _requireDeterministicDeployerOwner(state);
+    }
+
+    function _requireDeterministicDeployerOwner(DeployState memory state) internal view {
+        address actualOwner = state.deterministicDeployer.owner();
+        if (actualOwner != state.deployer) revert DeterministicDeployerOwnerMismatch(state.deployer, actualOwner);
+    }
+
+    function _deployDeterministic(DeployState memory state, bytes32 salt, bytes memory initCode)
+        internal
+        returns (address)
+    {
+        return state.deterministicDeployer.deploy(salt, initCode);
+    }
+
+    function _configureAmmProtocolFeeRecipient(AmmFactory ammFactory, address recipient) internal {
+        address currentRecipient = ammFactory.protocolFeeRecipient();
+        if (currentRecipient == recipient) return;
+        ammFactory.setProtocolFeeRecipient(recipient);
     }
 
     function _configurePolicies(DeployState memory state) internal {
@@ -118,6 +239,10 @@ contract Deploy is Script {
     }
 
     function _serializeAddresses(string memory json, DeployState memory state) internal {
+        json.serialize("deterministicDeployment", true);
+        json.serialize("deterministicDeploymentVersion", PledgeCashDeploymentSalts.version());
+        json.serialize("create2Factory", state.create2Factory);
+        json.serialize("deterministicDeployer", address(state.deterministicDeployer));
         json.serialize("boardroomPolicyRegistry", address(state.boardroomPolicyRegistry));
         json.serialize("protocolPolicy", address(state.protocolPolicy));
         json.serialize("assetPolicy", address(state.assetPolicy));
@@ -196,6 +321,10 @@ contract Deploy is Script {
     }
 
     function _logDeployment(DeployState memory state) internal view {
+        console2.log("DeterministicDeployment", true);
+        console2.log("DeterministicDeploymentVersion", PledgeCashDeploymentSalts.version());
+        console2.log("Create2Factory", state.create2Factory);
+        console2.log("DeterministicDeployer", address(state.deterministicDeployer));
         console2.log("BoardroomPolicyRegistry", address(state.boardroomPolicyRegistry));
         console2.log("ProtocolPolicy", address(state.protocolPolicy));
         console2.log("AssetPolicy", address(state.assetPolicy));

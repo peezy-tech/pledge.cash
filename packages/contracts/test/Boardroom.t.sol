@@ -129,7 +129,7 @@ contract BoardroomTest is Test {
         policyRegistry = new BoardroomPolicyRegistry(address(this));
         protocolPolicy = new ProtocolPolicy(address(this));
         assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
-        tokenGrantFactory = new TokenGrantFactory();
+        tokenGrantFactory = new TokenGrantFactory(address(this));
         boardroomFactory = new BoardroomFactory(address(policyRegistry), address(wrappedNative));
         paymentToken = new BoardroomCurrency("Payment", "PAY", 6);
 

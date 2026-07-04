@@ -20,6 +20,7 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomCallPolicy {
     error UnknownGrantToken(uint256 tokenId);
     error OnlyLinkedGrant(address caller);
     error GrantStillOpen(uint256 tokenId);
+    error InvalidOwner();
     error InvalidCreationFeePayment(uint256 expected, uint256 actual);
     error UnexpectedTokenBalanceChange(address token, uint256 expected, uint256 actual);
 
@@ -43,8 +44,9 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomCallPolicy {
     event CreationFeeSet(uint256 amount);
     event CreationFeePaid(address indexed payer, address indexed recipient, uint256 amount);
 
-    constructor() {
-        _initializeOwner(msg.sender);
+    constructor(address owner_) {
+        if (owner_ == address(0)) revert InvalidOwner();
+        _initializeOwner(owner_);
         tokenGrantLogic = address(new TokenGrant());
     }
 

@@ -22,7 +22,7 @@ contract TokenGrantForkTest is Test {
 
     function setUp() public {
         if (_hasMainnetTokens()) {
-            factory = new TokenGrantFactory();
+            factory = new TokenGrantFactory(address(this));
         }
     }
 

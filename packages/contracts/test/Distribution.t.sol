@@ -133,7 +133,7 @@ contract DistributionTest is Test {
         protocolPolicy = new ProtocolPolicy(address(this));
         assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
         boardroomFactory = new BoardroomFactory(address(policyRegistry), address(wrappedNative));
-        ammFactory = new AmmFactory();
+        ammFactory = new AmmFactory(address(this));
         ammRouter = new AmmRouter(address(ammFactory), address(wrappedNative));
         lockedLiquidityFactory = new LockedLiquidityFactory(address(ammRouter));
         distributionFactory = new DistributionFactory(address(lockedLiquidityFactory));

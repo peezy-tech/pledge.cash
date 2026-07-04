@@ -11,10 +11,17 @@ migrating bonding curve, AMM, and locked-liquidity primitives.
 - Wrapper: `packages/contracts/script/hyperevm-testnet/deploy.sh`
 - Artifact: `packages/contracts/deployments/998.json`
 
-The deploy script creates one `BoardroomPolicyRegistry`, one `ProtocolPolicy`, one `AssetPolicy`, one
+The deploy script creates or reuses one `PledgeCashDeterministicDeployer`, then creates one
+`BoardroomPolicyRegistry`, one `ProtocolPolicy`, one `AssetPolicy`, one
 `TokenGrantFactory`, one `DistributionFactory`, one `AmmFactory`, one `AmmRouter`, one `LockedLiquidityFactory`, and one
 `BoardroomFactory`. `WRAPPED_NATIVE_ADDRESS` is required because every Boardroom stores canonical WHYPE and wraps raw
 native HYPE before wind-down redemptions.
+
+Root protocol contracts are deployed through CREATE3 salts from `PledgeCashDeploymentSalts`. As long as the same
+`PledgeCashDeterministicDeployer` address is used on each chain, the root protocol addresses are the same even when
+constructor arguments differ by chain, such as the wrapped-native token. The deploy script can deploy the deterministic
+deployer through Foundry's default Arachnid CREATE2 factory (`0x4e59b44847b379578588920cA78FbF26c0B4956C`) or reuse an
+existing deployer from `PLEDGE_CASH_DETERMINISTIC_DEPLOYER`.
 
 The registry allows `ProtocolPolicy` for registered pledge.cash protocol targets and `AssetPolicy` for external asset
 operations. The deploy script registers the token grant, distribution, locked-liquidity, and AMM factory targets in
@@ -52,10 +59,17 @@ AMM_PROTOCOL_FEE_RECIPIENT=
 WRAPPED_NATIVE_ADDRESS=0x...
 HYPEREVM_GAS_PRICE_WEI=
 GAS_ESTIMATE_MULTIPLIER=200
+CREATE2_FACTORY_ADDRESS=0x4e59b44847b379578588920cA78FbF26c0B4956C
+PLEDGE_CASH_DETERMINISTIC_DEPLOYER=
 ```
 
 `TOKEN_GRANT_CREATION_FEE_WEI` is the preferred variable. `GRANT_CREATION_FEE_WEI` remains supported by the Foundry
 script as a legacy fallback.
+
+`CREATE2_FACTORY_ADDRESS` must name the same CREATE2 factory on every deterministic target chain. If a chain does not
+already have the factory deployed, bootstrap or select that factory before broadcasting. Set
+`PLEDGE_CASH_DETERMINISTIC_DEPLOYER` only when a pledge.cash deterministic deployer already exists at the intended
+cross-chain address.
 
 ## Dry Run
 
@@ -81,6 +95,10 @@ After a broadcast, verify `packages/contracts/deployments/998.json` contains:
 
 - `chainId`
 - `deployer`
+- `deterministicDeployment`
+- `deterministicDeploymentVersion`
+- `create2Factory`
+- `deterministicDeployer`
 - `boardroomPolicyRegistry`
 - `protocolPolicy`
 - `assetPolicy`
@@ -144,6 +162,8 @@ WRITE_DEPLOYMENT_STATE=true \
 forge script script/Deploy.s.sol:Deploy \
   --rpc-url http://127.0.0.1:8547 \
   --chain 31337 \
+  --always-use-create-2-factory \
+  --create2-deployer 0x4e59b44847b379578588920cA78FbF26c0B4956C \
   --broadcast
 
 LOCAL_SEED_NONCE=1 \
