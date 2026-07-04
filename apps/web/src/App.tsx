@@ -171,6 +171,10 @@ export { parseDeployment } from "./lib/deployment";
 
 type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
 type AppView = Tab | "product-boardroom" | "swap";
+type ChainProductSeed = {
+  chainId: number;
+  seed: ProductBoardroomSeed | undefined;
+};
 
 async function parseMinAmountsOut(client: PublicClient, value: string, assets: readonly Address[]): Promise<bigint[]> {
   const trimmed = value.trim();
@@ -249,6 +253,8 @@ export function App(): React.JSX.Element {
   const [selectedChainId, setSelectedChainId] = useState(() => initialSelectedNetwork().chainId);
   const activeNetwork = useMemo(() => networkForChainId(selectedChainId), [selectedChainId]);
   const networkRequestVersion = useRef(0);
+  const activeChainIdRef = useRef(activeNetwork.chainId);
+  activeChainIdRef.current = activeNetwork.chainId;
   const publicClient = useMemo(() => createPledgeCashPublicClient(activeNetwork), [activeNetwork]);
   const chain = activeNetwork.chain;
   const generatedDeployment = getPledgeCashDeployment(activeNetwork.chainId);
@@ -291,7 +297,7 @@ export function App(): React.JSX.Element {
   const [discoveryForm, setDiscoveryForm] = useState<DiscoveryForm>(() => defaultDiscoveryForm());
   const [discovery, setDiscovery] = useState<DiscoverySnapshot>(() => emptyDiscoverySnapshot());
   const [productBoardroom, setProductBoardroom] = useState<ProductBoardroomDashboardState>();
-  const [productSeed, setProductSeed] = useState<ProductBoardroomSeed>();
+  const [productSeedState, setProductSeedState] = useState<ChainProductSeed>();
   const [productBoardroomError, setProductBoardroomError] = useState<string>();
   const [productBoardroomLoading, setProductBoardroomLoading] = useState(false);
   const [swapForm, setSwapForm] = useState<SwapForm>(() => defaultSwapForm());
@@ -304,6 +310,7 @@ export function App(): React.JSX.Element {
   const [swapTokenList, setSwapTokenList] = useState<SwapTokenListState>(() => ({ tokens: [], pools: [], loaded: false }));
   const [swapTokenListLoading, setSwapTokenListLoading] = useState(false);
   const [swapSeedLoaded, setSwapSeedLoaded] = useState(false);
+  const productSeed = productSeedState?.chainId === activeNetwork.chainId ? productSeedState.seed : undefined;
 
   const syncSelectedChainFromLocation = useCallback((): void => {
     const nextChainId = initialSelectedNetwork().chainId;
@@ -370,7 +377,8 @@ export function App(): React.JSX.Element {
   }, [activeNetwork.chainId]);
 
   const isCurrentNetworkRequest = useCallback(
-    (version: number): boolean => networkRequestVersion.current === version,
+    (version: number, chainId: number): boolean =>
+      networkRequestVersion.current === version && activeChainIdRef.current === chainId,
     [],
   );
 
@@ -399,7 +407,7 @@ export function App(): React.JSX.Element {
     setPredictedLockedLiquidity(undefined);
     setDiscovery(emptyDiscoverySnapshot());
     setProductBoardroom(undefined);
-    setProductSeed(undefined);
+    setProductSeedState(undefined);
     setProductBoardroomError(undefined);
     setProductBoardroomLoading(false);
     setSwapForm(defaultSwapForm());
@@ -421,23 +429,23 @@ export function App(): React.JSX.Element {
     setProductBoardroomError(undefined);
     try {
       const seed = await loadProductBoardroomSeed(requestChainId);
-      if (!isCurrentNetworkRequest(requestVersion)) return;
-      setProductSeed(seed);
+      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
+      setProductSeedState({ chainId: requestChainId, seed });
       const address = resolveProductBoardroomAddress(seed);
       if (!address) {
         throw new Error("No product Boardroom address is configured for this chain.");
       }
       const next = await readProductBoardroomDashboard(publicClient, { address, seed });
-      if (!isCurrentNetworkRequest(requestVersion)) return;
+      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
       setProductBoardroom(next);
       pushLog(`Loaded product Boardroom ${address}`, "success");
     } catch (error) {
-      if (!isCurrentNetworkRequest(requestVersion)) return;
+      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
       const message = errorMessage(error);
       setProductBoardroomError(message);
       pushLog(message, "error");
     } finally {
-      if (isCurrentNetworkRequest(requestVersion)) setProductBoardroomLoading(false);
+      if (isCurrentNetworkRequest(requestVersion, requestChainId)) setProductBoardroomLoading(false);
     }
   }, [activeNetwork.chainId, isCurrentNetworkRequest, publicClient, pushLog]);
 
@@ -460,24 +468,26 @@ export function App(): React.JSX.Element {
     }
 
     let cancelled = false;
-    void loadProductBoardroomSeed(activeNetwork.chainId)
+    const requestVersion = networkRequestVersion.current;
+    const requestChainId = activeNetwork.chainId;
+    void loadProductBoardroomSeed(requestChainId)
       .then((seed) => {
-        if (cancelled) return;
-        setProductSeed(seed);
+        if (cancelled || !isCurrentNetworkRequest(requestVersion, requestChainId)) return;
+        setProductSeedState({ chainId: requestChainId, seed });
         setSwapForm((current) => withSwapSeedDefaults(current, seed, deployment));
         setLiquidityForm((current) => withLiquiditySeedDefaults(current, seed, deployment));
       })
       .catch((error) => {
-        if (!cancelled) pushLog(errorMessage(error), "error");
+        if (!cancelled && isCurrentNetworkRequest(requestVersion, requestChainId)) pushLog(errorMessage(error), "error");
       })
       .finally(() => {
-        if (!cancelled) setSwapSeedLoaded(true);
+        if (!cancelled && isCurrentNetworkRequest(requestVersion, requestChainId)) setSwapSeedLoaded(true);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [activeNetwork.chainId, activeView, deployment, productSeed, pushLog, swapSeedLoaded]);
+  }, [activeNetwork.chainId, activeView, deployment, isCurrentNetworkRequest, productSeed, pushLog, swapSeedLoaded]);
 
   useEffect(() => {
     setSwapQuote(undefined);
@@ -511,10 +521,10 @@ export function App(): React.JSX.Element {
     setSwapTokenListLoading(true);
     try {
       const seed = await loadProductBoardroomSeed(requestChainId);
-      if (!isCurrentNetworkRequest(requestVersion)) return;
-      setProductSeed(seed);
+      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
+      setProductSeedState({ chainId: requestChainId, seed });
       const next = await readSwapTokenList(publicClient, deployment, seed, wallet.account, { wrappedNativeLabel: activeNetwork.wrappedNativeSymbol });
-      if (!isCurrentNetworkRequest(requestVersion)) return;
+      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
       setSwapTokenList(next);
       setSwapForm((current) => withSwapSeedDefaults(current, seed, deployment));
       setLiquidityForm((current) => withLiquiditySeedDefaults(current, seed, deployment));
@@ -525,11 +535,11 @@ export function App(): React.JSX.Element {
       }
     } catch (error) {
       const message = errorMessage(error);
-      if (!isCurrentNetworkRequest(requestVersion)) return;
+      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
       setSwapTokenList({ tokens: [], pools: [], loaded: true, error: message });
       pushLog(message, "error");
     } finally {
-      if (isCurrentNetworkRequest(requestVersion)) setSwapTokenListLoading(false);
+      if (isCurrentNetworkRequest(requestVersion, requestChainId)) setSwapTokenListLoading(false);
     }
   }, [activeNetwork.chainId, activeNetwork.wrappedNativeSymbol, deployment, isCurrentNetworkRequest, publicClient, pushLog, wallet.account]);
 
