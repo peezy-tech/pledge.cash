@@ -21,9 +21,9 @@ Root protocol contracts are deployed through CREATE3 salts from `PledgeCashDeplo
 `PledgeCashDeterministicDeployer` address is used on each chain, the root protocol addresses are the same even when
 constructor arguments differ by chain, such as the wrapped-native token. The deploy script can deploy the deterministic
 deployer through Foundry's default Arachnid CREATE2 factory (`0x4e59b44847b379578588920cA78FbF26c0B4956C`) or reuse an
-existing deployer from `PLEDGE_CASH_DETERMINISTIC_DEPLOYER`. The deterministic deployer's CREATE2 init code does not
-encode the deployment key, so different funded operators can use the same deployer address on different chains. The
-deployer owner is still set to the broadcaster on each chain and is checked before any root deployment runs.
+existing deployer from `PLEDGE_CASH_DETERMINISTIC_DEPLOYER`. The deterministic deployer owner is encoded in constructor
+arguments, so it cannot be captured by the first account to deploy the public salt. Use the same
+`PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER` on every chain that should share deterministic root addresses.
 
 The registry allows `ProtocolPolicy` for registered pledge.cash protocol targets and `AssetPolicy` for external asset
 operations. The deploy script registers the token grant, distribution, locked-liquidity, and AMM factory targets in
@@ -62,6 +62,7 @@ WRAPPED_NATIVE_ADDRESS=0x...
 HYPEREVM_GAS_PRICE_WEI=
 GAS_ESTIMATE_MULTIPLIER=200
 CREATE2_FACTORY_ADDRESS=0x4e59b44847b379578588920cA78FbF26c0B4956C
+PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0x...
 PLEDGE_CASH_DETERMINISTIC_DEPLOYER=
 ```
 
@@ -69,9 +70,11 @@ PLEDGE_CASH_DETERMINISTIC_DEPLOYER=
 script as a legacy fallback.
 
 `CREATE2_FACTORY_ADDRESS` must name the same CREATE2 factory on every deterministic target chain. If a chain does not
-already have the factory deployed, bootstrap or select that factory before broadcasting. Set
-`PLEDGE_CASH_DETERMINISTIC_DEPLOYER` only when a pledge.cash deterministic deployer already exists at the intended
-cross-chain address and its owner is the current broadcaster.
+already have the factory deployed, bootstrap or select that factory before broadcasting.
+`PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER` must name the same owner on every chain that should share root addresses, and
+the current script requires it to match the broadcaster. Set `PLEDGE_CASH_DETERMINISTIC_DEPLOYER` only when a
+pledge.cash deterministic deployer already exists at the intended cross-chain address and its owner matches
+`PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER`.
 
 ## Dry Run
 
@@ -101,6 +104,7 @@ After a broadcast, verify `packages/contracts/deployments/998.json` contains:
 - `deterministicDeploymentVersion`
 - `create2Factory`
 - `deterministicDeployer`
+- `deterministicDeployerOwner`
 - `boardroomPolicyRegistry`
 - `protocolPolicy`
 - `assetPolicy`

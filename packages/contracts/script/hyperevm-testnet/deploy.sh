@@ -24,6 +24,11 @@ GAS_PRICE_WEI="${HYPEREVM_GAS_PRICE_WEI:-}"
 CREATE2_FACTORY_ADDRESS="${CREATE2_FACTORY_ADDRESS:-0x4e59b44847b379578588920cA78FbF26c0B4956C}"
 export CREATE2_FACTORY_ADDRESS
 
+if [[ -z "${PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER:-}" ]]; then
+  echo "Set PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER to the deployment key address shared across deterministic target chains." >&2
+  exit 1
+fi
+
 CHAIN_ID="$(cast chain-id --rpc-url "$RPC_URL")"
 if [[ "$CHAIN_ID" != "998" ]]; then
   echo "Refusing to deploy: RPC $RPC_URL reported chain id $CHAIN_ID, expected 998." >&2

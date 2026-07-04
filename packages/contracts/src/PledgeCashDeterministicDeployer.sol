@@ -6,15 +6,16 @@ import {CREATE3} from "solady/utils/CREATE3.sol";
 
 contract PledgeCashDeterministicDeployer is Ownable {
     error EmptyInitCode();
+    error InvalidAddress();
     error InitCodeHashMismatch(bytes32 salt, bytes32 expected, bytes32 actual);
 
     mapping(bytes32 => bytes32) public initCodeHashForSalt;
 
     event DeterministicContractDeployed(bytes32 indexed salt, address indexed deployed, bytes32 initCodeHash);
 
-    /// @dev No constructor args keeps the CREATE2 init-code hash stable across deployment keys.
-    constructor() {
-        _initializeOwner(tx.origin);
+    constructor(address owner_) {
+        if (owner_ == address(0)) revert InvalidAddress();
+        _initializeOwner(owner_);
     }
 
     function deploy(bytes32 salt, bytes calldata initCode) external onlyOwner returns (address deployed) {

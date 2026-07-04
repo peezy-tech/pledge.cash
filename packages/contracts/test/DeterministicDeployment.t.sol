@@ -25,46 +25,39 @@ contract DeterministicDeploymentTest is Test {
     WETH internal wrappedNative;
 
     function setUp() public {
-        vm.prank(address(this), owner);
-        deployer = new PledgeCashDeterministicDeployer();
+        deployer = new PledgeCashDeterministicDeployer(owner);
         wrappedNative = new WETH();
     }
 
-    function testDeployerOwnerComesFromBroadcastOrigin() public {
-        vm.prank(stranger, stranger);
-        PledgeCashDeterministicDeployer strangerDeployer = new PledgeCashDeterministicDeployer();
+    function testDeployerRejectsZeroOwnerAndEmptyInitCode() public {
+        vm.expectRevert(PledgeCashDeterministicDeployer.InvalidAddress.selector);
+        new PledgeCashDeterministicDeployer(address(0));
 
-        assertEq(deployer.owner(), owner);
-        assertEq(strangerDeployer.owner(), stranger);
-    }
-
-    function testDeployerRejectsEmptyInitCode() public {
         vm.prank(owner);
         vm.expectRevert(PledgeCashDeterministicDeployer.EmptyInitCode.selector);
         deployer.deploy(PledgeCashDeploymentSalts.tokenGrantFactory(), "");
     }
 
-    function testDeterministicDeployerCreate2AddressDoesNotDependOnDeploymentKey() public pure {
-        bytes memory initCode = type(PledgeCashDeterministicDeployer).creationCode;
-        bytes memory ownerDependentInitCodeA =
+    function testDeployerOwnerComesFromConstructorNotBroadcastOrigin() public {
+        vm.prank(stranger, stranger);
+        PledgeCashDeterministicDeployer strangerDeployer = new PledgeCashDeterministicDeployer(owner);
+
+        assertEq(deployer.owner(), owner);
+        assertEq(strangerDeployer.owner(), owner);
+    }
+
+    function testDeterministicDeployerCreate2AddressBindsExplicitOwner() public pure {
+        bytes memory initCodeA =
             abi.encodePacked(type(PledgeCashDeterministicDeployer).creationCode, abi.encode(address(0xA11CE)));
-        bytes memory ownerDependentInitCodeB =
+        bytes memory initCodeB =
             abi.encodePacked(type(PledgeCashDeterministicDeployer).creationCode, abi.encode(address(0xB0B)));
         address create2Factory = address(0x4e59b44847b379578588920cA78FbF26c0B4956C);
         bytes32 salt = PledgeCashDeploymentSalts.deterministicDeployer();
 
-        address ownerDependentA = vm.computeCreate2Address(salt, keccak256(ownerDependentInitCodeA), create2Factory);
-        address ownerDependentB = vm.computeCreate2Address(salt, keccak256(ownerDependentInitCodeB), create2Factory);
-        address stable = vm.computeCreate2Address(salt, keccak256(initCode), create2Factory);
+        address ownerA = vm.computeCreate2Address(salt, keccak256(initCodeA), create2Factory);
+        address ownerB = vm.computeCreate2Address(salt, keccak256(initCodeB), create2Factory);
 
-        assertNotEq(ownerDependentA, ownerDependentB);
-        assertNotEq(stable, ownerDependentA);
-        assertNotEq(stable, ownerDependentB);
-        address expected = vm.computeCreate2Address(
-            PledgeCashDeploymentSalts.deterministicDeployer(), keccak256(initCode), create2Factory
-        );
-
-        assertEq(expected, stable);
+        assertNotEq(ownerA, ownerB);
     }
 
     function testOnlyOwnerCanDeployDeterministicContracts() public {

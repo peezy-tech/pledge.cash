@@ -59,6 +59,7 @@ const deploymentFields = [
   ["deterministicDeployment", "boolean"],
   ["deterministicDeploymentVersion", "string"],
   ["deterministicDeployer", "address"],
+  ["deterministicDeployerOwner", "address"],
   ["create2Factory", "address"],
   ["boardroomStatus", "string"],
   ["boardroomReason", "string"],

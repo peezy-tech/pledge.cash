@@ -128,7 +128,10 @@ if field_exists deterministicDeployment; then
   deterministic_deployer="$(field deterministicDeployer)"
   require_code "PledgeCashDeterministicDeployer" "$deterministic_deployer"
 
-  if field_exists deployer; then
+  if field_exists deterministicDeployerOwner; then
+    actual_deterministic_owner="$(call_address "$deterministic_deployer" "owner()(address)")"
+    expect_address_equal "PledgeCashDeterministicDeployer owner" "$(field deterministicDeployerOwner)" "$actual_deterministic_owner"
+  elif field_exists deployer; then
     actual_deterministic_owner="$(call_address "$deterministic_deployer" "owner()(address)")"
     expect_address_equal "PledgeCashDeterministicDeployer owner" "$(field deployer)" "$actual_deterministic_owner"
   fi

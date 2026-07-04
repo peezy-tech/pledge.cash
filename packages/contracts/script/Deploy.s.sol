@@ -21,12 +21,15 @@ contract Deploy is Script {
     address internal constant DEFAULT_CREATE2_FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
     error MissingWrappedNativeAddress();
+    error MissingDeterministicDeployerOwner();
     error MissingDeterministicDeployer(address deterministicDeployer);
     error DeterministicDeployerMismatch(address expected, address actual);
     error DeterministicDeployerOwnerMismatch(address expected, address actual);
+    error DeterministicDeployerOperatorMismatch(address owner, address broadcaster);
 
     struct DeployState {
         address deployer;
+        address deterministicDeployerOwner;
         address create2Factory;
         address wrappedNative;
         address ammProtocolFeeRecipient;
@@ -46,6 +49,11 @@ contract Deploy is Script {
         uint256 deployerKey = vm.envOr("PRIVATE_KEY", uint256(0));
         DeployState memory state;
         state.deployer = deployerKey == 0 ? msg.sender : vm.addr(deployerKey);
+        state.deterministicDeployerOwner = vm.envOr("PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER", address(0));
+        if (state.deterministicDeployerOwner == address(0)) revert MissingDeterministicDeployerOwner();
+        if (state.deterministicDeployerOwner != state.deployer) {
+            revert DeterministicDeployerOperatorMismatch(state.deterministicDeployerOwner, state.deployer);
+        }
         state.wrappedNative = vm.envOr("WRAPPED_NATIVE_ADDRESS", address(0));
         if (state.wrappedNative == address(0)) revert MissingWrappedNativeAddress();
 
@@ -162,13 +170,18 @@ contract Deploy is Script {
             return;
         }
 
-        bytes memory initCode = type(PledgeCashDeterministicDeployer).creationCode;
+        bytes memory initCode = abi.encodePacked(
+            type(PledgeCashDeterministicDeployer).creationCode, abi.encode(state.deterministicDeployerOwner)
+        );
         address expectedDeployer = vm.computeCreate2Address(
             PledgeCashDeploymentSalts.deterministicDeployer(), keccak256(initCode), state.create2Factory
         );
         if (expectedDeployer.code.length == 0) {
-            state.deterministicDeployer =
-                new PledgeCashDeterministicDeployer{salt: PledgeCashDeploymentSalts.deterministicDeployer()}();
+            state.deterministicDeployer = new PledgeCashDeterministicDeployer{
+                salt: PledgeCashDeploymentSalts.deterministicDeployer()
+            }(
+                state.deterministicDeployerOwner
+            );
             if (address(state.deterministicDeployer) != expectedDeployer) {
                 revert DeterministicDeployerMismatch(expectedDeployer, address(state.deterministicDeployer));
             }
@@ -181,7 +194,9 @@ contract Deploy is Script {
 
     function _requireDeterministicDeployerOwner(DeployState memory state) internal view {
         address actualOwner = state.deterministicDeployer.owner();
-        if (actualOwner != state.deployer) revert DeterministicDeployerOwnerMismatch(state.deployer, actualOwner);
+        if (actualOwner != state.deterministicDeployerOwner) {
+            revert DeterministicDeployerOwnerMismatch(state.deterministicDeployerOwner, actualOwner);
+        }
     }
 
     function _deployDeterministic(DeployState memory state, bytes32 salt, bytes memory initCode)
@@ -239,6 +254,7 @@ contract Deploy is Script {
         json.serialize("deterministicDeploymentVersion", PledgeCashDeploymentSalts.version());
         json.serialize("create2Factory", state.create2Factory);
         json.serialize("deterministicDeployer", address(state.deterministicDeployer));
+        json.serialize("deterministicDeployerOwner", state.deterministicDeployerOwner);
         json.serialize("boardroomPolicyRegistry", address(state.boardroomPolicyRegistry));
         json.serialize("protocolPolicy", address(state.protocolPolicy));
         json.serialize("assetPolicy", address(state.assetPolicy));
@@ -321,6 +337,7 @@ contract Deploy is Script {
         console2.log("DeterministicDeploymentVersion", PledgeCashDeploymentSalts.version());
         console2.log("Create2Factory", state.create2Factory);
         console2.log("DeterministicDeployer", address(state.deterministicDeployer));
+        console2.log("DeterministicDeployerOwner", state.deterministicDeployerOwner);
         console2.log("BoardroomPolicyRegistry", address(state.boardroomPolicyRegistry));
         console2.log("ProtocolPolicy", address(state.protocolPolicy));
         console2.log("AssetPolicy", address(state.assetPolicy));

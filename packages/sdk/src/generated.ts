@@ -10,6 +10,7 @@ export type PledgeCashDeployment = {
   deterministicDeployment?: boolean;
   deterministicDeploymentVersion?: string;
   deterministicDeployer?: Address;
+  deterministicDeployerOwner?: Address;
   create2Factory?: Address;
   boardroomStatus?: string;
   boardroomReason?: string;
