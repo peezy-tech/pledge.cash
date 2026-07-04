@@ -19,7 +19,7 @@ field_exists() {
 }
 
 field() {
-  jq -r --arg key "$1" '.[$key] // empty' "$ARTIFACT"
+  jq -r --arg key "$1" '.[$key] | if . == null then empty else . end' "$ARTIFACT"
 }
 
 lower() {

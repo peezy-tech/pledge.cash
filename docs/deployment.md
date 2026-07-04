@@ -7,7 +7,7 @@ migrating bonding curve, AMM, and locked-liquidity primitives.
 
 | Network | Chain id | Default RPC | Wrapped native | Wrapper | Artifact |
 | --- | ---: | --- | --- | --- | --- |
-| HyperEVM Testnet | `998` | `https://rpc.hyperliquid-testnet.xyz/evm` | `HYPEREVM_WRAPPED_NATIVE_ADDRESS` | `packages/contracts/script/hyperevm-testnet/deploy.sh` | `packages/contracts/deployments/998.json` |
+| HyperEVM Testnet | `998` | `https://rpc.hyperliquid-testnet.xyz/evm` | `0x5555555555555555555555555555555555555555` | `packages/contracts/script/hyperevm-testnet/deploy.sh` | `packages/contracts/deployments/998.json` |
 | Monad Testnet | `10143` | `https://testnet-rpc.monad.xyz` | `0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541` | `packages/contracts/script/monad-testnet/deploy.sh` | `packages/contracts/deployments/10143.json` |
 
 The deploy script creates or reuses one `PledgeCashDeterministicDeployer`, then creates one
@@ -49,7 +49,7 @@ Required for dry runs and broadcasts:
 
 ```sh
 PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0x...
-HYPEREVM_WRAPPED_NATIVE_ADDRESS=0x...
+HYPEREVM_WRAPPED_NATIVE_ADDRESS=0x5555555555555555555555555555555555555555
 ```
 
 Required for broadcast:
@@ -68,7 +68,7 @@ MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS=0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541
 TOKEN_GRANT_CREATION_FEE_WEI=100000000000000000
 AMM_PROTOCOL_FEE_RECIPIENT=
 HYPEREVM_GAS_PRICE_WEI=
-HYPEREVM_GAS_ESTIMATE_MULTIPLIER=200
+HYPEREVM_GAS_ESTIMATE_MULTIPLIER=100
 MONAD_GAS_ESTIMATE_MULTIPLIER=100
 CREATE2_FACTORY_ADDRESS=0x4e59b44847b379578588920cA78FbF26c0B4956C
 PLEDGE_CASH_DETERMINISTIC_DEPLOYER=
@@ -78,13 +78,23 @@ PLEDGE_CASH_DETERMINISTIC_DEPLOYER=
 script as a legacy fallback.
 `WRAPPED_NATIVE_ADDRESS` remains supported as a legacy HyperEVM fallback. The Monad wrapper uses
 `MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS` or the canonical WMON default so an older HyperEVM env cannot leak into Monad.
-Monad defaults `MONAD_GAS_ESTIMATE_MULTIPLIER` to `100` because Monad charges the full transaction gas limit rather
-than post-execution gas used.
+Both testnet wrappers default their gas estimate multipliers to `100`. Monad charges the full transaction gas limit
+rather than post-execution gas used, and the HyperEVM deployment has transactions that must fit large-block limits.
 
 For Monad broadcasts, install Monad Foundry before running the wrapper:
 
 ```sh
 foundryup --network monad
+```
+
+For HyperEVM broadcasts, route the deployment account to big blocks before deploying because several root-contract
+transactions exceed the small-block `2M` gas limit. HyperEVM big blocks are slower, so a full broadcast can take many
+minutes. Switch back to small blocks after the deployment:
+
+```sh
+npx -y @layerzerolabs/hyperliquid-composer set-block --size big --network testnet --ci --private-key "$HYPEREVM_TESTNET_PRIVATE_KEY"
+bun run deploy:hyperevm-testnet
+npx -y @layerzerolabs/hyperliquid-composer set-block --size small --network testnet --ci --private-key "$HYPEREVM_TESTNET_PRIVATE_KEY"
 ```
 
 `CREATE2_FACTORY_ADDRESS` must name the same CREATE2 factory on every deterministic target chain. If a chain does not
