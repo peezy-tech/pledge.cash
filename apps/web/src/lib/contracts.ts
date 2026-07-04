@@ -103,7 +103,11 @@ export function createPledgeCashPublicClient(network: PledgeCashNetwork): Public
 
 export function persistSelectedNetwork(chainId: number): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(SELECTED_NETWORK_STORAGE_KEY, chainId.toString());
+  try {
+    window.localStorage.setItem(SELECTED_NETWORK_STORAGE_KEY, chainId.toString());
+  } catch {
+    // Network selection still works when browser storage is unavailable.
+  }
 }
 
 export function syncSelectedNetworkSearch(chainId: number): void {
@@ -176,7 +180,11 @@ function queryNetworkId(): number | undefined {
 
 function storedNetworkId(): number | undefined {
   if (typeof window === "undefined") return undefined;
-  return numericString(window.localStorage.getItem(SELECTED_NETWORK_STORAGE_KEY));
+  try {
+    return numericString(window.localStorage.getItem(SELECTED_NETWORK_STORAGE_KEY));
+  } catch {
+    return undefined;
+  }
 }
 
 function numericEnv(value: string | undefined): number | undefined {

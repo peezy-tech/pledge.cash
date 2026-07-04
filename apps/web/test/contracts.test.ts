@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { LOCAL_ANVIL_CHAIN_ID, PLEDGE_CASH_NETWORKS, networkForChainId, transactionUrl, walletRpcUrl } from "../src/lib/contracts";
+import {
+  LOCAL_ANVIL_CHAIN_ID,
+  PLEDGE_CASH_NETWORKS,
+  initialSelectedNetwork,
+  networkForChainId,
+  persistSelectedNetwork,
+  transactionUrl,
+  walletRpcUrl,
+} from "../src/lib/contracts";
 
 describe("web network profiles", () => {
   test("includes the local Anvil profile", () => {
@@ -21,5 +29,34 @@ describe("web network profiles", () => {
 
     expect(transactionUrl(hash, hyperEvm.chainId)).toBe(`${hyperEvm.explorerUrl}/tx/${hash}`);
     expect(transactionUrl(hash, LOCAL_ANVIL_CHAIN_ID)).toBeUndefined();
+  });
+
+  test("treats selected-network storage as best effort", () => {
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location: { href: "https://example.test/pledge-cash/" },
+        localStorage: {
+          getItem: () => {
+            throw new Error("storage unavailable");
+          },
+          setItem: () => {
+            throw new Error("storage unavailable");
+          },
+        },
+      },
+    });
+
+    try {
+      expect(() => persistSelectedNetwork(LOCAL_ANVIL_CHAIN_ID)).not.toThrow();
+      expect(initialSelectedNetwork().chainId).toBe(998);
+    } finally {
+      if (previousWindow) {
+        Object.defineProperty(globalThis, "window", previousWindow);
+      } else {
+        Reflect.deleteProperty(globalThis, "window");
+      }
+    }
   });
 });
