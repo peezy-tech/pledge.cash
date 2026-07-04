@@ -20,8 +20,9 @@ export function useRuntimeDeployment(
         if (!response.ok) return;
 
         const raw = await response.text();
-        if (!cancelled) {
-          setRuntimeDeployment(parseDeployment(raw));
+        const nextDeployment = parseDeployment(raw);
+        if (!cancelled && nextDeployment.chainId === chainId) {
+          setRuntimeDeployment(nextDeployment);
         }
       } catch {
         // The generated SDK deployment remains the fallback for SSR and package consumers.
@@ -34,5 +35,6 @@ export function useRuntimeDeployment(
     };
   }, [chainId, generatedDeployment]);
 
+  if (runtimeDeployment?.chainId !== chainId) return generatedDeployment;
   return runtimeDeployment;
 }
