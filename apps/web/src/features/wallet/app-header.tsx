@@ -1,4 +1,4 @@
-import { RefreshCw, Wallet } from "lucide-react";
+import { BookOpen, RefreshCw, Wallet } from "lucide-react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import type { WalletState } from "../../lib/types";
@@ -25,6 +25,13 @@ export function AppHeader({ wallet, connectWallet, chainId, chainName, runAction
           <span>pledge.cash</span>
         </a>
         <div className="flex flex-wrap items-center gap-2">
+          <a
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-900 hover:text-zinc-50"
+            href={`${import.meta.env.BASE_URL}docs/`}
+          >
+            <BookOpen className="h-4 w-4" />
+            Docs
+          </a>
           <Badge variant={walletReady ? "default" : "warning"}>{chainName}</Badge>
           <Button variant="secondary" onClick={() => void runAction("switch-chain", switchChain)}>
             <RefreshCw className="h-4 w-4" />

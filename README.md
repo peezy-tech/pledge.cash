@@ -5,11 +5,13 @@ pledge.cash is a smart contract workspace for token-backed pledges and grants. T
 ## Repository Layout
 
 - `packages/contracts`: Foundry contracts, tests, and contract-specific configuration.
-- `docs`: protocol and engineering guidance.
+- `docs/pages`: public user documentation published under `/docs`.
+- `docs/*.md`: protocol and engineering reference notes.
 
 ## Start Here
 
 - [Token Grant Protocol](docs/token-grant-protocol.md): escrow-backed free-claim and paid-settlement token grants.
+- [Public Docs](docs/pages/index.md): user-facing docs for founders, buyers, holders, advisors, and contractors.
 - [Boardroom Protocol](docs/boardroom-protocol.md): owned issuer accounts with native share tokens.
 - [Distribution Protocol](docs/distribution-protocol.md): fixed-price Boardroom share sales.
 - [AMM Protocol](docs/amm-protocol.md): Boardroom-owned liquidity, trading, and fee accounting.
@@ -55,6 +57,13 @@ Build the static contract interface for GitHub Pages:
 
 ```sh
 bun --cwd apps/web build
+```
+
+Check and build the public docs:
+
+```sh
+bun run docs:check
+bun run docs:build
 ```
 
 ## Product Standard

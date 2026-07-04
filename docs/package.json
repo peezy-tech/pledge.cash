@@ -1,0 +1,17 @@
+{
+  "name": "@pledge.cash/docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check:types": "node --check tome.config.js && node --check scripts/check-docs.js && node scripts/check-docs.js",
+    "dev": "tome dev --host 127.0.0.1",
+    "build": "tome build --outDir \"${PLEDGE_CASH_DOCS_OUT_DIR:-out}\" && find \"${PLEDGE_CASH_DOCS_OUT_DIR:-out}\" -type d -exec chmod 755 {} + && find \"${PLEDGE_CASH_DOCS_OUT_DIR:-out}\" -type f -exec chmod 644 {} +"
+  },
+  "devDependencies": {
+    "@tomehq/cli": "^0.8.1",
+    "@tomehq/theme": "^0.8.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}
