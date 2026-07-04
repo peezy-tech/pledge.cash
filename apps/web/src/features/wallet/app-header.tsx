@@ -62,11 +62,20 @@ export function AppHeader({
             Docs
           </a>
           <Badge variant={walletReady ? "default" : "warning"}>{chainName}</Badge>
-          <Button variant="secondary" onClick={() => void runAction("switch-chain", switchChain)}>
+          <Button
+            disabled={actionPending}
+            title={actionPending ? "Wallet actions are disabled while an action is running" : undefined}
+            variant="secondary"
+            onClick={() => void runAction("switch-chain", switchChain)}
+          >
             <RefreshCw className="h-4 w-4" />
             Switch
           </Button>
-          <Button onClick={() => void runAction("connect-wallet", connectWallet)}>
+          <Button
+            disabled={actionPending}
+            title={actionPending ? "Wallet actions are disabled while an action is running" : undefined}
+            onClick={() => void runAction("connect-wallet", connectWallet)}
+          >
             <Wallet className="h-4 w-4" />
             {wallet.account ? "Connected" : "Connect"}
           </Button>

@@ -4,6 +4,8 @@ import { renderToString } from "react-dom/server";
 import { App, parseDeployment } from "../src/App";
 import { BoardroomPanel } from "../src/features/boardrooms/boardroom-panel";
 import { DiscoveryPanel } from "../src/features/discovery/discovery-panel";
+import { AppHeader } from "../src/features/wallet/app-header";
+import { PLEDGE_CASH_NETWORKS } from "../src/lib/contracts";
 import {
   defaultBoardroomGrantForm,
   defaultCurveMigrationForm,
@@ -189,6 +191,26 @@ describe("web app shell", () => {
     expect(html).toContain("Inspect Grant");
     expect(html).toContain("Boardroom");
     expect(html).toContain("Discovery");
+  });
+
+  test("disables header network and wallet actions while an action is pending", () => {
+    const noop = async () => undefined;
+    const html = renderToString(
+      <AppHeader
+        chainId={31337}
+        chainName="Local Anvil"
+        connectWallet={noop}
+        networks={PLEDGE_CASH_NETWORKS}
+        onNetworkChange={() => undefined}
+        pendingAction="scan-discovery"
+        runAction={async (_label, action) => action()}
+        switchChain={noop}
+        wallet={{}}
+      />,
+    );
+
+    expect(html).toContain('aria-label="Network"');
+    expect(html.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(3);
   });
 
   test("renders discovery lists and cached scan status", () => {
