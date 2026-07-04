@@ -68,7 +68,8 @@ MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS=0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541
 TOKEN_GRANT_CREATION_FEE_WEI=100000000000000000
 AMM_PROTOCOL_FEE_RECIPIENT=
 HYPEREVM_GAS_PRICE_WEI=
-GAS_ESTIMATE_MULTIPLIER=200
+HYPEREVM_GAS_ESTIMATE_MULTIPLIER=200
+MONAD_GAS_ESTIMATE_MULTIPLIER=100
 CREATE2_FACTORY_ADDRESS=0x4e59b44847b379578588920cA78FbF26c0B4956C
 PLEDGE_CASH_DETERMINISTIC_DEPLOYER=
 ```
@@ -77,6 +78,8 @@ PLEDGE_CASH_DETERMINISTIC_DEPLOYER=
 script as a legacy fallback.
 `WRAPPED_NATIVE_ADDRESS` remains supported as a legacy HyperEVM fallback. The Monad wrapper uses
 `MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS` or the canonical WMON default so an older HyperEVM env cannot leak into Monad.
+Monad defaults `MONAD_GAS_ESTIMATE_MULTIPLIER` to `100` because Monad charges the full transaction gas limit rather
+than post-execution gas used.
 
 For Monad broadcasts, install Monad Foundry before running the wrapper:
 
