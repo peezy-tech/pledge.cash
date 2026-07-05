@@ -78,10 +78,10 @@ later wait for it to close.
 
 Launch-stage transitions are one-way implementation upgrades:
 
-1. `PreLaunch`: bootstrap minting, grants, fixed-price sales, and bonding-curve buys/sells are allowed. Share transfers
-   are locked except for Boardroom treasury moves and Boardroom-recorded grant or distribution paths.
-2. `LaunchFinalization`: normal share transfers are open, bootstrap minting is frozen, and liquidity migration or
-   direct locked-liquidity seeding can complete.
+1. `PreLaunch`: bootstrap minting, grants, fixed-price sales, bonding-curve buys/sells, and protocol-mediated
+   locked-liquidity seeding are allowed. Share transfers are locked except for Boardroom treasury moves and
+   Boardroom-recorded grant, distribution, or pending locked-liquidity seed paths.
+2. `LaunchFinalization`: normal share transfers are open and bootstrap minting is frozen.
 3. `PostLaunchGovernance`: normal transfers remain open, and minting requires a configured `IBoardroomMintPolicy`.
 4. `Final`: terminal implementation with no successor. Post-launch mint-policy rules remain in force.
 
@@ -141,8 +141,8 @@ and later create free USDC payroll grants through the same policy-gated batch ex
    `createMigratingBondingCurve`.
 3. Buyers buy shares from the curve while the Boardroom is active. Sellers can sell curve-issued shares back while the
    Boardroom is active.
-4. Once the quote reserve reaches the graduation target or sellable inventory is gone, the owner advances the Boardroom
-   to launch finalization and can migrate the curve through `Boardroom.execute`.
+4. Once the quote reserve reaches the graduation target or sellable inventory is gone, the owner can migrate the curve
+   through `Boardroom.execute`.
 5. Migration creates Boardroom-owned locked AMM liquidity through `LockedLiquidityFactory` and records the locker on the
    Boardroom. The Boardroom-controlled call supplies the AMM slippage bounds.
 6. Any quote or share remainder returns to the Boardroom treasury.
@@ -173,7 +173,8 @@ Redemption loops are bounded by `MAX_REDEEMABLE_ASSETS`. Wind-down gates are bou
 - Only the Boardroom can burn its share token.
 - Only the Boardroom owner can mint bootstrap shares through the pre-launch Boardroom implementation.
 - Pre-launch holder-to-holder share transfers are locked.
-- Pre-launch share transfers are still allowed for Boardroom treasury, recorded grant, and recorded distribution paths.
+- Pre-launch share transfers are still allowed for Boardroom treasury, recorded grant, recorded distribution, and
+  pending locked-liquidity seed paths.
 - Share transfers open when the Boardroom reaches launch finalization.
 - Post-launch minting requires a configured mint policy.
 - Boardroom implementation upgrades can only follow the declared successor chain.

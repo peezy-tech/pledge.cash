@@ -294,6 +294,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         if (isIssuedGrant[from] || isIssuedGrant[to]) return true;
         if (isIssuedDistribution[from] || isIssuedDistribution[to]) return true;
         if (isLockedLiquidity[from] || isLockedLiquidity[to]) return true;
+        if (_isPendingLockedLiquiditySeedTransfer(operator, from)) return true;
         return false;
     }
 
@@ -727,6 +728,74 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         }
         launchStage = nextStage;
         emit BoardroomLaunchStageAdvanced(previousStage, nextStage);
+    }
+
+    function _isPendingLockedLiquiditySeedTransfer(address operator, address locker) internal view returns (bool) {
+        if (locker.code.length == 0) return false;
+
+        address factory;
+        try LockedLiquidity(locker).factory() returns (address factory_) {
+            factory = factory_;
+        } catch {
+            return false;
+        }
+        if (factory == address(0) || factory.code.length == 0) return false;
+
+        try IBoardroomPolicyRegistry(policyRegistry).isPolicyAllowed(factory) returns (bool allowed) {
+            if (!allowed) return false;
+        } catch {
+            return false;
+        }
+
+        try LockedLiquidity(locker).boardroom() returns (address boardroom_) {
+            if (boardroom_ != address(this)) return false;
+        } catch {
+            return false;
+        }
+
+        try LockedLiquidity(locker).router() returns (address router) {
+            if (operator != router) return false;
+        } catch {
+            return false;
+        }
+
+        try LockedLiquidity(locker).pool() returns (address pool) {
+            if (pool != address(0)) return false;
+        } catch {
+            return false;
+        }
+
+        try LockedLiquidity(locker).seeded() returns (bool seeded) {
+            if (!seeded) return false;
+        } catch {
+            return false;
+        }
+
+        address tokenA;
+        address tokenB;
+        try LockedLiquidity(locker).tokenA() returns (address tokenA_) {
+            tokenA = tokenA_;
+        } catch {
+            return false;
+        }
+        try LockedLiquidity(locker).tokenB() returns (address tokenB_) {
+            tokenB = tokenB_;
+        } catch {
+            return false;
+        }
+        if (tokenA != shareToken && tokenB != shareToken) return false;
+
+        try LockedLiquidityFactory(factory).isLocker(locker) returns (bool isLocker_) {
+            if (!isLocker_) return false;
+        } catch {
+            return false;
+        }
+
+        try LockedLiquidityFactory(factory).lockerBoardroom(locker) returns (address boardroom_) {
+            return boardroom_ == address(this);
+        } catch {
+            return false;
+        }
     }
 
     function _selector(bytes calldata data) internal pure returns (bytes4 selector) {

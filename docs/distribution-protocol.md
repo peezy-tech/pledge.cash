@@ -10,8 +10,8 @@ This document describes the Boardroom distribution primitives in `packages/contr
 - Distribution factory: deploys deterministic distribution clones, records which Boardroom created each one, and acts as the Boardroom call policy for distribution actions.
 - Buyer: purchases Boardroom shares from a fixed-price sale or migrating bonding curve.
 - Seller: sells curve-issued shares back to an active migrating bonding curve.
-- Boardroom owner as migrator: advances the Boardroom to launch finalization, then calls a ready curve through
-  `Boardroom.execute` to migrate reserves into Boardroom-owned locked AMM liquidity.
+- Boardroom owner as migrator: calls a ready curve through `Boardroom.execute` to migrate reserves into Boardroom-owned
+  locked AMM liquidity.
 - Distribution recipient: receives purchased Boardroom shares.
 
 ## Assets
