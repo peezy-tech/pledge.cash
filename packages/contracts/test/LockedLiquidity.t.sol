@@ -218,12 +218,12 @@ contract LockedLiquidityTest is Test {
 
     function testWindDownRequiresLockedLiquidityExitBeforeRedemptions() public {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-wind-down");
+        vm.prank(owner);
+        boardroom.mint(holder, HOLDER_SHARES);
+
         CreatedLocker memory created = _createLockedLiquidity(
             boardroom, shareToken, address(quoteToken), address(lockedLiquidityFactory), "wind-down"
         );
-
-        vm.prank(owner);
-        boardroom.mint(holder, HOLDER_SHARES);
 
         vm.prank(owner);
         boardroom.startWindDown();
@@ -290,6 +290,7 @@ contract LockedLiquidityTest is Test {
         boardroom.mint(address(boardroom), SHARE_SEED);
         vm.stopPrank();
         quoteToken.mint(address(boardroom), QUOTE_SEED);
+        _advanceToLaunchFinalization(boardroom);
 
         LockedLiquidityFactory.CreateParams memory params = LockedLiquidityFactory.CreateParams({
             tokenA: address(shareToken),
@@ -477,6 +478,7 @@ contract LockedLiquidityTest is Test {
         bytes32 salt = keccak256(bytes(saltLabel));
         address predictedLocker = lockedLiquidityFactory.predictLockedLiquidityAddress(address(boardroom), salt);
         assetPolicy.setAssetAllowed(quote, true);
+        _advanceToLaunchFinalization(boardroom);
         LockedLiquidityFactory.CreateParams memory params = LockedLiquidityFactory.CreateParams({
             tokenA: address(shareToken),
             tokenB: quote,
@@ -511,6 +513,13 @@ contract LockedLiquidityTest is Test {
             token,
             abi.encodeWithSignature("approve(address,uint256)", address(lockedLiquidityFactory), amount)
         );
+    }
+
+    function _advanceToLaunchFinalization(Boardroom boardroom) internal {
+        if (boardroom.launchStage() != Boardroom.LaunchStage.PreLaunch) return;
+
+        vm.prank(owner);
+        boardroom.upgradeToNext("", bytes32(0));
     }
 
     function _policyCall(address policy, address target, bytes memory data)

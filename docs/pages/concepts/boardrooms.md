@@ -7,6 +7,8 @@ description: The on-chain project account used by pledge.cash projects.
 
 A Boardroom is an on-chain project account with its own ERC20 share token. It can hold treasury assets, mint shares, create grants, create distribution flows, own locked liquidity, and coordinate wind-down.
 
+New Boardrooms start in a pre-launch stage. During pre-launch, shares can move through Boardroom-approved grant and sale paths, but ordinary holder-to-holder transfers stay locked. Launch finalization opens normal share transfers and freezes bootstrap minting; post-launch minting must go through the Boardroom's governance mint policy.
+
 The simplest way to think about a Boardroom is: the project has a wallet-like contract account, and that account can only perform protocol actions allowed by its policies.
 
 ## Core Fields

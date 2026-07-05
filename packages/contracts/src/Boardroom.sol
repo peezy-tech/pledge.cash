@@ -9,11 +9,14 @@ import {BoardroomToken} from "./BoardroomToken.sol";
 import {DistributionFactory} from "./DistributionFactory.sol";
 import {ExactTransferLib} from "./ExactTransferLib.sol";
 import {FixedPriceSale} from "./FixedPriceSale.sol";
+import {IBoardroomMintPolicy} from "./IBoardroomMintPolicy.sol";
 import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
 import {IBoardroomPolicyRegistry} from "./IBoardroomPolicyRegistry.sol";
+import {IStagedBoardroomImplementation} from "./IStagedBoardroomImplementation.sol";
 import {LockedLiquidity} from "./LockedLiquidity.sol";
 import {LockedLiquidityFactory} from "./LockedLiquidityFactory.sol";
 import {MigratingBondingCurve} from "./MigratingBondingCurve.sol";
+import {StagedBoardroomSlots} from "./StagedBoardroomSlots.sol";
 import {TokenGrant} from "./TokenGrant.sol";
 import {TokenGrantFactory} from "./TokenGrantFactory.sol";
 
@@ -30,6 +33,14 @@ interface IBoardroomDistribution {
 contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     using SafeTransferLib for address;
 
+    bytes32 public constant STAGE_ID_PRE_LAUNCH = keccak256("pledge.cash.boardroom.stage.preLaunch");
+    bytes32 public constant STAGE_ID_LAUNCH_FINALIZATION = keccak256("pledge.cash.boardroom.stage.launchFinalization");
+    bytes32 public constant STAGE_ID_POST_LAUNCH_GOVERNANCE =
+        keccak256("pledge.cash.boardroom.stage.postLaunchGovernance");
+    bytes32 public constant STAGE_ID_FINAL = keccak256("pledge.cash.boardroom.stage.final");
+
+    uint256 public constant BOARDROOM_STORAGE_VERSION = 1;
+
     uint256 public constant MAX_BATCH_CALLS = 16;
     uint256 public constant MAX_REDEEMABLE_ASSETS = 32;
     uint256 public constant MAX_ISSUED_GRANTS = 128;
@@ -40,6 +51,13 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         Active,
         WindingDown,
         RedemptionsOpen
+    }
+
+    enum LaunchStage {
+        PreLaunch,
+        LaunchFinalization,
+        PostLaunchGovernance,
+        Final
     }
 
     struct Call {
@@ -53,6 +71,8 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     address public shareToken;
     address public wrappedNative;
     BoardroomStatus public status;
+    LaunchStage public launchStage;
+    address public postLaunchMintPolicy;
 
     address[] internal redeemableAssets;
     address[] internal issuedGrants;
@@ -88,6 +108,19 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     error CallNotAllowed(address policy, address target, bytes4 selector);
     error CallFailed(address target);
     error UnexpectedWrappedNativeBalanceChange(uint256 expected, uint256 actual);
+    error InvalidImplementation();
+    error NoNextImplementation();
+    error InvalidNextImplementation(address expected, address actual);
+    error InvalidPreviousImplementation(address expected, address actual);
+    error InvalidStageOrder(uint8 expected, uint8 actual);
+    error InvalidStorageVersion(uint256 expected, uint256 actual);
+    error ImplementationCodeHashMismatch(address implementation, bytes32 expected, bytes32 actual);
+    error UpgradeNotAllowed(address implementation);
+    error MigrationNotAllowed(address implementation);
+    error MintingFrozen(LaunchStage stage);
+    error MintPolicyNotSet();
+    error MintPolicyRejected(address policy, address to, uint256 amount);
+    error ShareTransferLocked(address operator, address from, address to);
 
     event BoardroomInitialized(
         address indexed owner,
@@ -115,9 +148,30 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     event BoardroomCallExecuted(
         address indexed policy, address indexed target, bytes4 indexed selector, uint256 value, bytes32 dataHash
     );
+    event BoardroomImplementationUpgraded(
+        address indexed previousImplementation,
+        address indexed nextImplementation,
+        bytes32 indexed stageId,
+        uint8 stageOrder,
+        bytes32 dataHash
+    );
+    event BoardroomLaunchStageAdvanced(LaunchStage indexed previousStage, LaunchStage indexed nextStage);
+    event PostLaunchMintPolicySet(address indexed policy);
 
-    constructor() {
+    address internal immutable implementationSelf;
+    address internal immutable implementationNext;
+    uint8 internal immutable implementationStageOrder;
+    bytes32 internal immutable implementationStageId;
+    address internal immutable implementationLinker;
+    address internal linkedPreviousImplementation;
+
+    constructor(address nextImplementation_, uint8 stageOrder_, bytes32 stageId_) {
         _disableInitializers();
+        implementationSelf = address(this);
+        implementationNext = nextImplementation_;
+        implementationStageOrder = stageOrder_;
+        implementationStageId = stageId_;
+        implementationLinker = msg.sender;
     }
 
     receive() external payable {}
@@ -136,18 +190,123 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         _initializeOwner(owner_);
         policyRegistry = policyRegistry_;
         wrappedNative = wrappedNative_;
+        launchStage = LaunchStage.PreLaunch;
         shareToken = address(new BoardroomToken(address(this), name_, symbol_));
 
         emit BoardroomInitialized(owner_, policyRegistry_, shareToken, wrappedNative_, name_, symbol_);
     }
 
-    function mint(address to, uint256 amount) external onlyOwner {
+    function mint(address to, uint256 amount) external virtual onlyOwner {
         _requireStatus(BoardroomStatus.Active);
         if (to == address(0)) revert InvalidAddress();
         if (amount == 0) revert InvalidAmount();
 
-        BoardroomToken(shareToken).mint(to, amount);
-        emit SharesMinted(to, amount);
+        _mintShares(to, amount);
+    }
+
+    function upgradeToNext(bytes calldata data, bytes32 expectedNextCodeHash)
+        external
+        onlyOwner
+        nonReentrant
+        returns (address next)
+    {
+        _requireStatus(BoardroomStatus.Active);
+        _requireActiveImplementation();
+
+        address current = implementationSelf;
+        next = implementationNext;
+        bytes32 dataHash = keccak256(data);
+        uint8 nextStageOrder;
+        bytes32 nextStageId;
+        if (next == address(0)) revert NoNextImplementation();
+        if (next.code.length == 0) revert InvalidImplementation();
+        if (expectedNextCodeHash != bytes32(0)) {
+            bytes32 actualCodeHash = next.codehash;
+            if (actualCodeHash != expectedNextCodeHash) {
+                revert ImplementationCodeHashMismatch(next, expectedNextCodeHash, actualCodeHash);
+            }
+        }
+
+        if (IStagedBoardroomImplementation(current).nextImplementation() != next) {
+            revert InvalidNextImplementation(next, IStagedBoardroomImplementation(current).nextImplementation());
+        }
+        address previous = IStagedBoardroomImplementation(next).previousImplementation();
+        if (previous != current) revert InvalidPreviousImplementation(current, previous);
+
+        uint8 expectedStageOrder = implementationStageOrder + 1;
+        nextStageOrder = IStagedBoardroomImplementation(next).stageOrder();
+        if (nextStageOrder != expectedStageOrder) revert InvalidStageOrder(expectedStageOrder, nextStageOrder);
+
+        uint256 nextStorageVersion = IStagedBoardroomImplementation(next).storageVersion();
+        if (nextStorageVersion != BOARDROOM_STORAGE_VERSION) {
+            revert InvalidStorageVersion(BOARDROOM_STORAGE_VERSION, nextStorageVersion);
+        }
+        if (!canUpgrade(data)) revert UpgradeNotAllowed(current);
+
+        StagedBoardroomSlots.setMigrationImplementation(next);
+        StagedBoardroomSlots.setImplementation(next);
+
+        (bool success, bytes memory result) =
+            next.delegatecall(abi.encodeCall(IStagedBoardroomImplementation.migrateFromPrevious, (data)));
+        StagedBoardroomSlots.setMigrationImplementation(address(0));
+        if (!success) _revertCall(next, result);
+
+        nextStageId = IStagedBoardroomImplementation(next).stageId();
+        emit BoardroomImplementationUpgraded(current, next, nextStageId, nextStageOrder, dataHash);
+    }
+
+    function stageId() external view returns (bytes32) {
+        return implementationStageId;
+    }
+
+    function stageOrder() external view returns (uint8) {
+        return implementationStageOrder;
+    }
+
+    function previousImplementation() external view returns (address) {
+        if (address(this) != implementationSelf) {
+            return IStagedBoardroomImplementation(implementationSelf).previousImplementation();
+        }
+        return linkedPreviousImplementation;
+    }
+
+    function nextImplementation() external view returns (address) {
+        return implementationNext;
+    }
+
+    function storageVersion() public pure returns (uint256) {
+        return BOARDROOM_STORAGE_VERSION;
+    }
+
+    function canUpgrade(bytes calldata data) public view virtual returns (bool) {
+        return status == BoardroomStatus.Active && data.length == 0;
+    }
+
+    function migrateFromPrevious(bytes calldata) external virtual {
+        _requireMigrationImplementation();
+    }
+
+    function canTransferShares(address operator, address from, address to, uint256) external view returns (bool) {
+        if (from == address(0) || to == address(0)) return true;
+        if (status != BoardroomStatus.Active) return true;
+        if (launchStage != LaunchStage.PreLaunch) return true;
+        if (operator == address(this) || from == address(this) || to == address(this)) return true;
+        if (isIssuedGrant[from] || isIssuedGrant[to]) return true;
+        if (isIssuedDistribution[from] || isIssuedDistribution[to]) return true;
+        if (isLockedLiquidity[from] || isLockedLiquidity[to]) return true;
+        return false;
+    }
+
+    function setPostLaunchMintPolicy(address) external virtual onlyOwner {
+        revert MintingFrozen(launchStage);
+    }
+
+    function linkPreviousImplementation(address previousImplementation_) external {
+        if (address(this) != implementationSelf || msg.sender != implementationLinker) revert InvalidImplementation();
+        if (linkedPreviousImplementation != address(0)) {
+            revert InvalidPreviousImplementation(address(0), linkedPreviousImplementation);
+        }
+        linkedPreviousImplementation = previousImplementation_;
     }
 
     function execute(Call calldata call_) external payable onlyOwner nonReentrant returns (bytes memory result) {
@@ -525,6 +684,11 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         emit TreasurySharesBurned(burned);
     }
 
+    function _mintShares(address to, uint256 amount) internal {
+        BoardroomToken(shareToken).mint(to, amount);
+        emit SharesMinted(to, amount);
+    }
+
     function _checkedRedeemableAssetTransfer(address asset, address recipient, uint256 expectedAmount) internal {
         ExactTransferLib.ExactDelta memory delta = ExactTransferLib.sendFromSelfTo(asset, recipient, expectedAmount);
         if (delta.senderBalanceIncreased) {
@@ -544,6 +708,25 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     function _requireStatus(BoardroomStatus expected) internal view {
         BoardroomStatus currentStatus = status;
         if (currentStatus != expected) revert InvalidStatus(expected, currentStatus);
+    }
+
+    function _requireActiveImplementation() internal view {
+        if (StagedBoardroomSlots.implementation() != implementationSelf) revert InvalidImplementation();
+    }
+
+    function _requireMigrationImplementation() internal view {
+        if (StagedBoardroomSlots.migrationImplementation() != implementationSelf) {
+            revert MigrationNotAllowed(implementationSelf);
+        }
+    }
+
+    function _advanceLaunchStage(LaunchStage nextStage) internal {
+        LaunchStage previousStage = launchStage;
+        if (uint8(nextStage) != uint8(previousStage) + 1) {
+            revert InvalidStageOrder(uint8(previousStage) + 1, uint8(nextStage));
+        }
+        launchStage = nextStage;
+        emit BoardroomLaunchStageAdvanced(previousStage, nextStage);
     }
 
     function _selector(bytes calldata data) internal pure returns (bytes4 selector) {

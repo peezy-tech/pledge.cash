@@ -3,7 +3,7 @@ pragma solidity ^0.8.30;
 
 library PledgeCashDeploymentSalts {
     function version() internal pure returns (string memory) {
-        return "pledge.cash.deterministic.v1";
+        return "pledge.cash.deterministic.v1-boardroom-factory-v2";
     }
 
     function deterministicDeployer() internal pure returns (bytes32) {
@@ -43,6 +43,6 @@ library PledgeCashDeploymentSalts {
     }
 
     function boardroomFactory() internal pure returns (bytes32) {
-        return keccak256("pledge.cash.deterministic.v1.BoardroomFactory");
+        return keccak256("pledge.cash.deterministic.v1.BoardroomFactory.v2");
     }
 }

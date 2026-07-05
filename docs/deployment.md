@@ -24,6 +24,11 @@ existing deployer from `PLEDGE_CASH_DETERMINISTIC_DEPLOYER`. The deterministic d
 arguments, so it cannot be captured by the first account to deploy the public salt. Use the same
 `PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER` on every chain that should share deterministic root addresses.
 
+The staged Boardroom implementation changes `BoardroomFactory` constructor bytecode, so it uses the
+`pledge.cash.deterministic.v1.BoardroomFactory.v2` salt label. Existing v1 artifacts remain accurate for already
+deployed factories until a fresh broadcast writes a new artifact with
+`pledge.cash.deterministic.v1-boardroom-factory-v2`.
+
 The registry allows `ProtocolPolicy` for registered pledge.cash protocol targets and `AssetPolicy` for external asset
 operations. The deploy script registers the token grant, distribution, locked-liquidity, and AMM factory targets in
 `ProtocolPolicy`; only the token grant factory is separately allowed to receive native value for exact creation-fee

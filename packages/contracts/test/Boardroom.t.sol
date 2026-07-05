@@ -9,8 +9,11 @@ import {Boardroom} from "../src/Boardroom.sol";
 import {BoardroomFactory} from "../src/BoardroomFactory.sol";
 import {BoardroomPolicyRegistry} from "../src/BoardroomPolicyRegistry.sol";
 import {BoardroomToken} from "../src/BoardroomToken.sol";
+import {IBoardroomMintPolicy} from "../src/IBoardroomMintPolicy.sol";
+import {IStagedBoardroomImplementation} from "../src/IStagedBoardroomImplementation.sol";
 import {IBoardroomCallPolicy} from "../src/IBoardroomCallPolicy.sol";
 import {ProtocolPolicy} from "../src/ProtocolPolicy.sol";
+import {StagedBoardroomProxy} from "../src/StagedBoardroomProxy.sol";
 import {TokenGrant} from "../src/TokenGrant.sol";
 import {TokenGrantFactory} from "../src/TokenGrantFactory.sol";
 
@@ -89,6 +92,18 @@ contract SenderFeeRedeemableCurrency {
 contract BoardroomTestAllowAllPolicy is IBoardroomCallPolicy {
     function canCall(address, address, address, uint256, bytes calldata) external pure returns (bool) {
         return true;
+    }
+}
+
+contract BoardroomTestMintPolicy is IBoardroomMintPolicy {
+    bool public allowed = true;
+
+    function setAllowed(bool allowed_) external {
+        allowed = allowed_;
+    }
+
+    function canMint(address, address, address, uint256) external view returns (bool) {
+        return allowed;
     }
 }
 
@@ -183,6 +198,7 @@ contract BoardroomTest is Test {
         (Boardroom boardroom, address boardroomAddress) = _createBoardroom("create");
 
         assertEq(address(boardroom), boardroomAddress);
+        assertEq(StagedBoardroomProxy(payable(boardroomAddress)).implementation(), boardroomFactory.boardroomLogic());
         assertTrue(boardroomFactory.isBoardroom(boardroomAddress));
         assertEq(boardroomFactory.allBoardrooms(0), boardroomAddress);
         assertEq(boardroomFactory.allBoardroomsLength(), 1);
@@ -196,6 +212,13 @@ contract BoardroomTest is Test {
         assertEq(shareToken.name(), "Acme Common");
         assertEq(shareToken.symbol(), "ACME");
         assertEq(shareToken.decimals(), 18);
+        assertEq(uint8(boardroom.launchStage()), uint8(Boardroom.LaunchStage.PreLaunch));
+        assertEq(boardroom.stageOrder(), 0);
+        assertEq(boardroom.nextImplementation(), boardroomFactory.launchFinalizationLogic());
+        assertEq(
+            IStagedBoardroomImplementation(boardroomFactory.launchFinalizationLogic()).previousImplementation(),
+            boardroomFactory.boardroomLogic()
+        );
     }
 
     function testBoardroomSaltIsBoundToOwnerAndMetadata() public {
@@ -249,6 +272,121 @@ contract BoardroomTest is Test {
 
         vm.expectRevert(BoardroomToken.OnlyBoardroom.selector);
         shareToken.burn(holder, 1 ether);
+    }
+
+    function testPreLaunchBlocksWalletToWalletShareTransfers() public {
+        (Boardroom boardroom,) = _createBoardroom("prelaunch-transfer-lock");
+        BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
+
+        vm.prank(owner);
+        boardroom.mint(holder, 1 ether);
+
+        vm.prank(holder);
+        vm.expectRevert(abi.encodeWithSelector(BoardroomToken.ShareTransferLocked.selector, holder, holder, stranger));
+        bool transferred = shareToken.transfer(stranger, 1 ether);
+        transferred;
+    }
+
+    function testPreLaunchAllowsGrantSettlementTransferPath() public {
+        (Boardroom boardroom,) = _createBoardroom("prelaunch-grant-transfer");
+        BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
+
+        vm.prank(owner);
+        boardroom.mint(address(boardroom), GRANT_SIZE);
+
+        TokenGrant grant = _createBoardroomGrant(
+            boardroom,
+            _boardroomGrantCreate(
+                address(shareToken), holder, address(0), GRANT_SIZE, 0, keccak256("prelaunch-grant-transfer"), 0
+            )
+        );
+
+        vm.warp(VESTING_END);
+        vm.prank(holder);
+        grant.settle(1 ether);
+
+        assertEq(shareToken.balanceOf(holder), 1 ether);
+    }
+
+    function testUpgradePathAdvancesStagesAndOpensTransfers() public {
+        (Boardroom boardroom, address boardroomAddress) = _createBoardroom("stage-upgrade");
+        BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
+
+        vm.prank(owner);
+        boardroom.mint(holder, 1 ether);
+
+        vm.prank(owner);
+        address launchImplementation = boardroom.upgradeToNext("", bytes32(0));
+        assertEq(launchImplementation, boardroomFactory.launchFinalizationLogic());
+        assertEq(StagedBoardroomProxy(payable(boardroomAddress)).implementation(), launchImplementation);
+        assertEq(uint8(boardroom.launchStage()), uint8(Boardroom.LaunchStage.LaunchFinalization));
+
+        vm.prank(holder);
+        assertTrue(shareToken.transfer(stranger, 1 ether));
+        assertEq(shareToken.balanceOf(stranger), 1 ether);
+
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(Boardroom.MintingFrozen.selector, Boardroom.LaunchStage.LaunchFinalization)
+        );
+        boardroom.mint(holder, 1 ether);
+
+        vm.prank(owner);
+        address postLaunchImplementation = boardroom.upgradeToNext("", bytes32(0));
+        assertEq(postLaunchImplementation, boardroomFactory.postLaunchGovernanceLogic());
+        assertEq(uint8(boardroom.launchStage()), uint8(Boardroom.LaunchStage.PostLaunchGovernance));
+
+        vm.prank(owner);
+        vm.expectRevert(Boardroom.MintPolicyNotSet.selector);
+        boardroom.mint(holder, 1 ether);
+
+        BoardroomTestMintPolicy mintPolicy = new BoardroomTestMintPolicy();
+        vm.prank(owner);
+        boardroom.setPostLaunchMintPolicy(address(mintPolicy));
+
+        vm.prank(owner);
+        boardroom.mint(holder, 1 ether);
+        assertEq(shareToken.balanceOf(holder), 1 ether);
+
+        mintPolicy.setAllowed(false);
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(Boardroom.MintPolicyRejected.selector, address(mintPolicy), holder, 1 ether)
+        );
+        boardroom.mint(holder, 1 ether);
+
+        vm.prank(owner);
+        address finalImplementation = boardroom.upgradeToNext("", bytes32(0));
+        assertEq(finalImplementation, boardroomFactory.finalLogic());
+        assertEq(uint8(boardroom.launchStage()), uint8(Boardroom.LaunchStage.Final));
+
+        vm.prank(owner);
+        vm.expectRevert(Boardroom.NoNextImplementation.selector);
+        boardroom.upgradeToNext("", bytes32(0));
+    }
+
+    function testUpgradeRejectsWrongExpectedCodeHash() public {
+        (Boardroom boardroom,) = _createBoardroom("stage-codehash");
+        bytes32 wrongCodeHash = keccak256("wrong-codehash");
+        address launchImplementation = boardroomFactory.launchFinalizationLogic();
+        bytes32 actualCodeHash = launchImplementation.codehash;
+
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Boardroom.ImplementationCodeHashMismatch.selector, launchImplementation, wrongCodeHash, actualCodeHash
+            )
+        );
+        boardroom.upgradeToNext("", wrongCodeHash);
+    }
+
+    function testUpgradeRejectsNonEmptyMigrationDataByDefault() public {
+        (Boardroom boardroom,) = _createBoardroom("stage-data");
+        address boardroomLogic = boardroomFactory.boardroomLogic();
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.UpgradeNotAllowed.selector, boardroomLogic));
+        boardroom.upgradeToNext("non-empty", bytes32(0));
     }
 
     function testMintRejectsZeroAddressAndZeroAmount() public {
@@ -676,7 +814,7 @@ contract BoardroomTest is Test {
 
         BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
         vm.prank(holder);
-        shareToken.transfer(address(boardroom), holderShares);
+        assertTrue(shareToken.transfer(address(boardroom), holderShares));
 
         uint256[] memory minimums = new uint256[](1);
         minimums[0] = redeemableAmount;

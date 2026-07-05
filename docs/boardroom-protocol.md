@@ -3,14 +3,17 @@
 This document describes the first Boardroom primitive in `packages/contracts/src/Boardroom.sol`,
 `BoardroomFactory.sol`, and `BoardroomToken.sol`.
 
-A Boardroom is an owned on-chain treasury and issuer account with its own ERC20 share token. It can mint shares and
-execute calls through centrally approved policy contracts. `ProtocolPolicy` covers explicit pledge.cash protocol
-targets, while `AssetPolicy` covers supported external assets and spender approvals.
+A Boardroom is an owned on-chain treasury and issuer account with its own ERC20 share token. Each Boardroom address is a
+staged proxy. The current implementation can only upgrade to the one successor implementation declared by that
+implementation, so launch-stage upgrades are bounded rather than generic. It can mint shares and execute calls through
+centrally approved policy contracts. `ProtocolPolicy` covers explicit pledge.cash protocol targets, while `AssetPolicy`
+covers supported external assets and spender approvals.
 
 ## Actors
 
 - Boardroom owner: controls share minting and policy-authorized treasury execution.
 - Boardroom: owns assets, creates its share token, and acts as grant issuer.
+- Boardroom implementation: current staged logic for the Boardroom proxy.
 - Policy registry: protocol-controlled allowlist of policy contracts that Boardrooms may use.
 - Protocol policy: owner-managed allowlist of pledge.cash protocol targets, with a separate allowlist for targets that
   may receive native value.
@@ -40,32 +43,51 @@ owner, share token name, share token symbol, and caller-provided salt.
 State:
 
 - `policyRegistry`: policy registry used by every Boardroom clone.
-- `boardroomLogic`: implementation cloned by the factory.
+- `boardroomProxyLogic`: proxy logic cloned by the factory for each Boardroom.
+- `boardroomLogic`: pre-launch implementation used by new Boardroom proxies.
+- `launchFinalizationLogic`: only valid successor to the pre-launch implementation.
+- `postLaunchGovernanceLogic`: only valid successor to launch finalization.
+- `finalLogic`: terminal implementation with no successor.
 - `allBoardrooms`: created Boardroom list.
 - `isBoardroom`: created Boardroom membership check.
 
 ### Boardroom
 
-`Boardroom` has one owner, one policy registry, one canonical wrapped-native token, one share token, and a wind-down
-status.
+`Boardroom` has one owner, one policy registry, one canonical wrapped-native token, one share token, a launch stage, and
+a wind-down status.
 
 State:
 
 - `policyRegistry`: protocol-controlled registry of allowed call policies.
 - `wrappedNative`: canonical WHYPE contract used to normalize raw native HYPE before redemptions.
 - `shareToken`: ERC20 minted only by this Boardroom.
+- `launchStage`: `PreLaunch`, `LaunchFinalization`, `PostLaunchGovernance`, or `Final`.
 - `status`: `Active`, `WindingDown`, or `RedemptionsOpen`.
+- `postLaunchMintPolicy`: optional mint policy required by post-launch implementations.
 - `redeemableAssets`: bounded list of ERC20 assets redeemed pro-rata by share holders.
 - `issuedGrants`: bounded list of Boardroom-issued token grants created through `TokenGrantFactory`.
 - `issuedDistributions`: bounded list of Boardroom-created distributions created through `DistributionFactory`.
 - `lockedLiquidityPositions`: bounded list of Boardroom-owned locked AMM liquidity positions.
 
-The owner can mint shares through `Boardroom.mint`. The owner can also call `Boardroom.execute` or
+The owner can mint shares through `Boardroom.mint` during pre-launch. The owner can also call `Boardroom.execute` or
 `Boardroom.executeBatch`. Each call names a policy, target, native value, and calldata. The Boardroom first checks that
 the registry allows the policy, then asks the policy whether the target call is allowed. If both checks pass, the
 Boardroom performs the external call and emits a generic execution event. When active execution creates a grant,
 distribution, or locked-liquidity position, the Boardroom records the returned obligation address so redemptions can
 later wait for it to close.
+
+Launch-stage transitions are one-way implementation upgrades:
+
+1. `PreLaunch`: bootstrap minting, grants, fixed-price sales, and bonding-curve buys/sells are allowed. Share transfers
+   are locked except for Boardroom treasury moves and Boardroom-recorded grant or distribution paths.
+2. `LaunchFinalization`: normal share transfers are open, bootstrap minting is frozen, and liquidity migration or
+   direct locked-liquidity seeding can complete.
+3. `PostLaunchGovernance`: normal transfers remain open, and minting requires a configured `IBoardroomMintPolicy`.
+4. `Final`: terminal implementation with no successor. Post-launch mint-policy rules remain in force.
+
+`upgradeToNext(data, expectedNextCodeHash)` can only move to the current implementation's declared successor. It checks
+the successor's declared previous implementation, stage order, storage version, optional code hash, and current-stage
+`canUpgrade(data)` hook before migrating.
 
 Wind-down transitions are one-way:
 
@@ -79,7 +101,9 @@ Wind-down transitions are one-way:
 
 ### BoardroomToken
 
-`BoardroomToken` is a standard ERC20 with immutable `boardroom` authority. Only the Boardroom can mint or burn it.
+`BoardroomToken` is an ERC20 with immutable `boardroom` authority. Only the Boardroom can mint or burn it. Non-mint and
+non-burn transfers ask the Boardroom whether the current launch stage permits the transfer. Pre-launch holder-to-holder
+transfers revert; settlement, sale, curve buy, curve sell, and treasury paths remain available.
 
 ## Grant Issuance Flow
 
@@ -117,8 +141,8 @@ and later create free USDC payroll grants through the same policy-gated batch ex
    `createMigratingBondingCurve`.
 3. Buyers buy shares from the curve while the Boardroom is active. Sellers can sell curve-issued shares back while the
    Boardroom is active.
-4. Once the quote reserve reaches the graduation target or sellable inventory is gone, the owner can migrate the curve
-   through `Boardroom.execute`.
+4. Once the quote reserve reaches the graduation target or sellable inventory is gone, the owner advances the Boardroom
+   to launch finalization and can migrate the curve through `Boardroom.execute`.
 5. Migration creates Boardroom-owned locked AMM liquidity through `LockedLiquidityFactory` and records the locker on the
    Boardroom. The Boardroom-controlled call supplies the AMM slippage bounds.
 6. Any quote or share remainder returns to the Boardroom treasury.
@@ -147,7 +171,13 @@ Redemption loops are bounded by `MAX_REDEEMABLE_ASSETS`. Wind-down gates are bou
 
 - Only the Boardroom can mint its share token.
 - Only the Boardroom can burn its share token.
-- Only the Boardroom owner can mint shares through the Boardroom.
+- Only the Boardroom owner can mint bootstrap shares through the pre-launch Boardroom implementation.
+- Pre-launch holder-to-holder share transfers are locked.
+- Pre-launch share transfers are still allowed for Boardroom treasury, recorded grant, and recorded distribution paths.
+- Share transfers open when the Boardroom reaches launch finalization.
+- Post-launch minting requires a configured mint policy.
+- Boardroom implementation upgrades can only follow the declared successor chain.
+- The final Boardroom implementation has no successor.
 - Shares cannot be minted after wind-down starts.
 - Boardroom execution requires a policy allowed by the central registry.
 - Boardroom execution requires the selected policy to allow the target, value, and calldata.

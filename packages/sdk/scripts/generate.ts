@@ -19,7 +19,18 @@ const contracts = [
   ["AmmRouter", "packages/contracts/out/AmmRouter.sol/AmmRouter.json", "ammRouterAbi"],
   ["AssetPolicy", "packages/contracts/out/AssetPolicy.sol/AssetPolicy.json", "assetPolicyAbi"],
   ["Boardroom", "packages/contracts/out/Boardroom.sol/Boardroom.json", "boardroomAbi"],
+  ["BoardroomFinal", "packages/contracts/out/BoardroomFinal.sol/BoardroomFinal.json", "boardroomFinalAbi"],
   ["BoardroomFactory", "packages/contracts/out/BoardroomFactory.sol/BoardroomFactory.json", "boardroomFactoryAbi"],
+  [
+    "BoardroomLaunchFinalization",
+    "packages/contracts/out/BoardroomLaunchFinalization.sol/BoardroomLaunchFinalization.json",
+    "boardroomLaunchFinalizationAbi",
+  ],
+  [
+    "BoardroomPostLaunchGovernance",
+    "packages/contracts/out/BoardroomPostLaunchGovernance.sol/BoardroomPostLaunchGovernance.json",
+    "boardroomPostLaunchGovernanceAbi",
+  ],
   [
     "BoardroomPolicyRegistry",
     "packages/contracts/out/BoardroomPolicyRegistry.sol/BoardroomPolicyRegistry.json",
@@ -29,11 +40,17 @@ const contracts = [
   ["DistributionFactory", "packages/contracts/out/DistributionFactory.sol/DistributionFactory.json", "distributionFactoryAbi"],
   ["ERC20", "packages/contracts/out/ERC20.sol/ERC20.json", "erc20Abi"],
   ["FixedPriceSale", "packages/contracts/out/FixedPriceSale.sol/FixedPriceSale.json", "fixedPriceSaleAbi"],
+  ["IBoardroomMintPolicy", "packages/contracts/out/IBoardroomMintPolicy.sol/IBoardroomMintPolicy.json", "boardroomMintPolicyAbi"],
   ["IBoardroomCallPolicy", "packages/contracts/out/IBoardroomCallPolicy.sol/IBoardroomCallPolicy.json", "boardroomCallPolicyAbi"],
   [
     "IBoardroomPolicyRegistry",
     "packages/contracts/out/IBoardroomPolicyRegistry.sol/IBoardroomPolicyRegistry.json",
     "boardroomPolicyRegistryInterfaceAbi",
+  ],
+  [
+    "IStagedBoardroomImplementation",
+    "packages/contracts/out/IStagedBoardroomImplementation.sol/IStagedBoardroomImplementation.json",
+    "stagedBoardroomImplementationAbi",
   ],
   ["LockedLiquidity", "packages/contracts/out/LockedLiquidity.sol/LockedLiquidity.json", "lockedLiquidityAbi"],
   [
@@ -48,6 +65,7 @@ const contracts = [
   ],
   ["PoolFees", "packages/contracts/out/PoolFees.sol/PoolFees.json", "poolFeesAbi"],
   ["ProtocolPolicy", "packages/contracts/out/ProtocolPolicy.sol/ProtocolPolicy.json", "protocolPolicyAbi"],
+  ["StagedBoardroomProxy", "packages/contracts/out/StagedBoardroomProxy.sol/StagedBoardroomProxy.json", "stagedBoardroomProxyAbi"],
   ["TokenGrant", "packages/contracts/out/TokenGrant.sol/TokenGrant.json", "tokenGrantAbi"],
   ["TokenGrantFactory", "packages/contracts/out/TokenGrantFactory.sol/TokenGrantFactory.json", "tokenGrantFactoryAbi"],
 ] as const;

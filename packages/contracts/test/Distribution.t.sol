@@ -362,6 +362,8 @@ contract DistributionTest is Test {
         vm.expectRevert(MigratingBondingCurve.OnlyBoardroom.selector);
         curve.migrate(1, 1, block.timestamp);
 
+        _advanceToLaunchFinalization(boardroom);
+
         vm.prank(owner);
         bytes memory migrationResult = boardroom.execute(
             _policyCall(
@@ -809,6 +811,13 @@ contract DistributionTest is Test {
 
         assertEq(amountsOut[0], expectedQuote);
         assertEq(shareToken.balanceOf(buyer), 0);
+    }
+
+    function _advanceToLaunchFinalization(Boardroom boardroom) internal {
+        if (boardroom.launchStage() != Boardroom.LaunchStage.PreLaunch) return;
+
+        vm.prank(owner);
+        boardroom.upgradeToNext("", bytes32(0));
     }
 
     function _policyCall(address policy, address target, uint256 value, bytes memory data)
