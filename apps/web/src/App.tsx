@@ -73,7 +73,7 @@ import { WalletPanel } from "./features/wallet/wallet-panel";
 import { useActionRunner } from "./hooks/use-action-runner";
 import { useFactorySnapshot } from "./hooks/use-factory-snapshot";
 import { useRuntimeDeployment } from "./hooks/use-runtime-deployment";
-import { useWalletConnection } from "./hooks/use-wallet-connection";
+import { useWagmiWallet } from "./hooks/use-wagmi-wallet";
 import { readBoardroomSnapshot } from "./lib/boardroom-snapshot";
 import {
   PLEDGE_CASH_NETWORKS,
@@ -355,7 +355,7 @@ export function App(): React.JSX.Element {
     [pushLog],
   );
 
-  const { activeAccount, connectWallet, switchChain, wallet, walletClient } = useWalletConnection({
+  const { activeAccount, switchChain, wallet, walletClient } = useWagmiWallet({
     network: activeNetwork,
     onAccountChanged: clearDirectGrantPrediction,
     pushLog,
@@ -1558,7 +1558,6 @@ export function App(): React.JSX.Element {
         chainName={activeNetwork.name}
         networks={PLEDGE_CASH_NETWORKS}
         onNetworkChange={selectNetwork}
-        connectWallet={connectWallet}
         pendingAction={pendingAction}
         runAction={runAction}
         switchChain={switchChain}

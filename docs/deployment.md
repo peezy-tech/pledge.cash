@@ -217,6 +217,8 @@ Use `VITE_PLEDGE_CASH_LOCAL_RPC_URL` to override the Local Anvil RPC endpoint wi
 If `VITE_PLEDGE_CASH_CHAIN_ID` is set to another chain id, the app preserves the legacy single-network behavior by
 adding a custom selectable profile from `VITE_PLEDGE_CASH_RPC_URL`, `VITE_PLEDGE_CASH_CHAIN_NAME`,
 `VITE_PLEDGE_CASH_EXPLORER_URL`, and `VITE_PLEDGE_CASH_WRAPPED_NATIVE_SYMBOL`.
+Set `VITE_PLEDGE_CASH_WALLETCONNECT_PROJECT_ID` or `VITE_WALLETCONNECT_PROJECT_ID` to enable WalletConnect in the
+SimpleKit wallet modal. Without one, the app still exposes injected and Coinbase wallet connectors.
 
 ## Local Anvil Seed
 

@@ -19,13 +19,18 @@
   },
   "dependencies": {
     "@pledge.cash/sdk": "workspace:*",
+    "@radix-ui/react-dialog": "^1.1.19",
+    "@radix-ui/react-scroll-area": "^1.2.14",
+    "@tanstack/react-query": "^5.101.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-merge": "^2.5.5",
-    "viem": "catalog:"
+    "vaul": "^1.1.2",
+    "viem": "catalog:",
+    "wagmi": "^3.7.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",

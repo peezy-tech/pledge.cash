@@ -1,4 +1,5 @@
-import { BookOpen, RefreshCw, Wallet } from "lucide-react";
+import { BookOpen, RefreshCw } from "lucide-react";
+import { ConnectWalletButton } from "../../components/simplekit";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import type { PledgeCashNetwork } from "../../lib/contracts";
@@ -6,7 +7,6 @@ import type { WalletState } from "../../lib/types";
 
 type AppHeaderProps = {
   wallet: WalletState;
-  connectWallet: () => Promise<void>;
   chainId: number;
   chainName: string;
   networks: PledgeCashNetwork[];
@@ -18,7 +18,6 @@ type AppHeaderProps = {
 
 export function AppHeader({
   wallet,
-  connectWallet,
   chainId,
   chainName,
   networks,
@@ -71,14 +70,7 @@ export function AppHeader({
             <RefreshCw className="h-4 w-4" />
             Switch
           </Button>
-          <Button
-            disabled={actionPending}
-            title={actionPending ? "Wallet actions are disabled while an action is running" : undefined}
-            onClick={() => void runAction("connect-wallet", connectWallet)}
-          >
-            <Wallet className="h-4 w-4" />
-            {wallet.account ? "Connected" : "Connect"}
-          </Button>
+          <ConnectWalletButton disabled={actionPending} />
         </div>
       </div>
     </header>
