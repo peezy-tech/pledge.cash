@@ -1,5 +1,5 @@
 import type { Address } from "@pledge.cash/sdk";
-import { ArrowRight, RefreshCw } from "lucide-react";
+import { ArrowDownUp, ArrowRight, ClipboardList, KeyRound, RefreshCw, Settings2 } from "lucide-react";
 import { ActionButton, ActionRow, AddressLink, Facts, Panel } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -17,22 +17,32 @@ import { formatTokenAmount } from "../../lib/token-amounts";
 import type { BoardroomDistributionSnapshot, BoardroomGrantSnapshot, BoardroomLockedLiquiditySnapshot } from "../../lib/types";
 
 type ProductBoardroomDashboardProps = {
+  account: Address | undefined;
   dashboard: ProductBoardroomDashboardState | undefined;
   error: string | undefined;
   loading: boolean;
   pendingAction: string | undefined;
   inspectGrant: (grant: Address) => void;
+  openAdvanced: () => void;
+  openGrants: () => void;
+  openManage: (boardroom: Address) => void;
+  openMarket: () => void;
   openTools: (boardroom: Address) => void;
   refresh: () => Promise<void>;
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
 };
 
 export function ProductBoardroomDashboard({
+  account,
   dashboard,
   error,
   loading,
   pendingAction,
   inspectGrant,
+  openAdvanced,
+  openGrants,
+  openManage,
+  openMarket,
   openTools,
   refresh,
   runAction,
@@ -41,11 +51,14 @@ export function ProductBoardroomDashboard({
   const revenueAssets = dashboard?.treasuryAssets.filter((asset) => isRevenueAsset(asset, dashboard.snapshot.shareToken)) ?? [];
   const grantStats = grantSummary(dashboard?.snapshot.grantSummaries ?? []);
   const activeCatalogEntry = dashboard?.catalog.find((entry) => sameAddress(entry.address, dashboard.address));
+  const projectName = activeCatalogEntry?.name ?? activeCatalogEntry?.symbol ?? "Boardroom Project";
+  const accountRoles = projectRoles(account, dashboard);
 
   return (
     <div className="grid gap-4">
       <Panel
-        title="Product Boardroom"
+        title="Project Overview"
+        description="Read the Boardroom as a project account: who controls it, what it owns, what it has promised, and which actions fit your wallet."
         action={
           <ActionButton
             actionId="refresh-product-boardroom"
@@ -65,17 +78,30 @@ export function ProductBoardroomDashboard({
                 <Badge variant={snapshot ? boardroomStatusTone(snapshot.status) : error ? "danger" : "muted"}>
                   {snapshot ? boardroomStatusLabel(snapshot.status) : error ? "Unavailable" : loading ? "Loading" : "Not loaded"}
                 </Badge>
+                {accountRoles.map((role) => (
+                  <Badge key={role.label} variant={role.tone}>{role.label}</Badge>
+                ))}
               </div>
-              <h1 className="m-0 text-2xl font-semibold tracking-normal text-zinc-50 sm:text-3xl">Boardroom Console</h1>
+              <h1 className="m-0 text-2xl font-semibold tracking-normal text-zinc-50 sm:text-3xl">{projectName}</h1>
               <p className="m-0 mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-                Project-level view of treasury balances, Boardroom-issued grants, and protocol obligations.
+                Project-level state for buyers, holders, grant recipients, and operators. The chain is the source of truth; service context can add attribution without changing settlement.
               </p>
             </div>
             {dashboard ? (
-              <Button className="self-start" variant="secondary" onClick={() => openTools(dashboard.address)}>
-                <ArrowRight className="h-4 w-4" />
-                Open Tools
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button className="self-start" variant="secondary" onClick={openMarket}>
+                  <ArrowDownUp className="h-4 w-4" />
+                  Market
+                </Button>
+                <Button className="self-start" variant="secondary" onClick={openGrants}>
+                  <KeyRound className="h-4 w-4" />
+                  Grants
+                </Button>
+                <Button className="self-start" variant={isBoardroomOwner(account, dashboard) ? "default" : "secondary"} onClick={() => openManage(dashboard.address)}>
+                  <Settings2 className="h-4 w-4" />
+                  Manage
+                </Button>
+              </div>
             ) : null}
           </div>
           {error ? <p className="m-0 mt-4 rounded-md border border-red-950 bg-red-950/35 p-3 text-sm text-red-200">{error}</p> : null}
@@ -86,11 +112,38 @@ export function ProductBoardroomDashboard({
             { label: "Boardroom", value: dashboard ? <AddressLink address={dashboard.address} /> : "No configured Boardroom" },
             { label: "Owner", value: snapshot?.owner ? <AddressLink address={snapshot.owner} /> : "Unknown" },
             { label: "Share token", value: snapshot?.shareToken ? <AddressLink address={snapshot.shareToken} /> : "Unknown" },
+            { label: "Connected wallet", value: account ? <AddressLink address={account} /> : "Read-only visitor" },
             { label: "Native balance", value: dashboard ? formatNativeBalance(dashboard.nativeBalance) : "Unknown" },
             { label: "Revenue assets", value: String(revenueAssets.filter((asset) => (asset.balance ?? 0n) > 0n).length) },
             { label: "Obligations", value: snapshot ? `${snapshot.issuedGrants.length} grants / ${snapshot.issuedDistributions.length} distributions / ${snapshot.lockedLiquidityPositions.length} lockers` : "Unknown" },
           ]}
         />
+        <ActionRow>
+          <Button variant="secondary" onClick={openMarket}>
+            <ArrowDownUp className="h-4 w-4" />
+            Buy or trade
+          </Button>
+          <Button variant="secondary" onClick={openGrants}>
+            <KeyRound className="h-4 w-4" />
+            Settle a grant
+          </Button>
+          {dashboard ? (
+            <Button variant={isBoardroomOwner(account, dashboard) ? "default" : "secondary"} onClick={() => openManage(dashboard.address)}>
+              <Settings2 className="h-4 w-4" />
+              Owner actions
+            </Button>
+          ) : null}
+          <Button variant="secondary" onClick={openAdvanced}>
+            <ClipboardList className="h-4 w-4" />
+            Discovery
+          </Button>
+          {dashboard ? (
+            <Button variant="ghost" onClick={() => openTools(dashboard.address)}>
+              <ArrowRight className="h-4 w-4" />
+              Raw tools
+            </Button>
+          ) : null}
+        </ActionRow>
       </Panel>
 
       <LocalNetworkPanel
@@ -648,6 +701,32 @@ function distributionPaymentTokenAddress(distribution: BoardroomDistributionSnap
   if ("paymentToken" in distribution.state) return distribution.state.paymentToken;
   if ("quoteToken" in distribution.state) return distribution.state.quoteToken;
   return undefined;
+}
+
+function projectRoles(
+  account: Address | undefined,
+  dashboard: ProductBoardroomDashboardState | undefined,
+): { label: string; tone: "default" | "muted" | "warning" }[] {
+  if (!account) return [{ label: "Read-only", tone: "muted" }];
+  if (!dashboard?.snapshot) return [{ label: "Wallet connected", tone: "muted" }];
+
+  const roles: { label: string; tone: "default" | "muted" | "warning" }[] = [];
+  if (isBoardroomOwner(account, dashboard)) roles.push({ label: "Boardroom owner", tone: "default" });
+  if (dashboard.snapshot.grantSummaries.some((grant) => sameAddress(grant.state?.holder, account))) {
+    roles.push({ label: "Grant holder", tone: "default" });
+  }
+  if (dashboard.snapshot.grantSummaries.some((grant) => sameAddress(grant.state?.issuer, account))) {
+    roles.push({ label: "Grant issuer", tone: "warning" });
+  }
+  if (roles.length === 0) roles.push({ label: "Buyer / holder view", tone: "muted" });
+  return roles;
+}
+
+function isBoardroomOwner(
+  account: Address | undefined,
+  dashboard: ProductBoardroomDashboardState | undefined,
+): boolean {
+  return sameAddress(account, dashboard?.snapshot.owner);
 }
 
 function sameAddress(first: Address | undefined, second: Address | undefined): boolean {

@@ -28,11 +28,12 @@ export function AppHeader({
 }: AppHeaderProps): React.JSX.Element {
   const walletReady = wallet.account !== undefined && wallet.chainId === chainId;
   const actionPending = pendingAction !== undefined;
+  const baseHref = import.meta.env.BASE_URL || "/";
 
   return (
     <header className="sticky top-0 z-20 border-b border-zinc-800 bg-zinc-950/88 backdrop-blur">
       <div className="flex min-h-16 flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-        <a className="flex items-center gap-3 font-bold tracking-normal text-zinc-50" href={import.meta.env.BASE_URL} aria-label="pledge.cash">
+        <a className="flex items-center gap-3 font-bold tracking-normal text-zinc-50" href={baseHref} aria-label="pledge.cash">
           <span className="grid h-8 w-8 place-items-center rounded-md border border-lime-300/40 bg-lime-300/10 text-lime-200">
             p
           </span>
@@ -55,7 +56,7 @@ export function AppHeader({
           </select>
           <a
             className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-900 hover:text-zinc-50"
-            href={`${import.meta.env.BASE_URL}docs/`}
+            href={`${baseHref}docs/`}
           >
             <BookOpen className="h-4 w-4" />
             Docs

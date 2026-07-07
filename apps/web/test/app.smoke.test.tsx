@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { Address, DiscoveredBoardroom, DiscoveredDistribution, DiscoveredGrant, DiscoveredLockedLiquidity, DiscoveredPool } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
-import { App, parseDeployment } from "../src/App";
+import { App, canRunGrantIssuerActions, manageWorkspaceSummary, parseDeployment } from "../src/App";
 import { Web3Provider } from "../src/components/web3-provider";
 import { BoardroomPanel } from "../src/features/boardrooms/boardroom-panel";
 import { DiscoveryPanel } from "../src/features/discovery/discovery-panel";
+import { GrantInspector } from "../src/features/grants/grant-inspector";
 import { AppHeader } from "../src/features/wallet/app-header";
 import { PLEDGE_CASH_NETWORKS } from "../src/lib/contracts";
 import {
@@ -182,7 +183,7 @@ const discoverySnapshot: DiscoverySnapshot = {
 };
 
 describe("web app shell", () => {
-  test("renders core protocol sections without a browser", () => {
+  test("renders product workspace sections without a browser", () => {
     const html = renderToString(
       <Web3Provider>
         <App />
@@ -194,10 +195,15 @@ describe("web app shell", () => {
     expect(html).toContain("Local Anvil");
     expect(html).toContain("TokenGrantFactory");
     expect(html).toContain("Ready");
-    expect(html).toContain("Direct Grant");
-    expect(html).toContain("Inspect Grant");
-    expect(html).toContain("Boardroom");
-    expect(html).toContain("Discovery");
+    expect(html).toContain("Project");
+    expect(html).toContain("Market");
+    expect(html).toContain("Positions");
+    expect(html).toContain("Grants");
+    expect(html).toContain("Manage");
+    expect(html).toContain("Activity");
+    expect(html).toContain("Advanced");
+    expect(html).toContain("Project Overview");
+    expect(html).toContain("Read-only");
   });
 
   test("disables header network and wallet actions while an action is pending", () => {
@@ -250,6 +256,51 @@ describe("web app shell", () => {
     expect(html).toContain("Pledge Common");
     expect(html).toContain("Use Distribution");
     expect(html).toContain("Use Locker");
+  });
+
+  test("keeps grant settlement scoped to the current holder wallet", () => {
+    const holderHtml = renderGrantInspector(oldGrant.currentHolder, false);
+    const observerHtml = renderGrantInspector("0x5000000000000000000000000000000000000000", false);
+
+    expect(holderHtml).toContain("Grant holder");
+    expect(holderHtml).not.toContain("Settlement is only available to the current grant holder wallet.");
+    expect(holderHtml).not.toContain("Issuer Controls");
+    expect(observerHtml).toContain("Observer");
+    expect(observerHtml).toContain("Settlement is only available to the current grant holder wallet.");
+    expect(observerHtml).not.toContain("Issuer Controls");
+  });
+
+  test("shows issuer controls only when issuer actions are available", () => {
+    const issuerHtml = renderGrantInspector(oldGrant.issuer, true);
+
+    expect(issuerHtml).toContain("Issuer controls");
+    expect(issuerHtml).toContain("Issuer Controls");
+    expect(issuerHtml).toContain("Halt Vesting");
+    expect(issuerHtml).toContain("Withdraw Expired");
+  });
+
+  test("allows Boardroom owners to operate directly loaded Boardroom grants", () => {
+    const grant = boardroomSnapshot.grantSummaries[0].state;
+
+    expect(canRunGrantIssuerActions(oldGrant.issuer, grant, undefined, undefined, { boardroom, owner: oldGrant.issuer })).toBe(true);
+    expect(
+      canRunGrantIssuerActions("0x5000000000000000000000000000000000000000", grant, undefined, undefined, {
+        boardroom,
+        owner: oldGrant.issuer,
+      }),
+    ).toBe(false);
+  });
+
+  test("bases Manage badges on the selected Boardroom state", () => {
+    expect(manageWorkspaceSummary(oldGrant.issuer, boardroom, boardroomSnapshot)).toMatchObject({
+      roleLabel: "Owner wallet",
+      statusLabel: "Winding down",
+    });
+    expect(manageWorkspaceSummary(oldGrant.issuer, boardroom, undefined)).toMatchObject({
+      roleLabel: "Load Boardroom",
+      statusLabel: "Selected Boardroom not loaded",
+      statusTone: "warning",
+    });
   });
 
   test("hides cached discovery rows after the wallet changes", () => {
@@ -399,3 +450,29 @@ describe("web app shell", () => {
   });
 
 });
+
+function renderGrantInspector(account: Address, issuerActionsAvailable: boolean): string {
+  const noop = async () => undefined;
+  const noopSetter = () => undefined;
+
+  return renderToString(
+    <GrantInspector
+      account={account}
+      approvePayment={noop}
+      grantAddress={oldGrant.grantAddress}
+      grantSnapshot={boardroomSnapshot.grantSummaries[0].state}
+      haltGrant={noop}
+      issuerActionsAvailable={issuerActionsAvailable}
+      loadGrant={noop}
+      paymentApproval="0"
+      pendingAction={undefined}
+      runAction={async (_label, action) => action()}
+      setGrantAddress={noopSetter}
+      setPaymentApproval={noopSetter}
+      setSettleAmount={noopSetter}
+      settleAmount="100"
+      settleGrant={noop}
+      withdrawExpired={noop}
+    />,
+  );
+}
