@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Address, DiscoveredBoardroom, DiscoveredDistribution, DiscoveredGrant, DiscoveredLockedLiquidity, DiscoveredPool } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
 import { App, parseDeployment } from "../src/App";
+import { Web3Provider } from "../src/components/web3-provider";
 import { BoardroomPanel } from "../src/features/boardrooms/boardroom-panel";
 import { DiscoveryPanel } from "../src/features/discovery/discovery-panel";
 import { AppHeader } from "../src/features/wallet/app-header";
@@ -182,7 +183,11 @@ const discoverySnapshot: DiscoverySnapshot = {
 
 describe("web app shell", () => {
   test("renders core protocol sections without a browser", () => {
-    const html = renderToString(<App />);
+    const html = renderToString(
+      <Web3Provider>
+        <App />
+      </Web3Provider>,
+    );
 
     expect(html).toContain("pledge.cash");
     expect(html).toContain("Deployment");
@@ -198,17 +203,18 @@ describe("web app shell", () => {
   test("disables header network and wallet actions while an action is pending", () => {
     const noop = async () => undefined;
     const html = renderToString(
-      <AppHeader
-        chainId={31337}
-        chainName="Local Anvil"
-        connectWallet={noop}
-        networks={PLEDGE_CASH_NETWORKS}
-        onNetworkChange={() => undefined}
-        pendingAction="scan-discovery"
-        runAction={async (_label, action) => action()}
-        switchChain={noop}
-        wallet={{}}
-      />,
+      <Web3Provider>
+        <AppHeader
+          chainId={31337}
+          chainName="Local Anvil"
+          networks={PLEDGE_CASH_NETWORKS}
+          onNetworkChange={() => undefined}
+          pendingAction="scan-discovery"
+          runAction={async (_label, action) => action()}
+          switchChain={noop}
+          wallet={{}}
+        />
+      </Web3Provider>,
     );
 
     expect(html).toContain('aria-label="Network"');
