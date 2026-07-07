@@ -4,10 +4,11 @@ import { renderToString } from "react-dom/server";
 import { App, canRunGrantIssuerActions, manageWorkspaceSummary, parseDeployment, viewFromPath } from "../src/App";
 import { Web3Provider } from "../src/components/web3-provider";
 import { BoardroomPanel } from "../src/features/boardrooms/boardroom-panel";
-import { DiscoveryPanel } from "../src/features/discovery/discovery-panel";
+import { DiscoveryPanel, WalletAccessPanel } from "../src/features/discovery/discovery-panel";
 import { GrantInspector } from "../src/features/grants/grant-inspector";
 import { AppHeader } from "../src/features/wallet/app-header";
 import { PLEDGE_CASH_NETWORKS } from "../src/lib/contracts";
+import { deploymentDiscoveryIdentity, discoveryStorageKey, resumeWalletAccessRange, walletAccessDiscoveryRange } from "../src/lib/discovery";
 import {
   defaultBoardroomGrantForm,
   defaultCurveMigrationForm,
@@ -170,7 +171,6 @@ const discoverySnapshot: DiscoverySnapshot = {
   chainId: 31337,
   loadedFor: oldGrant.currentHolder,
   fromBlock: 0n,
-  toBlock: 20n,
   chunkSize: 5000n,
   lastScannedBlock: 20n,
   complete: true,
@@ -239,7 +239,7 @@ describe("web app shell", () => {
     expect(html.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(3);
   });
 
-  test("renders discovery lists and cached scan status", () => {
+  test("renders discovery diagnostics with manual scan controls", () => {
     const noop = async () => undefined;
     const html = renderToString(
       <DiscoveryPanel
@@ -260,7 +260,12 @@ describe("web app shell", () => {
       />,
     );
 
-    expect(html).toContain("Discovery Scan");
+    expect(html).toContain("Discovery Diagnostics");
+    expect(html).toContain("Manual log range controls");
+    expect(html).toContain("From block");
+    expect(html).toContain("Chunk size");
+    expect(html).toContain("Resume");
+    expect(html).toContain("Clear Cache");
     expect(html).toContain("My Boardrooms");
     expect(html).toContain("My Grants");
     expect(html).toContain("Boardroom Obligations");
@@ -268,6 +273,228 @@ describe("web app shell", () => {
     expect(html).toContain("Pledge Common");
     expect(html).toContain("Use Distribution");
     expect(html).toContain("Use Locker");
+  });
+
+  test("gates discovery diagnostics actions while wallet sync is pending", () => {
+    const noop = async () => undefined;
+    const html = renderToString(
+      <DiscoveryPanel
+        account={oldGrant.currentHolder}
+        deployment={{ chainId: 31337 }}
+        discovery={discoverySnapshot}
+        discoveryForm={{ fromBlock: "0", toBlock: "20", chunkSize: "5000", includeClosedGrants: false }}
+        pendingAction="scan-discovery"
+        clearDiscovery={() => undefined}
+        inspectGrant={() => undefined}
+        resumeDiscovery={noop}
+        runAction={async (_label, action) => action()}
+        scanDiscovery={noop}
+        setDiscoveryForm={() => undefined}
+        useBoardroom={() => undefined}
+        useDistribution={() => undefined}
+        useLockedLiquidity={() => undefined}
+      />,
+    );
+
+    expect(html.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("renders wallet access without exposing manual discovery controls", () => {
+    const noop = async () => undefined;
+    const html = renderToString(
+      <WalletAccessPanel
+        account={oldGrant.currentHolder}
+        deployment={{ chainId: 31337 }}
+        discovery={discoverySnapshot}
+        discoveryForm={{ fromBlock: "0", toBlock: "20", chunkSize: "5000", includeClosedGrants: false }}
+        pendingAction={undefined}
+        inspectGrant={() => undefined}
+        runAction={async (_label, action) => action()}
+        scanDiscovery={noop}
+        useBoardroom={() => undefined}
+        useDistribution={() => undefined}
+        useLockedLiquidity={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Your Access");
+    expect(html).toContain("Wallet-linked Boardrooms");
+    expect(html).toContain("Ready");
+    expect(html).toContain("Boardrooms you manage");
+    expect(html).toContain("Grants for this wallet");
+    expect(html).toContain("Pledge Common");
+    expect(html).toContain("Refresh access");
+    expect(html).toContain("Open grant");
+    expect(html).not.toContain("From block");
+    expect(html).not.toContain("Chunk size");
+    expect(html).not.toContain("Discovery Diagnostics");
+    expect(html).not.toContain("Clear Cache");
+  });
+
+  test("warns when wallet access is backed by a limited diagnostics scan", () => {
+    const noop = async () => undefined;
+    const html = renderToString(
+      <WalletAccessPanel
+        account={oldGrant.currentHolder}
+        deployment={{ chainId: 31337 }}
+        discovery={{ ...discoverySnapshot, toBlock: 20n }}
+        discoveryForm={{ fromBlock: "0", toBlock: "20", chunkSize: "5000", includeClosedGrants: false }}
+        pendingAction={undefined}
+        inspectGrant={() => undefined}
+        runAction={async (_label, action) => action()}
+        scanDiscovery={noop}
+        useBoardroom={() => undefined}
+        useDistribution={() => undefined}
+        useLockedLiquidity={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Limited range");
+    expect(html).toContain("Use Discovery Diagnostics in Tools for a deeper historical scan.");
+  });
+
+  test("does not warn for deployment-bounded wallet access scans", () => {
+    const noop = async () => undefined;
+    const html = renderToString(
+      <WalletAccessPanel
+        account={oldGrant.currentHolder}
+        deployment={{ chainId: 31337 }}
+        discovery={{ ...discoverySnapshot, fromBlock: 10n, rangeMode: "deployment" }}
+        discoveryForm={{ fromBlock: "0", toBlock: "20", chunkSize: "5000", includeClosedGrants: false }}
+        pendingAction={undefined}
+        inspectGrant={() => undefined}
+        runAction={async (_label, action) => action()}
+        scanDiscovery={noop}
+        useBoardroom={() => undefined}
+        useDistribution={() => undefined}
+        useLockedLiquidity={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Ready");
+    expect(html).not.toContain("Limited range");
+  });
+
+  test("does not warn when a recent fallback scan still starts at genesis", () => {
+    const noop = async () => undefined;
+    const html = renderToString(
+      <WalletAccessPanel
+        account={oldGrant.currentHolder}
+        deployment={{ chainId: 31337 }}
+        discovery={{ ...discoverySnapshot, fromBlock: 0n, rangeMode: "recent" }}
+        discoveryForm={{ fromBlock: "0", toBlock: "20", chunkSize: "5000", includeClosedGrants: false }}
+        pendingAction={undefined}
+        inspectGrant={() => undefined}
+        runAction={async (_label, action) => action()}
+        scanDiscovery={noop}
+        useBoardroom={() => undefined}
+        useDistribution={() => undefined}
+        useLockedLiquidity={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Ready");
+    expect(html).not.toContain("Limited range");
+  });
+
+  test("derives wallet access scans from deployment timestamps", async () => {
+    const calls: bigint[] = [];
+    const client = {
+      async getBlock(args?: { blockNumber?: bigint }): Promise<{ number: bigint | null; timestamp: bigint }> {
+        const number = args?.blockNumber ?? 100n;
+        calls.push(number);
+        return { number, timestamp: 1_000n + number * 12n };
+      },
+    };
+
+    const range = await walletAccessDiscoveryRange(client, { chainId: 31337, deploymentTimestamp: 1_700n });
+
+    expect(range.rangeMode).toBe("deployment");
+    expect(range.fromBlock).toBe(9n);
+    expect(range.chunkSize).toBe(5000n);
+    expect(calls.length).toBeGreaterThan(1);
+  });
+
+  test("falls back to a recent bounded wallet access scan without deployment timestamps", async () => {
+    const client = {
+      async getBlock(): Promise<{ number: bigint | null; timestamp: bigint }> {
+        return { number: 150_000n, timestamp: 1_000n };
+      },
+    };
+
+    const range = await walletAccessDiscoveryRange(client, { chainId: 31337 });
+
+    expect(range.rangeMode).toBe("recent");
+    expect(range.fromBlock).toBe(50_000n);
+    expect(range.chunkSize).toBe(5000n);
+  });
+
+  test("resumes existing recent wallet access scans without jumping rolling windows", () => {
+    const range = resumeWalletAccessRange(
+      { fromBlock: 300_000n, chunkSize: 5000n, rangeMode: "recent" },
+      { ...discoverySnapshot, rangeMode: "recent", fromBlock: 100_000n, lastScannedBlock: 200_000n },
+    );
+
+    expect(range.fromBlock).toBe(200_001n);
+    expect(range.rangeMode).toBe("recent");
+  });
+
+  test("resumes cached deployment wallet access scans on reconnect", () => {
+    const range = resumeWalletAccessRange(
+      { fromBlock: 50n, chunkSize: 5000n, rangeMode: "deployment" },
+      { ...discoverySnapshot, rangeMode: "deployment", fromBlock: 50n, lastScannedBlock: 200_000n },
+    );
+
+    expect(range.fromBlock).toBe(200_001n);
+    expect(range.rangeMode).toBe("deployment");
+  });
+
+  test("does not resume manual diagnostics caches as wallet access scans", () => {
+    const range = resumeWalletAccessRange(
+      { fromBlock: 50n, chunkSize: 5000n, rangeMode: "deployment" },
+      { ...discoverySnapshot, rangeMode: "manual", fromBlock: 10_000n, lastScannedBlock: 20_000n },
+    );
+
+    expect(range.fromBlock).toBe(50n);
+    expect(range.rangeMode).toBe("deployment");
+  });
+
+  test("scopes wallet discovery cache keys by deployment identity", () => {
+    const firstIdentity = deploymentDiscoveryIdentity({
+      chainId: 31337,
+      boardroomFactory: "0x7900000000000000000000000000000000000000",
+      tokenGrantFactory: "0x7a00000000000000000000000000000000000000",
+    });
+    const secondIdentity = deploymentDiscoveryIdentity({
+      chainId: 31337,
+      boardroomFactory: "0x8900000000000000000000000000000000000000",
+      tokenGrantFactory: "0x8a00000000000000000000000000000000000000",
+    });
+
+    expect(firstIdentity).not.toBe(secondIdentity);
+    expect(discoveryStorageKey(31337, oldGrant.currentHolder, firstIdentity)).not.toBe(
+      discoveryStorageKey(31337, oldGrant.currentHolder, secondIdentity),
+    );
+  });
+
+  test("scopes deterministic wallet discovery caches by deployment timestamp", () => {
+    const oldIdentity = deploymentDiscoveryIdentity({
+      chainId: 31337,
+      deploymentTimestamp: 1_000n,
+      boardroomFactory: "0x7900000000000000000000000000000000000000",
+      tokenGrantFactory: "0x7a00000000000000000000000000000000000000",
+    });
+    const newIdentity = deploymentDiscoveryIdentity({
+      chainId: 31337,
+      deploymentTimestamp: 2_000n,
+      boardroomFactory: "0x7900000000000000000000000000000000000000",
+      tokenGrantFactory: "0x7a00000000000000000000000000000000000000",
+    });
+
+    expect(oldIdentity).not.toBe(newIdentity);
+    expect(discoveryStorageKey(31337, oldGrant.currentHolder, oldIdentity)).not.toBe(
+      discoveryStorageKey(31337, oldGrant.currentHolder, newIdentity),
+    );
   });
 
   test("keeps grant settlement scoped to the current holder wallet", () => {

@@ -61,9 +61,7 @@ import {
 import {
   Activity,
   ArrowDownUp,
-  ClipboardList,
   Compass,
-  FolderSearch,
   KeyRound,
   RefreshCw,
   Settings2,
@@ -78,7 +76,7 @@ import { Button } from "./components/ui/button";
 import { BoardroomPanel } from "./features/boardrooms/boardroom-panel";
 import { ProductBoardroomDashboard } from "./features/boardrooms/product-boardroom-dashboard";
 import { ArtifactPanel, DeploymentPanel } from "./features/deployment/deployment-panel";
-import { DiscoveryPanel } from "./features/discovery/discovery-panel";
+import { DiscoveryPanel, WalletAccessPanel } from "./features/discovery/discovery-panel";
 import { DirectGrantPanel } from "./features/grants/direct-grant-panel";
 import { GrantInspector } from "./features/grants/grant-inspector";
 import { LogPanel } from "./features/logs/log-panel";
@@ -102,6 +100,7 @@ import {
   addressMapKey,
   clearDiscoverySnapshot,
   combineDiscoveryLastScanned,
+  deploymentDiscoveryIdentity,
   discoveryErrors,
   discoveryItems,
   discoveryStorageKey,
@@ -110,7 +109,10 @@ import {
   loadDiscoverySnapshot,
   mergeAddressMap,
   parseDiscoveryToBlock,
+  resumeWalletAccessRange,
   saveDiscoverySnapshot,
+  walletAccessDiscoveryRange,
+  type DiscoveryScanRange,
 } from "./lib/discovery";
 import {
   defaultBoardroomGrantForm,
@@ -275,8 +277,12 @@ export function App(): React.JSX.Element {
   const [selectedChainId, setSelectedChainId] = useState(() => initialSelectedNetwork().chainId);
   const activeNetwork = useMemo(() => networkForChainId(selectedChainId), [selectedChainId]);
   const networkRequestVersion = useRef(0);
+  const discoveryWriteVersion = useRef(0);
   const activeChainIdRef = useRef(activeNetwork.chainId);
   activeChainIdRef.current = activeNetwork.chainId;
+  const activeAccountRef = useRef<Address | undefined>(undefined);
+  const activeDiscoveryKeyRef = useRef<string | undefined>(undefined);
+  const activeDeploymentIdentityRef = useRef<string | undefined>(undefined);
   const publicClient = useMemo(() => createPledgeCashPublicClient(activeNetwork), [activeNetwork]);
   const chain = activeNetwork.chain;
   const generatedDeployment = getPledgeCashDeployment(activeNetwork.chainId);
@@ -319,6 +325,10 @@ export function App(): React.JSX.Element {
   const [windDownForm, setWindDownForm] = useState<WindDownForm>(() => defaultWindDownForm());
   const [discoveryForm, setDiscoveryForm] = useState<DiscoveryForm>(() => defaultDiscoveryForm());
   const [discovery, setDiscovery] = useState<DiscoverySnapshot>(() => emptyDiscoverySnapshot());
+  const [loadedDiscoveryKey, setLoadedDiscoveryKey] = useState<string | undefined>();
+  const [autoDiscoveryPending, setAutoDiscoveryPending] = useState(false);
+  const autoDiscoveryKeyRef = useRef<string | undefined>(undefined);
+  const autoDiscoveryRunningRef = useRef(false);
   const [productBoardroom, setProductBoardroom] = useState<ProductBoardroomDashboardState>();
   const [productBoardroomError, setProductBoardroomError] = useState<string>();
   const [productBoardroomLoading, setProductBoardroomLoading] = useState(false);
@@ -391,11 +401,19 @@ export function App(): React.JSX.Element {
   });
   const factorySnapshot = useFactorySnapshot(publicClient, deployment, pushLog);
   const creationFee = factorySnapshot.creationFee ?? deployment?.creationFee ?? 0n;
-  const discoveryKey = discoveryStorageKey(activeNetwork.chainId, wallet.account);
+  const deploymentIdentity = deploymentDiscoveryIdentity(deployment);
+  const discoveryKey = discoveryStorageKey(activeNetwork.chainId, wallet.account, deploymentIdentity);
+  activeAccountRef.current = wallet.account;
+  activeDiscoveryKeyRef.current = discoveryKey;
+  activeDeploymentIdentityRef.current = deploymentIdentity;
 
   useEffect(() => {
     networkRequestVersion.current += 1;
   }, [activeNetwork.chainId]);
+
+  useEffect(() => {
+    discoveryWriteVersion.current += 1;
+  }, [discoveryKey]);
 
   const isCurrentNetworkRequest = useCallback(
     (version: number, chainId: number): boolean =>
@@ -473,6 +491,7 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     setDiscovery(loadDiscoverySnapshot(discoveryKey));
+    setLoadedDiscoveryKey(discoveryKey);
   }, [discoveryKey]);
 
   useEffect(() => {
@@ -1447,13 +1466,17 @@ export function App(): React.JSX.Element {
     await refreshBoardroom(boardroom.address);
   };
 
-  const scanDiscoveryFrom = async (fromBlock: bigint): Promise<void> => {
+  const scanDiscoveryRange = async ({ chunkSize, fromBlock, toBlock, rangeMode = "manual" }: DiscoveryScanRange): Promise<void> => {
     if (!wallet.account) throw new Error("Connect wallet first.");
     if (!deployment) throw new Error("Load a deployment artifact first.");
 
-    const toBlock = parseDiscoveryToBlock(discoveryForm.toBlock);
-    const chunkSize = uintInput(discoveryForm.chunkSize, "Chunk size");
-    const range = { fromBlock, toBlock, chunkSize };
+    const requestVersion = networkRequestVersion.current;
+    const requestChainId = activeNetwork.chainId;
+    const requestAccount = wallet.account;
+    const requestDiscoveryKey = discoveryKey;
+    const requestDeploymentIdentity = deploymentIdentity;
+    const requestDiscoveryWriteVersion = discoveryWriteVersion.current;
+    const range = toBlock === undefined ? { fromBlock, chunkSize } : { fromBlock, toBlock, chunkSize };
     const knownGrants = discoveryItems(discovery.grantsByAddress);
 
     const [boardroomResult, grantResult] = await Promise.all([
@@ -1507,8 +1530,8 @@ export function App(): React.JSX.Element {
       chainId: activeNetwork.chainId,
       loadedFor: wallet.account,
       fromBlock: discovery.fromBlock !== undefined && discovery.fromBlock < fromBlock ? discovery.fromBlock : fromBlock,
-      toBlock,
       chunkSize,
+      rangeMode,
       complete: results.every((result) => result.complete),
       errors: discoveryErrors(results),
       boardroomsByAddress,
@@ -1521,17 +1544,49 @@ export function App(): React.JSX.Element {
     if (lastScannedBlock !== undefined) {
       next.lastScannedBlock = lastScannedBlock;
     }
+    if (toBlock !== undefined) {
+      next.toBlock = toBlock;
+    }
+
+    if (
+      !isCurrentNetworkRequest(requestVersion, requestChainId)
+      || discoveryWriteVersion.current !== requestDiscoveryWriteVersion
+      || activeAccountRef.current?.toLowerCase() !== requestAccount.toLowerCase()
+      || activeDiscoveryKeyRef.current !== requestDiscoveryKey
+      || activeDeploymentIdentityRef.current !== requestDeploymentIdentity
+    ) {
+      return;
+    }
 
     setDiscovery(next);
-    saveDiscoverySnapshot(discoveryKey, next);
+    saveDiscoverySnapshot(requestDiscoveryKey, next);
     pushLog(
-      `Discovery scanned ${shortAddress(wallet.account)}: ${boardroomResult.items.length} boardrooms, ${grantResult.items.length} grants, ${relevantDistributions.length} distributions, ${relevantLockers.length} lockers.`,
+      `Discovery scanned ${shortAddress(requestAccount)}: ${boardroomResult.items.length} boardrooms, ${grantResult.items.length} grants, ${relevantDistributions.length} distributions, ${relevantLockers.length} lockers.`,
       next.complete ? "success" : "error",
     );
   };
 
+  const scanDiscoveryFrom = async (fromBlock: bigint): Promise<void> => {
+    await scanDiscoveryRange({
+      fromBlock,
+      toBlock: parseDiscoveryToBlock(discoveryForm.toBlock),
+      chunkSize: uintInput(discoveryForm.chunkSize, "Chunk size"),
+    });
+  };
+
   const scanDiscovery = async (): Promise<void> => {
     await scanDiscoveryFrom(uintInput(discoveryForm.fromBlock, "From block"));
+  };
+
+  const scanWalletAccess = async (): Promise<void> => {
+    const range = await walletAccessDiscoveryRange(publicClient, deployment);
+    const loadedForCurrentWallet = Boolean(
+      discovery.loadedFor
+        && wallet.account
+        && discovery.loadedFor.toLowerCase() === wallet.account.toLowerCase()
+        && discovery.chainId === activeNetwork.chainId,
+    );
+    await scanDiscoveryRange(loadedForCurrentWallet ? resumeWalletAccessRange(range, discovery) : range);
   };
 
   const resumeDiscovery = async (): Promise<void> => {
@@ -1542,10 +1597,38 @@ export function App(): React.JSX.Element {
   };
 
   const clearDiscovery = (): void => {
+    discoveryWriteVersion.current += 1;
+    autoDiscoveryKeyRef.current = discoveryKey;
+    setAutoDiscoveryPending(false);
     clearDiscoverySnapshot(discoveryKey);
     setDiscovery(emptyDiscoverySnapshot());
+    setLoadedDiscoveryKey(discoveryKey);
     pushLog("Cleared discovery cache.", "success");
   };
+
+  useEffect(() => {
+    autoDiscoveryKeyRef.current = undefined;
+  }, [discoveryKey]);
+
+  useEffect(() => {
+    if (!wallet.account || !deployment || pendingAction) return;
+    if (loadedDiscoveryKey !== discoveryKey) return;
+    if (autoDiscoveryRunningRef.current) return;
+
+    const key = discoveryKey;
+    if (!key) return;
+    if (autoDiscoveryKeyRef.current === key) return;
+
+    autoDiscoveryKeyRef.current = key;
+    autoDiscoveryRunningRef.current = true;
+    setAutoDiscoveryPending(true);
+    void scanWalletAccess()
+      .catch((error) => pushLog(errorMessage(error), "error"))
+      .finally(() => {
+        autoDiscoveryRunningRef.current = false;
+        setAutoDiscoveryPending(false);
+      });
+  }, [activeNetwork.chainId, deployment, discovery.chainId, discovery.loadedFor, discoveryKey, loadedDiscoveryKey, pendingAction, pushLog, scanWalletAccess, wallet.account]);
 
   const inspectDiscoveredGrant = useCallback(
     (grant: Address): void => {
@@ -1739,18 +1822,34 @@ export function App(): React.JSX.Element {
       workflow={{ deployment, pendingAction, runAction }}
     />
   );
+  const discoveryPendingAction = pendingAction ?? (autoDiscoveryPending ? "scan-discovery" : undefined);
   const discoveryPanel = (
     <DiscoveryPanel
       account={wallet.account}
       deployment={deployment}
       discovery={discovery}
       discoveryForm={discoveryForm}
-      pendingAction={pendingAction}
+      pendingAction={discoveryPendingAction}
       setDiscoveryForm={setDiscoveryForm}
       clearDiscovery={clearDiscovery}
       inspectGrant={inspectDiscoveredGrant}
       scanDiscovery={scanDiscovery}
       resumeDiscovery={resumeDiscovery}
+      useBoardroom={useDiscoveredBoardroom}
+      useDistribution={useDiscoveredDistribution}
+      useLockedLiquidity={useDiscoveredLockedLiquidity}
+      runAction={runAction}
+    />
+  );
+  const walletAccessPanel = (
+    <WalletAccessPanel
+      account={wallet.account}
+      deployment={deployment}
+      discovery={discovery}
+      discoveryForm={discoveryForm}
+      pendingAction={discoveryPendingAction}
+      inspectGrant={inspectDiscoveredGrant}
+      scanDiscovery={scanWalletAccess}
       useBoardroom={useDiscoveredBoardroom}
       useDistribution={useDiscoveredDistribution}
       useLockedLiquidity={useDiscoveredLockedLiquidity}
@@ -1835,18 +1934,7 @@ export function App(): React.JSX.Element {
           ) : null}
 
           {activeView === "wallet" ? (
-            <PositionsWorkspace
-              account={wallet.account}
-              deployment={deployment}
-              discovery={discovery}
-              discoveryForm={discoveryForm}
-              pendingAction={pendingAction}
-              resumeDiscovery={resumeDiscovery}
-              runAction={runAction}
-              scanDiscovery={scanDiscovery}
-            >
-              {discoveryPanel}
-            </PositionsWorkspace>
+            <PositionsWorkspace>{walletAccessPanel}</PositionsWorkspace>
           ) : null}
 
           {activeView === "grants" ? (
@@ -2097,70 +2185,15 @@ function WorkspaceNav({
   );
 }
 
-function PositionsWorkspace({
-  account,
-  children,
-  deployment,
-  discovery,
-  discoveryForm,
-  pendingAction,
-  resumeDiscovery,
-  runAction,
-  scanDiscovery,
-}: {
-  account: Address | undefined;
-  children: ReactNode;
-  deployment: PledgeCashDeployment | undefined;
-  discovery: DiscoverySnapshot;
-  discoveryForm: DiscoveryForm;
-  pendingAction: string | undefined;
-  resumeDiscovery: () => Promise<void>;
-  runAction: (label: string, action: () => Promise<void>) => Promise<void>;
-  scanDiscovery: () => Promise<void>;
-}): React.JSX.Element {
-  const summary = walletDiscoverySummary(account, deployment, discovery, discoveryForm.includeClosedGrants);
-
+function PositionsWorkspace({ children }: { children: ReactNode }): React.JSX.Element {
   return (
     <>
       <WorkspaceHeader
         eyebrow="Wallet"
-        title="Wallet View"
-        description="Scan the connected wallet for Boardrooms, grants, distributions, and liquidity that are relevant to this project graph."
-        action={
-          <>
-            <ActionButton
-              actionId="scan-discovery"
-              disabled={!account || !deployment}
-              pendingAction={pendingAction}
-              onClick={() => void runAction("scan-discovery", scanDiscovery)}
-            >
-              <FolderSearch className="h-4 w-4" />
-              Scan Wallet
-            </ActionButton>
-            <ActionButton
-              actionId="resume-discovery"
-              disabled={!account || discovery.lastScannedBlock === undefined}
-              pendingAction={pendingAction}
-              variant="secondary"
-              onClick={() => void runAction("resume-discovery", resumeDiscovery)}
-            >
-              <ClipboardList className="h-4 w-4" />
-              Resume
-            </ActionButton>
-          </>
-        }
+        title="Wallet Access"
+        description="See the grants, Boardrooms, treasury actions, and liquidity this wallet can read or manage."
       />
-      <Panel title="Wallet Summary" description="Discovery is cached per wallet and chain; scan again after changing accounts or networks.">
-        <Facts columns="three" items={[
-          { label: "Wallet", value: account ? <AddressLink address={account} /> : "Connect wallet" },
-          { label: "Scan status", value: <Badge variant={summary.loaded ? "default" : "muted"}>{summary.loaded ? summary.status : "Not scanned"}</Badge> },
-          { label: "Boardrooms", value: summary.boardrooms.toString() },
-          { label: "Current grants", value: summary.heldGrants.toString() },
-          { label: "Issued grants", value: summary.issuedGrants.toString() },
-          { label: "Obligations", value: `${summary.distributions.toString()} distributions / ${summary.lockers.toString()} lockers` },
-        ]} />
-      </Panel>
-      <div className="mt-4">{children}</div>
+      {children}
     </>
   );
 }
@@ -2243,53 +2276,6 @@ function AdvancedWorkspace({ children }: { children: ReactNode }): React.JSX.Ele
       <div className="grid gap-4">{children}</div>
     </>
   );
-}
-
-function walletDiscoverySummary(
-  account: Address | undefined,
-  deployment: PledgeCashDeployment | undefined,
-  discovery: DiscoverySnapshot,
-  includeClosedGrants: boolean,
-): {
-  boardrooms: number;
-  distributions: number;
-  heldGrants: number;
-  issuedGrants: number;
-  loaded: boolean;
-  lockers: number;
-  status: string;
-} {
-  const loaded = Boolean(
-    account
-      && discovery.loadedFor
-      && discovery.loadedFor.toLowerCase() === account.toLowerCase()
-      && discovery.chainId === deployment?.chainId,
-  );
-  if (!loaded || !account) {
-    return { boardrooms: 0, distributions: 0, heldGrants: 0, issuedGrants: 0, loaded: false, lockers: 0, status: "Not scanned" };
-  }
-
-  const grants = Object.values(discovery.grantsByAddress);
-  return {
-    boardrooms: Object.values(discovery.boardroomsByAddress).length,
-    distributions: Object.values(discovery.distributionsByAddress).length,
-    heldGrants: grants.filter((grant) => grantHeldBy(grant, account, includeClosedGrants)).length,
-    issuedGrants: grants.filter((grant) => grantIssuedBy(grant, account, includeClosedGrants)).length,
-    loaded: true,
-    lockers: Object.values(discovery.lockersByAddress).length,
-    status: discovery.complete && discovery.errors.length === 0 ? "Complete" : "Partial",
-  };
-}
-
-function grantHeldBy(grant: DiscoveredGrant, account: Address, includeClosed: boolean): boolean {
-  if (grant.closed && !includeClosed) return false;
-  const holder = grant.closed && grant.lastHolder ? grant.lastHolder : grant.currentHolder;
-  return sameAddress(holder, account);
-}
-
-function grantIssuedBy(grant: DiscoveredGrant, account: Address, includeClosed: boolean): boolean {
-  if (grant.closed && !includeClosed) return false;
-  return sameAddress(grant.issuer, account);
 }
 
 export function canRunGrantIssuerActions(

@@ -7,7 +7,7 @@ import type {
   DiscoveredPool,
   PledgeCashDeployment,
 } from "@pledge.cash/sdk";
-import { Database, RefreshCw, RotateCcw, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Database, FolderSearch, KeyRound, RefreshCw, RotateCcw, Search, ShieldCheck, Trash2 } from "lucide-react";
 import type React from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { ActionButton, ActionRow, AddressLink, Facts, Field, Panel } from "../../components/shell";
@@ -34,6 +34,130 @@ type DiscoveryPanelProps = {
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
 };
 
+type WalletAccessPanelProps = Pick<
+  DiscoveryPanelProps,
+  | "account"
+  | "deployment"
+  | "discovery"
+  | "discoveryForm"
+  | "pendingAction"
+  | "inspectGrant"
+  | "scanDiscovery"
+  | "useBoardroom"
+  | "useDistribution"
+  | "useLockedLiquidity"
+  | "runAction"
+>;
+
+type DiscoveryView = {
+  boardrooms: DiscoveredBoardroom[];
+  distributions: DiscoveredDistribution[];
+  grants: DiscoveredGrant[];
+  heldGrants: DiscoveredGrant[];
+  issuedGrants: DiscoveredGrant[];
+  loadedForCurrentAccount: boolean;
+  lockers: DiscoveredLockedLiquidity[];
+  originalHolderGrants: DiscoveredGrant[];
+  pools: DiscoveredPool[];
+  status: {
+    description: string;
+    label: string;
+    tone: "default" | "muted" | "warning";
+  };
+  totalLinkedItems: number;
+};
+
+export function WalletAccessPanel({
+  account,
+  deployment,
+  discovery,
+  discoveryForm,
+  pendingAction,
+  inspectGrant,
+  scanDiscovery,
+  useBoardroom,
+  useDistribution,
+  useLockedLiquidity,
+  runAction,
+}: WalletAccessPanelProps): React.JSX.Element {
+  const view = discoveryView(account, deployment, discovery, discoveryForm.includeClosedGrants, pendingAction);
+
+  return (
+    <div className="grid gap-4">
+      <Panel
+        title="Your Access"
+        description="Wallet-linked Boardrooms, grants, treasury actions, and liquidity refresh in the background when you connect."
+        action={
+          <ActionButton
+            actionId="scan-discovery"
+            disabled={!account || !deployment}
+            pendingAction={pendingAction}
+            variant="secondary"
+            onClick={() => void runAction("scan-discovery", scanDiscovery)}
+          >
+            <RefreshCw className="h-4 w-4" />
+            Refresh access
+          </ActionButton>
+        }
+      >
+        <Facts
+          columns="three"
+          items={[
+            { label: "Wallet", value: account ? <AddressLink address={account} /> : "Connect wallet" },
+            { label: "Status", value: <Badge variant={view.status.tone}>{view.status.label}</Badge> },
+            { label: "Last updated", value: view.loadedForCurrentAccount ? `Block ${bigintString(discovery.lastScannedBlock)}` : "Not synced" },
+            { label: "Boardrooms you manage", value: view.boardrooms.length.toString() },
+            { label: "Grants you can act on", value: view.heldGrants.length.toString() },
+            { label: "Treasury actions", value: `${view.distributions.length} distributions / ${view.lockers.length} lockers` },
+          ]}
+        />
+        <AccessNotice
+          account={account}
+          errors={view.loadedForCurrentAccount ? discovery.errors : []}
+          statusDescription={view.status.description}
+          totalLinkedItems={view.totalLinkedItems}
+        />
+      </Panel>
+
+      {view.loadedForCurrentAccount && view.totalLinkedItems > 0 ? (
+        <>
+          <BoardroomList
+            actionLabel="Manage"
+            boardrooms={view.boardrooms}
+            emptyLabel="No Boardrooms are managed by this wallet."
+            title="Boardrooms you manage"
+            useBoardroom={useBoardroom}
+          />
+          <GrantDiscoveryLists
+            actionLabel="Open grant"
+            heldGrants={view.heldGrants}
+            inspectGrant={inspectGrant}
+            issuedGrants={view.issuedGrants}
+            originalHolderGrants={view.originalHolderGrants}
+            title="Grants for this wallet"
+          />
+          <ObligationDiscoveryList
+            distributions={view.distributions}
+            lockerActionLabel="Open locker"
+            lockers={view.lockers}
+            title="Treasury actions you can manage"
+            useDistribution={useDistribution}
+            useLockedLiquidity={useLockedLiquidity}
+            distributionActionLabel="Open distribution"
+          />
+          <PoolDiscoveryList
+            actionLabel="Open locker"
+            lockers={view.lockers}
+            pools={view.pools}
+            title="Liquidity linked to your Boardrooms"
+            useLockedLiquidity={useLockedLiquidity}
+          />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 export function DiscoveryPanel({
   account,
   deployment,
@@ -50,27 +174,13 @@ export function DiscoveryPanel({
   useLockedLiquidity,
   runAction,
 }: DiscoveryPanelProps): React.JSX.Element {
-  const loadedForCurrentAccount = Boolean(
-    account
-      && discovery.loadedFor
-      && discovery.loadedFor.toLowerCase() === account.toLowerCase()
-      && discovery.chainId === deployment?.chainId,
-  );
-  const boardrooms = loadedForCurrentAccount ? Object.values(discovery.boardroomsByAddress) : [];
-  const grants = loadedForCurrentAccount ? Object.values(discovery.grantsByAddress) : [];
-  const distributions = loadedForCurrentAccount ? Object.values(discovery.distributionsByAddress) : [];
-  const lockers = loadedForCurrentAccount ? Object.values(discovery.lockersByAddress) : [];
-  const pools = loadedForCurrentAccount ? Object.values(discovery.poolsByAddress) : [];
-  const heldGrants = account ? grants.filter((grant) => grantHeldBy(grant, account, discoveryForm.includeClosedGrants)) : [];
-  const issuedGrants = account ? grants.filter((grant) => grantIssuedBy(grant, account, discoveryForm.includeClosedGrants)) : [];
-  const originalHolderGrants = account
-    ? grants.filter((grant) => grantOriginalHolder(grant, account, discoveryForm.includeClosedGrants))
-    : [];
+  const view = discoveryView(account, deployment, discovery, discoveryForm.includeClosedGrants, pendingAction);
 
   return (
     <div className="grid gap-4">
       <Panel
-        title="Discovery Scan"
+        title="Discovery Diagnostics"
+        description="Manual log range controls for troubleshooting wallet sync. Normal wallet access refreshes automatically."
         action={
           <ActionButton
             actionId="scan-discovery"
@@ -119,14 +229,14 @@ export function DiscoveryPanel({
           columns="three"
           items={[
             { label: "Wallet", value: account ? <AddressLink address={account} /> : "Connect wallet" },
-            { label: "Loaded range", value: loadedForCurrentAccount ? `${bigintString(discovery.fromBlock)} -> ${toBlockText(discovery.toBlock)}` : "None" },
+            { label: "Loaded range", value: view.loadedForCurrentAccount ? `${bigintString(discovery.fromBlock)} -> ${toBlockText(discovery.toBlock)}` : "None" },
             { label: "Last scanned block", value: bigintString(discovery.lastScannedBlock) },
-            { label: "Status", value: <StatusBadge complete={loadedForCurrentAccount ? discovery.complete : true} errors={loadedForCurrentAccount ? discovery.errors.length : 0} /> },
-            { label: "Boardrooms", value: String(boardrooms.length) },
-            { label: "Cached objects", value: `${grants.length} grants / ${distributions.length} distributions / ${lockers.length} lockers / ${pools.length} pools` },
+            { label: "Status", value: <StatusBadge complete={view.loadedForCurrentAccount ? discovery.complete : true} errors={view.loadedForCurrentAccount ? discovery.errors.length : 0} /> },
+            { label: "Boardrooms", value: String(view.boardrooms.length) },
+            { label: "Cached objects", value: `${view.grants.length} grants / ${view.distributions.length} distributions / ${view.lockers.length} lockers / ${view.pools.length} pools` },
           ]}
         />
-        {loadedForCurrentAccount && discovery.errors.length > 0 ? (
+        {view.loadedForCurrentAccount && discovery.errors.length > 0 ? (
           <ol className="grid gap-px border-t border-zinc-800 bg-zinc-800">
             {discovery.errors.map((error) => (
               <li className="bg-zinc-950 p-4 text-sm text-red-200" key={error}>{error}</li>
@@ -135,30 +245,36 @@ export function DiscoveryPanel({
         ) : null}
       </Panel>
 
-      <BoardroomList boardrooms={boardrooms} useBoardroom={useBoardroom} />
+      <BoardroomList boardrooms={view.boardrooms} useBoardroom={useBoardroom} />
       <GrantDiscoveryLists
-        heldGrants={heldGrants}
+        heldGrants={view.heldGrants}
         inspectGrant={inspectGrant}
-        issuedGrants={issuedGrants}
-        originalHolderGrants={originalHolderGrants}
+        issuedGrants={view.issuedGrants}
+        originalHolderGrants={view.originalHolderGrants}
       />
-      <ObligationDiscoveryList distributions={distributions} lockers={lockers} useDistribution={useDistribution} useLockedLiquidity={useLockedLiquidity} />
-      <PoolDiscoveryList lockers={lockers} pools={pools} useLockedLiquidity={useLockedLiquidity} />
+      <ObligationDiscoveryList distributions={view.distributions} lockers={view.lockers} useDistribution={useDistribution} useLockedLiquidity={useLockedLiquidity} />
+      <PoolDiscoveryList lockers={view.lockers} pools={view.pools} useLockedLiquidity={useLockedLiquidity} />
     </div>
   );
 }
 
 function BoardroomList({
+  actionLabel = "Use Boardroom",
   boardrooms,
+  emptyLabel = "No boardrooms",
+  title = "My Boardrooms",
   useBoardroom,
 }: {
+  actionLabel?: string;
   boardrooms: DiscoveredBoardroom[];
+  emptyLabel?: string;
+  title?: string;
   useBoardroom: (boardroom: Address) => void;
 }): React.JSX.Element {
   return (
-    <Panel title="My Boardrooms">
+    <Panel title={title}>
       {boardrooms.length === 0 ? (
-        <EmptyList label="No boardrooms" />
+        <EmptyList label={emptyLabel} />
       ) : (
         <ol className="grid gap-px border-t border-zinc-800 bg-zinc-800">
           {boardrooms.map((boardroom) => (
@@ -169,8 +285,8 @@ function BoardroomList({
                   <AddressLink address={boardroom.boardroom} />
                 </div>
                 <Button size="sm" variant="secondary" onClick={() => useBoardroom(boardroom.boardroom)}>
-                  <Database className="h-3.5 w-3.5" />
-                  Use Boardroom
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  {actionLabel}
                 </Button>
               </div>
               <Facts
@@ -193,32 +309,38 @@ function BoardroomList({
 }
 
 function GrantDiscoveryLists({
+  actionLabel = "Inspect",
   heldGrants,
   inspectGrant,
   issuedGrants,
   originalHolderGrants,
+  title = "My Grants",
 }: {
+  actionLabel?: string;
   heldGrants: DiscoveredGrant[];
   inspectGrant: (grant: Address) => void;
   issuedGrants: DiscoveredGrant[];
   originalHolderGrants: DiscoveredGrant[];
+  title?: string;
 }): React.JSX.Element {
   return (
-    <Panel title="My Grants">
+    <Panel title={title}>
       <div className="grid gap-px border-t border-zinc-800 bg-zinc-800 xl:grid-cols-3">
-        <GrantColumn grants={heldGrants} inspectGrant={inspectGrant} title="Current Holder" />
-        <GrantColumn grants={issuedGrants} inspectGrant={inspectGrant} title="Issuer" />
-        <GrantColumn grants={originalHolderGrants} inspectGrant={inspectGrant} title="Original Holder" />
+        <GrantColumn actionLabel={actionLabel} grants={heldGrants} inspectGrant={inspectGrant} title="Can settle" />
+        <GrantColumn actionLabel={actionLabel} grants={issuedGrants} inspectGrant={inspectGrant} title="Issued by this wallet" />
+        <GrantColumn actionLabel={actionLabel} grants={originalHolderGrants} inspectGrant={inspectGrant} title="Original holder" />
       </div>
     </Panel>
   );
 }
 
 function GrantColumn({
+  actionLabel,
   grants,
   inspectGrant,
   title,
 }: {
+  actionLabel: string;
   grants: DiscoveredGrant[];
   inspectGrant: (grant: Address) => void;
   title: string;
@@ -246,8 +368,8 @@ function GrantColumn({
                 ]}
               />
               <Button size="sm" variant="secondary" onClick={() => inspectGrant(grant.grantAddress)}>
-                <RefreshCw className="h-3.5 w-3.5" />
-                Inspect
+                <KeyRound className="h-3.5 w-3.5" />
+                {actionLabel}
               </Button>
             </li>
           ))}
@@ -259,17 +381,23 @@ function GrantColumn({
 
 function ObligationDiscoveryList({
   distributions,
+  distributionActionLabel = "Use Distribution",
+  lockerActionLabel = "Use Locker",
   lockers,
+  title = "Boardroom Obligations",
   useDistribution,
   useLockedLiquidity,
 }: {
   distributions: DiscoveredDistribution[];
+  distributionActionLabel?: string;
+  lockerActionLabel?: string;
   lockers: DiscoveredLockedLiquidity[];
+  title?: string;
   useDistribution: (distribution: DiscoveredDistribution) => void;
   useLockedLiquidity: (locker: DiscoveredLockedLiquidity) => void;
 }): React.JSX.Element {
   return (
-    <Panel title="Boardroom Obligations">
+    <Panel title={title}>
       {distributions.length === 0 && lockers.length === 0 ? (
         <EmptyList label="No obligations" />
       ) : (
@@ -294,7 +422,7 @@ function ObligationDiscoveryList({
                   />
                   <Button size="sm" variant="secondary" onClick={() => useDistribution(distribution)}>
                     <Database className="h-3.5 w-3.5" />
-                    Use Distribution
+                    {distributionActionLabel}
                   </Button>
                 </li>
               ))}
@@ -317,7 +445,7 @@ function ObligationDiscoveryList({
                   />
                   <Button size="sm" variant="secondary" onClick={() => useLockedLiquidity(locker)}>
                     <Database className="h-3.5 w-3.5" />
-                    Use Locker
+                    {lockerActionLabel}
                   </Button>
                 </li>
               ))}
@@ -330,16 +458,20 @@ function ObligationDiscoveryList({
 }
 
 function PoolDiscoveryList({
+  actionLabel = "Use Locker",
   lockers,
   pools,
+  title = "Pools And Liquidity",
   useLockedLiquidity,
 }: {
+  actionLabel?: string;
   lockers: DiscoveredLockedLiquidity[];
   pools: DiscoveredPool[];
+  title?: string;
   useLockedLiquidity: (locker: DiscoveredLockedLiquidity) => void;
 }): React.JSX.Element {
   return (
-    <Panel title="Pools And Liquidity">
+    <Panel title={title}>
       {pools.length === 0 && lockers.length === 0 ? (
         <EmptyList label="No pools" />
       ) : (
@@ -373,7 +505,7 @@ function PoolDiscoveryList({
               />
               <Button size="sm" variant="secondary" onClick={() => useLockedLiquidity(locker)}>
                 <Database className="h-3.5 w-3.5" />
-                Use Locker
+                {actionLabel}
               </Button>
             </div>
           ))}
@@ -387,9 +519,164 @@ function EmptyList({ label }: { label: string }): React.JSX.Element {
   return <div className="border-t border-zinc-800 p-4 text-sm text-zinc-500">{label}</div>;
 }
 
+function AccessNotice({
+  account,
+  errors,
+  statusDescription,
+  totalLinkedItems,
+}: {
+  account: Address | undefined;
+  errors: string[];
+  statusDescription: string;
+  totalLinkedItems: number;
+}): React.JSX.Element {
+  if (errors.length > 0) {
+    return (
+      <div className="grid gap-2 border-t border-zinc-800 p-4">
+        <div className="flex items-start gap-2 text-sm text-amber-100">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{statusDescription}</span>
+        </div>
+        <ol className="grid gap-1">
+          {errors.map((error) => (
+            <li className="text-sm text-red-200" key={error}>{error}</li>
+          ))}
+        </ol>
+      </div>
+    );
+  }
+
+  if (!account || totalLinkedItems === 0) {
+    return (
+      <div className="flex items-start gap-2 border-t border-zinc-800 p-4 text-sm text-zinc-400">
+        <FolderSearch className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
+        <span>{statusDescription}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-start gap-2 border-t border-zinc-800 p-4 text-sm text-zinc-400">
+      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-lime-300" />
+      <span>{statusDescription}</span>
+    </div>
+  );
+}
+
 function StatusBadge({ complete, errors }: { complete: boolean; errors: number }): React.JSX.Element {
   if (!complete || errors > 0) return <Badge variant="warning">Partial</Badge>;
   return <Badge variant="default">Complete</Badge>;
+}
+
+function discoveryView(
+  account: Address | undefined,
+  deployment: PledgeCashDeployment | undefined,
+  discovery: DiscoverySnapshot,
+  includeClosedGrants: boolean,
+  pendingAction: string | undefined,
+): DiscoveryView {
+  const loading = pendingAction === "scan-discovery" || pendingAction === "resume-discovery";
+  const loadedForCurrentAccount = Boolean(
+    account
+      && discovery.loadedFor
+      && discovery.loadedFor.toLowerCase() === account.toLowerCase()
+      && discovery.chainId === deployment?.chainId,
+  );
+  const boardrooms = loadedForCurrentAccount ? Object.values(discovery.boardroomsByAddress) : [];
+  const grants = loadedForCurrentAccount ? Object.values(discovery.grantsByAddress) : [];
+  const distributions = loadedForCurrentAccount ? Object.values(discovery.distributionsByAddress) : [];
+  const lockers = loadedForCurrentAccount ? Object.values(discovery.lockersByAddress) : [];
+  const pools = loadedForCurrentAccount ? Object.values(discovery.poolsByAddress) : [];
+  const heldGrants = account ? grants.filter((grant) => grantHeldBy(grant, account, includeClosedGrants)) : [];
+  const issuedGrants = account ? grants.filter((grant) => grantIssuedBy(grant, account, includeClosedGrants)) : [];
+  const originalHolderGrants = account ? grants.filter((grant) => grantOriginalHolder(grant, account, includeClosedGrants)) : [];
+  const totalLinkedItems = boardrooms.length + heldGrants.length + issuedGrants.length + originalHolderGrants.length + distributions.length + lockers.length + pools.length;
+
+  return {
+    boardrooms,
+    distributions,
+    grants,
+    heldGrants,
+    issuedGrants,
+    loadedForCurrentAccount,
+    lockers,
+    originalHolderGrants,
+    pools,
+    status: discoveryStatus(account, deployment, discovery, loadedForCurrentAccount, loading, totalLinkedItems),
+    totalLinkedItems,
+  };
+}
+
+function discoveryStatus(
+  account: Address | undefined,
+  deployment: PledgeCashDeployment | undefined,
+  discovery: DiscoverySnapshot,
+  loadedForCurrentAccount: boolean,
+  loading: boolean,
+  totalLinkedItems: number,
+): DiscoveryView["status"] {
+  if (!account) {
+    return {
+      label: "Connect wallet",
+      tone: "muted",
+      description: "Connect a wallet to see the grants, Boardrooms, treasury actions, and liquidity tied to it.",
+    };
+  }
+  if (!deployment) {
+    return {
+      label: "Waiting for network",
+      tone: "muted",
+      description: "The app is loading this network before it can read wallet-linked protocol activity.",
+    };
+  }
+  if (loading) {
+    return {
+      label: "Checking access",
+      tone: "muted",
+      description: "Looking up protocol activity for this wallet. You can keep using the app while this updates.",
+    };
+  }
+  if (!loadedForCurrentAccount) {
+    return {
+      label: "Syncing soon",
+      tone: "muted",
+      description: "Wallet activity will refresh automatically. Use Refresh access if you want to retry now.",
+    };
+  }
+  if (isLimitedDiscoveryRange(discovery)) {
+    return {
+      label: "Limited range",
+      tone: "warning",
+      description:
+        discovery.rangeMode === "recent"
+          ? "Wallet Access is using a recent block window. Use Discovery Diagnostics in Tools for a deeper historical scan."
+          : "Tools loaded a limited block range for this wallet. Use Discovery Diagnostics in Tools for a deeper historical scan.",
+    };
+  }
+  if (discovery.errors.length > 0 || !discovery.complete) {
+    return {
+      label: "Needs attention",
+      tone: "warning",
+      description: "Some wallet activity was loaded, but the scan did not finish cleanly. Details are available in Tools.",
+    };
+  }
+  if (totalLinkedItems === 0) {
+    return {
+      label: "Nothing linked",
+      tone: "muted",
+      description: "No grants, Boardrooms, treasury actions, or liquidity were found for this wallet on the active network.",
+    };
+  }
+  return {
+    label: "Ready",
+    tone: "default",
+    description: "Wallet-linked access is up to date for the active network.",
+  };
+}
+
+function isLimitedDiscoveryRange(discovery: DiscoverySnapshot): boolean {
+  if (discovery.rangeMode === "deployment") return false;
+  return Boolean((discovery.fromBlock !== undefined && discovery.fromBlock > 0n) || (discovery.toBlock !== undefined && discovery.toBlock !== "latest"));
 }
 
 function TextField<T extends object, K extends keyof T & string>({
