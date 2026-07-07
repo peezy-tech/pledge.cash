@@ -94,7 +94,7 @@ export function Facts({
   return (
     <dl
       className={cn(
-        "grid gap-px border-t border-zinc-800 bg-zinc-800",
+        "grid gap-px border-t border-zinc-800 bg-transparent",
         columns === "one" && "grid-cols-1",
         columns === "two" && "grid-cols-1 md:grid-cols-2",
         columns === "three" && "grid-cols-1 md:grid-cols-2 xl:grid-cols-3",
@@ -144,8 +144,10 @@ export function TabButton({
   return (
     <button
       className={cn(
-        "h-9 rounded-md border px-3 text-sm font-semibold transition-colors",
-        active ? "border-lime-300 bg-lime-300 text-zinc-950" : "border-zinc-800 bg-zinc-950 text-zinc-300 hover:bg-zinc-900",
+        "h-10 shrink-0 border-b-2 px-3 text-sm font-semibold transition-colors",
+        active
+          ? "border-lime-300 text-zinc-50"
+          : "border-transparent text-zinc-500 hover:border-zinc-700 hover:text-zinc-200",
       )}
       type="button"
       onClick={onClick}

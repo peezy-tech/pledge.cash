@@ -53,12 +53,13 @@ export function ProductBoardroomDashboard({
   const activeCatalogEntry = dashboard?.catalog.find((entry) => sameAddress(entry.address, dashboard.address));
   const projectName = activeCatalogEntry?.name ?? activeCatalogEntry?.symbol ?? "Boardroom Project";
   const accountRoles = projectRoles(account, dashboard);
+  const accessLabel = accountRoles.map((role) => role.label).join(" / ");
 
   return (
     <div className="grid gap-4">
       <Panel
-        title="Project Overview"
-        description="Read the Boardroom as a project account: who controls it, what it owns, what it has promised, and which actions fit your wallet."
+        title="Overview"
+        description="Project account state, treasury posture, open commitments, and wallet-relevant actions."
         action={
           <ActionButton
             actionId="refresh-product-boardroom"
@@ -82,16 +83,16 @@ export function ProductBoardroomDashboard({
                   <Badge key={role.label} variant={role.tone}>{role.label}</Badge>
                 ))}
               </div>
-              <h1 className="m-0 text-2xl font-semibold tracking-normal text-zinc-50 sm:text-3xl">{projectName}</h1>
+              <div className="m-0 text-2xl font-semibold tracking-normal text-zinc-50 sm:text-3xl">{projectName}</div>
               <p className="m-0 mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-                Project-level state for buyers, holders, grant recipients, and operators. The chain is the source of truth; service context can add attribution without changing settlement.
+                State for buyers, holders, grant recipients, and operators. Settlement stays onchain; service context can add attribution without changing authority.
               </p>
             </div>
             {dashboard ? (
               <div className="flex flex-wrap items-center gap-2">
                 <Button className="self-start" variant="secondary" onClick={openMarket}>
                   <ArrowDownUp className="h-4 w-4" />
-                  Market
+                  Trade
                 </Button>
                 <Button className="self-start" variant="secondary" onClick={openGrants}>
                   <KeyRound className="h-4 w-4" />
@@ -109,13 +110,15 @@ export function ProductBoardroomDashboard({
         <Facts
           columns="three"
           items={[
-            { label: "Boardroom", value: dashboard ? <AddressLink address={dashboard.address} /> : "No configured Boardroom" },
+            { label: "Project account", value: dashboard ? <AddressLink address={dashboard.address} /> : "No configured project" },
             { label: "Owner", value: snapshot?.owner ? <AddressLink address={snapshot.owner} /> : "Unknown" },
-            { label: "Share token", value: snapshot?.shareToken ? <AddressLink address={snapshot.shareToken} /> : "Unknown" },
+            { label: "Project token", value: snapshot?.shareToken ? <AddressLink address={snapshot.shareToken} /> : "Unknown" },
             { label: "Connected wallet", value: account ? <AddressLink address={account} /> : "Read-only visitor" },
             { label: "Native balance", value: dashboard ? formatNativeBalance(dashboard.nativeBalance) : "Unknown" },
             { label: "Revenue assets", value: String(revenueAssets.filter((asset) => (asset.balance ?? 0n) > 0n).length) },
-            { label: "Obligations", value: snapshot ? `${snapshot.issuedGrants.length} grants / ${snapshot.issuedDistributions.length} distributions / ${snapshot.lockedLiquidityPositions.length} lockers` : "Unknown" },
+            { label: "Open commitments", value: snapshot ? `${snapshot.issuedGrants.length} grants / ${snapshot.issuedDistributions.length} distributions / ${snapshot.lockedLiquidityPositions.length} lockers` : "Unknown" },
+            { label: "Access", value: accessLabel },
+            { label: "Settlement", value: "Onchain" },
           ]}
         />
         <ActionRow>
@@ -135,12 +138,12 @@ export function ProductBoardroomDashboard({
           ) : null}
           <Button variant="secondary" onClick={openAdvanced}>
             <ClipboardList className="h-4 w-4" />
-            Discovery
+            Tools
           </Button>
           {dashboard ? (
             <Button variant="ghost" onClick={() => openTools(dashboard.address)}>
               <ArrowRight className="h-4 w-4" />
-              Raw tools
+              Boardroom tools
             </Button>
           ) : null}
         </ActionRow>
@@ -190,37 +193,49 @@ function LocalNetworkPanel({
   if (entries.length === 0) return null;
 
   return (
-    <Panel title="Local Network">
-      <ol className="m-0 grid list-none gap-px border-t border-zinc-800 bg-zinc-800 p-0 lg:grid-cols-2 xl:grid-cols-4">
+    <Panel title="Project Directory" description="Related Boardrooms discovered for the selected local network.">
+      <ol className="m-0 grid list-none gap-px border-t border-zinc-800 bg-zinc-800 p-0">
         {entries.map((entry) => (
-          <li className="min-w-0 bg-zinc-950 p-4" key={entry.address}>
-            <div className="mb-3 flex min-w-0 items-start justify-between gap-3">
+          <li
+            className="grid min-w-0 gap-3 bg-zinc-950 p-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(120px,0.35fr)_minmax(120px,0.35fr)_minmax(92px,0.25fr)_auto] lg:items-center"
+            key={entry.address}
+          >
+            <div className="min-w-0">
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-zinc-100">{entry.name ?? entry.symbol ?? "Boardroom"}</div>
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <div className="truncate text-sm font-semibold text-zinc-100">{entry.name ?? entry.symbol ?? "Boardroom"}</div>
+                  <Badge variant={sameAddress(entry.address, activeBoardroom) ? "default" : "muted"}>{entry.status ?? "Discovered"}</Badge>
+                </div>
                 <div className="mt-1 truncate text-xs text-zinc-500">{entry.path ?? entry.distributionKind ?? "Boardroom"}</div>
+                <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2 text-xs text-zinc-500">
+                  <span className="min-w-0">Boardroom <AddressLink address={entry.address} /></span>
+                  {entry.distribution ? <span className="min-w-0">Distribution <AddressLink address={entry.distribution} /></span> : null}
+                </div>
               </div>
-              <Badge variant={sameAddress(entry.address, activeBoardroom) ? "default" : "muted"}>{entry.status ?? "Discovered"}</Badge>
             </div>
-            <Facts
-              columns="one"
-              items={[
-                { label: "Boardroom", value: <AddressLink address={entry.address} /> },
-                { label: "Distribution", value: entry.distribution ? <AddressLink address={entry.distribution} /> : "None" },
-                { label: "Sold", value: formatTokenAmount(entry.soldShares, catalogShareAsset(entry, shareAsset)) },
-                { label: "Raised", value: formatTokenAmount(entry.cashRaised, catalogCashAsset(entry, cashAsset)) },
-                { label: "Treasury cash", value: formatTokenAmount(entry.treasuryCash, catalogCashAsset(entry, cashAsset)) },
-                { label: "Buyers", value: entry.buyerCount === undefined ? "Unknown" : String(entry.buyerCount) },
-              ]}
-            />
-            <ActionRow>
+            <DirectoryMetric label="Sold" value={formatTokenAmount(entry.soldShares, catalogShareAsset(entry, shareAsset))} />
+            <DirectoryMetric label="Raised" value={formatTokenAmount(entry.cashRaised, catalogCashAsset(entry, cashAsset))} />
+            <DirectoryMetric label="Buyers" value={entry.buyerCount === undefined ? "Unknown" : String(entry.buyerCount)} />
+            <div className="flex lg:justify-end">
               <Button size="sm" variant="secondary" onClick={() => openTools(entry.address)}>
-                Open Tools
+                Open tools
               </Button>
-            </ActionRow>
+            </div>
           </li>
         ))}
       </ol>
     </Panel>
+  );
+}
+
+function DirectoryMetric({ label, value }: { label: string; value: React.ReactNode }): React.JSX.Element {
+  return (
+    <div className="min-w-0">
+      <div className="text-[11px] font-medium uppercase tracking-normal text-zinc-500">{label}</div>
+      <div className="mt-1 truncate text-sm font-semibold text-zinc-100" title={typeof value === "string" ? value : undefined}>
+        {value}
+      </div>
+    </div>
   );
 }
 
@@ -239,7 +254,7 @@ function LaunchPanel({ dashboard }: { dashboard: ProductBoardroomDashboardState 
   const claimableFees = formatClaimableLockerFees(locker);
 
   return (
-    <Panel title="Launch Path">
+    <Panel title="Launch">
       <Facts
         columns="three"
         items={[
@@ -395,7 +410,7 @@ function GrantHealthPanel({
   const migrationStrike = impliedUnitPrice(history?.curve?.migration?.quoteToLiquidity, history?.curve?.migration?.sharesToLiquidity, summaryTokenMetadata?.decimals);
 
   return (
-    <Panel title="Employee Options">
+    <Panel title="Grant Health">
       <Facts
         columns="two"
         items={[
@@ -460,7 +475,7 @@ function ObligationPanel({
   lockers: BoardroomLockedLiquiditySnapshot[];
 }): React.JSX.Element {
   return (
-    <Panel title="Protocol Obligations">
+    <Panel title="Obligations">
       <div className="grid gap-px border-t border-zinc-800 bg-zinc-800 lg:grid-cols-2">
         <ObligationColumn title="Distributions" emptyLabel="No distributions">
           {distributions.map((distribution) => (

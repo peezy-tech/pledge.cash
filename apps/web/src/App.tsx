@@ -65,14 +65,16 @@ import {
   Compass,
   FolderSearch,
   KeyRound,
+  RefreshCw,
   Settings2,
-  SlidersHorizontal,
+  Wrench,
   WalletCards,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Hex, PublicClient } from "viem";
 import { ActionButton, AddressLink, Facts, Panel, TabButton, WorkspaceHeader } from "./components/shell";
 import { Badge } from "./components/ui/badge";
+import { Button } from "./components/ui/button";
 import { BoardroomPanel } from "./features/boardrooms/boardroom-panel";
 import { ProductBoardroomDashboard } from "./features/boardrooms/product-boardroom-dashboard";
 import { ArtifactPanel, DeploymentPanel } from "./features/deployment/deployment-panel";
@@ -169,6 +171,7 @@ import type {
   CurveMigrationForm,
   DiscoveryForm,
   DiscoverySnapshot,
+  FactorySnapshot,
   FixedPriceSaleForm,
   GrantForm,
   GrantSnapshot,
@@ -177,12 +180,13 @@ import type {
   LockedLiquidityForm,
   MigratingCurveForm,
   WindDownForm,
+  WalletState,
 } from "./lib/types";
 
 export { parseDeployment } from "./lib/deployment";
 
 type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
-type AppView = "project" | "market" | "positions" | "grants" | "manage" | "activity" | "advanced";
+type AppView = "project" | "market" | "wallet" | "grants" | "manage" | "activity" | "advanced";
 export type GrantIssuerBoardroomAccess = { boardroom: Address; owner: Address };
 
 async function parseMinAmountsOut(client: PublicClient, value: string, assets: readonly Address[]): Promise<bigint[]> {
@@ -217,24 +221,24 @@ function initialView(): AppView {
   return viewFromPath(window.location.pathname);
 }
 
-function viewFromPath(pathname: string): AppView {
+export function viewFromPath(pathname: string): AppView {
   const base = import.meta.env.BASE_URL || "/";
   const relative = pathname.startsWith(base) ? pathname.slice(base.length) : pathname.replace(/^\/+/, "");
   const segment = relative.split("/")[0] || "project";
   if (segment === "boardroom" || segment === "project") return "project";
   if (segment === "swap" || segment === "market") return "market";
-  if (segment === "positions") return "positions";
+  if (segment === "positions" || segment === "wallet" || segment === "portfolio") return "wallet";
   if (segment === "grant" || segment === "grants") return "grants";
   if (segment === "manage" || segment === "boardroom-tools") return "manage";
   if (segment === "activity") return "activity";
-  if (segment === "advanced" || segment === "direct" || segment === "discovery") return "advanced";
+  if (segment === "advanced" || segment === "tools" || segment === "direct" || segment === "discovery") return "advanced";
   return "project";
 }
 
 function viewHref(view: AppView): string {
   const base = import.meta.env.BASE_URL || "/";
   const search = typeof window === "undefined" ? "" : window.location.search;
-  const path = view === "project" ? "project" : view;
+  const path = view === "project" ? "project" : view === "advanced" ? "tools" : view;
   return `${base}${path}${search}`;
 }
 
@@ -1753,6 +1757,15 @@ export function App(): React.JSX.Element {
       runAction={runAction}
     />
   );
+  const diagnosticsPanel = (
+    <ProjectDiagnostics
+      chainId={activeNetwork.chainId}
+      creationFee={creationFee}
+      deployment={deployment}
+      factorySnapshot={factorySnapshot}
+      wallet={wallet}
+    />
+  );
 
   return (
     <div className="min-h-svh text-zinc-100">
@@ -1767,20 +1780,21 @@ export function App(): React.JSX.Element {
         switchChain={switchChain}
       />
 
-      <main className="grid min-h-[calc(100svh-64px)] grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)]">
-        <aside className="grid content-start gap-4 border-b border-zinc-800 bg-zinc-950/35 p-4 lg:border-b-0 lg:border-r">
-          <DeploymentPanel
-            chainId={activeNetwork.chainId}
-            creationFee={creationFee}
+      <main className="min-h-[calc(100svh-64px)]">
+        <section className="mx-auto w-full max-w-[1480px] min-w-0 px-4 py-4 sm:px-6 sm:py-5">
+          <ProjectContextBar
+            activeView={activeView}
+            chainName={activeNetwork.name}
+            dashboard={productBoardroom}
             deployment={deployment}
-            factorySnapshot={factorySnapshot}
-            localAmmProtocolFeeRecipient={deployment?.ammProtocolFeeRecipient}
+            error={productBoardroomError}
+            loading={productBoardroomLoading}
+            pendingAction={pendingAction}
+            wallet={wallet}
+            navigateView={navigateView}
+            refresh={loadProductBoardroom}
+            runAction={runAction}
           />
-          <WalletPanel wallet={wallet} />
-          <ArtifactPanel deployment={deployment} />
-        </aside>
-
-        <section className="min-w-0 p-4 sm:p-5">
           <WorkspaceNav activeView={activeView} navigateView={navigateView} />
 
           {activeView === "project" ? (
@@ -1813,14 +1827,14 @@ export function App(): React.JSX.Element {
             <>
               <WorkspaceHeader
                 eyebrow="Market"
-                title="Buy, Sell, And Provide Liquidity"
-                description="Trade project tokens, inspect pool reserves, and manage LP positions without leaving the project context."
+                title="Trade and Liquidity"
+                description="Buy, sell, inspect pool reserves, and manage LP positions without leaving the project context."
               />
               {marketPanel}
             </>
           ) : null}
 
-          {activeView === "positions" ? (
+          {activeView === "wallet" ? (
             <PositionsWorkspace
               account={wallet.account}
               deployment={deployment}
@@ -1839,7 +1853,7 @@ export function App(): React.JSX.Element {
             <>
               <WorkspaceHeader
                 eyebrow="Grants"
-                title="Settle Token Grants"
+                title="Grant Settlement"
                 description="Inspect a grant, verify holder and payment terms, then settle vested tokens from the current holder wallet."
               />
               {grantPanel}
@@ -1858,6 +1872,7 @@ export function App(): React.JSX.Element {
 
           {activeView === "advanced" ? (
             <AdvancedWorkspace>
+              {diagnosticsPanel}
               {directGrantPanel}
               {discoveryPanel}
             </AdvancedWorkspace>
@@ -1868,6 +1883,189 @@ export function App(): React.JSX.Element {
   );
 }
 
+function ProjectContextBar({
+  activeView,
+  chainName,
+  dashboard,
+  deployment,
+  error,
+  loading,
+  pendingAction,
+  wallet,
+  navigateView,
+  refresh,
+  runAction,
+}: {
+  activeView: AppView;
+  chainName: string;
+  dashboard: ProductBoardroomDashboardState | undefined;
+  deployment: PledgeCashDeployment | undefined;
+  error: string | undefined;
+  loading: boolean;
+  pendingAction: string | undefined;
+  wallet: WalletState;
+  navigateView: (view: AppView) => void;
+  refresh: () => Promise<void>;
+  runAction: (label: string, action: () => Promise<void>) => Promise<void>;
+}): React.JSX.Element {
+  const project = projectContextSummary(wallet.account, dashboard, loading, error);
+  const protocolReady = Boolean(deployment?.tokenGrantFactory);
+
+  return (
+    <section aria-label="Project context" className="mb-4 border-b border-zinc-800 pb-4 sm:pb-5">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(560px,0.68fr)] xl:items-end">
+        <div className="min-w-0">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <Badge variant={project.statusTone}>{project.statusLabel}</Badge>
+            <Badge variant={project.roleTone}>{project.roleLabel}</Badge>
+            <Badge variant={activeView === "advanced" ? "warning" : "muted"}>
+              {activeView === "advanced" ? "Tools open" : "Project workspace"}
+            </Badge>
+          </div>
+          <h1 className="m-0 truncate text-2xl font-semibold tracking-normal text-zinc-50 sm:text-3xl">
+            {project.name}
+          </h1>
+          <p className="m-0 mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
+            See project state first. Trade, settle grants, and manage Boardrooms from job-based views; raw protocol details stay in Tools.
+          </p>
+        </div>
+
+        <div className="grid gap-3">
+          <dl className="grid min-w-0 grid-cols-1 gap-px overflow-hidden rounded-lg border border-zinc-800 bg-zinc-800 sm:grid-cols-3">
+            <ContextMetric label="Network" value={chainName} />
+            <ContextMetric label="Wallet" value={wallet.account ? shortAddress(wallet.account) : "Read-only visitor"} />
+            <ContextMetric label="Protocol" value={protocolReady ? "Ready" : "Pending"} tone={protocolReady ? "strong" : "warning"} />
+          </dl>
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            <ActionButton
+              actionId="refresh-project-context"
+              pendingAction={pendingAction}
+              variant="secondary"
+              onClick={() => void runAction("refresh-project-context", refresh)}
+            >
+              <RefreshCw className="h-4 w-4" />
+              {loading ? "Loading" : "Refresh"}
+            </ActionButton>
+            <Button variant="secondary" onClick={() => navigateView("wallet")}>
+              <WalletCards className="h-4 w-4" />
+              Wallet
+            </Button>
+            <Button variant="ghost" onClick={() => navigateView("advanced")}>
+              <Wrench className="h-4 w-4" />
+              Tools
+            </Button>
+          </div>
+        </div>
+      </div>
+      {error ? <p className="m-0 mt-3 rounded-md border border-red-950 bg-red-950/35 p-3 text-sm text-red-200">{error}</p> : null}
+    </section>
+  );
+}
+
+function ContextMetric({
+  label,
+  tone = "default",
+  value,
+}: {
+  label: string;
+  tone?: "default" | "strong" | "warning";
+  value: string;
+}): React.JSX.Element {
+  return (
+    <div className="min-w-0 bg-zinc-950 px-3 py-2.5">
+      <dt className="text-[11px] font-medium uppercase tracking-normal text-zinc-500">{label}</dt>
+      <dd
+        className={
+          tone === "warning"
+            ? "m-0 mt-1 truncate text-sm font-semibold text-amber-200"
+            : tone === "strong"
+              ? "m-0 mt-1 truncate text-sm font-semibold text-lime-200"
+              : "m-0 mt-1 truncate text-sm font-semibold text-zinc-100"
+        }
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+function ProjectDiagnostics({
+  chainId,
+  creationFee,
+  deployment,
+  factorySnapshot,
+  wallet,
+}: {
+  chainId: number;
+  creationFee: bigint;
+  deployment: PledgeCashDeployment | undefined;
+  factorySnapshot: FactorySnapshot;
+  wallet: WalletState;
+}): React.JSX.Element {
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
+      <div className="grid content-start gap-4">
+        <DeploymentPanel
+          chainId={chainId}
+          creationFee={creationFee}
+          deployment={deployment}
+          factorySnapshot={factorySnapshot}
+          localAmmProtocolFeeRecipient={deployment?.ammProtocolFeeRecipient}
+        />
+        <WalletPanel wallet={wallet} />
+      </div>
+      <ArtifactPanel deployment={deployment} />
+    </div>
+  );
+}
+
+function projectContextSummary(
+  account: Address | undefined,
+  dashboard: ProductBoardroomDashboardState | undefined,
+  loading: boolean,
+  error: string | undefined,
+): {
+  name: string;
+  roleLabel: string;
+  roleTone: "default" | "muted" | "warning";
+  statusLabel: string;
+  statusTone: "default" | "muted" | "warning" | "danger";
+} {
+  const catalogEntry = dashboard?.catalog.find((entry) => sameAddress(entry.address, dashboard.address));
+  const name = catalogEntry?.name ?? catalogEntry?.symbol ?? "Project workspace";
+  const role = projectContextRole(account, dashboard);
+
+  if (error) {
+    return { name, ...role, statusLabel: "Needs attention", statusTone: "danger" };
+  }
+  if (dashboard?.snapshot) {
+    return { name, ...role, statusLabel: boardroomStatusText(dashboard.snapshot.status), statusTone: dashboard.snapshot.status === 0 ? "default" : "warning" };
+  }
+  if (loading) {
+    return { name, ...role, statusLabel: "Loading project", statusTone: "muted" };
+  }
+  return { name, ...role, statusLabel: "Read-only mode", statusTone: "muted" };
+}
+
+function projectContextRole(
+  account: Address | undefined,
+  dashboard: ProductBoardroomDashboardState | undefined,
+): {
+  roleLabel: string;
+  roleTone: "default" | "muted" | "warning";
+} {
+  if (!account) return { roleLabel: "Read-only visitor", roleTone: "muted" };
+  if (!dashboard?.snapshot) return { roleLabel: "Wallet connected", roleTone: "muted" };
+  if (sameAddress(account, dashboard.snapshot.owner)) return { roleLabel: "Owner wallet", roleTone: "default" };
+  if (dashboard.snapshot.grantSummaries.some((grant) => sameAddress(grant.state?.holder, account))) {
+    return { roleLabel: "Grant holder", roleTone: "default" };
+  }
+  if (dashboard.snapshot.grantSummaries.some((grant) => sameAddress(grant.state?.issuer, account))) {
+    return { roleLabel: "Grant issuer", roleTone: "warning" };
+  }
+  return { roleLabel: "Buyer / holder view", roleTone: "muted" };
+}
+
 function WorkspaceNav({
   activeView,
   navigateView,
@@ -1876,17 +2074,17 @@ function WorkspaceNav({
   navigateView: (view: AppView) => void;
 }): React.JSX.Element {
   const items: { view: AppView; label: string; icon: ReactNode }[] = [
-    { view: "project", label: "Project", icon: <Compass className="h-4 w-4" /> },
+    { view: "project", label: "Overview", icon: <Compass className="h-4 w-4" /> },
     { view: "market", label: "Market", icon: <ArrowDownUp className="h-4 w-4" /> },
-    { view: "positions", label: "Positions", icon: <WalletCards className="h-4 w-4" /> },
+    { view: "wallet", label: "Wallet", icon: <WalletCards className="h-4 w-4" /> },
     { view: "grants", label: "Grants", icon: <KeyRound className="h-4 w-4" /> },
     { view: "manage", label: "Manage", icon: <Settings2 className="h-4 w-4" /> },
     { view: "activity", label: "Activity", icon: <Activity className="h-4 w-4" /> },
-    { view: "advanced", label: "Advanced", icon: <SlidersHorizontal className="h-4 w-4" /> },
+    { view: "advanced", label: "Tools", icon: <Wrench className="h-4 w-4" /> },
   ];
 
   return (
-    <nav aria-label="Workspace" className="mb-5 flex flex-wrap items-center gap-2">
+    <nav aria-label="Workspace" className="mb-5 flex items-center gap-1 overflow-x-auto border-b border-zinc-800">
       {items.map((item) => (
         <TabButton active={activeView === item.view} key={item.view} onClick={() => navigateView(item.view)}>
           <span className="inline-flex items-center gap-2">
@@ -1925,8 +2123,8 @@ function PositionsWorkspace({
   return (
     <>
       <WorkspaceHeader
-        eyebrow="Portfolio"
-        title="My Positions"
+        eyebrow="Wallet"
+        title="Wallet View"
         description="Scan the connected wallet for Boardrooms, grants, distributions, and liquidity that are relevant to this project graph."
         action={
           <>
@@ -1985,7 +2183,7 @@ function ManageWorkspace({
       <WorkspaceHeader
         eyebrow="Operations"
         title="Manage Boardroom"
-        description="Use owner-authorized workflows for grants, token issuance, sale setup, locked liquidity, and wind-down. Read-only users can still inspect the forms and loaded state."
+        description="Use owner-authorized workflows for grants, token issuance, sale setup, locked liquidity, and wind-down. Read-only users can still inspect loaded state."
       >
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={summary.roleTone}>{summary.roleLabel}</Badge>
@@ -2038,9 +2236,9 @@ function AdvancedWorkspace({ children }: { children: ReactNode }): React.JSX.Ele
   return (
     <>
       <WorkspaceHeader
-        eyebrow="Advanced"
-        title="Protocol Tools"
-        description="Use the raw grant creation and discovery tools when a workflow is not tied to the current project overview."
+        eyebrow="Tools"
+        title="Tools and Diagnostics"
+        description="Use raw deployment details, wallet diagnostics, grant creation, and discovery tools when a workflow needs protocol-level control."
       />
       <div className="grid gap-4">{children}</div>
     </>

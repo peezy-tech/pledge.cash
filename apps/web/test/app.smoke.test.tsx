@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Address, DiscoveredBoardroom, DiscoveredDistribution, DiscoveredGrant, DiscoveredLockedLiquidity, DiscoveredPool } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
-import { App, canRunGrantIssuerActions, manageWorkspaceSummary, parseDeployment } from "../src/App";
+import { App, canRunGrantIssuerActions, manageWorkspaceSummary, parseDeployment, viewFromPath } from "../src/App";
 import { Web3Provider } from "../src/components/web3-provider";
 import { BoardroomPanel } from "../src/features/boardrooms/boardroom-panel";
 import { DiscoveryPanel } from "../src/features/discovery/discovery-panel";
@@ -191,19 +191,31 @@ describe("web app shell", () => {
     );
 
     expect(html).toContain("pledge.cash");
-    expect(html).toContain("Deployment");
+    expect(html).toContain("Project workspace");
     expect(html).toContain("Local Anvil");
-    expect(html).toContain("TokenGrantFactory");
     expect(html).toContain("Ready");
-    expect(html).toContain("Project");
+    expect(html).toContain("Overview");
     expect(html).toContain("Market");
-    expect(html).toContain("Positions");
+    expect(html).toContain("Wallet");
     expect(html).toContain("Grants");
     expect(html).toContain("Manage");
     expect(html).toContain("Activity");
-    expect(html).toContain("Advanced");
-    expect(html).toContain("Project Overview");
-    expect(html).toContain("Read-only");
+    expect(html).toContain("Tools");
+    expect(html).toContain("Read-only visitor");
+    expect(html).not.toContain("Deployment");
+    expect(html).not.toContain("Artifact");
+    expect(html).not.toContain("TokenGrantFactory");
+    expect(html).not.toContain("Positions");
+    expect(html).not.toContain("Advanced");
+    expect(html).not.toContain("Project Overview");
+  });
+
+  test("keeps legacy workspace routes while using product labels", () => {
+    expect(viewFromPath("/wallet")).toBe("wallet");
+    expect(viewFromPath("/positions")).toBe("wallet");
+    expect(viewFromPath("/portfolio")).toBe("wallet");
+    expect(viewFromPath("/tools")).toBe("advanced");
+    expect(viewFromPath("/advanced")).toBe("advanced");
   });
 
   test("disables header network and wallet actions while an action is pending", () => {
