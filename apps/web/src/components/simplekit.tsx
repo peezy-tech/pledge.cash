@@ -137,11 +137,7 @@ function Account(): React.JSX.Element {
       </SimpleKitModalHeader>
       <SimpleKitModalBody className="h-[286px]">
         <div className="flex h-full w-full flex-col items-center justify-center gap-6">
-          <img
-            className="h-20 w-20 rounded-full border border-lime-300/30 bg-zinc-900"
-            src={`https://avatar.vercel.sh/${address}?size=160`}
-            alt=""
-          />
+          <WalletAvatar address={address} />
 
           <div className="min-w-0 space-y-2 text-center">
             <div className="flex items-center justify-center gap-1.5">
@@ -178,6 +174,21 @@ function Connectors(): React.JSX.Element {
         <div className="h-0" />
       </SimpleKitModalFooter>
     </>
+  );
+}
+
+function WalletAvatar({ address }: { address: string | undefined }): React.JSX.Element {
+  const style = React.useMemo(() => walletAvatarStyle(address), [address]);
+  const label = address ? address.slice(2, 4).toUpperCase() : "0X";
+
+  return (
+    <div
+      aria-hidden="true"
+      className="grid h-20 w-20 place-items-center rounded-full border border-lime-300/30 text-base font-bold text-zinc-950 shadow-lg shadow-lime-300/5"
+      style={style}
+    >
+      {label}
+    </div>
   );
 }
 
@@ -365,6 +376,19 @@ function useSimpleKit(): {
 function connectorIcon(connector: Connector | null): string | undefined {
   if (!connector) return undefined;
   return connector.icon ?? CONNECTOR_ICONS[connector.id];
+}
+
+function walletAvatarStyle(address: string | undefined): React.CSSProperties {
+  const seed = (address ?? "0x00").replace(/^0x/i, "").padEnd(12, "0");
+  const firstHue = Number.parseInt(seed.slice(0, 6), 16) % 360;
+  const secondHue = Number.parseInt(seed.slice(6, 12), 16) % 360;
+
+  return {
+    background: [
+      "radial-gradient(circle at 32% 28%, rgba(244, 244, 245, 0.86), rgba(244, 244, 245, 0) 26%)",
+      `linear-gradient(135deg, hsl(${firstHue} 88% 62%), hsl(${secondHue} 84% 48%))`,
+    ].join(", "),
+  };
 }
 
 export { ConnectWalletButton, SimpleKitContext, SimpleKitProvider, useSimpleKit };
