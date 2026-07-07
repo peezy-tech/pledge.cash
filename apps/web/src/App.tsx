@@ -61,9 +61,7 @@ import {
 import {
   Activity,
   ArrowDownUp,
-  ClipboardList,
   Compass,
-  FolderSearch,
   KeyRound,
   RefreshCw,
   Settings2,
@@ -78,7 +76,7 @@ import { Button } from "./components/ui/button";
 import { BoardroomPanel } from "./features/boardrooms/boardroom-panel";
 import { ProductBoardroomDashboard } from "./features/boardrooms/product-boardroom-dashboard";
 import { ArtifactPanel, DeploymentPanel } from "./features/deployment/deployment-panel";
-import { DiscoveryPanel } from "./features/discovery/discovery-panel";
+import { DiscoveryPanel, WalletAccessPanel } from "./features/discovery/discovery-panel";
 import { DirectGrantPanel } from "./features/grants/direct-grant-panel";
 import { GrantInspector } from "./features/grants/grant-inspector";
 import { LogPanel } from "./features/logs/log-panel";
@@ -319,6 +317,7 @@ export function App(): React.JSX.Element {
   const [windDownForm, setWindDownForm] = useState<WindDownForm>(() => defaultWindDownForm());
   const [discoveryForm, setDiscoveryForm] = useState<DiscoveryForm>(() => defaultDiscoveryForm());
   const [discovery, setDiscovery] = useState<DiscoverySnapshot>(() => emptyDiscoverySnapshot());
+  const autoDiscoveryKeyRef = useRef<string | undefined>(undefined);
   const [productBoardroom, setProductBoardroom] = useState<ProductBoardroomDashboardState>();
   const [productBoardroomError, setProductBoardroomError] = useState<string>();
   const [productBoardroomLoading, setProductBoardroomLoading] = useState(false);
@@ -1542,10 +1541,30 @@ export function App(): React.JSX.Element {
   };
 
   const clearDiscovery = (): void => {
+    autoDiscoveryKeyRef.current = wallet.account ? `${activeNetwork.chainId}:${wallet.account.toLowerCase()}` : undefined;
     clearDiscoverySnapshot(discoveryKey);
     setDiscovery(emptyDiscoverySnapshot());
     pushLog("Cleared discovery cache.", "success");
   };
+
+  useEffect(() => {
+    autoDiscoveryKeyRef.current = undefined;
+  }, [activeNetwork.chainId, wallet.account]);
+
+  useEffect(() => {
+    if (!wallet.account || !deployment || pendingAction) return;
+
+    const key = `${activeNetwork.chainId}:${wallet.account.toLowerCase()}`;
+    const loadedForCurrentWallet = Boolean(
+      discovery.loadedFor
+        && discovery.loadedFor.toLowerCase() === wallet.account.toLowerCase()
+        && discovery.chainId === activeNetwork.chainId,
+    );
+    if (loadedForCurrentWallet || autoDiscoveryKeyRef.current === key) return;
+
+    autoDiscoveryKeyRef.current = key;
+    void runAction("scan-discovery", scanDiscovery);
+  }, [activeNetwork.chainId, deployment, discovery.chainId, discovery.loadedFor, pendingAction, runAction, scanDiscovery, wallet.account]);
 
   const inspectDiscoveredGrant = useCallback(
     (grant: Address): void => {
@@ -1757,6 +1776,21 @@ export function App(): React.JSX.Element {
       runAction={runAction}
     />
   );
+  const walletAccessPanel = (
+    <WalletAccessPanel
+      account={wallet.account}
+      deployment={deployment}
+      discovery={discovery}
+      discoveryForm={discoveryForm}
+      pendingAction={pendingAction}
+      inspectGrant={inspectDiscoveredGrant}
+      scanDiscovery={scanDiscovery}
+      useBoardroom={useDiscoveredBoardroom}
+      useDistribution={useDiscoveredDistribution}
+      useLockedLiquidity={useDiscoveredLockedLiquidity}
+      runAction={runAction}
+    />
+  );
   const diagnosticsPanel = (
     <ProjectDiagnostics
       chainId={activeNetwork.chainId}
@@ -1835,18 +1869,7 @@ export function App(): React.JSX.Element {
           ) : null}
 
           {activeView === "wallet" ? (
-            <PositionsWorkspace
-              account={wallet.account}
-              deployment={deployment}
-              discovery={discovery}
-              discoveryForm={discoveryForm}
-              pendingAction={pendingAction}
-              resumeDiscovery={resumeDiscovery}
-              runAction={runAction}
-              scanDiscovery={scanDiscovery}
-            >
-              {discoveryPanel}
-            </PositionsWorkspace>
+            <PositionsWorkspace>{walletAccessPanel}</PositionsWorkspace>
           ) : null}
 
           {activeView === "grants" ? (
@@ -2097,70 +2120,15 @@ function WorkspaceNav({
   );
 }
 
-function PositionsWorkspace({
-  account,
-  children,
-  deployment,
-  discovery,
-  discoveryForm,
-  pendingAction,
-  resumeDiscovery,
-  runAction,
-  scanDiscovery,
-}: {
-  account: Address | undefined;
-  children: ReactNode;
-  deployment: PledgeCashDeployment | undefined;
-  discovery: DiscoverySnapshot;
-  discoveryForm: DiscoveryForm;
-  pendingAction: string | undefined;
-  resumeDiscovery: () => Promise<void>;
-  runAction: (label: string, action: () => Promise<void>) => Promise<void>;
-  scanDiscovery: () => Promise<void>;
-}): React.JSX.Element {
-  const summary = walletDiscoverySummary(account, deployment, discovery, discoveryForm.includeClosedGrants);
-
+function PositionsWorkspace({ children }: { children: ReactNode }): React.JSX.Element {
   return (
     <>
       <WorkspaceHeader
         eyebrow="Wallet"
-        title="Wallet View"
-        description="Scan the connected wallet for Boardrooms, grants, distributions, and liquidity that are relevant to this project graph."
-        action={
-          <>
-            <ActionButton
-              actionId="scan-discovery"
-              disabled={!account || !deployment}
-              pendingAction={pendingAction}
-              onClick={() => void runAction("scan-discovery", scanDiscovery)}
-            >
-              <FolderSearch className="h-4 w-4" />
-              Scan Wallet
-            </ActionButton>
-            <ActionButton
-              actionId="resume-discovery"
-              disabled={!account || discovery.lastScannedBlock === undefined}
-              pendingAction={pendingAction}
-              variant="secondary"
-              onClick={() => void runAction("resume-discovery", resumeDiscovery)}
-            >
-              <ClipboardList className="h-4 w-4" />
-              Resume
-            </ActionButton>
-          </>
-        }
+        title="Wallet Access"
+        description="See the grants, Boardrooms, treasury actions, and liquidity this wallet can read or manage."
       />
-      <Panel title="Wallet Summary" description="Discovery is cached per wallet and chain; scan again after changing accounts or networks.">
-        <Facts columns="three" items={[
-          { label: "Wallet", value: account ? <AddressLink address={account} /> : "Connect wallet" },
-          { label: "Scan status", value: <Badge variant={summary.loaded ? "default" : "muted"}>{summary.loaded ? summary.status : "Not scanned"}</Badge> },
-          { label: "Boardrooms", value: summary.boardrooms.toString() },
-          { label: "Current grants", value: summary.heldGrants.toString() },
-          { label: "Issued grants", value: summary.issuedGrants.toString() },
-          { label: "Obligations", value: `${summary.distributions.toString()} distributions / ${summary.lockers.toString()} lockers` },
-        ]} />
-      </Panel>
-      <div className="mt-4">{children}</div>
+      {children}
     </>
   );
 }
@@ -2243,53 +2211,6 @@ function AdvancedWorkspace({ children }: { children: ReactNode }): React.JSX.Ele
       <div className="grid gap-4">{children}</div>
     </>
   );
-}
-
-function walletDiscoverySummary(
-  account: Address | undefined,
-  deployment: PledgeCashDeployment | undefined,
-  discovery: DiscoverySnapshot,
-  includeClosedGrants: boolean,
-): {
-  boardrooms: number;
-  distributions: number;
-  heldGrants: number;
-  issuedGrants: number;
-  loaded: boolean;
-  lockers: number;
-  status: string;
-} {
-  const loaded = Boolean(
-    account
-      && discovery.loadedFor
-      && discovery.loadedFor.toLowerCase() === account.toLowerCase()
-      && discovery.chainId === deployment?.chainId,
-  );
-  if (!loaded || !account) {
-    return { boardrooms: 0, distributions: 0, heldGrants: 0, issuedGrants: 0, loaded: false, lockers: 0, status: "Not scanned" };
-  }
-
-  const grants = Object.values(discovery.grantsByAddress);
-  return {
-    boardrooms: Object.values(discovery.boardroomsByAddress).length,
-    distributions: Object.values(discovery.distributionsByAddress).length,
-    heldGrants: grants.filter((grant) => grantHeldBy(grant, account, includeClosedGrants)).length,
-    issuedGrants: grants.filter((grant) => grantIssuedBy(grant, account, includeClosedGrants)).length,
-    loaded: true,
-    lockers: Object.values(discovery.lockersByAddress).length,
-    status: discovery.complete && discovery.errors.length === 0 ? "Complete" : "Partial",
-  };
-}
-
-function grantHeldBy(grant: DiscoveredGrant, account: Address, includeClosed: boolean): boolean {
-  if (grant.closed && !includeClosed) return false;
-  const holder = grant.closed && grant.lastHolder ? grant.lastHolder : grant.currentHolder;
-  return sameAddress(holder, account);
-}
-
-function grantIssuedBy(grant: DiscoveredGrant, account: Address, includeClosed: boolean): boolean {
-  if (grant.closed && !includeClosed) return false;
-  return sameAddress(grant.issuer, account);
 }
 
 export function canRunGrantIssuerActions(

@@ -4,7 +4,7 @@ import { renderToString } from "react-dom/server";
 import { App, canRunGrantIssuerActions, manageWorkspaceSummary, parseDeployment, viewFromPath } from "../src/App";
 import { Web3Provider } from "../src/components/web3-provider";
 import { BoardroomPanel } from "../src/features/boardrooms/boardroom-panel";
-import { DiscoveryPanel } from "../src/features/discovery/discovery-panel";
+import { DiscoveryPanel, WalletAccessPanel } from "../src/features/discovery/discovery-panel";
 import { GrantInspector } from "../src/features/grants/grant-inspector";
 import { AppHeader } from "../src/features/wallet/app-header";
 import { PLEDGE_CASH_NETWORKS } from "../src/lib/contracts";
@@ -239,7 +239,7 @@ describe("web app shell", () => {
     expect(html.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(3);
   });
 
-  test("renders discovery lists and cached scan status", () => {
+  test("renders discovery diagnostics with manual scan controls", () => {
     const noop = async () => undefined;
     const html = renderToString(
       <DiscoveryPanel
@@ -260,7 +260,12 @@ describe("web app shell", () => {
       />,
     );
 
-    expect(html).toContain("Discovery Scan");
+    expect(html).toContain("Discovery Diagnostics");
+    expect(html).toContain("Manual log range controls");
+    expect(html).toContain("From block");
+    expect(html).toContain("Chunk size");
+    expect(html).toContain("Resume");
+    expect(html).toContain("Clear Cache");
     expect(html).toContain("My Boardrooms");
     expect(html).toContain("My Grants");
     expect(html).toContain("Boardroom Obligations");
@@ -268,6 +273,38 @@ describe("web app shell", () => {
     expect(html).toContain("Pledge Common");
     expect(html).toContain("Use Distribution");
     expect(html).toContain("Use Locker");
+  });
+
+  test("renders wallet access without exposing manual discovery controls", () => {
+    const noop = async () => undefined;
+    const html = renderToString(
+      <WalletAccessPanel
+        account={oldGrant.currentHolder}
+        deployment={{ chainId: 31337 }}
+        discovery={discoverySnapshot}
+        discoveryForm={{ fromBlock: "0", toBlock: "20", chunkSize: "5000", includeClosedGrants: false }}
+        pendingAction={undefined}
+        inspectGrant={() => undefined}
+        runAction={async (_label, action) => action()}
+        scanDiscovery={noop}
+        useBoardroom={() => undefined}
+        useDistribution={() => undefined}
+        useLockedLiquidity={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Your Access");
+    expect(html).toContain("Wallet-linked Boardrooms");
+    expect(html).toContain("Ready");
+    expect(html).toContain("Boardrooms you manage");
+    expect(html).toContain("Grants for this wallet");
+    expect(html).toContain("Pledge Common");
+    expect(html).toContain("Refresh access");
+    expect(html).toContain("Open grant");
+    expect(html).not.toContain("From block");
+    expect(html).not.toContain("Chunk size");
+    expect(html).not.toContain("Discovery Diagnostics");
+    expect(html).not.toContain("Clear Cache");
   });
 
   test("keeps grant settlement scoped to the current holder wallet", () => {
