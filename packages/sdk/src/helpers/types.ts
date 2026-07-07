@@ -169,6 +169,8 @@ export type GrantState = {
   grantSize: bigint;
   claimable: bigint;
   price: bigint;
+  vestingCliff: bigint;
+  vestingEnd: bigint;
   expiry: bigint;
   settledAmount: bigint;
   settleable: bigint;

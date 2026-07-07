@@ -3,11 +3,14 @@ import { ArrowRight, RefreshCw } from "lucide-react";
 import { ActionButton, ActionRow, AddressLink, Facts, Panel } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
+import { GrantVestingChart } from "../grants/grant-vesting-chart";
 import { dateString } from "../../lib/forms";
 import {
   formatNativeBalance,
   formatTokenBalance,
+  type ProductBoardroomCatalogEntry,
   type ProductBoardroomDashboardState,
+  type ProductBoardroomHistory,
   type ProductTreasuryAsset,
 } from "../../lib/product-boardroom";
 import { formatTokenAmount } from "../../lib/token-amounts";
@@ -37,6 +40,7 @@ export function ProductBoardroomDashboard({
   const snapshot = dashboard?.snapshot;
   const revenueAssets = dashboard?.treasuryAssets.filter((asset) => isRevenueAsset(asset, dashboard.snapshot.shareToken)) ?? [];
   const grantStats = grantSummary(dashboard?.snapshot.grantSummaries ?? []);
+  const activeCatalogEntry = dashboard?.catalog.find((entry) => sameAddress(entry.address, dashboard.address));
 
   return (
     <div className="grid gap-4">
@@ -61,7 +65,6 @@ export function ProductBoardroomDashboard({
                 <Badge variant={snapshot ? boardroomStatusTone(snapshot.status) : error ? "danger" : "muted"}>
                   {snapshot ? boardroomStatusLabel(snapshot.status) : error ? "Unavailable" : loading ? "Loading" : "Not loaded"}
                 </Badge>
-                {dashboard?.seed?.seedNonce !== undefined ? <Badge variant="muted">Seed {dashboard.seed.seedNonce}</Badge> : null}
               </div>
               <h1 className="m-0 text-2xl font-semibold tracking-normal text-zinc-50 sm:text-3xl">Boardroom Console</h1>
               <p className="m-0 mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
@@ -90,9 +93,24 @@ export function ProductBoardroomDashboard({
         />
       </Panel>
 
+      <LocalNetworkPanel
+        activeBoardroom={dashboard?.address}
+        cashAsset={dashboard?.treasuryAssets.find((asset) => sameAddress(asset.address, activeCatalogEntry?.cashToken))}
+        entries={dashboard?.catalog ?? []}
+        openTools={openTools}
+        shareAsset={dashboard?.treasuryAssets.find((asset) => sameAddress(asset.address, dashboard?.snapshot.shareToken))}
+      />
+
+      <LaunchPanel dashboard={dashboard} />
+
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
         <TreasuryPanel assets={dashboard?.treasuryAssets ?? []} nativeBalance={dashboard?.nativeBalance} shareToken={snapshot?.shareToken} />
-        <GrantHealthPanel grants={snapshot?.grantSummaries ?? []} stats={grantStats} inspectGrant={inspectGrant} />
+        <GrantHealthPanel
+          grants={snapshot?.grantSummaries ?? []}
+          history={dashboard?.history}
+          inspectGrant={inspectGrant}
+          stats={grantStats}
+        />
       </div>
 
       <ObligationPanel
@@ -100,6 +118,166 @@ export function ProductBoardroomDashboard({
         lockers={snapshot?.lockedLiquiditySummaries ?? []}
       />
     </div>
+  );
+}
+
+function LocalNetworkPanel({
+  activeBoardroom,
+  cashAsset,
+  entries,
+  openTools,
+  shareAsset,
+}: {
+  activeBoardroom: Address | undefined;
+  cashAsset: ProductTreasuryAsset | undefined;
+  entries: ProductBoardroomCatalogEntry[];
+  openTools: (boardroom: Address) => void;
+  shareAsset: ProductTreasuryAsset | undefined;
+}): React.JSX.Element | null {
+  if (entries.length === 0) return null;
+
+  return (
+    <Panel title="Local Network">
+      <ol className="m-0 grid list-none gap-px border-t border-zinc-800 bg-zinc-800 p-0 lg:grid-cols-2 xl:grid-cols-4">
+        {entries.map((entry) => (
+          <li className="min-w-0 bg-zinc-950 p-4" key={entry.address}>
+            <div className="mb-3 flex min-w-0 items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-zinc-100">{entry.name ?? entry.symbol ?? "Boardroom"}</div>
+                <div className="mt-1 truncate text-xs text-zinc-500">{entry.path ?? entry.distributionKind ?? "Boardroom"}</div>
+              </div>
+              <Badge variant={sameAddress(entry.address, activeBoardroom) ? "default" : "muted"}>{entry.status ?? "Discovered"}</Badge>
+            </div>
+            <Facts
+              columns="one"
+              items={[
+                { label: "Boardroom", value: <AddressLink address={entry.address} /> },
+                { label: "Distribution", value: entry.distribution ? <AddressLink address={entry.distribution} /> : "None" },
+                { label: "Sold", value: formatTokenAmount(entry.soldShares, catalogShareAsset(entry, shareAsset)) },
+                { label: "Raised", value: formatTokenAmount(entry.cashRaised, catalogCashAsset(entry, cashAsset)) },
+                { label: "Treasury cash", value: formatTokenAmount(entry.treasuryCash, catalogCashAsset(entry, cashAsset)) },
+                { label: "Buyers", value: entry.buyerCount === undefined ? "Unknown" : String(entry.buyerCount) },
+              ]}
+            />
+            <ActionRow>
+              <Button size="sm" variant="secondary" onClick={() => openTools(entry.address)}>
+                Open Tools
+              </Button>
+            </ActionRow>
+          </li>
+        ))}
+      </ol>
+    </Panel>
+  );
+}
+
+function LaunchPanel({ dashboard }: { dashboard: ProductBoardroomDashboardState | undefined }): React.JSX.Element {
+  const history = dashboard?.history;
+  const migration = history?.curve?.migration;
+  const curve = findLaunchDistribution(dashboard?.snapshot.distributionSummaries ?? [], history?.distribution);
+  const locker = findLaunchLocker(dashboard?.snapshot.lockedLiquiditySummaries ?? [], migration?.locker, history?.pool);
+  const shareAsset = findAsset(dashboard?.treasuryAssets ?? [], dashboard?.snapshot.shareToken);
+  const cashAsset = findAsset(dashboard?.treasuryAssets ?? [], distributionPaymentTokenAddress(curve));
+  const purchasedShares =
+    history?.soldShares ?? (curve?.state && "soldShares" in curve.state ? curve.state.soldShares : undefined);
+  const quoteRaised = history?.cashRaised ?? (curve?.state && "quoteReserve" in curve.state ? curve.state.quoteReserve : undefined);
+  const optionStrike = impliedUnitPrice(migration?.quoteToLiquidity, migration?.sharesToLiquidity, shareAsset?.decimals);
+  const migrationValuation = impliedQuoteValue(shareAsset?.totalSupply, optionStrike, shareAsset?.decimals);
+  const claimableFees = formatClaimableLockerFees(locker);
+
+  return (
+    <Panel title="Launch Path">
+      <Facts
+        columns="three"
+        items={[
+          { label: "Curve", value: curve?.address ? <AddressLink address={curve.address} /> : "Unknown" },
+          { label: "Curve status", value: curve ? curveStatusLabel(curve.state && "curveStatus" in curve.state ? curve.state.curveStatus : undefined) : "Unknown" },
+          { label: "Curve purchases", value: formatTokenAmount(purchasedShares, shareAsset) },
+          { label: "Quote raised", value: formatTokenAmount(quoteRaised, cashAsset) },
+          { label: "Graduation target", value: formatTokenAmount(curve?.state && "graduationQuoteTarget" in curve.state ? curve.state.graduationQuoteTarget : undefined, cashAsset) },
+          { label: "Quote to LP", value: formatTokenAmount(migration?.quoteToLiquidity, cashAsset) },
+          { label: "Employee option strike", value: formatTokenAmount(optionStrike, cashAsset) },
+          { label: "Implied FDV", value: formatTokenAmount(migrationValuation, cashAsset) },
+          { label: "Locked LP", value: formatTokenAmount(locker?.state?.lockedLiquidity ?? migration?.liquidity, locker?.liquidityMetadata) },
+          { label: "LP fees to claim", value: claimableFees },
+        ]}
+      />
+      <div className="grid gap-px border-t border-zinc-800 bg-zinc-800 lg:grid-cols-3">
+        <LaunchSlice
+          title="Curve Buyers"
+          items={[
+            {
+              label: "Unique buyers",
+              value: history?.buyerCount === undefined ? "Unknown" : String(history.buyerCount),
+              detail: `${history?.curve?.buyCount ?? 0} buys / ${history?.curve?.sellCount ?? 0} sells`,
+            },
+            {
+              label: "Net flow",
+              value: formatTokenAmount(quoteRaised, cashAsset),
+              detail: `${formatTokenAmount(purchasedShares, shareAsset)} shares`,
+            },
+          ]}
+        />
+        <LaunchSlice
+          title="Migration"
+          items={[
+            {
+              label: "Pool",
+              value: migration?.pool ? <AddressLink address={migration.pool} /> : curve?.state && "pool" in curve.state ? <AddressLink address={curve.state.pool} /> : "Unknown",
+              detail: `${formatTokenAmount(migration?.sharesToLiquidity, shareAsset)} paired`,
+            },
+            {
+              label: "Locker",
+              value: migration?.locker ? <AddressLink address={migration.locker} /> : locker?.address ? <AddressLink address={locker.address} /> : "Unknown",
+              detail: `${formatTokenAmount(migration?.quoteToBoardroom, cashAsset)} retained`,
+            },
+          ]}
+        />
+        <LaunchSlice
+          title="AMM Activity"
+          items={[
+            {
+              label: "Swaps",
+              value: history?.amm?.swapCount === undefined ? "Unknown" : String(history.amm.swapCount),
+              detail: history?.amm?.traderCount === undefined ? "Unknown traders" : `${history.amm.traderCount} traders`,
+            },
+            {
+              label: "Locker fees",
+              value: claimableFees,
+              detail: "Claimable by the locked LP position.",
+            },
+            {
+              label: "Option valuation",
+              value: formatTokenAmount(optionStrike, cashAsset),
+              detail: "Grant strike set from migrated LP quote/share.",
+            },
+          ]}
+        />
+      </div>
+    </Panel>
+  );
+}
+
+function LaunchSlice({
+  items,
+  title,
+}: {
+  items: { detail: string; label: string; value: React.ReactNode }[];
+  title: string;
+}): React.JSX.Element {
+  return (
+    <section className="min-w-0 bg-zinc-950 p-4">
+      <h3 className="m-0 mb-3 text-sm font-semibold text-zinc-100">{title}</h3>
+      <dl className="grid gap-3">
+        {items.map((item) => (
+          <div className="min-w-0" key={item.label}>
+            <dt className="text-xs font-medium uppercase tracking-normal text-zinc-500">{item.label}</dt>
+            <dd className="m-0 mt-1 min-w-0 text-sm font-medium text-zinc-100">{item.value}</dd>
+            <dd className="m-0 mt-1 text-xs leading-5 text-zinc-500">{item.detail}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   );
 }
 
@@ -150,17 +328,21 @@ function TreasuryPanel({
 
 function GrantHealthPanel({
   grants,
+  history,
   stats,
   inspectGrant,
 }: {
   grants: BoardroomGrantSnapshot[];
+  history: ProductBoardroomHistory | undefined;
   stats: ReturnType<typeof grantSummary>;
   inspectGrant: (grant: Address) => void;
 }): React.JSX.Element {
   const summaryTokenMetadata = commonGrantTokenMetadata(grants);
+  const cashAsset = commonGrantPaymentTokenMetadata(grants);
+  const migrationStrike = impliedUnitPrice(history?.curve?.migration?.quoteToLiquidity, history?.curve?.migration?.sharesToLiquidity, summaryTokenMetadata?.decimals);
 
   return (
-    <Panel title="Issued Grants">
+    <Panel title="Employee Options">
       <Facts
         columns="two"
         items={[
@@ -170,6 +352,7 @@ function GrantHealthPanel({
           { label: "Read failures", value: String(stats.failed) },
           { label: "Grant size", value: formatTokenAmount(stats.grantSize, summaryTokenMetadata) },
           { label: "Settled", value: formatTokenAmount(stats.settled, summaryTokenMetadata) },
+          { label: "Migration strike", value: formatTokenAmount(migrationStrike, cashAsset) },
         ]}
       />
       {grants.length === 0 ? (
@@ -179,7 +362,9 @@ function GrantHealthPanel({
           {grants.map((grant) => (
             <li className="bg-zinc-950 p-4" key={grant.address}>
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <AddressLink address={grant.address} />
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <AddressLink address={grant.address} />
+                </div>
                 <Badge variant={grant.error ? "danger" : grant.state?.closed ? "warning" : "default"}>
                   {grant.error ? "Read failed" : grant.state?.closed ? "Closed" : "Open"}
                 </Badge>
@@ -192,10 +377,15 @@ function GrantHealthPanel({
                   { label: "Grant size", value: formatTokenAmount(grant.state?.grantSize, grant.tokenMetadata) },
                   { label: "Claimable", value: formatTokenAmount(grant.state?.claimable, grant.tokenMetadata) },
                   { label: "Settled", value: formatTokenAmount(grant.state?.settledAmount, grant.tokenMetadata) },
+                  { label: "Settleable now", value: formatTokenAmount(grant.state?.settleable, grant.tokenMetadata) },
+                  { label: "Strike", value: formatTokenAmount(grant.state?.price, grant.paymentTokenMetadata) },
                   { label: "Payment", value: grant.state && !isZeroGrantPayment(grant.state.paymentToken) ? <AddressLink address={grant.state.paymentToken} /> : "None" },
+                  { label: "Vesting cliff", value: dateString(grant.state?.vestingCliff) },
+                  { label: "Vesting end", value: dateString(grant.state?.vestingEnd) },
                   { label: "Expiry", value: dateString(grant.state?.expiry) },
                 ]}
               />
+              <GrantVestingChart state={grant.state} tokenMetadata={grant.tokenMetadata} />
               <ActionRow>
                 <Button size="sm" variant="secondary" onClick={() => inspectGrant(grant.address)}>
                   Inspect Grant
@@ -253,6 +443,8 @@ function ObligationPanel({
                 items={[
                   { label: "Pool", value: locker.state?.pool ? <AddressLink address={locker.state.pool} /> : "Unknown" },
                   { label: "Locked LP", value: formatTokenAmount(locker.state?.lockedLiquidity, locker.liquidityMetadata) },
+                  { label: "Claimable A", value: formatTokenAmount(locker.claimableA, locker.tokenAMetadata) },
+                  { label: "Claimable B", value: formatTokenAmount(locker.claimableB, locker.tokenBMetadata) },
                   { label: "Pair", value: locker.state ? `${locker.state.tokenA} / ${locker.state.tokenB}` : "Unknown" },
                 ]}
               />
@@ -314,6 +506,15 @@ function commonGrantTokenMetadata(grants: BoardroomGrantSnapshot[]): BoardroomGr
   return first.tokenMetadata;
 }
 
+function commonGrantPaymentTokenMetadata(grants: BoardroomGrantSnapshot[]): BoardroomGrantSnapshot["paymentTokenMetadata"] | undefined {
+  const withPayment = grants.filter((grant) => grant.state && !isZeroGrantPayment(grant.state.paymentToken));
+  const first = withPayment[0];
+  if (!first?.state) return undefined;
+  const token = first.state.paymentToken.toLowerCase();
+  if (!withPayment.every((grant) => grant.state?.paymentToken.toLowerCase() === token)) return undefined;
+  return first.paymentTokenMetadata;
+}
+
 function isRevenueAsset(asset: ProductTreasuryAsset, shareToken: Address): boolean {
   return asset.address.toLowerCase() !== shareToken.toLowerCase() && (asset.balance ?? 0n) > 0n;
 }
@@ -348,4 +549,107 @@ function distributionPaymentToken(distribution: BoardroomDistributionSnapshot): 
   if ("paymentToken" in distribution.state) return <AddressLink address={distribution.state.paymentToken} />;
   if ("quoteToken" in distribution.state) return <AddressLink address={distribution.state.quoteToken} />;
   return "Unknown";
+}
+
+function findAsset(assets: ProductTreasuryAsset[], address: Address | undefined): ProductTreasuryAsset | undefined {
+  if (!address) return undefined;
+  return assets.find((asset) => asset.address.toLowerCase() === address.toLowerCase());
+}
+
+function findLaunchDistribution(
+  distributions: BoardroomDistributionSnapshot[],
+  address: Address | undefined,
+): BoardroomDistributionSnapshot | undefined {
+  if (address) {
+    const selected = distributions.find((distribution) => distribution.address.toLowerCase() === address.toLowerCase());
+    if (selected) return selected;
+  }
+  return distributions.find((distribution) => distribution.kind === "migrating-bonding-curve");
+}
+
+function findLaunchLocker(
+  lockers: BoardroomLockedLiquiditySnapshot[],
+  address: Address | undefined,
+  pool: Address | undefined,
+): BoardroomLockedLiquiditySnapshot | undefined {
+  if (address) {
+    const selected = lockers.find((locker) => locker.address.toLowerCase() === address.toLowerCase());
+    if (selected) return selected;
+  }
+  if (pool) {
+    const matchingPool = lockers.find((locker) => sameAddress(locker.state?.pool, pool));
+    if (matchingPool) return matchingPool;
+  }
+  return lockers[0];
+}
+
+function formatClaimableLockerFees(locker: BoardroomLockedLiquiditySnapshot | undefined): string {
+  if (!locker) return "Unknown";
+  return `${formatTokenAmount(locker.claimableA, locker.tokenAMetadata)} / ${formatTokenAmount(locker.claimableB, locker.tokenBMetadata)}`;
+}
+
+function impliedQuoteValue(
+  amount: bigint | undefined,
+  price: bigint | undefined,
+  decimals: number | undefined,
+): bigint | undefined {
+  if (amount === undefined || price === undefined || decimals === undefined) return undefined;
+  return (amount * price) / 10n ** BigInt(decimals);
+}
+
+function impliedUnitPrice(
+  quoteAmount: bigint | undefined,
+  shareAmount: bigint | undefined,
+  shareDecimals: number | undefined,
+): bigint | undefined {
+  if (quoteAmount === undefined || shareAmount === undefined || shareAmount === 0n || shareDecimals === undefined) return undefined;
+  return (quoteAmount * 10n ** BigInt(shareDecimals)) / shareAmount;
+}
+
+function curveStatusLabel(status: number | undefined): string {
+  if (status === 0) return "Active";
+  if (status === 1) return "Migrated";
+  if (status === 2) return "Cancelled";
+  return "Unknown";
+}
+
+function catalogShareAsset(
+  entry: ProductBoardroomCatalogEntry,
+  primaryShareAsset: ProductTreasuryAsset | undefined,
+): ProductTreasuryAsset | undefined {
+  if (!entry.shareToken) return undefined;
+  if (sameAddress(entry.shareToken, primaryShareAsset?.address)) return primaryShareAsset;
+  const asset: ProductTreasuryAsset = {
+    address: entry.shareToken,
+    decimals: entry.shareTokenDecimals ?? 18,
+    label: "Treasury shares",
+  };
+  if (entry.symbol) asset.symbol = entry.symbol;
+  return asset;
+}
+
+function catalogCashAsset(
+  entry: ProductBoardroomCatalogEntry,
+  primaryCashAsset: ProductTreasuryAsset | undefined,
+): ProductTreasuryAsset | undefined {
+  if (!entry.cashToken) return primaryCashAsset;
+  if (sameAddress(entry.cashToken, primaryCashAsset?.address)) return primaryCashAsset;
+  const asset: ProductTreasuryAsset = {
+    address: entry.cashToken,
+    label: "Cash / quote",
+  };
+  if (entry.cashTokenDecimals !== undefined) asset.decimals = entry.cashTokenDecimals;
+  if (entry.cashTokenSymbol) asset.symbol = entry.cashTokenSymbol;
+  return asset;
+}
+
+function distributionPaymentTokenAddress(distribution: BoardroomDistributionSnapshot | undefined): Address | undefined {
+  if (!distribution?.state) return undefined;
+  if ("paymentToken" in distribution.state) return distribution.state.paymentToken;
+  if ("quoteToken" in distribution.state) return distribution.state.quoteToken;
+  return undefined;
+}
+
+function sameAddress(first: Address | undefined, second: Address | undefined): boolean {
+  return Boolean(first && second && first.toLowerCase() === second.toLowerCase());
 }

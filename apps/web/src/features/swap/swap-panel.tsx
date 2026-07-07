@@ -581,7 +581,7 @@ function TokenSelectorDialog({
           {visibleTokens.map((token) => (
             <TokenRow
               key={token.address.toLowerCase()}
-              actionLabel={token.sources.includes("seed") ? "Pinned" : undefined}
+              actionLabel={undefined}
               active={selected ? sameAddress(token.address, selected.address) : sameAddress(token.address, value)}
               address={token.address}
               balance={formatSwapAmount(token.balance, token)}
@@ -828,9 +828,8 @@ function tokenSelectionRank(token: SwapTokenOption, otherToken: string): number 
   if (hasDirectPool(token, otherToken)) return 0;
   if (token.sources.includes("deployment")) return 1;
   if (token.label === "USDC / cash") return 2;
-  if (token.sources.includes("seed")) return 3;
-  if (token.sources.includes("pool")) return 4;
-  return 5;
+  if (token.sources.includes("pool")) return 3;
+  return 4;
 }
 
 function tokenMatchesQuery(token: SwapTokenOption, query: string): boolean {

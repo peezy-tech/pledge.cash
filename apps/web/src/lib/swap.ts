@@ -10,7 +10,6 @@ import {
 } from "@pledge.cash/sdk";
 import { isAddress } from "viem";
 import { errorMessage } from "./forms";
-import type { ProductBoardroomSeed } from "./product-boardroom";
 import { formatTokenAmount, parseTokenAmountInput } from "./token-amounts";
 
 export type SwapForm = {
@@ -51,7 +50,7 @@ export type SwapTokenMetadata = {
   error?: string;
 };
 
-export type SwapTokenSource = "pool" | "seed" | "deployment" | "custom";
+export type SwapTokenSource = "pool" | "deployment" | "custom";
 
 export type SwapTokenListOptions = {
   wrappedNativeLabel?: string;
@@ -190,10 +189,10 @@ type ExecutableRemoveLiquidityQuote = RemoveLiquidityQuoteState & {
 const AMM_MINIMUM_LIQUIDITY = 1_000n;
 const FEE_INDEX_SCALE = 1_000_000_000_000_000_000n;
 
-export function defaultSwapForm(seed?: ProductBoardroomSeed | undefined): SwapForm {
+export function defaultSwapForm(): SwapForm {
   return {
-    tokenIn: seed?.cashToken ?? "",
-    tokenOut: seed?.boardroomShareToken ?? "",
+    tokenIn: "",
+    tokenOut: "",
     amountIn: "1",
     slippageBps: "50",
     recipient: "",
@@ -202,12 +201,10 @@ export function defaultSwapForm(seed?: ProductBoardroomSeed | undefined): SwapFo
   };
 }
 
-export function defaultLiquidityForm(seed?: ProductBoardroomSeed | undefined, deployment?: PledgeCashDeployment | undefined): LiquidityForm {
-  const tokenA = deployment?.wrappedNative && !isZeroAddress(deployment.wrappedNative) ? deployment.wrappedNative : seed?.cashToken ?? "";
-  const tokenB = tokenA && seed?.cashToken && !sameAddress(tokenA, seed.cashToken) ? seed.cashToken : seed?.boardroomShareToken ?? "";
+export function defaultLiquidityForm(): LiquidityForm {
   return {
-    tokenA,
-    tokenB,
+    tokenA: "",
+    tokenB: "",
     amountA: "1",
     amountB: "1",
     slippageBps: "50",
@@ -227,15 +224,18 @@ export function defaultRemoveLiquidityForm(): RemoveLiquidityForm {
   };
 }
 
-export function withSwapSeedDefaults(form: SwapForm, seed: ProductBoardroomSeed | undefined, deployment?: PledgeCashDeployment | undefined): SwapForm {
-  const preferredInput = deployment?.wrappedNative && !isZeroAddress(deployment.wrappedNative) ? deployment.wrappedNative : seed?.cashToken;
-  const preferredOutput = preferredInput && seed?.cashToken && !sameAddress(preferredInput, seed.cashToken) ? seed.cashToken : seed?.boardroomShareToken;
-  if (!seed && !preferredInput && !preferredOutput) return form;
+export function withSwapTokenListDefaults(
+  form: SwapForm,
+  tokenList: SwapTokenListState,
+  deployment?: PledgeCashDeployment | undefined,
+): SwapForm {
+  const defaults = preferredPoolPair(tokenList, deployment);
+  if (!defaults) return form;
 
-  const tokenIn = form.tokenIn || preferredInput || "";
-  let tokenOut = form.tokenOut || preferredOutput || "";
+  const tokenIn = form.tokenIn || defaults.tokenIn;
+  let tokenOut = form.tokenOut || defaults.tokenOut;
   if (tokenIn && tokenOut && sameAddress(tokenIn, tokenOut)) {
-    tokenOut = seed?.boardroomShareToken && !sameAddress(tokenIn, seed.boardroomShareToken) ? seed.boardroomShareToken : "";
+    tokenOut = defaults.tokenOut && !sameAddress(tokenIn, defaults.tokenOut) ? defaults.tokenOut : "";
   }
 
   return {
@@ -246,12 +246,18 @@ export function withSwapSeedDefaults(form: SwapForm, seed: ProductBoardroomSeed 
   };
 }
 
-export function withLiquiditySeedDefaults(form: LiquidityForm, seed: ProductBoardroomSeed | undefined, deployment?: PledgeCashDeployment | undefined): LiquidityForm {
-  const defaults = defaultLiquidityForm(seed, deployment);
-  const tokenA = form.tokenA || defaults.tokenA;
-  let tokenB = form.tokenB || defaults.tokenB;
+export function withLiquidityTokenListDefaults(
+  form: LiquidityForm,
+  tokenList: SwapTokenListState,
+  deployment?: PledgeCashDeployment | undefined,
+): LiquidityForm {
+  const defaults = preferredPoolPair(tokenList, deployment);
+  if (!defaults) return form;
+
+  const tokenA = form.tokenA || defaults.tokenIn;
+  let tokenB = form.tokenB || defaults.tokenOut;
   if (tokenA && tokenB && sameAddress(tokenA, tokenB)) {
-    tokenB = seed?.boardroomShareToken && !sameAddress(tokenA, seed.boardroomShareToken) ? seed.boardroomShareToken : "";
+    tokenB = defaults.tokenOut && !sameAddress(tokenA, defaults.tokenOut) ? defaults.tokenOut : "";
   }
 
   return {
@@ -265,16 +271,12 @@ export function withLiquiditySeedDefaults(form: LiquidityForm, seed: ProductBoar
 export async function readSwapTokenList(
   client: PledgeCashReadClient,
   deployment: PledgeCashDeployment | undefined,
-  seed: ProductBoardroomSeed | undefined,
   account?: Address | undefined,
   listOptions: SwapTokenListOptions = {},
 ): Promise<SwapTokenListState> {
   const tokens = new Map<string, TokenAccumulator>();
   const wrappedNativeLabel = listOptions.wrappedNativeLabel || "Wrapped native";
   addTokenAccumulator(tokens, deployment?.wrappedNative, { label: wrappedNativeLabel, source: "deployment", rank: 0 });
-  addTokenAccumulator(tokens, seed?.cashToken, { label: "USDC / cash", source: "seed", rank: 1 });
-  addTokenAccumulator(tokens, seed?.boardroomShareToken, { label: "Boardroom shares", source: "seed", rank: 2 });
-  addTokenAccumulator(tokens, seed?.equityToken, { label: "Equity token", source: "seed", rank: 3 });
 
   let pools: SwapPoolSummary[] = [];
   let listError: string | undefined;
@@ -692,6 +694,24 @@ export function formatPoolShareBps(poolShareBps: bigint | undefined): string {
   const whole = poolShareBps / 100n;
   const fraction = poolShareBps % 100n;
   return `${whole.toString()}.${fraction.toString().padStart(2, "0")}%`;
+}
+
+function preferredPoolPair(
+  tokenList: SwapTokenListState,
+  deployment: PledgeCashDeployment | undefined,
+): { tokenIn: Address; tokenOut: Address } | undefined {
+  const pools = tokenList.pools;
+  const wrappedNative = deployment?.wrappedNative;
+  const preferred =
+    wrappedNative && !isZeroAddress(wrappedNative)
+      ? pools.find((pool) => sameAddress(pool.token0, wrappedNative) || sameAddress(pool.token1, wrappedNative)) ?? pools[0]
+      : pools[0];
+  if (!preferred) return undefined;
+  if (wrappedNative && !isZeroAddress(wrappedNative)) {
+    if (sameAddress(preferred.token0, wrappedNative)) return { tokenIn: preferred.token0, tokenOut: preferred.token1 };
+    if (sameAddress(preferred.token1, wrappedNative)) return { tokenIn: preferred.token1, tokenOut: preferred.token0 };
+  }
+  return { tokenIn: preferred.token0, tokenOut: preferred.token1 };
 }
 
 export function pairHasWrappedNative(deployment: PledgeCashDeployment | undefined, tokenA: string, tokenB: string): boolean {
@@ -1112,7 +1132,6 @@ function compareTokenOptions(left: SwapTokenOption, right: SwapTokenOption): num
 function tokenRank(token: SwapTokenOption): number {
   if (token.sources.includes("deployment")) return 0;
   if (token.label === "USDC / cash") return 1;
-  if (token.sources.includes("seed")) return 5;
   return 20;
 }
 

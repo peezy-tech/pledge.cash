@@ -6,6 +6,7 @@ import { Input } from "../../components/ui/input";
 import { dateString } from "../../lib/forms";
 import { formatTokenAmount } from "../../lib/token-amounts";
 import type { GrantSnapshot } from "../../lib/types";
+import { GrantVestingChart } from "./grant-vesting-chart";
 
 type GrantInspectorProps = {
   grantAddress: string;
@@ -57,6 +58,7 @@ export function GrantInspector({
           </Field>
         </div>
         <Facts columns="three" items={grantFacts(grantSnapshot)} />
+        <GrantVestingChart state={grantSnapshot} tokenMetadata={grantSnapshot?.tokenMetadata} />
       </Panel>
 
       <Panel title="Grant Actions">
@@ -107,6 +109,8 @@ function grantFacts(grantSnapshot: GrantSnapshot | undefined): { label: string; 
     { label: "Settled", value: formatTokenAmount(grantSnapshot.settledAmount, grantSnapshot.tokenMetadata) },
     { label: "Settleable now", value: formatTokenAmount(grantSnapshot.settleable, grantSnapshot.tokenMetadata) },
     { label: "Price", value: isZeroAddress(grantSnapshot.paymentToken) ? "Free" : formatTokenAmount(grantSnapshot.price, grantSnapshot.paymentTokenMetadata) },
+    { label: "Vesting cliff", value: dateString(grantSnapshot.vestingCliff) },
+    { label: "Vesting end", value: dateString(grantSnapshot.vestingEnd) },
     { label: "Expiry", value: dateString(grantSnapshot.expiry) },
     { label: "Halted", value: grantSnapshot.halted ? "Yes" : "No" },
     { label: "Closed", value: grantSnapshot.closed ? "Yes" : "No" },

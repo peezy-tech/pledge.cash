@@ -11,6 +11,8 @@
     "deploy:testnets": "bun run deploy:hyperevm-testnet && bun run deploy:monad-testnet",
     "format": "forge fmt",
     "format:check": "forge fmt --check",
+    "scenario:local-seed:dry-run": "forge script script/SeedLocal.s.sol:SeedLocal --rpc-url ${LOCAL_RPC_URL:-local} -vvv",
+    "scenario:local-seed:local": "forge script script/SeedLocal.s.sol:SeedLocal --rpc-url ${LOCAL_RPC_URL:-local} --broadcast -vvv",
     "scenario:project-token:dry-run": "forge script script/ProjectTokenLaunchScenario.s.sol:ProjectTokenLaunchScenario -vvv",
     "scenario:project-token:local": "forge script script/ProjectTokenLaunchScenario.s.sol:ProjectTokenLaunchScenario --rpc-url local --broadcast -vvv",
     "simulate:hyperevm-testnet": "script/hyperevm-testnet/deploy.sh",

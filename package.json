@@ -31,6 +31,8 @@
     "docs:dev": "bun --cwd docs dev",
     "format": "bun --cwd packages/contracts format",
     "format:check": "bun --cwd packages/contracts format:check",
+    "scenario:local-seed:dry-run": "bun --cwd packages/contracts scenario:local-seed:dry-run",
+    "scenario:local-seed:local": "bun --cwd packages/contracts scenario:local-seed:local",
     "scenario:project-token:dry-run": "bun --cwd packages/contracts scenario:project-token:dry-run",
     "scenario:project-token:local": "bun --cwd packages/contracts scenario:project-token:local",
     "simulate:hyperevm-testnet": "bun --cwd packages/contracts simulate:hyperevm-testnet",

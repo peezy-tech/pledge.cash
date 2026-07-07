@@ -65,6 +65,8 @@ const boardroomSnapshot: BoardroomSnapshot = {
         grantSize: 1000n,
         claimable: 100n,
         price: 0n,
+        vestingCliff: 1000n,
+        vestingEnd: 1800n,
         expiry: 2000n,
         settledAmount: 0n,
         settleable: 100n,
@@ -373,6 +375,8 @@ describe("web app shell", () => {
     expect(html).toContain("Wind-Down");
     expect(html).toContain("Winding down");
     expect(html).toContain("Open blockers");
+    expect(html).toContain("Vesting schedule");
+    expect(html).toContain("Settleable now");
     expect(html).toContain("Use Sale");
     expect(html).toContain("Use Locker");
   });

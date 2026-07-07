@@ -24,6 +24,7 @@ import { ActionButton, ActionRow, AddressLink, Facts, Field, Panel } from "../..
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { GrantVestingChart } from "../grants/grant-vesting-chart";
 import { dateString, randomSalt } from "../../lib/forms";
 import { formatTokenAmount } from "../../lib/token-amounts";
 import type {
@@ -1149,8 +1150,10 @@ function GrantRow({ grant }: { grant: BoardroomGrantSnapshot }): React.JSX.Eleme
           { label: "Holder", value: grant.state ? <AddressLink address={grant.state.holder} /> : "Unknown" },
           { label: "Grant size", value: formatTokenAmount(grant.state?.grantSize, grant.tokenMetadata) },
           { label: "Claimable", value: formatTokenAmount(grant.state?.claimable, grant.tokenMetadata) },
+          { label: "Settleable now", value: formatTokenAmount(grant.state?.settleable, grant.tokenMetadata) },
         ]}
       />
+      <GrantVestingChart state={grant.state} tokenMetadata={grant.tokenMetadata} />
     </div>
   );
 }

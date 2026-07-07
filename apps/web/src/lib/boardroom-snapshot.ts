@@ -1,15 +1,20 @@
 import {
+  ammPoolAbi,
+  erc20Abi,
+  type Address,
+  type LockedLiquidityState,
   readBoardroomState,
   readFixedPriceSaleState,
   readGrantState,
   readLockedLiquidityState,
   readMigratingBondingCurveState,
-  type Address,
   type PledgeCashReadClient,
 } from "@pledge.cash/sdk";
 import { errorMessage } from "./forms";
 import { readTokenMetadataMap, tokenMetadataFor } from "./token-amounts";
 import type { BoardroomDistributionSnapshot, BoardroomGrantSnapshot, BoardroomLockedLiquiditySnapshot, BoardroomSnapshot } from "./types";
+
+const FEE_INDEX_SCALE = 1_000_000_000_000_000_000n;
 
 export async function readBoardroomSnapshot(client: PledgeCashReadClient, address: Address): Promise<BoardroomSnapshot> {
   const state = await readBoardroomState(client, address);
@@ -102,10 +107,39 @@ async function readLockedLiquiditySummary(
   locker: Address,
 ): Promise<BoardroomLockedLiquiditySnapshot> {
   try {
-    return { address: locker, state: await readLockedLiquidityState(client, locker) };
+    const state = await readLockedLiquidityState(client, locker);
+    return { address: locker, state, ...(await readLockedLiquidityClaimable(client, state, locker)) };
   } catch (error) {
     return { address: locker, error: errorMessage(error) };
   }
+}
+
+async function readLockedLiquidityClaimable(
+  client: PledgeCashReadClient,
+  state: LockedLiquidityState,
+  locker: Address,
+): Promise<Pick<BoardroomLockedLiquiditySnapshot, "claimableA" | "claimableB">> {
+  if (!state.pool) return {};
+
+  const [token0, balance, stored0, stored1, index0, index1, supplyIndex0, supplyIndex1] = await Promise.all([
+    client.readContract({ address: state.pool, abi: ammPoolAbi, functionName: "token0" }) as Promise<Address>,
+    client.readContract({ address: state.pool, abi: erc20Abi, functionName: "balanceOf", args: [locker] }) as Promise<bigint>,
+    client.readContract({ address: state.pool, abi: ammPoolAbi, functionName: "claimable0", args: [locker] }) as Promise<bigint>,
+    client.readContract({ address: state.pool, abi: ammPoolAbi, functionName: "claimable1", args: [locker] }) as Promise<bigint>,
+    client.readContract({ address: state.pool, abi: ammPoolAbi, functionName: "index0" }) as Promise<bigint>,
+    client.readContract({ address: state.pool, abi: ammPoolAbi, functionName: "index1" }) as Promise<bigint>,
+    client.readContract({ address: state.pool, abi: ammPoolAbi, functionName: "supplyIndex0", args: [locker] }) as Promise<bigint>,
+    client.readContract({ address: state.pool, abi: ammPoolAbi, functionName: "supplyIndex1", args: [locker] }) as Promise<bigint>,
+  ]);
+  const claimable0 = stored0 + pendingFee(balance, index0, supplyIndex0);
+  const claimable1 = stored1 + pendingFee(balance, index1, supplyIndex1);
+  return token0.toLowerCase() === state.tokenA.toLowerCase()
+    ? { claimableA: claimable0, claimableB: claimable1 }
+    : { claimableA: claimable1, claimableB: claimable0 };
+}
+
+function pendingFee(balance: bigint, index: bigint, supplyIndex: bigint): bigint {
+  return index > supplyIndex ? (balance * (index - supplyIndex)) / FEE_INDEX_SCALE : 0n;
 }
 
 function distributionTokenAddresses(distribution: BoardroomDistributionSnapshot): (Address | undefined)[] {

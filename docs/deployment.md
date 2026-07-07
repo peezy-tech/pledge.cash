@@ -221,9 +221,19 @@ adding a custom selectable profile from `VITE_PLEDGE_CASH_RPC_URL`, `VITE_PLEDGE
 ## Local Anvil Seed
 
 For a semi-persistent local deployment, run Anvil on chain id `31337`, broadcast
-`Deploy.s.sol` with a predeployed wrapped-native contract, then seed demo tokens,
-direct grants, Boardroom grants, partial settlements, one transferred grant right,
-and one halted grant:
+`Deploy.s.sol` with a predeployed wrapped-native contract, then seed a repeatable
+scenario matrix:
+
+- direct grant variations: free partially settled, paid transferred and settled,
+  and halted before cliff;
+- project launch path: Boardroom-issued migrating curve, two curve buyers,
+  migration into locked AMM liquidity, several post-migration AMM buys, and
+  claimable locked-liquidity fees for the Boardroom;
+- local product network: additional Boardrooms with an active fixed-price
+  sale, an active bonding curve with buy/sell history, and a closed
+  fixed-price sale with treasury cash already raised;
+- employee option variations: partially settled active option, unvested future
+  cliff option, and vested partially settled advisor option.
 
 ```sh
 cd packages/contracts
@@ -239,10 +249,8 @@ forge script script/Deploy.s.sol:Deploy \
   --broadcast
 
 LOCAL_SEED_NONCE=1 \
-forge script script/SeedLocal.s.sol:SeedLocal \
-  --rpc-url http://127.0.0.1:8547 \
-  --chain 31337 \
-  --broadcast
+LOCAL_RPC_URL=http://127.0.0.1:8547 \
+bun run scenario:local-seed:local
 ```
 
 `SeedLocal` uses Anvil's public development keys only. Change

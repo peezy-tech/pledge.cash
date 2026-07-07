@@ -151,6 +151,8 @@ describe("SDK action and query helpers", () => {
       grantSize: 1000n,
       claimable: 900n,
       price: 25n,
+      vestingCliff: terms.vestingCliff,
+      vestingEnd: terms.vestingEnd,
       expiry: 3000n,
       settledAmount: 100n,
       vestingIsHalted: false,
@@ -203,6 +205,8 @@ describe("SDK action and query helpers", () => {
       address: boardroom,
       issuer,
       holder,
+      vestingCliff: terms.vestingCliff,
+      vestingEnd: terms.vestingEnd,
       settleable: 500n,
     });
     await expect(readBoardroomState(client, boardroom)).resolves.toMatchObject({

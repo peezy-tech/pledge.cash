@@ -50,6 +50,8 @@ export type GrantSnapshot = {
   grantSize: bigint;
   claimable: bigint;
   price: bigint;
+  vestingCliff: bigint;
+  vestingEnd: bigint;
   expiry: bigint;
   settledAmount: bigint;
   settleable: bigint;
@@ -88,6 +90,8 @@ export type BoardroomLockedLiquiditySnapshot = {
   address: Address;
   state?: LockedLiquidityState;
   error?: string;
+  claimableA?: bigint | undefined;
+  claimableB?: bigint | undefined;
   tokenAMetadata?: TokenMetadata | undefined;
   tokenBMetadata?: TokenMetadata | undefined;
   liquidityMetadata?: TokenMetadata | undefined;

@@ -22,25 +22,21 @@ const nativePool = "0x8000000000000000000000000000000000000000" as Address;
 const deployment: PledgeCashDeployment = { chainId: 31337, ammFactory: factory, ammRouter: router, wrappedNative: whype };
 
 describe("swap token discovery", () => {
-  test("lists AMM pool tokens plus pinned seed tokens", async () => {
+  test("lists AMM pool tokens plus deployment wrapped native", async () => {
     const state = await readSwapTokenList(
       fakeReadClient(),
       deployment,
-      {
-        cashToken: usdc,
-        boardroomShareToken: share,
-      },
       account,
       { wrappedNativeLabel: "WHYPE" },
     );
 
     expect(state.error).toBeUndefined();
     expect(state.pools).toHaveLength(1);
-    expect(state.tokens.map((token) => token.address)).toEqual([whype, usdc, share]);
+    expect(state.tokens.map((token) => token.address).sort()).toEqual([share, usdc, whype].sort());
 
     const cash = state.tokens.find((token) => token.address === usdc);
-    expect(cash?.label).toBe("USDC / cash");
-    expect(cash?.sources).toEqual(["seed", "pool"]);
+    expect(cash?.label).toBeUndefined();
+    expect(cash?.sources).toEqual(["pool"]);
     expect(cash?.pairAddresses).toEqual([share]);
     expect(cash?.balance).toBe(1_000_000n);
 
@@ -54,10 +50,6 @@ describe("swap token discovery", () => {
     const state = await readSwapTokenList(
       fakeReadClient(),
       deployment,
-      {
-        cashToken: usdc,
-        boardroomShareToken: share,
-      },
       account,
       { wrappedNativeLabel: "WMON" },
     );
