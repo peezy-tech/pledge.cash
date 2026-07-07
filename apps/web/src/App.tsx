@@ -183,6 +183,7 @@ export { parseDeployment } from "./lib/deployment";
 
 type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
 type AppView = "project" | "market" | "positions" | "grants" | "manage" | "activity" | "advanced";
+export type GrantIssuerBoardroomAccess = { boardroom: Address; owner: Address };
 
 async function parseMinAmountsOut(client: PublicClient, value: string, assets: readonly Address[]): Promise<bigint[]> {
   const trimmed = value.trim();
@@ -281,6 +282,7 @@ export function App(): React.JSX.Element {
   const [predictedGrant, setPredictedGrant] = useState<Address>();
   const [grantAddress, setGrantAddress] = useState("");
   const [grantSnapshot, setGrantSnapshot] = useState<GrantSnapshot>();
+  const [grantIssuerBoardroom, setGrantIssuerBoardroom] = useState<GrantIssuerBoardroomAccess>();
   const [settleAmount, setSettleAmount] = useState("1");
   const [paymentApproval, setPaymentApproval] = useState("0");
   const [boardroomForm, setBoardroomForm] = useState<BoardroomForm>(() => ({
@@ -357,6 +359,7 @@ export function App(): React.JSX.Element {
   const updateGrantAddress = useCallback((address: string): void => {
     setGrantAddress(address);
     setGrantSnapshot(undefined);
+    setGrantIssuerBoardroom(undefined);
   }, []);
 
   const clearDirectGrantPrediction = useCallback((): void => {
@@ -404,6 +407,7 @@ export function App(): React.JSX.Element {
     setPredictedGrant(undefined);
     setGrantAddress("");
     setGrantSnapshot(undefined);
+    setGrantIssuerBoardroom(undefined);
     setPaymentApproval("0");
     setPredictedBoardroom(undefined);
     setBoardroomAddress("");
@@ -811,9 +815,10 @@ export function App(): React.JSX.Element {
     const grant = requireAddress(grantAddress, "Grant address");
     const now = BigInt(Math.floor(Date.now() / 1000));
     const snapshot = await readGrantState(publicClient, grant, now);
-    const [tokenMetadata, paymentTokenMetadata] = await Promise.all([
+    const [tokenMetadata, paymentTokenMetadata, issuerBoardroom] = await Promise.all([
       readTokenMetadata(publicClient, snapshot.token),
       isZeroAddress(snapshot.paymentToken) ? undefined : readTokenMetadata(publicClient, snapshot.paymentToken),
+      readGrantIssuerBoardroomAccess(snapshot.issuer),
     ]);
 
     setGrantSnapshot({
@@ -835,6 +840,7 @@ export function App(): React.JSX.Element {
       tokenMetadata,
       paymentTokenMetadata,
     });
+    setGrantIssuerBoardroom(issuerBoardroom);
     pushLog(`Loaded grant ${grant}`, "success");
   };
 
@@ -866,14 +872,17 @@ export function App(): React.JSX.Element {
     });
   };
 
-  const isBoardroomIssuer = async (issuer: Address): Promise<boolean> => {
+  const readGrantIssuerBoardroomAccess = async (issuer: Address): Promise<GrantIssuerBoardroomAccess | undefined> => {
     try {
       const snapshot = await readBoardroomState(publicClient, issuer);
-      return !isZeroAddress(snapshot.policyRegistry);
+      if (isZeroAddress(snapshot.policyRegistry)) return undefined;
+      return { boardroom: issuer, owner: snapshot.owner };
     } catch {
-      return false;
+      return undefined;
     }
   };
+
+  const isBoardroomIssuer = async (issuer: Address): Promise<boolean> => Boolean(await readGrantIssuerBoardroomAccess(issuer));
 
   const runGrantIssuerAction = async (functionName: GrantIssuerAction, successMessage: string): Promise<void> => {
     const grant = requireAddress(grantAddress, "Grant address");
@@ -1572,7 +1581,7 @@ export function App(): React.JSX.Element {
     [navigateView, updateBoardroomAddress, updateLockedLiquidityAddress],
   );
 
-  const grantIssuerActionsAvailable = canRunGrantIssuerActions(wallet.account, grantSnapshot, productBoardroom, boardroomSnapshot);
+  const grantIssuerActionsAvailable = canRunGrantIssuerActions(wallet.account, grantSnapshot, productBoardroom, boardroomSnapshot, grantIssuerBoardroom);
   const marketPanel = (
     <SwapPanel
       account={wallet.account}
@@ -2083,15 +2092,17 @@ function grantIssuedBy(grant: DiscoveredGrant, account: Address, includeClosed: 
   return sameAddress(grant.issuer, account);
 }
 
-function canRunGrantIssuerActions(
+export function canRunGrantIssuerActions(
   account: Address | undefined,
   grantSnapshot: GrantSnapshot | undefined,
   dashboard: ProductBoardroomDashboardState | undefined,
   boardroomSnapshot: BoardroomSnapshot | undefined,
+  grantIssuerBoardroom: GrantIssuerBoardroomAccess | undefined,
 ): boolean {
   if (!account || !grantSnapshot) return false;
   if (sameAddress(account, grantSnapshot.issuer)) return true;
   if (sameAddress(grantSnapshot.issuer, dashboard?.address) && sameAddress(account, dashboard?.snapshot.owner)) return true;
+  if (sameAddress(grantSnapshot.issuer, grantIssuerBoardroom?.boardroom) && sameAddress(account, grantIssuerBoardroom?.owner)) return true;
   return sameAddress(grantSnapshot.issuer, boardroomSnapshot?.address) && sameAddress(account, boardroomSnapshot?.owner);
 }
 

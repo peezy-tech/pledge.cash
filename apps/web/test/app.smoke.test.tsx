@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Address, DiscoveredBoardroom, DiscoveredDistribution, DiscoveredGrant, DiscoveredLockedLiquidity, DiscoveredPool } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
-import { App, parseDeployment } from "../src/App";
+import { App, canRunGrantIssuerActions, parseDeployment } from "../src/App";
 import { Web3Provider } from "../src/components/web3-provider";
 import { BoardroomPanel } from "../src/features/boardrooms/boardroom-panel";
 import { DiscoveryPanel } from "../src/features/discovery/discovery-panel";
@@ -277,6 +277,18 @@ describe("web app shell", () => {
     expect(issuerHtml).toContain("Issuer Controls");
     expect(issuerHtml).toContain("Halt Vesting");
     expect(issuerHtml).toContain("Withdraw Expired");
+  });
+
+  test("allows Boardroom owners to operate directly loaded Boardroom grants", () => {
+    const grant = boardroomSnapshot.grantSummaries[0].state;
+
+    expect(canRunGrantIssuerActions(oldGrant.issuer, grant, undefined, undefined, { boardroom, owner: oldGrant.issuer })).toBe(true);
+    expect(
+      canRunGrantIssuerActions("0x5000000000000000000000000000000000000000", grant, undefined, undefined, {
+        boardroom,
+        owner: oldGrant.issuer,
+      }),
+    ).toBe(false);
   });
 
   test("hides cached discovery rows after the wallet changes", () => {
