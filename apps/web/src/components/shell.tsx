@@ -10,11 +10,13 @@ import { Label } from "./ui/label";
 
 export function Panel({
   title,
+  description,
   action,
   children,
   className,
 }: {
   title: string;
+  description?: string;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
@@ -22,10 +24,41 @@ export function Panel({
   return (
     <section className={cn("min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/82", className)}>
       <div className="flex min-h-14 items-center justify-between gap-3 px-4 py-3">
-        <h2 className="m-0 text-base font-semibold tracking-normal text-zinc-50">{title}</h2>
+        <div className="min-w-0">
+          <h2 className="m-0 text-base font-semibold tracking-normal text-zinc-50">{title}</h2>
+          {description ? <p className="m-0 mt-1 max-w-3xl text-sm leading-5 text-zinc-500">{description}</p> : null}
+        </div>
         {action}
       </div>
       {children}
+    </section>
+  );
+}
+
+export function WorkspaceHeader({
+  eyebrow,
+  title,
+  description,
+  action,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  action?: ReactNode;
+  children?: ReactNode;
+}): React.JSX.Element {
+  return (
+    <section className="mb-5 border-b border-zinc-800 pb-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="min-w-0">
+          <p className="m-0 text-xs font-semibold uppercase tracking-normal text-lime-200/80">{eyebrow}</p>
+          <h1 className="m-0 mt-2 text-3xl font-semibold tracking-normal text-zinc-50 sm:text-4xl">{title}</h1>
+          <p className="m-0 mt-3 max-w-3xl text-sm leading-6 text-zinc-400">{description}</p>
+        </div>
+        {action ? <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div> : null}
+      </div>
+      {children ? <div className="mt-4">{children}</div> : null}
     </section>
   );
 }

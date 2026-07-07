@@ -56,10 +56,23 @@ import {
   type GrantCreationTerms,
   type LockedLiquidityState,
   type MigratingBondingCurveState,
+  type PledgeCashDeployment,
 } from "@pledge.cash/sdk";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Activity,
+  ArrowDownUp,
+  ClipboardList,
+  Compass,
+  FolderSearch,
+  KeyRound,
+  Settings2,
+  SlidersHorizontal,
+  WalletCards,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Hex, PublicClient } from "viem";
-import { TabButton } from "./components/shell";
+import { ActionButton, AddressLink, Facts, Panel, TabButton, WorkspaceHeader } from "./components/shell";
+import { Badge } from "./components/ui/badge";
 import { BoardroomPanel } from "./features/boardrooms/boardroom-panel";
 import { ProductBoardroomDashboard } from "./features/boardrooms/product-boardroom-dashboard";
 import { ArtifactPanel, DeploymentPanel } from "./features/deployment/deployment-panel";
@@ -159,17 +172,17 @@ import type {
   FixedPriceSaleForm,
   GrantForm,
   GrantSnapshot,
+  LogEntry,
   LockedLiquidityExitForm,
   LockedLiquidityForm,
   MigratingCurveForm,
-  Tab,
   WindDownForm,
 } from "./lib/types";
 
 export { parseDeployment } from "./lib/deployment";
 
 type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
-type AppView = Tab | "product-boardroom" | "swap";
+type AppView = "project" | "market" | "positions" | "grants" | "manage" | "activity" | "advanced";
 
 async function parseMinAmountsOut(client: PublicClient, value: string, assets: readonly Address[]): Promise<bigint[]> {
   const trimmed = value.trim();
@@ -199,24 +212,33 @@ function defaultDiscoveryForm(): DiscoveryForm {
 }
 
 function initialView(): AppView {
-  if (typeof window === "undefined") return "direct";
+  if (typeof window === "undefined") return "project";
   return viewFromPath(window.location.pathname);
 }
 
 function viewFromPath(pathname: string): AppView {
   const base = import.meta.env.BASE_URL || "/";
   const relative = pathname.startsWith(base) ? pathname.slice(base.length) : pathname.replace(/^\/+/, "");
-  if (relative === "boardroom" || relative.startsWith("boardroom/")) return "product-boardroom";
-  if (relative === "swap" || relative.startsWith("swap/")) return "swap";
-  return "direct";
+  const segment = relative.split("/")[0] || "project";
+  if (segment === "boardroom" || segment === "project") return "project";
+  if (segment === "swap" || segment === "market") return "market";
+  if (segment === "positions") return "positions";
+  if (segment === "grant" || segment === "grants") return "grants";
+  if (segment === "manage" || segment === "boardroom-tools") return "manage";
+  if (segment === "activity") return "activity";
+  if (segment === "advanced" || segment === "direct" || segment === "discovery") return "advanced";
+  return "project";
 }
 
 function viewHref(view: AppView): string {
   const base = import.meta.env.BASE_URL || "/";
   const search = typeof window === "undefined" ? "" : window.location.search;
-  if (view === "product-boardroom") return `${base}boardroom${search}`;
-  if (view === "swap") return `${base}swap${search}`;
-  return `${base}${search}`;
+  const path = view === "project" ? "project" : view;
+  return `${base}${path}${search}`;
+}
+
+function viewUsesProjectDashboard(view: AppView): boolean {
+  return view === "project" || view === "manage" || view === "activity";
 }
 
 async function parseErc20Amount(client: PublicClient, value: string, token: Address, label: string): Promise<bigint> {
@@ -446,7 +468,7 @@ export function App(): React.JSX.Element {
   }, [discoveryKey]);
 
   useEffect(() => {
-    if (activeView !== "product-boardroom" || !deployment?.boardroomFactory || productBoardroom || productBoardroomError || productBoardroomLoading) return;
+    if (!viewUsesProjectDashboard(activeView) || !deployment?.boardroomFactory || productBoardroom || productBoardroomError || productBoardroomLoading) return;
     void loadProductBoardroom();
   }, [activeView, deployment?.boardroomFactory, loadProductBoardroom, productBoardroom, productBoardroomError, productBoardroomLoading]);
 
@@ -505,7 +527,7 @@ export function App(): React.JSX.Element {
   }, [activeNetwork.chainId, activeNetwork.wrappedNativeSymbol, deployment, isCurrentNetworkRequest, publicClient, pushLog, wallet.account]);
 
   useEffect(() => {
-    if (activeView !== "swap" || !deployment?.ammFactory || swapTokenList.loaded || swapTokenListLoading) return;
+    if (activeView !== "market" || !deployment?.ammFactory || swapTokenList.loaded || swapTokenListLoading) return;
     void loadSwapTokens();
   }, [activeView, deployment?.ammFactory, loadSwapTokens, swapTokenList.loaded, swapTokenListLoading]);
 
@@ -1515,7 +1537,7 @@ export function App(): React.JSX.Element {
   const inspectDiscoveredGrant = useCallback(
     (grant: Address): void => {
       updateGrantAddress(grant);
-      navigateView("grant");
+      navigateView("grants");
     },
     [navigateView, updateGrantAddress],
   );
@@ -1523,7 +1545,7 @@ export function App(): React.JSX.Element {
   const useDiscoveredBoardroom = useCallback(
     (boardroom: Address): void => {
       updateBoardroomAddress(boardroom);
-      navigateView("boardroom");
+      navigateView("manage");
     },
     [navigateView, updateBoardroomAddress],
   );
@@ -1536,7 +1558,7 @@ export function App(): React.JSX.Element {
       } else {
         updateFixedPriceSaleAddress(distribution.distribution);
       }
-      navigateView("boardroom");
+      navigateView("manage");
     },
     [navigateView, updateBoardroomAddress, updateFixedPriceSaleAddress, updateMigratingCurveAddress],
   );
@@ -1545,9 +1567,182 @@ export function App(): React.JSX.Element {
     (locker: DiscoveredLockedLiquidity): void => {
       updateBoardroomAddress(locker.boardroom);
       updateLockedLiquidityAddress(locker.locker);
-      navigateView("boardroom");
+      navigateView("manage");
     },
     [navigateView, updateBoardroomAddress, updateLockedLiquidityAddress],
+  );
+
+  const grantIssuerActionsAvailable = canRunGrantIssuerActions(wallet.account, grantSnapshot, productBoardroom, boardroomSnapshot);
+  const marketPanel = (
+    <SwapPanel
+      account={wallet.account}
+      deployment={deployment}
+      form={swapForm}
+      liquidityForm={liquidityForm}
+      liquidityQuote={liquidityQuote}
+      position={ammPosition}
+      pendingAction={pendingAction}
+      quote={swapQuote}
+      removeLiquidityForm={removeLiquidityForm}
+      removeLiquidityQuote={removeLiquidityQuote}
+      setLiquidityForm={setLiquidityForm}
+      setRemoveLiquidityForm={setRemoveLiquidityForm}
+      setForm={setSwapForm}
+      tokenList={swapTokenList}
+      tokenListLoading={swapTokenListLoading}
+      wrappedNativeSymbol={activeNetwork.wrappedNativeSymbol}
+      addLiquidity={addLiquidity}
+      approveLiquidityTokenA={approveLiquidityTokenA}
+      approveLiquidityTokenB={approveLiquidityTokenB}
+      approveLpToken={approveLpToken}
+      approveInput={approveSwapInput}
+      claimAmmFees={claimAmmFees}
+      executeSwap={executeSwap}
+      refreshLiquidityQuote={refreshLiquidityQuote}
+      refreshPosition={refreshAmmPosition}
+      refreshQuote={refreshSwapQuote}
+      refreshRemoveLiquidityQuote={refreshRemoveLiquidityQuote}
+      refreshTokens={loadSwapTokens}
+      removeLiquidity={removeLiquidity}
+      runAction={runAction}
+    />
+  );
+  const directGrantPanel = (
+    <DirectGrantPanel
+      creationFee={creationFee}
+      clearDirectGrantPrediction={clearDirectGrantPrediction}
+      grantForm={grantForm}
+      issuer={wallet.account}
+      pendingAction={pendingAction}
+      predictedGrant={predictedGrant}
+      setGrantForm={setGrantForm}
+      approveEscrow={approveEscrow}
+      createGrant={createGrant}
+      predictGrant={predictGrant}
+      runAction={runAction}
+    />
+  );
+  const grantPanel = (
+    <GrantInspector
+      account={wallet.account}
+      grantAddress={grantAddress}
+      grantSnapshot={grantSnapshot}
+      issuerActionsAvailable={grantIssuerActionsAvailable}
+      paymentApproval={paymentApproval}
+      pendingAction={pendingAction}
+      settleAmount={settleAmount}
+      setGrantAddress={updateGrantAddress}
+      setPaymentApproval={setPaymentApproval}
+      setSettleAmount={setSettleAmount}
+      approvePayment={approvePayment}
+      haltGrant={haltGrant}
+      loadGrant={loadGrant}
+      runAction={runAction}
+      settleGrant={settleGrant}
+      withdrawExpired={withdrawExpired}
+    />
+  );
+  const boardroomToolsPanel = (
+    <BoardroomPanel
+      boardroom={{
+        address: boardroomAddress,
+        form: boardroomForm,
+        mintAmount: boardroomMintAmount,
+        mintTo: boardroomMintTo,
+        predicted: predictedBoardroom,
+        snapshot: boardroomSnapshot,
+        create: createBoardroom,
+        load: loadBoardroom,
+        mintShares: mintBoardroomShares,
+        predict: predictBoardroom,
+        setBoardroomAddress: updateBoardroomAddress,
+        setBoardroomForm,
+        setBoardroomMintAmount,
+        setBoardroomMintTo,
+        setPredictedBoardroom,
+      }}
+      fixedPriceSale={{
+        address: fixedPriceSaleAddress,
+        form: fixedPriceSaleForm,
+        predicted: predictedFixedPriceSale,
+        snapshot: fixedPriceSaleSnapshot,
+        cancel: cancelFixedPriceSale,
+        close: closeFixedPriceSale,
+        create: createFixedPriceSale,
+        load: loadFixedPriceSale,
+        predict: predictFixedPriceSale,
+        setFixedPriceSaleAddress: updateFixedPriceSaleAddress,
+        setFixedPriceSaleForm,
+      }}
+      grant={{
+        form: boardroomGrantForm,
+        predicted: predictedBoardroomGrant,
+        approveFactory: boardroomApproveFactory,
+        clearPrediction: clearBoardroomGrantPrediction,
+        create: boardroomCreateGrant,
+        createBatch: boardroomCreateGrantBatch,
+        predict: predictBoardroomGrantAddress,
+        setForm: setBoardroomGrantForm,
+      }}
+      lockedLiquidity={{
+        address: lockedLiquidityAddress,
+        exitForm: lockedLiquidityExitForm,
+        form: lockedLiquidityForm,
+        predicted: predictedLockedLiquidity,
+        snapshot: lockedLiquiditySnapshot,
+        claimFees: claimLockedLiquidityFees,
+        create: createLockedLiquidity,
+        exit: exitLockedLiquidity,
+        load: loadLockedLiquidity,
+        predict: predictLockedLiquidity,
+        setLockedLiquidityAddress: updateLockedLiquidityAddress,
+        setLockedLiquidityExitForm,
+        setLockedLiquidityForm,
+      }}
+      migratingCurve={{
+        address: migratingCurveAddress,
+        form: migratingCurveForm,
+        migrationForm: curveMigrationForm,
+        predicted: predictedMigratingCurve,
+        snapshot: migratingCurveSnapshot,
+        cancel: cancelMigratingCurve,
+        create: createMigratingCurve,
+        load: loadMigratingCurve,
+        migrate: migrateCurve,
+        predict: predictMigratingCurve,
+        setCurveMigrationForm,
+        setMigratingCurveAddress: updateMigratingCurveAddress,
+        setMigratingCurveForm,
+      }}
+      windDown={{
+        form: windDownForm,
+        burnTreasuryShares,
+        openRedemptions,
+        redeemShares: redeemBoardroomShares,
+        registerRedeemableAsset,
+        setForm: setWindDownForm,
+        start: startWindDown,
+      }}
+      workflow={{ deployment, pendingAction, runAction }}
+    />
+  );
+  const discoveryPanel = (
+    <DiscoveryPanel
+      account={wallet.account}
+      deployment={deployment}
+      discovery={discovery}
+      discoveryForm={discoveryForm}
+      pendingAction={pendingAction}
+      setDiscoveryForm={setDiscoveryForm}
+      clearDiscovery={clearDiscovery}
+      inspectGrant={inspectDiscoveredGrant}
+      scanDiscovery={scanDiscovery}
+      resumeDiscovery={resumeDiscovery}
+      useBoardroom={useDiscoveredBoardroom}
+      useDistribution={useDiscoveredDistribution}
+      useLockedLiquidity={useDiscoveredLockedLiquidity}
+      runAction={runAction}
+    />
   );
 
   return (
@@ -1573,224 +1768,340 @@ export function App(): React.JSX.Element {
             localAmmProtocolFeeRecipient={deployment?.ammProtocolFeeRecipient}
           />
           <WalletPanel wallet={wallet} />
-          <LogPanel logs={logs} clearLogs={clearLogs} />
           <ArtifactPanel deployment={deployment} />
         </aside>
 
         <section className="min-w-0 p-4 sm:p-5">
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <TabButton active={activeView === "product-boardroom"} onClick={() => navigateView("product-boardroom")}>
-              Product Boardroom
-            </TabButton>
-            <TabButton active={activeView === "swap"} onClick={() => navigateView("swap")}>
-              Swap
-            </TabButton>
-            <TabButton active={activeView === "direct"} onClick={() => navigateView("direct")}>
-              Direct Grant
-            </TabButton>
-            <TabButton active={activeView === "grant"} onClick={() => navigateView("grant")}>
-              Inspect Grant
-            </TabButton>
-            <TabButton active={activeView === "boardroom"} onClick={() => navigateView("boardroom")}>
-              Boardroom Tools
-            </TabButton>
-            <TabButton active={activeView === "discovery"} onClick={() => navigateView("discovery")}>
-              Discovery
-            </TabButton>
-          </div>
+          <WorkspaceNav activeView={activeView} navigateView={navigateView} />
 
-          {activeView === "product-boardroom" ? (
+          {activeView === "project" ? (
             <ProductBoardroomDashboard
+              account={wallet.account}
               dashboard={productBoardroom}
               error={productBoardroomError}
               loading={productBoardroomLoading}
               pendingAction={pendingAction}
               inspectGrant={inspectDiscoveredGrant}
+              openAdvanced={() => navigateView("advanced")}
+              openGrants={() => navigateView("grants")}
+              openManage={(boardroom) => {
+                updateBoardroomAddress(boardroom);
+                void refreshBoardroom(boardroom);
+                navigateView("manage");
+              }}
+              openMarket={() => navigateView("market")}
               openTools={(boardroom) => {
                 updateBoardroomAddress(boardroom);
                 void refreshBoardroom(boardroom);
-                navigateView("boardroom");
+                navigateView("manage");
               }}
               refresh={loadProductBoardroom}
               runAction={runAction}
             />
           ) : null}
 
-          {activeView === "swap" ? (
-            <SwapPanel
-              account={wallet.account}
-              deployment={deployment}
-              form={swapForm}
-              liquidityForm={liquidityForm}
-              liquidityQuote={liquidityQuote}
-              position={ammPosition}
-              pendingAction={pendingAction}
-              quote={swapQuote}
-              removeLiquidityForm={removeLiquidityForm}
-              removeLiquidityQuote={removeLiquidityQuote}
-              setLiquidityForm={setLiquidityForm}
-              setRemoveLiquidityForm={setRemoveLiquidityForm}
-              setForm={setSwapForm}
-              tokenList={swapTokenList}
-              tokenListLoading={swapTokenListLoading}
-              wrappedNativeSymbol={activeNetwork.wrappedNativeSymbol}
-              addLiquidity={addLiquidity}
-              approveLiquidityTokenA={approveLiquidityTokenA}
-              approveLiquidityTokenB={approveLiquidityTokenB}
-              approveLpToken={approveLpToken}
-              approveInput={approveSwapInput}
-              claimAmmFees={claimAmmFees}
-              executeSwap={executeSwap}
-              refreshLiquidityQuote={refreshLiquidityQuote}
-              refreshPosition={refreshAmmPosition}
-              refreshQuote={refreshSwapQuote}
-              refreshRemoveLiquidityQuote={refreshRemoveLiquidityQuote}
-              refreshTokens={loadSwapTokens}
-              removeLiquidity={removeLiquidity}
-              runAction={runAction}
-            />
+          {activeView === "market" ? (
+            <>
+              <WorkspaceHeader
+                eyebrow="Market"
+                title="Buy, Sell, And Provide Liquidity"
+                description="Trade project tokens, inspect pool reserves, and manage LP positions without leaving the project context."
+              />
+              {marketPanel}
+            </>
           ) : null}
 
-          {activeView === "direct" ? (
-            <DirectGrantPanel
-              creationFee={creationFee}
-              clearDirectGrantPrediction={clearDirectGrantPrediction}
-              grantForm={grantForm}
-              issuer={wallet.account}
-              pendingAction={pendingAction}
-              predictedGrant={predictedGrant}
-              setGrantForm={setGrantForm}
-              approveEscrow={approveEscrow}
-              createGrant={createGrant}
-              predictGrant={predictGrant}
-              runAction={runAction}
-            />
-          ) : null}
-
-          {activeView === "grant" ? (
-            <GrantInspector
-              grantAddress={grantAddress}
-              grantSnapshot={grantSnapshot}
-              paymentApproval={paymentApproval}
-              pendingAction={pendingAction}
-              settleAmount={settleAmount}
-              setGrantAddress={updateGrantAddress}
-              setPaymentApproval={setPaymentApproval}
-              setSettleAmount={setSettleAmount}
-              approvePayment={approvePayment}
-              haltGrant={haltGrant}
-              loadGrant={loadGrant}
-              runAction={runAction}
-              settleGrant={settleGrant}
-              withdrawExpired={withdrawExpired}
-            />
-          ) : null}
-
-          {activeView === "boardroom" ? (
-            <BoardroomPanel
-              boardroom={{
-                address: boardroomAddress,
-                form: boardroomForm,
-                mintAmount: boardroomMintAmount,
-                mintTo: boardroomMintTo,
-                predicted: predictedBoardroom,
-                snapshot: boardroomSnapshot,
-                create: createBoardroom,
-                load: loadBoardroom,
-                mintShares: mintBoardroomShares,
-                predict: predictBoardroom,
-                setBoardroomAddress: updateBoardroomAddress,
-                setBoardroomForm,
-                setBoardroomMintAmount,
-                setBoardroomMintTo,
-                setPredictedBoardroom,
-              }}
-              fixedPriceSale={{
-                address: fixedPriceSaleAddress,
-                form: fixedPriceSaleForm,
-                predicted: predictedFixedPriceSale,
-                snapshot: fixedPriceSaleSnapshot,
-                cancel: cancelFixedPriceSale,
-                close: closeFixedPriceSale,
-                create: createFixedPriceSale,
-                load: loadFixedPriceSale,
-                predict: predictFixedPriceSale,
-                setFixedPriceSaleAddress: updateFixedPriceSaleAddress,
-                setFixedPriceSaleForm,
-              }}
-              grant={{
-                form: boardroomGrantForm,
-                predicted: predictedBoardroomGrant,
-                approveFactory: boardroomApproveFactory,
-                clearPrediction: clearBoardroomGrantPrediction,
-                create: boardroomCreateGrant,
-                createBatch: boardroomCreateGrantBatch,
-                predict: predictBoardroomGrantAddress,
-                setForm: setBoardroomGrantForm,
-              }}
-              lockedLiquidity={{
-                address: lockedLiquidityAddress,
-                exitForm: lockedLiquidityExitForm,
-                form: lockedLiquidityForm,
-                predicted: predictedLockedLiquidity,
-                snapshot: lockedLiquiditySnapshot,
-                claimFees: claimLockedLiquidityFees,
-                create: createLockedLiquidity,
-                exit: exitLockedLiquidity,
-                load: loadLockedLiquidity,
-                predict: predictLockedLiquidity,
-                setLockedLiquidityAddress: updateLockedLiquidityAddress,
-                setLockedLiquidityExitForm,
-                setLockedLiquidityForm,
-              }}
-              migratingCurve={{
-                address: migratingCurveAddress,
-                form: migratingCurveForm,
-                migrationForm: curveMigrationForm,
-                predicted: predictedMigratingCurve,
-                snapshot: migratingCurveSnapshot,
-                cancel: cancelMigratingCurve,
-                create: createMigratingCurve,
-                load: loadMigratingCurve,
-                migrate: migrateCurve,
-                predict: predictMigratingCurve,
-                setCurveMigrationForm,
-                setMigratingCurveAddress: updateMigratingCurveAddress,
-                setMigratingCurveForm,
-              }}
-              windDown={{
-                form: windDownForm,
-                burnTreasuryShares,
-                openRedemptions,
-                redeemShares: redeemBoardroomShares,
-                registerRedeemableAsset,
-                setForm: setWindDownForm,
-                start: startWindDown,
-              }}
-              workflow={{ deployment, pendingAction, runAction }}
-            />
-          ) : null}
-
-          {activeView === "discovery" ? (
-            <DiscoveryPanel
+          {activeView === "positions" ? (
+            <PositionsWorkspace
               account={wallet.account}
               deployment={deployment}
               discovery={discovery}
               discoveryForm={discoveryForm}
               pendingAction={pendingAction}
-              setDiscoveryForm={setDiscoveryForm}
-              clearDiscovery={clearDiscovery}
-              inspectGrant={inspectDiscoveredGrant}
-              scanDiscovery={scanDiscovery}
               resumeDiscovery={resumeDiscovery}
-              useBoardroom={useDiscoveredBoardroom}
-              useDistribution={useDiscoveredDistribution}
-              useLockedLiquidity={useDiscoveredLockedLiquidity}
               runAction={runAction}
-            />
+              scanDiscovery={scanDiscovery}
+            >
+              {discoveryPanel}
+            </PositionsWorkspace>
+          ) : null}
+
+          {activeView === "grants" ? (
+            <>
+              <WorkspaceHeader
+                eyebrow="Grants"
+                title="Settle Token Grants"
+                description="Inspect a grant, verify holder and payment terms, then settle vested tokens from the current holder wallet."
+              />
+              {grantPanel}
+            </>
+          ) : null}
+
+          {activeView === "manage" ? (
+            <ManageWorkspace account={wallet.account} dashboard={productBoardroom}>
+              {boardroomToolsPanel}
+            </ManageWorkspace>
+          ) : null}
+
+          {activeView === "activity" ? (
+            <ActivityWorkspace clearLogs={clearLogs} dashboard={productBoardroom} logs={logs} />
+          ) : null}
+
+          {activeView === "advanced" ? (
+            <AdvancedWorkspace>
+              {directGrantPanel}
+              {discoveryPanel}
+            </AdvancedWorkspace>
           ) : null}
         </section>
       </main>
     </div>
   );
+}
+
+function WorkspaceNav({
+  activeView,
+  navigateView,
+}: {
+  activeView: AppView;
+  navigateView: (view: AppView) => void;
+}): React.JSX.Element {
+  const items: { view: AppView; label: string; icon: ReactNode }[] = [
+    { view: "project", label: "Project", icon: <Compass className="h-4 w-4" /> },
+    { view: "market", label: "Market", icon: <ArrowDownUp className="h-4 w-4" /> },
+    { view: "positions", label: "Positions", icon: <WalletCards className="h-4 w-4" /> },
+    { view: "grants", label: "Grants", icon: <KeyRound className="h-4 w-4" /> },
+    { view: "manage", label: "Manage", icon: <Settings2 className="h-4 w-4" /> },
+    { view: "activity", label: "Activity", icon: <Activity className="h-4 w-4" /> },
+    { view: "advanced", label: "Advanced", icon: <SlidersHorizontal className="h-4 w-4" /> },
+  ];
+
+  return (
+    <nav aria-label="Workspace" className="mb-5 flex flex-wrap items-center gap-2">
+      {items.map((item) => (
+        <TabButton active={activeView === item.view} key={item.view} onClick={() => navigateView(item.view)}>
+          <span className="inline-flex items-center gap-2">
+            {item.icon}
+            {item.label}
+          </span>
+        </TabButton>
+      ))}
+    </nav>
+  );
+}
+
+function PositionsWorkspace({
+  account,
+  children,
+  deployment,
+  discovery,
+  discoveryForm,
+  pendingAction,
+  resumeDiscovery,
+  runAction,
+  scanDiscovery,
+}: {
+  account: Address | undefined;
+  children: ReactNode;
+  deployment: PledgeCashDeployment | undefined;
+  discovery: DiscoverySnapshot;
+  discoveryForm: DiscoveryForm;
+  pendingAction: string | undefined;
+  resumeDiscovery: () => Promise<void>;
+  runAction: (label: string, action: () => Promise<void>) => Promise<void>;
+  scanDiscovery: () => Promise<void>;
+}): React.JSX.Element {
+  const summary = walletDiscoverySummary(account, deployment, discovery, discoveryForm.includeClosedGrants);
+
+  return (
+    <>
+      <WorkspaceHeader
+        eyebrow="Portfolio"
+        title="My Positions"
+        description="Scan the connected wallet for Boardrooms, grants, distributions, and liquidity that are relevant to this project graph."
+        action={
+          <>
+            <ActionButton
+              actionId="scan-discovery"
+              disabled={!account || !deployment}
+              pendingAction={pendingAction}
+              onClick={() => void runAction("scan-discovery", scanDiscovery)}
+            >
+              <FolderSearch className="h-4 w-4" />
+              Scan Wallet
+            </ActionButton>
+            <ActionButton
+              actionId="resume-discovery"
+              disabled={!account || discovery.lastScannedBlock === undefined}
+              pendingAction={pendingAction}
+              variant="secondary"
+              onClick={() => void runAction("resume-discovery", resumeDiscovery)}
+            >
+              <ClipboardList className="h-4 w-4" />
+              Resume
+            </ActionButton>
+          </>
+        }
+      />
+      <Panel title="Wallet Summary" description="Discovery is cached per wallet and chain; scan again after changing accounts or networks.">
+        <Facts columns="three" items={[
+          { label: "Wallet", value: account ? <AddressLink address={account} /> : "Connect wallet" },
+          { label: "Scan status", value: <Badge variant={summary.loaded ? "default" : "muted"}>{summary.loaded ? summary.status : "Not scanned"}</Badge> },
+          { label: "Boardrooms", value: summary.boardrooms.toString() },
+          { label: "Current grants", value: summary.heldGrants.toString() },
+          { label: "Issued grants", value: summary.issuedGrants.toString() },
+          { label: "Obligations", value: `${summary.distributions.toString()} distributions / ${summary.lockers.toString()} lockers` },
+        ]} />
+      </Panel>
+      <div className="mt-4">{children}</div>
+    </>
+  );
+}
+
+function ManageWorkspace({
+  account,
+  children,
+  dashboard,
+}: {
+  account: Address | undefined;
+  children: ReactNode;
+  dashboard: ProductBoardroomDashboardState | undefined;
+}): React.JSX.Element {
+  const owner = sameAddress(account, dashboard?.snapshot.owner);
+
+  return (
+    <>
+      <WorkspaceHeader
+        eyebrow="Operations"
+        title="Manage Boardroom"
+        description="Use owner-authorized workflows for grants, token issuance, sale setup, locked liquidity, and wind-down. Read-only users can still inspect the forms and loaded state."
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={owner ? "default" : "muted"}>{owner ? "Owner wallet" : account ? "Read-only wallet" : "Connect owner wallet"}</Badge>
+          <Badge variant="muted">{dashboard ? boardroomStatusText(dashboard.snapshot.status) : "Project not loaded"}</Badge>
+        </div>
+      </WorkspaceHeader>
+      {children}
+    </>
+  );
+}
+
+function ActivityWorkspace({
+  clearLogs,
+  dashboard,
+  logs,
+}: {
+  clearLogs: () => void;
+  dashboard: ProductBoardroomDashboardState | undefined;
+  logs: LogEntry[];
+}): React.JSX.Element {
+  const history = dashboard?.history;
+  const purchaseCount = (history?.fixedPriceSale?.purchaseCount ?? 0) + (history?.curve?.buyCount ?? 0);
+  const sellCount = history?.curve?.sellCount ?? 0;
+
+  return (
+    <>
+      <WorkspaceHeader
+        eyebrow="Activity"
+        title="Project Activity"
+        description="Read recent project movement from indexed protocol history and local wallet actions from this session."
+      />
+      <Panel title="Protocol Activity" description="These counts come from the loaded Boardroom dashboard and its distribution or AMM history.">
+        <Facts columns="three" items={[
+          { label: "Boardroom", value: dashboard ? <AddressLink address={dashboard.address} /> : "No project loaded" },
+          { label: "Buyers", value: history?.buyerCount === undefined ? "Unknown" : history.buyerCount.toString() },
+          { label: "Purchases", value: purchaseCount.toString() },
+          { label: "Curve sells", value: sellCount.toString() },
+          { label: "AMM swaps", value: history?.amm?.swapCount === undefined ? "Unknown" : history.amm.swapCount.toString() },
+          { label: "AMM traders", value: history?.amm?.traderCount === undefined ? "Unknown" : history.amm.traderCount.toString() },
+        ]} />
+      </Panel>
+      <div className="mt-4">
+        <LogPanel logs={logs} clearLogs={clearLogs} />
+      </div>
+    </>
+  );
+}
+
+function AdvancedWorkspace({ children }: { children: ReactNode }): React.JSX.Element {
+  return (
+    <>
+      <WorkspaceHeader
+        eyebrow="Advanced"
+        title="Protocol Tools"
+        description="Use the raw grant creation and discovery tools when a workflow is not tied to the current project overview."
+      />
+      <div className="grid gap-4">{children}</div>
+    </>
+  );
+}
+
+function walletDiscoverySummary(
+  account: Address | undefined,
+  deployment: PledgeCashDeployment | undefined,
+  discovery: DiscoverySnapshot,
+  includeClosedGrants: boolean,
+): {
+  boardrooms: number;
+  distributions: number;
+  heldGrants: number;
+  issuedGrants: number;
+  loaded: boolean;
+  lockers: number;
+  status: string;
+} {
+  const loaded = Boolean(
+    account
+      && discovery.loadedFor
+      && discovery.loadedFor.toLowerCase() === account.toLowerCase()
+      && discovery.chainId === deployment?.chainId,
+  );
+  if (!loaded || !account) {
+    return { boardrooms: 0, distributions: 0, heldGrants: 0, issuedGrants: 0, loaded: false, lockers: 0, status: "Not scanned" };
+  }
+
+  const grants = Object.values(discovery.grantsByAddress);
+  return {
+    boardrooms: Object.values(discovery.boardroomsByAddress).length,
+    distributions: Object.values(discovery.distributionsByAddress).length,
+    heldGrants: grants.filter((grant) => grantHeldBy(grant, account, includeClosedGrants)).length,
+    issuedGrants: grants.filter((grant) => grantIssuedBy(grant, account, includeClosedGrants)).length,
+    loaded: true,
+    lockers: Object.values(discovery.lockersByAddress).length,
+    status: discovery.complete && discovery.errors.length === 0 ? "Complete" : "Partial",
+  };
+}
+
+function grantHeldBy(grant: DiscoveredGrant, account: Address, includeClosed: boolean): boolean {
+  if (grant.closed && !includeClosed) return false;
+  const holder = grant.closed && grant.lastHolder ? grant.lastHolder : grant.currentHolder;
+  return sameAddress(holder, account);
+}
+
+function grantIssuedBy(grant: DiscoveredGrant, account: Address, includeClosed: boolean): boolean {
+  if (grant.closed && !includeClosed) return false;
+  return sameAddress(grant.issuer, account);
+}
+
+function canRunGrantIssuerActions(
+  account: Address | undefined,
+  grantSnapshot: GrantSnapshot | undefined,
+  dashboard: ProductBoardroomDashboardState | undefined,
+  boardroomSnapshot: BoardroomSnapshot | undefined,
+): boolean {
+  if (!account || !grantSnapshot) return false;
+  if (sameAddress(account, grantSnapshot.issuer)) return true;
+  if (sameAddress(grantSnapshot.issuer, dashboard?.address) && sameAddress(account, dashboard?.snapshot.owner)) return true;
+  return sameAddress(grantSnapshot.issuer, boardroomSnapshot?.address) && sameAddress(account, boardroomSnapshot?.owner);
+}
+
+function boardroomStatusText(status: number): string {
+  if (status === 0) return "Active";
+  if (status === 1) return "Winding down";
+  if (status === 2) return "Redemptions open";
+  return "Unknown status";
+}
+
+function sameAddress(first: Address | undefined, second: Address | undefined): boolean {
+  return Boolean(first && second && first.toLowerCase() === second.toLowerCase());
 }
