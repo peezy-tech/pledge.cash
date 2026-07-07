@@ -280,6 +280,8 @@ export function App(): React.JSX.Element {
   const networkRequestVersion = useRef(0);
   const activeChainIdRef = useRef(activeNetwork.chainId);
   activeChainIdRef.current = activeNetwork.chainId;
+  const activeAccountRef = useRef<Address | undefined>(undefined);
+  const activeDiscoveryKeyRef = useRef<string | undefined>(undefined);
   const publicClient = useMemo(() => createPledgeCashPublicClient(activeNetwork), [activeNetwork]);
   const chain = activeNetwork.chain;
   const generatedDeployment = getPledgeCashDeployment(activeNetwork.chainId);
@@ -323,7 +325,9 @@ export function App(): React.JSX.Element {
   const [discoveryForm, setDiscoveryForm] = useState<DiscoveryForm>(() => defaultDiscoveryForm());
   const [discovery, setDiscovery] = useState<DiscoverySnapshot>(() => emptyDiscoverySnapshot());
   const [loadedDiscoveryKey, setLoadedDiscoveryKey] = useState<string | undefined>();
+  const [autoDiscoveryPending, setAutoDiscoveryPending] = useState(false);
   const autoDiscoveryKeyRef = useRef<string | undefined>(undefined);
+  const autoDiscoveryRunningRef = useRef(false);
   const [productBoardroom, setProductBoardroom] = useState<ProductBoardroomDashboardState>();
   const [productBoardroomError, setProductBoardroomError] = useState<string>();
   const [productBoardroomLoading, setProductBoardroomLoading] = useState(false);
@@ -397,6 +401,8 @@ export function App(): React.JSX.Element {
   const factorySnapshot = useFactorySnapshot(publicClient, deployment, pushLog);
   const creationFee = factorySnapshot.creationFee ?? deployment?.creationFee ?? 0n;
   const discoveryKey = discoveryStorageKey(activeNetwork.chainId, wallet.account);
+  activeAccountRef.current = wallet.account;
+  activeDiscoveryKeyRef.current = discoveryKey;
 
   useEffect(() => {
     networkRequestVersion.current += 1;
@@ -1457,6 +1463,10 @@ export function App(): React.JSX.Element {
     if (!wallet.account) throw new Error("Connect wallet first.");
     if (!deployment) throw new Error("Load a deployment artifact first.");
 
+    const requestVersion = networkRequestVersion.current;
+    const requestChainId = activeNetwork.chainId;
+    const requestAccount = wallet.account;
+    const requestDiscoveryKey = discoveryKey;
     const range = toBlock === undefined ? { fromBlock, chunkSize } : { fromBlock, toBlock, chunkSize };
     const knownGrants = discoveryItems(discovery.grantsByAddress);
 
@@ -1528,10 +1538,18 @@ export function App(): React.JSX.Element {
       next.toBlock = toBlock;
     }
 
+    if (
+      !isCurrentNetworkRequest(requestVersion, requestChainId)
+      || activeAccountRef.current?.toLowerCase() !== requestAccount.toLowerCase()
+      || activeDiscoveryKeyRef.current !== requestDiscoveryKey
+    ) {
+      return;
+    }
+
     setDiscovery(next);
     saveDiscoverySnapshot(discoveryKey, next);
     pushLog(
-      `Discovery scanned ${shortAddress(wallet.account)}: ${boardroomResult.items.length} boardrooms, ${grantResult.items.length} grants, ${relevantDistributions.length} distributions, ${relevantLockers.length} lockers.`,
+      `Discovery scanned ${shortAddress(requestAccount)}: ${boardroomResult.items.length} boardrooms, ${grantResult.items.length} grants, ${relevantDistributions.length} distributions, ${relevantLockers.length} lockers.`,
       next.complete ? "success" : "error",
     );
   };
@@ -1561,6 +1579,7 @@ export function App(): React.JSX.Element {
 
   const clearDiscovery = (): void => {
     autoDiscoveryKeyRef.current = wallet.account ? `${activeNetwork.chainId}:${wallet.account.toLowerCase()}` : undefined;
+    setAutoDiscoveryPending(false);
     clearDiscoverySnapshot(discoveryKey);
     setDiscovery(emptyDiscoverySnapshot());
     setLoadedDiscoveryKey(discoveryKey);
@@ -1574,6 +1593,7 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     if (!wallet.account || !deployment || pendingAction) return;
     if (loadedDiscoveryKey !== discoveryKey) return;
+    if (autoDiscoveryRunningRef.current) return;
 
     const key = `${activeNetwork.chainId}:${wallet.account.toLowerCase()}`;
     const loadedForCurrentWallet = Boolean(
@@ -1584,8 +1604,15 @@ export function App(): React.JSX.Element {
     if (loadedForCurrentWallet || autoDiscoveryKeyRef.current === key) return;
 
     autoDiscoveryKeyRef.current = key;
-    void runAction("scan-discovery", scanWalletAccess);
-  }, [activeNetwork.chainId, deployment, discovery.chainId, discovery.loadedFor, discoveryKey, loadedDiscoveryKey, pendingAction, runAction, scanWalletAccess, wallet.account]);
+    autoDiscoveryRunningRef.current = true;
+    setAutoDiscoveryPending(true);
+    void scanWalletAccess()
+      .catch((error) => pushLog(errorMessage(error), "error"))
+      .finally(() => {
+        autoDiscoveryRunningRef.current = false;
+        setAutoDiscoveryPending(false);
+      });
+  }, [activeNetwork.chainId, deployment, discovery.chainId, discovery.loadedFor, discoveryKey, loadedDiscoveryKey, pendingAction, pushLog, scanWalletAccess, wallet.account]);
 
   const inspectDiscoveredGrant = useCallback(
     (grant: Address): void => {
@@ -1797,13 +1824,14 @@ export function App(): React.JSX.Element {
       runAction={runAction}
     />
   );
+  const walletAccessPendingAction = pendingAction ?? (autoDiscoveryPending ? "scan-discovery" : undefined);
   const walletAccessPanel = (
     <WalletAccessPanel
       account={wallet.account}
       deployment={deployment}
       discovery={discovery}
       discoveryForm={discoveryForm}
-      pendingAction={pendingAction}
+      pendingAction={walletAccessPendingAction}
       inspectGrant={inspectDiscoveredGrant}
       scanDiscovery={scanWalletAccess}
       useBoardroom={useDiscoveredBoardroom}
