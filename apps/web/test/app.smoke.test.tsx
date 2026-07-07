@@ -8,6 +8,7 @@ import { DiscoveryPanel, WalletAccessPanel } from "../src/features/discovery/dis
 import { GrantInspector } from "../src/features/grants/grant-inspector";
 import { AppHeader } from "../src/features/wallet/app-header";
 import { PLEDGE_CASH_NETWORKS } from "../src/lib/contracts";
+import { deploymentDiscoveryIdentity, discoveryStorageKey } from "../src/lib/discovery";
 import {
   defaultBoardroomGrantForm,
   defaultCurveMigrationForm,
@@ -326,6 +327,24 @@ describe("web app shell", () => {
 
     expect(html).toContain("Limited range");
     expect(html).toContain("Refresh access to sync the full wallet history.");
+  });
+
+  test("scopes wallet discovery cache keys by deployment identity", () => {
+    const firstIdentity = deploymentDiscoveryIdentity({
+      chainId: 31337,
+      boardroomFactory: "0x7900000000000000000000000000000000000000",
+      tokenGrantFactory: "0x7a00000000000000000000000000000000000000",
+    });
+    const secondIdentity = deploymentDiscoveryIdentity({
+      chainId: 31337,
+      boardroomFactory: "0x8900000000000000000000000000000000000000",
+      tokenGrantFactory: "0x8a00000000000000000000000000000000000000",
+    });
+
+    expect(firstIdentity).not.toBe(secondIdentity);
+    expect(discoveryStorageKey(31337, oldGrant.currentHolder, firstIdentity)).not.toBe(
+      discoveryStorageKey(31337, oldGrant.currentHolder, secondIdentity),
+    );
   });
 
   test("keeps grant settlement scoped to the current holder wallet", () => {

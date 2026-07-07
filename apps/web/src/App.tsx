@@ -100,6 +100,7 @@ import {
   addressMapKey,
   clearDiscoverySnapshot,
   combineDiscoveryLastScanned,
+  deploymentDiscoveryIdentity,
   discoveryErrors,
   discoveryItems,
   discoveryStorageKey,
@@ -278,10 +279,12 @@ export function App(): React.JSX.Element {
   const [selectedChainId, setSelectedChainId] = useState(() => initialSelectedNetwork().chainId);
   const activeNetwork = useMemo(() => networkForChainId(selectedChainId), [selectedChainId]);
   const networkRequestVersion = useRef(0);
+  const discoveryWriteVersion = useRef(0);
   const activeChainIdRef = useRef(activeNetwork.chainId);
   activeChainIdRef.current = activeNetwork.chainId;
   const activeAccountRef = useRef<Address | undefined>(undefined);
   const activeDiscoveryKeyRef = useRef<string | undefined>(undefined);
+  const activeDeploymentIdentityRef = useRef<string | undefined>(undefined);
   const publicClient = useMemo(() => createPledgeCashPublicClient(activeNetwork), [activeNetwork]);
   const chain = activeNetwork.chain;
   const generatedDeployment = getPledgeCashDeployment(activeNetwork.chainId);
@@ -400,13 +403,19 @@ export function App(): React.JSX.Element {
   });
   const factorySnapshot = useFactorySnapshot(publicClient, deployment, pushLog);
   const creationFee = factorySnapshot.creationFee ?? deployment?.creationFee ?? 0n;
-  const discoveryKey = discoveryStorageKey(activeNetwork.chainId, wallet.account);
+  const deploymentIdentity = deploymentDiscoveryIdentity(deployment);
+  const discoveryKey = discoveryStorageKey(activeNetwork.chainId, wallet.account, deploymentIdentity);
   activeAccountRef.current = wallet.account;
   activeDiscoveryKeyRef.current = discoveryKey;
+  activeDeploymentIdentityRef.current = deploymentIdentity;
 
   useEffect(() => {
     networkRequestVersion.current += 1;
   }, [activeNetwork.chainId]);
+
+  useEffect(() => {
+    discoveryWriteVersion.current += 1;
+  }, [discoveryKey]);
 
   const isCurrentNetworkRequest = useCallback(
     (version: number, chainId: number): boolean =>
@@ -1467,6 +1476,8 @@ export function App(): React.JSX.Element {
     const requestChainId = activeNetwork.chainId;
     const requestAccount = wallet.account;
     const requestDiscoveryKey = discoveryKey;
+    const requestDeploymentIdentity = deploymentIdentity;
+    const requestDiscoveryWriteVersion = discoveryWriteVersion.current;
     const range = toBlock === undefined ? { fromBlock, chunkSize } : { fromBlock, toBlock, chunkSize };
     const knownGrants = discoveryItems(discovery.grantsByAddress);
 
@@ -1540,14 +1551,16 @@ export function App(): React.JSX.Element {
 
     if (
       !isCurrentNetworkRequest(requestVersion, requestChainId)
+      || discoveryWriteVersion.current !== requestDiscoveryWriteVersion
       || activeAccountRef.current?.toLowerCase() !== requestAccount.toLowerCase()
       || activeDiscoveryKeyRef.current !== requestDiscoveryKey
+      || activeDeploymentIdentityRef.current !== requestDeploymentIdentity
     ) {
       return;
     }
 
     setDiscovery(next);
-    saveDiscoverySnapshot(discoveryKey, next);
+    saveDiscoverySnapshot(requestDiscoveryKey, next);
     pushLog(
       `Discovery scanned ${shortAddress(requestAccount)}: ${boardroomResult.items.length} boardrooms, ${grantResult.items.length} grants, ${relevantDistributions.length} distributions, ${relevantLockers.length} lockers.`,
       next.complete ? "success" : "error",
@@ -1578,7 +1591,8 @@ export function App(): React.JSX.Element {
   };
 
   const clearDiscovery = (): void => {
-    autoDiscoveryKeyRef.current = wallet.account ? `${activeNetwork.chainId}:${wallet.account.toLowerCase()}` : undefined;
+    discoveryWriteVersion.current += 1;
+    autoDiscoveryKeyRef.current = discoveryKey;
     setAutoDiscoveryPending(false);
     clearDiscoverySnapshot(discoveryKey);
     setDiscovery(emptyDiscoverySnapshot());
@@ -1588,14 +1602,15 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     autoDiscoveryKeyRef.current = undefined;
-  }, [activeNetwork.chainId, wallet.account]);
+  }, [discoveryKey]);
 
   useEffect(() => {
     if (!wallet.account || !deployment || pendingAction) return;
     if (loadedDiscoveryKey !== discoveryKey) return;
     if (autoDiscoveryRunningRef.current) return;
 
-    const key = `${activeNetwork.chainId}:${wallet.account.toLowerCase()}`;
+    const key = discoveryKey;
+    if (!key) return;
     const loadedForCurrentWallet = Boolean(
       discovery.loadedFor
         && discovery.loadedFor.toLowerCase() === wallet.account.toLowerCase()

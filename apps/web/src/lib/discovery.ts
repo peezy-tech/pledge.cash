@@ -1,8 +1,15 @@
-import type { Address, DiscoveryResult } from "@pledge.cash/sdk";
+import type { Address, DiscoveryResult, PledgeCashDeployment } from "@pledge.cash/sdk";
 import type { DiscoverySnapshot } from "./types";
 
 const BIGINT_MARKER = "__pledgeCashBigint";
 const DISCOVERY_VERSION = 1;
+const DEPLOYMENT_DISCOVERY_FIELDS = [
+  "boardroomFactory",
+  "tokenGrantFactory",
+  "distributionFactory",
+  "lockedLiquidityFactory",
+  "ammFactory",
+] as const;
 
 export function emptyDiscoverySnapshot(): DiscoverySnapshot {
   return {
@@ -16,9 +23,21 @@ export function emptyDiscoverySnapshot(): DiscoverySnapshot {
   };
 }
 
-export function discoveryStorageKey(chainId: number | undefined, account: Address | undefined): string | undefined {
+export function deploymentDiscoveryIdentity(deployment: PledgeCashDeployment | undefined): string | undefined {
+  if (!deployment) return undefined;
+  const chain = Number.isNaN(deployment.chainId) ? "status" : deployment.chainId.toString();
+  const fields = DEPLOYMENT_DISCOVERY_FIELDS.map((field) => `${field}:${deployment[field]?.toLowerCase() ?? "-"}`);
+  return [`chain:${chain}`, ...fields].join("|");
+}
+
+export function discoveryStorageKey(
+  chainId: number | undefined,
+  account: Address | undefined,
+  deploymentIdentity?: string | undefined,
+): string | undefined {
   if (chainId === undefined || !account) return undefined;
-  return `pledge.cash.discovery.v${DISCOVERY_VERSION}.${chainId}.${account.toLowerCase()}`;
+  const scope = deploymentIdentity ? `.${encodeURIComponent(deploymentIdentity)}` : "";
+  return `pledge.cash.discovery.v${DISCOVERY_VERSION}.${chainId}${scope}.${account.toLowerCase()}`;
 }
 
 export function loadDiscoverySnapshot(key: string | undefined): DiscoverySnapshot {
