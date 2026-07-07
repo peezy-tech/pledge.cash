@@ -676,7 +676,6 @@ function discoveryStatus(
 
 function isLimitedDiscoveryRange(discovery: DiscoverySnapshot): boolean {
   if (discovery.rangeMode === "deployment") return false;
-  if (discovery.rangeMode === "recent") return true;
   return Boolean((discovery.fromBlock !== undefined && discovery.fromBlock > 0n) || (discovery.toBlock !== undefined && discovery.toBlock !== "latest"));
 }
 

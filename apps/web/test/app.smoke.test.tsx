@@ -375,6 +375,28 @@ describe("web app shell", () => {
     expect(html).not.toContain("Limited range");
   });
 
+  test("does not warn when a recent fallback scan still starts at genesis", () => {
+    const noop = async () => undefined;
+    const html = renderToString(
+      <WalletAccessPanel
+        account={oldGrant.currentHolder}
+        deployment={{ chainId: 31337 }}
+        discovery={{ ...discoverySnapshot, fromBlock: 0n, rangeMode: "recent" }}
+        discoveryForm={{ fromBlock: "0", toBlock: "20", chunkSize: "5000", includeClosedGrants: false }}
+        pendingAction={undefined}
+        inspectGrant={() => undefined}
+        runAction={async (_label, action) => action()}
+        scanDiscovery={noop}
+        useBoardroom={() => undefined}
+        useDistribution={() => undefined}
+        useLockedLiquidity={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Ready");
+    expect(html).not.toContain("Limited range");
+  });
+
   test("derives wallet access scans from deployment timestamps", async () => {
     const calls: bigint[] = [];
     const client = {
