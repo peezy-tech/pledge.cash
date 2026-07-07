@@ -2,7 +2,7 @@ import type { Address } from "@pledge.cash/sdk";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { getAddress, type WalletClient } from "viem";
 import { useAccount, useSwitchChain, useWalletClient } from "wagmi";
-import type { PledgeCashNetwork } from "../lib/contracts";
+import { walletRpcUrl, type PledgeCashNetwork } from "../lib/contracts";
 import { shortAddress, walletState } from "../lib/forms";
 import type { WalletState } from "../lib/types";
 import type { PushLog } from "./use-action-runner";
@@ -55,9 +55,17 @@ export function useWagmiWallet({
   }, [activeAccount, client]);
 
   const switchChain = useCallback(async (): Promise<void> => {
-    await switchChainAsync({ chainId: network.chainId });
+    await switchChainAsync({
+      chainId: network.chainId,
+      addEthereumChainParameter: {
+        chainName: network.name,
+        nativeCurrency: network.chain.nativeCurrency,
+        rpcUrls: [walletRpcUrl(network)],
+        ...(network.explorerUrl ? { blockExplorerUrls: [network.explorerUrl] } : {}),
+      },
+    });
     pushLog(`Wallet switched to ${network.name}.`, "success");
-  }, [network.chainId, network.name, pushLog, switchChainAsync]);
+  }, [network, pushLog, switchChainAsync]);
 
   return { activeAccount, switchChain, wallet, walletClient };
 }

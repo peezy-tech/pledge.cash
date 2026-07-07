@@ -24,15 +24,6 @@ import { cn } from "../lib/utils";
 
 const MODAL_CLOSE_DURATION = 320;
 
-const CONNECTOR_ICONS: Record<string, string> = {
-  coinbaseWalletSDK: "https://utfs.io/f/53e47f86-5f12-404f-a98b-19dc7b760333-chngxw.png",
-  injected: "https://utfs.io/f/be0bd88f-ce87-4cbc-b2e5-c578fa866173-sq4a0b.png",
-  metaMask: "https://utfs.io/f/be0bd88f-ce87-4cbc-b2e5-c578fa866173-sq4a0b.png",
-  metaMaskSDK: "https://utfs.io/f/be0bd88f-ce87-4cbc-b2e5-c578fa866173-sq4a0b.png",
-  safe: "https://utfs.io/f/164ea200-3e15-4a9b-9ce5-a397894c442a-awpd29.png",
-  walletConnect: "https://utfs.io/f/5bfaa4d1-b872-48a7-9d37-c2517d4fc07a-utlf4g.png",
-};
-
 type SimpleKitState = {
   pendingConnector: Connector | null;
   setPendingConnector: React.Dispatch<React.SetStateAction<Connector | null>>;
@@ -194,16 +185,13 @@ function WalletAvatar({ address }: { address: string | undefined }): React.JSX.E
 
 function WalletConnecting(): React.JSX.Element {
   const context = React.useContext(SimpleKitContext);
-  const icon = connectorIcon(context.pendingConnector);
 
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-7">
-      {icon ? (
-        <div className="relative flex h-24 w-24 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900 p-3">
-          <img src={icon} alt={context.pendingConnector?.name} className="h-full w-full rounded-md" />
-          {context.isConnectorError ? <RetryConnectorButton /> : null}
-        </div>
-      ) : null}
+      <div className="relative grid h-24 w-24 place-items-center rounded-lg border border-zinc-800 bg-zinc-900">
+        <Wallet className="h-8 w-8 text-lime-200" />
+        {context.isConnectorError ? <RetryConnectorButton /> : null}
+      </div>
 
       <div className="space-y-3 text-center">
         <h2 className="m-0 text-xl font-semibold text-zinc-50">
@@ -249,11 +237,7 @@ function WalletOption({ connector, onClick }: { connector: Connector; onClick: (
       onClick={onClick}
     >
       <span>{connector.name}</span>
-      {connectorIcon(connector) ? (
-        <img src={connectorIcon(connector)} alt="" className="h-8 w-8 rounded-md" />
-      ) : (
-        <Wallet className="h-5 w-5 text-zinc-500" />
-      )}
+      <Wallet className="h-5 w-5 text-zinc-500" />
     </Button>
   );
 }
@@ -340,7 +324,7 @@ function useConnectors(): { connectors: Connector[]; connect: ReturnType<typeof 
   });
 
   const sortedConnectors = React.useMemo(() => {
-    const preferredOrder = ["injected", "metaMask", "metaMaskSDK", "coinbaseWalletSDK", "walletConnect", "safe"];
+    const preferredOrder = ["injected", "metaMask", "metaMaskSDK", "safe"];
     return [...connectors].sort((left, right) => {
       const leftIndex = preferredOrder.indexOf(left.id);
       const rightIndex = preferredOrder.indexOf(right.id);
@@ -371,11 +355,6 @@ function useSimpleKit(): {
     open: () => context.setOpen(true),
     toggleModal: () => context.setOpen((current) => !current),
   };
-}
-
-function connectorIcon(connector: Connector | null): string | undefined {
-  if (!connector) return undefined;
-  return connector.icon ?? CONNECTOR_ICONS[connector.id];
 }
 
 function walletAvatarStyle(address: string | undefined): React.CSSProperties {
