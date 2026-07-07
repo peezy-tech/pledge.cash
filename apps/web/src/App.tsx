@@ -1847,7 +1847,7 @@ export function App(): React.JSX.Element {
           ) : null}
 
           {activeView === "manage" ? (
-            <ManageWorkspace account={wallet.account} dashboard={productBoardroom}>
+            <ManageWorkspace account={wallet.account} boardroomAddress={boardroomAddress} boardroomSnapshot={boardroomSnapshot}>
               {boardroomToolsPanel}
             </ManageWorkspace>
           ) : null}
@@ -1969,14 +1969,16 @@ function PositionsWorkspace({
 
 function ManageWorkspace({
   account,
+  boardroomAddress,
+  boardroomSnapshot,
   children,
-  dashboard,
 }: {
   account: Address | undefined;
+  boardroomAddress: string;
+  boardroomSnapshot: BoardroomSnapshot | undefined;
   children: ReactNode;
-  dashboard: ProductBoardroomDashboardState | undefined;
 }): React.JSX.Element {
-  const owner = sameAddress(account, dashboard?.snapshot.owner);
+  const summary = manageWorkspaceSummary(account, boardroomAddress, boardroomSnapshot);
 
   return (
     <>
@@ -1986,8 +1988,8 @@ function ManageWorkspace({
         description="Use owner-authorized workflows for grants, token issuance, sale setup, locked liquidity, and wind-down. Read-only users can still inspect the forms and loaded state."
       >
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={owner ? "default" : "muted"}>{owner ? "Owner wallet" : account ? "Read-only wallet" : "Connect owner wallet"}</Badge>
-          <Badge variant="muted">{dashboard ? boardroomStatusText(dashboard.snapshot.status) : "Project not loaded"}</Badge>
+          <Badge variant={summary.roleTone}>{summary.roleLabel}</Badge>
+          <Badge variant={summary.statusTone}>{summary.statusLabel}</Badge>
         </div>
       </WorkspaceHeader>
       {children}
@@ -2104,6 +2106,27 @@ export function canRunGrantIssuerActions(
   if (sameAddress(grantSnapshot.issuer, dashboard?.address) && sameAddress(account, dashboard?.snapshot.owner)) return true;
   if (sameAddress(grantSnapshot.issuer, grantIssuerBoardroom?.boardroom) && sameAddress(account, grantIssuerBoardroom?.owner)) return true;
   return sameAddress(grantSnapshot.issuer, boardroomSnapshot?.address) && sameAddress(account, boardroomSnapshot?.owner);
+}
+
+export function manageWorkspaceSummary(
+  account: Address | undefined,
+  boardroomAddress: string,
+  boardroomSnapshot: BoardroomSnapshot | undefined,
+): {
+  roleLabel: string;
+  roleTone: "default" | "muted" | "warning";
+  statusLabel: string;
+  statusTone: "default" | "muted" | "warning";
+} {
+  const selected = Boolean(boardroomSnapshot || boardroomAddress.trim());
+  const owner = sameAddress(account, boardroomSnapshot?.owner);
+
+  return {
+    roleLabel: !account ? "Connect owner wallet" : !boardroomSnapshot ? "Load Boardroom" : owner ? "Owner wallet" : "Read-only wallet",
+    roleTone: owner ? "default" : "muted",
+    statusLabel: boardroomSnapshot ? boardroomStatusText(boardroomSnapshot.status) : selected ? "Selected Boardroom not loaded" : "No Boardroom selected",
+    statusTone: boardroomSnapshot ? "muted" : selected ? "warning" : "muted",
+  };
 }
 
 function boardroomStatusText(status: number): string {

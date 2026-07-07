@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Address, DiscoveredBoardroom, DiscoveredDistribution, DiscoveredGrant, DiscoveredLockedLiquidity, DiscoveredPool } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
-import { App, canRunGrantIssuerActions, parseDeployment } from "../src/App";
+import { App, canRunGrantIssuerActions, manageWorkspaceSummary, parseDeployment } from "../src/App";
 import { Web3Provider } from "../src/components/web3-provider";
 import { BoardroomPanel } from "../src/features/boardrooms/boardroom-panel";
 import { DiscoveryPanel } from "../src/features/discovery/discovery-panel";
@@ -289,6 +289,18 @@ describe("web app shell", () => {
         owner: oldGrant.issuer,
       }),
     ).toBe(false);
+  });
+
+  test("bases Manage badges on the selected Boardroom state", () => {
+    expect(manageWorkspaceSummary(oldGrant.issuer, boardroom, boardroomSnapshot)).toMatchObject({
+      roleLabel: "Owner wallet",
+      statusLabel: "Winding down",
+    });
+    expect(manageWorkspaceSummary(oldGrant.issuer, boardroom, undefined)).toMatchObject({
+      roleLabel: "Load Boardroom",
+      statusLabel: "Selected Boardroom not loaded",
+      statusTone: "warning",
+    });
   });
 
   test("hides cached discovery rows after the wallet changes", () => {
