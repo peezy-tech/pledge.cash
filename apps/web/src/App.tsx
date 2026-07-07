@@ -317,6 +317,7 @@ export function App(): React.JSX.Element {
   const [windDownForm, setWindDownForm] = useState<WindDownForm>(() => defaultWindDownForm());
   const [discoveryForm, setDiscoveryForm] = useState<DiscoveryForm>(() => defaultDiscoveryForm());
   const [discovery, setDiscovery] = useState<DiscoverySnapshot>(() => emptyDiscoverySnapshot());
+  const [loadedDiscoveryKey, setLoadedDiscoveryKey] = useState<string | undefined>();
   const autoDiscoveryKeyRef = useRef<string | undefined>(undefined);
   const [productBoardroom, setProductBoardroom] = useState<ProductBoardroomDashboardState>();
   const [productBoardroomError, setProductBoardroomError] = useState<string>();
@@ -472,6 +473,7 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     setDiscovery(loadDiscoverySnapshot(discoveryKey));
+    setLoadedDiscoveryKey(discoveryKey);
   }, [discoveryKey]);
 
   useEffect(() => {
@@ -1544,6 +1546,7 @@ export function App(): React.JSX.Element {
     autoDiscoveryKeyRef.current = wallet.account ? `${activeNetwork.chainId}:${wallet.account.toLowerCase()}` : undefined;
     clearDiscoverySnapshot(discoveryKey);
     setDiscovery(emptyDiscoverySnapshot());
+    setLoadedDiscoveryKey(discoveryKey);
     pushLog("Cleared discovery cache.", "success");
   };
 
@@ -1553,6 +1556,7 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     if (!wallet.account || !deployment || pendingAction) return;
+    if (loadedDiscoveryKey !== discoveryKey) return;
 
     const key = `${activeNetwork.chainId}:${wallet.account.toLowerCase()}`;
     const loadedForCurrentWallet = Boolean(
@@ -1564,7 +1568,7 @@ export function App(): React.JSX.Element {
 
     autoDiscoveryKeyRef.current = key;
     void runAction("scan-discovery", scanDiscovery);
-  }, [activeNetwork.chainId, deployment, discovery.chainId, discovery.loadedFor, pendingAction, runAction, scanDiscovery, wallet.account]);
+  }, [activeNetwork.chainId, deployment, discovery.chainId, discovery.loadedFor, discoveryKey, loadedDiscoveryKey, pendingAction, runAction, scanDiscovery, wallet.account]);
 
   const inspectDiscoveredGrant = useCallback(
     (grant: Address): void => {
