@@ -193,6 +193,7 @@ export type DiscoverySnapshot = {
   fromBlock?: bigint;
   toBlock?: bigint | "latest";
   chunkSize?: bigint;
+  rangeMode?: "deployment" | "recent" | "manual";
   lastScannedBlock?: bigint;
   complete: boolean;
   errors: string[];

@@ -8,7 +8,7 @@ import { DiscoveryPanel, WalletAccessPanel } from "../src/features/discovery/dis
 import { GrantInspector } from "../src/features/grants/grant-inspector";
 import { AppHeader } from "../src/features/wallet/app-header";
 import { PLEDGE_CASH_NETWORKS } from "../src/lib/contracts";
-import { deploymentDiscoveryIdentity, discoveryStorageKey } from "../src/lib/discovery";
+import { deploymentDiscoveryIdentity, discoveryStorageKey, walletAccessDiscoveryRange } from "../src/lib/discovery";
 import {
   defaultBoardroomGrantForm,
   defaultCurveMigrationForm,
@@ -350,7 +350,61 @@ describe("web app shell", () => {
     );
 
     expect(html).toContain("Limited range");
-    expect(html).toContain("Refresh access to sync the full wallet history.");
+    expect(html).toContain("Use Discovery Diagnostics in Tools for a deeper historical scan.");
+  });
+
+  test("does not warn for deployment-bounded wallet access scans", () => {
+    const noop = async () => undefined;
+    const html = renderToString(
+      <WalletAccessPanel
+        account={oldGrant.currentHolder}
+        deployment={{ chainId: 31337 }}
+        discovery={{ ...discoverySnapshot, fromBlock: 10n, rangeMode: "deployment" }}
+        discoveryForm={{ fromBlock: "0", toBlock: "20", chunkSize: "5000", includeClosedGrants: false }}
+        pendingAction={undefined}
+        inspectGrant={() => undefined}
+        runAction={async (_label, action) => action()}
+        scanDiscovery={noop}
+        useBoardroom={() => undefined}
+        useDistribution={() => undefined}
+        useLockedLiquidity={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Ready");
+    expect(html).not.toContain("Limited range");
+  });
+
+  test("derives wallet access scans from deployment timestamps", async () => {
+    const calls: bigint[] = [];
+    const client = {
+      async getBlock(args?: { blockNumber?: bigint }): Promise<{ number: bigint | null; timestamp: bigint }> {
+        const number = args?.blockNumber ?? 100n;
+        calls.push(number);
+        return { number, timestamp: 1_000n + number * 12n };
+      },
+    };
+
+    const range = await walletAccessDiscoveryRange(client, { chainId: 31337, deploymentTimestamp: 1_700n });
+
+    expect(range.rangeMode).toBe("deployment");
+    expect(range.fromBlock).toBe(9n);
+    expect(range.chunkSize).toBe(5000n);
+    expect(calls.length).toBeGreaterThan(1);
+  });
+
+  test("falls back to a recent bounded wallet access scan without deployment timestamps", async () => {
+    const client = {
+      async getBlock(): Promise<{ number: bigint | null; timestamp: bigint }> {
+        return { number: 150_000n, timestamp: 1_000n };
+      },
+    };
+
+    const range = await walletAccessDiscoveryRange(client, { chainId: 31337 });
+
+    expect(range.rangeMode).toBe("recent");
+    expect(range.fromBlock).toBe(50_000n);
+    expect(range.chunkSize).toBe(5000n);
   });
 
   test("scopes wallet discovery cache keys by deployment identity", () => {

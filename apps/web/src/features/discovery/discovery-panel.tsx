@@ -647,7 +647,10 @@ function discoveryStatus(
     return {
       label: "Limited range",
       tone: "warning",
-      description: "Tools loaded a limited block range for this wallet. Refresh access to sync the full wallet history.",
+      description:
+        discovery.rangeMode === "recent"
+          ? "Wallet Access is using a recent block window. Use Discovery Diagnostics in Tools for a deeper historical scan."
+          : "Tools loaded a limited block range for this wallet. Use Discovery Diagnostics in Tools for a deeper historical scan.",
     };
   }
   if (discovery.errors.length > 0 || !discovery.complete) {
@@ -672,6 +675,8 @@ function discoveryStatus(
 }
 
 function isLimitedDiscoveryRange(discovery: DiscoverySnapshot): boolean {
+  if (discovery.rangeMode === "deployment") return false;
+  if (discovery.rangeMode === "recent") return true;
   return Boolean((discovery.fromBlock !== undefined && discovery.fromBlock > 0n) || (discovery.toBlock !== undefined && discovery.toBlock !== "latest"));
 }
 

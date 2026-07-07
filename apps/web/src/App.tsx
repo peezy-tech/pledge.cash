@@ -110,6 +110,8 @@ import {
   mergeAddressMap,
   parseDiscoveryToBlock,
   saveDiscoverySnapshot,
+  walletAccessDiscoveryRange,
+  type DiscoveryScanRange,
 } from "./lib/discovery";
 import {
   defaultBoardroomGrantForm,
@@ -187,7 +189,6 @@ export { parseDeployment } from "./lib/deployment";
 type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
 type AppView = "project" | "market" | "wallet" | "grants" | "manage" | "activity" | "advanced";
 export type GrantIssuerBoardroomAccess = { boardroom: Address; owner: Address };
-type DiscoveryScanRange = { fromBlock: bigint; toBlock?: bigint | "latest"; chunkSize: bigint };
 
 async function parseMinAmountsOut(client: PublicClient, value: string, assets: readonly Address[]): Promise<bigint[]> {
   const trimmed = value.trim();
@@ -214,10 +215,6 @@ function defaultDiscoveryForm(): DiscoveryForm {
     chunkSize: "5000",
     includeClosedGrants: false,
   };
-}
-
-function defaultWalletDiscoveryRange(): DiscoveryScanRange {
-  return { fromBlock: 0n, chunkSize: 5000n };
 }
 
 function initialView(): AppView {
@@ -1468,7 +1465,7 @@ export function App(): React.JSX.Element {
     await refreshBoardroom(boardroom.address);
   };
 
-  const scanDiscoveryRange = async ({ chunkSize, fromBlock, toBlock }: DiscoveryScanRange): Promise<void> => {
+  const scanDiscoveryRange = async ({ chunkSize, fromBlock, toBlock, rangeMode = "manual" }: DiscoveryScanRange): Promise<void> => {
     if (!wallet.account) throw new Error("Connect wallet first.");
     if (!deployment) throw new Error("Load a deployment artifact first.");
 
@@ -1533,6 +1530,7 @@ export function App(): React.JSX.Element {
       loadedFor: wallet.account,
       fromBlock: discovery.fromBlock !== undefined && discovery.fromBlock < fromBlock ? discovery.fromBlock : fromBlock,
       chunkSize,
+      rangeMode,
       complete: results.every((result) => result.complete),
       errors: discoveryErrors(results),
       boardroomsByAddress,
@@ -1580,7 +1578,7 @@ export function App(): React.JSX.Element {
   };
 
   const scanWalletAccess = async (): Promise<void> => {
-    await scanDiscoveryRange(defaultWalletDiscoveryRange());
+    await scanDiscoveryRange(await walletAccessDiscoveryRange(publicClient, deployment));
   };
 
   const resumeDiscovery = async (): Promise<void> => {

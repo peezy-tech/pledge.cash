@@ -3,6 +3,9 @@ import type { DiscoverySnapshot } from "./types";
 
 const BIGINT_MARKER = "__pledgeCashBigint";
 const DISCOVERY_VERSION = 1;
+const WALLET_ACCESS_DISCOVERY_CHUNK_SIZE = 5000n;
+const WALLET_ACCESS_FALLBACK_SCAN_BLOCKS = 100_000n;
+const WALLET_ACCESS_DEPLOYMENT_TIMESTAMP_MARGIN_SECONDS = 600n;
 const DEPLOYMENT_DISCOVERY_FIELDS = [
   "boardroomFactory",
   "tokenGrantFactory",
@@ -10,6 +13,17 @@ const DEPLOYMENT_DISCOVERY_FIELDS = [
   "lockedLiquidityFactory",
   "ammFactory",
 ] as const;
+
+export type DiscoveryScanRange = {
+  fromBlock: bigint;
+  toBlock?: bigint | "latest";
+  chunkSize: bigint;
+  rangeMode?: DiscoverySnapshot["rangeMode"];
+};
+
+type BlockTimestampReader = {
+  getBlock: (args?: { blockNumber?: bigint }) => Promise<{ number: bigint | null; timestamp: bigint }>;
+};
 
 export function emptyDiscoverySnapshot(): DiscoverySnapshot {
   return {
@@ -28,6 +42,39 @@ export function deploymentDiscoveryIdentity(deployment: PledgeCashDeployment | u
   const chain = Number.isNaN(deployment.chainId) ? "status" : deployment.chainId.toString();
   const fields = DEPLOYMENT_DISCOVERY_FIELDS.map((field) => `${field}:${deployment[field]?.toLowerCase() ?? "-"}`);
   return [`chain:${chain}`, ...fields].join("|");
+}
+
+export async function walletAccessDiscoveryRange(
+  client: BlockTimestampReader,
+  deployment: PledgeCashDeployment | undefined,
+): Promise<DiscoveryScanRange> {
+  const latest = await client.getBlock();
+  const latestNumber = latest.number ?? 0n;
+  const deploymentTimestamp = deployment?.deploymentTimestamp;
+
+  if (deploymentTimestamp !== undefined) {
+    const targetTimestamp =
+      deploymentTimestamp > WALLET_ACCESS_DEPLOYMENT_TIMESTAMP_MARGIN_SECONDS
+        ? deploymentTimestamp - WALLET_ACCESS_DEPLOYMENT_TIMESTAMP_MARGIN_SECONDS
+        : 0n;
+
+    if (targetTimestamp <= latest.timestamp) {
+      return {
+        fromBlock: await firstBlockAtOrAfterTimestamp(client, latestNumber, targetTimestamp),
+        chunkSize: WALLET_ACCESS_DISCOVERY_CHUNK_SIZE,
+        rangeMode: "deployment",
+      };
+    }
+  }
+
+  return {
+    fromBlock:
+      latestNumber > WALLET_ACCESS_FALLBACK_SCAN_BLOCKS
+        ? latestNumber - WALLET_ACCESS_FALLBACK_SCAN_BLOCKS
+        : 0n,
+    chunkSize: WALLET_ACCESS_DISCOVERY_CHUNK_SIZE,
+    rangeMode: "recent",
+  };
 }
 
 export function discoveryStorageKey(
@@ -110,6 +157,31 @@ export function parseDiscoveryToBlock(value: string): bigint | "latest" {
   if (!trimmed || trimmed.toLowerCase() === "latest") return "latest";
   if (!/^\d+$/.test(trimmed)) throw new Error("To block must be an unsigned integer or latest.");
   return BigInt(trimmed);
+}
+
+async function firstBlockAtOrAfterTimestamp(
+  client: BlockTimestampReader,
+  latestNumber: bigint,
+  targetTimestamp: bigint,
+): Promise<bigint> {
+  let low = 0n;
+  let high = latestNumber;
+  let candidate = latestNumber;
+
+  while (low <= high) {
+    const mid = (low + high) / 2n;
+    const block = await client.getBlock({ blockNumber: mid });
+
+    if (block.timestamp >= targetTimestamp) {
+      candidate = mid;
+      if (mid === 0n) break;
+      high = mid - 1n;
+    } else {
+      low = mid + 1n;
+    }
+  }
+
+  return candidate;
 }
 
 function replaceBigints(_key: string, value: unknown): unknown {
