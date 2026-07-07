@@ -275,6 +275,30 @@ describe("web app shell", () => {
     expect(html).toContain("Use Locker");
   });
 
+  test("gates discovery diagnostics actions while wallet sync is pending", () => {
+    const noop = async () => undefined;
+    const html = renderToString(
+      <DiscoveryPanel
+        account={oldGrant.currentHolder}
+        deployment={{ chainId: 31337 }}
+        discovery={discoverySnapshot}
+        discoveryForm={{ fromBlock: "0", toBlock: "20", chunkSize: "5000", includeClosedGrants: false }}
+        pendingAction="scan-discovery"
+        clearDiscovery={() => undefined}
+        inspectGrant={() => undefined}
+        resumeDiscovery={noop}
+        runAction={async (_label, action) => action()}
+        scanDiscovery={noop}
+        setDiscoveryForm={() => undefined}
+        useBoardroom={() => undefined}
+        useDistribution={() => undefined}
+        useLockedLiquidity={() => undefined}
+      />,
+    );
+
+    expect(html.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
   test("renders wallet access without exposing manual discovery controls", () => {
     const noop = async () => undefined;
     const html = renderToString(

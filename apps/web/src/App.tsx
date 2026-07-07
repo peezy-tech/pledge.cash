@@ -1821,13 +1821,14 @@ export function App(): React.JSX.Element {
       workflow={{ deployment, pendingAction, runAction }}
     />
   );
+  const discoveryPendingAction = pendingAction ?? (autoDiscoveryPending ? "scan-discovery" : undefined);
   const discoveryPanel = (
     <DiscoveryPanel
       account={wallet.account}
       deployment={deployment}
       discovery={discovery}
       discoveryForm={discoveryForm}
-      pendingAction={pendingAction}
+      pendingAction={discoveryPendingAction}
       setDiscoveryForm={setDiscoveryForm}
       clearDiscovery={clearDiscovery}
       inspectGrant={inspectDiscoveredGrant}
@@ -1839,14 +1840,13 @@ export function App(): React.JSX.Element {
       runAction={runAction}
     />
   );
-  const walletAccessPendingAction = pendingAction ?? (autoDiscoveryPending ? "scan-discovery" : undefined);
   const walletAccessPanel = (
     <WalletAccessPanel
       account={wallet.account}
       deployment={deployment}
       discovery={discovery}
       discoveryForm={discoveryForm}
-      pendingAction={walletAccessPendingAction}
+      pendingAction={discoveryPendingAction}
       inspectGrant={inspectDiscoveredGrant}
       scanDiscovery={scanWalletAccess}
       useBoardroom={useDiscoveredBoardroom}
