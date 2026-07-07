@@ -186,6 +186,7 @@ export { parseDeployment } from "./lib/deployment";
 type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
 type AppView = "project" | "market" | "wallet" | "grants" | "manage" | "activity" | "advanced";
 export type GrantIssuerBoardroomAccess = { boardroom: Address; owner: Address };
+type DiscoveryScanRange = { fromBlock: bigint; toBlock?: bigint | "latest"; chunkSize: bigint };
 
 async function parseMinAmountsOut(client: PublicClient, value: string, assets: readonly Address[]): Promise<bigint[]> {
   const trimmed = value.trim();
@@ -212,6 +213,10 @@ function defaultDiscoveryForm(): DiscoveryForm {
     chunkSize: "5000",
     includeClosedGrants: false,
   };
+}
+
+function defaultWalletDiscoveryRange(): DiscoveryScanRange {
+  return { fromBlock: 0n, chunkSize: 5000n };
 }
 
 function initialView(): AppView {
@@ -1448,13 +1453,11 @@ export function App(): React.JSX.Element {
     await refreshBoardroom(boardroom.address);
   };
 
-  const scanDiscoveryFrom = async (fromBlock: bigint): Promise<void> => {
+  const scanDiscoveryRange = async ({ chunkSize, fromBlock, toBlock }: DiscoveryScanRange): Promise<void> => {
     if (!wallet.account) throw new Error("Connect wallet first.");
     if (!deployment) throw new Error("Load a deployment artifact first.");
 
-    const toBlock = parseDiscoveryToBlock(discoveryForm.toBlock);
-    const chunkSize = uintInput(discoveryForm.chunkSize, "Chunk size");
-    const range = { fromBlock, toBlock, chunkSize };
+    const range = toBlock === undefined ? { fromBlock, chunkSize } : { fromBlock, toBlock, chunkSize };
     const knownGrants = discoveryItems(discovery.grantsByAddress);
 
     const [boardroomResult, grantResult] = await Promise.all([
@@ -1508,7 +1511,6 @@ export function App(): React.JSX.Element {
       chainId: activeNetwork.chainId,
       loadedFor: wallet.account,
       fromBlock: discovery.fromBlock !== undefined && discovery.fromBlock < fromBlock ? discovery.fromBlock : fromBlock,
-      toBlock,
       chunkSize,
       complete: results.every((result) => result.complete),
       errors: discoveryErrors(results),
@@ -1522,6 +1524,9 @@ export function App(): React.JSX.Element {
     if (lastScannedBlock !== undefined) {
       next.lastScannedBlock = lastScannedBlock;
     }
+    if (toBlock !== undefined) {
+      next.toBlock = toBlock;
+    }
 
     setDiscovery(next);
     saveDiscoverySnapshot(discoveryKey, next);
@@ -1531,8 +1536,20 @@ export function App(): React.JSX.Element {
     );
   };
 
+  const scanDiscoveryFrom = async (fromBlock: bigint): Promise<void> => {
+    await scanDiscoveryRange({
+      fromBlock,
+      toBlock: parseDiscoveryToBlock(discoveryForm.toBlock),
+      chunkSize: uintInput(discoveryForm.chunkSize, "Chunk size"),
+    });
+  };
+
   const scanDiscovery = async (): Promise<void> => {
     await scanDiscoveryFrom(uintInput(discoveryForm.fromBlock, "From block"));
+  };
+
+  const scanWalletAccess = async (): Promise<void> => {
+    await scanDiscoveryRange(defaultWalletDiscoveryRange());
   };
 
   const resumeDiscovery = async (): Promise<void> => {
@@ -1567,8 +1584,8 @@ export function App(): React.JSX.Element {
     if (loadedForCurrentWallet || autoDiscoveryKeyRef.current === key) return;
 
     autoDiscoveryKeyRef.current = key;
-    void runAction("scan-discovery", scanDiscovery);
-  }, [activeNetwork.chainId, deployment, discovery.chainId, discovery.loadedFor, discoveryKey, loadedDiscoveryKey, pendingAction, runAction, scanDiscovery, wallet.account]);
+    void runAction("scan-discovery", scanWalletAccess);
+  }, [activeNetwork.chainId, deployment, discovery.chainId, discovery.loadedFor, discoveryKey, loadedDiscoveryKey, pendingAction, runAction, scanWalletAccess, wallet.account]);
 
   const inspectDiscoveredGrant = useCallback(
     (grant: Address): void => {
@@ -1788,7 +1805,7 @@ export function App(): React.JSX.Element {
       discoveryForm={discoveryForm}
       pendingAction={pendingAction}
       inspectGrant={inspectDiscoveredGrant}
-      scanDiscovery={scanDiscovery}
+      scanDiscovery={scanWalletAccess}
       useBoardroom={useDiscoveredBoardroom}
       useDistribution={useDiscoveredDistribution}
       useLockedLiquidity={useDiscoveredLockedLiquidity}

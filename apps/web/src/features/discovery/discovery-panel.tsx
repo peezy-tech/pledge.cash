@@ -643,6 +643,13 @@ function discoveryStatus(
       description: "Wallet activity will refresh automatically. Use Refresh access if you want to retry now.",
     };
   }
+  if (isLimitedDiscoveryRange(discovery)) {
+    return {
+      label: "Limited range",
+      tone: "warning",
+      description: "Tools loaded a limited block range for this wallet. Refresh access to sync the full wallet history.",
+    };
+  }
   if (discovery.errors.length > 0 || !discovery.complete) {
     return {
       label: "Needs attention",
@@ -662,6 +669,10 @@ function discoveryStatus(
     tone: "default",
     description: "Wallet-linked access is up to date for the active network.",
   };
+}
+
+function isLimitedDiscoveryRange(discovery: DiscoverySnapshot): boolean {
+  return Boolean((discovery.fromBlock !== undefined && discovery.fromBlock > 0n) || (discovery.toBlock !== undefined && discovery.toBlock !== "latest"));
 }
 
 function TextField<T extends object, K extends keyof T & string>({

@@ -170,7 +170,6 @@ const discoverySnapshot: DiscoverySnapshot = {
   chainId: 31337,
   loadedFor: oldGrant.currentHolder,
   fromBlock: 0n,
-  toBlock: 20n,
   chunkSize: 5000n,
   lastScannedBlock: 20n,
   complete: true,
@@ -305,6 +304,28 @@ describe("web app shell", () => {
     expect(html).not.toContain("Chunk size");
     expect(html).not.toContain("Discovery Diagnostics");
     expect(html).not.toContain("Clear Cache");
+  });
+
+  test("warns when wallet access is backed by a limited diagnostics scan", () => {
+    const noop = async () => undefined;
+    const html = renderToString(
+      <WalletAccessPanel
+        account={oldGrant.currentHolder}
+        deployment={{ chainId: 31337 }}
+        discovery={{ ...discoverySnapshot, toBlock: 20n }}
+        discoveryForm={{ fromBlock: "0", toBlock: "20", chunkSize: "5000", includeClosedGrants: false }}
+        pendingAction={undefined}
+        inspectGrant={() => undefined}
+        runAction={async (_label, action) => action()}
+        scanDiscovery={noop}
+        useBoardroom={() => undefined}
+        useDistribution={() => undefined}
+        useLockedLiquidity={() => undefined}
+      />,
+    );
+
+    expect(html).toContain("Limited range");
+    expect(html).toContain("Refresh access to sync the full wallet history.");
   });
 
   test("keeps grant settlement scoped to the current holder wallet", () => {
