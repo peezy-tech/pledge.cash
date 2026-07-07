@@ -8,7 +8,7 @@ import { DiscoveryPanel, WalletAccessPanel } from "../src/features/discovery/dis
 import { GrantInspector } from "../src/features/grants/grant-inspector";
 import { AppHeader } from "../src/features/wallet/app-header";
 import { PLEDGE_CASH_NETWORKS } from "../src/lib/contracts";
-import { deploymentDiscoveryIdentity, discoveryStorageKey, resumeRecentWalletAccessRange, walletAccessDiscoveryRange } from "../src/lib/discovery";
+import { deploymentDiscoveryIdentity, discoveryStorageKey, resumeWalletAccessRange, walletAccessDiscoveryRange } from "../src/lib/discovery";
 import {
   defaultBoardroomGrantForm,
   defaultCurveMigrationForm,
@@ -430,13 +430,33 @@ describe("web app shell", () => {
   });
 
   test("resumes existing recent wallet access scans without jumping rolling windows", () => {
-    const range = resumeRecentWalletAccessRange(
+    const range = resumeWalletAccessRange(
       { fromBlock: 300_000n, chunkSize: 5000n, rangeMode: "recent" },
       { ...discoverySnapshot, rangeMode: "recent", fromBlock: 100_000n, lastScannedBlock: 200_000n },
     );
 
     expect(range.fromBlock).toBe(200_001n);
     expect(range.rangeMode).toBe("recent");
+  });
+
+  test("resumes cached deployment wallet access scans on reconnect", () => {
+    const range = resumeWalletAccessRange(
+      { fromBlock: 50n, chunkSize: 5000n, rangeMode: "deployment" },
+      { ...discoverySnapshot, rangeMode: "deployment", fromBlock: 50n, lastScannedBlock: 200_000n },
+    );
+
+    expect(range.fromBlock).toBe(200_001n);
+    expect(range.rangeMode).toBe("deployment");
+  });
+
+  test("does not resume manual diagnostics caches as wallet access scans", () => {
+    const range = resumeWalletAccessRange(
+      { fromBlock: 50n, chunkSize: 5000n, rangeMode: "deployment" },
+      { ...discoverySnapshot, rangeMode: "manual", fromBlock: 10_000n, lastScannedBlock: 20_000n },
+    );
+
+    expect(range.fromBlock).toBe(50n);
+    expect(range.rangeMode).toBe("deployment");
   });
 
   test("scopes wallet discovery cache keys by deployment identity", () => {

@@ -78,11 +78,12 @@ export async function walletAccessDiscoveryRange(
   };
 }
 
-export function resumeRecentWalletAccessRange(
+export function resumeWalletAccessRange(
   range: DiscoveryScanRange,
   discovery: DiscoverySnapshot,
 ): DiscoveryScanRange {
-  if (range.rangeMode !== "recent" || discovery.rangeMode !== "recent" || discovery.lastScannedBlock === undefined) {
+  const resumableRange = discovery.rangeMode === "deployment" || discovery.rangeMode === "recent";
+  if (!resumableRange || !discovery.complete || discovery.lastScannedBlock === undefined) {
     return range;
   }
 
