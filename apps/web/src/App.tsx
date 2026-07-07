@@ -109,6 +109,7 @@ import {
   loadDiscoverySnapshot,
   mergeAddressMap,
   parseDiscoveryToBlock,
+  resumeRecentWalletAccessRange,
   saveDiscoverySnapshot,
   walletAccessDiscoveryRange,
   type DiscoveryScanRange,
@@ -1578,7 +1579,14 @@ export function App(): React.JSX.Element {
   };
 
   const scanWalletAccess = async (): Promise<void> => {
-    await scanDiscoveryRange(await walletAccessDiscoveryRange(publicClient, deployment));
+    const range = await walletAccessDiscoveryRange(publicClient, deployment);
+    const loadedForCurrentWallet = Boolean(
+      discovery.loadedFor
+        && wallet.account
+        && discovery.loadedFor.toLowerCase() === wallet.account.toLowerCase()
+        && discovery.chainId === activeNetwork.chainId,
+    );
+    await scanDiscoveryRange(loadedForCurrentWallet ? resumeRecentWalletAccessRange(range, discovery) : range);
   };
 
   const resumeDiscovery = async (): Promise<void> => {

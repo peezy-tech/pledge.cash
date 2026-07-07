@@ -78,6 +78,17 @@ export async function walletAccessDiscoveryRange(
   };
 }
 
+export function resumeRecentWalletAccessRange(
+  range: DiscoveryScanRange,
+  discovery: DiscoverySnapshot,
+): DiscoveryScanRange {
+  if (range.rangeMode !== "recent" || discovery.rangeMode !== "recent" || discovery.lastScannedBlock === undefined) {
+    return range;
+  }
+
+  return { ...range, fromBlock: discovery.lastScannedBlock + 1n };
+}
+
 export function discoveryStorageKey(
   chainId: number | undefined,
   account: Address | undefined,
