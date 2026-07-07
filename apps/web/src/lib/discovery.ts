@@ -40,8 +40,9 @@ export function emptyDiscoverySnapshot(): DiscoverySnapshot {
 export function deploymentDiscoveryIdentity(deployment: PledgeCashDeployment | undefined): string | undefined {
   if (!deployment) return undefined;
   const chain = Number.isNaN(deployment.chainId) ? "status" : deployment.chainId.toString();
+  const deployedAt = deployment.deploymentTimestamp?.toString() ?? "-";
   const fields = DEPLOYMENT_DISCOVERY_FIELDS.map((field) => `${field}:${deployment[field]?.toLowerCase() ?? "-"}`);
-  return [`chain:${chain}`, ...fields].join("|");
+  return [`chain:${chain}`, `deploymentTimestamp:${deployedAt}`, ...fields].join("|");
 }
 
 export async function walletAccessDiscoveryRange(

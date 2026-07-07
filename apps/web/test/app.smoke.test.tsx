@@ -447,6 +447,26 @@ describe("web app shell", () => {
     );
   });
 
+  test("scopes deterministic wallet discovery caches by deployment timestamp", () => {
+    const oldIdentity = deploymentDiscoveryIdentity({
+      chainId: 31337,
+      deploymentTimestamp: 1_000n,
+      boardroomFactory: "0x7900000000000000000000000000000000000000",
+      tokenGrantFactory: "0x7a00000000000000000000000000000000000000",
+    });
+    const newIdentity = deploymentDiscoveryIdentity({
+      chainId: 31337,
+      deploymentTimestamp: 2_000n,
+      boardroomFactory: "0x7900000000000000000000000000000000000000",
+      tokenGrantFactory: "0x7a00000000000000000000000000000000000000",
+    });
+
+    expect(oldIdentity).not.toBe(newIdentity);
+    expect(discoveryStorageKey(31337, oldGrant.currentHolder, oldIdentity)).not.toBe(
+      discoveryStorageKey(31337, oldGrant.currentHolder, newIdentity),
+    );
+  });
+
   test("keeps grant settlement scoped to the current holder wallet", () => {
     const holderHtml = renderGrantInspector(oldGrant.currentHolder, false);
     const observerHtml = renderGrantInspector("0x5000000000000000000000000000000000000000", false);
