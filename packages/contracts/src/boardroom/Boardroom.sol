@@ -373,7 +373,11 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         (success, result) = target.call{value: call_.value}(call_.data);
         if (!success) _revertCall(target, result);
 
-        if (currentStatus == BoardroomStatus.Active) _recordIssuedObligation(policy, target, selector, result);
+        if (currentStatus == BoardroomStatus.Active) {
+            _recordIssuedObligation(policy, target, selector, result);
+        } else if (currentStatus == BoardroomStatus.WindingDown) {
+            _recordWindDownCall(target, selector);
+        }
 
         emit BoardroomCallExecuted(policy, target, selector, call_.value, keccak256(call_.data));
     }
@@ -427,6 +431,15 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
         if (selector == LockedLiquidityFactory.createLockedLiquidity.selector) {
             _recordLockedLiquidity(target, result);
+        }
+    }
+
+    function _recordWindDownCall(address target, bytes4 selector) internal {
+        if (
+            isIssuedDistribution[target]
+                && (selector == MerkleAirdrop.close.selector || selector == MerkleAirdrop.cancel.selector)
+        ) {
+            _releaseIssuedGrantSlots(target);
         }
     }
 

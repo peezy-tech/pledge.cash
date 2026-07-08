@@ -367,6 +367,37 @@ contract DistributionTest is Test {
         assertEq(boardroom.issuedGrantReservationsForDistribution(address(airdrop)), 0);
     }
 
+    function testMerkleAirdropWindDownCloseReleasesUnusedGrantReservations() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("airdrop-grant-wind-down-release");
+        bytes32 salt = keccak256("airdrop-grant-wind-down-release-create");
+        address predictedAirdrop = distributionFactory.predictMerkleAirdropAddress(address(boardroom), salt);
+        MerkleAirdrop.GrantClaimParams memory grantParams = _grantClaimParams("airdrop-grant-wind-down-release-claim");
+        bytes32 root =
+            _grantClaimLeaf(predictedAirdrop, boardroom, shareToken, 0, recipient, AIRDROP_CLAIM_SHARES, grantParams);
+
+        MerkleAirdrop airdrop = _createMerkleAirdrop(boardroom, shareToken, root, AIRDROP_SHARES, salt, 2);
+
+        assertEq(boardroom.issuedGrantSlotReservations(), 2);
+        assertEq(boardroom.issuedGrantReservationsForDistribution(address(airdrop)), 2);
+
+        vm.prank(owner);
+        boardroom.startWindDown();
+
+        vm.prank(owner);
+        boardroom.execute(
+            _policyCall(address(distributionFactory), address(airdrop), 0, abi.encodeCall(MerkleAirdrop.close, ()))
+        );
+
+        assertTrue(airdrop.isClosed());
+        assertEq(boardroom.issuedGrantSlotReservations(), 0);
+        assertEq(boardroom.issuedGrantReservationsForDistribution(address(airdrop)), 0);
+
+        vm.prank(owner);
+        boardroom.openRedemptions();
+
+        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
+    }
+
     function testBoardroomRedemptionsWaitForMerkleAirdropToClose() public {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("airdrop-wind-down");
         bytes32 salt = keccak256("airdrop-wind-down-create");
