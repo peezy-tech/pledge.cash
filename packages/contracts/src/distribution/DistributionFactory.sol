@@ -2,10 +2,10 @@
 pragma solidity ^0.8.30;
 
 import {LibClone} from "solady/utils/LibClone.sol";
-import {ExactTransferLib} from "./ExactTransferLib.sol";
 import {FixedPriceSale} from "./FixedPriceSale.sol";
-import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
 import {MigratingBondingCurve} from "./MigratingBondingCurve.sol";
+import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
+import {IBoardroomCallPolicy} from "../policy/IBoardroomCallPolicy.sol";
 
 interface IDistributionBoardroom {
     function shareToken() external view returns (address);

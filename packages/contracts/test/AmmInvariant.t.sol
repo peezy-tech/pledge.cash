@@ -5,9 +5,9 @@ import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
 import {WETH} from "solady/tokens/WETH.sol";
-import {AmmFactory} from "../src/AmmFactory.sol";
-import {AmmPool} from "../src/AmmPool.sol";
-import {AmmRouter} from "../src/AmmRouter.sol";
+import {AmmFactory} from "../src/amm/AmmFactory.sol";
+import {AmmPool} from "../src/amm/AmmPool.sol";
+import {AmmRouter} from "../src/amm/AmmRouter.sol";
 
 contract AmmInvariantERC20 is ERC20 {
     string internal tokenName;

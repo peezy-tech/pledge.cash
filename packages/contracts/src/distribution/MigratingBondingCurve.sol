@@ -6,8 +6,8 @@ import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Initializable} from "solady/utils/Initializable.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
-import {ExactTransferLib} from "./ExactTransferLib.sol";
-import {LockedLiquidityFactory} from "./LockedLiquidityFactory.sol";
+import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
+import {LockedLiquidityFactory} from "../liquidity/LockedLiquidityFactory.sol";
 
 interface IMigratingBondingCurveBoardroom {
     function status() external view returns (uint8);

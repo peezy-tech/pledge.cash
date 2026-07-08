@@ -6,16 +6,16 @@ import {Initializable} from "solady/utils/Initializable.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {BoardroomToken} from "./BoardroomToken.sol";
-import {DistributionFactory} from "./DistributionFactory.sol";
-import {ExactTransferLib} from "./ExactTransferLib.sol";
-import {FixedPriceSale} from "./FixedPriceSale.sol";
-import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
 import {IBoardroomPolicyRegistry} from "./IBoardroomPolicyRegistry.sol";
-import {LockedLiquidity} from "./LockedLiquidity.sol";
-import {LockedLiquidityFactory} from "./LockedLiquidityFactory.sol";
-import {MigratingBondingCurve} from "./MigratingBondingCurve.sol";
-import {TokenGrant} from "./TokenGrant.sol";
-import {TokenGrantFactory} from "./TokenGrantFactory.sol";
+import {DistributionFactory} from "../distribution/DistributionFactory.sol";
+import {FixedPriceSale} from "../distribution/FixedPriceSale.sol";
+import {MigratingBondingCurve} from "../distribution/MigratingBondingCurve.sol";
+import {TokenGrant} from "../grants/TokenGrant.sol";
+import {TokenGrantFactory} from "../grants/TokenGrantFactory.sol";
+import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
+import {LockedLiquidity} from "../liquidity/LockedLiquidity.sol";
+import {LockedLiquidityFactory} from "../liquidity/LockedLiquidityFactory.sol";
+import {IBoardroomCallPolicy} from "../policy/IBoardroomCallPolicy.sol";
 
 interface IBoardroomWrappedNative {
     function deposit() external payable;

@@ -5,7 +5,7 @@ import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Initializable} from "solady/utils/Initializable.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
-import {ExactTransferLib} from "./ExactTransferLib.sol";
+import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 
 interface IFixedPriceSaleBoardroom {
     function status() external view returns (uint8);

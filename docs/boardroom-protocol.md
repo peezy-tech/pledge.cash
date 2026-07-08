@@ -1,6 +1,6 @@
 # Boardroom Protocol
 
-This document describes the first Boardroom primitive in `packages/contracts/src/Boardroom.sol`,
+This document describes the first Boardroom primitive in `packages/contracts/src/boardroom/Boardroom.sol`,
 `BoardroomFactory.sol`, and `BoardroomToken.sol`.
 
 A Boardroom is an owned on-chain treasury and issuer account with its own ERC20 share token. It can mint shares and

@@ -8,8 +8,8 @@ deployment yet.
 
 Security reports are in scope for:
 
-- `packages/contracts/src/TokenGrant.sol`
-- `packages/contracts/src/TokenGrantFactory.sol`
+- `packages/contracts/src/grants/TokenGrant.sol`
+- `packages/contracts/src/grants/TokenGrantFactory.sol`
 - documentation that materially misstates custody, authority, or protocol risk
 
 Out of scope:

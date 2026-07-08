@@ -1,6 +1,6 @@
 # Distribution Protocol
 
-This document describes the Boardroom distribution primitives in `packages/contracts/src/DistributionFactory.sol`,
+This document describes the Boardroom distribution primitives in `packages/contracts/src/distribution/DistributionFactory.sol`,
 `FixedPriceSale.sol`, and `MigratingBondingCurve.sol`.
 
 ## Actors

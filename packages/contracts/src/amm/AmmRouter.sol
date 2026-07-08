@@ -6,7 +6,7 @@ import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {AmmFactory} from "./AmmFactory.sol";
 import {AmmPool} from "./AmmPool.sol";
-import {ExactTransferLib} from "./ExactTransferLib.sol";
+import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 
 interface IWrappedNative {
     function deposit() external payable;

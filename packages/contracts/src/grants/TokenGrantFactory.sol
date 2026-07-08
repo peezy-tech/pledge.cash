@@ -7,9 +7,9 @@ import {Base64} from "solady/utils/Base64.sol";
 import {LibClone} from "solady/utils/LibClone.sol";
 import {LibString} from "solady/utils/LibString.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
-import {ExactTransferLib} from "./ExactTransferLib.sol";
-import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
 import {TokenGrant} from "./TokenGrant.sol";
+import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
+import {IBoardroomCallPolicy} from "../policy/IBoardroomCallPolicy.sol";
 
 contract TokenGrantFactory is Ownable, ERC721, IBoardroomCallPolicy {
     address public immutable tokenGrantLogic;

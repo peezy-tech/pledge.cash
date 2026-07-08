@@ -3,21 +3,21 @@ pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 import {WETH} from "solady/tokens/WETH.sol";
-import {AmmFactory} from "../src/AmmFactory.sol";
-import {AmmPool} from "../src/AmmPool.sol";
-import {AmmRouter} from "../src/AmmRouter.sol";
-import {AssetPolicy} from "../src/AssetPolicy.sol";
-import {Boardroom} from "../src/Boardroom.sol";
-import {BoardroomFactory} from "../src/BoardroomFactory.sol";
-import {BoardroomPolicyRegistry} from "../src/BoardroomPolicyRegistry.sol";
-import {BoardroomToken} from "../src/BoardroomToken.sol";
-import {DistributionFactory} from "../src/DistributionFactory.sol";
-import {FixedPriceSale} from "../src/FixedPriceSale.sol";
-import {IBoardroomCallPolicy} from "../src/IBoardroomCallPolicy.sol";
-import {LockedLiquidity} from "../src/LockedLiquidity.sol";
-import {LockedLiquidityFactory} from "../src/LockedLiquidityFactory.sol";
-import {MigratingBondingCurve} from "../src/MigratingBondingCurve.sol";
-import {ProtocolPolicy} from "../src/ProtocolPolicy.sol";
+import {AmmFactory} from "../src/amm/AmmFactory.sol";
+import {AmmPool} from "../src/amm/AmmPool.sol";
+import {AmmRouter} from "../src/amm/AmmRouter.sol";
+import {AssetPolicy} from "../src/policy/AssetPolicy.sol";
+import {Boardroom} from "../src/boardroom/Boardroom.sol";
+import {BoardroomFactory} from "../src/boardroom/BoardroomFactory.sol";
+import {BoardroomPolicyRegistry} from "../src/boardroom/BoardroomPolicyRegistry.sol";
+import {BoardroomToken} from "../src/boardroom/BoardroomToken.sol";
+import {DistributionFactory} from "../src/distribution/DistributionFactory.sol";
+import {FixedPriceSale} from "../src/distribution/FixedPriceSale.sol";
+import {IBoardroomCallPolicy} from "../src/policy/IBoardroomCallPolicy.sol";
+import {LockedLiquidity} from "../src/liquidity/LockedLiquidity.sol";
+import {LockedLiquidityFactory} from "../src/liquidity/LockedLiquidityFactory.sol";
+import {MigratingBondingCurve} from "../src/distribution/MigratingBondingCurve.sol";
+import {ProtocolPolicy} from "../src/policy/ProtocolPolicy.sol";
 
 contract DistributionCurrency {
     string public name;

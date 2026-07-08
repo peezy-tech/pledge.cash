@@ -2,9 +2,9 @@
 pragma solidity ^0.8.30;
 
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
-import {ExactTransferLib} from "./ExactTransferLib.sol";
 import {Initializable} from "solady/utils/Initializable.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
+import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 
 interface ITokenGrantERC20Metadata {
     function decimals() external view returns (uint8);
