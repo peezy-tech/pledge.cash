@@ -343,34 +343,57 @@ function deriveDistributionCatalogFields(
     };
   }
 
-  if ("remainingShares" in distribution.state) {
-    const soldShares = distribution.state.saleSupply - distribution.state.remainingShares;
+  if ("paymentToken" in distribution.state) {
+    const state = distribution.state;
+    const soldShares = state.saleSupply - state.remainingShares;
     return {
-      cashRaised: fixedPriceSaleCashRaised(soldShares, distribution.state.price),
-      cashToken: distribution.state.paymentToken,
+      cashRaised: fixedPriceSaleCashRaised(soldShares, state.price),
+      cashToken: state.paymentToken,
       cashTokenDecimals: distribution.paymentTokenMetadata?.decimals,
       cashTokenSymbol: distribution.paymentTokenMetadata?.symbol,
       distribution: distribution.address,
       distributionKind: "fixed-price-sale",
       path: "Fixed price sale",
       soldShares,
-      status: fixedPriceSaleStatusLabel(distribution.state.saleStatus),
+      status: fixedPriceSaleStatusLabel(state.saleStatus),
     };
   }
 
-  const migrated = distribution.state.curveStatus === 1;
+  if ("airdropSupply" in distribution.state) {
+    const state = distribution.state;
+    return {
+      distribution: distribution.address,
+      distributionKind: "merkle-airdrop",
+      path: "Merkle airdrop",
+      soldShares: state.airdropSupply - state.remainingShares,
+      status: merkleAirdropStatusLabel(state.airdropStatus),
+      shareTokenDecimals,
+    };
+  }
+
+  if (!("quoteToken" in distribution.state)) {
+    return {
+      distribution: distribution.address,
+      distributionKind: distribution.kind,
+      path: "Distribution",
+      status: "Unknown",
+    };
+  }
+
+  const state = distribution.state;
+  const migrated = state.curveStatus === 1;
   return {
-    cashRaised: distribution.state.quoteReserve,
-    cashToken: distribution.state.quoteToken,
+    cashRaised: state.quoteReserve,
+    cashToken: state.quoteToken,
     cashTokenDecimals: distribution.quoteTokenMetadata?.decimals,
     cashTokenSymbol: distribution.quoteTokenMetadata?.symbol,
     distribution: distribution.address,
     distributionKind: "migrating-bonding-curve",
-    locker: nonZeroAddress(distribution.state.locker),
+    locker: nonZeroAddress(state.locker),
     path: migrated ? "Migrated curve + AMM" : "Bonding curve",
-    pool: nonZeroAddress(distribution.state.pool),
-    soldShares: distribution.state.soldShares,
-    status: migratingCurveStatusLabel(distribution.state.curveStatus),
+    pool: nonZeroAddress(state.pool),
+    soldShares: state.soldShares,
+    status: migratingCurveStatusLabel(state.curveStatus),
     shareTokenDecimals,
   };
 }
@@ -382,7 +405,7 @@ async function readDistributionHistory(
 ): Promise<ProductBoardroomHistory | undefined> {
   if (!distribution.state) return undefined;
 
-  if ("remainingShares" in distribution.state) {
+  if ("paymentToken" in distribution.state) {
     const fixedPriceSale = await readFixedPriceSaleHistory(client, distribution.address);
     if (!fixedPriceSale) return undefined;
     return {
@@ -393,6 +416,16 @@ async function readDistributionHistory(
       soldShares: fixedPriceSale.soldShares,
     };
   }
+
+  if ("airdropSupply" in distribution.state) {
+    const state = distribution.state;
+    return {
+      distribution: distribution.address,
+      soldShares: state.airdropSupply - state.remainingShares,
+    };
+  }
+
+  if (!("quoteToken" in distribution.state)) return undefined;
 
   const curve = await readCurveHistory(client, distribution.address);
   const historyPool = curve?.migration?.pool ?? pool ?? nonZeroAddress(distribution.state.pool);
@@ -596,6 +629,13 @@ function migratingCurveStatusLabel(status: number): string {
   if (status === 1) return "Live AMM";
   if (status === 2) return "Cancelled curve";
   return "Unknown curve";
+}
+
+function merkleAirdropStatusLabel(status: number): string {
+  if (status === 0) return "Open airdrop";
+  if (status === 1) return "Closed airdrop";
+  if (status === 2) return "Cancelled airdrop";
+  return "Unknown airdrop";
 }
 
 async function readOptionalTokenName(client: PledgeCashReadClient, address: Address): Promise<string | undefined> {

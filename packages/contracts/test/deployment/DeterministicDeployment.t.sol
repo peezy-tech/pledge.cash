@@ -143,7 +143,10 @@ contract DeterministicDeploymentTest is Test {
         DistributionFactory distributionFactory = DistributionFactory(
             _deploy(
                 PledgeCashDeploymentSalts.distributionFactory(),
-                abi.encodePacked(type(DistributionFactory).creationCode, abi.encode(address(lockedLiquidityFactory)))
+                abi.encodePacked(
+                    type(DistributionFactory).creationCode,
+                    abi.encode(address(lockedLiquidityFactory), address(tokenGrantFactory))
+                )
             )
         );
         BoardroomFactory boardroomFactory = BoardroomFactory(

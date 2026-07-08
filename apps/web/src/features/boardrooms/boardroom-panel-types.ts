@@ -2,6 +2,7 @@ import type {
   Address,
   FixedPriceSaleState,
   LockedLiquidityState,
+  MerkleAirdropState,
   MigratingBondingCurveState,
   PledgeCashDeployment,
 } from "@pledge.cash/sdk";
@@ -14,6 +15,7 @@ import type {
   FixedPriceSaleForm,
   LockedLiquidityExitForm,
   LockedLiquidityForm,
+  MerkleAirdropForm,
   MigratingCurveForm,
   WindDownForm,
 } from "../../lib/types";
@@ -23,6 +25,7 @@ export type BoardroomPanelProps = {
   fixedPriceSale: FixedPriceSalePanelState;
   grant: BoardroomGrantPanelState;
   lockedLiquidity: LockedLiquidityPanelState;
+  merkleAirdrop: MerkleAirdropPanelState;
   migratingCurve: MigratingCurvePanelState;
   windDown: WindDownPanelState;
   workflow: BoardroomWorkflow;
@@ -75,6 +78,20 @@ export type FixedPriceSalePanelState = {
   predict: () => Promise<void>;
   setFixedPriceSaleAddress: (address: string) => void;
   setFixedPriceSaleForm: Dispatch<SetStateAction<FixedPriceSaleForm>>;
+};
+
+export type MerkleAirdropPanelState = {
+  address: string;
+  form: MerkleAirdropForm;
+  predicted: Address | undefined;
+  snapshot: MerkleAirdropState | undefined;
+  cancel: () => Promise<void>;
+  close: () => Promise<void>;
+  create: () => Promise<void>;
+  load: () => Promise<void>;
+  predict: () => Promise<void>;
+  setMerkleAirdropAddress: (address: string) => void;
+  setMerkleAirdropForm: Dispatch<SetStateAction<MerkleAirdropForm>>;
 };
 
 export type MigratingCurvePanelState = {

@@ -9,6 +9,7 @@ import type {
   FixedPriceSaleState,
   GrantState,
   LockedLiquidityState,
+  MerkleAirdropState,
   MigratingBondingCurveState,
 } from "@pledge.cash/sdk";
 import type { Hex } from "viem";
@@ -78,8 +79,8 @@ export type BoardroomGrantSnapshot = {
 
 export type BoardroomDistributionSnapshot = {
   address: Address;
-  kind: "fixed-price-sale" | "migrating-bonding-curve" | "unknown";
-  state?: FixedPriceSaleState | MigratingBondingCurveState;
+  kind: "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "unknown";
+  state?: FixedPriceSaleState | MigratingBondingCurveState | MerkleAirdropState;
   error?: string;
   shareTokenMetadata?: TokenMetadata | undefined;
   paymentTokenMetadata?: TokenMetadata | undefined;
@@ -124,6 +125,15 @@ export type FixedPriceSaleForm = {
   maxPerBuyer: string;
   startTime: string;
   endTime: string;
+  salt: string;
+};
+
+export type MerkleAirdropForm = {
+  shareAmount: string;
+  merkleRoot: string;
+  startTime: string;
+  endTime: string;
+  maxGrantClaims: string;
   salt: string;
 };
 

@@ -9,6 +9,7 @@ import {BoardroomToken} from "./BoardroomToken.sol";
 import {IBoardroomPolicyRegistry} from "./IBoardroomPolicyRegistry.sol";
 import {DistributionFactory} from "../distribution/DistributionFactory.sol";
 import {FixedPriceSale} from "../distribution/FixedPriceSale.sol";
+import {MerkleAirdrop} from "../distribution/MerkleAirdrop.sol";
 import {MigratingBondingCurve} from "../distribution/MigratingBondingCurve.sol";
 import {TokenGrant} from "../grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../grants/TokenGrantFactory.sol";
@@ -58,11 +59,13 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     address[] internal issuedGrants;
     address[] internal issuedDistributions;
     address[] internal lockedLiquidityPositions;
+    uint256 public issuedGrantSlotReservations;
 
     mapping(address => bool) public isRedeemableAsset;
     mapping(address => bool) public isIssuedGrant;
     mapping(address => bool) public isIssuedDistribution;
     mapping(address => bool) public isLockedLiquidity;
+    mapping(address => uint256) public issuedGrantReservationsForDistribution;
 
     error InvalidAddress();
     error InvalidAmount();
@@ -71,8 +74,10 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     error RedeemableAssetAlreadyRegistered(address asset);
     error TooManyRedeemableAssets();
     error TooManyIssuedGrants();
+    error TooManyIssuedGrantReservations(uint256 requested, uint256 available);
     error TooManyIssuedDistributions();
     error TooManyLockedLiquidityPositions();
+    error NoReservedIssuedGrantSlots(address distribution);
     error InvalidRedeemableAsset(address asset);
     error InvalidIssuedGrant(address grant);
     error InvalidIssuedDistribution(address distribution);
@@ -104,6 +109,8 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     event RedeemableAssetRegistered(address indexed asset);
     event TreasurySharesBurned(uint256 amount);
     event BoardroomGrantRecorded(address indexed grant);
+    event BoardroomGrantSlotsReserved(address indexed distribution, uint256 count);
+    event BoardroomGrantSlotsReleased(address indexed distribution, uint256 count);
     event BoardroomDistributionRecorded(address indexed distribution);
     event BoardroomLockedLiquidityRecorded(address indexed locker);
     event BoardroomLockedLiquidityExited(
@@ -333,6 +340,14 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         _recordLockedLiquidityPosition(locker, pool, address(0));
     }
 
+    function recordGrantFromDistribution(address grant) external {
+        _requireStatus(BoardroomStatus.Active);
+        if (!isIssuedDistribution[msg.sender]) revert InvalidIssuedDistribution(msg.sender);
+        _consumeIssuedGrantReservation(msg.sender);
+
+        _recordIssuedGrant(TokenGrant(grant).factory(), abi.encode(grant));
+    }
+
     function _execute(Call calldata call_) internal returns (bytes memory result) {
         address policy = call_.policy;
         address target = call_.target;
@@ -358,7 +373,11 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         (success, result) = target.call{value: call_.value}(call_.data);
         if (!success) _revertCall(target, result);
 
-        if (currentStatus == BoardroomStatus.Active) _recordIssuedObligation(policy, target, selector, result);
+        if (currentStatus == BoardroomStatus.Active) {
+            _recordIssuedObligation(policy, target, selector, result);
+        } else if (currentStatus == BoardroomStatus.WindingDown) {
+            _recordWindDownCall(target, selector);
+        }
 
         emit BoardroomCallExecuted(policy, target, selector, call_.value, keccak256(call_.data));
     }
@@ -370,6 +389,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         }
         if (isIssuedDistribution[target]) {
             return selector == FixedPriceSale.close.selector || selector == FixedPriceSale.cancel.selector
+                || selector == MerkleAirdrop.close.selector || selector == MerkleAirdrop.cancel.selector
                 || selector == MigratingBondingCurve.cancel.selector
                 || selector == MigratingBondingCurve.migrate.selector;
         }
@@ -395,13 +415,36 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
             return;
         }
 
+        if (selector == DistributionFactory.createMerkleAirdrop.selector) {
+            address distribution = _recordIssuedDistribution(target, result);
+            _reserveIssuedGrantSlots(distribution, MerkleAirdrop(distribution).maxGrantClaims());
+            return;
+        }
+
+        if (
+            isIssuedDistribution[target]
+                && (selector == MerkleAirdrop.close.selector || selector == MerkleAirdrop.cancel.selector)
+        ) {
+            _releaseIssuedGrantSlots(target);
+            return;
+        }
+
         if (selector == LockedLiquidityFactory.createLockedLiquidity.selector) {
             _recordLockedLiquidity(target, result);
         }
     }
 
+    function _recordWindDownCall(address target, bytes4 selector) internal {
+        if (
+            isIssuedDistribution[target]
+                && (selector == MerkleAirdrop.close.selector || selector == MerkleAirdrop.cancel.selector)
+        ) {
+            _releaseIssuedGrantSlots(target);
+        }
+    }
+
     function _recordIssuedGrant(address factory, bytes memory result) internal {
-        if (issuedGrants.length >= MAX_ISSUED_GRANTS) revert TooManyIssuedGrants();
+        if (_remainingIssuedGrantSlots() == 0) revert TooManyIssuedGrants();
 
         address grant = abi.decode(result, (address));
         if (grant == address(0) || isIssuedGrant[grant]) revert InvalidIssuedGrant(grant);
@@ -414,10 +457,10 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         emit BoardroomGrantRecorded(grant);
     }
 
-    function _recordIssuedDistribution(address factory, bytes memory result) internal {
+    function _recordIssuedDistribution(address factory, bytes memory result) internal returns (address distribution) {
         if (issuedDistributions.length >= MAX_ISSUED_DISTRIBUTIONS) revert TooManyIssuedDistributions();
 
-        address distribution = abi.decode(result, (address));
+        distribution = abi.decode(result, (address));
         if (distribution == address(0) || isIssuedDistribution[distribution]) {
             revert InvalidIssuedDistribution(distribution);
         }
@@ -431,6 +474,40 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         isIssuedDistribution[distribution] = true;
         issuedDistributions.push(distribution);
         emit BoardroomDistributionRecorded(distribution);
+    }
+
+    function _reserveIssuedGrantSlots(address distribution, uint256 count) internal {
+        if (count == 0) return;
+
+        uint256 available = _remainingIssuedGrantSlots();
+        if (count > available) revert TooManyIssuedGrantReservations(count, available);
+
+        issuedGrantReservationsForDistribution[distribution] = count;
+        issuedGrantSlotReservations += count;
+        emit BoardroomGrantSlotsReserved(distribution, count);
+    }
+
+    function _consumeIssuedGrantReservation(address distribution) internal {
+        uint256 reserved = issuedGrantReservationsForDistribution[distribution];
+        if (reserved == 0) revert NoReservedIssuedGrantSlots(distribution);
+
+        issuedGrantReservationsForDistribution[distribution] = reserved - 1;
+        issuedGrantSlotReservations -= 1;
+    }
+
+    function _releaseIssuedGrantSlots(address distribution) internal {
+        uint256 reserved = issuedGrantReservationsForDistribution[distribution];
+        if (reserved == 0) return;
+
+        issuedGrantReservationsForDistribution[distribution] = 0;
+        issuedGrantSlotReservations -= reserved;
+        emit BoardroomGrantSlotsReleased(distribution, reserved);
+    }
+
+    function _remainingIssuedGrantSlots() internal view returns (uint256) {
+        uint256 usedAndReserved = issuedGrants.length + issuedGrantSlotReservations;
+        if (usedAndReserved >= MAX_ISSUED_GRANTS) return 0;
+        return MAX_ISSUED_GRANTS - usedAndReserved;
     }
 
     function _recordLockedLiquidity(address factory, bytes memory result) internal {

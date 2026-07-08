@@ -7,6 +7,7 @@ import {
   readFixedPriceSaleState,
   readGrantState,
   readLockedLiquidityState,
+  readMerkleAirdropState,
   readMigratingBondingCurveState,
   type PledgeCashReadClient,
 } from "@pledge.cash/sdk";
@@ -94,10 +95,27 @@ async function readCurveDistributionSummary(
       state: await readMigratingBondingCurveState(client, distribution),
     };
   } catch (curveError) {
+    return await readMerkleAirdropDistributionSummary(client, distribution, fixedPriceError, curveError);
+  }
+}
+
+async function readMerkleAirdropDistributionSummary(
+  client: PledgeCashReadClient,
+  distribution: Address,
+  fixedPriceError: unknown,
+  curveError: unknown,
+): Promise<BoardroomDistributionSnapshot> {
+  try {
+    return {
+      address: distribution,
+      kind: "merkle-airdrop",
+      state: await readMerkleAirdropState(client, distribution),
+    };
+  } catch (airdropError) {
     return {
       address: distribution,
       kind: "unknown",
-      error: `${errorMessage(fixedPriceError)}; ${errorMessage(curveError)}`,
+      error: `${errorMessage(fixedPriceError)}; ${errorMessage(curveError)}; ${errorMessage(airdropError)}`,
     };
   }
 }
@@ -146,5 +164,6 @@ function distributionTokenAddresses(distribution: BoardroomDistributionSnapshot)
   if (!distribution.state) return [];
   if ("paymentToken" in distribution.state) return [distribution.state.shareToken, distribution.state.paymentToken];
   if ("quoteToken" in distribution.state) return [distribution.state.shareToken, distribution.state.quoteToken];
+  if ("tokenGrantFactory" in distribution.state) return [distribution.state.shareToken];
   return [];
 }

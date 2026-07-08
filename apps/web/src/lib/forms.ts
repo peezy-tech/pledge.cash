@@ -6,6 +6,7 @@ import type {
   GrantForm,
   LockedLiquidityExitForm,
   LockedLiquidityForm,
+  MerkleAirdropForm,
   MigratingCurveForm,
   BoardroomGrantForm,
   WalletState,
@@ -79,6 +80,16 @@ export function defaultFixedPriceSaleForm(): FixedPriceSaleForm {
     price: "1",
     maxPerBuyer: "0",
     ...defaultWorkflowWindow(),
+    salt: randomSalt(),
+  };
+}
+
+export function defaultMerkleAirdropForm(): MerkleAirdropForm {
+  return {
+    shareAmount: "1",
+    merkleRoot: "",
+    ...defaultWorkflowWindow(),
+    maxGrantClaims: "0",
     salt: randomSalt(),
   };
 }

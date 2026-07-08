@@ -8,6 +8,7 @@ import {
   fixedPriceSaleAbi,
   lockedLiquidityAbi,
   lockedLiquidityFactoryAbi,
+  merkleAirdropAbi,
   migratingBondingCurveAbi,
   pledgeCashAbis,
   pledgeCashDeployments,
@@ -25,13 +26,16 @@ describe("generated SDK exports", () => {
     expect(pledgeCashAbis.FixedPriceSale).toBe(fixedPriceSaleAbi);
     expect(pledgeCashAbis.LockedLiquidity).toBe(lockedLiquidityAbi);
     expect(pledgeCashAbis.LockedLiquidityFactory).toBe(lockedLiquidityFactoryAbi);
+    expect(pledgeCashAbis.MerkleAirdrop).toBe(merkleAirdropAbi);
     expect(pledgeCashAbis.MigratingBondingCurve).toBe(migratingBondingCurveAbi);
     expect(pledgeCashAbis.PoolFees).toBe(poolFeesAbi);
     expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "createGrant")).toBe(true);
     expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "predictGrantAddress")).toBe(true);
     expect(distributionFactoryAbi.some((item) => item.type === "function" && item.name === "createFixedPriceSale")).toBe(true);
     expect(distributionFactoryAbi.some((item) => item.type === "function" && item.name === "createMigratingBondingCurve")).toBe(true);
+    expect(distributionFactoryAbi.some((item) => item.type === "function" && item.name === "createMerkleAirdrop")).toBe(true);
     expect(fixedPriceSaleAbi.some((item) => item.type === "function" && item.name === "buy")).toBe(true);
+    expect(merkleAirdropAbi.some((item) => item.type === "function" && item.name === "claimGrant")).toBe(true);
     expect(migratingBondingCurveAbi.some((item) => item.type === "function" && item.name === "migrate")).toBe(true);
     expect(ammRouterAbi.some((item) => item.type === "function" && item.name === "swapExactTokensForTokens")).toBe(true);
     expect(lockedLiquidityFactoryAbi.some((item) => item.type === "function" && item.name === "createLockedLiquidity")).toBe(true);
@@ -39,14 +43,15 @@ describe("generated SDK exports", () => {
 
   test("includes checked-in deployment metadata", () => {
     expect(pledgeCashDeployments[998]?.chainId).toBe(998);
-    expect(pledgeCashDeployments[998]?.deterministicDeployment).toBe(true);
-    expect(pledgeCashDeployments[998]?.tokenGrantFactory).toBe("0xa8c1590492c30d205704f0733E788C3900F283af");
-    expect(pledgeCashDeployments[998]?.creationFee).toBe(100000000000000000n);
-    expect(pledgeCashDeployments[998]?.boardroomFactory).toBe("0x4302Aa261B4416722413ea482dC3B70eb410F95c");
-    expect(pledgeCashDeployments[998]?.distributionFactory).toBe("0x923504c324b9fc18571f3f0AF9E0D7264129B292");
+    expect(pledgeCashDeployments[998]?.status).toBe("pending");
+    expect(pledgeCashDeployments[998]?.reason).toContain("deterministic v2 deployment");
+    expect(pledgeCashDeployments[998]?.tokenGrantFactory).toBeUndefined();
+    expect(pledgeCashDeployments[998]?.boardroomFactory).toBeUndefined();
+    expect(pledgeCashDeployments[998]?.distributionFactory).toBeUndefined();
     expect(pledgeCashDeployments[10143]?.chainId).toBe(10143);
-    expect(pledgeCashDeployments[10143]?.tokenGrantFactory).toBe(pledgeCashDeployments[998]?.tokenGrantFactory);
-    expect(pledgeCashDeployments[10143]?.boardroomFactory).toBe(pledgeCashDeployments[998]?.boardroomFactory);
+    expect(pledgeCashDeployments[10143]?.status).toBe("pending");
+    expect(pledgeCashDeployments[10143]?.tokenGrantFactory).toBeUndefined();
+    expect(pledgeCashDeployments[10143]?.boardroomFactory).toBeUndefined();
   });
 
   test("marks generated source as generated", async () => {

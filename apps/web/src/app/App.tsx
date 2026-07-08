@@ -10,6 +10,9 @@ import {
   buildBoardroomLockedLiquidityBatch,
   buildBoardroomLockedLiquidityExitTransaction,
   buildBoardroomLockedLiquidityFeeClaimAction,
+  buildBoardroomMerkleAirdropBatch,
+  buildBoardroomMerkleAirdropCancelAction,
+  buildBoardroomMerkleAirdropCloseAction,
   buildBoardroomMigratingCurveBatch,
   buildBoardroomMigratingCurveCancelAction,
   buildBoardroomMigratingCurveMigrationAction,
@@ -34,16 +37,19 @@ import {
   predictDirectGrantAddress as sdkPredictDirectGrantAddress,
   predictFixedPriceSaleAddress as sdkPredictFixedPriceSaleAddress,
   predictLockedLiquidityAddress as sdkPredictLockedLiquidityAddress,
+  predictMerkleAirdropAddress as sdkPredictMerkleAirdropAddress,
   predictMigratingBondingCurveAddress as sdkPredictMigratingBondingCurveAddress,
   readBoardroomState,
   readFixedPriceSaleState,
   readGrantState,
   readLockedLiquidityState,
+  readMerkleAirdropState,
   readMigratingBondingCurveState,
   tokenGrantAbi,
   type Address,
   type BoardroomFixedPriceSaleTerms,
   type BoardroomLockedLiquidityTerms,
+  type BoardroomMerkleAirdropTerms,
   type BoardroomMigratingBondingCurveTerms,
   type BoardroomShareGrantTerms,
   type DiscoveredBoardroom,
@@ -55,6 +61,7 @@ import {
   type FixedPriceSaleState,
   type GrantCreationTerms,
   type LockedLiquidityState,
+  type MerkleAirdropState,
   type MigratingBondingCurveState,
 } from "@pledge.cash/sdk";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -105,6 +112,7 @@ import {
   defaultGrantForm,
   defaultLockedLiquidityExitForm,
   defaultLockedLiquidityForm,
+  defaultMerkleAirdropForm,
   defaultMigratingCurveForm,
   defaultWindDownForm,
   errorMessage,
@@ -162,6 +170,7 @@ import type {
   GrantSnapshot,
   LockedLiquidityExitForm,
   LockedLiquidityForm,
+  MerkleAirdropForm,
   MigratingCurveForm,
   WindDownForm,
 } from "../lib/types";
@@ -276,6 +285,10 @@ export function App(): React.JSX.Element {
   const [fixedPriceSaleAddress, setFixedPriceSaleAddress] = useState("");
   const [fixedPriceSaleSnapshot, setFixedPriceSaleSnapshot] = useState<FixedPriceSaleState>();
   const [predictedFixedPriceSale, setPredictedFixedPriceSale] = useState<Address>();
+  const [merkleAirdropForm, setMerkleAirdropForm] = useState<MerkleAirdropForm>(() => defaultMerkleAirdropForm());
+  const [merkleAirdropAddress, setMerkleAirdropAddress] = useState("");
+  const [merkleAirdropSnapshot, setMerkleAirdropSnapshot] = useState<MerkleAirdropState>();
+  const [predictedMerkleAirdrop, setPredictedMerkleAirdrop] = useState<Address>();
   const [migratingCurveForm, setMigratingCurveForm] = useState<MigratingCurveForm>(() => defaultMigratingCurveForm());
   const [migratingCurveAddress, setMigratingCurveAddress] = useState("");
   const [migratingCurveSnapshot, setMigratingCurveSnapshot] = useState<MigratingBondingCurveState>();
@@ -403,6 +416,9 @@ export function App(): React.JSX.Element {
     setFixedPriceSaleAddress("");
     setFixedPriceSaleSnapshot(undefined);
     setPredictedFixedPriceSale(undefined);
+    setMerkleAirdropAddress("");
+    setMerkleAirdropSnapshot(undefined);
+    setPredictedMerkleAirdrop(undefined);
     setMigratingCurveAddress("");
     setMigratingCurveSnapshot(undefined);
     setPredictedMigratingCurve(undefined);
@@ -533,6 +549,7 @@ export function App(): React.JSX.Element {
     setBoardroomMintTo("");
     setPredictedBoardroomGrant(undefined);
     setPredictedFixedPriceSale(undefined);
+    setPredictedMerkleAirdrop(undefined);
     setPredictedMigratingCurve(undefined);
     setPredictedLockedLiquidity(undefined);
   }, []);
@@ -540,6 +557,11 @@ export function App(): React.JSX.Element {
   const updateFixedPriceSaleAddress = useCallback((address: string): void => {
     setFixedPriceSaleAddress(address);
     setFixedPriceSaleSnapshot(undefined);
+  }, []);
+
+  const updateMerkleAirdropAddress = useCallback((address: string): void => {
+    setMerkleAirdropAddress(address);
+    setMerkleAirdropSnapshot(undefined);
   }, []);
 
   const updateMigratingCurveAddress = useCallback((address: string): void => {
@@ -1167,6 +1189,92 @@ export function App(): React.JSX.Element {
     await Promise.all([refreshBoardroom(boardroom.address), loadFixedPriceSaleAddress(sale)]);
   };
 
+  const merkleAirdropTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomMerkleAirdropTerms> => {
+    const shareAmount = await parseErc20Amount(publicClient, merkleAirdropForm.shareAmount, boardroom.shareToken, "Airdrop share amount");
+    const maxGrantClaims = uintInput(merkleAirdropForm.maxGrantClaims, "Airdrop grant claim cap");
+    if (maxGrantClaims > 65_535n) {
+      throw new Error("Airdrop grant claim cap must fit uint16.");
+    }
+
+    return {
+      shareAmount,
+      merkleRoot: requireBytes32(merkleAirdropForm.merkleRoot, "Merkle root"),
+      startTime: uintInput(merkleAirdropForm.startTime, "Airdrop start time"),
+      endTime: uintInput(merkleAirdropForm.endTime, "Airdrop end time"),
+      maxGrantClaims: Number(maxGrantClaims),
+      salt: requireBytes32(merkleAirdropForm.salt, "Airdrop salt"),
+    };
+  };
+
+  const predictMerkleAirdrop = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
+    const { salt } = await merkleAirdropTerms(boardroom);
+    const predicted = await sdkPredictMerkleAirdropAddress(publicClient, { factory, boardroom: boardroom.address, salt });
+    setPredictedMerkleAirdrop(predicted);
+    updateMerkleAirdropAddress(predicted);
+    pushLog(`Predicted Merkle airdrop ${predicted}`, "success");
+  };
+
+  const loadMerkleAirdropAddress = async (address?: Address): Promise<MerkleAirdropState> => {
+    const airdrop = address ?? requireAddress(merkleAirdropAddress, "Merkle airdrop address");
+    const snapshot = await readMerkleAirdropState(publicClient, airdrop);
+    setMerkleAirdropSnapshot(snapshot);
+    setMerkleAirdropAddress(airdrop);
+    return snapshot;
+  };
+
+  const loadMerkleAirdrop = async (): Promise<void> => {
+    const airdrop = requireAddress(merkleAirdropAddress, "Merkle airdrop address");
+    await loadMerkleAirdropAddress(airdrop);
+    pushLog(`Loaded Merkle airdrop ${airdrop}`, "success");
+  };
+
+  const createMerkleAirdrop = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
+    const protocolPolicy = requireDeploymentAddress(deployment?.protocolPolicy ?? factory, "ProtocolPolicy");
+    const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
+    const terms = await merkleAirdropTerms(boardroom);
+    const predicted = await sdkPredictMerkleAirdropAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
+    await submitContractTransaction(
+      "Merkle airdrop creation",
+      buildBoardroomMerkleAirdropBatch({
+        boardroom: boardroom.address,
+        factory,
+        shareToken: boardroom.shareToken,
+        terms,
+        policy: protocolPolicy,
+        assetPolicy,
+      }),
+    );
+    setPredictedMerkleAirdrop(predicted);
+    updateMerkleAirdropAddress(predicted);
+    await Promise.all([refreshBoardroom(boardroom.address), loadMerkleAirdropAddress(predicted)]);
+  };
+
+  const closeMerkleAirdrop = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
+    const airdrop = requireAddress(merkleAirdropAddress, "Merkle airdrop address");
+    await submitContractTransaction(
+      "Merkle airdrop close",
+      buildBoardroomMerkleAirdropCloseAction({ boardroom: boardroom.address, policy: factory, airdrop }),
+    );
+    await Promise.all([refreshBoardroom(boardroom.address), loadMerkleAirdropAddress(airdrop)]);
+  };
+
+  const cancelMerkleAirdrop = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
+    const airdrop = requireAddress(merkleAirdropAddress, "Merkle airdrop address");
+    await submitContractTransaction(
+      "Merkle airdrop cancel",
+      buildBoardroomMerkleAirdropCancelAction({ boardroom: boardroom.address, policy: factory, airdrop }),
+    );
+    await Promise.all([refreshBoardroom(boardroom.address), loadMerkleAirdropAddress(airdrop)]);
+  };
+
   const migratingCurveTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomMigratingBondingCurveTerms> => {
     const quoteToken = requireAddress(migratingCurveForm.quoteToken, "Quote token");
     const quoteToLpBps = uintInput(migratingCurveForm.quoteToLpBps, "Quote-to-LP bps");
@@ -1615,12 +1723,14 @@ export function App(): React.JSX.Element {
       updateBoardroomAddress(distribution.boardroom);
       if (distribution.kind === "migrating-bonding-curve") {
         updateMigratingCurveAddress(distribution.distribution);
+      } else if (distribution.kind === "merkle-airdrop") {
+        updateMerkleAirdropAddress(distribution.distribution);
       } else {
         updateFixedPriceSaleAddress(distribution.distribution);
       }
       navigateView("manage");
     },
-    [navigateView, updateBoardroomAddress, updateFixedPriceSaleAddress, updateMigratingCurveAddress],
+    [navigateView, updateBoardroomAddress, updateFixedPriceSaleAddress, updateMerkleAirdropAddress, updateMigratingCurveAddress],
   );
 
   const useDiscoveredLockedLiquidity = useCallback(
@@ -1758,6 +1868,19 @@ export function App(): React.JSX.Element {
         setLockedLiquidityAddress: updateLockedLiquidityAddress,
         setLockedLiquidityExitForm,
         setLockedLiquidityForm,
+      }}
+      merkleAirdrop={{
+        address: merkleAirdropAddress,
+        form: merkleAirdropForm,
+        predicted: predictedMerkleAirdrop,
+        snapshot: merkleAirdropSnapshot,
+        cancel: cancelMerkleAirdrop,
+        close: closeMerkleAirdrop,
+        create: createMerkleAirdrop,
+        load: loadMerkleAirdrop,
+        predict: predictMerkleAirdrop,
+        setMerkleAirdropAddress: updateMerkleAirdropAddress,
+        setMerkleAirdropForm,
       }}
       migratingCurve={{
         address: migratingCurveAddress,

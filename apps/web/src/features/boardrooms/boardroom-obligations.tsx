@@ -1,4 +1,4 @@
-import type { FixedPriceSaleState, MigratingBondingCurveState } from "@pledge.cash/sdk";
+import type { FixedPriceSaleState, MerkleAirdropState, MigratingBondingCurveState } from "@pledge.cash/sdk";
 import type React from "react";
 import { AddressLink, Facts } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
@@ -11,16 +11,18 @@ import type {
   BoardroomSnapshot,
 } from "../../lib/types";
 import { GrantVestingChart } from "../grants/grant-vesting-chart";
-import { curveStatusLabel, saleStatusLabel, StatusBadge } from "./boardroom-panel-shared";
+import { airdropStatusLabel, curveStatusLabel, saleStatusLabel, StatusBadge } from "./boardroom-panel-shared";
 
 export function ObligationLists({
   boardroomSnapshot,
   setFixedPriceSaleAddress,
+  setMerkleAirdropAddress,
   setLockedLiquidityAddress,
   setMigratingCurveAddress,
 }: {
   boardroomSnapshot: BoardroomSnapshot | undefined;
   setFixedPriceSaleAddress: (address: string) => void;
+  setMerkleAirdropAddress: (address: string) => void;
   setLockedLiquidityAddress: (address: string) => void;
   setMigratingCurveAddress: (address: string) => void;
 }): React.JSX.Element {
@@ -41,6 +43,7 @@ export function ObligationLists({
             distribution={distribution}
             key={distribution.address}
             setFixedPriceSaleAddress={setFixedPriceSaleAddress}
+            setMerkleAirdropAddress={setMerkleAirdropAddress}
             setMigratingCurveAddress={setMigratingCurveAddress}
           />
         ))}
@@ -101,16 +104,22 @@ function GrantRow({ grant }: { grant: BoardroomGrantSnapshot }): React.JSX.Eleme
 function DistributionRow({
   distribution,
   setFixedPriceSaleAddress,
+  setMerkleAirdropAddress,
   setMigratingCurveAddress,
 }: {
   distribution: BoardroomDistributionSnapshot;
   setFixedPriceSaleAddress: (address: string) => void;
+  setMerkleAirdropAddress: (address: string) => void;
   setMigratingCurveAddress: (address: string) => void;
 }): React.JSX.Element {
-  const isFixedSale = distribution.kind === "fixed-price-sale";
-  const status = isFixedSale
-    ? saleStatusLabel((distribution.state as FixedPriceSaleState | undefined)?.saleStatus)
-    : curveStatusLabel((distribution.state as MigratingBondingCurveState | undefined)?.curveStatus);
+  const status =
+    distribution.kind === "fixed-price-sale"
+      ? saleStatusLabel((distribution.state as FixedPriceSaleState | undefined)?.saleStatus)
+      : distribution.kind === "migrating-bonding-curve"
+        ? curveStatusLabel((distribution.state as MigratingBondingCurveState | undefined)?.curveStatus)
+        : distribution.kind === "merkle-airdrop"
+          ? airdropStatusLabel((distribution.state as MerkleAirdropState | undefined)?.airdropStatus)
+          : "Unknown";
   const closed = Boolean(distribution.state?.closed);
 
   return (
@@ -128,6 +137,10 @@ function DistributionRow({
         ) : distribution.kind === "migrating-bonding-curve" ? (
           <Button size="sm" variant="secondary" onClick={() => setMigratingCurveAddress(distribution.address)}>
             Use Curve
+          </Button>
+        ) : distribution.kind === "merkle-airdrop" ? (
+          <Button size="sm" variant="secondary" onClick={() => setMerkleAirdropAddress(distribution.address)}>
+            Use Airdrop
           </Button>
         ) : null}
       </div>
@@ -175,6 +188,14 @@ function distributionFacts(distribution: BoardroomDistributionSnapshot): { label
       { label: "Remaining shares", value: formatTokenAmount(state?.remainingSaleShares, distribution.shareTokenMetadata) },
       { label: "Quote reserve", value: formatTokenAmount(state?.quoteReserve, distribution.quoteTokenMetadata) },
       { label: "Can migrate", value: state ? String(state.canMigrate) : "Unknown" },
+    ];
+  }
+  if (distribution.kind === "merkle-airdrop") {
+    const state = distribution.state as MerkleAirdropState | undefined;
+    return [
+      { label: "Remaining shares", value: formatTokenAmount(state?.remainingShares, distribution.shareTokenMetadata) },
+      { label: "Grant factory", value: state ? <AddressLink address={state.tokenGrantFactory} /> : "Unknown" },
+      { label: "Merkle root", value: state?.merkleRoot ?? "Unknown" },
     ];
   }
   return [];

@@ -144,7 +144,8 @@ contract Deploy is Script {
                 state,
                 PledgeCashDeploymentSalts.distributionFactory(),
                 abi.encodePacked(
-                    type(DistributionFactory).creationCode, abi.encode(address(state.lockedLiquidityFactory))
+                    type(DistributionFactory).creationCode,
+                    abi.encode(address(state.lockedLiquidityFactory), address(state.tokenGrantFactory))
                 )
             )
         );

@@ -1,7 +1,7 @@
 # Distribution Protocol
 
 This document describes the Boardroom distribution primitives in `packages/contracts/src/distribution/DistributionFactory.sol`,
-`FixedPriceSale.sol`, and `MigratingBondingCurve.sol`.
+`FixedPriceSale.sol`, `MerkleAirdrop.sol`, and `MigratingBondingCurve.sol`.
 
 ## Actors
 
@@ -13,12 +13,15 @@ This document describes the Boardroom distribution primitives in `packages/contr
 - Boardroom owner as migrator: calls a ready curve through `Boardroom.execute` to migrate reserves into Boardroom-owned
   locked AMM liquidity.
 - Distribution recipient: receives purchased Boardroom shares.
+- Airdrop claimant: proves inclusion in a Merkle root and receives Boardroom shares directly or through a Boardroom-issued grant.
 
 ## Assets
 
 - Boardroom share token: ERC20 minted by the Boardroom and sold through distributions.
 - Payment or quote token: ERC20 paid by buyers. Fixed-price sale payments go directly to the Boardroom treasury; curve quote reserves stay in the curve until sold back, migrated, or cancelled.
 - Distribution escrow: Boardroom shares held by a fixed-price sale or migrating curve until bought, closed, cancelled, or migrated.
+- Airdrop escrow: Boardroom shares held by a Merkle airdrop until claimed directly, escrowed into claim-created grants,
+  closed, or cancelled.
 - Locked liquidity: AMM LP tokens held by `LockedLiquidity` after a curve migrates.
 
 Native value is not used by these distribution flows.
@@ -33,6 +36,7 @@ State:
 
 - `lockedLiquidityFactory`: factory used by migrating curves to create Boardroom-owned locked AMM liquidity.
 - `fixedPriceSaleLogic`: immutable implementation cloned for each fixed-price sale.
+- `merkleAirdropLogic`: immutable implementation cloned for each Merkle airdrop.
 - `migratingBondingCurveLogic`: immutable implementation cloned for each migrating curve.
 - `isDistribution`: whether an address is a factory-created distribution.
 - `distributionBoardroom`: Boardroom that created a distribution.
@@ -44,7 +48,10 @@ As a Boardroom policy, the factory allows:
 - Boardroom share-token approvals where spender is the distribution factory.
 - `DistributionFactory.createFixedPriceSale(...)` calls where `params.shareToken` equals the calling Boardroom's share token.
 - `DistributionFactory.createMigratingBondingCurve(...)` calls where `params.shareToken` equals the calling Boardroom's share token and locked-liquidity support is configured.
+- `DistributionFactory.createMerkleAirdrop(...)` calls where `params.shareToken` equals the calling Boardroom's share
+  token and the Merkle root, inventory, and time window are valid.
 - `FixedPriceSale.close()` or `FixedPriceSale.cancel()` calls for fixed-price sales owned by the calling Boardroom.
+- `MerkleAirdrop.close()` or `MerkleAirdrop.cancel()` calls for airdrops owned by the calling Boardroom.
 - `MigratingBondingCurve.cancel()` or `MigratingBondingCurve.migrate(...)` calls for curves owned by the calling Boardroom.
 
 ### FixedPriceSale
@@ -145,6 +152,35 @@ Effects:
 Future buys also fail as soon as the creating Boardroom starts wind-down, even before the Boardroom closes or cancels the
 sale.
 
+## Merkle Airdrop Create And Claim
+
+Preconditions:
+
+- Boardroom owner has minted share inventory to the Boardroom.
+- Boardroom executes a policy-approved batch:
+  - approve the distribution factory for the airdrop inventory,
+  - call `createMerkleAirdrop`.
+- share token is the Boardroom's own share token.
+- share amount and Merkle root are nonzero.
+- end time is zero or not before start time.
+- `maxGrantClaims` is the maximum number of grant-claim leaves the airdrop can honor.
+
+Effects:
+
+- factory deploys an airdrop clone at a deterministic address,
+- factory records the airdrop under the Boardroom,
+- Boardroom reserves `maxGrantClaims` issued-grant slots for the airdrop,
+- airdrop initializes lifecycle and Merkle parameters,
+- factory transfers the full share inventory from the Boardroom into airdrop escrow.
+
+Direct claims transfer proven share amounts from airdrop escrow to the claimant account. Grant claims create a
+Boardroom-issued `TokenGrant` funded by the airdrop escrow, consume one reserved Boardroom grant slot, and record that
+grant so redemptions cannot open while it remains live. Grant-claim leaves are capped by `maxGrantClaims`; once the cap
+is reached, otherwise valid grant proofs revert instead of overflowing the Boardroom's bounded issued-grant list.
+
+Closing or cancelling an airdrop returns unclaimed share inventory to the Boardroom and releases any unused reserved
+grant slots.
+
 ## Curve Create
 
 Preconditions:
@@ -218,6 +254,8 @@ Cancellation is Boardroom-only and returns all curve-held shares and quote reser
 - Curve sell refunds are limited by account-bound sell rights credited by curve buys.
 - A Boardroom policy call cannot create a sale for another share token.
 - A Boardroom policy call cannot create a curve for another share token.
+- A Boardroom policy call cannot create an airdrop for another share token.
+- Grant-claim airdrops reserve Boardroom issued-grant capacity before claims can create grants.
 - Curve migration creates a locker owned by the originating Boardroom, not by the curve.
 - The Boardroom records migrated locked liquidity before redemptions can open.
 - Fee-on-transfer share or payment tokens fail safely through exact balance-delta checks.

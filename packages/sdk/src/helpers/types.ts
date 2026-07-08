@@ -56,6 +56,29 @@ export type MigratingBondingCurveTerms = {
 
 export type BoardroomMigratingBondingCurveTerms = Omit<MigratingBondingCurveTerms, "shareToken">;
 
+export type MerkleAirdropTerms = {
+  shareToken: Address;
+  shareAmount: bigint;
+  merkleRoot: Hex;
+  startTime: bigint;
+  endTime: bigint;
+  maxGrantClaims: number;
+  salt: Hex;
+};
+
+export type BoardroomMerkleAirdropTerms = Omit<MerkleAirdropTerms, "shareToken">;
+
+export type MerkleAirdropGrantClaimTerms = {
+  paymentToken: Address;
+  price: bigint;
+  expiry: bigint;
+  vestingCliff: bigint;
+  vestingEnd: bigint;
+  transferable: boolean;
+  transferUnlockTime: bigint;
+  salt: Hex;
+};
+
 export type LockedLiquidityTerms = {
   tokenA: Address;
   tokenB: Address;
@@ -138,6 +161,23 @@ export type MigratingBondingCurveState = {
   soldShares: bigint;
   quoteReserve: bigint;
   canMigrate: boolean;
+  closed: boolean;
+};
+
+export type MerkleAirdropState = {
+  address: Address;
+  factory: Address;
+  boardroom: Address;
+  shareToken: Address;
+  tokenGrantFactory: Address;
+  airdropSupply: bigint;
+  remainingShares: bigint;
+  merkleRoot: Hex;
+  startTime: bigint;
+  endTime: bigint;
+  maxGrantClaims: number;
+  claimedGrantCount: number;
+  airdropStatus: number;
   closed: boolean;
 };
 
@@ -236,7 +276,7 @@ export type DiscoveredDistribution = {
   distribution: Address;
   boardroom: Address;
   factory: Address;
-  kind: "fixed-price-sale" | "migrating-bonding-curve" | "unknown";
+  kind: "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "unknown";
   shareToken: Address;
   paymentToken: Address;
   shareAmount: bigint;

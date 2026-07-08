@@ -32,10 +32,12 @@ The deploy script also registers the token grant, distribution, and locked-liqui
 spenders in `AssetPolicy`. Boardroom-created share tokens and other project-specific assets still need to be registered
 in `AssetPolicy` before their approvals can be executed through a Boardroom.
 
-The checked-in HyperEVM testnet artifact may model subsystems independently while deployment history is being rebuilt.
-If an existing artifact predates a current subsystem, mark that subsystem pending instead of keeping stale partial fields.
-For example, a TokenGrant deployment without a current `DistributionFactory` should set `boardroomStatus: "pending"` and
-omit Boardroom factory fields until a full Boardroom broadcast replaces the artifact.
+The checked-in testnet artifacts may model subsystems independently while deployment history is being rebuilt. If an
+existing artifact predates a current subsystem, mark that subsystem pending instead of keeping stale partial fields. For
+example, a TokenGrant deployment without a current `DistributionFactory` should set `boardroomStatus: "pending"` and
+omit Boardroom factory fields until a full Boardroom broadcast replaces the artifact. If root factory bytecode changes
+under deterministic deployment, use new salts for those roots and keep the published artifacts pending until the current
+stack is actually broadcast.
 
 ## Environment
 

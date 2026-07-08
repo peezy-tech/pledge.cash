@@ -20,7 +20,9 @@ pledge.cash is currently oriented around testnet and local development flows.
 | Public app | `https://pledge.cash/` |
 
 Checked-in deployment artifacts are published with the static app so users and the frontend can resolve contract
-addresses for the active chain. Monad testnet remains pending until its first broadcast artifact is committed.
+addresses for the active chain. A testnet artifact can be marked pending while a current deterministic stack is waiting
+for a fresh broadcast; in that state the frontend withholds stale contract addresses instead of routing users to an
+older deployment.
 
 ## Local Development
 

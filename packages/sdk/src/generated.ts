@@ -2850,6 +2850,38 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "issuedGrantReservationsForDistribution",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "issuedGrantSlotReservations",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "lockedLiquidityAt",
     "inputs": [
       {
@@ -2962,6 +2994,19 @@ export const boardroomAbi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "recordGrantFromDistribution",
+    "inputs": [
+      {
+        "name": "grant",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -3194,6 +3239,44 @@ export const boardroomAbi = [
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BoardroomGrantSlotsReleased",
+    "inputs": [
+      {
+        "name": "distribution",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "count",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BoardroomGrantSlotsReserved",
+    "inputs": [
+      {
+        "name": "distribution",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "count",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -3664,6 +3747,17 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
+    "name": "NoReservedIssuedGrantSlots",
+    "inputs": [
+      {
+        "name": "distribution",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "NotInitializing",
     "inputs": []
   },
@@ -3714,6 +3808,22 @@ export const boardroomAbi = [
     "type": "error",
     "name": "TooManyIssuedDistributions",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TooManyIssuedGrantReservations",
+    "inputs": [
+      {
+        "name": "requested",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "available",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",
@@ -4663,6 +4773,11 @@ export const distributionFactoryAbi = [
         "name": "lockedLiquidityFactory_",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "tokenGrantFactory_",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
@@ -4774,6 +4889,62 @@ export const distributionFactoryAbi = [
     "outputs": [
       {
         "name": "sale",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "createMerkleAirdrop",
+    "inputs": [
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct MerkleAirdrop.CreateParams",
+        "components": [
+          {
+            "name": "shareToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "shareAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "merkleRoot",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "startTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "endTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "maxGrantClaims",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "salt",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "airdrop",
         "type": "address",
         "internalType": "address"
       }
@@ -5008,6 +5179,19 @@ export const distributionFactoryAbi = [
   },
   {
     "type": "function",
+    "name": "merkleAirdropLogic",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "migratingBondingCurveLogic",
     "inputs": [],
     "outputs": [
@@ -5045,6 +5229,30 @@ export const distributionFactoryAbi = [
   },
   {
     "type": "function",
+    "name": "predictMerkleAirdropAddress",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "predictMigratingBondingCurveAddress",
     "inputs": [
       {
@@ -5058,6 +5266,19 @@ export const distributionFactoryAbi = [
         "internalType": "bytes32"
       }
     ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "tokenGrantFactory",
+    "inputs": [],
     "outputs": [
       {
         "name": "",
@@ -8123,6 +8344,889 @@ export const migratingBondingCurveAbi = [
   }
 ] as const;
 
+export const merkleAirdropAbi = [
+  {
+    "type": "constructor",
+    "inputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "DIRECT_CLAIM_TYPEHASH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "GRANT_CLAIM_TYPEHASH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "GRANT_TERMS_TYPEHASH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "airdropStatus",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "enum MerkleAirdrop.AirdropStatus"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "airdropSupply",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "boardroom",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "cancel",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "claim",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "proof",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "claimGrant",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct MerkleAirdrop.GrantClaimParams",
+        "components": [
+          {
+            "name": "paymentToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "price",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "expiry",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "vestingCliff",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "vestingEnd",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "transferable",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "transferUnlockTime",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "salt",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      },
+      {
+        "name": "proof",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "grant",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "claimedGrantCount",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "close",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "endTime",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "factory",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getDirectClaimLeaf",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getGrantClaimLeaf",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct MerkleAirdrop.GrantClaimParams",
+        "components": [
+          {
+            "name": "paymentToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "price",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "expiry",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "vestingCliff",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "vestingEnd",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "transferable",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "transferUnlockTime",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "salt",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getGrantSalt",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getGrantTermsHash",
+    "inputs": [
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct MerkleAirdrop.GrantClaimParams",
+        "components": [
+          {
+            "name": "paymentToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "price",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "expiry",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "vestingCliff",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "vestingEnd",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "transferable",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "transferUnlockTime",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "salt",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "inputs": [
+      {
+        "name": "boardroom_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenGrantFactory_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct MerkleAirdrop.CreateParams",
+        "components": [
+          {
+            "name": "shareToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "shareAmount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "merkleRoot",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "startTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "endTime",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "maxGrantClaims",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "salt",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "isClaimed",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isClosed",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "maxGrantClaims",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "merkleRoot",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "remainingShares",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "shareToken",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "startTime",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "tokenGrantFactory",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "AirdropClaimed",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "AirdropGrantClaimed",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "grant",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Initialized",
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MerkleAirdropCancelled",
+    "inputs": [
+      {
+        "name": "returnedShares",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MerkleAirdropClosed",
+    "inputs": [
+      {
+        "name": "returnedShares",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MerkleAirdropInitialized",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "shareToken",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "tokenGrantFactory",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "shareAmount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "merkleRoot",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "startTime",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "endTime",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "maxGrantClaims",
+        "type": "uint16",
+        "indexed": false,
+        "internalType": "uint16"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "AirdropNotActive",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "AirdropNotOpen",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ClaimAlreadyMade",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InsufficientShares",
+    "inputs": [
+      {
+        "name": "requested",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "available",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidAmount",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidInitialization",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidMerkleRoot",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidProof",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidTimeWindow",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotInitializing",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyBoardroom",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Reentrancy",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TooManyGrantClaims",
+    "inputs": [
+      {
+        "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnexpectedTokenBalanceChange",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  }
+] as const;
+
 export const poolFeesAbi = [
   {
     "type": "constructor",
@@ -9544,6 +10648,87 @@ export const tokenGrantFactoryAbi = [
   },
   {
     "type": "function",
+    "name": "createGrantFromDistribution",
+    "inputs": [
+      {
+        "name": "issuer",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct TokenGrantFactory.GrantCreateParams",
+        "components": [
+          {
+            "name": "holder",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "token",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "paymentToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "price",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "expiry",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "vestingCliff",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "vestingEnd",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "transferable",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "transferUnlockTime",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "salt",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "grant",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
     "name": "creationFee",
     "inputs": [],
     "outputs": [
@@ -10280,6 +11465,22 @@ export const tokenGrantFactoryAbi = [
   },
   {
     "type": "error",
+    "name": "UnauthorizedGrantIssuer",
+    "inputs": [
+      {
+        "name": "issuer",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "caller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "UnexpectedTokenBalanceChange",
     "inputs": [
       {
@@ -10329,6 +11530,7 @@ export const pledgeCashAbis = {
   LockedLiquidity: lockedLiquidityAbi,
   LockedLiquidityFactory: lockedLiquidityFactoryAbi,
   MigratingBondingCurve: migratingBondingCurveAbi,
+  MerkleAirdrop: merkleAirdropAbi,
   PoolFees: poolFeesAbi,
   ProtocolPolicy: protocolPolicyAbi,
   TokenGrant: tokenGrantAbi,
@@ -10338,84 +11540,12 @@ export const pledgeCashAbis = {
 export const pledgeCashDeployments = {
   10143: {
     chainId: 10143,
-    deterministicDeployment: true,
-    deterministicDeploymentVersion: "pledge.cash.deterministic.v1",
-    deterministicDeployer: "0xa3bb8CD1442f3B373af5418E68bd2Af15445eC12" as Address,
-    deterministicDeployerOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    create2Factory: "0x4e59b44847b379578588920cA78FbF26c0B4956C" as Address,
-    boardroomFactory: "0x4302Aa261B4416722413ea482dC3B70eb410F95c" as Address,
-    boardroomPolicyRegistry: "0x5F381b61b5cAf8ef99f744557BD0f36D73320130" as Address,
-    protocolPolicy: "0x0c754b2F40A85b492265d7186773a89c12F90c4E" as Address,
-    assetPolicy: "0x25Ec56D5f1F5bb05903c268fCB869578A2800469" as Address,
-    distributionFactory: "0x923504c324b9fc18571f3f0AF9E0D7264129B292" as Address,
-    ammFactory: "0xe93fCee9F82768D6027bae46319c556089b1604d" as Address,
-    ammRouter: "0x17a9d6DdD77ff73BfAD4886AdbfD386650c0ace7" as Address,
-    lockedLiquidityFactory: "0xFA20c8Cf418943c26d3126035a79dEd9Eadb192F" as Address,
-    tokenGrantFactory: "0xa8c1590492c30d205704f0733E788C3900F283af" as Address,
-    tokenGrantLogic: "0xa6148C7da5BB924Ae442dFDEE0B2F6Fc17e9Ae59" as Address,
-    wrappedNative: "0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541" as Address,
-    deployer: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    factoryOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    policyRegistryOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    protocolPolicyOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    assetPolicyOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    protocolPolicyAllowed: true,
-    assetPolicyAllowed: true,
-    distributionPolicyAllowed: true,
-    lockedLiquidityPolicyAllowed: true,
-    tokenGrantPolicyAllowed: true,
-    protocolTokenGrantFactoryAllowed: true,
-    protocolTokenGrantFactoryValueAllowed: true,
-    protocolDistributionFactoryAllowed: true,
-    protocolLockedLiquidityFactoryAllowed: true,
-    protocolAmmFactoryAllowed: true,
-    protocolAmmRouterAllowed: false,
-    assetWrappedNativeAllowed: true,
-    assetTokenGrantSpenderAllowed: true,
-    assetDistributionSpenderAllowed: true,
-    assetLockedLiquiditySpenderAllowed: true,
-    creationFee: 100000000000000000n,
-    deploymentTimestamp: 1783187184n
+    status: "pending",
+    reason: "Airdrop-capable deterministic v2 deployment has not been broadcast yet"
   },
   998: {
     chainId: 998,
-    deterministicDeployment: true,
-    deterministicDeploymentVersion: "pledge.cash.deterministic.v1",
-    deterministicDeployer: "0xa3bb8CD1442f3B373af5418E68bd2Af15445eC12" as Address,
-    deterministicDeployerOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    create2Factory: "0x4e59b44847b379578588920cA78FbF26c0B4956C" as Address,
-    boardroomFactory: "0x4302Aa261B4416722413ea482dC3B70eb410F95c" as Address,
-    boardroomPolicyRegistry: "0x5F381b61b5cAf8ef99f744557BD0f36D73320130" as Address,
-    protocolPolicy: "0x0c754b2F40A85b492265d7186773a89c12F90c4E" as Address,
-    assetPolicy: "0x25Ec56D5f1F5bb05903c268fCB869578A2800469" as Address,
-    distributionFactory: "0x923504c324b9fc18571f3f0AF9E0D7264129B292" as Address,
-    ammFactory: "0xe93fCee9F82768D6027bae46319c556089b1604d" as Address,
-    ammRouter: "0x17a9d6DdD77ff73BfAD4886AdbfD386650c0ace7" as Address,
-    lockedLiquidityFactory: "0xFA20c8Cf418943c26d3126035a79dEd9Eadb192F" as Address,
-    tokenGrantFactory: "0xa8c1590492c30d205704f0733E788C3900F283af" as Address,
-    tokenGrantLogic: "0xa6148C7da5BB924Ae442dFDEE0B2F6Fc17e9Ae59" as Address,
-    wrappedNative: "0x5555555555555555555555555555555555555555" as Address,
-    deployer: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    factoryOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    policyRegistryOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    protocolPolicyOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    assetPolicyOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    protocolPolicyAllowed: true,
-    assetPolicyAllowed: true,
-    distributionPolicyAllowed: true,
-    lockedLiquidityPolicyAllowed: true,
-    tokenGrantPolicyAllowed: true,
-    protocolTokenGrantFactoryAllowed: true,
-    protocolTokenGrantFactoryValueAllowed: true,
-    protocolDistributionFactoryAllowed: true,
-    protocolLockedLiquidityFactoryAllowed: true,
-    protocolAmmFactoryAllowed: true,
-    protocolAmmRouterAllowed: false,
-    assetWrappedNativeAllowed: true,
-    assetTokenGrantSpenderAllowed: true,
-    assetDistributionSpenderAllowed: true,
-    assetLockedLiquiditySpenderAllowed: true,
-    creationFee: 100000000000000000n,
-    deploymentTimestamp: 1783185799n
+    status: "pending",
+    reason: "Airdrop-capable deterministic v2 deployment has not been broadcast yet"
   }
 } as const satisfies Record<number, PledgeCashDeployment>;

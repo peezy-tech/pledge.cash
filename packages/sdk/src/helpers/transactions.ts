@@ -7,6 +7,7 @@ import {
   fixedPriceSaleAbi,
   lockedLiquidityAbi,
   lockedLiquidityFactoryAbi,
+  merkleAirdropAbi,
   migratingBondingCurveAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
@@ -15,12 +16,15 @@ import type {
   BoardroomCall,
   BoardroomFixedPriceSaleTerms,
   BoardroomLockedLiquidityTerms,
+  BoardroomMerkleAirdropTerms,
   BoardroomMigratingBondingCurveTerms,
   BoardroomShareGrantTerms,
   FixedPriceSaleTerms,
   GrantCreationArgs,
   GrantCreationTerms,
   LockedLiquidityTerms,
+  MerkleAirdropGrantClaimTerms,
+  MerkleAirdropTerms,
   MigratingBondingCurveTerms,
 } from "./types";
 
@@ -221,6 +225,33 @@ export function migratingBondingCurveArgs(terms: MigratingBondingCurveTerms) {
       salt: terms.salt,
     },
   ] as const;
+}
+
+export function merkleAirdropArgs(terms: MerkleAirdropTerms) {
+  return [
+    {
+      shareToken: terms.shareToken,
+      shareAmount: terms.shareAmount,
+      merkleRoot: terms.merkleRoot,
+      startTime: terms.startTime,
+      endTime: terms.endTime,
+      maxGrantClaims: terms.maxGrantClaims,
+      salt: terms.salt,
+    },
+  ] as const;
+}
+
+export function merkleAirdropGrantClaimArgs(terms: MerkleAirdropGrantClaimTerms) {
+  return {
+    paymentToken: terms.paymentToken,
+    price: terms.price,
+    expiry: terms.expiry,
+    vestingCliff: terms.vestingCliff,
+    vestingEnd: terms.vestingEnd,
+    transferable: terms.transferable,
+    transferUnlockTime: terms.transferUnlockTime,
+    salt: terms.salt,
+  } as const;
 }
 
 export function lockedLiquidityArgs(terms: LockedLiquidityTerms) {
@@ -433,6 +464,133 @@ export function buildBoardroomMigratingCurveMigrationAction(input: {
       }),
     }),
   });
+}
+
+export function buildBoardroomMerkleAirdropApprovalCall(input: {
+  policy: Address;
+  shareToken: Address;
+  factory: Address;
+  amount: bigint;
+}): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.shareToken,
+    data: encodeFunctionData({
+      abi: boardroomTokenAbi,
+      functionName: "approve",
+      args: [input.factory, input.amount],
+    }),
+  });
+}
+
+export function buildBoardroomMerkleAirdropCreationCall(input: {
+  policy: Address;
+  factory: Address;
+  terms: MerkleAirdropTerms;
+}): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.factory,
+    data: encodeFunctionData({
+      abi: distributionFactoryAbi,
+      functionName: "createMerkleAirdrop",
+      args: merkleAirdropArgs(input.terms),
+    }),
+  });
+}
+
+export function buildBoardroomMerkleAirdropBatch(input: {
+  boardroom: Address;
+  factory: Address;
+  shareToken: Address;
+  terms: BoardroomMerkleAirdropTerms;
+  policy?: Address;
+  assetPolicy?: Address;
+}) {
+  const policy = input.policy ?? input.factory;
+  const assetPolicy = requireAssetPolicy(input.assetPolicy);
+  const terms = { ...input.terms, shareToken: input.shareToken } satisfies MerkleAirdropTerms;
+  const calls = [
+    buildBoardroomMerkleAirdropApprovalCall({
+      policy: assetPolicy,
+      shareToken: input.shareToken,
+      factory: input.factory,
+      amount: input.terms.shareAmount,
+    }),
+    buildBoardroomMerkleAirdropCreationCall({
+      policy,
+      factory: input.factory,
+      terms,
+    }),
+  ] as const;
+
+  return buildBoardroomExecuteBatchTransaction({
+    boardroom: input.boardroom,
+    calls,
+  });
+}
+
+export function buildBoardroomMerkleAirdropCloseAction(input: {
+  boardroom: Address;
+  policy: Address;
+  airdrop: Address;
+}) {
+  return buildBoardroomExecuteTransaction({
+    boardroom: input.boardroom,
+    call: buildBoardroomCall({
+      policy: input.policy,
+      target: input.airdrop,
+      data: encodeFunctionData({ abi: merkleAirdropAbi, functionName: "close" }),
+    }),
+  });
+}
+
+export function buildBoardroomMerkleAirdropCancelAction(input: {
+  boardroom: Address;
+  policy: Address;
+  airdrop: Address;
+}) {
+  return buildBoardroomExecuteTransaction({
+    boardroom: input.boardroom,
+    call: buildBoardroomCall({
+      policy: input.policy,
+      target: input.airdrop,
+      data: encodeFunctionData({ abi: merkleAirdropAbi, functionName: "cancel" }),
+    }),
+  });
+}
+
+export function buildMerkleAirdropClaimTransaction(input: {
+  airdrop: Address;
+  index: bigint;
+  account: Address;
+  amount: bigint;
+  proof: readonly Hex[];
+}) {
+  return {
+    address: input.airdrop,
+    abi: merkleAirdropAbi,
+    functionName: "claim",
+    args: [input.index, input.account, input.amount, input.proof] as const,
+  };
+}
+
+export function buildMerkleAirdropGrantClaimTransaction(input: {
+  airdrop: Address;
+  index: bigint;
+  account: Address;
+  amount: bigint;
+  terms: MerkleAirdropGrantClaimTerms;
+  proof: readonly Hex[];
+  creationFee?: bigint;
+}) {
+  return {
+    address: input.airdrop,
+    abi: merkleAirdropAbi,
+    functionName: "claimGrant",
+    args: [input.index, input.account, input.amount, merkleAirdropGrantClaimArgs(input.terms), input.proof] as const,
+    value: input.creationFee ?? 0n,
+  };
 }
 
 export function buildBoardroomLockedLiquidityApprovalCall(input: {
