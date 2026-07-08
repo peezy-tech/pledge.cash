@@ -222,7 +222,7 @@ describe("web app shell", () => {
     expect(html).toContain("pledge.cash");
     expect(html).toContain("Project workspace");
     expect(html).toContain("Local Anvil");
-    expect(html).toContain("Ready");
+    expect(html).toContain("Pending");
     expect(html).toContain("Overview");
     expect(html).toContain("Market");
     expect(html).toContain("Wallet");
