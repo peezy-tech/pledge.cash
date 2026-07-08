@@ -372,6 +372,8 @@ export async function readMerkleAirdropState(
     merkleRoot,
     startTime,
     endTime,
+    maxGrantClaims,
+    claimedGrantCount,
     airdropStatus,
     closed,
   ] = await Promise.all([
@@ -384,6 +386,8 @@ export async function readMerkleAirdropState(
     client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "merkleRoot" }),
     client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "startTime" }),
     client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "endTime" }),
+    client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "maxGrantClaims" }),
+    client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "claimedGrantCount" }),
     client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "airdropStatus" }),
     client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "isClosed" }),
   ]);
@@ -399,6 +403,8 @@ export async function readMerkleAirdropState(
     merkleRoot: merkleRoot as Hex,
     startTime: startTime as bigint,
     endTime: endTime as bigint,
+    maxGrantClaims: Number(maxGrantClaims),
+    claimedGrantCount: Number(claimedGrantCount),
     airdropStatus: Number(airdropStatus),
     closed: closed as boolean,
   };

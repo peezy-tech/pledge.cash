@@ -246,10 +246,14 @@ contract DistributionTest is Test {
         bytes32 root =
             _grantClaimLeaf(predictedAirdrop, boardroom, shareToken, 0, recipient, AIRDROP_CLAIM_SHARES, grantParams);
 
-        MerkleAirdrop airdrop = _createMerkleAirdrop(boardroom, shareToken, root, AIRDROP_SHARES, salt);
+        MerkleAirdrop airdrop = _createMerkleAirdrop(boardroom, shareToken, root, AIRDROP_SHARES, salt, 1);
         bytes32[] memory proof = new bytes32[](0);
         bytes32 grantSalt = _grantSalt(predictedAirdrop, 0, recipient, grantParams.salt);
         address predictedGrant = tokenGrantFactory.predictGrantAddress(address(boardroom), grantSalt);
+
+        assertEq(airdrop.maxGrantClaims(), 1);
+        assertEq(boardroom.issuedGrantSlotReservations(), 1);
+        assertEq(boardroom.issuedGrantReservationsForDistribution(address(airdrop)), 1);
 
         vm.prank(recipient);
         address grantAddress = airdrop.claimGrant(0, recipient, AIRDROP_CLAIM_SHARES, grantParams, proof);
@@ -271,9 +275,96 @@ contract DistributionTest is Test {
         assertEq(shareToken.balanceOf(address(grant)), AIRDROP_CLAIM_SHARES);
         assertEq(shareToken.balanceOf(recipient), 0);
         assertEq(airdrop.remainingShares(), AIRDROP_SHARES - AIRDROP_CLAIM_SHARES);
+        assertEq(airdrop.claimedGrantCount(), 1);
+        assertEq(boardroom.issuedGrantSlotReservations(), 0);
+        assertEq(boardroom.issuedGrantReservationsForDistribution(address(airdrop)), 0);
         assertEq(boardroom.issuedGrantCount(), 1);
         assertEq(boardroom.issuedGrantAt(0), grantAddress);
         assertTrue(boardroom.isIssuedGrant(grantAddress));
+    }
+
+    function testMerkleAirdropGrantClaimsCannotExceedReservedSlots() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("airdrop-grant-cap");
+        bytes32 salt = keccak256("airdrop-grant-cap-create");
+        address predictedAirdrop = distributionFactory.predictMerkleAirdropAddress(address(boardroom), salt);
+        MerkleAirdrop.GrantClaimParams memory firstGrantParams = _grantClaimParams("airdrop-grant-cap-first");
+        MerkleAirdrop.GrantClaimParams memory secondGrantParams = _grantClaimParams("airdrop-grant-cap-second");
+        bytes32 firstLeaf = _grantClaimLeaf(
+            predictedAirdrop, boardroom, shareToken, 0, recipient, AIRDROP_CLAIM_SHARES, firstGrantParams
+        );
+        bytes32 secondLeaf =
+            _grantClaimLeaf(predictedAirdrop, boardroom, shareToken, 1, buyer, AIRDROP_CLAIM_SHARES, secondGrantParams);
+        bytes32 root = _hashPair(firstLeaf, secondLeaf);
+
+        MerkleAirdrop airdrop = _createMerkleAirdrop(boardroom, shareToken, root, AIRDROP_SHARES, salt, 1);
+        bytes32[] memory firstProof = new bytes32[](1);
+        firstProof[0] = secondLeaf;
+        bytes32[] memory secondProof = new bytes32[](1);
+        secondProof[0] = firstLeaf;
+
+        vm.prank(recipient);
+        airdrop.claimGrant(0, recipient, AIRDROP_CLAIM_SHARES, firstGrantParams, firstProof);
+
+        assertEq(airdrop.claimedGrantCount(), 1);
+        assertEq(boardroom.issuedGrantSlotReservations(), 0);
+
+        vm.prank(buyer);
+        vm.expectRevert(abi.encodeWithSelector(MerkleAirdrop.TooManyGrantClaims.selector, 1));
+        airdrop.claimGrant(1, buyer, AIRDROP_CLAIM_SHARES, secondGrantParams, secondProof);
+    }
+
+    function testMerkleAirdropCreationRejectsGrantReservationOverflow() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("airdrop-grant-overflow");
+        bytes32 salt = keccak256("airdrop-grant-overflow-create");
+        address predictedAirdrop = distributionFactory.predictMerkleAirdropAddress(address(boardroom), salt);
+        MerkleAirdrop.GrantClaimParams memory grantParams = _grantClaimParams("airdrop-grant-overflow-claim");
+        bytes32 root =
+            _grantClaimLeaf(predictedAirdrop, boardroom, shareToken, 0, recipient, AIRDROP_CLAIM_SHARES, grantParams);
+        MerkleAirdrop.CreateParams memory params = _airdropParams(address(shareToken), AIRDROP_SHARES, root, salt);
+        params.maxGrantClaims = 129;
+
+        vm.startPrank(owner);
+        boardroom.mint(address(boardroom), AIRDROP_SHARES);
+
+        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        calls[0] = _policyCall(
+            address(assetPolicy),
+            address(shareToken),
+            0,
+            abi.encodeWithSignature("approve(address,uint256)", address(distributionFactory), AIRDROP_SHARES)
+        );
+        calls[1] = _policyCall(
+            address(distributionFactory),
+            address(distributionFactory),
+            0,
+            abi.encodeCall(DistributionFactory.createMerkleAirdrop, (params))
+        );
+
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.TooManyIssuedGrantReservations.selector, 129, 128));
+        boardroom.executeBatch(calls);
+        vm.stopPrank();
+    }
+
+    function testMerkleAirdropCloseReleasesUnusedGrantReservations() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("airdrop-grant-release");
+        bytes32 salt = keccak256("airdrop-grant-release-create");
+        address predictedAirdrop = distributionFactory.predictMerkleAirdropAddress(address(boardroom), salt);
+        MerkleAirdrop.GrantClaimParams memory grantParams = _grantClaimParams("airdrop-grant-release-claim");
+        bytes32 root =
+            _grantClaimLeaf(predictedAirdrop, boardroom, shareToken, 0, recipient, AIRDROP_CLAIM_SHARES, grantParams);
+
+        MerkleAirdrop airdrop = _createMerkleAirdrop(boardroom, shareToken, root, AIRDROP_SHARES, salt, 2);
+
+        assertEq(boardroom.issuedGrantSlotReservations(), 2);
+        assertEq(boardroom.issuedGrantReservationsForDistribution(address(airdrop)), 2);
+
+        vm.prank(owner);
+        boardroom.execute(
+            _policyCall(address(distributionFactory), address(airdrop), 0, abi.encodeCall(MerkleAirdrop.close, ()))
+        );
+
+        assertEq(boardroom.issuedGrantSlotReservations(), 0);
+        assertEq(boardroom.issuedGrantReservationsForDistribution(address(airdrop)), 0);
     }
 
     function testBoardroomRedemptionsWaitForMerkleAirdropToClose() public {
@@ -912,11 +1003,23 @@ contract DistributionTest is Test {
         uint256 shareAmount,
         bytes32 salt
     ) internal returns (MerkleAirdrop airdrop) {
+        return _createMerkleAirdrop(boardroom, shareToken, root, shareAmount, salt, 0);
+    }
+
+    function _createMerkleAirdrop(
+        Boardroom boardroom,
+        BoardroomToken shareToken,
+        bytes32 root,
+        uint256 shareAmount,
+        bytes32 salt,
+        uint16 maxGrantClaims
+    ) internal returns (MerkleAirdrop airdrop) {
         vm.startPrank(owner);
         boardroom.mint(address(boardroom), shareAmount);
 
         address predictedAirdrop = distributionFactory.predictMerkleAirdropAddress(address(boardroom), salt);
         MerkleAirdrop.CreateParams memory params = _airdropParams(address(shareToken), shareAmount, root, salt);
+        params.maxGrantClaims = maxGrantClaims;
 
         Boardroom.Call[] memory calls = new Boardroom.Call[](2);
         calls[0] = _policyCall(
@@ -989,6 +1092,7 @@ contract DistributionTest is Test {
             merkleRoot: root,
             startTime: uint64(block.timestamp),
             endTime: 0,
+            maxGrantClaims: 0,
             salt: salt
         });
     }

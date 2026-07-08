@@ -1191,12 +1191,17 @@ export function App(): React.JSX.Element {
 
   const merkleAirdropTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomMerkleAirdropTerms> => {
     const shareAmount = await parseErc20Amount(publicClient, merkleAirdropForm.shareAmount, boardroom.shareToken, "Airdrop share amount");
+    const maxGrantClaims = uintInput(merkleAirdropForm.maxGrantClaims, "Airdrop grant claim cap");
+    if (maxGrantClaims > 65_535n) {
+      throw new Error("Airdrop grant claim cap must fit uint16.");
+    }
 
     return {
       shareAmount,
       merkleRoot: requireBytes32(merkleAirdropForm.merkleRoot, "Merkle root"),
       startTime: uintInput(merkleAirdropForm.startTime, "Airdrop start time"),
       endTime: uintInput(merkleAirdropForm.endTime, "Airdrop end time"),
+      maxGrantClaims: Number(maxGrantClaims),
       salt: requireBytes32(merkleAirdropForm.salt, "Airdrop salt"),
     };
   };

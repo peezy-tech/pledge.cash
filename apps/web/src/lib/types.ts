@@ -133,6 +133,7 @@ export type MerkleAirdropForm = {
   merkleRoot: string;
   startTime: string;
   endTime: string;
+  maxGrantClaims: string;
   salt: string;
 };
 

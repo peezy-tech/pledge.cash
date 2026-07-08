@@ -2850,6 +2850,38 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "issuedGrantReservationsForDistribution",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "issuedGrantSlotReservations",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "lockedLiquidityAt",
     "inputs": [
       {
@@ -3207,6 +3239,44 @@ export const boardroomAbi = [
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BoardroomGrantSlotsReleased",
+    "inputs": [
+      {
+        "name": "distribution",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "count",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BoardroomGrantSlotsReserved",
+    "inputs": [
+      {
+        "name": "distribution",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "count",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -3677,6 +3747,17 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
+    "name": "NoReservedIssuedGrantSlots",
+    "inputs": [
+      {
+        "name": "distribution",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "NotInitializing",
     "inputs": []
   },
@@ -3727,6 +3808,22 @@ export const boardroomAbi = [
     "type": "error",
     "name": "TooManyIssuedDistributions",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TooManyIssuedGrantReservations",
+    "inputs": [
+      {
+        "name": "requested",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "available",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",
@@ -4831,6 +4928,11 @@ export const distributionFactoryAbi = [
             "name": "endTime",
             "type": "uint64",
             "internalType": "uint64"
+          },
+          {
+            "name": "maxGrantClaims",
+            "type": "uint16",
+            "internalType": "uint16"
           },
           {
             "name": "salt",
@@ -8444,6 +8546,19 @@ export const merkleAirdropAbi = [
   },
   {
     "type": "function",
+    "name": "claimedGrantCount",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "close",
     "inputs": [],
     "outputs": [],
@@ -8715,6 +8830,11 @@ export const merkleAirdropAbi = [
             "internalType": "uint64"
           },
           {
+            "name": "maxGrantClaims",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
             "name": "salt",
             "type": "bytes32",
             "internalType": "bytes32"
@@ -8753,6 +8873,19 @@ export const merkleAirdropAbi = [
         "name": "",
         "type": "bool",
         "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "maxGrantClaims",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
       }
     ],
     "stateMutability": "view"
@@ -8964,6 +9097,12 @@ export const merkleAirdropAbi = [
         "internalType": "uint64"
       },
       {
+        "name": "maxGrantClaims",
+        "type": "uint16",
+        "indexed": false,
+        "internalType": "uint16"
+      },
+      {
         "name": "salt",
         "type": "bytes32",
         "indexed": false,
@@ -9053,6 +9192,17 @@ export const merkleAirdropAbi = [
     "type": "error",
     "name": "Reentrancy",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TooManyGrantClaims",
+    "inputs": [
+      {
+        "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",

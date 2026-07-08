@@ -40,6 +40,7 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         bytes32 merkleRoot;
         uint64 startTime;
         uint64 endTime;
+        uint16 maxGrantClaims;
         bytes32 salt;
     }
 
@@ -63,6 +64,8 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
     bytes32 public merkleRoot;
     uint64 public startTime;
     uint64 public endTime;
+    uint16 public maxGrantClaims;
+    uint16 public claimedGrantCount;
     AirdropStatus public airdropStatus;
 
     mapping(uint256 => uint256) internal claimedBitMap;
@@ -77,6 +80,7 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
     error ClaimAlreadyMade(uint256 index);
     error InvalidProof();
     error InsufficientShares(uint256 requested, uint256 available);
+    error TooManyGrantClaims(uint256 maximum);
     error UnexpectedTokenBalanceChange(address token, uint256 expected, uint256 actual);
 
     event MerkleAirdropInitialized(
@@ -87,6 +91,7 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         bytes32 merkleRoot,
         uint64 startTime,
         uint64 endTime,
+        uint16 maxGrantClaims,
         bytes32 salt
     );
     event AirdropClaimed(uint256 indexed index, address indexed account, uint256 amount);
@@ -118,6 +123,7 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         merkleRoot = params.merkleRoot;
         startTime = params.startTime;
         endTime = params.endTime;
+        maxGrantClaims = params.maxGrantClaims;
         airdropStatus = AirdropStatus.Active;
 
         emit MerkleAirdropInitialized(
@@ -128,6 +134,7 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
             params.merkleRoot,
             params.startTime,
             params.endTime,
+            params.maxGrantClaims,
             params.salt
         );
     }
@@ -146,7 +153,11 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         GrantClaimParams calldata params,
         bytes32[] calldata proof
     ) external payable nonReentrant returns (address grant) {
+        uint16 claimedGrantCount_ = claimedGrantCount;
+        if (claimedGrantCount_ >= maxGrantClaims) revert TooManyGrantClaims(maxGrantClaims);
+
         _claim(index, account, amount, getGrantClaimLeaf(index, account, amount, params), proof);
+        claimedGrantCount = claimedGrantCount_ + 1;
 
         address shareToken_ = shareToken;
         address tokenGrantFactory_ = tokenGrantFactory;

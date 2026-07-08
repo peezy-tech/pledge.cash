@@ -235,6 +235,7 @@ export function merkleAirdropArgs(terms: MerkleAirdropTerms) {
       merkleRoot: terms.merkleRoot,
       startTime: terms.startTime,
       endTime: terms.endTime,
+      maxGrantClaims: terms.maxGrantClaims,
       salt: terms.salt,
     },
   ] as const;

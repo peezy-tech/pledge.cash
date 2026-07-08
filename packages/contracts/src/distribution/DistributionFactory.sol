@@ -15,7 +15,7 @@ interface IDistributionBoardroom {
 contract DistributionFactory is IBoardroomCallPolicy {
     uint256 internal constant FIXED_PRICE_SALE_CREATE_DATA_LENGTH = 4 + 32 * 8;
     uint256 internal constant MIGRATING_CURVE_CREATE_DATA_LENGTH = 4 + 32 * 12;
-    uint256 internal constant MERKLE_AIRDROP_CREATE_DATA_LENGTH = 4 + 32 * 6;
+    uint256 internal constant MERKLE_AIRDROP_CREATE_DATA_LENGTH = 4 + 32 * 7;
     uint256 internal constant BPS = 10_000;
     uint256 internal constant MAX_CURVE_SUPPLY = 1e36;
     uint256 public constant MAX_DISTRIBUTIONS_PER_BOARDROOM = 128;

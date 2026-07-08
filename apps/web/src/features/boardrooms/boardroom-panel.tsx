@@ -709,6 +709,7 @@ function MerkleAirdropPanel({
         <TextField form={merkleAirdropForm} field="merkleRoot" label="Merkle root" setForm={setMerkleAirdropForm} />
         <TextField form={merkleAirdropForm} field="startTime" inputMode="numeric" label="Start timestamp" setForm={setMerkleAirdropForm} />
         <TextField form={merkleAirdropForm} field="endTime" inputMode="numeric" label="End timestamp" setForm={setMerkleAirdropForm} />
+        <TextField form={merkleAirdropForm} field="maxGrantClaims" inputMode="numeric" label="Grant claim cap" setForm={setMerkleAirdropForm} />
         <TextField form={merkleAirdropForm} field="salt" label="Salt" setForm={setMerkleAirdropForm} className="md:col-span-2" />
       </div>
       <ActionRow>
@@ -764,6 +765,10 @@ function MerkleAirdropPanel({
             ),
           },
           { label: "Remaining shares", value: formatTokenAmount(merkleAirdropSnapshot?.remainingShares, distributionSummary?.shareTokenMetadata) },
+          {
+            label: "Grant claims",
+            value: merkleAirdropSnapshot ? `${merkleAirdropSnapshot.claimedGrantCount} / ${merkleAirdropSnapshot.maxGrantClaims}` : "Unknown",
+          },
           { label: "Grant factory", value: merkleAirdropSnapshot ? <AddressLink address={merkleAirdropSnapshot.tokenGrantFactory} /> : "Unknown" },
           { label: "Merkle root", value: merkleAirdropSnapshot?.merkleRoot ?? "Unknown" },
           { label: "Window", value: merkleAirdropSnapshot ? `${dateString(merkleAirdropSnapshot.startTime)} -> ${dateString(merkleAirdropSnapshot.endTime)}` : "Unknown" },

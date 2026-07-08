@@ -62,6 +62,7 @@ export type MerkleAirdropTerms = {
   merkleRoot: Hex;
   startTime: bigint;
   endTime: bigint;
+  maxGrantClaims: number;
   salt: Hex;
 };
 
@@ -174,6 +175,8 @@ export type MerkleAirdropState = {
   merkleRoot: Hex;
   startTime: bigint;
   endTime: bigint;
+  maxGrantClaims: number;
+  claimedGrantCount: number;
   airdropStatus: number;
   closed: boolean;
 };

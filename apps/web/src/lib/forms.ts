@@ -89,6 +89,7 @@ export function defaultMerkleAirdropForm(): MerkleAirdropForm {
     shareAmount: "1",
     merkleRoot: "",
     ...defaultWorkflowWindow(),
+    maxGrantClaims: "0",
     salt: randomSalt(),
   };
 }

@@ -57,6 +57,7 @@ State:
 - `status`: `Active`, `WindingDown`, or `RedemptionsOpen`.
 - `redeemableAssets`: bounded list of ERC20 assets redeemed pro-rata by share holders.
 - `issuedGrants`: bounded list of Boardroom-issued token grants created through `TokenGrantFactory`.
+- `issuedGrantSlotReservations`: grant slots reserved by recorded distributions that can create Boardroom-issued grants.
 - `issuedDistributions`: bounded list of Boardroom-created distributions created through `DistributionFactory`.
 - `lockedLiquidityPositions`: bounded list of Boardroom-owned locked AMM liquidity positions.
 

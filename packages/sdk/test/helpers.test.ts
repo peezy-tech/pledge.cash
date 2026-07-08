@@ -146,6 +146,7 @@ const airdropTerms = {
   merkleRoot,
   startTime: 100n,
   endTime: 1000n,
+  maxGrantClaims: 1,
   salt,
 } satisfies BoardroomMerkleAirdropTerms;
 
@@ -205,6 +206,8 @@ describe("SDK action and query helpers", () => {
       airdropSupply: 1000n,
       remainingShares: 900n,
       merkleRoot,
+      maxGrantClaims: 3,
+      claimedGrantCount: 1,
       maxPerBuyer: 500n,
       startTime: 100n,
       endTime: 1000n,
@@ -271,6 +274,8 @@ describe("SDK action and query helpers", () => {
       airdropSupply: 1000n,
       remainingShares: 900n,
       merkleRoot,
+      maxGrantClaims: 3,
+      claimedGrantCount: 1,
       closed: false,
     });
     await expect(readMigratingBondingCurveState(client, curve)).resolves.toMatchObject({
@@ -571,6 +576,7 @@ describe("SDK action and query helpers", () => {
             merkleRoot,
             startTime: 100n,
             endTime: 1000n,
+            maxGrantClaims: 1,
             salt,
           },
         ],
