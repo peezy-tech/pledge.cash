@@ -5,9 +5,9 @@ import {Test} from "forge-std/Test.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
 import {WETH} from "solady/tokens/WETH.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
-import {AmmFactory} from "../src/amm/AmmFactory.sol";
-import {AmmPool} from "../src/amm/AmmPool.sol";
-import {AmmRouter} from "../src/amm/AmmRouter.sol";
+import {AmmFactory} from "../../src/amm/AmmFactory.sol";
+import {AmmPool} from "../../src/amm/AmmPool.sol";
+import {AmmRouter} from "../../src/amm/AmmRouter.sol";
 
 contract AmmTestERC20 is ERC20 {
     string internal tokenName;

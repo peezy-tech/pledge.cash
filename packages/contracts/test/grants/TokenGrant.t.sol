@@ -5,8 +5,8 @@ import {Test} from "forge-std/Test.sol";
 import {ERC721} from "solady/tokens/ERC721.sol";
 import {Base64} from "solady/utils/Base64.sol";
 import {LibString} from "solady/utils/LibString.sol";
-import {TokenGrant} from "../src/grants/TokenGrant.sol";
-import {TokenGrantFactory} from "../src/grants/TokenGrantFactory.sol";
+import {TokenGrant} from "../../src/grants/TokenGrant.sol";
+import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
 
 contract GrantERC20 {
     string public name;

@@ -3,8 +3,8 @@ pragma solidity ^0.8.30;
 
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {Test} from "forge-std/Test.sol";
-import {TokenGrant} from "../src/grants/TokenGrant.sol";
-import {TokenGrantFactory} from "../src/grants/TokenGrantFactory.sol";
+import {TokenGrant} from "../../src/grants/TokenGrant.sol";
+import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
 
 contract InvariantERC20 {
     string public name;

@@ -2,8 +2,8 @@
 pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
-import {TokenGrant} from "../src/grants/TokenGrant.sol";
-import {TokenGrantFactory} from "../src/grants/TokenGrantFactory.sol";
+import {TokenGrant} from "../../src/grants/TokenGrant.sol";
+import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
 
 interface IERC20ForkLike {
     function approve(address spender, uint256 amount) external returns (bool);
