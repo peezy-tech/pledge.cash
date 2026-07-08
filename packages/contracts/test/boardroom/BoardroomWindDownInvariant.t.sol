@@ -5,10 +5,10 @@ import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
 import {WETH} from "solady/tokens/WETH.sol";
-import {Boardroom} from "../src/boardroom/Boardroom.sol";
-import {BoardroomFactory} from "../src/boardroom/BoardroomFactory.sol";
-import {BoardroomPolicyRegistry} from "../src/boardroom/BoardroomPolicyRegistry.sol";
-import {BoardroomToken} from "../src/boardroom/BoardroomToken.sol";
+import {Boardroom} from "../../src/boardroom/Boardroom.sol";
+import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
+import {BoardroomPolicyRegistry} from "../../src/boardroom/BoardroomPolicyRegistry.sol";
+import {BoardroomToken} from "../../src/boardroom/BoardroomToken.sol";
 
 contract BoardroomWindDownInvariantERC20 is ERC20 {
     string internal tokenName;

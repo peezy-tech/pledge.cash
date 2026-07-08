@@ -4,15 +4,15 @@ pragma solidity ^0.8.30;
 import {Test} from "forge-std/Test.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
 import {WETH} from "solady/tokens/WETH.sol";
-import {AssetPolicy} from "../src/policy/AssetPolicy.sol";
-import {Boardroom} from "../src/boardroom/Boardroom.sol";
-import {BoardroomFactory} from "../src/boardroom/BoardroomFactory.sol";
-import {BoardroomPolicyRegistry} from "../src/boardroom/BoardroomPolicyRegistry.sol";
-import {BoardroomToken} from "../src/boardroom/BoardroomToken.sol";
-import {IBoardroomCallPolicy} from "../src/policy/IBoardroomCallPolicy.sol";
-import {ProtocolPolicy} from "../src/policy/ProtocolPolicy.sol";
-import {TokenGrant} from "../src/grants/TokenGrant.sol";
-import {TokenGrantFactory} from "../src/grants/TokenGrantFactory.sol";
+import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
+import {Boardroom} from "../../src/boardroom/Boardroom.sol";
+import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
+import {BoardroomPolicyRegistry} from "../../src/boardroom/BoardroomPolicyRegistry.sol";
+import {BoardroomToken} from "../../src/boardroom/BoardroomToken.sol";
+import {IBoardroomCallPolicy} from "../../src/policy/IBoardroomCallPolicy.sol";
+import {ProtocolPolicy} from "../../src/policy/ProtocolPolicy.sol";
+import {TokenGrant} from "../../src/grants/TokenGrant.sol";
+import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
 
 contract BoardroomCurrency {
     string public name;
