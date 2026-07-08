@@ -4,8 +4,8 @@ pragma solidity ^0.8.30;
 import {Test} from "forge-std/Test.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
 import {WETH} from "solady/tokens/WETH.sol";
-import {AssetPolicy} from "../src/AssetPolicy.sol";
-import {ProtocolPolicy} from "../src/ProtocolPolicy.sol";
+import {AssetPolicy} from "../src/policy/AssetPolicy.sol";
+import {ProtocolPolicy} from "../src/policy/ProtocolPolicy.sol";
 
 contract BoardroomPolicyTest is Test {
     WETH internal wrappedNative;

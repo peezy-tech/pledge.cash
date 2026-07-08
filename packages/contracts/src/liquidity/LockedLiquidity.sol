@@ -4,7 +4,7 @@ pragma solidity ^0.8.30;
 import {ERC20} from "solady/tokens/ERC20.sol";
 import {Initializable} from "solady/utils/Initializable.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
-import {AmmPool} from "./AmmPool.sol";
+import {AmmPool} from "../amm/AmmPool.sol";
 
 interface ILockedLiquidityRouter {
     function addLiquidity(

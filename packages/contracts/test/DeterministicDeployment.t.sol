@@ -5,17 +5,17 @@ import {Test} from "forge-std/Test.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
 import {WETH} from "solady/tokens/WETH.sol";
 import {CREATE3} from "solady/utils/CREATE3.sol";
-import {AmmFactory} from "../src/AmmFactory.sol";
-import {AmmRouter} from "../src/AmmRouter.sol";
-import {AssetPolicy} from "../src/AssetPolicy.sol";
-import {BoardroomFactory} from "../src/BoardroomFactory.sol";
-import {BoardroomPolicyRegistry} from "../src/BoardroomPolicyRegistry.sol";
-import {DistributionFactory} from "../src/DistributionFactory.sol";
-import {LockedLiquidityFactory} from "../src/LockedLiquidityFactory.sol";
-import {PledgeCashDeploymentSalts} from "../src/PledgeCashDeploymentSalts.sol";
-import {PledgeCashDeterministicDeployer} from "../src/PledgeCashDeterministicDeployer.sol";
-import {ProtocolPolicy} from "../src/ProtocolPolicy.sol";
-import {TokenGrantFactory} from "../src/TokenGrantFactory.sol";
+import {AmmFactory} from "../src/amm/AmmFactory.sol";
+import {AmmRouter} from "../src/amm/AmmRouter.sol";
+import {AssetPolicy} from "../src/policy/AssetPolicy.sol";
+import {BoardroomFactory} from "../src/boardroom/BoardroomFactory.sol";
+import {BoardroomPolicyRegistry} from "../src/boardroom/BoardroomPolicyRegistry.sol";
+import {DistributionFactory} from "../src/distribution/DistributionFactory.sol";
+import {LockedLiquidityFactory} from "../src/liquidity/LockedLiquidityFactory.sol";
+import {PledgeCashDeploymentSalts} from "../src/deployment/PledgeCashDeploymentSalts.sol";
+import {PledgeCashDeterministicDeployer} from "../src/deployment/PledgeCashDeterministicDeployer.sol";
+import {ProtocolPolicy} from "../src/policy/ProtocolPolicy.sol";
+import {TokenGrantFactory} from "../src/grants/TokenGrantFactory.sol";
 
 contract DeterministicDeploymentTest is Test {
     address internal owner = address(0xA11CE);

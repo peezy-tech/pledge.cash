@@ -3,9 +3,9 @@ pragma solidity ^0.8.30;
 
 import {LibClone} from "solady/utils/LibClone.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
-import {ExactTransferLib} from "./ExactTransferLib.sol";
-import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
 import {LockedLiquidity} from "./LockedLiquidity.sol";
+import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
+import {IBoardroomCallPolicy} from "../policy/IBoardroomCallPolicy.sol";
 
 interface ILockedLiquidityFactoryBoardroom {
     function shareToken() external view returns (address);

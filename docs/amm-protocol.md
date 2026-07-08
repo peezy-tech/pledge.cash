@@ -2,12 +2,12 @@
 
 This document describes the AMM and Boardroom-owned locked liquidity primitives in:
 
-- `packages/contracts/src/AmmFactory.sol`
-- `packages/contracts/src/AmmPool.sol`
-- `packages/contracts/src/PoolFees.sol`
-- `packages/contracts/src/AmmRouter.sol`
-- `packages/contracts/src/LockedLiquidityFactory.sol`
-- `packages/contracts/src/LockedLiquidity.sol`
+- `packages/contracts/src/amm/AmmFactory.sol`
+- `packages/contracts/src/amm/AmmPool.sol`
+- `packages/contracts/src/amm/PoolFees.sol`
+- `packages/contracts/src/amm/AmmRouter.sol`
+- `packages/contracts/src/liquidity/LockedLiquidityFactory.sol`
+- `packages/contracts/src/liquidity/LockedLiquidity.sol`
 
 ## Actors
 

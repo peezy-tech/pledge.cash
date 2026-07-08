@@ -1,6 +1,6 @@
 # Token Grant Protocol
 
-This document describes the escrow-backed token grant primitive in `packages/contracts/src/TokenGrant.sol` and `packages/contracts/src/TokenGrantFactory.sol`.
+This document describes the escrow-backed token grant primitive in `packages/contracts/src/grants/TokenGrant.sol` and `packages/contracts/src/grants/TokenGrantFactory.sol`.
 
 `TokenGrant` generalizes two settlement flows:
 
