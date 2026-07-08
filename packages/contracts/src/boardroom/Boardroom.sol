@@ -9,6 +9,7 @@ import {BoardroomToken} from "./BoardroomToken.sol";
 import {IBoardroomPolicyRegistry} from "./IBoardroomPolicyRegistry.sol";
 import {DistributionFactory} from "../distribution/DistributionFactory.sol";
 import {FixedPriceSale} from "../distribution/FixedPriceSale.sol";
+import {MerkleAirdrop} from "../distribution/MerkleAirdrop.sol";
 import {MigratingBondingCurve} from "../distribution/MigratingBondingCurve.sol";
 import {TokenGrant} from "../grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../grants/TokenGrantFactory.sol";
@@ -377,6 +378,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         }
         if (isIssuedDistribution[target]) {
             return selector == FixedPriceSale.close.selector || selector == FixedPriceSale.cancel.selector
+                || selector == MerkleAirdrop.close.selector || selector == MerkleAirdrop.cancel.selector
                 || selector == MigratingBondingCurve.cancel.selector
                 || selector == MigratingBondingCurve.migrate.selector;
         }
