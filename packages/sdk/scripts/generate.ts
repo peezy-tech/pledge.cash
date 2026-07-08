@@ -46,6 +46,7 @@ const contracts = [
     "packages/contracts/out/MigratingBondingCurve.sol/MigratingBondingCurve.json",
     "migratingBondingCurveAbi",
   ],
+  ["MerkleAirdrop", "packages/contracts/out/MerkleAirdrop.sol/MerkleAirdrop.json", "merkleAirdropAbi"],
   ["PoolFees", "packages/contracts/out/PoolFees.sol/PoolFees.json", "poolFeesAbi"],
   ["ProtocolPolicy", "packages/contracts/out/ProtocolPolicy.sol/ProtocolPolicy.json", "protocolPolicyAbi"],
   ["TokenGrant", "packages/contracts/out/TokenGrant.sol/TokenGrant.json", "tokenGrantAbi"],

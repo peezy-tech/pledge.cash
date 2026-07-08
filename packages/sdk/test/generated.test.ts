@@ -8,6 +8,7 @@ import {
   fixedPriceSaleAbi,
   lockedLiquidityAbi,
   lockedLiquidityFactoryAbi,
+  merkleAirdropAbi,
   migratingBondingCurveAbi,
   pledgeCashAbis,
   pledgeCashDeployments,
@@ -25,13 +26,16 @@ describe("generated SDK exports", () => {
     expect(pledgeCashAbis.FixedPriceSale).toBe(fixedPriceSaleAbi);
     expect(pledgeCashAbis.LockedLiquidity).toBe(lockedLiquidityAbi);
     expect(pledgeCashAbis.LockedLiquidityFactory).toBe(lockedLiquidityFactoryAbi);
+    expect(pledgeCashAbis.MerkleAirdrop).toBe(merkleAirdropAbi);
     expect(pledgeCashAbis.MigratingBondingCurve).toBe(migratingBondingCurveAbi);
     expect(pledgeCashAbis.PoolFees).toBe(poolFeesAbi);
     expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "createGrant")).toBe(true);
     expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "predictGrantAddress")).toBe(true);
     expect(distributionFactoryAbi.some((item) => item.type === "function" && item.name === "createFixedPriceSale")).toBe(true);
     expect(distributionFactoryAbi.some((item) => item.type === "function" && item.name === "createMigratingBondingCurve")).toBe(true);
+    expect(distributionFactoryAbi.some((item) => item.type === "function" && item.name === "createMerkleAirdrop")).toBe(true);
     expect(fixedPriceSaleAbi.some((item) => item.type === "function" && item.name === "buy")).toBe(true);
+    expect(merkleAirdropAbi.some((item) => item.type === "function" && item.name === "claimGrant")).toBe(true);
     expect(migratingBondingCurveAbi.some((item) => item.type === "function" && item.name === "migrate")).toBe(true);
     expect(ammRouterAbi.some((item) => item.type === "function" && item.name === "swapExactTokensForTokens")).toBe(true);
     expect(lockedLiquidityFactoryAbi.some((item) => item.type === "function" && item.name === "createLockedLiquidity")).toBe(true);

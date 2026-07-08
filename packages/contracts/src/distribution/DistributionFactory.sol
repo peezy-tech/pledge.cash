@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import {LibClone} from "solady/utils/LibClone.sol";
 import {FixedPriceSale} from "./FixedPriceSale.sol";
+import {MerkleAirdrop} from "./MerkleAirdrop.sol";
 import {MigratingBondingCurve} from "./MigratingBondingCurve.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 import {IBoardroomCallPolicy} from "../policy/IBoardroomCallPolicy.sol";
@@ -14,18 +15,22 @@ interface IDistributionBoardroom {
 contract DistributionFactory is IBoardroomCallPolicy {
     uint256 internal constant FIXED_PRICE_SALE_CREATE_DATA_LENGTH = 4 + 32 * 8;
     uint256 internal constant MIGRATING_CURVE_CREATE_DATA_LENGTH = 4 + 32 * 12;
+    uint256 internal constant MERKLE_AIRDROP_CREATE_DATA_LENGTH = 4 + 32 * 6;
     uint256 internal constant BPS = 10_000;
     uint256 internal constant MAX_CURVE_SUPPLY = 1e36;
     uint256 public constant MAX_DISTRIBUTIONS_PER_BOARDROOM = 128;
 
     enum DistributionKind {
         FixedPriceSale,
-        MigratingBondingCurve
+        MigratingBondingCurve,
+        MerkleAirdrop
     }
 
     address public immutable lockedLiquidityFactory;
+    address public immutable tokenGrantFactory;
     address public immutable fixedPriceSaleLogic;
     address public immutable migratingBondingCurveLogic;
+    address public immutable merkleAirdropLogic;
 
     mapping(address => bool) public isDistribution;
     mapping(address => address) public distributionBoardroom;
@@ -48,10 +53,13 @@ contract DistributionFactory is IBoardroomCallPolicy {
         bytes32 salt
     );
 
-    constructor(address lockedLiquidityFactory_) {
+    constructor(address lockedLiquidityFactory_, address tokenGrantFactory_) {
+        if (tokenGrantFactory_ == address(0)) revert InvalidAddress();
         lockedLiquidityFactory = lockedLiquidityFactory_;
+        tokenGrantFactory = tokenGrantFactory_;
         fixedPriceSaleLogic = address(new FixedPriceSale());
         migratingBondingCurveLogic = address(new MigratingBondingCurve());
+        merkleAirdropLogic = address(new MerkleAirdrop());
     }
 
     function createFixedPriceSale(FixedPriceSale.CreateParams calldata params) external returns (address sale) {
@@ -93,6 +101,23 @@ contract DistributionFactory is IBoardroomCallPolicy {
         _checkedTransferFrom(params.shareToken, msg.sender, curve, shareAmount);
     }
 
+    function createMerkleAirdrop(MerkleAirdrop.CreateParams calldata params) external returns (address airdrop) {
+        _requireBoardroomShareToken(msg.sender, params.shareToken);
+
+        airdrop = _createDistribution(
+            merkleAirdropLogic,
+            msg.sender,
+            params.shareToken,
+            address(0),
+            params.shareAmount,
+            params.salt,
+            DistributionKind.MerkleAirdrop
+        );
+
+        MerkleAirdrop(airdrop).initialize(msg.sender, tokenGrantFactory, params);
+        _checkedTransferFrom(params.shareToken, msg.sender, airdrop, params.shareAmount);
+    }
+
     function canCall(address boardroom, address, address target, uint256 value, bytes calldata data)
         external
         view
@@ -104,6 +129,9 @@ contract DistributionFactory is IBoardroomCallPolicy {
         if (target == address(this)) {
             if (selector == DistributionFactory.createMigratingBondingCurve.selector) {
                 return _canCreateMigratingBondingCurve(boardroom, data);
+            }
+            if (selector == DistributionFactory.createMerkleAirdrop.selector) {
+                return _canCreateMerkleAirdrop(boardroom, data);
             }
 
             return
@@ -120,6 +148,9 @@ contract DistributionFactory is IBoardroomCallPolicy {
         if (kind == DistributionKind.MigratingBondingCurve) {
             return
                 selector == MigratingBondingCurve.cancel.selector || selector == MigratingBondingCurve.migrate.selector;
+        }
+        if (kind == DistributionKind.MerkleAirdrop) {
+            return selector == MerkleAirdrop.close.selector || selector == MerkleAirdrop.cancel.selector;
         }
 
         return false;
@@ -151,6 +182,12 @@ contract DistributionFactory is IBoardroomCallPolicy {
         );
     }
 
+    function predictMerkleAirdropAddress(address boardroom, bytes32 salt) external view returns (address) {
+        return LibClone.predictDeterministicAddress(
+            merkleAirdropLogic, _cloneSalt(boardroom, DistributionKind.MerkleAirdrop, salt), address(this)
+        );
+    }
+
     function _canCreateFixedPriceSale(address boardroom, bytes calldata data) internal view returns (bool) {
         if (data.length != FIXED_PRICE_SALE_CREATE_DATA_LENGTH) return false;
 
@@ -177,6 +214,15 @@ contract DistributionFactory is IBoardroomCallPolicy {
         return _hasValidTimeWindow(params.startTime, params.endTime);
     }
 
+    function _canCreateMerkleAirdrop(address boardroom, bytes calldata data) internal view returns (bool) {
+        if (data.length != MERKLE_AIRDROP_CREATE_DATA_LENGTH) return false;
+
+        MerkleAirdrop.CreateParams memory params = abi.decode(data[4:], (MerkleAirdrop.CreateParams));
+        if (params.shareToken != IDistributionBoardroom(boardroom).shareToken()) return false;
+        if (params.shareAmount == 0 || params.merkleRoot == bytes32(0)) return false;
+        return _hasValidTimeWindow(params.startTime, params.endTime);
+    }
+
     function _createDistribution(
         address implementation,
         address boardroom,
@@ -186,7 +232,7 @@ contract DistributionFactory is IBoardroomCallPolicy {
         bytes32 salt,
         DistributionKind kind
     ) internal returns (address distribution) {
-        if (boardroom == address(0) || shareToken == address(0) || paymentToken == address(0)) {
+        if (boardroom == address(0) || shareToken == address(0)) {
             revert InvalidAddress();
         }
         if (distributionsForBoardroom[boardroom].length >= MAX_DISTRIBUTIONS_PER_BOARDROOM) {

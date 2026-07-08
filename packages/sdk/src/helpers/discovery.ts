@@ -12,6 +12,7 @@ import {
   readFixedPriceSaleState,
   readGrantState,
   readLockedLiquidityState,
+  readMerkleAirdropState,
   readMigratingBondingCurveState,
 } from "./readers";
 import type {
@@ -29,6 +30,7 @@ import type {
   GrantDiscoveryRange,
   GrantState,
   LockedLiquidityState,
+  MerkleAirdropState,
   MigratingBondingCurveState,
   PledgeCashLogClient,
   PledgeCashReadClient,
@@ -323,7 +325,7 @@ export async function enrichDiscoveredGrants(
 export async function enrichDiscoveredDistributions(
   client: PledgeCashReadClient,
   distributions: readonly DiscoveredDistribution[],
-): Promise<EnrichedDiscovery<DiscoveredDistribution, FixedPriceSaleState | MigratingBondingCurveState>[]> {
+): Promise<EnrichedDiscovery<DiscoveredDistribution, FixedPriceSaleState | MigratingBondingCurveState | MerkleAirdropState>[]> {
   return await Promise.all(
     distributions.map(async (distribution) => {
       try {
@@ -333,11 +335,18 @@ export async function enrichDiscoveredDistributions(
         if (distribution.kind === "fixed-price-sale") {
           return { ...distribution, state: await readFixedPriceSaleState(client, distribution.distribution), stale: false };
         }
+        if (distribution.kind === "merkle-airdrop") {
+          return { ...distribution, state: await readMerkleAirdropState(client, distribution.distribution), stale: false };
+        }
 
         try {
           return { ...distribution, state: await readFixedPriceSaleState(client, distribution.distribution), stale: false };
         } catch {
-          return { ...distribution, state: await readMigratingBondingCurveState(client, distribution.distribution), stale: false };
+          try {
+            return { ...distribution, state: await readMigratingBondingCurveState(client, distribution.distribution), stale: false };
+          } catch {
+            return { ...distribution, state: await readMerkleAirdropState(client, distribution.distribution), stale: false };
+          }
         }
       } catch (error) {
         return { ...distribution, stale: true, error: error instanceof Error ? error.message : String(error) };
@@ -608,6 +617,7 @@ function stringArg(args: Record<string, unknown>, name: string): string | undefi
 function distributionKindLabel(kind: bigint | undefined): DiscoveredDistribution["kind"] {
   if (kind === 0n) return "fixed-price-sale";
   if (kind === 1n) return "migrating-bonding-curve";
+  if (kind === 2n) return "merkle-airdrop";
   return "unknown";
 }
 

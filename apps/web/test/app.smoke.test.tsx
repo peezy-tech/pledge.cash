@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import type { Address, DiscoveredBoardroom, DiscoveredDistribution, DiscoveredGrant, DiscoveredLockedLiquidity, DiscoveredPool } from "@pledge.cash/sdk";
+import type {
+  Address,
+  DiscoveredBoardroom,
+  DiscoveredDistribution,
+  DiscoveredGrant,
+  DiscoveredLockedLiquidity,
+  DiscoveredPool,
+  FixedPriceSaleState,
+  MerkleAirdropState,
+} from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
 import { App, canRunGrantIssuerActions, manageWorkspaceSummary, parseDeployment, viewFromPath } from "../src/App";
 import { Web3Provider } from "../src/components/web3-provider";
@@ -15,6 +24,7 @@ import {
   defaultFixedPriceSaleForm,
   defaultLockedLiquidityExitForm,
   defaultLockedLiquidityForm,
+  defaultMerkleAirdropForm,
   defaultMigratingCurveForm,
   defaultWindDownForm,
 } from "../src/lib/forms";
@@ -43,6 +53,7 @@ const boardroom = "0x7000000000000000000000000000000000000000" as Address;
 const policyRegistry = "0x7100000000000000000000000000000000000000" as Address;
 const shareToken = "0x7200000000000000000000000000000000000000" as Address;
 const sale = "0x7300000000000000000000000000000000000000" as Address;
+const airdrop = "0x7310000000000000000000000000000000000000" as Address;
 const locker = "0x7400000000000000000000000000000000000000" as Address;
 const pool = "0x7500000000000000000000000000000000000000" as Address;
 
@@ -54,7 +65,7 @@ const boardroomSnapshot: BoardroomSnapshot = {
   status: 1,
   redeemableAssets: [oldGrant.paymentToken],
   issuedGrants: [oldGrant.grantAddress],
-  issuedDistributions: [sale],
+  issuedDistributions: [sale, airdrop],
   lockedLiquidityPositions: [locker],
   grantSummaries: [
     {
@@ -95,6 +106,24 @@ const boardroomSnapshot: BoardroomSnapshot = {
         startTime: 1n,
         endTime: 2n,
         saleStatus: 0,
+        closed: false,
+      },
+    },
+    {
+      address: airdrop,
+      kind: "merkle-airdrop",
+      state: {
+        address: airdrop,
+        factory: "0x7600000000000000000000000000000000000000" as Address,
+        boardroom,
+        shareToken,
+        tokenGrantFactory: "0x7a000000000000000000000000000000000000000" as Address,
+        airdropSupply: 500n,
+        remainingShares: 250n,
+        merkleRoot: oldGrant.salt,
+        startTime: 1n,
+        endTime: 2n,
+        airdropStatus: 0,
         closed: false,
       },
     },
@@ -594,7 +623,7 @@ describe("web app shell", () => {
           address: sale,
           form: defaultFixedPriceSaleForm(),
           predicted: sale,
-          snapshot: boardroomSnapshot.distributionSummaries[0].state,
+          snapshot: boardroomSnapshot.distributionSummaries[0].state as FixedPriceSaleState,
           cancel: noop,
           close: noop,
           create: noop,
@@ -627,6 +656,19 @@ describe("web app shell", () => {
           setLockedLiquidityAddress: noopSetter,
           setLockedLiquidityExitForm: noopSetter,
           setLockedLiquidityForm: noopSetter,
+        }}
+        merkleAirdrop={{
+          address: airdrop,
+          form: defaultMerkleAirdropForm(),
+          predicted: airdrop,
+          snapshot: boardroomSnapshot.distributionSummaries[1].state as MerkleAirdropState,
+          cancel: noop,
+          close: noop,
+          create: noop,
+          load: noop,
+          predict: noop,
+          setMerkleAirdropAddress: noopSetter,
+          setMerkleAirdropForm: noopSetter,
         }}
         migratingCurve={{
           address: "",
@@ -666,6 +708,7 @@ describe("web app shell", () => {
     );
 
     expect(html).toContain("Fixed-Price Sale");
+    expect(html).toContain("Merkle Airdrop");
     expect(html).toContain("Migrating Bonding Curve");
     expect(html).toContain("Locked Liquidity");
     expect(html).toContain("Wind-Down");
@@ -674,6 +717,7 @@ describe("web app shell", () => {
     expect(html).toContain("Vesting schedule");
     expect(html).toContain("Settleable now");
     expect(html).toContain("Use Sale");
+    expect(html).toContain("Use Airdrop");
     expect(html).toContain("Use Locker");
   });
 

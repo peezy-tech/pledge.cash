@@ -11,17 +11,52 @@ import {TokenGrant} from "./TokenGrant.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 import {IBoardroomCallPolicy} from "../policy/IBoardroomCallPolicy.sol";
 
+interface ITokenGrantDistributionIssuer {
+    function isIssuedDistribution(address distribution) external view returns (bool);
+}
+
 contract TokenGrantFactory is Ownable, ERC721, IBoardroomCallPolicy {
     address public immutable tokenGrantLogic;
     uint256 public creationFee;
 
     mapping(uint256 => address) public grantForTokenId;
 
+    struct GrantCreateInput {
+        address issuer;
+        address funder;
+        address holder;
+        address token;
+        address paymentToken;
+        uint256 amount;
+        uint256 price;
+        uint256 expiry;
+        uint256 vestingCliff;
+        uint256 vestingEnd;
+        bool transferable;
+        uint256 transferUnlockTime;
+        bytes32 salt;
+    }
+
+    struct GrantCreateParams {
+        address holder;
+        address token;
+        address paymentToken;
+        uint256 amount;
+        uint256 price;
+        uint256 expiry;
+        uint256 vestingCliff;
+        uint256 vestingEnd;
+        bool transferable;
+        uint256 transferUnlockTime;
+        bytes32 salt;
+    }
+
     error UnknownGrantToken(uint256 tokenId);
     error OnlyLinkedGrant(address caller);
     error GrantStillOpen(uint256 tokenId);
     error InvalidOwner();
     error InvalidCreationFeePayment(uint256 expected, uint256 actual);
+    error UnauthorizedGrantIssuer(address issuer, address caller);
     error UnexpectedTokenBalanceChange(address token, uint256 expected, uint256 actual);
 
     event TokenGrantCreated(
@@ -91,32 +126,49 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomCallPolicy {
         uint256 transferUnlockTime,
         bytes32 salt
     ) external payable returns (address grant) {
-        if (msg.value != creationFee) {
-            revert InvalidCreationFeePayment(creationFee, msg.value);
-        }
-
-        grant = LibClone.cloneDeterministic(tokenGrantLogic, _deploymentSalt(msg.sender, salt));
-        uint256 tokenId = uint256(uint160(grant));
-
-        grantForTokenId[tokenId] = grant;
-
-        _initializeGrant(
-            grant,
-            holder,
-            token,
-            paymentToken,
-            amount,
-            price,
-            expiry,
-            vestingCliff,
-            vestingEnd,
-            transferable,
-            transferUnlockTime
+        grant = _createGrant(
+            GrantCreateInput({
+                issuer: msg.sender,
+                funder: msg.sender,
+                holder: holder,
+                token: token,
+                paymentToken: paymentToken,
+                amount: amount,
+                price: price,
+                expiry: expiry,
+                vestingCliff: vestingCliff,
+                vestingEnd: vestingEnd,
+                transferable: transferable,
+                transferUnlockTime: transferUnlockTime,
+                salt: salt
+            })
         );
-        _checkedTransferFrom(token, msg.sender, grant, amount);
-        _payCreationFee();
-        _mint(holder, tokenId);
-        _emitTokenGrantCreated(grant, tokenId, transferable, transferUnlockTime, salt);
+    }
+
+    function createGrantFromDistribution(address issuer, GrantCreateParams calldata params)
+        external
+        payable
+        returns (address grant)
+    {
+        _requireDistributionIssuer(issuer, msg.sender);
+
+        grant = _createGrant(
+            GrantCreateInput({
+                issuer: issuer,
+                funder: msg.sender,
+                holder: params.holder,
+                token: params.token,
+                paymentToken: params.paymentToken,
+                amount: params.amount,
+                price: params.price,
+                expiry: params.expiry,
+                vestingCliff: params.vestingCliff,
+                vestingEnd: params.vestingEnd,
+                transferable: params.transferable,
+                transferUnlockTime: params.transferUnlockTime,
+                salt: params.salt
+            })
+        );
     }
 
     function predictGrantAddress(address issuer, bytes32 salt) external view returns (address) {
@@ -192,33 +244,46 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomCallPolicy {
         TokenGrant(grant).requireCanTransferGrantRight(block.timestamp);
     }
 
-    function _initializeGrant(
-        address grant,
-        address holder,
-        address token,
-        address paymentToken,
-        uint256 amount,
-        uint256 price,
-        uint256 expiry,
-        uint256 vestingCliff,
-        uint256 vestingEnd,
-        bool transferable,
-        uint256 transferUnlockTime
-    ) internal {
+    function _createGrant(GrantCreateInput memory input) internal returns (address grant) {
+        if (msg.value != creationFee) {
+            revert InvalidCreationFeePayment(creationFee, msg.value);
+        }
+
+        grant = LibClone.cloneDeterministic(tokenGrantLogic, _deploymentSalt(input.issuer, input.salt));
+        uint256 tokenId = uint256(uint160(grant));
+
+        grantForTokenId[tokenId] = grant;
+
+        _initializeGrant(grant, input);
+        _checkedTransferFrom(input.token, input.funder, grant, input.amount);
+        _payCreationFee();
+        _mint(input.holder, tokenId);
+        _emitTokenGrantCreated(grant, tokenId, input.transferable, input.transferUnlockTime, input.salt);
+    }
+
+    function _initializeGrant(address grant, GrantCreateInput memory input) internal {
         TokenGrant(grant)
             .initialize(
-                msg.sender,
-                holder,
-                token,
-                paymentToken,
-                amount,
-                price,
-                expiry,
-                vestingCliff,
-                vestingEnd,
-                transferable,
-                transferUnlockTime
+                input.issuer,
+                input.holder,
+                input.token,
+                input.paymentToken,
+                input.amount,
+                input.price,
+                input.expiry,
+                input.vestingCliff,
+                input.vestingEnd,
+                input.transferable,
+                input.transferUnlockTime
             );
+    }
+
+    function _requireDistributionIssuer(address issuer, address caller) internal view {
+        try ITokenGrantDistributionIssuer(issuer).isIssuedDistribution(caller) returns (bool allowed) {
+            if (allowed) return;
+        } catch {}
+
+        revert UnauthorizedGrantIssuer(issuer, caller);
     }
 
     function _emitTokenGrantCreated(

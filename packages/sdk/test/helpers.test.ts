@@ -11,6 +11,9 @@ import {
   buildBoardroomLockedLiquidityBatch,
   buildBoardroomLockedLiquidityExitTransaction,
   buildBoardroomLockedLiquidityFeeClaimAction,
+  buildBoardroomMerkleAirdropBatch,
+  buildBoardroomMerkleAirdropCancelAction,
+  buildBoardroomMerkleAirdropCloseAction,
   buildBoardroomBurnTreasurySharesTransaction,
   buildBoardroomMintTransaction,
   buildBoardroomMigratingCurveBatch,
@@ -24,6 +27,8 @@ import {
   buildBoardroomWrapNativeBalanceTransaction,
   buildDirectGrantCreationTransaction,
   buildErc20Approval,
+  buildMerkleAirdropClaimTransaction,
+  buildMerkleAirdropGrantClaimTransaction,
   decodeKnownPledgeCashError,
   discoverBoardroomDistributions,
   discoverBoardroomLockedLiquidity,
@@ -35,10 +40,12 @@ import {
   fixedPriceSaleAbi,
   lockedLiquidityAbi,
   lockedLiquidityFactoryAbi,
+  merkleAirdropAbi,
   migratingBondingCurveAbi,
   poolFeesAbi,
   predictAmmPoolAddress,
   predictLockedLiquidityAddress,
+  predictMerkleAirdropAddress,
   predictMigratingBondingCurveAddress,
   queryGrantsHeldByAddress,
   queryGrantsIssuedByAddress,
@@ -47,12 +54,15 @@ import {
   readFixedPriceSaleState,
   readGrantState,
   readLockedLiquidityState,
+  readMerkleAirdropState,
   readMigratingBondingCurveState,
   tokenGrantFactoryAbi,
   type BoardroomLockedLiquidityTerms,
   type BoardroomFixedPriceSaleTerms,
+  type BoardroomMerkleAirdropTerms,
   type BoardroomMigratingBondingCurveTerms,
   type GrantCreationTerms,
+  type MerkleAirdropGrantClaimTerms,
   type PledgeCashLogClient,
   type PledgeCashReadClient,
 } from "../src";
@@ -69,6 +79,7 @@ const distributionFactory = "0x0000000000000000000000000000000000000d15" as Addr
 const protocolPolicy = "0x0000000000000000000000000000000000000c0c" as Address;
 const assetPolicy = "0x0000000000000000000000000000000000000a55" as Address;
 const sale = "0x0000000000000000000000000000000000000a1e" as Address;
+const airdrop = "0x0000000000000000000000000000000000000a1d" as Address;
 const curve = "0x0000000000000000000000000000000000000c0e" as Address;
 const ammFactory = "0x0000000000000000000000000000000000000aee" as Address;
 const lockedLiquidityFactory = "0x00000000000000000000000000000000000010cc" as Address;
@@ -76,6 +87,8 @@ const locker = "0x00000000000000000000000000000000000010cd" as Address;
 const pool = "0x0000000000000000000000000000000000000a00" as Address;
 const wrappedNative = "0x00000000000000000000000000000000000000ee" as Address;
 const salt = "0x1111111111111111111111111111111111111111111111111111111111111111" as Hex;
+const merkleRoot = "0x3333333333333333333333333333333333333333333333333333333333333333" as Hex;
+const proof = ["0x4444444444444444444444444444444444444444444444444444444444444444" as Hex];
 
 const terms = {
   holder,
@@ -128,6 +141,25 @@ const curveTerms = {
   salt,
 } satisfies BoardroomMigratingBondingCurveTerms;
 
+const airdropTerms = {
+  shareAmount: 1000n,
+  merkleRoot,
+  startTime: 100n,
+  endTime: 1000n,
+  salt,
+} satisfies BoardroomMerkleAirdropTerms;
+
+const airdropGrantTerms = {
+  paymentToken: "0x0000000000000000000000000000000000000000" as Address,
+  price: 0n,
+  expiry: 3000n,
+  vestingCliff: 1000n,
+  vestingEnd: 2000n,
+  transferable: false,
+  transferUnlockTime: 0n,
+  salt,
+} satisfies MerkleAirdropGrantClaimTerms;
+
 const lockedLiquidityTerms = {
   quoteToken: paymentToken,
   shareAmountDesired: 1000n,
@@ -168,12 +200,16 @@ describe("SDK action and query helpers", () => {
       getLockedLiquidityPositions: [locker],
       factory,
       boardroom,
+      tokenGrantFactory: factory,
       saleSupply: 1000n,
+      airdropSupply: 1000n,
       remainingShares: 900n,
+      merkleRoot,
       maxPerBuyer: 500n,
       startTime: 100n,
       endTime: 1000n,
       saleStatus: 0,
+      airdropStatus: 0,
       lockedLiquidityFactory,
       quoteToken: paymentToken,
       locker,
@@ -225,6 +261,16 @@ describe("SDK action and query helpers", () => {
       shareToken,
       paymentToken,
       remainingShares: 900n,
+      closed: false,
+    });
+    await expect(readMerkleAirdropState(client, airdrop)).resolves.toMatchObject({
+      address: airdrop,
+      boardroom,
+      shareToken,
+      tokenGrantFactory: factory,
+      airdropSupply: 1000n,
+      remainingShares: 900n,
+      merkleRoot,
       closed: false,
     });
     await expect(readMigratingBondingCurveState(client, curve)).resolves.toMatchObject({
@@ -488,6 +534,83 @@ describe("SDK action and query helpers", () => {
     );
   });
 
+  test("builds Boardroom Merkle airdrop and claim transaction inputs", () => {
+    const batch = buildBoardroomMerkleAirdropBatch({
+      boardroom,
+      factory: distributionFactory,
+      shareToken,
+      terms: airdropTerms,
+      policy: protocolPolicy,
+      assetPolicy,
+    });
+
+    expect(batch.address).toBe(boardroom);
+    expect(batch.abi).toBe(boardroomAbi);
+    expect(batch.functionName).toBe("executeBatch");
+    expect(batch.value).toBe(0n);
+
+    const calls = batch.args[0];
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({ policy: assetPolicy, target: shareToken, value: 0n });
+    expect(calls[0]?.data).toBe(
+      encodeFunctionData({
+        abi: boardroomTokenAbi,
+        functionName: "approve",
+        args: [distributionFactory, airdropTerms.shareAmount],
+      }),
+    );
+    expect(calls[1]).toMatchObject({ policy: protocolPolicy, target: distributionFactory, value: 0n });
+    expect(calls[1]?.data).toBe(
+      encodeFunctionData({
+        abi: distributionFactoryAbi,
+        functionName: "createMerkleAirdrop",
+        args: [
+          {
+            shareToken,
+            shareAmount: 1000n,
+            merkleRoot,
+            startTime: 100n,
+            endTime: 1000n,
+            salt,
+          },
+        ],
+      }),
+    );
+
+    const close = buildBoardroomMerkleAirdropCloseAction({ boardroom, policy: distributionFactory, airdrop });
+    expect(close.args[0]).toMatchObject({ policy: distributionFactory, target: airdrop, value: 0n });
+    expect(close.args[0].data).toBe(encodeFunctionData({ abi: merkleAirdropAbi, functionName: "close" }));
+
+    const cancel = buildBoardroomMerkleAirdropCancelAction({ boardroom, policy: distributionFactory, airdrop });
+    expect(cancel.args[0]).toMatchObject({ policy: distributionFactory, target: airdrop, value: 0n });
+    expect(cancel.args[0].data).toBe(encodeFunctionData({ abi: merkleAirdropAbi, functionName: "cancel" }));
+
+    expect(buildMerkleAirdropClaimTransaction({ airdrop, index: 1n, account: holder, amount: 100n, proof })).toMatchObject({
+      address: airdrop,
+      abi: merkleAirdropAbi,
+      functionName: "claim",
+      args: [1n, holder, 100n, proof],
+    });
+
+    expect(
+      buildMerkleAirdropGrantClaimTransaction({
+        airdrop,
+        index: 2n,
+        account: holder,
+        amount: 250n,
+        terms: airdropGrantTerms,
+        proof,
+        creationFee: 10n,
+      }),
+    ).toMatchObject({
+      address: airdrop,
+      abi: merkleAirdropAbi,
+      functionName: "claimGrant",
+      args: [2n, holder, 250n, airdropGrantTerms, proof],
+      value: 10n,
+    });
+  });
+
   test("builds Boardroom locked-liquidity transaction inputs", () => {
     const batch = buildBoardroomLockedLiquidityBatch({
       boardroom,
@@ -615,11 +738,13 @@ describe("SDK action and query helpers", () => {
       predictPoolAddress: pool,
       predictLockedLiquidityAddress: locker,
       predictMigratingBondingCurveAddress: curve,
+      predictMerkleAirdropAddress: airdrop,
     });
 
     await expect(predictAmmPoolAddress(client, { factory: ammFactory, tokenA: shareToken, tokenB: paymentToken })).resolves.toBe(pool);
     await expect(predictLockedLiquidityAddress(client, { factory: lockedLiquidityFactory, boardroom, salt })).resolves.toBe(locker);
     await expect(predictMigratingBondingCurveAddress(client, { factory: distributionFactory, boardroom, salt })).resolves.toBe(curve);
+    await expect(predictMerkleAirdropAddress(client, { factory: distributionFactory, boardroom, salt })).resolves.toBe(airdrop);
   });
 
   test("folds creation, transfer, and close logs into issued and held grants", async () => {
@@ -661,6 +786,7 @@ describe("SDK action and query helpers", () => {
       DistributionCreated: [
         distributionCreatedLog(22n, 0, sale, boardroom, 0n),
         distributionCreatedLog(23n, 0, curve, boardroom, 1n),
+        distributionCreatedLog(24n, 0, airdrop, boardroom, 2n),
         distributionCreatedLog(24n, 0, other, holder, 1n),
       ],
       LockedLiquidityCreated: [
@@ -679,8 +805,8 @@ describe("SDK action and query helpers", () => {
     expect(boardrooms.items[0]).toMatchObject({ boardroom, owner: issuer, shareToken, name: "Pledge Common" });
 
     const distributions = await discoverBoardroomDistributions(client, { factory: distributionFactory, boardroom });
-    expect(distributions.items.map((item) => item.kind)).toEqual(["migrating-bonding-curve", "fixed-price-sale"]);
-    expect(distributions.items.map((item) => item.distribution)).toEqual([curve, sale]);
+    expect(distributions.items.map((item) => item.kind)).toEqual(["merkle-airdrop", "migrating-bonding-curve", "fixed-price-sale"]);
+    expect(distributions.items.map((item) => item.distribution)).toEqual([airdrop, curve, sale]);
 
     const lockers = await discoverBoardroomLockedLiquidity(client, { factory: lockedLiquidityFactory, boardroom });
     expect(lockers.items).toHaveLength(1);

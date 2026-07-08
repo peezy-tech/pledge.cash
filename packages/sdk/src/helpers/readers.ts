@@ -7,6 +7,7 @@ import {
   fixedPriceSaleAbi,
   lockedLiquidityAbi,
   lockedLiquidityFactoryAbi,
+  merkleAirdropAbi,
   migratingBondingCurveAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
@@ -17,6 +18,7 @@ import type {
   FixedPriceSaleState,
   GrantState,
   LockedLiquidityState,
+  MerkleAirdropState,
   MigratingBondingCurveState,
   PledgeCashReadClient,
 } from "./types";
@@ -192,6 +194,18 @@ export async function predictMigratingBondingCurveAddress(
   })) as Address;
 }
 
+export async function predictMerkleAirdropAddress(
+  client: PledgeCashReadClient,
+  input: { factory: Address; boardroom: Address; salt: Hex },
+): Promise<Address> {
+  return (await client.readContract({
+    address: input.factory,
+    abi: distributionFactoryAbi,
+    functionName: "predictMerkleAirdropAddress",
+    args: [input.boardroom, input.salt],
+  })) as Address;
+}
+
 export async function predictAmmPoolAddress(
   client: PledgeCashReadClient,
   input: { factory: Address; tokenA: Address; tokenB: Address },
@@ -340,6 +354,52 @@ export async function readMigratingBondingCurveState(
     soldShares: soldShares as bigint,
     quoteReserve: quoteReserve as bigint,
     canMigrate: canMigrate as boolean,
+    closed: closed as boolean,
+  };
+}
+
+export async function readMerkleAirdropState(
+  client: PledgeCashReadClient,
+  airdrop: Address,
+): Promise<MerkleAirdropState> {
+  const [
+    factory,
+    boardroom,
+    shareToken,
+    tokenGrantFactory,
+    airdropSupply,
+    remainingShares,
+    merkleRoot,
+    startTime,
+    endTime,
+    airdropStatus,
+    closed,
+  ] = await Promise.all([
+    client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "factory" }),
+    client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "boardroom" }),
+    client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "shareToken" }),
+    client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "tokenGrantFactory" }),
+    client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "airdropSupply" }),
+    client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "remainingShares" }),
+    client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "merkleRoot" }),
+    client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "startTime" }),
+    client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "endTime" }),
+    client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "airdropStatus" }),
+    client.readContract({ address: airdrop, abi: merkleAirdropAbi, functionName: "isClosed" }),
+  ]);
+
+  return {
+    address: airdrop,
+    factory: factory as Address,
+    boardroom: boardroom as Address,
+    shareToken: shareToken as Address,
+    tokenGrantFactory: tokenGrantFactory as Address,
+    airdropSupply: airdropSupply as bigint,
+    remainingShares: remainingShares as bigint,
+    merkleRoot: merkleRoot as Hex,
+    startTime: startTime as bigint,
+    endTime: endTime as bigint,
+    airdropStatus: Number(airdropStatus),
     closed: closed as boolean,
   };
 }

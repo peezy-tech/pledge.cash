@@ -333,6 +333,13 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         _recordLockedLiquidityPosition(locker, pool, address(0));
     }
 
+    function recordGrantFromDistribution(address grant) external {
+        _requireStatus(BoardroomStatus.Active);
+        if (!isIssuedDistribution[msg.sender]) revert InvalidIssuedDistribution(msg.sender);
+
+        _recordIssuedGrant(TokenGrant(grant).factory(), abi.encode(grant));
+    }
+
     function _execute(Call calldata call_) internal returns (bytes memory result) {
         address policy = call_.policy;
         address target = call_.target;
@@ -391,6 +398,11 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         }
 
         if (selector == DistributionFactory.createMigratingBondingCurve.selector) {
+            _recordIssuedDistribution(target, result);
+            return;
+        }
+
+        if (selector == DistributionFactory.createMerkleAirdrop.selector) {
             _recordIssuedDistribution(target, result);
             return;
         }

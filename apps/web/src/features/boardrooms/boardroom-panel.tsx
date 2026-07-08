@@ -2,6 +2,7 @@ import type {
   Address,
   FixedPriceSaleState,
   LockedLiquidityState,
+  MerkleAirdropState,
   MigratingBondingCurveState,
   PledgeCashDeployment,
 } from "@pledge.cash/sdk";
@@ -9,6 +10,7 @@ import {
   CheckCircle2,
   Coins,
   Flame,
+  Gift,
   Lock,
   Plus,
   RefreshCw,
@@ -34,11 +36,13 @@ import type {
   FixedPriceSaleForm,
   LockedLiquidityExitForm,
   LockedLiquidityForm,
+  MerkleAirdropForm,
   MigratingCurveForm,
   WindDownForm,
 } from "../../lib/types";
 import { ObligationLists } from "./boardroom-obligations";
 import {
+  airdropStatusLabel,
   boardroomStatusLabel,
   boardroomStatusTone,
   curveStatusLabel,
@@ -57,6 +61,7 @@ export function BoardroomPanel({
   fixedPriceSale,
   grant,
   lockedLiquidity,
+  merkleAirdrop,
   migratingCurve,
   windDown,
   workflow,
@@ -102,6 +107,19 @@ export function BoardroomPanel({
     setFixedPriceSaleAddress,
     setFixedPriceSaleForm,
   } = fixedPriceSale;
+  const {
+    address: merkleAirdropAddress,
+    form: merkleAirdropForm,
+    predicted: predictedMerkleAirdrop,
+    snapshot: merkleAirdropSnapshot,
+    cancel: cancelMerkleAirdrop,
+    close: closeMerkleAirdrop,
+    create: createMerkleAirdrop,
+    load: loadMerkleAirdrop,
+    predict: predictMerkleAirdrop,
+    setMerkleAirdropAddress,
+    setMerkleAirdropForm,
+  } = merkleAirdrop;
   const {
     address: migratingCurveAddress,
     form: migratingCurveForm,
@@ -224,6 +242,7 @@ export function BoardroomPanel({
         pendingAction={pendingAction}
         setBoardroomAddress={setBoardroomAddress}
         setFixedPriceSaleAddress={setFixedPriceSaleAddress}
+        setMerkleAirdropAddress={setMerkleAirdropAddress}
         setLockedLiquidityAddress={setLockedLiquidityAddress}
         setMigratingCurveAddress={setMigratingCurveAddress}
         loadBoardroom={loadBoardroom}
@@ -276,6 +295,24 @@ export function BoardroomPanel({
         createFixedPriceSale={createFixedPriceSale}
         loadFixedPriceSale={loadFixedPriceSale}
         predictFixedPriceSale={predictFixedPriceSale}
+        runAction={runAction}
+      />
+
+      <MerkleAirdropPanel
+        boardroomSnapshot={boardroomSnapshot}
+        deployment={deployment}
+        merkleAirdropAddress={merkleAirdropAddress}
+        merkleAirdropForm={merkleAirdropForm}
+        merkleAirdropSnapshot={merkleAirdropSnapshot}
+        pendingAction={pendingAction}
+        predictedMerkleAirdrop={predictedMerkleAirdrop}
+        setMerkleAirdropAddress={setMerkleAirdropAddress}
+        setMerkleAirdropForm={setMerkleAirdropForm}
+        cancelMerkleAirdrop={cancelMerkleAirdrop}
+        closeMerkleAirdrop={closeMerkleAirdrop}
+        createMerkleAirdrop={createMerkleAirdrop}
+        loadMerkleAirdrop={loadMerkleAirdrop}
+        predictMerkleAirdrop={predictMerkleAirdrop}
         runAction={runAction}
       />
 
@@ -341,6 +378,7 @@ function BoardroomOverview({
   pendingAction,
   setBoardroomAddress,
   setFixedPriceSaleAddress,
+  setMerkleAirdropAddress,
   setLockedLiquidityAddress,
   setMigratingCurveAddress,
   loadBoardroom,
@@ -351,6 +389,7 @@ function BoardroomOverview({
   pendingAction: string | undefined;
   setBoardroomAddress: (address: string) => void;
   setFixedPriceSaleAddress: (address: string) => void;
+  setMerkleAirdropAddress: (address: string) => void;
   setLockedLiquidityAddress: (address: string) => void;
   setMigratingCurveAddress: (address: string) => void;
   loadBoardroom: () => Promise<void>;
@@ -391,6 +430,7 @@ function BoardroomOverview({
       <ObligationLists
         boardroomSnapshot={boardroomSnapshot}
         setFixedPriceSaleAddress={setFixedPriceSaleAddress}
+        setMerkleAirdropAddress={setMerkleAirdropAddress}
         setLockedLiquidityAddress={setLockedLiquidityAddress}
         setMigratingCurveAddress={setMigratingCurveAddress}
       />
@@ -613,6 +653,120 @@ function FixedPriceSalePanel({
           { label: "Payment token", value: fixedPriceSaleSnapshot ? <AddressLink address={fixedPriceSaleSnapshot.paymentToken} /> : "Unknown" },
           { label: "Price", value: formatTokenAmount(fixedPriceSaleSnapshot?.price, distributionSummary?.paymentTokenMetadata) },
           { label: "Window", value: fixedPriceSaleSnapshot ? `${dateString(fixedPriceSaleSnapshot.startTime)} -> ${dateString(fixedPriceSaleSnapshot.endTime)}` : "Unknown" },
+        ]}
+      />
+    </Panel>
+  );
+}
+
+function MerkleAirdropPanel({
+  boardroomSnapshot,
+  deployment,
+  merkleAirdropAddress,
+  merkleAirdropForm,
+  merkleAirdropSnapshot,
+  pendingAction,
+  predictedMerkleAirdrop,
+  setMerkleAirdropAddress,
+  setMerkleAirdropForm,
+  cancelMerkleAirdrop,
+  closeMerkleAirdrop,
+  createMerkleAirdrop,
+  loadMerkleAirdrop,
+  predictMerkleAirdrop,
+  runAction,
+}: {
+  boardroomSnapshot: BoardroomSnapshot | undefined;
+  deployment: PledgeCashDeployment | undefined;
+  merkleAirdropAddress: string;
+  merkleAirdropForm: MerkleAirdropForm;
+  merkleAirdropSnapshot: MerkleAirdropState | undefined;
+  pendingAction: string | undefined;
+  predictedMerkleAirdrop: Address | undefined;
+  setMerkleAirdropAddress: (address: string) => void;
+  setMerkleAirdropForm: Dispatch<SetStateAction<MerkleAirdropForm>>;
+  cancelMerkleAirdrop: () => Promise<void>;
+  closeMerkleAirdrop: () => Promise<void>;
+  createMerkleAirdrop: () => Promise<void>;
+  loadMerkleAirdrop: () => Promise<void>;
+  predictMerkleAirdrop: () => Promise<void>;
+  runAction: (label: string, action: () => Promise<void>) => Promise<void>;
+}): React.JSX.Element {
+  const distributionSummary = distributionSummaryFor(boardroomSnapshot, merkleAirdropSnapshot?.address ?? merkleAirdropAddress);
+
+  return (
+    <Panel
+      title="Merkle Airdrop"
+      action={
+        <Button variant="secondary" onClick={() => setMerkleAirdropForm((current) => ({ ...current, salt: randomSalt() }))}>
+          <Wand2 className="h-4 w-4" />
+          Salt
+        </Button>
+      }
+    >
+      <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2">
+        <TextField form={merkleAirdropForm} field="shareAmount" inputMode="decimal" label="Share amount" setForm={setMerkleAirdropForm} />
+        <TextField form={merkleAirdropForm} field="merkleRoot" label="Merkle root" setForm={setMerkleAirdropForm} />
+        <TextField form={merkleAirdropForm} field="startTime" inputMode="numeric" label="Start timestamp" setForm={setMerkleAirdropForm} />
+        <TextField form={merkleAirdropForm} field="endTime" inputMode="numeric" label="End timestamp" setForm={setMerkleAirdropForm} />
+        <TextField form={merkleAirdropForm} field="salt" label="Salt" setForm={setMerkleAirdropForm} className="md:col-span-2" />
+      </div>
+      <ActionRow>
+        <ActionButton
+          actionId="predict-merkle-airdrop"
+          disabled={!deployment?.distributionFactory}
+          pendingAction={pendingAction}
+          variant="secondary"
+          onClick={() => void runAction("predict-merkle-airdrop", predictMerkleAirdrop)}
+        >
+          <Search className="h-4 w-4" />
+          Predict
+        </ActionButton>
+        <ActionButton
+          actionId="create-merkle-airdrop"
+          disabled={!deployment?.distributionFactory}
+          pendingAction={pendingAction}
+          onClick={() => void runAction("create-merkle-airdrop", createMerkleAirdrop)}
+        >
+          <Gift className="h-4 w-4" />
+          Create Airdrop
+        </ActionButton>
+      </ActionRow>
+      <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-[minmax(0,1fr)_auto]">
+        <Field label="Airdrop address">
+          <Input value={merkleAirdropAddress} onChange={(event) => setMerkleAirdropAddress(event.target.value)} spellCheck={false} />
+        </Field>
+        <div className="flex items-end gap-2 border-b border-zinc-800 p-4">
+          <ActionButton actionId="load-merkle-airdrop" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("load-merkle-airdrop", loadMerkleAirdrop)}>
+            <RefreshCw className="h-4 w-4" />
+            Load
+          </ActionButton>
+          <ActionButton actionId="close-merkle-airdrop" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("close-merkle-airdrop", closeMerkleAirdrop)}>
+            <ShieldCheck className="h-4 w-4" />
+            Close
+          </ActionButton>
+          <ActionButton actionId="cancel-merkle-airdrop" pendingAction={pendingAction} variant="danger" onClick={() => void runAction("cancel-merkle-airdrop", cancelMerkleAirdrop)}>
+            <XCircle className="h-4 w-4" />
+            Cancel
+          </ActionButton>
+        </div>
+      </div>
+      <Facts
+        columns="three"
+        items={[
+          { label: "Predicted airdrop", value: predictedMerkleAirdrop ? <AddressLink address={predictedMerkleAirdrop} /> : "None" },
+          {
+            label: "Status",
+            value: merkleAirdropSnapshot ? (
+              <StatusBadge label={airdropStatusLabel(merkleAirdropSnapshot.airdropStatus)} tone={merkleAirdropSnapshot.closed ? "warning" : "default"} />
+            ) : (
+              "Not loaded"
+            ),
+          },
+          { label: "Remaining shares", value: formatTokenAmount(merkleAirdropSnapshot?.remainingShares, distributionSummary?.shareTokenMetadata) },
+          { label: "Grant factory", value: merkleAirdropSnapshot ? <AddressLink address={merkleAirdropSnapshot.tokenGrantFactory} /> : "Unknown" },
+          { label: "Merkle root", value: merkleAirdropSnapshot?.merkleRoot ?? "Unknown" },
+          { label: "Window", value: merkleAirdropSnapshot ? `${dateString(merkleAirdropSnapshot.startTime)} -> ${dateString(merkleAirdropSnapshot.endTime)}` : "Unknown" },
         ]}
       />
     </Panel>

@@ -72,6 +72,13 @@ export function curveStatusLabel(status: number | undefined): string {
   return "Unknown";
 }
 
+export function airdropStatusLabel(status: number | undefined): string {
+  if (status === 0) return "Active";
+  if (status === 1) return "Closed";
+  if (status === 2) return "Cancelled";
+  return "Unknown";
+}
+
 export function distributionSummaryFor(
   boardroomSnapshot: BoardroomSnapshot | undefined,
   address: string | undefined,
@@ -101,9 +108,21 @@ export function windDownBlockers(boardroomSnapshot: BoardroomSnapshot | undefine
   const distributionBlockers = boardroomSnapshot.distributionSummaries
     .filter((distribution) => distribution.error || !distribution.state?.closed)
     .map((distribution) => ({
-      kind: distribution.kind === "fixed-price-sale" ? "Sale" : "Curve",
+      kind:
+        distribution.kind === "fixed-price-sale"
+          ? "Sale"
+          : distribution.kind === "migrating-bonding-curve"
+            ? "Curve"
+            : distribution.kind === "merkle-airdrop"
+              ? "Airdrop"
+              : "Distribution",
       address: distribution.address,
-      action: distribution.error ? "Reload the distribution state." : "Close, cancel, or migrate this distribution.",
+      action:
+        distribution.error
+          ? "Reload the distribution state."
+          : distribution.kind === "migrating-bonding-curve"
+            ? "Cancel or migrate this distribution."
+            : "Close or cancel this distribution.",
     }));
   const lockerBlockers = boardroomSnapshot.lockedLiquiditySummaries
     .filter((locker) => locker.error || (locker.state?.lockedLiquidity ?? 0n) !== 0n)

@@ -16,8 +16,11 @@ import {FixedPriceSale} from "../../src/distribution/FixedPriceSale.sol";
 import {IBoardroomCallPolicy} from "../../src/policy/IBoardroomCallPolicy.sol";
 import {LockedLiquidity} from "../../src/liquidity/LockedLiquidity.sol";
 import {LockedLiquidityFactory} from "../../src/liquidity/LockedLiquidityFactory.sol";
+import {MerkleAirdrop} from "../../src/distribution/MerkleAirdrop.sol";
 import {MigratingBondingCurve} from "../../src/distribution/MigratingBondingCurve.sol";
 import {ProtocolPolicy} from "../../src/policy/ProtocolPolicy.sol";
+import {TokenGrant} from "../../src/grants/TokenGrant.sol";
+import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
 
 contract DistributionCurrency {
     string public name;
@@ -100,6 +103,16 @@ contract DistributionTestAllowAllPolicy is IBoardroomCallPolicy {
 }
 
 contract DistributionTest is Test {
+    bytes32 internal constant DIRECT_CLAIM_TYPEHASH = keccak256(
+        "MerkleAirdropDirectClaim(uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
+    );
+    bytes32 internal constant GRANT_CLAIM_TYPEHASH = keccak256(
+        "MerkleAirdropGrantClaim(uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)"
+    );
+    bytes32 internal constant GRANT_TERMS_TYPEHASH = keccak256(
+        "MerkleAirdropGrantTerms(address paymentToken,uint256 price,uint256 expiry,uint256 vestingCliff,uint256 vestingEnd,bool transferable,uint256 transferUnlockTime,bytes32 salt)"
+    );
+
     BoardroomPolicyRegistry internal policyRegistry;
     ProtocolPolicy internal protocolPolicy;
     AssetPolicy internal assetPolicy;
@@ -108,6 +121,7 @@ contract DistributionTest is Test {
     WETH internal wrappedNative;
     AmmRouter internal ammRouter;
     LockedLiquidityFactory internal lockedLiquidityFactory;
+    TokenGrantFactory internal tokenGrantFactory;
     DistributionFactory internal distributionFactory;
     DistributionCurrency internal paymentToken;
 
@@ -126,6 +140,8 @@ contract DistributionTest is Test {
     uint256 internal constant CURVE_SELL_SHARES = 50 ether;
     uint256 internal constant CURVE_SELL_REFUND = 100_000000;
     uint256 internal constant CURVE_GRADUATION_TARGET = 300_000000;
+    uint256 internal constant AIRDROP_SHARES = 300 ether;
+    uint256 internal constant AIRDROP_CLAIM_SHARES = 125 ether;
 
     function setUp() public {
         wrappedNative = new WETH();
@@ -136,13 +152,18 @@ contract DistributionTest is Test {
         ammFactory = new AmmFactory(address(this));
         ammRouter = new AmmRouter(address(ammFactory), address(wrappedNative));
         lockedLiquidityFactory = new LockedLiquidityFactory(address(ammRouter));
-        distributionFactory = new DistributionFactory(address(lockedLiquidityFactory));
+        tokenGrantFactory = new TokenGrantFactory(address(this));
+        distributionFactory = new DistributionFactory(address(lockedLiquidityFactory), address(tokenGrantFactory));
         paymentToken = new DistributionCurrency("USD Coin", "USDC", 6);
 
+        protocolPolicy.setProtocolTargetAllowed(address(tokenGrantFactory), true);
+        protocolPolicy.setProtocolValueTargetAllowed(address(tokenGrantFactory), true);
         protocolPolicy.setProtocolTargetAllowed(address(distributionFactory), true);
         assetPolicy.setApprovalSpenderAllowed(address(distributionFactory), true);
+        assetPolicy.setApprovalSpenderAllowed(address(tokenGrantFactory), true);
         policyRegistry.setPolicyAllowed(address(protocolPolicy), true);
         policyRegistry.setPolicyAllowed(address(assetPolicy), true);
+        policyRegistry.setPolicyAllowed(address(tokenGrantFactory), true);
         policyRegistry.setPolicyAllowed(address(distributionFactory), true);
         policyRegistry.setPolicyAllowed(address(lockedLiquidityFactory), true);
         paymentToken.mint(buyer, 10_000_000000);
@@ -175,6 +196,122 @@ contract DistributionTest is Test {
         assertEq(paymentToken.balanceOf(buyer), 10_000_000000 - BUY_PAYMENT);
         assertEq(sale.remainingShares(), SALE_SHARES - BUY_SHARES);
         assertEq(sale.purchasedBy(buyer), BUY_SHARES);
+    }
+
+    function testBoardroomCanCreateMerkleAirdropAndRecipientCanClaimShares() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("airdrop-direct");
+        bytes32 salt = keccak256("airdrop-direct-create");
+        address predictedAirdrop = distributionFactory.predictMerkleAirdropAddress(address(boardroom), salt);
+        bytes32 recipientLeaf =
+            _directClaimLeaf(predictedAirdrop, boardroom, shareToken, 0, recipient, AIRDROP_CLAIM_SHARES);
+        bytes32 buyerLeaf = _directClaimLeaf(predictedAirdrop, boardroom, shareToken, 1, buyer, 75 ether);
+        bytes32 root = _hashPair(recipientLeaf, buyerLeaf);
+
+        MerkleAirdrop airdrop = _createMerkleAirdrop(boardroom, shareToken, root, AIRDROP_SHARES, salt);
+
+        assertEq(address(airdrop), predictedAirdrop);
+        assertEq(airdrop.boardroom(), address(boardroom));
+        assertEq(airdrop.shareToken(), address(shareToken));
+        assertEq(airdrop.tokenGrantFactory(), address(tokenGrantFactory));
+        assertEq(airdrop.airdropSupply(), AIRDROP_SHARES);
+        assertEq(airdrop.remainingShares(), AIRDROP_SHARES);
+        assertEq(airdrop.merkleRoot(), root);
+        assertEq(shareToken.balanceOf(address(airdrop)), AIRDROP_SHARES);
+        assertEq(distributionFactory.distributionCountForBoardroom(address(boardroom)), 1);
+        assertEq(distributionFactory.distributionForBoardroomAt(address(boardroom), 0), address(airdrop));
+        assertTrue(distributionFactory.isDistribution(address(airdrop)));
+        assertTrue(boardroom.isIssuedDistribution(address(airdrop)));
+
+        bytes32[] memory proof = new bytes32[](1);
+        proof[0] = buyerLeaf;
+
+        vm.prank(recipient);
+        airdrop.claim(0, recipient, AIRDROP_CLAIM_SHARES, proof);
+
+        assertEq(shareToken.balanceOf(recipient), AIRDROP_CLAIM_SHARES);
+        assertEq(shareToken.balanceOf(address(airdrop)), AIRDROP_SHARES - AIRDROP_CLAIM_SHARES);
+        assertEq(airdrop.remainingShares(), AIRDROP_SHARES - AIRDROP_CLAIM_SHARES);
+        assertTrue(airdrop.isClaimed(0));
+
+        vm.prank(recipient);
+        vm.expectRevert(abi.encodeWithSelector(MerkleAirdrop.ClaimAlreadyMade.selector, 0));
+        airdrop.claim(0, recipient, AIRDROP_CLAIM_SHARES, proof);
+    }
+
+    function testMerkleAirdropClaimCanCreateBoardroomIssuedGrant() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("airdrop-grant");
+        bytes32 salt = keccak256("airdrop-grant-create");
+        address predictedAirdrop = distributionFactory.predictMerkleAirdropAddress(address(boardroom), salt);
+        MerkleAirdrop.GrantClaimParams memory grantParams = _grantClaimParams("airdrop-grant-claim");
+        bytes32 root =
+            _grantClaimLeaf(predictedAirdrop, boardroom, shareToken, 0, recipient, AIRDROP_CLAIM_SHARES, grantParams);
+
+        MerkleAirdrop airdrop = _createMerkleAirdrop(boardroom, shareToken, root, AIRDROP_SHARES, salt);
+        bytes32[] memory proof = new bytes32[](0);
+        bytes32 grantSalt = _grantSalt(predictedAirdrop, 0, recipient, grantParams.salt);
+        address predictedGrant = tokenGrantFactory.predictGrantAddress(address(boardroom), grantSalt);
+
+        vm.prank(recipient);
+        address grantAddress = airdrop.claimGrant(0, recipient, AIRDROP_CLAIM_SHARES, grantParams, proof);
+
+        TokenGrant grant = TokenGrant(grantAddress);
+        uint256 grantTokenId = uint256(uint160(grantAddress));
+
+        assertEq(grantAddress, predictedGrant);
+        assertEq(grant.issuer(), address(boardroom));
+        assertEq(grant.holder(), recipient);
+        assertEq(grant.token(), address(shareToken));
+        assertEq(grant.paymentToken(), address(0));
+        assertEq(grant.grantSize(), AIRDROP_CLAIM_SHARES);
+        assertEq(grant.price(), 0);
+        assertEq(grant.vestingCliff(), grantParams.vestingCliff);
+        assertEq(grant.vestingEnd(), grantParams.vestingEnd);
+        assertEq(grant.expiry(), grantParams.expiry);
+        assertEq(tokenGrantFactory.ownerOf(grantTokenId), recipient);
+        assertEq(shareToken.balanceOf(address(grant)), AIRDROP_CLAIM_SHARES);
+        assertEq(shareToken.balanceOf(recipient), 0);
+        assertEq(airdrop.remainingShares(), AIRDROP_SHARES - AIRDROP_CLAIM_SHARES);
+        assertEq(boardroom.issuedGrantCount(), 1);
+        assertEq(boardroom.issuedGrantAt(0), grantAddress);
+        assertTrue(boardroom.isIssuedGrant(grantAddress));
+    }
+
+    function testBoardroomRedemptionsWaitForMerkleAirdropToClose() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("airdrop-wind-down");
+        bytes32 salt = keccak256("airdrop-wind-down-create");
+        address predictedAirdrop = distributionFactory.predictMerkleAirdropAddress(address(boardroom), salt);
+        bytes32 root = _directClaimLeaf(predictedAirdrop, boardroom, shareToken, 0, recipient, AIRDROP_CLAIM_SHARES);
+        MerkleAirdrop airdrop = _createMerkleAirdrop(boardroom, shareToken, root, AIRDROP_SHARES, salt);
+
+        assertEq(boardroom.issuedDistributionCount(), 1);
+        assertEq(boardroom.issuedDistributionAt(0), address(airdrop));
+        assertTrue(boardroom.isIssuedDistribution(address(airdrop)));
+
+        vm.prank(owner);
+        boardroom.startWindDown();
+
+        bytes32[] memory proof = new bytes32[](0);
+        vm.prank(recipient);
+        vm.expectRevert(MerkleAirdrop.AirdropNotOpen.selector);
+        airdrop.claim(0, recipient, AIRDROP_CLAIM_SHARES, proof);
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.IssuedDistributionStillOpen.selector, address(airdrop)));
+        boardroom.openRedemptions();
+
+        vm.prank(owner);
+        boardroom.execute(
+            _policyCall(address(distributionFactory), address(airdrop), 0, abi.encodeCall(MerkleAirdrop.close, ()))
+        );
+
+        assertTrue(airdrop.isClosed());
+        assertEq(airdrop.remainingShares(), 0);
+        assertEq(shareToken.balanceOf(address(boardroom)), AIRDROP_SHARES);
+
+        vm.prank(owner);
+        boardroom.openRedemptions();
+
+        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
     }
 
     function testFixedPriceSaleRoundsPaymentUpForDustPurchase() public {
@@ -603,11 +740,31 @@ contract DistributionTest is Test {
                 abi.encodeCall(DistributionFactory.createMigratingBondingCurve, (curveParams))
             )
         );
+
+        MerkleAirdrop.CreateParams memory airdropParams = _airdropParams(
+            address(wrappedNative),
+            amount,
+            keccak256("protocol-policy-wrong-share-airdrop-root"),
+            keccak256("protocol-policy-wrong-share-airdrop")
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DistributionFactory.InvalidShareToken.selector, boardroom.shareToken(), address(wrappedNative)
+            )
+        );
+        boardroom.execute(
+            _policyCall(
+                address(protocolPolicy),
+                address(distributionFactory),
+                0,
+                abi.encodeCall(DistributionFactory.createMerkleAirdrop, (airdropParams))
+            )
+        );
         vm.stopPrank();
     }
 
     function testDistributionPolicyRejectsMigratingCurveWithoutLockedLiquidityFactory() public {
-        DistributionFactory factoryWithoutLocker = new DistributionFactory(address(0));
+        DistributionFactory factoryWithoutLocker = new DistributionFactory(address(0), address(tokenGrantFactory));
         policyRegistry.setPolicyAllowed(address(factoryWithoutLocker), true);
         assetPolicy.setApprovalSpenderAllowed(address(factoryWithoutLocker), true);
 
@@ -748,6 +905,41 @@ contract DistributionTest is Test {
         assertTrue(boardroom.isIssuedDistribution(address(curve)));
     }
 
+    function _createMerkleAirdrop(
+        Boardroom boardroom,
+        BoardroomToken shareToken,
+        bytes32 root,
+        uint256 shareAmount,
+        bytes32 salt
+    ) internal returns (MerkleAirdrop airdrop) {
+        vm.startPrank(owner);
+        boardroom.mint(address(boardroom), shareAmount);
+
+        address predictedAirdrop = distributionFactory.predictMerkleAirdropAddress(address(boardroom), salt);
+        MerkleAirdrop.CreateParams memory params = _airdropParams(address(shareToken), shareAmount, root, salt);
+
+        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        calls[0] = _policyCall(
+            address(assetPolicy),
+            address(shareToken),
+            0,
+            abi.encodeWithSignature("approve(address,uint256)", address(distributionFactory), shareAmount)
+        );
+        calls[1] = _policyCall(
+            address(distributionFactory),
+            address(distributionFactory),
+            0,
+            abi.encodeCall(DistributionFactory.createMerkleAirdrop, (params))
+        );
+
+        bytes[] memory results = boardroom.executeBatch(calls);
+        vm.stopPrank();
+
+        address createdAirdrop = abi.decode(results[1], (address));
+        assertEq(createdAirdrop, predictedAirdrop);
+        airdrop = MerkleAirdrop(createdAirdrop);
+    }
+
     function _saleParams(address shareToken, address paymentToken_, uint256 shareAmount, uint256 price, bytes32 salt)
         internal
         view
@@ -784,6 +976,99 @@ contract DistributionTest is Test {
             migrationSalt: keccak256(abi.encodePacked(salt, "migration")),
             salt: salt
         });
+    }
+
+    function _airdropParams(address shareToken, uint256 shareAmount, bytes32 root, bytes32 salt)
+        internal
+        view
+        returns (MerkleAirdrop.CreateParams memory params)
+    {
+        params = MerkleAirdrop.CreateParams({
+            shareToken: shareToken,
+            shareAmount: shareAmount,
+            merkleRoot: root,
+            startTime: uint64(block.timestamp),
+            endTime: 0,
+            salt: salt
+        });
+    }
+
+    function _grantClaimParams(string memory saltLabel)
+        internal
+        view
+        returns (MerkleAirdrop.GrantClaimParams memory params)
+    {
+        params = MerkleAirdrop.GrantClaimParams({
+            paymentToken: address(0),
+            price: 0,
+            expiry: block.timestamp + 365 days,
+            vestingCliff: block.timestamp + 30 days,
+            vestingEnd: block.timestamp + 180 days,
+            transferable: false,
+            transferUnlockTime: 0,
+            salt: keccak256(bytes(saltLabel))
+        });
+    }
+
+    function _directClaimLeaf(
+        address airdrop,
+        Boardroom boardroom,
+        BoardroomToken shareToken,
+        uint256 index,
+        address account,
+        uint256 amount
+    ) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(DIRECT_CLAIM_TYPEHASH, index, airdrop, address(boardroom), address(shareToken), account, amount)
+        );
+    }
+
+    function _grantClaimLeaf(
+        address airdrop,
+        Boardroom boardroom,
+        BoardroomToken shareToken,
+        uint256 index,
+        address account,
+        uint256 amount,
+        MerkleAirdrop.GrantClaimParams memory params
+    ) internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                GRANT_CLAIM_TYPEHASH,
+                index,
+                airdrop,
+                address(boardroom),
+                address(shareToken),
+                address(tokenGrantFactory),
+                account,
+                amount,
+                _grantTermsHash(params)
+            )
+        );
+    }
+
+    function _hashPair(bytes32 a, bytes32 b) internal pure returns (bytes32) {
+        return a < b ? keccak256(abi.encodePacked(a, b)) : keccak256(abi.encodePacked(b, a));
+    }
+
+    function _grantSalt(address airdrop, uint256 index, address account, bytes32 salt) internal pure returns (bytes32) {
+        return keccak256(abi.encode(airdrop, index, account, salt));
+    }
+
+    function _grantTermsHash(MerkleAirdrop.GrantClaimParams memory params) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                GRANT_TERMS_TYPEHASH,
+                params.paymentToken,
+                params.price,
+                params.expiry,
+                params.vestingCliff,
+                params.vestingEnd,
+                params.transferable,
+                params.transferUnlockTime,
+                params.salt
+            )
+        );
     }
 
     function _windDownAndRedeemAfterMigration(Boardroom boardroom, BoardroomToken shareToken, address lockerAddress)
