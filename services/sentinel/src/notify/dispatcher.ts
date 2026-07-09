@@ -235,7 +235,7 @@ function selectPendingSql(batchSize: number): SQL {
     FROM notifications
     WHERE status IN ('pending', 'failed')
       AND next_attempt_at <= NOW()
-    ORDER BY id
+    ORDER BY created_at ASC, id ASC
     LIMIT ${batchSize}
     FOR UPDATE SKIP LOCKED
   `;

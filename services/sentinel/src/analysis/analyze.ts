@@ -106,7 +106,11 @@ export function createDrizzleAnalysisStore(db: SentinelDb): AnalysisStore {
         })
         .returning();
 
-      return row ?? volatileResult(draft);
+      if (row === undefined) {
+        throw new Error("Analysis write did not return a row");
+      }
+
+      return row;
     }
   };
 }
@@ -129,11 +133,12 @@ async function analyzeActionNow(input: AnalyzeActionInput, deps: AnalyzeActionDe
 
   const adapter = input.harness?.eligible === false ? undefined : deps.adapter;
   if (adapter === undefined) {
-    return persistOrReturn(templateDraft(input, "template", null), deps.db);
+    return persistAnalysis(templateDraft(input, "template", null), deps.db);
   }
 
   const workdir = deps.workdir ?? DEFAULT_WORKDIR;
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  let draft: AnalysisDraft;
   let workspaceDir: string | undefined;
 
   try {
@@ -145,18 +150,18 @@ async function analyzeActionNow(input: AnalyzeActionInput, deps: AnalyzeActionDe
       timeoutMs,
       workspaceDir: workspace.workspaceDir
     });
-    const draft = response.ok
+    draft = response.ok
       ? await draftFromHarnessResponse(input, response)
       : templateDraft(input, adapter.harness, null);
-
-    return await persistOrReturn(draft, deps.db);
   } catch {
-    return await persistOrReturn(templateDraft(input, adapter.harness, null), deps.db);
+    draft = templateDraft(input, adapter.harness, null);
   } finally {
     if (workspaceDir !== undefined) {
       await cleanupAnalysisWorkspace(workspaceDir);
     }
   }
+
+  return await persistAnalysis(draft, deps.db);
 }
 
 async function tryGetCached(
@@ -223,15 +228,6 @@ function templateDraft(input: AnalyzeActionInput, harness: string, model: string
   };
 }
 
-async function persistOrReturn(draft: AnalysisDraft, db: AnalysisStore): Promise<AnalysisResult> {
-  try {
-    return await db.put(draft);
-  } catch {
-    return volatileResult(draft);
-  }
-}
-
-function volatileResult(draft: AnalysisDraft): AnalysisResult {
-  const now = new Date();
-  return { ...draft, createdAt: now, updatedAt: now };
+async function persistAnalysis(draft: AnalysisDraft, db: AnalysisStore): Promise<AnalysisResult> {
+  return await db.put(draft);
 }

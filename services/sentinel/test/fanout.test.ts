@@ -78,7 +78,7 @@ describe("notification fanout", () => {
   });
 
   test.each(["cancelled", "executed", "policy-admin"] as const)(
-    "threads Twitter %s follow-ups from the original sent queued tweet",
+    "preserves Twitter %s follow-ups when the original queued tweet is unsent",
     async (event) => {
       const db = new FakeDb([[], [{ id: `twitter-${event}`, channelType: "twitter" }]]);
 
@@ -87,7 +87,8 @@ describe("notification fanout", () => {
       expect(result).toEqual({ telegram: 0, total: 1, twitter: 1 });
       const followUpSql = sqlText(db.queries[1]);
       expect(followUpSql).toContain("original_tweet");
-      expect(followUpSql).toContain("external_id IS NOT NULL");
+      expect(followUpSql).toContain("status IN ('pending', 'failed', 'sent')");
+      expect(followUpSql).toContain("ORDER BY created_at ASC, id ASC");
       expect(followUpSql).toContain("replyToExternalId");
     }
   );

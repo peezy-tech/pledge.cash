@@ -331,9 +331,8 @@ async function insertTwitterFollowUp(
           WHERE action_id = ${event.action.id}
             AND channel_type = 'twitter'
             AND event = 'queued'
-            AND status = 'sent'
-            AND external_id IS NOT NULL
-          ORDER BY sent_at ASC NULLS LAST, id ASC
+            AND status IN ('pending', 'failed', 'sent')
+          ORDER BY created_at ASC, id ASC
           LIMIT 1
         )
         INSERT INTO notifications (

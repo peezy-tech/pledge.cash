@@ -241,6 +241,12 @@ describe("analyzeAction", () => {
     expect(result.harness).toBe("template");
     expect(adapter.runs).toBe(0);
   });
+
+  test("propagates persistence failures so watcher delivery can retry", async () => {
+    await expect(
+      analyzeAction(sampleInput("persistence-failure-action"), { db: new FailingAnalysisStore() })
+    ).rejects.toThrow("analysis database unavailable");
+  });
 });
 
 class MemoryAnalysisStore implements AnalysisStore {
@@ -264,6 +270,13 @@ class MemoryAnalysisStore implements AnalysisStore {
     };
     this.rows.set(draft.actionId, row);
     return row;
+  }
+}
+
+class FailingAnalysisStore extends MemoryAnalysisStore {
+  override async put(_draft: AnalysisDraft): Promise<AnalysisResult> {
+    this.puts += 1;
+    throw new Error("analysis database unavailable");
   }
 }
 

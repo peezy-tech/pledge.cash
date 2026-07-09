@@ -50,6 +50,7 @@ describe("notification dispatcher", () => {
     expect(db.transactionCount).toBe(1);
     expect(sent).toEqual([{ text: "rendered alert" }]);
     expect(sqlText(db.queries[0])).toContain("FOR UPDATE SKIP LOCKED");
+    expect(sqlText(db.queries[0])).toContain("ORDER BY created_at ASC, id ASC");
     expect(sqlText(db.queries[1])).toContain("status = 'sent'");
   });
 
