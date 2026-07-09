@@ -97,23 +97,11 @@ contract TokenGrant is Initializable {
         bool _transferable,
         uint256 _transferUnlockTime
     ) external initializer {
-        if (_issuer == address(0) || _holder == address(0) || _token == address(0)) {
-            revert InvalidAddress();
-        }
-        if (_amount == 0) revert InvalidAmount();
-        if (_expiry < _vestingEnd) revert InvalidExpiry();
-        if (_expiry <= block.timestamp) revert InvalidExpiry();
-        if (_vestingCliff > _vestingEnd) revert InvalidVestingSchedule();
+        _validateGrantParties(_issuer, _holder, _token);
+        _validateGrantTerms(_amount, _expiry, _vestingCliff, _vestingEnd);
 
         tokenDecimals = _readTokenDecimals(_token);
-
-        if (_price == 0) {
-            if (_paymentToken != address(0)) revert InvalidPaymentToken();
-        } else {
-            if (_paymentToken == address(0)) revert InvalidPaymentToken();
-            if (_paymentToken == _token) revert InvalidTokenPair();
-            paymentTokenDecimals = _readTokenDecimals(_paymentToken);
-        }
+        _configurePaymentTerms(_token, _paymentToken, _price);
 
         factory = msg.sender;
         issuer = _issuer;
@@ -136,23 +124,13 @@ contract TokenGrant is Initializable {
     //////////////////////////////////////////////////////////////*/
 
     function getCurrentlyVestedSnapshot(uint256 _currentTime) public view returns (uint256) {
-        if (_currentTime < vestingCliff) {
-            return 0;
-        }
-
-        uint256 cappedTime = _currentTime;
-        if (vestingIsHalted && vestingHaltTimestamp < cappedTime) {
-            cappedTime = vestingHaltTimestamp;
-        }
-
-        if (cappedTime < vestingCliff) {
-            return 0;
-        }
-        if (vestingEnd == vestingCliff || cappedTime >= vestingEnd) {
+        uint256 effectiveTime = _effectiveVestingTime(_currentTime);
+        if (effectiveTime < vestingCliff) return 0;
+        if (_isFullyVestedAt(effectiveTime)) {
             return claimable;
         }
 
-        return FixedPointMathLib.fullMulDiv(grantSize, cappedTime - vestingCliff, vestingEnd - vestingCliff);
+        return _linearVestedAmount(effectiveTime);
     }
 
     function getSettlementCost(uint256 _amountToSettle) public view returns (uint256) {
@@ -180,12 +158,7 @@ contract TokenGrant is Initializable {
 
     function requireCanTransferGrantRight(uint256 _currentTime) external view {
         _requireOpen();
-        if (!transferable) revert NonTransferableGrant(tokenId);
-        if (transferLocked) revert GrantTransferLocked(tokenId);
-        if (_currentTime < transferUnlockTime) {
-            revert GrantTransferNotUnlocked(tokenId, transferUnlockTime);
-        }
-        if (isExpired(_currentTime)) revert GrantExpired();
+        _requireTransferableGrantRight(_currentTime);
     }
 
     function tokenUnit() public view returns (uint256) {
@@ -210,25 +183,12 @@ contract TokenGrant is Initializable {
 
     function settle(uint256 _amountToSettle) external {
         _requireOpen();
-        if (block.timestamp > expiry) revert GrantExpired();
         address currentHolder = holder;
-        if (msg.sender != currentHolder) revert OnlyHolder();
-        if (_amountToSettle == 0) revert ZeroAmount();
-
-        uint256 requestedTotal = settledAmount + _amountToSettle;
-        if (requestedTotal > claimable) {
-            revert AmountExceedsTotal({requested: requestedTotal, available: claimable});
-        }
-
-        uint256 vested = getCurrentlyVestedSnapshot(block.timestamp);
-        uint256 settleable = vested - settledAmount;
-        if (_amountToSettle > settleable) {
-            revert InsufficientVestedAmount({requested: _amountToSettle, vested: settleable});
-        }
+        _requireSettlementAllowed(currentHolder, _amountToSettle);
 
         settledAmount += _amountToSettle;
-
         transferLocked = true;
+
         uint256 totalCost = getSettlementCost(_amountToSettle);
         if (totalCost > 0) {
             _checkedTransferFrom(paymentToken, currentHolder, issuer, totalCost);
@@ -249,11 +209,12 @@ contract TokenGrant is Initializable {
         _requireOpen();
         if (vestingIsHalted) revert VestingAlreadyHalted();
 
-        uint256 vestedAtHalt = getCurrentlyVestedSnapshot(block.timestamp);
+        uint256 haltTimestamp = block.timestamp;
+        uint256 vestedAtHalt = getCurrentlyVestedSnapshot(haltTimestamp);
         uint256 unvestedToWithdraw = grantSize - vestedAtHalt;
 
         vestingIsHalted = true;
-        vestingHaltTimestamp = block.timestamp;
+        vestingHaltTimestamp = haltTimestamp;
         claimable = vestedAtHalt;
 
         transferLocked = true;
@@ -299,6 +260,73 @@ contract TokenGrant is Initializable {
 
     function _requireOpen() internal view {
         if (isClosed) revert GrantClosed();
+    }
+
+    function _validateGrantParties(address issuer_, address holder_, address token_) internal pure {
+        if (issuer_ == address(0) || holder_ == address(0) || token_ == address(0)) {
+            revert InvalidAddress();
+        }
+    }
+
+    function _validateGrantTerms(uint256 amount_, uint256 expiry_, uint256 vestingCliff_, uint256 vestingEnd_)
+        internal
+        view
+    {
+        if (amount_ == 0) revert InvalidAmount();
+        if (expiry_ < vestingEnd_) revert InvalidExpiry();
+        if (expiry_ <= block.timestamp) revert InvalidExpiry();
+        if (vestingCliff_ > vestingEnd_) revert InvalidVestingSchedule();
+    }
+
+    function _configurePaymentTerms(address token_, address paymentToken_, uint256 price_) internal {
+        if (price_ == 0) {
+            if (paymentToken_ != address(0)) revert InvalidPaymentToken();
+            return;
+        }
+
+        if (paymentToken_ == address(0)) revert InvalidPaymentToken();
+        if (paymentToken_ == token_) revert InvalidTokenPair();
+        paymentTokenDecimals = _readTokenDecimals(paymentToken_);
+    }
+
+    function _effectiveVestingTime(uint256 currentTime) internal view returns (uint256) {
+        if (!vestingIsHalted) return currentTime;
+        if (vestingHaltTimestamp >= currentTime) return currentTime;
+        return vestingHaltTimestamp;
+    }
+
+    function _isFullyVestedAt(uint256 currentTime) internal view returns (bool) {
+        return vestingEnd == vestingCliff || currentTime >= vestingEnd;
+    }
+
+    function _linearVestedAmount(uint256 currentTime) internal view returns (uint256) {
+        return FixedPointMathLib.fullMulDiv(grantSize, currentTime - vestingCliff, vestingEnd - vestingCliff);
+    }
+
+    function _requireTransferableGrantRight(uint256 currentTime) internal view {
+        if (!transferable) revert NonTransferableGrant(tokenId);
+        if (transferLocked) revert GrantTransferLocked(tokenId);
+        if (currentTime < transferUnlockTime) {
+            revert GrantTransferNotUnlocked(tokenId, transferUnlockTime);
+        }
+        if (isExpired(currentTime)) revert GrantExpired();
+    }
+
+    function _requireSettlementAllowed(address currentHolder, uint256 amountToSettle) internal view {
+        if (block.timestamp > expiry) revert GrantExpired();
+        if (msg.sender != currentHolder) revert OnlyHolder();
+        if (amountToSettle == 0) revert ZeroAmount();
+
+        uint256 requestedTotal = settledAmount + amountToSettle;
+        if (requestedTotal > claimable) {
+            revert AmountExceedsTotal({requested: requestedTotal, available: claimable});
+        }
+
+        uint256 vested = getCurrentlyVestedSnapshot(block.timestamp);
+        uint256 settleable = vested - settledAmount;
+        if (amountToSettle > settleable) {
+            revert InsufficientVestedAmount({requested: amountToSettle, vested: settleable});
+        }
     }
 
     function _closeAndBurnGrantRight() internal {
