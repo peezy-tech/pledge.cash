@@ -28,91 +28,81 @@ type RootSimpleKitModalProps = {
   onOpenChange?: ((open: boolean) => void) | undefined;
 };
 
-type SimpleKitModalProps = {
+type SimpleKitModalPartProps = {
   children: React.ReactNode;
   className?: string | undefined;
 };
 
-const desktop = "(min-width: 768px)";
+const DESKTOP_MEDIA_QUERY = "(min-width: 768px)";
 
 function SimpleKitModal({ children, onOpenChange, open }: RootSimpleKitModalProps): React.JSX.Element {
-  const isDesktop = useMediaQuery(desktop);
-  const Modal = isDesktop ? Dialog : Drawer;
-  const modalProps = {
-    ...(open !== undefined ? { open } : {}),
-    ...(onOpenChange ? { onOpenChange } : {}),
-  };
+  const { Root } = useSimpleKitModalComponents();
+  const modalProps = modalControlProps({ onOpenChange, open });
 
-  return <Modal {...modalProps}>{children}</Modal>;
+  return <Root {...modalProps}>{children}</Root>;
 }
 
-function SimpleKitModalTrigger({ className, children }: SimpleKitModalProps): React.JSX.Element {
-  const isDesktop = useMediaQuery(desktop);
-  const ModalTrigger = isDesktop ? DialogTrigger : DrawerTrigger;
+function SimpleKitModalTrigger({ className, children }: SimpleKitModalPartProps): React.JSX.Element {
+  const { Trigger } = useSimpleKitModalComponents();
 
   return (
-    <ModalTrigger className={className}>
+    <Trigger className={className}>
       {children}
-    </ModalTrigger>
+    </Trigger>
   );
 }
 
-function SimpleKitModalClose({ className, children }: SimpleKitModalProps): React.JSX.Element {
-  const isDesktop = useMediaQuery(desktop);
-  const ModalClose = isDesktop ? DialogClose : DrawerClose;
+function SimpleKitModalClose({ className, children }: SimpleKitModalPartProps): React.JSX.Element {
+  const { Close } = useSimpleKitModalComponents();
 
   return (
-    <ModalClose className={className}>
+    <Close className={className}>
       {children}
-    </ModalClose>
+    </Close>
   );
 }
 
-function SimpleKitModalContent({ className, children }: SimpleKitModalProps): React.JSX.Element {
-  const isDesktop = useMediaQuery(desktop);
-  const ModalContent = isDesktop ? DialogContent : DrawerContent;
+function SimpleKitModalContent({ className, children }: SimpleKitModalPartProps): React.JSX.Element {
+  const { Content } = useSimpleKitModalComponents();
 
   return (
-    <ModalContent className={cn("rounded-t-lg md:max-w-[380px] [&>button]:right-5 [&>button]:top-5", className)}>
+    <Content className={cn("rounded-t-lg md:max-w-[380px] [&>button]:right-5 [&>button]:top-5", className)}>
       {children}
-    </ModalContent>
+    </Content>
   );
 }
 
-function SimpleKitModalDescription({ className, children }: SimpleKitModalProps): React.JSX.Element {
-  const isDesktop = useMediaQuery(desktop);
-  const ModalDescription = isDesktop ? DialogDescription : DrawerDescription;
+function SimpleKitModalDescription({ className, children }: SimpleKitModalPartProps): React.JSX.Element {
+  const { Description } = useSimpleKitModalComponents();
 
   return (
-    <ModalDescription className={className}>
+    <Description className={className}>
       {children}
-    </ModalDescription>
+    </Description>
   );
 }
 
-function SimpleKitModalHeader({ className, children }: SimpleKitModalProps): React.JSX.Element {
-  const isDesktop = useMediaQuery(desktop);
-  const ModalHeader = isDesktop ? DialogHeader : DrawerHeader;
+function SimpleKitModalHeader({ className, children }: SimpleKitModalPartProps): React.JSX.Element {
+  const { Header } = useSimpleKitModalComponents();
 
   return (
-    <ModalHeader className={cn("space-y-0 pb-4", className)}>
+    <Header className={cn("space-y-0 pb-4", className)}>
       {children}
-    </ModalHeader>
+    </Header>
   );
 }
 
-function SimpleKitModalTitle({ className, children }: SimpleKitModalProps): React.JSX.Element {
-  const isDesktop = useMediaQuery(desktop);
-  const ModalTitle = isDesktop ? DialogTitle : DrawerTitle;
+function SimpleKitModalTitle({ className, children }: SimpleKitModalPartProps): React.JSX.Element {
+  const { Title } = useSimpleKitModalComponents();
 
   return (
-    <ModalTitle className={cn("text-center", className)}>
+    <Title className={cn("text-center", className)}>
       {children}
-    </ModalTitle>
+    </Title>
   );
 }
 
-function SimpleKitModalBody({ className, children }: SimpleKitModalProps): React.JSX.Element {
+function SimpleKitModalBody({ className, children }: SimpleKitModalPartProps): React.JSX.Element {
   return (
     <ScrollArea className={cn("h-[250px] max-h-[50svh] px-6 md:h-full md:min-h-[260px] md:px-0", className)}>
       {children}
@@ -120,15 +110,36 @@ function SimpleKitModalBody({ className, children }: SimpleKitModalProps): React
   );
 }
 
-function SimpleKitModalFooter({ className, children }: SimpleKitModalProps): React.JSX.Element {
-  const isDesktop = useMediaQuery(desktop);
-  const ModalFooter = isDesktop ? DialogFooter : DrawerFooter;
+function SimpleKitModalFooter({ className, children }: SimpleKitModalPartProps): React.JSX.Element {
+  const { Footer } = useSimpleKitModalComponents();
 
   return (
-    <ModalFooter className={cn("py-4 md:py-0", className)}>
+    <Footer className={cn("py-4 md:py-0", className)}>
       {children}
-    </ModalFooter>
+    </Footer>
   );
+}
+
+function modalControlProps({ onOpenChange, open }: Pick<RootSimpleKitModalProps, "onOpenChange" | "open">) {
+  return {
+    ...(open !== undefined ? { open } : {}),
+    ...(onOpenChange ? { onOpenChange } : {}),
+  };
+}
+
+function useSimpleKitModalComponents() {
+  const isDesktop = useMediaQuery(DESKTOP_MEDIA_QUERY);
+
+  return {
+    Root: isDesktop ? Dialog : Drawer,
+    Trigger: isDesktop ? DialogTrigger : DrawerTrigger,
+    Close: isDesktop ? DialogClose : DrawerClose,
+    Content: isDesktop ? DialogContent : DrawerContent,
+    Description: isDesktop ? DialogDescription : DrawerDescription,
+    Header: isDesktop ? DialogHeader : DrawerHeader,
+    Title: isDesktop ? DialogTitle : DrawerTitle,
+    Footer: isDesktop ? DialogFooter : DrawerFooter,
+  };
 }
 
 function useMediaQuery(query: string): boolean {

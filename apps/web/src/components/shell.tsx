@@ -8,25 +8,72 @@ import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 import { Label } from "./ui/label";
 
+type PanelProps = {
+  title: string;
+  description?: string;
+  action?: ReactNode;
+  children: ReactNode;
+  className?: string;
+};
+
+type WorkspaceHeaderProps = {
+  eyebrow: string;
+  title: string;
+  description: string;
+  action?: ReactNode;
+  children?: ReactNode;
+};
+
+type FieldProps = {
+  label: string;
+  children: ReactNode;
+  className?: string;
+};
+
+type FactsColumnCount = "one" | "two" | "three";
+
+type FactItem = {
+  label: string;
+  value: ReactNode;
+};
+
+type FactsProps = {
+  items: FactItem[];
+  columns?: FactsColumnCount;
+};
+
+type ActionButtonProps = React.ComponentProps<typeof Button> & {
+  actionId: string;
+  pendingAction: string | undefined;
+};
+
+type TabButtonProps = {
+  active: boolean;
+  children: ReactNode;
+  onClick: () => void;
+};
+
+const factGridColumns: Record<FactsColumnCount, string> = {
+  one: "grid-cols-1",
+  two: "grid-cols-1 md:grid-cols-2",
+  three: "grid-cols-1 md:grid-cols-2 xl:grid-cols-3",
+};
+
 export function Panel({
   title,
   description,
   action,
   children,
   className,
-}: {
-  title: string;
-  description?: string;
-  action?: ReactNode;
-  children: ReactNode;
-  className?: string;
-}): React.JSX.Element {
+}: PanelProps): React.JSX.Element {
+  const hasDescription = description !== undefined && description.length > 0;
+
   return (
     <section className={cn("min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/82", className)}>
       <div className="flex min-h-14 items-center justify-between gap-3 px-4 py-3">
         <div className="min-w-0">
           <h2 className="m-0 text-base font-semibold tracking-normal text-zinc-50">{title}</h2>
-          {description ? <p className="m-0 mt-1 max-w-3xl text-sm leading-5 text-zinc-500">{description}</p> : null}
+          {hasDescription ? <p className="m-0 mt-1 max-w-3xl text-sm leading-5 text-zinc-500">{description}</p> : null}
         </div>
         {action}
       </div>
@@ -41,13 +88,10 @@ export function WorkspaceHeader({
   description,
   action,
   children,
-}: {
-  eyebrow: string;
-  title: string;
-  description: string;
-  action?: ReactNode;
-  children?: ReactNode;
-}): React.JSX.Element {
+}: WorkspaceHeaderProps): React.JSX.Element {
+  const hasAction = Boolean(action);
+  const hasChildren = Boolean(children);
+
   return (
     <section className="mb-5 border-b border-zinc-800 pb-5">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -56,9 +100,9 @@ export function WorkspaceHeader({
           <h1 className="m-0 mt-2 text-3xl font-semibold tracking-normal text-zinc-50 sm:text-4xl">{title}</h1>
           <p className="m-0 mt-3 max-w-3xl text-sm leading-6 text-zinc-400">{description}</p>
         </div>
-        {action ? <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div> : null}
+        {hasAction ? <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div> : null}
       </div>
-      {children ? <div className="mt-4">{children}</div> : null}
+      {hasChildren ? <div className="mt-4">{children}</div> : null}
     </section>
   );
 }
@@ -67,11 +111,7 @@ export function Field({
   label,
   children,
   className,
-}: {
-  label: string;
-  children: ReactNode;
-  className?: string;
-}): React.JSX.Element {
+}: FieldProps): React.JSX.Element {
   return (
     <Label className={cn("min-w-0 border-b border-zinc-800 p-4 md:border-r [&:nth-child(2n)]:md:border-r-0", className)}>
       <span>{label}</span>
@@ -83,23 +123,13 @@ export function Field({
 export function Facts({
   items,
   columns = "two",
-}: {
-  items: { label: string; value: ReactNode }[];
-  columns?: "one" | "two" | "three";
-}): React.JSX.Element {
+}: FactsProps): React.JSX.Element {
   if (items.length === 0) {
     return <div className="border-t border-zinc-800 p-4 text-sm text-zinc-500">No data</div>;
   }
 
   return (
-    <dl
-      className={cn(
-        "grid gap-px border-t border-zinc-800 bg-transparent",
-        columns === "one" && "grid-cols-1",
-        columns === "two" && "grid-cols-1 md:grid-cols-2",
-        columns === "three" && "grid-cols-1 md:grid-cols-2 xl:grid-cols-3",
-      )}
-    >
+    <dl className={cn("grid gap-px border-t border-zinc-800 bg-transparent", factGridColumns[columns])}>
       {items.map((item) => (
         <div className="min-w-0 bg-zinc-950 p-4" key={item.label}>
           <dt className="mb-1 text-xs font-medium text-zinc-500">{item.label}</dt>
@@ -120,14 +150,13 @@ export function ActionButton({
   children,
   disabled,
   ...props
-}: React.ComponentProps<typeof Button> & {
-  actionId: string;
-  pendingAction: string | undefined;
-}): React.JSX.Element {
-  const pending = pendingAction === actionId;
+}: ActionButtonProps): React.JSX.Element {
+  const isPending = pendingAction === actionId;
+  const hasPendingAction = pendingAction !== undefined;
+
   return (
-    <Button disabled={disabled || pendingAction !== undefined} {...props}>
-      {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : children}
+    <Button disabled={disabled || hasPendingAction} {...props}>
+      {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : children}
     </Button>
   );
 }
@@ -136,11 +165,7 @@ export function TabButton({
   active,
   children,
   onClick,
-}: {
-  active: boolean;
-  children: ReactNode;
-  onClick: () => void;
-}): React.JSX.Element {
+}: TabButtonProps): React.JSX.Element {
   return (
     <button
       className={cn(
@@ -160,6 +185,8 @@ export function TabButton({
 export function AddressLink({ address }: { address: Address }): React.JSX.Element {
   const [copied, setCopied] = useState(false);
   const explorerUrl = addressUrl(address);
+  const label = shortAddress(address);
+  const hasExplorerUrl = explorerUrl !== undefined && explorerUrl.length > 0;
 
   const copyAddress = async (): Promise<void> => {
     await navigator.clipboard.writeText(address);
@@ -169,7 +196,7 @@ export function AddressLink({ address }: { address: Address }): React.JSX.Elemen
 
   return (
     <span className="inline-flex max-w-full items-center gap-1.5 align-middle">
-      {explorerUrl ? (
+      {hasExplorerUrl ? (
         <a
           className="min-w-0 truncate text-lime-200 hover:text-lime-100"
           href={explorerUrl}
@@ -177,11 +204,11 @@ export function AddressLink({ address }: { address: Address }): React.JSX.Elemen
           target="_blank"
           title={address}
         >
-          {shortAddress(address)}
+          {label}
         </a>
       ) : (
         <span className="min-w-0 truncate text-lime-200" title={address}>
-          {shortAddress(address)}
+          {label}
         </span>
       )}
       <button
@@ -192,7 +219,7 @@ export function AddressLink({ address }: { address: Address }): React.JSX.Elemen
       >
         {copied ? <CheckCircle2 className="h-3.5 w-3.5 text-lime-300" /> : <Copy className="h-3.5 w-3.5" />}
       </button>
-      {explorerUrl ? (
+      {hasExplorerUrl ? (
         <a
           aria-label="Open in explorer"
           className="grid h-6 w-6 shrink-0 place-items-center rounded border border-zinc-800 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
@@ -209,7 +236,15 @@ export function AddressLink({ address }: { address: Address }): React.JSX.Elemen
 
 export function TransactionLink({ chainId, hash }: { chainId?: number | undefined; hash: Hex }): React.JSX.Element {
   const explorerUrl = transactionUrl(hash, chainId);
-  if (!explorerUrl) return <span className="text-lime-200">{shortAddress(hash)}</span>;
+  const label = shortAddress(hash);
 
-  return <a className="text-lime-200 hover:text-lime-100" href={explorerUrl} rel="noreferrer" target="_blank">{shortAddress(hash)}</a>;
+  if (!explorerUrl) {
+    return <span className="text-lime-200">{label}</span>;
+  }
+
+  return (
+    <a className="text-lime-200 hover:text-lime-100" href={explorerUrl} rel="noreferrer" target="_blank">
+      {label}
+    </a>
+  );
 }
