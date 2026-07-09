@@ -36,6 +36,7 @@ RUN if [ "$SENTINEL_HARNESS_CLI" = "claude" ]; then \
 
 COPY --from=deps /app/node_modules node_modules
 COPY package.json bun.lock tsconfig.base.json ./
+COPY docs docs
 COPY packages/sdk packages/sdk
 COPY services/sentinel services/sentinel
 

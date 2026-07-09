@@ -195,11 +195,19 @@ function sentinelErrorMessage(status: number, body: string): string {
 
   try {
     const parsed = JSON.parse(body) as { error?: unknown; message?: unknown };
-    const message = typeof parsed.message === "string" ? parsed.message : parsed.error;
+    const message = typeof parsed.message === "string" ? parsed.message : errorMessageValue(parsed.error);
     if (typeof message === "string" && message.trim()) return message;
   } catch {
     return body;
   }
 
   return body;
+}
+
+function errorMessageValue(error: unknown): string | undefined {
+  if (typeof error === "string") return error;
+  if (typeof error !== "object" || error === null) return undefined;
+
+  const message = (error as { readonly message?: unknown }).message;
+  return typeof message === "string" ? message : undefined;
 }

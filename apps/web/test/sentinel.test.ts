@@ -73,6 +73,22 @@ describe("sentinel web client", () => {
     }
   });
 
+  test("surfaces nested Sentinel API error messages", async () => {
+    const client = createSentinelClient({
+      baseUrl: "https://api.example.test",
+      fetcher: async () => jsonResponse({ error: { message: "Invalid authentication state" } }, { status: 400 }),
+    });
+
+    try {
+      await client.listChannels();
+      throw new Error("Expected listChannels to fail.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(SentinelApiError);
+      expect((error as SentinelApiError).status).toBe(400);
+      expect((error as Error).message).toBe("Invalid authentication state");
+    }
+  });
+
   test("builds the SIWE wallet-link message from nonce fields", () => {
     const address = "0x1000000000000000000000000000000000000000" as Address;
     const message = buildSentinelSiweMessage(
