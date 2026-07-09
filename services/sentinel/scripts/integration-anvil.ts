@@ -334,7 +334,7 @@ async function seedLocal(): Promise<void> {
   ], {
     cwd: contractsDir,
     env: {
-      LOCAL_SEED_NONCE: process.env.LOCAL_SEED_NONCE ?? "1",
+      LOCAL_SEED_NONCE: process.env.LOCAL_SEED_NONCE ?? "2",
       PRIVATE_KEY: deployerKey
     }
   });
