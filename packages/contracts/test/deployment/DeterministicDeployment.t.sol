@@ -14,7 +14,6 @@ import {DistributionFactory} from "../../src/distribution/DistributionFactory.so
 import {LockedLiquidityFactory} from "../../src/liquidity/LockedLiquidityFactory.sol";
 import {PledgeCashDeploymentSalts} from "../../src/deployment/PledgeCashDeploymentSalts.sol";
 import {PledgeCashDeterministicDeployer} from "../../src/deployment/PledgeCashDeterministicDeployer.sol";
-import {ProtocolPolicy} from "../../src/policy/ProtocolPolicy.sol";
 import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
 
 contract DeterministicDeploymentTest is Test {
@@ -102,12 +101,6 @@ contract DeterministicDeploymentTest is Test {
                 abi.encodePacked(type(BoardroomPolicyRegistry).creationCode, abi.encode(owner))
             )
         );
-        ProtocolPolicy protocolPolicy = ProtocolPolicy(
-            _deploy(
-                PledgeCashDeploymentSalts.protocolPolicy(),
-                abi.encodePacked(type(ProtocolPolicy).creationCode, abi.encode(owner))
-            )
-        );
         AssetPolicy assetPolicy = AssetPolicy(
             _deploy(
                 PledgeCashDeploymentSalts.assetPolicy(),
@@ -159,7 +152,6 @@ contract DeterministicDeploymentTest is Test {
         );
 
         assertEq(policyRegistry.owner(), owner);
-        assertEq(protocolPolicy.owner(), owner);
         assertEq(assetPolicy.owner(), owner);
         assertEq(tokenGrantFactory.owner(), owner);
         assertEq(ammFactory.feeManager(), owner);
@@ -171,14 +163,12 @@ contract DeterministicDeploymentTest is Test {
         assertEq(boardroomFactory.wrappedNative(), address(wrappedNative));
 
         vm.startPrank(owner);
-        protocolPolicy.setProtocolTargetAllowed(address(tokenGrantFactory), true);
         assetPolicy.setApprovalSpenderAllowed(address(tokenGrantFactory), true);
-        policyRegistry.setPolicyAllowed(address(protocolPolicy), true);
+        policyRegistry.setPolicyAllowed(address(tokenGrantFactory), true);
         vm.stopPrank();
 
-        assertTrue(protocolPolicy.isProtocolTargetAllowed(address(tokenGrantFactory)));
         assertTrue(assetPolicy.isApprovalSpenderAllowed(address(tokenGrantFactory)));
-        assertTrue(policyRegistry.isPolicyAllowed(address(protocolPolicy)));
+        assertTrue(policyRegistry.isPolicyAllowed(address(tokenGrantFactory)));
     }
 
     function testRepeatedDeployReturnsExistingAddress() public {

@@ -10,7 +10,6 @@ import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
 import {BoardroomPolicyRegistry} from "../../src/boardroom/BoardroomPolicyRegistry.sol";
 import {BoardroomToken} from "../../src/boardroom/BoardroomToken.sol";
 import {IBoardroomCallPolicy} from "../../src/policy/IBoardroomCallPolicy.sol";
-import {ProtocolPolicy} from "../../src/policy/ProtocolPolicy.sol";
 import {TokenGrant} from "../../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
 
@@ -104,7 +103,6 @@ contract BoardroomTest is Test {
     }
 
     BoardroomPolicyRegistry internal policyRegistry;
-    ProtocolPolicy internal protocolPolicy;
     AssetPolicy internal assetPolicy;
     TokenGrantFactory internal tokenGrantFactory;
     BoardroomFactory internal boardroomFactory;
@@ -127,18 +125,14 @@ contract BoardroomTest is Test {
     function setUp() public {
         wrappedNative = new WETH();
         policyRegistry = new BoardroomPolicyRegistry(address(this));
-        protocolPolicy = new ProtocolPolicy(address(this));
         assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
         tokenGrantFactory = new TokenGrantFactory(address(this));
         boardroomFactory = new BoardroomFactory(address(policyRegistry), address(wrappedNative));
         paymentToken = new BoardroomCurrency("Payment", "PAY", 6);
 
-        protocolPolicy.setProtocolTargetAllowed(address(tokenGrantFactory), true);
-        protocolPolicy.setProtocolValueTargetAllowed(address(tokenGrantFactory), true);
         assetPolicy.setAssetAllowed(address(paymentToken), true);
         assetPolicy.setApprovalSpenderAllowed(address(tokenGrantFactory), true);
 
-        policyRegistry.setPolicyAllowed(address(protocolPolicy), true);
         policyRegistry.setPolicyAllowed(address(assetPolicy), true);
         policyRegistry.setPolicyAllowed(address(tokenGrantFactory), true);
 
@@ -240,6 +234,65 @@ contract BoardroomTest is Test {
         assertEq(shareToken.totalSupply(), 1 ether);
     }
 
+    function testPrelaunchOwnershipTransferSyncsDefaultExecutor() public {
+        (Boardroom boardroom,) = _createBoardroom("owner-transfer-executor");
+
+        vm.prank(owner);
+        boardroom.transferOwnership(stranger);
+
+        assertEq(boardroom.owner(), stranger);
+        assertEq(boardroom.executor(), stranger);
+
+        vm.prank(stranger);
+        boardroom.launch(1 days);
+
+        Boardroom.Call memory call_ = _rawCall(address(boardroom), 0, abi.encodeCall(Boardroom.setExecutor, (owner)));
+
+        vm.prank(owner);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        boardroom.queueAction(call_, keccak256("old-owner-queue"));
+
+        vm.prank(stranger);
+        boardroom.queueAction(call_, keccak256("new-owner-queue"));
+    }
+
+    function testPrelaunchOwnershipHandoverSyncsDefaultExecutor() public {
+        (Boardroom boardroom,) = _createBoardroom("owner-handover-executor");
+
+        vm.prank(stranger);
+        boardroom.requestOwnershipHandover();
+
+        vm.prank(owner);
+        boardroom.completeOwnershipHandover(stranger);
+
+        assertEq(boardroom.owner(), stranger);
+        assertEq(boardroom.executor(), stranger);
+    }
+
+    function testPrelaunchOwnershipTransferPreservesExplicitExecutor() public {
+        (Boardroom boardroom,) = _createBoardroom("explicit-executor-transfer");
+
+        vm.startPrank(owner);
+        boardroom.setExecutor(stranger);
+        boardroom.transferOwnership(holder);
+        vm.stopPrank();
+
+        assertEq(boardroom.owner(), holder);
+        assertEq(boardroom.executor(), stranger);
+
+        vm.prank(holder);
+        boardroom.launch(1 days);
+
+        Boardroom.Call memory call_ = _rawCall(address(boardroom), 0, abi.encodeCall(Boardroom.setExecutor, (owner)));
+
+        vm.prank(holder);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        boardroom.queueAction(call_, keccak256("new-owner-queue"));
+
+        vm.prank(stranger);
+        boardroom.queueAction(call_, keccak256("explicit-executor-queue"));
+    }
+
     function testOnlyBoardroomCanMintShareToken() public {
         (Boardroom boardroom,) = _createBoardroom("token-mint-auth");
         BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
@@ -323,6 +376,115 @@ contract BoardroomTest is Test {
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(Boardroom.TooManyCalls.selector, maxBatchCalls + 1, maxBatchCalls));
         boardroom.executeBatch(tooManyCalls);
+    }
+
+    function testLaunchedBoardroomQueuesAndExecutorExecutesReadyAction() public {
+        (Boardroom boardroom,) = _createBoardroom("launched-queue-execute");
+        uint256 delay = 2 days;
+
+        vm.prank(owner);
+        boardroom.launch(delay);
+
+        Boardroom.Call memory call_ = _rawCall(address(boardroom), 0, abi.encodeCall(Boardroom.mint, (holder, 1 ether)));
+        bytes32 salt = keccak256("mint-after-launch");
+        bytes32 actionHash = boardroom.hashAction(call_, salt);
+
+        vm.prank(owner);
+        vm.expectRevert(Boardroom.BoardroomAlreadyLaunched.selector);
+        boardroom.execute(call_);
+
+        vm.prank(stranger);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        boardroom.queueAction(call_, salt);
+
+        vm.prank(owner);
+        (bytes32 queuedHash, uint256 eta) = boardroom.queueAction(call_, salt);
+
+        assertEq(queuedHash, actionHash);
+        assertEq(eta, block.timestamp + delay);
+        assertEq(boardroom.queuedActionEta(actionHash), eta);
+
+        vm.prank(stranger);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        boardroom.executeQueuedAction(call_, salt);
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.ActionNotReady.selector, actionHash, eta, block.timestamp));
+        boardroom.executeQueuedAction(call_, salt);
+
+        vm.warp(eta);
+        vm.prank(stranger);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        boardroom.executeQueuedAction(call_, salt);
+
+        vm.prank(owner);
+        boardroom.executeQueuedAction(call_, salt);
+
+        BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
+        assertEq(shareToken.balanceOf(holder), 1 ether);
+        assertEq(boardroom.queuedActionEta(actionHash), 0);
+    }
+
+    function testLaunchedShareholderCanCancelQueuedActionAndStartWindDown() public {
+        (Boardroom boardroom,) = _createBoardroom("launched-shareholder-veto");
+        BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, 1 ether);
+        boardroom.launch(1 days);
+        vm.stopPrank();
+
+        Boardroom.Call memory call_ = _rawCall(address(boardroom), 0, abi.encodeCall(Boardroom.setExecutor, (stranger)));
+        bytes32 salt = keccak256("set-executor-after-launch");
+        bytes32 actionHash = boardroom.hashAction(call_, salt);
+
+        vm.prank(owner);
+        boardroom.queueAction(call_, salt);
+
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.NotShareholder.selector, stranger));
+        boardroom.cancelAction(actionHash);
+
+        vm.prank(holder);
+        boardroom.cancelAction(actionHash);
+
+        assertEq(boardroom.queuedActionEta(actionHash), 0);
+
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.ActionNotQueued.selector, actionHash));
+        boardroom.executeQueuedAction(call_, salt);
+
+        assertEq(shareToken.balanceOf(holder), 1 ether);
+
+        vm.prank(holder);
+        boardroom.startWindDown();
+
+        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.WindingDown));
+    }
+
+    function testLaunchedWindDownCanExecuteQueuedOpenRedemptionsSelfCall() public {
+        (Boardroom boardroom,) = _createBoardroom("launched-wind-down-open-redemptions");
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, 1 ether);
+        boardroom.launch(1 days);
+        vm.stopPrank();
+
+        vm.prank(holder);
+        boardroom.startWindDown();
+
+        Boardroom.Call memory call_ = _rawCall(address(boardroom), 0, abi.encodeCall(Boardroom.openRedemptions, ()));
+        bytes32 salt = keccak256("open-redemptions-after-launch");
+
+        vm.prank(owner);
+        (, uint256 eta) = boardroom.queueAction(call_, salt);
+
+        vm.warp(eta);
+        vm.prank(owner);
+        boardroom.executeQueuedAction(call_, salt);
+
+        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
     }
 
     function testBoardroomCanIssueFreeGrantForItsShares() public {
@@ -742,12 +904,12 @@ contract BoardroomTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(
                 Boardroom.CallNotAllowed.selector,
-                address(protocolPolicy),
+                address(tokenGrantFactory),
                 address(tokenGrantFactory),
                 TokenGrantFactory.createGrant.selector
             )
         );
-        boardroom.execute(_protocolCall(address(tokenGrantFactory), 0, _createGrantData(create)));
+        boardroom.execute(_tokenGrantFactoryCall(address(tokenGrantFactory), 0, _createGrantData(create)));
     }
 
     function testBoardroomRedemptionsWaitForIssuedGrantToClose() public {
@@ -788,11 +950,11 @@ contract BoardroomTest is Test {
         assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
     }
 
-    function testBoardroomRecordsGrantCreatedThroughWrapperPolicy() public {
+    function testBoardroomRejectsWrapperPolicyForActiveModuleTarget() public {
         BoardroomTestAllowAllPolicy wrapperPolicy = new BoardroomTestAllowAllPolicy();
         policyRegistry.setPolicyAllowed(address(wrapperPolicy), true);
 
-        (Boardroom boardroom,) = _createBoardroom("wrapper-policy-grant");
+        (Boardroom boardroom,) = _createBoardroom("wrapper-policy-module-target");
         BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
 
         vm.prank(owner);
@@ -814,19 +976,26 @@ contract BoardroomTest is Test {
         });
 
         vm.prank(owner);
-        bytes[] memory results = boardroom.executeBatch(calls);
-        address grant = abi.decode(results[1], (address));
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.ModulePolicyRequired.selector, address(tokenGrantFactory)));
+        boardroom.executeBatch(calls);
+    }
 
-        assertEq(boardroom.issuedGrantCount(), 1);
-        assertEq(boardroom.issuedGrantAt(0), grant);
-        assertTrue(boardroom.isIssuedGrant(grant));
+    function testBoardroomRejectsRawCallToLifecycleOnlyModuleTarget() public {
+        policyRegistry.setPolicyStatus(address(tokenGrantFactory), BoardroomPolicyRegistry.PolicyStatus.LifecycleOnly);
+
+        (Boardroom boardroom,) = _createBoardroom("raw-lifecycle-module-target");
+        BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
 
         vm.prank(owner);
-        boardroom.startWindDown();
+        boardroom.mint(address(boardroom), GRANT_SIZE);
+
+        BoardroomGrantCreate memory create = _boardroomGrantCreate(
+            address(shareToken), holder, address(0), GRANT_SIZE, 0, keccak256("raw-lifecycle"), 0
+        );
 
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(Boardroom.IssuedGrantStillOpen.selector, grant));
-        boardroom.openRedemptions();
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.ModulePolicyRequired.selector, address(tokenGrantFactory)));
+        boardroom.execute(_rawCall(address(tokenGrantFactory), 0, _createGrantData(create)));
     }
 
     function testBoardroomRejectsInvalidRedeemableAssets() public {
@@ -883,7 +1052,7 @@ contract BoardroomTest is Test {
             0,
             abi.encodeWithSignature("approve(address,uint256)", address(tokenGrantFactory), create.amount)
         );
-        calls[1] = _protocolCall(address(tokenGrantFactory), create.value, _createGrantData(create));
+        calls[1] = _tokenGrantFactoryCall(address(tokenGrantFactory), create.value, _createGrantData(create));
 
         vm.prank(owner);
         bytes[] memory results = boardroom.executeBatch{value: create.value}(calls);
@@ -940,19 +1109,19 @@ contract BoardroomTest is Test {
         call_ = Boardroom.Call({policy: address(assetPolicy), target: target, value: value, data: data});
     }
 
-    function _protocolCall(address target, uint256 value, bytes memory data)
-        internal
-        view
-        returns (Boardroom.Call memory call_)
-    {
-        call_ = Boardroom.Call({policy: address(protocolPolicy), target: target, value: value, data: data});
-    }
-
     function _tokenGrantFactoryCall(address target, uint256 value, bytes memory data)
         internal
         view
         returns (Boardroom.Call memory call_)
     {
         call_ = Boardroom.Call({policy: address(tokenGrantFactory), target: target, value: value, data: data});
+    }
+
+    function _rawCall(address target, uint256 value, bytes memory data)
+        internal
+        pure
+        returns (Boardroom.Call memory call_)
+    {
+        call_ = Boardroom.Call({policy: address(0), target: target, value: value, data: data});
     }
 }

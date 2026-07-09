@@ -11,10 +11,9 @@ migrating bonding curve, AMM, and locked-liquidity primitives.
 | Monad Testnet | `10143` | `https://testnet-rpc.monad.xyz` | `0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541` | `packages/contracts/script/monad-testnet/deploy.sh` | `packages/contracts/deployments/10143.json` |
 
 The deploy script creates or reuses one `PledgeCashDeterministicDeployer`, then creates one
-`BoardroomPolicyRegistry`, one `ProtocolPolicy`, one `AssetPolicy`, one
-`TokenGrantFactory`, one `DistributionFactory`, one `AmmFactory`, one `AmmRouter`, one `LockedLiquidityFactory`, and one
-`BoardroomFactory`. A wrapped-native address is required because every Boardroom stores the canonical wrapped native
-token and wraps raw native funds before wind-down redemptions.
+`BoardroomPolicyRegistry`, one `AssetPolicy`, one `TokenGrantFactory`, one `DistributionFactory`, one `AmmFactory`, one
+`AmmRouter`, one `LockedLiquidityFactory`, and one `BoardroomFactory`. A wrapped-native address is required because
+every Boardroom stores the canonical wrapped native token and wraps raw native funds before wind-down redemptions.
 
 Root protocol contracts are deployed through CREATE3 salts from `PledgeCashDeploymentSalts`. As long as the same
 `PledgeCashDeterministicDeployer` address is used on each chain, the root protocol addresses are the same even when
@@ -24,13 +23,13 @@ existing deployer from `PLEDGE_CASH_DETERMINISTIC_DEPLOYER`. The deterministic d
 arguments, so it cannot be captured by the first account to deploy the public salt. Use the same
 `PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER` on every chain that should share deterministic root addresses.
 
-The registry allows `ProtocolPolicy` for registered pledge.cash protocol targets and `AssetPolicy` for external asset
-operations. The deploy script registers the token grant, distribution, locked-liquidity, and AMM factory targets in
-`ProtocolPolicy`; only the token grant factory is separately allowed to receive native value for exact creation-fee
-payments. `AmmRouter` is deployed for user and protocol flows but is not a Boardroom-callable protocol-policy target.
-The deploy script also registers the token grant, distribution, and locked-liquidity factories as allowed approval
-spenders in `AssetPolicy`. Boardroom-created share tokens and other project-specific assets still need to be registered
-in `AssetPolicy` before their approvals can be executed through a Boardroom.
+The registry allows `AssetPolicy` for external asset operations and allows the token grant, distribution, and
+locked-liquidity factories as their own Boardroom call policies. Each factory authorizes its own calls and reports any
+created Boardroom obligation for redemption accounting. `AmmRouter` is deployed for user and protocol flows but is not a
+deployment-default Boardroom policy. The deploy script also registers the token grant, distribution, and
+locked-liquidity factories as allowed approval spenders in `AssetPolicy`. Boardroom-created share tokens and other
+project-specific assets still need to be registered in `AssetPolicy` before their approvals can be executed through a
+Boardroom.
 
 The checked-in testnet artifacts may model subsystems independently while deployment history is being rebuilt. If an
 existing artifact predates a current subsystem, mark that subsystem pending instead of keeping stale partial fields. For
@@ -141,7 +140,6 @@ After a broadcast, verify each chain artifact contains:
 - `deterministicDeployer`
 - `deterministicDeployerOwner`
 - `boardroomPolicyRegistry`
-- `protocolPolicy`
 - `assetPolicy`
 - `boardroomFactory`
 - `distributionFactory`
@@ -150,19 +148,11 @@ After a broadcast, verify each chain artifact contains:
 - `ammRouter`
 - `lockedLiquidityFactory`
 - `policyRegistryOwner`
-- `protocolPolicyOwner`
 - `assetPolicyOwner`
-- `protocolPolicyAllowed`
 - `assetPolicyAllowed`
 - `tokenGrantPolicyAllowed`
 - `distributionPolicyAllowed`
 - `lockedLiquidityPolicyAllowed`
-- `protocolTokenGrantFactoryAllowed`
-- `protocolTokenGrantFactoryValueAllowed`
-- `protocolDistributionFactoryAllowed`
-- `protocolLockedLiquidityFactoryAllowed`
-- `protocolAmmFactoryAllowed`
-- `protocolAmmRouterAllowed`
 - `assetWrappedNativeAllowed`
 - `assetTokenGrantSpenderAllowed`
 - `assetDistributionSpenderAllowed`

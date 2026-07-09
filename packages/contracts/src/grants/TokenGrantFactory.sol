@@ -9,13 +9,13 @@ import {LibString} from "solady/utils/LibString.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {TokenGrant} from "./TokenGrant.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
-import {IBoardroomCallPolicy} from "../policy/IBoardroomCallPolicy.sol";
+import {IBoardroomObligationPolicy} from "../policy/IBoardroomObligationPolicy.sol";
 
 interface ITokenGrantDistributionIssuer {
     function isIssuedDistribution(address distribution) external view returns (bool);
 }
 
-contract TokenGrantFactory is Ownable, ERC721, IBoardroomCallPolicy {
+contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
     address public immutable tokenGrantLogic;
     uint256 public creationFee;
 
@@ -194,6 +194,31 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomCallPolicy {
         return selector == TokenGrant.stopVestingAndWithdrawUnvested.selector
             || selector == TokenGrant.withdrawExpiredTokens.selector;
     }
+
+    function obligationForCall(address, address target, uint256, bytes calldata data, bytes calldata result)
+        external
+        view
+        returns (Obligation memory obligation)
+    {
+        if (target != address(this) || _selector(data) != TokenGrantFactory.createGrant.selector || result.length != 32)
+        {
+            return obligation;
+        }
+
+        obligation.kind = ObligationKind.Grant;
+        obligation.account = abi.decode(result, (address));
+    }
+
+    function isLifecycleCallAllowed(address boardroom, address target, bytes4 selector) external view returns (bool) {
+        uint256 tokenId = uint256(uint160(target));
+        if (grantForTokenId[tokenId] != target) return false;
+        if (TokenGrant(target).issuer() != boardroom) return false;
+
+        return selector == TokenGrant.stopVestingAndWithdrawUnvested.selector
+            || selector == TokenGrant.withdrawExpiredTokens.selector;
+    }
+
+    function grantSlotReleaseForLifecycleCall(address, address, bytes4) external pure returns (address distribution) {}
 
     function closeGrant(uint256 tokenId) external onlyLinkedGrant(tokenId) {
         address grant = grantForTokenId[tokenId];

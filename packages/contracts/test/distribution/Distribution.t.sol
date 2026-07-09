@@ -18,7 +18,6 @@ import {LockedLiquidity} from "../../src/liquidity/LockedLiquidity.sol";
 import {LockedLiquidityFactory} from "../../src/liquidity/LockedLiquidityFactory.sol";
 import {MerkleAirdrop} from "../../src/distribution/MerkleAirdrop.sol";
 import {MigratingBondingCurve} from "../../src/distribution/MigratingBondingCurve.sol";
-import {ProtocolPolicy} from "../../src/policy/ProtocolPolicy.sol";
 import {TokenGrant} from "../../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
 
@@ -114,7 +113,6 @@ contract DistributionTest is Test {
     );
 
     BoardroomPolicyRegistry internal policyRegistry;
-    ProtocolPolicy internal protocolPolicy;
     AssetPolicy internal assetPolicy;
     BoardroomFactory internal boardroomFactory;
     AmmFactory internal ammFactory;
@@ -146,7 +144,6 @@ contract DistributionTest is Test {
     function setUp() public {
         wrappedNative = new WETH();
         policyRegistry = new BoardroomPolicyRegistry(address(this));
-        protocolPolicy = new ProtocolPolicy(address(this));
         assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
         boardroomFactory = new BoardroomFactory(address(policyRegistry), address(wrappedNative));
         ammFactory = new AmmFactory(address(this));
@@ -156,12 +153,8 @@ contract DistributionTest is Test {
         distributionFactory = new DistributionFactory(address(lockedLiquidityFactory), address(tokenGrantFactory));
         paymentToken = new DistributionCurrency("USD Coin", "USDC", 6);
 
-        protocolPolicy.setProtocolTargetAllowed(address(tokenGrantFactory), true);
-        protocolPolicy.setProtocolValueTargetAllowed(address(tokenGrantFactory), true);
-        protocolPolicy.setProtocolTargetAllowed(address(distributionFactory), true);
         assetPolicy.setApprovalSpenderAllowed(address(distributionFactory), true);
         assetPolicy.setApprovalSpenderAllowed(address(tokenGrantFactory), true);
-        policyRegistry.setPolicyAllowed(address(protocolPolicy), true);
         policyRegistry.setPolicyAllowed(address(assetPolicy), true);
         policyRegistry.setPolicyAllowed(address(tokenGrantFactory), true);
         policyRegistry.setPolicyAllowed(address(distributionFactory), true);
@@ -525,7 +518,7 @@ contract DistributionTest is Test {
         assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
     }
 
-    function testBoardroomRecordsFixedPriceSaleCreatedThroughWrapperPolicy() public {
+    function testBoardroomRejectsWrapperPolicyForDistributionCreation() public {
         DistributionTestAllowAllPolicy wrapperPolicy = new DistributionTestAllowAllPolicy();
         policyRegistry.setPolicyAllowed(address(wrapperPolicy), true);
 
@@ -552,21 +545,9 @@ contract DistributionTest is Test {
             data: abi.encodeCall(DistributionFactory.createFixedPriceSale, (params))
         });
 
-        bytes[] memory results = boardroom.executeBatch(calls);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.ModulePolicyRequired.selector, address(distributionFactory)));
+        boardroom.executeBatch(calls);
         vm.stopPrank();
-
-        address sale = abi.decode(results[1], (address));
-
-        assertEq(boardroom.issuedDistributionCount(), 1);
-        assertEq(boardroom.issuedDistributionAt(0), sale);
-        assertTrue(boardroom.isIssuedDistribution(sale));
-
-        vm.prank(owner);
-        boardroom.startWindDown();
-
-        vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(Boardroom.IssuedDistributionStillOpen.selector, sale));
-        boardroom.openRedemptions();
     }
 
     function testFixedPriceSaleRejectsFeeOnTransferPaymentToken() public {
@@ -812,8 +793,8 @@ contract DistributionTest is Test {
         );
     }
 
-    function testProtocolPolicyCannotBypassDistributionShareTokenValidation() public {
-        (Boardroom boardroom,) = _createBoardroom("protocol-policy-wrong-share-token");
+    function testDistributionFactoryRejectsWrongShareTokenEvenWhenApproved() public {
+        (Boardroom boardroom,) = _createBoardroom("distribution-wrong-share-token");
         uint256 amount = 1 ether;
 
         vm.deal(address(this), amount);
@@ -831,16 +812,19 @@ contract DistributionTest is Test {
         );
 
         FixedPriceSale.CreateParams memory saleParams = _saleParams(
-            address(wrappedNative), address(paymentToken), amount, PRICE, keccak256("protocol-policy-wrong-share-sale")
+            address(wrappedNative), address(paymentToken), amount, PRICE, keccak256("distribution-wrong-share-sale")
         );
         vm.expectRevert(
             abi.encodeWithSelector(
-                DistributionFactory.InvalidShareToken.selector, boardroom.shareToken(), address(wrappedNative)
+                Boardroom.CallNotAllowed.selector,
+                address(distributionFactory),
+                address(distributionFactory),
+                DistributionFactory.createFixedPriceSale.selector
             )
         );
         boardroom.execute(
             _policyCall(
-                address(protocolPolicy),
+                address(distributionFactory),
                 address(distributionFactory),
                 0,
                 abi.encodeCall(DistributionFactory.createFixedPriceSale, (saleParams))
@@ -848,15 +832,18 @@ contract DistributionTest is Test {
         );
 
         MigratingBondingCurve.CreateParams memory curveParams =
-            _curveParams(address(wrappedNative), address(paymentToken), keccak256("protocol-policy-wrong-share-curve"));
+            _curveParams(address(wrappedNative), address(paymentToken), keccak256("distribution-wrong-share-curve"));
         vm.expectRevert(
             abi.encodeWithSelector(
-                DistributionFactory.InvalidShareToken.selector, boardroom.shareToken(), address(wrappedNative)
+                Boardroom.CallNotAllowed.selector,
+                address(distributionFactory),
+                address(distributionFactory),
+                DistributionFactory.createMigratingBondingCurve.selector
             )
         );
         boardroom.execute(
             _policyCall(
-                address(protocolPolicy),
+                address(distributionFactory),
                 address(distributionFactory),
                 0,
                 abi.encodeCall(DistributionFactory.createMigratingBondingCurve, (curveParams))
@@ -866,17 +853,20 @@ contract DistributionTest is Test {
         MerkleAirdrop.CreateParams memory airdropParams = _airdropParams(
             address(wrappedNative),
             amount,
-            keccak256("protocol-policy-wrong-share-airdrop-root"),
-            keccak256("protocol-policy-wrong-share-airdrop")
+            keccak256("distribution-wrong-share-airdrop-root"),
+            keccak256("distribution-wrong-share-airdrop")
         );
         vm.expectRevert(
             abi.encodeWithSelector(
-                DistributionFactory.InvalidShareToken.selector, boardroom.shareToken(), address(wrappedNative)
+                Boardroom.CallNotAllowed.selector,
+                address(distributionFactory),
+                address(distributionFactory),
+                DistributionFactory.createMerkleAirdrop.selector
             )
         );
         boardroom.execute(
             _policyCall(
-                address(protocolPolicy),
+                address(distributionFactory),
                 address(distributionFactory),
                 0,
                 abi.encodeCall(DistributionFactory.createMerkleAirdrop, (airdropParams))

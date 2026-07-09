@@ -3,19 +3,23 @@
 This document describes the first Boardroom primitive in `packages/contracts/src/boardroom/Boardroom.sol`,
 `BoardroomFactory.sol`, and `BoardroomToken.sol`.
 
-A Boardroom is an owned on-chain treasury and issuer account with its own ERC20 share token. It can mint shares and
-execute calls through centrally approved policy contracts. `ProtocolPolicy` covers explicit pledge.cash protocol
-targets, while `AssetPolicy` covers supported external assets and spender approvals.
+A Boardroom is an owned on-chain treasury and issuer account with its own ERC20 share token. Before launch, its owner
+can mint shares and execute policy-checked calls directly. After launch, the Boardroom moves to delayed push-forward
+governance: the current executor queues and executes delayed actions, and share holders can cancel queued actions or
+start wind-down. `AssetPolicy` covers supported external assets and spender approvals, while obligation-
+creating protocol modules such as `TokenGrantFactory`, `DistributionFactory`, and `LockedLiquidityFactory` act as their
+own call policies so the Boardroom can record created obligations.
 
 ## Actors
 
-- Boardroom owner: controls share minting and policy-authorized treasury execution.
+- Boardroom owner: controls share minting and policy-authorized treasury execution before launch.
+- Executor: queues delayed governance actions after launch. This can be an EOA, multisig, or governance contract.
 - Boardroom: owns assets, creates its share token, and acts as grant issuer.
 - Policy registry: protocol-controlled allowlist of policy contracts that Boardrooms may use.
-- Protocol policy: owner-managed allowlist of pledge.cash protocol targets, with a separate allowlist for targets that
-  may receive native value.
+- Module policies: pledge.cash factories that authorize their own Boardroom calls and report created obligations.
 - Asset policy: owner-managed allowlist of supported assets and approval spenders.
-- Share holder: receives Boardroom share tokens directly or through grants, and can redeem shares after wind-down.
+- Share holder: receives Boardroom share tokens directly or through grants, can cancel queued actions and start
+  wind-down after launch, and can redeem shares after redemptions open.
 - Grant holder: receives settlement authority over a Boardroom-issued grant.
 - Distribution buyer: buys Boardroom shares through a Boardroom-created distribution.
 
@@ -54,6 +58,10 @@ State:
 - `policyRegistry`: protocol-controlled registry of allowed call policies.
 - `wrappedNative`: canonical WHYPE contract used to normalize raw native HYPE before redemptions.
 - `shareToken`: ERC20 minted only by this Boardroom.
+- `launched`: one-way flag that disables direct owner execution and enables queued governance.
+- `executor`: account allowed to queue delayed actions after launch.
+- `governanceDelay`: delay applied to every queued action after launch.
+- `queuedActionEta`: ETA for queued single-call and batch action hashes.
 - `status`: `Active`, `WindingDown`, or `RedemptionsOpen`.
 - `redeemableAssets`: bounded list of ERC20 assets redeemed pro-rata by share holders.
 - `issuedGrants`: bounded list of Boardroom-issued token grants created through `TokenGrantFactory`.
@@ -61,19 +69,26 @@ State:
 - `issuedDistributions`: bounded list of Boardroom-created distributions created through `DistributionFactory`.
 - `lockedLiquidityPositions`: bounded list of Boardroom-owned locked AMM liquidity positions.
 
-The owner can mint shares through `Boardroom.mint`. The owner can also call `Boardroom.execute` or
-`Boardroom.executeBatch`. Each call names a policy, target, native value, and calldata. The Boardroom first checks that
-the registry allows the policy, then asks the policy whether the target call is allowed. If both checks pass, the
-Boardroom performs the external call and emits a generic execution event. When active execution creates a grant,
-distribution, or locked-liquidity position, the Boardroom records the returned obligation address so redemptions can
-later wait for it to close.
+The owner can mint shares through `Boardroom.mint` before launch. The owner can also call `Boardroom.execute` or
+`Boardroom.executeBatch` before launch. Each call names a policy, target, native value, and calldata. Raw calls may omit
+the policy, but calls to active pledge.cash modules must use that module as the policy so obligation accounting cannot
+be bypassed. When a policy is present, the Boardroom first checks that the registry allows the policy, then asks the
+policy whether the target call is allowed. If both checks pass, the Boardroom performs the external call and emits a
+generic execution event. When active execution creates a grant, distribution, or locked-liquidity position, the
+Boardroom records the returned obligation address so redemptions can later wait for it to close.
+
+After launch, owner-only functions that affect treasury or shares must be called by the Boardroom itself through a
+queued action. The current executor queues a single call or batch with a salt. The action becomes executable after
+`governanceDelay`, and the current executor can execute it once ready. Any current share holder can cancel a queued
+action and can start wind-down directly.
 
 Wind-down transitions are one-way:
 
-1. `Active`: owner can mint shares, create grants, create distributions, and register redeemable assets.
-2. `WindingDown`: entered only after `startWindDown()` wraps the Boardroom's full native HYPE balance into WHYPE. Owner
-   cannot mint shares or create new grants/distributions. Owner may close recorded obligations,
-   exit locked liquidity, register final redeemable assets, wrap any late native balance, and burn treasury-held shares.
+1. `Active`: before launch, the owner can mint shares, create grants, create distributions, and register redeemable
+   assets. After launch, those actions must go through queued self-governance.
+2. `WindingDown`: entered only after `startWindDown()` wraps the Boardroom's full native HYPE balance into WHYPE. The
+   Boardroom cannot mint shares or create new grants/distributions. Governance may close recorded obligations, exit
+   locked liquidity, register final redeemable assets, wrap any late native balance, and burn treasury-held shares.
    Active fixed-price sales and migrating bonding curves stop accepting trades as soon as their Boardroom enters this
    state.
 3. `RedemptionsOpen`: share holders can burn shares to redeem registered assets pro-rata. Owner execution is closed.
@@ -87,9 +102,8 @@ Wind-down transitions are one-way:
 1. Owner ensures the Boardroom holds the ERC20 token to be granted.
 2. Owner builds a `Boardroom.executeBatch` with two policy-checked calls.
 3. The first call targets the grant token and approves `TokenGrantFactory` for the grant amount through `AssetPolicy`.
-4. The second call targets `TokenGrantFactory.createGrant(...)` through a protocol policy, optionally forwarding the
-   exact native creation fee. `TokenGrantFactory` is the only deployment-default protocol target allowed to receive
-   native value.
+4. The second call targets `TokenGrantFactory.createGrant(...)` through `TokenGrantFactory` as the policy, optionally
+   forwarding the exact native creation fee.
 5. `TokenGrantFactory` creates a grant where `issuer == boardroom`.
 6. `TokenGrantFactory` transfers the grant tokens from the Boardroom into the grant escrow.
 7. The factory mints the grant-right ERC721 token to the grant holder.
@@ -109,7 +123,7 @@ and later create free USDC payroll grants through the same policy-gated batch ex
 6. The factory deploys and records a `FixedPriceSale`.
 7. The factory transfers sale inventory from the Boardroom into sale escrow.
 8. Buyers pay the configured ERC20 payment token directly to the Boardroom and receive shares from sale escrow.
-9. The Boardroom can close or cancel its own sale through the same policy-gated execution surface.
+9. The Boardroom can close or cancel its own sale through `DistributionFactory` as the policy.
 
 ## Migrating Bonding Curve Flow
 
@@ -118,21 +132,21 @@ and later create free USDC payroll grants through the same policy-gated batch ex
    `createMigratingBondingCurve`.
 3. Buyers buy shares from the curve while the Boardroom is active. Sellers can sell curve-issued shares back while the
    Boardroom is active.
-4. Once the quote reserve reaches the graduation target or sellable inventory is gone, the owner can migrate the curve
-   through `Boardroom.execute`.
+4. Once the quote reserve reaches the graduation target or sellable inventory is gone, governance can migrate the curve
+   through `Boardroom.execute` before launch or a queued action after launch.
 5. Migration creates Boardroom-owned locked AMM liquidity through `LockedLiquidityFactory` and records the locker on the
    Boardroom. The Boardroom-controlled call supplies the AMM slippage bounds.
 6. Any quote or share remainder returns to the Boardroom treasury.
 
 ## Wind-Down And Redemption Flow
 
-1. Owner registers ERC20 assets that should be redeemable. Raw native HYPE is not a redeemable asset; register WHYPE
-   instead when native value should be claimable.
-2. Owner calls `startWindDown`, which wraps the Boardroom's full native HYPE balance into WHYPE before moving from
-   `Active` to `WindingDown`.
-3. Owner closes, cancels, or migrates every recorded distribution and halts or expires every recorded grant.
-4. Owner exits every recorded locked-liquidity position.
-5. Owner calls `openRedemptions`, which wraps any native HYPE received after wind-down started.
+1. Governance registers ERC20 assets that should be redeemable. Raw native HYPE is not a redeemable asset; register
+   WHYPE instead when native value should be claimable.
+2. Before launch, the owner calls `startWindDown`. After launch, any current share holder can call `startWindDown`.
+   The call wraps the Boardroom's full native HYPE balance into WHYPE before moving from `Active` to `WindingDown`.
+3. Governance closes, cancels, or migrates every recorded distribution and halts or expires every recorded grant.
+4. Governance exits every recorded locked-liquidity position.
+5. Governance calls `openRedemptions`, which wraps any native HYPE received after wind-down started.
 6. `openRedemptions` verifies no recorded grants, distributions, or locked-liquidity positions are still open, burns
    treasury-held shares, and moves the Boardroom to `RedemptionsOpen`.
 7. A share holder calls `redeem(shares, recipient, minAmountsOut)`.
@@ -148,13 +162,16 @@ Redemption loops are bounded by `MAX_REDEEMABLE_ASSETS`. Wind-down gates are bou
 
 - Only the Boardroom can mint its share token.
 - Only the Boardroom can burn its share token.
-- Only the Boardroom owner can mint shares through the Boardroom.
+- Only the Boardroom owner can mint shares before launch; after launch, minting must be a queued self-call.
 - Shares cannot be minted after wind-down starts.
-- Boardroom execution requires a policy allowed by the central registry.
-- Boardroom execution requires the selected policy to allow the target, value, and calldata.
+- Direct owner execution is disabled after launch.
+- Only the current executor can queue actions and execute ready actions after launch.
+- Queued actions cannot execute before their ETA.
+- Any current share holder can cancel a queued action and can start wind-down after launch.
+- Policy-backed Boardroom execution requires a policy allowed by the central registry.
+- Policy-backed Boardroom execution requires the selected policy to allow the target, value, and calldata.
+- Calls to active pledge.cash module targets must use that module as the policy.
 - Boardroom execution cannot create new obligations after wind-down starts.
-- `ProtocolPolicy` never authorizes calls to unregistered protocol targets.
-- `ProtocolPolicy` never authorizes nonzero native value unless the target is explicitly value-enabled.
 - `AssetPolicy` never authorizes arbitrary token calls.
 - Asset approvals are limited to allowed assets and allowed protocol spenders.
 - Boardroom-created grants approve `TokenGrantFactory` as spender for the requested grant amount through `AssetPolicy`.
