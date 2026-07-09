@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+
 import { and, eq, sql, type SQL } from "drizzle-orm";
 
 import type { SentinelDb } from "../db/client";
@@ -286,13 +288,25 @@ async function getCursorLags(
   });
 }
 
-async function getPublicActions(
+export async function getPublicActions(
   db: SentinelDb,
   query: PublicActionsQuery
 ): Promise<PublicActionsResponse> {
   const limit = query.limit;
-  const offset = cursorToOffset(query.cursor);
+  const cursor = decodePublicActionsCursor(query.cursor);
+  if (query.cursor !== undefined && cursor === undefined) {
+    throw new Error("Invalid public actions cursor");
+  }
   const filters: SQL[] = [];
+
+  if (cursor !== undefined) {
+    filters.push(
+      sql`(
+        qa.queue_block < ${cursor.queueBlock}
+        OR (qa.queue_block = ${cursor.queueBlock} AND qa.id < ${cursor.id}::uuid)
+      )`
+    );
+  }
 
   if (query.chainId !== undefined) {
     filters.push(sql`qa.chain_id = ${query.chainId}`);
@@ -356,9 +370,8 @@ async function getPublicActions(
         LEFT JOIN analyses a
           ON a.action_id = qa.id
         ${where}
-        ORDER BY qa.queue_block DESC, qa.created_at DESC, qa.id ASC
+        ORDER BY qa.queue_block DESC, qa.id DESC
         LIMIT ${limit + 1}
-        OFFSET ${offset}
       `
     )
   );
@@ -369,7 +382,10 @@ async function getPublicActions(
     items: pageRows.map((row) => toPublicActionDto(row, callsByAction.get(row.id) ?? [])),
     page: {
       limit,
-      nextCursor: rows.length > limit ? String(offset + limit) : null
+      nextCursor:
+        rows.length > limit && pageRows.length > 0
+          ? encodePublicActionsCursor(pageRows[pageRows.length - 1]!)
+          : null
     }
   };
 }
@@ -553,13 +569,49 @@ function toWalletDto(row: { readonly address: string; readonly verifiedAt: Date 
   };
 }
 
-function cursorToOffset(cursor: string | undefined): number {
-  if (cursor === undefined) {
-    return 0;
-  }
+type PublicActionsCursor = {
+  readonly id: string;
+  readonly queueBlock: bigint;
+};
 
-  const parsed = Number.parseInt(cursor, 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
+export function encodePublicActionsCursor(input: {
+  readonly id: string;
+  readonly queueBlock: bigint | string;
+}): string {
+  return Buffer.from(
+    JSON.stringify({ id: input.id, queueBlock: input.queueBlock.toString() }),
+    "utf8"
+  ).toString("base64url");
+}
+
+export function decodePublicActionsCursor(
+  cursor: string | undefined
+): PublicActionsCursor | undefined {
+  if (cursor === undefined) return undefined;
+
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
+      id?: unknown;
+      queueBlock?: unknown;
+    };
+    if (
+      typeof parsed.id !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        parsed.id
+      ) ||
+      typeof parsed.queueBlock !== "string" ||
+      !/^\d+$/.test(parsed.queueBlock)
+    ) {
+      return undefined;
+    }
+    return { id: parsed.id, queueBlock: BigInt(parsed.queueBlock) };
+  } catch {
+    return undefined;
+  }
+}
+
+export function isPublicActionsCursor(cursor: string): boolean {
+  return decodePublicActionsCursor(cursor) !== undefined;
 }
 
 function stringArray(value: unknown): string[] {

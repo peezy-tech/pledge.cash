@@ -43,7 +43,7 @@ export type DispatcherHandle = {
 };
 
 export interface NotificationRateLimiter {
-  wait(row: OutboxRow): Promise<void>;
+  wait(channel: NotificationChannel, row: OutboxRow): Promise<void>;
 }
 
 type SendResultWithExternalId = NotificationSendResult & {
@@ -128,7 +128,7 @@ export async function dispatchOnce(options: DispatchOnceOptions): Promise<Dispat
 
       try {
         const rendered = render(row);
-        await rateLimiter.wait(row);
+        await rateLimiter.wait(channel, row);
         const sendResult = (await channel.send(row, rendered)) as SendResultWithExternalId;
 
         if (sendResult.ok) {
@@ -174,8 +174,8 @@ export class InMemoryNotificationRateLimiter implements NotificationRateLimiter 
     this.#sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
-  async wait(row: OutboxRow): Promise<void> {
-    const limits = rateLimitsFor(row);
+  async wait(channel: NotificationChannel, row: OutboxRow): Promise<void> {
+    const limits = channel.rateLimits?.(row) ?? [];
     if (limits.length === 0) {
       return;
     }
@@ -195,22 +195,6 @@ export class InMemoryNotificationRateLimiter implements NotificationRateLimiter 
       this.#nextAvailableByKey.set(limit.key, nextNow + limit.intervalMs);
     }
   }
-}
-
-function rateLimitsFor(row: OutboxRow): readonly { readonly intervalMs: number; readonly key: string }[] {
-  if (row.channelType === "telegram") {
-    const channelKey = row.channelId ?? row.userId ?? "unknown";
-    return [
-      { intervalMs: 40, key: "telegram:global" },
-      { intervalMs: 1_000, key: `telegram:${channelKey}` }
-    ];
-  }
-
-  if (row.channelType === "twitter") {
-    return [{ intervalMs: 10_000, key: "twitter:public" }];
-  }
-
-  return [];
 }
 
 function selectPendingSql(batchSize: number): SQL {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -139,6 +139,52 @@ describe("analyzeAction", () => {
     expect(maxActiveRuns).toBe(1);
   });
 
+  test("prioritizes queued harness work by subscriber count", async () => {
+    const store = new MemoryAnalysisStore();
+    const workdir = await tempRoot();
+    const order: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+    let markFirstStarted: (() => void) | undefined;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const firstCanFinish = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstId = "priority-first";
+    const adapter = new FakeAdapter(async (req) => {
+      const input = JSON.parse(await readFile(join(req.workspaceDir, INPUT_FILENAME), "utf8")) as {
+        action: { id: string };
+      };
+      order.push(input.action.id);
+      if (input.action.id === firstId) {
+        markFirstStarted?.();
+        await firstCanFinish;
+      }
+      await writeValidAnalysis(req.workspaceDir, `Analysis for ${input.action.id}.`);
+      return { harness: "fake", ok: true, outputPath: join(req.workspaceDir, ANALYSIS_FILENAME) };
+    });
+
+    const first = analyzeAction(
+      { ...sampleInput(firstId, bytes32("1")), harness: { eligible: true, subscriberCount: 1 } },
+      { adapter, db: store, timeoutMs: 1_000, workdir }
+    );
+    await firstStarted;
+    const low = analyzeAction(
+      { ...sampleInput("priority-low", bytes32("2")), harness: { eligible: true, subscriberCount: 2 } },
+      { adapter, db: store, timeoutMs: 1_000, workdir }
+    );
+    const high = analyzeAction(
+      { ...sampleInput("priority-high", bytes32("3")), harness: { eligible: true, subscriberCount: 10 } },
+      { adapter, db: store, timeoutMs: 1_000, workdir }
+    );
+
+    releaseFirst?.();
+    await Promise.all([first, low, high]);
+
+    expect(order).toEqual([firstId, "priority-high", "priority-low"]);
+  });
+
   test("uses deterministic templates when no adapter is configured", async () => {
     const result = await analyzeAction(sampleInput(), { db: new MemoryAnalysisStore() });
 
@@ -242,6 +288,36 @@ describe("analyzeAction", () => {
     expect(adapter.runs).toBe(0);
   });
 
+  test("reserves harness runs and falls back after the UTC daily limit", async () => {
+    const store = new MemoryAnalysisStore();
+    const workdir = await tempRoot();
+    const now = () => new Date("2026-07-09T12:00:00.000Z");
+    const adapter = new FakeAdapter(async (req) => {
+      await writeValidAnalysis(req.workspaceDir, "Reserved harness result.");
+      return { harness: "fake", ok: true, outputPath: join(req.workspaceDir, ANALYSIS_FILENAME) };
+    });
+
+    const first = await analyzeAction(sampleInput("daily-first", bytes32("4")), {
+      adapter,
+      dailyLimit: 1,
+      db: store,
+      now,
+      workdir
+    });
+    const second = await analyzeAction(sampleInput("daily-second", bytes32("5")), {
+      adapter,
+      dailyLimit: 1,
+      db: store,
+      now,
+      workdir
+    });
+
+    expect(first.source).toBe("harness");
+    expect(second.source).toBe("template");
+    expect(second.harness).toBe("template");
+    expect(adapter.runs).toBe(1);
+  });
+
   test("propagates persistence failures so watcher delivery can retry", async () => {
     await expect(
       analyzeAction(sampleInput("persistence-failure-action"), { db: new FailingAnalysisStore() })
@@ -252,6 +328,7 @@ describe("analyzeAction", () => {
 class MemoryAnalysisStore implements AnalysisStore {
   gets = 0;
   puts = 0;
+  readonly harnessRuns = new Map<string, Date>();
   readonly rows = new Map<string, AnalysisResult>();
 
   async get(input: AnalyzeActionInput): Promise<AnalysisResult | undefined> {
@@ -270,6 +347,26 @@ class MemoryAnalysisStore implements AnalysisStore {
     };
     this.rows.set(draft.actionId, row);
     return row;
+  }
+
+  async reserveHarnessRun(input: {
+    readonly actionId: string;
+    readonly dailyLimit: number;
+    readonly harness: string;
+    readonly now: Date;
+  }): Promise<boolean> {
+    if (input.dailyLimit <= 0 || this.harnessRuns.has(input.actionId)) return false;
+    const dayStart = Date.UTC(
+      input.now.getUTCFullYear(),
+      input.now.getUTCMonth(),
+      input.now.getUTCDate()
+    );
+    const runsToday = [...this.harnessRuns.values()].filter(
+      (startedAt) => startedAt.getTime() >= dayStart
+    ).length;
+    if (runsToday >= input.dailyLimit) return false;
+    this.harnessRuns.set(input.actionId, input.now);
+    return true;
   }
 }
 
@@ -300,6 +397,22 @@ async function tempRoot(): Promise<string> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function writeValidAnalysis(workspaceDir: string, summary: string): Promise<void> {
+  await writeFile(
+    join(workspaceDir, ANALYSIS_FILENAME),
+    JSON.stringify({
+      affectedParties: ["share holders"],
+      effects: ["The governance action may execute."],
+      severityRationale: "Rules engine severity is high.",
+      summary
+    })
+  );
+}
+
+function bytes32(value: string): string {
+  return `0x${value.padStart(64, "0")}`;
 }
 
 function sampleInput(

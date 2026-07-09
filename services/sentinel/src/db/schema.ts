@@ -46,6 +46,7 @@ export const notificationEventEnum = pgEnum("sentinel_notification_event", [
   "queued",
   "cancelled",
   "executed",
+  "reminder",
   "policy-admin"
 ]);
 
@@ -128,7 +129,8 @@ export const queuedActions = pgTable(
     ),
     boardroomIdx: index("queued_actions_boardroom_idx").on(table.chainId, table.boardroom),
     etaIdx: index("queued_actions_eta_idx").on(table.status, table.eta),
-    hashIdx: index("queued_actions_hash_idx").on(table.chainId, table.actionHash)
+    hashIdx: index("queued_actions_hash_idx").on(table.chainId, table.actionHash),
+    publicFeedIdx: index("queued_actions_public_feed_idx").on(table.queueBlock, table.id)
   })
 );
 
@@ -197,6 +199,22 @@ export const analyses = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   }
+);
+
+export const harnessRuns = pgTable(
+  "harness_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    actionId: uuid("action_id")
+      .notNull()
+      .unique()
+      .references(() => queuedActions.id, { onDelete: "cascade" }),
+    harness: text("harness").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    startedAtIdx: index("harness_runs_started_at_idx").on(table.startedAt)
+  })
 );
 
 export const policyAdminEvents = pgTable(

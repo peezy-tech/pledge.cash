@@ -3,6 +3,8 @@ import { describe, expect, test } from "bun:test";
 import {
   buildNotificationDedupeKey,
   fanout,
+  runQueuedRefanoutSweep,
+  runReminderSweep,
   shouldNotifySeverity,
   type FanoutDb,
   type NotificationPipelineEvent
@@ -47,6 +49,27 @@ describe("notification fanout", () => {
     ).toBe("998:0xabcdef:queued:twitter:public");
     expect(shouldNotifySeverity("medium", "high")).toBe(true);
     expect(shouldNotifySeverity("high", "medium")).toBe(false);
+
+    const firstAdminKey = buildNotificationDedupeKey({
+      actionId: "00000000-0000-4000-8000-000000000001",
+      actionHash: "0xABCDEF",
+      chainId: 998,
+      channelId: "channel-1",
+      channelType: "telegram",
+      event: "policy-admin",
+      eventId: "998:0xaaa:1"
+    });
+    const secondAdminKey = buildNotificationDedupeKey({
+      actionId: "00000000-0000-4000-8000-000000000001",
+      actionHash: "0xABCDEF",
+      chainId: 998,
+      channelId: "channel-1",
+      channelType: "telegram",
+      event: "policy-admin",
+      eventId: "998:0xbbb:2"
+    });
+    expect(firstAdminKey).not.toBe(secondAdminKey);
+    expect(firstAdminKey).toContain(":policy-admin:998:0xaaa:1:telegram:");
   });
 
   test("inserts subscriber rows and high-severity public Twitter rows idempotently", async () => {
@@ -68,7 +91,8 @@ describe("notification fanout", () => {
     expect(subscriberSql).toContain("COALESCE(s.mode, 'holdings'::sentinel_subscription_mode)");
     expect(subscriberSql).toContain("WHERE w.user_id = c.user_id");
     expect(subscriberSql).toContain("ON CONFLICT (dedupe_key) DO NOTHING");
-    expect(subscriberSql).toContain("c.type = 'telegram'");
+    expect(subscriberSql).not.toContain("c.type = 'telegram'");
+    expect(subscriberSql).not.toContain("telegram_chat_id");
 
     const twitterSql = sqlText(db.queries[1]);
     expect(twitterSql).toContain("ctx.action_id::text");
@@ -92,9 +116,44 @@ describe("notification fanout", () => {
       expect(followUpSql).toContain("replyToExternalId");
     }
   );
+
+  test("re-fanout does not pre-load action calls that fanout ignores", async () => {
+    const db = new FakeDb([[makeAction()], [{ id: "telegram-row", channelType: "telegram" }]]);
+
+    const result = await runQueuedRefanoutSweep(db);
+
+    expect(result).toEqual({ telegram: 1, total: 1, twitter: 0 });
+    expect(db.queries).toHaveLength(2);
+    expect(sqlText(db.queries[0])).toContain("FROM queued_actions");
+    expect(sqlText(db.queries[1])).toContain("WITH action_context");
+  });
+
+  test("selects queued actions inside the reminder window and emits reminder rows", async () => {
+    const db = new FakeDb([[makeAction()], [{ id: "reminder-row", channelType: "telegram" }]]);
+
+    const result = await runReminderSweep(db, {
+      now: new Date("2026-07-09T00:00:00.000Z"),
+      reminderHoursBeforeEta: 24
+    });
+
+    expect(result).toEqual({ telegram: 1, total: 1, twitter: 0 });
+    expect(db.queries).toHaveLength(2);
+    const sweepSql = sqlText(db.queries[0]);
+    expect(sweepSql).toContain("eta >");
+    expect(sweepSql).toContain("eta <=");
+    expect(sqlText(db.queries[1])).toContain("sentinel_notification_event");
+  });
 });
 
 function makeEvent(event: NotificationPipelineEvent["event"]): NotificationPipelineEvent {
+  if (event === "policy-admin") {
+    return {
+      action: makeAction(),
+      calls: [],
+      event,
+      eventId: "998:0xadmin:0"
+    };
+  }
   return {
     action: makeAction(),
     calls: [],

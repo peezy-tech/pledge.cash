@@ -46,6 +46,16 @@ describe("notification rendering", () => {
     expect(rendered.subject).toContain("Policy Admin Updated action");
   });
 
+  test("renders reminder notifications as the last pre-eta veto prompt", () => {
+    const rendered = renderNotification(makeRow("telegram", "reminder"), {
+      now: new Date("2026-07-09T12:00:00.000Z")
+    });
+
+    expect(rendered.subject).toContain("Reminder");
+    expect(rendered.text).toContain("veto window ends in 12h");
+    expect(rendered.text).toContain("cancelAction");
+  });
+
   test("builds stable web and explorer links from render options", () => {
     const links = buildLinks(makeRow("telegram").payload, {
       explorerUrls: { 998: "https://explorer.example/" },

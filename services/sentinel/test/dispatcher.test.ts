@@ -31,6 +31,7 @@ describe("notification dispatcher", () => {
     const row = makeOutboxRow();
     const db = new FakeDb([[row], []]);
     const sent: RenderedMessage[] = [];
+    const limitedChannels: string[] = [];
     const channel = makeChannel("telegram", async (_row, rendered) => {
       sent.push(rendered);
       return { externalId: "telegram-42", ok: true } as NotificationSendResult & {
@@ -42,13 +43,18 @@ describe("notification dispatcher", () => {
       channels: [channel],
       db,
       now: () => new Date("2026-07-09T12:00:00.000Z"),
-      rateLimiter: { wait: async () => undefined },
+      rateLimiter: {
+        wait: async (limitedChannel) => {
+          limitedChannels.push(limitedChannel.type);
+        }
+      },
       render: () => ({ text: "rendered alert" })
     });
 
     expect(result).toEqual({ dead: 0, failed: 0, selected: 1, sent: 1 });
     expect(db.transactionCount).toBe(1);
     expect(sent).toEqual([{ text: "rendered alert" }]);
+    expect(limitedChannels).toEqual(["telegram"]);
     expect(sqlText(db.queries[0])).toContain("FOR UPDATE SKIP LOCKED");
     expect(sqlText(db.queries[0])).toContain("ORDER BY created_at ASC, id ASC");
     expect(sqlText(db.queries[1])).toContain("status = 'sent'");

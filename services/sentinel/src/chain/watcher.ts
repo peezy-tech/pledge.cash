@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { and, asc, desc, eq, lt, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, lt, lte, or, sql } from "drizzle-orm";
 import {
   createPublicClient,
   decodeFunctionData,
@@ -24,6 +24,7 @@ import {
   hashAction,
   hashBatch,
   pledgeCashAbis,
+  queryGovernanceEvents,
   type BoardroomCall,
   type DecodedQueueInput,
   type DiscoveredBoardroom,
@@ -45,10 +46,16 @@ import {
 } from "../db/schema";
 import type { ActionPipelineEvent, QueuedActionRow, StoredCall } from "../types";
 import { advanceCursor, loadCursorWindow, type CursorWindow, type WatcherCursorScope } from "./cursor";
-import { applyShareTransfers, queryShareTransfers, type ShareBalanceDeltaInput } from "./holders";
+import {
+  aggregateShareBalanceDeltas,
+  applyShareTransfers,
+  queryShareTransfers,
+  type ShareBalanceDeltaInput
+} from "./holders";
 
 export type PolicyAdminPipelineEvent = Omit<ActionPipelineEvent, "event"> & {
   readonly event: "policy-admin";
+  readonly eventId: string;
 };
 
 export type WatcherPipelineEvent = ActionPipelineEvent | PolicyAdminPipelineEvent;
@@ -109,7 +116,7 @@ export type InsertPolicyAdminEventInput = {
 };
 
 export type WatcherStoreTx = {
-  applyShareBalanceDelta(input: ShareBalanceDeltaInput): Promise<void>;
+  applyShareBalanceDeltas(inputs: readonly ShareBalanceDeltaInput[]): Promise<void>;
   getCursor(chainId: number, scope: WatcherCursorScope): Promise<bigint | undefined>;
   insertActionCalls(actionId: string, calls: readonly InsertActionCallInput[]): Promise<StoredCall[]>;
   insertPolicyAdminEvent(input: InsertPolicyAdminEventInput): Promise<boolean>;
@@ -516,19 +523,20 @@ async function runWatcherPass(input: {
     }
 
     for (const event of policyAdminEvents) {
-      await tx.insertPolicyAdminEvent(event);
-      if (event.enabled && event.affectedQueuedActions) {
+      const inserted = await tx.insertPolicyAdminEvent(event);
+      if (inserted && event.enabled && event.affectedQueuedActions) {
         const queued = await tx.listQueuedActions(input.chainId);
-        pendingEvents.push(...queued.map((item) => ({ ...item, event: "policy-admin" as const })));
+        const eventId = policyAdminEventId(event);
+        pendingEvents.push(
+          ...queued.map((item) => ({ ...item, event: "policy-admin" as const, eventId }))
+        );
       }
     }
 
     await applyShareTransfers(tx, input.chainId, shareTransfers);
 
     for (const window of windows) {
-      if (window.scope !== "governance") {
-        await advanceCursor(tx, input.chainId, window);
-      }
+      await advanceCursor(tx, input.chainId, window);
     }
 
     return pendingEvents;
@@ -536,13 +544,6 @@ async function runWatcherPass(input: {
 
   for (const event of actionEvents) {
     await input.onActionEvent?.(event);
-  }
-
-  const governanceWindow = plan.windows.governance;
-  if (governanceWindow !== undefined) {
-    await input.store.transaction(async (tx) => {
-      await advanceCursor(tx, input.chainId, governanceWindow);
-    });
   }
 
   return {
@@ -611,7 +612,6 @@ async function fetchGovernanceEvents(
 
   const events: GovernanceEvent[] = [];
   for (const addresses of chunks(uniqueAddresses(boardroomAddresses), BOARDROOM_QUERY_CHUNK_SIZE)) {
-    const { queryGovernanceEvents } = await import("@pledge.cash/sdk");
     events.push(
       ...(await queryGovernanceEvents(client, {
         boardrooms: addresses,
@@ -791,41 +791,28 @@ async function processGovernanceEvent(
 
 function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
   return {
-    async applyShareBalanceDelta(input: ShareBalanceDeltaInput): Promise<void> {
-      const [existing] = await db
-        .select({ balance: shareBalances.balance })
-        .from(shareBalances)
-        .where(
-          and(
-            eq(shareBalances.chainId, input.chainId),
-            eq(shareBalances.token, input.token),
-            eq(shareBalances.holder, input.holder)
-          )
-        )
-        .limit(1);
-      const current = existing ? BigInt(existing.balance) : 0n;
-      const next = current + input.delta;
+    async applyShareBalanceDeltas(inputs: readonly ShareBalanceDeltaInput[]): Promise<void> {
+      const aggregated = aggregateShareBalanceDeltas(inputs);
+      if (aggregated.length === 0) return;
 
-      if (existing) {
-        await db
-          .update(shareBalances)
-          .set({ balance: next.toString(), updatedBlock: input.blockNumber })
-          .where(
-            and(
-              eq(shareBalances.chainId, input.chainId),
-              eq(shareBalances.token, input.token),
-              eq(shareBalances.holder, input.holder)
-            )
-          );
-      } else {
-        await db.insert(shareBalances).values({
-          balance: next.toString(),
-          chainId: input.chainId,
-          holder: input.holder,
-          token: input.token,
-          updatedBlock: input.blockNumber
+      await db
+        .insert(shareBalances)
+        .values(
+          aggregated.map((input) => ({
+            balance: input.delta.toString(),
+            chainId: input.chainId,
+            holder: input.holder,
+            token: input.token,
+            updatedBlock: input.blockNumber
+          }))
+        )
+        .onConflictDoUpdate({
+          target: [shareBalances.chainId, shareBalances.token, shareBalances.holder],
+          set: {
+            balance: sql`${shareBalances.balance} + excluded.balance`,
+            updatedBlock: sql`GREATEST(${shareBalances.updatedBlock}, excluded.updated_block)`
+          }
         });
-      }
     },
     async getCursor(chainId: number, scope: WatcherCursorScope): Promise<bigint | undefined> {
       const [row] = await db
@@ -1062,6 +1049,10 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
         .where(and(eq(boardrooms.chainId, input.chainId), eq(boardrooms.address, input.boardroom)));
     }
   };
+}
+
+function policyAdminEventId(event: InsertPolicyAdminEventInput): string {
+  return `${event.chainId}:${event.txHash.toLowerCase()}:${event.logIndex}`;
 }
 
 function storedCallInput(call: BoardroomCall, callIndex: number): InsertActionCallInput {

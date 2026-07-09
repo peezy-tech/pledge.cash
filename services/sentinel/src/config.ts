@@ -33,6 +33,7 @@ export const sentinelEnvSchema = z
     SENTINEL_HARNESS_WORKDIR: optionalStringSchema,
     SENTINEL_HARNESS_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
     SENTINEL_HARNESS_DAILY_LIMIT: z.coerce.number().int().nonnegative().default(50),
+    SENTINEL_HARNESS_BOARDROOM_ALLOWLIST: optionalStringSchema,
     SENTINEL_REMINDER_HOURS_BEFORE_ETA: z.coerce.number().int().nonnegative().default(24),
     TELEGRAM_BOT_TOKEN: optionalStringSchema,
     TELEGRAM_BOT_USERNAME: optionalStringSchema,
@@ -58,6 +59,7 @@ export type Config = {
   readonly chains: SentinelChainConfig[];
   readonly databaseUrl: string;
   readonly harness: {
+    readonly boardroomAllowlist: readonly string[];
     readonly cmd?: string;
     readonly dailyLimit: number;
     readonly model: string;
@@ -101,6 +103,25 @@ function parseChainIds(value: string): number[] {
   }
 
   return [...new Set(ids)];
+}
+
+function parseAddressList(value: string | undefined): string[] {
+  if (value === undefined) return [];
+
+  return [
+    ...new Set(
+      value
+        .split(",")
+        .map((part) => part.trim().toLowerCase())
+        .filter((part) => part.length > 0)
+        .map((part) => {
+          if (!/^0x[0-9a-f]{40}$/.test(part)) {
+            throw new Error(`Invalid boardroom address in SENTINEL_HARNESS_BOARDROOM_ALLOWLIST: ${part}`);
+          }
+          return part;
+        })
+    )
+  ];
 }
 
 function readOptionalString(env: Record<string, unknown>, key: string): string | undefined {
@@ -161,6 +182,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     databaseUrl: raw.DATABASE_URL,
     harness: withOptional(
       {
+        boardroomAllowlist: parseAddressList(raw.SENTINEL_HARNESS_BOARDROOM_ALLOWLIST),
         dailyLimit: raw.SENTINEL_HARNESS_DAILY_LIMIT,
         model: raw.SENTINEL_HARNESS_MODEL,
         name: raw.SENTINEL_HARNESS,

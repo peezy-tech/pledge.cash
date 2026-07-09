@@ -6,8 +6,7 @@ import type {
   ChannelType,
   NotificationEvent,
   QueuedActionRow,
-  Severity,
-  StoredCall
+  Severity
 } from "../types";
 
 type QueryResult<T> = readonly T[] | { readonly rows: readonly T[] };
@@ -16,14 +15,21 @@ export type FanoutDb = {
   execute<T = Record<string, unknown>>(query: SQL): Promise<QueryResult<T>>;
 };
 
-export type NotificationFanoutEvent = ActionEvent | "policy-admin";
+export type NotificationFanoutEvent = NotificationEvent;
 
-export type NotificationPipelineEvent = Omit<ActionPipelineEvent, "event"> & {
-  readonly event: NotificationFanoutEvent;
-};
+export type NotificationPipelineEvent =
+  | (Omit<ActionPipelineEvent, "event"> & {
+      readonly event: ActionEvent | "reminder";
+    })
+  | (Omit<ActionPipelineEvent, "event"> & {
+      readonly event: "policy-admin";
+      readonly eventId: string;
+    });
 
 export type FanoutOptions = {
   readonly refanoutLimit?: number;
+  readonly reminderHoursBeforeEta?: number;
+  readonly now?: Date;
   readonly twitterEnabled?: boolean;
 };
 
@@ -31,6 +37,17 @@ export type FanoutResult = {
   readonly telegram: number;
   readonly total: number;
   readonly twitter: number;
+};
+
+export type FanoutSweepHandle = {
+  stop(): void;
+};
+
+export type StartFanoutSweepsOptions = FanoutOptions & {
+  readonly db: FanoutDb;
+  readonly logger?: Pick<Console, "error">;
+  readonly refanoutIntervalMs?: number;
+  readonly reminderIntervalMs?: number;
 };
 
 type InsertedNotificationRow = {
@@ -62,10 +79,18 @@ export function buildNotificationDedupeKey(args: {
   readonly channelId?: string | null;
   readonly channelType: ChannelType;
   readonly event: NotificationFanoutEvent;
+  readonly eventId?: string;
 }): string {
   const channelId = args.channelId ?? "public";
-  const actionScope = args.actionId === undefined ? args.actionHash.toLowerCase() : `${args.actionId}:${args.actionHash.toLowerCase()}`;
-  return `${args.chainId}:${actionScope}:${args.event}:${args.channelType}:${channelId}`;
+  const actionScope =
+    args.actionId === undefined
+      ? args.actionHash.toLowerCase()
+      : `${args.actionId}:${args.actionHash.toLowerCase()}`;
+  const eventScope =
+    args.event === "policy-admin"
+      ? `policy-admin:${requiredPolicyAdminEventId(args.eventId)}`
+      : args.event;
+  return `${args.chainId}:${actionScope}:${eventScope}:${args.channelType}:${channelId}`;
 }
 
 export async function fanout(
@@ -96,6 +121,7 @@ export async function runQueuedRefanoutSweep(
           executor,
           eta,
           queue_block AS "queueBlock",
+          queue_log_index AS "queueLogIndex",
           status,
           cancelled_by AS "cancelledBy",
           executed_by AS "executedBy",
@@ -107,7 +133,7 @@ export async function runQueuedRefanoutSweep(
         FROM queued_actions
         WHERE status = 'queued'
         ORDER BY eta ASC
-        LIMIT ${options.refanoutLimit ?? 100}
+        ${sweepLimitSql(options.refanoutLimit)}
       `
     )
   );
@@ -115,51 +141,121 @@ export async function runQueuedRefanoutSweep(
   return fanoutActions(actions, "queued", db, options);
 }
 
+export async function runReminderSweep(
+  db: FanoutDb,
+  options: FanoutOptions = {}
+): Promise<FanoutResult> {
+  const now = options.now ?? new Date();
+  const reminderDeadline = new Date(
+    now.getTime() + (options.reminderHoursBeforeEta ?? 24) * 3_600_000
+  );
+  const nowIso = now.toISOString();
+  const reminderDeadlineIso = reminderDeadline.toISOString();
+  const actions = rowsFromResult(
+    await db.execute<QueuedActionRow>(
+      sql`
+        SELECT
+          id,
+          chain_id AS "chainId",
+          boardroom,
+          action_hash AS "actionHash",
+          queue_tx_hash AS "queueTxHash",
+          salt,
+          executor,
+          eta,
+          queue_block AS "queueBlock",
+          queue_log_index AS "queueLogIndex",
+          status,
+          cancelled_by AS "cancelledBy",
+          executed_by AS "executedBy",
+          resolved_tx_hash AS "resolvedTxHash",
+          decode_status AS "decodeStatus",
+          raw_calldata AS "rawCalldata",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM queued_actions
+        WHERE status = 'queued'
+          AND eta > ${nowIso}::timestamptz
+          AND eta <= ${reminderDeadlineIso}::timestamptz
+        ORDER BY eta ASC, id ASC
+        ${sweepLimitSql(options.refanoutLimit)}
+      `
+    )
+  );
+
+  return fanoutActions(actions, "reminder", db, options);
+}
+
+export function startFanoutSweeps(options: StartFanoutSweepsOptions): FanoutSweepHandle {
+  const logger = options.logger ?? console;
+  let stopped = false;
+  let refanoutRunning = false;
+  let reminderRunning = false;
+
+  const runRefanout = async (): Promise<void> => {
+    if (stopped || refanoutRunning) return;
+    refanoutRunning = true;
+    try {
+      await runQueuedRefanoutSweep(options.db, options);
+    } catch (error) {
+      logger.error(error);
+    } finally {
+      refanoutRunning = false;
+    }
+  };
+  const runReminders = async (): Promise<void> => {
+    if (stopped || reminderRunning) return;
+    reminderRunning = true;
+    try {
+      await runReminderSweep(options.db, options);
+    } catch (error) {
+      logger.error(error);
+    } finally {
+      reminderRunning = false;
+    }
+  };
+
+  const refanoutTimer = setInterval(
+    () => void runRefanout(),
+    options.refanoutIntervalMs ?? 3_600_000
+  );
+  const reminderTimer = setInterval(
+    () => void runReminders(),
+    options.reminderIntervalMs ?? 600_000
+  );
+  void runRefanout();
+  void runReminders();
+
+  return {
+    stop() {
+      stopped = true;
+      clearInterval(refanoutTimer);
+      clearInterval(reminderTimer);
+    }
+  };
+}
+
 async function fanoutActions(
   actions: readonly QueuedActionRow[],
-  event: NotificationFanoutEvent,
+  event: ActionEvent | "reminder",
   db: FanoutDb,
   options: FanoutOptions
 ): Promise<FanoutResult> {
   let result = emptyFanoutResult;
 
   for (const action of actions) {
-    const calls = await loadStoredCalls(action.id, db);
-    const nextResult = await fanout({ action, calls, event }, db, options);
+    const nextResult = await fanout({ action, calls: [], event }, db, options);
     result = mergeFanoutResults(result, nextResult);
   }
 
   return result;
 }
 
-async function loadStoredCalls(actionId: string, db: FanoutDb): Promise<StoredCall[]> {
-  return [
-    ...rowsFromResult(
-      await db.execute<StoredCall>(
-        sql`
-          SELECT
-            action_id AS "actionId",
-            call_index AS "callIndex",
-            policy,
-            target,
-            value::text AS value,
-            data,
-            selector,
-            decoded_function AS "decodedFunction",
-            decoded_args AS "decodedArgs"
-          FROM action_calls
-          WHERE action_id = ${actionId}
-          ORDER BY call_index ASC
-        `
-      )
-    )
-  ];
-}
-
 async function insertSubscriberNotifications(
   event: NotificationPipelineEvent,
   db: FanoutDb
 ): Promise<readonly InsertedNotificationRow[]> {
+  const eventScope = eventDedupeScope(event);
   return rowsFromResult(
     await db.execute<InsertedNotificationRow>(
       sql`
@@ -170,13 +266,10 @@ async function insertSubscriberNotifications(
           SELECT DISTINCT
             c.id AS channel_id,
             c.type AS channel_type,
-            c.user_id,
-            c.telegram_chat_id
+            c.user_id
           FROM action_context ctx
           JOIN channels c
             ON c.enabled = TRUE
-           AND c.type = 'telegram'
-           AND c.telegram_chat_id IS NOT NULL
           LEFT JOIN subscriptions s
             ON s.user_id = c.user_id
           WHERE CASE COALESCE(s.min_severity, 'medium'::sentinel_severity)
@@ -232,7 +325,7 @@ async function insertSubscriberNotifications(
             ':',
             lower(ctx.action_hash),
             ':',
-            ${event.event}::text,
+            ${eventScope}::text,
             ':',
             eligible.channel_type,
             ':',
@@ -243,7 +336,7 @@ async function insertSubscriberNotifications(
           eligible.user_id,
           ctx.action_id,
           ${event.event}::sentinel_notification_event,
-          ${payloadSql("eligible.telegram_chat_id", null)},
+          ${payloadSql(null)},
           'pending',
           NOW()
         FROM action_context ctx
@@ -303,7 +396,7 @@ async function insertQueuedTweet(
           NULL,
           ctx.action_id,
           'queued'::sentinel_notification_event,
-          ${payloadSql(null, null)},
+          ${payloadSql(null)},
           'pending',
           NOW()
         FROM action_context ctx
@@ -319,6 +412,7 @@ async function insertTwitterFollowUp(
   event: NotificationPipelineEvent,
   db: FanoutDb
 ): Promise<readonly InsertedNotificationRow[]> {
+  const eventScope = eventDedupeScope(event);
   return rowsFromResult(
     await db.execute<InsertedNotificationRow>(
       sql`
@@ -347,13 +441,13 @@ async function insertTwitterFollowUp(
           next_attempt_at
         )
         SELECT
-          concat(ctx.chain_id::text, ':', ctx.action_id::text, ':', lower(ctx.action_hash), ':', ${event.event}::text, ':twitter:public'),
+          concat(ctx.chain_id::text, ':', ctx.action_id::text, ':', lower(ctx.action_hash), ':', ${eventScope}::text, ':twitter:public'),
           'twitter',
           NULL,
           NULL,
           ctx.action_id,
           ${event.event}::sentinel_notification_event,
-          ${payloadSql(null, "original.external_id")},
+          ${payloadSql("original.external_id")},
           'pending',
           NOW()
         FROM action_context ctx
@@ -420,8 +514,7 @@ function actionContextSql(actionId: string): SQL {
   `;
 }
 
-function payloadSql(telegramChatIdSql: string | null, replyToExternalIdSql: string | null): SQL {
-  const telegramChatId = telegramChatIdSql === null ? sql`NULL` : sql.raw(telegramChatIdSql);
+function payloadSql(replyToExternalIdSql: string | null): SQL {
   const replyToExternalId =
     replyToExternalIdSql === null ? sql`NULL` : sql.raw(replyToExternalIdSql);
 
@@ -463,13 +556,29 @@ function payloadSql(telegramChatIdSql: string | null, replyToExternalIdSql: stri
         'calls', ctx.calls,
         'delivery', jsonb_strip_nulls(
           jsonb_build_object(
-            'telegramChatId', ${telegramChatId},
             'replyToExternalId', ${replyToExternalId}
           )
         )
       )
     )
   `;
+}
+
+function eventDedupeScope(event: NotificationPipelineEvent): string {
+  return event.event === "policy-admin"
+    ? `policy-admin:${requiredPolicyAdminEventId(event.eventId)}`
+    : event.event;
+}
+
+function requiredPolicyAdminEventId(eventId: string | undefined): string {
+  if (eventId === undefined || eventId.length === 0) {
+    throw new Error("policy-admin notifications require a source event id");
+  }
+  return eventId;
+}
+
+function sweepLimitSql(limit: number | undefined): SQL {
+  return limit === undefined ? sql`` : sql`LIMIT ${limit}`;
 }
 
 function countInsertedRows(rows: readonly InsertedNotificationRow[]): FanoutResult {

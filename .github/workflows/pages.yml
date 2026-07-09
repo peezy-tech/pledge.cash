@@ -41,9 +41,15 @@ jobs:
       - name: Check docs
         run: bun run docs:check
 
+      - name: Verify configured Sentinel API
+        if: ${{ vars.VITE_SENTINEL_API_URL != '' }}
+        env:
+          SENTINEL_API_URL: ${{ vars.VITE_SENTINEL_API_URL }}
+        run: curl --fail --silent --show-error --retry 3 --retry-all-errors "${SENTINEL_API_URL%/}/health"
+
       - name: Build site
         env:
-          VITE_SENTINEL_API_URL: https://api.pledge.cash
+          VITE_SENTINEL_API_URL: ${{ vars.VITE_SENTINEL_API_URL }}
         run: bun --cwd apps/web build:pages
 
       - name: Upload artifact

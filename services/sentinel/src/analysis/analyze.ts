@@ -2,11 +2,11 @@ import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { eq } from "drizzle-orm";
+import { eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import type { SentinelDb } from "../db/client";
-import { analyses } from "../db/schema";
+import { analyses, harnessRuns } from "../db/schema";
 import type { AnalysisResult, BoardroomRow, QueuedActionRow, RiskAssessment, StoredCall } from "../types";
 import type { HarnessAdapter, HarnessResponse } from "./adapter";
 import { buildHarnessPrompt } from "./prompt";
@@ -61,6 +61,7 @@ export type AnalyzeActionInput = {
   readonly harness?: {
     readonly eligible: boolean;
     readonly reason?: string;
+    readonly subscriberCount?: number;
   };
   readonly risk: RiskAssessment;
 };
@@ -70,16 +71,35 @@ export type AnalysisDraft = Omit<AnalysisResult, "createdAt" | "updatedAt">;
 export type AnalysisStore = {
   get(input: AnalyzeActionInput): Promise<AnalysisResult | undefined>;
   put(draft: AnalysisDraft): Promise<AnalysisResult>;
+  reserveHarnessRun(input: {
+    readonly actionId: string;
+    readonly dailyLimit: number;
+    readonly harness: string;
+    readonly now: Date;
+  }): Promise<boolean>;
 };
 
 export type AnalyzeActionDeps = {
   readonly adapter?: HarnessAdapter;
+  readonly dailyLimit?: number;
   readonly db: AnalysisStore;
+  readonly now?: () => Date;
   readonly timeoutMs?: number;
   readonly workdir?: string;
 };
 
-let analysisQueue: Promise<void> = Promise.resolve();
+type AnalysisJob = {
+  readonly deps: AnalyzeActionDeps;
+  readonly input: AnalyzeActionInput;
+  readonly priority: number;
+  readonly reject: (reason?: unknown) => void;
+  readonly resolve: (result: AnalysisResult) => void;
+  readonly sequence: number;
+};
+
+const analysisQueue: AnalysisJob[] = [];
+let analysisQueueActive = false;
+let analysisSequence = 0;
 
 export function createDrizzleAnalysisStore(db: SentinelDb): AnalysisStore {
   return {
@@ -111,18 +131,61 @@ export function createDrizzleAnalysisStore(db: SentinelDb): AnalysisStore {
       }
 
       return row;
+    },
+    async reserveHarnessRun(input) {
+      if (input.dailyLimit <= 0) return false;
+
+      const [usage] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(harnessRuns)
+        .where(gte(harnessRuns.startedAt, utcDayStart(input.now)));
+      if ((usage?.count ?? 0) >= input.dailyLimit) return false;
+
+      const inserted = await db
+        .insert(harnessRuns)
+        .values({ actionId: input.actionId, harness: input.harness, startedAt: input.now })
+        .onConflictDoNothing()
+        .returning({ id: harnessRuns.id });
+      return inserted.length > 0;
     }
   };
 }
 
 export function analyzeAction(input: AnalyzeActionInput, deps: AnalyzeActionDeps): Promise<AnalysisResult> {
-  const run = (): Promise<AnalysisResult> => analyzeActionNow(input, deps);
-  const next = analysisQueue.then(run, run);
-  analysisQueue = next.then(
-    () => undefined,
-    () => undefined
-  );
-  return next;
+  return new Promise<AnalysisResult>((resolve, reject) => {
+    analysisQueue.push({
+      deps,
+      input,
+      priority: input.harness?.subscriberCount ?? 0,
+      reject,
+      resolve,
+      sequence: analysisSequence++
+    });
+    analysisQueue.sort(
+      (left, right) => right.priority - left.priority || left.sequence - right.sequence
+    );
+    void drainAnalysisQueue();
+  });
+}
+
+async function drainAnalysisQueue(): Promise<void> {
+  if (analysisQueueActive) return;
+  analysisQueueActive = true;
+
+  try {
+    let job = analysisQueue.shift();
+    while (job !== undefined) {
+      try {
+        job.resolve(await analyzeActionNow(job.input, job.deps));
+      } catch (error) {
+        job.reject(error);
+      }
+      job = analysisQueue.shift();
+    }
+  } finally {
+    analysisQueueActive = false;
+    if (analysisQueue.length > 0) void drainAnalysisQueue();
+  }
 }
 
 async function analyzeActionNow(input: AnalyzeActionInput, deps: AnalyzeActionDeps): Promise<AnalysisResult> {
@@ -133,6 +196,17 @@ async function analyzeActionNow(input: AnalyzeActionInput, deps: AnalyzeActionDe
 
   const adapter = input.harness?.eligible === false ? undefined : deps.adapter;
   if (adapter === undefined) {
+    return persistAnalysis(templateDraft(input, "template", null), deps.db);
+  }
+
+  const now = deps.now?.() ?? new Date();
+  const reserved = await deps.db.reserveHarnessRun({
+    actionId: input.action.id,
+    dailyLimit: deps.dailyLimit ?? Number.MAX_SAFE_INTEGER,
+    harness: adapter.harness,
+    now
+  });
+  if (!reserved) {
     return persistAnalysis(templateDraft(input, "template", null), deps.db);
   }
 
@@ -230,4 +304,8 @@ function templateDraft(input: AnalyzeActionInput, harness: string, model: string
 
 async function persistAnalysis(draft: AnalysisDraft, db: AnalysisStore): Promise<AnalysisResult> {
   return await db.put(draft);
+}
+
+function utcDayStart(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }

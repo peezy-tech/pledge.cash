@@ -198,6 +198,8 @@ function eventLabel(event: NotificationRenderEvent): string {
       return "Cancelled";
     case "executed":
       return "Executed";
+    case "reminder":
+      return "Reminder";
     case "policy-admin":
       return "Policy Admin Updated";
   }
