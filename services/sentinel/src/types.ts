@@ -1,0 +1,98 @@
+import type { InferSelectModel } from "drizzle-orm";
+import type { Address, Hex } from "viem";
+
+import type {
+  actionCalls,
+  analyses,
+  boardrooms,
+  channels,
+  notifications,
+  queuedActions,
+  riskAssessments,
+  users
+} from "./db/schema";
+import type { JsonValue } from "./db/schema";
+
+export type ChainId = number;
+export type AddressString = Lowercase<Address>;
+export type HexString = Hex;
+export type Uint256String = `${bigint}`;
+
+export type Severity = "low" | "medium" | "high";
+export type ActionEvent = "queued" | "cancelled" | "executed" | "reminder" | "policy-admin";
+export type ActionStatus = "queued" | "cancelled" | "executed";
+export type DecodeStatus = "decoded" | "undecoded";
+export type BoardroomStatus = "prelaunch" | "active" | "winddown";
+export type AnalysisSource = "harness" | "template";
+export type ChannelType = "telegram" | "twitter";
+export type SubscriptionMode = "holdings" | "explicit";
+
+export type UserRow = InferSelectModel<typeof users>;
+export type BoardroomRow = InferSelectModel<typeof boardrooms>;
+export type QueuedActionRow = InferSelectModel<typeof queuedActions>;
+export type ChannelRow = InferSelectModel<typeof channels>;
+
+export type StoredCall = Omit<InferSelectModel<typeof actionCalls>, "decodedArgs" | "value"> & {
+  decodedArgs: JsonValue | null;
+  value: Uint256String;
+};
+
+export type RiskFinding = {
+  readonly callIndex: number | null;
+  readonly detail: string;
+  readonly ruleId: string;
+  readonly severity: Severity;
+};
+
+export type RiskAssessment = Omit<InferSelectModel<typeof riskAssessments>, "findings" | "severity"> & {
+  readonly findings: RiskFinding[];
+  readonly severity: Severity;
+};
+
+export type AnalysisResult = Omit<
+  InferSelectModel<typeof analyses>,
+  "affectedParties" | "effects" | "source"
+> & {
+  readonly affectedParties: string[];
+  readonly effects: string[];
+  readonly source: AnalysisSource;
+};
+
+export type NotificationPayload = {
+  readonly action: {
+    readonly actionHash: HexString;
+    readonly boardroom: AddressString;
+    readonly chainId: ChainId;
+    readonly eta: string;
+    readonly id: string;
+    readonly status: ActionStatus;
+  };
+  readonly analysis?: {
+    readonly affectedParties: string[];
+    readonly effects: string[];
+    readonly severityRationale: string;
+    readonly summary: string;
+  };
+  readonly risk?: {
+    readonly findings: RiskFinding[];
+    readonly severity: Severity;
+  };
+};
+
+export type OutboxRow = Omit<InferSelectModel<typeof notifications>, "event" | "payload"> & {
+  readonly event: ActionEvent;
+  readonly payload: NotificationPayload;
+};
+
+export type RenderedMessage = {
+  readonly html?: string;
+  readonly subject?: string;
+  readonly text: string;
+  readonly url?: string;
+};
+
+export type ActionPipelineEvent = {
+  readonly action: QueuedActionRow;
+  readonly calls: StoredCall[];
+  readonly event: ActionEvent;
+};

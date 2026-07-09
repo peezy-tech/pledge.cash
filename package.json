@@ -13,7 +13,8 @@
       "docs",
       "packages/contracts",
       "packages/sdk",
-      "apps/*"
+      "apps/*",
+      "services/*"
     ],
     "catalog": {
       "@types/node": "^25.6.1",
@@ -35,6 +36,8 @@
     "scenario:local-seed:local": "bun --cwd packages/contracts scenario:local-seed:local",
     "scenario:project-token:dry-run": "bun --cwd packages/contracts scenario:project-token:dry-run",
     "scenario:project-token:local": "bun --cwd packages/contracts scenario:project-token:local",
+    "sentinel:dev": "bun --cwd services/sentinel dev",
+    "sentinel:test": "bun --cwd services/sentinel test",
     "simulate:hyperevm-testnet": "bun --cwd packages/contracts simulate:hyperevm-testnet",
     "simulate:monad-testnet": "bun --cwd packages/contracts simulate:monad-testnet",
     "simulate:testnets": "bun --cwd packages/contracts simulate:testnets",
