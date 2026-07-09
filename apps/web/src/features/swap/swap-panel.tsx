@@ -1,6 +1,6 @@
 import type { Address, PledgeCashDeployment } from "@pledge.cash/sdk";
 import { ArrowDownUp, Check, ChevronDown, Coins, Droplets, RefreshCw, Search, ShieldCheck, WalletCards, X } from "lucide-react";
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { isAddress } from "viem";
 import { ActionButton, ActionRow, AddressLink, Facts, Field, Panel } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
@@ -63,6 +63,35 @@ type SwapPanelProps = {
 
 type TokenSide = "tokenIn" | "tokenOut" | "tokenA" | "tokenB";
 
+type FactItem = {
+  label: string;
+  value: ReactNode;
+};
+
+type SwapActionState = {
+  quoteReady: boolean;
+  needsApproval: boolean;
+  canApproveInput: boolean;
+  canSwap: boolean;
+};
+
+type LiquidityActionState = {
+  quoteReady: boolean;
+  needsTokenAApproval: boolean;
+  needsTokenBApproval: boolean;
+  canApproveTokenA: boolean;
+  canApproveTokenB: boolean;
+  canAddLiquidity: boolean;
+};
+
+type PositionActionState = {
+  removeReady: boolean;
+  needsLpApproval: boolean;
+  canApproveLp: boolean;
+  canRemoveLiquidity: boolean;
+  canClaimFees: boolean;
+};
+
 export function SwapPanel({
   account,
   deployment,
@@ -97,36 +126,34 @@ export function SwapPanel({
 }: SwapPanelProps): React.JSX.Element {
   const [selectorSide, setSelectorSide] = useState<TokenSide>();
   const [tokenSearch, setTokenSearch] = useState("");
-  const ready = swapQuoteReady(quote);
+  const walletConnected = account !== undefined;
+
   const swapNativeAvailable = pairHasWrappedNative(deployment, form.tokenIn, form.tokenOut);
   const swapNative = swapNativeMode(deployment, form);
   const swapWrappedSide = wrappedSwapSide(deployment, form);
   const swapInputIsNative = swapNative === "input";
-  const needsApproval = ready && !swapInputIsNative && (quote.tokenIn.allowance ?? 0n) < quote.amountIn;
-  const canApprove = Boolean(account && ready && !swapInputIsNative);
-  const canSwap = Boolean(account && ready && !needsApproval);
+  const swapActions = swapActionState(walletConnected, quote, swapInputIsNative);
   const inputToken = selectedTokenOption(form.tokenIn, tokenList.tokens, quote?.tokenIn);
   const outputToken = selectedTokenOption(form.tokenOut, tokenList.tokens, quote?.tokenOut);
+
   const tokenA = selectedTokenOption(liquidityForm.tokenA, tokenList.tokens, liquidityQuote?.tokenA ?? position?.tokenA);
   const tokenB = selectedTokenOption(liquidityForm.tokenB, tokenList.tokens, liquidityQuote?.tokenB ?? position?.tokenB);
-  const addReady = liquidityQuoteReady(liquidityQuote);
-  const removeReady = removeLiquidityQuoteReady(removeLiquidityQuote);
-  const nativeAvailable = pairHasWrappedNative(deployment, liquidityForm.tokenA, liquidityForm.tokenB);
-  const tokenAIsNative = liquidityForm.useNative && nativeAvailable && deployment?.wrappedNative !== undefined && sameAddress(liquidityForm.tokenA, deployment.wrappedNative);
-  const tokenBIsNative = liquidityForm.useNative && nativeAvailable && deployment?.wrappedNative !== undefined && sameAddress(liquidityForm.tokenB, deployment.wrappedNative);
-  const needsTokenAApproval = addReady && !tokenAIsNative && (liquidityQuote.tokenA.allowance ?? 0n) < liquidityQuote.amountA;
-  const needsTokenBApproval = addReady && !tokenBIsNative && (liquidityQuote.tokenB.allowance ?? 0n) < liquidityQuote.amountB;
-  const needsLpApproval = removeReady && (removeLiquidityQuote.position.lpAllowance ?? 0n) < removeLiquidityQuote.liquidity;
-  const canAddLiquidity = Boolean(account && addReady && !needsTokenAApproval && !needsTokenBApproval);
-  const canApproveTokenA = Boolean(account && addReady && !tokenAIsNative);
-  const canApproveTokenB = Boolean(account && addReady && !tokenBIsNative);
-  const canApproveLp = Boolean(account && removeReady);
-  const canRemoveLiquidity = Boolean(account && removeReady && !needsLpApproval);
-  const canClaimFees = Boolean(account && position?.pool?.exists);
+  const liquidityNativeAvailable = pairHasWrappedNative(deployment, liquidityForm.tokenA, liquidityForm.tokenB);
+  const tokenAIsNative = liquidityForm.useNative && liquidityNativeAvailable && deployment?.wrappedNative !== undefined && sameAddress(liquidityForm.tokenA, deployment.wrappedNative);
+  const tokenBIsNative = liquidityForm.useNative && liquidityNativeAvailable && deployment?.wrappedNative !== undefined && sameAddress(liquidityForm.tokenB, deployment.wrappedNative);
+  const liquidityActions = liquidityActionState(walletConnected, liquidityQuote, tokenAIsNative, tokenBIsNative);
+  const positionActions = positionActionState(walletConnected, position, removeLiquidityQuote);
+
   const selectorLabel = tokenSelectorLabel(selectorSide);
   const selectorValue = tokenSelectorValue(selectorSide, form, liquidityForm);
   const selectorOtherToken = tokenSelectorOtherValue(selectorSide, form, liquidityForm);
-  const selectorSelected = selectedTokenOption(selectorValue, tokenList.tokens, selectorSide === "tokenIn" ? quote?.tokenIn : selectorSide === "tokenOut" ? quote?.tokenOut : selectorSide === "tokenA" ? liquidityQuote?.tokenA ?? position?.tokenA : liquidityQuote?.tokenB ?? position?.tokenB);
+  const selectorQuoteToken = selectedTokenForSide(selectorSide, quote, liquidityQuote, position);
+  const selectorSelected = selectedTokenOption(selectorValue, tokenList.tokens, selectorQuoteToken);
+
+  const swapFacts = swapTransactionFacts(deployment, quote, swapInputIsNative);
+  const liquidityFacts = liquidityTransactionFacts(liquidityQuote, tokenAIsNative, tokenBIsNative);
+  const positionFacts = lpPositionFacts(position, removeLiquidityQuote);
+  const removeLiquidityFacts = removeLiquidityTransactionFacts(removeLiquidityQuote);
 
   const openSelector = (side: TokenSide): void => {
     setSelectorSide(side);
@@ -211,11 +238,11 @@ export function SwapPanel({
         </div>
 
         <ActionRow>
-          <ActionButton actionId="approve-swap-input" disabled={!canApprove} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("approve-swap-input", approveInput)}>
+          <ActionButton actionId="approve-swap-input" disabled={!swapActions.canApproveInput} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("approve-swap-input", approveInput)}>
             <ShieldCheck className="h-4 w-4" />
             Approve
           </ActionButton>
-          <ActionButton actionId="execute-swap" disabled={!canSwap} pendingAction={pendingAction} onClick={() => void runAction("execute-swap", executeSwap)}>
+          <ActionButton actionId="execute-swap" disabled={!swapActions.canSwap} pendingAction={pendingAction} onClick={() => void runAction("execute-swap", executeSwap)}>
             <ArrowDownUp className="h-4 w-4" />
             Swap
           </ActionButton>
@@ -223,17 +250,7 @@ export function SwapPanel({
 
         <Facts
           columns="three"
-          items={[
-            { label: "Router", value: deployment?.ammRouter ? <AddressLink address={deployment.ammRouter} /> : "Missing" },
-            { label: "Pool", value: quote?.pool ? <AddressLink address={quote.pool.address} /> : "None" },
-            { label: "Fee", value: quote?.feeBps !== undefined ? `${quote.feeBps.toString()} bps` : "Unknown" },
-            { label: "Expected output", value: formatSwapAmount(quote?.amountOut, quote?.tokenOut) },
-            { label: "Minimum received", value: formatSwapAmount(quote?.amountOutMin, quote?.tokenOut) },
-            { label: "Approval", value: swapInputIsNative ? "Native value" : approvalLabel(quote?.tokenIn, quote?.amountIn) },
-            { label: "From balance", value: formatSwapAmount(quote?.tokenIn?.balance, quote?.tokenIn) },
-            { label: "Reserve in", value: formatSwapAmount(quote?.pool?.reserveIn, quote?.tokenIn) },
-            { label: "Reserve out", value: formatSwapAmount(quote?.pool?.reserveOut, quote?.tokenOut) },
-          ]}
+          items={swapFacts}
         />
       </Panel>
 
@@ -295,23 +312,23 @@ export function SwapPanel({
           <TextField form={liquidityForm} field="deadline" inputMode="numeric" label="Deadline" setForm={setLiquidityForm} />
           <NativeModeField
             checked={liquidityForm.useNative}
-            disabled={!nativeAvailable}
+            disabled={!liquidityNativeAvailable}
             label="Use native"
-            text={nativeAvailable ? "Supply native instead of wrapped native" : "Select the wrapped-native token pair"}
+            text={liquidityNativeAvailable ? "Supply native instead of wrapped native" : "Select the wrapped-native token pair"}
             onChange={(checked) => setLiquidityForm((current) => ({ ...current, useNative: checked }))}
           />
         </div>
 
         <ActionRow>
-          <ActionButton actionId="approve-liquidity-token-a" disabled={!canApproveTokenA} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("approve-liquidity-token-a", approveLiquidityTokenA)}>
+          <ActionButton actionId="approve-liquidity-token-a" disabled={!liquidityActions.canApproveTokenA} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("approve-liquidity-token-a", approveLiquidityTokenA)}>
             <ShieldCheck className="h-4 w-4" />
             Approve A
           </ActionButton>
-          <ActionButton actionId="approve-liquidity-token-b" disabled={!canApproveTokenB} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("approve-liquidity-token-b", approveLiquidityTokenB)}>
+          <ActionButton actionId="approve-liquidity-token-b" disabled={!liquidityActions.canApproveTokenB} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("approve-liquidity-token-b", approveLiquidityTokenB)}>
             <ShieldCheck className="h-4 w-4" />
             Approve B
           </ActionButton>
-          <ActionButton actionId="add-liquidity" disabled={!canAddLiquidity} pendingAction={pendingAction} onClick={() => void runAction("add-liquidity", addLiquidity)}>
+          <ActionButton actionId="add-liquidity" disabled={!liquidityActions.canAddLiquidity} pendingAction={pendingAction} onClick={() => void runAction("add-liquidity", addLiquidity)}>
             <Droplets className="h-4 w-4" />
             Add Liquidity
           </ActionButton>
@@ -319,17 +336,7 @@ export function SwapPanel({
 
         <Facts
           columns="three"
-          items={[
-            { label: "Pool", value: liquidityQuote?.pool ? <AddressLink address={liquidityQuote.pool.address} /> : "Unknown" },
-            { label: "Pool status", value: liquidityQuote?.pool ? liquidityQuote.pool.exists ? "Existing" : "Creates on add" : "Unknown" },
-            { label: "LP minted", value: formatSwapAmount(liquidityQuote?.liquidityOut, liquidityQuote?.pool ? { address: liquidityQuote.pool.address, decimals: 18, symbol: "LP" } : undefined) },
-            { label: "Token A used", value: formatSwapAmount(liquidityQuote?.amountA, liquidityQuote?.tokenA) },
-            { label: "Token B used", value: formatSwapAmount(liquidityQuote?.amountB, liquidityQuote?.tokenB) },
-            { label: "Minimum A", value: formatSwapAmount(liquidityQuote?.amountAMin, liquidityQuote?.tokenA) },
-            { label: "Minimum B", value: formatSwapAmount(liquidityQuote?.amountBMin, liquidityQuote?.tokenB) },
-            { label: "Token A approval", value: tokenAIsNative ? "Native value" : approvalLabel(liquidityQuote?.tokenA, liquidityQuote?.amountA) },
-            { label: "Token B approval", value: tokenBIsNative ? "Native value" : approvalLabel(liquidityQuote?.tokenB, liquidityQuote?.amountB) },
-          ]}
+          items={liquidityFacts}
         />
       </Panel>
 
@@ -351,7 +358,7 @@ export function SwapPanel({
               </div>
               <h2 className="m-0 text-xl font-semibold tracking-normal text-zinc-50 sm:text-2xl">Manage LP</h2>
             </div>
-            <ActionButton actionId="claim-amm-fees" disabled={!canClaimFees} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("claim-amm-fees", claimAmmFees)}>
+            <ActionButton actionId="claim-amm-fees" disabled={!positionActions.canClaimFees} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("claim-amm-fees", claimAmmFees)}>
               <Coins className="h-4 w-4" />
               Claim Fees
             </ActionButton>
@@ -362,17 +369,7 @@ export function SwapPanel({
 
         <Facts
           columns="three"
-          items={[
-            { label: "Pool", value: position?.pool?.exists ? <AddressLink address={position.pool.address} /> : "None" },
-            { label: "LP balance", value: formatSwapAmount(position?.lpBalance, position?.lpToken) },
-            { label: "Pool share", value: formatPoolShareBps(position?.poolShareBps) },
-            { label: "Claimable A", value: formatSwapAmount(position?.claimableA, position?.tokenA) },
-            { label: "Claimable B", value: formatSwapAmount(position?.claimableB, position?.tokenB) },
-            { label: "LP approval", value: lpApprovalLabel(position, removeLiquidityQuote?.liquidity) },
-            { label: "Reserve A", value: formatSwapAmount(position?.pool?.reserveA, position?.tokenA) },
-            { label: "Reserve B", value: formatSwapAmount(position?.pool?.reserveB, position?.tokenB) },
-            { label: "LP supply", value: formatSwapAmount(position?.pool?.totalSupply, position?.lpToken) },
-          ]}
+          items={positionFacts}
         />
 
         <div className="grid gap-px border-t border-zinc-800 bg-zinc-800 md:grid-cols-2">
@@ -382,9 +379,9 @@ export function SwapPanel({
           <TextField form={removeLiquidityForm} field="deadline" inputMode="numeric" label="Deadline" setForm={setRemoveLiquidityForm} />
           <NativeModeField
             checked={removeLiquidityForm.useNative}
-            disabled={!nativeAvailable}
+            disabled={!liquidityNativeAvailable}
             label="Receive native"
-            text={nativeAvailable ? "Unwrap wrapped native on removal" : "Select the wrapped-native token pair"}
+            text={liquidityNativeAvailable ? "Unwrap wrapped native on removal" : "Select the wrapped-native token pair"}
             onChange={(checked) => setRemoveLiquidityForm((current) => ({ ...current, useNative: checked }))}
           />
         </div>
@@ -394,11 +391,11 @@ export function SwapPanel({
             <RefreshCw className="h-4 w-4" />
             Quote Remove
           </ActionButton>
-          <ActionButton actionId="approve-lp-token" disabled={!canApproveLp} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("approve-lp-token", approveLpToken)}>
+          <ActionButton actionId="approve-lp-token" disabled={!positionActions.canApproveLp} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("approve-lp-token", approveLpToken)}>
             <ShieldCheck className="h-4 w-4" />
             Approve LP
           </ActionButton>
-          <ActionButton actionId="remove-liquidity" disabled={!canRemoveLiquidity} pendingAction={pendingAction} variant="danger" onClick={() => void runAction("remove-liquidity", removeLiquidity)}>
+          <ActionButton actionId="remove-liquidity" disabled={!positionActions.canRemoveLiquidity} pendingAction={pendingAction} variant="danger" onClick={() => void runAction("remove-liquidity", removeLiquidity)}>
             <WalletCards className="h-4 w-4" />
             Remove Liquidity
           </ActionButton>
@@ -406,12 +403,7 @@ export function SwapPanel({
 
         <Facts
           columns="two"
-          items={[
-            { label: "Expected A", value: formatSwapAmount(removeLiquidityQuote?.amountA, removeLiquidityQuote?.position?.tokenA) },
-            { label: "Expected B", value: formatSwapAmount(removeLiquidityQuote?.amountB, removeLiquidityQuote?.position?.tokenB) },
-            { label: "Minimum A", value: formatSwapAmount(removeLiquidityQuote?.amountAMin, removeLiquidityQuote?.position?.tokenA) },
-            { label: "Minimum B", value: formatSwapAmount(removeLiquidityQuote?.amountBMin, removeLiquidityQuote?.position?.tokenB) },
-          ]}
+          items={removeLiquidityFacts}
         />
       </Panel>
 
@@ -705,6 +697,145 @@ function NativeModeField({
       </button>
     </Field>
   );
+}
+
+function swapActionState(walletConnected: boolean, quote: SwapQuoteState | undefined, inputIsNative: boolean): SwapActionState {
+  const quoteReady = swapQuoteReady(quote);
+  let needsApproval = false;
+
+  if (quoteReady && !inputIsNative) {
+    needsApproval = (quote.tokenIn.allowance ?? 0n) < quote.amountIn;
+  }
+
+  return {
+    quoteReady,
+    needsApproval,
+    canApproveInput: walletConnected && quoteReady && !inputIsNative,
+    canSwap: walletConnected && quoteReady && !needsApproval,
+  };
+}
+
+function liquidityActionState(
+  walletConnected: boolean,
+  quote: LiquidityQuoteState | undefined,
+  tokenAIsNative: boolean,
+  tokenBIsNative: boolean,
+): LiquidityActionState {
+  const quoteReady = liquidityQuoteReady(quote);
+  let needsTokenAApproval = false;
+  let needsTokenBApproval = false;
+
+  if (quoteReady) {
+    needsTokenAApproval = !tokenAIsNative && (quote.tokenA.allowance ?? 0n) < quote.amountA;
+    needsTokenBApproval = !tokenBIsNative && (quote.tokenB.allowance ?? 0n) < quote.amountB;
+  }
+
+  return {
+    quoteReady,
+    needsTokenAApproval,
+    needsTokenBApproval,
+    canApproveTokenA: walletConnected && quoteReady && !tokenAIsNative,
+    canApproveTokenB: walletConnected && quoteReady && !tokenBIsNative,
+    canAddLiquidity: walletConnected && quoteReady && !needsTokenAApproval && !needsTokenBApproval,
+  };
+}
+
+function positionActionState(
+  walletConnected: boolean,
+  position: AmmPositionState | undefined,
+  quote: RemoveLiquidityQuoteState | undefined,
+): PositionActionState {
+  const removeReady = removeLiquidityQuoteReady(quote);
+  let needsLpApproval = false;
+
+  if (removeReady) {
+    needsLpApproval = (quote.position.lpAllowance ?? 0n) < quote.liquidity;
+  }
+
+  return {
+    removeReady,
+    needsLpApproval,
+    canApproveLp: walletConnected && removeReady,
+    canRemoveLiquidity: walletConnected && removeReady && !needsLpApproval,
+    canClaimFees: walletConnected && Boolean(position?.pool?.exists),
+  };
+}
+
+function swapTransactionFacts(
+  deployment: PledgeCashDeployment | undefined,
+  quote: SwapQuoteState | undefined,
+  inputIsNative: boolean,
+): FactItem[] {
+  return [
+    { label: "Router", value: deployment?.ammRouter ? <AddressLink address={deployment.ammRouter} /> : "Missing" },
+    { label: "Pool", value: quote?.pool ? <AddressLink address={quote.pool.address} /> : "None" },
+    { label: "Fee", value: quote?.feeBps !== undefined ? `${quote.feeBps.toString()} bps` : "Unknown" },
+    { label: "Expected output", value: formatSwapAmount(quote?.amountOut, quote?.tokenOut) },
+    { label: "Minimum received", value: formatSwapAmount(quote?.amountOutMin, quote?.tokenOut) },
+    { label: "Approval", value: inputIsNative ? "Native value" : approvalLabel(quote?.tokenIn, quote?.amountIn) },
+    { label: "From balance", value: formatSwapAmount(quote?.tokenIn?.balance, quote?.tokenIn) },
+    { label: "Reserve in", value: formatSwapAmount(quote?.pool?.reserveIn, quote?.tokenIn) },
+    { label: "Reserve out", value: formatSwapAmount(quote?.pool?.reserveOut, quote?.tokenOut) },
+  ];
+}
+
+function liquidityTransactionFacts(
+  quote: LiquidityQuoteState | undefined,
+  tokenAIsNative: boolean,
+  tokenBIsNative: boolean,
+): FactItem[] {
+  return [
+    { label: "Pool", value: quote?.pool ? <AddressLink address={quote.pool.address} /> : "Unknown" },
+    { label: "Pool status", value: quote?.pool ? quote.pool.exists ? "Existing" : "Creates on add" : "Unknown" },
+    { label: "LP minted", value: formatSwapAmount(quote?.liquidityOut, lpTokenMetadata(quote?.pool)) },
+    { label: "Token A used", value: formatSwapAmount(quote?.amountA, quote?.tokenA) },
+    { label: "Token B used", value: formatSwapAmount(quote?.amountB, quote?.tokenB) },
+    { label: "Minimum A", value: formatSwapAmount(quote?.amountAMin, quote?.tokenA) },
+    { label: "Minimum B", value: formatSwapAmount(quote?.amountBMin, quote?.tokenB) },
+    { label: "Token A approval", value: tokenAIsNative ? "Native value" : approvalLabel(quote?.tokenA, quote?.amountA) },
+    { label: "Token B approval", value: tokenBIsNative ? "Native value" : approvalLabel(quote?.tokenB, quote?.amountB) },
+  ];
+}
+
+function lpPositionFacts(position: AmmPositionState | undefined, removeQuote: RemoveLiquidityQuoteState | undefined): FactItem[] {
+  return [
+    { label: "Pool", value: position?.pool?.exists ? <AddressLink address={position.pool.address} /> : "None" },
+    { label: "LP balance", value: formatSwapAmount(position?.lpBalance, position?.lpToken) },
+    { label: "Pool share", value: formatPoolShareBps(position?.poolShareBps) },
+    { label: "Claimable A", value: formatSwapAmount(position?.claimableA, position?.tokenA) },
+    { label: "Claimable B", value: formatSwapAmount(position?.claimableB, position?.tokenB) },
+    { label: "LP approval", value: lpApprovalLabel(position, removeQuote?.liquidity) },
+    { label: "Reserve A", value: formatSwapAmount(position?.pool?.reserveA, position?.tokenA) },
+    { label: "Reserve B", value: formatSwapAmount(position?.pool?.reserveB, position?.tokenB) },
+    { label: "LP supply", value: formatSwapAmount(position?.pool?.totalSupply, position?.lpToken) },
+  ];
+}
+
+function removeLiquidityTransactionFacts(quote: RemoveLiquidityQuoteState | undefined): FactItem[] {
+  return [
+    { label: "Expected A", value: formatSwapAmount(quote?.amountA, quote?.position?.tokenA) },
+    { label: "Expected B", value: formatSwapAmount(quote?.amountB, quote?.position?.tokenB) },
+    { label: "Minimum A", value: formatSwapAmount(quote?.amountAMin, quote?.position?.tokenA) },
+    { label: "Minimum B", value: formatSwapAmount(quote?.amountBMin, quote?.position?.tokenB) },
+  ];
+}
+
+function lpTokenMetadata(pool: LiquidityQuoteState["pool"]): SwapTokenMetadata | undefined {
+  if (!pool) return undefined;
+  return { address: pool.address, decimals: 18, symbol: "LP" };
+}
+
+function selectedTokenForSide(
+  side: TokenSide | undefined,
+  swapQuote: SwapQuoteState | undefined,
+  liquidityQuote: LiquidityQuoteState | undefined,
+  position: AmmPositionState | undefined,
+): SwapTokenMetadata | undefined {
+  if (side === "tokenIn") return swapQuote?.tokenIn;
+  if (side === "tokenOut") return swapQuote?.tokenOut;
+  if (side === "tokenA") return liquidityQuote?.tokenA ?? position?.tokenA;
+  if (side === "tokenB") return liquidityQuote?.tokenB ?? position?.tokenB;
+  return undefined;
 }
 
 function flipSwap(setForm: Dispatch<SetStateAction<SwapForm>>): void {
