@@ -11,27 +11,22 @@ export function useRuntimeDeployment(
   chainId: number,
   generatedDeployment: PledgeCashDeployment | undefined,
 ): PledgeCashDeployment | undefined {
-  const [runtimeDeploymentState, setRuntimeDeploymentState] = useState<RuntimeDeploymentState>(() => ({
-    chainId,
-    deployment: generatedDeployment,
-  }));
+  const [runtimeDeploymentState, setRuntimeDeploymentState] = useState<RuntimeDeploymentState>(() =>
+    generatedDeploymentState(chainId, generatedDeployment),
+  );
 
   useEffect(() => {
     let cancelled = false;
-    setRuntimeDeploymentState({ chainId, deployment: generatedDeployment });
+    setRuntimeDeploymentState(generatedDeploymentState(chainId, generatedDeployment));
 
     async function loadRuntimeDeployment(): Promise<void> {
       try {
-        const response = await fetch(`${import.meta.env.BASE_URL}deployments/${chainId}.json`, {
-          cache: "no-store",
-        });
-        if (!response.ok) return;
+        const nextDeployment = await fetchRuntimeDeployment(chainId);
+        if (!nextDeployment) return;
+        if (cancelled) return;
+        if (!isRuntimeDeploymentForChain(nextDeployment, chainId)) return;
 
-        const raw = await response.text();
-        const nextDeployment = parseDeployment(raw);
-        if (!cancelled && isRuntimeDeploymentForChain(nextDeployment, chainId)) {
-          setRuntimeDeploymentState({ chainId, deployment: nextDeployment });
-        }
+        setRuntimeDeploymentState({ chainId, deployment: nextDeployment });
       } catch {
         // The generated SDK deployment remains the fallback for SSR and package consumers.
       }
@@ -43,16 +38,41 @@ export function useRuntimeDeployment(
     };
   }, [chainId, generatedDeployment]);
 
-  if (runtimeDeploymentState.chainId !== chainId) return generatedDeployment;
-  if (runtimeDeploymentState.deployment && !isRuntimeDeploymentForChain(runtimeDeploymentState.deployment, chainId)) {
-    return generatedDeployment;
-  }
-  return runtimeDeploymentState.deployment;
+  return selectedDeployment(runtimeDeploymentState, chainId, generatedDeployment);
 }
 
 export function isRuntimeDeploymentForChain(deployment: PledgeCashDeployment, chainId: number): boolean {
   if (deployment.chainId === chainId) return true;
   return Number.isNaN(deployment.chainId) && isStatusOnlyDeployment(deployment);
+}
+
+function generatedDeploymentState(
+  chainId: number,
+  generatedDeployment: PledgeCashDeployment | undefined,
+): RuntimeDeploymentState {
+  return { chainId, deployment: generatedDeployment };
+}
+
+async function fetchRuntimeDeployment(chainId: number): Promise<PledgeCashDeployment | undefined> {
+  const response = await fetch(runtimeDeploymentUrl(chainId), { cache: "no-store" });
+  if (!response.ok) return undefined;
+
+  return parseDeployment(await response.text());
+}
+
+function runtimeDeploymentUrl(chainId: number): string {
+  return `${import.meta.env.BASE_URL}deployments/${chainId}.json`;
+}
+
+function selectedDeployment(
+  state: RuntimeDeploymentState,
+  chainId: number,
+  generatedDeployment: PledgeCashDeployment | undefined,
+): PledgeCashDeployment | undefined {
+  if (state.chainId !== chainId) return generatedDeployment;
+  if (state.deployment && !isRuntimeDeploymentForChain(state.deployment, chainId)) return generatedDeployment;
+
+  return state.deployment;
 }
 
 function isStatusOnlyDeployment(deployment: PledgeCashDeployment): boolean {
