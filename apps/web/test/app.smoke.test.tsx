@@ -231,6 +231,8 @@ describe("web app shell", () => {
     expect(html).toContain("Activity");
     expect(html).toContain("Tools");
     expect(html).toContain("Read-only visitor");
+    expect(html).not.toContain("Sentinel");
+    expect(html).not.toContain("Alerts");
     expect(html).not.toContain("Deployment");
     expect(html).not.toContain("Artifact");
     expect(html).not.toContain("TokenGrantFactory");
@@ -243,6 +245,9 @@ describe("web app shell", () => {
     expect(viewFromPath("/wallet")).toBe("wallet");
     expect(viewFromPath("/positions")).toBe("wallet");
     expect(viewFromPath("/portfolio")).toBe("wallet");
+    expect(viewFromPath("/notifications")).toBe("project");
+    expect(viewFromPath("/sentinel")).toBe("project");
+    expect(viewFromPath("/notifications", { VITE_SENTINEL_API_URL: "https://api.example.test" })).toBe("notifications");
     expect(viewFromPath("/tools")).toBe("advanced");
     expect(viewFromPath("/advanced")).toBe("advanced");
   });
