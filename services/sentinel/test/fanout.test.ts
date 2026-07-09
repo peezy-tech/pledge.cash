@@ -29,13 +29,14 @@ describe("notification fanout", () => {
   test("builds deterministic dedupe keys and severity thresholds", () => {
     expect(
       buildNotificationDedupeKey({
+        actionId: "00000000-0000-4000-8000-000000000001",
         actionHash: "0xABCDEF",
         chainId: 998,
         channelId: "channel-1",
         channelType: "telegram",
         event: "queued"
       })
-    ).toBe("998:0xabcdef:queued:telegram:channel-1");
+    ).toBe("998:00000000-0000-4000-8000-000000000001:0xabcdef:queued:telegram:channel-1");
     expect(
       buildNotificationDedupeKey({
         actionHash: "0xABCDEF",
@@ -62,6 +63,7 @@ describe("notification fanout", () => {
     const subscriberSql = sqlText(db.queries[0]);
     expect(subscriberSql).toContain("JOIN share_balances");
     expect(subscriberSql).toContain("LEFT JOIN subscriptions s");
+    expect(subscriberSql).toContain("ctx.action_id::text");
     expect(subscriberSql).toContain("COALESCE(s.min_severity, 'medium'::sentinel_severity)");
     expect(subscriberSql).toContain("COALESCE(s.mode, 'holdings'::sentinel_subscription_mode)");
     expect(subscriberSql).toContain("WHERE w.user_id = c.user_id");
@@ -69,6 +71,7 @@ describe("notification fanout", () => {
     expect(subscriberSql).toContain("c.type = 'telegram'");
 
     const twitterSql = sqlText(db.queries[1]);
+    expect(twitterSql).toContain("ctx.action_id::text");
     expect(twitterSql).toContain("twitter:public");
     expect(twitterSql).toContain("ctx.severity = 'high'");
     expect(twitterSql).toContain("ON CONFLICT (dedupe_key) DO NOTHING");

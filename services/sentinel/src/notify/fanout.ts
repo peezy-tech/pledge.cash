@@ -56,6 +56,7 @@ export function shouldNotifySeverity(minSeverity: Severity, severity: Severity):
 }
 
 export function buildNotificationDedupeKey(args: {
+  readonly actionId?: string;
   readonly actionHash: string;
   readonly chainId: number;
   readonly channelId?: string | null;
@@ -63,7 +64,8 @@ export function buildNotificationDedupeKey(args: {
   readonly event: NotificationFanoutEvent;
 }): string {
   const channelId = args.channelId ?? "public";
-  return `${args.chainId}:${args.actionHash.toLowerCase()}:${args.event}:${args.channelType}:${channelId}`;
+  const actionScope = args.actionId === undefined ? args.actionHash.toLowerCase() : `${args.actionId}:${args.actionHash.toLowerCase()}`;
+  return `${args.chainId}:${actionScope}:${args.event}:${args.channelType}:${channelId}`;
 }
 
 export async function fanout(
@@ -226,6 +228,8 @@ async function insertSubscriberNotifications(
           concat(
             ctx.chain_id::text,
             ':',
+            ctx.action_id::text,
+            ':',
             lower(ctx.action_hash),
             ':',
             ${event.event}::text,
@@ -293,7 +297,7 @@ async function insertQueuedTweet(
           next_attempt_at
         )
         SELECT
-          concat(ctx.chain_id::text, ':', lower(ctx.action_hash), ':queued:twitter:public'),
+          concat(ctx.chain_id::text, ':', ctx.action_id::text, ':', lower(ctx.action_hash), ':queued:twitter:public'),
           'twitter',
           NULL,
           NULL,
@@ -344,7 +348,7 @@ async function insertTwitterFollowUp(
           next_attempt_at
         )
         SELECT
-          concat(ctx.chain_id::text, ':', lower(ctx.action_hash), ':', ${event.event}::text, ':twitter:public'),
+          concat(ctx.chain_id::text, ':', ctx.action_id::text, ':', lower(ctx.action_hash), ':', ${event.event}::text, ':twitter:public'),
           'twitter',
           NULL,
           NULL,

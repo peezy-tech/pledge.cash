@@ -72,7 +72,7 @@ export function buildLinks(
   const renderPayload = payload as RenderPayload;
   const webAction =
     renderPayload.links?.webAction ??
-    `${trimTrailingSlash(options.webOrigin ?? defaultWebOrigin)}/boardrooms/${payload.action.chainId}/${payload.action.boardroom}?action=${payload.action.actionHash}`;
+    buildWebActionLink(payload, options.webOrigin ?? defaultWebOrigin);
   const explorerBase = options.explorerUrls?.[payload.action.chainId];
   const txHash = renderPayload.action.resolvedTxHash ?? renderPayload.action.queueTxHash;
   const explorerTx =
@@ -82,6 +82,14 @@ export function buildLinks(
       : undefined);
 
   return explorerTx === undefined ? { webAction } : { explorerTx, webAction };
+}
+
+function buildWebActionLink(payload: NotificationPayload, webOrigin: string): string {
+  const url = new URL("notifications", `${trimTrailingSlash(webOrigin)}/`);
+  url.searchParams.set("chain", payload.action.chainId.toString());
+  url.searchParams.set("boardroom", payload.action.boardroom);
+  url.searchParams.set("action", payload.action.actionHash);
+  return url.toString();
 }
 
 function renderTelegram(

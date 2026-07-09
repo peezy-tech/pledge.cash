@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { privateKeyToAccount } from "viem/accounts";
 import { createSiweMessage } from "viem/siwe";
 
-import { SESSION_COOKIE_NAME, type AuthKitAdapter, type WalletNonceRecord } from "../src/api/auth";
+import {
+  AUTH_STATE_COOKIE_NAME,
+  SESSION_COOKIE_NAME,
+  type AuthKitAdapter,
+  type WalletNonceRecord
+} from "../src/api/auth";
 import { createApp, type SentinelApiDeps, type SentinelApiStore } from "../src/api/server";
 import type {
   AddressDto,
@@ -32,10 +37,12 @@ const TARGET = "0x4444444444444444444444444444444444444444" as AddressDto;
 
 class StubAuth implements AuthKitAdapter {
   readonly sessions = new Map<string, typeof WORKOS_USER>([["sealed-session", WORKOS_USER]]);
+  authenticatedInput: { code: string; state?: string } | undefined;
   authorizationInput: { returnTo: string; state: string } | undefined;
   revokedSession: string | undefined;
 
-  async authenticateWithCode(input: { readonly code: string }) {
+  async authenticateWithCode(input: { readonly code: string; readonly state?: string }) {
+    this.authenticatedInput = input;
     if (input.code !== "ok") {
       throw new Error("unexpected auth code");
     }
@@ -308,8 +315,41 @@ function sessionCookie(response: Response): string {
   expect(setCookie).toContain(SESSION_COOKIE_NAME);
   expect(setCookie).toContain("HttpOnly");
   expect(setCookie).toContain("Secure");
-    expect(setCookie).toContain("SameSite=Lax");
-  return setCookie?.split(";")[0] ?? "";
+  expect(setCookie).toContain("SameSite=Lax");
+  return responseCookie(response, SESSION_COOKIE_NAME);
+}
+
+function authStateCookie(response: Response): string {
+  const setCookie = response.headers.get("set-cookie");
+  expect(setCookie).toContain(AUTH_STATE_COOKIE_NAME);
+  expect(setCookie).toContain("HttpOnly");
+  expect(setCookie).toContain("Max-Age=600");
+  expect(setCookie).toContain("Path=/auth");
+  expect(setCookie).toContain("Secure");
+  expect(setCookie).toContain("SameSite=Lax");
+  return responseCookie(response, AUTH_STATE_COOKIE_NAME);
+}
+
+function responseCookie(response: Response, name: string): string {
+  const setCookie = response.headers.get("set-cookie") ?? "";
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = setCookie.match(new RegExp(`(?:^|,\\s*)(${escaped}=[^;,]*)`));
+  expect(match?.[1]).toBeDefined();
+  return match?.[1] ?? "";
+}
+
+async function signedInCookie(harness: ReturnType<typeof createHarness>): Promise<string> {
+  const login = await harness.app.request(
+    "/auth/login?return_to=https%3A%2F%2Fpledge.cash%2Fsettings"
+  );
+  const authCookie = authStateCookie(login);
+  const state = harness.auth.authorizationInput?.state ?? "";
+  const callback = await harness.app.request(
+    `/auth/callback?code=ok&state=${encodeURIComponent(state)}`,
+    { headers: { Cookie: authCookie } }
+  );
+  expect(callback.status).toBe(302);
+  return sessionCookie(callback);
 }
 
 describe("Sentinel WP5 API", () => {
@@ -352,18 +392,23 @@ describe("Sentinel WP5 API", () => {
 
     expect(login.status).toBe(302);
     expect(login.headers.get("location")).toBe(
-      "https://workos.example/authorize?state=https%3A%2F%2Fpledge.cash%2Fsettings"
+      "https://workos.example/authorize?state=nonce0001"
     );
+    const authCookie = authStateCookie(login);
     expect(harness.auth.authorizationInput).toEqual({
       returnTo: "https://pledge.cash/settings",
-      state: "https://pledge.cash/settings"
+      state: "nonce0001"
     });
 
     const callback = await harness.app.request(
-      "/auth/callback?code=ok&state=https%3A%2F%2Fpledge.cash%2Fsettings"
+      "/auth/callback?code=ok&state=nonce0001",
+      { headers: { Cookie: authCookie } }
     );
     expect(callback.status).toBe(302);
     expect(callback.headers.get("location")).toBe("https://pledge.cash/settings");
+    expect(harness.auth.authenticatedInput).toEqual({ code: "ok", state: "nonce0001" });
+    expect(callback.headers.get("set-cookie")).toContain(`${AUTH_STATE_COOKIE_NAME}=`);
+    expect(callback.headers.get("set-cookie")).toContain("Max-Age=0");
     const cookie = sessionCookie(callback);
 
     const me = await harness.app.request("/auth/me", { headers: { Cookie: cookie } });
@@ -386,6 +431,28 @@ describe("Sentinel WP5 API", () => {
     expect(logout.headers.get("set-cookie")).toContain("Max-Age=0");
   });
 
+  test("rejects AuthKit callbacks without the matching state cookie", async () => {
+    const login = await harness.app.request(
+      "/auth/login?return_to=https%3A%2F%2Fpledge.cash%2Fsettings"
+    );
+    const authCookie = authStateCookie(login);
+
+    const missingCookie = await harness.app.request("/auth/callback?code=ok&state=nonce0001");
+    expect(missingCookie.status).toBe(400);
+    expect(await readJson<{ error: { message: string } }>(missingCookie)).toEqual({
+      error: { message: "Invalid authentication state" }
+    });
+
+    const mismatchedState = await harness.app.request(
+      "/auth/callback?code=ok&state=attacker",
+      { headers: { Cookie: authCookie } }
+    );
+    expect(mismatchedState.status).toBe(400);
+    expect(await readJson<{ error: { message: string } }>(mismatchedState)).toEqual({
+      error: { message: "Invalid authentication state" }
+    });
+  });
+
   test("rejects protected routes without a valid session", async () => {
     const response = await harness.app.request("/auth/me");
 
@@ -396,8 +463,7 @@ describe("Sentinel WP5 API", () => {
   });
 
   test("links and unlinks a SIWE wallet with a single-use nonce", async () => {
-    const callback = await harness.app.request("/auth/callback?code=ok");
-    const cookie = sessionCookie(callback);
+    const cookie = await signedInCookie(harness);
     const account = privateKeyToAccount(
       "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     );
@@ -466,8 +532,7 @@ describe("Sentinel WP5 API", () => {
   });
 
   test("updates subscriptions and manages Telegram channels", async () => {
-    const callback = await harness.app.request("/auth/callback?code=ok");
-    const cookie = sessionCookie(callback);
+    const cookie = await signedInCookie(harness);
     const channel: ChannelDto = {
       enabled: true,
       id: CHANNEL_ID,

@@ -1,3 +1,6 @@
+import { Buffer } from "node:buffer";
+import { randomBytes } from "node:crypto";
+
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { z } from "zod";
@@ -20,12 +23,26 @@ import {
 } from "./dto";
 
 export const SESSION_COOKIE_NAME = "__Secure-pledge_cash_sentinel_session";
+export const AUTH_STATE_COOKIE_NAME = "__Secure-pledge_cash_sentinel_auth_state";
+const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 const sessionCookieOptions = {
   httpOnly: true,
   path: "/",
   sameSite: "Lax" as const,
   secure: true
+};
+
+const authStateCookieOptions = {
+  ...sessionCookieOptions,
+  maxAge: AUTH_STATE_TTL_MS / 1000,
+  path: "/auth"
+};
+
+type AuthStateCookie = {
+  readonly expiresAt: string;
+  readonly returnTo: string;
+  readonly state: string;
 };
 
 export type ApiChainConfig = {
@@ -235,6 +252,45 @@ export function validateReturnTo(webOrigin: string, candidate: string | undefine
   }
 }
 
+function generateAuthState(deps: SentinelApiDeps): string {
+  return deps.generateNonce?.() ?? randomBytes(16).toString("base64url");
+}
+
+function encodeAuthStateCookie(value: AuthStateCookie): string {
+  return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+}
+
+function decodeAuthStateCookie(value: string | undefined, now: Date): AuthStateCookie | null {
+  if (value === undefined || value.length === 0) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<AuthStateCookie>;
+    if (
+      typeof parsed.expiresAt !== "string" ||
+      typeof parsed.returnTo !== "string" ||
+      typeof parsed.state !== "string" ||
+      parsed.state.length === 0
+    ) {
+      return null;
+    }
+
+    const expiresAt = Date.parse(parsed.expiresAt);
+    if (!Number.isFinite(expiresAt) || expiresAt <= now.getTime()) {
+      return null;
+    }
+
+    return {
+      expiresAt: parsed.expiresAt,
+      returnTo: parsed.returnTo,
+      state: parsed.state
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function createSessionMiddleware(deps: SentinelApiDeps): MiddlewareHandler<ApiEnv> {
   return async (c, next) => {
     const sealedSession = getCookie(c, SESSION_COOKIE_NAME);
@@ -305,7 +361,16 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     }
 
     const returnTo = validateReturnTo(deps.config.webOrigin, parsed.value.return_to);
-    const authorizationUrl = await deps.auth.getAuthorizationUrl({ returnTo, state: returnTo });
+    const state = generateAuthState(deps);
+    const expiresAt = new Date(getNow(deps).getTime() + AUTH_STATE_TTL_MS).toISOString();
+    setCookie(
+      c,
+      AUTH_STATE_COOKIE_NAME,
+      encodeAuthStateCookie({ expiresAt, returnTo, state }),
+      authStateCookieOptions
+    );
+
+    const authorizationUrl = await deps.auth.getAuthorizationUrl({ returnTo, state });
     return c.redirect(authorizationUrl, 302);
   });
 
@@ -315,9 +380,19 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       return parsed.response;
     }
 
+    const expectedState = decodeAuthStateCookie(getCookie(c, AUTH_STATE_COOKIE_NAME), getNow(deps));
+    deleteCookie(c, AUTH_STATE_COOKIE_NAME, authStateCookieOptions);
+    if (
+      expectedState === null ||
+      parsed.value.state === undefined ||
+      parsed.value.state !== expectedState.state
+    ) {
+      return jsonError(c, 400, "Invalid authentication state");
+    }
+
     const authenticated = await deps.auth.authenticateWithCode({
       code: parsed.value.code,
-      ...(parsed.value.state === undefined ? {} : { state: parsed.value.state })
+      state: expectedState.state
     });
 
     await deps.store.upsertUser({
@@ -327,7 +402,7 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
 
     setCookie(c, SESSION_COOKIE_NAME, authenticated.sealedSession, sessionCookieOptions);
 
-    const returnTo = validateReturnTo(deps.config.webOrigin, parsed.value.state);
+    const returnTo = validateReturnTo(deps.config.webOrigin, expectedState.returnTo);
     return c.redirect(returnTo, 302);
   });
 

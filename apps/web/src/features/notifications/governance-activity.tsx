@@ -14,9 +14,10 @@ import { errorMessage, formatSentinelDate } from "./hooks";
 type GovernanceActivityProps = {
   boardroom: Address | undefined;
   chainId: number;
+  highlightActionHash?: string | undefined;
 };
 
-export function GovernanceActivity({ boardroom, chainId }: GovernanceActivityProps): React.JSX.Element | null {
+export function GovernanceActivity({ boardroom, chainId, highlightActionHash }: GovernanceActivityProps): React.JSX.Element | null {
   const baseUrl = getSentinelBaseUrl();
   const client = useMemo(() => (baseUrl ? createSentinelClient({ baseUrl }) : undefined), [baseUrl]);
   const [actions, setActions] = useState<PublicActionDto[]>([]);
@@ -64,14 +65,20 @@ export function GovernanceActivity({ boardroom, chainId }: GovernanceActivityPro
             {loading ? "Loading governance activity" : "No governance activity"}
           </li>
         ) : (
-          actions.map((action) => <GovernanceActionRow action={action} key={action.id} />)
+          actions.map((action) => (
+            <GovernanceActionRow
+              action={action}
+              highlighted={sameActionHash(action.actionHash, highlightActionHash)}
+              key={action.id}
+            />
+          ))
         )}
       </ol>
     </Panel>
   );
 }
 
-function GovernanceActionRow({ action }: { action: PublicActionDto }): React.JSX.Element {
+function GovernanceActionRow({ action, highlighted }: { action: PublicActionDto; highlighted: boolean }): React.JSX.Element {
   const severity = action.risk?.severity;
   const explanation =
     action.analysis?.summary
@@ -83,8 +90,13 @@ function GovernanceActionRow({ action }: { action: PublicActionDto }): React.JSX
     ? "No decoded calls"
     : action.calls.map((call) => call.decodedFunction ?? call.selector).join(", ");
 
+  const itemClassName = [
+    "grid min-w-0 gap-3 bg-zinc-950 p-4 xl:grid-cols-[minmax(0,1fr)_minmax(180px,0.28fr)] xl:items-start",
+    highlighted ? "ring-1 ring-inset ring-cyan-500/70" : "",
+  ].filter(Boolean).join(" ");
+
   return (
-    <li className="grid min-w-0 gap-3 bg-zinc-950 p-4 xl:grid-cols-[minmax(0,1fr)_minmax(180px,0.28fr)] xl:items-start">
+    <li className={itemClassName}>
       <div className="min-w-0">
         <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2">
           <Badge variant={statusTone(event)}>{statusIcon(event)}{event}</Badge>
@@ -130,4 +142,8 @@ function severityTone(severity: SeverityDto | undefined): "default" | "muted" | 
   if (severity === "medium") return "warning";
   if (severity === "low") return "default";
   return "muted";
+}
+
+function sameActionHash(left: string | undefined, right: string | undefined): boolean {
+  return Boolean(left && right && left.toLowerCase() === right.toLowerCase());
 }

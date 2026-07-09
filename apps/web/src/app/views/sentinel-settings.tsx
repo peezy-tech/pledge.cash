@@ -5,6 +5,7 @@ import { ActionRow, Facts, Panel, WorkspaceHeader } from "../../components/shell
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { ChannelSettings } from "../../features/notifications/channel-settings";
+import { GovernanceActivity } from "../../features/notifications/governance-activity";
 import { useSentinelSession } from "../../features/notifications/hooks";
 import { SubscriptionSettings } from "../../features/notifications/subscription-settings";
 import { WalletLink } from "../../features/notifications/wallet-link";
@@ -19,6 +20,7 @@ export function SentinelSettingsView({ account, chainId }: SentinelSettingsViewP
   const baseUrl = getSentinelBaseUrl();
   const session = useSentinelSession();
   const [logoutPending, setLogoutPending] = useState(false);
+  const focus = notificationFocusFromLocation();
 
   if (!baseUrl) return null;
 
@@ -48,6 +50,13 @@ export function SentinelSettingsView({ account, chainId }: SentinelSettingsViewP
           ) : undefined
         }
       />
+      {focus.boardroom ? (
+        <GovernanceActivity
+          boardroom={focus.boardroom}
+          chainId={chainId}
+          highlightActionHash={focus.actionHash}
+        />
+      ) : null}
       {session.loading && !session.me ? <LoadingPanel /> : null}
       {session.error ? (
         <Panel title="Sentinel Status">
@@ -101,6 +110,26 @@ export function SentinelSettingsView({ account, chainId }: SentinelSettingsViewP
       ) : null}
     </>
   );
+}
+
+function notificationFocusFromLocation(): { readonly actionHash?: string; readonly boardroom?: Address } {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const boardroom = normalizedHexParam(params.get("boardroom"), 20);
+  const actionHash = normalizedHexParam(params.get("action"), 32);
+  return {
+    ...(actionHash === undefined ? {} : { actionHash }),
+    ...(boardroom === undefined ? {} : { boardroom: boardroom as Address })
+  };
+}
+
+function normalizedHexParam(value: string | null, bytes: number): string | undefined {
+  if (value === null) return undefined;
+  const normalized = value.trim().toLowerCase();
+  return new RegExp(`^0x[0-9a-f]{${bytes * 2}}$`).test(normalized) ? normalized : undefined;
 }
 
 function LoadingPanel(): React.JSX.Element {

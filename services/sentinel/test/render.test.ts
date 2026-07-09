@@ -17,7 +17,7 @@ describe("notification rendering", () => {
     expect(rendered.html).toContain("https://explorer.example/tx/0x0000000000000000000000000000000000000000000000000000000000000def");
     expect(rendered.text).toContain("setExecutor");
     expect(rendered.url).toBe(
-      "https://sentinel.example/boardrooms/998/0x0000000000000000000000000000000000000b0a?action=0x0000000000000000000000000000000000000000000000000000000000000abc"
+      "https://sentinel.example/notifications?chain=998&boardroom=0x0000000000000000000000000000000000000b0a&action=0x0000000000000000000000000000000000000000000000000000000000000abc"
     );
   });
 
@@ -31,7 +31,7 @@ describe("notification rendering", () => {
     expect(rendered.text.length).toBeLessThanOrEqual(280);
     expect(rendered.text).toContain("HIGH-RISK action queued");
     expect(rendered.text).toContain("Shareholders can veto");
-    expect(rendered.text).toContain("https://sentinel.example/boardrooms/998");
+    expect(rendered.text).toContain("https://sentinel.example/notifications?chain=998");
     expect(rendered.html).toBeUndefined();
   });
 
@@ -56,7 +56,7 @@ describe("notification rendering", () => {
       explorerTx:
         "https://explorer.example/tx/0x0000000000000000000000000000000000000000000000000000000000000def",
       webAction:
-        "https://sentinel.example/boardrooms/998/0x0000000000000000000000000000000000000b0a?action=0x0000000000000000000000000000000000000000000000000000000000000abc"
+        "https://sentinel.example/notifications?chain=998&boardroom=0x0000000000000000000000000000000000000b0a&action=0x0000000000000000000000000000000000000000000000000000000000000abc"
     });
   });
 });
