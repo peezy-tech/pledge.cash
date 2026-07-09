@@ -7,6 +7,8 @@ import {IBoardroomCallPolicy} from "./IBoardroomCallPolicy.sol";
 contract AssetPolicy is Ownable, IBoardroomCallPolicy {
     bytes4 internal constant APPROVE_SELECTOR = 0x095ea7b3;
     bytes4 internal constant DEPOSIT_SELECTOR = 0xd0e30db0;
+    uint256 internal constant SELECTOR_LENGTH = 4;
+    uint256 internal constant APPROVE_CALL_LENGTH = SELECTOR_LENGTH + 32 * 2;
 
     address public immutable wrappedNative;
 
@@ -47,20 +49,38 @@ contract AssetPolicy is Ownable, IBoardroomCallPolicy {
         returns (bool)
     {
         bytes4 selector = _selector(data);
-        if (target == wrappedNative) {
-            if (selector == DEPOSIT_SELECTOR) return data.length == 4 && isAssetAllowed[target];
+        if (_isWrappedNativeDeposit(target, selector)) {
+            return data.length == SELECTOR_LENGTH && isAssetAllowed[target];
         }
 
-        if (value != 0 || selector != APPROVE_SELECTOR || data.length != 68 || !isAssetAllowed[target]) {
+        if (!_isAllowedApprovalCall(target, value, selector, data.length)) {
             return false;
         }
 
-        (address spender,) = abi.decode(data[4:], (address, uint256));
-        return isApprovalSpenderAllowed[spender];
+        return isApprovalSpenderAllowed[_approvalSpender(data)];
+    }
+
+    function _isWrappedNativeDeposit(address target, bytes4 selector) internal view returns (bool) {
+        return target == wrappedNative && selector == DEPOSIT_SELECTOR;
+    }
+
+    function _isAllowedApprovalCall(address target, uint256 value, bytes4 selector, uint256 dataLength)
+        internal
+        view
+        returns (bool)
+    {
+        if (value != 0) return false;
+        if (selector != APPROVE_SELECTOR) return false;
+        if (dataLength != APPROVE_CALL_LENGTH) return false;
+        return isAssetAllowed[target];
+    }
+
+    function _approvalSpender(bytes calldata data) internal pure returns (address spender) {
+        (spender,) = abi.decode(data[SELECTOR_LENGTH:], (address, uint256));
     }
 
     function _selector(bytes calldata data) internal pure returns (bytes4 selector) {
-        if (data.length < 4) return bytes4(0);
-        return bytes4(data[:4]);
+        if (data.length < SELECTOR_LENGTH) return bytes4(0);
+        return bytes4(data[:SELECTOR_LENGTH]);
     }
 }
