@@ -49,6 +49,9 @@ type WalletAccessPanelProps = Pick<
   | "runAction"
 >;
 
+const SCAN_DISCOVERY_ACTION = "scan-discovery";
+const RESUME_DISCOVERY_ACTION = "resume-discovery";
+
 type DiscoveryView = {
   boardrooms: DiscoveredBoardroom[];
   distributions: DiscoveredDistribution[];
@@ -65,6 +68,16 @@ type DiscoveryView = {
     tone: "default" | "muted" | "warning";
   };
   totalLinkedItems: number;
+};
+
+type DiscoveryDiagnosticsView = {
+  cachedObjectsLabel: string;
+  canResume: boolean;
+  canScan: boolean;
+  errors: string[];
+  loadedRange: string;
+  statusComplete: boolean;
+  statusErrorCount: number;
 };
 
 export function WalletAccessPanel({
@@ -89,11 +102,11 @@ export function WalletAccessPanel({
         description="Wallet-linked Boardrooms, grants, treasury actions, and liquidity refresh in the background when you connect."
         action={
           <ActionButton
-            actionId="scan-discovery"
+            actionId={SCAN_DISCOVERY_ACTION}
             disabled={!account || !deployment}
             pendingAction={pendingAction}
             variant="secondary"
-            onClick={() => void runAction("scan-discovery", scanDiscovery)}
+            onClick={() => void runAction(SCAN_DISCOVERY_ACTION, scanDiscovery)}
           >
             <RefreshCw className="h-4 w-4" />
             Refresh access
@@ -175,6 +188,7 @@ export function DiscoveryPanel({
   runAction,
 }: DiscoveryPanelProps): React.JSX.Element {
   const view = discoveryView(account, deployment, discovery, discoveryForm.includeClosedGrants, pendingAction);
+  const diagnostics = discoveryDiagnosticsView(account, deployment, discovery, view);
 
   return (
     <div className="grid gap-4">
@@ -183,68 +197,152 @@ export function DiscoveryPanel({
         description="Manual log range controls for troubleshooting wallet sync. Normal wallet access refreshes automatically."
         action={
           <ActionButton
-            actionId="scan-discovery"
-            disabled={!account || !deployment}
+            actionId={SCAN_DISCOVERY_ACTION}
+            disabled={!diagnostics.canScan}
             pendingAction={pendingAction}
-            onClick={() => void runAction("scan-discovery", scanDiscovery)}
+            onClick={() => void runAction(SCAN_DISCOVERY_ACTION, scanDiscovery)}
           >
             <Search className="h-4 w-4" />
             Scan
           </ActionButton>
         }
       >
-        <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2 xl:grid-cols-4">
-          <TextField form={discoveryForm} field="fromBlock" inputMode="numeric" label="From block" setForm={setDiscoveryForm} />
-          <TextField form={discoveryForm} field="toBlock" inputMode="numeric" label="To block" setForm={setDiscoveryForm} />
-          <TextField form={discoveryForm} field="chunkSize" inputMode="numeric" label="Chunk size" setForm={setDiscoveryForm} />
-          <Field label="Include closed grants">
-            <label className="flex h-10 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-200">
-              <input
-                checked={discoveryForm.includeClosedGrants}
-                className="h-4 w-4 accent-lime-300"
-                type="checkbox"
-                onChange={(event) => setDiscoveryForm((current) => ({ ...current, includeClosedGrants: event.target.checked }))}
-              />
-              Enabled
-            </label>
-          </Field>
-        </div>
-        <ActionRow>
-          <ActionButton
-            actionId="resume-discovery"
-            disabled={!account || !discovery.lastScannedBlock}
-            pendingAction={pendingAction}
-            variant="secondary"
-            onClick={() => void runAction("resume-discovery", resumeDiscovery)}
-          >
-            <RotateCcw className="h-4 w-4" />
-            Resume
-          </ActionButton>
-          <Button variant="secondary" onClick={clearDiscovery}>
-            <Trash2 className="h-4 w-4" />
-            Clear Cache
-          </Button>
-        </ActionRow>
-        <Facts
-          columns="three"
-          items={[
-            { label: "Wallet", value: account ? <AddressLink address={account} /> : "Connect wallet" },
-            { label: "Loaded range", value: view.loadedForCurrentAccount ? `${bigintString(discovery.fromBlock)} -> ${toBlockText(discovery.toBlock)}` : "None" },
-            { label: "Last scanned block", value: bigintString(discovery.lastScannedBlock) },
-            { label: "Status", value: <StatusBadge complete={view.loadedForCurrentAccount ? discovery.complete : true} errors={view.loadedForCurrentAccount ? discovery.errors.length : 0} /> },
-            { label: "Boardrooms", value: String(view.boardrooms.length) },
-            { label: "Cached objects", value: `${view.grants.length} grants / ${view.distributions.length} distributions / ${view.lockers.length} lockers / ${view.pools.length} pools` },
-          ]}
+        <DiscoveryInputGrid discoveryForm={discoveryForm} setDiscoveryForm={setDiscoveryForm} />
+        <DiscoveryActionControls
+          canResume={diagnostics.canResume}
+          clearDiscovery={clearDiscovery}
+          pendingAction={pendingAction}
+          resumeDiscovery={resumeDiscovery}
+          runAction={runAction}
         />
-        {view.loadedForCurrentAccount && discovery.errors.length > 0 ? (
-          <ol className="grid gap-px border-t border-zinc-800 bg-zinc-800">
-            {discovery.errors.map((error) => (
-              <li className="bg-zinc-950 p-4 text-sm text-red-200" key={error}>{error}</li>
-            ))}
-          </ol>
-        ) : null}
+        <DiscoveryDiagnosticsFacts account={account} diagnostics={diagnostics} discovery={discovery} view={view} />
+        <DiscoveryDiagnosticsErrors errors={diagnostics.errors} />
       </Panel>
 
+      <DiscoveryDiagnosticsResults
+        inspectGrant={inspectGrant}
+        useBoardroom={useBoardroom}
+        useDistribution={useDistribution}
+        useLockedLiquidity={useLockedLiquidity}
+        view={view}
+      />
+    </div>
+  );
+}
+
+function DiscoveryInputGrid({
+  discoveryForm,
+  setDiscoveryForm,
+}: {
+  discoveryForm: DiscoveryForm;
+  setDiscoveryForm: Dispatch<SetStateAction<DiscoveryForm>>;
+}): React.JSX.Element {
+  return (
+    <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2 xl:grid-cols-4">
+      <TextField form={discoveryForm} field="fromBlock" inputMode="numeric" label="From block" setForm={setDiscoveryForm} />
+      <TextField form={discoveryForm} field="toBlock" inputMode="numeric" label="To block" setForm={setDiscoveryForm} />
+      <TextField form={discoveryForm} field="chunkSize" inputMode="numeric" label="Chunk size" setForm={setDiscoveryForm} />
+      <Field label="Include closed grants">
+        <label className="flex h-10 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-200">
+          <input
+            checked={discoveryForm.includeClosedGrants}
+            className="h-4 w-4 accent-lime-300"
+            type="checkbox"
+            onChange={(event) => setDiscoveryForm((current) => ({ ...current, includeClosedGrants: event.target.checked }))}
+          />
+          Enabled
+        </label>
+      </Field>
+    </div>
+  );
+}
+
+function DiscoveryActionControls({
+  canResume,
+  clearDiscovery,
+  pendingAction,
+  resumeDiscovery,
+  runAction,
+}: {
+  canResume: boolean;
+  clearDiscovery: () => void;
+  pendingAction: string | undefined;
+  resumeDiscovery: () => Promise<void>;
+  runAction: (label: string, action: () => Promise<void>) => Promise<void>;
+}): React.JSX.Element {
+  return (
+    <ActionRow>
+      <ActionButton
+        actionId={RESUME_DISCOVERY_ACTION}
+        disabled={!canResume}
+        pendingAction={pendingAction}
+        variant="secondary"
+        onClick={() => void runAction(RESUME_DISCOVERY_ACTION, resumeDiscovery)}
+      >
+        <RotateCcw className="h-4 w-4" />
+        Resume
+      </ActionButton>
+      <Button variant="secondary" onClick={clearDiscovery}>
+        <Trash2 className="h-4 w-4" />
+        Clear Cache
+      </Button>
+    </ActionRow>
+  );
+}
+
+function DiscoveryDiagnosticsFacts({
+  account,
+  diagnostics,
+  discovery,
+  view,
+}: {
+  account: Address | undefined;
+  diagnostics: DiscoveryDiagnosticsView;
+  discovery: DiscoverySnapshot;
+  view: DiscoveryView;
+}): React.JSX.Element {
+  return (
+    <Facts
+      columns="three"
+      items={[
+        { label: "Wallet", value: account ? <AddressLink address={account} /> : "Connect wallet" },
+        { label: "Loaded range", value: diagnostics.loadedRange },
+        { label: "Last scanned block", value: bigintString(discovery.lastScannedBlock) },
+        { label: "Status", value: <StatusBadge complete={diagnostics.statusComplete} errors={diagnostics.statusErrorCount} /> },
+        { label: "Boardrooms", value: String(view.boardrooms.length) },
+        { label: "Cached objects", value: diagnostics.cachedObjectsLabel },
+      ]}
+    />
+  );
+}
+
+function DiscoveryDiagnosticsErrors({ errors }: { errors: string[] }): React.JSX.Element | null {
+  if (errors.length === 0) return null;
+
+  return (
+    <ol className="grid gap-px border-t border-zinc-800 bg-zinc-800">
+      {errors.map((error) => (
+        <li className="bg-zinc-950 p-4 text-sm text-red-200" key={error}>{error}</li>
+      ))}
+    </ol>
+  );
+}
+
+function DiscoveryDiagnosticsResults({
+  inspectGrant,
+  useBoardroom,
+  useDistribution,
+  useLockedLiquidity,
+  view,
+}: {
+  inspectGrant: (grant: Address) => void;
+  useBoardroom: (boardroom: Address) => void;
+  useDistribution: (distribution: DiscoveredDistribution) => void;
+  useLockedLiquidity: (locker: DiscoveredLockedLiquidity) => void;
+  view: DiscoveryView;
+}): React.JSX.Element {
+  return (
+    <>
       <BoardroomList boardrooms={view.boardrooms} useBoardroom={useBoardroom} />
       <GrantDiscoveryLists
         heldGrants={view.heldGrants}
@@ -254,7 +352,7 @@ export function DiscoveryPanel({
       />
       <ObligationDiscoveryList distributions={view.distributions} lockers={view.lockers} useDistribution={useDistribution} useLockedLiquidity={useLockedLiquidity} />
       <PoolDiscoveryList lockers={view.lockers} pools={view.pools} useLockedLiquidity={useLockedLiquidity} />
-    </div>
+    </>
   );
 }
 
@@ -568,6 +666,25 @@ function StatusBadge({ complete, errors }: { complete: boolean; errors: number }
   return <Badge variant="default">Complete</Badge>;
 }
 
+function discoveryDiagnosticsView(
+  account: Address | undefined,
+  deployment: PledgeCashDeployment | undefined,
+  discovery: DiscoverySnapshot,
+  view: DiscoveryView,
+): DiscoveryDiagnosticsView {
+  const errors = view.loadedForCurrentAccount ? discovery.errors : [];
+
+  return {
+    cachedObjectsLabel: `${view.grants.length} grants / ${view.distributions.length} distributions / ${view.lockers.length} lockers / ${view.pools.length} pools`,
+    canResume: Boolean(account && discovery.lastScannedBlock),
+    canScan: Boolean(account && deployment),
+    errors,
+    loadedRange: view.loadedForCurrentAccount ? `${bigintString(discovery.fromBlock)} -> ${toBlockText(discovery.toBlock)}` : "None",
+    statusComplete: view.loadedForCurrentAccount ? discovery.complete : true,
+    statusErrorCount: errors.length,
+  };
+}
+
 function discoveryView(
   account: Address | undefined,
   deployment: PledgeCashDeployment | undefined,
@@ -575,7 +692,7 @@ function discoveryView(
   includeClosedGrants: boolean,
   pendingAction: string | undefined,
 ): DiscoveryView {
-  const loading = pendingAction === "scan-discovery" || pendingAction === "resume-discovery";
+  const loading = pendingAction === SCAN_DISCOVERY_ACTION || pendingAction === RESUME_DISCOVERY_ACTION;
   const loadedForCurrentAccount = Boolean(
     account
       && discovery.loadedFor
