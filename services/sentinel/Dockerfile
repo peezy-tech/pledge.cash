@@ -39,6 +39,12 @@ COPY package.json bun.lock tsconfig.base.json ./
 COPY docs docs
 COPY packages/sdk packages/sdk
 COPY services/sentinel services/sentinel
+COPY --from=deps /app/packages/sdk/node_modules packages/sdk/node_modules
+COPY --from=deps /app/services/sentinel/node_modules services/sentinel/node_modules
+
+RUN chmod a+rx . docs packages packages/sdk services services/sentinel \
+  && chmod a+r package.json bun.lock tsconfig.base.json \
+  && chmod -R a+rX docs packages/sdk services/sentinel
 
 USER bun
 EXPOSE 8787
