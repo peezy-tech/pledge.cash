@@ -28,6 +28,18 @@ type GrantInspectorProps = {
   withdrawExpired: () => Promise<void>;
 };
 
+type GrantWalletRole = {
+  label: string;
+  tone: "default" | "muted" | "warning";
+};
+
+type GrantActionEligibility = {
+  holderActionsAvailable: boolean;
+  issuerActionsAvailable: boolean;
+  paymentApprovalAvailable: boolean;
+  showSettlementRestriction: boolean;
+};
+
 export function GrantInspector({
   account,
   grantAddress,
@@ -46,8 +58,9 @@ export function GrantInspector({
   settleGrant,
   withdrawExpired,
 }: GrantInspectorProps): React.JSX.Element {
-  const holderActionsAvailable = canSettleGrant(account, grantSnapshot);
   const walletRole = grantWalletRole(account, grantSnapshot, issuerActionsAvailable);
+  const eligibility = grantActionEligibility(account, grantSnapshot, issuerActionsAvailable);
+  const facts = grantFacts(grantSnapshot, walletRole);
 
   return (
     <div className="grid gap-4">
@@ -72,7 +85,7 @@ export function GrantInspector({
             <Input value={grantAddress} onChange={(event) => setGrantAddress(event.target.value)} spellCheck={false} />
           </Field>
         </div>
-        <Facts columns="three" items={grantFacts(grantSnapshot, account, issuerActionsAvailable)} />
+        <Facts columns="three" items={facts} />
         <GrantVestingChart state={grantSnapshot} tokenMetadata={grantSnapshot?.tokenMetadata} />
       </Panel>
 
@@ -91,7 +104,7 @@ export function GrantInspector({
         <ActionRow>
           <ActionButton
             actionId="approve-payment"
-            disabled={!holderActionsAvailable || !grantSnapshot || isZeroAddress(grantSnapshot.paymentToken)}
+            disabled={!eligibility.paymentApprovalAvailable}
             pendingAction={pendingAction}
             variant="secondary"
             onClick={() => void runAction("approve-payment", approvePayment)}
@@ -101,7 +114,7 @@ export function GrantInspector({
           </ActionButton>
           <ActionButton
             actionId="settle-grant"
-            disabled={!holderActionsAvailable}
+            disabled={!eligibility.holderActionsAvailable}
             pendingAction={pendingAction}
             onClick={() => void runAction("settle-grant", settleGrant)}
           >
@@ -109,14 +122,14 @@ export function GrantInspector({
             Settle
           </ActionButton>
         </ActionRow>
-        {grantSnapshot && !holderActionsAvailable ? (
+        {eligibility.showSettlementRestriction ? (
           <p className="m-0 border-t border-zinc-800 p-4 text-sm text-zinc-500">
             Settlement is only available to the current grant holder wallet.
           </p>
         ) : null}
       </Panel>
 
-      {issuerActionsAvailable ? (
+      {eligibility.issuerActionsAvailable ? (
         <Panel
           title="Issuer Controls"
           description="Issuer actions affect future vesting or expired balances. Review the grant state before signing."
@@ -139,25 +152,25 @@ export function GrantInspector({
 
 function grantFacts(
   grantSnapshot: GrantSnapshot | undefined,
-  account: Address | undefined,
-  issuerActionsAvailable: boolean,
+  walletRole: GrantWalletRole,
 ): { label: string; value: ReactNode }[] {
   if (!grantSnapshot) return [];
 
+  const freeGrant = isZeroAddress(grantSnapshot.paymentToken);
+  const paymentToken = freeGrant ? "None" : <AddressLink address={grantSnapshot.paymentToken} />;
+  const price = freeGrant ? "Free" : formatTokenAmount(grantSnapshot.price, grantSnapshot.paymentTokenMetadata);
+
   return [
-    { label: "Wallet role", value: grantWalletRole(account, grantSnapshot, issuerActionsAvailable).label },
+    { label: "Wallet role", value: walletRole.label },
     { label: "Issuer", value: <AddressLink address={grantSnapshot.issuer} /> },
     { label: "Holder", value: <AddressLink address={grantSnapshot.holder} /> },
     { label: "Grant token", value: <AddressLink address={grantSnapshot.token} /> },
-    {
-      label: "Payment token",
-      value: isZeroAddress(grantSnapshot.paymentToken) ? "None" : <AddressLink address={grantSnapshot.paymentToken} />,
-    },
+    { label: "Payment token", value: paymentToken },
     { label: "Grant size", value: formatTokenAmount(grantSnapshot.grantSize, grantSnapshot.tokenMetadata) },
     { label: "Claimable", value: formatTokenAmount(grantSnapshot.claimable, grantSnapshot.tokenMetadata) },
     { label: "Settled", value: formatTokenAmount(grantSnapshot.settledAmount, grantSnapshot.tokenMetadata) },
     { label: "Settleable now", value: formatTokenAmount(grantSnapshot.settleable, grantSnapshot.tokenMetadata) },
-    { label: "Price", value: isZeroAddress(grantSnapshot.paymentToken) ? "Free" : formatTokenAmount(grantSnapshot.price, grantSnapshot.paymentTokenMetadata) },
+    { label: "Price", value: price },
     { label: "Vesting cliff", value: dateString(grantSnapshot.vestingCliff) },
     { label: "Vesting end", value: dateString(grantSnapshot.vestingEnd) },
     { label: "Expiry", value: dateString(grantSnapshot.expiry) },
@@ -170,12 +183,28 @@ function grantWalletRole(
   account: Address | undefined,
   grantSnapshot: GrantSnapshot | undefined,
   issuerActionsAvailable: boolean,
-): { label: string; tone: "default" | "muted" | "warning" } {
+): GrantWalletRole {
   if (!account) return { label: "Read-only", tone: "muted" };
   if (!grantSnapshot) return { label: "Wallet connected", tone: "muted" };
   if (sameAddress(account, grantSnapshot.holder)) return { label: "Grant holder", tone: "default" };
   if (issuerActionsAvailable || sameAddress(account, grantSnapshot.issuer)) return { label: "Issuer controls", tone: "warning" };
   return { label: "Observer", tone: "muted" };
+}
+
+function grantActionEligibility(
+  account: Address | undefined,
+  grantSnapshot: GrantSnapshot | undefined,
+  issuerActionsAvailable: boolean,
+): GrantActionEligibility {
+  const holderActionsAvailable = canSettleGrant(account, grantSnapshot);
+  const paidGrant = Boolean(grantSnapshot && !isZeroAddress(grantSnapshot.paymentToken));
+
+  return {
+    holderActionsAvailable,
+    issuerActionsAvailable,
+    paymentApprovalAvailable: holderActionsAvailable && paidGrant,
+    showSettlementRestriction: Boolean(grantSnapshot && !holderActionsAvailable),
+  };
 }
 
 function canSettleGrant(account: Address | undefined, grantSnapshot: GrantSnapshot | undefined): boolean {

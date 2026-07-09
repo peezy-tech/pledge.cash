@@ -18,6 +18,8 @@ type VestingSegment = {
   label: string;
   amount: bigint;
   className: string;
+  formattedAmount: string;
+  width: string;
 };
 
 type VestingMetrics = {
@@ -27,6 +29,17 @@ type VestingMetrics = {
   settleable: bigint;
   timePercent: number;
   total: bigint;
+};
+
+type VestingStatus = {
+  label: string;
+  tone: "default" | "muted" | "warning" | "danger";
+};
+
+type VestingViewModel = {
+  metrics: VestingMetrics;
+  segments: VestingSegment[];
+  status: VestingStatus;
 };
 
 export function GrantVestingChart({
@@ -40,46 +53,40 @@ export function GrantVestingChart({
 }): React.JSX.Element | null {
   if (!state) return null;
 
-  const metrics = vestingMetrics(state);
-  const segments: VestingSegment[] = [
-    { label: "Settled", amount: metrics.settled, className: "bg-lime-300" },
-    { label: "Settleable", amount: metrics.settleable, className: "bg-amber-300" },
-    { label: "Future", amount: metrics.futureClaimable, className: "bg-sky-400/70" },
-    { label: "Removed", amount: metrics.removed, className: "bg-zinc-700" },
-  ];
+  const view = vestingViewModel(state, tokenMetadata, unixTimestamp());
 
   return (
     <section className="border-t border-zinc-800 p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h3 className="m-0 text-sm font-semibold text-zinc-100">{title}</h3>
-        <Badge variant={vestingStatusTone(state)}>{vestingStatusLabel(state)}</Badge>
+        <Badge variant={view.status.tone}>{view.status.label}</Badge>
       </div>
       <div className="relative h-3 overflow-hidden rounded-sm bg-zinc-900" aria-label={title}>
         <div className="flex h-full w-full">
-          {segments.map((segment) => (
+          {view.segments.map((segment) => (
             <div
               className={segment.className}
               key={segment.label}
-              style={{ width: cssPercent(percentOf(segment.amount, metrics.total)) }}
-              title={`${segment.label}: ${formatTokenAmount(segment.amount, tokenMetadata)}`}
+              style={{ width: segment.width }}
+              title={`${segment.label}: ${segment.formattedAmount}`}
             />
           ))}
         </div>
         <div
           className="absolute inset-y-0 w-px bg-zinc-50/80 shadow-[0_0_0_1px_rgba(9,9,11,0.9)]"
-          style={{ left: cssPercent(metrics.timePercent) }}
+          style={{ left: cssPercent(view.metrics.timePercent) }}
           title="Now"
         />
       </div>
       <div className="mt-3 grid gap-2 text-xs text-zinc-500 sm:grid-cols-4">
-        {segments.map((segment) => (
+        {view.segments.map((segment) => (
           <div className="min-w-0" key={segment.label}>
             <div className="mb-1 flex items-center gap-1.5">
               <span className={`h-2 w-2 shrink-0 rounded-sm ${segment.className}`} />
               <span className="font-medium text-zinc-400">{segment.label}</span>
             </div>
-            <div className="truncate" title={formatTokenAmount(segment.amount, tokenMetadata)}>
-              {formatTokenAmount(segment.amount, tokenMetadata)}
+            <div className="truncate" title={segment.formattedAmount}>
+              {segment.formattedAmount}
             </div>
           </div>
         ))}
@@ -93,6 +100,43 @@ export function GrantVestingChart({
   );
 }
 
+function vestingViewModel(
+  state: GrantVestingState,
+  tokenMetadata: TokenMetadata | undefined,
+  now: bigint,
+): VestingViewModel {
+  const metrics = vestingMetrics(state, now);
+  const status = vestingStatus(state, now);
+  const segments = vestingSegments(metrics, tokenMetadata);
+
+  return { metrics, segments, status };
+}
+
+function vestingSegments(metrics: VestingMetrics, tokenMetadata: TokenMetadata | undefined): VestingSegment[] {
+  return [
+    segmentView("Settled", metrics.settled, "bg-lime-300", metrics.total, tokenMetadata),
+    segmentView("Settleable", metrics.settleable, "bg-amber-300", metrics.total, tokenMetadata),
+    segmentView("Future", metrics.futureClaimable, "bg-sky-400/70", metrics.total, tokenMetadata),
+    segmentView("Removed", metrics.removed, "bg-zinc-700", metrics.total, tokenMetadata),
+  ];
+}
+
+function segmentView(
+  label: string,
+  amount: bigint,
+  className: string,
+  total: bigint,
+  tokenMetadata: TokenMetadata | undefined,
+): VestingSegment {
+  return {
+    amount,
+    className,
+    formattedAmount: formatTokenAmount(amount, tokenMetadata),
+    label,
+    width: cssPercent(percentOf(amount, total)),
+  };
+}
+
 function VestingDate({ label, timestamp }: { label: string; timestamp: bigint }): React.JSX.Element {
   return (
     <div className="min-w-0">
@@ -104,7 +148,7 @@ function VestingDate({ label, timestamp }: { label: string; timestamp: bigint })
   );
 }
 
-function vestingMetrics(state: GrantVestingState): VestingMetrics {
+function vestingMetrics(state: GrantVestingState, now: bigint): VestingMetrics {
   const total = state.grantSize > 0n ? state.grantSize : state.claimable;
   const claimable = clampAmount(state.claimable, 0n, total);
   const settled = clampAmount(state.settledAmount, 0n, claimable);
@@ -117,36 +161,25 @@ function vestingMetrics(state: GrantVestingState): VestingMetrics {
     removed,
     settled,
     settleable,
-    timePercent: schedulePercent(state),
+    timePercent: schedulePercent(state, now),
     total,
   };
 }
 
-function schedulePercent(state: GrantVestingState): number {
-  const now = BigInt(Math.floor(Date.now() / 1000));
+function schedulePercent(state: GrantVestingState, now: bigint): number {
   if (state.vestingEnd <= state.vestingCliff) return now >= state.vestingEnd ? 100 : 0;
   if (now <= state.vestingCliff) return 0;
   if (now >= state.vestingEnd) return 100;
   return percentOf(now - state.vestingCliff, state.vestingEnd - state.vestingCliff);
 }
 
-function vestingStatusLabel(state: GrantVestingState): string {
-  const now = BigInt(Math.floor(Date.now() / 1000));
-  if (state.closed) return "Closed";
-  if (state.halted) return "Halted";
-  if (now < state.vestingCliff) return "Cliff pending";
-  if (state.settleable > 0n) return "Settleable";
-  if (now >= state.vestingEnd) return "Fully vested";
-  return "Vesting";
-}
-
-function vestingStatusTone(state: GrantVestingState): "default" | "muted" | "warning" | "danger" {
-  if (state.closed) return "muted";
-  if (state.halted) return "warning";
-  if (state.settleable > 0n) return "default";
-  const now = BigInt(Math.floor(Date.now() / 1000));
-  if (now < state.vestingCliff) return "muted";
-  return "default";
+function vestingStatus(state: GrantVestingState, now: bigint): VestingStatus {
+  if (state.closed) return { label: "Closed", tone: "muted" };
+  if (state.halted) return { label: "Halted", tone: "warning" };
+  if (now < state.vestingCliff) return { label: "Cliff pending", tone: "muted" };
+  if (state.settleable > 0n) return { label: "Settleable", tone: "default" };
+  if (now >= state.vestingEnd) return { label: "Fully vested", tone: "default" };
+  return { label: "Vesting", tone: "default" };
 }
 
 function percentOf(amount: bigint, total: bigint): number {
@@ -163,4 +196,8 @@ function clampAmount(value: bigint, min: bigint, max: bigint): bigint {
   if (value < min) return min;
   if (value > max) return max;
   return value;
+}
+
+function unixTimestamp(): bigint {
+  return BigInt(Math.floor(Date.now() / 1000));
 }
