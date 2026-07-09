@@ -13,6 +13,17 @@ type DeploymentPanelProps = {
   localAmmProtocolFeeRecipient?: Address | undefined;
 };
 
+type DeploymentSummary = {
+  ammProtocolFeeRecipient: Address | undefined;
+  ammState: string;
+  boardroomState: string;
+  factoryOwner: Address | undefined;
+  hasTokenGrantFactory: boolean;
+  tokenGrantLogic: Address | undefined;
+};
+
+type FactItem = React.ComponentProps<typeof Facts>["items"][number];
+
 export function DeploymentPanel({
   chainId,
   creationFee,
@@ -20,53 +31,29 @@ export function DeploymentPanel({
   factorySnapshot,
   localAmmProtocolFeeRecipient,
 }: DeploymentPanelProps): React.JSX.Element {
-  const boardroomState = deployment?.boardroomFactory ? "Ready" : deployment?.boardroomStatus === "pending" ? "Pending" : "Not in artifact";
-  const ammState = deployment?.ammRouter ? "Router ready" : deployment?.ammFactory ? "Factory only" : "Not in artifact";
-  const ammProtocolFeeRecipient = deployment?.ammProtocolFeeRecipient ?? localAmmProtocolFeeRecipient;
-  const tokenGrantLogic = factorySnapshot.tokenGrantLogic ?? deployment?.tokenGrantLogic;
-  const factoryOwner = factorySnapshot.owner ?? deployment?.factoryOwner;
+  const summary = summarizeDeployment({
+    deployment,
+    factorySnapshot,
+    localAmmProtocolFeeRecipient,
+  });
 
   return (
     <Panel
       title="Deployment"
-      action={<Badge variant={deployment?.tokenGrantFactory ? "default" : "warning"}>{deployment?.tokenGrantFactory ? "Ready" : "Pending"}</Badge>}
+      action={
+        <Badge variant={summary.hasTokenGrantFactory ? "default" : "warning"}>
+          {summary.hasTokenGrantFactory ? "Ready" : "Pending"}
+        </Badge>
+      }
     >
       <Facts
         columns="one"
-        items={[
-          { label: "Chain", value: `${chainId}` },
-          {
-            label: "TokenGrantFactory",
-            value: deployment?.tokenGrantFactory ? <AddressLink address={deployment.tokenGrantFactory} /> : "Missing",
-          },
-          {
-            label: "TokenGrantLogic",
-            value: tokenGrantLogic ? <AddressLink address={tokenGrantLogic} /> : "Unknown",
-          },
-          { label: "Boardroom", value: boardroomState },
-          {
-            label: "BoardroomFactory",
-            value: deployment?.boardroomFactory ? <AddressLink address={deployment.boardroomFactory} /> : deployment?.boardroomReason ?? "Not in artifact",
-          },
-          { label: "AMM", value: ammState },
-          {
-            label: "AmmFactory",
-            value: deployment?.ammFactory ? <AddressLink address={deployment.ammFactory} /> : "Not in artifact",
-          },
-          {
-            label: "AMM protocol fees",
-            value: ammProtocolFeeRecipient ? <AddressLink address={ammProtocolFeeRecipient} /> : "Not configured",
-          },
-          {
-            label: "LockedLiquidityFactory",
-            value: deployment?.lockedLiquidityFactory ? <AddressLink address={deployment.lockedLiquidityFactory} /> : "Not in artifact",
-          },
-          { label: "Creation fee", value: formatNativeTokenAmount(creationFee) },
-          {
-            label: "Factory owner",
-            value: factoryOwner ? <AddressLink address={factoryOwner} /> : "Unknown",
-          },
-        ]}
+        items={deploymentFacts({
+          chainId,
+          creationFee,
+          deployment,
+          summary,
+        })}
       />
     </Panel>
   );
@@ -80,4 +67,98 @@ export function ArtifactPanel({ deployment }: { deployment: PledgeCashDeployment
       </pre>
     </Panel>
   );
+}
+
+function summarizeDeployment({
+  deployment,
+  factorySnapshot,
+  localAmmProtocolFeeRecipient,
+}: {
+  deployment: PledgeCashDeployment | undefined;
+  factorySnapshot: FactorySnapshot;
+  localAmmProtocolFeeRecipient: Address | undefined;
+}): DeploymentSummary {
+  return {
+    ammProtocolFeeRecipient: deployment?.ammProtocolFeeRecipient ?? localAmmProtocolFeeRecipient,
+    ammState: describeAmmState(deployment),
+    boardroomState: describeBoardroomState(deployment),
+    factoryOwner: factorySnapshot.owner ?? deployment?.factoryOwner,
+    hasTokenGrantFactory: Boolean(deployment?.tokenGrantFactory),
+    tokenGrantLogic: factorySnapshot.tokenGrantLogic ?? deployment?.tokenGrantLogic,
+  };
+}
+
+function deploymentFacts({
+  chainId,
+  creationFee,
+  deployment,
+  summary,
+}: {
+  chainId: number;
+  creationFee: bigint;
+  deployment: PledgeCashDeployment | undefined;
+  summary: DeploymentSummary;
+}): FactItem[] {
+  return [
+    { label: "Chain", value: `${chainId}` },
+    {
+      label: "TokenGrantFactory",
+      value: addressValue(deployment?.tokenGrantFactory, "Missing"),
+    },
+    {
+      label: "TokenGrantLogic",
+      value: addressValue(summary.tokenGrantLogic, "Unknown"),
+    },
+    { label: "Boardroom", value: summary.boardroomState },
+    {
+      label: "BoardroomFactory",
+      value: addressValue(deployment?.boardroomFactory, deployment?.boardroomReason ?? "Not in artifact"),
+    },
+    { label: "AMM", value: summary.ammState },
+    {
+      label: "AmmFactory",
+      value: addressValue(deployment?.ammFactory, "Not in artifact"),
+    },
+    {
+      label: "AMM protocol fees",
+      value: addressValue(summary.ammProtocolFeeRecipient, "Not configured"),
+    },
+    {
+      label: "LockedLiquidityFactory",
+      value: addressValue(deployment?.lockedLiquidityFactory, "Not in artifact"),
+    },
+    { label: "Creation fee", value: formatNativeTokenAmount(creationFee) },
+    {
+      label: "Factory owner",
+      value: addressValue(summary.factoryOwner, "Unknown"),
+    },
+  ];
+}
+
+function describeBoardroomState(deployment: PledgeCashDeployment | undefined): string {
+  if (deployment?.boardroomFactory) {
+    return "Ready";
+  }
+
+  if (deployment?.boardroomStatus === "pending") {
+    return "Pending";
+  }
+
+  return "Not in artifact";
+}
+
+function describeAmmState(deployment: PledgeCashDeployment | undefined): string {
+  if (deployment?.ammRouter) {
+    return "Router ready";
+  }
+
+  if (deployment?.ammFactory) {
+    return "Factory only";
+  }
+
+  return "Not in artifact";
+}
+
+function addressValue(address: Address | undefined, fallback: string): React.ReactNode {
+  return address ? <AddressLink address={address} /> : fallback;
 }
