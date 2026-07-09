@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test";
 import {
   buildNotificationDedupeKey,
   fanout,
-  runReminderSweep,
   shouldNotifySeverity,
   type FanoutDb,
   type NotificationPipelineEvent
@@ -71,31 +70,20 @@ describe("notification fanout", () => {
     expect(twitterSql).toContain("ON CONFLICT (dedupe_key) DO NOTHING");
   });
 
-  test("threads Twitter follow-ups from the original sent queued tweet", async () => {
-    const db = new FakeDb([[], [{ id: "twitter-cancelled", channelType: "twitter" }]]);
+  test.each(["cancelled", "executed"] as const)(
+    "threads Twitter %s follow-ups from the original sent queued tweet",
+    async (event) => {
+      const db = new FakeDb([[], [{ id: `twitter-${event}`, channelType: "twitter" }]]);
 
-    const result = await fanout(makeEvent("cancelled"), db, { twitterEnabled: true });
+      const result = await fanout(makeEvent(event), db, { twitterEnabled: true });
 
-    expect(result).toEqual({ telegram: 0, total: 1, twitter: 1 });
-    const followUpSql = sqlText(db.queries[1]);
-    expect(followUpSql).toContain("original_tweet");
-    expect(followUpSql).toContain("external_id IS NOT NULL");
-    expect(followUpSql).toContain("replyToExternalId");
-  });
-
-  test("reminder sweep reuses fanout dedupe semantics for queued actions", async () => {
-    const db = new FakeDb([
-      [makeAction()],
-      [],
-      [{ id: "reminder-row", channelType: "telegram" }]
-    ]);
-
-    const result = await runReminderSweep(db, { reminderHoursBeforeEta: 12 });
-
-    expect(result).toEqual({ telegram: 1, total: 1, twitter: 0 });
-    expect(sqlText(db.queries[0])).toContain("eta <= NOW() +");
-    expect(sqlText(db.queries[2])).toContain("sentinel_notification_event");
-  });
+      expect(result).toEqual({ telegram: 0, total: 1, twitter: 1 });
+      const followUpSql = sqlText(db.queries[1]);
+      expect(followUpSql).toContain("original_tweet");
+      expect(followUpSql).toContain("external_id IS NOT NULL");
+      expect(followUpSql).toContain("replyToExternalId");
+    }
+  );
 });
 
 function makeEvent(event: NotificationPipelineEvent["event"]): NotificationPipelineEvent {

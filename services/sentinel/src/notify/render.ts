@@ -18,7 +18,7 @@ type Links = {
   readonly webAction: string;
 };
 
-export type NotificationRenderEvent = OutboxRow["event"] | "reminder" | "policy-admin";
+export type NotificationRenderEvent = OutboxRow["event"];
 
 export type RenderPayload = NotificationPayload & {
   readonly action: NotificationPayload["action"] & {
@@ -190,10 +190,6 @@ function eventLabel(event: NotificationRenderEvent): string {
       return "Cancelled";
     case "executed":
       return "Executed";
-    case "reminder":
-      return "Reminder";
-    case "policy-admin":
-      return "Policy-admin";
   }
 }
 

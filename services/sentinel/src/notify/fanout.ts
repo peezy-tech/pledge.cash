@@ -15,7 +15,7 @@ export type FanoutDb = {
   execute<T = Record<string, unknown>>(query: SQL): Promise<QueryResult<T>>;
 };
 
-export type NotificationFanoutEvent = ActionEvent | "reminder" | "policy-admin";
+export type NotificationFanoutEvent = ActionEvent;
 
 export type NotificationPipelineEvent = Omit<ActionPipelineEvent, "event"> & {
   readonly event: NotificationFanoutEvent;
@@ -23,7 +23,6 @@ export type NotificationPipelineEvent = Omit<ActionPipelineEvent, "event"> & {
 
 export type FanoutOptions = {
   readonly refanoutLimit?: number;
-  readonly reminderHoursBeforeEta?: number;
   readonly twitterEnabled?: boolean;
 };
 
@@ -111,45 +110,6 @@ export async function runQueuedRefanoutSweep(
   );
 
   return fanoutActions(actions, "queued", db, options);
-}
-
-export async function runReminderSweep(
-  db: FanoutDb,
-  options: FanoutOptions = {}
-): Promise<FanoutResult> {
-  const hoursBeforeEta = options.reminderHoursBeforeEta ?? 24;
-  const actions = rowsFromResult(
-    await db.execute<QueuedActionRow>(
-      sql`
-        SELECT
-          id,
-          chain_id AS "chainId",
-          boardroom,
-          action_hash AS "actionHash",
-          queue_tx_hash AS "queueTxHash",
-          salt,
-          executor,
-          eta,
-          queue_block AS "queueBlock",
-          status,
-          cancelled_by AS "cancelledBy",
-          executed_by AS "executedBy",
-          resolved_tx_hash AS "resolvedTxHash",
-          decode_status AS "decodeStatus",
-          raw_calldata AS "rawCalldata",
-          created_at AS "createdAt",
-          updated_at AS "updatedAt"
-        FROM queued_actions
-        WHERE status = 'queued'
-          AND eta > NOW()
-          AND eta <= NOW() + (${hoursBeforeEta} * INTERVAL '1 hour')
-        ORDER BY eta ASC
-        LIMIT ${options.refanoutLimit ?? 100}
-      `
-    )
-  );
-
-  return fanoutActions(actions, "reminder", db, options);
 }
 
 async function fanoutActions(
