@@ -182,17 +182,11 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
     {
         bytes4 selector = _selector(data);
         if (target == address(this)) {
-            return selector == TokenGrantFactory.createGrant.selector && value == creationFee;
+            return _isAuthorizedCreateGrantCall(selector, value);
         }
 
         if (value != 0) return false;
-
-        uint256 tokenId = uint256(uint160(target));
-        if (grantForTokenId[tokenId] != target) return false;
-        if (TokenGrant(target).issuer() != boardroom) return false;
-
-        return selector == TokenGrant.stopVestingAndWithdrawUnvested.selector
-            || selector == TokenGrant.withdrawExpiredTokens.selector;
+        return _isAuthorizedLifecycleCall(boardroom, target, selector);
     }
 
     function obligationForCall(address, address target, uint256, bytes calldata data, bytes calldata result)
@@ -200,8 +194,7 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
         view
         returns (Obligation memory obligation)
     {
-        if (target != address(this) || _selector(data) != TokenGrantFactory.createGrant.selector || result.length != 32)
-        {
+        if (!_createsGrantObligation(target, data, result)) {
             return obligation;
         }
 
@@ -210,12 +203,7 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
     }
 
     function isLifecycleCallAllowed(address boardroom, address target, bytes4 selector) external view returns (bool) {
-        uint256 tokenId = uint256(uint160(target));
-        if (grantForTokenId[tokenId] != target) return false;
-        if (TokenGrant(target).issuer() != boardroom) return false;
-
-        return selector == TokenGrant.stopVestingAndWithdrawUnvested.selector
-            || selector == TokenGrant.withdrawExpiredTokens.selector;
+        return _isAuthorizedLifecycleCall(boardroom, target, selector);
     }
 
     function grantSlotReleaseForLifecycleCall(address, address, bytes4) external pure returns (address distribution) {}
@@ -239,7 +227,7 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
     //////////////////////////////////////////////////////////////*/
 
     function _beforeTokenTransfer(address from, address to, uint256 id) internal view override {
-        if (from == address(0) || to == address(0)) return;
+        if (_isMintOrBurn(from, to)) return;
 
         address grant = grantForTokenId[id];
         if (grant == address(0)) revert UnknownGrantToken(id);
@@ -247,7 +235,7 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
     }
 
     function _afterTokenTransfer(address from, address to, uint256 id) internal override {
-        if (from == address(0) || to == address(0)) return;
+        if (_isMintOrBurn(from, to)) return;
 
         TokenGrant(grantForTokenId[id]).onGrantRightTransferred(from, to);
     }
@@ -267,6 +255,42 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
         address grant = grantForTokenId[tokenId];
         if (grant == address(0)) revert UnknownGrantToken(tokenId);
         TokenGrant(grant).requireCanTransferGrantRight(block.timestamp);
+    }
+
+    function _isMintOrBurn(address from, address to) internal pure returns (bool) {
+        return from == address(0) || to == address(0);
+    }
+
+    function _isAuthorizedCreateGrantCall(bytes4 selector, uint256 value) internal view returns (bool) {
+        return selector == TokenGrantFactory.createGrant.selector && value == creationFee;
+    }
+
+    function _isAuthorizedLifecycleCall(address boardroom, address grant, bytes4 selector)
+        internal
+        view
+        returns (bool)
+    {
+        return _isLinkedBoardroomGrant(boardroom, grant) && _isGrantLifecycleSelector(selector);
+    }
+
+    function _isLinkedBoardroomGrant(address boardroom, address grant) internal view returns (bool) {
+        uint256 tokenId = uint256(uint160(grant));
+        if (grantForTokenId[tokenId] != grant) return false;
+        return TokenGrant(grant).issuer() == boardroom;
+    }
+
+    function _isGrantLifecycleSelector(bytes4 selector) internal pure returns (bool) {
+        return selector == TokenGrant.stopVestingAndWithdrawUnvested.selector
+            || selector == TokenGrant.withdrawExpiredTokens.selector;
+    }
+
+    function _createsGrantObligation(address target, bytes calldata data, bytes calldata result)
+        internal
+        view
+        returns (bool)
+    {
+        return
+            target == address(this) && _selector(data) == TokenGrantFactory.createGrant.selector && result.length == 32;
     }
 
     function _createGrant(GrantCreateInput memory input) internal returns (address grant) {
@@ -348,6 +372,13 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
 
     function _checkedTransferFrom(address token, address from, address to, uint256 expectedAmount) internal {
         ExactTransferLib.RecipientDelta memory delta = ExactTransferLib.pullTo(token, from, to, expectedAmount);
+        _requireExactReceived(token, expectedAmount, delta);
+    }
+
+    function _requireExactReceived(address token, uint256 expectedAmount, ExactTransferLib.RecipientDelta memory delta)
+        internal
+        pure
+    {
         if (delta.balanceDecreased) {
             revert UnexpectedTokenBalanceChange(token, expectedAmount, 0);
         }
