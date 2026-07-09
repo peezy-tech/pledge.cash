@@ -11,7 +11,7 @@ library PledgeCashDeploymentSalts {
     }
 
     function boardroomPolicyRegistry() internal pure returns (bytes32) {
-        return keccak256("pledge.cash.deterministic.v1.BoardroomPolicyRegistry");
+        return keccak256("pledge.cash.deterministic.v2.BoardroomPolicyRegistry");
     }
 
     function assetPolicy() internal pure returns (bytes32) {
@@ -31,7 +31,7 @@ library PledgeCashDeploymentSalts {
     }
 
     function lockedLiquidityFactory() internal pure returns (bytes32) {
-        return keccak256("pledge.cash.deterministic.v1.LockedLiquidityFactory");
+        return keccak256("pledge.cash.deterministic.v2.LockedLiquidityFactory");
     }
 
     function distributionFactory() internal pure returns (bytes32) {

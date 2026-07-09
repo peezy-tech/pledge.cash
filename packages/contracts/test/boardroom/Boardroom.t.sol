@@ -234,6 +234,65 @@ contract BoardroomTest is Test {
         assertEq(shareToken.totalSupply(), 1 ether);
     }
 
+    function testPrelaunchOwnershipTransferSyncsDefaultExecutor() public {
+        (Boardroom boardroom,) = _createBoardroom("owner-transfer-executor");
+
+        vm.prank(owner);
+        boardroom.transferOwnership(stranger);
+
+        assertEq(boardroom.owner(), stranger);
+        assertEq(boardroom.executor(), stranger);
+
+        vm.prank(stranger);
+        boardroom.launch(1 days);
+
+        Boardroom.Call memory call_ = _rawCall(address(boardroom), 0, abi.encodeCall(Boardroom.setExecutor, (owner)));
+
+        vm.prank(owner);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        boardroom.queueAction(call_, keccak256("old-owner-queue"));
+
+        vm.prank(stranger);
+        boardroom.queueAction(call_, keccak256("new-owner-queue"));
+    }
+
+    function testPrelaunchOwnershipHandoverSyncsDefaultExecutor() public {
+        (Boardroom boardroom,) = _createBoardroom("owner-handover-executor");
+
+        vm.prank(stranger);
+        boardroom.requestOwnershipHandover();
+
+        vm.prank(owner);
+        boardroom.completeOwnershipHandover(stranger);
+
+        assertEq(boardroom.owner(), stranger);
+        assertEq(boardroom.executor(), stranger);
+    }
+
+    function testPrelaunchOwnershipTransferPreservesExplicitExecutor() public {
+        (Boardroom boardroom,) = _createBoardroom("explicit-executor-transfer");
+
+        vm.startPrank(owner);
+        boardroom.setExecutor(stranger);
+        boardroom.transferOwnership(holder);
+        vm.stopPrank();
+
+        assertEq(boardroom.owner(), holder);
+        assertEq(boardroom.executor(), stranger);
+
+        vm.prank(holder);
+        boardroom.launch(1 days);
+
+        Boardroom.Call memory call_ = _rawCall(address(boardroom), 0, abi.encodeCall(Boardroom.setExecutor, (owner)));
+
+        vm.prank(holder);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        boardroom.queueAction(call_, keccak256("new-owner-queue"));
+
+        vm.prank(stranger);
+        boardroom.queueAction(call_, keccak256("explicit-executor-queue"));
+    }
+
     function testOnlyBoardroomCanMintShareToken() public {
         (Boardroom boardroom,) = _createBoardroom("token-mint-auth");
         BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());

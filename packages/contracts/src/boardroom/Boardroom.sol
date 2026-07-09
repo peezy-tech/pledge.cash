@@ -143,6 +143,18 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
     receive() external payable {}
 
+    function transferOwnership(address newOwner) public payable override {
+        address oldOwner = owner();
+        super.transferOwnership(newOwner);
+        _syncExecutorAfterOwnershipTransfer(oldOwner, newOwner);
+    }
+
+    function completeOwnershipHandover(address pendingOwner) public payable override {
+        address oldOwner = owner();
+        super.completeOwnershipHandover(pendingOwner);
+        _syncExecutorAfterOwnershipTransfer(oldOwner, pendingOwner);
+    }
+
     function initialize(
         address owner_,
         address policyRegistry_,
@@ -832,6 +844,10 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
         executor = executor_;
         emit ExecutorSet(executor_);
+    }
+
+    function _syncExecutorAfterOwnershipTransfer(address oldOwner, address newOwner) internal {
+        if (!launched && executor == oldOwner) _setExecutor(newOwner);
     }
 
     function _queueAction(bytes32 actionHash, bytes32 salt) internal returns (uint256 eta) {
