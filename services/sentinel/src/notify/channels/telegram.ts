@@ -73,6 +73,13 @@ export function createTelegramBot(config: TelegramBotConfig, db: TelegramDb): Te
 export function createTelegramChannel(bot: TelegramBotLike, db: TelegramDb): NotificationChannel {
   return {
     type: "telegram",
+    rateLimits(row) {
+      const channelKey = row.channelId ?? row.userId ?? "unknown";
+      return [
+        { intervalMs: 40, key: "telegram:global" },
+        { intervalMs: 1_000, key: `telegram:${channelKey}` }
+      ];
+    },
     async send(row: OutboxRow, rendered: RenderedMessage): Promise<NotificationSendResult> {
       const chatId = await lookupTelegramChatId(db, row);
       if (chatId === undefined) {

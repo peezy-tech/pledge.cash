@@ -154,7 +154,7 @@ describe("runWatcherOnce", () => {
     expect(events.map((event) => event.event)).toEqual(["queued"]);
   });
 
-  test("keeps governance cursor retryable until queued event delivery succeeds", async () => {
+  test("commits the governance cursor atomically with rows before post-commit delivery", async () => {
     const store = new MemoryWatcherStore();
     const client = createClient({
       latestBlock: 5n,
@@ -185,7 +185,7 @@ describe("runWatcherOnce", () => {
 
     expect(store.cursor("factory-discovery")).toBe(5n);
     expect(store.cursor("share-transfers")).toBe(5n);
-    expect(store.cursor("governance")).toBeUndefined();
+    expect(store.cursor("governance")).toBe(5n);
     expect(store.state.actions).toHaveLength(1);
     expect(store.balance(shareToken, holder)).toBe(100n);
 
@@ -198,12 +198,12 @@ describe("runWatcherOnce", () => {
       store
     });
 
-    expect(retry.actionEvents).toBe(1);
-    expect(retry.cursorAdvances).toBe(1);
+    expect(retry.actionEvents).toBe(0);
+    expect(retry.cursorAdvances).toBe(0);
     expect(store.cursor("governance")).toBe(5n);
     expect(store.state.actions).toHaveLength(1);
     expect(store.balance(shareToken, holder)).toBe(100n);
-    expect(events.map((event) => event.event)).toEqual(["queued"]);
+    expect(events).toHaveLength(0);
   });
 
   test("transitions the latest pending row for repeated action hashes", async () => {
@@ -281,7 +281,7 @@ describe("runWatcherOnce", () => {
     expect(events[0]?.action.id).toBe(terminalAction.id);
   });
 
-  test("re-emits transitioned actions when governance delivery is retried", async () => {
+  test("does not replay transitioned actions after their atomic governance cursor commit", async () => {
     const store = new MemoryWatcherStore();
     store.addBoardroom();
     store.setCursor("factory-discovery", 5n);
@@ -311,7 +311,7 @@ describe("runWatcherOnce", () => {
     ).rejects.toThrow("pipeline unavailable");
 
     expect(store.action(latestAction.id)?.status).toBe("cancelled");
-    expect(store.cursor("governance")).toBeUndefined();
+    expect(store.cursor("governance")).toBe(5n);
 
     const events: WatcherPipelineEvent[] = [];
     await runWatcherOnce(chainId, {
@@ -323,9 +323,7 @@ describe("runWatcherOnce", () => {
     });
 
     expect(store.cursor("governance")).toBe(5n);
-    expect(events).toHaveLength(1);
-    expect(events[0]?.action.id).toBe(latestAction.id);
-    expect(events[0]?.event).toBe("cancelled");
+    expect(events).toHaveLength(0);
   });
 
   test("persists undecoded queued actions instead of dropping them", async () => {
@@ -422,6 +420,7 @@ describe("runWatcherOnce", () => {
     expect(result.policyAdminEvents).toBe(1);
     expect(events).toHaveLength(1);
     expect(events[0]?.event).toBe("policy-admin");
+    expect(events[0]?.eventId).toBe(`${chainId}:${adminTx}:0`);
     expect(events[0]?.action.id).toBe("pending-action");
   });
 
@@ -552,13 +551,15 @@ class MemoryWatcherTx implements WatcherStoreTx {
     private readonly parent: MemoryWatcherStore
   ) {}
 
-  async applyShareBalanceDelta(input: ShareBalanceDeltaInput): Promise<void> {
-    const key = `${input.token}:${input.holder}`;
-    const current = this.state.balances.get(key)?.balance ?? 0n;
-    this.state.balances.set(key, {
-      balance: current + input.delta,
-      updatedBlock: input.blockNumber
-    });
+  async applyShareBalanceDeltas(inputs: readonly ShareBalanceDeltaInput[]): Promise<void> {
+    for (const input of inputs) {
+      const key = `${input.token}:${input.holder}`;
+      const current = this.state.balances.get(key)?.balance ?? 0n;
+      this.state.balances.set(key, {
+        balance: current + input.delta,
+        updatedBlock: input.blockNumber
+      });
+    }
   }
 
   async getCursor(chainId_: number, scope: WatcherCursorScope): Promise<bigint | undefined> {

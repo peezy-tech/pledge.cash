@@ -8,6 +8,7 @@ import {
   PublicActionsResponseSchema,
   type PublicActionsQuery
 } from "../dto";
+import { isPublicActionsCursor } from "../store";
 import { normalizeAddress } from "./wallets";
 
 function withCacheHeaders(c: Context<ApiEnv>): void {
@@ -29,6 +30,9 @@ export function createPublicRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     if (!parsed.ok) {
       return parsed.response;
     }
+    if (parsed.value.cursor !== undefined && !isPublicActionsCursor(parsed.value.cursor)) {
+      return jsonError(c, 400, "cursor is invalid");
+    }
 
     const response = await deps.store.getPublicActions(
       normalizePublicQuery({ ...parsed.value, limit: parsed.value.limit ?? 25 })
@@ -46,6 +50,9 @@ export function createPublicRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     const query = parseQuery(c, BoardroomActionsQuerySchema, c.req.query());
     if (!query.ok) {
       return query.response;
+    }
+    if (query.value.cursor !== undefined && !isPublicActionsCursor(query.value.cursor)) {
+      return jsonError(c, 400, "cursor is invalid");
     }
 
     const response = await deps.store.getPublicActions({

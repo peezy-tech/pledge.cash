@@ -42,6 +42,9 @@ export function createTwitterChannel(config: TwitterChannelConfig): Notification
 
   return {
     type: "twitter",
+    rateLimits() {
+      return [{ intervalMs: 10_000, key: "twitter:public" }];
+    },
     async send(row: OutboxRow, rendered: RenderedMessage): Promise<NotificationSendResult> {
       const payload = row.payload as TwitterPayload;
       const text = rendered.text.length <= 280 ? rendered.text : `${rendered.text.slice(0, 277)}...`;

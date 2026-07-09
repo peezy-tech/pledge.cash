@@ -35,8 +35,9 @@ Copy `.env.example` and set values for your environment.
 | `SENTINEL_HARNESS_MODEL` | no | Model label passed to the harness adapter. |
 | `SENTINEL_HARNESS_WORKDIR` | no | Temporary workspace root for analysis runs. |
 | `SENTINEL_HARNESS_TIMEOUT_MS` | no | Per-analysis deadline, default `300000`. |
-| `SENTINEL_HARNESS_DAILY_LIMIT` | no | Host policy knob for future rate limiting, default `50`. |
-| `SENTINEL_REMINDER_HOURS_BEFORE_ETA` | no | Reminder timing policy knob, default `24`. |
+| `SENTINEL_HARNESS_DAILY_LIMIT` | no | Maximum reserved harness runs per UTC day, default `50`; excess uses templates. |
+| `SENTINEL_HARNESS_BOARDROOM_ALLOWLIST` | no | Comma-separated boardrooms allowed to use the harness without subscribers. |
+| `SENTINEL_REMINDER_HOURS_BEFORE_ETA` | no | Send one reminder per channel inside this pre-eta window, default `24`. |
 | `TELEGRAM_BOT_TOKEN` | yes for Telegram | Bot token used for long polling and message sends. |
 | `TELEGRAM_BOT_USERNAME` | yes for linking | Bot username used to create deep links. |
 | `SENTINEL_TWITTER_ENABLED` | no | Set `1` to enable Twitter delivery. |
@@ -85,3 +86,7 @@ docker run --rm --env-file .env -p 8787:8787 pledge-cash-sentinel
 ```
 
 Sentinel does not require deployment-specific files in this repository. Provide networking, TLS, persistence, backups, and process supervision in your own hosting environment.
+
+The static web app remains Sentinel-free unless its build receives `VITE_SENTINEL_API_URL`. For
+GitHub Pages, set that repository variable only after the API is deployed and healthy; the Pages
+workflow probes its `/health` endpoint before building or deploying an enabled UI.

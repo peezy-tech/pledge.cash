@@ -22,7 +22,7 @@ export type ShareBalanceDeltaInput = {
 };
 
 export type ShareBalanceWriter = {
-  applyShareBalanceDelta(input: ShareBalanceDeltaInput): Promise<void>;
+  applyShareBalanceDeltas(inputs: readonly ShareBalanceDeltaInput[]): Promise<void>;
 };
 
 type RawTransferLog = {
@@ -63,10 +63,12 @@ export async function applyShareTransfers(
   chainId: number,
   transfers: readonly ShareTransfer[]
 ): Promise<void> {
+  const deltas = new Map<string, ShareBalanceDeltaInput>();
+
   for (const transfer of transfers) {
     const token = lowerAddress(transfer.token);
     if (!isZeroAddress(transfer.from)) {
-      await store.applyShareBalanceDelta({
+      mergeDelta(deltas, {
         blockNumber: transfer.blockNumber,
         chainId,
         delta: -transfer.amount,
@@ -76,7 +78,7 @@ export async function applyShareTransfers(
     }
 
     if (!isZeroAddress(transfer.to)) {
-      await store.applyShareBalanceDelta({
+      mergeDelta(deltas, {
         blockNumber: transfer.blockNumber,
         chainId,
         delta: transfer.amount,
@@ -85,6 +87,32 @@ export async function applyShareTransfers(
       });
     }
   }
+
+  await store.applyShareBalanceDeltas([...deltas.values()]);
+}
+
+export function aggregateShareBalanceDeltas(
+  inputs: readonly ShareBalanceDeltaInput[]
+): ShareBalanceDeltaInput[] {
+  const deltas = new Map<string, ShareBalanceDeltaInput>();
+  for (const input of inputs) mergeDelta(deltas, input);
+  return [...deltas.values()];
+}
+
+function mergeDelta(
+  deltas: Map<string, ShareBalanceDeltaInput>,
+  input: ShareBalanceDeltaInput
+): void {
+  const key = `${input.chainId}:${input.token}:${input.holder}`;
+  const existing = deltas.get(key);
+  deltas.set(key, {
+    ...input,
+    blockNumber:
+      existing === undefined || input.blockNumber > existing.blockNumber
+        ? input.blockNumber
+        : existing.blockNumber,
+    delta: (existing?.delta ?? 0n) + input.delta
+  });
 }
 
 function toShareTransfer(log: RawTransferLog): ShareTransfer | undefined {

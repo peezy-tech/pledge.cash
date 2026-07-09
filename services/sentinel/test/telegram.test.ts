@@ -35,6 +35,10 @@ describe("Telegram notification channel", () => {
       text: "rendered alert"
     });
 
+    expect(channel.rateLimits?.(makeOutboxRow())).toEqual([
+      { intervalMs: 40, key: "telegram:global" },
+      { intervalMs: 1_000, key: "telegram:00000000-0000-4000-8000-000000000002" }
+    ]);
     expect(result).toEqual({ externalId: "42", ok: true });
     expect(messages).toEqual([
       { chatId: "live-chat", options: { disable_web_page_preview: false }, text: "rendered alert" }

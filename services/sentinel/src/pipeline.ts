@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getPledgeCashDeployment } from "@pledge.cash/sdk";
 
 import type { Config } from "./config";
@@ -32,27 +32,46 @@ export function createActionPipeline(options: CreateActionPipelineOptions): Acti
         const risk = evaluatePipelineRisk(event);
         await persistRisk(options.db, risk);
         const boardroom = await loadBoardroom(options.db, event);
+        const subscriberCount = await countActionSubscribers(options.db, event);
+        const allowlisted = options.config.harness.boardroomAllowlist.includes(
+          event.action.boardroom.toLowerCase()
+        );
         await analyzeAction(
           {
             action: event.action,
             ...(boardroom === undefined ? {} : { boardroom }),
             calls: event.calls,
+            harness: {
+              eligible: allowlisted || subscriberCount > 0,
+              reason: allowlisted
+                ? "operator allowlist"
+                : subscriberCount > 0
+                  ? "subscribers"
+                  : "no subscribers",
+              subscriberCount
+            },
             risk
           },
           {
             ...(options.adapter === undefined ? {} : { adapter: options.adapter }),
+            dailyLimit: options.config.harness.dailyLimit,
             db: analysisStore,
             timeoutMs: options.config.harness.timeoutMs,
             workdir: options.config.harness.workdir
           }
         );
 
+        const notificationEvent =
+          event.event === "policy-admin"
+            ? {
+                action: event.action,
+                calls: event.calls,
+                event: event.event,
+                eventId: event.eventId
+              }
+            : { action: event.action, calls: event.calls, event: event.event };
         await fanout(
-          {
-            action: event.action,
-            calls: event.calls,
-            event: event.event
-          },
+          notificationEvent,
           options.db as unknown as FanoutDb,
           { twitterEnabled: options.config.twitter.enabled }
         );
@@ -62,6 +81,56 @@ export function createActionPipeline(options: CreateActionPipelineOptions): Acti
       }
     }
   };
+}
+
+type SubscriberCountRow = { readonly count: number | string };
+type QueryResult<T> = readonly T[] | { readonly rows: readonly T[] };
+
+export async function countActionSubscribers(
+  db: Pick<SentinelDb, "execute">,
+  event: WatcherPipelineEvent
+): Promise<number> {
+  const rows = rowsFromResult(
+    await db.execute<SubscriberCountRow>(
+      sql`
+        SELECT COUNT(DISTINCT u.id)::int AS count
+        FROM users u
+        LEFT JOIN subscriptions s
+          ON s.user_id = u.id
+        WHERE (
+          s.mode = 'explicit'
+          AND EXISTS (
+            SELECT 1
+            FROM subscription_boardrooms sbm
+            WHERE sbm.user_id = u.id
+              AND sbm.chain_id = ${event.action.chainId}
+              AND lower(sbm.boardroom) = lower(${event.action.boardroom})
+          )
+        ) OR (
+          COALESCE(s.mode, 'holdings'::sentinel_subscription_mode) = 'holdings'
+          AND EXISTS (
+            SELECT 1
+            FROM wallets w
+            JOIN boardrooms b
+              ON b.chain_id = ${event.action.chainId}
+             AND lower(b.address) = lower(${event.action.boardroom})
+            JOIN share_balances sb
+              ON sb.chain_id = b.chain_id
+             AND lower(sb.token) = lower(b.share_token)
+             AND lower(sb.holder) = lower(w.address)
+             AND sb.balance::numeric > 0
+            WHERE w.user_id = u.id
+          )
+        )
+      `
+    )
+  );
+  return Number(rows[0]?.count ?? 0);
+}
+
+function rowsFromResult<T>(result: QueryResult<T>): readonly T[] {
+  if (Array.isArray(result)) return result;
+  return (result as { readonly rows: readonly T[] }).rows;
 }
 
 function evaluatePipelineRisk(event: WatcherPipelineEvent): RiskAssessment {

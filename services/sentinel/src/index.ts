@@ -8,6 +8,7 @@ import { runWatcherOnce, type WatcherActionEventHandler } from "./chain/watcher"
 import { loadConfig, type Config, type SentinelChainConfig } from "./config";
 import { createDbClient, type SentinelDbClient } from "./db/client";
 import { startDispatcher, type DispatcherDb } from "./notify/dispatcher";
+import { startFanoutSweeps, type FanoutDb } from "./notify/fanout";
 import type { NotificationChannel } from "./notify/types";
 import { createTelegramBot, type TelegramBotLike, type TelegramDb } from "./notify/channels/telegram";
 import { createTwitterChannel } from "./notify/channels/twitter";
@@ -102,6 +103,12 @@ export async function startSentinel(options: StartSentinelOptions = {}): Promise
             webOrigin: config.webOrigin
           }
         });
+  const fanoutSweeps = startFanoutSweeps({
+    db: dbClient.db as unknown as FanoutDb,
+    logger,
+    reminderHoursBeforeEta: config.reminderHoursBeforeEta,
+    twitterEnabled: config.twitter.enabled
+  });
   const app = createApp({
     auth: createWorkOsAuthAdapter(config),
     config,
@@ -120,6 +127,7 @@ export async function startSentinel(options: StartSentinelOptions = {}): Promise
       }
       await Promise.allSettled(watcherHandles.map((watcher) => watcher.done));
       dispatcher?.stop();
+      fanoutSweeps.stop();
       for (const bot of bots) {
         bot.stop?.();
       }
