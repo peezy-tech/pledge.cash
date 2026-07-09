@@ -127,33 +127,10 @@ contract DistributionFactory is IBoardroomObligationPolicy {
 
         bytes4 selector = _selector(data);
         if (target == address(this)) {
-            if (selector == DistributionFactory.createMigratingBondingCurve.selector) {
-                return _canCreateMigratingBondingCurve(boardroom, data);
-            }
-            if (selector == DistributionFactory.createMerkleAirdrop.selector) {
-                return _canCreateMerkleAirdrop(boardroom, data);
-            }
-
-            return
-                selector == DistributionFactory.createFixedPriceSale.selector
-                    && _canCreateFixedPriceSale(boardroom, data);
+            return _canCreateDistribution(boardroom, selector, data);
         }
 
-        if (distributionBoardroom[target] != boardroom) return false;
-
-        DistributionKind kind = distributionKind[target];
-        if (kind == DistributionKind.FixedPriceSale) {
-            return selector == FixedPriceSale.close.selector || selector == FixedPriceSale.cancel.selector;
-        }
-        if (kind == DistributionKind.MigratingBondingCurve) {
-            return
-                selector == MigratingBondingCurve.cancel.selector || selector == MigratingBondingCurve.migrate.selector;
-        }
-        if (kind == DistributionKind.MerkleAirdrop) {
-            return selector == MerkleAirdrop.close.selector || selector == MerkleAirdrop.cancel.selector;
-        }
-
-        return false;
+        return _canCallDistributionLifecycle(boardroom, target, selector);
     }
 
     function obligationForCall(address, address target, uint256, bytes calldata data, bytes calldata result)
@@ -164,13 +141,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         if (target != address(this) || result.length != 32) return obligation;
 
         bytes4 selector = _selector(data);
-        if (
-            selector != DistributionFactory.createFixedPriceSale.selector
-                && selector != DistributionFactory.createMigratingBondingCurve.selector
-                && selector != DistributionFactory.createMerkleAirdrop.selector
-        ) {
-            return obligation;
-        }
+        if (!_isCreateDistributionSelector(selector)) return obligation;
 
         address distribution = abi.decode(result, (address));
         obligation.kind = ObligationKind.Distribution;
@@ -181,21 +152,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     }
 
     function isLifecycleCallAllowed(address boardroom, address target, bytes4 selector) external view returns (bool) {
-        if (distributionBoardroom[target] != boardroom) return false;
-
-        DistributionKind kind = distributionKind[target];
-        if (kind == DistributionKind.FixedPriceSale) {
-            return selector == FixedPriceSale.close.selector || selector == FixedPriceSale.cancel.selector;
-        }
-        if (kind == DistributionKind.MigratingBondingCurve) {
-            return
-                selector == MigratingBondingCurve.cancel.selector || selector == MigratingBondingCurve.migrate.selector;
-        }
-        if (kind == DistributionKind.MerkleAirdrop) {
-            return selector == MerkleAirdrop.close.selector || selector == MerkleAirdrop.cancel.selector;
-        }
-
-        return false;
+        return _canCallDistributionLifecycle(boardroom, target, selector);
     }
 
     function grantSlotReleaseForLifecycleCall(address boardroom, address target, bytes4 selector)
@@ -205,7 +162,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     {
         if (distributionBoardroom[target] != boardroom) return address(0);
         if (distributionKind[target] != DistributionKind.MerkleAirdrop) return address(0);
-        if (selector != MerkleAirdrop.close.selector && selector != MerkleAirdrop.cancel.selector) return address(0);
+        if (!_isMerkleAirdropLifecycleSelector(selector)) return address(0);
         return target;
     }
 
@@ -239,6 +196,45 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         return LibClone.predictDeterministicAddress(
             merkleAirdropLogic, _cloneSalt(boardroom, DistributionKind.MerkleAirdrop, salt), address(this)
         );
+    }
+
+    function _canCreateDistribution(address boardroom, bytes4 selector, bytes calldata data)
+        internal
+        view
+        returns (bool)
+    {
+        if (selector == DistributionFactory.createFixedPriceSale.selector) {
+            return _canCreateFixedPriceSale(boardroom, data);
+        }
+        if (selector == DistributionFactory.createMigratingBondingCurve.selector) {
+            return _canCreateMigratingBondingCurve(boardroom, data);
+        }
+        if (selector == DistributionFactory.createMerkleAirdrop.selector) {
+            return _canCreateMerkleAirdrop(boardroom, data);
+        }
+
+        return false;
+    }
+
+    function _canCallDistributionLifecycle(address boardroom, address target, bytes4 selector)
+        internal
+        view
+        returns (bool)
+    {
+        if (distributionBoardroom[target] != boardroom) return false;
+
+        DistributionKind kind = distributionKind[target];
+        if (kind == DistributionKind.FixedPriceSale) {
+            return _isFixedPriceSaleLifecycleSelector(selector);
+        }
+        if (kind == DistributionKind.MigratingBondingCurve) {
+            return _isMigratingBondingCurveLifecycleSelector(selector);
+        }
+        if (kind == DistributionKind.MerkleAirdrop) {
+            return _isMerkleAirdropLifecycleSelector(selector);
+        }
+
+        return false;
     }
 
     function _canCreateFixedPriceSale(address boardroom, bytes calldata data) internal view returns (bool) {
@@ -313,6 +309,24 @@ contract DistributionFactory is IBoardroomObligationPolicy {
 
     function _hasValidTimeWindow(uint64 startTime, uint64 endTime) internal pure returns (bool) {
         return endTime == 0 || endTime >= startTime;
+    }
+
+    function _isCreateDistributionSelector(bytes4 selector) internal pure returns (bool) {
+        return selector == DistributionFactory.createFixedPriceSale.selector
+            || selector == DistributionFactory.createMigratingBondingCurve.selector
+            || selector == DistributionFactory.createMerkleAirdrop.selector;
+    }
+
+    function _isFixedPriceSaleLifecycleSelector(bytes4 selector) internal pure returns (bool) {
+        return selector == FixedPriceSale.close.selector || selector == FixedPriceSale.cancel.selector;
+    }
+
+    function _isMigratingBondingCurveLifecycleSelector(bytes4 selector) internal pure returns (bool) {
+        return selector == MigratingBondingCurve.cancel.selector || selector == MigratingBondingCurve.migrate.selector;
+    }
+
+    function _isMerkleAirdropLifecycleSelector(bytes4 selector) internal pure returns (bool) {
+        return selector == MerkleAirdrop.close.selector || selector == MerkleAirdrop.cancel.selector;
     }
 
     function _requireBoardroomShareToken(address boardroom, address shareToken) internal view {

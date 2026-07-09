@@ -79,11 +79,7 @@ contract FixedPriceSale is Initializable, ReentrancyGuard {
     }
 
     function initialize(address boardroom_, CreateParams calldata params) external initializer {
-        if (boardroom_ == address(0) || params.shareToken == address(0) || params.paymentToken == address(0)) {
-            revert InvalidAddress();
-        }
-        if (params.shareAmount == 0 || params.price == 0) revert InvalidAmount();
-        if (params.endTime != 0 && params.endTime < params.startTime) revert InvalidTimeWindow();
+        _requireValidCreateParams(boardroom_, params);
 
         factory = msg.sender;
         boardroom = boardroom_;
@@ -116,9 +112,7 @@ contract FixedPriceSale is Initializable, ReentrancyGuard {
         returns (uint256 payment)
     {
         _requireOpen(deadline);
-        if (recipient == address(0)) revert InvalidAddress();
-        if (shareAmount == 0) revert InvalidAmount();
-        if (shareAmount > remainingShares) revert InsufficientShares(shareAmount, remainingShares);
+        _requirePurchasableShares(recipient, shareAmount);
 
         payment = getPaymentAmount(shareAmount);
         if (payment > maxPayment) revert InsufficientPayment(payment, maxPayment);
@@ -141,9 +135,7 @@ contract FixedPriceSale is Initializable, ReentrancyGuard {
         _requireActive();
         saleStatus = SaleStatus.Closed;
 
-        uint256 returnedShares = remainingShares;
-        remainingShares = 0;
-        if (returnedShares != 0) _checkedTransfer(shareToken, boardroom, returnedShares);
+        uint256 returnedShares = _returnRemainingShares();
 
         emit FixedPriceSaleClosed(returnedShares);
     }
@@ -152,9 +144,7 @@ contract FixedPriceSale is Initializable, ReentrancyGuard {
         _requireActive();
         saleStatus = SaleStatus.Cancelled;
 
-        uint256 returnedShares = remainingShares;
-        remainingShares = 0;
-        if (returnedShares != 0) _checkedTransfer(shareToken, boardroom, returnedShares);
+        uint256 returnedShares = _returnRemainingShares();
 
         emit FixedPriceSaleCancelled(returnedShares);
     }
@@ -178,9 +168,37 @@ contract FixedPriceSale is Initializable, ReentrancyGuard {
 
     function _requireOpen(uint256 deadline) internal view {
         _requireActive();
-        if (IFixedPriceSaleBoardroom(boardroom).status() != BOARDROOM_STATUS_ACTIVE) revert SaleNotOpen();
+        if (!_isBoardroomActive()) revert SaleNotOpen();
         if (deadline < block.timestamp) revert Expired();
-        if (block.timestamp < startTime || (endTime != 0 && block.timestamp > endTime)) revert SaleNotOpen();
+        if (!_isWithinSaleWindow()) revert SaleNotOpen();
+    }
+
+    function _requireValidCreateParams(address boardroom_, CreateParams calldata params) internal pure {
+        if (boardroom_ == address(0) || params.shareToken == address(0) || params.paymentToken == address(0)) {
+            revert InvalidAddress();
+        }
+        if (params.shareAmount == 0 || params.price == 0) revert InvalidAmount();
+        if (params.endTime != 0 && params.endTime < params.startTime) revert InvalidTimeWindow();
+    }
+
+    function _requirePurchasableShares(address recipient, uint256 shareAmount) internal view {
+        if (recipient == address(0)) revert InvalidAddress();
+        if (shareAmount == 0) revert InvalidAmount();
+        if (shareAmount > remainingShares) revert InsufficientShares(shareAmount, remainingShares);
+    }
+
+    function _returnRemainingShares() internal returns (uint256 returnedShares) {
+        returnedShares = remainingShares;
+        remainingShares = 0;
+        if (returnedShares != 0) _checkedTransfer(shareToken, boardroom, returnedShares);
+    }
+
+    function _isBoardroomActive() internal view returns (bool) {
+        return IFixedPriceSaleBoardroom(boardroom).status() == BOARDROOM_STATUS_ACTIVE;
+    }
+
+    function _isWithinSaleWindow() internal view returns (bool) {
+        return block.timestamp >= startTime && (endTime == 0 || block.timestamp <= endTime);
     }
 
     function _checkedTransfer(address token, address to, uint256 expectedAmount) internal {
