@@ -323,10 +323,17 @@ async function deployContracts(wrappedNative: Address): Promise<void> {
 }
 
 async function seedLocal(): Promise<void> {
-  await runCommand("seed local", "bun", ["run", "scenario:local-seed:local"], {
+  await runCommand("seed local", "forge", [
+    "script",
+    "script/SeedLocal.s.sol:SeedLocal",
+    "--rpc-url",
+    rpcUrl,
+    "--broadcast",
+    "--slow",
+    "-vvv"
+  ], {
     cwd: contractsDir,
     env: {
-      LOCAL_RPC_URL: rpcUrl,
       LOCAL_SEED_NONCE: process.env.LOCAL_SEED_NONCE ?? "1",
       PRIVATE_KEY: deployerKey
     }
