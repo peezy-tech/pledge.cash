@@ -45,9 +45,7 @@ export const subscriptionModeEnum = pgEnum("sentinel_subscription_mode", ["holdi
 export const notificationEventEnum = pgEnum("sentinel_notification_event", [
   "queued",
   "cancelled",
-  "executed",
-  "reminder",
-  "policy-admin"
+  "executed"
 ]);
 
 export const notificationStatusEnum = pgEnum("sentinel_notification_status", [
@@ -184,8 +182,9 @@ export const riskAssessments = pgTable("risk_assessments", {
 export const analyses = pgTable(
   "analyses",
   {
-    chainId: integer("chain_id").notNull(),
-    actionHash: text("action_hash").notNull(),
+    actionId: uuid("action_id")
+      .primaryKey()
+      .references(() => queuedActions.id, { onDelete: "cascade" }),
     harness: text("harness").notNull(),
     model: text("model"),
     summary: text("summary").notNull(),
@@ -195,10 +194,7 @@ export const analyses = pgTable(
     source: analysisSourceEnum("source").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
-  },
-  (table) => ({
-    pk: primaryKey({ columns: [table.chainId, table.actionHash] })
-  })
+  }
 );
 
 export const policyAdminEvents = pgTable(

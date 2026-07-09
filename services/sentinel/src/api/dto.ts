@@ -9,7 +9,7 @@ export const IntegerStringSchema = z.string().regex(/^-?\d+$/);
 export const UintStringSchema = z.string().regex(/^\d+$/);
 
 export const SeveritySchema = z.enum(["low", "medium", "high"]);
-export const ActionEventSchema = z.enum(["queued", "cancelled", "executed", "reminder", "policy-admin"]);
+export const ActionEventSchema = z.enum(["queued", "cancelled", "executed"]);
 export const ActionStatusSchema = z.enum(["queued", "cancelled", "executed"]);
 export const DecodeStatusSchema = z.enum(["decoded", "undecoded"]);
 export const ChannelTypeSchema = z.enum(["telegram", "twitter"]);

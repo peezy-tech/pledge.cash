@@ -1,5 +1,5 @@
 {
-  "id": "c76c1a22-1524-4dcb-993e-1e3e3f82764c",
+  "id": "12d364b7-7d3f-492e-bc82-aedff74dc967",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -143,16 +143,10 @@
       "name": "analyses",
       "schema": "",
       "columns": {
-        "chain_id": {
-          "name": "chain_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "action_hash": {
-          "name": "action_hash",
-          "type": "text",
-          "primaryKey": false,
+        "action_id": {
+          "name": "action_id",
+          "type": "uuid",
+          "primaryKey": true,
           "notNull": true
         },
         "harness": {
@@ -214,16 +208,22 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "analyses_chain_id_action_hash_pk": {
-          "name": "analyses_chain_id_action_hash_pk",
-          "columns": [
-            "chain_id",
-            "action_hash"
-          ]
+      "foreignKeys": {
+        "analyses_action_id_queued_actions_id_fk": {
+          "name": "analyses_action_id_queued_actions_id_fk",
+          "tableFrom": "analyses",
+          "tableTo": "queued_actions",
+          "columnsFrom": [
+            "action_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -1608,9 +1608,7 @@
       "values": [
         "queued",
         "cancelled",
-        "executed",
-        "reminder",
-        "policy-admin"
+        "executed"
       ]
     },
     "public.sentinel_notification_status": {

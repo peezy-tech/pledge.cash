@@ -32,8 +32,6 @@ export const sentinelEnvSchema = z
     SENTINEL_HARNESS_MODEL: z.string().trim().min(1).default("claude-opus-4-8"),
     SENTINEL_HARNESS_WORKDIR: optionalStringSchema,
     SENTINEL_HARNESS_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
-    SENTINEL_HARNESS_DAILY_LIMIT: z.coerce.number().int().nonnegative().default(50),
-    SENTINEL_REMINDER_HOURS_BEFORE_ETA: z.coerce.number().int().positive().default(24),
     TELEGRAM_BOT_TOKEN: optionalStringSchema,
     TELEGRAM_BOT_USERNAME: optionalStringSchema,
     SENTINEL_TWITTER_ENABLED: booleanFlagSchema,
@@ -59,7 +57,6 @@ export type Config = {
   readonly databaseUrl: string;
   readonly harness: {
     readonly cmd?: string;
-    readonly dailyLimit: number;
     readonly model: string;
     readonly name: HarnessName;
     readonly timeoutMs: number;
@@ -68,7 +65,6 @@ export type Config = {
   readonly maxBlockRange: number;
   readonly pollIntervalMs: number;
   readonly port: number;
-  readonly reminderHoursBeforeEta: number;
   readonly telegram: {
     readonly botToken?: string;
     readonly botUsername?: string;
@@ -161,7 +157,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     databaseUrl: raw.DATABASE_URL,
     harness: withOptional(
       {
-        dailyLimit: raw.SENTINEL_HARNESS_DAILY_LIMIT,
         model: raw.SENTINEL_HARNESS_MODEL,
         name: raw.SENTINEL_HARNESS,
         timeoutMs: raw.SENTINEL_HARNESS_TIMEOUT_MS,
@@ -173,7 +168,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     maxBlockRange: raw.SENTINEL_MAX_BLOCK_RANGE,
     pollIntervalMs: raw.SENTINEL_POLL_INTERVAL_MS,
     port: raw.SENTINEL_PORT,
-    reminderHoursBeforeEta: raw.SENTINEL_REMINDER_HOURS_BEFORE_ETA,
     telegram: withOptional(
       withOptional({}, "botToken", raw.TELEGRAM_BOT_TOKEN),
       "botUsername",

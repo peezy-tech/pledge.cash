@@ -2,7 +2,7 @@ CREATE TYPE "public"."sentinel_analysis_source" AS ENUM('harness', 'template');-
 CREATE TYPE "public"."sentinel_boardroom_status" AS ENUM('prelaunch', 'active', 'winddown');--> statement-breakpoint
 CREATE TYPE "public"."sentinel_channel_type" AS ENUM('telegram', 'twitter');--> statement-breakpoint
 CREATE TYPE "public"."sentinel_decode_status" AS ENUM('decoded', 'undecoded');--> statement-breakpoint
-CREATE TYPE "public"."sentinel_notification_event" AS ENUM('queued', 'cancelled', 'executed', 'reminder', 'policy-admin');--> statement-breakpoint
+CREATE TYPE "public"."sentinel_notification_event" AS ENUM('queued', 'cancelled', 'executed');--> statement-breakpoint
 CREATE TYPE "public"."sentinel_notification_status" AS ENUM('pending', 'sent', 'failed', 'dead');--> statement-breakpoint
 CREATE TYPE "public"."sentinel_policy_admin_contract" AS ENUM('registry', 'asset-policy');--> statement-breakpoint
 CREATE TYPE "public"."sentinel_queued_action_status" AS ENUM('queued', 'cancelled', 'executed');--> statement-breakpoint
@@ -22,8 +22,7 @@ CREATE TABLE IF NOT EXISTS "action_calls" (
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "analyses" (
-	"chain_id" integer NOT NULL,
-	"action_hash" text NOT NULL,
+	"action_id" uuid PRIMARY KEY NOT NULL,
 	"harness" text NOT NULL,
 	"model" text,
 	"summary" text NOT NULL,
@@ -32,8 +31,7 @@ CREATE TABLE IF NOT EXISTS "analyses" (
 	"severity_rationale" text NOT NULL,
 	"source" "sentinel_analysis_source" NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "analyses_chain_id_action_hash_pk" PRIMARY KEY("chain_id","action_hash")
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "boardrooms" (
@@ -194,6 +192,12 @@ CREATE TABLE IF NOT EXISTS "wallets" (
 --> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "action_calls" ADD CONSTRAINT "action_calls_action_id_queued_actions_id_fk" FOREIGN KEY ("action_id") REFERENCES "public"."queued_actions"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "analyses" ADD CONSTRAINT "analyses_action_id_queued_actions_id_fk" FOREIGN KEY ("action_id") REFERENCES "public"."queued_actions"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;

@@ -19,7 +19,7 @@ export type HexString = Hex;
 export type Uint256String = `${bigint}`;
 
 export type Severity = "low" | "medium" | "high";
-export type ActionEvent = "queued" | "cancelled" | "executed" | "reminder" | "policy-admin";
+export type ActionEvent = "queued" | "cancelled" | "executed";
 export type ActionStatus = "queued" | "cancelled" | "executed";
 export type DecodeStatus = "decoded" | "undecoded";
 export type BoardroomStatus = "prelaunch" | "active" | "winddown";
