@@ -1,4 +1,5 @@
 import type { FixedPriceSaleState, MerkleAirdropState, MigratingBondingCurveState } from "@pledge.cash/sdk";
+import { Children } from "react";
 import type React from "react";
 import { AddressLink, Facts } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
@@ -11,7 +12,15 @@ import type {
   BoardroomSnapshot,
 } from "../../lib/types";
 import { GrantVestingChart } from "../grants/grant-vesting-chart";
-import { airdropStatusLabel, curveStatusLabel, saleStatusLabel, StatusBadge } from "./boardroom-panel-shared";
+import {
+  distributionPaymentTokenAddress,
+  distributionStatusLabel,
+  distributionStatusTone,
+  lockerStatusLabel,
+  lockerStatusTone,
+  remainingDistributionShares,
+  StatusBadge,
+} from "./boardroom-panel-shared";
 
 export function ObligationLists({
   boardroomSnapshot,
@@ -58,8 +67,7 @@ export function ObligationLists({
 }
 
 function ObligationColumn({ children, emptyLabel, title }: { children: React.ReactNode; emptyLabel: string; title: string }): React.JSX.Element {
-  const childArray = Array.isArray(children) ? children : [children];
-  const visibleChildren = childArray.filter(Boolean);
+  const visibleChildren = Children.toArray(children).filter(Boolean);
 
   return (
     <section className="min-w-0 bg-zinc-950">
@@ -80,11 +88,14 @@ function ObligationColumn({ children, emptyLabel, title }: { children: React.Rea
 }
 
 function GrantRow({ grant }: { grant: BoardroomGrantSnapshot }): React.JSX.Element {
+  const statusLabel = grant.state?.closed ? "Closed" : grant.error ? "Read failed" : "Open";
+  const statusTone = grant.state?.closed ? "warning" : grant.error ? "danger" : "default";
+
   return (
     <div className="grid gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <AddressLink address={grant.address} />
-        <StatusBadge label={grant.state?.closed ? "Closed" : grant.error ? "Read failed" : "Open"} tone={grant.state?.closed ? "warning" : grant.error ? "danger" : "default"} />
+        <StatusBadge label={statusLabel} tone={statusTone} />
       </div>
       {grant.error ? <p className="m-0 text-sm text-red-200">{grant.error}</p> : null}
       <Facts
@@ -112,35 +123,25 @@ function DistributionRow({
   setMerkleAirdropAddress: (address: string) => void;
   setMigratingCurveAddress: (address: string) => void;
 }): React.JSX.Element {
-  const status =
-    distribution.kind === "fixed-price-sale"
-      ? saleStatusLabel((distribution.state as FixedPriceSaleState | undefined)?.saleStatus)
-      : distribution.kind === "migrating-bonding-curve"
-        ? curveStatusLabel((distribution.state as MigratingBondingCurveState | undefined)?.curveStatus)
-        : distribution.kind === "merkle-airdrop"
-          ? airdropStatusLabel((distribution.state as MerkleAirdropState | undefined)?.airdropStatus)
-          : "Unknown";
-  const closed = Boolean(distribution.state?.closed);
+  const addressAction = distributionAddressAction(distribution.kind, {
+    setFixedPriceSaleAddress,
+    setMerkleAirdropAddress,
+    setMigratingCurveAddress,
+  });
+  const statusLabel = distributionStatusLabel(distribution);
+  const statusTone = distributionStatusTone(distribution);
 
   return (
     <div className="grid gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <AddressLink address={distribution.address} />
-        <StatusBadge label={distribution.error ? "Read failed" : status} tone={closed ? "warning" : distribution.error ? "danger" : "default"} />
+        <StatusBadge label={statusLabel} tone={statusTone} />
       </div>
       <div className="flex flex-wrap gap-2">
         <Badge variant="muted">{distribution.kind}</Badge>
-        {distribution.kind === "fixed-price-sale" ? (
-          <Button size="sm" variant="secondary" onClick={() => setFixedPriceSaleAddress(distribution.address)}>
-            Use Sale
-          </Button>
-        ) : distribution.kind === "migrating-bonding-curve" ? (
-          <Button size="sm" variant="secondary" onClick={() => setMigratingCurveAddress(distribution.address)}>
-            Use Curve
-          </Button>
-        ) : distribution.kind === "merkle-airdrop" ? (
-          <Button size="sm" variant="secondary" onClick={() => setMerkleAirdropAddress(distribution.address)}>
-            Use Airdrop
+        {addressAction ? (
+          <Button size="sm" variant="secondary" onClick={() => addressAction.setAddress(distribution.address)}>
+            {addressAction.label}
           </Button>
         ) : null}
       </div>
@@ -150,12 +151,29 @@ function DistributionRow({
   );
 }
 
+function distributionAddressAction(
+  kind: BoardroomDistributionSnapshot["kind"],
+  setters: {
+    setFixedPriceSaleAddress: (address: string) => void;
+    setMerkleAirdropAddress: (address: string) => void;
+    setMigratingCurveAddress: (address: string) => void;
+  },
+): { label: string; setAddress: (address: string) => void } | undefined {
+  if (kind === "fixed-price-sale") return { label: "Use Sale", setAddress: setters.setFixedPriceSaleAddress };
+  if (kind === "migrating-bonding-curve") return { label: "Use Curve", setAddress: setters.setMigratingCurveAddress };
+  if (kind === "merkle-airdrop") return { label: "Use Airdrop", setAddress: setters.setMerkleAirdropAddress };
+  return undefined;
+}
+
 function LockerRow({ locker, setLockedLiquidityAddress }: { locker: BoardroomLockedLiquiditySnapshot; setLockedLiquidityAddress: (address: string) => void }): React.JSX.Element {
+  const statusLabel = lockerStatusLabel(locker);
+  const statusTone = lockerStatusTone(locker);
+
   return (
     <div className="grid gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <AddressLink address={locker.address} />
-        <StatusBadge label={locker.error ? "Read failed" : locker.state?.lockedLiquidity === 0n ? "Exited" : "Locked"} tone={locker.error ? "danger" : locker.state?.lockedLiquidity === 0n ? "warning" : "default"} />
+        <StatusBadge label={statusLabel} tone={statusTone} />
       </div>
       <Button size="sm" variant="secondary" onClick={() => setLockedLiquidityAddress(locker.address)}>
         Use Locker
@@ -176,16 +194,17 @@ function LockerRow({ locker, setLockedLiquidityAddress }: { locker: BoardroomLoc
 function distributionFacts(distribution: BoardroomDistributionSnapshot): { label: string; value: React.ReactNode }[] {
   if (distribution.kind === "fixed-price-sale") {
     const state = distribution.state as FixedPriceSaleState | undefined;
+    const paymentToken = distributionPaymentTokenAddress(distribution);
     return [
-      { label: "Remaining shares", value: formatTokenAmount(state?.remainingShares, distribution.shareTokenMetadata) },
-      { label: "Payment token", value: state ? <AddressLink address={state.paymentToken} /> : "Unknown" },
+      { label: "Remaining shares", value: formatTokenAmount(remainingDistributionShares(distribution), distribution.shareTokenMetadata) },
+      { label: "Payment token", value: paymentToken ? <AddressLink address={paymentToken} /> : "Unknown" },
       { label: "Price", value: formatTokenAmount(state?.price, distribution.paymentTokenMetadata) },
     ];
   }
   if (distribution.kind === "migrating-bonding-curve") {
     const state = distribution.state as MigratingBondingCurveState | undefined;
     return [
-      { label: "Remaining shares", value: formatTokenAmount(state?.remainingSaleShares, distribution.shareTokenMetadata) },
+      { label: "Remaining shares", value: formatTokenAmount(remainingDistributionShares(distribution), distribution.shareTokenMetadata) },
       { label: "Quote reserve", value: formatTokenAmount(state?.quoteReserve, distribution.quoteTokenMetadata) },
       { label: "Can migrate", value: state ? String(state.canMigrate) : "Unknown" },
     ];
@@ -193,7 +212,7 @@ function distributionFacts(distribution: BoardroomDistributionSnapshot): { label
   if (distribution.kind === "merkle-airdrop") {
     const state = distribution.state as MerkleAirdropState | undefined;
     return [
-      { label: "Remaining shares", value: formatTokenAmount(state?.remainingShares, distribution.shareTokenMetadata) },
+      { label: "Remaining shares", value: formatTokenAmount(remainingDistributionShares(distribution), distribution.shareTokenMetadata) },
       { label: "Grant factory", value: state ? <AddressLink address={state.tokenGrantFactory} /> : "Unknown" },
       { label: "Merkle root", value: state?.merkleRoot ?? "Unknown" },
     ];

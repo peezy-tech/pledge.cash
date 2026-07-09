@@ -14,7 +14,21 @@ import {
   type ProductTreasuryAsset,
 } from "../../lib/product-boardroom";
 import { formatTokenAmount } from "../../lib/token-amounts";
-import type { BoardroomDistributionSnapshot, BoardroomGrantSnapshot, BoardroomLockedLiquiditySnapshot } from "../../lib/types";
+import type { BoardroomDistributionSnapshot, BoardroomGrantSnapshot, BoardroomLockedLiquiditySnapshot, BoardroomSnapshot } from "../../lib/types";
+import {
+  boardroomStatusLabel,
+  boardroomStatusTone,
+  curveStatusLabel,
+  distributionPaymentTokenAddress,
+  grantStatusLabel,
+  grantStatusTone,
+  lockerStatusLabel,
+  lockerStatusTone,
+  remainingDistributionShares,
+  sameAddress,
+  type BoardroomFact,
+  type StatusTone,
+} from "./boardroom-panel-shared";
 
 type ProductBoardroomDashboardProps = {
   account: Address | undefined;
@@ -48,12 +62,15 @@ export function ProductBoardroomDashboard({
   runAction,
 }: ProductBoardroomDashboardProps): React.JSX.Element {
   const snapshot = dashboard?.snapshot;
-  const revenueAssets = dashboard?.treasuryAssets.filter((asset) => isRevenueAsset(asset, dashboard.snapshot.shareToken)) ?? [];
+  const treasuryAssets = dashboard?.treasuryAssets ?? [];
+  const revenueAssetCount = treasuryAssets.filter((asset) => isRevenueAsset(asset, snapshot?.shareToken)).length;
   const grantStats = grantSummary(dashboard?.snapshot.grantSummaries ?? []);
-  const activeCatalogEntry = dashboard?.catalog.find((entry) => sameAddress(entry.address, dashboard.address));
-  const projectName = activeCatalogEntry?.name ?? activeCatalogEntry?.symbol ?? "Boardroom Project";
+  const activeCatalogEntry = selectedCatalogEntry(dashboard);
+  const projectName = projectDisplayName(activeCatalogEntry);
   const accountRoles = projectRoles(account, dashboard);
   const accessLabel = accountRoles.map((role) => role.label).join(" / ");
+  const isOwner = isBoardroomOwner(account, dashboard);
+  const overviewStatus = dashboardOverviewStatus(snapshot, error, loading);
 
   return (
     <div className="grid gap-4">
@@ -76,11 +93,11 @@ export function ProductBoardroomDashboard({
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
               <div className="mb-2 flex flex-wrap items-center gap-2">
-                <Badge variant={snapshot ? boardroomStatusTone(snapshot.status) : error ? "danger" : "muted"}>
-                  {snapshot ? boardroomStatusLabel(snapshot.status) : error ? "Unavailable" : loading ? "Loading" : "Not loaded"}
-                </Badge>
+                <Badge variant={overviewStatus.tone}>{overviewStatus.label}</Badge>
                 {accountRoles.map((role) => (
-                  <Badge key={role.label} variant={role.tone}>{role.label}</Badge>
+                  <Badge key={role.label} variant={role.tone}>
+                    {role.label}
+                  </Badge>
                 ))}
               </div>
               <div className="m-0 text-2xl font-semibold tracking-normal text-zinc-50 sm:text-3xl">{projectName}</div>
@@ -98,7 +115,7 @@ export function ProductBoardroomDashboard({
                   <KeyRound className="h-4 w-4" />
                   Grants
                 </Button>
-                <Button className="self-start" variant={isBoardroomOwner(account, dashboard) ? "default" : "secondary"} onClick={() => openManage(dashboard.address)}>
+                <Button className="self-start" variant={isOwner ? "default" : "secondary"} onClick={() => openManage(dashboard.address)}>
                   <Settings2 className="h-4 w-4" />
                   Manage
                 </Button>
@@ -115,8 +132,8 @@ export function ProductBoardroomDashboard({
             { label: "Project token", value: snapshot?.shareToken ? <AddressLink address={snapshot.shareToken} /> : "Unknown" },
             { label: "Connected wallet", value: account ? <AddressLink address={account} /> : "Read-only visitor" },
             { label: "Native balance", value: dashboard ? formatNativeBalance(dashboard.nativeBalance) : "Unknown" },
-            { label: "Revenue assets", value: String(revenueAssets.filter((asset) => (asset.balance ?? 0n) > 0n).length) },
-            { label: "Open commitments", value: snapshot ? `${snapshot.issuedGrants.length} grants / ${snapshot.issuedDistributions.length} distributions / ${snapshot.lockedLiquidityPositions.length} lockers` : "Unknown" },
+            { label: "Revenue assets", value: String(revenueAssetCount) },
+            { label: "Open commitments", value: openCommitmentsLabel(snapshot) },
             { label: "Access", value: accessLabel },
             { label: "Settlement", value: "Onchain" },
           ]}
@@ -131,7 +148,7 @@ export function ProductBoardroomDashboard({
             Settle a grant
           </Button>
           {dashboard ? (
-            <Button variant={isBoardroomOwner(account, dashboard) ? "default" : "secondary"} onClick={() => openManage(dashboard.address)}>
+            <Button variant={isOwner ? "default" : "secondary"} onClick={() => openManage(dashboard.address)}>
               <Settings2 className="h-4 w-4" />
               Owner actions
             </Button>
@@ -151,10 +168,10 @@ export function ProductBoardroomDashboard({
 
       <LocalNetworkPanel
         activeBoardroom={dashboard?.address}
-        cashAsset={dashboard?.treasuryAssets.find((asset) => sameAddress(asset.address, activeCatalogEntry?.cashToken))}
+        cashAsset={findAsset(treasuryAssets, activeCatalogEntry?.cashToken)}
         entries={dashboard?.catalog ?? []}
         openTools={openTools}
-        shareAsset={dashboard?.treasuryAssets.find((asset) => sameAddress(asset.address, dashboard?.snapshot.shareToken))}
+        shareAsset={findAsset(treasuryAssets, snapshot?.shareToken)}
       />
 
       <LaunchPanel dashboard={dashboard} />
@@ -249,6 +266,10 @@ function LaunchPanel({ dashboard }: { dashboard: ProductBoardroomDashboardState 
   const purchasedShares =
     history?.soldShares ?? (curve?.state && "soldShares" in curve.state ? curve.state.soldShares : undefined);
   const quoteRaised = history?.cashRaised ?? (curve?.state && "quoteReserve" in curve.state ? curve.state.quoteReserve : undefined);
+  const curveStatus = curve ? curveStatusLabel(curve.state && "curveStatus" in curve.state ? curve.state.curveStatus : undefined) : "Unknown";
+  const graduationTarget = curve?.state && "graduationQuoteTarget" in curve.state ? curve.state.graduationQuoteTarget : undefined;
+  const migrationPool = migration?.pool ?? (curve?.state && "pool" in curve.state ? curve.state.pool : undefined);
+  const migrationLocker = migration?.locker ?? locker?.address;
   const optionStrike = impliedUnitPrice(migration?.quoteToLiquidity, migration?.sharesToLiquidity, shareAsset?.decimals);
   const migrationValuation = impliedQuoteValue(shareAsset?.totalSupply, optionStrike, shareAsset?.decimals);
   const claimableFees = formatClaimableLockerFees(locker);
@@ -259,10 +280,10 @@ function LaunchPanel({ dashboard }: { dashboard: ProductBoardroomDashboardState 
         columns="three"
         items={[
           { label: "Curve", value: curve?.address ? <AddressLink address={curve.address} /> : "Unknown" },
-          { label: "Curve status", value: curve ? curveStatusLabel(curve.state && "curveStatus" in curve.state ? curve.state.curveStatus : undefined) : "Unknown" },
+          { label: "Curve status", value: curveStatus },
           { label: "Curve purchases", value: formatTokenAmount(purchasedShares, shareAsset) },
           { label: "Quote raised", value: formatTokenAmount(quoteRaised, cashAsset) },
-          { label: "Graduation target", value: formatTokenAmount(curve?.state && "graduationQuoteTarget" in curve.state ? curve.state.graduationQuoteTarget : undefined, cashAsset) },
+          { label: "Graduation target", value: formatTokenAmount(graduationTarget, cashAsset) },
           { label: "Quote to LP", value: formatTokenAmount(migration?.quoteToLiquidity, cashAsset) },
           { label: "Employee option strike", value: formatTokenAmount(optionStrike, cashAsset) },
           { label: "Implied FDV", value: formatTokenAmount(migrationValuation, cashAsset) },
@@ -291,12 +312,12 @@ function LaunchPanel({ dashboard }: { dashboard: ProductBoardroomDashboardState 
           items={[
             {
               label: "Pool",
-              value: migration?.pool ? <AddressLink address={migration.pool} /> : curve?.state && "pool" in curve.state ? <AddressLink address={curve.state.pool} /> : "Unknown",
+              value: migrationPool ? <AddressLink address={migrationPool} /> : "Unknown",
               detail: `${formatTokenAmount(migration?.sharesToLiquidity, shareAsset)} paired`,
             },
             {
               label: "Locker",
-              value: migration?.locker ? <AddressLink address={migration.locker} /> : locker?.address ? <AddressLink address={locker.address} /> : "Unknown",
+              value: migrationLocker ? <AddressLink address={migrationLocker} /> : "Unknown",
               detail: `${formatTokenAmount(migration?.quoteToBoardroom, cashAsset)} retained`,
             },
           ]}
@@ -428,43 +449,57 @@ function GrantHealthPanel({
       ) : (
         <ol className="grid gap-px border-t border-zinc-800 bg-zinc-800">
           {grants.map((grant) => (
-            <li className="bg-zinc-950 p-4" key={grant.address}>
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <AddressLink address={grant.address} />
-                </div>
-                <Badge variant={grant.error ? "danger" : grant.state?.closed ? "warning" : "default"}>
-                  {grant.error ? "Read failed" : grant.state?.closed ? "Closed" : "Open"}
-                </Badge>
-              </div>
-              {grant.error ? <p className="m-0 text-sm text-red-200">{grant.error}</p> : null}
-              <Facts
-                columns="three"
-                items={[
-                  { label: "Holder", value: grant.state ? <AddressLink address={grant.state.holder} /> : "Unknown" },
-                  { label: "Grant size", value: formatTokenAmount(grant.state?.grantSize, grant.tokenMetadata) },
-                  { label: "Claimable", value: formatTokenAmount(grant.state?.claimable, grant.tokenMetadata) },
-                  { label: "Settled", value: formatTokenAmount(grant.state?.settledAmount, grant.tokenMetadata) },
-                  { label: "Settleable now", value: formatTokenAmount(grant.state?.settleable, grant.tokenMetadata) },
-                  { label: "Strike", value: formatTokenAmount(grant.state?.price, grant.paymentTokenMetadata) },
-                  { label: "Payment", value: grant.state && !isZeroGrantPayment(grant.state.paymentToken) ? <AddressLink address={grant.state.paymentToken} /> : "None" },
-                  { label: "Vesting cliff", value: dateString(grant.state?.vestingCliff) },
-                  { label: "Vesting end", value: dateString(grant.state?.vestingEnd) },
-                  { label: "Expiry", value: dateString(grant.state?.expiry) },
-                ]}
-              />
-              <GrantVestingChart state={grant.state} tokenMetadata={grant.tokenMetadata} />
-              <ActionRow>
-                <Button size="sm" variant="secondary" onClick={() => inspectGrant(grant.address)}>
-                  Inspect Grant
-                </Button>
-              </ActionRow>
-            </li>
+            <GrantHealthRow grant={grant} inspectGrant={inspectGrant} key={grant.address} />
           ))}
         </ol>
       )}
     </Panel>
   );
+}
+
+function GrantHealthRow({
+  grant,
+  inspectGrant,
+}: {
+  grant: BoardroomGrantSnapshot;
+  inspectGrant: (grant: Address) => void;
+}): React.JSX.Element {
+  const statusLabel = grantStatusLabel(grant);
+  const statusTone = grantStatusTone(grant);
+
+  return (
+    <li className="bg-zinc-950 p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <AddressLink address={grant.address} />
+        </div>
+        <Badge variant={statusTone}>{statusLabel}</Badge>
+      </div>
+      {grant.error ? <p className="m-0 text-sm text-red-200">{grant.error}</p> : null}
+      <Facts columns="three" items={grantHealthFacts(grant)} />
+      <GrantVestingChart state={grant.state} tokenMetadata={grant.tokenMetadata} />
+      <ActionRow>
+        <Button size="sm" variant="secondary" onClick={() => inspectGrant(grant.address)}>
+          Inspect Grant
+        </Button>
+      </ActionRow>
+    </li>
+  );
+}
+
+function grantHealthFacts(grant: BoardroomGrantSnapshot): BoardroomFact[] {
+  return [
+    { label: "Holder", value: grant.state ? <AddressLink address={grant.state.holder} /> : "Unknown" },
+    { label: "Grant size", value: formatTokenAmount(grant.state?.grantSize, grant.tokenMetadata) },
+    { label: "Claimable", value: formatTokenAmount(grant.state?.claimable, grant.tokenMetadata) },
+    { label: "Settled", value: formatTokenAmount(grant.state?.settledAmount, grant.tokenMetadata) },
+    { label: "Settleable now", value: formatTokenAmount(grant.state?.settleable, grant.tokenMetadata) },
+    { label: "Strike", value: formatTokenAmount(grant.state?.price, grant.paymentTokenMetadata) },
+    { label: "Payment", value: grant.state && !isZeroGrantPayment(grant.state.paymentToken) ? <AddressLink address={grant.state.paymentToken} /> : "None" },
+    { label: "Vesting cliff", value: dateString(grant.state?.vestingCliff) },
+    { label: "Vesting end", value: dateString(grant.state?.vestingEnd) },
+    { label: "Expiry", value: dateString(grant.state?.expiry) },
+  ];
 }
 
 function ObligationPanel({
@@ -479,48 +514,45 @@ function ObligationPanel({
       <div className="grid gap-px border-t border-zinc-800 bg-zinc-800 lg:grid-cols-2">
         <ObligationColumn title="Distributions" emptyLabel="No distributions">
           {distributions.map((distribution) => (
-            <li className="bg-zinc-950 p-4" key={distribution.address}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <AddressLink address={distribution.address} />
-                <Badge variant={distribution.error ? "danger" : distribution.state?.closed ? "warning" : "default"}>
-                  {distribution.error ? "Read failed" : distribution.kind}
-                </Badge>
-              </div>
-              <Facts
-                columns="one"
-                items={[
-                  { label: "Kind", value: distribution.kind },
-                  { label: "Remaining shares", value: formatTokenAmount(remainingDistributionShares(distribution), distribution.shareTokenMetadata) },
-                  { label: "Payment token", value: distributionPaymentToken(distribution) },
-                ]}
-              />
-            </li>
+            <DashboardDistributionRow distribution={distribution} key={distribution.address} />
           ))}
         </ObligationColumn>
         <ObligationColumn title="Locked Liquidity" emptyLabel="No lockers">
           {lockers.map((locker) => (
-            <li className="bg-zinc-950 p-4" key={locker.address}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <AddressLink address={locker.address} />
-                <Badge variant={locker.error ? "danger" : locker.state?.lockedLiquidity === 0n ? "warning" : "default"}>
-                  {locker.error ? "Read failed" : locker.state?.lockedLiquidity === 0n ? "Exited" : "Locked"}
-                </Badge>
-              </div>
-              <Facts
-                columns="one"
-                items={[
-                  { label: "Pool", value: locker.state?.pool ? <AddressLink address={locker.state.pool} /> : "Unknown" },
-                  { label: "Locked LP", value: formatTokenAmount(locker.state?.lockedLiquidity, locker.liquidityMetadata) },
-                  { label: "Claimable A", value: formatTokenAmount(locker.claimableA, locker.tokenAMetadata) },
-                  { label: "Claimable B", value: formatTokenAmount(locker.claimableB, locker.tokenBMetadata) },
-                  { label: "Pair", value: locker.state ? `${locker.state.tokenA} / ${locker.state.tokenB}` : "Unknown" },
-                ]}
-              />
-            </li>
+            <DashboardLockerRow locker={locker} key={locker.address} />
           ))}
         </ObligationColumn>
       </div>
     </Panel>
+  );
+}
+
+function DashboardDistributionRow({ distribution }: { distribution: BoardroomDistributionSnapshot }): React.JSX.Element {
+  const badge = dashboardDistributionBadge(distribution);
+
+  return (
+    <li className="bg-zinc-950 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <AddressLink address={distribution.address} />
+        <Badge variant={badge.tone}>{badge.label}</Badge>
+      </div>
+      <Facts columns="one" items={dashboardDistributionFacts(distribution)} />
+    </li>
+  );
+}
+
+function DashboardLockerRow({ locker }: { locker: BoardroomLockedLiquiditySnapshot }): React.JSX.Element {
+  const statusLabel = lockerStatusLabel(locker);
+  const statusTone = lockerStatusTone(locker);
+
+  return (
+    <li className="bg-zinc-950 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <AddressLink address={locker.address} />
+        <Badge variant={statusTone}>{statusLabel}</Badge>
+      </div>
+      <Facts columns="one" items={dashboardLockerFacts(locker)} />
+    </li>
   );
 }
 
@@ -539,6 +571,56 @@ function ObligationColumn({
       {children.length === 0 ? <p className="m-0 p-4 text-sm text-zinc-500">{emptyLabel}</p> : <ol className="grid gap-px bg-zinc-800">{children}</ol>}
     </section>
   );
+}
+
+function selectedCatalogEntry(
+  dashboard: ProductBoardroomDashboardState | undefined,
+): ProductBoardroomCatalogEntry | undefined {
+  return dashboard?.catalog.find((entry) => sameAddress(entry.address, dashboard.address));
+}
+
+function projectDisplayName(entry: ProductBoardroomCatalogEntry | undefined): string {
+  return entry?.name ?? entry?.symbol ?? "Boardroom Project";
+}
+
+function dashboardOverviewStatus(
+  snapshot: BoardroomSnapshot | undefined,
+  error: string | undefined,
+  loading: boolean,
+): { label: string; tone: StatusTone } {
+  if (snapshot) return { label: boardroomStatusLabel(snapshot.status), tone: boardroomStatusTone(snapshot.status) };
+  if (error) return { label: "Unavailable", tone: "danger" };
+  if (loading) return { label: "Loading", tone: "muted" };
+  return { label: "Not loaded", tone: "muted" };
+}
+
+function openCommitmentsLabel(snapshot: BoardroomSnapshot | undefined): string {
+  if (!snapshot) return "Unknown";
+  return `${snapshot.issuedGrants.length} grants / ${snapshot.issuedDistributions.length} distributions / ${snapshot.lockedLiquidityPositions.length} lockers`;
+}
+
+function dashboardDistributionBadge(distribution: BoardroomDistributionSnapshot): { label: string; tone: StatusTone } {
+  if (distribution.error) return { label: "Read failed", tone: "danger" };
+  if (distribution.state?.closed) return { label: distribution.kind, tone: "warning" };
+  return { label: distribution.kind, tone: "default" };
+}
+
+function dashboardDistributionFacts(distribution: BoardroomDistributionSnapshot): BoardroomFact[] {
+  return [
+    { label: "Kind", value: distribution.kind },
+    { label: "Remaining shares", value: formatTokenAmount(remainingDistributionShares(distribution), distribution.shareTokenMetadata) },
+    { label: "Payment token", value: distributionPaymentToken(distribution) },
+  ];
+}
+
+function dashboardLockerFacts(locker: BoardroomLockedLiquiditySnapshot): BoardroomFact[] {
+  return [
+    { label: "Pool", value: locker.state?.pool ? <AddressLink address={locker.state.pool} /> : "Unknown" },
+    { label: "Locked LP", value: formatTokenAmount(locker.state?.lockedLiquidity, locker.liquidityMetadata) },
+    { label: "Claimable A", value: formatTokenAmount(locker.claimableA, locker.tokenAMetadata) },
+    { label: "Claimable B", value: formatTokenAmount(locker.claimableB, locker.tokenBMetadata) },
+    { label: "Pair", value: locker.state ? `${locker.state.tokenA} / ${locker.state.tokenB}` : "Unknown" },
+  ];
 }
 
 function grantSummary(grants: BoardroomGrantSnapshot[]): {
@@ -583,45 +665,22 @@ function commonGrantPaymentTokenMetadata(grants: BoardroomGrantSnapshot[]): Boar
   return first.paymentTokenMetadata;
 }
 
-function isRevenueAsset(asset: ProductTreasuryAsset, shareToken: Address): boolean {
-  return asset.address.toLowerCase() !== shareToken.toLowerCase() && (asset.balance ?? 0n) > 0n;
-}
-
-function boardroomStatusLabel(status: number | undefined): string {
-  if (status === 0) return "Active";
-  if (status === 1) return "Winding down";
-  if (status === 2) return "Redemptions open";
-  return "Unknown";
-}
-
-function boardroomStatusTone(status: number | undefined): "default" | "muted" | "warning" | "danger" {
-  if (status === 0) return "default";
-  if (status === 1) return "warning";
-  if (status === 2) return "muted";
-  return "muted";
+function isRevenueAsset(asset: ProductTreasuryAsset, shareToken: Address | undefined): boolean {
+  return !sameAddress(asset.address, shareToken) && (asset.balance ?? 0n) > 0n;
 }
 
 function isZeroGrantPayment(address: Address): boolean {
   return address.toLowerCase() === "0x0000000000000000000000000000000000000000";
 }
 
-function remainingDistributionShares(distribution: BoardroomDistributionSnapshot): bigint | undefined {
-  if (!distribution.state) return undefined;
-  if ("remainingShares" in distribution.state) return distribution.state.remainingShares;
-  if ("remainingSaleShares" in distribution.state) return distribution.state.remainingSaleShares;
-  return undefined;
-}
-
 function distributionPaymentToken(distribution: BoardroomDistributionSnapshot): React.ReactNode {
-  if (!distribution.state) return "Unknown";
-  if ("paymentToken" in distribution.state) return <AddressLink address={distribution.state.paymentToken} />;
-  if ("quoteToken" in distribution.state) return <AddressLink address={distribution.state.quoteToken} />;
-  return "Unknown";
+  const paymentToken = distributionPaymentTokenAddress(distribution);
+  return paymentToken ? <AddressLink address={paymentToken} /> : "Unknown";
 }
 
 function findAsset(assets: ProductTreasuryAsset[], address: Address | undefined): ProductTreasuryAsset | undefined {
   if (!address) return undefined;
-  return assets.find((asset) => asset.address.toLowerCase() === address.toLowerCase());
+  return assets.find((asset) => sameAddress(asset.address, address));
 }
 
 function findLaunchDistribution(
@@ -629,7 +688,7 @@ function findLaunchDistribution(
   address: Address | undefined,
 ): BoardroomDistributionSnapshot | undefined {
   if (address) {
-    const selected = distributions.find((distribution) => distribution.address.toLowerCase() === address.toLowerCase());
+    const selected = distributions.find((distribution) => sameAddress(distribution.address, address));
     if (selected) return selected;
   }
   return distributions.find((distribution) => distribution.kind === "migrating-bonding-curve");
@@ -641,7 +700,7 @@ function findLaunchLocker(
   pool: Address | undefined,
 ): BoardroomLockedLiquiditySnapshot | undefined {
   if (address) {
-    const selected = lockers.find((locker) => locker.address.toLowerCase() === address.toLowerCase());
+    const selected = lockers.find((locker) => sameAddress(locker.address, address));
     if (selected) return selected;
   }
   if (pool) {
@@ -674,13 +733,6 @@ function impliedUnitPrice(
   return (quoteAmount * 10n ** BigInt(shareDecimals)) / shareAmount;
 }
 
-function curveStatusLabel(status: number | undefined): string {
-  if (status === 0) return "Active";
-  if (status === 1) return "Migrated";
-  if (status === 2) return "Cancelled";
-  return "Unknown";
-}
-
 function catalogShareAsset(
   entry: ProductBoardroomCatalogEntry,
   primaryShareAsset: ProductTreasuryAsset | undefined,
@@ -711,13 +763,6 @@ function catalogCashAsset(
   return asset;
 }
 
-function distributionPaymentTokenAddress(distribution: BoardroomDistributionSnapshot | undefined): Address | undefined {
-  if (!distribution?.state) return undefined;
-  if ("paymentToken" in distribution.state) return distribution.state.paymentToken;
-  if ("quoteToken" in distribution.state) return distribution.state.quoteToken;
-  return undefined;
-}
-
 function projectRoles(
   account: Address | undefined,
   dashboard: ProductBoardroomDashboardState | undefined,
@@ -742,8 +787,4 @@ function isBoardroomOwner(
   dashboard: ProductBoardroomDashboardState | undefined,
 ): boolean {
   return sameAddress(account, dashboard?.snapshot.owner);
-}
-
-function sameAddress(first: Address | undefined, second: Address | undefined): boolean {
-  return Boolean(first && second && first.toLowerCase() === second.toLowerCase());
 }
