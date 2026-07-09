@@ -277,6 +277,37 @@ contract LockedLiquidityTest is Test {
         assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
     }
 
+    function testLaunchedWindDownCanExecuteQueuedLockedLiquidityExitSelfCall() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-launched-exit");
+        CreatedLocker memory created = _createLockedLiquidity(
+            boardroom, shareToken, address(quoteToken), address(lockedLiquidityFactory), "launched-exit"
+        );
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, HOLDER_SHARES);
+        boardroom.launch(1 days);
+        vm.stopPrank();
+
+        vm.prank(holder);
+        boardroom.startWindDown();
+
+        Boardroom.Call memory call_ = _policyCall(
+            address(0),
+            address(boardroom),
+            abi.encodeCall(Boardroom.exitLockedLiquidity, (created.locker, 1, 1, block.timestamp + 2 days))
+        );
+        bytes32 salt = keccak256("queued-exit-locked-liquidity");
+
+        vm.prank(owner);
+        (, uint256 eta) = boardroom.queueAction(call_, salt);
+
+        vm.warp(eta);
+        vm.prank(owner);
+        boardroom.executeQueuedAction(call_, salt);
+
+        assertEq(LockedLiquidity(created.locker).lockedLiquidity(), 0);
+    }
+
     function testBoardroomCanClaimLockedLiquidityFeesDuringWindDown() public {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-fees");
         CreatedLocker memory created =

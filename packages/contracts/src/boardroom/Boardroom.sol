@@ -180,6 +180,10 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
     function mint(address to, uint256 amount) external {
         _requireGovernanceCaller();
+        _mintShares(to, amount);
+    }
+
+    function _mintShares(address to, uint256 amount) internal {
         _requireStatus(BoardroomStatus.Active);
         if (to == address(0)) revert InvalidAddress();
         if (amount == 0) revert InvalidAmount();
@@ -298,6 +302,10 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
     function registerRedeemableAsset(address asset) external {
         _requireGovernanceCaller();
+        _registerRedeemableAssetGoverned(asset);
+    }
+
+    function _registerRedeemableAssetGoverned(address asset) internal {
         BoardroomStatus currentStatus = status;
         if (currentStatus == BoardroomStatus.RedemptionsOpen) {
             revert InvalidStatus(BoardroomStatus.WindingDown, currentStatus);
@@ -307,6 +315,10 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
     function burnTreasuryShares() external returns (uint256 burned) {
         _requireGovernanceCaller();
+        burned = _burnTreasurySharesGoverned();
+    }
+
+    function _burnTreasurySharesGoverned() internal returns (uint256 burned) {
         _requireStatus(BoardroomStatus.WindingDown);
         burned = _burnTreasuryShares();
     }
@@ -317,6 +329,13 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         returns (uint256 amountA, uint256 amountB, uint256 liquidity)
     {
         _requireGovernanceCaller();
+        (amountA, amountB, liquidity) = _exitLockedLiquidity(locker, amountAMin, amountBMin, deadline);
+    }
+
+    function _exitLockedLiquidity(address locker, uint256 amountAMin, uint256 amountBMin, uint256 deadline)
+        internal
+        returns (uint256 amountA, uint256 amountB, uint256 liquidity)
+    {
         _requireStatus(BoardroomStatus.WindingDown);
         if (!isLockedLiquidity[locker]) revert InvalidLockedLiquidity(locker);
 
@@ -336,6 +355,10 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
     function openRedemptions() external {
         _requireGovernanceCaller();
+        _openRedemptions();
+    }
+
+    function _openRedemptions() internal {
         _requireStatus(BoardroomStatus.WindingDown);
         _requireNoOpenIssuedGrants();
         _requireNoOpenIssuedDistributions();
@@ -475,9 +498,14 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
             _authorizeActiveCall(policy, target, selector, call_.value, call_.data);
         }
 
-        bool success;
-        (success, result) = target.call{value: call_.value}(call_.data);
-        if (!success) _revertCall(target, result);
+        if (_isBoardroomGovernanceCall(policy, target, selector)) {
+            if (call_.value != 0) revert CallNotAllowed(policy, target, selector);
+            result = _executeBoardroomGovernanceCall(selector, call_.data);
+        } else {
+            bool success;
+            (success, result) = target.call{value: call_.value}(call_.data);
+            if (!success) _revertCall(target, result);
+        }
 
         if (currentStatus == BoardroomStatus.Active) {
             _recordIssuedObligation(policy, target, call_.value, call_.data, result);
@@ -494,12 +522,13 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         view
     {
         IBoardroomPolicyRegistry registry = IBoardroomPolicyRegistry(policyRegistry);
+        bool targetIsModule = registry.isPolicyLifecycleAllowed(target);
         if (policy == address(0)) {
-            if (registry.isPolicyAllowed(target)) revert ModulePolicyRequired(target);
+            if (targetIsModule) revert ModulePolicyRequired(target);
             return;
         }
 
-        if (registry.isPolicyAllowed(target) && policy != target) revert ModulePolicyRequired(target);
+        if (targetIsModule && policy != target) revert ModulePolicyRequired(target);
         if (!registry.isPolicyAllowed(policy)) revert PolicyNotAllowed(policy);
         if (!IBoardroomCallPolicy(policy).canCall(address(this), msg.sender, target, value, data)) {
             revert CallNotAllowed(policy, target, selector);
@@ -507,6 +536,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     }
 
     function _isWindDownCallAllowed(address policy, address target, bytes4 selector) internal view returns (bool) {
+        if (_isBoardroomWindDownGovernanceCall(policy, target, selector)) return true;
         if (policy == address(0)) return false;
         if (!IBoardroomPolicyRegistry(policyRegistry).isPolicyLifecycleAllowed(policy)) return false;
         if (!isIssuedGrant[target] && !isIssuedDistribution[target] && !isLockedLiquidity[target]) return false;
@@ -518,6 +548,69 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         } catch {}
 
         return false;
+    }
+
+    function _isBoardroomGovernanceCall(address policy, address target, bytes4 selector) internal view returns (bool) {
+        if (policy != address(0) || target != address(this)) return false;
+        return selector == Boardroom.setExecutor.selector || selector == Boardroom.mint.selector
+            || selector == Boardroom.wrapNativeBalance.selector
+            || selector == Boardroom.registerRedeemableAsset.selector
+            || selector == Boardroom.burnTreasuryShares.selector || selector == Boardroom.exitLockedLiquidity.selector
+            || selector == Boardroom.openRedemptions.selector;
+    }
+
+    function _isBoardroomWindDownGovernanceCall(address policy, address target, bytes4 selector)
+        internal
+        view
+        returns (bool)
+    {
+        if (policy != address(0) || target != address(this)) return false;
+        return selector == Boardroom.setExecutor.selector || selector == Boardroom.wrapNativeBalance.selector
+            || selector == Boardroom.registerRedeemableAsset.selector
+            || selector == Boardroom.burnTreasuryShares.selector || selector == Boardroom.exitLockedLiquidity.selector
+            || selector == Boardroom.openRedemptions.selector;
+    }
+
+    function _executeBoardroomGovernanceCall(bytes4 selector, bytes calldata data)
+        internal
+        returns (bytes memory result)
+    {
+        if (selector == Boardroom.setExecutor.selector) {
+            address executor_ = abi.decode(data[4:], (address));
+            _setExecutor(executor_);
+            return "";
+        }
+        if (selector == Boardroom.mint.selector) {
+            (address to, uint256 amount) = abi.decode(data[4:], (address, uint256));
+            _mintShares(to, amount);
+            return "";
+        }
+        if (selector == Boardroom.wrapNativeBalance.selector) {
+            _wrapNativeBalanceForWindDown();
+            return "";
+        }
+        if (selector == Boardroom.registerRedeemableAsset.selector) {
+            address asset = abi.decode(data[4:], (address));
+            _registerRedeemableAssetGoverned(asset);
+            return "";
+        }
+        if (selector == Boardroom.burnTreasuryShares.selector) {
+            uint256 burned = _burnTreasurySharesGoverned();
+            return abi.encode(burned);
+        }
+        if (selector == Boardroom.exitLockedLiquidity.selector) {
+            (address locker, uint256 amountAMin, uint256 amountBMin, uint256 deadline) =
+                abi.decode(data[4:], (address, uint256, uint256, uint256));
+            (uint256 amountA, uint256 amountB, uint256 liquidity) =
+                _exitLockedLiquidity(locker, amountAMin, amountBMin, deadline);
+            return abi.encode(amountA, amountB, liquidity);
+        }
+        if (selector == Boardroom.openRedemptions.selector) {
+            _openRedemptions();
+            return "";
+        }
+
+        revert CallNotAllowed(address(0), address(this), selector);
     }
 
     function _recordIssuedObligation(

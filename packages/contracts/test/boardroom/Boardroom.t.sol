@@ -404,6 +404,30 @@ contract BoardroomTest is Test {
         assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.WindingDown));
     }
 
+    function testLaunchedWindDownCanExecuteQueuedOpenRedemptionsSelfCall() public {
+        (Boardroom boardroom,) = _createBoardroom("launched-wind-down-open-redemptions");
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, 1 ether);
+        boardroom.launch(1 days);
+        vm.stopPrank();
+
+        vm.prank(holder);
+        boardroom.startWindDown();
+
+        Boardroom.Call memory call_ = _rawCall(address(boardroom), 0, abi.encodeCall(Boardroom.openRedemptions, ()));
+        bytes32 salt = keccak256("open-redemptions-after-launch");
+
+        vm.prank(owner);
+        (, uint256 eta) = boardroom.queueAction(call_, salt);
+
+        vm.warp(eta);
+        vm.prank(owner);
+        boardroom.executeQueuedAction(call_, salt);
+
+        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
+    }
+
     function testBoardroomCanIssueFreeGrantForItsShares() public {
         (Boardroom boardroom,) = _createBoardroom("issue-free-grant");
         BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
@@ -895,6 +919,24 @@ contract BoardroomTest is Test {
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(Boardroom.ModulePolicyRequired.selector, address(tokenGrantFactory)));
         boardroom.executeBatch(calls);
+    }
+
+    function testBoardroomRejectsRawCallToLifecycleOnlyModuleTarget() public {
+        policyRegistry.setPolicyStatus(address(tokenGrantFactory), BoardroomPolicyRegistry.PolicyStatus.LifecycleOnly);
+
+        (Boardroom boardroom,) = _createBoardroom("raw-lifecycle-module-target");
+        BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
+
+        vm.prank(owner);
+        boardroom.mint(address(boardroom), GRANT_SIZE);
+
+        BoardroomGrantCreate memory create = _boardroomGrantCreate(
+            address(shareToken), holder, address(0), GRANT_SIZE, 0, keccak256("raw-lifecycle"), 0
+        );
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.ModulePolicyRequired.selector, address(tokenGrantFactory)));
+        boardroom.execute(_rawCall(address(tokenGrantFactory), 0, _createGrantData(create)));
     }
 
     function testBoardroomRejectsInvalidRedeemableAssets() public {
