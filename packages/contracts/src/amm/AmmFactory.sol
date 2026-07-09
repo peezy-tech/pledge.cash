@@ -27,15 +27,16 @@ contract AmmFactory {
     event ProtocolFeeRecipientSet(address indexed recipient);
 
     constructor(address feeManager_) {
-        if (feeManager_ == address(0)) revert ZeroAddress();
+        _requireNonZero(feeManager_);
+
         feeManager = feeManager_;
         poolImplementation = address(new AmmPool());
     }
 
     function setProtocolFeeRecipient(address recipient) external {
-        if (msg.sender != feeManager) revert OnlyFeeManager();
-        if (recipient == address(0)) revert ZeroAddress();
-        if (protocolFeeRecipient != address(0)) revert ProtocolFeeRecipientAlreadySet(protocolFeeRecipient);
+        _requireFeeManager();
+        _requireNonZero(recipient);
+        _requireProtocolFeeRecipientUnset();
 
         protocolFeeRecipient = recipient;
         emit ProtocolFeeRecipientSet(recipient);
@@ -43,16 +44,12 @@ contract AmmFactory {
 
     function createPool(address tokenA, address tokenB) external returns (address pool) {
         (address token0, address token1) = sortTokens(tokenA, tokenB);
-        if (getPool[token0][token1] != address(0)) revert PoolAlreadyExists(getPool[token0][token1]);
+        _requirePoolMissing(token0, token1);
 
         pool = LibClone.cloneDeterministic(poolImplementation, _salt(token0, token1));
         AmmPool(pool).initialize(token0, token1);
 
-        getPool[token0][token1] = pool;
-        getPool[token1][token0] = pool;
-        isPool[pool] = true;
-        allPools.push(pool);
-
+        _recordPool(token0, token1, pool);
         emit PoolCreated(token0, token1, pool, allPools.length);
     }
 
@@ -67,11 +64,37 @@ contract AmmFactory {
 
     function sortTokens(address tokenA, address tokenB) public pure returns (address token0, address token1) {
         if (tokenA == tokenB) revert IdenticalTokens();
+
         (token0, token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
-        if (token0 == address(0)) revert ZeroAddress();
+        _requireNonZero(token0);
     }
 
     function _salt(address token0, address token1) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(token0, token1));
+    }
+
+    function _requireFeeManager() internal view {
+        if (msg.sender != feeManager) revert OnlyFeeManager();
+    }
+
+    function _requireNonZero(address account) internal pure {
+        if (account == address(0)) revert ZeroAddress();
+    }
+
+    function _requirePoolMissing(address token0, address token1) internal view {
+        address existingPool = getPool[token0][token1];
+        if (existingPool != address(0)) revert PoolAlreadyExists(existingPool);
+    }
+
+    function _requireProtocolFeeRecipientUnset() internal view {
+        address recipient = protocolFeeRecipient;
+        if (recipient != address(0)) revert ProtocolFeeRecipientAlreadySet(recipient);
+    }
+
+    function _recordPool(address token0, address token1, address pool) internal {
+        getPool[token0][token1] = pool;
+        getPool[token1][token0] = pool;
+        isPool[pool] = true;
+        allPools.push(pool);
     }
 }

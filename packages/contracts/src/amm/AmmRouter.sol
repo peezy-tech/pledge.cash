@@ -37,8 +37,11 @@ contract AmmRouter is ReentrancyGuard {
     }
 
     constructor(address factory_, address wrappedNative_) {
-        if (factory_ == address(0) || wrappedNative_ == address(0)) revert InvalidAddress();
-        if (factory_.code.length == 0 || wrappedNative_.code.length == 0) revert InvalidAddress();
+        _requireNonZero(factory_);
+        _requireNonZero(wrappedNative_);
+        _requireContract(factory_);
+        _requireContract(wrappedNative_);
+
         factory = factory_;
         wrappedNative = wrappedNative_;
     }
@@ -63,8 +66,7 @@ contract AmmRouter is ReentrancyGuard {
         amounts = new uint256[](path.length);
         amounts[0] = amountIn;
         for (uint256 i; i < path.length - 1; ++i) {
-            address pool = AmmFactory(factory).getPool(path[i], path[i + 1]);
-            if (pool == address(0)) revert InvalidPath();
+            address pool = _existingPool(path[i], path[i + 1]);
             amounts[i + 1] = AmmPool(pool).getAmountOut(amounts[i], path[i]);
         }
     }
@@ -110,7 +112,7 @@ contract AmmRouter is ReentrancyGuard {
         wrappedNative.safeTransfer(pool, amountNative);
         liquidity = AmmPool(pool).mint(to);
 
-        if (msg.value > amountNative) SafeTransferLib.safeTransferETH(msg.sender, msg.value - amountNative);
+        _refundNative(msg.sender, msg.value, amountNative);
     }
 
     function removeLiquidity(
@@ -122,17 +124,15 @@ contract AmmRouter is ReentrancyGuard {
         address to,
         uint256 deadline
     ) external nonReentrant ensure(deadline) returns (uint256 amountA, uint256 amountB) {
-        address pool = AmmFactory(factory).getPool(tokenA, tokenB);
-        if (pool == address(0)) revert InvalidPath();
+        address pool = _existingPool(tokenA, tokenB);
 
         uint256 balanceABefore = ERC20(tokenA).balanceOf(to);
         uint256 balanceBBefore = ERC20(tokenB).balanceOf(to);
-        pool.safeTransferFrom(msg.sender, pool, liquidity);
-        AmmPool(pool).burn(to);
+        _burnLiquidity(pool, liquidity, to);
 
         amountA = _received(tokenA, to, balanceABefore);
         amountB = _received(tokenB, to, balanceBBefore);
-        if (amountA < amountAMin || amountB < amountBMin) revert InsufficientAmount();
+        _requireMinimumAmounts(amountA, amountB, amountAMin, amountBMin);
     }
 
     function removeLiquidityNative(
@@ -143,17 +143,15 @@ contract AmmRouter is ReentrancyGuard {
         address to,
         uint256 deadline
     ) external nonReentrant ensure(deadline) returns (uint256 amountToken, uint256 amountNative) {
-        address pool = AmmFactory(factory).getPool(token, wrappedNative);
-        if (pool == address(0)) revert InvalidPath();
+        address pool = _existingPool(token, wrappedNative);
 
         uint256 tokenBalanceBefore = ERC20(token).balanceOf(address(this));
         uint256 nativeBalanceBefore = ERC20(wrappedNative).balanceOf(address(this));
-        pool.safeTransferFrom(msg.sender, pool, liquidity);
-        AmmPool(pool).burn(address(this));
+        _burnLiquidity(pool, liquidity, address(this));
 
         amountToken = _received(token, address(this), tokenBalanceBefore);
         amountNative = _received(wrappedNative, address(this), nativeBalanceBefore);
-        if (amountToken < amountTokenMin || amountNative < amountNativeMin) revert InsufficientAmount();
+        _requireMinimumAmounts(amountToken, amountNative, amountTokenMin, amountNativeMin);
 
         _checkedTransfer(token, to, amountToken);
         IWrappedNative(wrappedNative).withdraw(amountNative);
@@ -172,11 +170,9 @@ contract AmmRouter is ReentrancyGuard {
 
         address tokenOut = path[path.length - 1];
         uint256 balanceBefore = ERC20(tokenOut).balanceOf(to);
-        _checkedTransferFrom(path[0], msg.sender, AmmFactory(factory).getPool(path[0], path[1]), amounts[0]);
+        _checkedTransferFrom(path[0], msg.sender, _firstPool(path), amounts[0]);
         _swap(amounts, path, to);
-        uint256 amountOut = _received(tokenOut, to, balanceBefore);
-        if (amountOut < amountOutMin) revert InsufficientOutputAmount();
-        amounts[amounts.length - 1] = amountOut;
+        amounts[amounts.length - 1] = _receivedAtLeast(tokenOut, to, balanceBefore, amountOutMin);
     }
 
     function swapExactNativeForTokens(uint256 amountOutMin, address[] calldata path, address to, uint256 deadline)
@@ -195,11 +191,9 @@ contract AmmRouter is ReentrancyGuard {
         address tokenOut = path[path.length - 1];
         uint256 balanceBefore = ERC20(tokenOut).balanceOf(to);
         IWrappedNative(wrappedNative).deposit{value: amounts[0]}();
-        wrappedNative.safeTransfer(AmmFactory(factory).getPool(path[0], path[1]), amounts[0]);
+        wrappedNative.safeTransfer(_firstPool(path), amounts[0]);
         _swap(amounts, path, to);
-        uint256 amountOut = _received(tokenOut, to, balanceBefore);
-        if (amountOut < amountOutMin) revert InsufficientOutputAmount();
-        amounts[amounts.length - 1] = amountOut;
+        amounts[amounts.length - 1] = _receivedAtLeast(tokenOut, to, balanceBefore, amountOutMin);
     }
 
     function swapExactTokensForNative(
@@ -216,10 +210,9 @@ contract AmmRouter is ReentrancyGuard {
         if (amountOut < amountOutMin) revert InsufficientOutputAmount();
 
         uint256 balanceBefore = ERC20(wrappedNative).balanceOf(address(this));
-        _checkedTransferFrom(path[0], msg.sender, AmmFactory(factory).getPool(path[0], path[1]), amounts[0]);
+        _checkedTransferFrom(path[0], msg.sender, _firstPool(path), amounts[0]);
         _swap(amounts, path, address(this));
-        amountOut = _received(wrappedNative, address(this), balanceBefore);
-        if (amountOut < amountOutMin) revert InsufficientOutputAmount();
+        amountOut = _receivedAtLeast(wrappedNative, address(this), balanceBefore, amountOutMin);
         amounts[amounts.length - 1] = amountOut;
 
         IWrappedNative(wrappedNative).withdraw(amountOut);
@@ -227,14 +220,16 @@ contract AmmRouter is ReentrancyGuard {
     }
 
     function _swap(uint256[] memory amounts, address[] calldata path, address to) internal {
+        AmmFactory factory_ = AmmFactory(factory);
+
         for (uint256 i; i < path.length - 1; ++i) {
             (address input, address output) = (path[i], path[i + 1]);
-            address pool = AmmFactory(factory).getPool(input, output);
-            (address token0,) = AmmFactory(factory).sortTokens(input, output);
+            address pool = factory_.getPool(input, output);
+            (address token0,) = factory_.sortTokens(input, output);
             uint256 amountOut = amounts[i + 1];
             (uint256 amount0Out, uint256 amount1Out) =
                 input == token0 ? (uint256(0), amountOut) : (amountOut, uint256(0));
-            address nextTo = i < path.length - 2 ? AmmFactory(factory).getPool(output, path[i + 2]) : to;
+            address nextTo = _swapRecipient(factory_, path, i, to);
             AmmPool(pool).swap(amount0Out, amount1Out, nextTo, "");
         }
     }
@@ -272,7 +267,7 @@ contract AmmRouter is ReentrancyGuard {
             }
         }
 
-        if (amountA < amountAMin || amountB < amountBMin) revert InsufficientAmount();
+        _requireMinimumAmounts(amountA, amountB, amountAMin, amountBMin);
     }
 
     function _checkedTransferFrom(address token, address from, address to, uint256 expectedAmount) internal {
@@ -290,6 +285,15 @@ contract AmmRouter is ReentrancyGuard {
         return delta.received;
     }
 
+    function _receivedAtLeast(address token, address account, uint256 balanceBefore, uint256 minimumAmount)
+        internal
+        view
+        returns (uint256 amount)
+    {
+        amount = _received(token, account, balanceBefore);
+        if (amount < minimumAmount) revert InsufficientOutputAmount();
+    }
+
     function _requireExactReceived(address token, uint256 expectedAmount, ExactTransferLib.RecipientDelta memory delta)
         internal
         pure
@@ -302,5 +306,50 @@ contract AmmRouter is ReentrancyGuard {
 
     function _requireValidPath(address[] memory path) internal pure {
         if (path.length < 2 || path.length > MAX_SWAP_PATH_LENGTH) revert InvalidPath();
+    }
+
+    function _requireMinimumAmounts(uint256 amountA, uint256 amountB, uint256 amountAMin, uint256 amountBMin)
+        internal
+        pure
+    {
+        if (amountA < amountAMin || amountB < amountBMin) revert InsufficientAmount();
+    }
+
+    function _requireNonZero(address account) internal pure {
+        if (account == address(0)) revert InvalidAddress();
+    }
+
+    function _requireContract(address account) internal view {
+        if (account.code.length == 0) revert InvalidAddress();
+    }
+
+    function _existingPool(address tokenA, address tokenB) internal view returns (address pool) {
+        pool = AmmFactory(factory).getPool(tokenA, tokenB);
+        if (pool == address(0)) revert InvalidPath();
+    }
+
+    function _firstPool(address[] calldata path) internal view returns (address) {
+        return _existingPool(path[0], path[1]);
+    }
+
+    function _burnLiquidity(address pool, uint256 liquidity, address recipient) internal {
+        pool.safeTransferFrom(msg.sender, pool, liquidity);
+        AmmPool(pool).burn(recipient);
+    }
+
+    function _refundNative(address recipient, uint256 suppliedAmount, uint256 usedAmount) internal {
+        if (suppliedAmount <= usedAmount) return;
+
+        SafeTransferLib.safeTransferETH(recipient, suppliedAmount - usedAmount);
+    }
+
+    function _swapRecipient(AmmFactory factory_, address[] calldata path, uint256 index, address finalRecipient)
+        internal
+        view
+        returns (address)
+    {
+        if (index >= path.length - 2) return finalRecipient;
+
+        return factory_.getPool(path[index + 1], path[index + 2]);
     }
 }
