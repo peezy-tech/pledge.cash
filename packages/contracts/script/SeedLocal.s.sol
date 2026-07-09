@@ -14,7 +14,6 @@ import {DistributionFactory} from "../src/distribution/DistributionFactory.sol";
 import {FixedPriceSale} from "../src/distribution/FixedPriceSale.sol";
 import {LockedLiquidity} from "../src/liquidity/LockedLiquidity.sol";
 import {MigratingBondingCurve} from "../src/distribution/MigratingBondingCurve.sol";
-import {ProtocolPolicy} from "../src/policy/ProtocolPolicy.sol";
 import {TokenGrant} from "../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../src/grants/TokenGrantFactory.sol";
 
@@ -111,7 +110,6 @@ contract SeedLocal is Script {
 
     struct Deployment {
         BoardroomFactory boardroomFactory;
-        ProtocolPolicy protocolPolicy;
         AssetPolicy assetPolicy;
         TokenGrantFactory tokenGrantFactory;
         DistributionFactory distributionFactory;
@@ -236,7 +234,6 @@ contract SeedLocal is Script {
         string memory path = string.concat("deployments/", vm.toString(block.chainid), ".json");
         string memory json = vm.readFile(path);
         BoardroomFactory boardroomFactory = BoardroomFactory(json.readAddress(".boardroomFactory"));
-        ProtocolPolicy protocolPolicy = ProtocolPolicy(json.readAddress(".protocolPolicy"));
         AssetPolicy assetPolicy = AssetPolicy(json.readAddress(".assetPolicy"));
         TokenGrantFactory tokenGrantFactory = TokenGrantFactory(json.readAddress(".tokenGrantFactory"));
         DistributionFactory distributionFactory = DistributionFactory(json.readAddress(".distributionFactory"));
@@ -244,7 +241,6 @@ contract SeedLocal is Script {
         AmmRouter ammRouter = AmmRouter(payable(json.readAddress(".ammRouter")));
         deployment = Deployment({
             boardroomFactory: boardroomFactory,
-            protocolPolicy: protocolPolicy,
             assetPolicy: assetPolicy,
             tokenGrantFactory: tokenGrantFactory,
             distributionFactory: distributionFactory,
@@ -515,7 +511,7 @@ contract SeedLocal is Script {
             )
         });
         calls[1] = Boardroom.Call({
-            policy: address(deployment.protocolPolicy),
+            policy: address(deployment.distributionFactory),
             target: address(deployment.distributionFactory),
             value: 0,
             data: abi.encodeCall(DistributionFactory.createFixedPriceSale, (params))
@@ -597,7 +593,7 @@ contract SeedLocal is Script {
             )
         });
         calls[1] = Boardroom.Call({
-            policy: address(deployment.protocolPolicy),
+            policy: address(deployment.distributionFactory),
             target: address(deployment.distributionFactory),
             value: 0,
             data: abi.encodeCall(DistributionFactory.createMigratingBondingCurve, (params))
@@ -697,7 +693,7 @@ contract SeedLocal is Script {
             )
         });
         calls[1] = Boardroom.Call({
-            policy: address(deployment.protocolPolicy),
+            policy: address(deployment.distributionFactory),
             target: address(deployment.distributionFactory),
             value: 0,
             data: abi.encodeCall(DistributionFactory.createMigratingBondingCurve, (params))
@@ -896,7 +892,7 @@ contract SeedLocal is Script {
             )
         });
         calls[1] = Boardroom.Call({
-            policy: address(deployment.protocolPolicy),
+            policy: address(deployment.tokenGrantFactory),
             target: address(deployment.tokenGrantFactory),
             value: fee,
             data: _createGrantData(spec)

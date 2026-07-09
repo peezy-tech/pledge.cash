@@ -6,13 +6,13 @@ import {FixedPriceSale} from "./FixedPriceSale.sol";
 import {MerkleAirdrop} from "./MerkleAirdrop.sol";
 import {MigratingBondingCurve} from "./MigratingBondingCurve.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
-import {IBoardroomCallPolicy} from "../policy/IBoardroomCallPolicy.sol";
+import {IBoardroomObligationPolicy} from "../policy/IBoardroomObligationPolicy.sol";
 
 interface IDistributionBoardroom {
     function shareToken() external view returns (address);
 }
 
-contract DistributionFactory is IBoardroomCallPolicy {
+contract DistributionFactory is IBoardroomObligationPolicy {
     uint256 internal constant FIXED_PRICE_SALE_CREATE_DATA_LENGTH = 4 + 32 * 8;
     uint256 internal constant MIGRATING_CURVE_CREATE_DATA_LENGTH = 4 + 32 * 12;
     uint256 internal constant MERKLE_AIRDROP_CREATE_DATA_LENGTH = 4 + 32 * 7;
@@ -154,6 +154,59 @@ contract DistributionFactory is IBoardroomCallPolicy {
         }
 
         return false;
+    }
+
+    function obligationForCall(address, address target, uint256, bytes calldata data, bytes calldata result)
+        external
+        view
+        returns (Obligation memory obligation)
+    {
+        if (target != address(this) || result.length != 32) return obligation;
+
+        bytes4 selector = _selector(data);
+        if (
+            selector != DistributionFactory.createFixedPriceSale.selector
+                && selector != DistributionFactory.createMigratingBondingCurve.selector
+                && selector != DistributionFactory.createMerkleAirdrop.selector
+        ) {
+            return obligation;
+        }
+
+        address distribution = abi.decode(result, (address));
+        obligation.kind = ObligationKind.Distribution;
+        obligation.account = distribution;
+        if (selector == DistributionFactory.createMerkleAirdrop.selector) {
+            obligation.grantSlotReservations = MerkleAirdrop(distribution).maxGrantClaims();
+        }
+    }
+
+    function isLifecycleCallAllowed(address boardroom, address target, bytes4 selector) external view returns (bool) {
+        if (distributionBoardroom[target] != boardroom) return false;
+
+        DistributionKind kind = distributionKind[target];
+        if (kind == DistributionKind.FixedPriceSale) {
+            return selector == FixedPriceSale.close.selector || selector == FixedPriceSale.cancel.selector;
+        }
+        if (kind == DistributionKind.MigratingBondingCurve) {
+            return
+                selector == MigratingBondingCurve.cancel.selector || selector == MigratingBondingCurve.migrate.selector;
+        }
+        if (kind == DistributionKind.MerkleAirdrop) {
+            return selector == MerkleAirdrop.close.selector || selector == MerkleAirdrop.cancel.selector;
+        }
+
+        return false;
+    }
+
+    function grantSlotReleaseForLifecycleCall(address boardroom, address target, bytes4 selector)
+        external
+        view
+        returns (address distribution)
+    {
+        if (distributionBoardroom[target] != boardroom) return address(0);
+        if (distributionKind[target] != DistributionKind.MerkleAirdrop) return address(0);
+        if (selector != MerkleAirdrop.close.selector && selector != MerkleAirdrop.cancel.selector) return address(0);
+        return target;
     }
 
     function distributionCountForBoardroom(address boardroom) external view returns (uint256) {

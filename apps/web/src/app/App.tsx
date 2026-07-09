@@ -1043,7 +1043,6 @@ export function App(): React.JSX.Element {
   const boardroomCreateGrant = async (): Promise<void> => {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
-    const protocolPolicy = requireDeploymentAddress(deployment?.protocolPolicy ?? factory, "ProtocolPolicy");
     const terms = await boardroomShareGrantTerms();
     const predicted = await sdkPredictBoardroomGrantAddress(publicClient, {
       factory,
@@ -1055,7 +1054,7 @@ export function App(): React.JSX.Element {
       buildBoardroomExecuteTransaction({
         boardroom: boardroomSnapshot.address,
         call: buildBoardroomGrantCreationCall({
-          policy: protocolPolicy,
+          policy: factory,
           factory,
           terms: { ...terms, token: boardroomSnapshot.shareToken },
           creationFee,
@@ -1071,7 +1070,6 @@ export function App(): React.JSX.Element {
   const boardroomCreateGrantBatch = async (): Promise<void> => {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
-    const protocolPolicy = requireDeploymentAddress(deployment?.protocolPolicy ?? factory, "ProtocolPolicy");
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const terms = await boardroomShareGrantTerms();
     const predicted = await sdkPredictBoardroomGrantAddress(publicClient, {
@@ -1087,7 +1085,7 @@ export function App(): React.JSX.Element {
         shareToken: boardroomSnapshot.shareToken,
         terms,
         creationFee,
-        policy: protocolPolicy,
+        policy: factory,
         assetPolicy,
       }),
     );
@@ -1147,7 +1145,6 @@ export function App(): React.JSX.Element {
   const createFixedPriceSale = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
-    const protocolPolicy = requireDeploymentAddress(deployment?.protocolPolicy ?? factory, "ProtocolPolicy");
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const terms = await fixedPriceSaleTerms(boardroom);
     const predicted = await sdkPredictFixedPriceSaleAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
@@ -1158,7 +1155,7 @@ export function App(): React.JSX.Element {
         factory,
         shareToken: boardroom.shareToken,
         terms,
-        policy: protocolPolicy,
+        policy: factory,
         assetPolicy,
       }),
     );
@@ -1233,7 +1230,6 @@ export function App(): React.JSX.Element {
   const createMerkleAirdrop = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
-    const protocolPolicy = requireDeploymentAddress(deployment?.protocolPolicy ?? factory, "ProtocolPolicy");
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const terms = await merkleAirdropTerms(boardroom);
     const predicted = await sdkPredictMerkleAirdropAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
@@ -1244,7 +1240,7 @@ export function App(): React.JSX.Element {
         factory,
         shareToken: boardroom.shareToken,
         terms,
-        policy: protocolPolicy,
+        policy: factory,
         assetPolicy,
       }),
     );
@@ -1329,7 +1325,6 @@ export function App(): React.JSX.Element {
   const createMigratingCurve = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
-    const protocolPolicy = requireDeploymentAddress(deployment?.protocolPolicy ?? factory, "ProtocolPolicy");
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const terms = await migratingCurveTerms(boardroom);
     const predicted = await sdkPredictMigratingBondingCurveAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
@@ -1340,7 +1335,7 @@ export function App(): React.JSX.Element {
         factory,
         shareToken: boardroom.shareToken,
         terms,
-        policy: protocolPolicy,
+        policy: factory,
         assetPolicy,
       }),
     );
@@ -1434,7 +1429,6 @@ export function App(): React.JSX.Element {
   const createLockedLiquidity = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
-    const protocolPolicy = requireDeploymentAddress(deployment?.protocolPolicy ?? factory, "ProtocolPolicy");
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const terms = await lockedLiquidityTerms(boardroom);
     const predicted = await sdkPredictLockedLiquidityAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
@@ -1445,7 +1439,7 @@ export function App(): React.JSX.Element {
         factory,
         shareToken: boardroom.shareToken,
         terms,
-        policy: protocolPolicy,
+        policy: factory,
         assetPolicy,
       }),
     );

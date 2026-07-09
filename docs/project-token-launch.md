@@ -18,10 +18,10 @@ starts, the Boardroom wraps that raw HYPE into WHYPE before entering `WindingDow
 
 ## State Machine
 
-1. Deploy `BoardroomPolicyRegistry`, `ProtocolPolicy`, `AssetPolicy`, `BoardroomFactory`, `TokenGrantFactory`,
-   `AmmFactory`, `AmmRouter`, `LockedLiquidityFactory`, and wrapped HYPE.
-2. Allow `ProtocolPolicy` for protocol targets, value-enable `TokenGrantFactory` for exact creation fees, and use
-   `AssetPolicy` for supported asset approvals.
+1. Deploy `BoardroomPolicyRegistry`, `AssetPolicy`, `BoardroomFactory`, `TokenGrantFactory`, `AmmFactory`, `AmmRouter`,
+   `LockedLiquidityFactory`, and wrapped HYPE.
+2. Allow the token grant and locked-liquidity factories as Boardroom call policies, and use `AssetPolicy` for supported
+   asset approvals.
 3. Create the project Boardroom and use its share token as `PLEDGE`.
 4. Set the AMM protocol fee recipient to the project Boardroom.
 5. Set the native token grant creation fee to `0.1 HYPE` and transfer `TokenGrantFactory` ownership to the Boardroom.
@@ -37,7 +37,7 @@ starts, the Boardroom wraps that raw HYPE into WHYPE before entering `WindingDow
 - AMM factory fee manager: can set the protocol fee recipient once.
 - Token grant factory owner: sets the creation fee and receives native fee revenue; after handoff this is the Boardroom.
 - Boardroom owner: mints project tokens, approves Boardroom-owned assets through `AssetPolicy`, and creates locked
-  liquidity through `ProtocolPolicy`.
+  liquidity through `LockedLiquidityFactory` as the Boardroom call policy.
 - External trader: pays HYPE into the AMM and receives project tokens.
 - External grant issuer: escrows project tokens into a grant and pays the native creation fee.
 

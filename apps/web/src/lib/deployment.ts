@@ -31,7 +31,6 @@ function applyAddressFields(deployment: PledgeCashDeployment, json: Record<strin
   for (const field of [
     "boardroomFactory",
     "boardroomPolicyRegistry",
-    "protocolPolicy",
     "assetPolicy",
     "distributionFactory",
     "ammFactory",
@@ -44,7 +43,6 @@ function applyAddressFields(deployment: PledgeCashDeployment, json: Record<strin
     "deployer",
     "factoryOwner",
     "policyRegistryOwner",
-    "protocolPolicyOwner",
     "assetPolicyOwner",
   ] as const) {
     if (typeof json[field] === "string") {
@@ -58,14 +56,7 @@ function applyBooleanFields(deployment: PledgeCashDeployment, json: Record<strin
     "tokenGrantPolicyAllowed",
     "distributionPolicyAllowed",
     "lockedLiquidityPolicyAllowed",
-    "protocolPolicyAllowed",
     "assetPolicyAllowed",
-    "protocolTokenGrantFactoryAllowed",
-    "protocolTokenGrantFactoryValueAllowed",
-    "protocolDistributionFactoryAllowed",
-    "protocolLockedLiquidityFactoryAllowed",
-    "protocolAmmFactoryAllowed",
-    "protocolAmmRouterAllowed",
     "assetWrappedNativeAllowed",
     "assetTokenGrantSpenderAllowed",
     "assetDistributionSpenderAllowed",

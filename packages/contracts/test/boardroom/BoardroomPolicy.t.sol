@@ -4,58 +4,61 @@ pragma solidity ^0.8.30;
 import {Test} from "forge-std/Test.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
 import {WETH} from "solady/tokens/WETH.sol";
+import {BoardroomPolicyRegistry} from "../../src/boardroom/BoardroomPolicyRegistry.sol";
 import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
-import {ProtocolPolicy} from "../../src/policy/ProtocolPolicy.sol";
 
 contract BoardroomPolicyTest is Test {
     WETH internal wrappedNative;
-    ProtocolPolicy internal protocolPolicy;
+    BoardroomPolicyRegistry internal policyRegistry;
     AssetPolicy internal assetPolicy;
 
     address internal owner = address(this);
     address internal boardroom = address(0xB0A);
     address internal caller = address(0xA11CE);
-    address internal protocolTarget = address(0xFACADE);
     address internal token = address(0xC0FFEE);
     address internal spender = address(0x5EED);
     address internal stranger = address(0xCAFE);
 
     function setUp() public {
         wrappedNative = new WETH();
-        protocolPolicy = new ProtocolPolicy(owner);
+        policyRegistry = new BoardroomPolicyRegistry(owner);
         assetPolicy = new AssetPolicy(owner, address(wrappedNative));
     }
 
-    function testProtocolPolicyAllowsOnlyRegisteredProtocolTargetsAndValueTargets() public {
-        bytes memory data = abi.encodeWithSignature("setCreationFee(uint256)", 1 ether);
+    function testPolicyRegistryTracksActiveAndLifecycleOnlyStatus() public {
+        assertFalse(policyRegistry.isPolicyAllowed(token));
+        assertFalse(policyRegistry.isPolicyLifecycleAllowed(token));
 
-        assertFalse(protocolPolicy.canCall(boardroom, caller, protocolTarget, 0, data));
+        policyRegistry.setPolicyAllowed(token, true);
 
-        protocolPolicy.setProtocolTargetAllowed(protocolTarget, true);
+        assertTrue(policyRegistry.isPolicyAllowed(token));
+        assertTrue(policyRegistry.isPolicyLifecycleAllowed(token));
 
-        assertTrue(protocolPolicy.canCall(boardroom, caller, protocolTarget, 0, data));
-        assertFalse(protocolPolicy.canCall(boardroom, caller, protocolTarget, 1 ether, data));
+        policyRegistry.setPolicyStatus(token, BoardroomPolicyRegistry.PolicyStatus.LifecycleOnly);
 
-        protocolPolicy.setProtocolValueTargetAllowed(protocolTarget, true);
+        assertFalse(policyRegistry.isPolicyAllowed(token));
+        assertTrue(policyRegistry.isPolicyLifecycleAllowed(token));
 
-        assertTrue(protocolPolicy.canCall(boardroom, caller, protocolTarget, 1 ether, data));
-        assertFalse(protocolPolicy.canCall(boardroom, caller, stranger, 0, data));
+        policyRegistry.setPolicyAllowed(token, false);
+
+        assertFalse(policyRegistry.isPolicyAllowed(token));
+        assertFalse(policyRegistry.isPolicyLifecycleAllowed(token));
     }
 
-    function testProtocolPolicyOnlyOwnerCanManageTargets() public {
+    function testPolicyRegistryOnlyOwnerCanManageStatus() public {
         vm.prank(stranger);
         vm.expectRevert(Ownable.Unauthorized.selector);
-        protocolPolicy.setProtocolTargetAllowed(protocolTarget, true);
+        policyRegistry.setPolicyAllowed(token, true);
 
         vm.prank(stranger);
         vm.expectRevert(Ownable.Unauthorized.selector);
-        protocolPolicy.setProtocolValueTargetAllowed(protocolTarget, true);
+        policyRegistry.setPolicyStatus(token, BoardroomPolicyRegistry.PolicyStatus.LifecycleOnly);
 
-        vm.expectRevert(ProtocolPolicy.InvalidAddress.selector);
-        protocolPolicy.setProtocolTargetAllowed(address(0), true);
+        vm.expectRevert(BoardroomPolicyRegistry.InvalidAddress.selector);
+        policyRegistry.setPolicyAllowed(address(0), true);
 
-        vm.expectRevert(ProtocolPolicy.InvalidAddress.selector);
-        protocolPolicy.setProtocolValueTargetAllowed(address(0), true);
+        vm.expectRevert(BoardroomPolicyRegistry.InvalidAddress.selector);
+        policyRegistry.setPolicyStatus(address(0), BoardroomPolicyRegistry.PolicyStatus.Active);
     }
 
     function testAssetPolicyAllowsWrappedNativeDepositOnly() public view {

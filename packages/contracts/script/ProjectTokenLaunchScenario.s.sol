@@ -13,7 +13,6 @@ import {BoardroomPolicyRegistry} from "../src/boardroom/BoardroomPolicyRegistry.
 import {BoardroomToken} from "../src/boardroom/BoardroomToken.sol";
 import {LockedLiquidity} from "../src/liquidity/LockedLiquidity.sol";
 import {LockedLiquidityFactory} from "../src/liquidity/LockedLiquidityFactory.sol";
-import {ProtocolPolicy} from "../src/policy/ProtocolPolicy.sol";
 import {TokenGrant} from "../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../src/grants/TokenGrantFactory.sol";
 
@@ -23,7 +22,6 @@ contract ProjectTokenLaunchScenario is Script {
     struct ScenarioState {
         uint256 nonce;
         BoardroomPolicyRegistry policyRegistry;
-        ProtocolPolicy protocolPolicy;
         AssetPolicy assetPolicy;
         BoardroomFactory boardroomFactory;
         TokenGrantFactory tokenGrantFactory;
@@ -82,7 +80,6 @@ contract ProjectTokenLaunchScenario is Script {
     function _deployProject(address owner, uint256 nonce) internal returns (ScenarioState memory state) {
         state.nonce = nonce;
         state.policyRegistry = new BoardroomPolicyRegistry(owner);
-        state.protocolPolicy = new ProtocolPolicy(owner);
         state.tokenGrantFactory = new TokenGrantFactory(owner);
         state.ammFactory = new AmmFactory(owner);
         state.wrappedHype = new WETH();
@@ -91,12 +88,9 @@ contract ProjectTokenLaunchScenario is Script {
         state.lockedLiquidityFactory = new LockedLiquidityFactory(address(state.ammRouter));
         state.boardroomFactory = new BoardroomFactory(address(state.policyRegistry), address(state.wrappedHype));
 
-        state.protocolPolicy.setProtocolTargetAllowed(address(state.tokenGrantFactory), true);
-        state.protocolPolicy.setProtocolValueTargetAllowed(address(state.tokenGrantFactory), true);
-        state.protocolPolicy.setProtocolTargetAllowed(address(state.lockedLiquidityFactory), true);
         state.assetPolicy.setApprovalSpenderAllowed(address(state.lockedLiquidityFactory), true);
-        state.policyRegistry.setPolicyAllowed(address(state.protocolPolicy), true);
         state.policyRegistry.setPolicyAllowed(address(state.assetPolicy), true);
+        state.policyRegistry.setPolicyAllowed(address(state.lockedLiquidityFactory), true);
 
         address boardroomAddress = state.boardroomFactory
             .createBoardroom(owner, "pledge.cash Project Token", "PLEDGE", _salt(nonce, "project-boardroom"));
@@ -145,7 +139,7 @@ contract ProjectTokenLaunchScenario is Script {
         calls[0] = _approvalCall(state, address(state.projectToken), PROJECT_LP_SUPPLY);
         calls[1] = _approvalCall(state, address(state.wrappedHype), HYPE_LIQUIDITY);
         calls[2] = Boardroom.Call({
-            policy: address(state.protocolPolicy),
+            policy: address(state.lockedLiquidityFactory),
             target: address(state.lockedLiquidityFactory),
             value: 0,
             data: abi.encodeCall(LockedLiquidityFactory.createLockedLiquidity, (params))
@@ -258,7 +252,6 @@ contract ProjectTokenLaunchScenario is Script {
         console2.log("grantIssuer", grantIssuer);
         console2.log("contributor", contributor);
         console2.log("policyRegistry", address(state.policyRegistry));
-        console2.log("protocolPolicy", address(state.protocolPolicy));
         console2.log("assetPolicy", address(state.assetPolicy));
         console2.log("boardroomFactory", address(state.boardroomFactory));
         console2.log("tokenGrantFactory", address(state.tokenGrantFactory));

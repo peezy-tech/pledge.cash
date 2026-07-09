@@ -12,7 +12,6 @@ import {DistributionFactory} from "../src/distribution/DistributionFactory.sol";
 import {LockedLiquidityFactory} from "../src/liquidity/LockedLiquidityFactory.sol";
 import {PledgeCashDeploymentSalts} from "../src/deployment/PledgeCashDeploymentSalts.sol";
 import {PledgeCashDeterministicDeployer} from "../src/deployment/PledgeCashDeterministicDeployer.sol";
-import {ProtocolPolicy} from "../src/policy/ProtocolPolicy.sol";
 import {TokenGrantFactory} from "../src/grants/TokenGrantFactory.sol";
 
 contract Deploy is Script {
@@ -35,7 +34,6 @@ contract Deploy is Script {
         address ammProtocolFeeRecipient;
         PledgeCashDeterministicDeployer deterministicDeployer;
         BoardroomPolicyRegistry boardroomPolicyRegistry;
-        ProtocolPolicy protocolPolicy;
         AssetPolicy assetPolicy;
         TokenGrantFactory tokenGrantFactory;
         AmmFactory ammFactory;
@@ -87,13 +85,6 @@ contract Deploy is Script {
                 state,
                 PledgeCashDeploymentSalts.boardroomPolicyRegistry(),
                 abi.encodePacked(type(BoardroomPolicyRegistry).creationCode, abi.encode(state.deployer))
-            )
-        );
-        state.protocolPolicy = ProtocolPolicy(
-            _deployDeterministic(
-                state,
-                PledgeCashDeploymentSalts.protocolPolicy(),
-                abi.encodePacked(type(ProtocolPolicy).creationCode, abi.encode(state.deployer))
             )
         );
         state.assetPolicy = AssetPolicy(
@@ -214,15 +205,9 @@ contract Deploy is Script {
     }
 
     function _configurePolicies(DeployState memory state) internal {
-        state.protocolPolicy.setProtocolTargetAllowed(address(state.tokenGrantFactory), true);
-        state.protocolPolicy.setProtocolValueTargetAllowed(address(state.tokenGrantFactory), true);
-        state.protocolPolicy.setProtocolTargetAllowed(address(state.distributionFactory), true);
-        state.protocolPolicy.setProtocolTargetAllowed(address(state.lockedLiquidityFactory), true);
-        state.protocolPolicy.setProtocolTargetAllowed(address(state.ammFactory), true);
         state.assetPolicy.setApprovalSpenderAllowed(address(state.tokenGrantFactory), true);
         state.assetPolicy.setApprovalSpenderAllowed(address(state.distributionFactory), true);
         state.assetPolicy.setApprovalSpenderAllowed(address(state.lockedLiquidityFactory), true);
-        state.boardroomPolicyRegistry.setPolicyAllowed(address(state.protocolPolicy), true);
         state.boardroomPolicyRegistry.setPolicyAllowed(address(state.assetPolicy), true);
         state.boardroomPolicyRegistry.setPolicyAllowed(address(state.tokenGrantFactory), true);
         state.boardroomPolicyRegistry.setPolicyAllowed(address(state.distributionFactory), true);
@@ -257,7 +242,6 @@ contract Deploy is Script {
         json.serialize("deterministicDeployer", address(state.deterministicDeployer));
         json.serialize("deterministicDeployerOwner", state.deterministicDeployerOwner);
         json.serialize("boardroomPolicyRegistry", address(state.boardroomPolicyRegistry));
-        json.serialize("protocolPolicy", address(state.protocolPolicy));
         json.serialize("assetPolicy", address(state.assetPolicy));
         json.serialize("boardroomFactory", address(state.boardroomFactory));
         json.serialize("distributionFactory", address(state.distributionFactory));
@@ -273,32 +257,7 @@ contract Deploy is Script {
     }
 
     function _serializePolicyState(string memory json, DeployState memory state) internal {
-        json.serialize(
-            "protocolPolicyAllowed", state.boardroomPolicyRegistry.isPolicyAllowed(address(state.protocolPolicy))
-        );
         json.serialize("assetPolicyAllowed", state.boardroomPolicyRegistry.isPolicyAllowed(address(state.assetPolicy)));
-        json.serialize(
-            "protocolTokenGrantFactoryAllowed",
-            state.protocolPolicy.isProtocolTargetAllowed(address(state.tokenGrantFactory))
-        );
-        json.serialize(
-            "protocolTokenGrantFactoryValueAllowed",
-            state.protocolPolicy.isProtocolValueTargetAllowed(address(state.tokenGrantFactory))
-        );
-        json.serialize(
-            "protocolDistributionFactoryAllowed",
-            state.protocolPolicy.isProtocolTargetAllowed(address(state.distributionFactory))
-        );
-        json.serialize(
-            "protocolLockedLiquidityFactoryAllowed",
-            state.protocolPolicy.isProtocolTargetAllowed(address(state.lockedLiquidityFactory))
-        );
-        json.serialize(
-            "protocolAmmFactoryAllowed", state.protocolPolicy.isProtocolTargetAllowed(address(state.ammFactory))
-        );
-        json.serialize(
-            "protocolAmmRouterAllowed", state.protocolPolicy.isProtocolTargetAllowed(address(state.ammRouter))
-        );
         json.serialize("assetWrappedNativeAllowed", state.assetPolicy.isAssetAllowed(state.wrappedNative));
         json.serialize(
             "assetTokenGrantSpenderAllowed",
@@ -327,7 +286,6 @@ contract Deploy is Script {
 
     function _serializeOwnershipState(string memory json, DeployState memory state) internal {
         json.serialize("policyRegistryOwner", state.boardroomPolicyRegistry.owner());
-        json.serialize("protocolPolicyOwner", state.protocolPolicy.owner());
         json.serialize("assetPolicyOwner", state.assetPolicy.owner());
         json.serialize("factoryOwner", state.tokenGrantFactory.owner());
         json.serialize("creationFee", state.tokenGrantFactory.creationFee());
@@ -340,7 +298,6 @@ contract Deploy is Script {
         console2.log("DeterministicDeployer", address(state.deterministicDeployer));
         console2.log("DeterministicDeployerOwner", state.deterministicDeployerOwner);
         console2.log("BoardroomPolicyRegistry", address(state.boardroomPolicyRegistry));
-        console2.log("ProtocolPolicy", address(state.protocolPolicy));
         console2.log("AssetPolicy", address(state.assetPolicy));
         console2.log("BoardroomFactory", address(state.boardroomFactory));
         console2.log("DistributionFactory", address(state.distributionFactory));
@@ -355,7 +312,6 @@ contract Deploy is Script {
         console2.log("TokenGrantFactory", address(state.tokenGrantFactory));
         console2.log("TokenGrantLogic", state.tokenGrantFactory.tokenGrantLogic());
         console2.log("PolicyRegistryOwner", state.boardroomPolicyRegistry.owner());
-        console2.log("ProtocolPolicyOwner", state.protocolPolicy.owner());
         console2.log("AssetPolicyOwner", state.assetPolicy.owner());
         console2.log(
             "TokenGrantPolicyAllowed", state.boardroomPolicyRegistry.isPolicyAllowed(address(state.tokenGrantFactory))
@@ -370,30 +326,7 @@ contract Deploy is Script {
     }
 
     function _logPolicyState(DeployState memory state) internal view {
-        console2.log(
-            "ProtocolPolicyAllowed", state.boardroomPolicyRegistry.isPolicyAllowed(address(state.protocolPolicy))
-        );
         console2.log("AssetPolicyAllowed", state.boardroomPolicyRegistry.isPolicyAllowed(address(state.assetPolicy)));
-        console2.log(
-            "ProtocolTokenGrantFactoryAllowed",
-            state.protocolPolicy.isProtocolTargetAllowed(address(state.tokenGrantFactory))
-        );
-        console2.log(
-            "ProtocolTokenGrantFactoryValueAllowed",
-            state.protocolPolicy.isProtocolValueTargetAllowed(address(state.tokenGrantFactory))
-        );
-        console2.log(
-            "ProtocolDistributionFactoryAllowed",
-            state.protocolPolicy.isProtocolTargetAllowed(address(state.distributionFactory))
-        );
-        console2.log(
-            "ProtocolLockedLiquidityFactoryAllowed",
-            state.protocolPolicy.isProtocolTargetAllowed(address(state.lockedLiquidityFactory))
-        );
-        console2.log(
-            "ProtocolAmmFactoryAllowed", state.protocolPolicy.isProtocolTargetAllowed(address(state.ammFactory))
-        );
-        console2.log("ProtocolAmmRouterAllowed", state.protocolPolicy.isProtocolTargetAllowed(address(state.ammRouter)));
         console2.log("AssetWrappedNativeAllowed", state.assetPolicy.isAssetAllowed(state.wrappedNative));
         console2.log(
             "AssetTokenGrantSpenderAllowed",

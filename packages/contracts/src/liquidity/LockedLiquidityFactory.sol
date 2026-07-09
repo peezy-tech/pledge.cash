@@ -5,7 +5,7 @@ import {LibClone} from "solady/utils/LibClone.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {LockedLiquidity} from "./LockedLiquidity.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
-import {IBoardroomCallPolicy} from "../policy/IBoardroomCallPolicy.sol";
+import {IBoardroomObligationPolicy} from "../policy/IBoardroomObligationPolicy.sol";
 
 interface ILockedLiquidityFactoryBoardroom {
     function shareToken() external view returns (address);
@@ -13,7 +13,7 @@ interface ILockedLiquidityFactoryBoardroom {
     function isIssuedDistribution(address distribution) external view returns (bool);
 }
 
-contract LockedLiquidityFactory is IBoardroomCallPolicy, ReentrancyGuard {
+contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
     uint256 internal constant CREATE_LOCKED_LIQUIDITY_DATA_LENGTH = 4 + 32 * 8;
     uint256 public constant MAX_LOCKERS_PER_BOARDROOM = 32;
 
@@ -96,6 +96,28 @@ contract LockedLiquidityFactory is IBoardroomCallPolicy, ReentrancyGuard {
         if (lockerBoardroom[target] != boardroom) return false;
         return selector == LockedLiquidity.claimFees.selector;
     }
+
+    function obligationForCall(address, address target, uint256, bytes calldata data, bytes calldata result)
+        external
+        view
+        returns (Obligation memory obligation)
+    {
+        if (target != address(this) || _selector(data) != LockedLiquidityFactory.createLockedLiquidity.selector) {
+            return obligation;
+        }
+        if (result.length != 32 * 5) return obligation;
+
+        (address locker, address pool,,,) = abi.decode(result, (address, address, uint256, uint256, uint256));
+        obligation.kind = ObligationKind.LockedLiquidity;
+        obligation.account = locker;
+        obligation.aux = pool;
+    }
+
+    function isLifecycleCallAllowed(address boardroom, address target, bytes4 selector) external view returns (bool) {
+        return lockerBoardroom[target] == boardroom && selector == LockedLiquidity.claimFees.selector;
+    }
+
+    function grantSlotReleaseForLifecycleCall(address, address, bytes4) external pure returns (address distribution) {}
 
     function lockerCountForBoardroom(address boardroom) external view returns (uint256) {
         return lockersForBoardroom[boardroom].length;

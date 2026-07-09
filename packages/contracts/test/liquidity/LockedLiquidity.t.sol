@@ -203,17 +203,41 @@ contract LockedLiquidityTest is Test {
         assertEq(quoteToken.allowance(address(boardroom), address(lockedLiquidityFactory)), 0);
     }
 
-    function testBoardroomRecordsLockedLiquidityCreatedThroughWrapperPolicy() public {
+    function testBoardroomRejectsWrapperPolicyForLockedLiquidityCreation() public {
         LockedLiquidityTestAllowAllPolicy wrapperPolicy = new LockedLiquidityTestAllowAllPolicy();
         policyRegistry.setPolicyAllowed(address(wrapperPolicy), true);
 
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-wrapper");
-        CreatedLocker memory created =
-            _createLockedLiquidity(boardroom, shareToken, address(quoteToken), address(wrapperPolicy), "wrapper");
 
-        assertEq(boardroom.lockedLiquidityCount(), 1);
-        assertEq(boardroom.lockedLiquidityAt(0), created.locker);
-        assertTrue(boardroom.isLockedLiquidity(created.locker));
+        vm.prank(owner);
+        boardroom.mint(address(boardroom), SHARE_SEED);
+        quoteToken.mint(address(boardroom), QUOTE_SEED);
+
+        LockedLiquidityFactory.CreateParams memory params = LockedLiquidityFactory.CreateParams({
+            tokenA: address(shareToken),
+            tokenB: address(quoteToken),
+            amountADesired: SHARE_SEED,
+            amountBDesired: QUOTE_SEED,
+            amountAMin: 1,
+            amountBMin: 1,
+            deadline: block.timestamp,
+            salt: keccak256("wrapper")
+        });
+
+        Boardroom.Call[] memory calls = new Boardroom.Call[](3);
+        calls[0] = _approvalCall(address(shareToken), SHARE_SEED);
+        calls[1] = _approvalCall(address(quoteToken), QUOTE_SEED);
+        calls[2] = _policyCall(
+            address(wrapperPolicy),
+            address(lockedLiquidityFactory),
+            abi.encodeCall(LockedLiquidityFactory.createLockedLiquidity, (params))
+        );
+
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(Boardroom.ModulePolicyRequired.selector, address(lockedLiquidityFactory))
+        );
+        boardroom.executeBatch(calls);
     }
 
     function testWindDownRequiresLockedLiquidityExitBeforeRedemptions() public {

@@ -14,10 +14,6 @@ library PledgeCashDeploymentSalts {
         return keccak256("pledge.cash.deterministic.v1.BoardroomPolicyRegistry");
     }
 
-    function protocolPolicy() internal pure returns (bytes32) {
-        return keccak256("pledge.cash.deterministic.v1.ProtocolPolicy");
-    }
-
     function assetPolicy() internal pure returns (bytes32) {
         return keccak256("pledge.cash.deterministic.v1.AssetPolicy");
     }

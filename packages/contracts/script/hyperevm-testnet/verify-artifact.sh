@@ -160,33 +160,25 @@ fi
 if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactory || field_exists boardroomPolicyRegistry; }; then
   require_field boardroomFactory
   require_field boardroomPolicyRegistry
-  require_field protocolPolicy
   require_field assetPolicy
   require_field wrappedNative
   require_field policyRegistryOwner
-  require_field protocolPolicyOwner
   require_field assetPolicyOwner
-  require_field protocolPolicyAllowed
   require_field assetPolicyAllowed
   require_field tokenGrantPolicyAllowed
   require_field distributionFactory
   require_field distributionPolicyAllowed
-  require_field protocolTokenGrantFactoryAllowed
-  require_field protocolTokenGrantFactoryValueAllowed
-  require_field protocolDistributionFactoryAllowed
   require_field assetWrappedNativeAllowed
   require_field assetTokenGrantSpenderAllowed
   require_field assetDistributionSpenderAllowed
 
   boardroom_factory="$(field boardroomFactory)"
   policy_registry="$(field boardroomPolicyRegistry)"
-  protocol_policy="$(field protocolPolicy)"
   asset_policy="$(field assetPolicy)"
   wrapped_native="$(field wrappedNative)"
   distribution_factory="$(field distributionFactory)"
   require_code "BoardroomFactory" "$boardroom_factory"
   require_code "BoardroomPolicyRegistry" "$policy_registry"
-  require_code "ProtocolPolicy" "$protocol_policy"
   require_code "AssetPolicy" "$asset_policy"
   require_code "DistributionFactory" "$distribution_factory"
 
@@ -199,14 +191,8 @@ if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactor
   actual_registry_owner="$(call_address "$policy_registry" "owner()(address)")"
   expect_address_equal "BoardroomPolicyRegistry owner" "$(field policyRegistryOwner)" "$actual_registry_owner"
 
-  actual_protocol_policy_owner="$(call_address "$protocol_policy" "owner()(address)")"
-  expect_address_equal "ProtocolPolicy owner" "$(field protocolPolicyOwner)" "$actual_protocol_policy_owner"
-
   actual_asset_policy_owner="$(call_address "$asset_policy" "owner()(address)")"
   expect_address_equal "AssetPolicy owner" "$(field assetPolicyOwner)" "$actual_asset_policy_owner"
-
-  actual_protocol_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$protocol_policy")"
-  expect_equal "Protocol policy allowance" "$(field protocolPolicyAllowed)" "$actual_protocol_policy_allowed"
 
   actual_asset_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$asset_policy")"
   expect_equal "Asset policy allowance" "$(field assetPolicyAllowed)" "$actual_asset_policy_allowed"
@@ -216,15 +202,6 @@ if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactor
 
   actual_distribution_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$distribution_factory")"
   expect_equal "Distribution policy allowance" "$(field distributionPolicyAllowed)" "$actual_distribution_policy_allowed"
-
-  actual_protocol_token_grant_allowed="$(call_bool "$protocol_policy" "isProtocolTargetAllowed(address)(bool)" "$token_grant_factory")"
-  expect_equal "ProtocolPolicy TokenGrantFactory allowance" "$(field protocolTokenGrantFactoryAllowed)" "$actual_protocol_token_grant_allowed"
-
-  actual_protocol_token_grant_value_allowed="$(call_bool "$protocol_policy" "isProtocolValueTargetAllowed(address)(bool)" "$token_grant_factory")"
-  expect_equal "ProtocolPolicy TokenGrantFactory value allowance" "$(field protocolTokenGrantFactoryValueAllowed)" "$actual_protocol_token_grant_value_allowed"
-
-  actual_protocol_distribution_allowed="$(call_bool "$protocol_policy" "isProtocolTargetAllowed(address)(bool)" "$distribution_factory")"
-  expect_equal "ProtocolPolicy DistributionFactory allowance" "$(field protocolDistributionFactoryAllowed)" "$actual_protocol_distribution_allowed"
 
   actual_asset_wrapped_native_allowed="$(call_bool "$asset_policy" "isAssetAllowed(address)(bool)" "$wrapped_native")"
   expect_equal "AssetPolicy wrapped native allowance" "$(field assetWrappedNativeAllowed)" "$actual_asset_wrapped_native_allowed"
@@ -256,12 +233,8 @@ if field_exists ammRouter || field_exists lockedLiquidityFactory; then
   require_field ammRouter
   require_field lockedLiquidityFactory
   require_field boardroomPolicyRegistry
-  require_field protocolPolicy
   require_field assetPolicy
   require_field lockedLiquidityPolicyAllowed
-  require_field protocolLockedLiquidityFactoryAllowed
-  require_field protocolAmmFactoryAllowed
-  require_field protocolAmmRouterAllowed
   require_field assetLockedLiquiditySpenderAllowed
 
   amm_factory="$(field ammFactory)"
@@ -269,7 +242,6 @@ if field_exists ammRouter || field_exists lockedLiquidityFactory; then
   amm_router="$(field ammRouter)"
   locked_liquidity_factory="$(field lockedLiquidityFactory)"
   policy_registry="$(field boardroomPolicyRegistry)"
-  protocol_policy="$(field protocolPolicy)"
   asset_policy="$(field assetPolicy)"
 
   require_code "AmmFactory" "$amm_factory"
@@ -287,15 +259,6 @@ if field_exists ammRouter || field_exists lockedLiquidityFactory; then
 
   actual_locked_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$locked_liquidity_factory")"
   expect_equal "Locked liquidity policy allowance" "$(field lockedLiquidityPolicyAllowed)" "$actual_locked_policy_allowed"
-
-  actual_protocol_locked_liquidity_allowed="$(call_bool "$protocol_policy" "isProtocolTargetAllowed(address)(bool)" "$locked_liquidity_factory")"
-  expect_equal "ProtocolPolicy LockedLiquidityFactory allowance" "$(field protocolLockedLiquidityFactoryAllowed)" "$actual_protocol_locked_liquidity_allowed"
-
-  actual_protocol_amm_factory_allowed="$(call_bool "$protocol_policy" "isProtocolTargetAllowed(address)(bool)" "$amm_factory")"
-  expect_equal "ProtocolPolicy AmmFactory allowance" "$(field protocolAmmFactoryAllowed)" "$actual_protocol_amm_factory_allowed"
-
-  actual_protocol_amm_router_allowed="$(call_bool "$protocol_policy" "isProtocolTargetAllowed(address)(bool)" "$amm_router")"
-  expect_equal "ProtocolPolicy AmmRouter allowance" "$(field protocolAmmRouterAllowed)" "$actual_protocol_amm_router_allowed"
 
   actual_asset_locked_liquidity_spender_allowed="$(call_bool "$asset_policy" "isApprovalSpenderAllowed(address)(bool)" "$locked_liquidity_factory")"
   expect_equal "AssetPolicy LockedLiquidityFactory spender allowance" "$(field assetLockedLiquiditySpenderAllowed)" "$actual_asset_locked_liquidity_spender_allowed"

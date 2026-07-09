@@ -76,7 +76,6 @@ const other = "0x000000000000000000000000000000000000cafe" as Address;
 const grantToken = "0x0000000000000000000000000000000000000123" as Address;
 const paymentToken = "0x0000000000000000000000000000000000000456" as Address;
 const distributionFactory = "0x0000000000000000000000000000000000000d15" as Address;
-const protocolPolicy = "0x0000000000000000000000000000000000000c0c" as Address;
 const assetPolicy = "0x0000000000000000000000000000000000000a55" as Address;
 const sale = "0x0000000000000000000000000000000000000a1e" as Address;
 const airdrop = "0x0000000000000000000000000000000000000a1d" as Address;
@@ -330,7 +329,7 @@ describe("SDK action and query helpers", () => {
       shareToken,
       terms: shareGrantTerms,
       creationFee: 10n,
-      policy: protocolPolicy,
+      policy: factory,
       assetPolicy,
     });
 
@@ -345,7 +344,7 @@ describe("SDK action and query helpers", () => {
     expect(calls[0]?.data).toBe(
       encodeFunctionData({ abi: boardroomTokenAbi, functionName: "approve", args: [factory, 1000n] }),
     );
-    expect(calls[1]).toMatchObject({ policy: protocolPolicy, target: factory, value: 10n });
+    expect(calls[1]).toMatchObject({ policy: factory, target: factory, value: 10n });
     expect(calls[1]?.data).toBe(
       encodeFunctionData({
         abi: tokenGrantFactoryAbi,
@@ -396,7 +395,7 @@ describe("SDK action and query helpers", () => {
       factory: distributionFactory,
       shareToken,
       terms: saleTerms,
-      policy: protocolPolicy,
+      policy: distributionFactory,
       assetPolicy,
     });
 
@@ -415,7 +414,7 @@ describe("SDK action and query helpers", () => {
         args: [distributionFactory, saleTerms.shareAmount],
       }),
     );
-    expect(calls[1]).toMatchObject({ policy: protocolPolicy, target: distributionFactory, value: 0n });
+    expect(calls[1]).toMatchObject({ policy: distributionFactory, target: distributionFactory, value: 0n });
     expect(calls[1]?.data).toBe(
       encodeFunctionData({
         abi: distributionFactoryAbi,
@@ -464,7 +463,7 @@ describe("SDK action and query helpers", () => {
       factory: distributionFactory,
       shareToken,
       terms: curveTerms,
-      policy: protocolPolicy,
+      policy: distributionFactory,
       assetPolicy,
     });
 
@@ -483,7 +482,7 @@ describe("SDK action and query helpers", () => {
         args: [distributionFactory, curveTerms.saleSupply + curveTerms.migrationSupply],
       }),
     );
-    expect(calls[1]).toMatchObject({ policy: protocolPolicy, target: distributionFactory, value: 0n });
+    expect(calls[1]).toMatchObject({ policy: distributionFactory, target: distributionFactory, value: 0n });
     expect(calls[1]?.data).toBe(
       encodeFunctionData({
         abi: distributionFactoryAbi,
@@ -545,7 +544,7 @@ describe("SDK action and query helpers", () => {
       factory: distributionFactory,
       shareToken,
       terms: airdropTerms,
-      policy: protocolPolicy,
+      policy: distributionFactory,
       assetPolicy,
     });
 
@@ -564,7 +563,7 @@ describe("SDK action and query helpers", () => {
         args: [distributionFactory, airdropTerms.shareAmount],
       }),
     );
-    expect(calls[1]).toMatchObject({ policy: protocolPolicy, target: distributionFactory, value: 0n });
+    expect(calls[1]).toMatchObject({ policy: distributionFactory, target: distributionFactory, value: 0n });
     expect(calls[1]?.data).toBe(
       encodeFunctionData({
         abi: distributionFactoryAbi,
@@ -623,7 +622,7 @@ describe("SDK action and query helpers", () => {
       factory: lockedLiquidityFactory,
       shareToken,
       terms: lockedLiquidityTerms,
-      policy: protocolPolicy,
+      policy: lockedLiquidityFactory,
       assetPolicy,
     });
 
@@ -650,7 +649,7 @@ describe("SDK action and query helpers", () => {
         args: [lockedLiquidityFactory, lockedLiquidityTerms.quoteAmountDesired],
       }),
     );
-    expect(calls[2]).toMatchObject({ policy: protocolPolicy, target: lockedLiquidityFactory, value: 0n });
+    expect(calls[2]).toMatchObject({ policy: lockedLiquidityFactory, target: lockedLiquidityFactory, value: 0n });
     expect(calls[2]?.data).toBe(
       encodeFunctionData({
         abi: lockedLiquidityFactoryAbi,
@@ -703,7 +702,7 @@ describe("SDK action and query helpers", () => {
         factory,
         shareToken,
         terms: shareGrantTerms,
-        policy: protocolPolicy,
+        policy: factory,
       }),
     ).toThrow(error);
 
@@ -713,7 +712,7 @@ describe("SDK action and query helpers", () => {
         factory: distributionFactory,
         shareToken,
         terms: saleTerms,
-        policy: protocolPolicy,
+        policy: distributionFactory,
       }),
     ).toThrow(error);
 
@@ -723,7 +722,7 @@ describe("SDK action and query helpers", () => {
         factory: distributionFactory,
         shareToken,
         terms: curveTerms,
-        policy: protocolPolicy,
+        policy: distributionFactory,
       }),
     ).toThrow(error);
 
@@ -733,7 +732,7 @@ describe("SDK action and query helpers", () => {
         factory: lockedLiquidityFactory,
         shareToken,
         terms: lockedLiquidityTerms,
-        policy: protocolPolicy,
+        policy: lockedLiquidityFactory,
       }),
     ).toThrow(error);
   });
