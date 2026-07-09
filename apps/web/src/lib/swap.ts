@@ -186,15 +186,25 @@ type ExecutableRemoveLiquidityQuote = RemoveLiquidityQuoteState & {
   amountBMin: bigint;
 };
 
+type AmmFeeConfig = {
+  feeBps: bigint;
+  feeDenominator: bigint;
+  protocolFeeShareBps: bigint;
+};
+
 const AMM_MINIMUM_LIQUIDITY = 1_000n;
 const FEE_INDEX_SCALE = 1_000_000_000_000_000_000n;
+const DEFAULT_SLIPPAGE_BPS = 50;
+const FULL_BPS = 10_000;
+const FULL_BPS_BIGINT = 10_000n;
+const MAX_DISCOVERED_POOLS = 500;
 
 export function defaultSwapForm(): SwapForm {
   return {
     tokenIn: "",
     tokenOut: "",
     amountIn: "1",
-    slippageBps: "50",
+    slippageBps: DEFAULT_SLIPPAGE_BPS.toString(),
     recipient: "",
     deadline: defaultSwapDeadline(),
     useNative: false,
@@ -207,7 +217,7 @@ export function defaultLiquidityForm(): LiquidityForm {
     tokenB: "",
     amountA: "1",
     amountB: "1",
-    slippageBps: "50",
+    slippageBps: DEFAULT_SLIPPAGE_BPS.toString(),
     recipient: "",
     deadline: defaultSwapDeadline(),
     useNative: false,
@@ -217,7 +227,7 @@ export function defaultLiquidityForm(): LiquidityForm {
 export function defaultRemoveLiquidityForm(): RemoveLiquidityForm {
   return {
     liquidity: "",
-    slippageBps: "50",
+    slippageBps: DEFAULT_SLIPPAGE_BPS.toString(),
     recipient: "",
     deadline: defaultSwapDeadline(),
     useNative: false,
@@ -233,10 +243,7 @@ export function withSwapTokenListDefaults(
   if (!defaults) return form;
 
   const tokenIn = form.tokenIn || defaults.tokenIn;
-  let tokenOut = form.tokenOut || defaults.tokenOut;
-  if (tokenIn && tokenOut && sameAddress(tokenIn, tokenOut)) {
-    tokenOut = defaults.tokenOut && !sameAddress(tokenIn, defaults.tokenOut) ? defaults.tokenOut : "";
-  }
+  const tokenOut = defaultTokenOut(form.tokenOut, tokenIn, defaults.tokenOut);
 
   return {
     ...form,
@@ -255,10 +262,7 @@ export function withLiquidityTokenListDefaults(
   if (!defaults) return form;
 
   const tokenA = form.tokenA || defaults.tokenIn;
-  let tokenB = form.tokenB || defaults.tokenOut;
-  if (tokenA && tokenB && sameAddress(tokenA, tokenB)) {
-    tokenB = defaults.tokenOut && !sameAddress(tokenA, defaults.tokenOut) ? defaults.tokenOut : "";
-  }
+  const tokenB = defaultTokenOut(form.tokenB, tokenA, defaults.tokenOut);
 
   return {
     ...form,
@@ -266,6 +270,12 @@ export function withLiquidityTokenListDefaults(
     tokenB,
     useNative: form.useNative && pairHasWrappedNative(deployment, tokenA, tokenB),
   };
+}
+
+function defaultTokenOut(currentTokenOut: string, tokenIn: string, fallbackTokenOut: Address): string {
+  const tokenOut = currentTokenOut || fallbackTokenOut;
+  if (!tokenIn || !tokenOut || !sameAddress(tokenIn, tokenOut)) return tokenOut;
+  return !sameAddress(tokenIn, fallbackTokenOut) ? fallbackTokenOut : "";
 }
 
 export async function readSwapTokenList(
@@ -283,25 +293,14 @@ export async function readSwapTokenList(
 
   try {
     const factory = requireDeploymentAddress(deployment?.ammFactory, "AMM factory");
-    const poolCount = await readPoolCount(client, factory);
-    const cappedPoolCount = Math.min(poolCount, 500);
-    const poolAddresses = await Promise.all(
-      Array.from({ length: cappedPoolCount }, (_, index) =>
-        client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "allPools", args: [BigInt(index)] }) as Promise<Address>,
-      ),
-    );
-    pools = await Promise.all(poolAddresses.map(async (address) => await readPoolSummary(client, address)));
-    if (poolCount > cappedPoolCount) {
-      listError = `Showing the first ${cappedPoolCount.toString()} pools. Narrow by token address for anything older.`;
-    }
+    const discovered = await readPoolSummaries(client, factory);
+    pools = discovered.pools;
+    listError = discovered.error;
   } catch (error) {
     listError = errorMessage(error);
   }
 
-  for (const pool of pools) {
-    addTokenAccumulator(tokens, pool.token0, { source: "pool", pool: pool.address, pair: pool.token1, rank: 20 });
-    addTokenAccumulator(tokens, pool.token1, { source: "pool", pool: pool.address, pair: pool.token0, rank: 20 });
-  }
+  addPoolTokens(tokens, pools);
 
   const rankedTokens = Array.from(tokens.values()).sort((left, right) => left.rank - right.rank);
   const options = await Promise.all(rankedTokens.map(async (token) => await tokenOptionFromAccumulator(client, token, account)));
@@ -318,7 +317,7 @@ export async function readSwapQuote(
   form: SwapForm,
   account?: Address | undefined,
 ): Promise<SwapQuoteState> {
-  let slippageBps = 50;
+  let slippageBps = DEFAULT_SLIPPAGE_BPS;
 
   try {
     slippageBps = parseSlippageBps(form.slippageBps);
@@ -330,25 +329,23 @@ export async function readSwapQuote(
       throw new Error("Choose two different tokens.");
     }
 
-    const [inputToken, outputToken, poolAddress, feeBps, feeDenominator, protocolFeeShareBps] = await Promise.all([
+    const [inputToken, outputToken, poolAddress, fees] = await Promise.all([
       readTokenMetadata(client, tokenIn, account, router),
       readTokenMetadata(client, tokenOut, account),
       client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "getPool", args: [tokenIn, tokenOut] }) as Promise<Address>,
-      client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "SWAP_FEE_BPS" }) as Promise<bigint>,
-      client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "FEE_DENOMINATOR" }) as Promise<bigint>,
-      client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "PROTOCOL_FEE_SHARE_BPS" }) as Promise<bigint>,
+      readAmmFeeConfig(client, factory),
     ]);
 
     if (inputToken.decimals === undefined) {
-      return baseQuote({ inputToken, outputToken, slippageBps, feeBps, feeDenominator, protocolFeeShareBps, error: "From token decimals could not be read." });
+      return baseQuote({ inputToken, outputToken, slippageBps, ...fees, error: "From token decimals could not be read." });
     }
     if (outputToken.decimals === undefined) {
-      return baseQuote({ inputToken, outputToken, slippageBps, feeBps, feeDenominator, protocolFeeShareBps, error: "To token decimals could not be read." });
+      return baseQuote({ inputToken, outputToken, slippageBps, ...fees, error: "To token decimals could not be read." });
     }
 
     const amountIn = parseTokenAmountInput(form.amountIn, inputToken, "Input amount");
     if (amountIn === 0n) {
-      return baseQuote({ inputToken, outputToken, amountIn, slippageBps, feeBps, feeDenominator, protocolFeeShareBps, error: "Enter a positive input amount." });
+      return baseQuote({ inputToken, outputToken, amountIn, slippageBps, ...fees, error: "Enter a positive input amount." });
     }
 
     if (isZeroAddress(poolAddress)) {
@@ -357,33 +354,18 @@ export async function readSwapQuote(
         outputToken,
         amountIn,
         slippageBps,
-        feeBps,
-        feeDenominator,
-        protocolFeeShareBps,
+        ...fees,
         error: "No AMM pool exists for this pair yet.",
       });
     }
 
     const path = [tokenIn, tokenOut] as const;
-    const [token0, token1, reserves, amounts] = await Promise.all([
-      client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "token0" }) as Promise<Address>,
-      client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "token1" }) as Promise<Address>,
-      client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "getReserves" }) as Promise<readonly [bigint, bigint, number]>,
+    const [pool, amounts] = await Promise.all([
+      readSwapPoolState(client, poolAddress, tokenIn),
       client.readContract({ address: router, abi: ammRouterAbi, functionName: "getAmountsOut", args: [amountIn, path] }) as Promise<readonly bigint[]>,
     ]);
     const amountOut = amounts[1] ?? 0n;
     const amountOutMin = applySlippage(amountOut, slippageBps);
-    const [reserve0, reserve1] = reserves;
-    const tokenInIsToken0 = token0.toLowerCase() === tokenIn.toLowerCase();
-    const pool = {
-      address: poolAddress,
-      token0,
-      token1,
-      reserve0,
-      reserve1,
-      reserveIn: tokenInIsToken0 ? reserve0 : reserve1,
-      reserveOut: tokenInIsToken0 ? reserve1 : reserve0,
-    };
 
     if (amountOut === 0n) {
       return {
@@ -394,9 +376,7 @@ export async function readSwapQuote(
         amountOut,
         amountOutMin,
         slippageBps,
-        feeBps,
-        feeDenominator,
-        protocolFeeShareBps,
+        ...fees,
         error: "Swap output would be zero.",
       };
     }
@@ -409,9 +389,7 @@ export async function readSwapQuote(
       amountOut,
       amountOutMin,
       slippageBps,
-      feeBps,
-      feeDenominator,
-      protocolFeeShareBps,
+      ...fees,
     };
   } catch (error) {
     return { slippageBps, error: errorMessage(error) };
@@ -424,7 +402,7 @@ export async function readLiquidityQuote(
   form: LiquidityForm,
   account?: Address | undefined,
 ): Promise<LiquidityQuoteState> {
-  let slippageBps = 50;
+  let slippageBps = DEFAULT_SLIPPAGE_BPS;
 
   try {
     slippageBps = parseSlippageBps(form.slippageBps);
@@ -502,7 +480,7 @@ export async function readAmmPosition(
       lpToken,
       lpBalance,
       lpAllowance: lpToken.allowance ?? 0n,
-      poolShareBps: pool.totalSupply === 0n ? 0n : (lpBalance * 10_000n) / pool.totalSupply,
+      poolShareBps: pool.totalSupply === 0n ? 0n : (lpBalance * FULL_BPS_BIGINT) / pool.totalSupply,
     };
 
     if (account) {
@@ -527,7 +505,7 @@ export async function readRemoveLiquidityQuote(
   removeForm: RemoveLiquidityForm,
   account?: Address | undefined,
 ): Promise<RemoveLiquidityQuoteState> {
-  let slippageBps = 50;
+  let slippageBps = DEFAULT_SLIPPAGE_BPS;
 
   try {
     slippageBps = parseSlippageBps(removeForm.slippageBps);
@@ -541,8 +519,7 @@ export async function readRemoveLiquidityQuote(
     if (position.lpBalance !== undefined && liquidity > position.lpBalance) return { position, liquidity, slippageBps, error: "LP amount exceeds your balance." };
     if (position.pool.totalSupply === 0n) return { position, liquidity, slippageBps, error: "Pool supply is zero." };
 
-    const amountA = (liquidity * position.pool.reserveA) / position.pool.totalSupply;
-    const amountB = (liquidity * position.pool.reserveB) / position.pool.totalSupply;
+    const [amountA, amountB] = removeLiquidityAmounts(position.pool, liquidity);
     const amountAMin = applySlippage(amountA, slippageBps);
     const amountBMin = applySlippage(amountB, slippageBps);
     if (amountA === 0n || amountB === 0n) {
@@ -746,12 +723,9 @@ export function swapQuoteReady(quote: SwapQuoteState | undefined): quote is Exec
   return Boolean(
     quote &&
       !quote.error &&
-      quote.tokenIn?.decimals !== undefined &&
-      quote.tokenOut?.decimals !== undefined &&
+      swapQuoteTokensReady(quote) &&
       quote.pool &&
-      quote.amountIn !== undefined &&
-      quote.amountOut !== undefined &&
-      quote.amountOutMin !== undefined,
+      swapQuoteAmountsReady(quote),
   );
 }
 
@@ -784,14 +758,9 @@ export function liquidityQuoteReady(quote: LiquidityQuoteState | undefined): quo
   return Boolean(
     quote &&
       !quote.error &&
-      quote.tokenA?.decimals !== undefined &&
-      quote.tokenB?.decimals !== undefined &&
+      liquidityQuoteTokensReady(quote) &&
       quote.pool &&
-      quote.amountA !== undefined &&
-      quote.amountB !== undefined &&
-      quote.amountAMin !== undefined &&
-      quote.amountBMin !== undefined &&
-      quote.liquidityOut !== undefined,
+      liquidityQuoteAmountsReady(quote),
   );
 }
 
@@ -799,16 +768,54 @@ export function removeLiquidityQuoteReady(quote: RemoveLiquidityQuoteState | und
   return Boolean(
     quote &&
       !quote.error &&
-      quote.position?.tokenA.decimals !== undefined &&
+      removeLiquidityPositionReady(quote) &&
+      removeLiquidityAmountsReady(quote),
+  );
+}
+
+function swapQuoteTokensReady(quote: SwapQuoteState): boolean {
+  return quote.tokenIn?.decimals !== undefined && quote.tokenOut?.decimals !== undefined;
+}
+
+function swapQuoteAmountsReady(quote: SwapQuoteState): boolean {
+  return (
+    quote.amountIn !== undefined &&
+    quote.amountOut !== undefined &&
+    quote.amountOutMin !== undefined
+  );
+}
+
+function liquidityQuoteTokensReady(quote: LiquidityQuoteState): boolean {
+  return quote.tokenA?.decimals !== undefined && quote.tokenB?.decimals !== undefined;
+}
+
+function liquidityQuoteAmountsReady(quote: LiquidityQuoteState): boolean {
+  return (
+    quote.amountA !== undefined &&
+    quote.amountB !== undefined &&
+    quote.amountAMin !== undefined &&
+    quote.amountBMin !== undefined &&
+    quote.liquidityOut !== undefined
+  );
+}
+
+function removeLiquidityPositionReady(quote: RemoveLiquidityQuoteState): boolean {
+  return Boolean(
+    quote.position?.tokenA.decimals !== undefined &&
       quote.position.tokenB.decimals !== undefined &&
       quote.position.pool &&
       quote.position.lpToken?.decimals !== undefined &&
-      quote.position.lpBalance !== undefined &&
-      quote.liquidity !== undefined &&
-      quote.amountA !== undefined &&
-      quote.amountB !== undefined &&
-      quote.amountAMin !== undefined &&
-      quote.amountBMin !== undefined,
+      quote.position.lpBalance !== undefined,
+  );
+}
+
+function removeLiquidityAmountsReady(quote: RemoveLiquidityQuoteState): boolean {
+  return (
+    quote.liquidity !== undefined &&
+    quote.amountA !== undefined &&
+    quote.amountB !== undefined &&
+    quote.amountAMin !== undefined &&
+    quote.amountBMin !== undefined
   );
 }
 
@@ -899,24 +906,75 @@ async function readTokenMetadata(
   return token;
 }
 
+async function readAmmFeeConfig(client: PledgeCashReadClient, factory: Address): Promise<AmmFeeConfig> {
+  const [feeBps, feeDenominator, protocolFeeShareBps] = await Promise.all([
+    client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "SWAP_FEE_BPS" }) as Promise<bigint>,
+    client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "FEE_DENOMINATOR" }) as Promise<bigint>,
+    client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "PROTOCOL_FEE_SHARE_BPS" }) as Promise<bigint>,
+  ]);
+
+  return { feeBps, feeDenominator, protocolFeeShareBps };
+}
+
+async function readSwapPoolState(
+  client: PledgeCashReadClient,
+  poolAddress: Address,
+  tokenIn: Address,
+): Promise<SwapPoolState> {
+  const [token0, token1, reserves] = await Promise.all([
+    client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "token0" }) as Promise<Address>,
+    client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "token1" }) as Promise<Address>,
+    client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "getReserves" }) as Promise<readonly [bigint, bigint, number]>,
+  ]);
+  const [reserve0, reserve1] = reserves;
+  const tokenInIsToken0 = sameAddress(token0, tokenIn);
+
+  return {
+    address: poolAddress,
+    token0,
+    token1,
+    reserve0,
+    reserve1,
+    reserveIn: tokenInIsToken0 ? reserve0 : reserve1,
+    reserveOut: tokenInIsToken0 ? reserve1 : reserve0,
+  };
+}
+
 async function readLiquidityPool(client: PledgeCashReadClient, factory: Address, tokenA: Address, tokenB: Address): Promise<LiquidityPoolState> {
   const poolAddress = await client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "getPool", args: [tokenA, tokenB] }) as Address;
   if (isZeroAddress(poolAddress)) {
-    const predicted = await client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "predictPoolAddress", args: [tokenA, tokenB] }) as Address;
-    const [token0, token1] = sortTokenAddresses(tokenA, tokenB);
-    return {
-      address: predicted,
-      exists: false,
-      token0,
-      token1,
-      reserve0: 0n,
-      reserve1: 0n,
-      reserveA: 0n,
-      reserveB: 0n,
-      totalSupply: 0n,
-    };
+    return await readPredictedLiquidityPool(client, factory, tokenA, tokenB);
   }
 
+  return await readExistingLiquidityPool(client, poolAddress, tokenA);
+}
+
+async function readPredictedLiquidityPool(
+  client: PledgeCashReadClient,
+  factory: Address,
+  tokenA: Address,
+  tokenB: Address,
+): Promise<LiquidityPoolState> {
+  const predicted = await client.readContract({ address: factory, abi: ammFactoryAbi, functionName: "predictPoolAddress", args: [tokenA, tokenB] }) as Address;
+  const [token0, token1] = sortTokenAddresses(tokenA, tokenB);
+  return {
+    address: predicted,
+    exists: false,
+    token0,
+    token1,
+    reserve0: 0n,
+    reserve1: 0n,
+    reserveA: 0n,
+    reserveB: 0n,
+    totalSupply: 0n,
+  };
+}
+
+async function readExistingLiquidityPool(
+  client: PledgeCashReadClient,
+  poolAddress: Address,
+  tokenA: Address,
+): Promise<LiquidityPoolState> {
   const [token0, token1, reserves, totalSupply] = await Promise.all([
     client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "token0" }) as Promise<Address>,
     client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "token1" }) as Promise<Address>,
@@ -995,14 +1053,14 @@ function requireTokenAddress(value: string, label: string): Address {
 
 function parseSlippageBps(value: string): number {
   const trimmed = value.trim() || "0";
-  if (!/^\d+$/.test(trimmed)) throw new Error("Slippage must be whole basis points.");
+  if (!isUnsignedInteger(trimmed)) throw new Error("Slippage must be whole basis points.");
   const bps = Number(trimmed);
-  if (!Number.isSafeInteger(bps) || bps < 0 || bps >= 10_000) throw new Error("Slippage must be between 0 and 9999 bps.");
+  if (!Number.isSafeInteger(bps) || bps < 0 || bps >= FULL_BPS) throw new Error("Slippage must be between 0 and 9999 bps.");
   return bps;
 }
 
 function applySlippage(amount: bigint, bps: number): bigint {
-  return (amount * BigInt(10_000 - bps)) / 10_000n;
+  return (amount * BigInt(FULL_BPS - bps)) / FULL_BPS_BIGINT;
 }
 
 function optimalLiquidityAmounts(pool: LiquidityPoolState, amountADesired: bigint, amountBDesired: bigint): readonly [bigint, bigint] {
@@ -1011,6 +1069,13 @@ function optimalLiquidityAmounts(pool: LiquidityPoolState, amountADesired: bigin
   const amountBOptimal = quoteAmount(amountADesired, pool.reserveA, pool.reserveB);
   if (amountBOptimal <= amountBDesired) return [amountADesired, amountBOptimal];
   return [quoteAmount(amountBDesired, pool.reserveB, pool.reserveA), amountBDesired];
+}
+
+function removeLiquidityAmounts(pool: LiquidityPoolState, liquidity: bigint): readonly [bigint, bigint] {
+  return [
+    (liquidity * pool.reserveA) / pool.totalSupply,
+    (liquidity * pool.reserveB) / pool.totalSupply,
+  ];
 }
 
 function quoteAmount(amountA: bigint, reserveA: bigint, reserveB: bigint): bigint {
@@ -1051,7 +1116,7 @@ function bigintSqrt(value: bigint): bigint {
 
 function parseSwapDeadline(value: string): bigint {
   const trimmed = value.trim();
-  if (!/^\d+$/.test(trimmed)) throw new Error("Deadline must be a Unix timestamp.");
+  if (!isUnsignedInteger(trimmed)) throw new Error("Deadline must be a Unix timestamp.");
   return BigInt(trimmed);
 }
 
@@ -1102,6 +1167,39 @@ async function readPoolCount(client: PledgeCashReadClient, factory: Address): Pr
   return count;
 }
 
+async function readPoolSummaries(
+  client: PledgeCashReadClient,
+  factory: Address,
+): Promise<{ pools: SwapPoolSummary[]; error?: string | undefined }> {
+  const poolCount = await readPoolCount(client, factory);
+  const cappedPoolCount = Math.min(poolCount, MAX_DISCOVERED_POOLS);
+  const poolAddresses = await readPoolAddresses(client, factory, cappedPoolCount);
+  const pools = await Promise.all(poolAddresses.map(async (address) => await readPoolSummary(client, address)));
+
+  if (poolCount <= cappedPoolCount) return { pools };
+  return {
+    pools,
+    error: `Showing the first ${cappedPoolCount.toString()} pools. Narrow by token address for anything older.`,
+  };
+}
+
+async function readPoolAddresses(
+  client: PledgeCashReadClient,
+  factory: Address,
+  count: number,
+): Promise<Address[]> {
+  return await Promise.all(
+    Array.from({ length: count }, (_, index) =>
+      client.readContract({
+        address: factory,
+        abi: ammFactoryAbi,
+        functionName: "allPools",
+        args: [BigInt(index)],
+      }) as Promise<Address>
+    ),
+  );
+}
+
 async function readPoolSummary(client: PledgeCashReadClient, address: Address): Promise<SwapPoolSummary> {
   const [token0, token1, reserves] = await Promise.all([
     client.readContract({ address, abi: ammPoolAbi, functionName: "token0" }) as Promise<Address>,
@@ -1110,6 +1208,13 @@ async function readPoolSummary(client: PledgeCashReadClient, address: Address): 
   ]);
   const [reserve0, reserve1] = reserves;
   return { address, token0, token1, reserve0, reserve1 };
+}
+
+function addPoolTokens(tokens: Map<string, TokenAccumulator>, pools: readonly SwapPoolSummary[]): void {
+  for (const pool of pools) {
+    addTokenAccumulator(tokens, pool.token0, { source: "pool", pool: pool.address, pair: pool.token1, rank: 20 });
+    addTokenAccumulator(tokens, pool.token1, { source: "pool", pool: pool.address, pair: pool.token0, rank: 20 });
+  }
 }
 
 async function tokenOptionFromAccumulator(client: PledgeCashReadClient, token: TokenAccumulator, account: Address | undefined): Promise<SwapTokenOption> {
@@ -1145,4 +1250,8 @@ function sortTokenAddresses(tokenA: Address, tokenB: Address): readonly [Address
 
 function sameAddress(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
+}
+
+function isUnsignedInteger(value: string): boolean {
+  return /^\d+$/.test(value);
 }

@@ -13,7 +13,12 @@ import { getAbiItem, isAddress, type PublicClient } from "viem";
 import { readBoardroomSnapshot } from "./boardroom-snapshot";
 import { errorMessage } from "./forms";
 import { formatNativeTokenAmount, formatTokenAmount } from "./token-amounts";
-import type { BoardroomDistributionSnapshot, BoardroomSnapshot } from "./types";
+import type {
+  BoardroomDistributionSnapshot,
+  BoardroomGrantSnapshot,
+  BoardroomLockedLiquiditySnapshot,
+  BoardroomSnapshot,
+} from "./types";
 
 export type ProductBoardroomCatalogEntry = {
   address: Address;
@@ -112,6 +117,10 @@ export type ProductBoardroomDashboardState = {
 };
 
 type ProductBoardroomClient = PledgeCashReadClient & Pick<PublicClient, "getBalance"> & Partial<Pick<PublicClient, "getBlockNumber" | "getLogs">>;
+type ProductBoardroomEventLog = { args?: Record<string, unknown> };
+type ProductBoardroomEventAbi = typeof ammPoolAbi | typeof fixedPriceSaleAbi | typeof migratingBondingCurveAbi;
+type ProductBoardroomEventName = "CurveBuy" | "CurveMigrated" | "CurveSell" | "FixedPricePurchase" | "Swap";
+
 const MAX_DISCOVERED_BOARDROOMS = 64;
 const WAD = 1_000_000_000_000_000_000n;
 
@@ -176,28 +185,36 @@ async function readTreasuryAssets(
   snapshot: BoardroomSnapshot,
   catalogEntry: ProductBoardroomCatalogEntry | undefined,
 ): Promise<ProductTreasuryAsset[]> {
-  const labels = new Map<Address, string>();
-  addAsset(labels, snapshot.shareToken, "Treasury shares");
-  addAsset(labels, snapshot.wrappedNative, "Wrapped native");
-  addAsset(labels, catalogEntry?.cashToken, "Cash / quote");
-  for (const distribution of snapshot.distributionSummaries) {
-    addAsset(labels, distributionPaymentToken(distribution), "Cash / quote");
-  }
-  for (const asset of snapshot.redeemableAssets) {
-    addAsset(labels, asset, "Redeemable asset");
-  }
-  for (const grant of snapshot.grantSummaries) {
-    if (grant.state) {
-      addAsset(labels, grant.state.token, grant.state.token.toLowerCase() === snapshot.shareToken.toLowerCase() ? "Treasury shares" : "Grant token");
-      if (!isZeroAddress(grant.state.paymentToken)) {
-        addAsset(labels, grant.state.paymentToken, "Revenue token");
-      }
-    }
-  }
+  const labels = treasuryAssetLabels(snapshot, catalogEntry);
 
   return await Promise.all(
     Array.from(labels.entries()).map(async ([address, label]) => await readTreasuryAsset(client, snapshot.address, address, label)),
   );
+}
+
+function treasuryAssetLabels(
+  snapshot: BoardroomSnapshot,
+  catalogEntry: ProductBoardroomCatalogEntry | undefined,
+): Map<Address, string> {
+  const labels = new Map<Address, string>();
+
+  addAsset(labels, snapshot.shareToken, "Treasury shares");
+  addAsset(labels, snapshot.wrappedNative, "Wrapped native");
+  addAsset(labels, catalogEntry?.cashToken, "Cash / quote");
+
+  for (const distribution of snapshot.distributionSummaries) {
+    addAsset(labels, distributionPaymentToken(distribution), "Cash / quote");
+  }
+
+  for (const asset of snapshot.redeemableAssets) {
+    addAsset(labels, asset, "Redeemable asset");
+  }
+
+  for (const grant of snapshot.grantSummaries) {
+    addGrantAssets(labels, grant, snapshot.shareToken);
+  }
+
+  return labels;
 }
 
 async function readTreasuryAsset(
@@ -237,17 +254,35 @@ function addAsset(labels: Map<Address, string>, address: Address | undefined, la
   labels.set(address, label);
 }
 
+function addGrantAssets(labels: Map<Address, string>, grant: BoardroomGrantSnapshot, shareToken: Address): void {
+  if (!grant.state) return;
+  const tokenLabel = sameAddress(grant.state.token, shareToken) ? "Treasury shares" : "Grant token";
+  addAsset(labels, grant.state.token, tokenLabel);
+  if (!isZeroAddress(grant.state.paymentToken)) {
+    addAsset(labels, grant.state.paymentToken, "Revenue token");
+  }
+}
+
 async function discoverProductBoardroomCatalog(
   client: ProductBoardroomClient,
   factory: Address,
 ): Promise<ProductBoardroomCatalogEntry[]> {
+  const addresses = await readFactoryBoardrooms(client, factory);
+
+  return await Promise.all(
+    uniqueAddresses(addresses).map(async (address) => await readProductBoardroomCatalogEntry(client, address)),
+  );
+}
+
+async function readFactoryBoardrooms(client: ProductBoardroomClient, factory: Address): Promise<Address[]> {
   const rawCount = await client.readContract({
     address: factory,
     abi: boardroomFactoryAbi,
     functionName: "allBoardroomsLength",
   });
   const count = boundedCount(rawCount);
-  const addresses = await Promise.all(
+
+  return await Promise.all(
     Array.from({ length: count }, async (_, index) =>
       (await client.readContract({
         address: factory,
@@ -256,10 +291,6 @@ async function discoverProductBoardroomCatalog(
         args: [BigInt(index)],
       })) as Address
     ),
-  );
-
-  return await Promise.all(
-    uniqueAddresses(addresses).map(async (address) => await readProductBoardroomCatalogEntry(client, address)),
   );
 }
 
@@ -272,17 +303,10 @@ async function readProductBoardroomCatalogEntry(
     const distribution = snapshot.distributionSummaries[0];
     const distributionState = distribution ? deriveDistributionCatalogFields(distribution, snapshot.shareTokenMetadata?.decimals) : {};
     const locker = findCatalogLocker(snapshot, distributionState.pool);
-    const pool = distributionState.pool ?? locker?.state?.pool;
+    const pool = catalogPoolAddress(distributionState, locker);
     const history = distribution ? await readDistributionHistory(client, distribution, pool) : undefined;
     const cashToken = distributionState.cashToken;
-    const treasuryCash = cashToken
-      ? ((await client.readContract({
-          address: cashToken,
-          abi: erc20Abi,
-          functionName: "balanceOf",
-          args: [address],
-        })) as bigint)
-      : undefined;
+    const treasuryCash = await readCatalogTreasuryCash(client, address, cashToken);
     const shareName = await readOptionalTokenName(client, snapshot.shareToken);
 
     return {
@@ -294,8 +318,8 @@ async function readProductBoardroomCatalogEntry(
       treasuryCash,
       ...distributionState,
       ...catalogHistoryFields(history),
-      locker: history?.curve?.migration?.locker ?? distributionState.locker ?? locker?.address,
-      pool: history?.pool ?? distributionState.pool ?? locker?.state?.pool,
+      locker: catalogLockerAddress(history, distributionState, locker),
+      pool: history?.pool ?? pool,
     };
   } catch (error) {
     return {
@@ -304,6 +328,35 @@ async function readProductBoardroomCatalogEntry(
       status: "Read failed",
     };
   }
+}
+
+async function readCatalogTreasuryCash(
+  client: ProductBoardroomClient,
+  boardroom: Address,
+  cashToken: Address | undefined,
+): Promise<bigint | undefined> {
+  if (!cashToken) return undefined;
+  return await client.readContract({
+    address: cashToken,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: [boardroom],
+  }) as bigint;
+}
+
+function catalogPoolAddress(
+  distributionState: Partial<ProductBoardroomCatalogEntry>,
+  locker: BoardroomLockedLiquiditySnapshot | undefined,
+): Address | undefined {
+  return distributionState.pool ?? locker?.state?.pool;
+}
+
+function catalogLockerAddress(
+  history: ProductBoardroomHistory | undefined,
+  distributionState: Partial<ProductBoardroomCatalogEntry>,
+  locker: BoardroomLockedLiquiditySnapshot | undefined,
+): Address | undefined {
+  return history?.curve?.migration?.locker ?? distributionState.locker ?? locker?.address;
 }
 
 export async function readProductBoardroomHistory(
@@ -551,14 +604,14 @@ async function readAmmHistory(
 async function readEventLogs(
   client: ProductBoardroomClient,
   address: Address,
-  abi: typeof ammPoolAbi | typeof fixedPriceSaleAbi | typeof migratingBondingCurveAbi,
-  name: "CurveBuy" | "CurveMigrated" | "CurveSell" | "FixedPricePurchase" | "Swap",
-): Promise<{ args?: Record<string, unknown> }[] | undefined> {
+  abi: ProductBoardroomEventAbi,
+  name: ProductBoardroomEventName,
+): Promise<ProductBoardroomEventLog[] | undefined> {
   if (!client.getBlockNumber || !client.getLogs) return undefined;
   const toBlock = await client.getBlockNumber();
   const event = getAbiItem({ abi, name });
   const logs = await client.getLogs({ address, event, fromBlock: 0n, toBlock });
-  return logs as { args?: Record<string, unknown> }[];
+  return logs as ProductBoardroomEventLog[];
 }
 
 function curveMigrationHistory(args: Record<string, unknown> | undefined): ProductBoardroomCurveMigrationHistory | undefined {
@@ -618,24 +671,42 @@ function fixedPriceSaleCashRaised(soldShares: bigint, price: bigint): bigint {
 }
 
 function fixedPriceSaleStatusLabel(status: number): string {
-  if (status === 0) return "Active sale";
-  if (status === 1) return "Closed sale";
-  if (status === 2) return "Cancelled sale";
-  return "Unknown sale";
+  switch (status) {
+    case 0:
+      return "Active sale";
+    case 1:
+      return "Closed sale";
+    case 2:
+      return "Cancelled sale";
+    default:
+      return "Unknown sale";
+  }
 }
 
 function migratingCurveStatusLabel(status: number): string {
-  if (status === 0) return "Open curve";
-  if (status === 1) return "Live AMM";
-  if (status === 2) return "Cancelled curve";
-  return "Unknown curve";
+  switch (status) {
+    case 0:
+      return "Open curve";
+    case 1:
+      return "Live AMM";
+    case 2:
+      return "Cancelled curve";
+    default:
+      return "Unknown curve";
+  }
 }
 
 function merkleAirdropStatusLabel(status: number): string {
-  if (status === 0) return "Open airdrop";
-  if (status === 1) return "Closed airdrop";
-  if (status === 2) return "Cancelled airdrop";
-  return "Unknown airdrop";
+  switch (status) {
+    case 0:
+      return "Open airdrop";
+    case 1:
+      return "Closed airdrop";
+    case 2:
+      return "Cancelled airdrop";
+    default:
+      return "Unknown airdrop";
+  }
 }
 
 async function readOptionalTokenName(client: PledgeCashReadClient, address: Address): Promise<string | undefined> {
@@ -647,8 +718,11 @@ async function readOptionalTokenName(client: PledgeCashReadClient, address: Addr
 }
 
 function boundedCount(value: unknown): number {
-  const parsed = typeof value === "bigint" ? value : typeof value === "number" && Number.isSafeInteger(value) ? BigInt(value) : 0n;
-  return Number(parsed > BigInt(MAX_DISCOVERED_BOARDROOMS) ? BigInt(MAX_DISCOVERED_BOARDROOMS) : parsed);
+  const parsed = bigintCount(value);
+  const capped = parsed > BigInt(MAX_DISCOVERED_BOARDROOMS)
+    ? BigInt(MAX_DISCOVERED_BOARDROOMS)
+    : parsed;
+  return Number(capped);
 }
 
 function uniqueAddresses(addresses: Address[]): Address[] {
@@ -686,4 +760,10 @@ function sameAddress(first: Address | undefined, second: Address | undefined): b
 
 function nonZeroAddress(address: Address | undefined): Address | undefined {
   return address && !isZeroAddress(address) ? address : undefined;
+}
+
+function bigintCount(value: unknown): bigint {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number" && Number.isSafeInteger(value)) return BigInt(value);
+  return 0n;
 }
