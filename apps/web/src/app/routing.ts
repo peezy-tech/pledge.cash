@@ -1,4 +1,6 @@
-export type AppView = "project" | "market" | "wallet" | "grants" | "manage" | "activity" | "advanced";
+import { getSentinelBaseUrl, type SentinelEnv } from "../lib/sentinel";
+
+export type AppView = "project" | "market" | "wallet" | "grants" | "manage" | "activity" | "notifications" | "advanced";
 
 const DEFAULT_VIEW: AppView = "project";
 
@@ -13,9 +15,11 @@ const VIEW_BY_ROUTE_SEGMENT: Record<string, AppView> = {
   grants: "grants",
   manage: "manage",
   market: "market",
+  notifications: "notifications",
   portfolio: "wallet",
   positions: "wallet",
   project: "project",
+  sentinel: "notifications",
   swap: "market",
   tools: "advanced",
   wallet: "wallet",
@@ -27,6 +31,7 @@ const PATH_BY_VIEW: Record<AppView, string> = {
   grants: "grants",
   manage: "manage",
   market: "market",
+  notifications: "notifications",
   project: "project",
   wallet: "wallet",
 };
@@ -36,8 +41,10 @@ export function initialView(): AppView {
   return viewFromPath(window.location.pathname);
 }
 
-export function viewFromPath(pathname: string): AppView {
-  return VIEW_BY_ROUTE_SEGMENT[firstRouteSegment(pathname)] ?? DEFAULT_VIEW;
+export function viewFromPath(pathname: string, env: SentinelEnv = import.meta.env): AppView {
+  const view = VIEW_BY_ROUTE_SEGMENT[firstRouteSegment(pathname)] ?? DEFAULT_VIEW;
+  if (view === "notifications" && !getSentinelBaseUrl(env)) return DEFAULT_VIEW;
+  return view;
 }
 
 export function viewHref(view: AppView): string {

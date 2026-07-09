@@ -1,5 +1,5 @@
 import type { Address, PledgeCashDeployment } from "@pledge.cash/sdk";
-import { Activity, ArrowDownUp, Compass, KeyRound, Settings2, WalletCards, Wrench } from "lucide-react";
+import { Activity, ArrowDownUp, BellRing, Compass, KeyRound, Settings2, WalletCards, Wrench } from "lucide-react";
 import type React from "react";
 import type { ReactNode } from "react";
 import { AddressLink, Facts, Panel, TabButton, WorkspaceHeader } from "../../components/shell";
@@ -8,6 +8,7 @@ import { ArtifactPanel, DeploymentPanel } from "../../features/deployment/deploy
 import { LogPanel } from "../../features/logs/log-panel";
 import { WalletPanel } from "../../features/wallet/wallet-panel";
 import type { ProductBoardroomDashboardState } from "../../lib/product-boardroom";
+import { getSentinelBaseUrl } from "../../lib/sentinel";
 import type { BoardroomSnapshot, FactorySnapshot, LogEntry, WalletState } from "../../lib/types";
 import type { AppView } from "../routing";
 import { manageWorkspaceSummary } from "./workspace-helpers";
@@ -56,6 +57,9 @@ export function WorkspaceNav({
     { view: "grants", label: "Grants", icon: <KeyRound className="h-4 w-4" /> },
     { view: "manage", label: "Manage", icon: <Settings2 className="h-4 w-4" /> },
     { view: "activity", label: "Activity", icon: <Activity className="h-4 w-4" /> },
+    ...(getSentinelBaseUrl()
+      ? [{ view: "notifications" as const, label: "Alerts", icon: <BellRing className="h-4 w-4" /> }]
+      : []),
     { view: "advanced", label: "Tools", icon: <Wrench className="h-4 w-4" /> },
   ];
 

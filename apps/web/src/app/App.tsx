@@ -73,6 +73,7 @@ import { ProductBoardroomDashboard } from "../features/boardrooms/product-boardr
 import { DiscoveryPanel, WalletAccessPanel } from "../features/discovery/discovery-panel";
 import { DirectGrantPanel } from "../features/grants/direct-grant-panel";
 import { GrantInspector } from "../features/grants/grant-inspector";
+import { GovernanceActivity } from "../features/notifications/governance-activity";
 import { SwapPanel } from "../features/swap/swap-panel";
 import { AppHeader } from "../features/wallet/app-header";
 import { useActionRunner } from "../hooks/use-action-runner";
@@ -131,6 +132,7 @@ import {
   resolveProductBoardroomAddress,
   type ProductBoardroomDashboardState,
 } from "../lib/product-boardroom";
+import { getSentinelBaseUrl } from "../lib/sentinel";
 import {
   buildAddLiquidityTransaction,
   buildClaimAmmFeesTransaction,
@@ -177,6 +179,7 @@ import type {
 } from "../lib/types";
 import { initialView, viewFromPath, viewHref, viewUsesProjectDashboard, type AppView } from "./routing";
 import { ProjectContextBar } from "./views/project-context";
+import { SentinelSettingsView } from "./views/sentinel-settings";
 import { sameAddress } from "./views/workspace-helpers";
 import {
   ActivityWorkspace,
@@ -363,6 +366,7 @@ export function App(): React.JSX.Element {
   const [ammPosition, setAmmPosition] = useState<AmmPositionState>();
   const [swapTokenList, setSwapTokenList] = useState<SwapTokenListState>(() => emptySwapTokenList());
   const [swapTokenListLoading, setSwapTokenListLoading] = useState(false);
+  const sentinelBaseUrl = getSentinelBaseUrl();
 
   const syncSelectedChainFromLocation = useCallback((): void => {
     const nextChainId = initialSelectedNetwork().chainId;
@@ -2011,6 +2015,11 @@ export function App(): React.JSX.Element {
             account={wallet.account}
             dashboard={productBoardroom}
             error={productBoardroomError}
+            governanceActivity={
+              sentinelBaseUrl ? (
+                <GovernanceActivity boardroom={productBoardroom?.address} chainId={activeNetwork.chainId} />
+              ) : undefined
+            }
             loading={productBoardroomLoading}
             pendingAction={pendingAction}
             inspectGrant={inspectDiscoveredGrant}
@@ -2055,6 +2064,8 @@ export function App(): React.JSX.Element {
         );
       case "activity":
         return <ActivityWorkspace clearLogs={clearLogs} dashboard={productBoardroom} logs={logs} />;
+      case "notifications":
+        return <SentinelSettingsView account={wallet.account} chainId={activeNetwork.chainId} />;
       case "advanced":
         return (
           <AdvancedWorkspace>

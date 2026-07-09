@@ -34,6 +34,7 @@ type ProductBoardroomDashboardProps = {
   account: Address | undefined;
   dashboard: ProductBoardroomDashboardState | undefined;
   error: string | undefined;
+  governanceActivity?: React.ReactNode;
   loading: boolean;
   pendingAction: string | undefined;
   inspectGrant: (grant: Address) => void;
@@ -50,6 +51,7 @@ export function ProductBoardroomDashboard({
   account,
   dashboard,
   error,
+  governanceActivity,
   loading,
   pendingAction,
   inspectGrant,
@@ -175,6 +177,8 @@ export function ProductBoardroomDashboard({
       />
 
       <LaunchPanel dashboard={dashboard} />
+
+      {governanceActivity}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
         <TreasuryPanel assets={dashboard?.treasuryAssets ?? []} nativeBalance={dashboard?.nativeBalance} shareToken={snapshot?.shareToken} />
