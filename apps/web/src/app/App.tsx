@@ -63,6 +63,7 @@ import {
   type LockedLiquidityState,
   type MerkleAirdropState,
   type MigratingBondingCurveState,
+  type PledgeCashDeployment,
 } from "@pledge.cash/sdk";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Hex, PublicClient } from "viem";
@@ -245,6 +246,50 @@ function isZeroDecimalInput(value: string): boolean {
   return normalized === "" || /^0+(?:\.0*)?$/.test(normalized);
 }
 
+function emptySwapTokenList(): SwapTokenListState {
+  return { tokens: [], pools: [], loaded: false };
+}
+
+function shouldLoadProductBoardroom({
+  activeView,
+  deployment,
+  productBoardroom,
+  productBoardroomError,
+  productBoardroomLoading,
+}: {
+  activeView: AppView;
+  deployment: PledgeCashDeployment | undefined;
+  productBoardroom: ProductBoardroomDashboardState | undefined;
+  productBoardroomError: string | undefined;
+  productBoardroomLoading: boolean;
+}): boolean {
+  if (!viewUsesProjectDashboard(activeView)) return false;
+  if (!deployment?.boardroomFactory) return false;
+  if (productBoardroom || productBoardroomError || productBoardroomLoading) return false;
+  return true;
+}
+
+function shouldLoadSwapTokens({
+  activeView,
+  deployment,
+  swapTokenList,
+  swapTokenListLoading,
+}: {
+  activeView: AppView;
+  deployment: PledgeCashDeployment | undefined;
+  swapTokenList: SwapTokenListState;
+  swapTokenListLoading: boolean;
+}): boolean {
+  if (activeView !== "market") return false;
+  if (!deployment?.ammFactory) return false;
+  if (swapTokenList.loaded || swapTokenListLoading) return false;
+  return true;
+}
+
+function discoveryLoadedForWallet(discovery: DiscoverySnapshot, account: Address | undefined, chainId: number): boolean {
+  return Boolean(discovery.loadedFor && sameAddress(discovery.loadedFor, account) && discovery.chainId === chainId);
+}
+
 export function App(): React.JSX.Element {
   const { clearLogs, logs, pendingAction, pushLog, runAction } = useActionRunner();
   const [selectedChainId, setSelectedChainId] = useState(() => initialSelectedNetwork().chainId);
@@ -316,7 +361,7 @@ export function App(): React.JSX.Element {
   const [removeLiquidityForm, setRemoveLiquidityForm] = useState<RemoveLiquidityForm>(() => defaultRemoveLiquidityForm());
   const [removeLiquidityQuote, setRemoveLiquidityQuote] = useState<RemoveLiquidityQuoteState>();
   const [ammPosition, setAmmPosition] = useState<AmmPositionState>();
-  const [swapTokenList, setSwapTokenList] = useState<SwapTokenListState>(() => ({ tokens: [], pools: [], loaded: false }));
+  const [swapTokenList, setSwapTokenList] = useState<SwapTokenListState>(() => emptySwapTokenList());
   const [swapTokenListLoading, setSwapTokenListLoading] = useState(false);
 
   const syncSelectedChainFromLocation = useCallback((): void => {
@@ -398,11 +443,7 @@ export function App(): React.JSX.Element {
     [],
   );
 
-  useEffect(() => {
-    persistSelectedNetwork(activeNetwork.chainId);
-  }, [activeNetwork.chainId]);
-
-  useEffect(() => {
+  const resetNetworkScopedState = useCallback((): void => {
     setPredictedGrant(undefined);
     setGrantAddress("");
     setGrantSnapshot(undefined);
@@ -436,9 +477,17 @@ export function App(): React.JSX.Element {
     setRemoveLiquidityForm(defaultRemoveLiquidityForm());
     setRemoveLiquidityQuote(undefined);
     setAmmPosition(undefined);
-    setSwapTokenList({ tokens: [], pools: [], loaded: false });
+    setSwapTokenList(emptySwapTokenList());
     setSwapTokenListLoading(false);
+  }, []);
+
+  useEffect(() => {
+    persistSelectedNetwork(activeNetwork.chainId);
   }, [activeNetwork.chainId]);
+
+  useEffect(() => {
+    resetNetworkScopedState();
+  }, [activeNetwork.chainId, resetNetworkScopedState]);
 
   const loadProductBoardroom = useCallback(async (): Promise<void> => {
     const requestVersion = networkRequestVersion.current;
@@ -475,9 +524,9 @@ export function App(): React.JSX.Element {
   }, [discoveryKey]);
 
   useEffect(() => {
-    if (!viewUsesProjectDashboard(activeView) || !deployment?.boardroomFactory || productBoardroom || productBoardroomError || productBoardroomLoading) return;
+    if (!shouldLoadProductBoardroom({ activeView, deployment, productBoardroom, productBoardroomError, productBoardroomLoading })) return;
     void loadProductBoardroom();
-  }, [activeView, deployment?.boardroomFactory, loadProductBoardroom, productBoardroom, productBoardroomError, productBoardroomLoading]);
+  }, [activeView, deployment, loadProductBoardroom, productBoardroom, productBoardroomError, productBoardroomLoading]);
 
   useEffect(() => {
     setSwapQuote(undefined);
@@ -493,10 +542,13 @@ export function App(): React.JSX.Element {
   }, [removeLiquidityForm]);
 
   useEffect(() => {
-    if (!pairHasWrappedNative(deployment, swapForm.tokenIn, swapForm.tokenOut) && swapForm.useNative) {
+    const swapPairSupportsNative = pairHasWrappedNative(deployment, swapForm.tokenIn, swapForm.tokenOut);
+    const liquidityPairSupportsNative = pairHasWrappedNative(deployment, liquidityForm.tokenA, liquidityForm.tokenB);
+
+    if (!swapPairSupportsNative && swapForm.useNative) {
       setSwapForm((current) => ({ ...current, useNative: false }));
     }
-    if (pairHasWrappedNative(deployment, liquidityForm.tokenA, liquidityForm.tokenB)) return;
+    if (liquidityPairSupportsNative) return;
     if (liquidityForm.useNative) {
       setLiquidityForm((current) => ({ ...current, useNative: false }));
     }
@@ -534,9 +586,9 @@ export function App(): React.JSX.Element {
   }, [activeNetwork.chainId, activeNetwork.wrappedNativeSymbol, deployment, isCurrentNetworkRequest, publicClient, pushLog, wallet.account]);
 
   useEffect(() => {
-    if (activeView !== "market" || !deployment?.ammFactory || swapTokenList.loaded || swapTokenListLoading) return;
+    if (!shouldLoadSwapTokens({ activeView, deployment, swapTokenList, swapTokenListLoading })) return;
     void loadSwapTokens();
-  }, [activeView, deployment?.ammFactory, loadSwapTokens, swapTokenList.loaded, swapTokenListLoading]);
+  }, [activeView, deployment, loadSwapTokens, swapTokenList, swapTokenListLoading]);
 
   useEffect(() => {
     if (!wallet.account || boardroomForm.owner) return;
@@ -1646,12 +1698,7 @@ export function App(): React.JSX.Element {
 
   const scanWalletAccess = async (): Promise<void> => {
     const range = await walletAccessDiscoveryRange(publicClient, deployment);
-    const loadedForCurrentWallet = Boolean(
-      discovery.loadedFor
-        && wallet.account
-        && discovery.loadedFor.toLowerCase() === wallet.account.toLowerCase()
-        && discovery.chainId === activeNetwork.chainId,
-    );
+    const loadedForCurrentWallet = discoveryLoadedForWallet(discovery, wallet.account, activeNetwork.chainId);
     await scanDiscoveryRange(loadedForCurrentWallet ? resumeWalletAccessRange(range, discovery) : range);
   };
 
@@ -1715,12 +1762,15 @@ export function App(): React.JSX.Element {
   const useDiscoveredDistribution = useCallback(
     (distribution: DiscoveredDistribution): void => {
       updateBoardroomAddress(distribution.boardroom);
-      if (distribution.kind === "migrating-bonding-curve") {
-        updateMigratingCurveAddress(distribution.distribution);
-      } else if (distribution.kind === "merkle-airdrop") {
-        updateMerkleAirdropAddress(distribution.distribution);
-      } else {
-        updateFixedPriceSaleAddress(distribution.distribution);
+      switch (distribution.kind) {
+        case "migrating-bonding-curve":
+          updateMigratingCurveAddress(distribution.distribution);
+          break;
+        case "merkle-airdrop":
+          updateMerkleAirdropAddress(distribution.distribution);
+          break;
+        default:
+          updateFixedPriceSaleAddress(distribution.distribution);
       }
       navigateView("manage");
     },
@@ -1735,6 +1785,12 @@ export function App(): React.JSX.Element {
     },
     [navigateView, updateBoardroomAddress, updateLockedLiquidityAddress],
   );
+
+  const openProductBoardroomWorkspace = (boardroom: Address): void => {
+    updateBoardroomAddress(boardroom);
+    void refreshBoardroom(boardroom);
+    navigateView("manage");
+  };
 
   const grantIssuerActionsAvailable = canRunGrantIssuerActions(wallet.account, grantSnapshot, productBoardroom, boardroomSnapshot, grantIssuerBoardroom);
   const marketPanel = (
@@ -1947,6 +2003,69 @@ export function App(): React.JSX.Element {
     />
   );
 
+  const renderActiveWorkspace = (): React.JSX.Element | null => {
+    switch (activeView) {
+      case "project":
+        return (
+          <ProductBoardroomDashboard
+            account={wallet.account}
+            dashboard={productBoardroom}
+            error={productBoardroomError}
+            loading={productBoardroomLoading}
+            pendingAction={pendingAction}
+            inspectGrant={inspectDiscoveredGrant}
+            openAdvanced={() => navigateView("advanced")}
+            openGrants={() => navigateView("grants")}
+            openManage={openProductBoardroomWorkspace}
+            openMarket={() => navigateView("market")}
+            openTools={openProductBoardroomWorkspace}
+            refresh={loadProductBoardroom}
+            runAction={runAction}
+          />
+        );
+      case "market":
+        return (
+          <>
+            <WorkspaceHeader
+              eyebrow="Market"
+              title="Trade and Liquidity"
+              description="Buy, sell, inspect pool reserves, and manage LP positions without leaving the project context."
+            />
+            {marketPanel}
+          </>
+        );
+      case "wallet":
+        return <PositionsWorkspace>{walletAccessPanel}</PositionsWorkspace>;
+      case "grants":
+        return (
+          <>
+            <WorkspaceHeader
+              eyebrow="Grants"
+              title="Grant Settlement"
+              description="Inspect a grant, verify holder and payment terms, then settle vested tokens from the current holder wallet."
+            />
+            {grantPanel}
+          </>
+        );
+      case "manage":
+        return (
+          <ManageWorkspace account={wallet.account} boardroomAddress={boardroomAddress} boardroomSnapshot={boardroomSnapshot}>
+            {boardroomToolsPanel}
+          </ManageWorkspace>
+        );
+      case "activity":
+        return <ActivityWorkspace clearLogs={clearLogs} dashboard={productBoardroom} logs={logs} />;
+      case "advanced":
+        return (
+          <AdvancedWorkspace>
+            {diagnosticsPanel}
+            {directGrantPanel}
+            {discoveryPanel}
+          </AdvancedWorkspace>
+        );
+    }
+  };
+
   return (
     <div className="min-h-svh text-zinc-100">
       <AppHeader
@@ -1977,75 +2096,7 @@ export function App(): React.JSX.Element {
           />
           <WorkspaceNav activeView={activeView} navigateView={navigateView} />
 
-          {activeView === "project" ? (
-            <ProductBoardroomDashboard
-              account={wallet.account}
-              dashboard={productBoardroom}
-              error={productBoardroomError}
-              loading={productBoardroomLoading}
-              pendingAction={pendingAction}
-              inspectGrant={inspectDiscoveredGrant}
-              openAdvanced={() => navigateView("advanced")}
-              openGrants={() => navigateView("grants")}
-              openManage={(boardroom) => {
-                updateBoardroomAddress(boardroom);
-                void refreshBoardroom(boardroom);
-                navigateView("manage");
-              }}
-              openMarket={() => navigateView("market")}
-              openTools={(boardroom) => {
-                updateBoardroomAddress(boardroom);
-                void refreshBoardroom(boardroom);
-                navigateView("manage");
-              }}
-              refresh={loadProductBoardroom}
-              runAction={runAction}
-            />
-          ) : null}
-
-          {activeView === "market" ? (
-            <>
-              <WorkspaceHeader
-                eyebrow="Market"
-                title="Trade and Liquidity"
-                description="Buy, sell, inspect pool reserves, and manage LP positions without leaving the project context."
-              />
-              {marketPanel}
-            </>
-          ) : null}
-
-          {activeView === "wallet" ? (
-            <PositionsWorkspace>{walletAccessPanel}</PositionsWorkspace>
-          ) : null}
-
-          {activeView === "grants" ? (
-            <>
-              <WorkspaceHeader
-                eyebrow="Grants"
-                title="Grant Settlement"
-                description="Inspect a grant, verify holder and payment terms, then settle vested tokens from the current holder wallet."
-              />
-              {grantPanel}
-            </>
-          ) : null}
-
-          {activeView === "manage" ? (
-            <ManageWorkspace account={wallet.account} boardroomAddress={boardroomAddress} boardroomSnapshot={boardroomSnapshot}>
-              {boardroomToolsPanel}
-            </ManageWorkspace>
-          ) : null}
-
-          {activeView === "activity" ? (
-            <ActivityWorkspace clearLogs={clearLogs} dashboard={productBoardroom} logs={logs} />
-          ) : null}
-
-          {activeView === "advanced" ? (
-            <AdvancedWorkspace>
-              {diagnosticsPanel}
-              {directGrantPanel}
-              {discoveryPanel}
-            </AdvancedWorkspace>
-          ) : null}
+          {renderActiveWorkspace()}
         </section>
       </main>
     </div>
