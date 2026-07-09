@@ -61,6 +61,10 @@ describe("notification fanout", () => {
 
     const subscriberSql = sqlText(db.queries[0]);
     expect(subscriberSql).toContain("JOIN share_balances");
+    expect(subscriberSql).toContain("LEFT JOIN subscriptions s");
+    expect(subscriberSql).toContain("COALESCE(s.min_severity, 'medium'::sentinel_severity)");
+    expect(subscriberSql).toContain("COALESCE(s.mode, 'holdings'::sentinel_subscription_mode)");
+    expect(subscriberSql).toContain("WHERE w.user_id = c.user_id");
     expect(subscriberSql).toContain("ON CONFLICT (dedupe_key) DO NOTHING");
     expect(subscriberSql).toContain("c.type = 'telegram'");
 

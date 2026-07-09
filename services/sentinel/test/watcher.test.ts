@@ -154,6 +154,58 @@ describe("runWatcherOnce", () => {
     expect(events.map((event) => event.event)).toEqual(["queued"]);
   });
 
+  test("keeps governance cursor retryable until queued event delivery succeeds", async () => {
+    const store = new MemoryWatcherStore();
+    const client = createClient({
+      latestBlock: 5n,
+      logs: [
+        boardroomCreatedLog(1n),
+        governanceLog("BoardroomActionQueued", 2n, 0, queueTx, {
+          actionHash,
+          eta: 1_800n,
+          executor,
+          salt
+        }),
+        transferLog(3n, holder, 100n)
+      ],
+      txInputs: { [queueTx]: queueInput }
+    });
+
+    await expect(
+      runWatcherOnce(chainId, {
+        client,
+        config: testConfig(10),
+        deployment: testDeployment(),
+        onActionEvent: () => {
+          throw new Error("pipeline unavailable");
+        },
+        store
+      })
+    ).rejects.toThrow("pipeline unavailable");
+
+    expect(store.cursor("factory-discovery")).toBe(5n);
+    expect(store.cursor("share-transfers")).toBe(5n);
+    expect(store.cursor("governance")).toBeUndefined();
+    expect(store.state.actions).toHaveLength(1);
+    expect(store.balance(shareToken, holder)).toBe(100n);
+
+    const events: WatcherPipelineEvent[] = [];
+    const retry = await runWatcherOnce(chainId, {
+      client,
+      config: testConfig(10),
+      deployment: testDeployment(),
+      onActionEvent: (event) => events.push(event),
+      store
+    });
+
+    expect(retry.actionEvents).toBe(1);
+    expect(retry.cursorAdvances).toBe(1);
+    expect(store.cursor("governance")).toBe(5n);
+    expect(store.state.actions).toHaveLength(1);
+    expect(store.balance(shareToken, holder)).toBe(100n);
+    expect(events.map((event) => event.event)).toEqual(["queued"]);
+  });
+
   test("transitions the latest pending row for repeated action hashes", async () => {
     const store = new MemoryWatcherStore();
     store.addBoardroom();
@@ -182,6 +234,53 @@ describe("runWatcherOnce", () => {
 
     expect(store.action(oldAction.id)?.status).toBe("queued");
     expect(store.action(latestAction.id)?.status).toBe("cancelled");
+    expect(events).toHaveLength(1);
+    expect(events[0]?.action.id).toBe(latestAction.id);
+    expect(events[0]?.event).toBe("cancelled");
+  });
+
+  test("re-emits transitioned actions when governance delivery is retried", async () => {
+    const store = new MemoryWatcherStore();
+    store.addBoardroom();
+    store.setCursor("factory-discovery", 5n);
+    store.setCursor("share-transfers", 5n);
+    const latestAction = store.addQueuedAction({ id: "latest-action", queueBlock: 4n, queueTxHash: bytes32("202") });
+    const client = createClient({
+      latestBlock: 5n,
+      logs: [
+        governanceLog("BoardroomActionCancelled", 5n, 0, cancelTx, {
+          actionHash,
+          caller: holder
+        })
+      ],
+      txInputs: {}
+    });
+
+    await expect(
+      runWatcherOnce(chainId, {
+        client,
+        config: testConfig(10),
+        deployment: testDeployment(),
+        onActionEvent: () => {
+          throw new Error("pipeline unavailable");
+        },
+        store
+      })
+    ).rejects.toThrow("pipeline unavailable");
+
+    expect(store.action(latestAction.id)?.status).toBe("cancelled");
+    expect(store.cursor("governance")).toBeUndefined();
+
+    const events: WatcherPipelineEvent[] = [];
+    await runWatcherOnce(chainId, {
+      client,
+      config: testConfig(10),
+      deployment: testDeployment(),
+      onActionEvent: (event) => events.push(event),
+      store
+    });
+
+    expect(store.cursor("governance")).toBe(5n);
     expect(events).toHaveLength(1);
     expect(events[0]?.action.id).toBe(latestAction.id);
     expect(events[0]?.event).toBe("cancelled");
@@ -415,7 +514,15 @@ class MemoryWatcherTx implements WatcherStoreTx {
         action.actionHash === input.actionHash &&
         action.queueTxHash === input.queueTxHash
     );
-    if (exists) return undefined;
+    if (exists) {
+      return this.state.actions.find(
+        (action) =>
+          action.chainId === input.chainId &&
+          action.boardroom === input.boardroom &&
+          action.actionHash === input.actionHash &&
+          action.queueTxHash === input.queueTxHash
+      );
+    }
 
     const action = queuedAction({
       ...input,
@@ -463,7 +570,21 @@ class MemoryWatcherTx implements WatcherStoreTx {
       )
       .sort((left, right) => Number(right.queueBlock - left.queueBlock));
     const latest = matching[0];
-    if (!latest) return undefined;
+    if (!latest) {
+      const existing = this.state.actions
+        .filter(
+          (action) =>
+            action.chainId === input.chainId &&
+            action.boardroom === input.boardroom &&
+            action.actionHash === input.actionHash &&
+            action.status === input.status &&
+            action.resolvedTxHash === input.txHash
+        )
+        .sort((left, right) => Number(right.queueBlock - left.queueBlock))[0];
+      return existing === undefined
+        ? undefined
+        : { action: existing, calls: this.state.calls.get(existing.id) ?? [] };
+    }
 
     const updated: QueuedActionRow = {
       ...latest,

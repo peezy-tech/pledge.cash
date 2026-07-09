@@ -513,8 +513,8 @@ async function runWatcherPass(input: {
     }
 
     for (const event of policyAdminEvents) {
-      const inserted = await tx.insertPolicyAdminEvent(event);
-      if (inserted && event.enabled && event.affectedQueuedActions) {
+      await tx.insertPolicyAdminEvent(event);
+      if (event.enabled && event.affectedQueuedActions) {
         const queued = await tx.listQueuedActions(input.chainId);
         pendingEvents.push(...queued.map((item) => ({ ...item, event: "policy-admin" as const })));
       }
@@ -523,7 +523,9 @@ async function runWatcherPass(input: {
     await applyShareTransfers(tx, input.chainId, shareTransfers);
 
     for (const window of windows) {
-      await advanceCursor(tx, input.chainId, window);
+      if (window.scope !== "governance") {
+        await advanceCursor(tx, input.chainId, window);
+      }
     }
 
     return pendingEvents;
@@ -531,6 +533,13 @@ async function runWatcherPass(input: {
 
   for (const event of actionEvents) {
     await input.onActionEvent?.(event);
+  }
+
+  const governanceWindow = plan.windows.governance;
+  if (governanceWindow !== undefined) {
+    await input.store.transaction(async (tx) => {
+      await advanceCursor(tx, input.chainId, governanceWindow);
+    });
   }
 
   return {
@@ -865,7 +874,23 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
         })
         .onConflictDoNothing()
         .returning();
-      return inserted[0];
+      if (inserted[0] !== undefined) {
+        return inserted[0];
+      }
+
+      const [existing] = await db
+        .select()
+        .from(queuedActions)
+        .where(
+          and(
+            eq(queuedActions.chainId, input.chainId),
+            eq(queuedActions.boardroom, input.boardroom),
+            eq(queuedActions.actionHash, input.actionHash),
+            eq(queuedActions.queueTxHash, input.queueTxHash)
+          )
+        )
+        .limit(1);
+      return existing;
     },
     async listActionCalls(actionId: string): Promise<StoredCall[]> {
       const rows = await db
@@ -933,7 +958,25 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
         )
         .orderBy(desc(queuedActions.queueBlock), desc(queuedActions.createdAt))
         .limit(1);
-      if (!pending) return undefined;
+      if (!pending) {
+        const [existing] = await db
+          .select()
+          .from(queuedActions)
+          .where(
+            and(
+              eq(queuedActions.chainId, input.chainId),
+              eq(queuedActions.boardroom, input.boardroom),
+              eq(queuedActions.actionHash, input.actionHash),
+              eq(queuedActions.status, input.status),
+              eq(queuedActions.resolvedTxHash, input.txHash)
+            )
+          )
+          .orderBy(desc(queuedActions.queueBlock), desc(queuedActions.createdAt))
+          .limit(1);
+        return existing === undefined
+          ? undefined
+          : { action: existing, calls: await this.listActionCalls(existing.id) };
+      }
 
       const updates =
         input.status === "cancelled"

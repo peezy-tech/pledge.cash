@@ -171,8 +171,13 @@ async function insertSubscriberNotifications(
             c.user_id,
             c.telegram_chat_id
           FROM action_context ctx
-          JOIN subscriptions s
-            ON CASE s.min_severity
+          JOIN channels c
+            ON c.enabled = TRUE
+           AND c.type = 'telegram'
+           AND c.telegram_chat_id IS NOT NULL
+          LEFT JOIN subscriptions s
+            ON s.user_id = c.user_id
+          WHERE CASE COALESCE(s.min_severity, 'medium'::sentinel_severity)
               WHEN 'low' THEN 1
               WHEN 'medium' THEN 2
               WHEN 'high' THEN 3
@@ -181,31 +186,28 @@ async function insertSubscriberNotifications(
               WHEN 'medium' THEN 2
               WHEN 'high' THEN 3
             END
-          JOIN channels c
-            ON c.user_id = s.user_id
-           AND c.enabled = TRUE
-           AND c.type = 'telegram'
-           AND c.telegram_chat_id IS NOT NULL
-          WHERE (
-            s.mode = 'holdings'
-            AND EXISTS (
-              SELECT 1
-              FROM wallets w
-              JOIN share_balances sb
-                ON sb.chain_id = ctx.chain_id
-               AND sb.token = ctx.share_token
-               AND lower(sb.holder) = lower(w.address)
-               AND sb.balance::numeric > 0
-              WHERE w.user_id = s.user_id
-            )
-          ) OR (
-            s.mode = 'explicit'
-            AND EXISTS (
-              SELECT 1
-              FROM subscription_boardrooms sbm
-              WHERE sbm.user_id = s.user_id
-                AND sbm.chain_id = ctx.chain_id
-                AND lower(sbm.boardroom) = lower(ctx.boardroom)
+          AND (
+            (
+              COALESCE(s.mode, 'holdings'::sentinel_subscription_mode) = 'holdings'
+              AND EXISTS (
+                SELECT 1
+                FROM wallets w
+                JOIN share_balances sb
+                  ON sb.chain_id = ctx.chain_id
+                 AND sb.token = ctx.share_token
+                 AND lower(sb.holder) = lower(w.address)
+                 AND sb.balance::numeric > 0
+                WHERE w.user_id = c.user_id
+              )
+            ) OR (
+              s.mode = 'explicit'
+              AND EXISTS (
+                SELECT 1
+                FROM subscription_boardrooms sbm
+                WHERE sbm.user_id = s.user_id
+                  AND sbm.chain_id = ctx.chain_id
+                  AND lower(sbm.boardroom) = lower(ctx.boardroom)
+              )
             )
           )
         )
