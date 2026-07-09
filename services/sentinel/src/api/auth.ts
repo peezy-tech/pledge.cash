@@ -24,7 +24,7 @@ export const SESSION_COOKIE_NAME = "__Secure-pledge_cash_sentinel_session";
 const sessionCookieOptions = {
   httpOnly: true,
   path: "/",
-  sameSite: "None" as const,
+  sameSite: "Lax" as const,
   secure: true
 };
 

@@ -35,6 +35,17 @@ describe("notification rendering", () => {
     expect(rendered.html).toBeUndefined();
   });
 
+  test("renders policy-admin updates with the admin label", () => {
+    const rendered = renderNotification(makeRow("telegram", "policy-admin"), {
+      chainNames: { 998: "HyperEVM testnet" },
+      now: new Date("2026-07-09T12:00:00.000Z"),
+      webOrigin: "https://sentinel.example"
+    });
+
+    expect(rendered.html).toContain("Policy Admin Updated governance action");
+    expect(rendered.subject).toContain("Policy Admin Updated action");
+  });
+
   test("builds stable web and explorer links from render options", () => {
     const links = buildLinks(makeRow("telegram").payload, {
       explorerUrls: { 998: "https://explorer.example/" },
@@ -50,7 +61,10 @@ describe("notification rendering", () => {
   });
 });
 
-function makeRow(channelType: "telegram" | "twitter"): RenderableOutboxRow {
+function makeRow(
+  channelType: "telegram" | "twitter",
+  event: RenderableOutboxRow["event"] = "queued"
+): RenderableOutboxRow {
   const now = new Date("2026-07-09T00:00:00.000Z");
   return {
     actionId: "00000000-0000-4000-8000-000000000001",
@@ -59,7 +73,7 @@ function makeRow(channelType: "telegram" | "twitter"): RenderableOutboxRow {
     channelType,
     createdAt: now,
     dedupeKey: `998:0xabc:queued:${channelType}:public`,
-    event: "queued",
+    event,
     externalId: null,
     id: "00000000-0000-4000-8000-000000000003",
     lastError: null,

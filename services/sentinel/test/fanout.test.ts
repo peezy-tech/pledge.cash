@@ -70,7 +70,7 @@ describe("notification fanout", () => {
     expect(twitterSql).toContain("ON CONFLICT (dedupe_key) DO NOTHING");
   });
 
-  test.each(["cancelled", "executed"] as const)(
+  test.each(["cancelled", "executed", "policy-admin"] as const)(
     "threads Twitter %s follow-ups from the original sent queued tweet",
     async (event) => {
       const db = new FakeDb([[], [{ id: `twitter-${event}`, channelType: "twitter" }]]);

@@ -17,7 +17,9 @@
   "scripts": {
     "dev": "bun src/index.ts",
     "drizzle:generate": "drizzle-kit generate",
-    "test": "bun run typecheck",
+    "integration:anvil": "bun scripts/integration-anvil.ts",
+    "test": "bun test && bun run typecheck",
+    "test:unit": "bun test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

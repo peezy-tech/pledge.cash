@@ -4,6 +4,7 @@ import type {
   ActionEvent,
   ActionPipelineEvent,
   ChannelType,
+  NotificationEvent,
   QueuedActionRow,
   Severity,
   StoredCall
@@ -15,7 +16,7 @@ export type FanoutDb = {
   execute<T = Record<string, unknown>>(query: SQL): Promise<QueryResult<T>>;
 };
 
-export type NotificationFanoutEvent = ActionEvent;
+export type NotificationFanoutEvent = ActionEvent | "policy-admin";
 
 export type NotificationPipelineEvent = Omit<ActionPipelineEvent, "event"> & {
   readonly event: NotificationFanoutEvent;
@@ -225,7 +226,7 @@ async function insertSubscriberNotifications(
             ':',
             lower(ctx.action_hash),
             ':',
-            ${event.event},
+            ${event.event}::text,
             ':',
             eligible.channel_type,
             ':',
@@ -261,7 +262,7 @@ async function insertTwitterNotification(
     return insertQueuedTweet(event, db);
   }
 
-  if (event.event === "cancelled" || event.event === "executed") {
+  if (event.event === "cancelled" || event.event === "executed" || event.event === "policy-admin") {
     return insertTwitterFollowUp(event, db);
   }
 
@@ -341,7 +342,7 @@ async function insertTwitterFollowUp(
           next_attempt_at
         )
         SELECT
-          concat(ctx.chain_id::text, ':', lower(ctx.action_hash), ':', ${event.event}, ':twitter:public'),
+          concat(ctx.chain_id::text, ':', lower(ctx.action_hash), ':', ${event.event}::text, ':twitter:public'),
           'twitter',
           NULL,
           NULL,
@@ -500,3 +501,5 @@ function rowsFromResult<T>(result: QueryResult<T>): readonly T[] {
 
   return (result as { readonly rows: readonly T[] }).rows;
 }
+
+export type { NotificationEvent };

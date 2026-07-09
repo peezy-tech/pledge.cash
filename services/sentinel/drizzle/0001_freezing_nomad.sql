@@ -1,0 +1,1 @@
+ALTER TYPE "public"."sentinel_notification_event" ADD VALUE 'policy-admin';

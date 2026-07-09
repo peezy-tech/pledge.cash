@@ -308,7 +308,7 @@ function sessionCookie(response: Response): string {
   expect(setCookie).toContain(SESSION_COOKIE_NAME);
   expect(setCookie).toContain("HttpOnly");
   expect(setCookie).toContain("Secure");
-  expect(setCookie).toContain("SameSite=None");
+    expect(setCookie).toContain("SameSite=Lax");
   return setCookie?.split(";")[0] ?? "";
 }
 

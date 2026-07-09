@@ -45,7 +45,8 @@ export const subscriptionModeEnum = pgEnum("sentinel_subscription_mode", ["holdi
 export const notificationEventEnum = pgEnum("sentinel_notification_event", [
   "queued",
   "cancelled",
-  "executed"
+  "executed",
+  "policy-admin"
 ]);
 
 export const notificationStatusEnum = pgEnum("sentinel_notification_status", [
