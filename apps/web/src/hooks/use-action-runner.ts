@@ -1,9 +1,18 @@
-import { useCallback, useRef, useState } from "react";
+import {
+  useCallback,
+  useRef,
+  useState,
+  type Dispatch,
+  type MutableRefObject,
+  type SetStateAction,
+} from "react";
 import type { Hex } from "viem";
 import { errorMessage } from "../lib/forms";
 import type { LogEntry } from "../lib/types";
 
 export type PushLog = (message: string, level?: LogEntry["level"], txHash?: Hex, txChainId?: number) => void;
+
+const MAX_LOG_ENTRIES = 80;
 
 export function useActionRunner(): {
   clearLogs: () => void;
@@ -17,34 +26,26 @@ export function useActionRunner(): {
   const pendingActionRef = useRef<string | undefined>(undefined);
 
   const pushLog = useCallback<PushLog>((message, level = "info", txHash, txChainId) => {
-    const entry = {
-      id: `${Date.now()}-${Math.random()}`,
-      level,
-      message,
-      time: new Date().toISOString().replace(".000Z", "Z"),
-      ...(txHash ? { txHash } : {}),
-      ...(txHash && txChainId !== undefined ? { txChainId } : {}),
-    };
-    setLogs((current) => [entry, ...current].slice(0, 80));
+    setLogs((current) =>
+      [createLogEntry(message, level, txHash, txChainId), ...current].slice(0, MAX_LOG_ENTRIES),
+    );
   }, []);
 
   const runAction = useCallback(
     async (label: string, action: () => Promise<void>): Promise<void> => {
-      if (pendingActionRef.current) {
-        pushLog(`Wait for ${pendingActionRef.current} to finish before starting ${label}.`, "error");
+      const activeAction = pendingActionRef.current;
+      if (activeAction) {
+        pushLog(`Wait for ${activeAction} to finish before starting ${label}.`, "error");
         return;
       }
-      pendingActionRef.current = label;
-      setPendingAction(label);
+
+      startAction(label, pendingActionRef, setPendingAction);
       try {
         await action();
       } catch (error) {
         pushLog(errorMessage(error), "error");
       } finally {
-        if (pendingActionRef.current === label) {
-          pendingActionRef.current = undefined;
-          setPendingAction(undefined);
-        }
+        finishAction(label, pendingActionRef, setPendingAction);
       }
     },
     [pushLog],
@@ -53,4 +54,40 @@ export function useActionRunner(): {
   const clearLogs = useCallback((): void => setLogs([]), []);
 
   return { clearLogs, logs, pendingAction, pushLog, runAction };
+}
+
+function createLogEntry(
+  message: string,
+  level: LogEntry["level"],
+  txHash: Hex | undefined,
+  txChainId: number | undefined,
+): LogEntry {
+  return {
+    id: `${Date.now()}-${Math.random()}`,
+    level,
+    message,
+    time: new Date().toISOString().replace(".000Z", "Z"),
+    ...(txHash ? { txHash } : {}),
+    ...(txHash && txChainId !== undefined ? { txChainId } : {}),
+  };
+}
+
+function startAction(
+  label: string,
+  pendingActionRef: MutableRefObject<string | undefined>,
+  setPendingAction: Dispatch<SetStateAction<string | undefined>>,
+): void {
+  pendingActionRef.current = label;
+  setPendingAction(label);
+}
+
+function finishAction(
+  label: string,
+  pendingActionRef: MutableRefObject<string | undefined>,
+  setPendingAction: Dispatch<SetStateAction<string | undefined>>,
+): void {
+  if (pendingActionRef.current !== label) return;
+
+  pendingActionRef.current = undefined;
+  setPendingAction(undefined);
 }

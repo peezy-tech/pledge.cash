@@ -14,20 +14,17 @@ export function useFactorySnapshot(
 
   useEffect(() => {
     let cancelled = false;
+    const factoryAddress = deployment?.tokenGrantFactory;
 
     async function loadFactory(): Promise<void> {
       setFactorySnapshot({});
-      if (!deployment?.tokenGrantFactory) return;
+      if (!factoryAddress) return;
 
       try {
-        const snapshot = await readFactoryState(client, deployment.tokenGrantFactory);
-        if (!cancelled) {
-          setFactorySnapshot({
-            owner: snapshot.owner,
-            tokenGrantLogic: snapshot.tokenGrantLogic,
-            creationFee: snapshot.creationFee,
-          });
-        }
+        const snapshot = await readFactoryState(client, factoryAddress);
+        if (cancelled) return;
+
+        setFactorySnapshot(factoryStateSnapshot(snapshot));
       } catch (error) {
         pushLog(`Factory reads failed: ${errorMessage(error)}`, "error");
       }
@@ -40,4 +37,14 @@ export function useFactorySnapshot(
   }, [client, deployment?.tokenGrantFactory, pushLog]);
 
   return factorySnapshot;
+}
+
+type ReadFactoryState = Awaited<ReturnType<typeof readFactoryState>>;
+
+function factoryStateSnapshot(snapshot: ReadFactoryState): FactorySnapshot {
+  return {
+    owner: snapshot.owner,
+    tokenGrantLogic: snapshot.tokenGrantLogic,
+    creationFee: snapshot.creationFee,
+  };
 }

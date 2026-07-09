@@ -29,20 +29,23 @@ export function useWagmiWallet({
   const wallet = useMemo(() => walletState(account, chainId), [account, chainId]);
 
   useEffect(() => {
-    if (sameOptionalAddress(previousAccount.current, account)) return;
+    const priorAccount = previousAccount.current;
+    if (!hasAccountChanged(priorAccount, account)) return;
 
-    if (previousAccount.current !== undefined || account !== undefined) {
+    if (shouldNotifyAccountChanged(priorAccount, account)) {
       onAccountChanged();
     }
+
     if (account) {
       pushLog(`Connected ${shortAddress(account)}`, "success");
     }
+
     previousAccount.current = account;
   }, [account, onAccountChanged, pushLog]);
 
   const activeAccount = useCallback((): Address => {
-    if (!account) throw new Error("Connect wallet first.");
-    if (chainId !== network.chainId) throw new Error(`Switch wallet to ${network.name} first.`);
+    requireConnectedAccount(account);
+    requireExpectedChain(chainId, network);
 
     return account;
   }, [account, chainId, network.chainId, network.name]);
@@ -70,6 +73,22 @@ export function useWagmiWallet({
   return { activeAccount, switchChain, wallet, walletClient };
 }
 
-function sameOptionalAddress(left: Address | undefined, right: Address | undefined): boolean {
-  return (left ?? "").toLowerCase() === (right ?? "").toLowerCase();
+function hasAccountChanged(previousAccount: Address | undefined, account: Address | undefined): boolean {
+  return normalizedAddress(previousAccount) !== normalizedAddress(account);
+}
+
+function shouldNotifyAccountChanged(previousAccount: Address | undefined, account: Address | undefined): boolean {
+  return previousAccount !== undefined || account !== undefined;
+}
+
+function normalizedAddress(address: Address | undefined): string {
+  return (address ?? "").toLowerCase();
+}
+
+function requireConnectedAccount(account: Address | undefined): asserts account is Address {
+  if (!account) throw new Error("Connect wallet first.");
+}
+
+function requireExpectedChain(chainId: number | undefined, network: PledgeCashNetwork): void {
+  if (chainId !== network.chainId) throw new Error(`Switch wallet to ${network.name} first.`);
 }
