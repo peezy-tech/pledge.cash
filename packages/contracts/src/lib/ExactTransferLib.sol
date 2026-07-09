@@ -51,7 +51,10 @@ library ExactTransferLib {
         returns (RecipientDelta memory)
     {
         uint256 balanceAfter = SafeTransferLib.balanceOf(token, account);
-        if (balanceAfter < balanceBefore) return RecipientDelta({balanceDecreased: true, received: 0});
+        if (balanceAfter < balanceBefore) {
+            return RecipientDelta({balanceDecreased: true, received: 0});
+        }
+
         return RecipientDelta({balanceDecreased: false, received: balanceAfter - balanceBefore});
     }
 
@@ -65,13 +68,17 @@ library ExactTransferLib {
         uint256 senderBalanceAfter = SafeTransferLib.balanceOf(token, sender);
         uint256 recipientBalanceAfter = SafeTransferLib.balanceOf(token, recipient);
 
+        bool senderBalanceIncreased = senderBalanceAfter > senderBalanceBefore;
+        uint256 senderSpent = senderBalanceIncreased ? 0 : senderBalanceBefore - senderBalanceAfter;
+
+        bool recipientBalanceDecreased = recipientBalanceAfter < recipientBalanceBefore;
+        uint256 recipientReceived = recipientBalanceDecreased ? 0 : recipientBalanceAfter - recipientBalanceBefore;
+
         return ExactDelta({
-            senderBalanceIncreased: senderBalanceAfter > senderBalanceBefore,
-            senderSpent: senderBalanceAfter > senderBalanceBefore ? 0 : senderBalanceBefore - senderBalanceAfter,
-            recipientBalanceDecreased: recipientBalanceAfter < recipientBalanceBefore,
-            recipientReceived: recipientBalanceAfter < recipientBalanceBefore
-                ? 0
-                : recipientBalanceAfter - recipientBalanceBefore
+            senderBalanceIncreased: senderBalanceIncreased,
+            senderSpent: senderSpent,
+            recipientBalanceDecreased: recipientBalanceDecreased,
+            recipientReceived: recipientReceived
         });
     }
 }
