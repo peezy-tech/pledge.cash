@@ -9,6 +9,7 @@ contract PledgeCashDeterministicDeployer is Ownable {
     error InvalidAddress();
     error InitCodeHashMismatch(bytes32 salt, bytes32 expected, bytes32 actual);
 
+    /// @notice First init-code hash accepted for each CREATE3 salt.
     mapping(bytes32 => bytes32) public initCodeHashForSalt;
 
     event DeterministicContractDeployed(bytes32 indexed salt, address indexed deployed, bytes32 initCodeHash);
@@ -18,6 +19,8 @@ contract PledgeCashDeterministicDeployer is Ownable {
         _initializeOwner(owner_);
     }
 
+    /// @notice Deploy `initCode` behind `salt`, or return the existing deployment for the same init-code hash.
+    /// @dev A salt can be reused only with the same init code, which protects deterministic addresses from drift.
     function deploy(bytes32 salt, bytes calldata initCode) external onlyOwner returns (address deployed) {
         if (initCode.length == 0) revert EmptyInitCode();
 
@@ -39,6 +42,7 @@ contract PledgeCashDeterministicDeployer is Ownable {
         emit DeterministicContractDeployed(salt, deployed, initCodeHash);
     }
 
+    /// @notice Predict the deterministic deployment address for `salt` from this deployer.
     function predict(bytes32 salt) public view returns (address) {
         return CREATE3.predictDeterministicAddress(salt);
     }
