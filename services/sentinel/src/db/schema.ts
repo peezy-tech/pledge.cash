@@ -109,6 +109,7 @@ export const queuedActions = pgTable(
     executor: text("executor").notNull(),
     eta: timestamp("eta", { withTimezone: true }).notNull(),
     queueBlock: bigint("queue_block", { mode: "bigint" }).notNull(),
+    queueLogIndex: integer("queue_log_index").notNull().default(0),
     status: queuedActionStatusEnum("status").notNull().default("queued"),
     cancelledBy: text("cancelled_by"),
     executedBy: text("executed_by"),

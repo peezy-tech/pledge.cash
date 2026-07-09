@@ -1,0 +1,1 @@
+ALTER TABLE "queued_actions" ADD COLUMN "queue_log_index" integer DEFAULT 0 NOT NULL;

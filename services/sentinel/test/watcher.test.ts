@@ -239,6 +239,48 @@ describe("runWatcherOnce", () => {
     expect(events[0]?.event).toBe("cancelled");
   });
 
+  test("matches terminal events to queued rows before the terminal log", async () => {
+    const store = new MemoryWatcherStore();
+    store.addBoardroom();
+    store.setCursor("factory-discovery", 5n);
+    store.setCursor("share-transfers", 5n);
+    const terminalAction = store.addQueuedAction({
+      id: "terminal-action",
+      queueBlock: 5n,
+      queueLogIndex: 1,
+      queueTxHash: bytes32("201")
+    });
+    const requeuedAction = store.addQueuedAction({
+      id: "requeued-action",
+      queueBlock: 5n,
+      queueLogIndex: 3,
+      queueTxHash: bytes32("202")
+    });
+    const events: WatcherPipelineEvent[] = [];
+
+    await runWatcherOnce(chainId, {
+      client: createClient({
+        latestBlock: 5n,
+        logs: [
+          governanceLog("BoardroomActionCancelled", 5n, 2, cancelTx, {
+            actionHash,
+            caller: holder
+          })
+        ],
+        txInputs: {}
+      }),
+      config: testConfig(10),
+      deployment: testDeployment(),
+      onActionEvent: (event) => events.push(event),
+      store
+    });
+
+    expect(store.action(terminalAction.id)?.status).toBe("cancelled");
+    expect(store.action(requeuedAction.id)?.status).toBe("queued");
+    expect(events).toHaveLength(1);
+    expect(events[0]?.action.id).toBe(terminalAction.id);
+  });
+
   test("re-emits transitioned actions when governance delivery is retried", async () => {
     const store = new MemoryWatcherStore();
     store.addBoardroom();
@@ -313,6 +355,43 @@ describe("runWatcherOnce", () => {
     expect(store.state.actions).toHaveLength(1);
     expect(store.state.actions[0]?.decodeStatus).toBe("undecoded");
     expect(store.callsFor(store.state.actions[0]!.id)).toHaveLength(0);
+  });
+
+  test("stores schema-valid selectors for empty calldata calls", async () => {
+    const emptyCall: BoardroomCall = { ...call, data: "0x" };
+    const emptyActionHash = hashAction(emptyCall, salt);
+    const emptyQueueInput = encodeFunctionData({
+      abi: boardroomAbi,
+      functionName: "queueAction",
+      args: [emptyCall, salt]
+    });
+    const store = new MemoryWatcherStore();
+    store.addBoardroom();
+    store.setCursor("factory-discovery", 5n);
+    store.setCursor("share-transfers", 5n);
+
+    await runWatcherOnce(chainId, {
+      client: createClient({
+        latestBlock: 5n,
+        logs: [
+          governanceLog("BoardroomActionQueued", 5n, 0, queueTx, {
+            actionHash: emptyActionHash,
+            eta: 1_800n,
+            executor,
+            salt
+          })
+        ],
+        txInputs: { [queueTx]: emptyQueueInput }
+      }),
+      config: testConfig(10),
+      deployment: testDeployment(),
+      store
+    });
+
+    expect(store.state.actions).toHaveLength(1);
+    expect(store.callsFor(store.state.actions[0]!.id)).toMatchObject([
+      { data: "0x", decodedFunction: null, selector: "0x00000000" }
+    ]);
   });
 
   test("emits policy-admin events for pending actions on enabling admin changes", async () => {
@@ -429,10 +508,16 @@ class MemoryWatcherStore implements WatcherStore {
     });
   }
 
-  addQueuedAction(input: { id: string; queueBlock: bigint; queueTxHash: Lowercase<Hex> }): QueuedActionRow {
+  addQueuedAction(input: {
+    id: string;
+    queueBlock: bigint;
+    queueLogIndex?: number;
+    queueTxHash: Lowercase<Hex>;
+  }): QueuedActionRow {
     const action = queuedAction({
       id: input.id,
       queueBlock: input.queueBlock,
+      queueLogIndex: input.queueLogIndex,
       queueTxHash: input.queueTxHash
     });
     this.state.actions.push(action);
@@ -545,6 +630,7 @@ class MemoryWatcherTx implements WatcherStoreTx {
   async listQueuedActions(chainId_: number): Promise<Array<{ action: QueuedActionRow; calls: StoredCall[] }>> {
     return this.state.actions
       .filter((action) => action.chainId === chainId_ && action.status === "queued")
+      .sort((left, right) => Number(right.queueBlock - left.queueBlock) || right.queueLogIndex - left.queueLogIndex)
       .map((action) => ({ action, calls: this.state.calls.get(action.id) ?? [] }));
   }
 
@@ -558,6 +644,8 @@ class MemoryWatcherTx implements WatcherStoreTx {
     readonly caller: Lowercase<Address>;
     readonly chainId: number;
     readonly status: "cancelled" | "executed";
+    readonly terminalBlock: bigint;
+    readonly terminalLogIndex: number;
     readonly txHash: Lowercase<Hex>;
   }): Promise<{ action: QueuedActionRow; calls: StoredCall[] } | undefined> {
     const matching = this.state.actions
@@ -566,9 +654,11 @@ class MemoryWatcherTx implements WatcherStoreTx {
           action.chainId === input.chainId &&
           action.boardroom === input.boardroom &&
           action.actionHash === input.actionHash &&
+          (action.queueBlock < input.terminalBlock ||
+            (action.queueBlock === input.terminalBlock && action.queueLogIndex <= input.terminalLogIndex)) &&
           action.status === "queued"
       )
-      .sort((left, right) => Number(right.queueBlock - left.queueBlock));
+      .sort((left, right) => Number(right.queueBlock - left.queueBlock) || right.queueLogIndex - left.queueLogIndex);
     const latest = matching[0];
     if (!latest) {
       const existing = this.state.actions
@@ -580,7 +670,9 @@ class MemoryWatcherTx implements WatcherStoreTx {
             action.status === input.status &&
             action.resolvedTxHash === input.txHash
         )
-        .sort((left, right) => Number(right.queueBlock - left.queueBlock))[0];
+        .sort(
+          (left, right) => Number(right.queueBlock - left.queueBlock) || right.queueLogIndex - left.queueLogIndex
+        )[0];
       return existing === undefined
         ? undefined
         : { action: existing, calls: this.state.calls.get(existing.id) ?? [] };
@@ -759,6 +851,7 @@ function queuedAction(
     executor: input.executor ?? executor,
     id: input.id,
     queueBlock: input.queueBlock,
+    queueLogIndex: input.queueLogIndex ?? 0,
     queueTxHash: input.queueTxHash,
     rawCalldata: input.rawCalldata ?? queueInput,
     resolvedTxHash: null,

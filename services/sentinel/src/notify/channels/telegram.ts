@@ -55,12 +55,6 @@ type LinkCodeRow = {
   readonly channelId: string;
 };
 
-type TelegramPayload = OutboxRow["payload"] & {
-  readonly delivery?: {
-    readonly telegramChatId?: string;
-  };
-};
-
 export function createTelegramBot(config: TelegramBotConfig, db: TelegramDb): TelegramBotBundle {
   const token = config.botToken ?? config.token;
   if (token === undefined) {
@@ -80,8 +74,7 @@ export function createTelegramChannel(bot: TelegramBotLike, db: TelegramDb): Not
   return {
     type: "telegram",
     async send(row: OutboxRow, rendered: RenderedMessage): Promise<NotificationSendResult> {
-      const payload = row.payload as TelegramPayload;
-      const chatId = payload.delivery?.telegramChatId ?? (await lookupTelegramChatId(db, row));
+      const chatId = await lookupTelegramChatId(db, row);
       if (chatId === undefined) {
         return {
           error: `No Telegram chat id for notification ${row.id}`,

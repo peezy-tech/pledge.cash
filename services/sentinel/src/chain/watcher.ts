@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, lt, lte, or } from "drizzle-orm";
 import {
   createPublicClient,
   decodeFunctionData,
@@ -80,6 +80,7 @@ export type InsertQueuedActionInput = {
   readonly eta: Date;
   readonly executor: Lowercase<Address>;
   readonly queueBlock: bigint;
+  readonly queueLogIndex: number;
   readonly queueTxHash: Lowercase<Hex>;
   readonly rawCalldata: Hex;
   readonly salt: Lowercase<Hex>;
@@ -123,6 +124,8 @@ export type WatcherStoreTx = {
     readonly caller: Lowercase<Address>;
     readonly chainId: number;
     readonly status: "cancelled" | "executed";
+    readonly terminalBlock: bigint;
+    readonly terminalLogIndex: number;
     readonly txHash: Lowercase<Hex>;
   }): Promise<{ action: QueuedActionRow; calls: StoredCall[] } | undefined>;
   upsertBoardrooms(chainId: number, discovered: readonly DiscoveredBoardroom[]): Promise<void>;
@@ -754,6 +757,7 @@ async function processGovernanceEvent(
       eta: new Date(Number(event.eta) * 1000),
       executor: lowerAddress(event.executor),
       queueBlock: event.blockNumber,
+      queueLogIndex: event.logIndex,
       queueTxHash: lowerHex(event.transactionHash),
       rawCalldata: txInput,
       salt: lowerHex(event.salt)
@@ -775,6 +779,8 @@ async function processGovernanceEvent(
       caller: lowerAddress(event.caller),
       chainId,
       status: event.kind === "actionCancelled" ? "cancelled" : "executed",
+      terminalBlock: event.blockNumber,
+      terminalLogIndex: event.logIndex,
       txHash: lowerHex(event.transactionHash)
     });
     return transitioned ? [{ ...transitioned, event: transitioned.action.status }] : [];
@@ -868,6 +874,7 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
           eta: input.eta,
           executor: input.executor,
           queueBlock: input.queueBlock,
+          queueLogIndex: input.queueLogIndex,
           queueTxHash: input.queueTxHash,
           rawCalldata: input.rawCalldata,
           salt: input.salt
@@ -920,7 +927,7 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
         .select()
         .from(queuedActions)
         .where(and(eq(queuedActions.chainId, chainId), eq(queuedActions.status, "queued")))
-        .orderBy(desc(queuedActions.queueBlock), desc(queuedActions.createdAt));
+        .orderBy(desc(queuedActions.queueBlock), desc(queuedActions.queueLogIndex), desc(queuedActions.createdAt));
       return Promise.all(
         rows.map(async (action) => ({
           action,
@@ -943,6 +950,8 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
       readonly caller: Lowercase<Address>;
       readonly chainId: number;
       readonly status: "cancelled" | "executed";
+      readonly terminalBlock: bigint;
+      readonly terminalLogIndex: number;
       readonly txHash: Lowercase<Hex>;
     }): Promise<{ action: QueuedActionRow; calls: StoredCall[] } | undefined> {
       const [pending] = await db
@@ -953,10 +962,17 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
             eq(queuedActions.chainId, input.chainId),
             eq(queuedActions.boardroom, input.boardroom),
             eq(queuedActions.actionHash, input.actionHash),
+            or(
+              lt(queuedActions.queueBlock, input.terminalBlock),
+              and(
+                eq(queuedActions.queueBlock, input.terminalBlock),
+                lte(queuedActions.queueLogIndex, input.terminalLogIndex)
+              )
+            ),
             eq(queuedActions.status, "queued")
           )
         )
-        .orderBy(desc(queuedActions.queueBlock), desc(queuedActions.createdAt))
+        .orderBy(desc(queuedActions.queueBlock), desc(queuedActions.queueLogIndex), desc(queuedActions.createdAt))
         .limit(1);
       if (!pending) {
         const [existing] = await db
@@ -971,7 +987,7 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
               eq(queuedActions.resolvedTxHash, input.txHash)
             )
           )
-          .orderBy(desc(queuedActions.queueBlock), desc(queuedActions.createdAt))
+          .orderBy(desc(queuedActions.queueBlock), desc(queuedActions.queueLogIndex), desc(queuedActions.createdAt))
           .limit(1);
         return existing === undefined
           ? undefined
@@ -1329,7 +1345,7 @@ function comparePolicyAdminEvents(left: PolicyAdminEvent, right: PolicyAdminEven
 }
 
 function selectorOf(data: Hex): Hex {
-  return data.length >= 10 ? (data.slice(0, 10) as Hex) : "0x";
+  return data.length >= 10 ? (data.slice(0, 10) as Hex) : "0x00000000";
 }
 
 function hexArray(value: unknown): Hex[] {
