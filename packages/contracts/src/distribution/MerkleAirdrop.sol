@@ -107,12 +107,7 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         external
         initializer
     {
-        if (boardroom_ == address(0) || params.shareToken == address(0) || tokenGrantFactory_ == address(0)) {
-            revert InvalidAddress();
-        }
-        if (params.shareAmount == 0) revert InvalidAmount();
-        if (params.merkleRoot == bytes32(0)) revert InvalidMerkleRoot();
-        if (params.endTime != 0 && params.endTime < params.startTime) revert InvalidTimeWindow();
+        _requireValidCreateParams(boardroom_, tokenGrantFactory_, params);
 
         factory = msg.sender;
         boardroom = boardroom_;
@@ -153,20 +148,12 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         GrantClaimParams calldata params,
         bytes32[] calldata proof
     ) external payable nonReentrant returns (address grant) {
-        uint16 claimedGrantCount_ = claimedGrantCount;
-        if (claimedGrantCount_ >= maxGrantClaims) revert TooManyGrantClaims(maxGrantClaims);
+        uint16 nextClaimedGrantCount = _nextClaimedGrantCount();
 
         _claim(index, account, amount, getGrantClaimLeaf(index, account, amount, params), proof);
-        claimedGrantCount = claimedGrantCount_ + 1;
+        claimedGrantCount = nextClaimedGrantCount;
 
-        address shareToken_ = shareToken;
-        address tokenGrantFactory_ = tokenGrantFactory;
-        shareToken_.safeApprove(tokenGrantFactory_, amount);
-        grant = TokenGrantFactory(tokenGrantFactory_).createGrantFromDistribution{value: msg.value}(
-            boardroom, _grantCreateParams(index, account, shareToken_, amount, params)
-        );
-        shareToken_.safeApprove(tokenGrantFactory_, 0);
-
+        grant = _createGrantFromClaim(index, account, amount, params);
         IMerkleAirdropBoardroom(boardroom).recordGrantFromDistribution(grant);
 
         emit AirdropGrantClaimed(index, account, grant, amount);
@@ -176,9 +163,7 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         _requireActive();
         airdropStatus = AirdropStatus.Closed;
 
-        uint256 returnedShares = remainingShares;
-        remainingShares = 0;
-        if (returnedShares != 0) _checkedTransfer(boardroom, returnedShares);
+        uint256 returnedShares = _returnRemainingShares();
 
         emit MerkleAirdropClosed(returnedShares);
     }
@@ -187,9 +172,7 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         _requireActive();
         airdropStatus = AirdropStatus.Cancelled;
 
-        uint256 returnedShares = remainingShares;
-        remainingShares = 0;
-        if (returnedShares != 0) _checkedTransfer(boardroom, returnedShares);
+        uint256 returnedShares = _returnRemainingShares();
 
         emit MerkleAirdropCancelled(returnedShares);
     }
@@ -199,11 +182,9 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
     }
 
     function isClaimed(uint256 index) public view returns (bool) {
-        uint256 claimedWordIndex = index >> 8;
-        uint256 claimedBitIndex = index & 255;
+        (uint256 claimedWordIndex, uint256 mask) = _claimBit(index);
         uint256 claimedWord = claimedBitMap[claimedWordIndex];
-        uint256 mask = uint256(1) << claimedBitIndex;
-        return claimedWord & mask == mask;
+        return (claimedWord & mask) == mask;
     }
 
     function getDirectClaimLeaf(uint256 index, address account, uint256 amount) public view returns (bytes32) {
@@ -258,20 +239,20 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
 
     function _claim(uint256 index, address account, uint256 amount, bytes32 leaf, bytes32[] calldata proof) internal {
         _requireOpen();
-        if (account == address(0)) revert InvalidAddress();
-        if (amount == 0) revert InvalidAmount();
-        if (amount > remainingShares) revert InsufficientShares(amount, remainingShares);
-        if (isClaimed(index)) revert ClaimAlreadyMade(index);
-        if (!MerkleProofLib.verifyCalldata(proof, merkleRoot, leaf)) revert InvalidProof();
+        _requireClaimable(index, account, amount, leaf, proof);
 
         _setClaimed(index);
         remainingShares -= amount;
     }
 
     function _setClaimed(uint256 index) internal {
-        uint256 claimedWordIndex = index >> 8;
-        uint256 claimedBitIndex = index & 255;
-        claimedBitMap[claimedWordIndex] = claimedBitMap[claimedWordIndex] | (uint256(1) << claimedBitIndex);
+        (uint256 claimedWordIndex, uint256 mask) = _claimBit(index);
+        claimedBitMap[claimedWordIndex] = claimedBitMap[claimedWordIndex] | mask;
+    }
+
+    function _claimBit(uint256 index) internal pure returns (uint256 claimedWordIndex, uint256 mask) {
+        claimedWordIndex = index >> 8;
+        mask = uint256(1) << (index & 255);
     }
 
     function _grantCreateParams(
@@ -302,8 +283,64 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
 
     function _requireOpen() internal view {
         _requireActive();
-        if (IMerkleAirdropBoardroom(boardroom).status() != BOARDROOM_STATUS_ACTIVE) revert AirdropNotOpen();
-        if (block.timestamp < startTime || (endTime != 0 && block.timestamp > endTime)) revert AirdropNotOpen();
+        if (!_isBoardroomActive()) revert AirdropNotOpen();
+        if (!_isWithinClaimWindow()) revert AirdropNotOpen();
+    }
+
+    function _requireValidCreateParams(address boardroom_, address tokenGrantFactory_, CreateParams calldata params)
+        internal
+        pure
+    {
+        if (boardroom_ == address(0) || params.shareToken == address(0) || tokenGrantFactory_ == address(0)) {
+            revert InvalidAddress();
+        }
+        if (params.shareAmount == 0) revert InvalidAmount();
+        if (params.merkleRoot == bytes32(0)) revert InvalidMerkleRoot();
+        if (params.endTime != 0 && params.endTime < params.startTime) revert InvalidTimeWindow();
+    }
+
+    function _requireClaimable(uint256 index, address account, uint256 amount, bytes32 leaf, bytes32[] calldata proof)
+        internal
+        view
+    {
+        if (account == address(0)) revert InvalidAddress();
+        if (amount == 0) revert InvalidAmount();
+        if (amount > remainingShares) revert InsufficientShares(amount, remainingShares);
+        if (isClaimed(index)) revert ClaimAlreadyMade(index);
+        if (!MerkleProofLib.verifyCalldata(proof, merkleRoot, leaf)) revert InvalidProof();
+    }
+
+    function _nextClaimedGrantCount() internal view returns (uint16) {
+        uint16 claimedGrantCount_ = claimedGrantCount;
+        if (claimedGrantCount_ >= maxGrantClaims) revert TooManyGrantClaims(maxGrantClaims);
+        return claimedGrantCount_ + 1;
+    }
+
+    function _createGrantFromClaim(uint256 index, address account, uint256 amount, GrantClaimParams calldata params)
+        internal
+        returns (address grant)
+    {
+        address shareToken_ = shareToken;
+        address tokenGrantFactory_ = tokenGrantFactory;
+        shareToken_.safeApprove(tokenGrantFactory_, amount);
+        grant = TokenGrantFactory(tokenGrantFactory_).createGrantFromDistribution{value: msg.value}(
+            boardroom, _grantCreateParams(index, account, shareToken_, amount, params)
+        );
+        shareToken_.safeApprove(tokenGrantFactory_, 0);
+    }
+
+    function _returnRemainingShares() internal returns (uint256 returnedShares) {
+        returnedShares = remainingShares;
+        remainingShares = 0;
+        if (returnedShares != 0) _checkedTransfer(boardroom, returnedShares);
+    }
+
+    function _isBoardroomActive() internal view returns (bool) {
+        return IMerkleAirdropBoardroom(boardroom).status() == BOARDROOM_STATUS_ACTIVE;
+    }
+
+    function _isWithinClaimWindow() internal view returns (bool) {
+        return block.timestamp >= startTime && (endTime == 0 || block.timestamp <= endTime);
     }
 
     function _checkedTransfer(address to, uint256 expectedAmount) internal {

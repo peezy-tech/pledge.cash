@@ -115,20 +115,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         external
         initializer
     {
-        if (
-            boardroom_ == address(0) || lockedLiquidityFactory_ == address(0) || params.shareToken == address(0)
-                || params.quoteToken == address(0) || params.shareToken == params.quoteToken
-        ) {
-            revert InvalidAddress();
-        }
-        if (
-            params.saleSupply == 0 || params.migrationSupply == 0 || params.basePrice == 0
-                || params.graduationQuoteTarget == 0 || params.saleSupply + params.migrationSupply > MAX_CURVE_SUPPLY
-        ) {
-            revert InvalidAmount();
-        }
-        if (params.quoteToLpBps == 0 || params.quoteToLpBps > BPS) revert InvalidBasisPoints();
-        if (params.endTime != 0 && params.endTime < params.startTime) revert InvalidTimeWindow();
+        _requireValidCreateParams(boardroom_, lockedLiquidityFactory_, params);
 
         factory = msg.sender;
         boardroom = boardroom_;
@@ -171,9 +158,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     {
         _requireActiveBoardroom();
         _requireBuyOpen(deadline);
-        if (recipient == address(0)) revert InvalidAddress();
-        if (shareAmount == 0) revert InvalidAmount();
-        if (shareAmount > remainingSaleShares) revert InsufficientShares(shareAmount, remainingSaleShares);
+        _requireBuyableShares(recipient, shareAmount);
 
         quoteIn = getBuyQuote(shareAmount);
         if (quoteIn > maxQuoteIn) revert SlippageExceeded(quoteIn, maxQuoteIn);
@@ -194,13 +179,8 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         _requireActiveBoardroom();
         _requireCurveActive();
         if (deadline < block.timestamp) revert Expired();
-        if (recipient == address(0)) revert InvalidAddress();
-        if (shareAmount == 0) revert InvalidAmount();
 
-        uint256 sellerSellableShares = sellableSharesBy[msg.sender];
-        if (shareAmount > sellerSellableShares) {
-            revert InsufficientSellableShares(msg.sender, shareAmount, sellerSellableShares);
-        }
+        uint256 sellerSellableShares = _requireSellableShares(recipient, shareAmount);
         uint256 currentlySold = soldShares();
         if (shareAmount > currentlySold) revert InsufficientShares(shareAmount, currentlySold);
 
@@ -225,48 +205,24 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     {
         _requireCurveActive();
         if (deadline < block.timestamp) revert Expired();
-        if (!canMigrate()) {
-            revert MigrationNotReady(quoteReserve(), graduationQuoteTarget, remainingSaleShares);
-        }
+        _requireMigrationReady();
 
         curveStatus = CurveStatus.Migrated;
         uint256 sharesToLiquidity = migrationSupply + remainingSaleShares;
         uint256 quoteBalance = quoteReserve();
-        uint256 quoteToLiquidity = quoteBalance * quoteToLpBps / BPS;
-        if (sharesToLiquidity == 0 || quoteToLiquidity == 0) revert InvalidAmount();
-        if (sharesToLiquidity < minShareLiquidity) revert SlippageExceeded(sharesToLiquidity, minShareLiquidity);
-        if (quoteToLiquidity < minQuoteLiquidity) revert SlippageExceeded(quoteToLiquidity, minQuoteLiquidity);
+        uint256 quoteToLiquidity = _quoteToLiquidity(quoteBalance);
+        _requireMigrationLiquidity(sharesToLiquidity, quoteToLiquidity, minShareLiquidity, minQuoteLiquidity);
 
         remainingSaleShares = 0;
 
-        shareToken.safeApprove(lockedLiquidityFactory, sharesToLiquidity);
-        quoteToken.safeApprove(lockedLiquidityFactory, quoteToLiquidity);
-        (createdLocker, createdPool, amountA, amountB, liquidity) = LockedLiquidityFactory(lockedLiquidityFactory)
-            .createLockedLiquidityForBoardroom(
-                boardroom,
-                LockedLiquidityFactory.CreateParams({
-                tokenA: shareToken,
-                tokenB: quoteToken,
-                amountADesired: sharesToLiquidity,
-                amountBDesired: quoteToLiquidity,
-                amountAMin: minShareLiquidity,
-                amountBMin: minQuoteLiquidity,
-                deadline: deadline,
-                salt: migrationSalt
-            })
-            );
-        if (createdLocker == address(0) || createdPool == address(0)) revert InvalidAddress();
-        shareToken.safeApprove(lockedLiquidityFactory, 0);
-        quoteToken.safeApprove(lockedLiquidityFactory, 0);
+        (createdLocker, createdPool, amountA, amountB, liquidity) =
+            _createLockedLiquidity(sharesToLiquidity, quoteToLiquidity, minShareLiquidity, minQuoteLiquidity, deadline);
 
         locker = createdLocker;
         pool = createdPool;
         IMigratingBondingCurveBoardroom(boardroom).recordLockedLiquidityFromDistribution(createdLocker, createdPool);
 
-        uint256 shareRemainder = ERC20(shareToken).balanceOf(address(this));
-        uint256 quoteRemainder = ERC20(quoteToken).balanceOf(address(this));
-        if (shareRemainder != 0) _checkedTransfer(shareToken, boardroom, shareRemainder);
-        if (quoteRemainder != 0) _checkedTransfer(quoteToken, boardroom, quoteRemainder);
+        (, uint256 quoteRemainder) = _returnBalancesToBoardroom();
 
         emit CurveMigrated(createdLocker, createdPool, amountA, amountB, liquidity, quoteRemainder);
     }
@@ -276,10 +232,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         curveStatus = CurveStatus.Cancelled;
         remainingSaleShares = 0;
 
-        uint256 shareBalance = ERC20(shareToken).balanceOf(address(this));
-        uint256 quoteBalance = ERC20(quoteToken).balanceOf(address(this));
-        if (shareBalance != 0) _checkedTransfer(shareToken, boardroom, shareBalance);
-        if (quoteBalance != 0) _checkedTransfer(quoteToken, boardroom, quoteBalance);
+        (uint256 shareBalance, uint256 quoteBalance) = _returnBalancesToBoardroom();
 
         emit CurveCancelled(shareBalance, quoteBalance);
     }
@@ -289,8 +242,9 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     }
 
     function canMigrate() public view returns (bool) {
-        return
-            curveStatus == CurveStatus.Active && (quoteReserve() >= graduationQuoteTarget || remainingSaleShares == 0);
+        if (curveStatus != CurveStatus.Active) return false;
+        if (quoteReserve() >= graduationQuoteTarget) return true;
+        return remainingSaleShares == 0;
     }
 
     function soldShares() public view returns (uint256) {
@@ -332,7 +286,123 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     function _requireBuyOpen(uint256 deadline) internal view {
         _requireCurveActive();
         if (deadline < block.timestamp) revert Expired();
-        if (block.timestamp < startTime || (endTime != 0 && block.timestamp > endTime)) revert BuyWindowClosed();
+        if (!_isWithinBuyWindow()) revert BuyWindowClosed();
+    }
+
+    function _requireValidCreateParams(
+        address boardroom_,
+        address lockedLiquidityFactory_,
+        CreateParams calldata params
+    ) internal pure {
+        _requireValidCreateAddresses(boardroom_, lockedLiquidityFactory_, params);
+        _requireValidCurveParameters(params);
+        if (params.quoteToLpBps == 0 || params.quoteToLpBps > BPS) revert InvalidBasisPoints();
+        if (params.endTime != 0 && params.endTime < params.startTime) revert InvalidTimeWindow();
+    }
+
+    function _requireValidCreateAddresses(
+        address boardroom_,
+        address lockedLiquidityFactory_,
+        CreateParams calldata params
+    ) internal pure {
+        if (
+            boardroom_ == address(0) || lockedLiquidityFactory_ == address(0) || params.shareToken == address(0)
+                || params.quoteToken == address(0) || params.shareToken == params.quoteToken
+        ) {
+            revert InvalidAddress();
+        }
+    }
+
+    function _requireValidCurveParameters(CreateParams calldata params) internal pure {
+        if (
+            params.saleSupply == 0 || params.migrationSupply == 0 || params.basePrice == 0
+                || params.graduationQuoteTarget == 0 || params.saleSupply + params.migrationSupply > MAX_CURVE_SUPPLY
+        ) {
+            revert InvalidAmount();
+        }
+    }
+
+    function _requireBuyableShares(address recipient, uint256 shareAmount) internal view {
+        if (recipient == address(0)) revert InvalidAddress();
+        if (shareAmount == 0) revert InvalidAmount();
+        if (shareAmount > remainingSaleShares) revert InsufficientShares(shareAmount, remainingSaleShares);
+    }
+
+    function _requireSellableShares(address recipient, uint256 shareAmount)
+        internal
+        view
+        returns (uint256 sellerSellableShares)
+    {
+        if (recipient == address(0)) revert InvalidAddress();
+        if (shareAmount == 0) revert InvalidAmount();
+
+        sellerSellableShares = sellableSharesBy[msg.sender];
+        if (shareAmount > sellerSellableShares) {
+            revert InsufficientSellableShares(msg.sender, shareAmount, sellerSellableShares);
+        }
+    }
+
+    function _requireMigrationReady() internal view {
+        if (!canMigrate()) {
+            revert MigrationNotReady(quoteReserve(), graduationQuoteTarget, remainingSaleShares);
+        }
+    }
+
+    function _requireMigrationLiquidity(
+        uint256 sharesToLiquidity,
+        uint256 quoteToLiquidity,
+        uint256 minShareLiquidity,
+        uint256 minQuoteLiquidity
+    ) internal pure {
+        if (sharesToLiquidity == 0 || quoteToLiquidity == 0) revert InvalidAmount();
+        if (sharesToLiquidity < minShareLiquidity) revert SlippageExceeded(sharesToLiquidity, minShareLiquidity);
+        if (quoteToLiquidity < minQuoteLiquidity) revert SlippageExceeded(quoteToLiquidity, minQuoteLiquidity);
+    }
+
+    function _createLockedLiquidity(
+        uint256 sharesToLiquidity,
+        uint256 quoteToLiquidity,
+        uint256 minShareLiquidity,
+        uint256 minQuoteLiquidity,
+        uint256 deadline
+    )
+        internal
+        returns (address createdLocker, address createdPool, uint256 amountA, uint256 amountB, uint256 liquidity)
+    {
+        shareToken.safeApprove(lockedLiquidityFactory, sharesToLiquidity);
+        quoteToken.safeApprove(lockedLiquidityFactory, quoteToLiquidity);
+        (createdLocker, createdPool, amountA, amountB, liquidity) = LockedLiquidityFactory(lockedLiquidityFactory)
+            .createLockedLiquidityForBoardroom(
+                boardroom,
+                LockedLiquidityFactory.CreateParams({
+                tokenA: shareToken,
+                tokenB: quoteToken,
+                amountADesired: sharesToLiquidity,
+                amountBDesired: quoteToLiquidity,
+                amountAMin: minShareLiquidity,
+                amountBMin: minQuoteLiquidity,
+                deadline: deadline,
+                salt: migrationSalt
+            })
+            );
+        if (createdLocker == address(0) || createdPool == address(0)) revert InvalidAddress();
+        shareToken.safeApprove(lockedLiquidityFactory, 0);
+        quoteToken.safeApprove(lockedLiquidityFactory, 0);
+    }
+
+    function _returnBalancesToBoardroom() internal returns (uint256 shareBalance, uint256 quoteBalance) {
+        shareBalance = ERC20(shareToken).balanceOf(address(this));
+        quoteBalance = ERC20(quoteToken).balanceOf(address(this));
+        if (shareBalance != 0) _checkedTransfer(shareToken, boardroom, shareBalance);
+        if (quoteBalance != 0) _checkedTransfer(quoteToken, boardroom, quoteBalance);
+    }
+
+    function _quoteToLiquidity(uint256 quoteBalance) internal view returns (uint256) {
+        return quoteBalance * quoteToLpBps / BPS;
+    }
+
+    function _isWithinBuyWindow() internal view returns (bool) {
+        return block.timestamp >= startTime && (endTime == 0 || block.timestamp <= endTime);
     }
 
     function _curveIntegralUp(uint256 soldBefore, uint256 shareAmount) internal view returns (uint256) {
