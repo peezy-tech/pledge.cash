@@ -66,10 +66,7 @@ contract LockedLiquidity is Initializable {
         external
         initializer
     {
-        if (
-            factory_ == address(0) || boardroom_ == address(0) || router_ == address(0) || tokenA_ == address(0)
-                || tokenB_ == address(0) || tokenA_ == tokenB_
-        ) revert InvalidAddress();
+        if (_hasInvalidInitializationAddress(factory_, boardroom_, router_, tokenA_, tokenB_)) revert InvalidAddress();
 
         factory = factory_;
         boardroom = boardroom_;
@@ -87,24 +84,22 @@ contract LockedLiquidity is Initializable {
         uint256 amountBMin,
         uint256 deadline
     ) external returns (address seededPool, uint256 amountA, uint256 amountB, uint256 liquidity) {
-        if (msg.sender != factory) revert OnlyFactory();
-        if (seeded) revert AlreadySeeded();
+        _requireFactoryCaller();
+        _requireUnseeded();
+
         seeded = true;
 
-        tokenA.safeApprove(router, amountADesired);
-        tokenB.safeApprove(router, amountBDesired);
+        _approveRouterForSeed(amountADesired, amountBDesired);
         (amountA, amountB, liquidity) = ILockedLiquidityRouter(router)
             .addLiquidity(
                 tokenA, tokenB, amountADesired, amountBDesired, amountAMin, amountBMin, address(this), deadline
             );
-        tokenA.safeApprove(router, 0);
-        tokenB.safeApprove(router, 0);
+        _clearRouterSeedApproval();
 
         seededPool = ILockedLiquidityRouter(router).poolFor(tokenA, tokenB);
         pool = seededPool;
 
-        _refundDust(tokenA);
-        _refundDust(tokenB);
+        _refundSeedDust();
 
         emit LiquidityLocked(seededPool, amountA, amountB, liquidity);
     }
@@ -113,8 +108,8 @@ contract LockedLiquidity is Initializable {
         external
         returns (uint256 amountA, uint256 amountB, uint256 liquidity)
     {
-        if (msg.sender != boardroom) revert OnlyBoardroom();
-        if (!ILockedLiquidityBoardroom(boardroom).lockedLiquidityExitAllowed()) revert BoardroomNotWindingDown();
+        _requireBoardroomCaller();
+        _requireBoardroomCanExit();
 
         address pool_ = pool;
         if (pool_ == address(0)) revert NotSeeded();
@@ -144,14 +139,65 @@ contract LockedLiquidity is Initializable {
         address pool_ = pool;
         if (pool_ == address(0)) return (0, 0);
 
-        AmmPool(pool_).claimFees();
-        (address token0, address token1) = AmmPool(pool_).tokens();
-        claimed0 = ERC20(token0).balanceOf(address(this));
-        claimed1 = ERC20(token1).balanceOf(address(this));
-        if (claimed0 != 0) token0.safeTransfer(boardroom, claimed0);
-        if (claimed1 != 0) token1.safeTransfer(boardroom, claimed1);
+        AmmPool feePool = AmmPool(pool_);
+        feePool.claimFees();
+
+        (address token0, address token1) = feePool.tokens();
+        claimed0 = _forwardTokenBalance(token0);
+        claimed1 = _forwardTokenBalance(token1);
 
         emit FeesForwarded(boardroom, claimed0, claimed1);
+    }
+
+    function _hasInvalidInitializationAddress(
+        address factory_,
+        address boardroom_,
+        address router_,
+        address tokenA_,
+        address tokenB_
+    ) internal pure returns (bool) {
+        if (factory_ == address(0)) return true;
+        if (boardroom_ == address(0)) return true;
+        if (router_ == address(0)) return true;
+        if (tokenA_ == address(0)) return true;
+        if (tokenB_ == address(0)) return true;
+        return tokenA_ == tokenB_;
+    }
+
+    function _requireFactoryCaller() internal view {
+        if (msg.sender != factory) revert OnlyFactory();
+    }
+
+    function _requireBoardroomCaller() internal view {
+        if (msg.sender != boardroom) revert OnlyBoardroom();
+    }
+
+    function _requireUnseeded() internal view {
+        if (seeded) revert AlreadySeeded();
+    }
+
+    function _requireBoardroomCanExit() internal view {
+        if (!ILockedLiquidityBoardroom(boardroom).lockedLiquidityExitAllowed()) revert BoardroomNotWindingDown();
+    }
+
+    function _approveRouterForSeed(uint256 amountADesired, uint256 amountBDesired) internal {
+        tokenA.safeApprove(router, amountADesired);
+        tokenB.safeApprove(router, amountBDesired);
+    }
+
+    function _clearRouterSeedApproval() internal {
+        tokenA.safeApprove(router, 0);
+        tokenB.safeApprove(router, 0);
+    }
+
+    function _refundSeedDust() internal {
+        _refundDust(tokenA);
+        _refundDust(tokenB);
+    }
+
+    function _forwardTokenBalance(address token) internal returns (uint256 balance) {
+        balance = ERC20(token).balanceOf(address(this));
+        if (balance != 0) token.safeTransfer(boardroom, balance);
     }
 
     function _refundDust(address token) internal {
