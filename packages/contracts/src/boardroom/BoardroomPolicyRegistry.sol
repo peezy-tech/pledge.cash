@@ -33,12 +33,11 @@ contract BoardroomPolicyRegistry is Ownable, IBoardroomPolicyRegistry {
     }
 
     function isPolicyAllowed(address policy) external view returns (bool) {
-        return policyStatus[policy] == PolicyStatus.Active;
+        return _allowsActiveCalls(policyStatus[policy]);
     }
 
     function isPolicyLifecycleAllowed(address policy) external view returns (bool) {
-        PolicyStatus status = policyStatus[policy];
-        return status == PolicyStatus.Active || status == PolicyStatus.LifecycleOnly;
+        return _allowsLifecycleCalls(policyStatus[policy]);
     }
 
     function _setPolicyStatus(address policy, PolicyStatus status) internal {
@@ -46,5 +45,13 @@ contract BoardroomPolicyRegistry is Ownable, IBoardroomPolicyRegistry {
 
         policyStatus[policy] = status;
         emit PolicyStatusSet(policy, status);
+    }
+
+    function _allowsActiveCalls(PolicyStatus status) internal pure returns (bool) {
+        return status == PolicyStatus.Active;
+    }
+
+    function _allowsLifecycleCalls(PolicyStatus status) internal pure returns (bool) {
+        return status == PolicyStatus.Active || status == PolicyStatus.LifecycleOnly;
     }
 }

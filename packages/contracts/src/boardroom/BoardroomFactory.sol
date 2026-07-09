@@ -26,7 +26,8 @@ contract BoardroomFactory {
     );
 
     constructor(address policyRegistry_, address wrappedNative_) {
-        if (policyRegistry_ == address(0) || wrappedNative_ == address(0)) revert InvalidAddress();
+        _requireAddress(policyRegistry_);
+        _requireAddress(wrappedNative_);
 
         policyRegistry = policyRegistry_;
         wrappedNative = wrappedNative_;
@@ -37,7 +38,7 @@ contract BoardroomFactory {
         external
         returns (address boardroom)
     {
-        if (owner == address(0)) revert InvalidAddress();
+        _requireAddress(owner);
 
         boardroom = LibClone.cloneDeterministic(boardroomLogic, _deploymentSalt(owner, name, symbol, salt));
         Boardroom createdBoardroom = Boardroom(payable(boardroom));
@@ -71,5 +72,9 @@ contract BoardroomFactory {
         returns (bytes32)
     {
         return keccak256(abi.encode(owner, name, symbol, salt));
+    }
+
+    function _requireAddress(address account) internal pure {
+        if (account == address(0)) revert InvalidAddress();
     }
 }

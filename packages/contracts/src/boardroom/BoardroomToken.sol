@@ -30,18 +30,30 @@ contract BoardroomToken is ERC20 {
     }
 
     function mint(address to, uint256 amount) external {
-        if (msg.sender != boardroom) revert OnlyBoardroom();
-        if (to == address(0)) revert InvalidAddress();
-        if (amount == 0) revert InvalidAmount();
+        _requireBoardroomCaller();
+        _requireTokenAccount(to);
+        _requireTokenAmount(amount);
 
         _mint(to, amount);
     }
 
     function burn(address from, uint256 amount) external {
-        if (msg.sender != boardroom) revert OnlyBoardroom();
-        if (from == address(0)) revert InvalidAddress();
-        if (amount == 0) revert InvalidAmount();
+        _requireBoardroomCaller();
+        _requireTokenAccount(from);
+        _requireTokenAmount(amount);
 
         _burn(from, amount);
+    }
+
+    function _requireBoardroomCaller() internal view {
+        if (msg.sender != boardroom) revert OnlyBoardroom();
+    }
+
+    function _requireTokenAccount(address account) internal pure {
+        if (account == address(0)) revert InvalidAddress();
+    }
+
+    function _requireTokenAmount(uint256 amount) internal pure {
+        if (amount == 0) revert InvalidAmount();
     }
 }
