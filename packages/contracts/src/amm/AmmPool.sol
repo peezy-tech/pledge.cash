@@ -91,7 +91,7 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     }
 
     function initialize(address token0_, address token1_) external initializer {
-        if (token0_ == address(0) || token1_ == address(0) || token0_ == token1_) revert InvalidAddress();
+        _requireDistinctTokens(token0_, token1_);
 
         factory = msg.sender;
         token0 = token0_;
@@ -131,9 +131,10 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         price1Cumulative = price1CumulativeLast;
 
         uint32 timeElapsed = timestamp - blockTimestampLast;
-        if (timeElapsed != 0 && reserve0 != 0 && reserve1 != 0) {
-            price0Cumulative += uint256(reserve1) * FEE_INDEX_SCALE * timeElapsed / reserve0;
-            price1Cumulative += uint256(reserve0) * FEE_INDEX_SCALE * timeElapsed / reserve1;
+        if (_hasCumulativePriceDelta(timeElapsed, reserve0, reserve1)) {
+            (uint256 price0Delta, uint256 price1Delta) = _cumulativePriceDeltas(reserve0, reserve1, timeElapsed);
+            price0Cumulative += price0Delta;
+            price1Cumulative += price1Delta;
         }
     }
 
@@ -142,37 +143,32 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         view
         returns (uint256[] memory amountsOut)
     {
-        if (tokenIn != token0 && tokenIn != token1) revert InvalidToken();
-        if (points == 0 || window == 0) revert InvalidInput();
-        if (points > MAX_SAMPLE_POINTS) revert TooManySamplePoints(points, MAX_SAMPLE_POINTS);
+        _requireSampleInput(tokenIn, points, window);
 
         amountsOut = new uint256[](points);
         uint32 nowTimestamp = _blockTimestamp();
+        bool tokenInIsToken0 = tokenIn == token0;
+
         for (uint256 i; i < points; ++i) {
             uint256 offset = (points - i) * window;
             uint256 target = offset > nowTimestamp ? 0 : uint256(nowTimestamp) - offset;
-            (uint256 start0, uint256 start1) = _cumulativeAt(target);
-            (uint256 end0, uint256 end1) = _cumulativeAt(target + window);
-            uint256 averagePrice = tokenIn == token0 ? (end0 - start0) / window : (end1 - start1) / window;
-            amountsOut[i] = amountIn * averagePrice / FEE_INDEX_SCALE;
+            amountsOut[i] = _sampleAmountOut(amountIn, window, target, tokenInIsToken0);
         }
     }
 
     function getAmountOut(uint256 amountIn, address tokenIn) public view returns (uint256 amountOut) {
-        if (tokenIn != token0 && tokenIn != token1) revert InvalidToken();
+        _requirePoolToken(tokenIn);
         if (amountIn == 0) return 0;
 
-        (uint112 reserveIn, uint112 reserveOut) = tokenIn == token0 ? (reserve0, reserve1) : (reserve1, reserve0);
-        if (reserveIn == 0 || reserveOut == 0) revert InsufficientLiquidity();
+        (uint112 reserveIn, uint112 reserveOut) = _reservesFor(tokenIn);
+        _requireLiquidity(reserveIn, reserveOut);
 
-        uint256 amountInWithFee = amountIn
-            * (AmmFactory(factory).FEE_DENOMINATOR() - AmmFactory(factory).SWAP_FEE_BPS())
-            / AmmFactory(factory).FEE_DENOMINATOR();
+        uint256 amountInWithFee = _amountInAfterSwapFee(amountIn);
         amountOut = amountInWithFee * reserveOut / (reserveIn + amountInWithFee);
     }
 
     function mint(address to) external nonReentrant returns (uint256 liquidity) {
-        if (to == address(0)) revert InvalidAddress();
+        _requireNonZero(to);
         _updateFor(to);
 
         (uint112 reserve0_, uint112 reserve1_,) = getReserves();
@@ -183,10 +179,9 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         uint256 supply = totalSupply();
 
         if (supply == 0) {
-            liquidity = (amount0 * amount1).sqrt() - MINIMUM_LIQUIDITY;
-            _mint(address(1), MINIMUM_LIQUIDITY);
+            liquidity = _mintInitialLiquidity(amount0, amount1);
         } else {
-            liquidity = FixedPointMathLib.min(amount0 * supply / reserve0_, amount1 * supply / reserve1_);
+            liquidity = _mintAdditionalLiquidity(amount0, amount1, supply, reserve0_, reserve1_);
         }
         if (liquidity == 0) revert InsufficientLiquidityMinted();
 
@@ -196,7 +191,7 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     }
 
     function burn(address to) external nonReentrant returns (uint256 amount0, uint256 amount1) {
-        if (to == address(0)) revert InvalidAddress();
+        _requireNonZero(to);
 
         (uint112 reserve0_, uint112 reserve1_,) = getReserves();
         address token0_ = token0;
@@ -206,9 +201,7 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         uint256 liquidity = balanceOf(address(this));
         uint256 supply = totalSupply();
 
-        amount0 = liquidity * balance0 / supply;
-        amount1 = liquidity * balance1 / supply;
-        if (amount0 == 0 || amount1 == 0) revert InsufficientLiquidityBurned();
+        (amount0, amount1) = _burnedAmounts(liquidity, supply, balance0, balance1);
 
         _burn(address(this), liquidity);
         token0_.safeTransfer(to, amount0);
@@ -221,28 +214,26 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     }
 
     function swap(uint256 amount0Out, uint256 amount1Out, address to, bytes calldata data) external nonReentrant {
-        if (amount0Out == 0 && amount1Out == 0) revert InsufficientOutputAmount();
+        _requireSwapOutput(amount0Out, amount1Out);
+
         SwapCache memory cache;
         (cache.reserve0, cache.reserve1,) = getReserves();
-        if (amount0Out >= cache.reserve0 || amount1Out >= cache.reserve1) revert InsufficientLiquidity();
-        if (to == token0 || to == token1 || to == address(0)) revert InvalidRecipient();
+        _requireSwapLiquidity(amount0Out, amount1Out, cache.reserve0, cache.reserve1);
+        _requireSwapRecipient(to);
 
-        if (amount0Out != 0) token0.safeTransfer(to, amount0Out);
-        if (amount1Out != 0) token1.safeTransfer(to, amount1Out);
-        if (data.length != 0) IAmmCallee(to).ammCall(msg.sender, amount0Out, amount1Out, data);
+        _transferSwapOutput(to, amount0Out, amount1Out);
+        _callAmmCallee(to, amount0Out, amount1Out, data);
 
         cache.balance0 = _balance(token0);
         cache.balance1 = _balance(token1);
-        cache.amount0In =
-            cache.balance0 > cache.reserve0 - amount0Out ? cache.balance0 - (cache.reserve0 - amount0Out) : 0;
-        cache.amount1In =
-            cache.balance1 > cache.reserve1 - amount1Out ? cache.balance1 - (cache.reserve1 - amount1Out) : 0;
-        if (cache.amount0In == 0 && cache.amount1In == 0) revert InsufficientInputAmount();
+        cache.amount0In = _amountIn(cache.balance0, cache.reserve0, amount0Out);
+        cache.amount1In = _amountIn(cache.balance1, cache.reserve1, amount1Out);
+        _requireSwapInput(cache.amount0In, cache.amount1In);
 
         cache.balance0 -= _accrueFee(token0, cache.amount0In, true);
         cache.balance1 -= _accrueFee(token1, cache.amount1In, false);
 
-        if (cache.balance0 * cache.balance1 < uint256(cache.reserve0) * uint256(cache.reserve1)) revert KInvariant();
+        _requireKInvariant(cache);
 
         _update(cache.balance0, cache.balance1, cache.reserve0, cache.reserve1);
         emit Swap(msg.sender, cache.amount0In, cache.amount1In, amount0Out, amount1Out, to);
@@ -251,16 +242,133 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     function claimFees() external nonReentrant returns (uint256 claimed0, uint256 claimed1) {
         _updateFor(msg.sender);
 
-        claimed0 = claimable0[msg.sender];
-        claimed1 = claimable1[msg.sender];
-        if (claimed0 != 0) claimable0[msg.sender] = 0;
-        if (claimed1 != 0) claimable1[msg.sender] = 0;
-
-        if (claimed0 != 0 || claimed1 != 0) {
-            PoolFees(poolFees).claimFeesFor(msg.sender, claimed0, claimed1);
-        }
+        (claimed0, claimed1) = _clearClaimableFees(msg.sender);
+        _claimFeesIfAny(msg.sender, claimed0, claimed1);
 
         emit FeesClaimed(msg.sender, claimed0, claimed1);
+    }
+
+    function _requireDistinctTokens(address token0_, address token1_) internal pure {
+        if (token0_ == address(0)) revert InvalidAddress();
+        if (token1_ == address(0)) revert InvalidAddress();
+        if (token0_ == token1_) revert InvalidAddress();
+    }
+
+    function _requireNonZero(address account) internal pure {
+        if (account == address(0)) revert InvalidAddress();
+    }
+
+    function _requirePoolToken(address token) internal view {
+        if (token != token0 && token != token1) revert InvalidToken();
+    }
+
+    function _requireSampleInput(address tokenIn, uint256 points, uint256 window) internal view {
+        _requirePoolToken(tokenIn);
+        if (points == 0 || window == 0) revert InvalidInput();
+        if (points > MAX_SAMPLE_POINTS) revert TooManySamplePoints(points, MAX_SAMPLE_POINTS);
+    }
+
+    function _sampleAmountOut(uint256 amountIn, uint256 window, uint256 target, bool tokenInIsToken0)
+        internal
+        view
+        returns (uint256)
+    {
+        (uint256 start0, uint256 start1) = _cumulativeAt(target);
+        (uint256 end0, uint256 end1) = _cumulativeAt(target + window);
+        uint256 averagePrice = tokenInIsToken0 ? (end0 - start0) / window : (end1 - start1) / window;
+        return amountIn * averagePrice / FEE_INDEX_SCALE;
+    }
+
+    function _reservesFor(address tokenIn) internal view returns (uint112 reserveIn, uint112 reserveOut) {
+        return tokenIn == token0 ? (reserve0, reserve1) : (reserve1, reserve0);
+    }
+
+    function _requireLiquidity(uint112 reserveIn, uint112 reserveOut) internal pure {
+        if (reserveIn == 0 || reserveOut == 0) revert InsufficientLiquidity();
+    }
+
+    function _amountInAfterSwapFee(uint256 amountIn) internal view returns (uint256) {
+        AmmFactory factory_ = AmmFactory(factory);
+        uint256 denominator = factory_.FEE_DENOMINATOR();
+        return amountIn * (denominator - factory_.SWAP_FEE_BPS()) / denominator;
+    }
+
+    function _mintInitialLiquidity(uint256 amount0, uint256 amount1) internal returns (uint256 liquidity) {
+        liquidity = (amount0 * amount1).sqrt() - MINIMUM_LIQUIDITY;
+        _mint(address(1), MINIMUM_LIQUIDITY);
+    }
+
+    function _mintAdditionalLiquidity(
+        uint256 amount0,
+        uint256 amount1,
+        uint256 supply,
+        uint112 reserve0_,
+        uint112 reserve1_
+    ) internal pure returns (uint256) {
+        return FixedPointMathLib.min(amount0 * supply / reserve0_, amount1 * supply / reserve1_);
+    }
+
+    function _burnedAmounts(uint256 liquidity, uint256 supply, uint256 balance0, uint256 balance1)
+        internal
+        pure
+        returns (uint256 amount0, uint256 amount1)
+    {
+        amount0 = liquidity * balance0 / supply;
+        amount1 = liquidity * balance1 / supply;
+        if (amount0 == 0 || amount1 == 0) revert InsufficientLiquidityBurned();
+    }
+
+    function _requireSwapOutput(uint256 amount0Out, uint256 amount1Out) internal pure {
+        if (amount0Out == 0 && amount1Out == 0) revert InsufficientOutputAmount();
+    }
+
+    function _requireSwapLiquidity(uint256 amount0Out, uint256 amount1Out, uint112 reserve0_, uint112 reserve1_)
+        internal
+        pure
+    {
+        if (amount0Out >= reserve0_ || amount1Out >= reserve1_) revert InsufficientLiquidity();
+    }
+
+    function _requireSwapRecipient(address recipient) internal view {
+        if (recipient == token0 || recipient == token1 || recipient == address(0)) revert InvalidRecipient();
+    }
+
+    function _transferSwapOutput(address recipient, uint256 amount0Out, uint256 amount1Out) internal {
+        if (amount0Out != 0) token0.safeTransfer(recipient, amount0Out);
+        if (amount1Out != 0) token1.safeTransfer(recipient, amount1Out);
+    }
+
+    function _callAmmCallee(address recipient, uint256 amount0Out, uint256 amount1Out, bytes calldata data) internal {
+        if (data.length == 0) return;
+
+        IAmmCallee(recipient).ammCall(msg.sender, amount0Out, amount1Out, data);
+    }
+
+    function _amountIn(uint256 balance, uint112 reserve, uint256 amountOut) internal pure returns (uint256) {
+        uint256 balanceBeforeInput = uint256(reserve) - amountOut;
+        return balance > balanceBeforeInput ? balance - balanceBeforeInput : 0;
+    }
+
+    function _requireSwapInput(uint256 amount0In, uint256 amount1In) internal pure {
+        if (amount0In == 0 && amount1In == 0) revert InsufficientInputAmount();
+    }
+
+    function _requireKInvariant(SwapCache memory cache) internal pure {
+        if (cache.balance0 * cache.balance1 < uint256(cache.reserve0) * uint256(cache.reserve1)) revert KInvariant();
+    }
+
+    function _clearClaimableFees(address owner) internal returns (uint256 claimed0, uint256 claimed1) {
+        claimed0 = claimable0[owner];
+        claimed1 = claimable1[owner];
+
+        if (claimed0 != 0) claimable0[owner] = 0;
+        if (claimed1 != 0) claimable1[owner] = 0;
+    }
+
+    function _claimFeesIfAny(address recipient, uint256 claimed0, uint256 claimed1) internal {
+        if (claimed0 == 0 && claimed1 == 0) return;
+
+        PoolFees(poolFees).claimFeesFor(recipient, claimed0, claimed1);
     }
 
     function _beforeTokenTransfer(address from, address to, uint256) internal override {
@@ -271,23 +379,8 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     function _updateFor(address owner) internal {
         uint256 ownerBalance = balanceOf(owner);
 
-        uint256 currentIndex0 = index0;
-        uint256 suppliedIndex0 = supplyIndex0[owner];
-        if (suppliedIndex0 != currentIndex0) {
-            if (ownerBalance != 0) {
-                claimable0[owner] += ownerBalance * (currentIndex0 - suppliedIndex0) / FEE_INDEX_SCALE;
-            }
-            supplyIndex0[owner] = currentIndex0;
-        }
-
-        uint256 currentIndex1 = index1;
-        uint256 suppliedIndex1 = supplyIndex1[owner];
-        if (suppliedIndex1 != currentIndex1) {
-            if (ownerBalance != 0) {
-                claimable1[owner] += ownerBalance * (currentIndex1 - suppliedIndex1) / FEE_INDEX_SCALE;
-            }
-            supplyIndex1[owner] = currentIndex1;
-        }
+        _applyFeeIndex(owner, ownerBalance, index0, supplyIndex0, claimable0);
+        _applyFeeIndex(owner, ownerBalance, index1, supplyIndex1, claimable1);
     }
 
     function _accrueFee(address token, uint256 amountIn, bool zeroForOne) internal returns (uint256 debitedFee) {
@@ -299,33 +392,64 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         if (debitedFee == 0) return 0;
 
         address protocolFeeRecipient = factory_.protocolFeeRecipient();
-        uint256 protocolFee;
-        if (protocolFeeRecipient != address(0)) {
-            protocolFee = debitedFee * factory_.PROTOCOL_FEE_SHARE_BPS() / denominator;
-        }
-
+        uint256 protocolFee = _protocolFee(factory_, protocolFeeRecipient, debitedFee, denominator);
         uint256 lpFee = debitedFee - protocolFee;
-        uint256 receivedFee;
-        if (lpFee != 0) {
-            (uint256 spent, uint256 received) = _transferFee(token, poolFees, lpFee);
-            debitedFee = spent;
-            receivedFee = received;
-        } else {
-            debitedFee = 0;
+
+        (uint256 lpFeeSpent, uint256 lpFeeReceived) = _transferLpFee(token, lpFee);
+        debitedFee = lpFeeSpent + _transferProtocolFee(token, protocolFeeRecipient, protocolFee);
+        _increaseLpFeeIndex(zeroForOne, lpFeeReceived);
+    }
+
+    function _applyFeeIndex(
+        address owner,
+        uint256 ownerBalance,
+        uint256 currentIndex,
+        mapping(address => uint256) storage suppliedIndexes,
+        mapping(address => uint256) storage claimableAmounts
+    ) internal {
+        uint256 suppliedIndex = suppliedIndexes[owner];
+        if (suppliedIndex == currentIndex) return;
+
+        if (ownerBalance != 0) {
+            claimableAmounts[owner] += ownerBalance * (currentIndex - suppliedIndex) / FEE_INDEX_SCALE;
         }
-        if (protocolFee != 0) {
-            (uint256 spent, uint256 received) = _transferFee(token, protocolFeeRecipient, protocolFee);
-            debitedFee += spent;
-            if (received != 0) emit ProtocolFeesAccrued(protocolFeeRecipient, token, received);
-        }
+        suppliedIndexes[owner] = currentIndex;
+    }
+
+    function _protocolFee(AmmFactory factory_, address protocolFeeRecipient, uint256 swapFee, uint256 denominator)
+        internal
+        view
+        returns (uint256)
+    {
+        if (protocolFeeRecipient == address(0)) return 0;
+
+        return swapFee * factory_.PROTOCOL_FEE_SHARE_BPS() / denominator;
+    }
+
+    function _transferLpFee(address token, uint256 amount) internal returns (uint256 spent, uint256 received) {
+        if (amount == 0) return (0, 0);
+
+        return _transferFee(token, poolFees, amount);
+    }
+
+    function _transferProtocolFee(address token, address recipient, uint256 amount) internal returns (uint256 spent) {
+        if (amount == 0) return 0;
+
+        uint256 received;
+        (spent, received) = _transferFee(token, recipient, amount);
+        if (received != 0) emit ProtocolFeesAccrued(recipient, token, received);
+    }
+
+    function _increaseLpFeeIndex(bool zeroForOne, uint256 receivedFee) internal {
+        if (receivedFee == 0) return;
 
         uint256 supply = totalSupply();
-        if (supply != 0 && receivedFee != 0) {
-            if (zeroForOne) {
-                index0 += receivedFee * FEE_INDEX_SCALE / supply;
-            } else {
-                index1 += receivedFee * FEE_INDEX_SCALE / supply;
-            }
+        if (supply == 0) return;
+
+        if (zeroForOne) {
+            index0 += receivedFee * FEE_INDEX_SCALE / supply;
+        } else {
+            index1 += receivedFee * FEE_INDEX_SCALE / supply;
         }
     }
 
@@ -347,26 +471,13 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     }
 
     function _update(uint256 balance0, uint256 balance1, uint112 reserve0_, uint112 reserve1_) internal {
-        if (balance0 > type(uint112).max || balance1 > type(uint112).max) revert ReserveOverflow();
-
-        // casting to uint112 is safe because ReserveOverflow was checked above.
-        // forge-lint: disable-next-line(unsafe-typecast)
-        uint112 nextReserve0 = uint112(balance0);
-        // casting to uint112 is safe because ReserveOverflow was checked above.
-        // forge-lint: disable-next-line(unsafe-typecast)
-        uint112 nextReserve1 = uint112(balance1);
+        uint112 nextReserve0 = _toReserve(balance0);
+        uint112 nextReserve1 = _toReserve(balance1);
 
         uint32 timestamp = _blockTimestamp();
         uint32 timeElapsed = timestamp - blockTimestampLast;
-        if (timeElapsed != 0 && reserve0_ != 0 && reserve1_ != 0) {
-            price0CumulativeLast += uint256(reserve1_) * FEE_INDEX_SCALE * timeElapsed / reserve0_;
-            price1CumulativeLast += uint256(reserve0_) * FEE_INDEX_SCALE * timeElapsed / reserve1_;
-        }
-        if (timeElapsed != 0) {
-            observations.push(
-                Observation(timestamp, price0CumulativeLast, price1CumulativeLast, nextReserve0, nextReserve1)
-            );
-        }
+        _accumulateCumulativePrices(timeElapsed, reserve0_, reserve1_);
+        _recordObservation(timestamp, timeElapsed, nextReserve0, nextReserve1);
 
         reserve0 = nextReserve0;
         reserve1 = nextReserve1;
@@ -385,20 +496,75 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         uint256 length = observations.length;
         for (uint256 i = length; i > 0; --i) {
             Observation memory observation = observations[i - 1];
-            if (targetTimestamp >= observation.timestamp) {
-                price0Cumulative = observation.price0Cumulative;
-                price1Cumulative = observation.price1Cumulative;
-                uint256 elapsed = targetTimestamp - observation.timestamp;
-                if (elapsed != 0 && observation.reserve0 != 0 && observation.reserve1 != 0) {
-                    price0Cumulative += uint256(observation.reserve1) * FEE_INDEX_SCALE * elapsed / observation.reserve0;
-                    price1Cumulative += uint256(observation.reserve0) * FEE_INDEX_SCALE * elapsed / observation.reserve1;
-                }
-                return (price0Cumulative, price1Cumulative);
-            }
+            if (targetTimestamp < observation.timestamp) continue;
+
+            return _cumulativeFromObservation(observation, targetTimestamp);
         }
 
         Observation memory first = observations[0];
         return (first.price0Cumulative, first.price1Cumulative);
+    }
+
+    function _toReserve(uint256 balance) internal pure returns (uint112) {
+        if (balance > type(uint112).max) revert ReserveOverflow();
+
+        // casting to uint112 is safe because ReserveOverflow was checked above.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint112(balance);
+    }
+
+    function _accumulateCumulativePrices(uint32 timeElapsed, uint112 reserve0_, uint112 reserve1_) internal {
+        if (!_hasCumulativePriceDelta(timeElapsed, reserve0_, reserve1_)) return;
+
+        (uint256 price0Delta, uint256 price1Delta) = _cumulativePriceDeltas(reserve0_, reserve1_, timeElapsed);
+        price0CumulativeLast += price0Delta;
+        price1CumulativeLast += price1Delta;
+    }
+
+    function _recordObservation(uint32 timestamp, uint32 timeElapsed, uint112 nextReserve0, uint112 nextReserve1)
+        internal
+    {
+        if (timeElapsed == 0) return;
+
+        observations.push(
+            Observation(timestamp, price0CumulativeLast, price1CumulativeLast, nextReserve0, nextReserve1)
+        );
+    }
+
+    function _cumulativeFromObservation(Observation memory observation, uint256 targetTimestamp)
+        internal
+        pure
+        returns (uint256 price0Cumulative, uint256 price1Cumulative)
+    {
+        price0Cumulative = observation.price0Cumulative;
+        price1Cumulative = observation.price1Cumulative;
+
+        uint256 elapsed = targetTimestamp - observation.timestamp;
+        if (!_hasCumulativePriceDelta(elapsed, observation.reserve0, observation.reserve1)) {
+            return (price0Cumulative, price1Cumulative);
+        }
+
+        (uint256 price0Delta, uint256 price1Delta) =
+            _cumulativePriceDeltas(observation.reserve0, observation.reserve1, elapsed);
+        price0Cumulative += price0Delta;
+        price1Cumulative += price1Delta;
+    }
+
+    function _hasCumulativePriceDelta(uint256 timeElapsed, uint112 reserve0_, uint112 reserve1_)
+        internal
+        pure
+        returns (bool)
+    {
+        return timeElapsed != 0 && reserve0_ != 0 && reserve1_ != 0;
+    }
+
+    function _cumulativePriceDeltas(uint112 reserve0_, uint112 reserve1_, uint256 timeElapsed)
+        internal
+        pure
+        returns (uint256 price0Delta, uint256 price1Delta)
+    {
+        price0Delta = uint256(reserve1_) * FEE_INDEX_SCALE * timeElapsed / reserve0_;
+        price1Delta = uint256(reserve0_) * FEE_INDEX_SCALE * timeElapsed / reserve1_;
     }
 
     function _balance(address token) internal view returns (uint256) {

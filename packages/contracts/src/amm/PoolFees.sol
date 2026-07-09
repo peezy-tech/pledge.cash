@@ -14,7 +14,9 @@ contract PoolFees {
     error OnlyPool();
 
     constructor(address pool_, address token0_, address token1_) {
-        if (pool_ == address(0) || token0_ == address(0) || token1_ == address(0)) revert InvalidAddress();
+        _requireNonZero(pool_);
+        _requireNonZero(token0_);
+        _requireNonZero(token1_);
 
         pool = pool_;
         token0 = token0_;
@@ -24,7 +26,17 @@ contract PoolFees {
     function claimFeesFor(address recipient, uint256 amount0, uint256 amount1) external {
         if (msg.sender != pool) revert OnlyPool();
 
-        if (amount0 != 0) token0.safeTransfer(recipient, amount0);
-        if (amount1 != 0) token1.safeTransfer(recipient, amount1);
+        _transferIfRequested(token0, recipient, amount0);
+        _transferIfRequested(token1, recipient, amount1);
+    }
+
+    function _requireNonZero(address account) internal pure {
+        if (account == address(0)) revert InvalidAddress();
+    }
+
+    function _transferIfRequested(address token, address recipient, uint256 amount) internal {
+        if (amount == 0) return;
+
+        token.safeTransfer(recipient, amount);
     }
 }
