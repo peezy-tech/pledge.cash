@@ -1,13 +1,21 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { App } from "./app/App";
+import { App } from "./App";
 import { Web3Provider } from "./components/web3-provider";
 import "./index.css";
 
-createRoot(document.getElementById("root")!).render(
+const rootElement = document.getElementById("root");
+
+if (!rootElement) {
+  throw new Error("Missing root element for pledge.cash web app");
+}
+
+const app = (
   <React.StrictMode>
     <Web3Provider>
       <App />
     </Web3Provider>
-  </React.StrictMode>,
+  </React.StrictMode>
 );
+
+createRoot(rootElement).render(app);
