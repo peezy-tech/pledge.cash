@@ -281,11 +281,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     }
 
     function startWindDown() external nonReentrant {
-        if (launched) {
-            _requireShareholder(msg.sender);
-        } else {
-            _requireOwner();
-        }
+        _requireWindDownStarter();
         _startWindDown();
     }
 
@@ -388,17 +384,17 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         returns (uint256[] memory amountsOut)
     {
         _requireStatus(BoardroomStatus.RedemptionsOpen);
-        if (shares == 0 || recipient == address(0) || recipient == address(this)) revert InvalidRedemptionInput();
 
         uint256 assetsLength = redeemableAssets.length;
-        if (minAmountsOut.length != assetsLength) revert InvalidRedemptionInput();
+        _requireValidRedemptionInput(shares, recipient, minAmountsOut.length, assetsLength);
 
         BoardroomToken shares_ = BoardroomToken(shareToken);
         _wrapNativeBalanceForWindDown();
         _burnTreasuryShares();
 
         uint256 supplyBeforeBurn = shares_.totalSupply();
-        if (supplyBeforeBurn == 0 || shares > shares_.balanceOf(msg.sender)) revert InvalidRedemptionInput();
+        if (supplyBeforeBurn == 0) revert InvalidRedemptionInput();
+        if (shares > shares_.balanceOf(msg.sender)) revert InvalidRedemptionInput();
 
         address[] memory assets = new address[](assetsLength);
         amountsOut = new uint256[](assetsLength);
@@ -499,34 +495,38 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
         bytes4 selector = _selector(call_.data);
         BoardroomStatus currentStatus = status;
-        if (currentStatus == BoardroomStatus.RedemptionsOpen) {
-            revert InvalidStatus(BoardroomStatus.Active, currentStatus);
-        }
-        if (currentStatus == BoardroomStatus.WindingDown && !_isWindDownCallAllowed(policy, target, selector)) {
-            revert CallNotAllowed(policy, target, selector);
-        }
-
-        if (currentStatus == BoardroomStatus.Active) {
-            _authorizeActiveCall(policy, target, selector, call_.value, call_.data);
-        }
+        _authorizeCallForStatus(currentStatus, policy, target, selector, call_.value, call_.data);
 
         if (_isBoardroomGovernanceCall(policy, target, selector)) {
             if (call_.value != 0) revert CallNotAllowed(policy, target, selector);
             result = _executeBoardroomGovernanceCall(selector, call_.data);
         } else {
-            bool success;
-            (success, result) = target.call{value: call_.value}(call_.data);
-            if (!success) _revertCall(target, result);
+            result = _executeExternalCall(call_);
         }
 
-        if (currentStatus == BoardroomStatus.Active) {
-            _recordIssuedObligation(policy, target, call_.value, call_.data, result);
-            _recordLifecycleCall(policy, target, selector);
-        } else if (currentStatus == BoardroomStatus.WindingDown) {
-            _recordLifecycleCall(policy, target, selector);
-        }
+        _recordPostCallEffects(currentStatus, policy, target, selector, call_.value, call_.data, result);
 
         emit BoardroomCallExecuted(policy, target, selector, call_.value, keccak256(call_.data));
+    }
+
+    function _authorizeCallForStatus(
+        BoardroomStatus currentStatus,
+        address policy,
+        address target,
+        bytes4 selector,
+        uint256 value,
+        bytes calldata data
+    ) internal view {
+        if (currentStatus == BoardroomStatus.RedemptionsOpen) {
+            revert InvalidStatus(BoardroomStatus.Active, currentStatus);
+        }
+
+        if (currentStatus == BoardroomStatus.WindingDown) {
+            if (!_isWindDownCallAllowed(policy, target, selector)) revert CallNotAllowed(policy, target, selector);
+            return;
+        }
+
+        _authorizeActiveCall(policy, target, selector, value, data);
     }
 
     function _authorizeActiveCall(address policy, address target, bytes4 selector, uint256 value, bytes calldata data)
@@ -551,7 +551,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         if (_isBoardroomWindDownGovernanceCall(policy, target, selector)) return true;
         if (policy == address(0)) return false;
         if (!IBoardroomPolicyRegistry(policyRegistry).isPolicyLifecycleAllowed(policy)) return false;
-        if (!isIssuedGrant[target] && !isIssuedDistribution[target] && !isLockedLiquidity[target]) return false;
+        if (!_isTrackedLifecycleTarget(target)) return false;
 
         try IBoardroomObligationPolicy(policy).isLifecycleCallAllowed(address(this), target, selector) returns (
             bool allowed
@@ -563,12 +563,8 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     }
 
     function _isBoardroomGovernanceCall(address policy, address target, bytes4 selector) internal view returns (bool) {
-        if (policy != address(0) || target != address(this)) return false;
-        return selector == Boardroom.setExecutor.selector || selector == Boardroom.mint.selector
-            || selector == Boardroom.wrapNativeBalance.selector
-            || selector == Boardroom.registerRedeemableAsset.selector
-            || selector == Boardroom.burnTreasuryShares.selector || selector == Boardroom.exitLockedLiquidity.selector
-            || selector == Boardroom.openRedemptions.selector;
+        if (!_isSelfCallWithoutPolicy(policy, target)) return false;
+        return _isActiveGovernanceSelector(selector);
     }
 
     function _isBoardroomWindDownGovernanceCall(address policy, address target, bytes4 selector)
@@ -576,11 +572,31 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         view
         returns (bool)
     {
-        if (policy != address(0) || target != address(this)) return false;
+        if (!_isSelfCallWithoutPolicy(policy, target)) return false;
+        return _isWindDownGovernanceSelector(selector);
+    }
+
+    function _isSelfCallWithoutPolicy(address policy, address target) internal view returns (bool) {
+        return policy == address(0) && target == address(this);
+    }
+
+    function _isActiveGovernanceSelector(bytes4 selector) internal pure returns (bool) {
+        return selector == Boardroom.setExecutor.selector || selector == Boardroom.mint.selector
+            || selector == Boardroom.wrapNativeBalance.selector
+            || selector == Boardroom.registerRedeemableAsset.selector
+            || selector == Boardroom.burnTreasuryShares.selector || selector == Boardroom.exitLockedLiquidity.selector
+            || selector == Boardroom.openRedemptions.selector;
+    }
+
+    function _isWindDownGovernanceSelector(bytes4 selector) internal pure returns (bool) {
         return selector == Boardroom.setExecutor.selector || selector == Boardroom.wrapNativeBalance.selector
             || selector == Boardroom.registerRedeemableAsset.selector
             || selector == Boardroom.burnTreasuryShares.selector || selector == Boardroom.exitLockedLiquidity.selector
             || selector == Boardroom.openRedemptions.selector;
+    }
+
+    function _isTrackedLifecycleTarget(address target) internal view returns (bool) {
+        return isIssuedGrant[target] || isIssuedDistribution[target] || isLockedLiquidity[target];
     }
 
     function _executeBoardroomGovernanceCall(bytes4 selector, bytes calldata data)
@@ -623,6 +639,32 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         }
 
         revert CallNotAllowed(address(0), address(this), selector);
+    }
+
+    function _executeExternalCall(Call calldata call_) internal returns (bytes memory result) {
+        bool success;
+        (success, result) = call_.target.call{value: call_.value}(call_.data);
+        if (!success) _revertCall(call_.target, result);
+    }
+
+    function _recordPostCallEffects(
+        BoardroomStatus currentStatus,
+        address policy,
+        address target,
+        bytes4 selector,
+        uint256 value,
+        bytes calldata data,
+        bytes memory result
+    ) internal {
+        if (currentStatus == BoardroomStatus.Active) {
+            _recordIssuedObligation(policy, target, value, data, result);
+            _recordLifecycleCall(policy, target, selector);
+            return;
+        }
+
+        if (currentStatus == BoardroomStatus.WindingDown) {
+            _recordLifecycleCall(policy, target, selector);
+        }
     }
 
     function _recordIssuedObligation(
@@ -690,10 +732,9 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         if (distribution == address(0) || isIssuedDistribution[distribution]) {
             revert InvalidIssuedDistribution(distribution);
         }
-        if (
-            IBoardroomDistribution(distribution).boardroom() != address(this)
-                || IBoardroomDistribution(distribution).factory() != factory
-        ) {
+
+        IBoardroomDistribution issuedDistribution = IBoardroomDistribution(distribution);
+        if (issuedDistribution.boardroom() != address(this) || issuedDistribution.factory() != factory) {
             revert InvalidIssuedDistribution(distribution);
         }
 
@@ -746,10 +787,11 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         LockedLiquidity position = LockedLiquidity(locker);
         address factory = position.factory();
         if (expectedFactory != address(0) && factory != expectedFactory) revert InvalidLockedLiquidity(locker);
-        if (
-            position.boardroom() != address(this) || position.pool() != pool
-                || !LockedLiquidityFactory(factory).isLocker(locker)
-        ) {
+
+        bool lockerMatchesBoardroom = position.boardroom() == address(this);
+        bool lockerMatchesPool = position.pool() == pool;
+        bool lockerIsFromFactory = LockedLiquidityFactory(factory).isLocker(locker);
+        if (!lockerMatchesBoardroom || !lockerMatchesPool || !lockerIsFromFactory) {
             revert InvalidLockedLiquidity(locker);
         }
 
@@ -762,7 +804,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     }
 
     function _registerRedeemableAsset(address asset) internal {
-        if (asset == address(0) || asset == shareToken || asset == address(this)) revert InvalidRedeemableAsset(asset);
+        if (!_isValidRedeemableAsset(asset)) revert InvalidRedeemableAsset(asset);
         if (isRedeemableAsset[asset]) revert RedeemableAssetAlreadyRegistered(asset);
         if (redeemableAssets.length >= MAX_REDEEMABLE_ASSETS) revert TooManyRedeemableAssets();
 
@@ -772,8 +814,12 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     }
 
     function _registerRedeemableAssetIfNeeded(address asset) internal {
-        if (asset == address(0) || asset == shareToken || asset == address(this) || isRedeemableAsset[asset]) return;
+        if (!_isValidRedeemableAsset(asset) || isRedeemableAsset[asset]) return;
         _registerRedeemableAsset(asset);
+    }
+
+    function _isValidRedeemableAsset(address asset) internal view returns (bool) {
+        return asset != address(0) && asset != shareToken && asset != address(this);
     }
 
     function _wrapNativeBalanceForWindDown() internal {
@@ -847,7 +893,9 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     }
 
     function _syncExecutorAfterOwnershipTransfer(address oldOwner, address newOwner) internal {
-        if (!launched && executor == oldOwner) _setExecutor(newOwner);
+        if (launched) return;
+        if (executor != oldOwner) return;
+        _setExecutor(newOwner);
     }
 
     function _queueAction(bytes32 actionHash, bytes32 salt) internal returns (uint256 eta) {
@@ -875,6 +923,15 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         _requireOwner();
     }
 
+    function _requireWindDownStarter() internal view {
+        if (launched) {
+            _requireShareholder(msg.sender);
+            return;
+        }
+
+        _requireOwner();
+    }
+
     function _requirePrelaunchOwner() internal view {
         if (launched) revert BoardroomAlreadyLaunched();
         _requireOwner();
@@ -896,6 +953,18 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
     function _requireShareholder(address account) internal view {
         if (BoardroomToken(shareToken).balanceOf(account) == 0) revert NotShareholder(account);
+    }
+
+    function _requireValidRedemptionInput(
+        uint256 shares,
+        address recipient,
+        uint256 minAmountsLength,
+        uint256 assetsLength
+    ) internal view {
+        if (shares == 0) revert InvalidRedemptionInput();
+        if (recipient == address(0)) revert InvalidRedemptionInput();
+        if (recipient == address(this)) revert InvalidRedemptionInput();
+        if (minAmountsLength != assetsLength) revert InvalidRedemptionInput();
     }
 
     function _requireNotRedemptionsOpen() internal view {
