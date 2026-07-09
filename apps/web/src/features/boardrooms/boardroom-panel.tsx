@@ -30,7 +30,9 @@ import { dateString, randomSalt } from "../../lib/forms";
 import { formatTokenAmount } from "../../lib/token-amounts";
 import type {
   BoardroomForm,
+  BoardroomDistributionSnapshot,
   BoardroomGrantForm,
+  BoardroomLockedLiquiditySnapshot,
   BoardroomSnapshot,
   CurveMigrationForm,
   FixedPriceSaleForm,
@@ -53,6 +55,7 @@ import {
   StatusBadge,
   TextField,
   windDownBlockers,
+  type BoardroomFact,
 } from "./boardroom-panel-shared";
 import type { BoardroomPanelProps } from "./boardroom-panel-types";
 
@@ -395,6 +398,8 @@ function BoardroomOverview({
   loadBoardroom: () => Promise<void>;
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
 }): React.JSX.Element {
+  const accountFacts = boardroomAccountFacts(boardroomSnapshot);
+
   return (
     <Panel
       title="Boardroom Account"
@@ -412,20 +417,7 @@ function BoardroomOverview({
       </div>
       <Facts
         columns="three"
-        items={[
-          { label: "Owner", value: boardroomSnapshot?.owner ? <AddressLink address={boardroomSnapshot.owner} /> : "Unknown" },
-          {
-            label: "Policy registry",
-            value: boardroomSnapshot?.policyRegistry ? <AddressLink address={boardroomSnapshot.policyRegistry} /> : "Unknown",
-          },
-          { label: "Share token", value: boardroomSnapshot?.shareToken ? <AddressLink address={boardroomSnapshot.shareToken} /> : "Unknown" },
-          { label: "Status", value: <StatusBadge label={boardroomStatusLabel(boardroomSnapshot?.status)} tone={boardroomStatusTone(boardroomSnapshot?.status)} /> },
-          { label: "Redeemable assets", value: String(boardroomSnapshot?.redeemableAssets.length ?? 0) },
-          {
-            label: "Obligations",
-            value: `${boardroomSnapshot?.issuedGrants.length ?? 0} grants / ${boardroomSnapshot?.issuedDistributions.length ?? 0} distributions / ${boardroomSnapshot?.lockedLiquidityPositions.length ?? 0} lockers`,
-          },
-        ]}
+        items={accountFacts}
       />
       <ObligationLists
         boardroomSnapshot={boardroomSnapshot}
@@ -436,6 +428,123 @@ function BoardroomOverview({
       />
     </Panel>
   );
+}
+
+function boardroomAccountFacts(boardroomSnapshot: BoardroomSnapshot | undefined): BoardroomFact[] {
+  return [
+    { label: "Owner", value: boardroomSnapshot?.owner ? <AddressLink address={boardroomSnapshot.owner} /> : "Unknown" },
+    {
+      label: "Policy registry",
+      value: boardroomSnapshot?.policyRegistry ? <AddressLink address={boardroomSnapshot.policyRegistry} /> : "Unknown",
+    },
+    { label: "Share token", value: boardroomSnapshot?.shareToken ? <AddressLink address={boardroomSnapshot.shareToken} /> : "Unknown" },
+    { label: "Status", value: <StatusBadge label={boardroomStatusLabel(boardroomSnapshot?.status)} tone={boardroomStatusTone(boardroomSnapshot?.status)} /> },
+    { label: "Redeemable assets", value: String(boardroomSnapshot?.redeemableAssets.length ?? 0) },
+    { label: "Obligations", value: boardroomObligationCount(boardroomSnapshot) },
+  ];
+}
+
+function boardroomObligationCount(boardroomSnapshot: BoardroomSnapshot | undefined): string {
+  const grantCount = boardroomSnapshot?.issuedGrants.length ?? 0;
+  const distributionCount = boardroomSnapshot?.issuedDistributions.length ?? 0;
+  const lockerCount = boardroomSnapshot?.lockedLiquidityPositions.length ?? 0;
+  return `${grantCount} grants / ${distributionCount} distributions / ${lockerCount} lockers`;
+}
+
+function fixedPriceSaleFacts(
+  fixedPriceSaleSnapshot: FixedPriceSaleState | undefined,
+  distributionSummary: BoardroomDistributionSnapshot | undefined,
+  predictedFixedPriceSale: Address | undefined,
+): BoardroomFact[] {
+  return [
+    { label: "Predicted sale", value: predictedFixedPriceSale ? <AddressLink address={predictedFixedPriceSale} /> : "None" },
+    {
+      label: "Status",
+      value: fixedPriceSaleSnapshot ? (
+        <StatusBadge label={saleStatusLabel(fixedPriceSaleSnapshot.saleStatus)} tone={fixedPriceSaleSnapshot.closed ? "warning" : "default"} />
+      ) : (
+        "Not loaded"
+      ),
+    },
+    { label: "Remaining shares", value: formatTokenAmount(fixedPriceSaleSnapshot?.remainingShares, distributionSummary?.shareTokenMetadata) },
+    { label: "Payment token", value: fixedPriceSaleSnapshot ? <AddressLink address={fixedPriceSaleSnapshot.paymentToken} /> : "Unknown" },
+    { label: "Price", value: formatTokenAmount(fixedPriceSaleSnapshot?.price, distributionSummary?.paymentTokenMetadata) },
+    { label: "Window", value: fixedPriceSaleSnapshot ? `${dateString(fixedPriceSaleSnapshot.startTime)} -> ${dateString(fixedPriceSaleSnapshot.endTime)}` : "Unknown" },
+  ];
+}
+
+function merkleAirdropFacts(
+  merkleAirdropSnapshot: MerkleAirdropState | undefined,
+  distributionSummary: BoardroomDistributionSnapshot | undefined,
+  predictedMerkleAirdrop: Address | undefined,
+): BoardroomFact[] {
+  return [
+    { label: "Predicted airdrop", value: predictedMerkleAirdrop ? <AddressLink address={predictedMerkleAirdrop} /> : "None" },
+    {
+      label: "Status",
+      value: merkleAirdropSnapshot ? (
+        <StatusBadge label={airdropStatusLabel(merkleAirdropSnapshot.airdropStatus)} tone={merkleAirdropSnapshot.closed ? "warning" : "default"} />
+      ) : (
+        "Not loaded"
+      ),
+    },
+    { label: "Remaining shares", value: formatTokenAmount(merkleAirdropSnapshot?.remainingShares, distributionSummary?.shareTokenMetadata) },
+    {
+      label: "Grant claims",
+      value: merkleAirdropSnapshot ? `${merkleAirdropSnapshot.claimedGrantCount} / ${merkleAirdropSnapshot.maxGrantClaims}` : "Unknown",
+    },
+    { label: "Grant factory", value: merkleAirdropSnapshot ? <AddressLink address={merkleAirdropSnapshot.tokenGrantFactory} /> : "Unknown" },
+    { label: "Merkle root", value: merkleAirdropSnapshot?.merkleRoot ?? "Unknown" },
+    { label: "Window", value: merkleAirdropSnapshot ? `${dateString(merkleAirdropSnapshot.startTime)} -> ${dateString(merkleAirdropSnapshot.endTime)}` : "Unknown" },
+  ];
+}
+
+function migratingCurveFacts(
+  migratingCurveSnapshot: MigratingBondingCurveState | undefined,
+  distributionSummary: BoardroomDistributionSnapshot | undefined,
+  predictedMigratingCurve: Address | undefined,
+): BoardroomFact[] {
+  return [
+    { label: "Predicted curve", value: predictedMigratingCurve ? <AddressLink address={predictedMigratingCurve} /> : "None" },
+    {
+      label: "Status",
+      value: migratingCurveSnapshot ? (
+        <StatusBadge label={curveStatusLabel(migratingCurveSnapshot.curveStatus)} tone={migratingCurveSnapshot.closed ? "warning" : "default"} />
+      ) : (
+        "Not loaded"
+      ),
+    },
+    { label: "Can migrate", value: migratingCurveSnapshot ? String(migratingCurveSnapshot.canMigrate) : "Unknown" },
+    { label: "Remaining sale shares", value: formatTokenAmount(migratingCurveSnapshot?.remainingSaleShares, distributionSummary?.shareTokenMetadata) },
+    { label: "Sold shares", value: formatTokenAmount(migratingCurveSnapshot?.soldShares, distributionSummary?.shareTokenMetadata) },
+    { label: "Quote reserve", value: formatTokenAmount(migratingCurveSnapshot?.quoteReserve, distributionSummary?.quoteTokenMetadata) },
+    { label: "Quote token", value: migratingCurveSnapshot ? <AddressLink address={migratingCurveSnapshot.quoteToken} /> : "Unknown" },
+    { label: "Locker", value: migratingCurveSnapshot?.locker ? <AddressLink address={migratingCurveSnapshot.locker} /> : "Unknown" },
+    { label: "Pool", value: migratingCurveSnapshot?.pool ? <AddressLink address={migratingCurveSnapshot.pool} /> : "Unknown" },
+  ];
+}
+
+function lockedLiquidityFacts(
+  lockedLiquiditySnapshot: LockedLiquidityState | undefined,
+  lockerSummary: BoardroomLockedLiquiditySnapshot | undefined,
+  predictedLockedLiquidity: Address | undefined,
+): BoardroomFact[] {
+  return [
+    { label: "Predicted locker", value: predictedLockedLiquidity ? <AddressLink address={predictedLockedLiquidity} /> : "None" },
+    { label: "Seeded", value: lockedLiquiditySnapshot ? String(lockedLiquiditySnapshot.seeded) : "Unknown" },
+    { label: "Locked LP", value: formatTokenAmount(lockedLiquiditySnapshot?.lockedLiquidity, lockerSummary?.liquidityMetadata) },
+    { label: "Token A", value: lockedLiquiditySnapshot ? <AddressLink address={lockedLiquiditySnapshot.tokenA} /> : "Unknown" },
+    { label: "Token B", value: lockedLiquiditySnapshot ? <AddressLink address={lockedLiquiditySnapshot.tokenB} /> : "Unknown" },
+    { label: "Pool", value: lockedLiquiditySnapshot?.pool ? <AddressLink address={lockedLiquiditySnapshot.pool} /> : "Unknown" },
+  ];
+}
+
+function boardroomWindDownFacts(boardroomSnapshot: BoardroomSnapshot | undefined, blockerCount: number): BoardroomFact[] {
+  return [
+    { label: "Status", value: <StatusBadge label={boardroomStatusLabel(boardroomSnapshot?.status)} tone={boardroomStatusTone(boardroomSnapshot?.status)} /> },
+    { label: "Open blockers", value: String(blockerCount) },
+    { label: "Redeemable assets", value: String(boardroomSnapshot?.redeemableAssets.length ?? 0) },
+  ];
 }
 
 function BoardroomGrantPanel({
@@ -584,6 +693,8 @@ function FixedPriceSalePanel({
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
 }): React.JSX.Element {
   const distributionSummary = distributionSummaryFor(boardroomSnapshot, fixedPriceSaleSnapshot?.address ?? fixedPriceSaleAddress);
+  const canUseDistributionFactory = Boolean(deployment?.distributionFactory);
+  const saleFacts = fixedPriceSaleFacts(fixedPriceSaleSnapshot, distributionSummary, predictedFixedPriceSale);
 
   return (
     <Panel
@@ -607,7 +718,7 @@ function FixedPriceSalePanel({
       <ActionRow>
         <ActionButton
           actionId="predict-fixed-sale"
-          disabled={!deployment?.distributionFactory}
+          disabled={!canUseDistributionFactory}
           pendingAction={pendingAction}
           variant="secondary"
           onClick={() => void runAction("predict-fixed-sale", predictFixedPriceSale)}
@@ -617,7 +728,7 @@ function FixedPriceSalePanel({
         </ActionButton>
         <ActionButton
           actionId="create-fixed-sale"
-          disabled={!deployment?.distributionFactory}
+          disabled={!canUseDistributionFactory}
           pendingAction={pendingAction}
           onClick={() => void runAction("create-fixed-sale", createFixedPriceSale)}
         >
@@ -646,14 +757,7 @@ function FixedPriceSalePanel({
       </div>
       <Facts
         columns="three"
-        items={[
-          { label: "Predicted sale", value: predictedFixedPriceSale ? <AddressLink address={predictedFixedPriceSale} /> : "None" },
-          { label: "Status", value: fixedPriceSaleSnapshot ? <StatusBadge label={saleStatusLabel(fixedPriceSaleSnapshot.saleStatus)} tone={fixedPriceSaleSnapshot.closed ? "warning" : "default"} /> : "Not loaded" },
-          { label: "Remaining shares", value: formatTokenAmount(fixedPriceSaleSnapshot?.remainingShares, distributionSummary?.shareTokenMetadata) },
-          { label: "Payment token", value: fixedPriceSaleSnapshot ? <AddressLink address={fixedPriceSaleSnapshot.paymentToken} /> : "Unknown" },
-          { label: "Price", value: formatTokenAmount(fixedPriceSaleSnapshot?.price, distributionSummary?.paymentTokenMetadata) },
-          { label: "Window", value: fixedPriceSaleSnapshot ? `${dateString(fixedPriceSaleSnapshot.startTime)} -> ${dateString(fixedPriceSaleSnapshot.endTime)}` : "Unknown" },
-        ]}
+        items={saleFacts}
       />
     </Panel>
   );
@@ -693,6 +797,8 @@ function MerkleAirdropPanel({
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
 }): React.JSX.Element {
   const distributionSummary = distributionSummaryFor(boardroomSnapshot, merkleAirdropSnapshot?.address ?? merkleAirdropAddress);
+  const canUseDistributionFactory = Boolean(deployment?.distributionFactory);
+  const airdropFacts = merkleAirdropFacts(merkleAirdropSnapshot, distributionSummary, predictedMerkleAirdrop);
 
   return (
     <Panel
@@ -715,7 +821,7 @@ function MerkleAirdropPanel({
       <ActionRow>
         <ActionButton
           actionId="predict-merkle-airdrop"
-          disabled={!deployment?.distributionFactory}
+          disabled={!canUseDistributionFactory}
           pendingAction={pendingAction}
           variant="secondary"
           onClick={() => void runAction("predict-merkle-airdrop", predictMerkleAirdrop)}
@@ -725,7 +831,7 @@ function MerkleAirdropPanel({
         </ActionButton>
         <ActionButton
           actionId="create-merkle-airdrop"
-          disabled={!deployment?.distributionFactory}
+          disabled={!canUseDistributionFactory}
           pendingAction={pendingAction}
           onClick={() => void runAction("create-merkle-airdrop", createMerkleAirdrop)}
         >
@@ -754,25 +860,7 @@ function MerkleAirdropPanel({
       </div>
       <Facts
         columns="three"
-        items={[
-          { label: "Predicted airdrop", value: predictedMerkleAirdrop ? <AddressLink address={predictedMerkleAirdrop} /> : "None" },
-          {
-            label: "Status",
-            value: merkleAirdropSnapshot ? (
-              <StatusBadge label={airdropStatusLabel(merkleAirdropSnapshot.airdropStatus)} tone={merkleAirdropSnapshot.closed ? "warning" : "default"} />
-            ) : (
-              "Not loaded"
-            ),
-          },
-          { label: "Remaining shares", value: formatTokenAmount(merkleAirdropSnapshot?.remainingShares, distributionSummary?.shareTokenMetadata) },
-          {
-            label: "Grant claims",
-            value: merkleAirdropSnapshot ? `${merkleAirdropSnapshot.claimedGrantCount} / ${merkleAirdropSnapshot.maxGrantClaims}` : "Unknown",
-          },
-          { label: "Grant factory", value: merkleAirdropSnapshot ? <AddressLink address={merkleAirdropSnapshot.tokenGrantFactory} /> : "Unknown" },
-          { label: "Merkle root", value: merkleAirdropSnapshot?.merkleRoot ?? "Unknown" },
-          { label: "Window", value: merkleAirdropSnapshot ? `${dateString(merkleAirdropSnapshot.startTime)} -> ${dateString(merkleAirdropSnapshot.endTime)}` : "Unknown" },
-        ]}
+        items={airdropFacts}
       />
     </Panel>
   );
@@ -816,6 +904,8 @@ function MigratingCurvePanel({
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
 }): React.JSX.Element {
   const distributionSummary = distributionSummaryFor(boardroomSnapshot, migratingCurveSnapshot?.address ?? migratingCurveAddress);
+  const canUseDistributionFactory = Boolean(deployment?.distributionFactory);
+  const curveFacts = migratingCurveFacts(migratingCurveSnapshot, distributionSummary, predictedMigratingCurve);
 
   return (
     <Panel
@@ -846,7 +936,7 @@ function MigratingCurvePanel({
       <ActionRow>
         <ActionButton
           actionId="predict-migrating-curve"
-          disabled={!deployment?.distributionFactory}
+          disabled={!canUseDistributionFactory}
           pendingAction={pendingAction}
           variant="secondary"
           onClick={() => void runAction("predict-migrating-curve", predictMigratingCurve)}
@@ -856,7 +946,7 @@ function MigratingCurvePanel({
         </ActionButton>
         <ActionButton
           actionId="create-migrating-curve"
-          disabled={!deployment?.distributionFactory}
+          disabled={!canUseDistributionFactory}
           pendingAction={pendingAction}
           onClick={() => void runAction("create-migrating-curve", createMigratingCurve)}
         >
@@ -881,17 +971,7 @@ function MigratingCurvePanel({
       </div>
       <Facts
         columns="three"
-        items={[
-          { label: "Predicted curve", value: predictedMigratingCurve ? <AddressLink address={predictedMigratingCurve} /> : "None" },
-          { label: "Status", value: migratingCurveSnapshot ? <StatusBadge label={curveStatusLabel(migratingCurveSnapshot.curveStatus)} tone={migratingCurveSnapshot.closed ? "warning" : "default"} /> : "Not loaded" },
-          { label: "Can migrate", value: migratingCurveSnapshot ? String(migratingCurveSnapshot.canMigrate) : "Unknown" },
-          { label: "Remaining sale shares", value: formatTokenAmount(migratingCurveSnapshot?.remainingSaleShares, distributionSummary?.shareTokenMetadata) },
-          { label: "Sold shares", value: formatTokenAmount(migratingCurveSnapshot?.soldShares, distributionSummary?.shareTokenMetadata) },
-          { label: "Quote reserve", value: formatTokenAmount(migratingCurveSnapshot?.quoteReserve, distributionSummary?.quoteTokenMetadata) },
-          { label: "Quote token", value: migratingCurveSnapshot ? <AddressLink address={migratingCurveSnapshot.quoteToken} /> : "Unknown" },
-          { label: "Locker", value: migratingCurveSnapshot?.locker ? <AddressLink address={migratingCurveSnapshot.locker} /> : "Unknown" },
-          { label: "Pool", value: migratingCurveSnapshot?.pool ? <AddressLink address={migratingCurveSnapshot.pool} /> : "Unknown" },
-        ]}
+        items={curveFacts}
       />
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-3">
         <TextField form={curveMigrationForm} field="minShareLiquidity" inputMode="decimal" label="Min share liquidity" setForm={setCurveMigrationForm} />
@@ -946,6 +1026,8 @@ function LockedLiquidityPanel({
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
 }): React.JSX.Element {
   const lockerSummary = lockerSummaryFor(boardroomSnapshot, lockedLiquiditySnapshot?.address ?? lockedLiquidityAddress);
+  const canUseLockedLiquidityFactory = Boolean(deployment?.lockedLiquidityFactory);
+  const lockerFacts = lockedLiquidityFacts(lockedLiquiditySnapshot, lockerSummary, predictedLockedLiquidity);
 
   return (
     <Panel
@@ -993,7 +1075,7 @@ function LockedLiquidityPanel({
       <ActionRow>
         <ActionButton
           actionId="predict-locked-liquidity"
-          disabled={!deployment?.lockedLiquidityFactory}
+          disabled={!canUseLockedLiquidityFactory}
           pendingAction={pendingAction}
           variant="secondary"
           onClick={() => void runAction("predict-locked-liquidity", predictLockedLiquidity)}
@@ -1003,7 +1085,7 @@ function LockedLiquidityPanel({
         </ActionButton>
         <ActionButton
           actionId="create-locked-liquidity"
-          disabled={!deployment?.lockedLiquidityFactory}
+          disabled={!canUseLockedLiquidityFactory}
           pendingAction={pendingAction}
           onClick={() => void runAction("create-locked-liquidity", createLockedLiquidity)}
         >
@@ -1028,14 +1110,7 @@ function LockedLiquidityPanel({
       </div>
       <Facts
         columns="three"
-        items={[
-          { label: "Predicted locker", value: predictedLockedLiquidity ? <AddressLink address={predictedLockedLiquidity} /> : "None" },
-          { label: "Seeded", value: lockedLiquiditySnapshot ? String(lockedLiquiditySnapshot.seeded) : "Unknown" },
-          { label: "Locked LP", value: formatTokenAmount(lockedLiquiditySnapshot?.lockedLiquidity, lockerSummary?.liquidityMetadata) },
-          { label: "Token A", value: lockedLiquiditySnapshot ? <AddressLink address={lockedLiquiditySnapshot.tokenA} /> : "Unknown" },
-          { label: "Token B", value: lockedLiquiditySnapshot ? <AddressLink address={lockedLiquiditySnapshot.tokenB} /> : "Unknown" },
-          { label: "Pool", value: lockedLiquiditySnapshot?.pool ? <AddressLink address={lockedLiquiditySnapshot.pool} /> : "Unknown" },
-        ]}
+        items={lockerFacts}
       />
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-3">
         <TextField form={lockedLiquidityExitForm} field="amountAMin" inputMode="decimal" label="Exit amount A min" setForm={setLockedLiquidityExitForm} />
@@ -1076,20 +1151,17 @@ function WindDownPanel({
   startWindDown: () => Promise<void>;
 }): React.JSX.Element {
   const blockers = windDownBlockers(boardroomSnapshot);
+  const hasBlockers = blockers.length > 0;
+  const redeemableAssets = boardroomSnapshot?.redeemableAssets ?? [];
+  const windDownFacts = boardroomWindDownFacts(boardroomSnapshot, blockers.length);
 
   return (
     <Panel title="Wind-Down">
       <Facts
         columns="three"
-        items={[
-          { label: "Status", value: <StatusBadge label={boardroomStatusLabel(boardroomSnapshot?.status)} tone={boardroomStatusTone(boardroomSnapshot?.status)} /> },
-          { label: "Open blockers", value: String(blockers.length) },
-          { label: "Redeemable assets", value: String(boardroomSnapshot?.redeemableAssets.length ?? 0) },
-        ]}
+        items={windDownFacts}
       />
-      {blockers.length === 0 ? (
-        <p className="m-0 border-t border-zinc-800 p-4 text-sm text-zinc-500">No loaded blockers.</p>
-      ) : (
+      {hasBlockers ? (
         <ol className="grid gap-px border-t border-zinc-800 bg-zinc-800">
           {blockers.map((blocker) => (
             <li className="grid gap-2 bg-zinc-950 p-4 text-sm" key={`${blocker.kind}-${blocker.address}`}>
@@ -1101,6 +1173,8 @@ function WindDownPanel({
             </li>
           ))}
         </ol>
+      ) : (
+        <p className="m-0 border-t border-zinc-800 p-4 text-sm text-zinc-500">No loaded blockers.</p>
       )}
       <ActionRow>
         <ActionButton actionId="start-wind-down" pendingAction={pendingAction} variant="danger" onClick={() => void runAction("start-wind-down", startWindDown)}>
@@ -1120,10 +1194,10 @@ function WindDownPanel({
         <TextField form={windDownForm} field="redeemableAsset" label="Redeemable asset" setForm={setWindDownForm} />
         <Field label="Registered assets">
           <div className="flex min-h-10 flex-wrap items-center gap-2">
-            {(boardroomSnapshot?.redeemableAssets ?? []).length === 0 ? (
+            {redeemableAssets.length === 0 ? (
               <span className="text-sm text-zinc-500">None</span>
             ) : (
-              boardroomSnapshot?.redeemableAssets.map((asset) => <AddressLink address={asset} key={asset} />)
+              redeemableAssets.map((asset) => <AddressLink address={asset} key={asset} />)
             )}
           </div>
         </Field>
