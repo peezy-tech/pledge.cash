@@ -11,14 +11,24 @@ export function manageWorkspaceSummary(
   statusLabel: string;
   statusTone: "default" | "muted" | "warning";
 } {
-  const selected = Boolean(boardroomSnapshot || boardroomAddress.trim());
-  const owner = sameAddress(account, boardroomSnapshot?.owner);
+  if (!boardroomSnapshot) {
+    const selected = Boolean(boardroomAddress.trim());
+
+    return {
+      roleLabel: account ? "Load Boardroom" : "Connect owner wallet",
+      roleTone: "muted",
+      statusLabel: selected ? "Selected Boardroom not loaded" : "No Boardroom selected",
+      statusTone: selected ? "warning" : "muted",
+    };
+  }
+
+  const owner = sameAddress(account, boardroomSnapshot.owner);
 
   return {
-    roleLabel: !account ? "Connect owner wallet" : !boardroomSnapshot ? "Load Boardroom" : owner ? "Owner wallet" : "Read-only wallet",
+    roleLabel: !account ? "Connect owner wallet" : owner ? "Owner wallet" : "Read-only wallet",
     roleTone: owner ? "default" : "muted",
-    statusLabel: boardroomSnapshot ? boardroomStatusText(boardroomSnapshot.status) : selected ? "Selected Boardroom not loaded" : "No Boardroom selected",
-    statusTone: boardroomSnapshot ? "muted" : selected ? "warning" : "muted",
+    statusLabel: boardroomStatusText(boardroomSnapshot.status),
+    statusTone: "muted",
   };
 }
 
