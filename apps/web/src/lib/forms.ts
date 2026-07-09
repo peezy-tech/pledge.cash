@@ -13,6 +13,15 @@ import type {
   WindDownForm,
 } from "./types";
 
+const BYTES32_PATTERN = /^0x[0-9a-fA-F]{64}$/;
+const UINT_PATTERN = /^\d+$/;
+const SECONDS_PER_MINUTE = 60;
+const SECONDS_PER_HOUR = 3600;
+const SECONDS_PER_DAY = 86_400;
+const SECONDS_PER_WEEK = 604_800;
+const SECONDS_PER_MONTH = 2_629_800;
+const SECONDS_PER_YEAR = 31_557_600;
+
 export function randomSalt(): Hex {
   const bytes = new Uint8Array(32);
   if (globalThis.crypto) {
@@ -26,24 +35,24 @@ export function randomSalt(): Hex {
 }
 
 export function defaultTimes(): Pick<GrantForm, "vestingCliff" | "vestingEnd" | "expiry"> {
-  const now = Math.floor(Date.now() / 1000);
+  const now = currentUnixSeconds();
   return {
-    vestingCliff: String(now + 60),
-    vestingEnd: String(now + 3600),
-    expiry: String(now + 7200),
+    vestingCliff: secondsAfter(now, SECONDS_PER_MINUTE),
+    vestingEnd: secondsAfter(now, SECONDS_PER_HOUR),
+    expiry: secondsAfter(now, 2 * SECONDS_PER_HOUR),
   };
 }
 
 export function defaultWorkflowWindow(): { startTime: string; endTime: string } {
-  const now = Math.floor(Date.now() / 1000);
+  const now = currentUnixSeconds();
   return {
     startTime: String(now),
-    endTime: String(now + 7200),
+    endTime: secondsAfter(now, 2 * SECONDS_PER_HOUR),
   };
 }
 
 export function defaultDeadline(): string {
-  return String(Math.floor(Date.now() / 1000) + 900);
+  return secondsAfter(currentUnixSeconds(), 15 * SECONDS_PER_MINUTE);
 }
 
 export function defaultGrantForm(): GrantForm {
@@ -179,13 +188,13 @@ function relativeTimeUnit(
   deltaSeconds: number,
   absoluteSeconds: number,
 ): { unit: Intl.RelativeTimeFormatUnit; value: number } {
-  if (absoluteSeconds < 60) return { unit: "second", value: deltaSeconds };
-  if (absoluteSeconds < 3600) return { unit: "minute", value: Math.round(deltaSeconds / 60) };
-  if (absoluteSeconds < 86_400) return { unit: "hour", value: Math.round(deltaSeconds / 3600) };
-  if (absoluteSeconds < 604_800) return { unit: "day", value: Math.round(deltaSeconds / 86_400) };
-  if (absoluteSeconds < 2_629_800) return { unit: "week", value: Math.round(deltaSeconds / 604_800) };
-  if (absoluteSeconds < 31_557_600) return { unit: "month", value: Math.round(deltaSeconds / 2_629_800) };
-  return { unit: "year", value: Math.round(deltaSeconds / 31_557_600) };
+  if (absoluteSeconds < SECONDS_PER_MINUTE) return { unit: "second", value: deltaSeconds };
+  if (absoluteSeconds < SECONDS_PER_HOUR) return { unit: "minute", value: Math.round(deltaSeconds / SECONDS_PER_MINUTE) };
+  if (absoluteSeconds < SECONDS_PER_DAY) return { unit: "hour", value: Math.round(deltaSeconds / SECONDS_PER_HOUR) };
+  if (absoluteSeconds < SECONDS_PER_WEEK) return { unit: "day", value: Math.round(deltaSeconds / SECONDS_PER_DAY) };
+  if (absoluteSeconds < SECONDS_PER_MONTH) return { unit: "week", value: Math.round(deltaSeconds / SECONDS_PER_WEEK) };
+  if (absoluteSeconds < SECONDS_PER_YEAR) return { unit: "month", value: Math.round(deltaSeconds / SECONDS_PER_MONTH) };
+  return { unit: "year", value: Math.round(deltaSeconds / SECONDS_PER_YEAR) };
 }
 
 export function requireAddress(value: string, label: string): Address {
@@ -201,13 +210,13 @@ export function requireDeploymentAddress(value: Address | undefined, label: stri
 
 export function requireBytes32(value: string, label: string): Hex {
   const trimmed = value.trim();
-  if (!/^0x[0-9a-fA-F]{64}$/.test(trimmed)) throw new Error(`${label} must be bytes32.`);
+  if (!BYTES32_PATTERN.test(trimmed)) throw new Error(`${label} must be bytes32.`);
   return trimmed as Hex;
 }
 
 export function uintInput(value: string, label: string): bigint {
   const trimmed = value.trim();
-  if (!/^\d+$/.test(trimmed)) throw new Error(`${label} must be an unsigned integer.`);
+  if (!UINT_PATTERN.test(trimmed)) throw new Error(`${label} must be an unsigned integer.`);
   return BigInt(trimmed);
 }
 
@@ -222,4 +231,12 @@ export function walletState(account: Address | undefined, chainId: number | unde
   if (account) next.account = account;
   if (chainId !== undefined) next.chainId = chainId;
   return next;
+}
+
+function currentUnixSeconds(): number {
+  return Math.floor(Date.now() / 1000);
+}
+
+function secondsAfter(startSeconds: number, offsetSeconds: number): string {
+  return String(startSeconds + offsetSeconds);
 }

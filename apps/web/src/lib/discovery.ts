@@ -51,28 +51,18 @@ export async function walletAccessDiscoveryRange(
 ): Promise<DiscoveryScanRange> {
   const latest = await client.getBlock();
   const latestNumber = latest.number ?? 0n;
-  const deploymentTimestamp = deployment?.deploymentTimestamp;
+  const targetTimestamp = deploymentScanTargetTimestamp(deployment?.deploymentTimestamp);
 
-  if (deploymentTimestamp !== undefined) {
-    const targetTimestamp =
-      deploymentTimestamp > WALLET_ACCESS_DEPLOYMENT_TIMESTAMP_MARGIN_SECONDS
-        ? deploymentTimestamp - WALLET_ACCESS_DEPLOYMENT_TIMESTAMP_MARGIN_SECONDS
-        : 0n;
-
-    if (targetTimestamp <= latest.timestamp) {
-      return {
-        fromBlock: await firstBlockAtOrAfterTimestamp(client, latestNumber, targetTimestamp),
-        chunkSize: WALLET_ACCESS_DISCOVERY_CHUNK_SIZE,
-        rangeMode: "deployment",
-      };
-    }
+  if (targetTimestamp !== undefined && targetTimestamp <= latest.timestamp) {
+    return {
+      fromBlock: await firstBlockAtOrAfterTimestamp(client, latestNumber, targetTimestamp),
+      chunkSize: WALLET_ACCESS_DISCOVERY_CHUNK_SIZE,
+      rangeMode: "deployment",
+    };
   }
 
   return {
-    fromBlock:
-      latestNumber > WALLET_ACCESS_FALLBACK_SCAN_BLOCKS
-        ? latestNumber - WALLET_ACCESS_FALLBACK_SCAN_BLOCKS
-        : 0n,
+    fromBlock: recentDiscoveryStartBlock(latestNumber),
     chunkSize: WALLET_ACCESS_DISCOVERY_CHUNK_SIZE,
     rangeMode: "recent",
   };
@@ -82,8 +72,7 @@ export function resumeWalletAccessRange(
   range: DiscoveryScanRange,
   discovery: DiscoverySnapshot,
 ): DiscoveryScanRange {
-  const resumableRange = discovery.rangeMode === "deployment" || discovery.rangeMode === "recent";
-  if (!resumableRange || !discovery.complete || discovery.lastScannedBlock === undefined) {
+  if (!canResumeDiscovery(discovery)) {
     return range;
   }
 
@@ -203,14 +192,37 @@ function replaceBigints(_key: string, value: unknown): unknown {
 }
 
 function reviveBigints(_key: string, value: unknown): unknown {
-  if (
-    value
-    && typeof value === "object"
-    && BIGINT_MARKER in value
-    && typeof (value as Record<string, unknown>)[BIGINT_MARKER] === "string"
-  ) {
-    const raw = (value as Record<string, string>)[BIGINT_MARKER];
-    if (raw !== undefined) return BigInt(raw);
+  if (hasSerializedBigint(value)) {
+    return BigInt(value[BIGINT_MARKER]);
   }
   return value;
+}
+
+function deploymentScanTargetTimestamp(deploymentTimestamp: bigint | undefined): bigint | undefined {
+  if (deploymentTimestamp === undefined) return undefined;
+  if (deploymentTimestamp > WALLET_ACCESS_DEPLOYMENT_TIMESTAMP_MARGIN_SECONDS) {
+    return deploymentTimestamp - WALLET_ACCESS_DEPLOYMENT_TIMESTAMP_MARGIN_SECONDS;
+  }
+  return 0n;
+}
+
+function recentDiscoveryStartBlock(latestNumber: bigint): bigint {
+  return latestNumber > WALLET_ACCESS_FALLBACK_SCAN_BLOCKS
+    ? latestNumber - WALLET_ACCESS_FALLBACK_SCAN_BLOCKS
+    : 0n;
+}
+
+function canResumeDiscovery(discovery: DiscoverySnapshot): discovery is DiscoverySnapshot & { lastScannedBlock: bigint } {
+  if (discovery.rangeMode !== "deployment" && discovery.rangeMode !== "recent") return false;
+  if (!discovery.complete) return false;
+  return discovery.lastScannedBlock !== undefined;
+}
+
+function hasSerializedBigint(value: unknown): value is Record<typeof BIGINT_MARKER, string> {
+  return Boolean(
+    value
+      && typeof value === "object"
+      && BIGINT_MARKER in value
+      && typeof (value as Record<string, unknown>)[BIGINT_MARKER] === "string",
+  );
 }

@@ -18,6 +18,8 @@ type TokenAmountFormatOptions = {
 
 const DECIMAL_INPUT_PATTERN = /^\d+(?:\.\d+)?$/;
 const COMPACT_SUFFIXES = ["", "k", "m", "b", "t", "q"] as const;
+const DEFAULT_COMPACT_FRACTION_DIGITS = 4;
+const DEFAULT_FULL_FRACTION_DIGITS = 6;
 
 export async function readTokenMetadata(
   client: PledgeCashReadClient,
@@ -53,7 +55,7 @@ export function tokenMetadataFor(
   metadataByAddress: Record<string, TokenMetadata> | undefined,
   address: Address | undefined,
 ): TokenMetadata | undefined {
-  if (!address || isZeroAddress(address)) return undefined;
+  if (!isUsableTokenAddress(address)) return undefined;
   return metadataByAddress?.[address.toLowerCase()];
 }
 
@@ -74,21 +76,22 @@ export function formatTokenAmount(
   if (amount === undefined) return "Unknown";
   const symbol = options.symbol ?? metadata?.symbol;
 
-  if (metadata?.decimals === undefined) {
-    const fallback = options.rawFallback === false ? amount.toString() : `${formatCompactInteger(amount.toString())} raw`;
-    return symbol ? `${fallback} ${symbol}` : fallback;
+  if (!hasTokenDecimals(metadata)) {
+    return appendTokenSymbol(formatRawTokenAmount(amount, options.rawFallback), symbol);
   }
 
-  const value = formatDecimalString(formatUnits(amount, metadata.decimals), {
+  return appendTokenSymbol(formatDecimalString(formatUnits(amount, metadata.decimals), {
     compact: options.compact ?? true,
-    maximumFractionDigits: options.maximumFractionDigits ?? 4,
-  });
-  return symbol ? `${value} ${symbol}` : value;
+    maximumFractionDigits: options.maximumFractionDigits ?? DEFAULT_COMPACT_FRACTION_DIGITS,
+  }), symbol);
 }
 
 export function formatNativeTokenAmount(amount: bigint | undefined, symbol = "native"): string {
   if (amount === undefined) return "Unknown";
-  const value = formatDecimalString(formatUnits(amount, 18), { compact: true, maximumFractionDigits: 4 });
+  const value = formatDecimalString(formatUnits(amount, 18), {
+    compact: true,
+    maximumFractionDigits: DEFAULT_COMPACT_FRACTION_DIGITS,
+  });
   return `${value} ${symbol}`;
 }
 
@@ -106,8 +109,8 @@ export function formatDecimalString(
   options: { compact?: boolean; maximumFractionDigits?: number } = {},
 ): string {
   const trimmed = trimDecimal(value);
-  if (!options.compact) return trimFraction(trimmed, options.maximumFractionDigits ?? 6);
-  return compactDecimalString(trimmed, options.maximumFractionDigits ?? 4);
+  if (!options.compact) return trimFraction(trimmed, options.maximumFractionDigits ?? DEFAULT_FULL_FRACTION_DIGITS);
+  return compactDecimalString(trimmed, options.maximumFractionDigits ?? DEFAULT_COMPACT_FRACTION_DIGITS);
 }
 
 export function trimDecimal(value: string): string {
@@ -120,7 +123,7 @@ function uniqueTokenAddresses(addresses: readonly (Address | undefined)[]): Addr
   const unique: Address[] = [];
 
   for (const address of addresses) {
-    if (!address || isZeroAddress(address)) continue;
+    if (!isUsableTokenAddress(address)) continue;
     const key = address.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -136,6 +139,10 @@ function compactDecimalString(value: string, maximumFractionDigits: number): str
   if (whole !== "0" && whole.length >= 4) return formatCompactInteger(whole);
   if (whole !== "0") return trimFraction(`${whole}.${fractionPart}`, maximumFractionDigits);
 
+  return compactFractionOnlyDecimal(fractionPart, maximumFractionDigits);
+}
+
+function compactFractionOnlyDecimal(fractionPart: string, maximumFractionDigits: number): string {
   const trimmedFraction = fractionPart.replace(/0+$/, "");
   if (!trimmedFraction) return "0";
   const firstNonZero = trimmedFraction.search(/[1-9]/);
@@ -165,4 +172,21 @@ function trimFraction(value: string, maximumFractionDigits: number): string {
 
 function stripLeadingZeroes(value: string): string {
   return value.replace(/^0+/, "") || "0";
+}
+
+function isUsableTokenAddress(address: Address | undefined): address is Address {
+  return Boolean(address && !isZeroAddress(address));
+}
+
+function hasTokenDecimals(metadata: TokenMetadata | undefined): metadata is TokenMetadata & { decimals: number } {
+  return metadata?.decimals !== undefined;
+}
+
+function formatRawTokenAmount(amount: bigint, rawFallback: boolean | undefined): string {
+  if (rawFallback === false) return amount.toString();
+  return `${formatCompactInteger(amount.toString())} raw`;
+}
+
+function appendTokenSymbol(value: string, symbol: string | undefined): string {
+  return symbol ? `${value} ${symbol}` : value;
 }

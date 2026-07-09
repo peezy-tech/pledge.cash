@@ -26,9 +26,9 @@ export async function readBoardroomSnapshot(client: PledgeCashReadClient, addres
   ]);
   const metadataByAddress = await readTokenMetadataMap(client, [
     state.shareToken,
-    ...grantSummaries.flatMap((grant) => [grant.state?.token, grant.state?.paymentToken]),
+    ...grantSummaries.flatMap(grantTokenAddresses),
     ...distributionSummaries.flatMap((distribution) => distributionTokenAddresses(distribution)),
-    ...lockedLiquiditySummaries.flatMap((locker) => [locker.state?.tokenA, locker.state?.tokenB, locker.state?.pool]),
+    ...lockedLiquiditySummaries.flatMap(lockedLiquidityTokenAddresses),
   ]);
 
   return {
@@ -151,7 +151,7 @@ async function readLockedLiquidityClaimable(
   ]);
   const claimable0 = stored0 + pendingFee(balance, index0, supplyIndex0);
   const claimable1 = stored1 + pendingFee(balance, index1, supplyIndex1);
-  return token0.toLowerCase() === state.tokenA.toLowerCase()
+  return sameAddress(token0, state.tokenA)
     ? { claimableA: claimable0, claimableB: claimable1 }
     : { claimableA: claimable1, claimableB: claimable0 };
 }
@@ -160,10 +160,22 @@ function pendingFee(balance: bigint, index: bigint, supplyIndex: bigint): bigint
   return index > supplyIndex ? (balance * (index - supplyIndex)) / FEE_INDEX_SCALE : 0n;
 }
 
+function grantTokenAddresses(grant: BoardroomGrantSnapshot): (Address | undefined)[] {
+  return [grant.state?.token, grant.state?.paymentToken];
+}
+
 function distributionTokenAddresses(distribution: BoardroomDistributionSnapshot): (Address | undefined)[] {
   if (!distribution.state) return [];
   if ("paymentToken" in distribution.state) return [distribution.state.shareToken, distribution.state.paymentToken];
   if ("quoteToken" in distribution.state) return [distribution.state.shareToken, distribution.state.quoteToken];
   if ("tokenGrantFactory" in distribution.state) return [distribution.state.shareToken];
   return [];
+}
+
+function lockedLiquidityTokenAddresses(locker: BoardroomLockedLiquiditySnapshot): (Address | undefined)[] {
+  return [locker.state?.tokenA, locker.state?.tokenB, locker.state?.pool];
+}
+
+function sameAddress(first: Address, second: Address): boolean {
+  return first.toLowerCase() === second.toLowerCase();
 }
