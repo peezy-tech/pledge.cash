@@ -19,6 +19,10 @@ interface ILockedLiquidityFactoryPolicyRegistry {
     function isModulePolicy(address policy) external view returns (bool);
 }
 
+interface ILockedLiquidityFactoryShareToken {
+    function boardroom() external view returns (address);
+}
+
 interface ILockedLiquidityMigrationDistribution {
     function factory() external view returns (address);
     function boardroom() external view returns (address);
@@ -331,6 +335,12 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
 
         address registry = ILockedLiquidityFactoryBoardroom(boardroom).policyRegistry();
         if (!ILockedLiquidityFactoryPolicyRegistry(registry).isModulePolicy(msg.sender)) {
+            revert UnauthorizedMigrationReservation(boardroom, msg.sender);
+        }
+        if (
+            ILockedLiquidityFactoryBoardroom(boardroom).shareToken() != tokenA
+                || ILockedLiquidityFactoryShareToken(tokenA).boardroom() != boardroom
+        ) {
             revert UnauthorizedMigrationReservation(boardroom, msg.sender);
         }
 
