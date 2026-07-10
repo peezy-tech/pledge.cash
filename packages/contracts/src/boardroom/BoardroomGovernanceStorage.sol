@@ -15,6 +15,7 @@ library BoardroomGovernanceStorage {
         uint64 epoch;
         uint64 windDownStartedAt;
         mapping(bytes32 actionHash => ActionContext context) actions;
+        mapping(address asset => uint256 count) redeemableAssetPins;
     }
 
     function layout() internal pure returns (Layout storage result) {

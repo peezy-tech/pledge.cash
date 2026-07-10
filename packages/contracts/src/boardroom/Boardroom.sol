@@ -66,7 +66,6 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     error InvalidAmount();
     error InvalidStatus(BoardroomStatus expected, BoardroomStatus actual);
     error InvalidRedemptionInput();
-    error ZeroRedemptionAmount(address asset);
     error RedeemableAssetAlreadyRegistered(address asset);
     error TooManyRedeemableAssets();
     error TooManyIssuedGrants();
@@ -109,6 +108,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     error WindDownFinalizationNotReady(uint256 readyAt, uint256 currentTime);
     error RedeemableAssetStillValid(address asset);
     error RedeemableAssetHasBalance(address asset, uint256 balance);
+    error RedeemableAssetReserved(address asset);
     error OwnershipRenunciationDisabled();
     error NoRedemptionExcess(address asset);
 
@@ -134,6 +134,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     event BoardroomLockedLiquidityExited(
         address indexed locker, address indexed pool, uint256 liquidity, uint256 amountA, uint256 amountB
     );
+    event BoardroomLockedLiquidityReturnedAsLp(address indexed locker, address indexed pool, uint256 liquidity);
     event SharesRedeemed(
         address indexed holder, address indexed recipient, uint256 shares, address[] assets, uint256[] amounts
     );
@@ -440,7 +441,8 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
                         locker: locker,
                         amountAMin: amountAMin,
                         amountBMin: amountBMin,
-                        deadline: deadline
+                        deadline: deadline,
+                        governanceDelay: governanceDelay
                     })
                 )
             )

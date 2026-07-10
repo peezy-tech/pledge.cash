@@ -1526,7 +1526,7 @@ contract BoardroomTest is Test {
         assertEq(redeemable.balanceOf(owner), 100 ether);
     }
 
-    function testZeroSnapshotAssetRetainsCreditAndLaterFundingIsExcess() public {
+    function testZeroSnapshotAssetAllocatesCreditAndLaterFundingIsExcess() public {
         (Boardroom boardroom,) = _createBoardroom("redemption-zero-retry");
         BoardroomCurrency redeemable = new BoardroomCurrency("Redeemable", "RDM", 18);
 
@@ -1543,22 +1543,59 @@ contract BoardroomTest is Test {
 
         assertEq(amounts[1], 0);
         assertEq(boardroom.redemptionCredits(holder), 50 ether);
-        assertEq(boardroom.allocatedRedemptionShares(holder, address(redeemable)), 0);
+        assertEq(boardroom.allocatedRedemptionShares(holder, address(redeemable)), 50 ether);
 
         vm.prank(holder);
-        vm.expectRevert(abi.encodeWithSelector(Boardroom.ZeroRedemptionAmount.selector, address(redeemable)));
+        vm.expectRevert(Boardroom.InvalidRedemptionInput.selector);
         boardroom.claimRedemptionAsset(address(redeemable), holder, 0);
 
         redeemable.mint(address(boardroom), 100 ether);
 
         vm.prank(holder);
-        vm.expectRevert(abi.encodeWithSelector(Boardroom.ZeroRedemptionAmount.selector, address(redeemable)));
+        vm.expectRevert(Boardroom.InvalidRedemptionInput.selector);
         boardroom.claimRedemptionAsset(address(redeemable), holder, 0);
 
         vm.prank(stranger);
         assertEq(boardroom.sweepRedemptionExcess(address(redeemable)), 100 ether);
         assertEq(redeemable.balanceOf(owner), 100 ether);
+        assertEq(boardroom.allocatedRedemptionShares(holder, address(redeemable)), 50 ether);
+    }
+
+    function testZeroRoundedClaimAllocatesSharesSoFinalClaimReceivesRemainder() public {
+        (Boardroom boardroom,) = _createBoardroom("redemption-rounding-remainder");
+        BoardroomCurrency redeemable = new BoardroomCurrency("Redeemable", "RDM", 18);
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, 1);
+        boardroom.mint(stranger, 1);
+        boardroom.registerRedeemableAsset(address(redeemable));
+        redeemable.mint(address(boardroom), 1);
+        boardroom.startWindDown();
+        boardroom.openRedemptions();
+        vm.stopPrank();
+
+        uint256[] memory minimums = new uint256[](2);
+        minimums[1] = 1;
+        vm.prank(holder);
+        uint256[] memory firstAmounts = boardroom.redeem(1, holder, minimums);
+        assertEq(firstAmounts[1], 0);
         assertEq(boardroom.allocatedRedemptionShares(holder, address(redeemable)), 0);
+
+        vm.prank(holder);
+        vm.expectRevert(
+            abi.encodeWithSelector(Boardroom.InsufficientRedemptionAmount.selector, address(redeemable), 0, 1)
+        );
+        boardroom.claimRedemptionAsset(address(redeemable), holder, 1);
+
+        vm.prank(holder);
+        assertEq(boardroom.claimRedemptionAsset(address(redeemable), holder, 0), 0);
+        assertEq(boardroom.allocatedRedemptionShares(holder, address(redeemable)), 1);
+
+        minimums[1] = 0;
+        vm.prank(stranger);
+        uint256[] memory finalAmounts = boardroom.redeem(1, stranger, minimums);
+        assertEq(finalAmounts[1], 1);
+        assertEq(redeemable.balanceOf(stranger), 1);
     }
 
     function testRedemptionUsesFullPrecisionMultiplication() public {

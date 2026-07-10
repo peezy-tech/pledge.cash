@@ -33,7 +33,6 @@ contract BoardroomRedemptionPayout {
     uint256 internal constant ASSET_PROBE_GAS = 30_000;
 
     error InvalidRedemptionInput();
-    error ZeroRedemptionAmount(address asset);
     error InsufficientRedemptionAmount(address asset, uint256 amountOut, uint256 minAmountOut);
     error UnexpectedRedeemableAssetBalanceChange(address asset, uint256 expected, uint256 actual);
     error UnexpectedWrappedNativeBalanceChange(uint256 expected, uint256 actual);
@@ -209,7 +208,6 @@ contract BoardroomRedemptionPayout {
 
         uint256 remainingBalance = redemption.snapshotBalance[asset] - redemption.paid[asset];
         amountOut = FixedPointMathLib.fullMulDiv(remainingBalance, shares, remainingShares);
-        if (amountOut == 0) revert ZeroRedemptionAmount(asset);
         if (amountOut < minAmountOut) {
             revert InsufficientRedemptionAmount(asset, amountOut, minAmountOut);
         }
@@ -217,7 +215,7 @@ contract BoardroomRedemptionPayout {
         redemption.holderAllocatedShares[holder][asset] = allocated + shares;
         redemption.allocatedShares[asset] = totalAllocated + shares;
         redemption.paid[asset] += amountOut;
-        _checkedTransfer(asset, recipient, amountOut);
+        if (amountOut != 0) _checkedTransfer(asset, recipient, amountOut);
 
         emit RedemptionAssetClaimed(holder, recipient, asset, shares, amountOut);
     }

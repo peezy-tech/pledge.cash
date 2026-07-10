@@ -56,6 +56,7 @@ contract LockedLiquidity is Initializable {
     event LockedLiquidityInitialized(address indexed boardroom, address indexed router, address tokenA, address tokenB);
     event LiquidityLocked(address indexed pool, uint256 amountA, uint256 amountB, uint256 liquidity);
     event LiquidityExited(address indexed pool, uint256 liquidity, uint256 amountA, uint256 amountB);
+    event LiquidityReturnedAsLp(address indexed pool, address indexed boardroom, uint256 liquidity);
     event FeesForwarded(address indexed boardroom, uint256 amount0, uint256 amount1);
 
     constructor() {
@@ -128,6 +129,20 @@ contract LockedLiquidity is Initializable {
         pool_.safeApprove(router, 0);
 
         emit LiquidityExited(pool_, liquidity, amountA, amountB);
+    }
+
+    /// @notice Terminal fallback that preserves the pool claim when an underlying token blocks a normal exit.
+    function returnLpToBoardroom() external returns (uint256 liquidity) {
+        _requireBoardroomCaller();
+        _requireBoardroomCanExit();
+
+        address pool_ = pool;
+        if (pool_ == address(0)) revert NotSeeded();
+
+        liquidity = ERC20(pool_).balanceOf(address(this));
+        if (liquidity != 0) pool_.safeTransfer(boardroom, liquidity);
+
+        emit LiquidityReturnedAsLp(pool_, boardroom, liquidity);
     }
 
     function lockedLiquidity() external view returns (uint256) {

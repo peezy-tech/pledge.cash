@@ -18,6 +18,8 @@ interface IBoardroomGovernanceDistribution {
 
 contract BoardroomGovernanceLogic {
     uint256 internal constant ASSET_PROBE_GAS = 30_000;
+    uint256 internal constant TERMINAL_LIQUIDITY_EXIT_GAS = 1_500_000;
+    uint256 internal constant MIN_TERMINAL_LIQUIDITY_DELAY = 1 days;
     error ActionAlreadyQueued(bytes32 actionHash);
     error ActionNotQueued(bytes32 actionHash);
     error ActionNotReady(bytes32 actionHash, uint256 eta, uint256 currentTime);
@@ -31,6 +33,7 @@ contract BoardroomGovernanceLogic {
     error RedeemableAssetAlreadyRegistered(address asset);
     error RedeemableAssetStillValid(address asset);
     error RedeemableAssetHasBalance(address asset, uint256 balance);
+    error RedeemableAssetReserved(address asset);
     error TooManyRedeemableAssets();
     error PolicyNotAllowed(address policy);
     error TooManyIssuedGrants();
@@ -58,6 +61,7 @@ contract BoardroomGovernanceLogic {
     event BoardroomLockedLiquidityExited(
         address indexed locker, address indexed pool, uint256 liquidity, uint256 amountA, uint256 amountB
     );
+    event BoardroomLockedLiquidityReturnedAsLp(address indexed locker, address indexed pool, uint256 liquidity);
 
     struct LifecycleSlots {
         uint256 redeemableAssets;
@@ -88,6 +92,17 @@ contract BoardroomGovernanceLogic {
         uint256 amountAMin;
         uint256 amountBMin;
         uint256 deadline;
+        uint256 governanceDelay;
+    }
+
+    struct ExitResult {
+        address pool;
+        address tokenA;
+        address tokenB;
+        uint256 amountA;
+        uint256 amountB;
+        uint256 liquidity;
+        bool returnedAsLp;
     }
 
     function queueAction(bytes32 actionHash, uint8 status, uint256 delay, uint256 gracePeriod)
@@ -228,6 +243,9 @@ contract BoardroomGovernanceLogic {
 
     function _removeRedeemableAsset(LifecycleSlots memory slots, address asset, bool quarantined) private {
         if (!_mappingBool(slots.isRedeemableAsset, asset)) revert InvalidRedeemableAsset(asset);
+        if (BoardroomGovernanceStorage.layout().redeemableAssetPins[asset] != 0) {
+            revert RedeemableAssetReserved(asset);
+        }
         (bool found, uint256 index) = _find(slots.redeemableAssets, asset);
         if (!found) revert InvalidRedeemableAsset(asset);
 
@@ -303,14 +321,24 @@ contract BoardroomGovernanceLogic {
         if (!_mappingBool(lifecycleSlots.isLockedLiquidity, locker)) {
             revert InvalidLockedLiquidity(locker);
         }
-        LockedLiquidity position = LockedLiquidity(locker);
-        address pool = position.pool();
-        address tokenA = position.tokenA();
-        address tokenB = position.tokenB();
-        (amountA, amountB, liquidity) = position.exitToBoardroom(params.amountAMin, params.amountBMin, params.deadline);
+        ExitResult memory exited = _exitPosition(LockedLiquidity(locker), params);
+        amountA = exited.amountA;
+        amountB = exited.amountB;
+        liquidity = exited.liquidity;
 
-        _registerAssetIfNeeded(lifecycleSlots, tokenA, config.shareToken, config.maxAssets);
-        _registerAssetIfNeeded(lifecycleSlots, tokenB, config.shareToken, config.maxAssets);
+        BoardroomGovernanceStorage.Layout storage governance = BoardroomGovernanceStorage.layout();
+        governance.redeemableAssetPins[exited.pool] -= 1;
+        if (exited.returnedAsLp) {
+            _quarantineUnreadableAssetIfNeeded(lifecycleSlots, exited.tokenA, config.shareToken);
+            _quarantineUnreadableAssetIfNeeded(lifecycleSlots, exited.tokenB, config.shareToken);
+        } else {
+            _registerAssetIfNeeded(lifecycleSlots, exited.tokenA, config.shareToken, config.maxAssets);
+            _registerAssetIfNeeded(lifecycleSlots, exited.tokenB, config.shareToken, config.maxAssets);
+            if (governance.redeemableAssetPins[exited.pool] == 0) {
+                (bool readable, uint256 balance) = _tryBalanceOf(exited.pool, address(this));
+                if (readable && balance == 0) _removeRedeemableAsset(lifecycleSlots, exited.pool, false);
+            }
+        }
         _delegate(
             params.redemptionPayout,
             abi.encodeCall(BoardroomRedemptionPayout.burnTreasuryShares, (config.shareToken, false))
@@ -319,7 +347,35 @@ contract BoardroomGovernanceLogic {
             params.redemptionPayout,
             abi.encodeCall(BoardroomRedemptionPayout.pruneClosedObligation, (obligationSlots, locker))
         );
-        emit BoardroomLockedLiquidityExited(locker, pool, liquidity, amountA, amountB);
+        if (exited.returnedAsLp) emit BoardroomLockedLiquidityReturnedAsLp(locker, exited.pool, liquidity);
+        else emit BoardroomLockedLiquidityExited(locker, exited.pool, liquidity, amountA, amountB);
+    }
+
+    function _exitPosition(LockedLiquidity position, ExitParams calldata params)
+        private
+        returns (ExitResult memory exited)
+    {
+        exited.pool = position.pool();
+        exited.tokenA = position.tokenA();
+        exited.tokenB = position.tokenB();
+        uint256 fallbackDelay = params.governanceDelay == 0 ? MIN_TERMINAL_LIQUIDITY_DELAY : params.governanceDelay;
+        uint256 terminalAt = uint256(BoardroomGovernanceStorage.layout().windDownStartedAt) + fallbackDelay;
+        if (block.timestamp < terminalAt) {
+            (exited.amountA, exited.amountB, exited.liquidity) =
+                position.exitToBoardroom(params.amountAMin, params.amountBMin, params.deadline);
+            return exited;
+        }
+
+        try position.exitToBoardroom{gas: TERMINAL_LIQUIDITY_EXIT_GAS}(0, 0, block.timestamp) returns (
+            uint256 amountA, uint256 amountB, uint256 liquidity
+        ) {
+            exited.amountA = amountA;
+            exited.amountB = amountB;
+            exited.liquidity = liquidity;
+        } catch {
+            exited.liquidity = position.returnLpToBoardroom();
+            exited.returnedAsLp = true;
+        }
     }
 
     function finalizeWindDown(
@@ -425,6 +481,8 @@ contract BoardroomGovernanceLogic {
 
         _registerAssetIfNeeded(slots, position.tokenA(), config.shareToken, config.maxAssets);
         _registerAssetIfNeeded(slots, position.tokenB(), config.shareToken, config.maxAssets);
+        _registerAssetIfNeeded(slots, pool, config.shareToken, config.maxAssets);
+        BoardroomGovernanceStorage.layout().redeemableAssetPins[pool] += 1;
         _setMappingBool(slots.isLockedLiquidity, locker, true);
         _setMappingAddress(slots.obligationPolicyOf, locker, factory);
         _push(slots.lockedLiquidityPositions, locker);
@@ -441,6 +499,14 @@ contract BoardroomGovernanceLogic {
         _setMappingBool(slots.isRedeemableAsset, asset, true);
         _push(slots.redeemableAssets, asset);
         emit RedeemableAssetRegistered(asset);
+    }
+
+    function _quarantineUnreadableAssetIfNeeded(LifecycleSlots memory slots, address asset, address shareToken)
+        private
+    {
+        if (asset == shareToken || !_mappingBool(slots.isRedeemableAsset, asset)) return;
+        (bool readable,) = _tryBalanceOf(asset, address(this));
+        if (asset.code.length == 0 || !readable) _removeRedeemableAsset(slots, asset, true);
     }
 
     function _reserveIssuedGrantSlots(address distribution, uint256 count, uint256 maximum) private {
