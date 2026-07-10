@@ -2095,7 +2095,7 @@ export function App(): React.JSX.Element {
       case "activity":
         return <ActivityWorkspace clearLogs={clearLogs} dashboard={productBoardroom} logs={logs} />;
       case "notifications":
-        return <SentinelSettingsView account={wallet.account} chainId={activeNetwork.chainId} />;
+        return <SentinelSettingsView governanceChainId={activeNetwork.chainId} wallet={wallet} />;
       case "advanced":
         return (
           <AdvancedWorkspace>
@@ -2122,19 +2122,21 @@ export function App(): React.JSX.Element {
 
       <main className="min-h-[calc(100svh-64px)]">
         <section className="mx-auto w-full max-w-[1480px] min-w-0 px-4 py-4 sm:px-6 sm:py-5">
-          <ProjectContextBar
-            activeView={activeView}
-            chainName={activeNetwork.name}
-            dashboard={productBoardroom}
-            deployment={deployment}
-            error={productBoardroomError}
-            loading={productBoardroomLoading}
-            pendingAction={pendingAction}
-            wallet={wallet}
-            navigateView={navigateView}
-            refresh={loadProductBoardroom}
-            runAction={runAction}
-          />
+          {activeView === "notifications" ? null : (
+            <ProjectContextBar
+              activeView={activeView}
+              chainName={activeNetwork.name}
+              dashboard={productBoardroom}
+              deployment={deployment}
+              error={productBoardroomError}
+              loading={productBoardroomLoading}
+              pendingAction={pendingAction}
+              wallet={wallet}
+              navigateView={navigateView}
+              refresh={loadProductBoardroom}
+              runAction={runAction}
+            />
+          )}
           <WorkspaceNav activeView={activeView} navigateView={navigateView} />
 
           {renderActiveWorkspace()}

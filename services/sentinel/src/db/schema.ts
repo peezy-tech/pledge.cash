@@ -11,8 +11,10 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | { [key: string]: JsonValue } | JsonValue[];
@@ -248,25 +250,191 @@ export const policyAdminEvents = pgTable(
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
-  workosUserId: text("workos_user_id").notNull().unique(),
-  email: text("email").notNull(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  emailVerified: boolean("email_verified").notNull().default(false),
+  image: text("image"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
 
-export const wallets = pgTable(
-  "wallets",
+export const organizations = pgTable("organizations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  logo: text("logo"),
+  metadata: text("metadata"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const authSessions = pgTable(
+  "auth_sessions",
   {
+    id: uuid("id").primaryKey().defaultRandom(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    token: text("token").notNull().unique(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    activeOrganizationId: uuid("active_organization_id").references(() => organizations.id, {
+      onDelete: "set null"
+    })
+  },
+  (table) => ({
+    userIdx: index("auth_sessions_user_idx").on(table.userId)
+  })
+);
+
+export const authAccounts = pgTable(
+  "auth_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    accountId: text("account_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }),
+    scope: text("scope"),
+    password: text("password"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    providerAccountUnique: unique("auth_accounts_provider_account_unique").on(
+      table.providerId,
+      table.accountId
+    ),
+    userIdx: index("auth_accounts_user_idx").on(table.userId)
+  })
+);
+
+export const authVerifications = pgTable(
+  "auth_verifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    identifierIdx: index("auth_verifications_identifier_idx").on(table.identifier)
+  })
+);
+
+export const organizationMembers = pgTable(
+  "organization_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("member"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    organizationIdx: index("organization_members_organization_idx").on(table.organizationId),
+    organizationUserUnique: unique("organization_members_organization_user_unique").on(
+      table.organizationId,
+      table.userId
+    ),
+    userIdx: index("organization_members_user_idx").on(table.userId)
+  })
+);
+
+export const organizationInvitations = pgTable(
+  "organization_invitations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    role: text("role"),
+    status: text("status").notNull().default("pending"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    inviterId: uuid("inviter_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" })
+  },
+  (table) => ({
+    emailIdx: index("organization_invitations_email_idx").on(table.email),
+    organizationIdx: index("organization_invitations_organization_idx").on(table.organizationId)
+  })
+);
+
+export const authWallets = pgTable(
+  "auth_wallets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     address: text("address").notNull(),
-    verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull().defaultNow(),
-    siweMessage: text("siwe_message").notNull()
+    chainId: integer("chain_id").notNull(),
+    isPrimary: boolean("is_primary").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => ({
-    pk: primaryKey({ columns: [table.userId, table.address] }),
-    addressIdx: index("wallets_address_idx").on(table.address)
+    addressChainUnique: uniqueIndex("auth_wallets_address_chain_unique").on(
+      sql`lower(${table.address})`,
+      table.chainId
+    ),
+    addressIdx: index("auth_wallets_address_idx").on(sql`lower(${table.address})`),
+    userIdx: index("auth_wallets_user_idx").on(table.userId)
+  })
+);
+
+export const walletOwners = pgTable(
+  "wallet_owners",
+  {
+    address: text("address").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    userIdx: index("wallet_owners_user_idx").on(table.userId)
+  })
+);
+
+export const wallets = pgTable(
+  "wallets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    address: text("address").notNull(),
+    chainId: integer("chain_id").notNull(),
+    isPrimary: boolean("is_primary").notNull().default(false),
+    alertsEnabled: boolean("alerts_enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull().defaultNow(),
+    siweMessage: text("siwe_message")
+  },
+  (table) => ({
+    addressChainUnique: uniqueIndex("wallets_address_chain_unique").on(
+      sql`lower(${table.address})`,
+      table.chainId
+    ),
+    addressIdx: index("wallets_address_idx").on(sql`lower(${table.address})`),
+    userIdx: index("wallets_user_idx").on(table.userId)
   })
 );
 

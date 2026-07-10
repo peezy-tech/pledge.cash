@@ -31,8 +31,8 @@ export function useSentinelSession(): SentinelSession {
     setLoading(true);
     try {
       const next = await client.authMe();
-      setMe(next);
-      setAuthenticated(true);
+      setMe(next ?? undefined);
+      setAuthenticated(next !== null);
       setError(undefined);
     } catch (error) {
       if (error instanceof SentinelApiError && error.status === 401) {

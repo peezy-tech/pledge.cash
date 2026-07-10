@@ -93,7 +93,7 @@ export function SubscriptionSettings({
 
   return (
     <Panel
-      title="Alert Subscription"
+      title="Alert rules"
       description="Choose which governance actions should fan out to enabled delivery channels."
       action={
         <Button disabled={!dirty || pending} onClick={() => void save()}>
@@ -105,9 +105,9 @@ export function SubscriptionSettings({
       <Facts
         columns="three"
         items={[
-          { label: "Mode", value: subscription.mode === "holdings" ? "Shareholder holdings" : "Explicit Boardrooms" },
+          { label: "Mode", value: subscription.mode === "holdings" ? "Wallet holdings" : "Specific Boardrooms" },
           { label: "Minimum severity", value: subscription.minSeverity },
-          { label: "Explicit Boardrooms", value: subscription.boardrooms.length.toString() },
+          { label: "Specific Boardrooms", value: subscription.boardrooms.length.toString() },
         ]}
       />
       <div className="grid gap-px border-t border-zinc-800 bg-zinc-800 md:grid-cols-2">
@@ -115,10 +115,10 @@ export function SubscriptionSettings({
           <div className="mb-2 text-xs font-semibold text-zinc-400">Mode</div>
           <div className="inline-flex max-w-full rounded-md border border-zinc-800 bg-zinc-950 p-1">
             <ModeButton active={mode === "holdings"} onClick={() => setMode("holdings")}>
-              Holdings
+              Wallet holdings
             </ModeButton>
             <ModeButton active={mode === "explicit"} onClick={() => setMode("explicit")}>
-              Explicit
+              Specific Boardrooms
             </ModeButton>
           </div>
         </div>
@@ -158,7 +158,7 @@ export function SubscriptionSettings({
       {error ? <p className="m-0 border-t border-red-950 bg-red-950/35 p-4 text-sm text-red-200">{error}</p> : null}
       <ol className="m-0 grid list-none gap-px border-t border-zinc-800 bg-zinc-800 p-0">
         {boardrooms.length === 0 ? (
-          <li className="bg-zinc-950 p-4 text-sm text-zinc-500">No explicit Boardrooms</li>
+          <li className="bg-zinc-950 p-4 text-sm text-zinc-500">No specific Boardrooms</li>
         ) : (
           boardrooms.map((boardroom) => (
             <li

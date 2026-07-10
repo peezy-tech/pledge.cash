@@ -32,23 +32,17 @@ export const HealthResponseSchema = z.object({
   ok: z.literal(true)
 });
 
-export const AuthLoginQuerySchema = z.object({
-  return_to: z.string().url().optional()
-});
-
-export const AuthCallbackQuerySchema = z.object({
-  code: z.string().min(1),
-  state: z.string().min(1).optional()
-});
+export const SocialProviderSchema = z.enum(["apple", "github", "google"]);
+export const AuthProviderSchema = z.enum(["siwe", ...SocialProviderSchema.options]);
 
 export const UserDtoSchema = z.object({
-  email: z.string().email(),
-  id: UuidSchema,
-  workosUserId: z.string().min(1)
+  id: UuidSchema
 });
 
 export const WalletDtoSchema = z.object({
+  alertsEnabled: z.boolean(),
   address: AddressSchema,
+  isPrimary: z.boolean(),
   verifiedAt: IsoDateSchema
 });
 
@@ -72,9 +66,41 @@ export const SubscriptionDtoSchema = z.object({
 
 export const AuthMeResponseSchema = z.object({
   channels: z.array(ChannelDtoSchema),
+  providers: z.array(AuthProviderSchema),
   subscription: SubscriptionDtoSchema,
   user: UserDtoSchema,
   wallets: z.array(WalletDtoSchema)
+});
+
+export const AuthCapabilitiesResponseSchema = z.object({
+  socialProviders: z.array(SocialProviderSchema)
+});
+
+export const AuthSiweNonceRequestSchema = z.object({
+  chainId: z.number().int().positive(),
+  walletAddress: AddressSchema
+});
+
+export const AuthSiweNonceResponseSchema = z.object({
+  nonce: z.string().min(8)
+});
+
+export const AuthSiweVerifyRequestSchema = z.object({
+  chainId: z.number().int().positive(),
+  message: z.string().min(1),
+  signature: HexSchema,
+  walletAddress: AddressSchema
+});
+
+export const AuthRedirectRequestSchema = z.object({
+  callbackURL: z.string().url(),
+  errorCallbackURL: z.string().url().optional(),
+  provider: SocialProviderSchema
+});
+
+export const AuthRedirectResponseSchema = z.object({
+  redirect: z.boolean(),
+  url: z.string().optional()
 });
 
 export const LogoutResponseSchema = OkResponseSchema;
@@ -105,7 +131,10 @@ export const LinkWalletResponseSchema = z.object({
   wallet: WalletDtoSchema
 });
 
-export const DeleteWalletResponseSchema = OkResponseSchema;
+export const DeleteWalletResponseSchema = z.object({
+  alertsEnabled: z.literal(false),
+  ok: z.literal(true)
+});
 
 export const WalletAddressParamsSchema = z.object({
   address: AddressSchema
@@ -231,15 +260,21 @@ export type ActionStatusDto = z.infer<typeof ActionStatusSchema>;
 export type DecodeStatusDto = z.infer<typeof DecodeStatusSchema>;
 export type ChannelTypeDto = z.infer<typeof ChannelTypeSchema>;
 export type SubscriptionModeDto = z.infer<typeof SubscriptionModeSchema>;
+export type SocialProviderDto = z.infer<typeof SocialProviderSchema>;
+export type AuthProviderDto = z.infer<typeof AuthProviderSchema>;
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
-export type AuthLoginQuery = z.infer<typeof AuthLoginQuerySchema>;
-export type AuthCallbackQuery = z.infer<typeof AuthCallbackQuerySchema>;
 export type UserDto = z.infer<typeof UserDtoSchema>;
 export type WalletDto = z.infer<typeof WalletDtoSchema>;
 export type ChannelDto = z.infer<typeof ChannelDtoSchema>;
 export type BoardroomRef = z.infer<typeof BoardroomRefSchema>;
 export type SubscriptionDto = z.infer<typeof SubscriptionDtoSchema>;
 export type AuthMeResponse = z.infer<typeof AuthMeResponseSchema>;
+export type AuthCapabilitiesResponse = z.infer<typeof AuthCapabilitiesResponseSchema>;
+export type AuthSiweNonceRequest = z.infer<typeof AuthSiweNonceRequestSchema>;
+export type AuthSiweNonceResponse = z.infer<typeof AuthSiweNonceResponseSchema>;
+export type AuthSiweVerifyRequest = z.infer<typeof AuthSiweVerifyRequestSchema>;
+export type AuthRedirectRequest = z.infer<typeof AuthRedirectRequestSchema>;
+export type AuthRedirectResponse = z.infer<typeof AuthRedirectResponseSchema>;
 export type LogoutResponse = z.infer<typeof LogoutResponseSchema>;
 export type WalletNonceRequest = z.infer<typeof WalletNonceRequestSchema>;
 export type WalletNonceResponse = z.infer<typeof WalletNonceResponseSchema>;

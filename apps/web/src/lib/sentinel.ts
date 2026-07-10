@@ -1,15 +1,21 @@
 import type {
+  AuthCapabilitiesResponse,
   AuthMeResponse,
+  AuthRedirectRequest,
+  AuthRedirectResponse,
+  AuthSiweNonceRequest,
+  AuthSiweNonceResponse,
+  AuthSiweVerifyRequest,
   BoardroomActionsQuery,
   ChannelsResponse,
   DeleteChannelResponse,
   DeleteWalletResponse,
   LinkWalletRequest,
   LinkWalletResponse,
-  LogoutResponse,
   PublicActionsQuery,
   PublicActionsResponse,
   PutSubscriptionRequest,
+  SocialProviderDto,
   SubscriptionResponse,
   TelegramLinkCodeResponse,
   WalletNonceRequest,
@@ -21,6 +27,20 @@ export type SentinelEnv = {
 };
 
 export type SentinelFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+export type SentinelSocialProvider = SocialProviderDto;
+
+export type AuthSiweVerifyResponse = {
+  success: boolean;
+};
+
+export type AuthSignOutResponse = {
+  success: boolean;
+};
+
+export type SocialAuthRequest = AuthRedirectRequest & {
+  errorCallbackURL?: string | undefined;
+};
 
 export type SentinelPublicActionsQuery = Partial<PublicActionsQuery>;
 export type SentinelBoardroomActionsQuery = Partial<BoardroomActionsQuery>;
@@ -63,25 +83,16 @@ export function hasSentinelApi(env: SentinelEnv = import.meta.env): boolean {
   return getSentinelBaseUrl(env) !== undefined;
 }
 
-export function sentinelLoginUrl(returnTo: string, baseUrl = getRequiredSentinelBaseUrl()): string {
-  const url = sentinelUrl(baseUrl, "/auth/login");
-  url.searchParams.set("return_to", returnTo);
-  return url.toString();
-}
-
-export function redirectToSentinelLogin(returnTo = browserReturnUrl(), baseUrl = getRequiredSentinelBaseUrl()): void {
-  if (typeof window === "undefined") {
-    throw new Error("Sentinel login requires a browser window.");
-  }
-  window.location.assign(sentinelLoginUrl(returnTo, baseUrl));
-}
-
 export function createSentinelClient(options: SentinelClientOptions = {}) {
   const baseUrl = normalizeBaseUrl(options.baseUrl ?? getRequiredSentinelBaseUrl());
   const fetcher = options.fetcher ?? fetch;
 
   return {
-    authMe: (signal?: AbortSignal) => sentinelJson<AuthMeResponse>(baseUrl, fetcher, "/auth/me", { signal }),
+    authCapabilities: (signal?: AbortSignal) =>
+      sentinelJson<AuthCapabilitiesResponse>(baseUrl, fetcher, "/auth/capabilities", { signal }),
+    authMe: (signal?: AbortSignal) => sentinelJson<AuthMeResponse | null>(baseUrl, fetcher, "/auth/me", { signal }),
+    createAuthSiweNonce: (body: AuthSiweNonceRequest) =>
+      sentinelJson<AuthSiweNonceResponse>(baseUrl, fetcher, "/auth/siwe/nonce", { method: "POST", body }),
     createTelegramLinkCode: () =>
       sentinelJson<TelegramLinkCodeResponse>(baseUrl, fetcher, "/channels/telegram/link-code", { method: "POST" }),
     createWalletNonce: (body: WalletNonceRequest) =>
@@ -112,9 +123,15 @@ export function createSentinelClient(options: SentinelClientOptions = {}) {
     listChannels: () => sentinelJson<ChannelsResponse>(baseUrl, fetcher, "/channels"),
     listPublicActions: (query?: SentinelPublicActionsQuery | undefined, signal?: AbortSignal | undefined) =>
       sentinelJson<PublicActionsResponse>(baseUrl, fetcher, "/public/actions", { query: queryParams(query), signal }),
-    logout: () => sentinelJson<LogoutResponse>(baseUrl, fetcher, "/auth/logout", { method: "POST" }),
+    linkSocial: (body: SocialAuthRequest) =>
+      sentinelJson<AuthRedirectResponse>(baseUrl, fetcher, "/auth/link-social", { method: "POST", body }),
+    logout: () => sentinelJson<AuthSignOutResponse>(baseUrl, fetcher, "/auth/sign-out", { method: "POST" }),
     putSubscription: (body: PutSubscriptionRequest) =>
       sentinelJson<SubscriptionResponse>(baseUrl, fetcher, "/subscriptions", { method: "PUT", body }),
+    signInSocial: (body: SocialAuthRequest) =>
+      sentinelJson<AuthRedirectResponse>(baseUrl, fetcher, "/auth/sign-in/social", { method: "POST", body }),
+    verifyAuthSiwe: (body: AuthSiweVerifyRequest) =>
+      sentinelJson<AuthSiweVerifyResponse>(baseUrl, fetcher, "/auth/siwe/verify", { method: "POST", body }),
   };
 }
 
@@ -184,13 +201,8 @@ function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, "");
 }
 
-function browserReturnUrl(): string {
-  if (typeof window === "undefined") return "/";
-  return window.location.href;
-}
-
 function sentinelErrorMessage(status: number, body: string): string {
-  if (status === 401) return "Sign in to manage Sentinel settings.";
+  if (status === 401) return "Sign with your wallet to manage alerts.";
   if (!body) return `Sentinel request failed with status ${status.toString()}.`;
 
   try {

@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { Address } from "@pledge.cash/sdk";
+import { buildAlertsSiweMessage } from "../src/features/notifications/alerts-identity";
+import { alertsViewState } from "../src/features/notifications/alerts-view-state";
 import { buildSentinelSiweMessage } from "../src/features/notifications/wallet-link";
 import {
   createSentinelClient,
   getSentinelBaseUrl,
-  sentinelLoginUrl,
   SentinelApiError,
   type SentinelFetch,
 } from "../src/lib/sentinel";
@@ -16,14 +17,6 @@ describe("sentinel web client", () => {
     expect(getSentinelBaseUrl({ VITE_SENTINEL_API_URL: " https://api.example.test/sentinel/ " })).toBe(
       "https://api.example.test/sentinel",
     );
-  });
-
-  test("builds AuthKit redirect URLs with the SPA return URL", () => {
-    const returnTo = "https://pledge.cash/project?chain=31337";
-    const url = new URL(sentinelLoginUrl(returnTo, "https://api.example.test/sentinel"));
-
-    expect(`${url.origin}${url.pathname}`).toBe("https://api.example.test/sentinel/auth/login");
-    expect(url.searchParams.get("return_to")).toBe(returnTo);
   });
 
   test("sends JSON requests with session credentials", async () => {
@@ -42,6 +35,60 @@ describe("sentinel web client", () => {
     expect(calls[0]?.init?.method).toBe("POST");
     expect((calls[0]?.init?.headers as Record<string, string> | undefined)?.["Content-Type"]).toBe("application/json");
     expect(calls[0]?.init?.body).toBe(JSON.stringify({ message: "hello", signature: "0x1234" }));
+  });
+
+  test("uses the connected wallet chain for the SIWE nonce request", async () => {
+    const calls: { input: string; init: RequestInit | undefined }[] = [];
+    const fetcher: SentinelFetch = async (input, init) => {
+      calls.push({ input: input.toString(), init });
+      return jsonResponse({ nonce: "abcdefghi" });
+    };
+    const client = createSentinelClient({ baseUrl: "https://api.example.test", fetcher });
+
+    await client.createAuthSiweNonce({
+      chainId: 8453,
+      walletAddress: "0x1000000000000000000000000000000000000000",
+    });
+
+    expect(calls[0]?.input).toBe("https://api.example.test/auth/siwe/nonce");
+    expect(calls[0]?.init?.body).toBe(
+      JSON.stringify({ chainId: 8453, walletAddress: "0x1000000000000000000000000000000000000000" }),
+    );
+  });
+
+  test("removes a secondary wallet from alert coverage", async () => {
+    const calls: { input: string; init: RequestInit | undefined }[] = [];
+    const fetcher: SentinelFetch = async (input, init) => {
+      calls.push({ input: input.toString(), init });
+      return jsonResponse({ alertsEnabled: false, ok: true });
+    };
+    const client = createSentinelClient({ baseUrl: "https://api.example.test", fetcher });
+    const address = "0x1000000000000000000000000000000000000000";
+
+    await expect(client.deleteWallet(address)).resolves.toEqual({ alertsEnabled: false, ok: true });
+
+    expect(calls[0]?.input).toBe(`https://api.example.test/wallets/${address}`);
+    expect(calls[0]?.init?.method).toBe("DELETE");
+  });
+
+  test("starts direct-provider social linking with the current callback", async () => {
+    const calls: { input: string; init: RequestInit | undefined }[] = [];
+    const fetcher: SentinelFetch = async (input, init) => {
+      calls.push({ input: input.toString(), init });
+      return jsonResponse({ redirect: true, url: "https://github.com/login/oauth/authorize" });
+    };
+    const client = createSentinelClient({ baseUrl: "https://api.example.test", fetcher });
+    const body = {
+      callbackURL: "https://pledge.cash/notifications",
+      errorCallbackURL: "https://pledge.cash/notifications",
+      provider: "github" as const,
+    };
+
+    await client.linkSocial(body);
+
+    expect(calls[0]?.input).toBe("https://api.example.test/auth/link-social");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.body).toBe(JSON.stringify(body));
   });
 
   test("encodes public action filters without a network request dependency", async () => {
@@ -69,7 +116,7 @@ describe("sentinel web client", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(SentinelApiError);
       expect((error as SentinelApiError).status).toBe(401);
-      expect((error as Error).message).toBe("Sign in to manage Sentinel settings.");
+      expect((error as Error).message).toBe("Sign with your wallet to manage alerts.");
     }
   });
 
@@ -111,6 +158,64 @@ describe("sentinel web client", () => {
     expect(message).toContain(address);
     expect(message).toContain("Chain ID: 31337");
     expect(message).toContain("Nonce: abcdefghi");
+  });
+
+  test("builds the wallet-first sign-in message required by Alerts", () => {
+    const address = "0x1000000000000000000000000000000000000000" as Address;
+    const message = buildAlertsSiweMessage({
+      address,
+      chainId: 8453,
+      domain: "pledge.cash",
+      issuedAt: new Date("2026-07-10T12:00:00.000Z"),
+      nonce: "abcdefghi",
+      uri: "https://pledge.cash/notifications",
+    });
+
+    expect(message).toContain("pledge.cash wants you to sign in with your Ethereum account:");
+    expect(message).toContain("Sign in to pledge.cash alerts.");
+    expect(message).toContain("URI: https://pledge.cash/notifications");
+    expect(message).toContain("Chain ID: 8453");
+    expect(message).toContain("Nonce: abcdefghi");
+  });
+});
+
+describe("alerts view state", () => {
+  const address = "0x1000000000000000000000000000000000000000" as Address;
+  const otherAddress = "0x2000000000000000000000000000000000000000" as Address;
+
+  test("asks for a wallet before authentication", () => {
+    expect(alertsViewState({}, undefined)).toBe("connect-wallet");
+  });
+
+  test("asks a connected wallet to sign", () => {
+    expect(alertsViewState({ account: address, chainId: 8453 }, undefined)).toBe("sign-wallet");
+  });
+
+  test("warns when the connected wallet is not part of the session", () => {
+    expect(
+      alertsViewState(
+        { account: otherAddress, chainId: 8453 },
+        { channels: [{ enabled: true }], wallets: [{ address }] },
+      ),
+    ).toBe("wallet-mismatch");
+  });
+
+  test("moves a verified wallet to delivery setup", () => {
+    expect(
+      alertsViewState(
+        { account: address, chainId: 8453 },
+        { channels: [], wallets: [{ address: address.toUpperCase() }] },
+      ),
+    ).toBe("link-delivery");
+  });
+
+  test("reports active when identity and delivery are ready", () => {
+    expect(
+      alertsViewState(
+        { account: address, chainId: 8453 },
+        { channels: [{ enabled: true }], wallets: [{ address }] },
+      ),
+    ).toBe("active");
   });
 });
 

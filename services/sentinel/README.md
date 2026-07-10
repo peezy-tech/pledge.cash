@@ -6,7 +6,7 @@ Sentinel is a self-hosted off-chain monitor for pledge.cash Boardroom governance
 
 - Bun 1.3.11.
 - Postgres 15 or newer.
-- A WorkOS AuthKit app for account sessions.
+- A 32+ character Better Auth secret for self-hosted account sessions.
 - A Telegram bot from BotFather for private alerts.
 - Optional: `claude` or `codex` on `PATH` with its own host-level authentication for harness analysis.
 - Optional: Twitter API credentials for public high-risk alerts.
@@ -26,10 +26,11 @@ Copy `.env.example` and set values for your environment.
 | `SENTINEL_POLL_INTERVAL_MS` | no | Watcher loop delay, default `12000`. |
 | `SENTINEL_MAX_BLOCK_RANGE` | no | Maximum block span per watcher pass, default `2000`. |
 | `SENTINEL_EXPLORER_URL_<chainId>` | no | Explorer base URL used in rendered notifications. |
-| `WORKOS_API_KEY` | yes for auth | WorkOS API key. |
-| `WORKOS_CLIENT_ID` | yes for auth | WorkOS client id. |
-| `WORKOS_COOKIE_PASSWORD` | yes for auth | WorkOS sealed-session cookie password. |
-| `WORKOS_REDIRECT_URI` | yes for auth | AuthKit callback URL ending in `/auth/callback`. |
+| `BETTER_AUTH_SECRET` | yes | Unique 32+ character secret used to protect self-hosted auth state and tokens. |
+| `BETTER_AUTH_URL` | yes | Public Sentinel API origin. Better Auth is mounted at `/auth`. |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | no | Enables GitHub as an explicitly linked sign-in method. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | no | Enables Google as an explicitly linked sign-in method. |
+| `APPLE_CLIENT_ID`, `APPLE_CLIENT_SECRET` | no | Enables Apple as an explicitly linked sign-in method. |
 | `SENTINEL_HARNESS` | no | `claude`, `codex`, or `none`; default `claude`. |
 | `SENTINEL_HARNESS_CMD` | no | Harness binary override. |
 | `SENTINEL_HARNESS_MODEL` | no | Model label passed to the harness adapter. |
@@ -44,6 +45,10 @@ Copy `.env.example` and set values for your environment.
 | `TWITTER_API_KEY`, `TWITTER_API_SECRET`, `TWITTER_ACCESS_TOKEN`, `TWITTER_ACCESS_TOKEN_SECRET` | yes for Twitter | Credentials for the optional Twitter channel. |
 
 Harness credentials such as API keys or CLI logins belong to the host environment. Sentinel passes only the configured command/model/workdir settings.
+
+Authentication is wallet-first: the first SIWE signature creates a pseudonymous local account with no profile form, password, or deliverable email address. This release accepts EOA signatures only; ERC-1271 smart-account authentication needs a chain-scoped identity model and is rejected rather than merging the same contract address across chains. Configured social providers can be linked explicitly and can then sign back into that same wallet account; they cannot create walletless accounts. Better Auth organization tables are present as a dormant foundation for future group accounts, but organization creation and UI are disabled until group ownership semantics are defined.
+
+OAuth provider callbacks use `${BETTER_AUTH_URL}/auth/callback/<provider>`, for example `http://localhost:8787/auth/callback/github` in local development.
 
 ## Local Commands
 

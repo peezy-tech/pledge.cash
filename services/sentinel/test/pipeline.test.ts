@@ -26,6 +26,7 @@ describe("analysis subscriber eligibility", () => {
     expect(query).toContain("COALESCE(s.mode, 'holdings'::sentinel_subscription_mode) = 'holdings'");
     expect(query).toContain("JOIN share_balances");
     expect(query).toContain("sb.balance::numeric > 0");
+    expect(query).toContain("w.alerts_enabled = TRUE");
   });
 });
 

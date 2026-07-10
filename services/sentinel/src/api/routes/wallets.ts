@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { getAddress } from "viem";
 import { parseSiweMessage } from "viem/siwe";
 
+import { WALLET_LINK_SIWE_STATEMENT } from "../better-auth";
 import {
   createRateLimitMiddleware,
   createSessionMiddleware,
@@ -23,7 +24,6 @@ import {
   type WalletNonceResponse
 } from "../dto";
 
-const WALLET_LINK_STATEMENT = "Link this wallet to pledge.cash Sentinel notifications.";
 const WALLET_NONCE_TTL_MS = 10 * 60 * 1_000;
 
 function webOriginHost(webOrigin: string): string {
@@ -54,7 +54,7 @@ function buildWalletNonceResponse(input: {
     expirationTime: input.expiresAt.toISOString(),
     issuedAt: input.issuedAt.toISOString(),
     nonce: input.nonce,
-    statement: WALLET_LINK_STATEMENT,
+    statement: WALLET_LINK_SIWE_STATEMENT,
     uri: input.deps.config.webOrigin,
     version: "1" as const
   };
@@ -112,6 +112,7 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       siwe.domain === undefined ||
       siwe.nonce === undefined ||
       siwe.uri === undefined ||
+      siwe.statement !== WALLET_LINK_SIWE_STATEMENT ||
       siwe.version !== "1"
     ) {
       return jsonError(c, 400, "SIWE message is missing required fields");
@@ -128,7 +129,7 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       return jsonError(c, 400, "SIWE URI is invalid");
     }
 
-    if (siweUriOrigin !== deps.config.webOrigin) {
+    if (siweUriOrigin !== new URL(deps.config.webOrigin).origin) {
       return jsonError(c, 400, "SIWE URI does not match Sentinel web origin");
     }
 
@@ -158,6 +159,7 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     const address = normalizeAddress(siwe.address);
     const signatureOk = await deps.verifySiweSignature?.({
       address,
+      chainId: siwe.chainId,
       message: parsed.value.message,
       signature: parsed.value.signature
     });
@@ -173,10 +175,15 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
 
     const wallet = await deps.store.linkWallet({
       address,
+      chainId: siwe.chainId,
       siweMessage: parsed.value.message,
       userId: user.id,
       verifiedAt: now
     });
+
+    if (wallet === null) {
+      return jsonError(c, 409, "Wallet is already linked to another alert account");
+    }
 
     return c.json(LinkWalletResponseSchema.parse({ wallet }));
   });
@@ -188,16 +195,19 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     }
 
     const user = c.get("user");
-    const deleted = await deps.store.unlinkWallet({
+    const result = await deps.store.unlinkWallet({
       address: normalizeAddress(parsed.data.address),
       userId: user.id
     });
 
-    if (!deleted) {
+    if (result === "not_found") {
       return jsonError(c, 404, "Wallet link not found");
     }
+    if (result === "primary_wallet") {
+      return jsonError(c, 409, "Primary wallet is required for sign-in and cannot be removed");
+    }
 
-    return c.json(DeleteWalletResponseSchema.parse({ ok: true }));
+    return c.json(DeleteWalletResponseSchema.parse({ alertsEnabled: false, ok: true }));
   });
 
   return app;

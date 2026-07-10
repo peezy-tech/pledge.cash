@@ -1,26 +1,44 @@
 import type { Address } from "@pledge.cash/sdk";
-import { LogIn, LogOut, RefreshCw } from "lucide-react";
-import { useState } from "react";
-import { ActionRow, Facts, Panel, WorkspaceHeader } from "../../components/shell";
-import { Badge } from "../../components/ui/badge";
+import { LogOut, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Panel, WorkspaceHeader } from "../../components/shell";
 import { Button } from "../../components/ui/button";
+import { AlertsIdentity } from "../../features/notifications/alerts-identity";
+import { alertsViewState } from "../../features/notifications/alerts-view-state";
 import { ChannelSettings } from "../../features/notifications/channel-settings";
 import { GovernanceActivity } from "../../features/notifications/governance-activity";
 import { useSentinelSession } from "../../features/notifications/hooks";
 import { SubscriptionSettings } from "../../features/notifications/subscription-settings";
 import { WalletLink } from "../../features/notifications/wallet-link";
-import { getSentinelBaseUrl, redirectToSentinelLogin } from "../../lib/sentinel";
+import { getSentinelBaseUrl, type SentinelSocialProvider } from "../../lib/sentinel";
+import type { WalletState } from "../../lib/types";
 
 type SentinelSettingsViewProps = {
-  account: Address | undefined;
-  chainId: number;
+  governanceChainId: number;
+  wallet: WalletState;
 };
 
-export function SentinelSettingsView({ account, chainId }: SentinelSettingsViewProps): React.JSX.Element | null {
+export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSettingsViewProps): React.JSX.Element | null {
   const baseUrl = getSentinelBaseUrl();
   const session = useSentinelSession();
+  const [socialProviders, setSocialProviders] = useState<SentinelSocialProvider[]>([]);
   const [logoutPending, setLogoutPending] = useState(false);
   const focus = notificationFocusFromLocation();
+  const viewState = alertsViewState(wallet, session.me);
+
+  useEffect(() => {
+    if (!session.client) {
+      setSocialProviders([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    void session.client
+      .authCapabilities(controller.signal)
+      .then((capabilities) => setSocialProviders(capabilities.socialProviders))
+      .catch(() => setSocialProviders([]));
+    return () => controller.abort();
+  }, [session.client]);
 
   if (!baseUrl) return null;
 
@@ -39,65 +57,58 @@ export function SentinelSettingsView({ account, chainId }: SentinelSettingsViewP
     <>
       <WorkspaceHeader
         eyebrow="Notifications"
-        title="Sentinel Alerts"
-        description="Governance alerts for linked wallets, delivery channels, and Boardroom subscriptions."
+        title="Governance alerts"
+        description="Get notified when queued governance actions affect wallets you control."
         action={
           session.authenticated ? (
-            <Button disabled={session.loading} variant="secondary" onClick={() => void session.refresh()}>
-              <RefreshCw className="h-4 w-4" />
-              Refresh
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button disabled={session.loading} variant="ghost" onClick={() => void session.refresh()}>
+                <RefreshCw className="h-4 w-4" />
+                Refresh
+              </Button>
+              <Button disabled={logoutPending} variant="secondary" onClick={() => void logout()}>
+                {logoutPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+                Sign out
+              </Button>
+            </div>
           ) : undefined
         }
       />
       {focus.boardroom ? (
         <GovernanceActivity
           boardroom={focus.boardroom}
-          chainId={chainId}
+          chainId={governanceChainId}
           highlightActionHash={focus.actionHash}
         />
       ) : null}
       {session.loading && !session.me ? <LoadingPanel /> : null}
       {session.error ? (
-        <Panel title="Sentinel Status">
+        <Panel title="Alert service">
           <p className="m-0 border-t border-red-950 bg-red-950/35 p-4 text-sm text-red-200">{session.error}</p>
-          <ActionRow>
+          <div className="border-t border-zinc-800 p-4">
             <Button variant="secondary" onClick={() => void session.refresh()}>
               <RefreshCw className="h-4 w-4" />
               Retry
             </Button>
-          </ActionRow>
+          </div>
         </Panel>
       ) : null}
-      {!session.loading && !session.authenticated ? <SignedOutPanel /> : null}
+      {!session.loading && !session.error && session.client ? (
+        <AlertsIdentity
+          client={session.client}
+          onChanged={session.refresh}
+          session={session.me}
+          socialProviders={socialProviders}
+          state={viewState}
+          wallet={wallet}
+        />
+      ) : null}
       {session.client && session.me ? (
-        <div className="grid gap-4">
-          <Panel
-            title="Account"
-            action={
-              <Button disabled={logoutPending} variant="secondary" onClick={() => void logout()}>
-                {logoutPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
-                Sign out
-              </Button>
-            }
-          >
-            <Facts
-              columns="three"
-              items={[
-                { label: "Email", value: session.me.user.email },
-                { label: "Wallets", value: session.me.wallets.length.toString() },
-                { label: "Channels", value: session.me.channels.length.toString() },
-                { label: "Subscription", value: session.me.subscription.mode === "holdings" ? "Holdings" : "Explicit Boardrooms" },
-                { label: "Minimum severity", value: session.me.subscription.minSeverity },
-                { label: "Status", value: <Badge>Signed in</Badge> },
-              ]}
-            />
-          </Panel>
+        <div className="mt-4 grid gap-4">
           <WalletLink
-            account={account}
-            chainId={chainId}
             client={session.client}
             session={session.me}
+            wallet={wallet}
             onChanged={session.refresh}
           />
           <ChannelSettings channels={session.me.channels} client={session.client} onChanged={session.refresh} />
@@ -134,21 +145,8 @@ function normalizedHexParam(value: string | null, bytes: number): string | undef
 
 function LoadingPanel(): React.JSX.Element {
   return (
-    <Panel title="Sentinel Status">
-      <p className="m-0 border-t border-zinc-800 p-4 text-sm text-zinc-500">Loading account</p>
-    </Panel>
-  );
-}
-
-function SignedOutPanel(): React.JSX.Element {
-  return (
-    <Panel title="Account" description="Sign in to connect wallets, Telegram, and alert preferences.">
-      <ActionRow>
-        <Button onClick={() => redirectToSentinelLogin()}>
-          <LogIn className="h-4 w-4" />
-          Sign in
-        </Button>
-      </ActionRow>
+    <Panel title="Wallet identity">
+      <p className="m-0 border-t border-zinc-800 p-4 text-sm text-zinc-500">Checking alert access</p>
     </Panel>
   );
 }

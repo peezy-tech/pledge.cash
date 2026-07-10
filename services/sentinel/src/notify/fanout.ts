@@ -302,6 +302,7 @@ async function insertSubscriberNotifications(
                  AND lower(sb.holder) = lower(w.address)
                  AND sb.balance::numeric > 0
                 WHERE w.user_id = c.user_id
+                  AND w.alerts_enabled = TRUE
               )
             ) OR (
               s.mode = 'explicit'
