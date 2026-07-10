@@ -115,6 +115,7 @@ contract SeedLocal is Script {
         DistributionFactory distributionFactory;
         AmmFactory ammFactory;
         AmmRouter ammRouter;
+        address protocolFeeRouter;
     }
 
     struct Actors {
@@ -239,13 +240,15 @@ contract SeedLocal is Script {
         DistributionFactory distributionFactory = DistributionFactory(json.readAddress(".distributionFactory"));
         AmmFactory ammFactory = AmmFactory(json.readAddress(".ammFactory"));
         AmmRouter ammRouter = AmmRouter(payable(json.readAddress(".ammRouter")));
+        address protocolFeeRouter = json.readAddress(".protocolFeeRouter");
         deployment = Deployment({
             boardroomFactory: boardroomFactory,
             assetPolicy: assetPolicy,
             tokenGrantFactory: tokenGrantFactory,
             distributionFactory: distributionFactory,
             ammFactory: ammFactory,
-            ammRouter: ammRouter
+            ammRouter: ammRouter,
+            protocolFeeRouter: protocolFeeRouter
         });
         creationFee = tokenGrantFactory.creationFee();
     }
@@ -645,22 +648,11 @@ contract SeedLocal is Script {
     }
 
     function _seedBoardroomLaunch() internal {
-        _setProjectFeeRecipient();
         _createMigratingCurve();
         launch.buyerOneQuotePaid = _buyCurve(launch.curve, INVESTOR_KEY, actors.investor, CURVE_BUYER_ONE_SHARES);
         launch.buyerTwoQuotePaid = _buyCurve(launch.curve, NEW_HOLDER_KEY, actors.newHolder, CURVE_BUYER_TWO_SHARES);
         _migrateCurve();
         _seedPostMigrationSwap();
-    }
-
-    function _setProjectFeeRecipient() internal {
-        address recipient = deployment.ammFactory.protocolFeeRecipient();
-        if (recipient == address(boardroom)) return;
-        if (recipient != address(0)) revert ScenarioInvariantFailed("amm-fee-recipient-already-set");
-
-        vm.startBroadcast(deployerKey);
-        deployment.ammFactory.setProtocolFeeRecipient(address(boardroom));
-        vm.stopBroadcast();
     }
 
     function _createMigratingCurve() internal {
@@ -941,7 +933,7 @@ contract SeedLocal is Script {
         BoardroomToken shares = BoardroomToken(boardroom.shareToken());
         LockedLiquidity locker = LockedLiquidity(launch.locker);
 
-        _check(deployment.ammFactory.protocolFeeRecipient() == address(boardroom), "amm-fee-recipient");
+        _check(deployment.ammFactory.protocolFeeRecipient() == deployment.protocolFeeRouter, "amm-protocol-fee-router");
         _check(address(launch.curve) != address(0), "curve-created");
         _check(launch.curve.curveStatus() == MigratingBondingCurve.CurveStatus.Migrated, "curve-migrated");
         _check(launch.curve.pool() == launch.pool, "curve-pool");

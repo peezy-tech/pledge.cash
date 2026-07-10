@@ -108,9 +108,12 @@ class InMemoryStore implements SentinelApiStore {
       ],
       chainId: 31337,
       decodeStatus: "decoded",
+      epoch: "1",
       eta: new Date(FIXED_NOW.getTime() + 86_400_000).toISOString(),
       event: "queued",
+      expiresAt: new Date(FIXED_NOW.getTime() + 8 * 86_400_000).toISOString(),
       id: ACTION_ID,
+      invalidatedByEpoch: null,
       queueBlock: "123",
       queueTxHash: `0x${"cd".repeat(32)}`,
       risk: {

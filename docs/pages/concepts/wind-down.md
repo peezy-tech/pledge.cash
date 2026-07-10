@@ -27,10 +27,10 @@ Native HYPE held by a Boardroom is normalized into wrapped HYPE during wind-down
 
 ## Obligations
 
-Before redemptions open, users should inspect outstanding grants, sales, curves, and locked liquidity positions. These obligations can affect which assets are available and when redemptions can safely begin.
+Before redemptions open, users should inspect outstanding grants, sales, curves, and locked liquidity positions. These obligations can affect which assets are available and when redemptions can safely begin. A locked-liquidity position that cannot exit an underlying token exactly may resolve into the LP token itself after the governance delay; that preserves the pool claim while allowing unrelated redemption assets to proceed.
 
 ## Redemptions
 
-When redemptions are open, share holders burn Boardroom share tokens to receive registered redeemable assets pro rata.
+When redemptions are open, share holders burn Boardroom share tokens to receive registered redeemable assets pro rata. Governance excludes authenticated protocol custody from holder-power thresholds, but redemption accounting continues to use total economic share supply.
 
 The redemption set is limited to assets registered by the Boardroom according to contract rules. Holding shares does not create a claim on assets that are not registered for redemption.

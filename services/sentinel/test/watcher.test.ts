@@ -35,6 +35,7 @@ const salt = bytes32("01");
 const queueTx = bytes32("100");
 const cancelTx = bytes32("101");
 const adminTx = bytes32("102");
+const epochTx = bytes32("103");
 
 const call: BoardroomCall = {
   data: encodeFunctionData({
@@ -111,7 +112,9 @@ describe("runWatcherOnce", () => {
         boardroomCreatedLog(1n),
         governanceLog("BoardroomActionQueued", 2n, 0, queueTx, {
           actionHash,
+          epoch: 1n,
           eta: 1_800n,
+          expiresAt: 606_600n,
           executor,
           salt
         }),
@@ -146,6 +149,8 @@ describe("runWatcherOnce", () => {
       actionHash,
       boardroom,
       decodeStatus: "decoded",
+      epoch: 1n,
+      expiresAt: new Date(606_600_000),
       queueTxHash: queueTx,
       status: "queued"
     });
@@ -162,7 +167,9 @@ describe("runWatcherOnce", () => {
         boardroomCreatedLog(1n),
         governanceLog("BoardroomActionQueued", 2n, 0, queueTx, {
           actionHash,
+          epoch: 1n,
           eta: 1_800n,
+          expiresAt: 606_600n,
           executor,
           salt
         }),
@@ -281,6 +288,97 @@ describe("runWatcherOnce", () => {
     expect(events[0]?.action.id).toBe(terminalAction.id);
   });
 
+  test("records an executing epoch-changing action as executed instead of invalidated", async () => {
+    const store = new MemoryWatcherStore();
+    store.addBoardroom();
+    store.setCursor("factory-discovery", 5n);
+    store.setCursor("share-transfers", 5n);
+    const executingAction = store.addQueuedAction({
+      id: "executing-action",
+      queueBlock: 2n,
+      queueTxHash: bytes32("201")
+    });
+    const events: WatcherPipelineEvent[] = [];
+
+    await runWatcherOnce(chainId, {
+      client: createClient({
+        latestBlock: 5n,
+        logs: [
+          governanceLog("GovernanceEpochAdvanced", 5n, 1, epochTx, { epoch: 2n }),
+          governanceLog("BoardroomActionExecuted", 5n, 3, epochTx, { actionHash, caller: holder })
+        ],
+        txInputs: {}
+      }),
+      config: testConfig(10),
+      deployment: testDeployment(),
+      onActionEvent: (event) => events.push(event),
+      store
+    });
+
+    expect(store.action(executingAction.id)).toMatchObject({
+      invalidatedByEpoch: null,
+      status: "executed"
+    });
+    expect(events.map((event) => event.event)).toEqual(["executed"]);
+  });
+
+  test("invalidates old epochs without touching a queue later in the same block", async () => {
+    const store = new MemoryWatcherStore();
+    store.addBoardroom();
+    store.setCursor("factory-discovery", 5n);
+    store.setCursor("share-transfers", 5n);
+    const oldAction = store.addQueuedAction({
+      id: "old-epoch-action",
+      queueBlock: 2n,
+      queueTxHash: bytes32("201")
+    });
+    const events: WatcherPipelineEvent[] = [];
+    const client = createClient({
+      latestBlock: 5n,
+      logs: [
+        governanceLog("GovernanceEpochAdvanced", 5n, 1, epochTx, { epoch: 2n }),
+        governanceLog("BoardroomActionQueued", 5n, 3, queueTx, {
+          actionHash,
+          epoch: 2n,
+          eta: 2_000n,
+          expiresAt: 606_800n,
+          executor,
+          salt
+        })
+      ],
+      txInputs: { [queueTx]: queueInput }
+    });
+
+    const firstRun = await runWatcherOnce(chainId, {
+      client,
+      config: testConfig(10),
+      deployment: testDeployment(),
+      onActionEvent: (event) => events.push(event),
+      store
+    });
+
+    expect(firstRun.actionEvents).toBe(2);
+    expect(store.action(oldAction.id)).toMatchObject({
+      invalidatedByEpoch: 2n,
+      resolvedTxHash: epochTx,
+      status: "invalidated"
+    });
+    const newAction = store.state.actions.find((action) => action.id !== oldAction.id);
+    expect(newAction).toMatchObject({ epoch: 2n, queueLogIndex: 3, status: "queued" });
+    expect(events.map((event) => event.event)).toEqual(["invalidated", "queued"]);
+
+    const retry = await runWatcherOnce(chainId, {
+      client,
+      config: testConfig(10),
+      deployment: testDeployment(),
+      onActionEvent: (event) => events.push(event),
+      store
+    });
+    expect(retry.actionEvents).toBe(0);
+    expect(store.state.actions).toHaveLength(2);
+    expect(events.map((event) => event.event)).toEqual(["invalidated", "queued"]);
+  });
+
   test("does not replay transitioned actions after their atomic governance cursor commit", async () => {
     const store = new MemoryWatcherStore();
     store.addBoardroom();
@@ -338,7 +436,9 @@ describe("runWatcherOnce", () => {
         logs: [
           governanceLog("BoardroomActionQueued", 5n, 0, queueTx, {
             actionHash,
+            epoch: 1n,
             eta: 1_800n,
+            expiresAt: 606_600n,
             executor,
             salt
           })
@@ -374,7 +474,9 @@ describe("runWatcherOnce", () => {
         logs: [
           governanceLog("BoardroomActionQueued", 5n, 0, queueTx, {
             actionHash: emptyActionHash,
+            epoch: 1n,
             eta: 1_800n,
+            expiresAt: 606_600n,
             executor,
             salt
           })
@@ -424,6 +526,39 @@ describe("runWatcherOnce", () => {
     expect(events[0]?.action.id).toBe("pending-action");
   });
 
+  test("does not fan out policy-admin changes to actions past their execution deadline", async () => {
+    const store = new MemoryWatcherStore();
+    store.addBoardroom();
+    store.addQueuedAction({
+      expiresAt: new Date("2000-01-01T00:00:00.000Z"),
+      id: "expired-action",
+      queueBlock: 2n,
+      queueTxHash: queueTx
+    });
+    store.setCursor("factory-discovery", 5n);
+    store.setCursor("share-transfers", 5n);
+    const events: WatcherPipelineEvent[] = [];
+
+    await runWatcherOnce(chainId, {
+      client: createClient({
+        latestBlock: 6n,
+        logs: [
+          rawLog("ApprovalSpenderAllowedSet", assetPolicy, 6n, 0, adminTx, {
+            allowed: true,
+            spender: target
+          })
+        ],
+        txInputs: {}
+      }),
+      config: testConfig(10),
+      deployment: testDeployment(),
+      onActionEvent: (event) => events.push(event),
+      store
+    });
+
+    expect(events).toHaveLength(0);
+  });
+
   test("records permanent module registration and deduplicates its paired active-status notification", async () => {
     const store = new MemoryWatcherStore();
     store.addBoardroom();
@@ -465,7 +600,9 @@ describe("runWatcherOnce", () => {
             boardroomCreatedLog(1n),
             governanceLog("BoardroomActionQueued", 2n, 0, queueTx, {
               actionHash,
+              epoch: 1n,
               eta: 1_800n,
+              expiresAt: 606_600n,
               executor,
               salt
             })
@@ -537,6 +674,8 @@ class MemoryWatcherStore implements WatcherStore {
   }
 
   addQueuedAction(input: {
+    epoch?: bigint;
+    expiresAt?: Date;
     id: string;
     queueBlock: bigint;
     queueLogIndex?: number;
@@ -544,6 +683,8 @@ class MemoryWatcherStore implements WatcherStore {
   }): QueuedActionRow {
     const action = queuedAction({
       id: input.id,
+      epoch: input.epoch,
+      expiresAt: input.expiresAt,
       queueBlock: input.queueBlock,
       queueLogIndex: input.queueLogIndex,
       queueTxHash: input.queueTxHash
@@ -593,6 +734,39 @@ class MemoryWatcherTx implements WatcherStoreTx {
 
   async getCursor(chainId_: number, scope: WatcherCursorScope): Promise<bigint | undefined> {
     return this.state.cursors.get(`${chainId_}:${scope}`);
+  }
+
+  async invalidateQueuedActionsBeforeEpoch(input: {
+    readonly boardroom: Lowercase<Address>;
+    readonly chainId: number;
+    readonly epoch: bigint;
+    readonly terminalBlock: bigint;
+    readonly terminalLogIndex: number;
+    readonly txHash: Lowercase<Hex>;
+  }): Promise<Array<{ action: QueuedActionRow; calls: StoredCall[] }>> {
+    const matching = this.state.actions.filter(
+      (action) =>
+        action.chainId === input.chainId
+        && action.boardroom === input.boardroom
+        && action.status === "queued"
+        && action.epoch !== null
+        && action.epoch < input.epoch
+        && (action.queueBlock < input.terminalBlock
+          || (action.queueBlock === input.terminalBlock && action.queueLogIndex < input.terminalLogIndex))
+    );
+
+    return matching.map((action) => {
+      const updated: QueuedActionRow = {
+        ...action,
+        invalidatedByEpoch: input.epoch,
+        resolvedTxHash: input.txHash,
+        status: "invalidated",
+        updatedAt: new Date()
+      };
+      const index = this.state.actions.findIndex((candidate) => candidate.id === action.id);
+      this.state.actions[index] = updated;
+      return { action: updated, calls: this.state.calls.get(updated.id) ?? [] };
+    });
   }
 
   async insertActionCalls(actionId: string, calls: readonly InsertActionCallInput[]): Promise<StoredCall[]> {
@@ -659,7 +833,12 @@ class MemoryWatcherTx implements WatcherStoreTx {
 
   async listQueuedActions(chainId_: number): Promise<Array<{ action: QueuedActionRow; calls: StoredCall[] }>> {
     return this.state.actions
-      .filter((action) => action.chainId === chainId_ && action.status === "queued")
+      .filter(
+        (action) =>
+          action.chainId === chainId_
+          && action.status === "queued"
+          && (action.expiresAt === null || action.expiresAt.getTime() > Date.now())
+      )
       .sort((left, right) => Number(right.queueBlock - left.queueBlock) || right.queueLogIndex - left.queueLogIndex)
       .map((action) => ({ action, calls: this.state.calls.get(action.id) ?? [] }));
   }
@@ -876,10 +1055,13 @@ function queuedAction(
     chainId: input.chainId ?? chainId,
     createdAt: now,
     decodeStatus: input.decodeStatus ?? "decoded",
+    epoch: input.epoch ?? 1n,
     eta: input.eta ?? new Date(1_800_000),
+    expiresAt: input.expiresAt ?? new Date("2100-01-01T00:00:00.000Z"),
     executedBy: null,
     executor: input.executor ?? executor,
     id: input.id,
+    invalidatedByEpoch: null,
     queueBlock: input.queueBlock,
     queueLogIndex: input.queueLogIndex ?? 0,
     queueTxHash: input.queueTxHash,

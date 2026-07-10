@@ -37,4 +37,6 @@ For users, the practical question is: is the Boardroom action visible, expected,
 
 The Boardroom share token is the project token. Holding it means your wallet holds that ERC20 token. It does not automatically create equity, debt, voting, dividend, or employment rights.
 
+For on-chain holder-power checks, shares held inside authenticated grants, distributions, AMM pools, and fee vaults are treated as protocol custody rather than as an active voter. Current and prior-block custody are both checkpointed so moving shares into or out of those contracts cannot create a one-block threshold shortcut.
+
 If redemptions later open, share holders can burn shares for registered redeemable assets according to the Boardroom state.

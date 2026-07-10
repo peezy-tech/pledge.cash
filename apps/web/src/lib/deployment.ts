@@ -3,8 +3,12 @@ import type { Address, PledgeCashDeployment } from "@pledge.cash/sdk";
 const STRING_DEPLOYMENT_FIELDS = ["status", "reason", "boardroomStatus", "boardroomReason"] as const;
 const ADDRESS_DEPLOYMENT_FIELDS = [
   "boardroomFactory",
+  "boardroomGovernanceLogic",
+  "boardroomRedemptionPayout",
+  "boardroomLogic",
   "boardroomPolicyRegistry",
   "assetPolicy",
+  "protocolFeeRouter",
   "distributionFactory",
   "ammFactory",
   "ammProtocolFeeRecipient",
@@ -17,6 +21,15 @@ const ADDRESS_DEPLOYMENT_FIELDS = [
   "factoryOwner",
   "policyRegistryOwner",
   "assetPolicyOwner",
+  "protocolGovernance",
+  "protocolTreasury",
+  "protocolFeeRouterOwner",
+  "protocolFeeRouterRecipient",
+  "tokenGrantFeeRecipient",
+  "ammFactoryOwner",
+  "ammFeeManager",
+  "ammLiquidityRouter",
+  "ammReservationManager",
 ] as const;
 const BOOLEAN_DEPLOYMENT_FIELDS = [
   "tokenGrantPolicyAllowed",

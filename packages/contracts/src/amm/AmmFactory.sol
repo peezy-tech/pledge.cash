@@ -2,47 +2,219 @@
 pragma solidity ^0.8.30;
 
 import {LibClone} from "solady/utils/LibClone.sol";
+import {Ownable} from "solady/auth/Ownable.sol";
 import {AmmPool} from "./AmmPool.sol";
 
-contract AmmFactory {
+interface IAmmFactoryBoardroomFactory {
+    function isShareToken(address token) external view returns (bool);
+}
+
+contract AmmFactory is Ownable {
     uint256 public constant SWAP_FEE_BPS = 30;
     uint256 public constant PROTOCOL_FEE_SHARE_BPS = 500;
     uint256 public constant FEE_DENOMINATOR = 10_000;
 
-    address public immutable feeManager;
+    struct InitialLiquidityReservation {
+        address initializer;
+        address recipient;
+        address reservationOwner;
+        address manager;
+    }
+
+    address public feeManager;
+    address public immutable boardroomFactory;
     address public immutable poolImplementation;
     address public protocolFeeRecipient;
+    address public liquidityRouter;
+    address public reservationManager;
     address[] public allPools;
 
     mapping(address => mapping(address => address)) public getPool;
     mapping(address => bool) public isPool;
+    mapping(address => InitialLiquidityReservation) public initialLiquidityReservation;
 
     error IdenticalTokens();
     error ZeroAddress();
+    error InvalidBoardroomFactory(address factory);
     error PoolAlreadyExists(address pool);
-    error OnlyFeeManager();
-    error ProtocolFeeRecipientAlreadySet(address recipient);
+    error OnlyPool();
+    error OnlyReservationManager();
+    error OnlyLiquidityRouter();
+    error PoolAlreadyInitialized(address pool);
+    error InitialLiquidityAlreadyReserved(address pool, address reservationOwner);
+    error InitialLiquidityReservationMismatch(address expected, address actual);
+    error InitialLiquidityReservationManagerMismatch(address expected, address actual);
+    error InitialLiquidityReservationRequired(address pool);
 
     event PoolCreated(address indexed token0, address indexed token1, address indexed pool, uint256 poolCount);
-    event ProtocolFeeRecipientSet(address indexed recipient);
+    event FeeManagerSet(address indexed previousManager, address indexed newManager);
+    event ProtocolFeeRecipientSet(address indexed previousRecipient, address indexed newRecipient);
+    event LiquidityRouterSet(address indexed previousRouter, address indexed newRouter);
+    event ReservationManagerSet(address indexed previousManager, address indexed newManager);
+    event InitialLiquidityReserved(
+        address indexed pool,
+        address indexed initializer,
+        address indexed recipient,
+        address reservationOwner,
+        address manager
+    );
+    event InitialLiquidityReservationReleased(
+        address indexed pool, address indexed reservationOwner, address indexed manager
+    );
+    event InitialLiquidityReservationConsumed(
+        address indexed pool,
+        address indexed initializer,
+        address indexed recipient,
+        address reservationOwner,
+        address manager
+    );
 
-    constructor(address feeManager_) {
+    constructor(address feeManager_, address boardroomFactory_) {
         _requireNonZero(feeManager_);
+        if (boardroomFactory_ == address(0) || boardroomFactory_.code.length == 0) {
+            revert InvalidBoardroomFactory(boardroomFactory_);
+        }
 
+        _initializeOwner(feeManager_);
         feeManager = feeManager_;
+        boardroomFactory = boardroomFactory_;
         poolImplementation = address(new AmmPool());
+        emit FeeManagerSet(address(0), feeManager_);
     }
 
-    function setProtocolFeeRecipient(address recipient) external {
-        _requireFeeManager();
-        _requireNonZero(recipient);
-        _requireProtocolFeeRecipientUnset();
+    function setFeeManager(address manager) external onlyOwner {
+        _requireNonZero(manager);
 
+        address previousManager = feeManager;
+        feeManager = manager;
+        emit FeeManagerSet(previousManager, manager);
+    }
+
+    function setProtocolFeeRecipient(address recipient) external onlyOwner {
+        _requireNonZero(recipient);
+
+        address previousRecipient = protocolFeeRecipient;
         protocolFeeRecipient = recipient;
-        emit ProtocolFeeRecipientSet(recipient);
+        emit ProtocolFeeRecipientSet(previousRecipient, recipient);
+    }
+
+    function setLiquidityRouter(address router) external onlyOwner {
+        _requireNonZero(router);
+
+        address previousRouter = liquidityRouter;
+        liquidityRouter = router;
+        emit LiquidityRouterSet(previousRouter, router);
+    }
+
+    function setReservationManager(address manager) external onlyOwner {
+        _requireNonZero(manager);
+
+        address previousManager = reservationManager;
+        reservationManager = manager;
+        emit ReservationManagerSet(previousManager, manager);
+    }
+
+    function reserveInitialLiquidity(
+        address tokenA,
+        address tokenB,
+        address initializer,
+        address recipient,
+        address reservationOwner
+    ) external returns (address pool) {
+        _requireReservationManager();
+        _requireNonZero(initializer);
+        _requireNonZero(recipient);
+        _requireNonZero(reservationOwner);
+
+        pool = getPool[tokenA][tokenB];
+        if (pool == address(0)) pool = _createPool(tokenA, tokenB);
+        if (AmmPool(pool).totalSupply() != 0) revert PoolAlreadyInitialized(pool);
+
+        InitialLiquidityReservation memory existing = initialLiquidityReservation[pool];
+        if (existing.manager != address(0)) {
+            if (
+                existing.initializer == initializer && existing.recipient == recipient
+                    && existing.reservationOwner == reservationOwner && existing.manager == msg.sender
+            ) return pool;
+            revert InitialLiquidityAlreadyReserved(pool, existing.reservationOwner);
+        }
+
+        initialLiquidityReservation[pool] =
+            InitialLiquidityReservation(initializer, recipient, reservationOwner, msg.sender);
+        emit InitialLiquidityReserved(pool, initializer, recipient, reservationOwner, msg.sender);
+    }
+
+    function releaseInitialLiquidityReservation(address tokenA, address tokenB, address reservationOwner) external {
+        address pool = getPool[tokenA][tokenB];
+        if (pool == address(0)) {
+            _requireReservationManager();
+            return;
+        }
+
+        InitialLiquidityReservation memory reservation = initialLiquidityReservation[pool];
+        if (reservation.manager == address(0)) {
+            _requireReservationManager();
+            return;
+        }
+        if (msg.sender != reservation.manager) {
+            revert InitialLiquidityReservationManagerMismatch(reservation.manager, msg.sender);
+        }
+        if (reservation.reservationOwner != reservationOwner) {
+            revert InitialLiquidityReservationMismatch(reservation.reservationOwner, reservationOwner);
+        }
+
+        delete initialLiquidityReservation[pool];
+        emit InitialLiquidityReservationReleased(pool, reservationOwner, reservation.manager);
+    }
+
+    function consumeInitialLiquidityReservation(address initializer, address recipient, address liquidityCaller)
+        external
+        returns (bool reserved, address reservationOwner)
+    {
+        if (!isPool[msg.sender]) revert OnlyPool();
+
+        InitialLiquidityReservation memory reservation = initialLiquidityReservation[msg.sender];
+        if (reservation.manager == address(0)) {
+            (address token0, address token1) = AmmPool(msg.sender).tokens();
+            IAmmFactoryBoardroomFactory canonicalFactory = IAmmFactoryBoardroomFactory(boardroomFactory);
+            if (canonicalFactory.isShareToken(token0) || canonicalFactory.isShareToken(token1)) {
+                revert InitialLiquidityReservationRequired(msg.sender);
+            }
+            return (false, address(0));
+        }
+        if (liquidityCaller != liquidityRouter) revert OnlyLiquidityRouter();
+        if (initializer != reservation.initializer) {
+            revert InitialLiquidityReservationMismatch(reservation.initializer, initializer);
+        }
+        if (recipient != reservation.recipient) {
+            revert InitialLiquidityReservationMismatch(reservation.recipient, recipient);
+        }
+
+        delete initialLiquidityReservation[msg.sender];
+        emit InitialLiquidityReservationConsumed(
+            msg.sender,
+            reservation.initializer,
+            reservation.recipient,
+            reservation.reservationOwner,
+            reservation.manager
+        );
+        return (true, reservation.reservationOwner);
+    }
+
+    function initialLiquidityReservationFor(address tokenA, address tokenB)
+        external
+        view
+        returns (address initializer, address recipient, address reservationOwner, address manager)
+    {
+        InitialLiquidityReservation memory reservation = initialLiquidityReservation[getPool[tokenA][tokenB]];
+        return (reservation.initializer, reservation.recipient, reservation.reservationOwner, reservation.manager);
     }
 
     function createPool(address tokenA, address tokenB) external returns (address pool) {
+        return _createPool(tokenA, tokenB);
+    }
+
+    function _createPool(address tokenA, address tokenB) internal returns (address pool) {
         (address token0, address token1) = sortTokens(tokenA, tokenB);
         _requirePoolMissing(token0, token1);
 
@@ -73,22 +245,17 @@ contract AmmFactory {
         return keccak256(abi.encodePacked(token0, token1));
     }
 
-    function _requireFeeManager() internal view {
-        if (msg.sender != feeManager) revert OnlyFeeManager();
-    }
-
     function _requireNonZero(address account) internal pure {
         if (account == address(0)) revert ZeroAddress();
+    }
+
+    function _requireReservationManager() internal view {
+        if (msg.sender != reservationManager) revert OnlyReservationManager();
     }
 
     function _requirePoolMissing(address token0, address token1) internal view {
         address existingPool = getPool[token0][token1];
         if (existingPool != address(0)) revert PoolAlreadyExists(existingPool);
-    }
-
-    function _requireProtocolFeeRecipientUnset() internal view {
-        address recipient = protocolFeeRecipient;
-        if (recipient != address(0)) revert ProtocolFeeRecipientAlreadySet(recipient);
     }
 
     function _recordPool(address token0, address token1, address pool) internal {

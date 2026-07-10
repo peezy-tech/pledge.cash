@@ -19,9 +19,9 @@ export type HexString = Hex;
 export type Uint256String = `${bigint}`;
 
 export type Severity = "low" | "medium" | "high";
-export type ActionEvent = "queued" | "cancelled" | "executed";
+export type ActionEvent = "queued" | "cancelled" | "executed" | "invalidated";
 export type NotificationEvent = ActionEvent | "policy-admin" | "reminder";
-export type ActionStatus = "queued" | "cancelled" | "executed";
+export type ActionStatus = "queued" | "cancelled" | "executed" | "invalidated";
 export type DecodeStatus = "decoded" | "undecoded";
 export type BoardroomStatus = "prelaunch" | "active" | "winddown";
 export type AnalysisSource = "harness" | "template";
@@ -64,8 +64,11 @@ export type NotificationPayload = {
     readonly actionHash: HexString;
     readonly boardroom: AddressString;
     readonly chainId: ChainId;
+    readonly epoch?: string | null;
     readonly eta: string;
+    readonly expiresAt?: string | null;
     readonly id: string;
+    readonly invalidatedByEpoch?: string | null;
     readonly status: ActionStatus;
   };
   readonly analysis?: {

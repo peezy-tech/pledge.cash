@@ -2,9 +2,11 @@
 pragma solidity ^0.8.30;
 
 import {ERC20} from "solady/tokens/ERC20.sol";
+import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Initializable} from "solady/utils/Initializable.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {AmmPool} from "../amm/AmmPool.sol";
+import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 
 interface ILockedLiquidityRouter {
     function addLiquidity(
@@ -36,7 +38,16 @@ interface ILockedLiquidityBoardroom {
 }
 
 contract LockedLiquidity is Initializable {
+    using FixedPointMathLib for uint256;
     using SafeTransferLib for address;
+
+    struct ExitQuote {
+        uint256 liquidity;
+        uint256 poolBalanceA;
+        uint256 poolBalanceB;
+        uint256 expectedA;
+        uint256 expectedB;
+    }
 
     address public factory;
     address public boardroom;
@@ -52,10 +63,13 @@ contract LockedLiquidity is Initializable {
     error AlreadySeeded();
     error NotSeeded();
     error BoardroomNotWindingDown();
+    error UnexpectedExitAmount(address token, uint256 expected, uint256 received, uint256 poolSpent);
+    error UnexpectedTokenTransfer(address token, uint256 expected, uint256 senderSpent, uint256 recipientReceived);
 
     event LockedLiquidityInitialized(address indexed boardroom, address indexed router, address tokenA, address tokenB);
     event LiquidityLocked(address indexed pool, uint256 amountA, uint256 amountB, uint256 liquidity);
     event LiquidityExited(address indexed pool, uint256 liquidity, uint256 amountA, uint256 amountB);
+    event LiquidityReturnedAsLp(address indexed pool, address indexed boardroom, uint256 liquidity);
     event FeesForwarded(address indexed boardroom, uint256 amount0, uint256 amount1);
 
     constructor() {
@@ -116,7 +130,8 @@ contract LockedLiquidity is Initializable {
 
         claimFees();
 
-        liquidity = ERC20(pool_).balanceOf(address(this));
+        ExitQuote memory quote = _quoteExit(pool_);
+        liquidity = quote.liquidity;
         if (liquidity == 0) {
             emit LiquidityExited(pool_, 0, 0, 0);
             return (0, 0, 0);
@@ -124,10 +139,35 @@ contract LockedLiquidity is Initializable {
 
         pool_.safeApprove(router, liquidity);
         (amountA, amountB) = ILockedLiquidityRouter(router)
-            .removeLiquidity(tokenA, tokenB, liquidity, amountAMin, amountBMin, boardroom, deadline);
+            .removeLiquidity(
+                tokenA,
+                tokenB,
+                liquidity,
+                amountAMin > quote.expectedA ? amountAMin : quote.expectedA,
+                amountBMin > quote.expectedB ? amountBMin : quote.expectedB,
+                boardroom,
+                deadline
+            );
         pool_.safeApprove(router, 0);
 
+        _requireExactExit(tokenA, pool_, quote.poolBalanceA, quote.expectedA, amountA);
+        _requireExactExit(tokenB, pool_, quote.poolBalanceB, quote.expectedB, amountB);
+
         emit LiquidityExited(pool_, liquidity, amountA, amountB);
+    }
+
+    /// @notice Terminal fallback that preserves the pool claim when an underlying token blocks a normal exit.
+    function returnLpToBoardroom() external returns (uint256 liquidity) {
+        _requireBoardroomCaller();
+        _requireBoardroomCanExit();
+
+        address pool_ = pool;
+        if (pool_ == address(0)) revert NotSeeded();
+
+        liquidity = ERC20(pool_).balanceOf(address(this));
+        if (liquidity != 0) pool_.safeTransfer(boardroom, liquidity);
+
+        emit LiquidityReturnedAsLp(pool_, boardroom, liquidity);
     }
 
     function lockedLiquidity() external view returns (uint256) {
@@ -197,11 +237,46 @@ contract LockedLiquidity is Initializable {
 
     function _forwardTokenBalance(address token) internal returns (uint256 balance) {
         balance = ERC20(token).balanceOf(address(this));
-        if (balance != 0) token.safeTransfer(boardroom, balance);
+        if (balance != 0) _transferExactToBoardroom(token, balance);
     }
 
     function _refundDust(address token) internal {
         uint256 balance = ERC20(token).balanceOf(address(this));
-        if (balance != 0) token.safeTransfer(boardroom, balance);
+        if (balance != 0) _transferExactToBoardroom(token, balance);
+    }
+
+    function _quoteExit(address pool_) internal view returns (ExitQuote memory quote) {
+        quote.liquidity = ERC20(pool_).balanceOf(address(this));
+        if (quote.liquidity == 0) return quote;
+
+        uint256 supply = ERC20(pool_).totalSupply();
+        quote.poolBalanceA = ERC20(tokenA).balanceOf(pool_);
+        quote.poolBalanceB = ERC20(tokenB).balanceOf(pool_);
+        quote.expectedA = quote.poolBalanceA.fullMulDiv(quote.liquidity, supply);
+        quote.expectedB = quote.poolBalanceB.fullMulDiv(quote.liquidity, supply);
+    }
+
+    function _requireExactExit(
+        address token,
+        address pool_,
+        uint256 poolBalanceBefore,
+        uint256 expected,
+        uint256 received
+    ) internal view {
+        uint256 poolBalanceAfter = ERC20(token).balanceOf(pool_);
+        uint256 poolSpent = poolBalanceAfter > poolBalanceBefore ? 0 : poolBalanceBefore - poolBalanceAfter;
+        if (received != expected || poolSpent != expected) {
+            revert UnexpectedExitAmount(token, expected, received, poolSpent);
+        }
+    }
+
+    function _transferExactToBoardroom(address token, uint256 amount) internal {
+        ExactTransferLib.ExactDelta memory delta = ExactTransferLib.sendFromSelfTo(token, boardroom, amount);
+        if (
+            delta.senderBalanceIncreased || delta.recipientBalanceDecreased || delta.senderSpent != amount
+                || delta.recipientReceived != amount
+        ) {
+            revert UnexpectedTokenTransfer(token, amount, delta.senderSpent, delta.recipientReceived);
+        }
     }
 }

@@ -27,4 +27,17 @@ describe("runtime deployment artifacts", () => {
     expect(deployment.distributionModulePolicy).toBe(false);
     expect(deployment.lockedLiquidityModulePolicy).toBe(true);
   });
+
+  test("preserves Boardroom implementation and helper roots", () => {
+    const deployment = parseDeployment(`{
+      "chainId": 998,
+      "boardroomGovernanceLogic": "0x1000000000000000000000000000000000000001",
+      "boardroomRedemptionPayout": "0x1000000000000000000000000000000000000002",
+      "boardroomLogic": "0x1000000000000000000000000000000000000003"
+    }`);
+
+    expect(deployment.boardroomGovernanceLogic).toBe("0x1000000000000000000000000000000000000001");
+    expect(deployment.boardroomRedemptionPayout).toBe("0x1000000000000000000000000000000000000002");
+    expect(deployment.boardroomLogic).toBe("0x1000000000000000000000000000000000000003");
+  });
 });

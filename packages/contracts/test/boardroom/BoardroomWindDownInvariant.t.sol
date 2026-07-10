@@ -7,7 +7,9 @@ import {ERC20} from "solady/tokens/ERC20.sol";
 import {WETH} from "solady/tokens/WETH.sol";
 import {Boardroom} from "../../src/boardroom/Boardroom.sol";
 import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
+import {BoardroomGovernanceLogic} from "../../src/boardroom/BoardroomGovernanceLogic.sol";
 import {BoardroomPolicyRegistry} from "../../src/boardroom/BoardroomPolicyRegistry.sol";
+import {BoardroomRedemptionPayout} from "../../src/boardroom/BoardroomRedemptionPayout.sol";
 import {BoardroomToken} from "../../src/boardroom/BoardroomToken.sol";
 
 contract BoardroomWindDownInvariantERC20 is ERC20 {
@@ -56,7 +58,12 @@ contract BoardroomWindDownInvariantHandler is Test {
     constructor() {
         BoardroomPolicyRegistry policyRegistry = new BoardroomPolicyRegistry(address(this));
         WETH wrappedNative = new WETH();
-        BoardroomFactory boardroomFactory = new BoardroomFactory(address(policyRegistry), address(wrappedNative));
+        BoardroomFactory boardroomFactory = new BoardroomFactory(
+            address(policyRegistry),
+            address(wrappedNative),
+            address(new BoardroomRedemptionPayout()),
+            address(new BoardroomGovernanceLogic())
+        );
 
         boardroom = Boardroom(
             payable(boardroomFactory.createBoardroom(

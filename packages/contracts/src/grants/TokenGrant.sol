@@ -4,6 +4,7 @@ pragma solidity ^0.8.30;
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {Initializable} from "solady/utils/Initializable.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
+import {BestEffortTokenLib} from "../lib/BestEffortTokenLib.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 
 interface ITokenGrantERC20Metadata {
@@ -12,6 +13,7 @@ interface ITokenGrantERC20Metadata {
 
 interface ITokenGrantFactory {
     function closeGrant(uint256 tokenId) external;
+    function isCanonicalBoardroom(address account) external view returns (bool);
 }
 
 contract TokenGrant is Initializable {
@@ -50,6 +52,8 @@ contract TokenGrant is Initializable {
 
     // Terminal state.
     bool public isClosed;
+    bool public isQuarantined;
+    uint256 public quarantinedAmount;
 
     error InvalidAddress();
     error InvalidAmount();
@@ -74,10 +78,12 @@ contract TokenGrant is Initializable {
     error GrantTransferNotUnlocked(uint256 tokenId, uint256 unlockTime);
     error OnlyFactory();
     error HolderSyncMismatch(address expected, address actual);
+    error QuarantineNotAllowed(address issuer);
 
     event GrantSettled(address indexed holder, address indexed issuer, uint256 tokenAmount, uint256 paymentAmount);
     event VestingHalted(address indexed issuer, uint256 vestedAtHalt, uint256 unvestedWithdrawn);
     event ExpiredTokensWithdrawn(address indexed issuer, uint256 amountWithdrawn);
+    event GrantQuarantined(address indexed issuer, address indexed lastHolder, uint256 strandedAmount);
 
     constructor() {
         _disableInitializers();
@@ -138,6 +144,7 @@ contract TokenGrant is Initializable {
     }
 
     function getSettleableAmount(uint256 _currentTime) public view returns (uint256) {
+        if (isClosed || isExpired(_currentTime)) return 0;
         uint256 vested = getCurrentlyVestedSnapshot(_currentTime);
         if (vested <= settledAmount) return 0;
         return vested - settledAmount;
@@ -243,9 +250,54 @@ contract TokenGrant is Initializable {
         emit ExpiredTokensWithdrawn(issuer, remainingBalance);
     }
 
+    /// @notice Recovers an expired Boardroom grant when possible, or closes it around a token that cannot transfer safely.
+    /// @dev Recovery calls are bounded; `quarantinedAmount` records any unsettled promise left behind on failure.
+    function quarantineAndClose() external onlyIssuer {
+        _requireOpen();
+        if (block.timestamp <= expiry) revert NotYetExpired();
+        if (!ITokenGrantFactory(factory).isCanonicalBoardroom(issuer)) revert QuarantineNotAllowed(issuer);
+
+        uint256 unsettledPromise = claimable - settledAmount;
+        (bool recoveredExactly, uint256 recoveredAmount) = _tryRecoverExpiredTokens(unsettledPromise);
+        if (recoveredExactly) {
+            _closeAndBurnGrantRight();
+            emit ExpiredTokensWithdrawn(issuer, recoveredAmount);
+            return;
+        }
+
+        address lastHolder = holder;
+        uint256 strandedAmount = unsettledPromise > recoveredAmount ? unsettledPromise - recoveredAmount : 0;
+        isQuarantined = true;
+        quarantinedAmount = strandedAmount;
+        _closeAndBurnGrantRight();
+
+        emit GrantQuarantined(issuer, lastHolder, strandedAmount);
+    }
+
     /*//////////////////////////////////////////////////////////////
                                INTERNAL
     //////////////////////////////////////////////////////////////*/
+
+    function _tryRecoverExpiredTokens(uint256 expectedAmount)
+        internal
+        returns (bool recoveredExactly, uint256 recoveredAmount)
+    {
+        (bool grantBalanceReadable, uint256 grantBalanceBefore) = BestEffortTokenLib.tryBalanceOf(token, address(this));
+        (bool issuerBalanceReadable, uint256 issuerBalanceBefore) = BestEffortTokenLib.tryBalanceOf(token, issuer);
+        if (!grantBalanceReadable || !issuerBalanceReadable || grantBalanceBefore == 0) return (false, 0);
+
+        bool callSucceeded = BestEffortTokenLib.tryTransfer(token, issuer, grantBalanceBefore);
+        if (!callSucceeded) return (false, 0);
+
+        (bool grantAfterReadable, uint256 grantBalanceAfter) = BestEffortTokenLib.tryBalanceOf(token, address(this));
+        (bool issuerAfterReadable, uint256 issuerBalanceAfter) = BestEffortTokenLib.tryBalanceOf(token, issuer);
+        if (!grantAfterReadable || !issuerAfterReadable) return (false, 0);
+
+        uint256 grantSpent = grantBalanceAfter > grantBalanceBefore ? 0 : grantBalanceBefore - grantBalanceAfter;
+        recoveredAmount = issuerBalanceAfter > issuerBalanceBefore ? issuerBalanceAfter - issuerBalanceBefore : 0;
+        recoveredExactly = grantBalanceBefore >= expectedAmount && grantSpent == grantBalanceBefore
+            && recoveredAmount == grantBalanceBefore;
+    }
 
     modifier onlyFactory() {
         if (msg.sender != factory) revert OnlyFactory();

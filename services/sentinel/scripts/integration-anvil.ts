@@ -54,6 +54,7 @@ const deploymentPath = join(contractsDir, "deployments/31337.json");
 const seedPath = join(contractsDir, "deployments/31337.seed.json");
 
 const chainId = 31337;
+const governanceDelay = 86_400n;
 const defaultPort = Number.parseInt(process.env.SENTINEL_ANVIL_PORT ?? "8547", 10);
 const rpcUrl = process.env.SENTINEL_ANVIL_RPC_URL ?? `http://127.0.0.1:${defaultPort}`;
 const deployerKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as Hex;
@@ -201,6 +202,18 @@ try {
   };
   const approveSalt = salt("sentinel-policy-admin-approve");
   const approveHash = hashAction(approveCall, approveSalt);
+  await submit(deployerClient.writeContract({
+    address: deployment.assetPolicy as Address,
+    abi: assetPolicyAbi,
+    functionName: "setApprovalSpenderAllowed",
+    args: [approveSpender, true]
+  }), "pre-authorize approve spender");
+  await runWatcherOnce(chainId, {
+    config,
+    deployment,
+    onActionEvent: pipeline.handle,
+    db: dbClient.db
+  });
   await submit(ownerClient.writeContract({
     address: seed.boardroom,
     abi: boardroomAbi,
@@ -220,8 +233,14 @@ try {
     address: deployment.assetPolicy as Address,
     abi: assetPolicyAbi,
     functionName: "setApprovalSpenderAllowed",
+    args: [approveSpender, false]
+  }), "disable approve spender");
+  await submit(deployerClient.writeContract({
+    address: deployment.assetPolicy as Address,
+    abi: assetPolicyAbi,
+    functionName: "setApprovalSpenderAllowed",
     args: [approveSpender, true]
-  }), "enable approve spender");
+  }), "re-enable approve spender");
   await runWatcherOnce(chainId, {
     config,
     deployment,
@@ -310,12 +329,16 @@ async function deployContracts(wrappedNative: Address): Promise<void> {
     "--create2-deployer",
     create2Factory,
     "--broadcast",
+    "--slow",
     "-vvv"
   ], {
     cwd: contractsDir,
     env: {
       PRIVATE_KEY: deployerKey,
       PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER: deployer.address,
+      PLEDGE_CASH_PROTOCOL_GOVERNANCE: deployer.address,
+      PLEDGE_CASH_PROTOCOL_TREASURY: deployer.address,
+      PLEDGE_CASH_AMM_FEE_MANAGER: deployer.address,
       WRAPPED_NATIVE_ADDRESS: wrappedNative,
       WRITE_DEPLOYMENT_STATE: "true"
     }
@@ -420,7 +443,7 @@ async function launchBoardroom(seed: SeedArtifact): Promise<void> {
     address: seed.boardroom,
     abi: boardroomAbi,
     functionName: "launch",
-    args: [60n]
+    args: [governanceDelay]
   }), "launch boardroom");
 }
 

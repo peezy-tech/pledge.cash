@@ -8,8 +8,14 @@ deployment yet.
 
 Security reports are in scope for:
 
-- `packages/contracts/src/grants/TokenGrant.sol`
-- `packages/contracts/src/grants/TokenGrantFactory.sol`
+- all Solidity protocol code under `packages/contracts/src`, including Boardroom governance and redemption, policy
+  registries, token grants, distributions, bonding-curve migration, AMM pools and routing, locked liquidity, protocol
+  fee routing, token-transfer helpers, factories, and deterministic deployment primitives,
+- deployment and verification surfaces that can publish or attest an unsafe contract stack, including
+  `packages/contracts/script/Deploy.s.sol`, chain-specific deployment wrappers and artifact verifiers,
+  `PledgeCashDeploymentSalts.sol`, and checked-in deployment artifacts,
+- SDK or web deployment parsing when a defect can select, conceal, or misrepresent a contract address, authority,
+  runtime code hash, or chain,
 - documentation that materially misstates custody, authority, or protocol risk
 
 Out of scope:
@@ -33,6 +39,8 @@ Include:
 - a short impact statement,
 - reproduction steps or a failing test,
 - affected assets and required authority,
+- the expected invariant and the state transition that violates it,
+- any external-call or non-standard-token assumptions needed for impact,
 - whether the issue affects the testnet candidate only or could affect a
   future mainnet deployment.
 
@@ -41,9 +49,10 @@ a private security contact without including technical details.
 
 ## Expectations
 
-Please avoid interacting with funds or infrastructure you do not own. Testnet
-proofs should use self-funded test accounts and should not degrade public RPC,
-hosting, or wallet-provider services.
+Please avoid interacting with funds, contracts, accounts, or infrastructure you do not own. Do not demonstrate a
+finding against a shared live deployment when a local Foundry test, fork, or self-deployed testnet instance can prove
+it. Testnet proofs should use self-funded test accounts and should not degrade public RPC, hosting, or wallet-provider
+services.
 
 This repository has no supported mainnet deployment. Treat reports against the
 current contracts as testnet-candidate findings unless a future release states

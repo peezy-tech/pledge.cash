@@ -39,6 +39,6 @@ AMM activity does not guarantee deep liquidity or stable prices. It only means a
 
 ## Locked Liquidity
 
-Boardroom-owned liquidity can be placed in a locked-liquidity contract. The locker can claim fees for the Boardroom while principal remains locked. During wind-down, the locker exits principal back to the Boardroom so assets can be considered for redemptions.
+Boardroom-owned liquidity can be placed in a locked-liquidity contract. The locker can claim fees for the Boardroom while principal remains locked. During wind-down, the locker normally exits principal back to the Boardroom so assets can be considered for redemptions. If a token later blocks an exact exit, the protocol can return the LP token itself after the governance delay so that one hostile asset does not freeze the rest of the wind-down.
 
 For buyers, locked liquidity is useful context because it shows whether a project has Boardroom-owned LP principal and whether that principal can leave before wind-down.

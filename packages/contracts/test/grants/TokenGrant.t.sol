@@ -218,6 +218,21 @@ contract ReentrantPaymentERC20 is GrantERC20 {
     }
 }
 
+contract MutableFailureGrantERC20 is GrantERC20 {
+    bool public transfersFail;
+
+    constructor() GrantERC20("Mutable Grant", "MGRANT", 18) {}
+
+    function setTransfersFail(bool fail_) external {
+        transfersFail = fail_;
+    }
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        if (transfersFail) return false;
+        return super.transfer(to, amount);
+    }
+}
+
 interface IERC721Transfer {
     function transferFrom(address from, address to, uint256 tokenId) external;
     function safeTransferFrom(address from, address to, uint256 tokenId) external;
@@ -225,6 +240,10 @@ interface IERC721Transfer {
 
 contract TokenGrantTestBoardroomFactory {
     mapping(address => bool) public isBoardroom;
+
+    function setBoardroom(address boardroom, bool allowed) external {
+        isBoardroom[boardroom] = allowed;
+    }
 }
 
 contract TokenGrantTest is Test {
@@ -277,6 +296,7 @@ contract TokenGrantTest is Test {
     event ExpiredTokensWithdrawn(address indexed issuer, uint256 amountWithdrawn);
     event GrantClosed(address indexed grantAddress, uint256 indexed tokenId, address indexed lastHolder);
     event CreationFeeSet(uint256 amount);
+    event FeeRecipientSet(address indexed previousRecipient, address indexed newRecipient);
     event CreationFeePaid(address indexed payer, address indexed recipient, uint256 amount);
 
     function setUp() public {
@@ -346,6 +366,7 @@ contract TokenGrantTest is Test {
 
     function testFactoryOwnerIsDeployer() public view {
         assertEq(factory.owner(), address(this));
+        assertEq(factory.feeRecipient(), address(this));
         assertEq(factory.boardroomFactory(), address(boardroomFactory));
     }
 
@@ -381,15 +402,17 @@ contract TokenGrantTest is Test {
         factory.setCreationFee(0.01 ether);
     }
 
-    function testBoardroomOwnerPolicyAllowsFeeUpdateAndOwnershipRotation() public {
+    function testBoardroomOwnerPolicyAllowsFeeAndRecipientUpdatesAndOwnershipRotation() public {
         address boardroom = address(0xB04D);
         address nextOwner = address(0xA0A0);
         factory.transferOwnership(boardroom);
 
         bytes memory setFeeData = abi.encodeCall(TokenGrantFactory.setCreationFee, (0.02 ether));
+        bytes memory setFeeRecipientData = abi.encodeCall(TokenGrantFactory.setFeeRecipient, (stranger));
         bytes memory transferOwnershipData = abi.encodeWithSignature("transferOwnership(address)", nextOwner);
 
         assertTrue(factory.canCall(boardroom, address(this), address(factory), 0, setFeeData));
+        assertTrue(factory.canCall(boardroom, address(this), address(factory), 0, setFeeRecipientData));
         assertTrue(factory.canCall(boardroom, address(this), address(factory), 0, transferOwnershipData));
         assertFalse(factory.canCall(stranger, address(this), address(factory), 0, setFeeData));
         assertFalse(factory.canCall(boardroom, address(this), address(factory), 1, setFeeData));
@@ -399,12 +422,18 @@ contract TokenGrantTest is Test {
         assertEq(factory.creationFee(), 0.02 ether);
 
         vm.prank(boardroom);
+        factory.setFeeRecipient(stranger);
+        assertEq(factory.feeRecipient(), stranger);
+
+        vm.prank(boardroom);
         factory.transferOwnership(nextOwner);
         assertEq(factory.owner(), nextOwner);
+        assertEq(factory.feeRecipient(), stranger);
     }
 
-    function testCreationFeeIsSentToOwnerOnGrantCreation() public {
+    function testCreationFeeIsSentToIndependentFeeRecipientOnGrantCreation() public {
         uint256 fee = 0.01 ether;
+        factory.setFeeRecipient(stranger);
         factory.setCreationFee(fee);
 
         bytes32 salt = keccak256("native-fee-create");
@@ -414,14 +443,26 @@ contract TokenGrantTest is Test {
         vm.deal(issuer, fee);
         vm.prank(issuer);
         vm.expectEmit(true, true, false, true, address(factory));
-        emit CreationFeePaid(issuer, address(this), fee);
-        uint256 ownerBalanceBefore = address(this).balance;
+        emit CreationFeePaid(issuer, stranger, fee);
+        uint256 recipientBalanceBefore = stranger.balance;
         address created = _createFreeGrantWithValue(salt, fee);
 
         assertEq(created, grantAddress);
-        assertEq(address(this).balance, ownerBalanceBefore + fee);
+        assertEq(stranger.balance, recipientBalanceBefore + fee);
         assertEq(address(factory).balance, 0);
         assertEq(token.balanceOf(grantAddress), GRANT_SIZE);
+    }
+
+    function testOwnershipTransferDoesNotMoveFeeRecipient() public {
+        address nextOwner = address(0xA0A0);
+        factory.transferOwnership(nextOwner);
+        assertEq(factory.feeRecipient(), address(this));
+
+        vm.prank(nextOwner);
+        factory.setFeeRecipient(stranger);
+        vm.prank(nextOwner);
+        factory.transferOwnership(address(0xB0B));
+        assertEq(factory.feeRecipient(), stranger);
     }
 
     function testCreationFeeRejectsWrongNativePayment() public {

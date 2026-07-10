@@ -29,13 +29,17 @@ interface IBoardroomRedemptionCallback {
 
 /// @notice Delegate-call payout logic kept outside Boardroom's EIP-170-constrained runtime.
 contract BoardroomRedemptionPayout {
-    uint256 internal constant PAYOUT_GAS = 200_000;
+    // Covers the canonical AMM LP fee-settlement path while keeping every
+    // redemption asset isolated behind a fixed, best-effort gas budget.
+    uint256 internal constant PAYOUT_GAS = 300_000;
+    uint256 internal constant ASSET_PROBE_GAS = 30_000;
 
     error InvalidRedemptionInput();
-    error ZeroRedemptionAmount(address asset);
     error InsufficientRedemptionAmount(address asset, uint256 amountOut, uint256 minAmountOut);
     error UnexpectedRedeemableAssetBalanceChange(address asset, uint256 expected, uint256 actual);
     error UnexpectedWrappedNativeBalanceChange(uint256 expected, uint256 actual);
+    error NoRedemptionExcess(address asset);
+    error InvalidRedeemableAsset(address asset);
 
     struct ObligationSlots {
         uint256 issuedGrants;
@@ -61,6 +65,7 @@ contract BoardroomRedemptionPayout {
     event BoardroomDistributionPruned(address indexed distribution);
     event BoardroomLockedLiquidityPruned(address indexed locker);
     event BoardroomGrantSlotsReleased(address indexed distribution, uint256 count);
+    event RedemptionExcessSwept(address indexed asset, address indexed recipient, uint256 amount);
 
     function wrapNative(address wrappedNative) external payable {
         uint256 nativeBalance = address(this).balance;
@@ -85,6 +90,27 @@ contract BoardroomRedemptionPayout {
             if (forfeit) BoardroomRedemptionStorage.layout().forfeitedShares += burned;
         }
         emit TreasurySharesBurned(burned);
+    }
+
+    function snapshotAssets(address[] calldata assets) external {
+        BoardroomRedemptionStorage.Layout storage redemption = BoardroomRedemptionStorage.layout();
+        uint256 length = assets.length;
+        for (uint256 i; i < length; ++i) {
+            redemption.snapshotBalance[assets[i]] = _boundedBalanceOf(assets[i], address(this));
+        }
+    }
+
+    function sweepExcess(address asset, address recipient) external returns (uint256 amount) {
+        BoardroomRedemptionStorage.Layout storage redemption = BoardroomRedemptionStorage.layout();
+        uint256 allocatedAndForfeited = redemption.allocatedShares[asset] + redemption.forfeitedShares;
+        uint256 reserved =
+            allocatedAndForfeited == redemption.supply ? 0 : redemption.snapshotBalance[asset] - redemption.paid[asset];
+        uint256 balance = _boundedBalanceOf(asset, address(this));
+        if (balance <= reserved) revert NoRedemptionExcess(asset);
+
+        amount = balance - reserved;
+        _checkedTransfer(asset, recipient, amount);
+        emit RedemptionExcessSwept(asset, recipient, amount);
     }
 
     function pruneClosedObligations(ObligationSlots calldata slots) external {
@@ -182,16 +208,16 @@ contract BoardroomRedemptionPayout {
         uint256 remainingShares = redemption.supply - redemption.forfeitedShares - totalAllocated;
         if (shares > remainingShares) revert InvalidRedemptionInput();
 
-        amountOut =
-            FixedPointMathLib.fullMulDiv(SafeTransferLib.balanceOf(asset, address(this)), shares, remainingShares);
-        if (amountOut == 0) revert ZeroRedemptionAmount(asset);
+        uint256 remainingBalance = redemption.snapshotBalance[asset] - redemption.paid[asset];
+        amountOut = FixedPointMathLib.fullMulDiv(remainingBalance, shares, remainingShares);
         if (amountOut < minAmountOut) {
             revert InsufficientRedemptionAmount(asset, amountOut, minAmountOut);
         }
 
         redemption.holderAllocatedShares[holder][asset] = allocated + shares;
         redemption.allocatedShares[asset] = totalAllocated + shares;
-        _checkedTransfer(asset, recipient, amountOut);
+        redemption.paid[asset] += amountOut;
+        if (amountOut != 0) _checkedTransfer(asset, recipient, amountOut);
 
         emit RedemptionAssetClaimed(holder, recipient, asset, shares, amountOut);
     }
@@ -207,6 +233,19 @@ contract BoardroomRedemptionPayout {
         if (delta.recipientReceived != expectedAmount) {
             revert UnexpectedRedeemableAssetBalanceChange(asset, expectedAmount, delta.recipientReceived);
         }
+    }
+
+    function _boundedBalanceOf(address asset, address account) private view returns (uint256 amount) {
+        bool success;
+        assembly ("memory-safe") {
+            let pointer := mload(0x40)
+            mstore(pointer, shl(224, 0x70a08231))
+            mstore(add(pointer, 4), account)
+            success := staticcall(ASSET_PROBE_GAS, asset, pointer, 36, pointer, 32)
+            success := and(success, eq(returndatasize(), 32))
+            amount := mload(pointer)
+        }
+        if (!success) revert InvalidRedeemableAsset(asset);
     }
 
     function _removeGrantAt(ObligationSlots calldata slots, uint256 index) private {

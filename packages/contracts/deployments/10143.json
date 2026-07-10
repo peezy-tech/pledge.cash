@@ -1,5 +1,5 @@
 {
   "chainId": 10143,
   "status": "pending",
-  "reason": "Security-remediated deterministic v3 deployment has not been broadcast yet"
+  "reason": "Authority-hardened deterministic v4 deployment has not been broadcast yet"
 }

@@ -12,6 +12,45 @@ interface ILockedLiquidityFactoryBoardroom {
     function shareToken() external view returns (address);
     function lockedLiquidityExitAllowed() external view returns (bool);
     function isIssuedDistribution(address distribution) external view returns (bool);
+    function policyRegistry() external view returns (address);
+}
+
+interface ILockedLiquidityFactoryPolicyRegistry {
+    function isModulePolicy(address policy) external view returns (bool);
+}
+
+interface ILockedLiquidityFactoryBoardroomFactory {
+    function isBoardroom(address boardroom) external view returns (bool);
+    function isShareToken(address token) external view returns (bool);
+}
+
+interface ILockedLiquidityFactoryShareToken {
+    function boardroom() external view returns (address);
+}
+
+interface ILockedLiquidityMigrationDistribution {
+    function factory() external view returns (address);
+    function boardroom() external view returns (address);
+    function shareToken() external view returns (address);
+    function quoteToken() external view returns (address);
+    function migrationSalt() external view returns (bytes32);
+}
+
+interface ILockedLiquidityReservationRouter {
+    function poolFor(address tokenA, address tokenB) external view returns (address);
+    function factory() external view returns (address);
+}
+
+interface ILockedLiquidityReservationAmmFactory {
+    function reserveInitialLiquidity(
+        address tokenA,
+        address tokenB,
+        address initializer,
+        address recipient,
+        address reservationOwner
+    ) external returns (address pool);
+
+    function releaseInitialLiquidityReservation(address tokenA, address tokenB, address reservationOwner) external;
 }
 
 contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
@@ -33,22 +72,33 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
     }
 
     address public immutable ammRouter;
+    address public immutable boardroomFactory;
     address public immutable lockedLiquidityLogic;
 
     mapping(address => bool) public isLocker;
     mapping(address => address) public lockerBoardroom;
     mapping(address => mapping(address => address)) public lockerForBoardroomPool;
     mapping(address => address[]) internal lockersForBoardroom;
+    mapping(address => uint256) public migrationReservationCount;
+    mapping(address => mapping(bytes32 => address)) public migrationReservationForSalt;
+    mapping(address => mapping(bytes32 => address)) public migrationReservationForPair;
 
     error InvalidAddress();
+    error InvalidBoardroomFactory(address factory);
     error InvalidAmount();
     error UnsafeLiquidityMinimums(uint256 amountAMin, uint256 requiredAMin, uint256 amountBMin, uint256 requiredBMin);
     error InvalidBoardroom(address boardroom);
     error MissingBoardroomShareToken(address tokenA, address tokenB, address shareToken);
+    error CanonicalSharePairNotAllowed(address tokenA, address tokenB);
     error UnauthorizedBoardroomPayer(address boardroom, address payer);
     error LockerAlreadyExists(address boardroom, address pool);
     error TooManyBoardroomLockers(address boardroom);
     error TransferAmountMismatch(address token, uint256 expected, uint256 actual);
+    error UnauthorizedMigrationReservation(address boardroom, address caller);
+    error MigrationSaltReserved(address boardroom, bytes32 salt);
+    error MigrationLockerSaltUsed(address boardroom, bytes32 salt, address locker);
+    error MigrationPairReserved(address boardroom, address tokenA, address tokenB);
+    error MissingMigrationReservation(address boardroom, address distribution);
 
     event LockedLiquidityCreated(
         address indexed locker,
@@ -62,10 +112,18 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         bytes32 salt
     );
     event ClosedLockerPruned(address indexed boardroom, address indexed locker, address indexed pool);
+    event MigrationReserved(
+        address indexed boardroom, address indexed distribution, bytes32 indexed salt, address tokenA, address tokenB
+    );
+    event MigrationReservationReleased(address indexed boardroom, address indexed distribution, bytes32 indexed salt);
 
-    constructor(address ammRouter_) {
+    constructor(address ammRouter_, address boardroomFactory_) {
         if (ammRouter_ == address(0)) revert InvalidAddress();
+        if (boardroomFactory_ == address(0) || boardroomFactory_.code.length == 0) {
+            revert InvalidBoardroomFactory(boardroomFactory_);
+        }
         ammRouter = ammRouter_;
+        boardroomFactory = boardroomFactory_;
         lockedLiquidityLogic = address(new LockedLiquidity());
     }
 
@@ -84,6 +142,52 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
     {
         _requireIssuedDistribution(boardroom, msg.sender);
         return _createLockedLiquidity(boardroom, msg.sender, params);
+    }
+
+    function reserveMigration(address boardroom, address distribution, address tokenA, address tokenB, bytes32 salt)
+        external
+        nonReentrant
+    {
+        _requireAuthorizedMigrationFactory(boardroom, distribution, tokenA, tokenB, salt);
+        _pruneClosedLockers(boardroom);
+
+        bytes32 pairKey = _pairKey(tokenA, tokenB);
+        if (migrationReservationForSalt[boardroom][salt] != address(0)) {
+            revert MigrationSaltReserved(boardroom, salt);
+        }
+        address predictedLocker =
+            LibClone.predictDeterministicAddress(lockedLiquidityLogic, _cloneSalt(boardroom, salt), address(this));
+        if (isLocker[predictedLocker] || predictedLocker.code.length != 0) {
+            revert MigrationLockerSaltUsed(boardroom, salt, predictedLocker);
+        }
+        if (migrationReservationForPair[boardroom][pairKey] != address(0)) {
+            revert MigrationPairReserved(boardroom, tokenA, tokenB);
+        }
+
+        address existingPool = ILockedLiquidityReservationRouter(ammRouter).poolFor(tokenA, tokenB);
+        if (existingPool != address(0) && lockerForBoardroomPool[boardroom][existingPool] != address(0)) {
+            revert LockerAlreadyExists(boardroom, existingPool);
+        }
+        if (lockersForBoardroom[boardroom].length + migrationReservationCount[boardroom] >= MAX_LOCKERS_PER_BOARDROOM) {
+            revert TooManyBoardroomLockers(boardroom);
+        }
+
+        migrationReservationForSalt[boardroom][salt] = distribution;
+        migrationReservationForPair[boardroom][pairKey] = distribution;
+        migrationReservationCount[boardroom] += 1;
+
+        address ammFactory = ILockedLiquidityReservationRouter(ammRouter).factory();
+        ILockedLiquidityReservationAmmFactory(ammFactory)
+            .reserveInitialLiquidity(tokenA, tokenB, predictedLocker, predictedLocker, distribution);
+        emit MigrationReserved(boardroom, distribution, salt, tokenA, tokenB);
+    }
+
+    function releaseMigrationReservation(address boardroom, address tokenA, address tokenB, bytes32 salt)
+        external
+        nonReentrant
+    {
+        _requireIssuedDistribution(boardroom, msg.sender);
+        _releaseMigrationReservation(boardroom, msg.sender, tokenA, tokenB, salt, true);
     }
 
     function canCall(address boardroom, address, address target, uint256 value, bytes calldata data)
@@ -150,14 +254,38 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         address shareToken = _boardroomShareToken(boardroom);
         _requirePairContainsShareToken(params, shareToken);
         _pruneClosedLockers(boardroom);
-        _requireLockerCapacity(boardroom);
+        bool usesMigrationReservation = payer != boardroom;
+        if (usesMigrationReservation) {
+            _requireOwnedMigrationReservation(boardroom, payer, params.tokenA, params.tokenB, params.salt);
+        } else {
+            _requireUnreservedDirectCreation(boardroom, params.tokenA, params.tokenB, params.salt);
+        }
+        _requireLockerCapacity(boardroom, usesMigrationReservation);
 
         locker = _deployLocker(boardroom, params);
         _recordLockerBoardroom(locker, boardroom);
+        if (!usesMigrationReservation) {
+            _reserveDirectInitialLiquidity(boardroom, locker, params.tokenA, params.tokenB);
+        }
         _pullSeedTokens(locker, payer, params);
         (pool, amountA, amountB, liquidity) = _seedLockerLiquidity(locker, params);
         _recordLockerPool(boardroom, pool, locker);
+        if (usesMigrationReservation) {
+            _releaseMigrationReservation(boardroom, payer, params.tokenA, params.tokenB, params.salt, false);
+        }
 
+        _emitLockedLiquidityCreated(locker, boardroom, pool, params, amountA, amountB, liquidity);
+    }
+
+    function _emitLockedLiquidityCreated(
+        address locker,
+        address boardroom,
+        address pool,
+        CreateParams calldata params,
+        uint256 amountA,
+        uint256 amountB,
+        uint256 liquidity
+    ) internal {
         emit LockedLiquidityCreated(
             locker, boardroom, pool, params.tokenA, params.tokenB, amountA, amountB, liquidity, params.salt
         );
@@ -190,7 +318,7 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
 
         address shareToken = _verifiedBoardroomShareToken(boardroom);
         if (shareToken == address(0)) return false;
-        return _containsShareToken(params.tokenA, params.tokenB, shareToken);
+        return _isAllowedBoardroomPair(params.tokenA, params.tokenB, shareToken);
     }
 
     function _requireValidCreateRequest(address boardroom, address payer, CreateParams calldata params) internal pure {
@@ -200,16 +328,110 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         _requireMeaningfulSeedMinimums(params);
     }
 
-    function _requirePairContainsShareToken(CreateParams calldata params, address shareToken) internal pure {
+    function _requirePairContainsShareToken(CreateParams calldata params, address shareToken) internal view {
         if (!_containsShareToken(params.tokenA, params.tokenB, shareToken)) {
             revert MissingBoardroomShareToken(params.tokenA, params.tokenB, shareToken);
         }
+        address pairedToken = params.tokenA == shareToken ? params.tokenB : params.tokenA;
+        if (_isCanonicalShareToken(pairedToken)) {
+            revert CanonicalSharePairNotAllowed(params.tokenA, params.tokenB);
+        }
     }
 
-    function _requireLockerCapacity(address boardroom) internal view {
-        if (lockersForBoardroom[boardroom].length >= MAX_LOCKERS_PER_BOARDROOM) {
+    function _requireLockerCapacity(address boardroom, bool usesMigrationReservation) internal view {
+        uint256 used = lockersForBoardroom[boardroom].length + migrationReservationCount[boardroom];
+        if (usesMigrationReservation ? used > MAX_LOCKERS_PER_BOARDROOM : used >= MAX_LOCKERS_PER_BOARDROOM) {
             revert TooManyBoardroomLockers(boardroom);
         }
+    }
+
+    function _requireAuthorizedMigrationFactory(
+        address boardroom,
+        address distribution,
+        address tokenA,
+        address tokenB,
+        bytes32 salt
+    ) internal view {
+        if (boardroom.code.length == 0 || distribution.code.length == 0) {
+            revert UnauthorizedMigrationReservation(boardroom, msg.sender);
+        }
+        if (!ILockedLiquidityFactoryBoardroomFactory(boardroomFactory).isBoardroom(boardroom)) {
+            revert UnauthorizedMigrationReservation(boardroom, msg.sender);
+        }
+
+        address registry = ILockedLiquidityFactoryBoardroom(boardroom).policyRegistry();
+        if (!ILockedLiquidityFactoryPolicyRegistry(registry).isModulePolicy(msg.sender)) {
+            revert UnauthorizedMigrationReservation(boardroom, msg.sender);
+        }
+        if (
+            ILockedLiquidityFactoryBoardroom(boardroom).shareToken() != tokenA
+                || ILockedLiquidityFactoryShareToken(tokenA).boardroom() != boardroom || _isCanonicalShareToken(tokenB)
+        ) {
+            revert UnauthorizedMigrationReservation(boardroom, msg.sender);
+        }
+
+        ILockedLiquidityMigrationDistribution curve = ILockedLiquidityMigrationDistribution(distribution);
+        if (
+            curve.factory() != msg.sender || curve.boardroom() != boardroom || curve.shareToken() != tokenA
+                || curve.quoteToken() != tokenB || curve.migrationSalt() != salt
+        ) {
+            revert UnauthorizedMigrationReservation(boardroom, msg.sender);
+        }
+    }
+
+    function _requireOwnedMigrationReservation(
+        address boardroom,
+        address distribution,
+        address tokenA,
+        address tokenB,
+        bytes32 salt
+    ) internal view {
+        if (
+            migrationReservationForSalt[boardroom][salt] != distribution
+                || migrationReservationForPair[boardroom][_pairKey(tokenA, tokenB)] != distribution
+        ) {
+            revert MissingMigrationReservation(boardroom, distribution);
+        }
+    }
+
+    function _requireUnreservedDirectCreation(address boardroom, address tokenA, address tokenB, bytes32 salt)
+        internal
+        view
+    {
+        if (migrationReservationForSalt[boardroom][salt] != address(0)) {
+            revert MigrationSaltReserved(boardroom, salt);
+        }
+        if (migrationReservationForPair[boardroom][_pairKey(tokenA, tokenB)] != address(0)) {
+            revert MigrationPairReserved(boardroom, tokenA, tokenB);
+        }
+    }
+
+    function _releaseMigrationReservation(
+        address boardroom,
+        address distribution,
+        address tokenA,
+        address tokenB,
+        bytes32 salt,
+        bool releaseAmmReservation
+    ) internal {
+        _requireOwnedMigrationReservation(boardroom, distribution, tokenA, tokenB, salt);
+        if (releaseAmmReservation) {
+            address ammFactory = ILockedLiquidityReservationRouter(ammRouter).factory();
+            ILockedLiquidityReservationAmmFactory(ammFactory)
+                .releaseInitialLiquidityReservation(tokenA, tokenB, distribution);
+        }
+        delete migrationReservationForSalt[boardroom][salt];
+        delete migrationReservationForPair[boardroom][_pairKey(tokenA, tokenB)];
+        migrationReservationCount[boardroom] -= 1;
+        emit MigrationReservationReleased(boardroom, distribution, salt);
+    }
+
+    function _reserveDirectInitialLiquidity(address boardroom, address locker, address tokenA, address tokenB)
+        internal
+    {
+        address ammFactory = ILockedLiquidityReservationRouter(ammRouter).factory();
+        ILockedLiquidityReservationAmmFactory(ammFactory)
+            .reserveInitialLiquidity(tokenA, tokenB, locker, locker, boardroom);
     }
 
     function _pruneClosedLockers(address boardroom) internal returns (uint256 pruned) {
@@ -277,10 +499,31 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
 
     function _verifiedBoardroomShareToken(address boardroom) internal view returns (address shareToken) {
         if (boardroom.code.length == 0) return address(0);
+        if (!_isCanonicalBoardroom(boardroom)) return address(0);
 
         shareToken = _readBoardroomShareToken(boardroom);
         if (shareToken == address(0)) return address(0);
+        if (!_isReciprocalShareToken(boardroom, shareToken)) return address(0);
         if (!_hasLockedLiquidityExitHook(boardroom)) return address(0);
+    }
+
+    function _isCanonicalBoardroom(address boardroom) internal view returns (bool) {
+        (bool success, bytes memory data) = boardroomFactory.staticcall(
+            abi.encodeCall(ILockedLiquidityFactoryBoardroomFactory.isBoardroom, (boardroom))
+        );
+        return success && data.length == 32 && abi.decode(data, (bool));
+    }
+
+    function _isCanonicalShareToken(address token) internal view returns (bool) {
+        (bool success, bytes memory data) =
+            boardroomFactory.staticcall(abi.encodeCall(ILockedLiquidityFactoryBoardroomFactory.isShareToken, (token)));
+        return success && data.length == 32 && abi.decode(data, (bool));
+    }
+
+    function _isReciprocalShareToken(address boardroom, address shareToken) internal view returns (bool) {
+        (bool success, bytes memory data) =
+            shareToken.staticcall(abi.encodeCall(ILockedLiquidityFactoryShareToken.boardroom, ()));
+        return success && data.length == 32 && abi.decode(data, (address)) == boardroom;
     }
 
     function _readBoardroomShareToken(address boardroom) internal view returns (address shareToken) {
@@ -333,6 +576,12 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         return tokenA == shareToken || tokenB == shareToken;
     }
 
+    function _isAllowedBoardroomPair(address tokenA, address tokenB, address shareToken) internal view returns (bool) {
+        if (!_containsShareToken(tokenA, tokenB, shareToken)) return false;
+        address pairedToken = tokenA == shareToken ? tokenB : tokenA;
+        return !_isCanonicalShareToken(pairedToken);
+    }
+
     function _pullSeedTokens(address locker, address payer, CreateParams calldata params) internal {
         _checkedTransferFrom(params.tokenA, payer, locker, params.amountADesired);
         _checkedTransferFrom(params.tokenB, payer, locker, params.amountBDesired);
@@ -352,6 +601,10 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
 
     function _cloneSalt(address boardroom, bytes32 salt) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(boardroom, salt));
+    }
+
+    function _pairKey(address tokenA, address tokenB) internal pure returns (bytes32) {
+        return tokenA < tokenB ? keccak256(abi.encode(tokenA, tokenB)) : keccak256(abi.encode(tokenB, tokenA));
     }
 
     function _selector(bytes calldata data) internal pure returns (bytes4 selector) {

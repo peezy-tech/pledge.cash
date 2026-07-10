@@ -6,6 +6,7 @@ This document describes the AMM and Boardroom-owned locked liquidity primitives 
 - `packages/contracts/src/amm/AmmPool.sol`
 - `packages/contracts/src/amm/PoolFees.sol`
 - `packages/contracts/src/amm/AmmRouter.sol`
+- `packages/contracts/src/fees/ProtocolFeeRouter.sol`
 - `packages/contracts/src/liquidity/LockedLiquidityFactory.sol`
 - `packages/contracts/src/liquidity/LockedLiquidity.sol`
 
@@ -20,7 +21,9 @@ This document describes the AMM and Boardroom-owned locked liquidity primitives 
 
 - Pool reserves: the two ERC20 tokens held by `AmmPool`.
 - LP swap fees: the LP share of the `30 bps` swap input fee, segregated into the pool's `PoolFees` vault and indexed to LP token holders.
-- Protocol swap fees: optional protocol share of the swap fee, paid directly to the factory's one-way protocol fee recipient.
+- Protocol swap fees: optional protocol share of the swap fee, paid to the factory's governance-controlled recipient. The
+  canonical deployment uses `ProtocolFeeRouter`, whose treasury destination remains rotatable across Boardroom
+  wind-downs.
 - LP principal: ERC20 LP tokens minted by the pool. Boardroom-owned principal sits inside a `LockedLiquidity` clone.
 - Native gas token: supported only through `AmmRouter` and its immutable wrapped-native token.
 
@@ -30,9 +33,11 @@ supported set. Router inputs and locked-liquidity funding enforce exact receipt,
 requires exact sender and recipient deltas. A negative rebase is rejected with `BalanceBelowReserve`; it cannot be
 silently synchronized into LP accounting.
 
-`AmmFactory.setProtocolFeeRecipient` can be called once by the deploying fee manager. When unset, all swap fees accrue
-to LPs. When set, `PROTOCOL_FEE_SHARE_BPS` of each nominal swap fee is transferred directly to the protocol recipient,
-and the remainder is transferred to `PoolFees` for LP claims.
+`AmmFactory.owner()` is protocol governance. Governance may rotate the protocol fee recipient and the operational fee
+manager independently. The fee manager can reconcile untracked pool balances but cannot redirect protocol revenue.
+When the recipient is unset, all swap fees accrue to LPs. Canonical deployments set it to `ProtocolFeeRouter`, and
+`PROTOCOL_FEE_SHARE_BPS` of each nominal swap fee is transferred there. Anyone may forward a router-held token or native
+balance to its current treasury; only router governance may rotate that treasury.
 
 The nominal swap fee rounds up. Consequently, splitting one input across smaller swaps cannot reduce the total nominal
 fee. The pool carries both protocol-share division remainders and LP-index numerator remainders forward so repeated
@@ -46,7 +51,22 @@ small swaps cannot systematically escape either allocation.
 2. Initialized with sorted token pair, fee vault, empty reserves, and initial TWAP observation.
 3. Active pool where liquidity can be added, removed, swapped, and fee claims can be pulled by LP holders.
 
-The factory creates exactly one pool for each sorted pair.
+The factory creates exactly one pool for each sorted pair. Its immutable `boardroomFactory` identifies canonical
+Boardroom share tokens. An empty pool containing one of those shares cannot accept an unreserved first mint, even if
+someone created the pool while a governance action was waiting in the timelock.
+
+Before a Boardroom locker funds an empty pool, `LockedLiquidityFactory` reserves that pair's initial mint in
+`AmmFactory`. Direct Boardroom creation reserves in the same transaction immediately before funding; curve migrations
+reserve when the migration is authorized. The reservation binds the expected initializer and LP recipient to the
+predicted locker. Only the canonical `AmmRouter` may consume a reservation, and consumption occurs inside the pool's
+first mint so any later failure restores it atomically. The locker factory grants this authority only when the caller is
+registered by its immutable `BoardroomFactory` and the claimed share token points back to that exact Boardroom.
+
+For an unreserved public pool, `MINIMUM_LIQUIDITY` remains permanently minted to `address(1)`. A reserved Boardroom
+pool instead mints the entire geometric-mean initial LP supply to its locked-liquidity recipient. Because that recipient
+cannot release LP before wind-down, the same anti-withdrawal property holds during the active lifecycle. If nobody adds
+liquidity later, terminal exit owns and burns the complete supply, drains both reserves, and leaves no irredeemable
+Boardroom shares in the pool. Later public LP positions remain independently owned and are not confiscated by wind-down.
 
 ### Locked Liquidity
 
@@ -91,13 +111,21 @@ Effects:
 - router creates the pool if needed,
 - tokens move into the pool,
 - pool mints LP tokens to the recipient,
-- first mint permanently locks `MINIMUM_LIQUIDITY` to `address(1)`.
+- an unreserved first mint permanently locks `MINIMUM_LIQUIDITY` to `address(1)`, while a reserved Boardroom first mint
+  sends the complete initial LP supply to the authenticated locker.
+
+If an initial-liquidity reservation exists, the router also proves the real token payer to the pool. Direct pool mints,
+router calls funded by another account, and mints to another recipient all revert. Unreserved pools retain the public
+first-liquidity flow.
 
 Fee-on-transfer seed tokens are rejected by exact balance-delta checks.
 
-The locked-liquidity factory enforces the two-sided `5%` maximum seed slippage in contract, including migrations from a
-bonding curve. A permissionless caller may pre-create the canonical pair, but a hostile reserve ratio cannot reduce
-either Boardroom contribution below that bound. The transaction reverts atomically instead.
+The locked-liquidity factory reserves an empty pool before pulling seed assets and enforces the two-sided `5%` maximum
+seed slippage in contract, including migrations from a bonding curve. A permissionless caller may pre-create the
+canonical pair, but cannot take the first mint after reservation. If a pool is already initialized, a hostile reserve
+ratio cannot reduce either Boardroom contribution below the configured bounds; the transaction reverts atomically
+instead. Token donations can still delay a reserved initialization until the fee manager recovers them, so the
+reservation is an ownership-integrity guarantee rather than an availability guarantee.
 
 ### Swap
 
@@ -136,16 +164,22 @@ If LP received in the current block is burned, its proportional pending entitlem
 the post-burn LP supply. This prevents a just-in-time provider from minting, generating its own swap fee, removing the
 liquidity, and claiming that pending fee later; mature fees on older liquidity remain claimable after a burn.
 
+Fee-vault payouts require both the vault's exact spend and the recipient's exact receipt. If a token later mutates into a
+taxed, partial, or success-without-transfer mode, the claim reverts atomically instead of clearing the LP holder's fee
+entitlement. The same revert protects a locker exit, allowing its delayed LP fallback to preserve principal and fees.
+
 ### Recover Or Synchronize Excess Balances
 
-Only the factory's immutable fee manager can act on positive balances above recorded reserves:
+Only the factory's current fee manager can call the explicit positive-balance reconciliation functions:
 
 - `recoverExcess(recipient)` transfers exactly the two excess amounts without changing reserves;
 - `syncExcess()` incorporates the current positive excess into reserves, subject to the `uint112` reserve cap.
 
-Neither function permits a balance below its recorded reserve, and recovery rejects inexact token transfers. This
-keeps arbitrary callers from skimming positive rebases or donations while still giving the deployment authority a
-bounded way to reconcile accidental transfers.
+Neither function permits a balance below its recorded reserve, recovery rejects inexact token transfers, and
+`syncExcess` is unavailable before the first LP supply exists. These functions are best-effort operational tools, not
+custody for accidental transfers. Because mint and swap infer input from raw pool balance deltas, any untracked balance
+can be consumed permissionlessly before the fee manager recovers it. Never transfer assets to a pool outside an atomic
+router or pool interaction with the expectation that they remain recoverable.
 
 ### Create Boardroom Locked Liquidity
 
@@ -155,7 +189,10 @@ The Boardroom owner executes a batch:
 2. approve `LockedLiquidityFactory` for the quote token,
 3. call `createLockedLiquidity`.
 
-The factory policy only permits creation where one side is the Boardroom share token. The factory pulls exact seed amounts from the Boardroom to the locker, then asks the locker to add liquidity through the router. The Boardroom records the returned locker.
+The factory policy permits creation only when exactly one side is a canonical Boardroom share token and that share belongs
+to the creating Boardroom. Canonical share/share pairs are rejected because one Boardroom cannot authenticate AMM
+custody on behalf of the other token's governance. The factory pulls exact seed amounts from the Boardroom to the
+locker, then asks the locker to add liquidity through the router. The Boardroom records the returned locker.
 
 ### Claim Locked LP Fees
 
@@ -163,15 +200,27 @@ The Boardroom may call `LockedLiquidity.claimFees` through policy while active o
 
 ### Exit Locked LP
 
-During `WindingDown`, the Boardroom owner calls `exitLockedLiquidity`. The Boardroom:
+During `WindingDown`, anyone may call `exitLockedLiquidity`. The Boardroom:
 
 1. verifies the locker was recorded,
 2. asks the locker to claim fees and remove all LP it owns,
-3. registers non-share token sides as redeemable assets,
-4. burns Boardroom-held share tokens,
-5. emits the exit event.
+3. requires the Pool's exact pro-rata spend and the Boardroom's exact receipt for both assets, in addition to any stricter
+   caller minima,
+4. registers non-share token sides as redeemable assets,
+5. burns Boardroom-held share tokens,
+6. unpins and removes the now-empty LP fallback asset, then emits the direct-exit event.
 
-Redemptions can open only after all recorded lockers report zero locked LP. First-liquidity dust can remain in the pool because `MINIMUM_LIQUIDITY` is permanently locked.
+The LP token is admitted and pinned as a fallback redemption asset when the locker is recorded, so it cannot be removed
+while principal remains open. Before the terminal delay, an inexact, taxed, no-op, reverting, or gas-burning underlying
+transfer reverts atomically and preserves the locker LP. Once the greater of one day or the launched Boardroom's
+governance delay has elapsed, the Boardroom retries with protocol-fixed minima under bounded gas. If that exact exit
+still fails, the locker transfers its LP token itself to the Boardroom, the LP remains admitted, unreadable underlying
+assets are quarantined, and the locker is pruned. This fallback preserves the Pool claim without letting a hostile token
+block unrelated redemptions. Redemption supply remains total economic share supply; pool-held shares are not generically
+excluded because later public LP positions may own them.
+
+Redemptions can open only after all recorded lockers report zero locked LP. Unreserved pools retain permanently locked
+first-liquidity dust; a reserved pool has none unless later public liquidity changes the ownership set.
 
 ### Prune Closed Lockers
 
@@ -207,7 +256,9 @@ full-precision multiply/divide where user-controlled multiplication could otherw
 - one pool exists per sorted token pair,
 - pool reserves equal pool token balances after fees are moved to `PoolFees` and the protocol recipient,
 - LP fee claims cannot exceed `PoolFees` balances,
-- protocol fee routing can only be configured once by the factory fee manager,
+- protocol fee routing and the operational fee manager can be rotated only by factory governance,
+- reserved initial liquidity can be minted only through the canonical router by the expected payer to the expected LP
+  recipient, and reservation consumption is atomic with the mint,
 - ordinary LP transfers move unclaimed fee entitlement pro rata with the LP balance,
 - same-block incoming and newly accrued entitlement is pending while existing mature fees remain claimable,
 - LP sent into the pool for burning leaves already accrued fees claimable by its former owner,
@@ -219,6 +270,8 @@ full-precision multiply/divide where user-controlled multiplication could otherw
 - token inputs must arrive exactly, rejecting fee-on-transfer behavior,
 - native flows unwrap only the router's immutable wrapped-native token.
 - native-output flows reject the zero address as recipient.
+- untracked pool balances are public swap or mint inputs until the fee manager recovers or synchronizes them.
+- an uninitialized pool cannot synchronize donations into one-sided or otherwise unusable reserves.
 
 ## Local Proof
 

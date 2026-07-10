@@ -43,6 +43,14 @@ if [[ -z "${PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER:-}" ]]; then
 fi
 require_address PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER "$PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER"
 
+for role in PLEDGE_CASH_PROTOCOL_GOVERNANCE PLEDGE_CASH_PROTOCOL_TREASURY PLEDGE_CASH_AMM_FEE_MANAGER; do
+  if [[ -z "${!role:-}" ]]; then
+    echo "Set $role before dry-running or broadcasting." >&2
+    exit 1
+  fi
+  require_address "$role" "${!role}"
+done
+
 if [[ -n "${PLEDGE_CASH_DETERMINISTIC_DEPLOYER:-}" ]]; then
   require_address PLEDGE_CASH_DETERMINISTIC_DEPLOYER "$PLEDGE_CASH_DETERMINISTIC_DEPLOYER"
 fi
@@ -90,6 +98,7 @@ args=(
 
 if [[ "$BROADCAST" == "1" ]]; then
   export WRITE_DEPLOYMENT_STATE=true
+  export DEPLOYMENT_ARTIFACT_PATH="deployments/998.candidate.json"
   args+=(--broadcast --slow)
 else
   export WRITE_DEPLOYMENT_STATE=false
@@ -97,4 +106,13 @@ else
 fi
 
 cd "$ROOT_DIR"
+if [[ "$BROADCAST" == "1" ]]; then
+  rm -f "$DEPLOYMENT_ARTIFACT_PATH"
+fi
 "${args[@]}"
+
+if [[ "$BROADCAST" == "1" ]]; then
+  ARTIFACT="$DEPLOYMENT_ARTIFACT_PATH" RPC_URL="$RPC_URL" REQUIRE_DEPLOYMENT=1 \
+    script/hyperevm-testnet/verify-artifact.sh
+  mv "$DEPLOYMENT_ARTIFACT_PATH" deployments/998.json
+fi

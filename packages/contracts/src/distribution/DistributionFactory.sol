@@ -2,14 +2,18 @@
 pragma solidity ^0.8.30;
 
 import {LibClone} from "solady/utils/LibClone.sol";
+import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {FixedPriceSale} from "./FixedPriceSale.sol";
 import {MerkleAirdrop} from "./MerkleAirdrop.sol";
 import {MigratingBondingCurve} from "./MigratingBondingCurve.sol";
+import {LockedLiquidityFactory} from "../liquidity/LockedLiquidityFactory.sol";
+import {BestEffortTokenLib} from "../lib/BestEffortTokenLib.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 import {IBoardroomObligationPolicy} from "../policy/IBoardroomObligationPolicy.sol";
 
 interface IDistributionBoardroom {
     function shareToken() external view returns (address);
+    function reserveRedeemableAsset(address asset) external;
 }
 
 interface IDistributionLifecycle {
@@ -21,7 +25,10 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     uint256 internal constant MIGRATING_CURVE_CREATE_DATA_LENGTH = 4 + 32 * 12;
     uint256 internal constant MERKLE_AIRDROP_CREATE_DATA_LENGTH = 4 + 32 * 7;
     uint256 internal constant BPS = 10_000;
-    uint256 internal constant MAX_CURVE_SUPPLY = 1e36;
+    uint256 internal constant WAD = 1e18;
+    uint256 internal constant MINIMUM_MIGRATION_FILL_BPS = 9_500;
+    uint256 internal constant AMM_MINIMUM_LIQUIDITY = 1_000;
+    uint256 internal constant MAX_CURVE_SUPPLY = type(uint112).max;
     uint256 public constant MAX_DISTRIBUTIONS_PER_BOARDROOM = 128;
 
     enum DistributionKind {
@@ -46,6 +53,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     error InvalidShareToken(address expected, address actual);
     error TooManyBoardroomDistributions(address boardroom);
     error UnexpectedTokenBalanceChange(address token, uint256 expected, uint256 actual);
+    error InvalidAsset(address asset);
 
     event DistributionCreated(
         address indexed distribution,
@@ -69,6 +77,8 @@ contract DistributionFactory is IBoardroomObligationPolicy {
 
     function createFixedPriceSale(FixedPriceSale.CreateParams calldata params) external returns (address sale) {
         _requireBoardroomShareToken(msg.sender, params.shareToken);
+        _requireAsset(params.paymentToken);
+        IDistributionBoardroom(msg.sender).reserveRedeemableAsset(params.paymentToken);
 
         sale = _createDistribution(
             fixedPriceSaleLogic,
@@ -90,6 +100,8 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     {
         if (lockedLiquidityFactory == address(0)) revert InvalidAddress();
         _requireBoardroomShareToken(msg.sender, params.shareToken);
+        _requireAsset(params.quoteToken);
+        IDistributionBoardroom(msg.sender).reserveRedeemableAsset(params.quoteToken);
 
         uint256 shareAmount = params.saleSupply + params.migrationSupply;
         curve = _createDistribution(
@@ -103,6 +115,8 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         );
 
         MigratingBondingCurve(curve).initialize(msg.sender, lockedLiquidityFactory, params);
+        LockedLiquidityFactory(lockedLiquidityFactory)
+            .reserveMigration(msg.sender, curve, params.shareToken, params.quoteToken, params.migrationSalt);
         _checkedTransferFrom(params.shareToken, msg.sender, curve, shareAmount);
     }
 
@@ -272,6 +286,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         FixedPriceSale.CreateParams memory params = abi.decode(data[4:], (FixedPriceSale.CreateParams));
         if (params.shareToken != IDistributionBoardroom(boardroom).shareToken()) return false;
         if (params.paymentToken == address(0)) return false;
+        if (!_isAsset(params.paymentToken)) return false;
         if (params.shareAmount == 0 || params.price == 0) return false;
         return _hasValidTimeWindow(params.startTime, params.endTime);
     }
@@ -283,12 +298,15 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         MigratingBondingCurve.CreateParams memory params = abi.decode(data[4:], (MigratingBondingCurve.CreateParams));
         if (params.shareToken != IDistributionBoardroom(boardroom).shareToken()) return false;
         if (params.quoteToken == address(0) || params.quoteToken == params.shareToken) return false;
+        if (!_isAsset(params.quoteToken)) return false;
         if (params.saleSupply == 0 || params.migrationSupply == 0) return false;
         if (params.saleSupply > MAX_CURVE_SUPPLY || params.migrationSupply > MAX_CURVE_SUPPLY - params.saleSupply) {
             return false;
         }
+        if (params.basePrice > type(uint112).max || params.slope > type(uint112).max) return false;
         if (params.basePrice == 0 || params.graduationQuoteTarget == 0) return false;
         if (params.quoteToLpBps == 0 || params.quoteToLpBps > BPS) return false;
+        if (!_hasFeasibleCurveMigration(params)) return false;
         return _hasValidTimeWindow(params.startTime, params.endTime);
     }
 
@@ -347,6 +365,27 @@ contract DistributionFactory is IBoardroomObligationPolicy {
 
     function _hasValidTimeWindow(uint64 startTime, uint64 endTime) internal view returns (bool) {
         return endTime == 0 || (endTime > startTime && uint256(endTime) > block.timestamp);
+    }
+
+    function _hasFeasibleCurveMigration(MigratingBondingCurve.CreateParams memory params) internal pure returns (bool) {
+        uint256 linearQuote = FixedPointMathLib.fullMulDivUp(params.basePrice, params.saleSupply, WAD);
+        uint256 slopeNumerator = params.saleSupply * params.saleSupply;
+        uint256 slopeQuote = FixedPointMathLib.fullMulDivUp(params.slope, slopeNumerator, 2 * WAD * WAD);
+        uint256 fullSaleQuote = linearQuote + slopeQuote;
+        uint256 quoteToLiquidity = FixedPointMathLib.fullMulDiv(fullSaleQuote, params.quoteToLpBps, BPS);
+        uint256 minimumShares = FixedPointMathLib.fullMulDivUp(params.migrationSupply, MINIMUM_MIGRATION_FILL_BPS, BPS);
+        uint256 minimumQuote = FixedPointMathLib.fullMulDivUp(quoteToLiquidity, MINIMUM_MIGRATION_FILL_BPS, BPS);
+        return quoteToLiquidity != 0 && quoteToLiquidity <= type(uint112).max
+            && FixedPointMathLib.sqrt(minimumShares * minimumQuote) > AMM_MINIMUM_LIQUIDITY;
+    }
+
+    function _requireAsset(address asset) internal view {
+        if (!_isAsset(asset)) revert InvalidAsset(asset);
+    }
+
+    function _isAsset(address asset) internal view returns (bool) {
+        (bool readable,) = BestEffortTokenLib.tryBalanceOf(asset, address(this));
+        return readable;
     }
 
     function _isClosedDistribution(address distribution) internal view returns (bool) {

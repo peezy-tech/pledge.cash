@@ -18,18 +18,21 @@ tokens into it.
 - Factory: deploys deterministic token grant clones, mints and transfers grant-right ERC721 tokens, mirrors ERC721 transfers
   into the grant holder field, optionally collects a native creation fee, and stores an immutable canonical
   `BoardroomFactory` for distribution-grant provenance.
-- Factory owner: authority that can update the native creation fee and receives paid creation fees. In the
-  Boardroom-owned protocol flow this owner is the pledge.cash Boardroom. The canonical factory policy permits that
-  owning Boardroom to call `setCreationFee` and `transferOwnership`.
+- Factory owner: authority that can update the native creation fee, rotate its independent fee recipient, and transfer
+  factory ownership. The canonical deployment assigns this role to protocol governance.
+- Fee recipient: receives paid native creation fees. Factory ownership transfers do not change this address. The
+  canonical deployment points it at `ProtocolFeeRouter`, whose treasury destination is independently rotatable.
 
 ## Assets
 
 - Grant token: ERC20 token escrowed by the issuer and delivered to the holder on settlement.
 - Payment token: ERC20 token paid by the holder only when `price > 0`.
-- Creation fee: optional native token fee paid by the grant issuer to the factory owner when creating a grant.
+- Creation fee: optional native token fee paid by the grant issuer to the configured fee recipient when creating a
+  grant.
 - Grant-right NFT: ERC721 token minted by the factory. Its `tokenId` is `uint256(uint160(grantAddress))`.
 
-Native HYPE is not escrowed by grants. It is only used for the optional creation fee, which the factory forwards to the owner during grant creation.
+Native HYPE is not escrowed by grants. It is only used for the optional creation fee, which the factory forwards to the
+current `feeRecipient` during grant creation.
 
 ## Parameters
 
@@ -46,8 +49,8 @@ Native HYPE is not escrowed by grants. It is only used for the optional creation
 - `transferable`: whether the factory ERC721 holder right may be transferred before expiry and close.
 - `transferUnlockTime`: timestamp before which a transferable grant-right token cannot be transferred.
 
-The initial project-token launch scenario uses a `0.1 HYPE` creation fee. After ownership handoff, fees are sent to the
-project Boardroom and wrapped into WHYPE when wind-down starts.
+The local project-token scenario may explicitly direct a `0.1 HYPE` creation fee to its project Boardroom. That is a
+scenario-specific revenue choice, not an effect of factory ownership and not the canonical root deployment route.
 
 ## HyperEVM Testnet
 
@@ -88,6 +91,8 @@ Preconditions:
 - vesting cliff is not after vesting end,
 - expiry is at least `MIN_SETTLEMENT_GRACE` (one day) after vesting end,
 - expiry is after the creation timestamp,
+- for a canonical Boardroom issuer, expiry is no more than five years after creation; standalone issuers retain the
+  general timing rules without this Boardroom wind-down bound,
 - grant token exposes supported `decimals()`,
 - issuer has approved `TokenGrantFactory` to transfer the full grant,
 - if a creation fee is configured, the issuer pays exact native value equal to the fee.
@@ -112,10 +117,12 @@ For `price > 0`:
 Effects:
 
 - factory validates exact native value equal to the configured creation fee,
+- for a Boardroom-issued grant, every non-share grant token and every nonzero payment token is registered immediately
+  as a redeemable Boardroom asset,
 - factory deploys the grant clone at an address derived from `issuer` and `salt`,
 - grant state is initialized once,
 - full grant is transferred from issuer into escrow by the factory,
-- when configured, the factory forwards the creation fee to the owner,
+- when configured, the factory forwards the creation fee to `feeRecipient`,
 - factory records the token id to grant clone mapping,
 - factory mints the grant-right ERC721 token to the holder,
 - creation event is emitted by the factory.
@@ -192,12 +199,22 @@ Effects:
 - remaining grant token escrow returns to issuer,
 - grant marks itself closed and the factory burns the grant-right ERC721 token.
 
+### Quarantine An Expired Boardroom Grant
+
+If a grant token mutates so that even expiry withdrawal can no longer transfer safely, the Boardroom issuer may call
+`quarantineAndClose()` only after expiry. The path first attempts bounded-gas, exact-delta recovery of all remaining
+escrow to the Boardroom. A healthy token therefore follows normal expiry withdrawal semantics. Only a failed or
+non-exact recovery records the remaining promise in `quarantinedAmount`, closes the obligation, and burns the
+grant-right NFT. It cannot be used by standalone issuers or before expiry, so it cannot forfeit live vested settlement
+rights. Partially settled grants preserve their settled accounting and record only the remaining stranded promise.
+
 ## Invariants
 
 - `settledAmount <= claimable`.
 - `claimable <= grantSize`.
 - vested amount never exceeds `claimable`.
 - settleable amount never exceeds `claimable - settledAmount`.
+- settleable amount is zero after expiry or closure.
 - once halted, vested amount does not increase.
 - live grant-right ERC721 owner equals the grant-local holder authority.
 - soulbound grant-right ERC721 tokens cannot be transferred or approved per-token.
@@ -206,18 +223,23 @@ Effects:
 - grant-right ERC721 ownership does not silently disappear at expiry.
 - holder-only settlement cannot be called by issuer or random callers.
 - issuer-only transitions cannot be called by holder or random callers.
+- only a canonical Boardroom issuer can quarantine a grant, and only after settlement rights have expired.
+- a non-share grant asset that returns on halt or expiry remains inside the Boardroom redemption basket.
 - `price == 0` grants never call a payment token.
 - `price > 0` payment cost is rounded up to the nearest payment-token smallest unit.
 - configured native creation fees must be paid exactly.
 - distribution-created grants are always fee-exempt and nonpayable.
 - the immutable canonical Boardroom factory and issuer-side distribution tracking gate every fee-exempt grant creation.
 - creation fee configuration can only be updated by the factory owner.
+- creation-fee destination can only be updated by the factory owner, and ownership transfer does not implicitly change
+  it.
 - after expiry withdrawal, no further settlement succeeds.
 
 ## External Call Failure Model
 
 Grant funding, payment, delivery, halt-return, and expiry-return paths verify both the exact sender decrease and exact
-recipient increase. Native creation fee forwarding reverts if the owner cannot receive native value. Grant lifecycle
+recipient increase. Native creation fee forwarding reverts if the configured recipient cannot receive native value.
+Grant lifecycle
 transitions temporarily lock the factory ERC721 token before ERC20 external calls, preventing malicious token callbacks
 from transferring the holder right mid-settlement or mid-withdrawal.
 
@@ -229,4 +251,4 @@ Current token behavior policy:
 - rebasing tokens are unsupported; asynchronous rebases remain a higher-level token-policy risk,
 - tokens with unsupported decimals are rejected at initialization,
 - `price == 0` has no payment token external call,
-- native creation fee forwarding reverts if the owner cannot receive native value.
+- native creation fee forwarding reverts if the configured recipient cannot receive native value.

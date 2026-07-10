@@ -98,6 +98,12 @@ State:
 - `quoteToLpBps`: portion of quote reserve sent into AMM liquidity.
 - `locker` and `pool`: created after migration.
 - `curveStatus`: `Active`, `Migrated`, or `Cancelled`.
+- `accountedQuoteReserve`: quote received from curve buys minus quote returned by sells. Donations and rebases do not
+  silently change migration economics.
+- `graduationLatched`: permanent readiness flag set once the quote target is reached or inventory sells out and the
+  resulting seed is AMM-feasible.
+- `quoteQuarantined` and `unrecoveredQuote`: explicit accounting for quote that could not be inspected or returned while
+  closing a curve.
 
 ## Fixed-Price Create
 
@@ -108,7 +114,7 @@ Preconditions:
   - approve the distribution factory for the share inventory,
   - call `createFixedPriceSale`.
 - share token is the Boardroom's own share token.
-- payment token is nonzero.
+- payment token is a deployed contract whose `balanceOf(address)` returns exactly one word under a bounded probe.
 - share amount and price are nonzero.
 - end time is zero for an open-ended sale, or is strictly after start time and in the future at creation.
 
@@ -117,6 +123,7 @@ Effects:
 - factory deploys a sale clone at a deterministic address,
 - factory records the sale under the Boardroom,
 - sale initializes immutable lifecycle parameters,
+- the payment token is registered immediately as a Boardroom redeemable asset, reserving bounded wind-down capacity,
 - factory transfers the full share inventory from the Boardroom into sale escrow.
 
 If initialization or escrow transfer fails, the transaction reverts atomically.
@@ -210,15 +217,21 @@ Preconditions:
   - approve the distribution factory for the total share inventory,
   - call `createMigratingBondingCurve`.
 - share token is the Boardroom's own share token.
-- quote token is nonzero and not the share token.
+- quote token is a deployed contract whose `balanceOf(address)` returns exactly one word under a bounded probe, is not
+  the share token, and is not another canonical Boardroom share token.
 - sale supply, migration supply, base price, graduation target, and LP quote basis points are nonzero.
-- total curve supply is at most `MAX_CURVE_SUPPLY`.
+- total curve supply is at most the AMM `uint112` reserve limit.
+- a full sale must allocate nonzero quote no greater than the AMM reserve limit and produce an initial LP amount above
+  the AMM's `MINIMUM_LIQUIDITY` safety floor after applying the mandatory 95% migration minima.
 - end time is zero for an open-ended sale, or is strictly after start time and in the future at creation.
 - the distribution factory has a nonzero locked-liquidity factory.
 
 Effects:
 
 - factory deploys a curve clone at a deterministic address,
+- the quote token is registered immediately as a Boardroom redeemable asset,
+- the locked-liquidity factory reserves the Boardroom's migration salt, share/quote pair, locker slot, predicted locker,
+  and AMM initializer before accepting the curve,
 - factory records the curve under the Boardroom,
 - curve initializes lifecycle and pricing parameters,
 - factory transfers the full share inventory from the Boardroom into curve escrow.
@@ -243,12 +256,17 @@ All curve token transfers require exact sender and recipient balance deltas, rej
 tokens. Curve sell rights do not follow ERC20 transfers; a recipient that transfers away curve-bought shares keeps the
 sell right but still needs enough shares to sell.
 
+Once graduation readiness is feasible it latches permanently. Further buys and sells revert, freezing the reserve,
+inventory, and migration amounts until the Boardroom migrates or cancels.
+
 ## Curve Migration Or Cancellation
 
-Migration is allowed through the issuing Boardroom when the curve is active, either the quote reserve has reached
-`graduationQuoteTarget` or all sellable shares have been bought, and applying `quoteToLpBps` produces a nonzero quote
-allocation. `canMigrate()` remains false when that allocation rounds to zero, and `migrate()` reverts before changing
-status in the same case.
+Migration is allowed through the issuing Boardroom only while that Boardroom is active and after graduation has
+latched. Once wind-down begins the only terminal path is cancellation, so a cleanup caller cannot burn redemption value
+into a fresh AMM position. The share and quote allocations must fit the AMM's `uint112` reserves and produce more than
+the AMM's `MINIMUM_LIQUIDITY` initial-supply safety floor. Reserved Boardroom initialization mints that full initial
+supply to the authenticated locker rather than permanently burning a slice. Caller minima for both assets must be at
+least 95% of the desired seed amounts; weaker slippage bounds revert before any external call.
 
 Effects:
 
@@ -258,27 +276,37 @@ Effects:
 - the curve asks the issuing Boardroom to record the locker,
 - share or quote remainders return to the Boardroom treasury.
 
-Only a Boardroom-issued distribution can create locked liquidity for that Boardroom through this path. This prevents
-untrusted contracts from filling another Boardroom's locker slots or redemption asset list.
-The Boardroom-controlled migration call supplies the minimum share and quote amounts accepted into liquidity, so third
-parties cannot force migration with weak slippage bounds.
+Only the reserved curve can consume its predicted locked-liquidity and AMM initializer reservation. This prevents
+untrusted contracts from filling another Boardroom's locker slots, pre-seeding the pair, or consuming a reserved salt.
+The locked-liquidity factory accepts migration reservations only for Boardrooms recognized by its immutable canonical
+`BoardroomFactory`, and permanently used locker salts are rejected before a curve is accepted. The reservation is
+consumed atomically by migration.
 
-Cancellation is Boardroom-only and returns all curve-held shares and quote reserve to the Boardroom treasury.
+Cancellation is Boardroom-only and releases the unused migration reservation. Canonical Boardroom shares are returned
+first with exact transfer checks. Quote return is best-effort: bounded-gas balance and transfer calls cannot block
+closure if the quote token later reverts, burns gas, or returns malformed data. Any shortfall is quarantined explicitly
+in `unrecoveredQuote`; anyone can retry `recoverQuarantinedQuote`, but recovery can only pay the issuing Boardroom. Since
+the quote asset was registered at creation, recovery remains safe even after redemptions have opened.
 
 ## Invariants
 
 - Sale escrow inventory plus sold shares equals original sale supply.
 - Fixed-price buyer payments go to the Boardroom, not the factory or sale.
 - Curve buyer quote payments stay in the curve reserve until sale, migration, or cancellation.
+- Curve migration economics use accounted quote, not unsolicited token balance changes.
+- Graduation is monotonic and freezes buys and sells once latched.
 - Only the creating Boardroom can close or cancel its sale.
 - Fixed-price sales cannot keep selling shares after the creating Boardroom starts wind-down.
-- Migrating curves cannot buy or sell after the creating Boardroom starts wind-down.
+- Migrating curves cannot buy, sell, or migrate after the creating Boardroom starts wind-down.
 - Curve sell refunds are limited by account-bound sell rights credited by curve buys.
 - A Boardroom policy call cannot create a sale for another share token.
 - A Boardroom policy call cannot create a curve for another share token.
 - A Boardroom policy call cannot create an airdrop for another share token.
 - Grant-claim airdrops reserve Boardroom issued-grant capacity before claims can create grants.
 - Curve migration creates a locker owned by the originating Boardroom, not by the curve.
+- Active curve migration salts, token pairs, locker slots, and initial AMM liquidity are reserved before share escrow.
+- Curve cancellation cannot be blocked by a subsequently hostile quote token; unrecovered quote remains explicitly
+  quarantined and canonical share recovery remains exact.
 - The Boardroom records migrated locked liquidity before redemptions can open.
 - Fee-on-transfer and sender-surcharge share or payment tokens fail safely through exact two-sided balance-delta checks.
 - Aggregate Merkle claims never exceed the airdrop inventory committed at creation.

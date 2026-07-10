@@ -102,9 +102,17 @@ function renderTelegram(
   const event = eventLabel(row.event as NotificationRenderEvent);
   const boardroom = boardroomName(payload);
   const chain = chainName(payload.action.chainId, options);
+  const now = options.now ?? new Date();
   const eta = new Date(payload.action.eta);
   const utcEta = formatUtc(eta);
-  const vetoWindow = vetoWindowText(eta, options.now ?? new Date());
+  const expiresAt = payload.action.expiresAt ? new Date(payload.action.expiresAt) : undefined;
+  const activeNotification = row.event === "queued" || row.event === "reminder" || row.event === "policy-admin";
+  const actionExpired = activeNotification
+    && expiresAt !== undefined
+    && Number.isFinite(expiresAt.getTime())
+    && expiresAt.getTime() <= now.getTime();
+  const executionOpening = actionExpired ? "execution window has expired" : executionOpeningText(eta, now);
+  const executionDeadline = expiresAt ? formatUtc(expiresAt) : "Unavailable";
   const summary = payload.analysis?.summary ?? "Sentinel detected a governance action.";
   const source = payload.analysis?.source ?? "template";
   const callLines = summarizeCalls(payload.calls ?? []);
@@ -112,20 +120,30 @@ function renderTelegram(
     links.explorerTx === undefined
       ? ""
       : `\n<a href="${escapeHtml(links.explorerTx)}">Queue transaction</a>`;
+  const actionStillQueued = activeNotification && !actionExpired;
+  const terminalDescription = actionExpired ? "expired" : event.toLowerCase();
+  const cancellationHtml = actionStillQueued
+    ? `<b>Cancellation:</b> While queued, cancellation requires at least 1% of prior-block circulating shares held both now and in the prior block. Open ${linkHtml(
+        links.webAction,
+        "the boardroom"
+      )} or call <code>cancelAction(${escapeHtml(payload.action.actionHash)})</code>.${explorerLine}`
+    : `<b>Status:</b> This action is ${escapeHtml(terminalDescription)} and is no longer executable.${explorerLine}`;
+  const cancellationText = actionStillQueued
+    ? `Cancellation: While queued, cancellation requires at least 1% of prior-block circulating shares held both now and in the prior block. ${links.webAction} or call cancelAction(${payload.action.actionHash})`
+    : `Status: This action is ${terminalDescription} and is no longer executable.`;
 
   const html = [
     `<b>${escapeHtml(severityBadge(severity))} ${escapeHtml(event)} governance action</b>`,
     `<b>Boardroom:</b> ${escapeHtml(boardroom)} on ${escapeHtml(chain)}`,
     `<b>Address:</b> <code>${escapeHtml(payload.action.boardroom)}</code>`,
-    `<b>Executable:</b> ${escapeHtml(utcEta)} (${escapeHtml(vetoWindow)})`,
+    `<b>Executable from:</b> ${escapeHtml(utcEta)} (${escapeHtml(executionOpening)})`,
+    `<b>Execution deadline:</b> ${escapeHtml(executionDeadline)}`,
     `<b>Summary:</b> ${escapeHtml(summary)}`,
     `<b>Calls:</b>\n${escapeHtml(callLines.join("\n"))}`,
     `<b>Analysis:</b> ${escapeHtml(source)} explanation. ${escapeHtml(
       payload.analysis?.severityRationale ?? "Severity comes from deterministic Sentinel rules."
     )}`,
-    `<b>Veto:</b> Open ${linkHtml(links.webAction, "the boardroom")} or call <code>cancelAction(${escapeHtml(
-      payload.action.actionHash
-    )})</code>.${explorerLine}`
+    cancellationHtml
   ].join("\n\n");
 
   return {
@@ -135,13 +153,14 @@ function renderTelegram(
       `${severityBadge(severity)} ${event} governance action`,
       `Boardroom: ${boardroom} on ${chain}`,
       `Address: ${payload.action.boardroom}`,
-      `Executable: ${utcEta} (${vetoWindow})`,
+      `Executable from: ${utcEta} (${executionOpening})`,
+      `Execution deadline: ${executionDeadline}`,
       `Summary: ${summary}`,
       `Calls:\n${callLines.join("\n")}`,
       `Analysis: ${source} explanation. ${
         payload.analysis?.severityRationale ?? "Severity comes from deterministic Sentinel rules."
       }`,
-      `Veto: ${links.webAction} or call cancelAction(${payload.action.actionHash})`,
+      cancellationText,
       links.explorerTx === undefined ? "" : `Queue transaction: ${links.explorerTx}`
     ]
       .filter((line) => line.length > 0)
@@ -161,18 +180,26 @@ function renderTwitter(
   const summary = oneLine(payload.analysis?.summary ?? "governance action pending");
   const eta = formatUtc(new Date(payload.action.eta));
   const event = row.event as NotificationRenderEvent;
+  const expiresAt = payload.action.expiresAt ? new Date(payload.action.expiresAt) : undefined;
+  const now = options.now ?? new Date();
+  const queuedActionExpired = event === "queued"
+    && expiresAt !== undefined
+    && Number.isFinite(expiresAt.getTime())
+    && expiresAt.getTime() <= now.getTime();
   const text =
-    event === "queued"
+    event === "queued" && !queuedActionExpired
       ? fitTweetParts(
-          `${warningSign} HIGH-RISK action queued in ${boardroom} on ${chain}: `,
+          `${warningSign} HIGH-RISK action queued: `,
           summary,
-          `. Executable ${eta}. Shareholders can veto.`,
+          `. Opens ${eta}. Eligible 1% holders may cancel.`,
           links.webAction
         )
       : fitTweet(
-          `UPDATE: ${boardroom} action on ${chain} was ${eventLabel(
-            event
-          ).toLowerCase()}. Shareholders can review details.`,
+          queuedActionExpired
+            ? `UPDATE: ${boardroom} action on ${chain} expired and is no longer executable.`
+            : `UPDATE: ${boardroom} action on ${chain} was ${eventLabel(
+                event
+              ).toLowerCase()}. Shareholders can review details.`,
           links.webAction
         );
 
@@ -198,6 +225,8 @@ function eventLabel(event: NotificationRenderEvent): string {
       return "Cancelled";
     case "executed":
       return "Executed";
+    case "invalidated":
+      return "Invalidated";
     case "reminder":
       return "Reminder";
     case "policy-admin":
@@ -225,18 +254,18 @@ function summarizeCalls(calls: readonly StoredCall[]): string[] {
   });
 }
 
-function vetoWindowText(eta: Date, now: Date): string {
+function executionOpeningText(eta: Date, now: Date): string {
   const ms = eta.getTime() - now.getTime();
   if (!Number.isFinite(ms)) {
-    return "veto window timing unavailable";
+    return "execution timing unavailable";
   }
 
   if (ms <= 0) {
-    return "veto window has ended";
+    return "execution window is open";
   }
 
   const hours = Math.max(1, Math.ceil(ms / 3_600_000));
-  return `veto window ends in ${hours}h`;
+  return `execution opens in ${hours}h`;
 }
 
 function fitTweet(base: string, url: string): string {

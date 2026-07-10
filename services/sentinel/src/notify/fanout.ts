@@ -108,6 +108,7 @@ export async function runQueuedRefanoutSweep(
   db: FanoutDb,
   options: FanoutOptions = {}
 ): Promise<FanoutResult> {
+  const nowIso = (options.now ?? new Date()).toISOString();
   const actions = rowsFromResult(
     await db.execute<QueuedActionRow>(
       sql`
@@ -120,6 +121,9 @@ export async function runQueuedRefanoutSweep(
           salt,
           executor,
           eta,
+          expires_at AS "expiresAt",
+          epoch,
+          invalidated_by_epoch AS "invalidatedByEpoch",
           queue_block AS "queueBlock",
           queue_log_index AS "queueLogIndex",
           status,
@@ -132,6 +136,7 @@ export async function runQueuedRefanoutSweep(
           updated_at AS "updatedAt"
         FROM queued_actions
         WHERE status = 'queued'
+          AND (expires_at IS NULL OR expires_at > ${nowIso}::timestamptz)
         ORDER BY eta ASC
         ${sweepLimitSql(options.refanoutLimit)}
       `
@@ -163,6 +168,9 @@ export async function runReminderSweep(
           salt,
           executor,
           eta,
+          expires_at AS "expiresAt",
+          epoch,
+          invalidated_by_epoch AS "invalidatedByEpoch",
           queue_block AS "queueBlock",
           queue_log_index AS "queueLogIndex",
           status,
@@ -175,6 +183,7 @@ export async function runReminderSweep(
           updated_at AS "updatedAt"
         FROM queued_actions
         WHERE status = 'queued'
+          AND (expires_at IS NULL OR expires_at > ${nowIso}::timestamptz)
           AND eta > ${nowIso}::timestamptz
           AND eta <= ${reminderDeadlineIso}::timestamptz
         ORDER BY eta ASC, id ASC
@@ -361,7 +370,12 @@ async function insertTwitterNotification(
     return insertQueuedTweet(event, db);
   }
 
-  if (event.event === "cancelled" || event.event === "executed" || event.event === "policy-admin") {
+  if (
+    event.event === "cancelled"
+    || event.event === "executed"
+    || event.event === "invalidated"
+    || event.event === "policy-admin"
+  ) {
     return insertTwitterFollowUp(event, db);
   }
 
@@ -469,6 +483,9 @@ function actionContextSql(actionId: string): SQL {
       qa.queue_tx_hash,
       qa.resolved_tx_hash,
       qa.eta,
+      qa.expires_at,
+      qa.epoch,
+      qa.invalidated_by_epoch,
       qa.status,
       b.name AS boardroom_name,
       b.share_token,
@@ -527,7 +544,10 @@ function payloadSql(replyToExternalIdSql: string | null): SQL {
             'chainId', ctx.chain_id,
             'boardroom', ctx.boardroom,
             'actionHash', ctx.action_hash,
+            'epoch', ctx.epoch::text,
             'eta', ctx.eta,
+            'expiresAt', ctx.expires_at,
+            'invalidatedByEpoch', ctx.invalidated_by_epoch::text,
             'status', ctx.status,
             'queueTxHash', ctx.queue_tx_hash,
             'resolvedTxHash', ctx.resolved_tx_hash

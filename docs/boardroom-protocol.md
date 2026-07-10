@@ -5,8 +5,8 @@ This document describes the first Boardroom primitive in `packages/contracts/src
 
 A Boardroom is an owned on-chain treasury and issuer account with its own ERC20 share token. Before launch, its owner
 can mint shares and execute policy-checked calls directly. After launch, the Boardroom moves to delayed push-forward
-governance: the current executor queues delayed actions, share holders can cancel queued actions or start wind-down,
-and anyone may execute an action after its delay. `AssetPolicy` covers supported external assets and spender approvals,
+governance: the current executor queues delayed actions, historically checkpointed share holders can veto or start
+wind-down at explicit thresholds, and anyone may execute a live action after its delay. `AssetPolicy` covers supported external assets and spender approvals,
 while obligation-creating protocol modules such as `TokenGrantFactory`, `DistributionFactory`, and
 `LockedLiquidityFactory` act as their own call policies so the Boardroom can record created obligations.
 
@@ -20,8 +20,10 @@ while obligation-creating protocol modules such as `TokenGrantFactory`, `Distrib
   blocks new obligations without erasing the cleanup authority of obligations it already created.
 - Module policies: pledge.cash factories that authorize their own Boardroom calls and report created obligations.
 - Asset policy: owner-managed allowlist of supported assets and approval spenders.
-- Share holder: receives Boardroom share tokens directly or through grants, can cancel queued actions and start
-  wind-down after launch, and can redeem shares after redemptions open.
+- Share holder: receives Boardroom share tokens directly or through grants. A holder with at least 1% of both the
+  previous-block and current governance-eligible supply can cancel an action; 10% can start wind-down. Same-transaction
+  flash balances, already-transferred stale balances, treasury shares, and shares inside authenticated protocol custody
+  are ineligible.
 - Grant holder: receives settlement authority over a Boardroom-issued grant.
 - Distribution buyer: buys Boardroom shares through a Boardroom-created distribution.
 
@@ -50,6 +52,9 @@ State:
 - `boardroomLogic`: implementation cloned by the factory.
 - `redemptionPayoutLogic`: immutable delegate helper used by every clone for isolated redemption accounting, exact
   transfers, native wrapping, treasury-share burning, and active-obligation pruning. Callers cannot select this target.
+- `governanceLogic`: immutable delegate helper for action context, historical-holder checks, bounded asset admission,
+  obligation bookkeeping, and wind-down finalization. Both helpers are injected into the factory, must contain code,
+  and can be deployed and attested independently before the factory.
 - `allBoardrooms`: created Boardroom list.
 - `isBoardroom`: created Boardroom membership check.
 
@@ -66,7 +71,8 @@ State:
 - `launched`: one-way flag that disables direct owner execution and enables queued governance.
 - `executor`: account allowed to queue delayed actions after launch.
 - `governanceDelay`: delay applied to every queued action after launch.
-- `queuedActionEta`: ETA for queued single-call and batch action hashes.
+- governance action context: ETA, seven-day execution grace period, governance epoch, and Boardroom status captured for
+  every queued single-call or batch hash.
 - `status`: `Active`, `WindingDown`, or `RedemptionsOpen`.
 - `redeemableAssets`: bounded list of ERC20 assets redeemed pro-rata by share holders.
 - `issuedGrants`: bounded active list of Boardroom-issued token grants created through `TokenGrantFactory`.
@@ -75,12 +81,18 @@ State:
 - `lockedLiquidityPositions`: bounded active list of Boardroom-owned locked AMM liquidity positions.
 - `obligationPolicyOf`: permanent canonical-policy identity for every obligation ever recorded. Active-array pruning
   never erases this binding.
-- redemption credits: burned shares retained per holder until each redeemable asset has allocated and paid that
-  holder's corresponding entitlement.
+- redemption snapshot: fixed per-asset balances and total share supply captured after treasury shares burn when
+  redemptions open. Governance-only custody exclusions do not change economic redemption supply.
+- redemption credits: burned shares retained per holder until each snapshot asset has allocated and paid that holder's
+  corresponding entitlement.
+- `redemptionExcessRecipient`: fixed recipient for post-snapshot deposits and terminally unowed snapshot balances. It
+  defaults to the prelaunch owner, follows prelaunch ownership transfers, can be governed while active, and freezes
+  once redemptions open.
 
 The owner can mint shares through `Boardroom.mint` before launch. The owner can also call `Boardroom.execute` or
 `Boardroom.executeBatch` before launch. Each call names a policy, target, native value, and calldata. Raw calls may omit
-the policy, but calls to a registered pledge.cash module must use that module even when its current status is disabled.
+the policy only when the target is the Boardroom itself. Every external target requires an explicit registered policy;
+calls to a registered pledge.cash module must use that module even when its current status is disabled.
 Module identity is one-way and independent of `Active`, `LifecycleOnly`, or `Disabled` status, so disabling a module
 cannot reopen a raw-call bypass. New module calls require active status. Calls to a recorded obligation must use its
 permanent canonical policy, and only selectors approved by that policy's lifecycle hook may run. This cleanup route
@@ -91,25 +103,39 @@ lifecycle hook must successfully classify cleanup and reservation release. A rev
 entire call. Plain policies such as `AssetPolicy` do not implement or invoke obligation hooks.
 
 After launch, owner-only functions that affect treasury or shares must be called by the Boardroom itself through a
-queued action. The current executor queues a single call or batch with a salt. The action becomes executable by any
-caller after `governanceDelay`; queue authority remains executor-only. The delay must be nonzero and cannot exceed 30
-days. Any current share holder can cancel a queued action and can start wind-down directly.
+queued action. Launch requires at least one whole governance-eligible share outside the Boardroom treasury and
+authenticated protocol custody. The current executor queues a
+single call or batch with a salt. The action becomes executable by any caller after `governanceDelay`, which is between
+one and 30 days, and expires seven days after its ETA. Executor changes and wind-down advance the governance epoch, so
+pre-existing actions fail even if their calldata and salt are replayed. Threshold checks require both current and
+previous-block holder balances to meet the stricter threshold computed from current and previous-block
+governance-eligible supply.
 
 Wind-down transitions are one-way:
 
 1. `Active`: before launch, the owner can mint shares, create grants, create distributions, and register redeemable
    assets. After launch, those actions must go through queued self-governance.
 2. `WindingDown`: entered only after `startWindDown()` wraps the Boardroom's full native HYPE balance into WHYPE. The
-   Boardroom cannot mint shares or create new grants/distributions. Governance may close recorded obligations, exit
-   locked liquidity, register final redeemable assets, wrap any late native balance, and burn treasury-held shares.
+   Boardroom cannot mint shares or create new grants/distributions. Canonical zero-value lifecycle calls, locked
+   liquidity exits, native wrapping, closed-obligation pruning, and treasury-share burns are permissionless. Qualified
+   holders can admit final assets only when the Boardroom already has a positive balance, and anyone can quarantine an
+   admitted asset whose bounded `balanceOf` probe has become unreadable. Empty-asset removal is permissionless during
+   wind-down only after every grant, distribution, and locked-liquidity obligation has closed and been pruned, so an
+   obligation cannot later return value into an omitted asset.
    Active fixed-price sales and migrating bonding curves stop accepting trades as soon as their Boardroom enters this
    state.
-3. `RedemptionsOpen`: share holders can burn shares into per-asset redemption credits. Each asset pays independently,
-   and failed payouts remain retryable. Owner execution is closed.
+3. `RedemptionsOpen`: share holders burn shares against the fixed opening snapshot. Each asset pays independently and
+   failed snapshot claims remain retryable. Late deposits never change redemption economics and are permissionlessly
+   swept to the frozen excess recipient. Owner execution is closed.
 
 ### BoardroomToken
 
-`BoardroomToken` is a standard ERC20 with immutable `boardroom` authority. Only the Boardroom can mint or burn it.
+`BoardroomToken` is an ERC20 with immutable `boardroom` authority and direct balance, total-supply, and aggregate
+encumbered-supply checkpoints. Only the Boardroom can mint, burn, or permanently classify an authenticated custody
+account. Canonical share grants, distributions, locked-liquidity pools, and their fee vaults are classified when their
+obligation is recorded; token transfers then update the aggregate in O(1), including transfers between two classified
+accounts without double counting. Checkpoint lookup is logarithmic and only permits completed blocks. This custody
+accounting affects governance power only, not redemption ownership.
 
 ## Grant Issuance Flow
 
@@ -122,9 +148,10 @@ Wind-down transitions are one-way:
 6. `TokenGrantFactory` transfers the grant tokens from the Boardroom into the grant escrow.
 7. The factory mints the grant-right ERC721 token to the grant holder.
 
-For paid grants, settlement payment tokens are transferred to the Boardroom. The Boardroom owner can then use other
-registry-approved policies to deploy or spend those proceeds. For example, the Boardroom can sell share grants for USDC
-and later create free USDC payroll grants through the same policy-gated batch execution surface.
+Every non-share grant token and every paid-grant settlement token is atomically, permanently admitted to the bounded
+redemption basket when the grant is recorded. This covers both settlement revenue and grant assets that can return on
+halt, expiry, or quarantine recovery. Distribution payment and curve quote assets are admitted the same way by their
+module factories. The Boardroom owner can use registry-approved policies to deploy or spend proceeds while active.
 
 ## Fixed-Price Share Sale Flow
 
@@ -154,29 +181,26 @@ and later create free USDC payroll grants through the same policy-gated batch ex
 
 ## Wind-Down And Redemption Flow
 
-1. Governance registers ERC20 assets that should be redeemable. Canonical WHYPE is already registered during
-   initialization, so raw native HYPE and WHYPE received later cannot be omitted from the basket.
-2. Before launch, the owner calls `startWindDown`. After launch, any current share holder can call `startWindDown`.
-   The call wraps the Boardroom's full native HYPE balance into WHYPE before moving from `Active` to `WindingDown`.
-3. Governance closes, cancels, or migrates every recorded distribution and halts or expires every recorded grant.
-4. Governance exits every recorded locked-liquidity position.
-5. Governance calls `openRedemptions`, which wraps any native HYPE received after wind-down started.
-6. `openRedemptions` prunes closed obligations from the bounded active lists, verifies every remaining obligation is
-   still a blocker, burns treasury-held shares, and moves the Boardroom to `RedemptionsOpen`. Closure events and the
-   permanent `obligationPolicyOf` binding retain history after an item leaves an active list.
-7. A share holder calls `redeem(shares, recipient, minAmountsOut)`.
-8. The Boardroom wraps any late native HYPE balance, burns and forfeits any shares currently held by the Boardroom, then
-   burns the caller's shares into credits owned by that caller. `recipient` only selects the payout address and never
-   owns the credits.
-9. Each asset is attempted independently with bounded gas. Its amount uses full-precision multiplication over the
-   current unallocated balance, the caller's unallocated burned shares, and that asset's remaining entitlement shares.
-   This preserves failed claims and allocates deposits received after earlier claims among the shares still waiting.
-10. A successful nonzero asset payout records its allocated shares before making an exact-delta transfer. A zero or
-    rounded-to-zero amount, reverting token, sender surcharge, or unmet per-asset minimum returns zero for that slot and
-    emits `RedemptionAssetClaimFailed`; it does not revert the share burn or successful assets in the same basket, and
-    it leaves the credit available for later funding or retry.
-11. The credit owner retries a failed slot with
-    `claimRedemptionAsset(asset, recipient, minAmountOut)`. An asset cannot allocate the same burned shares twice.
+1. Canonical WHYPE is admitted at initialization. Module factories atomically admit any asset that can later reach the
+   Boardroom, and governance can admit additional ERC20s only after a bounded exact-size `balanceOf` probe succeeds;
+   during wind-down the probed Boardroom balance must also be nonzero.
+2. Before launch, the owner starts wind-down. After launch, a holder meeting the 10% historical/current threshold can
+   start it even if the executor is lost. The transition is monotonic, wraps native HYPE, and invalidates queued actions.
+3. Anyone can execute canonical zero-value lifecycle cleanup, prune closed obligations, exit recorded liquidity, wrap
+   native balance, and burn treasury shares. Empty assets can be removed once no obligation remains; unreadable admitted
+   assets can be quarantined through the explicit liveness escape hatch.
+4. After the governance delay from wind-down start, anyone can call `openRedemptions`. It wraps native HYPE, prunes and
+   rejects any remaining obligation, burns treasury shares, and snapshots total supply plus every admitted balance.
+5. A holder calls `redeem(shares, recipient, minAmountsOut)`. Shares burn into caller-owned credits; `recipient` only
+   selects the payout address.
+6. Each asset is attempted independently with bounded gas. Its full-precision amount uses only the remaining opening
+   snapshot balance and remaining entitlement shares. A failed transfer or unmet minimum leaves that asset credit
+   retryable. A zero-rounded amount with a zero minimum succeeds and allocates the shares, allowing the final claimant to
+   receive the indivisible remainder instead of deadlocking it.
+7. The credit owner retries with `claimRedemptionAsset`. An asset cannot allocate the same burned shares twice.
+8. Deposits received after opening are never owed to redeemers. Anyone can sweep only balance above the still-owed
+   snapshot amount to the frozen `redemptionExcessRecipient`. When all shares for an asset are paid or forfeited, any
+   remaining snapshot balance also becomes sweepable.
 
 Redemption loops are bounded by `MAX_REDEEMABLE_ASSETS`. Wind-down gates are bounded by active, rather than lifetime,
 counts: `MAX_ISSUED_GRANTS`, `MAX_ISSUED_DISTRIBUTIONS`, and `MAX_LOCKED_LIQUIDITY_POSITIONS`. Successful lifecycle
@@ -191,9 +215,13 @@ their own public lifecycle.
 - Shares cannot be minted after wind-down starts.
 - Direct owner execution is disabled after launch.
 - Only the current executor can queue actions after launch; any caller can execute a ready action or batch.
-- Queued actions cannot execute before their ETA.
-- Governance delay is nonzero and no greater than 30 days.
-- Any current share holder can cancel a queued action and can start wind-down after launch.
+- Queued actions bind their epoch and status, cannot execute before ETA, and expire seven days after ETA.
+- Governance delay is at least one day and no greater than 30 days.
+- Executor changes and wind-down invalidate every action from the prior epoch.
+- Veto requires 1% and wind-down requires 10% of governance-eligible shares, using the larger current/prior threshold
+  and requiring the caller to hold it both now and in the previous block.
+- Same-transaction borrowed balances, stale transferred balances, treasury-held shares, and shares in authenticated
+  grants, distributions, pools, or fee vaults do not satisfy thresholds.
 - New policy-backed Boardroom execution requires a policy allowed by the central registry.
 - Policy-backed Boardroom execution requires the selected policy to allow the target, value, and calldata.
 - Registered module identity is permanent across `Active`, `LifecycleOnly`, and `Disabled` status.
@@ -204,12 +232,14 @@ their own public lifecycle.
 - Obligation-creation and lifecycle hooks fail closed; plain asset-policy calls do not invoke them.
 - Boardroom execution cannot create new obligations after wind-down starts.
 - `AssetPolicy` never authorizes arbitrary token calls.
+- Policy-free raw calls can only target the Boardroom itself; external raw-call escape is closed.
 - Asset approvals are limited to allowed assets and allowed protocol spenders.
 - Boardroom-created grants approve `TokenGrantFactory` as spender for the requested grant amount through `AssetPolicy`.
 - A Boardroom-issued grant must have `issuer == boardroom`.
 - Boardroom-issued grants escrow tokens from the Boardroom before holders can settle.
-- Native grant creation fees flow to `TokenGrantFactory.owner()`. If that owner is the Boardroom, the raw native balance
-  is normalized into WHYPE on wind-down.
+- Native grant creation fees flow to `TokenGrantFactory.feeRecipient()`, independently of factory ownership. A bespoke
+  deployment may select a Boardroom recipient, in which case raw native balance is normalized into WHYPE on wind-down;
+  the canonical root deployment routes fees through the durable protocol fee router instead.
 - Boardroom-created fixed-price sales can only sell the Boardroom's own share token.
 - Boardroom-created migrating curves can only sell the Boardroom's own share token.
 - Fixed-price sale payments are transferred directly to the Boardroom treasury.
@@ -219,16 +249,23 @@ their own public lifecycle.
 - Only the Boardroom that created a distribution can close, cancel, or migrate it through the distribution policy.
 - Redemptions cannot open while a recorded grant or distribution is still open.
 - Redemptions cannot open while a recorded locked-liquidity position still holds LP principal.
+- A lost executor cannot stop qualified holders from starting wind-down or stop anyone from running bounded canonical
+  cleanup and finalization after the delay.
 - Closed obligations are removed from active capacity without erasing their canonical-policy history.
 - Raw native HYPE is never redeemed directly.
 - Canonical WHYPE is a redeemable asset from initialization onward.
 - `startWindDown()` wraps native HYPE before `status` changes to `WindingDown`.
-- `openRedemptions()` and `redeem()` wrap any late native HYPE balance before redemption pricing.
+- `openRedemptions()` fixes per-asset balances and supply. Native HYPE arriving later is wrapped but remains excess.
 - Treasury-held shares are burned before redemptions open.
 - Shares sent to the Boardroom after redemptions open are burned before the next redemption is priced.
 - Share redemption burns shares into caller-owned per-asset credits before attempting transfers.
 - One failing redeemable asset cannot block successful assets, and its allocation remains retryable.
-- Redemption multiplication is full precision and each asset's burned-share allocation is single-use.
+- Redemption multiplication is full precision, each asset's burned-share allocation is single-use, and zero-rounded
+  allocations advance accounting when the caller permits zero output so indivisible dust cannot remain reserved forever.
+- Post-snapshot deposits cannot dilute or enrich any redemption; only excess above outstanding snapshot obligations can
+  be swept to the frozen recipient.
+- Once all snapshot shares are paid or forfeited, no remaining asset balance can be trapped as a phantom obligation.
+- Ownership cannot be renounced, and the excess recipient cannot be changed after redemptions open.
 - Fee-on-transfer and sender-surcharge redeemable assets fail safely through exact Boardroom and recipient balance-delta
   checks without discarding their failed claims.
 

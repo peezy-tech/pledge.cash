@@ -101,7 +101,7 @@ describe("notification fanout", () => {
     expect(twitterSql).toContain("ON CONFLICT (dedupe_key) DO NOTHING");
   });
 
-  test.each(["cancelled", "executed", "policy-admin"] as const)(
+  test.each(["cancelled", "executed", "invalidated", "policy-admin"] as const)(
     "preserves Twitter %s follow-ups when the original queued tweet is unsent",
     async (event) => {
       const db = new FakeDb([[], [{ id: `twitter-${event}`, channelType: "twitter" }]]);
@@ -125,6 +125,7 @@ describe("notification fanout", () => {
     expect(result).toEqual({ telegram: 1, total: 1, twitter: 0 });
     expect(db.queries).toHaveLength(2);
     expect(sqlText(db.queries[0])).toContain("FROM queued_actions");
+    expect(sqlText(db.queries[0])).toContain("expires_at IS NULL OR expires_at >");
     expect(sqlText(db.queries[1])).toContain("WITH action_context");
   });
 
@@ -141,6 +142,7 @@ describe("notification fanout", () => {
     const sweepSql = sqlText(db.queries[0]);
     expect(sweepSql).toContain("eta >");
     expect(sweepSql).toContain("eta <=");
+    expect(sweepSql).toContain("expires_at IS NULL OR expires_at >");
     expect(sqlText(db.queries[1])).toContain("sentinel_notification_event");
   });
 });
@@ -169,10 +171,13 @@ function makeAction(): QueuedActionRow {
     chainId: 998,
     createdAt: new Date("2026-07-09T00:00:00.000Z"),
     decodeStatus: "decoded",
+    epoch: 2n,
     eta: new Date("2026-07-10T00:00:00.000Z"),
+    expiresAt: new Date("2026-07-17T00:00:00.000Z"),
     executedBy: null,
     executor: "0x0000000000000000000000000000000000000e0e",
     id: "00000000-0000-4000-8000-000000000001",
+    invalidatedByEpoch: null,
     queueBlock: 123n,
     queueTxHash: "0x0000000000000000000000000000000000000000000000000000000000000def",
     rawCalldata: "0x",

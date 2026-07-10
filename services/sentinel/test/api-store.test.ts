@@ -39,6 +39,20 @@ describe("public action keyset pagination", () => {
     expect(query).toContain("ORDER BY qa.queue_block DESC, qa.id DESC");
     expect(query).not.toContain("OFFSET");
   });
+
+  test("derives expired read-model status without changing the on-chain event status", async () => {
+    const expiredDb = new QueryCaptureDb();
+    await getPublicActions(expiredDb as unknown as SentinelDb, { limit: 25, status: "expired" });
+    const expiredQuery = sqlText(expiredDb.queries[0]);
+
+    expect(expiredQuery).toContain("THEN 'expired'");
+    expect(expiredQuery).toContain("qa.status = 'queued' AND qa.expires_at IS NOT NULL");
+    expect(expiredQuery).not.toContain("'expired'::sentinel_queued_action_status");
+
+    const queuedDb = new QueryCaptureDb();
+    await getPublicActions(queuedDb as unknown as SentinelDb, { limit: 25, status: "queued" });
+    expect(sqlText(queuedDb.queries[0])).toContain("qa.expires_at IS NULL OR qa.expires_at > NOW()");
+  });
 });
 
 class QueryCaptureDb {

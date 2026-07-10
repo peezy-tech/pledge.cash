@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { and, asc, desc, eq, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lt, lte, or, sql } from "drizzle-orm";
 import {
   createPublicClient,
   decodeFunctionData,
@@ -84,7 +84,9 @@ export type InsertQueuedActionInput = {
   readonly boardroom: Lowercase<Address>;
   readonly chainId: number;
   readonly decodeStatus: "decoded" | "undecoded";
+  readonly epoch: bigint;
   readonly eta: Date;
+  readonly expiresAt: Date;
   readonly executor: Lowercase<Address>;
   readonly queueBlock: bigint;
   readonly queueLogIndex: number;
@@ -118,6 +120,14 @@ export type InsertPolicyAdminEventInput = {
 export type WatcherStoreTx = {
   applyShareBalanceDeltas(inputs: readonly ShareBalanceDeltaInput[]): Promise<void>;
   getCursor(chainId: number, scope: WatcherCursorScope): Promise<bigint | undefined>;
+  invalidateQueuedActionsBeforeEpoch(input: {
+    readonly boardroom: Lowercase<Address>;
+    readonly chainId: number;
+    readonly epoch: bigint;
+    readonly terminalBlock: bigint;
+    readonly terminalLogIndex: number;
+    readonly txHash: Lowercase<Hex>;
+  }): Promise<Array<{ action: QueuedActionRow; calls: StoredCall[] }>>;
   insertActionCalls(actionId: string, calls: readonly InsertActionCallInput[]): Promise<StoredCall[]>;
   insertPolicyAdminEvent(input: InsertPolicyAdminEventInput): Promise<boolean>;
   insertQueuedAction(input: InsertQueuedActionInput): Promise<QueuedActionRow | undefined>;
@@ -188,6 +198,12 @@ type WatcherPassPlan = {
 
 type PolicyAdminEvent = InsertPolicyAdminEventInput & {
   readonly affectedQueuedActions: boolean;
+};
+
+type PositionedPipelineEvent = {
+  readonly blockNumber: bigint;
+  readonly event: WatcherPipelineEvent;
+  readonly logIndex: number;
 };
 
 type QueuedDecodeResult =
@@ -515,14 +531,51 @@ async function runWatcherPass(input: {
 
   const actionEvents = await input.store.transaction(async (tx) => {
     const pendingEvents: WatcherPipelineEvent[] = [];
+    const governancePipelineEvents: PositionedPipelineEvent[] = [];
+    const epochEvents: Extract<GovernanceEvent, { kind: "governanceEpochAdvanced" }>[] = [];
     const notifiedPolicyChanges = new Set<string>();
 
     await tx.upsertBoardrooms(input.chainId, discovery.items);
 
     for (const event of governanceEvents) {
+      if (event.kind === "governanceEpochAdvanced") {
+        epochEvents.push(event);
+        continue;
+      }
       const emitted = await processGovernanceEvent(tx, input.client, input.chainId, event);
-      pendingEvents.push(...emitted);
+      governancePipelineEvents.push(
+        ...emitted.map((pipelineEvent) => ({
+          blockNumber: event.blockNumber,
+          event: pipelineEvent,
+          logIndex: event.logIndex
+        }))
+      );
     }
+
+    // Epoch advancement can be emitted from inside the action currently being executed.
+    // Apply terminal events first so that action is recorded as executed, then invalidate
+    // only older actions that remain queued. The queue-position bound protects actions
+    // created later in the same block, while the epoch bound protects new-epoch queues.
+    for (const event of epochEvents) {
+      const invalidated = await tx.invalidateQueuedActionsBeforeEpoch({
+        boardroom: lowerAddress(event.boardroom),
+        chainId: input.chainId,
+        epoch: event.epoch,
+        terminalBlock: event.blockNumber,
+        terminalLogIndex: event.logIndex,
+        txHash: lowerHex(event.transactionHash)
+      });
+      governancePipelineEvents.push(
+        ...invalidated.map((item) => ({
+          blockNumber: event.blockNumber,
+          event: { ...item, event: "invalidated" as const },
+          logIndex: event.logIndex
+        }))
+      );
+    }
+
+    governancePipelineEvents.sort(comparePositionedPipelineEvents);
+    pendingEvents.push(...governancePipelineEvents.map((item) => item.event));
 
     for (const event of policyAdminEvents) {
       const inserted = await tx.insertPolicyAdminEvent(event);
@@ -772,7 +825,9 @@ async function processGovernanceEvent(
       boardroom,
       chainId,
       decodeStatus: decoded.decodeStatus,
+      epoch: event.epoch,
       eta: new Date(Number(event.eta) * 1000),
+      expiresAt: new Date(Number(event.expiresAt) * 1000),
       executor: lowerAddress(event.executor),
       queueBlock: event.blockNumber,
       queueLogIndex: event.logIndex,
@@ -840,6 +895,52 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
         .limit(1);
       return row?.blockNumber;
     },
+    async invalidateQueuedActionsBeforeEpoch(input: {
+      readonly boardroom: Lowercase<Address>;
+      readonly chainId: number;
+      readonly epoch: bigint;
+      readonly terminalBlock: bigint;
+      readonly terminalLogIndex: number;
+      readonly txHash: Lowercase<Hex>;
+    }): Promise<Array<{ action: QueuedActionRow; calls: StoredCall[] }>> {
+      const invalidated = await db
+        .update(queuedActions)
+        .set({
+          invalidatedByEpoch: input.epoch,
+          resolvedTxHash: input.txHash,
+          status: "invalidated",
+          updatedAt: new Date()
+        })
+        .where(
+          and(
+            eq(queuedActions.chainId, input.chainId),
+            eq(queuedActions.boardroom, input.boardroom),
+            eq(queuedActions.status, "queued"),
+            lt(queuedActions.epoch, input.epoch),
+            or(
+              lt(queuedActions.queueBlock, input.terminalBlock),
+              and(
+                eq(queuedActions.queueBlock, input.terminalBlock),
+                lt(queuedActions.queueLogIndex, input.terminalLogIndex)
+              )
+            )
+          )
+        )
+        .returning();
+
+      invalidated.sort(
+        (left, right) =>
+          Number(left.queueBlock - right.queueBlock)
+          || left.queueLogIndex - right.queueLogIndex
+          || left.createdAt.getTime() - right.createdAt.getTime()
+      );
+      return Promise.all(
+        invalidated.map(async (action) => ({
+          action,
+          calls: await this.listActionCalls(action.id)
+        }))
+      );
+    },
     async insertActionCalls(actionId: string, calls: readonly InsertActionCallInput[]): Promise<StoredCall[]> {
       if (calls.length === 0) return [];
 
@@ -876,7 +977,9 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
           boardroom: input.boardroom,
           chainId: input.chainId,
           decodeStatus: input.decodeStatus,
+          epoch: input.epoch,
           eta: input.eta,
+          expiresAt: input.expiresAt,
           executor: input.executor,
           queueBlock: input.queueBlock,
           queueLogIndex: input.queueLogIndex,
@@ -931,7 +1034,13 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
       const rows = await db
         .select()
         .from(queuedActions)
-        .where(and(eq(queuedActions.chainId, chainId), eq(queuedActions.status, "queued")))
+        .where(
+          and(
+            eq(queuedActions.chainId, chainId),
+            eq(queuedActions.status, "queued"),
+            or(isNull(queuedActions.expiresAt), gt(queuedActions.expiresAt, new Date()))
+          )
+        )
         .orderBy(desc(queuedActions.queueBlock), desc(queuedActions.queueLogIndex), desc(queuedActions.createdAt));
       return Promise.all(
         rows.map(async (action) => ({
@@ -1349,6 +1458,12 @@ function chunks<T>(items: readonly T[], size: number): T[][] {
 }
 
 function compareGovernanceEvents(left: GovernanceEvent, right: GovernanceEvent): number {
+  if (left.blockNumber < right.blockNumber) return -1;
+  if (left.blockNumber > right.blockNumber) return 1;
+  return left.logIndex - right.logIndex;
+}
+
+function comparePositionedPipelineEvents(left: PositionedPipelineEvent, right: PositionedPipelineEvent): number {
   if (left.blockNumber < right.blockNumber) return -1;
   if (left.blockNumber > right.blockNumber) return 1;
   return left.logIndex - right.logIndex;

@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
+import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 
 contract PoolFees {
-    using SafeTransferLib for address;
-
     address public immutable pool;
     address public immutable token0;
     address public immutable token1;
 
     error InvalidAddress();
     error OnlyPool();
+    error UnexpectedFeeTransfer(address token, uint256 expected, uint256 senderSpent, uint256 recipientReceived);
 
     constructor(address pool_, address token0_, address token1_) {
         _requireNonZero(pool_);
@@ -37,6 +36,12 @@ contract PoolFees {
     function _transferIfRequested(address token, address recipient, uint256 amount) internal {
         if (amount == 0) return;
 
-        token.safeTransfer(recipient, amount);
+        ExactTransferLib.ExactDelta memory delta = ExactTransferLib.sendFromSelfTo(token, recipient, amount);
+        if (
+            delta.senderBalanceIncreased || delta.recipientBalanceDecreased || delta.senderSpent != amount
+                || delta.recipientReceived != amount
+        ) {
+            revert UnexpectedFeeTransfer(token, amount, delta.senderSpent, delta.recipientReceived);
+        }
     }
 }
