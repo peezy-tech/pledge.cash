@@ -7,8 +7,8 @@
   --color-zinc-200: #dcddd2;
   --color-zinc-300: #c3c5b8;
   --color-zinc-400: #a7aa9d;
-  --color-zinc-500: #777b70;
-  --color-zinc-600: #5e6258;
+  --color-zinc-500: #94988c;
+  --color-zinc-600: #878b7f;
   --color-zinc-700: #464a3e;
   --color-zinc-800: #30332b;
   --color-zinc-900: #20221d;
@@ -48,7 +48,7 @@
   --pc-border-strong: #464a3e;
   --pc-text: #f3f2e9;
   --pc-text-muted: #a7aa9d;
-  --pc-text-subtle: #777b70;
+  --pc-text-subtle: #878b7f;
   --pc-accent: #c9ff57;
   --pc-accent-ink: #172000;
   --pc-success: #68d7a5;

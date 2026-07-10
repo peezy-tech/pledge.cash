@@ -36,6 +36,7 @@ type SimpleKitState = {
 
 type ConnectWalletButtonProps = {
   className?: string | undefined;
+  compactOnMobile?: boolean | undefined;
   disabled?: boolean | undefined;
 };
 
@@ -116,19 +117,25 @@ function SimpleKitProvider({ children }: { children: React.ReactNode }): React.J
   );
 }
 
-function ConnectWalletButton({ className, disabled }: ConnectWalletButtonProps): React.JSX.Element {
+function ConnectWalletButton({ className, compactOnMobile = false, disabled }: ConnectWalletButtonProps): React.JSX.Element {
   const simplekit = useSimpleKit();
   const buttonLabel = simplekit.isConnected ? simplekit.formattedAddress : "Connect Wallet";
 
   return (
     <Button
+      aria-label={buttonLabel}
       className={cn("min-w-[9.5rem]", className)}
       disabled={disabled}
       type="button"
       onClick={simplekit.toggleModal}
     >
       <Wallet className="h-4 w-4" />
-      <span className="truncate">{buttonLabel}</span>
+      {!simplekit.isConnected && compactOnMobile ? (
+        <>
+          <span className="min-[420px]:hidden" aria-hidden="true">Connect</span>
+          <span className="hidden min-[420px]:inline" aria-hidden="true">Connect Wallet</span>
+        </>
+      ) : <span className="truncate">{buttonLabel}</span>}
     </Button>
   );
 }

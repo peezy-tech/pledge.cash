@@ -3,17 +3,25 @@ import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AddressLink } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
+import {
+  participationDistributionKey,
+  participationPathFromContentKey,
+  type ParticipationContentKey,
+  type ParticipationRoutePath,
+} from "../../features/participation/types";
+import { shortAddress } from "../../lib/forms";
 import type { ProductBoardroomDashboardState } from "../../lib/product-boardroom";
 import { formatTokenAmount } from "../../lib/token-amounts";
 import { cn } from "../../lib/utils";
 import { KeyValueList, PageNotice, RuledSection, SectionHeading } from "./page-primitives";
 
-export type ParticipationPath = "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "amm";
+export type ParticipationPath = ParticipationRoutePath;
 
 export type ParticipationOption = {
   address?: Address;
   available: boolean;
   description: string;
+  id: ParticipationContentKey;
   label: string;
   path: ParticipationPath;
   remaining?: bigint;
@@ -22,12 +30,14 @@ export type ParticipationOption = {
 };
 
 export type ParticipatePageProps = {
-  content?: Partial<Record<ParticipationPath, ReactNode>>;
+  content?: Partial<Record<ParticipationContentKey, ReactNode>>;
   dashboard?: ProductBoardroomDashboardState | undefined;
   error?: string | undefined;
   loading: boolean;
   onSelectPath?: ((path: ParticipationPath) => void) | undefined;
+  onSelectRoute?: ((route: ParticipationContentKey) => void) | undefined;
   selectedPath?: ParticipationPath | undefined;
+  selectedRoute?: ParticipationContentKey | undefined;
 };
 
 export function ParticipatePage({
@@ -36,25 +46,29 @@ export function ParticipatePage({
   error,
   loading,
   onSelectPath,
+  onSelectRoute,
   selectedPath,
+  selectedRoute,
 }: ParticipatePageProps): React.JSX.Element {
   const options = useMemo(() => participationOptions(dashboard, content), [content, dashboard]);
-  const [localSelection, setLocalSelection] = useState<ParticipationPath | undefined>(() => firstAvailablePath(options));
+  const [localSelection, setLocalSelection] = useState<ParticipationContentKey | undefined>(() => firstAvailableRoute(options));
   const dashboardAddress = dashboard?.address.toLowerCase();
 
   useEffect(() => {
-    setLocalSelection(firstAvailablePath(options));
+    setLocalSelection(firstAvailableRoute(options));
   }, [dashboardAddress]);
 
-  const activePath = validSelection(selectedPath, options)
+  const activeRoute = validSelection(selectedRoute ?? selectedPath, options)
     ?? validSelection(localSelection, options)
-    ?? firstAvailablePath(options)
-    ?? options[0]?.path;
-  const activeOption = options.find((option) => option.path === activePath);
+    ?? firstAvailableRoute(options)
+    ?? options[0]?.id;
+  const activeOption = options.find((option) => option.id === activeRoute);
+  const activeContent = activeOption ? content[activeOption.id] ?? content[activeOption.path] : undefined;
 
-  const selectPath = (path: ParticipationPath): void => {
-    setLocalSelection(path);
-    onSelectPath?.(path);
+  const selectRoute = (option: ParticipationOption): void => {
+    setLocalSelection(option.id);
+    onSelectRoute?.(option.id);
+    onSelectPath?.(option.path);
   };
 
   if (loading && !dashboard) {
@@ -77,28 +91,42 @@ export function ParticipatePage({
               This project has no readable sale, curve, airdrop, or AMM market. Its transparency record remains available.
             </PageNotice>
           </div>
+        ) : options.length === 1 && activeOption ? (
+          <div className="mt-5">
+            <section aria-label={`${activeOption.label} participation workflow`}>
+              {activeContent ?? (
+                <PageNotice title={activeOption.available ? "Action controls are not loaded" : "This route is not active"}>
+                  {activeOption.available
+                    ? "The project data is readable, but the transaction workflow has not been attached to this page."
+                    : "You can inspect this route’s history and contract, but it is not currently accepting participation."}
+                </PageNotice>
+              )}
+            </section>
+            <SingleParticipationDetails dashboard={dashboard} option={activeOption} />
+          </div>
         ) : (
           <div className="mt-5 grid border-y border-zinc-800 lg:grid-cols-[minmax(260px,0.65fr)_minmax(0,1.35fr)]">
-            <div aria-label="Participation routes" className="border-b border-zinc-800 lg:border-b-0 lg:border-r" role="tablist">
+            <div aria-label="Participation routes" className="border-b border-zinc-800 lg:border-b-0 lg:border-r" role="group">
               {options.map((option) => (
                 <button
-                  aria-controls={`participation-panel-${option.path}`}
-                  aria-selected={activePath === option.path}
+                  aria-controls={`participation-panel-${routeDomId(option.id)}`}
+                  aria-pressed={activeRoute === option.id}
                   className={cn(
                     "group grid w-full gap-2 border-b border-zinc-800 px-4 py-4 text-left transition-colors last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-lime-300/70",
-                    activePath === option.path ? "bg-zinc-900/70" : "hover:bg-zinc-900/35",
+                    activeRoute === option.id ? "bg-zinc-900/70" : "hover:bg-zinc-900/35",
                   )}
-                  id={`participation-tab-${option.path}`}
-                  key={option.path}
-                  role="tab"
+                  id={`participation-route-${routeDomId(option.id)}`}
+                  key={option.id}
                   type="button"
-                  onClick={() => selectPath(option.path)}
+                  onClick={() => selectRoute(option)}
                 >
                   <span className="flex items-center justify-between gap-3">
                     <span className="font-semibold text-zinc-100">{option.label}</span>
                     <Badge variant={option.available ? "default" : "muted"}>{option.status}</Badge>
                   </span>
-                  <span className="text-xs leading-5 text-zinc-500">{option.description}</span>
+                  <span className="text-xs leading-5 text-zinc-500">
+                    {option.address ? `${shortAddress(option.address)} · ` : ""}{option.description}
+                  </span>
                   <span className="inline-flex items-center gap-1 text-xs font-semibold text-zinc-500 group-hover:text-lime-200">
                     Review route <ArrowRight className="h-3.5 w-3.5" />
                   </span>
@@ -106,13 +134,13 @@ export function ParticipatePage({
               ))}
             </div>
             <div
-              aria-labelledby={activePath ? `participation-tab-${activePath}` : undefined}
+              aria-labelledby={activeRoute ? `participation-route-${routeDomId(activeRoute)}` : undefined}
               className="min-w-0 px-4 py-5 sm:px-6"
-              id={activePath ? `participation-panel-${activePath}` : undefined}
-              role="tabpanel"
+              id={activeRoute ? `participation-panel-${routeDomId(activeRoute)}` : undefined}
+              role="region"
             >
               {activeOption ? <ParticipationSummary dashboard={dashboard} option={activeOption} /> : null}
-              {activePath && content[activePath] ? <div className="mt-5 border-t border-zinc-800 pt-5">{content[activePath]}</div> : (
+              {activeContent ? <div className="mt-5 border-t border-zinc-800 pt-5">{activeContent}</div> : (
                 <div className="mt-5 border-t border-zinc-800 pt-5">
                   <PageNotice title={activeOption?.available ? "Action controls are not loaded" : "This route is not active"}>
                     {activeOption?.available
@@ -148,9 +176,9 @@ export function ParticipatePage({
 
 export function participationOptions(
   dashboard: ProductBoardroomDashboardState | undefined,
-  content: Partial<Record<ParticipationPath, ReactNode>> = {},
+  content: Partial<Record<ParticipationContentKey, ReactNode>> = {},
 ): ParticipationOption[] {
-  if (!dashboard) return Object.keys(content).map((path) => fallbackOption(path as ParticipationPath));
+  if (!dashboard) return Object.keys(content).map((key) => fallbackOption(key as ParticipationContentKey));
   const options: ParticipationOption[] = [];
 
   for (const distribution of dashboard.snapshot.distributionSummaries) {
@@ -159,6 +187,7 @@ export function participationOptions(
         address: distribution.address,
         available: distribution.state.saleStatus === 0 && !distribution.state.closed && distribution.state.remainingShares > 0n,
         description: "Buy a known number of project tokens at a fixed unit price.",
+        id: participationDistributionKey("fixed-price-sale", distribution.address),
         label: "Fixed-price sale",
         path: "fixed-price-sale",
         remaining: distribution.state.remainingShares,
@@ -170,6 +199,7 @@ export function participationOptions(
         address: distribution.address,
         available: distribution.state.curveStatus === 0 && !distribution.state.closed && distribution.state.remainingSaleShares > 0n,
         description: "Buy or sell against an onchain price curve before liquidity migration.",
+        id: participationDistributionKey("migrating-bonding-curve", distribution.address),
         label: "Bonding curve",
         path: "migrating-bonding-curve",
         remaining: distribution.state.remainingSaleShares,
@@ -181,6 +211,7 @@ export function participationOptions(
         address: distribution.address,
         available: distribution.state.airdropStatus === 0 && !distribution.state.closed && distribution.state.remainingShares > 0n,
         description: "Claim a published allocation with a proof supplied by the project.",
+        id: participationDistributionKey("merkle-airdrop", distribution.address),
         label: "Airdrop",
         path: "merkle-airdrop",
         remaining: distribution.state.remainingShares,
@@ -190,23 +221,33 @@ export function participationOptions(
     }
   }
 
-  const pool = dashboard.history?.pool ?? selectedPool(dashboard);
+  const pool = dashboard.histories?.find((history) => history.pool)?.pool
+    ?? dashboard.history?.pool
+    ?? selectedPool(dashboard);
   if (pool || content.amm) {
     options.push({
       ...(pool ? { address: pool } : {}),
       available: Boolean(pool),
       description: "Swap against the project’s migrated liquidity pool.",
+      id: "amm",
       label: "AMM market",
       path: "amm",
       status: pool ? "Live" : "Unavailable",
     });
   }
 
-  for (const path of Object.keys(content) as ParticipationPath[]) {
-    if (!options.some((option) => option.path === path)) options.push(fallbackOption(path));
+  for (const key of Object.keys(content) as ParticipationContentKey[]) {
+    const path = participationPathFromContentKey(key);
+    const legacyPathAlreadyRepresented = key === path && options.some((option) => option.path === path);
+    if (!legacyPathAlreadyRepresented && !options.some((option) => option.id === key)) {
+      options.push(fallbackOption(key));
+    }
   }
 
-  return deduplicateOptions(options);
+  return options
+    .map((option, index) => ({ index, option }))
+    .sort((left, right) => Number(right.option.available) - Number(left.option.available) || left.index - right.index)
+    .map(({ option }) => option);
 }
 
 function ParticipationSummary({
@@ -239,6 +280,32 @@ function ParticipationSummary({
   );
 }
 
+function SingleParticipationDetails({
+  dashboard,
+  option,
+}: {
+  dashboard: ProductBoardroomDashboardState | undefined;
+  option: ParticipationOption;
+}): React.JSX.Element {
+  const remaining = option.remaining === undefined
+    ? "Not applicable"
+    : formatTokenAmount(option.remaining, dashboard?.snapshot.shareTokenMetadata, { symbol: option.tokenSymbol });
+
+  return (
+    <div className="mt-5 border-t border-zinc-800 pt-5">
+      <p className="m-0 text-xs font-semibold uppercase tracking-[0.08em] text-zinc-500">Route details</p>
+      <KeyValueList
+        columns={3}
+        items={[
+          { label: "Status", value: option.status },
+          { label: "Remaining", value: remaining },
+          { label: "Contract", value: option.address ? <AddressLink address={option.address} /> : "Not loaded" },
+        ]}
+      />
+    </div>
+  );
+}
+
 function ParticipationLoading(): React.JSX.Element {
   return (
     <div aria-label="Loading participation routes" aria-live="polite" className="grid animate-pulse gap-5 py-6" role="status">
@@ -248,15 +315,18 @@ function ParticipationLoading(): React.JSX.Element {
   );
 }
 
-function firstAvailablePath(options: readonly ParticipationOption[]): ParticipationPath | undefined {
-  return options.find((option) => option.available)?.path ?? options[0]?.path;
+function firstAvailableRoute(options: readonly ParticipationOption[]): ParticipationContentKey | undefined {
+  return options.find((option) => option.available)?.id ?? options[0]?.id;
 }
 
 function validSelection(
-  path: ParticipationPath | undefined,
+  selection: ParticipationContentKey | undefined,
   options: readonly ParticipationOption[],
-): ParticipationPath | undefined {
-  return path && options.some((option) => option.path === path) ? path : undefined;
+): ParticipationContentKey | undefined {
+  if (!selection) return undefined;
+  if (options.some((option) => option.id === selection)) return selection;
+  const path = participationPathFromContentKey(selection);
+  return options.find((option) => option.path === path)?.id;
 }
 
 function distributionStatus(status: number, closedLabel: string): string {
@@ -266,20 +336,22 @@ function distributionStatus(status: number, closedLabel: string): string {
   return "Unknown";
 }
 
-function fallbackOption(path: ParticipationPath): ParticipationOption {
-  if (path === "fixed-price-sale") return { available: false, description: "Buy at a published unit price.", label: "Fixed-price sale", path, status: "Not loaded" };
-  if (path === "migrating-bonding-curve") return { available: false, description: "Buy or sell against a price curve.", label: "Bonding curve", path, status: "Not loaded" };
-  if (path === "merkle-airdrop") return { available: false, description: "Claim a published allocation.", label: "Airdrop", path, status: "Not loaded" };
-  return { available: false, description: "Swap through the project liquidity pool.", label: "AMM market", path, status: "Not loaded" };
+function fallbackOption(id: ParticipationContentKey): ParticipationOption {
+  const path = participationPathFromContentKey(id);
+  const address = distributionAddressFromContentKey(id);
+  if (path === "fixed-price-sale") return { ...(address ? { address } : {}), available: false, description: "Buy at a published unit price.", id, label: "Fixed-price sale", path, status: "Not loaded" };
+  if (path === "migrating-bonding-curve") return { ...(address ? { address } : {}), available: false, description: "Buy or sell against a price curve.", id, label: "Bonding curve", path, status: "Not loaded" };
+  if (path === "merkle-airdrop") return { ...(address ? { address } : {}), available: false, description: "Claim a published allocation.", id, label: "Airdrop", path, status: "Not loaded" };
+  return { available: false, description: "Swap through the project liquidity pool.", id, label: "AMM market", path, status: "Not loaded" };
 }
 
-function deduplicateOptions(options: readonly ParticipationOption[]): ParticipationOption[] {
-  const byPath = new Map<ParticipationPath, ParticipationOption>();
-  for (const option of options) {
-    const current = byPath.get(option.path);
-    if (!current || (!current.available && option.available)) byPath.set(option.path, option);
-  }
-  return Array.from(byPath.values());
+function distributionAddressFromContentKey(key: ParticipationContentKey): Address | undefined {
+  const separator = key.indexOf(":");
+  return separator === -1 ? undefined : key.slice(separator + 1) as Address;
+}
+
+function routeDomId(route: ParticipationContentKey): string {
+  return route.replace(/[^a-zA-Z0-9_-]/g, "-");
 }
 
 function selectedPool(dashboard: ProductBoardroomDashboardState): Address | undefined {

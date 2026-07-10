@@ -10,8 +10,11 @@ import {
   minimumWithSlippage,
   parseMerkleProof,
   parseSlippageBps,
+  participationDistributionKey,
   transactionDeadline,
 } from "../src/features/participation";
+import { ParticipatePage, participationOptions } from "../src/app/pages";
+import { shortAddress } from "../src/lib/forms";
 import type { ProductBoardroomDashboardState } from "../src/lib/product-boardroom";
 import type { BoardroomDistributionSnapshot } from "../src/lib/types";
 
@@ -176,9 +179,12 @@ describe("participation flow composition", () => {
 
   test("builds injectable content for every discovered buyer path", () => {
     const content = createParticipationFlowContent(context);
-    expect(Object.keys(content)).toEqual(["fixed-price-sale", "migrating-bonding-curve", "merkle-airdrop"]);
+    const fixedKey = participationDistributionKey("fixed-price-sale", sale);
+    const curveKey = participationDistributionKey("migrating-bonding-curve", curve);
+    const airdropKey = participationDistributionKey("merkle-airdrop", airdrop);
+    expect(Object.keys(content)).toEqual([fixedKey, curveKey, airdropKey]);
 
-    const fixedHtml = renderToString(<ParticipationFlows {...context} path="fixed-price-sale" />);
+    const fixedHtml = renderToString(content[fixedKey]);
     expect(fixedHtml).toContain("Buy from the fixed-price sale");
     expect(fixedHtml).toContain("Expected payment");
     expect(fixedHtml).toContain("Advanced purchase settings");
@@ -193,5 +199,51 @@ describe("participation flow composition", () => {
     expect(airdropHtml).toContain("Claim an airdrop allocation");
     expect(airdropHtml).toContain("Proof and claim details");
     expect(airdropHtml).toContain("Grant claim slots");
+  });
+
+  test("keeps every same-type distribution address-scoped and renders the selected contract", () => {
+    const closedSale: BoardroomDistributionSnapshot = {
+      ...fixedSaleDistribution,
+      address: oldSale,
+      state: fixedSaleDistribution.state && "saleStatus" in fixedSaleDistribution.state
+        ? { ...fixedSaleDistribution.state, address: oldSale, closed: true, saleStatus: 1 }
+        : undefined,
+    };
+    const multiSaleDashboard: ProductBoardroomDashboardState = {
+      ...dashboard,
+      snapshot: {
+        ...dashboard.snapshot,
+        issuedDistributions: [oldSale, sale, curve, airdrop],
+        distributionSummaries: [closedSale, fixedSaleDistribution, curveDistribution, airdropDistribution],
+      },
+    };
+    const multiSaleContext = { ...context, dashboard: multiSaleDashboard };
+    const content = createParticipationFlowContent(multiSaleContext);
+    const activeKey = participationDistributionKey("fixed-price-sale", sale);
+    const closedKey = participationDistributionKey("fixed-price-sale", oldSale);
+
+    expect(Object.keys(content)).toContain(activeKey);
+    expect(Object.keys(content)).toContain(closedKey);
+    expect(participationOptions(multiSaleDashboard, content).filter((option) => option.path === "fixed-price-sale").map((option) => option.address))
+      .toEqual([sale, oldSale]);
+
+    const activeHtml = renderToString(content[activeKey]);
+    const closedHtml = renderToString(content[closedKey]);
+    expect(activeHtml).toContain(sale);
+    expect(activeHtml).not.toContain(oldSale);
+    expect(closedHtml).toContain(oldSale);
+    expect(closedHtml).not.toContain(sale);
+
+    const pageHtml = renderToString(
+      <ParticipatePage
+        content={content}
+        dashboard={multiSaleDashboard}
+        loading={false}
+        selectedRoute={closedKey}
+      />,
+    );
+    expect(pageHtml).toContain(shortAddress(sale));
+    expect(pageHtml).toContain(shortAddress(oldSale));
+    expect(pageHtml).toContain('aria-pressed="true"');
   });
 });

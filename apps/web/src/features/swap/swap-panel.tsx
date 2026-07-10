@@ -46,6 +46,7 @@ type SwapPanelProps = {
   tokenListLoading: boolean;
   wrappedNativeSymbol: string;
   mode?: "all" | "liquidity" | "swap";
+  lockSwapPair?: boolean | undefined;
   addLiquidity: () => Promise<void>;
   approveLiquidityTokenA: () => Promise<void>;
   approveLiquidityTokenB: () => Promise<void>;
@@ -111,6 +112,7 @@ export function SwapPanel({
   tokenListLoading,
   wrappedNativeSymbol,
   mode = "all",
+  lockSwapPair = false,
   addLiquidity,
   approveLiquidityTokenA,
   approveLiquidityTokenB,
@@ -173,6 +175,13 @@ export function SwapPanel({
     setTokenSearch("");
   };
 
+  useEffect(() => {
+    if (lockSwapPair && (selectorSide === "tokenIn" || selectorSide === "tokenOut")) {
+      setSelectorSide(undefined);
+      setTokenSearch("");
+    }
+  }, [lockSwapPair, selectorSide]);
+
   return (
     <div className="grid gap-4">
       {mode !== "liquidity" ? <Panel
@@ -191,7 +200,7 @@ export function SwapPanel({
                 <Badge variant={swapTone(quote)}>{swapStatus(quote)}</Badge>
                 <Badge variant="muted">{swapPairLabel(quote, form)}</Badge>
               </div>
-              <h1 className="m-0 text-2xl font-semibold tracking-normal text-zinc-50 sm:text-3xl">AMM Swap</h1>
+              <h3 className="m-0 text-2xl font-semibold tracking-normal text-zinc-50 sm:text-3xl">AMM Swap</h3>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Button aria-label="Flip swap direction" title="Flip swap direction" size="icon" variant="secondary" onClick={() => flipSwap(setForm)}>
@@ -207,6 +216,7 @@ export function SwapPanel({
 
         <div className="grid gap-px border-t border-zinc-800 bg-zinc-800 md:grid-cols-2">
           <TokenSelectField
+            disabled={lockSwapPair}
             label="From token"
             loading={tokenListLoading}
             option={inputToken}
@@ -217,6 +227,7 @@ export function SwapPanel({
             onOpen={() => openSelector("tokenIn")}
           />
           <TokenSelectField
+            disabled={lockSwapPair}
             label="To token"
             loading={tokenListLoading}
             option={outputToken}
@@ -434,6 +445,7 @@ export function SwapPanel({
 }
 
 function TokenSelectField({
+  disabled = false,
   label,
   loading,
   option,
@@ -443,6 +455,7 @@ function TokenSelectField({
   wrappedNativeSymbol,
   onOpen,
 }: {
+  disabled?: boolean;
   label: string;
   loading: boolean;
   option: SwapTokenOption | undefined;
@@ -459,7 +472,8 @@ function TokenSelectField({
   return (
     <Field label={label}>
       <button
-        className="flex min-h-14 w-full items-center justify-between gap-3 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-left outline-none transition-colors hover:border-zinc-700 hover:bg-zinc-900 focus:border-lime-300/70 focus:ring-2 focus:ring-lime-300/10"
+        className="flex min-h-14 w-full items-center justify-between gap-3 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-left outline-none transition-colors hover:border-zinc-700 hover:bg-zinc-900 focus:border-lime-300/70 focus:ring-2 focus:ring-lime-300/10 disabled:cursor-default disabled:opacity-80"
+        disabled={disabled}
         type="button"
         onClick={onOpen}
       >
@@ -469,7 +483,7 @@ function TokenSelectField({
         </span>
         <span className="flex shrink-0 items-center gap-2">
           <Badge variant={route === "Direct pool" ? "default" : route === "No direct pool" ? "warning" : "muted"}>{loading ? "Loading" : route || `${tokenCount.toString()} tokens`}</Badge>
-          <ChevronDown className="h-4 w-4 text-zinc-500" />
+          {disabled ? <Badge variant="muted">Project pool</Badge> : <ChevronDown className="h-4 w-4 text-zinc-500" />}
         </span>
       </button>
     </Field>

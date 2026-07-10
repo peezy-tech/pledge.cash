@@ -104,7 +104,11 @@ function HeaderActions({
       <DocsLink href={docsHref} />
       <Badge className="hidden xl:inline-flex" variant={walletReady ? "default" : "warning"}>{chainName}</Badge>
       {walletConnected && !walletReady ? <SwitchChainButton actionPending={actionPending} runAction={runAction} switchChain={switchChain} /> : null}
-      <ConnectWalletButton className="min-w-[9.5rem] max-w-[9.5rem] px-2 sm:max-w-none sm:px-3" disabled={actionPending} />
+      <ConnectWalletButton
+        className="min-w-28 max-w-28 px-2 min-[420px]:min-w-[9.5rem] min-[420px]:max-w-[9.5rem] sm:max-w-none sm:px-3"
+        compactOnMobile
+        disabled={actionPending}
+      />
     </div>
   );
 }

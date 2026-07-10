@@ -1,12 +1,48 @@
 import { describe, expect, test } from "bun:test";
 import type { Address, PledgeCashReadClient } from "@pledge.cash/sdk";
 import {
+  distributionCirculatingShares,
+  readFactoryBoardrooms,
   readProductBoardroomCatalog,
   readProductBoardroomDashboard,
   resolveProductBoardroomAddress,
 } from "../src/lib/product-boardroom";
+import type { BoardroomDistributionSnapshot } from "../src/lib/types";
 
 describe("product boardroom runtime discovery", () => {
+  test("uses claimed airdrop shares after unclaimed inventory is returned", () => {
+    const distribution = {
+      address: "0x6000000000000000000000000000000000000000",
+      kind: "merkle-airdrop",
+      state: {
+        airdropSupply: 1_000n,
+        claimedShares: 125n,
+        remainingShares: 0n,
+      },
+    } as BoardroomDistributionSnapshot;
+
+    expect(distributionCirculatingShares(distribution)).toBe(125n);
+  });
+
+  test("pages through every factory Boardroom newest first", async () => {
+    const factory = "0x0100000000000000000000000000000000000000" as Address;
+    const addresses = Array.from({ length: 65 }, (_, index) =>
+      `0x${(index + 1).toString(16).padStart(40, "0")}` as Address);
+    const client = {
+      async getBalance() { return 0n; },
+      async readContract(parameters: { functionName: string; args?: readonly [bigint] }) {
+        if (parameters.functionName === "allBoardroomsLength") return BigInt(addresses.length);
+        return addresses[Number(parameters.args?.[0] ?? 0n)];
+      },
+    };
+
+    const discovered = await readFactoryBoardrooms(client as never, factory);
+
+    expect(discovered).toHaveLength(65);
+    expect(discovered[0]).toBe(addresses[64]);
+    expect(discovered[64]).toBe(addresses[0]);
+  });
+
   test("loads dashboard treasury assets from Boardroom state without seed artifacts", async () => {
     const context = productBoardroomFixture();
     const tokenReads = new Set<string>();
@@ -59,6 +95,27 @@ describe("product boardroom runtime discovery", () => {
     });
   });
 
+  test("adapts event scans to RPC range limits without dropping history", async () => {
+    const context = productBoardroomFixture();
+    const successfulRanges: Array<{ fromBlock: bigint; toBlock: bigint }> = [];
+    const client = fakeProductBoardroomClient({
+      ...context,
+      latestBlock: 250_000n,
+      maxLogRange: 50_000n,
+      successfulRanges,
+      tokenReads: new Set<string>(),
+    });
+
+    const catalog = await readProductBoardroomCatalog(client, {
+      chainId: 31337,
+      boardroomFactory: context.boardroomFactory,
+    });
+
+    expect(catalog[0]?.buyerCount).toBe(2);
+    expect(successfulRanges.length).toBeGreaterThan(2);
+    expect(successfulRanges.every(({ fromBlock, toBlock }) => toBlock - fromBlock + 1n <= 50_000n)).toBe(true);
+  });
+
   test("keeps pruned distribution history visible after a sale or curve closes", async () => {
     const context = productBoardroomFixture();
     const client = fakeProductBoardroomClient({ ...context, pruned: true, tokenReads: new Set<string>() });
@@ -78,6 +135,8 @@ describe("product boardroom runtime discovery", () => {
       soldShares: 650n * 10n ** 18n,
     });
     expect(dashboard.history?.fixedPriceSale?.purchaseCount).toBe(2);
+    expect(dashboard.histories).toHaveLength(1);
+    expect(dashboard.snapshot.distributionSummaries.map((distribution) => distribution.address)).toContain(context.sale);
   });
 });
 
@@ -96,11 +155,17 @@ function productBoardroomFixture() {
 }
 
 function fakeProductBoardroomClient(
-  context: ProductBoardroomFixture & { pruned?: boolean; tokenReads: Set<string> },
+  context: ProductBoardroomFixture & {
+    latestBlock?: bigint;
+    maxLogRange?: bigint;
+    pruned?: boolean;
+    successfulRanges?: Array<{ fromBlock: bigint; toBlock: bigint }>;
+    tokenReads: Set<string>;
+  },
 ): PledgeCashReadClient & {
   getBalance: () => Promise<bigint>;
   getBlockNumber: () => Promise<bigint>;
-  getLogs: (parameters: { address: Address; event?: { name?: string } }) => Promise<{ args: Record<string, unknown> }[]>;
+  getLogs: (parameters: { address: Address; event?: { name?: string }; fromBlock?: bigint; toBlock?: bigint }) => Promise<{ args: Record<string, unknown> }[]>;
 } {
   const share = 10n ** 18n;
   const cash = 10n ** 6n;
@@ -119,9 +184,17 @@ function fakeProductBoardroomClient(
       return 0n;
     },
     async getBlockNumber() {
-      return 100n;
+      return context.latestBlock ?? 100n;
     },
     async getLogs(parameters) {
+      const fromBlock = parameters.fromBlock ?? 0n;
+      const toBlock = parameters.toBlock ?? context.latestBlock ?? 100n;
+      if (context.maxLogRange && toBlock - fromBlock + 1n > context.maxLogRange) {
+        throw new Error("RPC range limit");
+      }
+      context.successfulRanges?.push({ fromBlock, toBlock });
+      const containsFixtureEvents = fromBlock <= 10n && toBlock >= 10n;
+      if (!containsFixtureEvents) return [];
       if (parameters.address.toLowerCase() === context.boardroom.toLowerCase() && parameters.event?.name === "BoardroomDistributionRecorded") {
         return [{ args: { distribution: context.sale } }];
       }

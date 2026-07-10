@@ -10,7 +10,7 @@ import {
   type PledgeCashDeployment,
   type PledgeCashReadClient,
 } from "@pledge.cash/sdk";
-import { getAbiItem, isAddress, type PublicClient } from "viem";
+import { getAbiItem, isAddress, type AbiEvent, type PublicClient } from "viem";
 import { readBoardroomDistributionSnapshot, readBoardroomSnapshot } from "./boardroom-snapshot";
 import { errorMessage } from "./forms";
 import { formatNativeTokenAmount, formatTokenAmount } from "./token-amounts";
@@ -30,6 +30,8 @@ export type ProductBoardroomCatalogEntry = {
   cashTokenDecimals?: number | undefined;
   cashTokenSymbol?: string | undefined;
   distribution?: Address | undefined;
+  distributionAddresses?: Address[] | undefined;
+  distributionCount?: number | undefined;
   distributionKind?: string | undefined;
   error?: string | undefined;
   liquidity?: bigint | undefined;
@@ -112,18 +114,25 @@ export type ProductBoardroomDashboardState = {
   address: Address;
   catalog: ProductBoardroomCatalogEntry[];
   history?: ProductBoardroomHistory | undefined;
+  histories?: ProductBoardroomHistory[] | undefined;
   nativeBalance: bigint;
   snapshot: BoardroomSnapshot;
   treasuryAssets: ProductTreasuryAsset[];
 };
 
-type ProductBoardroomClient = PledgeCashReadClient & Pick<PublicClient, "getBalance"> & Partial<Pick<PublicClient, "getBlockNumber" | "getLogs">>;
+type ProductBoardroomClient = PledgeCashReadClient & Pick<PublicClient, "getBalance"> & Partial<Pick<PublicClient, "getBlockNumber" | "getCode" | "getLogs">>;
 type ProductBoardroomEventLog = { args?: Record<string, unknown> };
 type ProductBoardroomEventAbi = typeof ammPoolAbi | typeof boardroomAbi | typeof fixedPriceSaleAbi | typeof migratingBondingCurveAbi;
 type ProductBoardroomEventName = "BoardroomDistributionRecorded" | "CurveBuy" | "CurveMigrated" | "CurveSell" | "FixedPricePurchase" | "Swap";
 
-const MAX_DISCOVERED_BOARDROOMS = 64;
+const CATALOG_READ_CONCURRENCY = 8;
+const EVENT_LOG_CHUNK_SIZE = 100_000n;
+const EVENT_LOG_CONCURRENCY = 4;
+const MIN_EVENT_LOG_CHUNK_SIZE = 1_000n;
+const FACTORY_PAGE_SIZE = 64;
 const WAD = 1_000_000_000_000_000_000n;
+const contractStartBlockCache = new WeakMap<object, Map<string, Promise<bigint>>>();
+const eventLogCache = new WeakMap<object, Map<string, Promise<ProductBoardroomEventLog[]>>>();
 
 export async function readProductBoardroomDashboard(
   client: ProductBoardroomClient,
@@ -133,20 +142,23 @@ export async function readProductBoardroomDashboard(
     deployment?: PledgeCashDeployment | undefined;
   },
 ): Promise<ProductBoardroomDashboardState> {
-  const [snapshot, nativeBalance] = await Promise.all([
+  const [currentSnapshot, nativeBalance] = await Promise.all([
     readBoardroomSnapshot(client, input.address),
     client.getBalance({ address: input.address }),
   ]);
+  const snapshot = await hydrateHistoricalDistributions(client, currentSnapshot);
   const catalog = input.catalog ?? await readProductBoardroomCatalog(client, input.deployment);
   const activeCatalogEntry = catalog.find((entry) => sameAddress(entry.address, input.address));
-  const [treasuryAssets, history] = await Promise.all([
+  const [treasuryAssets, histories] = await Promise.all([
     readTreasuryAssets(client, snapshot, activeCatalogEntry),
-    readProductBoardroomHistory(client, snapshot, activeCatalogEntry),
+    readProductBoardroomHistories(client, snapshot),
   ]);
+  const history = selectPrimaryHistory(histories, activeCatalogEntry);
 
   return {
     address: input.address,
     catalog,
+    histories,
     history,
     nativeBalance,
     snapshot,
@@ -269,30 +281,38 @@ async function discoverProductBoardroomCatalog(
   factory: Address,
 ): Promise<ProductBoardroomCatalogEntry[]> {
   const addresses = await readFactoryBoardrooms(client, factory);
-
-  return await Promise.all(
-    uniqueAddresses(addresses).map(async (address) => await readProductBoardroomCatalogEntry(client, address)),
+  return await mapInBatches(
+    uniqueAddresses(addresses),
+    CATALOG_READ_CONCURRENCY,
+    async (address) => await readProductBoardroomCatalogEntry(client, address),
   );
 }
 
-async function readFactoryBoardrooms(client: ProductBoardroomClient, factory: Address): Promise<Address[]> {
+export async function readFactoryBoardrooms(client: ProductBoardroomClient, factory: Address): Promise<Address[]> {
   const rawCount = await client.readContract({
     address: factory,
     abi: boardroomFactoryAbi,
     functionName: "allBoardroomsLength",
   });
-  const count = boundedCount(rawCount);
+  const count = safeCount(rawCount, "Boardroom count");
+  const addresses: Address[] = [];
 
-  return await Promise.all(
-    Array.from({ length: count }, async (_, index) =>
+  // Read newest projects first, one bounded page at a time. This avoids the old
+  // silent 64-project truncation without fanning an unbounded RPC burst.
+  for (let end = count; end > 0; end = Math.max(0, end - FACTORY_PAGE_SIZE)) {
+    const start = Math.max(0, end - FACTORY_PAGE_SIZE);
+    const indexes = Array.from({ length: end - start }, (_, offset) => end - offset - 1);
+    addresses.push(...await Promise.all(indexes.map(async (index) =>
       (await client.readContract({
         address: factory,
         abi: boardroomFactoryAbi,
         functionName: "allBoardrooms",
         args: [BigInt(index)],
       })) as Address
-    ),
-  );
+    )));
+  }
+
+  return addresses;
 }
 
 async function readProductBoardroomCatalogEntry(
@@ -300,18 +320,24 @@ async function readProductBoardroomCatalogEntry(
   address: Address,
 ): Promise<ProductBoardroomCatalogEntry> {
   try {
-    const snapshot = await readBoardroomSnapshot(client, address);
-    const distribution = snapshot.distributionSummaries[0] ?? await readHistoricalBoardroomDistribution(client, address);
+    const snapshot = await hydrateHistoricalDistributions(client, await readBoardroomSnapshot(client, address));
+    const distribution = findCatalogDistribution(snapshot.distributionSummaries);
     const distributionState = distribution ? deriveDistributionCatalogFields(distribution, snapshot.shareTokenMetadata?.decimals) : {};
     const locker = findCatalogLocker(snapshot, distributionState.pool);
     const pool = catalogPoolAddress(distributionState, locker);
-    const history = distribution ? await readDistributionHistory(client, distribution, pool) : undefined;
+    const histories = await readProductBoardroomHistories(client, snapshot);
+    const history = selectPrimaryHistory(histories, {
+      distribution: distribution?.address,
+      pool,
+    });
     const cashToken = distributionState.cashToken;
     const treasuryCash = await readCatalogTreasuryCash(client, address, cashToken);
     const shareName = await readOptionalTokenName(client, snapshot.shareToken);
 
     return {
       address,
+      distributionAddresses: snapshot.distributionSummaries.map((entry) => entry.address),
+      distributionCount: snapshot.distributionSummaries.length,
       name: shareName,
       shareToken: snapshot.shareToken,
       shareTokenDecimals: snapshot.shareTokenMetadata?.decimals,
@@ -365,40 +391,51 @@ export async function readProductBoardroomHistory(
   snapshot: BoardroomSnapshot,
   catalogEntry: ProductBoardroomCatalogEntry | undefined,
 ): Promise<ProductBoardroomHistory | undefined> {
-  const distribution = findHistoryDistribution(snapshot, catalogEntry?.distribution)
-    ?? (catalogEntry?.distribution ? await readBoardroomDistributionSnapshot(client, catalogEntry.distribution) : undefined);
-  if (!distribution) return undefined;
-
-  try {
-    const history = await readDistributionHistory(client, distribution, catalogEntry?.pool);
-    if (!history) return undefined;
-    return {
-      ...history,
-      pool: history.pool ?? catalogEntry?.pool,
-    };
-  } catch (error) {
-    return {
-      distribution: distribution.address,
-      pool: catalogEntry?.pool,
-      scanError: errorMessage(error),
-    };
-  }
+  return selectPrimaryHistory(await readProductBoardroomHistories(client, snapshot), catalogEntry);
 }
 
-async function readHistoricalBoardroomDistribution(
+export async function readProductBoardroomHistories(
   client: ProductBoardroomClient,
-  boardroom: Address,
-): Promise<BoardroomDistributionSnapshot | undefined> {
-  try {
-    const logs = await readEventLogs(client, boardroom, boardroomAbi, "BoardroomDistributionRecorded");
-    const distribution = logs
-      ?.map((log) => addressArg(log.args, "distribution"))
-      .filter((address): address is Address => address !== undefined)
-      .at(-1);
-    return distribution ? await readBoardroomDistributionSnapshot(client, distribution) : undefined;
-  } catch {
-    return undefined;
-  }
+  snapshot: BoardroomSnapshot,
+): Promise<ProductBoardroomHistory[]> {
+  const histories = await mapInBatches(
+    snapshot.distributionSummaries,
+    CATALOG_READ_CONCURRENCY,
+    async (distribution): Promise<ProductBoardroomHistory | undefined> => {
+      try {
+        return await readDistributionHistory(client, distribution, undefined);
+      } catch (error) {
+        return {
+          distribution: distribution.address,
+          scanError: errorMessage(error),
+        };
+      }
+    },
+  );
+  return histories.filter((history): history is ProductBoardroomHistory => history !== undefined);
+}
+
+async function hydrateHistoricalDistributions(
+  client: ProductBoardroomClient,
+  snapshot: BoardroomSnapshot,
+): Promise<BoardroomSnapshot> {
+  const logs = await readEventLogs(client, snapshot.address, boardroomAbi, "BoardroomDistributionRecorded");
+  if (!logs) return snapshot;
+  const recorded = uniqueAddresses(logs
+    .map((log) => addressArg(log.args, "distribution"))
+    .filter((address): address is Address => address !== undefined));
+  const missing = recorded.filter((address) =>
+    !snapshot.distributionSummaries.some((distribution) => sameAddress(distribution.address, address)));
+  if (missing.length === 0) return snapshot;
+  const historical = await mapInBatches(
+    missing,
+    CATALOG_READ_CONCURRENCY,
+    async (distribution) => await readBoardroomDistributionSnapshot(client, distribution),
+  );
+  return {
+    ...snapshot,
+    distributionSummaries: [...snapshot.distributionSummaries, ...historical],
+  };
 }
 
 function deriveDistributionCatalogFields(
@@ -436,7 +473,7 @@ function deriveDistributionCatalogFields(
       distribution: distribution.address,
       distributionKind: "merkle-airdrop",
       path: "Merkle airdrop",
-      soldShares: state.airdropSupply - state.remainingShares,
+      soldShares: distributionCirculatingShares(distribution),
       status: merkleAirdropStatusLabel(state.airdropStatus),
       shareTokenDecimals,
     };
@@ -489,10 +526,9 @@ async function readDistributionHistory(
   }
 
   if ("airdropSupply" in distribution.state) {
-    const state = distribution.state;
     return {
       distribution: distribution.address,
-      soldShares: state.airdropSupply - state.remainingShares,
+      soldShares: distributionCirculatingShares(distribution),
     };
   }
 
@@ -627,9 +663,120 @@ async function readEventLogs(
 ): Promise<ProductBoardroomEventLog[] | undefined> {
   if (!client.getBlockNumber || !client.getLogs) return undefined;
   const toBlock = await client.getBlockNumber();
-  const event = getAbiItem({ abi, name });
-  const logs = await client.getLogs({ address, event, fromBlock: 0n, toBlock });
-  return logs as ProductBoardroomEventLog[];
+  const cacheKey = `${address.toLowerCase()}:${name}:${toBlock.toString()}`;
+  let clientCache = eventLogCache.get(client);
+  if (!clientCache) {
+    clientCache = new Map();
+    eventLogCache.set(client, clientCache);
+  }
+  const cached = clientCache.get(cacheKey);
+  if (cached) return await cached;
+
+  const request = readEventLogsInChunks(client, address, abi, name, toBlock);
+  clientCache.set(cacheKey, request);
+  try {
+    return await request;
+  } catch (error) {
+    clientCache.delete(cacheKey);
+    throw error;
+  }
+}
+
+async function readEventLogsInChunks(
+  client: ProductBoardroomClient,
+  address: Address,
+  abi: ProductBoardroomEventAbi,
+  name: ProductBoardroomEventName,
+  toBlock: bigint,
+): Promise<ProductBoardroomEventLog[]> {
+  if (!client.getLogs) return [];
+  const fromBlock = await contractStartBlock(client, address, toBlock);
+  if (fromBlock > toBlock) return [];
+  const event = getAbiItem({ abi, name }) as AbiEvent;
+  const logs: ProductBoardroomEventLog[] = [];
+  let nextBlock = fromBlock;
+
+  while (nextBlock <= toBlock) {
+    const ranges = Array.from({ length: EVENT_LOG_CONCURRENCY }, (_, offset) => {
+      const start = nextBlock + BigInt(offset) * EVENT_LOG_CHUNK_SIZE;
+      const end = minBigInt(start + EVENT_LOG_CHUNK_SIZE - 1n, toBlock);
+      return start <= toBlock ? { start, end } : undefined;
+    }).filter((range): range is { start: bigint; end: bigint } => range !== undefined);
+    const pages = await Promise.all(ranges.map(async ({ start, end }) =>
+      await readLogRangeAdaptive(client, address, event, start, end)));
+    for (const page of pages) logs.push(...page);
+    const last = ranges.at(-1);
+    if (!last) break;
+    nextBlock = last.end + 1n;
+  }
+
+  return logs;
+}
+
+async function readLogRangeAdaptive(
+  client: ProductBoardroomClient,
+  address: Address,
+  event: AbiEvent,
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<ProductBoardroomEventLog[]> {
+  if (!client.getLogs) return [];
+  try {
+    return await client.getLogs({ address, event, fromBlock, toBlock }) as ProductBoardroomEventLog[];
+  } catch (error) {
+    const size = toBlock - fromBlock + 1n;
+    if (size <= MIN_EVENT_LOG_CHUNK_SIZE) throw error;
+    const middle = fromBlock + (toBlock - fromBlock) / 2n;
+    const [first, second] = await Promise.all([
+      readLogRangeAdaptive(client, address, event, fromBlock, middle),
+      readLogRangeAdaptive(client, address, event, middle + 1n, toBlock),
+    ]);
+    return [...first, ...second];
+  }
+}
+
+async function contractStartBlock(
+  client: ProductBoardroomClient,
+  address: Address,
+  toBlock: bigint,
+): Promise<bigint> {
+  if (!client.getCode) return 0n;
+  let clientCache = contractStartBlockCache.get(client);
+  if (!clientCache) {
+    clientCache = new Map();
+    contractStartBlockCache.set(client, clientCache);
+  }
+  const key = address.toLowerCase();
+  const cached = clientCache.get(key);
+  if (cached) return await cached;
+
+  const request = findContractStartBlock(client, address, toBlock);
+  clientCache.set(key, request);
+  try {
+    return await request;
+  } catch {
+    clientCache.delete(key);
+    return 0n;
+  }
+}
+
+async function findContractStartBlock(
+  client: ProductBoardroomClient,
+  address: Address,
+  toBlock: bigint,
+): Promise<bigint> {
+  if (!client.getCode) return 0n;
+  const latestCode = await client.getCode({ address, blockNumber: toBlock });
+  if (!latestCode || latestCode === "0x") return 0n;
+  let low = 0n;
+  let high = toBlock;
+  while (low < high) {
+    const middle = (low + high) / 2n;
+    const code = await client.getCode({ address, blockNumber: middle });
+    if (code && code !== "0x") high = middle;
+    else low = middle + 1n;
+  }
+  return low;
 }
 
 function curveMigrationHistory(args: Record<string, unknown> | undefined): ProductBoardroomCurveMigrationHistory | undefined {
@@ -663,15 +810,37 @@ function catalogHistoryFields(history: ProductBoardroomHistory | undefined): Par
   };
 }
 
-function findHistoryDistribution(
-  snapshot: BoardroomSnapshot,
-  distributionAddress: Address | undefined,
+function findCatalogDistribution(
+  distributions: readonly BoardroomDistributionSnapshot[],
 ): BoardroomDistributionSnapshot | undefined {
-  if (distributionAddress) {
-    const selected = snapshot.distributionSummaries.find((distribution) => sameAddress(distribution.address, distributionAddress));
-    if (selected) return selected;
+  return distributions.find(distributionIsActive)
+    ?? distributions.find((distribution) => distribution.kind === "migrating-bonding-curve" && Boolean(nonZeroAddress(
+      distribution.state && "quoteToken" in distribution.state ? distribution.state.pool : undefined,
+    )))
+    ?? distributions[0];
+}
+
+function distributionIsActive(distribution: BoardroomDistributionSnapshot): boolean {
+  if (!distribution.state || distribution.state.closed) return false;
+  if ("saleStatus" in distribution.state) return distribution.state.saleStatus === 0;
+  if ("curveStatus" in distribution.state) return distribution.state.curveStatus === 0;
+  if ("airdropStatus" in distribution.state) return distribution.state.airdropStatus === 0;
+  return false;
+}
+
+function selectPrimaryHistory(
+  histories: readonly ProductBoardroomHistory[],
+  catalogEntry: Pick<ProductBoardroomCatalogEntry, "distribution" | "pool"> | undefined,
+): ProductBoardroomHistory | undefined {
+  if (catalogEntry?.distribution) {
+    const exact = histories.find((history) => sameAddress(history.distribution, catalogEntry.distribution));
+    if (exact) return {
+      ...exact,
+      pool: exact.pool ?? catalogEntry.pool,
+    };
   }
-  return snapshot.distributionSummaries.find((distribution) => distribution.kind === "migrating-bonding-curve") ?? snapshot.distributionSummaries[0];
+  return histories.find((history) => history.pool || history.curve?.migration)
+    ?? histories[0];
 }
 
 function findCatalogLocker(snapshot: BoardroomSnapshot, pool: Address | undefined) {
@@ -686,6 +855,16 @@ function findCatalogLocker(snapshot: BoardroomSnapshot, pool: Address | undefine
 
 function fixedPriceSaleCashRaised(soldShares: bigint, price: bigint): bigint {
   return (soldShares * price + WAD - 1n) / WAD;
+}
+
+export function distributionCirculatingShares(
+  distribution: BoardroomDistributionSnapshot,
+): bigint | undefined {
+  if (!distribution.state) return undefined;
+  if ("paymentToken" in distribution.state) return distribution.state.saleSupply - distribution.state.remainingShares;
+  if ("airdropSupply" in distribution.state) return distribution.state.claimedShares;
+  if ("quoteToken" in distribution.state) return distribution.state.soldShares;
+  return undefined;
 }
 
 function fixedPriceSaleStatusLabel(status: number): string {
@@ -735,12 +914,29 @@ async function readOptionalTokenName(client: PledgeCashReadClient, address: Addr
   }
 }
 
-function boundedCount(value: unknown): number {
+function safeCount(value: unknown, label: string): number {
   const parsed = bigintCount(value);
-  const capped = parsed > BigInt(MAX_DISCOVERED_BOARDROOMS)
-    ? BigInt(MAX_DISCOVERED_BOARDROOMS)
-    : parsed;
-  return Number(capped);
+  if (parsed > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(`${label} exceeds the browser's safe discovery range.`);
+  }
+  return Number(parsed);
+}
+
+async function mapInBatches<T, U>(
+  values: readonly T[],
+  concurrency: number,
+  mapper: (value: T, index: number) => Promise<U>,
+): Promise<U[]> {
+  const results: U[] = [];
+  for (let start = 0; start < values.length; start += concurrency) {
+    const batch = values.slice(start, start + concurrency);
+    results.push(...await Promise.all(batch.map(async (value, offset) => await mapper(value, start + offset))));
+  }
+  return results;
+}
+
+function minBigInt(first: bigint, second: bigint): bigint {
+  return first < second ? first : second;
 }
 
 function uniqueAddresses(addresses: Address[]): Address[] {

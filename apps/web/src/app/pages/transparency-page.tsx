@@ -7,6 +7,7 @@ import {
   formatNativeBalance,
   formatTokenBalance,
   type ProductBoardroomDashboardState,
+  type ProductBoardroomHistory,
   type ProductTreasuryAsset,
 } from "../../lib/product-boardroom";
 import { formatTokenAmount } from "../../lib/token-amounts";
@@ -55,11 +56,9 @@ export function TransparencyPage({
   const snapshot = dashboard.snapshot;
   const shareAsset = dashboard.treasuryAssets.find((asset) => sameAddress(asset.address, snapshot.shareToken));
   const catalogEntry = dashboard.catalog.find((entry) => sameAddress(entry.address, dashboard.address));
-  const cashMetadata = catalogEntry?.cashToken ? {
-    address: catalogEntry.cashToken,
-    ...(catalogEntry.cashTokenDecimals === undefined ? {} : { decimals: catalogEntry.cashTokenDecimals }),
-    ...(catalogEntry.cashTokenSymbol === undefined ? {} : { symbol: catalogEntry.cashTokenSymbol }),
-  } : undefined;
+  const histories = (dashboard.histories?.length ?? 0) > 0
+    ? dashboard.histories ?? []
+    : dashboard.history ? [dashboard.history] : [];
   const totals = transparencyTotals(dashboard);
 
   return (
@@ -113,22 +112,23 @@ export function TransparencyPage({
         <DistributionTable distributions={snapshot.distributionSummaries} />
       </RuledSection>
 
-      {dashboard.history || catalogEntry?.distribution ? (
+      {histories.length > 0 || catalogEntry?.distribution ? (
         <RuledSection>
-          <SectionHeading title="Participation history" description="Cumulative sale, curve, and market activity reconstructed from onchain events." />
-          <KeyValueList
-            columns={4}
-            items={[
-              { label: "Launch route", value: catalogEntry?.path ?? "Onchain distribution" },
-              { label: "Tokens allocated", value: formatTokenAmount(dashboard.history?.soldShares ?? catalogEntry?.soldShares, snapshot.shareTokenMetadata) },
-              { label: "Capital raised", value: formatTokenAmount(dashboard.history?.cashRaised ?? catalogEntry?.cashRaised, cashMetadata) },
-              { label: "Participants", value: String(dashboard.history?.buyerCount ?? catalogEntry?.buyerCount ?? "Unknown") },
-              { label: "Curve buys", value: String(dashboard.history?.curve?.buyCount ?? catalogEntry?.buyCount ?? 0) },
-              { label: "Curve sells", value: String(dashboard.history?.curve?.sellCount ?? catalogEntry?.sellCount ?? 0) },
-              { label: "AMM swaps", value: String(dashboard.history?.amm?.swapCount ?? catalogEntry?.swapCount ?? 0) },
-              { label: "Distribution", value: catalogEntry?.distribution ? <AddressLink address={catalogEntry.distribution} /> : "Unknown" },
-            ]}
-          />
+          <SectionHeading title="Participation history" description="Each sale, curve, airdrop, and migrated market stays separate so incompatible payment tokens are never added together." />
+          <div className="mt-4 divide-y divide-zinc-800 border-y border-zinc-800">
+            {(histories.length > 0 ? histories : [{
+              buyerCount: catalogEntry?.buyerCount,
+              cashRaised: catalogEntry?.cashRaised,
+              distribution: catalogEntry?.distribution,
+              soldShares: catalogEntry?.soldShares,
+            }]).map((history, index) => (
+              <ParticipationHistoryRow
+                dashboard={dashboard}
+                history={history}
+                key={history.distribution ?? `history-${index.toString()}`}
+              />
+            ))}
+          </div>
         </RuledSection>
       ) : null}
 
@@ -168,6 +168,46 @@ export function TransparencyPage({
         </details>
       </RuledSection>
     </>
+  );
+}
+
+function ParticipationHistoryRow({
+  dashboard,
+  history,
+}: {
+  dashboard: ProductBoardroomDashboardState;
+  history: ProductBoardroomHistory;
+}): React.JSX.Element {
+  const distribution = dashboard.snapshot.distributionSummaries.find((entry) =>
+    sameAddress(entry.address, history.distribution));
+  const cashMetadata = distribution?.state && "paymentToken" in distribution.state
+    ? distribution.paymentTokenMetadata
+    : distribution?.state && "quoteToken" in distribution.state
+      ? distribution.quoteTokenMetadata
+      : undefined;
+  const route = distribution ? distributionKindLabel(distribution.kind) : "Onchain distribution";
+
+  return (
+    <div className="py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="m-0 text-sm font-semibold text-zinc-100">{route}</h3>
+        {history.scanError ? <Badge variant="danger">Partial history</Badge> : <Badge variant="muted">Onchain record</Badge>}
+      </div>
+      <KeyValueList
+        columns={4}
+        items={[
+          { label: "Tokens allocated", value: formatTokenAmount(history.soldShares, dashboard.snapshot.shareTokenMetadata) },
+          { label: "Capital raised", value: history.cashRaised === undefined ? "Not applicable" : formatTokenAmount(history.cashRaised, cashMetadata) },
+          { label: "Buyers", value: history.buyerCount === undefined ? "Unknown" : String(history.buyerCount) },
+          { label: "Purchases", value: String(history.fixedPriceSale?.purchaseCount ?? history.curve?.buyCount ?? 0) },
+          { label: "Curve sells", value: String(history.curve?.sellCount ?? 0) },
+          { label: "AMM swaps", value: String(history.amm?.swapCount ?? 0) },
+          { label: "AMM traders", value: history.amm?.traderCount === undefined ? "Not applicable" : String(history.amm.traderCount) },
+          { label: "Distribution", value: history.distribution ? <AddressLink address={history.distribution} /> : "Unknown" },
+        ]}
+      />
+      {history.scanError ? <p className="m-0 mt-3 text-xs leading-5 text-red-300">{history.scanError}</p> : null}
+    </div>
   );
 }
 
@@ -344,6 +384,6 @@ function TransparencyLoading(): React.JSX.Element {
   );
 }
 
-function sameAddress(first: Address, second: Address): boolean {
-  return first.toLowerCase() === second.toLowerCase();
+function sameAddress(first: Address | undefined, second: Address | undefined): boolean {
+  return Boolean(first && second && first.toLowerCase() === second.toLowerCase());
 }

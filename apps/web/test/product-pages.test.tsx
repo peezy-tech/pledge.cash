@@ -224,7 +224,31 @@ describe("read-first product pages", () => {
     );
     expect(participate).toContain("Choose how to participate");
     expect(participate).toContain("Review purchase");
+    expect(participate).toContain("Route details");
+    expect(participate.indexOf("Review purchase")).toBeLessThan(participate.indexOf("Route details"));
+    expect(participate).not.toContain('role="tablist"');
+    expect(participate).not.toContain("Review route");
     expect(participate).toContain("Before anything reaches your wallet");
+  });
+
+  test("uses semantically honest route controls when multiple participation paths exist", () => {
+    const participate = renderToString(
+      <ParticipatePage
+        content={{
+          "fixed-price-sale": <button type="button">Review purchase</button>,
+          amm: <button type="button">Review swap</button>,
+        }}
+        dashboard={dashboard}
+        loading={false}
+      />,
+    );
+
+    expect(participate).toContain('aria-label="Participation routes"');
+    expect(participate).toContain('role="group"');
+    expect(participate).toContain('aria-pressed="true"');
+    expect(participate).toContain('role="region"');
+    expect(participate).not.toContain('role="tab"');
+    expect(participate).not.toContain('role="tabpanel"');
   });
 
   test("explains governance thresholds and exposes transparency tables", () => {

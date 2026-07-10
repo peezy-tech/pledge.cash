@@ -4,7 +4,13 @@ import { ReadError } from "./flow-primitives";
 import { FixedPriceSaleFlow } from "./fixed-price-sale-flow";
 import { BondingCurveFlow } from "./bonding-curve-flow";
 import { MerkleAirdropFlow } from "./merkle-airdrop-flow";
-import type { ParticipationFlowContext, ParticipationFlowsProps, ParticipationPath } from "./types";
+import {
+  participationDistributionKey,
+  type ParticipationContentKey,
+  type ParticipationFlowContext,
+  type ParticipationFlowsProps,
+  type ParticipationPath,
+} from "./types";
 
 export function ParticipationFlows({
   distribution,
@@ -23,10 +29,20 @@ export function ParticipationFlows({
 
 export function createParticipationFlowContent(
   context: ParticipationFlowContext,
-): Partial<Record<ParticipationPath, ReactNode>> {
-  const paths = (["fixed-price-sale", "migrating-bonding-curve", "merkle-airdrop"] as const)
-    .filter((path) => findParticipationDistribution(context.dashboard.snapshot.distributionSummaries, path));
-  return Object.fromEntries(paths.map((path) => [path, <ParticipationFlows {...context} key={path} path={path} />]));
+): Partial<Record<ParticipationContentKey, ReactNode>> {
+  const entries = context.dashboard.snapshot.distributionSummaries.flatMap((distribution) => {
+    if (!isParticipationPath(distribution.kind)) return [];
+    const key = participationDistributionKey(distribution.kind, distribution.address);
+    return [[key, (
+      <ParticipationFlows
+        {...context}
+        distribution={distribution}
+        key={key}
+        path={distribution.kind}
+      />
+    )] as const];
+  });
+  return Object.fromEntries(entries) as Partial<Record<ParticipationContentKey, ReactNode>>;
 }
 
 export function findParticipationDistribution(
@@ -46,9 +62,12 @@ function isActiveDistribution(distribution: BoardroomDistributionSnapshot): bool
   return false;
 }
 
+function isParticipationPath(kind: BoardroomDistributionSnapshot["kind"]): kind is ParticipationPath {
+  return kind === "fixed-price-sale" || kind === "migrating-bonding-curve" || kind === "merkle-airdrop";
+}
+
 function participationPathLabel(path: ParticipationPath): string {
   if (path === "fixed-price-sale") return "fixed-price sale";
   if (path === "migrating-bonding-curve") return "bonding curve";
   return "airdrop";
 }
-

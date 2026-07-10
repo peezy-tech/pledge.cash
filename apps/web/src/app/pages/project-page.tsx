@@ -27,6 +27,7 @@ export type ProjectLayoutProps = {
   loading: boolean;
   mastheadAction?: ReactNode;
   onNavigateSection: (section: ProjectSection) => void;
+  onRetry?: (() => void) | undefined;
   projectName?: string | undefined;
   sectionHref?: ((section: ProjectSection) => string) | undefined;
 };
@@ -48,6 +49,7 @@ export function ProjectLayout({
   loading,
   mastheadAction,
   onNavigateSection,
+  onRetry,
   projectName,
   sectionHref,
 }: ProjectLayoutProps): React.JSX.Element {
@@ -94,7 +96,11 @@ export function ProjectLayout({
               className={className}
               href={href}
               key={section.value}
-              onClick={() => onNavigateSection(section.value)}
+              onClick={(event) => {
+                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+                onNavigateSection(section.value);
+              }}
             >
               <span className="md:hidden">{section.mobileLabel}</span><span className="hidden md:inline">{section.label}</span>
             </a>
@@ -114,7 +120,10 @@ export function ProjectLayout({
 
       {error ? (
         <div className="pt-5">
-          <PageNotice title="Some project data could not be read" tone="danger">{error}</PageNotice>
+          <PageNotice title="Some project data could not be read" tone="danger">
+            <p className="m-0">{error}</p>
+            {onRetry ? <Button className="mt-3" size="sm" variant="secondary" onClick={onRetry}>Try again</Button> : null}
+          </PageNotice>
         </div>
       ) : null}
       <div aria-busy={loading}>{children}</div>
@@ -287,7 +296,11 @@ function commitmentSummary(dashboard: ProductBoardroomDashboardState | undefined
   const grants = dashboard?.snapshot.grantSummaries ?? [];
   const distributions = dashboard?.snapshot.distributionSummaries ?? [];
   const unsettled = grants.reduce((total, grant) => total + (grant.state?.unsettledAmount ?? 0n), 0n);
-  const hasAmm = Boolean(dashboard?.history?.pool ?? selectedCatalogEntry(dashboard)?.pool);
+  const hasAmm = Boolean(
+    dashboard?.histories?.find((history) => history.pool)?.pool
+    ?? dashboard?.history?.pool
+    ?? selectedCatalogEntry(dashboard)?.pool,
+  );
   return {
     openDistributions: distributions.filter(distributionIsActive).length + (hasAmm ? 1 : 0),
     openGrants: grants.filter((grant) => grant.state && !grant.state.closed).length,
