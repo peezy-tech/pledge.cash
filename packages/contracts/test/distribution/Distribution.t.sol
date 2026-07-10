@@ -267,7 +267,7 @@ contract DistributionTest is Test {
             address(new BoardroomRedemptionPayout()),
             address(new BoardroomGovernanceLogic())
         );
-        ammFactory = new AmmFactory(address(this));
+        ammFactory = new AmmFactory(address(this), address(boardroomFactory));
         ammRouter = new AmmRouter(address(ammFactory), address(wrappedNative));
         lockedLiquidityFactory = new LockedLiquidityFactory(address(ammRouter), address(boardroomFactory));
         ammFactory.setLiquidityRouter(address(ammRouter));

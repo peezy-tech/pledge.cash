@@ -335,6 +335,7 @@ if field_exists ammFactory; then
   actual_amm_protocol_fee_recipient="$(call_address "$amm_factory" "protocolFeeRecipient()(address)")"
   actual_amm_liquidity_router="$(call_address "$amm_factory" "liquidityRouter()(address)")"
   actual_amm_reservation_manager="$(call_address "$amm_factory" "reservationManager()(address)")"
+  actual_amm_boardroom_factory="$(call_address "$amm_factory" "boardroomFactory()(address)")"
   expect_address_equal "AmmFactory owner" "$(field ammFactoryOwner)" "$actual_amm_owner"
   expect_address_equal "Protocol governance owns AmmFactory" "$(field protocolGovernance)" "$actual_amm_owner"
   expect_address_equal "AmmFactory feeManager" "$(field ammFeeManager)" "$actual_amm_fee_manager"
@@ -342,6 +343,7 @@ if field_exists ammFactory; then
   expect_address_equal "AmmFactory routes through ProtocolFeeRouter" "$protocol_fee_router" "$actual_amm_protocol_fee_recipient"
   expect_address_equal "AmmFactory liquidityRouter" "$(field ammLiquidityRouter)" "$actual_amm_liquidity_router"
   expect_address_equal "AmmFactory liquidityRouter wiring" "$(field ammRouter)" "$actual_amm_liquidity_router"
+  expect_address_equal "AmmFactory BoardroomFactory wiring" "$(field boardroomFactory)" "$actual_amm_boardroom_factory"
   expect_address_equal \
     "AmmFactory reservationManager" \
     "$(field ammReservationManager)" \

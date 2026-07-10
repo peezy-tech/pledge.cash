@@ -262,6 +262,9 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
 
         locker = _deployLocker(boardroom, params);
         _recordLockerBoardroom(locker, boardroom);
+        if (!usesMigrationReservation) {
+            _reserveDirectInitialLiquidity(boardroom, locker, params.tokenA, params.tokenB);
+        }
         _pullSeedTokens(locker, payer, params);
         (pool, amountA, amountB, liquidity) = _seedLockerLiquidity(locker, params);
         _recordLockerPool(boardroom, pool, locker);
@@ -417,6 +420,14 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         emit MigrationReservationReleased(boardroom, distribution, salt);
     }
 
+    function _reserveDirectInitialLiquidity(address boardroom, address locker, address tokenA, address tokenB)
+        internal
+    {
+        address ammFactory = ILockedLiquidityReservationRouter(ammRouter).factory();
+        ILockedLiquidityReservationAmmFactory(ammFactory)
+            .reserveInitialLiquidity(tokenA, tokenB, locker, locker, boardroom);
+    }
+
     function _pruneClosedLockers(address boardroom) internal returns (uint256 pruned) {
         address[] storage lockers = lockersForBoardroom[boardroom];
         uint256 index;
@@ -482,10 +493,25 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
 
     function _verifiedBoardroomShareToken(address boardroom) internal view returns (address shareToken) {
         if (boardroom.code.length == 0) return address(0);
+        if (!_isCanonicalBoardroom(boardroom)) return address(0);
 
         shareToken = _readBoardroomShareToken(boardroom);
         if (shareToken == address(0)) return address(0);
+        if (!_isReciprocalShareToken(boardroom, shareToken)) return address(0);
         if (!_hasLockedLiquidityExitHook(boardroom)) return address(0);
+    }
+
+    function _isCanonicalBoardroom(address boardroom) internal view returns (bool) {
+        (bool success, bytes memory data) = boardroomFactory.staticcall(
+            abi.encodeCall(ILockedLiquidityFactoryBoardroomFactory.isBoardroom, (boardroom))
+        );
+        return success && data.length == 32 && abi.decode(data, (bool));
+    }
+
+    function _isReciprocalShareToken(address boardroom, address shareToken) internal view returns (bool) {
+        (bool success, bytes memory data) =
+            shareToken.staticcall(abi.encodeCall(ILockedLiquidityFactoryShareToken.boardroom, ()));
+        return success && data.length == 32 && abi.decode(data, (address)) == boardroom;
     }
 
     function _readBoardroomShareToken(address boardroom) internal view returns (address shareToken) {

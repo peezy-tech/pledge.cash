@@ -80,6 +80,11 @@ export const ammFactoryAbi = [
         "name": "feeManager_",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "boardroomFactory_",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
@@ -151,6 +156,19 @@ export const ammFactoryAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "boardroomFactory",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -944,6 +962,28 @@ export const ammFactoryAbi = [
       },
       {
         "name": "actual",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InitialLiquidityReservationRequired",
+    "inputs": [
+      {
+        "name": "pool",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidBoardroomFactory",
+    "inputs": [
+      {
+        "name": "factory",
         "type": "address",
         "internalType": "address"
       }
@@ -6295,6 +6335,25 @@ export const boardroomFactoryAbi = [
   {
     "type": "function",
     "name": "isBoardroom",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isShareToken",
     "inputs": [
       {
         "name": "",

@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
 import {WETH} from "solady/tokens/WETH.sol";
 import {AmmFactory} from "../../src/amm/AmmFactory.sol";
+import {AmmPool} from "../../src/amm/AmmPool.sol";
 import {AmmRouter} from "../../src/amm/AmmRouter.sol";
 import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
 import {Boardroom} from "../../src/boardroom/Boardroom.sol";
@@ -210,6 +211,19 @@ contract LockedLiquidityTestAllowAllPolicy is IBoardroomCallPolicy {
     }
 }
 
+contract LockedLiquidityTestCanonicalFactory {
+    mapping(address => bool) public isBoardroom;
+    mapping(address => bool) public isShareToken;
+
+    function setBoardroom(address boardroom, bool canonical) external {
+        isBoardroom[boardroom] = canonical;
+    }
+
+    function setShareToken(address token, bool canonical) external {
+        isShareToken[token] = canonical;
+    }
+}
+
 contract LockedLiquidityTestBoardroom {
     address public immutable shareToken;
     bool public lockedLiquidityExitAllowed;
@@ -220,6 +234,39 @@ contract LockedLiquidityTestBoardroom {
 
     function isIssuedDistribution(address) external pure returns (bool) {
         return false;
+    }
+
+    function approveToken(address token, address spender, uint256 amount) external {
+        ERC20(token).approve(spender, amount);
+    }
+
+    function createLockedLiquidity(LockedLiquidityFactory factory, LockedLiquidityFactory.CreateParams calldata params)
+        external
+        returns (address locker, address pool, uint256 amountA, uint256 amountB, uint256 liquidity)
+    {
+        return factory.createLockedLiquidity(params);
+    }
+
+    function exitLockedLiquidity(address locker) external {
+        lockedLiquidityExitAllowed = true;
+        LockedLiquidity(locker).exitToBoardroom(1, 1, block.timestamp);
+    }
+}
+
+contract LockedLiquidityCanonicalTestBoardroom {
+    address public immutable shareToken;
+    bool public lockedLiquidityExitAllowed;
+
+    constructor() {
+        shareToken = address(new BoardroomToken(address(this), "Canonical Test Share", "CTSHARE"));
+    }
+
+    function isIssuedDistribution(address) external pure returns (bool) {
+        return false;
+    }
+
+    function mintShares(uint256 amount) external {
+        BoardroomToken(shareToken).mint(address(this), amount);
     }
 
     function approveToken(address token, address spender, uint256 amount) external {
@@ -267,7 +314,6 @@ contract LockedLiquidityTest is Test {
     uint256 internal constant HOLDER_SHARES = 100 ether;
 
     function setUp() public {
-        ammFactory = new AmmFactory(address(this));
         wrappedNative = new WETH();
         policyRegistry = new BoardroomPolicyRegistry(address(this));
         assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
@@ -277,8 +323,11 @@ contract LockedLiquidityTest is Test {
             address(new BoardroomRedemptionPayout()),
             address(new BoardroomGovernanceLogic())
         );
+        ammFactory = new AmmFactory(address(this), address(boardroomFactory));
         router = new AmmRouter(address(ammFactory), address(wrappedNative));
         lockedLiquidityFactory = new LockedLiquidityFactory(address(router), address(boardroomFactory));
+        ammFactory.setLiquidityRouter(address(router));
+        ammFactory.setReservationManager(address(lockedLiquidityFactory));
         quoteToken = new LockedLiquidityTestERC20("Quote", "QUOTE", 18);
 
         assetPolicy.setAssetAllowed(address(quoteToken), true);
@@ -294,6 +343,7 @@ contract LockedLiquidityTest is Test {
         );
 
         assertTrue(lockedLiquidityFactory.isLocker(created.locker));
+        assertTrue(boardroomFactory.isShareToken(address(shareToken)));
         assertEq(lockedLiquidityFactory.lockerBoardroom(created.locker), address(boardroom));
         assertEq(lockedLiquidityFactory.lockerCountForBoardroom(address(boardroom)), 1);
         assertEq(lockedLiquidityFactory.lockerForBoardroomAt(address(boardroom), 0), created.locker);
@@ -314,8 +364,63 @@ contract LockedLiquidityTest is Test {
         assertEq(locker.pool(), created.pool);
         assertEq(locker.lockedLiquidity(), created.liquidity);
         assertGt(created.liquidity, 0);
+        assertEq(AmmPool(created.pool).totalSupply(), created.liquidity);
+        assertEq(AmmPool(created.pool).balanceOf(address(1)), 0);
         assertEq(shareToken.allowance(address(boardroom), address(lockedLiquidityFactory)), 0);
         assertEq(quoteToken.allowance(address(boardroom), address(lockedLiquidityFactory)), 0);
+    }
+
+    function testQueuedLockerCreationSeedsPubliclyPrecreatedEmptyPool() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("queued-precreated-pool");
+        bytes32 lockerSalt = keccak256("queued-precreated-locker");
+        address predictedLocker = lockedLiquidityFactory.predictLockedLiquidityAddress(address(boardroom), lockerSalt);
+
+        vm.startPrank(owner);
+        boardroom.mint(address(boardroom), SHARE_SEED);
+        boardroom.mint(owner, 1 ether);
+        boardroom.launch(1 days);
+        vm.stopPrank();
+        quoteToken.mint(address(boardroom), QUOTE_SEED);
+
+        LockedLiquidityFactory.CreateParams memory params = LockedLiquidityFactory.CreateParams({
+            tokenA: address(shareToken),
+            tokenB: address(quoteToken),
+            amountADesired: SHARE_SEED,
+            amountBDesired: QUOTE_SEED,
+            amountAMin: SEED_MINIMUM,
+            amountBMin: SEED_MINIMUM,
+            deadline: block.timestamp + 2 days,
+            salt: lockerSalt
+        });
+        Boardroom.Call[] memory calls = new Boardroom.Call[](3);
+        calls[0] = _approvalCall(address(shareToken), SHARE_SEED);
+        calls[1] = _approvalCall(address(quoteToken), QUOTE_SEED);
+        calls[2] = _policyCall(
+            address(lockedLiquidityFactory),
+            address(lockedLiquidityFactory),
+            abi.encodeCall(LockedLiquidityFactory.createLockedLiquidity, (params))
+        );
+
+        bytes32 actionSalt = keccak256("queued-precreated-action");
+        vm.prank(owner);
+        (, uint256 eta) = boardroom.queueBatch(calls, actionSalt);
+
+        address precreatedPool = ammFactory.createPool(address(shareToken), address(quoteToken));
+        assertEq(AmmPool(precreatedPool).totalSupply(), 0);
+
+        vm.warp(eta);
+        vm.prank(trader);
+        bytes[] memory results = boardroom.executeQueuedBatch(calls, actionSalt);
+        (address locker, address pool,,, uint256 liquidity) =
+            abi.decode(results[2], (address, address, uint256, uint256, uint256));
+
+        assertEq(locker, predictedLocker);
+        assertEq(pool, precreatedPool);
+        assertGt(liquidity, 0);
+        assertEq(AmmPool(pool).balanceOf(locker), liquidity);
+        assertEq(AmmPool(pool).balanceOf(address(1)), 0);
+        assertEq(AmmPool(pool).totalSupply(), liquidity);
+        _assertNoInitialLiquidityReservation(address(shareToken), address(quoteToken));
     }
 
     function testLockedLiquidityFactoryRejectsInvalidBoardroomFactory() public {
@@ -393,8 +498,9 @@ contract LockedLiquidityTest is Test {
         lockedLiquidityFactory.createLockedLiquidity(params);
     }
 
-    function testHostilePreseededPoolRatioCannotExtractBoardroomMigrationValue() public {
+    function testPublicCannotPreseedCanonicalBoardroomPoolBeforeLockerCreation() public {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-hostile-preseed");
+        address pool = ammFactory.createPool(address(shareToken), address(quoteToken));
 
         vm.prank(owner);
         boardroom.mint(trader, SHARE_SEED);
@@ -402,6 +508,7 @@ contract LockedLiquidityTest is Test {
         vm.startPrank(trader);
         shareToken.approve(address(router), SHARE_SEED);
         quoteToken.approve(address(router), 10 ether);
+        vm.expectRevert(abi.encodeWithSelector(AmmFactory.InitialLiquidityReservationRequired.selector, pool));
         router.addLiquidity(
             address(shareToken),
             address(quoteToken),
@@ -438,12 +545,16 @@ contract LockedLiquidityTest is Test {
         );
 
         vm.prank(owner);
-        vm.expectRevert(AmmRouter.InsufficientAmount.selector);
-        boardroom.executeBatch(calls);
+        bytes[] memory results = boardroom.executeBatch(calls);
+        (address locker, address seededPool,,, uint256 liquidity) =
+            abi.decode(results[2], (address, address, uint256, uint256, uint256));
 
-        assertEq(lockedLiquidityFactory.lockerCountForBoardroom(address(boardroom)), 0);
-        assertEq(shareToken.balanceOf(address(boardroom)), SHARE_SEED);
-        assertEq(quoteToken.balanceOf(address(boardroom)), QUOTE_SEED);
+        assertEq(seededPool, pool);
+        assertEq(lockedLiquidityFactory.lockerCountForBoardroom(address(boardroom)), 1);
+        assertEq(AmmPool(pool).balanceOf(locker), liquidity);
+        assertEq(AmmPool(pool).balanceOf(address(1)), 0);
+        assertEq(shareToken.balanceOf(address(boardroom)), 0);
+        assertEq(quoteToken.balanceOf(address(boardroom)), 0);
     }
 
     function testWindDownRequiresLockedLiquidityExitBeforeRedemptions() public {
@@ -472,6 +583,13 @@ contract LockedLiquidityTest is Test {
         assertGt(amountB, 0);
         assertEq(liquidity, created.liquidity);
         assertEq(LockedLiquidity(created.locker).lockedLiquidity(), 0);
+        assertEq(AmmPool(created.pool).totalSupply(), 0);
+        assertEq(AmmPool(created.pool).balanceOf(address(1)), 0);
+        assertEq(shareToken.balanceOf(created.pool), 0);
+        assertEq(quoteToken.balanceOf(created.pool), 0);
+        (uint112 reserve0, uint112 reserve1,) = AmmPool(created.pool).getReserves();
+        assertEq(reserve0, 0);
+        assertEq(reserve1, 0);
         assertTrue(boardroom.isRedeemableAsset(address(quoteToken)));
         assertFalse(boardroom.isRedeemableAsset(address(shareToken)));
         assertFalse(boardroom.isRedeemableAsset(created.pool));
@@ -506,9 +624,18 @@ contract LockedLiquidityTest is Test {
     }
 
     function testCreationPrunesClosedLockerAndRestoresFactoryCapacity() public {
-        LockedLiquidityTestERC20 mockShare = new LockedLiquidityTestERC20("Mock Share", "MSHARE", 18);
-        LockedLiquidityTestBoardroom mockBoardroom = new LockedLiquidityTestBoardroom(address(mockShare));
-        mockShare.mint(address(mockBoardroom), 100 ether);
+        LockedLiquidityTestCanonicalFactory testCanonicalFactory = new LockedLiquidityTestCanonicalFactory();
+        ammFactory = new AmmFactory(address(this), address(testCanonicalFactory));
+        router = new AmmRouter(address(ammFactory), address(wrappedNative));
+        lockedLiquidityFactory = new LockedLiquidityFactory(address(router), address(testCanonicalFactory));
+        ammFactory.setLiquidityRouter(address(router));
+        ammFactory.setReservationManager(address(lockedLiquidityFactory));
+
+        LockedLiquidityCanonicalTestBoardroom mockBoardroom = new LockedLiquidityCanonicalTestBoardroom();
+        BoardroomToken mockShare = BoardroomToken(mockBoardroom.shareToken());
+        testCanonicalFactory.setBoardroom(address(mockBoardroom), true);
+        testCanonicalFactory.setShareToken(address(mockShare), true);
+        mockBoardroom.mintShares(100 ether);
         mockBoardroom.approveToken(address(mockShare), address(lockedLiquidityFactory), type(uint256).max);
 
         uint256 capacity = lockedLiquidityFactory.MAX_LOCKERS_PER_BOARDROOM();
@@ -848,6 +975,55 @@ contract LockedLiquidityTest is Test {
         lockedLiquidityFactory.createLockedLiquidity(params);
     }
 
+    function testFakeBoardroomCannotReserveCanonicalSharePool() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("fake-boardroom-canonical-share");
+        LockedLiquidityTestBoardroom fakeBoardroom = new LockedLiquidityTestBoardroom(address(shareToken));
+
+        vm.prank(owner);
+        boardroom.mint(address(fakeBoardroom), SHARE_SEED);
+        quoteToken.mint(address(fakeBoardroom), QUOTE_SEED);
+        fakeBoardroom.approveToken(address(shareToken), address(lockedLiquidityFactory), SHARE_SEED);
+        fakeBoardroom.approveToken(address(quoteToken), address(lockedLiquidityFactory), QUOTE_SEED);
+
+        LockedLiquidityFactory.CreateParams memory params =
+            _createParams(address(shareToken), address(quoteToken), keccak256("fake-boardroom-canonical-share"));
+        vm.expectRevert(
+            abi.encodeWithSelector(LockedLiquidityFactory.InvalidBoardroom.selector, address(fakeBoardroom))
+        );
+        fakeBoardroom.createLockedLiquidity(lockedLiquidityFactory, params);
+
+        assertEq(ammFactory.getPool(address(shareToken), address(quoteToken)), address(0));
+    }
+
+    function testReciprocalShareTokenLinkRejectsRegistryApprovedImpostor() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("reciprocal-share-link");
+        LockedLiquidityTestBoardroom fakeBoardroom = new LockedLiquidityTestBoardroom(address(shareToken));
+        LockedLiquidityTestCanonicalFactory testCanonicalFactory = new LockedLiquidityTestCanonicalFactory();
+        AmmFactory testAmmFactory = new AmmFactory(address(this), address(testCanonicalFactory));
+        AmmRouter testRouter = new AmmRouter(address(testAmmFactory), address(wrappedNative));
+        LockedLiquidityFactory testLockerFactory =
+            new LockedLiquidityFactory(address(testRouter), address(testCanonicalFactory));
+        testCanonicalFactory.setBoardroom(address(fakeBoardroom), true);
+        testCanonicalFactory.setShareToken(address(shareToken), true);
+        testAmmFactory.setLiquidityRouter(address(testRouter));
+        testAmmFactory.setReservationManager(address(testLockerFactory));
+
+        vm.prank(owner);
+        boardroom.mint(address(fakeBoardroom), SHARE_SEED);
+        quoteToken.mint(address(fakeBoardroom), QUOTE_SEED);
+        fakeBoardroom.approveToken(address(shareToken), address(testLockerFactory), SHARE_SEED);
+        fakeBoardroom.approveToken(address(quoteToken), address(testLockerFactory), QUOTE_SEED);
+
+        LockedLiquidityFactory.CreateParams memory params =
+            _createParams(address(shareToken), address(quoteToken), keccak256("reciprocal-share-link"));
+        vm.expectRevert(
+            abi.encodeWithSelector(LockedLiquidityFactory.InvalidBoardroom.selector, address(fakeBoardroom))
+        );
+        fakeBoardroom.createLockedLiquidity(testLockerFactory, params);
+
+        assertEq(testAmmFactory.getPool(address(shareToken), address(quoteToken)), address(0));
+    }
+
     function testLockedLiquidityFactoryRejectsFeeOnTransferSeedToken() public {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-fee-token");
         LockedLiquidityFeeToken feeToken = new LockedLiquidityFeeToken();
@@ -994,8 +1170,8 @@ contract LockedLiquidityTest is Test {
     }
 
     function _createMockLockedLiquidity(
-        LockedLiquidityTestBoardroom mockBoardroom,
-        LockedLiquidityTestERC20 mockShare,
+        LockedLiquidityCanonicalTestBoardroom mockBoardroom,
+        BoardroomToken mockShare,
         uint256 index
     ) internal returns (address locker, address pool) {
         LockedLiquidityTestERC20 mockQuote = new LockedLiquidityTestERC20("Mock Quote", "MQUOTE", 18);
@@ -1015,12 +1191,38 @@ contract LockedLiquidityTest is Test {
         (locker, pool,,,) = mockBoardroom.createLockedLiquidity(lockedLiquidityFactory, params);
     }
 
+    function _createParams(address tokenA, address tokenB, bytes32 salt)
+        internal
+        view
+        returns (LockedLiquidityFactory.CreateParams memory params)
+    {
+        params = LockedLiquidityFactory.CreateParams({
+            tokenA: tokenA,
+            tokenB: tokenB,
+            amountADesired: SHARE_SEED,
+            amountBDesired: QUOTE_SEED,
+            amountAMin: SEED_MINIMUM,
+            amountBMin: SEED_MINIMUM,
+            deadline: block.timestamp,
+            salt: salt
+        });
+    }
+
     function _approvalCall(address token, uint256 amount) internal view returns (Boardroom.Call memory) {
         return _policyCall(
             address(assetPolicy),
             token,
             abi.encodeWithSignature("approve(address,uint256)", address(lockedLiquidityFactory), amount)
         );
+    }
+
+    function _assertNoInitialLiquidityReservation(address tokenA, address tokenB) internal view {
+        (address initializer, address recipient, address reservationOwner, address manager) =
+            ammFactory.initialLiquidityReservationFor(tokenA, tokenB);
+        assertEq(initializer, address(0));
+        assertEq(recipient, address(0));
+        assertEq(reservationOwner, address(0));
+        assertEq(manager, address(0));
     }
 
     function _policyCall(address policy, address target, bytes memory data)

@@ -6,6 +6,7 @@ import {Ownable} from "solady/auth/Ownable.sol";
 import {WETH} from "solady/tokens/WETH.sol";
 import {AmmFactory} from "../../src/amm/AmmFactory.sol";
 import {AmmPool} from "../../src/amm/AmmPool.sol";
+import {AmmRouter} from "../../src/amm/AmmRouter.sol";
 import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
 import {Boardroom} from "../../src/boardroom/Boardroom.sol";
 import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
@@ -785,14 +786,21 @@ contract BoardroomTest is Test {
         (Boardroom boardroom,) = _createBoardroom("amm-flash-holder-threshold");
         BoardroomToken shares = BoardroomToken(boardroom.shareToken());
         BoardroomCurrency quote = new BoardroomCurrency("Quote", "QUOTE", 18);
-        AmmFactory ammFactory = new AmmFactory(address(this));
-        AmmPool pool = AmmPool(ammFactory.createPool(address(shares), address(quote)));
+        AmmFactory ammFactory = new AmmFactory(address(this), address(boardroomFactory));
+        AmmRouter ammRouter = new AmmRouter(address(ammFactory), address(wrappedNative));
+
+        ammFactory.setLiquidityRouter(address(ammRouter));
+        ammFactory.setReservationManager(address(this));
+        AmmPool pool = AmmPool(ammFactory.reserveInitialLiquidity(address(shares), address(quote), owner, owner, owner));
 
         vm.startPrank(owner);
         boardroom.mint(owner, 100 ether);
-        shares.transfer(address(pool), 100 ether);
-        quote.mint(address(pool), 100 ether);
-        pool.mint(owner);
+        quote.mint(owner, 100 ether);
+        shares.approve(address(ammRouter), 100 ether);
+        quote.approve(address(ammRouter), 100 ether);
+        ammRouter.addLiquidity(
+            address(shares), address(quote), 100 ether, 100 ether, 100 ether, 100 ether, owner, block.timestamp
+        );
         boardroom.launch(1 days);
         vm.stopPrank();
         vm.roll(block.number + 1);

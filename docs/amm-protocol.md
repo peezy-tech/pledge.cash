@@ -51,12 +51,22 @@ small swaps cannot systematically escape either allocation.
 2. Initialized with sorted token pair, fee vault, empty reserves, and initial TWAP observation.
 3. Active pool where liquidity can be added, removed, swapped, and fee claims can be pulled by LP holders.
 
-The factory creates exactly one pool for each sorted pair.
+The factory creates exactly one pool for each sorted pair. Its immutable `boardroomFactory` identifies canonical
+Boardroom share tokens. An empty pool containing one of those shares cannot accept an unreserved first mint, even if
+someone created the pool while a governance action was waiting in the timelock.
 
 Before a Boardroom locker funds an empty pool, `LockedLiquidityFactory` reserves that pair's initial mint in
-`AmmFactory`. The reservation binds the expected initializer and LP recipient to the predicted locker. Only the
-canonical `AmmRouter` may consume a reservation, and consumption occurs inside the pool's first mint so any later
-failure restores it atomically.
+`AmmFactory`. Direct Boardroom creation reserves in the same transaction immediately before funding; curve migrations
+reserve when the migration is authorized. The reservation binds the expected initializer and LP recipient to the
+predicted locker. Only the canonical `AmmRouter` may consume a reservation, and consumption occurs inside the pool's
+first mint so any later failure restores it atomically. The locker factory grants this authority only when the caller is
+registered by its immutable `BoardroomFactory` and the claimed share token points back to that exact Boardroom.
+
+For an unreserved public pool, `MINIMUM_LIQUIDITY` remains permanently minted to `address(1)`. A reserved Boardroom
+pool instead mints the entire geometric-mean LP supply to its locked-liquidity recipient. Because that recipient cannot
+release LP before wind-down, the same anti-withdrawal property holds during the active lifecycle, while terminal exit
+can burn the complete supply and drain both reserves. No irredeemable Boardroom shares remain stranded in the pool and
+included in the redemption denominator.
 
 ### Locked Liquidity
 

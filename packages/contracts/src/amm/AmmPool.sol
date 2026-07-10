@@ -259,7 +259,7 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
             _requireReserveBalances(cache.balance0, cache.balance1);
             cache.amount0 = cache.balance0 - cache.reserve0;
             cache.amount1 = cache.balance1 - cache.reserve1;
-            liquidity = _mintInitialLiquidity(cache.amount0, cache.amount1);
+            liquidity = _mintInitialLiquidity(cache.amount0, cache.amount1, reserved);
         } else {
             _requireReserveBalances(cache.balance0, cache.balance1);
             cache.amount0 = cache.balance0 - cache.reserve0;
@@ -439,8 +439,15 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         return FixedPointMathLib.fullMulDivUp(amountIn, factory_.SWAP_FEE_BPS(), factory_.FEE_DENOMINATOR());
     }
 
-    function _mintInitialLiquidity(uint256 amount0, uint256 amount1) internal returns (uint256 liquidity) {
-        liquidity = (amount0 * amount1).sqrt() - MINIMUM_LIQUIDITY;
+    function _mintInitialLiquidity(uint256 amount0, uint256 amount1, bool reserved)
+        internal
+        returns (uint256 liquidity)
+    {
+        uint256 initialLiquidity = (amount0 * amount1).sqrt();
+        if (initialLiquidity <= MINIMUM_LIQUIDITY) revert InsufficientLiquidityMinted();
+        if (reserved) return initialLiquidity;
+
+        liquidity = initialLiquidity - MINIMUM_LIQUIDITY;
         _mint(address(1), MINIMUM_LIQUIDITY);
     }
 

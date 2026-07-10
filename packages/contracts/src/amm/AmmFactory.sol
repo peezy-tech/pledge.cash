@@ -5,6 +5,10 @@ import {LibClone} from "solady/utils/LibClone.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
 import {AmmPool} from "./AmmPool.sol";
 
+interface IAmmFactoryBoardroomFactory {
+    function isShareToken(address token) external view returns (bool);
+}
+
 contract AmmFactory is Ownable {
     uint256 public constant SWAP_FEE_BPS = 30;
     uint256 public constant PROTOCOL_FEE_SHARE_BPS = 500;
@@ -18,6 +22,7 @@ contract AmmFactory is Ownable {
     }
 
     address public feeManager;
+    address public immutable boardroomFactory;
     address public immutable poolImplementation;
     address public protocolFeeRecipient;
     address public liquidityRouter;
@@ -30,6 +35,7 @@ contract AmmFactory is Ownable {
 
     error IdenticalTokens();
     error ZeroAddress();
+    error InvalidBoardroomFactory(address factory);
     error PoolAlreadyExists(address pool);
     error OnlyPool();
     error OnlyReservationManager();
@@ -38,6 +44,7 @@ contract AmmFactory is Ownable {
     error InitialLiquidityAlreadyReserved(address pool, address reservationOwner);
     error InitialLiquidityReservationMismatch(address expected, address actual);
     error InitialLiquidityReservationManagerMismatch(address expected, address actual);
+    error InitialLiquidityReservationRequired(address pool);
 
     event PoolCreated(address indexed token0, address indexed token1, address indexed pool, uint256 poolCount);
     event FeeManagerSet(address indexed previousManager, address indexed newManager);
@@ -62,11 +69,15 @@ contract AmmFactory is Ownable {
         address manager
     );
 
-    constructor(address feeManager_) {
+    constructor(address feeManager_, address boardroomFactory_) {
         _requireNonZero(feeManager_);
+        if (boardroomFactory_ == address(0) || boardroomFactory_.code.length == 0) {
+            revert InvalidBoardroomFactory(boardroomFactory_);
+        }
 
         _initializeOwner(feeManager_);
         feeManager = feeManager_;
+        boardroomFactory = boardroomFactory_;
         poolImplementation = address(new AmmPool());
         emit FeeManagerSet(address(0), feeManager_);
     }
@@ -163,7 +174,14 @@ contract AmmFactory is Ownable {
         if (!isPool[msg.sender]) revert OnlyPool();
 
         InitialLiquidityReservation memory reservation = initialLiquidityReservation[msg.sender];
-        if (reservation.manager == address(0)) return (false, address(0));
+        if (reservation.manager == address(0)) {
+            (address token0, address token1) = AmmPool(msg.sender).tokens();
+            IAmmFactoryBoardroomFactory canonicalFactory = IAmmFactoryBoardroomFactory(boardroomFactory);
+            if (canonicalFactory.isShareToken(token0) || canonicalFactory.isShareToken(token1)) {
+                revert InitialLiquidityReservationRequired(msg.sender);
+            }
+            return (false, address(0));
+        }
         if (liquidityCaller != liquidityRouter) revert OnlyLiquidityRouter();
         if (initializer != reservation.initializer) {
             revert InitialLiquidityReservationMismatch(reservation.initializer, initializer);

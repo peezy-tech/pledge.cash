@@ -33,9 +33,14 @@ contract MigrationReservationPolicyRegistry {
 
 contract MigrationReservationBoardroomFactory {
     mapping(address => bool) public isBoardroom;
+    mapping(address => bool) public isShareToken;
 
     function setBoardroom(address boardroom, bool canonical) external {
         isBoardroom[boardroom] = canonical;
+    }
+
+    function setShareToken(address token, bool canonical) external {
+        isShareToken[token] = canonical;
     }
 }
 
@@ -144,9 +149,9 @@ contract MigrationReservationBoundaryTest is Test {
 
     function setUp() public {
         WETH wrappedNative = new WETH();
-        ammFactory = new AmmFactory(address(this));
-        ammRouter = new AmmRouter(address(ammFactory), address(wrappedNative));
         boardroomFactory = new MigrationReservationBoardroomFactory();
+        ammFactory = new AmmFactory(address(this), address(boardroomFactory));
+        ammRouter = new AmmRouter(address(ammFactory), address(wrappedNative));
         lockedLiquidityFactory = new LockedLiquidityFactory(address(ammRouter), address(boardroomFactory));
 
         IMigrationReservationAmmFactory configurableFactory = IMigrationReservationAmmFactory(address(ammFactory));
@@ -159,6 +164,7 @@ contract MigrationReservationBoundaryTest is Test {
         distributionFactory = new MigrationReservationDistributionFactory();
         policyRegistry.setModulePolicy(address(distributionFactory), true);
         shareToken = boardroom.shareToken();
+        boardroomFactory.setShareToken(shareToken, true);
     }
 
     function testSamePairCannotBeReservedByTwoCurves() public {

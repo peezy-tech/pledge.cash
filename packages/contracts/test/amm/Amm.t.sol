@@ -182,9 +182,10 @@ contract AmmTest is Test {
     address internal trader = address(0xB0B);
     address internal receiver = address(0xCAFE);
     address internal protocolFeeRecipient = address(0xFEE);
+    mapping(address => bool) public isShareToken;
 
     function setUp() public {
-        factory = new AmmFactory(address(this));
+        factory = new AmmFactory(address(this), address(this));
         wrappedNative = new WETH();
         router = new AmmRouter(address(factory), address(wrappedNative));
         tokenA = new AmmTestERC20("Token A", "TKNA", 18);
@@ -218,12 +219,37 @@ contract AmmTest is Test {
         factory.createPool(address(0), address(tokenA));
     }
 
+    function testCanonicalBoardroomShareCannotBeInitializedWithoutReservation() public {
+        isShareToken[address(tokenA)] = true;
+        address pool = factory.createPool(address(tokenA), address(tokenB));
+
+        vm.startPrank(lp);
+        tokenA.approve(address(router), 1_000 ether);
+        tokenB.approve(address(router), 1_000 ether);
+        vm.expectRevert(abi.encodeWithSelector(AmmFactory.InitialLiquidityReservationRequired.selector, pool));
+        router.addLiquidity(
+            address(tokenA), address(tokenB), 1_000 ether, 1_000 ether, 1_000 ether, 1_000 ether, lp, block.timestamp
+        );
+        vm.stopPrank();
+
+        assertEq(AmmPool(pool).totalSupply(), 0);
+        assertEq(tokenA.balanceOf(pool), 0);
+        assertEq(tokenB.balanceOf(pool), 0);
+    }
+
     function testFactoryGovernanceRotatesProtocolFeeRecipient() public {
         assertEq(factory.feeManager(), address(this));
         assertEq(factory.owner(), address(this));
 
         vm.expectRevert(AmmFactory.ZeroAddress.selector);
-        new AmmFactory(address(0));
+        new AmmFactory(address(0), address(this));
+
+        vm.expectRevert(abi.encodeWithSelector(AmmFactory.InvalidBoardroomFactory.selector, address(0)));
+        new AmmFactory(address(this), address(0));
+
+        address nonContract = address(0xBEEF);
+        vm.expectRevert(abi.encodeWithSelector(AmmFactory.InvalidBoardroomFactory.selector, nonContract));
+        new AmmFactory(address(this), nonContract);
 
         vm.prank(trader);
         vm.expectRevert(Ownable.Unauthorized.selector);
@@ -308,7 +334,11 @@ contract AmmTest is Test {
         );
         vm.stopPrank();
 
-        assertGt(liquidity, 0);
+        uint256 expectedLiquidity = (uint256(1_000 ether) * 1_000 ether).sqrt();
+        assertEq(liquidity, expectedLiquidity);
+        assertEq(AmmPool(pool).balanceOf(lp), expectedLiquidity);
+        assertEq(AmmPool(pool).balanceOf(address(1)), 0);
+        assertEq(AmmPool(pool).totalSupply(), expectedLiquidity);
         (initializer, recipient, reservationOwner, manager) =
             factory.initialLiquidityReservationFor(address(tokenA), address(tokenB));
         assertEq(initializer, address(0));
@@ -339,7 +369,8 @@ contract AmmTest is Test {
         assertEq(tokenA.balanceOf(receiver) - receiverBefore, hostilePreload);
         assertEq(tokenA.balanceOf(pool), amountA);
         assertEq(tokenB.balanceOf(pool), amountB);
-        assertEq(liquidity, (amountA * amountB).sqrt() - AmmPool(pool).MINIMUM_LIQUIDITY());
+        assertEq(liquidity, (amountA * amountB).sqrt());
+        assertEq(AmmPool(pool).balanceOf(address(1)), 0);
     }
 
     function testReservedInitialMintSweepsPreloadAboveUint112BeforeReserveCheck() public {

@@ -91,7 +91,7 @@ contract ProjectTokenLaunchScenario is Script {
             address(new BoardroomGovernanceLogic())
         );
         state.tokenGrantFactory = new TokenGrantFactory(owner, address(state.boardroomFactory));
-        state.ammFactory = new AmmFactory(owner);
+        state.ammFactory = new AmmFactory(owner, address(state.boardroomFactory));
         state.ammRouter = new AmmRouter(address(state.ammFactory), address(state.wrappedHype));
         state.lockedLiquidityFactory =
             new LockedLiquidityFactory(address(state.ammRouter), address(state.boardroomFactory));

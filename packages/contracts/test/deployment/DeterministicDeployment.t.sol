@@ -232,7 +232,7 @@ contract DeterministicDeploymentTest is Test {
         AmmFactory ammFactory = AmmFactory(
             _deploy(
                 PledgeCashDeploymentSalts.ammFactory(),
-                abi.encodePacked(type(AmmFactory).creationCode, abi.encode(owner))
+                abi.encodePacked(type(AmmFactory).creationCode, abi.encode(owner, address(boardroomFactory)))
             )
         );
         AmmRouter ammRouter = AmmRouter(
@@ -269,6 +269,7 @@ contract DeterministicDeploymentTest is Test {
         assertEq(protocolFeeRouter.feeRecipient(), owner);
         assertEq(ammFactory.owner(), owner);
         assertEq(ammFactory.feeManager(), owner);
+        assertEq(ammFactory.boardroomFactory(), address(boardroomFactory));
         assertEq(ammRouter.factory(), address(ammFactory));
         assertEq(ammRouter.wrappedNative(), address(wrappedNative));
         assertEq(lockedLiquidityFactory.ammRouter(), address(ammRouter));

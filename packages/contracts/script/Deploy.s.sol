@@ -174,7 +174,9 @@ contract Deploy is Script {
             _deployDeterministic(
                 state,
                 PledgeCashDeploymentSalts.ammFactory(),
-                abi.encodePacked(type(AmmFactory).creationCode, abi.encode(state.deployer))
+                abi.encodePacked(
+                    type(AmmFactory).creationCode, abi.encode(state.deployer, address(state.boardroomFactory))
+                )
             )
         );
         state.ammProtocolFeeRecipient = address(state.protocolFeeRouter);
@@ -365,6 +367,7 @@ contract Deploy is Script {
             "ammFactory.recipient", address(state.protocolFeeRouter), state.ammFactory.protocolFeeRecipient()
         );
         _attestAddress("ammFactory.router", address(state.ammRouter), state.ammFactory.liquidityRouter());
+        _attestAddress("ammFactory.boardroom", address(state.boardroomFactory), state.ammFactory.boardroomFactory());
         _attestAddress(
             "ammFactory.reserveMgr", address(state.lockedLiquidityFactory), state.ammFactory.reservationManager()
         );

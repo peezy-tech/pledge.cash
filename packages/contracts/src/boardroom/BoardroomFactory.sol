@@ -13,6 +13,7 @@ contract BoardroomFactory {
 
     address[] public allBoardrooms;
     mapping(address => bool) public isBoardroom;
+    mapping(address => bool) public isShareToken;
 
     error InvalidAddress();
 
@@ -57,6 +58,7 @@ contract BoardroomFactory {
 
         allBoardrooms.push(boardroom);
         isBoardroom[boardroom] = true;
+        isShareToken[createdBoardroom.shareToken()] = true;
 
         emit BoardroomCreated(
             boardroom, owner, policyRegistry, createdBoardroom.shareToken(), wrappedNative, name, symbol, salt
