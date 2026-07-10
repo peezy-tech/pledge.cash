@@ -12,6 +12,7 @@ interface ITokenGrantERC20Metadata {
 
 interface ITokenGrantFactory {
     function closeGrant(uint256 tokenId) external;
+    function isCanonicalBoardroom(address account) external view returns (bool);
 }
 
 contract TokenGrant is Initializable {
@@ -50,6 +51,8 @@ contract TokenGrant is Initializable {
 
     // Terminal state.
     bool public isClosed;
+    bool public isQuarantined;
+    uint256 public quarantinedAmount;
 
     error InvalidAddress();
     error InvalidAmount();
@@ -74,10 +77,12 @@ contract TokenGrant is Initializable {
     error GrantTransferNotUnlocked(uint256 tokenId, uint256 unlockTime);
     error OnlyFactory();
     error HolderSyncMismatch(address expected, address actual);
+    error QuarantineNotAllowed(address issuer);
 
     event GrantSettled(address indexed holder, address indexed issuer, uint256 tokenAmount, uint256 paymentAmount);
     event VestingHalted(address indexed issuer, uint256 vestedAtHalt, uint256 unvestedWithdrawn);
     event ExpiredTokensWithdrawn(address indexed issuer, uint256 amountWithdrawn);
+    event GrantQuarantined(address indexed issuer, address indexed lastHolder, uint256 strandedAmount);
 
     constructor() {
         _disableInitializers();
@@ -138,6 +143,7 @@ contract TokenGrant is Initializable {
     }
 
     function getSettleableAmount(uint256 _currentTime) public view returns (uint256) {
+        if (isClosed || isExpired(_currentTime)) return 0;
         uint256 vested = getCurrentlyVestedSnapshot(_currentTime);
         if (vested <= settledAmount) return 0;
         return vested - settledAmount;
@@ -241,6 +247,22 @@ contract TokenGrant is Initializable {
         }
         _closeAndBurnGrantRight();
         emit ExpiredTokensWithdrawn(issuer, remainingBalance);
+    }
+
+    /// @notice Closes a Boardroom-issued grant without touching a token that can no longer be transferred safely.
+    /// @dev This is a post-expiry accounting closure. `quarantinedAmount` records the unsettled promise left behind.
+    function quarantineAndClose() external onlyIssuer {
+        _requireOpen();
+        if (block.timestamp <= expiry) revert NotYetExpired();
+        if (!ITokenGrantFactory(factory).isCanonicalBoardroom(issuer)) revert QuarantineNotAllowed(issuer);
+
+        address lastHolder = holder;
+        uint256 strandedAmount = claimable - settledAmount;
+        isQuarantined = true;
+        quarantinedAmount = strandedAmount;
+        _closeAndBurnGrantRight();
+
+        emit GrantQuarantined(issuer, lastHolder, strandedAmount);
     }
 
     /*//////////////////////////////////////////////////////////////

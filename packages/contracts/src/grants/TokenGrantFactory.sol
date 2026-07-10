@@ -19,8 +19,13 @@ interface ITokenGrantBoardroomFactory {
     function isBoardroom(address boardroom) external view returns (bool);
 }
 
+interface ITokenGrantBoardroomAssetRegistry {
+    function reserveRedeemableAsset(address asset) external;
+}
+
 contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
     bytes4 internal constant TRANSFER_OWNERSHIP_SELECTOR = bytes4(keccak256("transferOwnership(address)"));
+    uint256 public constant MAX_BOARDROOM_GRANT_DURATION = 5 * 365 days;
 
     address public immutable boardroomFactory;
     address public immutable tokenGrantLogic;
@@ -67,6 +72,7 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
     error InvalidBoardroomFactory(address factory);
     error InvalidCreationFeePayment(uint256 expected, uint256 actual);
     error UnauthorizedGrantIssuer(address issuer, address caller);
+    error BoardroomGrantExpiryTooFar(uint256 expiry, uint256 maximum);
     error UnexpectedTokenBalanceChange(address token, uint256 expected, uint256 actual);
 
     event TokenGrantCreated(
@@ -235,6 +241,10 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
 
     function grantSlotReleaseForLifecycleCall(address, address, bytes4) external pure returns (address distribution) {}
 
+    function isCanonicalBoardroom(address account) public view returns (bool) {
+        return ITokenGrantBoardroomFactory(boardroomFactory).isBoardroom(account);
+    }
+
     function closeGrant(uint256 tokenId) external onlyLinkedGrant(tokenId) {
         address grant = grantForTokenId[tokenId];
         address holder = ownerOf(tokenId);
@@ -312,7 +322,8 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
 
     function _isGrantLifecycleSelector(bytes4 selector) internal pure returns (bool) {
         return selector == TokenGrant.stopVestingAndWithdrawUnvested.selector
-            || selector == TokenGrant.withdrawExpiredTokens.selector;
+            || selector == TokenGrant.withdrawExpiredTokens.selector
+            || selector == TokenGrant.quarantineAndClose.selector;
     }
 
     function _createsGrantObligation(address target, bytes calldata data, bytes calldata result)
@@ -328,6 +339,10 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
         if (msg.value != fee) {
             revert InvalidCreationFeePayment(fee, msg.value);
         }
+        _requireBoardroomGrantExpiry(input.issuer, input.expiry);
+        if (isCanonicalBoardroom(input.issuer) && input.paymentToken != address(0)) {
+            ITokenGrantBoardroomAssetRegistry(input.issuer).reserveRedeemableAsset(input.paymentToken);
+        }
 
         grant = LibClone.cloneDeterministic(tokenGrantLogic, _deploymentSalt(input.issuer, input.salt));
         uint256 tokenId = uint256(uint160(grant));
@@ -339,6 +354,13 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
         _payCreationFee(fee);
         _mint(input.holder, tokenId);
         _emitTokenGrantCreated(grant, tokenId, input.transferable, input.transferUnlockTime, input.salt);
+    }
+
+    function _requireBoardroomGrantExpiry(address issuer, uint256 expiry) internal view {
+        if (!isCanonicalBoardroom(issuer)) return;
+
+        uint256 maximum = block.timestamp + MAX_BOARDROOM_GRANT_DURATION;
+        if (expiry > maximum) revert BoardroomGrantExpiryTooFar(expiry, maximum);
     }
 
     function _initializeGrant(address grant, GrantCreateInput memory input) internal {

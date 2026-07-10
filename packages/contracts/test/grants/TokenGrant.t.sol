@@ -218,6 +218,21 @@ contract ReentrantPaymentERC20 is GrantERC20 {
     }
 }
 
+contract MutableFailureGrantERC20 is GrantERC20 {
+    bool public transfersFail;
+
+    constructor() GrantERC20("Mutable Grant", "MGRANT", 18) {}
+
+    function setTransfersFail(bool fail_) external {
+        transfersFail = fail_;
+    }
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        if (transfersFail) return false;
+        return super.transfer(to, amount);
+    }
+}
+
 interface IERC721Transfer {
     function transferFrom(address from, address to, uint256 tokenId) external;
     function safeTransferFrom(address from, address to, uint256 tokenId) external;
@@ -225,6 +240,10 @@ interface IERC721Transfer {
 
 contract TokenGrantTestBoardroomFactory {
     mapping(address => bool) public isBoardroom;
+
+    function setBoardroom(address boardroom, bool allowed) external {
+        isBoardroom[boardroom] = allowed;
+    }
 }
 
 contract TokenGrantTest is Test {
@@ -545,6 +564,124 @@ contract TokenGrantTest is Test {
         assertEq(grant.getUnsettledAmount(), GRANT_SIZE);
         assertEq(grant.getSettleableAmount(CLIFF - 1), 0);
         assertEq(grant.getSettleableAmount(1_500), 50 ether);
+    }
+
+    function testSettleableIsZeroAfterExpiryAndClose() public {
+        (TokenGrant grant,) = _createFreeGrant("settleable-expiry");
+
+        vm.warp(VESTING_END);
+        assertEq(grant.getSettleableAmount(block.timestamp), GRANT_SIZE);
+
+        vm.warp(EXPIRY + 1);
+        assertEq(grant.getSettleableAmount(block.timestamp), 0);
+
+        vm.prank(issuer);
+        grant.withdrawExpiredTokens();
+        assertTrue(grant.isClosed());
+        assertEq(grant.getSettleableAmount(block.timestamp), 0);
+    }
+
+    function testCanonicalBoardroomGrantExpiryIsBoundedWhileStandaloneGrantIsNot() public {
+        uint256 maximum = block.timestamp + factory.MAX_BOARDROOM_GRANT_DURATION();
+        uint256 longExpiry = maximum + 1;
+        uint256 vestingEnd = block.timestamp + 1 days;
+        bytes32 boardroomSalt = keccak256("boardroom-long-expiry");
+        _approve(address(token), issuer, address(factory), GRANT_SIZE);
+        boardroomFactory.setBoardroom(issuer, true);
+
+        vm.prank(issuer);
+        vm.expectRevert(
+            abi.encodeWithSelector(TokenGrantFactory.BoardroomGrantExpiryTooFar.selector, longExpiry, maximum)
+        );
+        factory.createGrant(
+            holder,
+            address(token),
+            address(0),
+            GRANT_SIZE,
+            0,
+            longExpiry,
+            block.timestamp,
+            vestingEnd,
+            false,
+            0,
+            boardroomSalt
+        );
+
+        boardroomFactory.setBoardroom(issuer, false);
+        vm.prank(issuer);
+        address grant = factory.createGrant(
+            holder,
+            address(token),
+            address(0),
+            GRANT_SIZE,
+            0,
+            longExpiry,
+            block.timestamp,
+            vestingEnd,
+            false,
+            0,
+            keccak256("standalone-long-expiry")
+        );
+        assertEq(TokenGrant(grant).expiry(), longExpiry);
+    }
+
+    function testExpiredBoardroomGrantCanQuarantineMutatedTokenWithoutTokenCall() public {
+        MutableFailureGrantERC20 mutableToken = new MutableFailureGrantERC20();
+        mutableToken.mint(issuer, GRANT_SIZE);
+        boardroomFactory.setBoardroom(issuer, true);
+
+        uint256 cliff = block.timestamp;
+        uint256 vestingEnd = block.timestamp + 10 days;
+        uint256 expiry = vestingEnd + 1 days;
+        _approve(address(mutableToken), issuer, address(factory), GRANT_SIZE);
+        vm.prank(issuer);
+        TokenGrant grant = TokenGrant(
+            factory.createGrant(
+                holder,
+                address(mutableToken),
+                address(0),
+                GRANT_SIZE,
+                0,
+                expiry,
+                cliff,
+                vestingEnd,
+                false,
+                0,
+                keccak256("mutated-boardroom-grant")
+            )
+        );
+
+        vm.warp(cliff + 5 days);
+        uint256 settledBeforeMutation = 25 ether;
+        vm.prank(holder);
+        grant.settle(settledBeforeMutation);
+        assertEq(grant.settledAmount(), settledBeforeMutation);
+        assertEq(mutableToken.balanceOf(holder), settledBeforeMutation);
+
+        mutableToken.setTransfersFail(true);
+        vm.prank(issuer);
+        vm.expectRevert();
+        grant.stopVestingAndWithdrawUnvested();
+
+        vm.prank(issuer);
+        vm.expectRevert(TokenGrant.NotYetExpired.selector);
+        grant.quarantineAndClose();
+
+        vm.warp(expiry + 1);
+        vm.prank(issuer);
+        vm.expectRevert();
+        grant.withdrawExpiredTokens();
+
+        vm.prank(issuer);
+        grant.quarantineAndClose();
+
+        assertTrue(grant.isClosed());
+        assertTrue(grant.isQuarantined());
+        assertEq(grant.quarantinedAmount(), GRANT_SIZE - settledBeforeMutation);
+        assertEq(mutableToken.balanceOf(address(grant)), GRANT_SIZE - settledBeforeMutation);
+        uint256 tokenId = grant.tokenId();
+        vm.expectRevert();
+        factory.ownerOf(tokenId);
     }
 
     function testTransferableGrantNftTransfersSettlementAuthorityAfterUnlock() public {

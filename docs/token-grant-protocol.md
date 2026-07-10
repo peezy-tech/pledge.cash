@@ -91,6 +91,8 @@ Preconditions:
 - vesting cliff is not after vesting end,
 - expiry is at least `MIN_SETTLEMENT_GRACE` (one day) after vesting end,
 - expiry is after the creation timestamp,
+- for a canonical Boardroom issuer, expiry is no more than five years after creation; standalone issuers retain the
+  general timing rules without this Boardroom wind-down bound,
 - grant token exposes supported `decimals()`,
 - issuer has approved `TokenGrantFactory` to transfer the full grant,
 - if a creation fee is configured, the issuer pays exact native value equal to the fee.
@@ -115,6 +117,7 @@ For `price > 0`:
 Effects:
 
 - factory validates exact native value equal to the configured creation fee,
+- for a paid Boardroom-issued grant, the payment token is registered immediately as a redeemable Boardroom asset,
 - factory deploys the grant clone at an address derived from `issuer` and `salt`,
 - grant state is initialized once,
 - full grant is transferred from issuer into escrow by the factory,
@@ -195,12 +198,21 @@ Effects:
 - remaining grant token escrow returns to issuer,
 - grant marks itself closed and the factory burns the grant-right ERC721 token.
 
+### Quarantine An Expired Boardroom Grant
+
+If a grant token mutates so that even expiry withdrawal can no longer transfer safely, the Boardroom issuer may call
+`quarantineAndClose()` only after expiry. This path makes no token call, records `quarantinedAmount` as
+`claimable - settledAmount`, closes the obligation, and burns the grant-right NFT. It cannot be used by standalone
+issuers or before expiry, so it cannot forfeit live vested settlement rights. Partially settled grants preserve their
+settled accounting and record only the remaining stranded promise.
+
 ## Invariants
 
 - `settledAmount <= claimable`.
 - `claimable <= grantSize`.
 - vested amount never exceeds `claimable`.
 - settleable amount never exceeds `claimable - settledAmount`.
+- settleable amount is zero after expiry or closure.
 - once halted, vested amount does not increase.
 - live grant-right ERC721 owner equals the grant-local holder authority.
 - soulbound grant-right ERC721 tokens cannot be transferred or approved per-token.
@@ -209,6 +221,7 @@ Effects:
 - grant-right ERC721 ownership does not silently disappear at expiry.
 - holder-only settlement cannot be called by issuer or random callers.
 - issuer-only transitions cannot be called by holder or random callers.
+- only a canonical Boardroom issuer can quarantine a grant, and only after settlement rights have expired.
 - `price == 0` grants never call a payment token.
 - `price > 0` payment cost is rounded up to the nearest payment-token smallest unit.
 - configured native creation fees must be paid exactly.

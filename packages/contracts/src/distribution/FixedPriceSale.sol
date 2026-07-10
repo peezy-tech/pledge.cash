@@ -5,6 +5,7 @@ import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Initializable} from "solady/utils/Initializable.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
+import {BestEffortTokenLib} from "../lib/BestEffortTokenLib.sol";
 
 interface IFixedPriceSaleBoardroom {
     function status() external view returns (uint8);
@@ -55,6 +56,7 @@ contract FixedPriceSale is Initializable, ReentrancyGuard {
     error InsufficientPayment(uint256 required, uint256 maximum);
     error MaxPerBuyerExceeded(address buyer, uint256 purchased, uint256 maximum);
     error UnexpectedTokenBalanceChange(address token, uint256 expected, uint256 actual);
+    error InvalidPaymentAsset(address asset);
 
     event FixedPriceSaleInitialized(
         address indexed boardroom,
@@ -174,6 +176,7 @@ contract FixedPriceSale is Initializable, ReentrancyGuard {
         if (boardroom_ == address(0) || params.shareToken == address(0) || params.paymentToken == address(0)) {
             revert InvalidAddress();
         }
+        if (!_isAsset(params.paymentToken)) revert InvalidPaymentAsset(params.paymentToken);
         if (params.shareAmount == 0 || params.price == 0) revert InvalidAmount();
         if (params.endTime != 0 && (params.endTime <= params.startTime || uint256(params.endTime) <= block.timestamp)) {
             revert InvalidTimeWindow();
@@ -198,6 +201,11 @@ contract FixedPriceSale is Initializable, ReentrancyGuard {
 
     function _isWithinSaleWindow() internal view returns (bool) {
         return block.timestamp >= startTime && (endTime == 0 || block.timestamp <= endTime);
+    }
+
+    function _isAsset(address asset) internal view returns (bool) {
+        (bool readable,) = BestEffortTokenLib.tryBalanceOf(asset, address(this));
+        return readable;
     }
 
     function _checkedTransfer(address token, address to, uint256 expectedAmount) internal {

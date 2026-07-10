@@ -7,6 +7,7 @@ import {Initializable} from "solady/utils/Initializable.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
+import {BestEffortTokenLib} from "../lib/BestEffortTokenLib.sol";
 import {LockedLiquidityFactory} from "../liquidity/LockedLiquidityFactory.sol";
 
 interface IMigratingBondingCurveBoardroom {
@@ -20,7 +21,9 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     uint8 internal constant BOARDROOM_STATUS_ACTIVE = 0;
     uint256 internal constant WAD = 1e18;
     uint256 internal constant BPS = 10_000;
-    uint256 public constant MAX_CURVE_SUPPLY = 1e36;
+    uint256 internal constant MINIMUM_MIGRATION_FILL_BPS = 9_500;
+    uint256 internal constant AMM_MINIMUM_LIQUIDITY = 1_000;
+    uint256 public constant MAX_CURVE_SUPPLY = type(uint112).max;
 
     enum CurveStatus {
         Active,
@@ -53,6 +56,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     uint256 public saleSupply;
     uint256 public migrationSupply;
     uint256 public remainingSaleShares;
+    uint256 public accountedQuoteReserve;
     uint256 public basePrice;
     uint256 public slope;
     uint256 public graduationQuoteTarget;
@@ -61,6 +65,9 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     uint64 public endTime;
     bytes32 public migrationSalt;
     CurveStatus public curveStatus;
+    bool public graduationLatched;
+    bool public quoteQuarantined;
+    uint256 public unrecoveredQuote;
 
     mapping(address => uint256) public sellableSharesBy;
 
@@ -79,6 +86,11 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     error SlippageExceeded(uint256 actual, uint256 bound);
     error MigrationNotReady(uint256 quoteReserve, uint256 target, uint256 remainingShares);
     error UnexpectedTokenBalanceChange(address token, uint256 expected, uint256 actual);
+    error InvalidQuoteAsset(address asset);
+    error InvalidMigrationConfiguration();
+    error MigrationMinimumTooLow(uint256 provided, uint256 required);
+    error GraduationLatched();
+    error QuoteNotQuarantined();
 
     event MigratingBondingCurveInitialized(
         address indexed boardroom,
@@ -106,6 +118,15 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         uint256 quoteToBoardroom
     );
     event CurveCancelled(uint256 returnedShares, uint256 returnedQuote);
+    event CurveGraduationLatched(uint256 quoteReserve, uint256 remainingShares);
+    event CurveQuoteQuarantined(
+        uint256 expectedQuote,
+        uint256 observedQuote,
+        uint256 returnedQuote,
+        uint256 unrecoveredQuote,
+        bool balanceReadable
+    );
+    event CurveQuoteRecovered(uint256 returnedQuote, uint256 unrecoveredQuote, bool balanceReadable);
 
     constructor() {
         _disableInitializers();
@@ -125,6 +146,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         saleSupply = params.saleSupply;
         migrationSupply = params.migrationSupply;
         remainingSaleShares = params.saleSupply;
+        accountedQuoteReserve = 0;
         basePrice = params.basePrice;
         slope = params.slope;
         graduationQuoteTarget = params.graduationQuoteTarget;
@@ -165,8 +187,10 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
 
         remainingSaleShares -= shareAmount;
         sellableSharesBy[recipient] += shareAmount;
+        accountedQuoteReserve += quoteIn;
         _checkedTransferFrom(quoteToken, msg.sender, address(this), quoteIn);
         _checkedTransfer(shareToken, recipient, shareAmount);
+        _latchGraduationIfReady();
 
         emit CurveBuy(msg.sender, recipient, shareAmount, quoteIn);
     }
@@ -178,6 +202,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     {
         _requireActiveBoardroom();
         _requireCurveActive();
+        if (graduationLatched) revert GraduationLatched();
         if (deadline < block.timestamp) revert Expired();
 
         uint256 sellerSellableShares = _requireSellableShares(recipient, shareAmount);
@@ -186,11 +211,12 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
 
         quoteOut = getSellQuote(shareAmount);
         if (quoteOut < minQuoteOut) revert SlippageExceeded(quoteOut, minQuoteOut);
-        uint256 reserve = quoteReserve();
+        uint256 reserve = accountedQuoteReserve;
         if (quoteOut > reserve) revert InsufficientQuote(reserve, quoteOut);
 
         remainingSaleShares += shareAmount;
         sellableSharesBy[msg.sender] = sellerSellableShares - shareAmount;
+        accountedQuoteReserve = reserve - quoteOut;
         _checkedTransferFrom(shareToken, msg.sender, address(this), shareAmount);
         _checkedTransfer(quoteToken, recipient, quoteOut);
 
@@ -209,7 +235,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
 
         curveStatus = CurveStatus.Migrated;
         uint256 sharesToLiquidity = migrationSupply + remainingSaleShares;
-        uint256 quoteBalance = quoteReserve();
+        uint256 quoteBalance = accountedQuoteReserve;
         uint256 quoteToLiquidity = _quoteToLiquidity(quoteBalance);
         _requireMigrationLiquidity(sharesToLiquidity, quoteToLiquidity, minShareLiquidity, minQuoteLiquidity);
 
@@ -222,7 +248,10 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         pool = createdPool;
         IMigratingBondingCurveBoardroom(boardroom).recordLockedLiquidityFromDistribution(createdLocker, createdPool);
 
-        (, uint256 quoteRemainder) = _returnBalancesToBoardroom();
+        uint256 expectedQuoteRemainder = quoteBalance - quoteToLiquidity;
+        accountedQuoteReserve = 0;
+        _returnCanonicalShares();
+        uint256 quoteRemainder = _returnQuoteOrQuarantine(expectedQuoteRemainder);
 
         emit CurveMigrated(createdLocker, createdPool, amountA, amountB, liquidity, quoteRemainder);
     }
@@ -231,10 +260,26 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         _requireCurveActive();
         curveStatus = CurveStatus.Cancelled;
         remainingSaleShares = 0;
+        uint256 expectedQuote = accountedQuoteReserve;
+        accountedQuoteReserve = 0;
 
-        (uint256 shareBalance, uint256 quoteBalance) = _returnBalancesToBoardroom();
+        LockedLiquidityFactory(lockedLiquidityFactory)
+            .releaseMigrationReservation(boardroom, shareToken, quoteToken, migrationSalt);
+
+        uint256 shareBalance = _returnCanonicalShares();
+        uint256 quoteBalance = _returnQuoteOrQuarantine(expectedQuote);
 
         emit CurveCancelled(shareBalance, quoteBalance);
+    }
+
+    /// @notice Retries recovery of quote assets left in a closed curve after a token failure.
+    /// @dev Anyone may call; recovered value can only be sent to the issuing Boardroom.
+    function recoverQuarantinedQuote() external nonReentrant returns (uint256 returnedQuote) {
+        if (curveStatus == CurveStatus.Active || !quoteQuarantined) revert QuoteNotQuarantined();
+        uint256 expectedQuote = unrecoveredQuote;
+        returnedQuote = _returnQuoteOrQuarantine(expectedQuote);
+        (bool balanceReadable,) = _tryBalanceOf(quoteToken, address(this));
+        emit CurveQuoteRecovered(returnedQuote, unrecoveredQuote, balanceReadable);
     }
 
     function isClosed() external view returns (bool) {
@@ -242,11 +287,8 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     }
 
     function canMigrate() public view returns (bool) {
-        if (curveStatus != CurveStatus.Active) return false;
-        uint256 reserve = quoteReserve();
-        if (_quoteToLiquidity(reserve) == 0) return false;
-        if (reserve >= graduationQuoteTarget) return true;
-        return remainingSaleShares == 0;
+        if (curveStatus != CurveStatus.Active || !graduationLatched) return false;
+        return _migrationAmountsFitAmm(accountedQuoteReserve, remainingSaleShares);
     }
 
     function soldShares() public view returns (uint256) {
@@ -254,7 +296,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     }
 
     function quoteReserve() public view returns (uint256) {
-        return ERC20(quoteToken).balanceOf(address(this));
+        return accountedQuoteReserve;
     }
 
     function getBuyQuote(uint256 shareAmount) public view returns (uint256) {
@@ -287,6 +329,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
 
     function _requireBuyOpen(uint256 deadline) internal view {
         _requireCurveActive();
+        if (graduationLatched) revert GraduationLatched();
         if (deadline < block.timestamp) revert Expired();
         if (!_isWithinBuyWindow()) revert BuyWindowClosed();
     }
@@ -297,8 +340,8 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         CreateParams calldata params
     ) internal view {
         _requireValidCreateAddresses(boardroom_, lockedLiquidityFactory_, params);
-        _requireValidCurveParameters(params);
         if (params.quoteToLpBps == 0 || params.quoteToLpBps > BPS) revert InvalidBasisPoints();
+        _requireValidCurveParameters(params);
         if (params.endTime != 0 && (params.endTime <= params.startTime || uint256(params.endTime) <= block.timestamp)) {
             revert InvalidTimeWindow();
         }
@@ -308,21 +351,35 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         address boardroom_,
         address lockedLiquidityFactory_,
         CreateParams calldata params
-    ) internal pure {
+    ) internal view {
         if (
             boardroom_ == address(0) || lockedLiquidityFactory_ == address(0) || params.shareToken == address(0)
                 || params.quoteToken == address(0) || params.shareToken == params.quoteToken
         ) {
             revert InvalidAddress();
         }
+        if (!_isAsset(params.quoteToken)) revert InvalidQuoteAsset(params.quoteToken);
     }
 
     function _requireValidCurveParameters(CreateParams calldata params) internal pure {
         if (
             params.saleSupply == 0 || params.migrationSupply == 0 || params.basePrice == 0
-                || params.graduationQuoteTarget == 0 || params.saleSupply + params.migrationSupply > MAX_CURVE_SUPPLY
+                || params.graduationQuoteTarget == 0 || params.saleSupply > MAX_CURVE_SUPPLY
+                || params.migrationSupply > MAX_CURVE_SUPPLY - params.saleSupply || params.basePrice > type(uint112).max
+                || params.slope > type(uint112).max
         ) {
             revert InvalidAmount();
+        }
+
+        uint256 fullSaleQuote = _curveIntegralForParams(params, 0, params.saleSupply);
+        uint256 fullSaleQuoteToLiquidity = FixedPointMathLib.fullMulDiv(fullSaleQuote, params.quoteToLpBps, BPS);
+        uint256 minimumShares = _minimumMigrationFill(params.migrationSupply);
+        uint256 minimumQuote = _minimumMigrationFill(fullSaleQuoteToLiquidity);
+        if (
+            fullSaleQuoteToLiquidity == 0 || fullSaleQuoteToLiquidity > type(uint112).max
+                || FixedPointMathLib.sqrt(minimumShares * minimumQuote) <= AMM_MINIMUM_LIQUIDITY
+        ) {
+            revert InvalidMigrationConfiguration();
         }
     }
 
@@ -348,7 +405,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
 
     function _requireMigrationReady() internal view {
         if (!canMigrate()) {
-            revert MigrationNotReady(quoteReserve(), graduationQuoteTarget, remainingSaleShares);
+            revert MigrationNotReady(accountedQuoteReserve, graduationQuoteTarget, remainingSaleShares);
         }
     }
 
@@ -359,6 +416,14 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         uint256 minQuoteLiquidity
     ) internal pure {
         if (sharesToLiquidity == 0 || quoteToLiquidity == 0) revert InvalidAmount();
+        uint256 requiredShareMinimum = _minimumMigrationFill(sharesToLiquidity);
+        uint256 requiredQuoteMinimum = _minimumMigrationFill(quoteToLiquidity);
+        if (minShareLiquidity < requiredShareMinimum) {
+            revert MigrationMinimumTooLow(minShareLiquidity, requiredShareMinimum);
+        }
+        if (minQuoteLiquidity < requiredQuoteMinimum) {
+            revert MigrationMinimumTooLow(minQuoteLiquidity, requiredQuoteMinimum);
+        }
         if (sharesToLiquidity < minShareLiquidity) revert SlippageExceeded(sharesToLiquidity, minShareLiquidity);
         if (quoteToLiquidity < minQuoteLiquidity) revert SlippageExceeded(quoteToLiquidity, minQuoteLiquidity);
     }
@@ -394,11 +459,58 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         quoteToken.safeApprove(lockedLiquidityFactory, 0);
     }
 
-    function _returnBalancesToBoardroom() internal returns (uint256 shareBalance, uint256 quoteBalance) {
+    function _returnCanonicalShares() internal returns (uint256 shareBalance) {
         shareBalance = ERC20(shareToken).balanceOf(address(this));
-        quoteBalance = ERC20(quoteToken).balanceOf(address(this));
         if (shareBalance != 0) _checkedTransfer(shareToken, boardroom, shareBalance);
-        if (quoteBalance != 0) _checkedTransfer(quoteToken, boardroom, quoteBalance);
+    }
+
+    function _returnQuoteOrQuarantine(uint256 expectedQuote) internal returns (uint256 returnedQuote) {
+        (bool balanceReadable, uint256 observedQuote) = _tryBalanceOf(quoteToken, address(this));
+        uint256 remainingQuote = observedQuote;
+
+        if (balanceReadable && observedQuote != 0) {
+            (returnedQuote, remainingQuote, balanceReadable) = _tryReturnQuote(observedQuote);
+        }
+
+        uint256 shortfall = expectedQuote > returnedQuote ? expectedQuote - returnedQuote : 0;
+        uint256 unrecovered = shortfall > remainingQuote ? shortfall : remainingQuote;
+        quoteQuarantined = !balanceReadable || unrecovered != 0;
+        unrecoveredQuote = unrecovered;
+
+        if (quoteQuarantined) {
+            emit CurveQuoteQuarantined(expectedQuote, observedQuote, returnedQuote, unrecoveredQuote, balanceReadable);
+        }
+    }
+
+    function _tryReturnQuote(uint256 amount)
+        internal
+        returns (uint256 returnedQuote, uint256 remainingQuote, bool verified)
+    {
+        (bool senderBeforeReadable, uint256 senderBefore) = _tryBalanceOf(quoteToken, address(this));
+        (bool recipientBeforeReadable, uint256 recipientBefore) = _tryBalanceOf(quoteToken, boardroom);
+        if (!senderBeforeReadable || !recipientBeforeReadable || senderBefore < amount) {
+            return (0, senderBefore, false);
+        }
+
+        bool callSucceeded = BestEffortTokenLib.tryTransfer(quoteToken, boardroom, amount);
+        if (!callSucceeded) return (0, senderBefore, true);
+
+        (bool senderAfterReadable, uint256 senderAfter) = _tryBalanceOf(quoteToken, address(this));
+        (bool recipientAfterReadable, uint256 recipientAfter) = _tryBalanceOf(quoteToken, boardroom);
+        if (!senderAfterReadable || !recipientAfterReadable) return (0, senderBefore, false);
+
+        if (recipientAfter >= recipientBefore) returnedQuote = recipientAfter - recipientBefore;
+        remainingQuote = senderAfter;
+        verified = true;
+    }
+
+    function _tryBalanceOf(address asset, address account) internal view returns (bool readable, uint256 balance) {
+        return BestEffortTokenLib.tryBalanceOf(asset, account);
+    }
+
+    function _isAsset(address asset) internal view returns (bool) {
+        (bool readable,) = _tryBalanceOf(asset, address(this));
+        return readable;
     }
 
     function _quoteToLiquidity(uint256 quoteBalance) internal view returns (uint256) {
@@ -409,10 +521,45 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         return block.timestamp >= startTime && (endTime == 0 || block.timestamp <= endTime);
     }
 
+    function _latchGraduationIfReady() internal {
+        if (graduationLatched) return;
+        uint256 reserve = accountedQuoteReserve;
+        if (reserve < graduationQuoteTarget && remainingSaleShares != 0) return;
+        if (!_migrationAmountsFitAmm(reserve, remainingSaleShares)) return;
+
+        graduationLatched = true;
+        emit CurveGraduationLatched(reserve, remainingSaleShares);
+    }
+
+    function _migrationAmountsFitAmm(uint256 quoteBalance, uint256 remainingShares) internal view returns (bool) {
+        uint256 sharesToLiquidity = migrationSupply + remainingShares;
+        uint256 quoteToLiquidity = _quoteToLiquidity(quoteBalance);
+        uint256 minimumShares = _minimumMigrationFill(sharesToLiquidity);
+        uint256 minimumQuote = _minimumMigrationFill(quoteToLiquidity);
+        return sharesToLiquidity != 0 && sharesToLiquidity <= type(uint112).max && quoteToLiquidity != 0
+            && quoteToLiquidity <= type(uint112).max
+            && FixedPointMathLib.sqrt(minimumShares * minimumQuote) > AMM_MINIMUM_LIQUIDITY;
+    }
+
+    function _minimumMigrationFill(uint256 desiredAmount) internal pure returns (uint256) {
+        return FixedPointMathLib.fullMulDivUp(desiredAmount, MINIMUM_MIGRATION_FILL_BPS, BPS);
+    }
+
     function _curveIntegralUp(uint256 soldBefore, uint256 shareAmount) internal view returns (uint256) {
         uint256 linearQuote = FixedPointMathLib.fullMulDivUp(basePrice, shareAmount, WAD);
         uint256 slopeQuote =
             FixedPointMathLib.fullMulDivUp(slope, _slopeNumerator(soldBefore, shareAmount), 2 * WAD * WAD);
+        return linearQuote + slopeQuote;
+    }
+
+    function _curveIntegralForParams(CreateParams calldata params, uint256 soldBefore, uint256 shareAmount)
+        internal
+        pure
+        returns (uint256)
+    {
+        uint256 linearQuote = FixedPointMathLib.fullMulDivUp(params.basePrice, shareAmount, WAD);
+        uint256 slopeNumerator = shareAmount * (soldBefore * 2 + shareAmount);
+        uint256 slopeQuote = FixedPointMathLib.fullMulDivUp(params.slope, slopeNumerator, 2 * WAD * WAD);
         return linearQuote + slopeQuote;
     }
 

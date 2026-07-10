@@ -127,6 +127,75 @@ contract SenderSurchargeDistributionCurrency is DistributionCurrency {
     }
 }
 
+contract MutableDistributionCurrency {
+    string public constant name = "Mutable Quote";
+    string public constant symbol = "MQUOTE";
+    uint8 public constant decimals = 6;
+    uint256 public totalSupply;
+    bool public balanceReadsFail;
+    bool public transfersFail;
+    bool public balanceReadsBurnGas;
+    bool public transfersBurnGas;
+
+    mapping(address => uint256) internal balances;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    function setFailureMode(bool balanceReadsFail_, bool transfersFail_) external {
+        balanceReadsFail = balanceReadsFail_;
+        transfersFail = transfersFail_;
+    }
+
+    function setGasBurnMode(bool balanceReadsBurnGas_, bool transfersBurnGas_) external {
+        balanceReadsBurnGas = balanceReadsBurnGas_;
+        transfersBurnGas = transfersBurnGas_;
+    }
+
+    function balanceOf(address account) external view returns (uint256) {
+        if (balanceReadsBurnGas) {
+            assembly {
+                for {} 1 {} {}
+            }
+        }
+        require(!balanceReadsFail, "balance disabled");
+        return balances[account];
+    }
+
+    function mint(address to, uint256 amount) external {
+        balances[to] += amount;
+        totalSupply += amount;
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        if (transfersBurnGas) {
+            assembly {
+                for {} 1 {} {}
+            }
+        }
+        if (transfersFail) return false;
+        balances[msg.sender] -= amount;
+        balances[to] += amount;
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        if (transfersFail) return false;
+        uint256 allowed = allowance[from][msg.sender];
+        if (allowed != type(uint256).max) allowance[from][msg.sender] = allowed - amount;
+        balances[from] -= amount;
+        balances[to] += amount;
+        return true;
+    }
+}
+
+contract MalformedDistributionAsset {
+    function balanceOf(address) external pure {}
+}
+
 contract DistributionTestAllowAllPolicy is IBoardroomCallPolicy {
     function canCall(address, address, address, uint256, bytes calldata) external pure returns (bool) {
         return true;
@@ -182,7 +251,7 @@ contract DistributionTest is Test {
     uint256 internal constant CURVE_BUY_PAYMENT = 400_000000;
     uint256 internal constant CURVE_SELL_SHARES = 50 ether;
     uint256 internal constant CURVE_SELL_REFUND = 100_000000;
-    uint256 internal constant CURVE_GRADUATION_TARGET = 300_000000;
+    uint256 internal constant CURVE_GRADUATION_TARGET = 500_000000;
     uint256 internal constant AIRDROP_SHARES = 300 ether;
     uint256 internal constant AIRDROP_CLAIM_SHARES = 125 ether;
 
@@ -221,6 +290,7 @@ contract DistributionTest is Test {
         assertEq(distributionFactory.distributionCountForBoardroom(address(boardroom)), 1);
         assertEq(distributionFactory.distributionForBoardroomAt(address(boardroom), 0), address(sale));
         assertTrue(distributionFactory.isDistribution(address(sale)));
+        assertTrue(boardroom.isRedeemableAsset(address(paymentToken)));
 
         vm.prank(buyer);
         paymentToken.approve(address(sale), BUY_PAYMENT);
@@ -361,6 +431,8 @@ contract DistributionTest is Test {
         bytes32 salt = keccak256("airdrop-grant-create");
         address predictedAirdrop = distributionFactory.predictMerkleAirdropAddress(address(boardroom), salt);
         MerkleAirdrop.GrantClaimParams memory grantParams = _grantClaimParams("airdrop-grant-claim");
+        grantParams.paymentToken = address(paymentToken);
+        grantParams.price = PRICE;
         bytes32 root =
             _grantClaimLeaf(predictedAirdrop, boardroom, shareToken, 0, recipient, AIRDROP_CLAIM_SHARES, grantParams);
 
@@ -383,9 +455,9 @@ contract DistributionTest is Test {
         assertEq(grant.issuer(), address(boardroom));
         assertEq(grant.holder(), recipient);
         assertEq(grant.token(), address(shareToken));
-        assertEq(grant.paymentToken(), address(0));
+        assertEq(grant.paymentToken(), address(paymentToken));
         assertEq(grant.grantSize(), AIRDROP_CLAIM_SHARES);
-        assertEq(grant.price(), 0);
+        assertEq(grant.price(), PRICE);
         assertEq(grant.vestingCliff(), grantParams.vestingCliff);
         assertEq(grant.vestingEnd(), grantParams.vestingEnd);
         assertEq(grant.expiry(), grantParams.expiry);
@@ -400,6 +472,7 @@ contract DistributionTest is Test {
         assertEq(boardroom.issuedGrantCount(), 1);
         assertEq(boardroom.issuedGrantAt(0), grantAddress);
         assertTrue(boardroom.isIssuedGrant(grantAddress));
+        assertTrue(boardroom.isRedeemableAsset(address(paymentToken)));
     }
 
     function testMerkleAirdropGrantClaimIsExemptFromMutableFactoryFee() public {
@@ -871,11 +944,20 @@ contract DistributionTest is Test {
         assertEq(sellRefund, CURVE_SELL_REFUND);
         assertEq(shareToken.balanceOf(buyer), CURVE_BUY_SHARES - CURVE_SELL_SHARES);
         assertEq(curve.sellableSharesBy(buyer), CURVE_BUY_SHARES - CURVE_SELL_SHARES);
+        assertEq(curve.quoteReserve(), 300_000000);
+        assertFalse(curve.canMigrate());
+
+        vm.prank(buyer);
+        paymentToken.approve(address(curve), 200_000000);
+        vm.prank(buyer);
+        curve.buy(100 ether, buyer, 200_000000, block.timestamp);
+
         assertEq(curve.quoteReserve(), CURVE_GRADUATION_TARGET);
+        assertTrue(curve.graduationLatched());
         assertTrue(curve.canMigrate());
 
-        uint256 minShareLiquidity = 807.5 ether;
-        uint256 minQuoteLiquidity = 142_500000;
+        uint256 minShareLiquidity = 712.5 ether;
+        uint256 minQuoteLiquidity = 237_500000;
 
         vm.prank(buyer);
         vm.expectRevert(MigratingBondingCurve.OnlyBoardroom.selector);
@@ -976,7 +1058,7 @@ contract DistributionTest is Test {
         assertEq(curve.getSellQuote(0), 0);
     }
 
-    function testMigratingBondingCurveCannotMigrateWhenLpQuoteAllocationRoundsToZero() public {
+    function testMigratingBondingCurveRejectsUnseedableLpConfigurationAtCreation() public {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("curve-zero-lp-allocation");
         MigratingBondingCurve.CreateParams memory params =
             _curveParams(address(shareToken), address(paymentToken), keccak256("curve-zero-lp-allocation-create"));
@@ -1001,28 +1083,16 @@ contract DistributionTest is Test {
             0,
             abi.encodeCall(DistributionFactory.createMigratingBondingCurve, (params))
         );
-        bytes[] memory results = boardroom.executeBatch(calls);
-        vm.stopPrank();
-        MigratingBondingCurve curve = MigratingBondingCurve(abi.decode(results[1], (address)));
-
-        vm.prank(buyer);
-        paymentToken.approve(address(curve), 1);
-        vm.prank(buyer);
-        curve.buy(1, buyer, 1, block.timestamp);
-
-        assertEq(curve.quoteReserve(), 1);
-        assertEq(curve.remainingSaleShares(), 0);
-        assertFalse(curve.canMigrate());
-
-        vm.prank(address(boardroom));
         vm.expectRevert(
-            abi.encodeWithSelector(MigratingBondingCurve.MigrationNotReady.selector, uint256(1), uint256(1), uint256(0))
+            abi.encodeWithSelector(
+                Boardroom.CallNotAllowed.selector,
+                address(distributionFactory),
+                address(distributionFactory),
+                DistributionFactory.createMigratingBondingCurve.selector
+            )
         );
-        curve.migrate(0, 0, block.timestamp);
-
-        assertEq(uint8(curve.curveStatus()), uint8(MigratingBondingCurve.CurveStatus.Active));
-        assertEq(shareToken.balanceOf(address(curve)), 1);
-        assertEq(paymentToken.balanceOf(address(curve)), 1);
+        boardroom.executeBatch(calls);
+        vm.stopPrank();
     }
 
     function testMigratingBondingCurveRejectsFeeOnTransferQuoteToken() public {
@@ -1046,6 +1116,213 @@ contract DistributionTest is Test {
         assertEq(feeToken.balanceOf(address(curve)), 0);
         assertEq(shareToken.balanceOf(buyer), 0);
         assertEq(curve.remainingSaleShares(), CURVE_SALE_SHARES);
+    }
+
+    function testDistributionPolicyRejectsNonContractAndMalformedPaymentAssets() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("invalid-distribution-assets");
+        MalformedDistributionAsset malformed = new MalformedDistributionAsset();
+        address nonContract = address(0xBADCAFE);
+
+        FixedPriceSale.CreateParams memory saleParams =
+            _saleParams(address(shareToken), nonContract, SALE_SHARES, PRICE, keccak256("invalid-sale-asset"));
+        assertFalse(
+            distributionFactory.canCall(
+                address(boardroom),
+                owner,
+                address(distributionFactory),
+                0,
+                abi.encodeCall(DistributionFactory.createFixedPriceSale, (saleParams))
+            )
+        );
+
+        saleParams.paymentToken = address(malformed);
+        assertFalse(
+            distributionFactory.canCall(
+                address(boardroom),
+                owner,
+                address(distributionFactory),
+                0,
+                abi.encodeCall(DistributionFactory.createFixedPriceSale, (saleParams))
+            )
+        );
+
+        MigratingBondingCurve.CreateParams memory curveParams =
+            _curveParams(address(shareToken), nonContract, keccak256("invalid-curve-asset"));
+        assertFalse(
+            distributionFactory.canCall(
+                address(boardroom),
+                owner,
+                address(distributionFactory),
+                0,
+                abi.encodeCall(DistributionFactory.createMigratingBondingCurve, (curveParams))
+            )
+        );
+
+        curveParams.quoteToken = address(malformed);
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Boardroom.CallNotAllowed.selector,
+                address(distributionFactory),
+                address(distributionFactory),
+                DistributionFactory.createMigratingBondingCurve.selector
+            )
+        );
+        boardroom.execute(
+            _policyCall(
+                address(distributionFactory),
+                address(distributionFactory),
+                0,
+                abi.encodeCall(DistributionFactory.createMigratingBondingCurve, (curveParams))
+            )
+        );
+    }
+
+    function testDistributionPolicyAcceptsWellFormedPaymentAndQuoteAssets() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("valid-distribution-assets");
+        FixedPriceSale.CreateParams memory saleParams =
+            _saleParams(address(shareToken), address(paymentToken), SALE_SHARES, PRICE, keccak256("valid-sale-asset"));
+        assertTrue(
+            distributionFactory.canCall(
+                address(boardroom),
+                owner,
+                address(distributionFactory),
+                0,
+                abi.encodeCall(DistributionFactory.createFixedPriceSale, (saleParams))
+            )
+        );
+
+        MigratingBondingCurve.CreateParams memory curveParams =
+            _curveParams(address(shareToken), address(paymentToken), keccak256("valid-curve-asset"));
+        assertTrue(
+            distributionFactory.canCall(
+                address(boardroom),
+                owner,
+                address(distributionFactory),
+                0,
+                abi.encodeCall(DistributionFactory.createMigratingBondingCurve, (curveParams))
+            )
+        );
+    }
+
+    function testMigratingBondingCurveFreezesTradingAtGraduationAndRequiresNinetyFivePercentMinima() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("curve-graduation-latch");
+        MigratingBondingCurve curve = _createMigratingCurve(boardroom, shareToken, "curve-graduation-latch-create");
+
+        vm.prank(buyer);
+        paymentToken.approve(address(curve), 600_000000);
+        vm.prank(buyer);
+        curve.buy(250 ether, buyer, 500_000000, block.timestamp);
+
+        assertTrue(curve.graduationLatched());
+        assertTrue(curve.canMigrate());
+        assertEq(curve.quoteReserve(), 500_000000);
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(MigratingBondingCurve.MigrationMinimumTooLow.selector, 0, 712.5 ether));
+        boardroom.execute(
+            _policyCall(
+                address(distributionFactory),
+                address(curve),
+                0,
+                abi.encodeCall(MigratingBondingCurve.migrate, (0, 0, block.timestamp))
+            )
+        );
+
+        vm.prank(buyer);
+        vm.expectRevert(MigratingBondingCurve.GraduationLatched.selector);
+        curve.buy(1 ether, buyer, 2_000000, block.timestamp);
+
+        vm.prank(buyer);
+        shareToken.approve(address(curve), 1 ether);
+        vm.prank(buyer);
+        vm.expectRevert(MigratingBondingCurve.GraduationLatched.selector);
+        curve.sell(1 ether, buyer, 0, block.timestamp);
+
+        assertTrue(curve.graduationLatched());
+        assertEq(curve.quoteReserve(), 500_000000);
+        assertEq(curve.remainingSaleShares(), 250 ether);
+        assertEq(curve.sellableSharesBy(buyer), 250 ether);
+    }
+
+    function testMigratingBondingCurveCancellationQuarantinesHostileQuoteAndCanRecoverAfterRedemptionsOpen() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("curve-hostile-quote-cancel");
+        MutableDistributionCurrency mutableQuote = new MutableDistributionCurrency();
+        mutableQuote.mint(buyer, 1_000_000000);
+        MigratingBondingCurve curve =
+            _createMigratingCurve(boardroom, shareToken, mutableQuote, "curve-hostile-quote-cancel-create");
+
+        vm.prank(buyer);
+        mutableQuote.approve(address(curve), 200_000000);
+        vm.prank(buyer);
+        curve.buy(100 ether, buyer, 200_000000, block.timestamp);
+
+        mutableQuote.setGasBurnMode(true, false);
+        vm.startPrank(owner);
+        boardroom.startWindDown();
+        boardroom.execute(
+            _policyCall(
+                address(distributionFactory), address(curve), 0, abi.encodeCall(MigratingBondingCurve.cancel, ())
+            )
+        );
+        boardroom.openRedemptions();
+        vm.stopPrank();
+
+        assertTrue(curve.isClosed());
+        assertTrue(curve.quoteQuarantined());
+        assertEq(curve.unrecoveredQuote(), 200_000000);
+        assertEq(curve.quoteReserve(), 0);
+        assertEq(shareToken.balanceOf(address(curve)), 0);
+        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
+
+        mutableQuote.setGasBurnMode(false, true);
+        vm.prank(recipient);
+        assertEq(curve.recoverQuarantinedQuote(), 0);
+        assertTrue(curve.quoteQuarantined());
+        assertEq(curve.unrecoveredQuote(), 200_000000);
+
+        mutableQuote.setGasBurnMode(false, false);
+        vm.prank(recipient);
+        assertEq(curve.recoverQuarantinedQuote(), 200_000000);
+
+        assertFalse(curve.quoteQuarantined());
+        assertEq(curve.unrecoveredQuote(), 0);
+        assertEq(mutableQuote.balanceOf(address(curve)), 0);
+        assertEq(mutableQuote.balanceOf(address(boardroom)), 200_000000);
+        assertTrue(boardroom.isRedeemableAsset(address(mutableQuote)));
+    }
+
+    function testMigratingBondingCurvePolicyRejectsAmmInfeasibleBounds() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("curve-amm-bounds");
+        MigratingBondingCurve.CreateParams memory params =
+            _curveParams(address(shareToken), address(paymentToken), keccak256("curve-supply-overflow"));
+
+        params.saleSupply = uint256(type(uint112).max);
+        params.migrationSupply = 1;
+        assertFalse(
+            distributionFactory.canCall(
+                address(boardroom),
+                owner,
+                address(distributionFactory),
+                0,
+                abi.encodeCall(DistributionFactory.createMigratingBondingCurve, (params))
+            )
+        );
+
+        params.saleSupply = 1 ether;
+        params.migrationSupply = 1 ether;
+        params.basePrice = uint256(type(uint112).max);
+        params.slope = uint256(type(uint112).max);
+        params.quoteToLpBps = 10_000;
+        assertFalse(
+            distributionFactory.canCall(
+                address(boardroom),
+                owner,
+                address(distributionFactory),
+                0,
+                abi.encodeCall(DistributionFactory.createMigratingBondingCurve, (params))
+            )
+        );
     }
 
     function testDistributionPolicyRejectsNonShareTokenApproval() public {
@@ -1384,6 +1661,24 @@ contract DistributionTest is Test {
         DistributionCurrency quoteToken,
         string memory saltLabel
     ) internal returns (MigratingBondingCurve curve) {
+        return _createMigratingCurve(boardroom, shareToken, address(quoteToken), saltLabel);
+    }
+
+    function _createMigratingCurve(
+        Boardroom boardroom,
+        BoardroomToken shareToken,
+        MutableDistributionCurrency quoteToken,
+        string memory saltLabel
+    ) internal returns (MigratingBondingCurve curve) {
+        return _createMigratingCurve(boardroom, shareToken, address(quoteToken), saltLabel);
+    }
+
+    function _createMigratingCurve(
+        Boardroom boardroom,
+        BoardroomToken shareToken,
+        address quoteToken,
+        string memory saltLabel
+    ) internal returns (MigratingBondingCurve curve) {
         uint256 totalShares = CURVE_SALE_SHARES + CURVE_MIGRATION_SHARES;
 
         vm.startPrank(owner);
@@ -1391,7 +1686,7 @@ contract DistributionTest is Test {
 
         bytes32 salt = keccak256(bytes(saltLabel));
         address predictedCurve = distributionFactory.predictMigratingBondingCurveAddress(address(boardroom), salt);
-        MigratingBondingCurve.CreateParams memory params = _curveParams(address(shareToken), address(quoteToken), salt);
+        MigratingBondingCurve.CreateParams memory params = _curveParams(address(shareToken), quoteToken, salt);
 
         Boardroom.Call[] memory calls = new Boardroom.Call[](2);
         calls[0] = _policyCall(
@@ -1415,7 +1710,7 @@ contract DistributionTest is Test {
         curve = MigratingBondingCurve(createdCurve);
         assertEq(curve.boardroom(), address(boardroom));
         assertEq(curve.shareToken(), address(shareToken));
-        assertEq(curve.quoteToken(), address(quoteToken));
+        assertEq(curve.quoteToken(), quoteToken);
         assertEq(shareToken.balanceOf(address(curve)), totalShares);
         assertEq(shareToken.allowance(address(boardroom), address(distributionFactory)), 0);
         assertEq(distributionFactory.distributionCountForBoardroom(address(boardroom)), 1);
@@ -1423,6 +1718,7 @@ contract DistributionTest is Test {
         assertEq(boardroom.issuedDistributionCount(), 1);
         assertEq(boardroom.issuedDistributionAt(0), address(curve));
         assertTrue(boardroom.isIssuedDistribution(address(curve)));
+        assertTrue(boardroom.isRedeemableAsset(quoteToken));
     }
 
     function _createMerkleAirdrop(
