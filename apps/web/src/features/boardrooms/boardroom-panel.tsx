@@ -28,6 +28,7 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { dateString, randomSalt } from "../../lib/forms";
 import { formatTokenAmount } from "../../lib/token-amounts";
+import type { Capability } from "../capabilities/project-capabilities";
 import type {
   BoardroomForm,
   BoardroomDistributionSnapshot,
@@ -61,6 +62,8 @@ import type { BoardroomPanelProps } from "./boardroom-panel-types";
 
 export function BoardroomPanel({
   section = "all",
+  boardroomIdentityLocked = false,
+  capabilities,
   boardroom,
   fixedPriceSale,
   grant,
@@ -248,14 +251,16 @@ export function BoardroomPanel({
           </ActionButton>
           <ActionButton
             actionId="create-boardroom"
-            disabled={!deployment?.boardroomFactory}
+            disabled={!deployment?.boardroomFactory || !capabilityEnabled(capabilities?.createBoardroom)}
             pendingAction={pendingAction}
+            title={capabilityReason(capabilities?.createBoardroom)}
             onClick={() => void runAction("create-boardroom", createBoardroom)}
           >
             <Plus className="h-4 w-4" />
             Create
           </ActionButton>
         </ActionRow>
+        <CapabilityNotice capability={capabilities?.createBoardroom} />
         <Facts
           columns="one"
           items={[
@@ -266,6 +271,7 @@ export function BoardroomPanel({
       </Panel> : null}
 
       {section === "all" || section === "setup" || section === "token" || section === "close" ? <BoardroomOverview
+        addressLocked={boardroomIdentityLocked}
         boardroomAddress={boardroomAddress}
         boardroomSnapshot={boardroomSnapshot}
         pendingAction={pendingAction}
@@ -289,7 +295,13 @@ export function BoardroomPanel({
           </Field>
         </div>
         <ActionRow>
-          <ActionButton actionId="mint-boardroom-shares" pendingAction={pendingAction} onClick={() => void runAction("mint-boardroom-shares", mintBoardroomShares)}>
+          <ActionButton
+            actionId="mint-boardroom-shares"
+            disabled={!capabilityEnabled(capabilities?.mint)}
+            pendingAction={pendingAction}
+            title={capabilityReason(capabilities?.mint)}
+            onClick={() => void runAction("mint-boardroom-shares", mintBoardroomShares)}
+          >
             <Plus className="h-4 w-4" />
             Mint Shares
           </ActionButton>
@@ -298,6 +310,7 @@ export function BoardroomPanel({
 
       {section === "all" || section === "grants" ? <BoardroomGrantPanel
         boardroomGrantForm={boardroomGrantForm}
+        capability={capabilities?.createGrant}
         boardroomSnapshot={boardroomSnapshot}
         pendingAction={pendingAction}
         predictedBoardroomGrant={predictedBoardroomGrant}
@@ -310,6 +323,7 @@ export function BoardroomPanel({
         runAction={runAction}
       /> : null}
       {section === "grants" ? obligationList("grants") : null}
+      {section === "grants" ? <CapabilityNotice capability={capabilities?.createGrant} /> : null}
 
       {section === "all" || section === "distributions" ? <>
       {section === "distributions" ? (
@@ -332,11 +346,13 @@ export function BoardroomPanel({
       ) : null}
       {section === "all" || distributionTool === "fixed-price" ? <FixedPriceSalePanel
         boardroomSnapshot={boardroomSnapshot}
+        createCapability={capabilities?.createDistribution}
         deployment={deployment}
         fixedPriceSaleAddress={fixedPriceSaleAddress}
         fixedPriceSaleForm={fixedPriceSaleForm}
         fixedPriceSaleSnapshot={fixedPriceSaleSnapshot}
         pendingAction={pendingAction}
+        manageCapability={capabilities?.manageDistribution}
         predictedFixedPriceSale={predictedFixedPriceSale}
         setFixedPriceSaleAddress={setFixedPriceSaleAddress}
         setFixedPriceSaleForm={setFixedPriceSaleForm}
@@ -350,11 +366,13 @@ export function BoardroomPanel({
 
       {section === "all" || distributionTool === "airdrop" ? <MerkleAirdropPanel
         boardroomSnapshot={boardroomSnapshot}
+        createCapability={capabilities?.createDistribution}
         deployment={deployment}
         merkleAirdropAddress={merkleAirdropAddress}
         merkleAirdropForm={merkleAirdropForm}
         merkleAirdropSnapshot={merkleAirdropSnapshot}
         pendingAction={pendingAction}
+        manageCapability={capabilities?.manageDistribution}
         predictedMerkleAirdrop={predictedMerkleAirdrop}
         setMerkleAirdropAddress={setMerkleAirdropAddress}
         setMerkleAirdropForm={setMerkleAirdropForm}
@@ -368,12 +386,14 @@ export function BoardroomPanel({
 
       {section === "all" || distributionTool === "curve" ? <MigratingCurvePanel
         boardroomSnapshot={boardroomSnapshot}
+        createCapability={capabilities?.createDistribution}
         curveMigrationForm={curveMigrationForm}
         deployment={deployment}
         migratingCurveAddress={migratingCurveAddress}
         migratingCurveForm={migratingCurveForm}
         migratingCurveSnapshot={migratingCurveSnapshot}
         pendingAction={pendingAction}
+        manageCapability={capabilities?.manageDistribution}
         predictedMigratingCurve={predictedMigratingCurve}
         setCurveMigrationForm={setCurveMigrationForm}
         setMigratingCurveAddress={setMigratingCurveAddress}
@@ -386,16 +406,19 @@ export function BoardroomPanel({
         runAction={runAction}
       /> : null}
       {section === "distributions" ? obligationList("distributions") : null}
+      {section === "distributions" ? <CapabilityNotice capability={capabilities?.createDistribution} fallback={capabilities?.manageDistribution} /> : null}
       </> : null}
 
       {section === "all" || section === "liquidity" ? <LockedLiquidityPanel
         boardroomSnapshot={boardroomSnapshot}
+        createCapability={capabilities?.createLiquidity}
         deployment={deployment}
         lockedLiquidityAddress={lockedLiquidityAddress}
         lockedLiquidityExitForm={lockedLiquidityExitForm}
         lockedLiquidityForm={lockedLiquidityForm}
         lockedLiquiditySnapshot={lockedLiquiditySnapshot}
         pendingAction={pendingAction}
+        manageCapability={capabilities?.manageLiquidity}
         predictedLockedLiquidity={predictedLockedLiquidity}
         setLockedLiquidityAddress={setLockedLiquidityAddress}
         setLockedLiquidityExitForm={setLockedLiquidityExitForm}
@@ -408,10 +431,15 @@ export function BoardroomPanel({
         runAction={runAction}
       /> : null}
       {section === "liquidity" ? obligationList("liquidity") : null}
+      {section === "liquidity" ? <CapabilityNotice capability={capabilities?.createLiquidity} fallback={capabilities?.manageLiquidity} /> : null}
 
       {section === "all" || section === "close" ? <WindDownPanel
         boardroomSnapshot={boardroomSnapshot}
+        claimCapability={capabilities?.claimRedemption}
+        permissionlessCapability={capabilities?.permissionlessWindDown}
         pendingAction={pendingAction}
+        redeemCapability={capabilities?.redeem}
+        registerCapability={capabilities?.registerRedeemableAsset}
         setWindDownForm={setWindDownForm}
         windDownForm={windDownForm}
         burnTreasuryShares={burnTreasuryShares}
@@ -420,6 +448,7 @@ export function BoardroomPanel({
         redeemBoardroomShares={redeemBoardroomShares}
         registerRedeemableAsset={registerRedeemableAsset}
         runAction={runAction}
+        startCapability={capabilities?.startWindDown}
         startWindDown={startWindDown}
       /> : null}
     </div>
@@ -427,6 +456,7 @@ export function BoardroomPanel({
 }
 
 function BoardroomOverview({
+  addressLocked,
   boardroomAddress,
   boardroomSnapshot,
   pendingAction,
@@ -439,6 +469,7 @@ function BoardroomOverview({
   loadBoardroom,
   runAction,
 }: {
+  addressLocked: boolean;
   boardroomAddress: string;
   boardroomSnapshot: BoardroomSnapshot | undefined;
   pendingAction: string | undefined;
@@ -459,13 +490,21 @@ function BoardroomOverview({
       action={
         <ActionButton actionId="load-boardroom" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("load-boardroom", loadBoardroom)}>
           <RefreshCw className="h-4 w-4" />
-          Load
+          {addressLocked ? "Refresh" : "Load"}
         </ActionButton>
       }
     >
       <div className="border-t border-zinc-800">
         <Field label="Boardroom address">
-          <Input value={boardroomAddress} onChange={(event) => setBoardroomAddress(event.target.value)} spellCheck={false} />
+          <Input
+            aria-readonly={addressLocked}
+            readOnly={addressLocked}
+            value={boardroomAddress}
+            onChange={(event) => {
+              if (!addressLocked) setBoardroomAddress(event.target.value);
+            }}
+            spellCheck={false}
+          />
         </Field>
       </div>
       <Facts
@@ -613,6 +652,7 @@ function boardroomWindDownFacts(boardroomSnapshot: BoardroomSnapshot | undefined
 function BoardroomGrantPanel({
   boardroomGrantForm,
   boardroomSnapshot,
+  capability,
   pendingAction,
   predictedBoardroomGrant,
   setBoardroomGrantForm,
@@ -625,6 +665,7 @@ function BoardroomGrantPanel({
 }: {
   boardroomGrantForm: BoardroomGrantForm;
   boardroomSnapshot: BoardroomSnapshot | undefined;
+  capability: Capability | undefined;
   pendingAction: string | undefined;
   predictedBoardroomGrant: Address | undefined;
   setBoardroomGrantForm: Dispatch<SetStateAction<BoardroomGrantForm>>;
@@ -687,7 +728,9 @@ function BoardroomGrantPanel({
         </ActionButton>
         <ActionButton
           actionId="boardroom-approve-factory"
+          disabled={!capabilityEnabled(capability)}
           pendingAction={pendingAction}
+          title={capabilityReason(capability)}
           variant="secondary"
           onClick={() => void runAction("boardroom-approve-factory", boardroomApproveFactory)}
         >
@@ -696,7 +739,9 @@ function BoardroomGrantPanel({
         </ActionButton>
         <ActionButton
           actionId="boardroom-create-grant-batch"
+          disabled={!capabilityEnabled(capability)}
           pendingAction={pendingAction}
+          title={capabilityReason(capability)}
           onClick={() => void runAction("boardroom-create-grant-batch", boardroomCreateGrantBatch)}
         >
           <Send className="h-4 w-4" />
@@ -704,7 +749,9 @@ function BoardroomGrantPanel({
         </ActionButton>
         <ActionButton
           actionId="boardroom-create-grant"
+          disabled={!capabilityEnabled(capability)}
           pendingAction={pendingAction}
+          title={capabilityReason(capability)}
           variant="secondary"
           onClick={() => void runAction("boardroom-create-grant", boardroomCreateGrant)}
         >
@@ -712,6 +759,7 @@ function BoardroomGrantPanel({
           Create after approval
         </ActionButton>
       </ActionRow>
+      <CapabilityNotice capability={capability} />
       <Facts
         columns="one"
         items={[
@@ -725,10 +773,12 @@ function BoardroomGrantPanel({
 
 function FixedPriceSalePanel({
   boardroomSnapshot,
+  createCapability,
   deployment,
   fixedPriceSaleAddress,
   fixedPriceSaleForm,
   fixedPriceSaleSnapshot,
+  manageCapability,
   pendingAction,
   predictedFixedPriceSale,
   setFixedPriceSaleAddress,
@@ -741,10 +791,12 @@ function FixedPriceSalePanel({
   runAction,
 }: {
   boardroomSnapshot: BoardroomSnapshot | undefined;
+  createCapability: Capability | undefined;
   deployment: PledgeCashDeployment | undefined;
   fixedPriceSaleAddress: string;
   fixedPriceSaleForm: FixedPriceSaleForm;
   fixedPriceSaleSnapshot: FixedPriceSaleState | undefined;
+  manageCapability: Capability | undefined;
   pendingAction: string | undefined;
   predictedFixedPriceSale: Address | undefined;
   setFixedPriceSaleAddress: (address: string) => void;
@@ -792,8 +844,9 @@ function FixedPriceSalePanel({
         </ActionButton>
         <ActionButton
           actionId="create-fixed-sale"
-          disabled={!canUseDistributionFactory}
+          disabled={!canUseDistributionFactory || !capabilityEnabled(createCapability)}
           pendingAction={pendingAction}
+          title={capabilityReason(createCapability)}
           onClick={() => void runAction("create-fixed-sale", createFixedPriceSale)}
         >
           <Coins className="h-4 w-4" />
@@ -809,16 +862,17 @@ function FixedPriceSalePanel({
             <RefreshCw className="h-4 w-4" />
             Load
           </ActionButton>
-          <ActionButton actionId="close-fixed-sale" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("close-fixed-sale", closeFixedPriceSale)}>
+          <ActionButton actionId="close-fixed-sale" disabled={!capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} variant="secondary" onClick={() => void runAction("close-fixed-sale", closeFixedPriceSale)}>
             <ShieldCheck className="h-4 w-4" />
             Close
           </ActionButton>
-          <ActionButton actionId="cancel-fixed-sale" pendingAction={pendingAction} variant="danger" onClick={() => void runAction("cancel-fixed-sale", cancelFixedPriceSale)}>
+          <ActionButton actionId="cancel-fixed-sale" disabled={!capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} variant="danger" onClick={() => void runAction("cancel-fixed-sale", cancelFixedPriceSale)}>
             <XCircle className="h-4 w-4" />
             Cancel
           </ActionButton>
         </div>
       </div>
+      <CapabilityNotice capability={createCapability} fallback={manageCapability} />
       <Facts
         columns="three"
         items={saleFacts}
@@ -829,10 +883,12 @@ function FixedPriceSalePanel({
 
 function MerkleAirdropPanel({
   boardroomSnapshot,
+  createCapability,
   deployment,
   merkleAirdropAddress,
   merkleAirdropForm,
   merkleAirdropSnapshot,
+  manageCapability,
   pendingAction,
   predictedMerkleAirdrop,
   setMerkleAirdropAddress,
@@ -845,10 +901,12 @@ function MerkleAirdropPanel({
   runAction,
 }: {
   boardroomSnapshot: BoardroomSnapshot | undefined;
+  createCapability: Capability | undefined;
   deployment: PledgeCashDeployment | undefined;
   merkleAirdropAddress: string;
   merkleAirdropForm: MerkleAirdropForm;
   merkleAirdropSnapshot: MerkleAirdropState | undefined;
+  manageCapability: Capability | undefined;
   pendingAction: string | undefined;
   predictedMerkleAirdrop: Address | undefined;
   setMerkleAirdropAddress: (address: string) => void;
@@ -895,8 +953,9 @@ function MerkleAirdropPanel({
         </ActionButton>
         <ActionButton
           actionId="create-merkle-airdrop"
-          disabled={!canUseDistributionFactory}
+          disabled={!canUseDistributionFactory || !capabilityEnabled(createCapability)}
           pendingAction={pendingAction}
+          title={capabilityReason(createCapability)}
           onClick={() => void runAction("create-merkle-airdrop", createMerkleAirdrop)}
         >
           <Gift className="h-4 w-4" />
@@ -912,16 +971,17 @@ function MerkleAirdropPanel({
             <RefreshCw className="h-4 w-4" />
             Load
           </ActionButton>
-          <ActionButton actionId="close-merkle-airdrop" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("close-merkle-airdrop", closeMerkleAirdrop)}>
+          <ActionButton actionId="close-merkle-airdrop" disabled={!capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} variant="secondary" onClick={() => void runAction("close-merkle-airdrop", closeMerkleAirdrop)}>
             <ShieldCheck className="h-4 w-4" />
             Close
           </ActionButton>
-          <ActionButton actionId="cancel-merkle-airdrop" pendingAction={pendingAction} variant="danger" onClick={() => void runAction("cancel-merkle-airdrop", cancelMerkleAirdrop)}>
+          <ActionButton actionId="cancel-merkle-airdrop" disabled={!capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} variant="danger" onClick={() => void runAction("cancel-merkle-airdrop", cancelMerkleAirdrop)}>
             <XCircle className="h-4 w-4" />
             Cancel
           </ActionButton>
         </div>
       </div>
+      <CapabilityNotice capability={createCapability} fallback={manageCapability} />
       <Facts
         columns="three"
         items={airdropFacts}
@@ -932,11 +992,13 @@ function MerkleAirdropPanel({
 
 function MigratingCurvePanel({
   boardroomSnapshot,
+  createCapability,
   curveMigrationForm,
   deployment,
   migratingCurveAddress,
   migratingCurveForm,
   migratingCurveSnapshot,
+  manageCapability,
   pendingAction,
   predictedMigratingCurve,
   setCurveMigrationForm,
@@ -950,11 +1012,13 @@ function MigratingCurvePanel({
   runAction,
 }: {
   boardroomSnapshot: BoardroomSnapshot | undefined;
+  createCapability: Capability | undefined;
   curveMigrationForm: CurveMigrationForm;
   deployment: PledgeCashDeployment | undefined;
   migratingCurveAddress: string;
   migratingCurveForm: MigratingCurveForm;
   migratingCurveSnapshot: MigratingBondingCurveState | undefined;
+  manageCapability: Capability | undefined;
   pendingAction: string | undefined;
   predictedMigratingCurve: Address | undefined;
   setCurveMigrationForm: Dispatch<SetStateAction<CurveMigrationForm>>;
@@ -1010,8 +1074,9 @@ function MigratingCurvePanel({
         </ActionButton>
         <ActionButton
           actionId="create-migrating-curve"
-          disabled={!canUseDistributionFactory}
+          disabled={!canUseDistributionFactory || !capabilityEnabled(createCapability)}
           pendingAction={pendingAction}
+          title={capabilityReason(createCapability)}
           onClick={() => void runAction("create-migrating-curve", createMigratingCurve)}
         >
           <Coins className="h-4 w-4" />
@@ -1027,7 +1092,7 @@ function MigratingCurvePanel({
             <RefreshCw className="h-4 w-4" />
             Load
           </ActionButton>
-          <ActionButton actionId="cancel-migrating-curve" pendingAction={pendingAction} variant="danger" onClick={() => void runAction("cancel-migrating-curve", cancelMigratingCurve)}>
+          <ActionButton actionId="cancel-migrating-curve" disabled={!capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} variant="danger" onClick={() => void runAction("cancel-migrating-curve", cancelMigratingCurve)}>
             <XCircle className="h-4 w-4" />
             Cancel
           </ActionButton>
@@ -1043,22 +1108,25 @@ function MigratingCurvePanel({
         <TextField description={timestampPreview(curveMigrationForm.deadline)} form={curveMigrationForm} field="deadline" inputMode="numeric" label="Migration deadline" setForm={setCurveMigrationForm} />
       </div>
       <ActionRow>
-        <ActionButton actionId="migrate-curve" pendingAction={pendingAction} onClick={() => void runAction("migrate-curve", migrateCurve)}>
+        <ActionButton actionId="migrate-curve" disabled={!capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} onClick={() => void runAction("migrate-curve", migrateCurve)}>
           <ShieldCheck className="h-4 w-4" />
           Migrate To Locked LP
         </ActionButton>
       </ActionRow>
+      <CapabilityNotice capability={createCapability} fallback={manageCapability} />
     </Panel>
   );
 }
 
 function LockedLiquidityPanel({
   boardroomSnapshot,
+  createCapability,
   deployment,
   lockedLiquidityAddress,
   lockedLiquidityExitForm,
   lockedLiquidityForm,
   lockedLiquiditySnapshot,
+  manageCapability,
   pendingAction,
   predictedLockedLiquidity,
   setLockedLiquidityAddress,
@@ -1072,11 +1140,13 @@ function LockedLiquidityPanel({
   runAction,
 }: {
   boardroomSnapshot: BoardroomSnapshot | undefined;
+  createCapability: Capability | undefined;
   deployment: PledgeCashDeployment | undefined;
   lockedLiquidityAddress: string;
   lockedLiquidityExitForm: LockedLiquidityExitForm;
   lockedLiquidityForm: LockedLiquidityForm;
   lockedLiquiditySnapshot: LockedLiquidityState | undefined;
+  manageCapability: Capability | undefined;
   pendingAction: string | undefined;
   predictedLockedLiquidity: Address | undefined;
   setLockedLiquidityAddress: (address: string) => void;
@@ -1149,8 +1219,9 @@ function LockedLiquidityPanel({
         </ActionButton>
         <ActionButton
           actionId="create-locked-liquidity"
-          disabled={!canUseLockedLiquidityFactory}
+          disabled={!canUseLockedLiquidityFactory || !capabilityEnabled(createCapability)}
           pendingAction={pendingAction}
+          title={capabilityReason(createCapability)}
           onClick={() => void runAction("create-locked-liquidity", createLockedLiquidity)}
         >
           <Lock className="h-4 w-4" />
@@ -1166,7 +1237,7 @@ function LockedLiquidityPanel({
             <RefreshCw className="h-4 w-4" />
             Load
           </ActionButton>
-          <ActionButton actionId="claim-locked-liquidity-fees" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("claim-locked-liquidity-fees", claimLockedLiquidityFees)}>
+          <ActionButton actionId="claim-locked-liquidity-fees" disabled={!capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} variant="secondary" onClick={() => void runAction("claim-locked-liquidity-fees", claimLockedLiquidityFees)}>
             <Coins className="h-4 w-4" />
             Claim Fees
           </ActionButton>
@@ -1182,19 +1253,25 @@ function LockedLiquidityPanel({
         <TextField description={timestampPreview(lockedLiquidityExitForm.deadline)} form={lockedLiquidityExitForm} field="deadline" inputMode="numeric" label="Exit deadline" setForm={setLockedLiquidityExitForm} />
       </div>
       <ActionRow>
-        <ActionButton actionId="exit-locked-liquidity" pendingAction={pendingAction} variant="danger" onClick={() => void runAction("exit-locked-liquidity", exitLockedLiquidity)}>
+        <ActionButton actionId="exit-locked-liquidity" disabled={!capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} variant="danger" onClick={() => void runAction("exit-locked-liquidity", exitLockedLiquidity)}>
           <Flame className="h-4 w-4" />
           Exit During Wind-Down
         </ActionButton>
       </ActionRow>
+      <CapabilityNotice capability={createCapability} fallback={manageCapability} />
     </Panel>
   );
 }
 
 function WindDownPanel({
   boardroomSnapshot,
+  claimCapability,
   pendingAction,
+  permissionlessCapability,
+  redeemCapability,
+  registerCapability,
   setWindDownForm,
+  startCapability,
   windDownForm,
   burnTreasuryShares,
   claimRedemptionAsset,
@@ -1205,8 +1282,13 @@ function WindDownPanel({
   startWindDown,
 }: {
   boardroomSnapshot: BoardroomSnapshot | undefined;
+  claimCapability: Capability | undefined;
   pendingAction: string | undefined;
+  permissionlessCapability: Capability | undefined;
+  redeemCapability: Capability | undefined;
+  registerCapability: Capability | undefined;
   setWindDownForm: Dispatch<SetStateAction<WindDownForm>>;
+  startCapability: Capability | undefined;
   windDownForm: WindDownForm;
   burnTreasuryShares: () => Promise<void>;
   claimRedemptionAsset: () => Promise<void>;
@@ -1243,19 +1325,20 @@ function WindDownPanel({
         <p className="m-0 border-t border-zinc-800 p-4 text-sm text-zinc-500">No loaded blockers.</p>
       )}
       <ActionRow>
-        <ActionButton actionId="start-wind-down" disabled={hasBlockers || boardroomSnapshot?.status !== 0} pendingAction={pendingAction} variant="danger" onClick={() => void runAction("start-wind-down", startWindDown)}>
+        <ActionButton actionId="start-wind-down" disabled={hasBlockers || boardroomSnapshot?.status !== 0 || !capabilityEnabled(startCapability)} pendingAction={pendingAction} title={capabilityReason(startCapability)} variant="danger" onClick={() => void runAction("start-wind-down", startWindDown)}>
           <Flame className="h-4 w-4" />
           Start Wind-Down
         </ActionButton>
-        <ActionButton actionId="burn-treasury-shares" disabled={boardroomSnapshot?.status !== 1} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("burn-treasury-shares", burnTreasuryShares)}>
+        <ActionButton actionId="burn-treasury-shares" disabled={boardroomSnapshot?.status !== 1 || !capabilityEnabled(permissionlessCapability)} pendingAction={pendingAction} title={capabilityReason(permissionlessCapability)} variant="secondary" onClick={() => void runAction("burn-treasury-shares", burnTreasuryShares)}>
           <Flame className="h-4 w-4" />
           Burn Treasury Shares
         </ActionButton>
-        <ActionButton actionId="open-redemptions" disabled={hasBlockers || boardroomSnapshot?.status !== 1} pendingAction={pendingAction} onClick={() => void runAction("open-redemptions", openRedemptions)}>
+        <ActionButton actionId="open-redemptions" disabled={hasBlockers || boardroomSnapshot?.status !== 1 || !capabilityEnabled(permissionlessCapability)} pendingAction={pendingAction} title={capabilityReason(permissionlessCapability)} onClick={() => void runAction("open-redemptions", openRedemptions)}>
           <ShieldCheck className="h-4 w-4" />
           Open Redemptions
         </ActionButton>
       </ActionRow>
+      <CapabilityNotice capability={startCapability} fallback={permissionlessCapability} />
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2">
         <TextField form={windDownForm} field="redeemableAsset" label="Redeemable asset" setForm={setWindDownForm} />
         <Field label="Registered assets">
@@ -1269,7 +1352,7 @@ function WindDownPanel({
         </Field>
       </div>
       <ActionRow>
-        <ActionButton actionId="register-redeemable-asset" disabled={!boardroomSnapshot || boardroomSnapshot.status === 2} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("register-redeemable-asset", registerRedeemableAsset)}>
+        <ActionButton actionId="register-redeemable-asset" disabled={!boardroomSnapshot || boardroomSnapshot.status === 2 || !capabilityEnabled(registerCapability)} pendingAction={pendingAction} title={capabilityReason(registerCapability)} variant="secondary" onClick={() => void runAction("register-redeemable-asset", registerRedeemableAsset)}>
           <Plus className="h-4 w-4" />
           Register Asset
         </ActionButton>
@@ -1280,7 +1363,7 @@ function WindDownPanel({
         <TextField form={windDownForm} field="minAmountsOut" label="Min amounts out" setForm={setWindDownForm} />
       </div>
       <ActionRow>
-        <ActionButton actionId="redeem-boardroom-shares" disabled={boardroomSnapshot?.status !== 2} pendingAction={pendingAction} onClick={() => void runAction("redeem-boardroom-shares", redeemBoardroomShares)}>
+        <ActionButton actionId="redeem-boardroom-shares" disabled={boardroomSnapshot?.status !== 2 || !capabilityEnabled(redeemCapability)} pendingAction={pendingAction} title={capabilityReason(redeemCapability)} onClick={() => void runAction("redeem-boardroom-shares", redeemBoardroomShares)}>
           <Send className="h-4 w-4" />
           Redeem Shares
         </ActionButton>
@@ -1295,11 +1378,39 @@ function WindDownPanel({
         <TextField form={windDownForm} field="claimMinAmount" inputMode="decimal" label="Retry minimum" setForm={setWindDownForm} />
       </div>
       <ActionRow>
-        <ActionButton actionId="claim-redemption-asset" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("claim-redemption-asset", claimRedemptionAsset)}>
+        <ActionButton actionId="claim-redemption-asset" disabled={boardroomSnapshot?.status !== 2 || !capabilityEnabled(claimCapability)} pendingAction={pendingAction} title={capabilityReason(claimCapability)} variant="secondary" onClick={() => void runAction("claim-redemption-asset", claimRedemptionAsset)}>
           <Send className="h-4 w-4" />
           Retry Asset Claim
         </ActionButton>
       </ActionRow>
+      <CapabilityNotice capability={redeemCapability} fallback={claimCapability} />
     </Panel>
+  );
+}
+
+function capabilityEnabled(capability: Capability | undefined): boolean {
+  return capability === undefined || capability.status === "enabled";
+}
+
+function capabilityReason(capability: Capability | undefined): string | undefined {
+  if (!capability || capability.status === "enabled") return undefined;
+  return capability.reason ?? "This action is not available in the project’s current lifecycle state.";
+}
+
+function CapabilityNotice({
+  capability,
+  fallback,
+}: {
+  capability: Capability | undefined;
+  fallback?: Capability | undefined;
+}): React.JSX.Element | null {
+  const blockedCapability = [capability, fallback].find((candidate) =>
+    candidate && candidate.status !== "enabled" && candidate.status !== "hidden" && candidate.reason
+  );
+  if (!blockedCapability?.reason) return null;
+  return (
+    <p aria-live="polite" className="m-0 border-t border-zinc-800 px-4 py-3 text-sm text-amber-200">
+      {blockedCapability.reason}
+    </p>
   );
 }

@@ -76,7 +76,18 @@ const PATH_BY_VIEW: Record<AppView, string> = {
 
 export function initialRoute(env: RouteEnvironment = import.meta.env): AppRoute {
   if (typeof window === "undefined") return { kind: "explore" };
-  return routeFromPath(window.location.pathname, env);
+  return routeFromLocation(window.location.pathname, window.location.search, env);
+}
+
+export function routeFromLocation(
+  pathname: string,
+  search = "",
+  env: RouteEnvironment = import.meta.env,
+): AppRoute {
+  const route = routeFromPath(pathname, env);
+  if (!isPrimaryRoute(route)) return route;
+  const chainId = routeChainFromSearch(search);
+  return chainId === undefined ? route : { ...route, chainId };
 }
 
 export function routeFromPath(pathname: string, env: RouteEnvironment = import.meta.env): AppRoute {
@@ -230,6 +241,14 @@ function routeChainId(value: string | undefined): number | undefined {
   return Number.isSafeInteger(chainId) ? chainId : undefined;
 }
 
+function routeChainFromSearch(search: string): number | undefined {
+  try {
+    return routeChainId(new URLSearchParams(search).get("chain") ?? undefined);
+  } catch {
+    return undefined;
+  }
+}
+
 function routeAddress(value: string | undefined): Address | undefined {
   if (!value || !isAddress(value, { strict: false })) return undefined;
   return value.toLowerCase() as Address;
@@ -282,6 +301,6 @@ function normalizeBaseUrl(baseUrl: string): string {
   return withLeadingSlash.endsWith("/") ? withLeadingSlash : `${withLeadingSlash}/`;
 }
 
-function isPrimaryRoute(route: CanonicalAppRoute): route is Extract<CanonicalAppRoute, { kind: PrimaryDestination }> {
+function isPrimaryRoute(route: AppRoute): route is Extract<CanonicalAppRoute, { kind: PrimaryDestination }> {
   return route.kind === "explore" || route.kind === "portfolio" || route.kind === "studio";
 }

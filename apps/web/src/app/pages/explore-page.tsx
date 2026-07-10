@@ -202,7 +202,17 @@ function ProjectDirectoryRow({
   return (
     <li>
       {href ? (
-        <a className={className} href={href} onClick={onOpen}>{content}</a>
+        <a
+          className={className}
+          href={href}
+          onClick={(event) => {
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            onOpen();
+          }}
+        >
+          {content}
+        </a>
       ) : (
         <button className={className} type="button" onClick={onOpen}>{content}</button>
       )}

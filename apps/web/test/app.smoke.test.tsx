@@ -10,7 +10,7 @@ import type {
   MerkleAirdropState,
 } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
-import { App, canRunGrantIssuerActions, manageWorkspaceSummary, parseDeployment, viewFromPath } from "../src/App";
+import { App, canRunGrantIssuerActions, manageWorkspaceSummary, mergeCapabilityOpportunity, parseDeployment, viewFromPath } from "../src/App";
 import { Web3Provider } from "../src/components/web3-provider";
 import { BoardroomPanel } from "../src/features/boardrooms/boardroom-panel";
 import { DiscoveryPanel, WalletAccessPanel } from "../src/features/discovery/discovery-panel";
@@ -551,16 +551,53 @@ describe("web app shell", () => {
     expect(issuerHtml).toContain("Withdraw Expired");
   });
 
+  test("keeps grant authority visible but blocks writes on the wrong chain", () => {
+    const html = renderGrantInspector(oldGrant.issuer, true, {
+      status: "switch",
+      reason: "Switch your wallet to chain 31337 to continue.",
+    });
+
+    expect(html).toContain("Issuer Controls");
+    expect(html).toContain("Switch your wallet to chain 31337 to continue.");
+    expect(html).toContain("disabled=\"\"");
+  });
+
   test("allows Boardroom owners to operate directly loaded Boardroom grants", () => {
     const grant = boardroomSnapshot.grantSummaries[0].state;
 
-    expect(canRunGrantIssuerActions(oldGrant.issuer, grant, undefined, undefined, { boardroom, owner: oldGrant.issuer })).toBe(true);
+    expect(canRunGrantIssuerActions(oldGrant.issuer, grant, undefined, undefined, {
+      boardroom,
+      executor: oldGrant.issuer,
+      launched: false,
+      owner: oldGrant.issuer,
+      status: 0,
+    })).toBe(true);
     expect(
       canRunGrantIssuerActions("0x5000000000000000000000000000000000000000", grant, undefined, undefined, {
         boardroom,
+        executor: oldGrant.issuer,
+        launched: false,
         owner: oldGrant.issuer,
+        status: 0,
       }),
     ).toBe(false);
+  });
+
+  test("moves Boardroom grant issuer controls to the launched executor", () => {
+    const grant = boardroomSnapshot.grantSummaries[0].state;
+    const executor = "0x6000000000000000000000000000000000000000";
+    const access = { boardroom, executor, launched: true, owner: oldGrant.issuer, status: 0 };
+
+    expect(canRunGrantIssuerActions(executor, grant, undefined, undefined, access)).toBe(true);
+    expect(canRunGrantIssuerActions(oldGrant.issuer, grant, undefined, undefined, access)).toBe(false);
+  });
+
+  test("allows permissionless Boardroom grant cleanup during wind-down", () => {
+    const grant = boardroomSnapshot.grantSummaries[0].state;
+    const observer = "0x5000000000000000000000000000000000000000";
+    const access = { boardroom, executor: oldGrant.issuer, launched: true, owner: oldGrant.issuer, status: 1 };
+
+    expect(canRunGrantIssuerActions(observer, grant, undefined, undefined, access)).toBe(true);
   });
 
   test("bases Manage badges on the selected Boardroom state", () => {
@@ -737,15 +774,27 @@ describe("web app shell", () => {
     expect(deployment.deploymentTimestamp).toBe(178264485400000000001n);
   });
 
+  test("keeps participation available when a later historical distribution is closed", () => {
+    expect(mergeCapabilityOpportunity(
+      { available: true },
+      { available: false, reason: "The historical sale is closed." },
+    )).toEqual({ available: true });
+  });
+
 });
 
-function renderGrantInspector(account: Address, issuerActionsAvailable: boolean): string {
+function renderGrantInspector(
+  account: Address,
+  issuerActionsAvailable: boolean,
+  actionCapability: { status: "enabled" | "switch"; reason?: string } = { status: "enabled" },
+): string {
   const noop = async () => undefined;
   const noopSetter = () => undefined;
 
   return renderToString(
     <GrantInspector
       account={account}
+      actionCapability={actionCapability}
       approvePayment={noop}
       grantAddress={oldGrant.grantAddress}
       grantSnapshot={boardroomSnapshot.grantSummaries[0].state}

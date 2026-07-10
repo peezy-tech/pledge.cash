@@ -4,6 +4,7 @@ import {
   appRouteHref,
   primaryDestination,
   projectRouteHref,
+  routeFromLocation,
   routeFromPath,
   studioRouteHref,
   viewFromPath,
@@ -73,6 +74,17 @@ describe("canonical application routing", () => {
     expect(appRouteHref({ kind: "portfolio", chainId: 31337 }, "/pledge-cash/")).toBe("/pledge-cash/portfolio?chain=31337");
     expect(viewFromPath(`/projects/31337/${boardroom}/participate`)).toBe("market");
     expect(viewFromPath(`/projects/31337/${boardroom}/transparency`)).toBe("activity");
+  });
+
+  test("round-trips the selected chain on primary routes", () => {
+    const route = routeFromLocation("/explore", "?chain=31337");
+    expect(route).toEqual({ kind: "explore", chainId: 31337 });
+    expect(appRouteHref(route as Extract<typeof route, { kind: "explore" }>)).toBe("/explore?chain=31337");
+    expect(routeFromLocation("/portfolio", "?chain=01")).toEqual({ kind: "portfolio" });
+    expect(routeFromLocation(`/projects/31337/${boardroom}/overview`, "?chain=998")).toMatchObject({
+      kind: "project",
+      chainId: 31337,
+    });
   });
 
   test("derives the three-destination product navigation state", () => {

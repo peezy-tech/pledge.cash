@@ -3,6 +3,7 @@ import { CheckCircle2, Circle, LockKeyhole, Wrench } from "lucide-react";
 import type { ReactNode } from "react";
 import { AddressLink } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
 import type { ProductBoardroomDashboardState } from "../../lib/product-boardroom";
 import { PageHeading, PageNotice, RuledSection, SectionHeading } from "./page-primitives";
 import { selectedCatalogEntry } from "./project-page";
@@ -17,6 +18,7 @@ export type StudioPageProps = {
   lifecycle?: StudioLifecycle | undefined;
   loading: boolean;
   nextAction?: ReactNode;
+  onRetry?: (() => void) | undefined;
   operatorTools?: ReactNode;
   projectDirectoryContent?: ReactNode;
   sectionNavigation?: ReactNode;
@@ -31,6 +33,7 @@ export function StudioPage({
   lifecycle,
   loading,
   nextAction,
+  onRetry,
   operatorTools,
   projectDirectoryContent,
   sectionNavigation,
@@ -52,7 +55,14 @@ export function StudioPage({
 
       {sectionNavigation ? <div className="border-b border-zinc-800 py-3">{sectionNavigation}</div> : null}
 
-      {error ? <div className="pt-5"><PageNotice title="Studio data is incomplete" tone="danger">{error}</PageNotice></div> : null}
+      {error ? (
+        <div className="pt-5">
+          <PageNotice title="Studio data is incomplete" tone="danger">
+            <p className="m-0">{error}</p>
+            {onRetry ? <Button className="mt-3" size="sm" variant="secondary" onClick={onRetry}>Try again</Button> : null}
+          </PageNotice>
+        </div>
+      ) : null}
 
       {showLifecycleOverview ? <>
       <RuledSection>
@@ -113,7 +123,7 @@ export function StudioPage({
           title="Operator tools"
           description="Creation, issuance, liquidity, and wind-down controls appear here only when the lifecycle and connected wallet allow them."
         />
-        <div className="mt-4">
+        <div className="mt-4" id="studio-operator-tools">
           {operatorTools ?? (
             <div className="border-y border-zinc-800 py-6">
               <div className="flex items-center gap-2 text-zinc-300"><Wrench className="h-4 w-4" /><span className="text-sm font-semibold">Tools are not attached</span></div>

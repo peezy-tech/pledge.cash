@@ -75,9 +75,16 @@ import {
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Hex, PublicClient } from "viem";
 import { TransactionReview } from "../components/transaction-review";
+import { ConnectWalletButton } from "../components/simplekit";
 import { Button } from "../components/ui/button";
 import { windDownBlockers } from "../features/boardrooms/boardroom-panel-shared";
-import { resolveProjectCapabilities, type ProjectCapabilityContext } from "../features/capabilities/project-capabilities";
+import {
+  resolveProjectCapabilities,
+  type Capability,
+  type CapabilityOpportunity,
+  type ProjectCapabilityContext,
+} from "../features/capabilities/project-capabilities";
+import type { BoardroomPanelCapabilities } from "../features/boardrooms/boardroom-panel-types";
 import { GovernanceLaunchControl, GovernanceQueue } from "../features/governance";
 import { createParticipationFlowContent } from "../features/participation";
 import { AppHeader } from "../features/wallet/app-header";
@@ -124,7 +131,6 @@ import {
   defaultMerkleAirdropForm,
   defaultMigratingCurveForm,
   defaultWindDownForm,
-  dateString,
   errorMessage,
   optionalPaymentToken,
   randomSalt,
@@ -191,7 +197,8 @@ import {
   appRouteHref,
   initialRoute,
   primaryDestination,
-  routeFromPath,
+  projectRouteHref,
+  routeFromLocation,
   type AppRoute,
   type AppView,
   type CanonicalAppRoute,
@@ -234,7 +241,13 @@ export { manageWorkspaceSummary } from "./views/workspace-helpers";
 const MIN_SETTLEMENT_GRACE_SECONDS = 86_400n;
 
 type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
-export type GrantIssuerBoardroomAccess = { boardroom: Address; owner: Address };
+export type GrantIssuerBoardroomAccess = {
+  boardroom: Address;
+  executor: Address;
+  launched: boolean;
+  owner: Address;
+  status: number;
+};
 
 async function parseMinAmountsOut(client: PublicClient, value: string, assets: readonly Address[]): Promise<bigint[]> {
   const trimmed = value.trim();
@@ -342,9 +355,14 @@ export function App(): React.JSX.Element {
   const activeNetwork = useMemo(() => networkForChainId(selectedChainId), [selectedChainId]);
   const networkRequestVersion = useRef(0);
   const discoveryWriteVersion = useRef(0);
+  const grantLoadVersionRef = useRef(0);
+  const governanceRequestVersionRef = useRef(0);
+  const activeGovernanceKeyRef = useRef<string | undefined>(undefined);
   const productGovernanceLoadedKeyRef = useRef<string | undefined>(undefined);
   const grantRouteLoadedKeyRef = useRef<string | undefined>(undefined);
-  const watchedTransactionIdsRef = useRef(new Set<string>());
+  const watchedTransactionIdsRef = useRef(new Map<string, number>());
+  const transactionWatcherIdentityRef = useRef<string | undefined>(undefined);
+  const transactionWatcherVersionRef = useRef(0);
   const activeChainIdRef = useRef(activeNetwork.chainId);
   activeChainIdRef.current = activeNetwork.chainId;
   const activeAccountRef = useRef<Address | undefined>(undefined);
@@ -354,6 +372,8 @@ export function App(): React.JSX.Element {
   const generatedDeployment = getPledgeCashDeployment(activeNetwork.chainId);
   const deployment = useRuntimeDeployment(activeNetwork.chainId, generatedDeployment);
   const [appRoute, setAppRoute] = useState<AppRoute>(() => initialRoute());
+  const activeAppRouteRef = useRef<AppRoute>(appRoute);
+  activeAppRouteRef.current = appRoute;
   const activeView = appRouteView(appRoute);
   const requestedProductBoardroom = appRoute.kind === "project" || appRoute.kind === "studio-project"
     ? appRoute.boardroom
@@ -438,7 +458,8 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     const syncRoute = (): void => {
-      const nextRoute = routeFromPath(window.location.pathname);
+      const nextRoute = routeFromLocation(window.location.pathname, window.location.search);
+      activeAppRouteRef.current = nextRoute;
       setAppRoute(nextRoute);
       const routeChainId = appRouteChainId(nextRoute);
       if (routeChainId !== undefined && supportedNetworkForChainId(routeChainId)) {
@@ -452,6 +473,7 @@ export function App(): React.JSX.Element {
   }, [pendingAction, syncSelectedChainFromLocation]);
 
   const navigateRoute = useCallback((route: CanonicalAppRoute, replace = false): void => {
+    activeAppRouteRef.current = route;
     setAppRoute(route);
     if (typeof window === "undefined") return;
     const href = appRouteHref(route);
@@ -505,26 +527,41 @@ export function App(): React.JSX.Element {
     onAccountChanged: clearDirectGrantPrediction,
     pushLog,
   });
+  const transactionWatcherIdentity = `${activeNetwork.chainId.toString()}:${wallet.account?.toLowerCase() ?? "read-only"}`;
+  if (transactionWatcherIdentityRef.current !== transactionWatcherIdentity) {
+    transactionWatcherIdentityRef.current = transactionWatcherIdentity;
+    transactionWatcherVersionRef.current += 1;
+    watchedTransactionIdsRef.current.clear();
+  }
+  const activeGovernanceKey = governanceRouteKey(appRoute, wallet.account);
+  activeGovernanceKeyRef.current = activeGovernanceKey;
   const { records: transactions, startTransaction, updateTransaction, clearSettled } = useTransactionCenter(
     activeNetwork.chainId,
     wallet.account,
   );
   useEffect(() => {
     for (const transaction of transactions) {
-      if (transaction.stage !== "submitted" || !transaction.hash || watchedTransactionIdsRef.current.has(transaction.id)) continue;
-      watchedTransactionIdsRef.current.add(transaction.id);
+      if (transaction.chainId !== activeNetwork.chainId || transaction.stage !== "submitted" || !transaction.hash) continue;
+      const watcherKey = `${activeNetwork.chainId.toString()}:${wallet.account?.toLowerCase() ?? "read-only"}:${transaction.id}`;
+      if (watchedTransactionIdsRef.current.has(watcherKey)) continue;
+      const watcherVersion = transactionWatcherVersionRef.current;
+      watchedTransactionIdsRef.current.set(watcherKey, watcherVersion);
       void publicClient.waitForTransactionReceipt({ hash: transaction.hash })
         .then((receipt) => {
+          if (transactionWatcherVersionRef.current !== watcherVersion) return;
           updateTransaction(transaction.id, {
             ...(receipt.status === "success" ? {} : { error: `${transaction.label} failed after submission.` }),
             stage: receipt.status === "success" ? "confirmed" : "failed",
           });
         })
-        .catch(() => {
-          watchedTransactionIdsRef.current.delete(transaction.id);
+        .catch(() => undefined)
+        .finally(() => {
+          if (watchedTransactionIdsRef.current.get(watcherKey) === watcherVersion) {
+            watchedTransactionIdsRef.current.delete(watcherKey);
+          }
         });
     }
-  }, [publicClient, transactions, updateTransaction]);
+  }, [activeNetwork.chainId, publicClient, transactions, updateTransaction, wallet.account]);
   const factorySnapshot = useFactorySnapshot(publicClient, deployment, pushLog);
   const creationFee = factorySnapshot.creationFee ?? deployment?.creationFee ?? 0n;
   const deploymentIdentity = deploymentDiscoveryIdentity(deployment);
@@ -631,8 +668,11 @@ export function App(): React.JSX.Element {
 
   const loadProductGovernance = useCallback(async (address: Address): Promise<void> => {
     const key = `${activeNetwork.chainId.toString()}:${address.toLowerCase()}:${wallet.account?.toLowerCase() ?? "read-only"}`;
-    if (productGovernanceLoadedKeyRef.current === key || productGovernanceLoading) return;
+    if (activeGovernanceKeyRef.current !== key || productGovernanceLoadedKeyRef.current === key) return;
+    const requestVersion = ++governanceRequestVersionRef.current;
     productGovernanceLoadedKeyRef.current = key;
+    setQueuedBoardroomActions([]);
+    setBoardroomHolderPower(undefined);
     setProductGovernanceLoading(true);
     setProductGovernanceError(undefined);
     try {
@@ -640,16 +680,26 @@ export function App(): React.JSX.Element {
         queryQueuedBoardroomActions(publicClient, { boardrooms: [address] }),
         wallet.account ? readBoardroomHolderPower(publicClient, { boardroom: address, account: wallet.account }) : Promise.resolve(undefined),
       ]);
-      if (queuedResult.status === "fulfilled") setQueuedBoardroomActions(queuedResult.value);
-      if (holderResult.status === "fulfilled") setBoardroomHolderPower(holderResult.value);
+      if (governanceRequestVersionRef.current !== requestVersion || activeGovernanceKeyRef.current !== key) return;
+      if (queuedResult.status === "fulfilled") {
+        setQueuedBoardroomActions(queuedResult.value.filter((action) => sameAddress(action.boardroom, address)));
+      }
+      if (holderResult.status === "fulfilled" && holderResult.value?.boardroom && sameAddress(holderResult.value.boardroom, address)) {
+        setBoardroomHolderPower(holderResult.value);
+      }
       const errors = [queuedResult, holderResult]
         .filter((result): result is PromiseRejectedResult => result.status === "rejected")
         .map((result) => errorMessage(result.reason));
-      if (errors.length > 0) setProductGovernanceError(errors.join(" "));
+      if (errors.length > 0) {
+        productGovernanceLoadedKeyRef.current = undefined;
+        setProductGovernanceError(errors.join(" "));
+      }
     } finally {
-      setProductGovernanceLoading(false);
+      if (governanceRequestVersionRef.current === requestVersion && activeGovernanceKeyRef.current === key) {
+        setProductGovernanceLoading(false);
+      }
     }
-  }, [activeNetwork.chainId, productGovernanceLoading, publicClient, wallet.account]);
+  }, [activeNetwork.chainId, publicClient, wallet.account]);
 
   useEffect(() => {
     setDiscovery(loadDiscoverySnapshot(discoveryKey));
@@ -682,8 +732,17 @@ export function App(): React.JSX.Element {
   }, [activeNetwork.chainId, appRoute, navigateRoute, productBoardroom]);
 
   useEffect(() => {
+    governanceRequestVersionRef.current += 1;
+    productGovernanceLoadedKeyRef.current = undefined;
+    setQueuedBoardroomActions([]);
+    setBoardroomHolderPower(undefined);
+    setProductGovernanceError(undefined);
+    setProductGovernanceLoading(false);
+  }, [activeGovernanceKey]);
+
+  useEffect(() => {
     const governanceRoute = (appRoute.kind === "project" && appRoute.section === "governance")
-      || (appRoute.kind === "studio-project" && appRoute.section === "governance");
+      || (appRoute.kind === "studio-project" && (appRoute.section === "governance" || appRoute.section === "close"));
     if (!governanceRoute || !productBoardroom || productBoardroom.address.toLowerCase() !== requestedProductBoardroom?.toLowerCase()) return;
     void loadProductGovernance(productBoardroom.address);
   }, [appRoute, loadProductGovernance, productBoardroom, requestedProductBoardroom]);
@@ -795,9 +854,14 @@ export function App(): React.JSX.Element {
 
   const refreshBoardroom = async (address?: Address): Promise<BoardroomSnapshot> => {
     const boardroom = address ?? boardroomSnapshot?.address ?? requireAddress(boardroomAddress, "Boardroom address");
+    const route = activeAppRouteRef.current;
+    if (route.kind === "studio-project" && !sameAddress(route.boardroom, boardroom)) {
+      throw new Error("Studio project identity changed. Reload the Boardroom from its canonical route before continuing.");
+    }
     const snapshot = await readBoardroomSnapshot(publicClient, boardroom);
     setBoardroomSnapshot(snapshot);
     setBoardroomMintTo((current) => current || snapshot.address);
+    await loadProductBoardroom(boardroom);
     return snapshot;
   };
 
@@ -881,6 +945,14 @@ export function App(): React.JSX.Element {
 
   const refreshSwapQuote = async (): Promise<void> => {
     const next = await readSwapQuote(publicClient, deployment, swapForm, wallet.account);
+    const route = activeAppRouteRef.current;
+    const expectedPool = route.kind === "project" && route.section === "participate" ? exactProjectPoolRef.current : undefined;
+    if (expectedPool && (!next.pool || !sameAddress(next.pool.address, expectedPool))) {
+      const message = "This quote does not use the project pool. Refresh the project before swapping.";
+      setSwapQuote({ ...next, error: message });
+      pushLog(message, "error");
+      return;
+    }
     setSwapQuote(next);
     if (next.error) {
       pushLog(next.error, next.error.startsWith("No AMM pool") ? "info" : "error");
@@ -893,6 +965,11 @@ export function App(): React.JSX.Element {
     const next = await readSwapQuote(publicClient, deployment, swapForm, wallet.account);
     setSwapQuote(next);
     if (next.error) throw new Error(next.error);
+    const route = activeAppRouteRef.current;
+    const expectedPool = route.kind === "project" && route.section === "participate" ? exactProjectPoolRef.current : undefined;
+    if (expectedPool && (!next.pool || !sameAddress(next.pool.address, expectedPool))) {
+      throw new Error("The current quote does not use this project’s AMM pool.");
+    }
     return next;
   };
 
@@ -1092,7 +1169,9 @@ export function App(): React.JSX.Element {
     );
   };
 
-  const loadGrantAddress = async (grant: Address): Promise<void> => {
+  const loadGrantAddress = async (grant: Address, expectedRouteKey?: string): Promise<void> => {
+    const requestVersion = ++grantLoadVersionRef.current;
+    const requestChainId = activeNetwork.chainId;
     const now = BigInt(Math.floor(Date.now() / 1000));
     const snapshot = await readGrantState(publicClient, grant, now);
     const [tokenMetadata, paymentTokenMetadata, issuerBoardroom] = await Promise.all([
@@ -1100,6 +1179,14 @@ export function App(): React.JSX.Element {
       isZeroAddress(snapshot.paymentToken) ? undefined : readTokenMetadata(publicClient, snapshot.paymentToken),
       readGrantIssuerBoardroomAccess(snapshot.issuer),
     ]);
+    if (grantLoadVersionRef.current !== requestVersion || activeChainIdRef.current !== requestChainId) return;
+    if (expectedRouteKey) {
+      const route = activeAppRouteRef.current;
+      const activeRouteKey = route.kind === "grant"
+        ? `${route.chainId.toString()}:${route.grant.toLowerCase()}`
+        : undefined;
+      if (activeRouteKey !== expectedRouteKey) return;
+    }
 
     setGrantSnapshot({
       address: grant,
@@ -1126,12 +1213,22 @@ export function App(): React.JSX.Element {
   };
 
   const loadGrant = async (): Promise<void> => {
+    const route = activeAppRouteRef.current;
+    if (route.kind === "grant") {
+      await loadGrantAddress(route.grant, `${route.chainId.toString()}:${route.grant.toLowerCase()}`);
+      return;
+    }
     await loadGrantAddress(requireAddress(grantAddress, "Grant address"));
+  };
+
+  const selectedGrantAddress = (): Address => {
+    const route = activeAppRouteRef.current;
+    return route.kind === "grant" ? route.grant : requireAddress(grantAddress, "Grant address");
   };
 
   const approvePayment = async (): Promise<void> => {
     if (!grantSnapshot) throw new Error("Load a grant first.");
-    const grant = requireAddress(grantAddress, "Grant address");
+    const grant = selectedGrantAddress();
     if (grantSnapshot.address.toLowerCase() !== grant.toLowerCase()) throw new Error("Reload the grant after changing the address.");
     if (isZeroAddress(grantSnapshot.paymentToken)) throw new Error("Selected grant has no payment token.");
 
@@ -1143,7 +1240,7 @@ export function App(): React.JSX.Element {
   };
 
   const settleGrant = async (): Promise<void> => {
-    const grant = requireAddress(grantAddress, "Grant address");
+    const grant = selectedGrantAddress();
     const snapshot =
       grantSnapshot && grantSnapshot.address.toLowerCase() === grant.toLowerCase()
         ? grantSnapshot
@@ -1161,23 +1258,41 @@ export function App(): React.JSX.Element {
     try {
       const snapshot = await readBoardroomState(publicClient, issuer);
       if (isZeroAddress(snapshot.policyRegistry)) return undefined;
-      return { boardroom: issuer, owner: snapshot.owner };
+      return {
+        boardroom: issuer,
+        executor: snapshot.executor,
+        launched: snapshot.launched,
+        owner: snapshot.owner,
+        status: snapshot.status,
+      };
     } catch {
       return undefined;
     }
   };
 
   useEffect(() => {
-    if (appRoute.kind !== "grant" || appRoute.chainId !== activeNetwork.chainId) return;
+    grantLoadVersionRef.current += 1;
+    if (appRoute.kind !== "grant" || appRoute.chainId !== activeNetwork.chainId) {
+      grantRouteLoadedKeyRef.current = undefined;
+      setGrantSnapshot(undefined);
+      setGrantIssuerBoardroom(undefined);
+      return;
+    }
     const key = `${appRoute.chainId.toString()}:${appRoute.grant.toLowerCase()}`;
     if (grantRouteLoadedKeyRef.current === key) return;
     grantRouteLoadedKeyRef.current = key;
-    setGrantAddress(appRoute.grant);
-    void loadGrantAddress(appRoute.grant).catch((error) => pushLog(errorMessage(error), "error"));
+    updateGrantAddress(appRoute.grant);
+    void loadGrantAddress(appRoute.grant, key).catch((error) => {
+      const route = activeAppRouteRef.current;
+      if (route.kind === "grant" && `${route.chainId.toString()}:${route.grant.toLowerCase()}` === key) {
+        grantRouteLoadedKeyRef.current = undefined;
+        pushLog(errorMessage(error), "error");
+      }
+    });
   }, [activeNetwork.chainId, appRoute, pushLog]);
 
   const runGrantIssuerAction = async (functionName: GrantIssuerAction, successMessage: string): Promise<void> => {
-    const grant = requireAddress(grantAddress, "Grant address");
+    const grant = selectedGrantAddress();
     const { issuer } = await readGrantState(publicClient, grant);
     const issuerBoardroom = await readBoardroomState(publicClient, issuer).catch(() => undefined);
 
@@ -1241,11 +1356,15 @@ export function App(): React.JSX.Element {
     });
     setPredictedBoardroom(predicted);
     setBoardroomAddress(predicted);
+    navigateRoute({ kind: "studio-project", chainId: activeNetwork.chainId, boardroom: predicted, section: "setup" });
     await refreshBoardroom(predicted);
   };
 
   const loadBoardroom = async (): Promise<void> => {
-    const address = requireAddress(boardroomAddress, "Boardroom address");
+    const route = activeAppRouteRef.current;
+    const address = route.kind === "studio-project"
+      ? route.boardroom
+      : requireAddress(boardroomAddress, "Boardroom address");
     await refreshBoardroom(address);
     pushLog(`Loaded Boardroom ${address}`, "success");
   };
@@ -1392,6 +1511,10 @@ export function App(): React.JSX.Element {
 
   const requireLoadedBoardroom = (): BoardroomSnapshot => {
     if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
+    const route = activeAppRouteRef.current;
+    if (route.kind === "studio-project" && !sameAddress(route.boardroom, boardroomSnapshot.address)) {
+      throw new Error("The loaded Boardroom does not match this Studio route. Refresh the project before continuing.");
+    }
     return boardroomSnapshot;
   };
 
@@ -2064,7 +2187,79 @@ export function App(): React.JSX.Element {
     [activeNetwork.chainId, navigateRoute, updateBoardroomAddress, updateLockedLiquidityAddress],
   );
 
-  const grantIssuerActionsAvailable = canRunGrantIssuerActions(wallet.account, grantSnapshot, productBoardroom, boardroomSnapshot, grantIssuerBoardroom);
+  const exactProjectAddress = appRoute.kind === "project" || appRoute.kind === "studio-project" ? appRoute.boardroom : undefined;
+  const exactProjectDashboard = exactProjectAddress && productBoardroom?.address.toLowerCase() === exactProjectAddress.toLowerCase()
+    ? productBoardroom
+    : undefined;
+  const projectCapabilities = resolveProjectCapabilities({
+    account: wallet.account,
+    routeChainId: appRouteChainId(appRoute) ?? activeNetwork.chainId,
+    walletChainId: wallet.chainId,
+    project: exactProjectDashboard ? {
+      owner: exactProjectDashboard.snapshot.owner,
+      executor: exactProjectDashboard.snapshot.executor,
+      launched: exactProjectDashboard.snapshot.launched,
+      status: capabilityLifecycle(exactProjectDashboard.snapshot.status),
+      launchReady: boardroomLaunchReady(exactProjectDashboard.snapshot),
+      launchBlockedReason: boardroomLaunchReady(exactProjectDashboard.snapshot)
+        ? undefined
+        : "Distribute at least one whole governance-eligible project token before launch.",
+      windDownBlockers: windDownBlockers(exactProjectDashboard.snapshot).length,
+    } : undefined,
+    wallet: {
+      shareBalance: boardroomHolderPower?.currentBalance,
+      vetoEligible: boardroomHolderPower?.canVeto,
+      windDownEligible: boardroomHolderPower?.canStartWindDown,
+    },
+    governance: {
+      queuedActionCount: queuedBoardroomActions.filter((action) => action.status === "waiting" || action.status === "ready").length,
+      readyActionCount: queuedBoardroomActions.filter((action) => action.status === "ready").length,
+    },
+    opportunities: participationCapabilityOpportunities(exactProjectDashboard),
+  });
+  const routeWalletCapability = walletWriteCapability(wallet.account, wallet.chainId, appRouteChainId(appRoute) ?? activeNetwork.chainId);
+  const projectLifecycle = exactProjectDashboard?.snapshot.status;
+  const lifecycleUnavailable: Capability = { status: "hidden" };
+  const boardroomPanelCapabilities: BoardroomPanelCapabilities | undefined = appRoute.kind === "studio"
+    ? {
+        claimRedemption: lifecycleUnavailable,
+        createBoardroom: routeWalletCapability,
+        createDistribution: lifecycleUnavailable,
+        createGrant: lifecycleUnavailable,
+        createLiquidity: lifecycleUnavailable,
+        manageDistribution: lifecycleUnavailable,
+        manageLiquidity: lifecycleUnavailable,
+        mint: lifecycleUnavailable,
+        permissionlessWindDown: lifecycleUnavailable,
+        redeem: lifecycleUnavailable,
+        registerRedeemableAsset: lifecycleUnavailable,
+        startWindDown: lifecycleUnavailable,
+      }
+    : appRoute.kind === "studio-project"
+      ? {
+        claimRedemption: projectLifecycle === 2 ? routeWalletCapability : lifecycleUnavailable,
+        createBoardroom: lifecycleUnavailable,
+        createDistribution: projectCapabilities["studio.createDistribution"],
+        createGrant: projectCapabilities["studio.createGrant"],
+        createLiquidity: projectCapabilities["studio.manageLiquidity"],
+        manageDistribution: projectLifecycle === 1
+          ? routeWalletCapability
+          : projectCapabilities["studio.createDistribution"],
+        manageLiquidity: projectLifecycle === 1
+          ? routeWalletCapability
+          : projectCapabilities["studio.manageLiquidity"],
+        mint: projectCapabilities["studio.mint"],
+        permissionlessWindDown: projectCapabilities["windDown.openRedemptions"],
+        redeem: projectCapabilities["redemption.redeem"],
+        registerRedeemableAsset: projectCapabilities["windDown.registerAsset"],
+        startWindDown: projectCapabilities["windDown.start"],
+        }
+      : undefined;
+
+  const displayedGrantSnapshot = appRoute.kind === "grant"
+    ? grantSnapshot?.address.toLowerCase() === appRoute.grant.toLowerCase() ? grantSnapshot : undefined
+    : grantSnapshot;
+  const grantIssuerActionsAvailable = canRunGrantIssuerActions(wallet.account, displayedGrantSnapshot, productBoardroom, boardroomSnapshot, grantIssuerBoardroom);
   const marketPanel = (
     <Suspense fallback={<div aria-live="polite" className="border-y border-zinc-800 py-6 text-sm text-zinc-500">Loading market tools…</div>}>
     <SwapPanel
@@ -2085,6 +2280,7 @@ export function App(): React.JSX.Element {
       tokenListLoading={swapTokenListLoading}
       wrappedNativeSymbol={activeNetwork.wrappedNativeSymbol}
       mode={appRoute.kind === "project" ? "swap" : appRoute.kind === "studio-project" && appRoute.section === "liquidity" ? "liquidity" : "all"}
+      lockSwapPair={appRoute.kind === "project" && appRoute.section === "participate"}
       addLiquidity={addLiquidity}
       approveLiquidityTokenA={approveLiquidityTokenA}
       approveLiquidityTokenB={approveLiquidityTokenB}
@@ -2120,8 +2316,10 @@ export function App(): React.JSX.Element {
   const grantPanel = (
     <GrantInspector
       account={wallet.account}
-      grantAddress={grantAddress}
-      grantSnapshot={grantSnapshot}
+      actionCapability={walletWriteCapability(wallet.account, wallet.chainId, appRouteChainId(appRoute) ?? activeNetwork.chainId)}
+      addressLocked={appRoute.kind === "grant"}
+      grantAddress={appRoute.kind === "grant" ? appRoute.grant : grantAddress}
+      grantSnapshot={displayedGrantSnapshot}
       issuerActionsAvailable={grantIssuerActionsAvailable}
       paymentApproval={paymentApproval}
       pendingAction={pendingAction}
@@ -2137,17 +2335,23 @@ export function App(): React.JSX.Element {
       withdrawExpired={withdrawExpired}
     />
   );
+  const canonicalStudioBoardroom = appRoute.kind === "studio-project" ? appRoute.boardroom : undefined;
+  const displayedBoardroomSnapshot = canonicalStudioBoardroom
+    ? boardroomSnapshot?.address.toLowerCase() === canonicalStudioBoardroom.toLowerCase() ? boardroomSnapshot : undefined
+    : boardroomSnapshot;
   const boardroomToolsPanel = (
     <Suspense fallback={<div aria-live="polite" className="border-y border-zinc-800 py-6 text-sm text-zinc-500">Loading operator tools…</div>}>
     <BoardroomPanel
       section={appRoute.kind === "studio-project" ? appRoute.section : "setup"}
+      boardroomIdentityLocked={appRoute.kind === "studio-project"}
+      capabilities={boardroomPanelCapabilities}
       boardroom={{
-        address: boardroomAddress,
+        address: canonicalStudioBoardroom ?? boardroomAddress,
         form: boardroomForm,
         mintAmount: boardroomMintAmount,
         mintTo: boardroomMintTo,
         predicted: predictedBoardroom,
-        snapshot: boardroomSnapshot,
+        snapshot: displayedBoardroomSnapshot,
         create: createBoardroom,
         load: loadBoardroom,
         mintShares: mintBoardroomShares,
@@ -2282,65 +2486,60 @@ export function App(): React.JSX.Element {
     />
   );
 
-  const exactProjectAddress = appRoute.kind === "project" || appRoute.kind === "studio-project" ? appRoute.boardroom : undefined;
-  const exactProjectDashboard = exactProjectAddress && productBoardroom?.address.toLowerCase() === exactProjectAddress.toLowerCase()
-    ? productBoardroom
-    : undefined;
-  const projectCapabilities = resolveProjectCapabilities({
-    account: wallet.account,
-    routeChainId: appRouteChainId(appRoute) ?? activeNetwork.chainId,
-    walletChainId: wallet.chainId,
-    project: exactProjectDashboard ? {
-      owner: exactProjectDashboard.snapshot.owner,
-      executor: exactProjectDashboard.snapshot.executor,
-      launched: exactProjectDashboard.snapshot.launched,
-      status: capabilityLifecycle(exactProjectDashboard.snapshot.status),
-      launchReady: boardroomLaunchReady(exactProjectDashboard.snapshot),
-      launchBlockedReason: boardroomLaunchReady(exactProjectDashboard.snapshot)
-        ? undefined
-        : "Distribute at least one whole governance-eligible project token before launch.",
-      windDownBlockers: windDownBlockers(exactProjectDashboard.snapshot).length,
-    } : undefined,
-    wallet: {
-      shareBalance: boardroomHolderPower?.currentBalance,
-      vetoEligible: boardroomHolderPower?.canVeto,
-      windDownEligible: boardroomHolderPower?.canStartWindDown,
-    },
-    governance: {
-      queuedActionCount: queuedBoardroomActions.filter((action) => action.status === "waiting" || action.status === "ready").length,
-      readyActionCount: queuedBoardroomActions.filter((action) => action.status === "ready").length,
-    },
-    opportunities: participationCapabilityOpportunities(exactProjectDashboard),
-  });
-  const governanceControls = exactProjectDashboard ? (
-    exactProjectDashboard.snapshot.launched ? (
-      <GovernanceQueue
-        account={wallet.account}
-        actions={queuedBoardroomActions}
-        capabilities={projectCapabilities}
-        pendingAction={pendingAction}
-        runAction={runAction}
-        submitTransaction={submitContractTransaction}
-      />
-    ) : (
-      <GovernanceLaunchControl
-        account={wallet.account}
-        boardroom={exactProjectDashboard.address}
-        capabilities={projectCapabilities}
-        currentExecutor={exactProjectDashboard.snapshot.executor}
-        minimumDelay={exactProjectDashboard.snapshot.governanceConfig.minimumDelay}
-        pendingAction={pendingAction}
-        runAction={runAction}
-        submitTransaction={submitContractTransaction}
-        onComplete={async () => {
-          productGovernanceLoadedKeyRef.current = undefined;
-          await loadProductBoardroom(exactProjectDashboard.address);
-        }}
-      />
-    )
-  ) : <GovernanceQueueSummary actions={queuedBoardroomActions} />;
-  const exactProjectPool = exactProjectDashboard?.history?.pool
+  const governanceQueueControls = exactProjectDashboard?.snapshot.launched ? (
+    <GovernanceQueue
+      account={wallet.account}
+      actions={queuedBoardroomActions}
+      capabilities={projectCapabilities}
+      pendingAction={pendingAction}
+      runAction={runAction}
+      submitTransaction={submitContractTransaction}
+    />
+  ) : undefined;
+  const governanceLaunchControls = exactProjectDashboard && !exactProjectDashboard.snapshot.launched ? (
+    <GovernanceLaunchControl
+      account={wallet.account}
+      boardroom={exactProjectDashboard.address}
+      capabilities={projectCapabilities}
+      currentExecutor={exactProjectDashboard.snapshot.executor}
+      minimumDelay={exactProjectDashboard.snapshot.governanceConfig.minimumDelay}
+      pendingAction={pendingAction}
+      runAction={runAction}
+      submitTransaction={submitContractTransaction}
+      onComplete={async () => {
+        productGovernanceLoadedKeyRef.current = undefined;
+        await loadProductBoardroom(exactProjectDashboard.address);
+      }}
+    />
+  ) : undefined;
+  const retryGovernanceAction = productGovernanceError && exactProjectDashboard ? (
+    <Button
+      size="sm"
+      variant="secondary"
+      onClick={() => {
+        productGovernanceLoadedKeyRef.current = undefined;
+        void loadProductGovernance(exactProjectDashboard.address);
+      }}
+    >
+      Retry governance
+    </Button>
+  ) : undefined;
+  const exactProjectPool = exactProjectDashboard?.histories?.find((history) => history.pool)?.pool
+    ?? exactProjectDashboard?.history?.pool
     ?? exactProjectDashboard?.catalog.find((entry) => sameAddress(entry.address, exactProjectDashboard.address))?.pool;
+  const exactProjectPoolRef = useRef<Address | undefined>(exactProjectPool);
+  exactProjectPoolRef.current = exactProjectPool;
+  useEffect(() => {
+    if (appRoute.kind !== "project" || appRoute.section !== "participate" || !exactProjectPool) return;
+    const pool = swapTokenList.pools.find((candidate) => sameAddress(candidate.address, exactProjectPool));
+    if (!pool) return;
+    setSwapForm((current) => {
+      const alreadyScoped = (sameAddress(current.tokenIn as Address, pool.token0) && sameAddress(current.tokenOut as Address, pool.token1))
+        || (sameAddress(current.tokenIn as Address, pool.token1) && sameAddress(current.tokenOut as Address, pool.token0));
+      return alreadyScoped ? current : { ...current, tokenIn: pool.token0, tokenOut: pool.token1 };
+    });
+    setSwapQuote((current) => current?.pool && sameAddress(current.pool.address, exactProjectPool) ? current : undefined);
+  }, [appRoute, exactProjectPool, swapTokenList.pools]);
   const participationContent = exactProjectDashboard ? {
     ...createParticipationFlowContent({
       account: wallet.account,
@@ -2362,10 +2561,12 @@ export function App(): React.JSX.Element {
     <ol className="m-0 list-none border-t border-zinc-800 p-0">
       {productBoardroom.catalog.map((project) => (
         <li className="border-b border-zinc-800" key={project.address}>
-          <button
+          <a
             className="flex w-full items-center justify-between gap-4 px-3 py-4 text-left transition-colors hover:bg-zinc-900/45"
-            type="button"
-            onClick={() => {
+            href={appRouteHref({ kind: "studio-project", chainId: activeNetwork.chainId, boardroom: project.address, section: "setup" })}
+            onClick={(event) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              event.preventDefault();
               updateBoardroomAddress(project.address);
               navigateRoute({ kind: "studio-project", chainId: activeNetwork.chainId, boardroom: project.address, section: "setup" });
             }}
@@ -2375,7 +2576,7 @@ export function App(): React.JSX.Element {
               <span className="mt-1 block truncate text-xs text-zinc-500">{project.symbol ?? "Boardroom"} · {shortAddress(project.address)}</span>
             </span>
             <span className="text-xs font-semibold text-lime-200">Open Studio</span>
-          </button>
+          </a>
         </li>
       ))}
     </ol>
@@ -2406,6 +2607,7 @@ export function App(): React.JSX.Element {
             projects={productBoardroom?.catalog ?? []}
             onOpenProject={(project) => navigateRoute({ kind: "project", chainId: activeNetwork.chainId, boardroom: project.address, section: "overview" })}
             onRetry={() => void loadProductBoardroom()}
+            projectHref={(project) => projectRouteHref(activeNetwork.chainId, project.address)}
           />
         );
       case "project":
@@ -2418,13 +2620,15 @@ export function App(): React.JSX.Element {
             error={productBoardroomError}
             loading={productBoardroomLoading}
             mastheadAction={
-              exactProjectDashboard && sameAddress(wallet.account, exactProjectDashboard.snapshot.owner) ? (
+              exactProjectDashboard ? (
                 <Button variant="secondary" onClick={() => navigateRoute({ kind: "studio-project", chainId: appRoute.chainId, boardroom: appRoute.boardroom, section: "setup" })}>
                   Open Studio
                 </Button>
               ) : undefined
             }
             onNavigateSection={(section) => navigateRoute({ kind: "project", chainId: appRoute.chainId, boardroom: appRoute.boardroom, section })}
+            onRetry={() => void loadProductBoardroom(appRoute.boardroom)}
+            sectionHref={(section) => projectRouteHref(appRoute.chainId, appRoute.boardroom, section)}
           >
             {appRoute.section === "overview" ? (
               <ProjectOverviewPage
@@ -2448,7 +2652,8 @@ export function App(): React.JSX.Element {
                 error={productGovernanceError}
                 holderPower={boardroomHolderPower}
                 loading={productBoardroomLoading || productGovernanceLoading}
-                queueContent={governanceControls}
+                primaryAction={retryGovernanceAction}
+                queueContent={governanceQueueControls}
               />
             ) : (
               <TransparencyPage
@@ -2463,6 +2668,7 @@ export function App(): React.JSX.Element {
         return (
           <PortfolioPage
             account={wallet.account}
+            connectAction={wallet.account ? undefined : <ConnectWalletButton />}
             discoveryContent={walletAccessPanel}
             error={discovery.errors.length ? discovery.errors.join(" ") : undefined}
             loading={Boolean(discoveryPendingAction)}
@@ -2483,18 +2689,16 @@ export function App(): React.JSX.Element {
       case "studio":
       case "studio-project": {
         const selectedDashboard = appRoute.kind === "studio-project" ? exactProjectDashboard : undefined;
-        const expectedOperator = selectedDashboard
-          ? selectedDashboard.snapshot.launched
-            ? selectedDashboard.snapshot.executor
-            : selectedDashboard.snapshot.owner
-          : undefined;
-        const operatorTools = !wallet.account ? (
+        const exactOperatorStateReady = appRoute.kind !== "studio-project"
+          || appRoute.section === "governance"
+          || Boolean(selectedDashboard && displayedBoardroomSnapshot && sameAddress(displayedBoardroomSnapshot.address, appRoute.boardroom));
+        const operatorTools = !exactOperatorStateReady ? (
+          <PageNotice title="Loading the exact project state">
+            Studio will not expose transaction controls until the loaded Boardroom matches this canonical project URL.
+          </PageNotice>
+        ) : appRoute.kind === "studio" && !wallet.account ? (
           <PageNotice title="Connect the operator wallet">
             Studio keeps transaction controls hidden until a wallet is connected. The project’s public state remains available in its Overview and Transparency pages.
-          </PageNotice>
-        ) : expectedOperator && !sameAddress(wallet.account, expectedOperator) ? (
-          <PageNotice title="This wallet does not hold project authority" tone="warning">
-            Connect the current {selectedDashboard?.snapshot.launched ? "executor" : "owner"} wallet to prepare project transactions. Nothing is blocked from public inspection.
           </PageNotice>
         ) : appRoute.kind === "studio-project" && appRoute.section === "governance" ? (
           <GovernancePage
@@ -2502,7 +2706,8 @@ export function App(): React.JSX.Element {
             error={productGovernanceError}
             holderPower={boardroomHolderPower}
             loading={productBoardroomLoading || productGovernanceLoading}
-            queueContent={governanceControls}
+            primaryAction={retryGovernanceAction}
+            queueContent={governanceQueueControls ?? governanceLaunchControls}
           />
         ) : appRoute.kind === "studio-project" && appRoute.section === "liquidity" ? (
           <div className="grid gap-4">{boardroomToolsPanel}{marketPanel}</div>
@@ -2511,8 +2716,24 @@ export function App(): React.JSX.Element {
           <StudioPage
             account={wallet.account}
             dashboard={selectedDashboard}
-            error={productBoardroomError}
+            error={productBoardroomError ?? (appRoute.kind === "studio-project" && appRoute.section === "close" ? productGovernanceError : undefined)}
             loading={productBoardroomLoading}
+            createAction={appRoute.kind === "studio" ? (
+              wallet.account ? (
+                <Button onClick={() => document.getElementById("studio-operator-tools")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+                  Start project setup
+                </Button>
+              ) : <ConnectWalletButton />
+            ) : undefined}
+            onRetry={appRoute.kind === "studio-project"
+              ? () => {
+                  void loadProductBoardroom(appRoute.boardroom);
+                  if (appRoute.section === "close") {
+                    productGovernanceLoadedKeyRef.current = undefined;
+                    void loadProductGovernance(appRoute.boardroom);
+                  }
+                }
+              : () => void loadProductBoardroom()}
             operatorTools={operatorTools}
             projectDirectoryContent={appRoute.kind === "studio" ? studioDirectory : undefined}
             showLifecycleOverview={appRoute.kind === "studio" || appRoute.section === "setup"}
@@ -2596,9 +2817,23 @@ export function canRunGrantIssuerActions(
 ): boolean {
   if (!account || !grantSnapshot) return false;
   if (sameAddress(account, grantSnapshot.issuer)) return true;
-  if (sameAddress(grantSnapshot.issuer, dashboard?.address) && sameAddress(account, dashboard?.snapshot.owner)) return true;
-  if (sameAddress(grantSnapshot.issuer, grantIssuerBoardroom?.boardroom) && sameAddress(account, grantIssuerBoardroom?.owner)) return true;
-  return sameAddress(grantSnapshot.issuer, boardroomSnapshot?.address) && sameAddress(account, boardroomSnapshot?.owner);
+  if (dashboard && sameAddress(grantSnapshot.issuer, dashboard.address)) {
+    if (dashboard.snapshot.status === 1) return true;
+    if (dashboard.snapshot.status !== 0) return false;
+    const authority = dashboard?.snapshot.launched ? dashboard.snapshot.executor : dashboard?.snapshot.owner;
+    if (sameAddress(account, authority)) return true;
+  }
+  if (grantIssuerBoardroom && sameAddress(grantSnapshot.issuer, grantIssuerBoardroom.boardroom)) {
+    if (grantIssuerBoardroom.status === 1) return true;
+    if (grantIssuerBoardroom.status !== 0) return false;
+    const authority = grantIssuerBoardroom?.launched ? grantIssuerBoardroom.executor : grantIssuerBoardroom?.owner;
+    if (sameAddress(account, authority)) return true;
+  }
+  if (!boardroomSnapshot || !sameAddress(grantSnapshot.issuer, boardroomSnapshot.address)) return false;
+  if (boardroomSnapshot.status === 1) return true;
+  if (boardroomSnapshot.status !== 0) return false;
+  const authority = boardroomSnapshot?.launched ? boardroomSnapshot.executor : boardroomSnapshot?.owner;
+  return sameAddress(account, authority);
 }
 
 function boardroomCallsFromExecution(request: Record<string, unknown>): readonly BoardroomCall[] {
@@ -2657,46 +2892,23 @@ function walletPortfolioTasks({
   return tasks;
 }
 
-function GovernanceQueueSummary({ actions }: { actions: readonly QueuedBoardroomAction[] }): React.JSX.Element {
-  if (actions.length === 0) {
-    return <p className="m-0 border-y border-zinc-800 py-5 text-sm text-zinc-500">No queued decisions were found for this project.</p>;
-  }
-  return (
-    <ol className="m-0 list-none border-t border-zinc-800 p-0">
-      {actions.map((action) => (
-        <li className="grid gap-3 border-b border-zinc-800 py-4 sm:px-3 lg:grid-cols-[minmax(0,1fr)_auto]" key={action.actionHash}>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-semibold text-zinc-100">{action.calls?.length === 1 ? "Project change" : `${(action.calls?.length ?? 0).toString()}-call project change`}</span>
-              <span className="rounded-full border border-zinc-700 px-2 py-0.5 text-[11px] font-semibold capitalize text-zinc-300">{action.status}</span>
-            </div>
-            <p className="m-0 mt-1 text-xs text-zinc-500">
-              {action.status === "waiting" ? `Ready ${dateString(action.eta)}` : action.status === "ready" ? `Expires ${dateString(action.expiresAt)}` : `Queued at block ${action.queueBlockNumber.toString()}`}
-            </p>
-            {action.payloadError ? <p className="m-0 mt-2 text-xs text-amber-200">Call details unavailable: {action.payloadError}</p> : null}
-            {action.calls?.map((call, index) => (
-              <details className="mt-3 border-l border-zinc-800 pl-3 text-xs text-zinc-500" key={`${action.actionHash}:${index.toString()}`}>
-                <summary className="cursor-pointer text-zinc-300">Call {(index + 1).toString()} · {shortAddress(call.target)}</summary>
-                <div className="mt-2 grid gap-1 font-mono">
-                  <span className="break-all">Target {call.target}</span>
-                  <span>Native value {call.value.toString()}</span>
-                  <span className="break-all">Data {call.data}</span>
-                </div>
-              </details>
-            ))}
-          </div>
-          <code className="self-start text-[11px] text-zinc-600">{shortAddress(action.actionHash)}</code>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
 function capabilityLifecycle(status: number): NonNullable<ProjectCapabilityContext["project"]>["status"] {
   if (status === 0) return "active";
   if (status === 1) return "winding-down";
   if (status === 2) return "redemptions-open";
   return "closed";
+}
+
+function walletWriteCapability(
+  account: Address | undefined,
+  walletChainId: number | undefined,
+  routeChainId: number,
+): Capability {
+  if (!account) return { status: "connect", reason: "Connect a wallet to continue." };
+  if (walletChainId !== routeChainId) {
+    return { status: "switch", reason: `Switch your wallet to chain ${routeChainId.toString()} to continue.` };
+  }
+  return { status: "enabled" };
 }
 
 function boardroomLaunchReady(snapshot: BoardroomSnapshot): boolean {
@@ -2712,21 +2924,36 @@ function participationCapabilityOpportunities(
     if (!distribution.state) continue;
     if (distribution.kind === "fixed-price-sale" && "saleStatus" in distribution.state) {
       const available = distribution.state.saleStatus === 0 && !distribution.state.closed && distribution.state.remainingShares > 0n;
-      opportunities["participate.fixedSale.buy"] = { available, ...(!available ? { reason: "The fixed-price sale is not accepting purchases." } : {}) };
+      opportunities["participate.fixedSale.buy"] = mergeCapabilityOpportunity(
+        opportunities["participate.fixedSale.buy"],
+        { available, ...(!available ? { reason: "The fixed-price sale is not accepting purchases." } : {}) },
+      );
     }
     if (distribution.kind === "migrating-bonding-curve" && "curveStatus" in distribution.state) {
       const available = distribution.state.curveStatus === 0 && !distribution.state.closed;
-      opportunities["participate.curve.buy"] = {
-        available: available && distribution.state.remainingSaleShares > 0n,
-        ...(!available || distribution.state.remainingSaleShares === 0n ? { reason: "The curve is no longer selling project tokens." } : {}),
-      };
-      opportunities["participate.curve.sell"] = { available, ...(!available ? { reason: "The curve is no longer accepting sells." } : {}) };
+      opportunities["participate.curve.buy"] = mergeCapabilityOpportunity(
+        opportunities["participate.curve.buy"],
+        {
+          available: available && distribution.state.remainingSaleShares > 0n,
+          ...(!available || distribution.state.remainingSaleShares === 0n ? { reason: "The curve is no longer selling project tokens." } : {}),
+        },
+      );
+      opportunities["participate.curve.sell"] = mergeCapabilityOpportunity(
+        opportunities["participate.curve.sell"],
+        { available, ...(!available ? { reason: "The curve is no longer accepting sells." } : {}) },
+      );
     }
     if (distribution.kind === "merkle-airdrop" && "airdropStatus" in distribution.state) {
       const available = distribution.state.airdropStatus === 0 && !distribution.state.closed && distribution.state.remainingShares > 0n;
       const opportunity = { available, ...(!available ? { reason: "The airdrop claim window is not active." } : {}) };
-      opportunities["participate.airdrop.claim"] = opportunity;
-      opportunities["participate.airdrop.claimGrant"] = opportunity;
+      opportunities["participate.airdrop.claim"] = mergeCapabilityOpportunity(
+        opportunities["participate.airdrop.claim"],
+        opportunity,
+      );
+      opportunities["participate.airdrop.claimGrant"] = mergeCapabilityOpportunity(
+        opportunities["participate.airdrop.claimGrant"],
+        opportunity,
+      );
     }
   }
   const hasAmm = Boolean(dashboard?.history?.pool || dashboard?.snapshot.lockedLiquiditySummaries.some((locker) => locker.state?.pool));
@@ -2737,8 +2964,24 @@ function participationCapabilityOpportunities(
   return opportunities;
 }
 
+export function mergeCapabilityOpportunity(
+  current: CapabilityOpportunity | undefined,
+  next: CapabilityOpportunity,
+): CapabilityOpportunity {
+  if (!current) return next;
+  if (current.available || next.available) return { available: true };
+  return { available: false, reason: current.reason ?? next.reason };
+}
+
 function appRouteChainId(route: AppRoute): number | undefined {
   return "chainId" in route ? route.chainId : undefined;
+}
+
+function governanceRouteKey(route: AppRoute, account: Address | undefined): string | undefined {
+  const governanceRoute = (route.kind === "project" && route.section === "governance")
+    || (route.kind === "studio-project" && (route.section === "governance" || route.section === "close"));
+  if (!governanceRoute) return undefined;
+  return `${route.chainId.toString()}:${route.boardroom.toLowerCase()}:${account?.toLowerCase() ?? "read-only"}`;
 }
 
 function isCanonicalAppRoute(route: AppRoute): route is CanonicalAppRoute {

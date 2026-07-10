@@ -148,19 +148,19 @@ export function resolveProjectCapabilities(context: ProjectCapabilityContext): P
   capabilities["windDown.start"] = windDownStartCapability(context);
 
   const windingDown = project.status === "winding-down";
-  for (const key of ["windDown.registerAsset", "windDown.openRedemptions"] as const) {
-    if (!windingDown) {
-      capabilities[key] = hidden();
-      continue;
-    }
+  if (windingDown) {
     const authorized = project.launched ? context.wallet?.windDownEligible === true : ownerAuthority;
-    capabilities[key] = authorityCapability(
+    capabilities["windDown.registerAsset"] = authorityCapability(
       context,
       authorized,
       project.launched
         ? "This wallet does not have enough eligible governance power to manage wind-down assets."
         : "Only the project owner can manage wind-down assets before launch.",
     );
+    capabilities["windDown.openRedemptions"] = walletGate(context);
+  } else {
+    capabilities["windDown.registerAsset"] = hidden();
+    capabilities["windDown.openRedemptions"] = hidden();
   }
 
   capabilities["redemption.redeem"] = redemptionCapability(context);

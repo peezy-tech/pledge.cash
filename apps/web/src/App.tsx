@@ -2,6 +2,7 @@ export {
   App,
   canRunGrantIssuerActions,
   manageWorkspaceSummary,
+  mergeCapabilityOpportunity,
   parseDeployment,
   viewFromPath,
   viewHref,

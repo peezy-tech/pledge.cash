@@ -7,10 +7,13 @@ import { Input } from "../../components/ui/input";
 import { dateString } from "../../lib/forms";
 import { formatTokenAmount } from "../../lib/token-amounts";
 import type { GrantSnapshot } from "../../lib/types";
+import type { Capability } from "../capabilities/project-capabilities";
 import { GrantVestingChart } from "./grant-vesting-chart";
 
 type GrantInspectorProps = {
   account: Address | undefined;
+  actionCapability: Capability;
+  addressLocked?: boolean | undefined;
   grantAddress: string;
   grantSnapshot: GrantSnapshot | undefined;
   issuerActionsAvailable: boolean;
@@ -42,6 +45,8 @@ type GrantActionEligibility = {
 
 export function GrantInspector({
   account,
+  actionCapability,
+  addressLocked = false,
   grantAddress,
   grantSnapshot,
   issuerActionsAvailable,
@@ -59,7 +64,7 @@ export function GrantInspector({
   withdrawExpired,
 }: GrantInspectorProps): React.JSX.Element {
   const walletRole = grantWalletRole(account, grantSnapshot, issuerActionsAvailable);
-  const eligibility = grantActionEligibility(account, grantSnapshot, issuerActionsAvailable);
+  const eligibility = grantActionEligibility(account, grantSnapshot, issuerActionsAvailable, actionCapability);
   const facts = grantFacts(grantSnapshot, walletRole);
 
   return (
@@ -70,7 +75,7 @@ export function GrantInspector({
         action={
           <ActionButton actionId="load-grant" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("load-grant", loadGrant)}>
             <RefreshCw className="h-4 w-4" />
-            Load
+            {addressLocked ? "Refresh" : "Load"}
           </ActionButton>
         }
       >
@@ -82,7 +87,15 @@ export function GrantInspector({
         </div>
         <div className="border-t border-zinc-800">
           <Field label="Grant address">
-            <Input value={grantAddress} onChange={(event) => setGrantAddress(event.target.value)} spellCheck={false} />
+            <Input
+              aria-readonly={addressLocked}
+              readOnly={addressLocked}
+              value={grantAddress}
+              onChange={(event) => {
+                if (!addressLocked) setGrantAddress(event.target.value);
+              }}
+              spellCheck={false}
+            />
           </Field>
         </div>
         <Facts columns="three" items={facts} />
@@ -106,6 +119,7 @@ export function GrantInspector({
             actionId="approve-payment"
             disabled={!eligibility.paymentApprovalAvailable}
             pendingAction={pendingAction}
+            title={capabilityReason(actionCapability)}
             variant="secondary"
             onClick={() => void runAction("approve-payment", approvePayment)}
           >
@@ -116,12 +130,14 @@ export function GrantInspector({
             actionId="settle-grant"
             disabled={!eligibility.holderActionsAvailable}
             pendingAction={pendingAction}
+            title={capabilityReason(actionCapability)}
             onClick={() => void runAction("settle-grant", settleGrant)}
           >
             <Send className="h-4 w-4" />
             Settle
           </ActionButton>
         </ActionRow>
+        <CapabilityNotice capability={actionCapability} />
         {eligibility.showSettlementRestriction ? (
           <p className="m-0 border-t border-zinc-800 p-4 text-sm text-zinc-500">
             Settlement is only available to the current grant holder wallet.
@@ -135,15 +151,16 @@ export function GrantInspector({
           description="Issuer actions affect future vesting or expired balances. Review the grant state before signing."
         >
           <ActionRow>
-            <ActionButton actionId="halt-grant" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("halt-grant", haltGrant)}>
+            <ActionButton actionId="halt-grant" disabled={actionCapability.status !== "enabled"} pendingAction={pendingAction} title={capabilityReason(actionCapability)} variant="secondary" onClick={() => void runAction("halt-grant", haltGrant)}>
               <ArchiveRestore className="h-4 w-4" />
               Halt Vesting
             </ActionButton>
-            <ActionButton actionId="withdraw-expired" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("withdraw-expired", withdrawExpired)}>
+            <ActionButton actionId="withdraw-expired" disabled={actionCapability.status !== "enabled"} pendingAction={pendingAction} title={capabilityReason(actionCapability)} variant="secondary" onClick={() => void runAction("withdraw-expired", withdrawExpired)}>
               <ArchiveRestore className="h-4 w-4" />
               Withdraw Expired
             </ActionButton>
           </ActionRow>
+          <CapabilityNotice capability={actionCapability} />
         </Panel>
       ) : null}
     </div>
@@ -195,16 +212,27 @@ function grantActionEligibility(
   account: Address | undefined,
   grantSnapshot: GrantSnapshot | undefined,
   issuerActionsAvailable: boolean,
+  actionCapability: Capability,
 ): GrantActionEligibility {
-  const holderActionsAvailable = canSettleGrant(account, grantSnapshot);
+  const holderActionsAvailable = canSettleGrant(account, grantSnapshot) && actionCapability.status === "enabled";
   const paidGrant = Boolean(grantSnapshot && !isZeroAddress(grantSnapshot.paymentToken));
 
   return {
     holderActionsAvailable,
     issuerActionsAvailable,
     paymentApprovalAvailable: holderActionsAvailable && paidGrant,
-    showSettlementRestriction: Boolean(grantSnapshot && !holderActionsAvailable),
+    showSettlementRestriction: Boolean(grantSnapshot && !sameAddress(account, grantSnapshot.holder)),
   };
+}
+
+function capabilityReason(capability: Capability): string | undefined {
+  return capability.status === "enabled" ? undefined : capability.reason ?? "This action is not available right now.";
+}
+
+function CapabilityNotice({ capability }: { capability: Capability }): React.JSX.Element | null {
+  const reason = capabilityReason(capability);
+  if (!reason) return null;
+  return <p aria-live="polite" className="m-0 border-t border-zinc-800 p-4 text-sm text-amber-200">{reason}</p>;
 }
 
 function canSettleGrant(account: Address | undefined, grantSnapshot: GrantSnapshot | undefined): boolean {

@@ -146,6 +146,27 @@ describe("project capability resolver", () => {
     expect(holderCanStart["windDown.start"].status).toBe("enabled");
   });
 
+  test("separates holder-managed assets from permissionless wind-down completion", () => {
+    const ineligibleHolder = resolveProjectCapabilities(context({
+      account: holder,
+      project: { owner, executor, launched: true, status: "winding-down" },
+      wallet: { windDownEligible: false },
+    }));
+
+    expect(ineligibleHolder["windDown.registerAsset"]).toEqual({
+      status: "blocked",
+      reason: "This wallet does not have enough eligible governance power to manage wind-down assets.",
+    });
+    expect(ineligibleHolder["windDown.openRedemptions"].status).toBe("enabled");
+
+    const anonymous = resolveProjectCapabilities(context({
+      account: undefined,
+      walletChainId: undefined,
+      project: { owner, executor, launched: true, status: "winding-down" },
+    }));
+    expect(anonymous["windDown.openRedemptions"].status).toBe("connect");
+  });
+
   test("allows redemption only with an open window and a nonzero share balance", () => {
     const noShares = resolveProjectCapabilities(context({
       account: holder,

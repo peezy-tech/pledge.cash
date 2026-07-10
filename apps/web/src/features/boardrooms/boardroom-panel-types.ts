@@ -7,6 +7,7 @@ import type {
   PledgeCashDeployment,
 } from "@pledge.cash/sdk";
 import type { Dispatch, SetStateAction } from "react";
+import type { Capability } from "../capabilities/project-capabilities";
 import type {
   BoardroomForm,
   BoardroomGrantForm,
@@ -22,6 +23,8 @@ import type {
 
 export type BoardroomPanelProps = {
   section?: "all" | "setup" | "token" | "grants" | "distributions" | "liquidity" | "governance" | "close";
+  boardroomIdentityLocked?: boolean | undefined;
+  capabilities?: BoardroomPanelCapabilities | undefined;
   boardroom: BoardroomPanelState;
   fixedPriceSale: FixedPriceSalePanelState;
   grant: BoardroomGrantPanelState;
@@ -30,6 +33,21 @@ export type BoardroomPanelProps = {
   migratingCurve: MigratingCurvePanelState;
   windDown: WindDownPanelState;
   workflow: BoardroomWorkflow;
+};
+
+export type BoardroomPanelCapabilities = {
+  claimRedemption: Capability;
+  createBoardroom: Capability;
+  createDistribution: Capability;
+  createGrant: Capability;
+  createLiquidity: Capability;
+  manageDistribution: Capability;
+  manageLiquidity: Capability;
+  mint: Capability;
+  permissionlessWindDown: Capability;
+  redeem: Capability;
+  registerRedeemableAsset: Capability;
+  startWindDown: Capability;
 };
 
 export type BoardroomWorkflow = {
