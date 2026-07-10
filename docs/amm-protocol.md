@@ -63,10 +63,10 @@ first mint so any later failure restores it atomically. The locker factory grant
 registered by its immutable `BoardroomFactory` and the claimed share token points back to that exact Boardroom.
 
 For an unreserved public pool, `MINIMUM_LIQUIDITY` remains permanently minted to `address(1)`. A reserved Boardroom
-pool instead mints the entire geometric-mean LP supply to its locked-liquidity recipient. Because that recipient cannot
-release LP before wind-down, the same anti-withdrawal property holds during the active lifecycle, while terminal exit
-can burn the complete supply and drain both reserves. No irredeemable Boardroom shares remain stranded in the pool and
-included in the redemption denominator.
+pool instead mints the entire geometric-mean initial LP supply to its locked-liquidity recipient. Because that recipient
+cannot release LP before wind-down, the same anti-withdrawal property holds during the active lifecycle. If nobody adds
+liquidity later, terminal exit owns and burns the complete supply, drains both reserves, and leaves no irredeemable
+Boardroom shares in the pool. Later public LP positions remain independently owned and are not confiscated by wind-down.
 
 ### Locked Liquidity
 
@@ -111,7 +111,8 @@ Effects:
 - router creates the pool if needed,
 - tokens move into the pool,
 - pool mints LP tokens to the recipient,
-- first mint permanently locks `MINIMUM_LIQUIDITY` to `address(1)`.
+- an unreserved first mint permanently locks `MINIMUM_LIQUIDITY` to `address(1)`, while a reserved Boardroom first mint
+  sends the complete initial LP supply to the authenticated locker.
 
 If an initial-liquidity reservation exists, the router also proves the real token payer to the pool. Direct pool mints,
 router calls funded by another account, and mints to another recipient all revert. Unreserved pools retain the public
@@ -192,15 +193,27 @@ The Boardroom may call `LockedLiquidity.claimFees` through policy while active o
 
 ### Exit Locked LP
 
-During `WindingDown`, the Boardroom owner calls `exitLockedLiquidity`. The Boardroom:
+During `WindingDown`, anyone may call `exitLockedLiquidity`. The Boardroom:
 
 1. verifies the locker was recorded,
 2. asks the locker to claim fees and remove all LP it owns,
-3. registers non-share token sides as redeemable assets,
-4. burns Boardroom-held share tokens,
-5. emits the exit event.
+3. requires the Pool's exact pro-rata spend and the Boardroom's exact receipt for both assets, in addition to any stricter
+   caller minima,
+4. registers non-share token sides as redeemable assets,
+5. burns Boardroom-held share tokens,
+6. unpins and removes the now-empty LP fallback asset, then emits the direct-exit event.
 
-Redemptions can open only after all recorded lockers report zero locked LP. First-liquidity dust can remain in the pool because `MINIMUM_LIQUIDITY` is permanently locked.
+The LP token is admitted and pinned as a fallback redemption asset when the locker is recorded, so it cannot be removed
+while principal remains open. Before the terminal delay, an inexact, taxed, no-op, reverting, or gas-burning underlying
+transfer reverts atomically and preserves the locker LP. Once the greater of one day or the launched Boardroom's
+governance delay has elapsed, the Boardroom retries with protocol-fixed minima under bounded gas. If that exact exit
+still fails, the locker transfers its LP token itself to the Boardroom, the LP remains admitted, unreadable underlying
+assets are quarantined, and the locker is pruned. This fallback preserves the Pool claim without letting a hostile token
+block unrelated redemptions. Redemption supply remains total economic share supply; pool-held shares are not generically
+excluded because later public LP positions may own them.
+
+Redemptions can open only after all recorded lockers report zero locked LP. Unreserved pools retain permanently locked
+first-liquidity dust; a reserved pool has none unless later public liquidity changes the ownership set.
 
 ### Prune Closed Lockers
 

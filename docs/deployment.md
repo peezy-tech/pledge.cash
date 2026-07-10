@@ -245,8 +245,10 @@ The fee-exempt distribution-grant path accepts issuers only when that canonical 
 Boardrooms; artifact verification checks the link directly to prevent a miswired deployment.
 
 `BoardroomFactory` must point to the artifact's governance helper, redemption helper, and Boardroom implementation.
-That implementation must point back to the same two helpers, and `LockedLiquidityFactory.boardroomFactory()` must equal
-the same canonical factory. The verifier checks each link against live contract state.
+That implementation must point back to the same two helpers, and both `AmmFactory.boardroomFactory()` and
+`LockedLiquidityFactory.boardroomFactory()` must equal the same canonical factory. The verifier checks each link against
+live contract state. The AMM link makes the factory's canonical share-token registry authoritative for protected first
+liquidity.
 
 The verifier also requires `TokenGrantFactory.feeRecipient()` and `AmmFactory.protocolFeeRecipient()` to equal the
 artifact's `protocolFeeRouter`, requires that router's destination to equal `protocolTreasury`, and requires the AMM

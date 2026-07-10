@@ -5303,6 +5303,31 @@ export const boardroomAbi = [
   },
   {
     "type": "event",
+    "name": "BoardroomLockedLiquidityReturnedAsLp",
+    "inputs": [
+      {
+        "name": "locker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "pool",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "liquidity",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "BoardroomRedemptionsOpened",
     "inputs": [
       {
@@ -6076,6 +6101,17 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
+    "name": "RedeemableAssetReserved",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "RedeemableAssetStillValid",
     "inputs": [
       {
@@ -6197,17 +6233,6 @@ export const boardroomAbi = [
         "name": "currentTime",
         "type": "uint256",
         "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ZeroRedemptionAmount",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
       }
     ]
   }
@@ -6689,6 +6714,11 @@ export const boardroomGovernanceLogicAbi = [
           },
           {
             "name": "deadline",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "governanceDelay",
             "type": "uint256",
             "internalType": "uint256"
           }
@@ -7303,6 +7333,31 @@ export const boardroomGovernanceLogicAbi = [
   },
   {
     "type": "event",
+    "name": "BoardroomLockedLiquidityReturnedAsLp",
+    "inputs": [
+      {
+        "name": "locker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "pool",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "liquidity",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "RedeemableAssetQuarantined",
     "inputs": [
       {
@@ -7591,6 +7646,17 @@ export const boardroomGovernanceLogicAbi = [
         "name": "balance",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RedeemableAssetReserved",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
       }
     ]
   },
@@ -9357,17 +9423,6 @@ export const boardroomRedemptionPayoutAbi = [
         "name": "actual",
         "type": "uint256",
         "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ZeroRedemptionAmount",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
       }
     ]
   }
@@ -11390,6 +11445,19 @@ export const lockedLiquidityAbi = [
   },
   {
     "type": "function",
+    "name": "returnLpToBoardroom",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "liquidity",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "router",
     "inputs": [],
     "outputs": [
@@ -11596,6 +11664,31 @@ export const lockedLiquidityAbi = [
   },
   {
     "type": "event",
+    "name": "LiquidityReturnedAsLp",
+    "inputs": [
+      {
+        "name": "pool",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "boardroom",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "liquidity",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "LockedLiquidityInitialized",
     "inputs": [
       {
@@ -11664,6 +11757,32 @@ export const lockedLiquidityAbi = [
     "type": "error",
     "name": "OnlyFactory",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "UnexpectedExitAmount",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "received",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "poolSpent",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   }
 ] as const;
 

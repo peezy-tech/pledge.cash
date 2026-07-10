@@ -21,8 +21,9 @@ while obligation-creating protocol modules such as `TokenGrantFactory`, `Distrib
 - Module policies: pledge.cash factories that authorize their own Boardroom calls and report created obligations.
 - Asset policy: owner-managed allowlist of supported assets and approval spenders.
 - Share holder: receives Boardroom share tokens directly or through grants. A holder with at least 1% of both the
-  previous-block and current circulating supply can cancel an action; 10% can start wind-down. Same-transaction flash
-  balances and already-transferred stale balances are ineligible.
+  previous-block and current governance-eligible supply can cancel an action; 10% can start wind-down. Same-transaction
+  flash balances, already-transferred stale balances, treasury shares, and shares inside authenticated protocol custody
+  are ineligible.
 - Grant holder: receives settlement authority over a Boardroom-issued grant.
 - Distribution buyer: buys Boardroom shares through a Boardroom-created distribution.
 
@@ -80,7 +81,8 @@ State:
 - `lockedLiquidityPositions`: bounded active list of Boardroom-owned locked AMM liquidity positions.
 - `obligationPolicyOf`: permanent canonical-policy identity for every obligation ever recorded. Active-array pruning
   never erases this binding.
-- redemption snapshot: fixed per-asset balances and total circulating share supply captured when redemptions open.
+- redemption snapshot: fixed per-asset balances and total share supply captured after treasury shares burn when
+  redemptions open. Governance-only custody exclusions do not change economic redemption supply.
 - redemption credits: burned shares retained per holder until each snapshot asset has allocated and paid that holder's
   corresponding entitlement.
 - `redemptionExcessRecipient`: fixed recipient for post-snapshot deposits and terminally unowed snapshot balances. It
@@ -101,11 +103,13 @@ lifecycle hook must successfully classify cleanup and reservation release. A rev
 entire call. Plain policies such as `AssetPolicy` do not implement or invoke obligation hooks.
 
 After launch, owner-only functions that affect treasury or shares must be called by the Boardroom itself through a
-queued action. Launch requires at least one whole share outside the Boardroom treasury. The current executor queues a
+queued action. Launch requires at least one whole governance-eligible share outside the Boardroom treasury and
+authenticated protocol custody. The current executor queues a
 single call or batch with a salt. The action becomes executable by any caller after `governanceDelay`, which is between
 one and 30 days, and expires seven days after its ETA. Executor changes and wind-down advance the governance epoch, so
-pre-existing actions fail even if their calldata and salt are replayed. Threshold checks use the smaller of current
-and previous-block holder balances against previous-block circulating supply.
+pre-existing actions fail even if their calldata and salt are replayed. Threshold checks require both current and
+previous-block holder balances to meet the stricter threshold computed from current and previous-block
+governance-eligible supply.
 
 Wind-down transitions are one-way:
 
@@ -124,8 +128,12 @@ Wind-down transitions are one-way:
 
 ### BoardroomToken
 
-`BoardroomToken` is an ERC20 with immutable `boardroom` authority and direct balance/total-supply checkpoints. Only the
-Boardroom can mint or burn it. Checkpoint lookup is logarithmic and only permits completed blocks.
+`BoardroomToken` is an ERC20 with immutable `boardroom` authority and direct balance, total-supply, and aggregate
+encumbered-supply checkpoints. Only the Boardroom can mint, burn, or permanently classify an authenticated custody
+account. Canonical share grants, distributions, locked-liquidity pools, and their fee vaults are classified when their
+obligation is recorded; token transfers then update the aggregate in O(1), including transfers between two classified
+accounts without double counting. Checkpoint lookup is logarithmic and only permits completed blocks. This custody
+accounting affects governance power only, not redemption ownership.
 
 ## Grant Issuance Flow
 
@@ -182,7 +190,9 @@ module factories. The Boardroom owner can use registry-approved policies to depl
 5. A holder calls `redeem(shares, recipient, minAmountsOut)`. Shares burn into caller-owned credits; `recipient` only
    selects the payout address.
 6. Each asset is attempted independently with bounded gas. Its full-precision amount uses only the remaining opening
-   snapshot balance and remaining entitlement shares. A failed or zero payout leaves that asset credit retryable.
+   snapshot balance and remaining entitlement shares. A failed transfer or unmet minimum leaves that asset credit
+   retryable. A zero-rounded amount with a zero minimum succeeds and allocates the shares, allowing the final claimant to
+   receive the indivisible remainder instead of deadlocking it.
 7. The credit owner retries with `claimRedemptionAsset`. An asset cannot allocate the same burned shares twice.
 8. Deposits received after opening are never owed to redeemers. Anyone can sweep only balance above the still-owed
    snapshot amount to the frozen `redemptionExcessRecipient`. When all shares for an asset are paid or forfeited, any
@@ -204,8 +214,10 @@ their own public lifecycle.
 - Queued actions bind their epoch and status, cannot execute before ETA, and expire seven days after ETA.
 - Governance delay is at least one day and no greater than 30 days.
 - Executor changes and wind-down invalidate every action from the prior epoch.
-- Veto requires 1% and wind-down requires 10% of previous-block circulating shares in both the previous block and now.
-- Same-transaction borrowed balances, stale transferred balances, and treasury-held shares do not satisfy thresholds.
+- Veto requires 1% and wind-down requires 10% of governance-eligible shares, using the larger current/prior threshold
+  and requiring the caller to hold it both now and in the previous block.
+- Same-transaction borrowed balances, stale transferred balances, treasury-held shares, and shares in authenticated
+  grants, distributions, pools, or fee vaults do not satisfy thresholds.
 - New policy-backed Boardroom execution requires a policy allowed by the central registry.
 - Policy-backed Boardroom execution requires the selected policy to allow the target, value, and calldata.
 - Registered module identity is permanent across `Active`, `LifecycleOnly`, and `Disabled` status.
@@ -244,7 +256,8 @@ their own public lifecycle.
 - Shares sent to the Boardroom after redemptions open are burned before the next redemption is priced.
 - Share redemption burns shares into caller-owned per-asset credits before attempting transfers.
 - One failing redeemable asset cannot block successful assets, and its allocation remains retryable.
-- Redemption multiplication is full precision and each asset's burned-share allocation is single-use.
+- Redemption multiplication is full precision, each asset's burned-share allocation is single-use, and zero-rounded
+  allocations advance accounting when the caller permits zero output so indivisible dust cannot remain reserved forever.
 - Post-snapshot deposits cannot dilute or enrich any redemption; only excess above outstanding snapshot obligations can
   be swept to the frozen recipient.
 - Once all snapshot shares are paid or forfeited, no remaining asset balance can be trapped as a phantom obligation.

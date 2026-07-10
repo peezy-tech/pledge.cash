@@ -221,8 +221,8 @@ Preconditions:
   not the share token.
 - sale supply, migration supply, base price, graduation target, and LP quote basis points are nonzero.
 - total curve supply is at most the AMM `uint112` reserve limit.
-- a full sale must allocate nonzero quote no greater than the AMM reserve limit and still mint more than
-  `MINIMUM_LIQUIDITY` after applying the mandatory 95% migration minima.
+- a full sale must allocate nonzero quote no greater than the AMM reserve limit and produce an initial LP amount above
+  the AMM's `MINIMUM_LIQUIDITY` safety floor after applying the mandatory 95% migration minima.
 - end time is zero for an open-ended sale, or is strictly after start time and in the future at creation.
 - the distribution factory has a nonzero locked-liquidity factory.
 
@@ -264,8 +264,9 @@ inventory, and migration amounts until the Boardroom migrates or cancels.
 Migration is allowed through the issuing Boardroom only while that Boardroom is active and after graduation has
 latched. Once wind-down begins the only terminal path is cancellation, so a cleanup caller cannot burn redemption value
 into a fresh AMM position. The share and quote allocations must fit the AMM's `uint112` reserves and produce more than
-permanently locked `MINIMUM_LIQUIDITY`. Caller minima for both assets must be at least 95% of the desired seed amounts;
-weaker slippage bounds revert before any external call.
+the AMM's `MINIMUM_LIQUIDITY` initial-supply safety floor. Reserved Boardroom initialization mints that full initial
+supply to the authenticated locker rather than permanently burning a slice. Caller minima for both assets must be at
+least 95% of the desired seed amounts; weaker slippage bounds revert before any external call.
 
 Effects:
 
