@@ -275,7 +275,9 @@ Effects:
 
 Only the reserved curve can consume its predicted locked-liquidity and AMM initializer reservation. This prevents
 untrusted contracts from filling another Boardroom's locker slots, pre-seeding the pair, or consuming a reserved salt.
-The reservation is consumed atomically by migration.
+The locked-liquidity factory accepts migration reservations only for Boardrooms recognized by its immutable canonical
+`BoardroomFactory`, and permanently used locker salts are rejected before a curve is accepted. The reservation is
+consumed atomically by migration.
 
 Cancellation is Boardroom-only and releases the unused migration reservation. Canonical Boardroom shares are returned
 first with exact transfer checks. Quote return is best-effort: bounded-gas balance and transfer calls cannot block

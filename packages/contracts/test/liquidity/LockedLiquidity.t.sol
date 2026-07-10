@@ -239,7 +239,7 @@ contract LockedLiquidityTest is Test {
         assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
         boardroomFactory = new BoardroomFactory(address(policyRegistry), address(wrappedNative));
         router = new AmmRouter(address(ammFactory), address(wrappedNative));
-        lockedLiquidityFactory = new LockedLiquidityFactory(address(router));
+        lockedLiquidityFactory = new LockedLiquidityFactory(address(router), address(boardroomFactory));
         quoteToken = new LockedLiquidityTestERC20("Quote", "QUOTE", 18);
 
         assetPolicy.setAssetAllowed(address(quoteToken), true);

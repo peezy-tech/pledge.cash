@@ -262,7 +262,7 @@ contract DistributionTest is Test {
         boardroomFactory = new BoardroomFactory(address(policyRegistry), address(wrappedNative));
         ammFactory = new AmmFactory(address(this));
         ammRouter = new AmmRouter(address(ammFactory), address(wrappedNative));
-        lockedLiquidityFactory = new LockedLiquidityFactory(address(ammRouter));
+        lockedLiquidityFactory = new LockedLiquidityFactory(address(ammRouter), address(boardroomFactory));
         ammFactory.setLiquidityRouter(address(ammRouter));
         ammFactory.setReservationManager(address(lockedLiquidityFactory));
         tokenGrantFactory = new TokenGrantFactory(address(this), address(boardroomFactory));

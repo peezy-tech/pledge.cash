@@ -86,7 +86,8 @@ contract ProjectTokenLaunchScenario is Script {
         state.tokenGrantFactory = new TokenGrantFactory(owner, address(state.boardroomFactory));
         state.ammFactory = new AmmFactory(owner);
         state.ammRouter = new AmmRouter(address(state.ammFactory), address(state.wrappedHype));
-        state.lockedLiquidityFactory = new LockedLiquidityFactory(address(state.ammRouter));
+        state.lockedLiquidityFactory =
+            new LockedLiquidityFactory(address(state.ammRouter), address(state.boardroomFactory));
 
         state.assetPolicy.setApprovalSpenderAllowed(address(state.lockedLiquidityFactory), true);
         state.policyRegistry.setPolicyAllowed(address(state.assetPolicy), true);

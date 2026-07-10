@@ -19,6 +19,10 @@ interface ILockedLiquidityFactoryPolicyRegistry {
     function isModulePolicy(address policy) external view returns (bool);
 }
 
+interface ILockedLiquidityFactoryBoardroomFactory {
+    function isBoardroom(address boardroom) external view returns (bool);
+}
+
 interface ILockedLiquidityFactoryShareToken {
     function boardroom() external view returns (address);
 }
@@ -67,6 +71,7 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
     }
 
     address public immutable ammRouter;
+    address public immutable boardroomFactory;
     address public immutable lockedLiquidityLogic;
 
     mapping(address => bool) public isLocker;
@@ -88,6 +93,7 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
     error TransferAmountMismatch(address token, uint256 expected, uint256 actual);
     error UnauthorizedMigrationReservation(address boardroom, address caller);
     error MigrationSaltReserved(address boardroom, bytes32 salt);
+    error MigrationLockerSaltUsed(address boardroom, bytes32 salt, address locker);
     error MigrationPairReserved(address boardroom, address tokenA, address tokenB);
     error MissingMigrationReservation(address boardroom, address distribution);
 
@@ -108,9 +114,10 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
     );
     event MigrationReservationReleased(address indexed boardroom, address indexed distribution, bytes32 indexed salt);
 
-    constructor(address ammRouter_) {
-        if (ammRouter_ == address(0)) revert InvalidAddress();
+    constructor(address ammRouter_, address boardroomFactory_) {
+        if (ammRouter_ == address(0) || boardroomFactory_ == address(0)) revert InvalidAddress();
         ammRouter = ammRouter_;
+        boardroomFactory = boardroomFactory_;
         lockedLiquidityLogic = address(new LockedLiquidity());
     }
 
@@ -142,6 +149,11 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         if (migrationReservationForSalt[boardroom][salt] != address(0)) {
             revert MigrationSaltReserved(boardroom, salt);
         }
+        address predictedLocker =
+            LibClone.predictDeterministicAddress(lockedLiquidityLogic, _cloneSalt(boardroom, salt), address(this));
+        if (isLocker[predictedLocker] || predictedLocker.code.length != 0) {
+            revert MigrationLockerSaltUsed(boardroom, salt, predictedLocker);
+        }
         if (migrationReservationForPair[boardroom][pairKey] != address(0)) {
             revert MigrationPairReserved(boardroom, tokenA, tokenB);
         }
@@ -158,8 +170,6 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         migrationReservationForPair[boardroom][pairKey] = distribution;
         migrationReservationCount[boardroom] += 1;
 
-        address predictedLocker =
-            LibClone.predictDeterministicAddress(lockedLiquidityLogic, _cloneSalt(boardroom, salt), address(this));
         address ammFactory = ILockedLiquidityReservationRouter(ammRouter).factory();
         ILockedLiquidityReservationAmmFactory(ammFactory)
             .reserveInitialLiquidity(tokenA, tokenB, predictedLocker, predictedLocker, distribution);
@@ -330,6 +340,9 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         bytes32 salt
     ) internal view {
         if (boardroom.code.length == 0 || distribution.code.length == 0) {
+            revert UnauthorizedMigrationReservation(boardroom, msg.sender);
+        }
+        if (!ILockedLiquidityFactoryBoardroomFactory(boardroomFactory).isBoardroom(boardroom)) {
             revert UnauthorizedMigrationReservation(boardroom, msg.sender);
         }
 
