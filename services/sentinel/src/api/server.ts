@@ -15,11 +15,15 @@ function randomToken(bytes: number): string {
   return randomBytes(bytes).toString("base64url");
 }
 
+function randomSiweNonce(bytes: number): string {
+  return randomBytes(bytes).toString("hex");
+}
+
 function withDefaults(deps: SentinelApiDeps): SentinelApiDeps {
   return {
     ...deps,
     generateLinkCode: deps.generateLinkCode ?? (() => randomToken(9)),
-    generateNonce: deps.generateNonce ?? (() => randomToken(16)),
+    generateNonce: deps.generateNonce ?? (() => randomSiweNonce(16)),
     verifySiweSignature:
       deps.verifySiweSignature ??
       (({ address, message, signature }) =>
@@ -52,6 +56,7 @@ export function createApp(inputDeps: SentinelApiDeps): Hono<ApiEnv> {
   });
 
   app.route("/auth", createAuthRoutes(deps));
+  app.on(["GET", "POST"], "/auth/*", (c) => deps.auth.handler(c.req.raw));
   app.route("/wallets", createWalletRoutes(deps));
   app.route("/subscriptions", createSubscriptionRoutes(deps));
   app.route("/channels", createChannelRoutes(deps));
@@ -66,4 +71,4 @@ export function createApp(inputDeps: SentinelApiDeps): Hono<ApiEnv> {
   return app;
 }
 
-export type { ApiConfig, AuthKitAdapter, SentinelApiDeps, SentinelApiStore } from "./auth";
+export type { ApiConfig, AuthAdapter, SentinelApiDeps, SentinelApiStore } from "./auth";

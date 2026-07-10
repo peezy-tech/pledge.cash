@@ -90,6 +90,7 @@ describe("notification fanout", () => {
     expect(subscriberSql).toContain("COALESCE(s.min_severity, 'medium'::sentinel_severity)");
     expect(subscriberSql).toContain("COALESCE(s.mode, 'holdings'::sentinel_subscription_mode)");
     expect(subscriberSql).toContain("WHERE w.user_id = c.user_id");
+    expect(subscriberSql).toContain("w.alerts_enabled = TRUE");
     expect(subscriberSql).toContain("ON CONFLICT (dedupe_key) DO NOTHING");
     expect(subscriberSql).not.toContain("c.type = 'telegram'");
     expect(subscriberSql).not.toContain("telegram_chat_id");

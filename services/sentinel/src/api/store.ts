@@ -1,20 +1,23 @@
 import { Buffer } from "node:buffer";
 
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import { and, eq, gt, isNull, sql, type SQL } from "drizzle-orm";
+import { getAddress } from "viem";
 
 import type { SentinelDb } from "../db/client";
 import {
+  authAccounts,
   channels,
   subscriptionBoardrooms,
   subscriptions,
   telegramLinkCodes,
-  users,
   walletLinkNonces,
+  walletOwners,
   wallets
 } from "../db/schema";
 import type {
   AddressDto,
   AnalysisDto,
+  AuthProviderDto,
   BoardroomRef,
   ChannelDto,
   HealthResponse,
@@ -23,7 +26,6 @@ import type {
   PublicActionsResponse,
   RiskAssessmentDto,
   SubscriptionDto,
-  UserDto,
   WalletDto
 } from "./dto";
 import type { SentinelApiStore, TelegramLinkCodeRecord, WalletNonceRecord } from "./auth";
@@ -93,8 +95,8 @@ export function createDrizzleApiStore(db: SentinelDb): SentinelApiStore {
           and(
             eq(walletLinkNonces.nonce, input.nonce),
             eq(walletLinkNonces.userId, input.userId),
-            sql`${walletLinkNonces.usedAt} IS NULL`,
-            sql`${walletLinkNonces.expiresAt} > ${input.now}`
+            isNull(walletLinkNonces.usedAt),
+            gt(walletLinkNonces.expiresAt, input.now)
           )
         )
         .returning({ nonce: walletLinkNonces.nonce });
@@ -122,12 +124,13 @@ export function createDrizzleApiStore(db: SentinelDb): SentinelApiStore {
       return row !== undefined;
     },
     async getAuthSnapshot(userId) {
-      const [channels_, subscription, wallets_] = await Promise.all([
+      const [channels_, providers, subscription, wallets_] = await Promise.all([
         listChannels(db, userId),
+        listAuthProviders(db, userId),
         readSubscription(db, userId),
         listWallets(db, userId)
       ]);
-      return { channels: channels_, subscription, wallets: wallets_ };
+      return { channels: channels_, providers, subscription, wallets: wallets_ };
     },
     async getChannels(userId) {
       return listChannels(db, userId);
@@ -150,21 +153,64 @@ export function createDrizzleApiStore(db: SentinelDb): SentinelApiStore {
       return row ?? null;
     },
     async linkWallet(input) {
-      const [row] = await db
-        .insert(wallets)
-        .values(input)
-        .onConflictDoUpdate({
-          target: [wallets.userId, wallets.address],
-          set: {
+      return db.transaction(async (tx) => {
+        const checksumAddress = getAddress(input.address);
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(lower(${checksumAddress})))`);
+
+        await tx
+          .insert(walletOwners)
+          .values({ address: checksumAddress.toLowerCase(), userId: input.userId })
+          .onConflictDoNothing();
+
+        const [owner] = await tx
+          .select({ userId: walletOwners.userId })
+          .from(walletOwners)
+          .where(eq(walletOwners.address, checksumAddress.toLowerCase()))
+          .for("update")
+          .limit(1);
+        if (owner !== undefined && owner.userId !== input.userId) {
+          return null;
+        }
+
+        const [created] = await tx
+          .insert(wallets)
+          .values({
+            address: checksumAddress,
+            alertsEnabled: true,
+            chainId: input.chainId,
+            isPrimary: false,
             siweMessage: input.siweMessage,
+            userId: input.userId,
             verifiedAt: input.verifiedAt
-          }
-        })
-        .returning({
-          address: wallets.address,
-          verifiedAt: wallets.verifiedAt
-        });
-      return toWalletDto(row ?? { address: input.address, verifiedAt: input.verifiedAt });
+          })
+          .onConflictDoNothing()
+          .returning();
+
+        const [row] =
+          created === undefined
+            ? await tx
+                .update(wallets)
+                .set({
+                  alertsEnabled: true,
+                  siweMessage: input.siweMessage,
+                  verifiedAt: input.verifiedAt
+                })
+                .where(
+                  and(
+                    eq(wallets.userId, input.userId),
+                    eq(wallets.chainId, input.chainId),
+                    sql`lower(${wallets.address}) = lower(${checksumAddress})`
+                  )
+                )
+                .returning()
+            : [created];
+
+        if (row === undefined) {
+          return null;
+        }
+
+        return toWalletDto(row);
+      });
     },
     async ping() {
       await db.execute(sql`SELECT 1`);
@@ -207,44 +253,38 @@ export function createDrizzleApiStore(db: SentinelDb): SentinelApiStore {
       });
     },
     async unlinkWallet(input) {
-      const [row] = await db
-        .delete(wallets)
-        .where(and(eq(wallets.userId, input.userId), eq(wallets.address, input.address)))
-        .returning({ address: wallets.address });
-      return row !== undefined;
-    },
-    async upsertUser(user) {
-      const now = new Date();
-      const [row] = await db
-        .insert(users)
-        .values({
-          email: user.email,
-          updatedAt: now,
-          workosUserId: user.workosUserId
-        })
-        .onConflictDoUpdate({
-          target: users.workosUserId,
-          set: {
-            email: user.email,
-            updatedAt: now
-          }
-        })
-        .returning();
+      return db.transaction(async (tx) => {
+        const checksumAddress = getAddress(input.address);
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(lower(${checksumAddress})))`);
 
-      if (row !== undefined) {
-        return toUserDto(row);
-      }
+        const rows = await tx
+          .select({ isPrimary: wallets.isPrimary })
+          .from(wallets)
+          .where(
+            and(
+              eq(wallets.userId, input.userId),
+              sql`lower(${wallets.address}) = lower(${checksumAddress})`
+            )
+          );
 
-      const [existing] = await db
-        .select()
-        .from(users)
-        .where(eq(users.workosUserId, user.workosUserId))
-        .limit(1);
-      if (existing === undefined) {
-        throw new Error("Failed to upsert Sentinel user");
-      }
+        if (rows.length === 0) {
+          return "not_found";
+        }
+        if (rows.some((row) => row.isPrimary)) {
+          return "primary_wallet";
+        }
 
-      return toUserDto(existing);
+        await tx
+          .update(wallets)
+          .set({ alertsEnabled: false })
+          .where(
+            and(
+              eq(wallets.userId, input.userId),
+              sql`lower(${wallets.address}) = lower(${checksumAddress})`
+            )
+          );
+        return "unlinked";
+      });
     }
   };
 }
@@ -463,15 +503,56 @@ async function listChannels(db: SentinelDb, userId: string): Promise<ChannelDto[
   }));
 }
 
+async function listAuthProviders(db: SentinelDb, userId: string): Promise<AuthProviderDto[]> {
+  const rows = await db
+    .selectDistinct({ providerId: authAccounts.providerId })
+    .from(authAccounts)
+    .where(eq(authAccounts.userId, userId));
+  const providers = rows
+    .map((row) => row.providerId)
+    .filter((provider): provider is AuthProviderDto =>
+      ["apple", "github", "google", "siwe"].includes(provider)
+    );
+  return [...new Set(providers)].sort((left, right) => {
+    if (left === "siwe") return -1;
+    if (right === "siwe") return 1;
+    return left.localeCompare(right);
+  });
+}
+
 async function listWallets(db: SentinelDb, userId: string): Promise<WalletDto[]> {
   const rows = await db
     .select({
+      alertsEnabled: wallets.alertsEnabled,
       address: wallets.address,
+      isPrimary: wallets.isPrimary,
       verifiedAt: wallets.verifiedAt
     })
     .from(wallets)
     .where(eq(wallets.userId, userId));
-  return rows.map(toWalletDto);
+
+  const byAddress = new Map<string, WalletDto>();
+  for (const row of rows) {
+    const wallet = toWalletDto(row);
+    const key = wallet.address.toLowerCase();
+    const existing = byAddress.get(key);
+    if (existing === undefined) {
+      byAddress.set(key, wallet);
+      continue;
+    }
+
+    byAddress.set(key, {
+      address: existing.address,
+      alertsEnabled: existing.alertsEnabled || wallet.alertsEnabled,
+      isPrimary: existing.isPrimary || wallet.isPrimary,
+      verifiedAt:
+        Date.parse(existing.verifiedAt) >= Date.parse(wallet.verifiedAt)
+          ? existing.verifiedAt
+          : wallet.verifiedAt
+    });
+  }
+
+  return [...byAddress.values()].sort((left, right) => Number(right.isPrimary) - Number(left.isPrimary));
 }
 
 async function readSubscription(db: SentinelDb, userId: string): Promise<SubscriptionDto> {
@@ -573,17 +654,16 @@ function toAnalysisDto(row: PublicActionRow): AnalysisDto | null {
   };
 }
 
-function toUserDto(row: typeof users.$inferSelect): UserDto {
+function toWalletDto(row: {
+  readonly address: string;
+  readonly alertsEnabled: boolean;
+  readonly isPrimary: boolean;
+  readonly verifiedAt: Date;
+}): WalletDto {
   return {
-    email: row.email,
-    id: row.id,
-    workosUserId: row.workosUserId
-  };
-}
-
-function toWalletDto(row: { readonly address: string; readonly verifiedAt: Date }): WalletDto {
-  return {
-    address: row.address as AddressDto,
+    address: getAddress(row.address).toLowerCase() as AddressDto,
+    alertsEnabled: row.alertsEnabled,
+    isPrimary: row.isPrimary,
     verifiedAt: row.verifiedAt.toISOString()
   };
 }

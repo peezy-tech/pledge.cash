@@ -1,9 +1,13 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { createHarnessAdapter } from "./analysis/adapter";
+import {
+  createBetterAuthAdapter,
+  createPledgeCashSiweVerifier,
+  WALLET_LINK_SIWE_STATEMENT
+} from "./api/better-auth";
 import { createApp } from "./api/server";
 import { createDrizzleApiStore } from "./api/store";
-import { createWorkOsAuthAdapter } from "./api/workos";
 import { runWatcherOnce, type WatcherActionEventHandler } from "./chain/watcher";
 import { loadConfig, type Config, type SentinelChainConfig } from "./config";
 import { createDbClient, type SentinelDbClient } from "./db/client";
@@ -110,9 +114,10 @@ export async function startSentinel(options: StartSentinelOptions = {}): Promise
     twitterEnabled: config.twitter.enabled
   });
   const app = createApp({
-    auth: createWorkOsAuthAdapter(config),
+    auth: createBetterAuthAdapter(config, dbClient.db),
     config,
-    store: createDrizzleApiStore(dbClient.db)
+    store: createDrizzleApiStore(dbClient.db),
+    verifySiweSignature: createPledgeCashSiweVerifier(config, [WALLET_LINK_SIWE_STATEMENT])
   });
   const server = Bun.serve({ fetch: app.fetch, port: config.port });
 

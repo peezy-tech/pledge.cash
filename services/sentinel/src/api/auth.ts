@@ -1,49 +1,23 @@
-import { Buffer } from "node:buffer";
-import { randomBytes } from "node:crypto";
-
 import { Hono, type Context, type MiddlewareHandler } from "hono";
-import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { z } from "zod";
 
 import {
-  AuthCallbackQuerySchema,
-  AuthLoginQuerySchema,
+  AuthCapabilitiesResponseSchema,
   AuthMeResponseSchema,
-  LogoutResponseSchema,
+  UserDtoSchema,
   type AddressDto,
   type AuthMeResponse,
+  type AuthProviderDto,
   type BoardroomRef,
   type ChannelDto,
   type HealthResponse,
   type PublicActionsQuery,
   type PublicActionsResponse,
+  type SocialProviderDto,
   type SubscriptionDto,
   type UserDto,
   type WalletDto
 } from "./dto";
-
-export const SESSION_COOKIE_NAME = "__Secure-pledge_cash_sentinel_session";
-export const AUTH_STATE_COOKIE_NAME = "__Secure-pledge_cash_sentinel_auth_state";
-const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
-
-const sessionCookieOptions = {
-  httpOnly: true,
-  path: "/",
-  sameSite: "Lax" as const,
-  secure: true
-};
-
-const authStateCookieOptions = {
-  ...sessionCookieOptions,
-  maxAge: AUTH_STATE_TTL_MS / 1000,
-  path: "/auth"
-};
-
-type AuthStateCookie = {
-  readonly expiresAt: string;
-  readonly returnTo: string;
-  readonly state: string;
-};
 
 export type ApiChainConfig = {
   readonly chainId: number;
@@ -55,33 +29,23 @@ export type ApiConfig = {
     readonly botUsername?: string;
   };
   readonly webOrigin: string;
-  readonly workos?: {
-    readonly clientId?: string;
-    readonly cookiePassword?: string;
-    readonly redirectUri?: string;
+};
+
+export type AuthSession = {
+  readonly user: {
+    readonly id: string;
   };
 };
 
-export type AuthKitUser = {
-  readonly email: string;
-  readonly id: string;
-};
-
-export type AuthKitAdapter = {
-  authenticateWithCode(input: {
-    readonly code: string;
-    readonly state?: string;
-  }): Promise<{
-    readonly sealedSession: string;
-    readonly user: AuthKitUser;
-  }>;
-  getAuthorizationUrl(input: { readonly returnTo: string; readonly state: string }): Promise<string> | string;
-  getSession(input: { readonly sealedSession: string }): Promise<{ readonly user: AuthKitUser } | null>;
-  revokeSession(input: { readonly sealedSession: string }): Promise<void>;
+export type AuthAdapter = {
+  readonly socialProviders: readonly SocialProviderDto[];
+  getSession(input: { readonly headers: Headers }): Promise<AuthSession | null>;
+  handler(request: Request): Promise<Response>;
 };
 
 export type AuthSnapshot = {
   readonly channels: ChannelDto[];
+  readonly providers: AuthProviderDto[];
   readonly subscription: SubscriptionDto;
   readonly wallets: WalletDto[];
 };
@@ -97,6 +61,8 @@ export type TelegramLinkCodeRecord = {
   readonly code: string;
   readonly expiresAt: Date;
 };
+
+export type UnlinkWalletResult = "not_found" | "primary_wallet" | "unlinked";
 
 export type SentinelApiStore = {
   consumeWalletNonce(input: {
@@ -123,10 +89,11 @@ export type SentinelApiStore = {
   getWalletNonce(nonce: string): Promise<WalletNonceRecord | null>;
   linkWallet(input: {
     readonly address: AddressDto;
+    readonly chainId: number;
     readonly siweMessage: string;
     readonly userId: string;
     readonly verifiedAt: Date;
-  }): Promise<WalletDto>;
+  }): Promise<WalletDto | null>;
   ping(): Promise<void>;
   putSubscription(input: {
     readonly boardrooms: readonly BoardroomRef[];
@@ -134,12 +101,15 @@ export type SentinelApiStore = {
     readonly mode: SubscriptionDto["mode"];
     readonly userId: string;
   }): Promise<SubscriptionDto>;
-  unlinkWallet(input: { readonly address: AddressDto; readonly userId: string }): Promise<boolean>;
-  upsertUser(user: { readonly email: string; readonly workosUserId: string }): Promise<UserDto>;
+  unlinkWallet(input: {
+    readonly address: AddressDto;
+    readonly userId: string;
+  }): Promise<UnlinkWalletResult>;
 };
 
 export type SiweSignatureVerifier = (input: {
   readonly address: AddressDto;
+  readonly chainId: number;
   readonly message: string;
   readonly signature: string;
 }) => Promise<boolean>;
@@ -150,7 +120,7 @@ export type RateLimitConfig = {
 };
 
 export type SentinelApiDeps = {
-  readonly auth: AuthKitAdapter;
+  readonly auth: AuthAdapter;
   readonly config: ApiConfig;
   readonly generateLinkCode?: () => string;
   readonly generateNonce?: () => string;
@@ -161,9 +131,7 @@ export type SentinelApiDeps = {
 };
 
 export type ApiVariables = {
-  sealedSession: string;
   user: UserDto;
-  workosUser: AuthKitUser;
 };
 
 export type ApiEnv = {
@@ -238,80 +206,15 @@ export async function parseJson<T>(
   return { ok: true, value: parsed.data };
 }
 
-export function validateReturnTo(webOrigin: string, candidate: string | undefined): string {
-  if (candidate === undefined) {
-    return webOrigin;
-  }
-
-  try {
-    const webOriginUrl = new URL(webOrigin);
-    const returnToUrl = new URL(candidate);
-    return returnToUrl.origin === webOriginUrl.origin ? returnToUrl.toString() : webOrigin;
-  } catch {
-    return webOrigin;
-  }
-}
-
-function generateAuthState(deps: SentinelApiDeps): string {
-  return deps.generateNonce?.() ?? randomBytes(16).toString("base64url");
-}
-
-function encodeAuthStateCookie(value: AuthStateCookie): string {
-  return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
-}
-
-function decodeAuthStateCookie(value: string | undefined, now: Date): AuthStateCookie | null {
-  if (value === undefined || value.length === 0) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<AuthStateCookie>;
-    if (
-      typeof parsed.expiresAt !== "string" ||
-      typeof parsed.returnTo !== "string" ||
-      typeof parsed.state !== "string" ||
-      parsed.state.length === 0
-    ) {
-      return null;
-    }
-
-    const expiresAt = Date.parse(parsed.expiresAt);
-    if (!Number.isFinite(expiresAt) || expiresAt <= now.getTime()) {
-      return null;
-    }
-
-    return {
-      expiresAt: parsed.expiresAt,
-      returnTo: parsed.returnTo,
-      state: parsed.state
-    };
-  } catch {
-    return null;
-  }
-}
-
 export function createSessionMiddleware(deps: SentinelApiDeps): MiddlewareHandler<ApiEnv> {
   return async (c, next) => {
-    const sealedSession = getCookie(c, SESSION_COOKIE_NAME);
-    if (sealedSession === undefined || sealedSession.length === 0) {
-      return jsonError(c, 401, "Authentication required");
-    }
-
-    const session = await deps.auth.getSession({ sealedSession });
+    const session = await deps.auth.getSession({ headers: c.req.raw.headers });
     if (session === null) {
       return jsonError(c, 401, "Authentication required");
     }
 
-    const user = await deps.store.upsertUser({
-      email: session.user.email,
-      workosUserId: session.user.id
-    });
-
-    c.set("sealedSession", sealedSession);
+    const user = UserDtoSchema.parse({ id: session.user.id });
     c.set("user", user);
-    c.set("workosUser", session.user);
-
     return await next();
   };
 }
@@ -351,73 +254,23 @@ export function createRateLimitMiddleware(
 
 export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
   const app = new Hono<ApiEnv>();
-  const rateLimit = createRateLimitMiddleware(deps, "auth");
-  const requireSession = createSessionMiddleware(deps);
 
-  app.get("/login", rateLimit, async (c) => {
-    const parsed = parseQuery(c, AuthLoginQuerySchema, c.req.query());
-    if (!parsed.ok) {
-      return parsed.response;
+  app.get("/capabilities", (c) =>
+    c.json(
+      AuthCapabilitiesResponseSchema.parse({ socialProviders: deps.auth.socialProviders })
+    )
+  );
+
+  app.get("/me", async (c) => {
+    const session = await deps.auth.getSession({ headers: c.req.raw.headers });
+    if (session === null) {
+      return c.json(null);
     }
 
-    const returnTo = validateReturnTo(deps.config.webOrigin, parsed.value.return_to);
-    const state = generateAuthState(deps);
-    const expiresAt = new Date(getNow(deps).getTime() + AUTH_STATE_TTL_MS).toISOString();
-    setCookie(
-      c,
-      AUTH_STATE_COOKIE_NAME,
-      encodeAuthStateCookie({ expiresAt, returnTo, state }),
-      authStateCookieOptions
-    );
-
-    const authorizationUrl = await deps.auth.getAuthorizationUrl({ returnTo, state });
-    return c.redirect(authorizationUrl, 302);
-  });
-
-  app.get("/callback", rateLimit, async (c) => {
-    const parsed = parseQuery(c, AuthCallbackQuerySchema, c.req.query());
-    if (!parsed.ok) {
-      return parsed.response;
-    }
-
-    const expectedState = decodeAuthStateCookie(getCookie(c, AUTH_STATE_COOKIE_NAME), getNow(deps));
-    deleteCookie(c, AUTH_STATE_COOKIE_NAME, authStateCookieOptions);
-    if (
-      expectedState === null ||
-      parsed.value.state === undefined ||
-      parsed.value.state !== expectedState.state
-    ) {
-      return jsonError(c, 400, "Invalid authentication state");
-    }
-
-    const authenticated = await deps.auth.authenticateWithCode({
-      code: parsed.value.code,
-      state: expectedState.state
-    });
-
-    await deps.store.upsertUser({
-      email: authenticated.user.email,
-      workosUserId: authenticated.user.id
-    });
-
-    setCookie(c, SESSION_COOKIE_NAME, authenticated.sealedSession, sessionCookieOptions);
-
-    const returnTo = validateReturnTo(deps.config.webOrigin, expectedState.returnTo);
-    return c.redirect(returnTo, 302);
-  });
-
-  app.get("/me", requireSession, async (c) => {
-    const user = c.get("user");
+    const user = UserDtoSchema.parse({ id: session.user.id });
     const snapshot = await deps.store.getAuthSnapshot(user.id);
     const response: AuthMeResponse = AuthMeResponseSchema.parse({ user, ...snapshot });
     return c.json(response);
-  });
-
-  app.post("/logout", requireSession, async (c) => {
-    const sealedSession = c.get("sealedSession");
-    await deps.auth.revokeSession({ sealedSession });
-    deleteCookie(c, SESSION_COOKIE_NAME, sessionCookieOptions);
-    return c.json(LogoutResponseSchema.parse({ ok: true }));
   });
 
   return app;

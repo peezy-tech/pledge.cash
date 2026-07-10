@@ -2,12 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { privateKeyToAccount } from "viem/accounts";
 import { createSiweMessage } from "viem/siwe";
 
-import {
-  AUTH_STATE_COOKIE_NAME,
-  SESSION_COOKIE_NAME,
-  type AuthKitAdapter,
-  type WalletNonceRecord
-} from "../src/api/auth";
+import { type AuthAdapter, type WalletNonceRecord } from "../src/api/auth";
 import { createApp, type SentinelApiDeps, type SentinelApiStore } from "../src/api/server";
 import type {
   AddressDto,
@@ -20,59 +15,70 @@ import type {
   PublicActionsResponse,
   SubscriptionDto,
   TelegramLinkCodeResponse,
-  UserDto,
   WalletDto
 } from "../src/api/dto";
 
 const WEB_ORIGIN = "https://pledge.cash";
 const FIXED_NOW = new Date("2026-07-09T12:00:00.000Z");
-const WORKOS_USER = { email: "ada@example.com", id: "user_workos_123" };
 const USER_ID = "00000000-0000-4000-8000-000000000001";
 const CHANNEL_ID = "00000000-0000-4000-8000-000000000002";
 const ACTION_ID = "00000000-0000-4000-8000-000000000003";
+const SESSION_COOKIE = "better-auth.session_token=stub-session";
+const PRIMARY_WALLET = "0x5555555555555555555555555555555555555555" as AddressDto;
 const BOARDROOM = "0x1111111111111111111111111111111111111111" as AddressDto;
 const SHARE_TOKEN = "0x2222222222222222222222222222222222222222" as AddressDto;
 const POLICY = "0x3333333333333333333333333333333333333333" as AddressDto;
 const TARGET = "0x4444444444444444444444444444444444444444" as AddressDto;
 
-class StubAuth implements AuthKitAdapter {
-  readonly sessions = new Map<string, typeof WORKOS_USER>([["sealed-session", WORKOS_USER]]);
-  authenticatedInput: { code: string; state?: string } | undefined;
-  authorizationInput: { returnTo: string; state: string } | undefined;
-  revokedSession: string | undefined;
+type ForwardedAuthRequest = {
+  readonly body: unknown;
+  readonly method: string;
+  readonly path: string;
+};
 
-  async authenticateWithCode(input: { readonly code: string; readonly state?: string }) {
-    this.authenticatedInput = input;
-    if (input.code !== "ok") {
-      throw new Error("unexpected auth code");
+class StubAuth implements AuthAdapter {
+  readonly forwarded: ForwardedAuthRequest[] = [];
+  readonly socialProviders = ["github", "google"] as const;
+
+  async getSession(input: { readonly headers: Headers }) {
+    return input.headers.get("cookie")?.includes(SESSION_COOKIE) === true
+      ? { user: { id: USER_ID } }
+      : null;
+  }
+
+  async handler(request: Request): Promise<Response> {
+    const bodyText = request.method === "GET" ? "" : await request.text();
+    const body = bodyText.length === 0 ? null : (JSON.parse(bodyText) as unknown);
+    const path = new URL(request.url).pathname;
+    this.forwarded.push({ body, method: request.method, path });
+
+    const headers = new Headers({ "Content-Type": "application/json" });
+    if (path === "/auth/siwe/verify") {
+      headers.set(
+        "Set-Cookie",
+        `${SESSION_COOKIE}; Path=/; HttpOnly; Secure; SameSite=Lax`
+      );
     }
 
-    return { sealedSession: "sealed-session", user: WORKOS_USER };
-  }
-
-  getAuthorizationUrl(input: { readonly returnTo: string; readonly state: string }): string {
-    this.authorizationInput = input;
-    return `https://workos.example/authorize?state=${encodeURIComponent(input.state)}`;
-  }
-
-  async getSession(input: { readonly sealedSession: string }) {
-    const user = this.sessions.get(input.sealedSession);
-    return user === undefined ? null : { user };
-  }
-
-  async revokeSession(input: { readonly sealedSession: string }): Promise<void> {
-    this.revokedSession = input.sealedSession;
-    this.sessions.delete(input.sealedSession);
+    return new Response(JSON.stringify({ forwarded: true, path }), { headers, status: 200 });
   }
 }
 
 class InMemoryStore implements SentinelApiStore {
   readonly linkCodes = new Map<string, { expiresAt: Date; userId: string }>();
   readonly nonces = new Map<string, WalletNonceRecord>();
-  readonly usersByWorkos = new Map<string, UserDto>();
   channelsByUser = new Map<string, ChannelDto[]>();
+  conflictedWallets = new Set<AddressDto>();
   lastPublicQuery: PublicActionsQuery | undefined;
+  lastLinkedWalletInput:
+    | {
+        readonly address: AddressDto;
+        readonly chainId: number;
+        readonly userId: string;
+      }
+    | undefined;
   pingCount = 0;
+  providersByUser = new Map<string, Array<"apple" | "github" | "google" | "siwe">>();
   subscriptionsByUser = new Map<string, SubscriptionDto>();
   walletsByUser = new Map<string, WalletDto[]>();
 
@@ -176,6 +182,7 @@ class InMemoryStore implements SentinelApiStore {
   async getAuthSnapshot(userId: string) {
     return {
       channels: await this.getChannels(userId),
+      providers: this.providersByUser.get(userId) ?? [],
       subscription: await this.getSubscription(userId),
       wallets: this.walletsByUser.get(userId) ?? []
     };
@@ -236,12 +243,27 @@ class InMemoryStore implements SentinelApiStore {
 
   async linkWallet(input: {
     readonly address: AddressDto;
+    readonly chainId: number;
     readonly siweMessage: string;
     readonly userId: string;
     readonly verifiedAt: Date;
-  }): Promise<WalletDto> {
+  }): Promise<WalletDto | null> {
     expect(input.siweMessage.toLowerCase()).toContain(input.address.slice(2));
-    const wallet = { address: input.address, verifiedAt: input.verifiedAt.toISOString() };
+    this.lastLinkedWalletInput = {
+      address: input.address,
+      chainId: input.chainId,
+      userId: input.userId
+    };
+    if (this.conflictedWallets.has(input.address)) {
+      return null;
+    }
+
+    const wallet = {
+      alertsEnabled: true,
+      address: input.address,
+      isPrimary: false,
+      verifiedAt: input.verifiedAt.toISOString()
+    };
     const wallets = this.walletsByUser.get(input.userId) ?? [];
     this.walletsByUser.set(input.userId, [
       ...wallets.filter((existing) => existing.address !== input.address),
@@ -269,38 +291,40 @@ class InMemoryStore implements SentinelApiStore {
     return subscription;
   }
 
-  async unlinkWallet(input: { readonly address: AddressDto; readonly userId: string }): Promise<boolean> {
+  async unlinkWallet(input: { readonly address: AddressDto; readonly userId: string }) {
     const wallets = this.walletsByUser.get(input.userId) ?? [];
-    const nextWallets = wallets.filter((wallet) => wallet.address !== input.address);
-    this.walletsByUser.set(input.userId, nextWallets);
-    return nextWallets.length !== wallets.length;
-  }
+    const matches = wallets.filter((wallet) => wallet.address === input.address);
+    if (matches.length === 0) {
+      return "not_found" as const;
+    }
+    if (matches.some((wallet) => wallet.isPrimary)) {
+      return "primary_wallet" as const;
+    }
 
-  async upsertUser(user: { readonly email: string; readonly workosUserId: string }): Promise<UserDto> {
-    const existing = this.usersByWorkos.get(user.workosUserId);
-    const nextUser = {
-      email: user.email,
-      id: existing?.id ?? USER_ID,
-      workosUserId: user.workosUserId
-    };
-    this.usersByWorkos.set(user.workosUserId, nextUser);
-    return nextUser;
+    const nextWallets = wallets.map((wallet) =>
+      wallet.address === input.address ? { ...wallet, alertsEnabled: false } : wallet
+    );
+    this.walletsByUser.set(input.userId, nextWallets);
+    return "unlinked" as const;
   }
 }
 
 function createHarness() {
   const auth = new StubAuth();
   const store = new InMemoryStore();
+  let nonceSequence = 0;
   const deps: SentinelApiDeps = {
     auth,
     config: {
       chains: [{ chainId: 31337 }],
       telegram: { botUsername: "PledgeCashBot" },
-      webOrigin: WEB_ORIGIN,
-      workos: {}
+      webOrigin: WEB_ORIGIN
     },
     generateLinkCode: () => "ABC123",
-    generateNonce: () => "nonce0001",
+    generateNonce: () => {
+      nonceSequence += 1;
+      return `nonce${nonceSequence.toString().padStart(4, "0")}`;
+    },
     now: () => FIXED_NOW,
     rateLimit: { capacity: 100 },
     store
@@ -313,46 +337,20 @@ async function readJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-function sessionCookie(response: Response): string {
-  const setCookie = response.headers.get("set-cookie");
-  expect(setCookie).toContain(SESSION_COOKIE_NAME);
-  expect(setCookie).toContain("HttpOnly");
-  expect(setCookie).toContain("Secure");
-  expect(setCookie).toContain("SameSite=Lax");
-  return responseCookie(response, SESSION_COOKIE_NAME);
-}
-
-function authStateCookie(response: Response): string {
-  const setCookie = response.headers.get("set-cookie");
-  expect(setCookie).toContain(AUTH_STATE_COOKIE_NAME);
-  expect(setCookie).toContain("HttpOnly");
-  expect(setCookie).toContain("Max-Age=600");
-  expect(setCookie).toContain("Path=/auth");
-  expect(setCookie).toContain("Secure");
-  expect(setCookie).toContain("SameSite=Lax");
-  return responseCookie(response, AUTH_STATE_COOKIE_NAME);
-}
-
-function responseCookie(response: Response, name: string): string {
-  const setCookie = response.headers.get("set-cookie") ?? "";
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = setCookie.match(new RegExp(`(?:^|,\\s*)(${escaped}=[^;,]*)`));
-  expect(match?.[1]).toBeDefined();
-  return match?.[1] ?? "";
-}
-
 async function signedInCookie(harness: ReturnType<typeof createHarness>): Promise<string> {
-  const login = await harness.app.request(
-    "/auth/login?return_to=https%3A%2F%2Fpledge.cash%2Fsettings"
-  );
-  const authCookie = authStateCookie(login);
-  const state = harness.auth.authorizationInput?.state ?? "";
-  const callback = await harness.app.request(
-    `/auth/callback?code=ok&state=${encodeURIComponent(state)}`,
-    { headers: { Cookie: authCookie } }
-  );
-  expect(callback.status).toBe(302);
-  return sessionCookie(callback);
+  const verify = await harness.app.request("/auth/siwe/verify", {
+    body: JSON.stringify({
+      chainId: 31337,
+      message: "stub SIWE message",
+      signature: `0x${"ab".repeat(65)}`,
+      walletAddress: PRIMARY_WALLET
+    }),
+    headers: { "Content-Type": "application/json" },
+    method: "POST"
+  });
+  expect(verify.status).toBe(200);
+  expect(verify.headers.get("set-cookie")).toContain(SESSION_COOKIE);
+  return SESSION_COOKIE;
 }
 
 describe("Sentinel WP5 API", () => {
@@ -388,85 +386,105 @@ describe("Sentinel WP5 API", () => {
     expect(harness.store.pingCount).toBe(1);
   });
 
-  test("runs AuthKit redirect, callback, session, me, and logout through stubs", async () => {
-    const login = await harness.app.request(
-      "/auth/login?return_to=https%3A%2F%2Fpledge.cash%2Fsettings"
-    );
-
-    expect(login.status).toBe(302);
-    expect(login.headers.get("location")).toBe(
-      "https://workos.example/authorize?state=nonce0001"
-    );
-    const authCookie = authStateCookie(login);
-    expect(harness.auth.authorizationInput).toEqual({
-      returnTo: "https://pledge.cash/settings",
-      state: "nonce0001"
+  test("reports auth capabilities and returns a wallet-first auth snapshot", async () => {
+    const capabilities = await harness.app.request("/auth/capabilities");
+    expect(capabilities.status).toBe(200);
+    expect(await readJson<{ socialProviders: string[] }>(capabilities)).toEqual({
+      socialProviders: ["github", "google"]
     });
 
-    const callback = await harness.app.request(
-      "/auth/callback?code=ok&state=nonce0001",
-      { headers: { Cookie: authCookie } }
-    );
-    expect(callback.status).toBe(302);
-    expect(callback.headers.get("location")).toBe("https://pledge.cash/settings");
-    expect(harness.auth.authenticatedInput).toEqual({ code: "ok", state: "nonce0001" });
-    expect(callback.headers.get("set-cookie")).toContain(`${AUTH_STATE_COOKIE_NAME}=`);
-    expect(callback.headers.get("set-cookie")).toContain("Max-Age=0");
-    const cookie = sessionCookie(callback);
-
+    harness.store.providersByUser.set(USER_ID, ["siwe", "github"]);
+    harness.store.walletsByUser.set(USER_ID, [
+      {
+        alertsEnabled: true,
+        address: PRIMARY_WALLET,
+        isPrimary: true,
+        verifiedAt: FIXED_NOW.toISOString()
+      }
+    ]);
+    const cookie = await signedInCookie(harness);
     const me = await harness.app.request("/auth/me", { headers: { Cookie: cookie } });
+
     expect(me.status).toBe(200);
     const meBody = await readJson<AuthMeResponse>(me);
-    expect(meBody.user).toEqual({
-      email: WORKOS_USER.email,
-      id: USER_ID,
-      workosUserId: WORKOS_USER.id
+    expect(meBody).toEqual({
+      channels: [],
+      providers: ["siwe", "github"],
+      subscription: { boardrooms: [], minSeverity: "medium", mode: "holdings" },
+      user: { id: USER_ID },
+      wallets: [
+        {
+          alertsEnabled: true,
+          address: PRIMARY_WALLET,
+          isPrimary: true,
+          verifiedAt: FIXED_NOW.toISOString()
+        }
+      ]
     });
-    expect(meBody.subscription).toEqual({ boardrooms: [], minSeverity: "medium", mode: "holdings" });
+    expect(meBody.user).not.toHaveProperty("email");
+    expect(meBody.user).not.toHaveProperty("workosUserId");
+  });
 
-    const logout = await harness.app.request("/auth/logout", {
+  test("forwards SIWE and sign-out requests to the Better Auth handler", async () => {
+    const nonceBody = { chainId: 31337, walletAddress: PRIMARY_WALLET };
+    const nonce = await harness.app.request("/auth/siwe/nonce", {
+      body: JSON.stringify(nonceBody),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    });
+    const cookie = await signedInCookie(harness);
+    const signOut = await harness.app.request("/auth/sign-out", {
       headers: { Cookie: cookie },
       method: "POST"
     });
-    expect(logout.status).toBe(200);
-    expect(await readJson<{ ok: true }>(logout)).toEqual({ ok: true });
-    expect(harness.auth.revokedSession).toBe("sealed-session");
-    expect(logout.headers.get("set-cookie")).toContain("Max-Age=0");
+
+    expect(nonce.status).toBe(200);
+    expect(signOut.status).toBe(200);
+    expect(harness.auth.forwarded).toEqual([
+      { body: nonceBody, method: "POST", path: "/auth/siwe/nonce" },
+      {
+        body: {
+          chainId: 31337,
+          message: "stub SIWE message",
+          signature: `0x${"ab".repeat(65)}`,
+          walletAddress: PRIMARY_WALLET
+        },
+        method: "POST",
+        path: "/auth/siwe/verify"
+      },
+      { body: null, method: "POST", path: "/auth/sign-out" }
+    ]);
   });
 
-  test("rejects AuthKit callbacks without the matching state cookie", async () => {
-    const login = await harness.app.request(
-      "/auth/login?return_to=https%3A%2F%2Fpledge.cash%2Fsettings"
-    );
-    const authCookie = authStateCookie(login);
+  test("reports an anonymous session without noisy errors and protects account routes", async () => {
+    const me = await harness.app.request("/auth/me");
+    expect(me.status).toBe(200);
+    expect(await readJson<null>(me)).toBeNull();
 
-    const missingCookie = await harness.app.request("/auth/callback?code=ok&state=nonce0001");
-    expect(missingCookie.status).toBe(400);
-    expect(await readJson<{ error: { message: string } }>(missingCookie)).toEqual({
-      error: { message: "Invalid authentication state" }
-    });
+    const requests = [
+      harness.app.request("/wallets/nonce", { method: "POST" }),
+      harness.app.request("/subscriptions"),
+      harness.app.request("/channels")
+    ];
 
-    const mismatchedState = await harness.app.request(
-      "/auth/callback?code=ok&state=attacker",
-      { headers: { Cookie: authCookie } }
-    );
-    expect(mismatchedState.status).toBe(400);
-    expect(await readJson<{ error: { message: string } }>(mismatchedState)).toEqual({
-      error: { message: "Invalid authentication state" }
-    });
+    for (const response of await Promise.all(requests)) {
+      expect(response.status).toBe(401);
+      expect(await readJson<{ error: { message: string } }>(response)).toEqual({
+        error: { message: "Authentication required" }
+      });
+    }
   });
 
-  test("rejects protected routes without a valid session", async () => {
-    const response = await harness.app.request("/auth/me");
-
-    expect(response.status).toBe(401);
-    expect(await readJson<{ error: { message: string } }>(response)).toEqual({
-      error: { message: "Authentication required" }
-    });
-  });
-
-  test("links and unlinks a SIWE wallet with a single-use nonce", async () => {
+  test("links and disables secondary alert coverage with chain and conflict checks", async () => {
     const cookie = await signedInCookie(harness);
+    harness.store.walletsByUser.set(USER_ID, [
+      {
+        alertsEnabled: true,
+        address: PRIMARY_WALLET,
+        isPrimary: true,
+        verifiedAt: FIXED_NOW.toISOString()
+      }
+    ]);
     const account = privateKeyToAccount(
       "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     );
@@ -517,7 +535,17 @@ describe("Sentinel WP5 API", () => {
     });
     expect(link.status).toBe(200);
     const linked = await readJson<{ wallet: WalletDto }>(link);
-    expect(linked.wallet.address).toBe(account.address.toLowerCase());
+    expect(linked.wallet).toEqual({
+      alertsEnabled: true,
+      address: account.address.toLowerCase(),
+      isPrimary: false,
+      verifiedAt: FIXED_NOW.toISOString()
+    });
+    expect(harness.store.lastLinkedWalletInput).toEqual({
+      address: account.address.toLowerCase(),
+      chainId: 31337,
+      userId: USER_ID
+    });
 
     const replay = await harness.app.request("/wallets", {
       body: JSON.stringify({ message, signature }),
@@ -531,7 +559,94 @@ describe("Sentinel WP5 API", () => {
       method: "DELETE"
     });
     expect(unlink.status).toBe(200);
-    expect(await readJson<{ ok: true }>(unlink)).toEqual({ ok: true });
+    expect(await readJson<{ alertsEnabled: false; ok: true }>(unlink)).toEqual({
+      alertsEnabled: false,
+      ok: true
+    });
+    expect(harness.store.walletsByUser.get(USER_ID)).toContainEqual({
+      ...linked.wallet,
+      alertsEnabled: false
+    });
+
+    const relinkNonceResponse = await harness.app.request("/wallets/nonce", {
+      body: JSON.stringify({ address: account.address, chainId: 31337 }),
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      method: "POST"
+    });
+    const relinkNonce = await readJson<typeof nonce>(relinkNonceResponse);
+    expect(relinkNonce.nonce).toBe("nonce0002");
+    const relinkMessage = createSiweMessage({
+      address: account.address,
+      chainId: 31337,
+      domain: relinkNonce.domain,
+      expirationTime: new Date(relinkNonce.expirationTime),
+      issuedAt: new Date(relinkNonce.issuedAt),
+      nonce: relinkNonce.nonce,
+      statement: relinkNonce.statement,
+      uri: relinkNonce.uri,
+      version: "1"
+    });
+    const relinkSignature = await account.signMessage({ message: relinkMessage });
+    const relink = await harness.app.request("/wallets", {
+      body: JSON.stringify({ message: relinkMessage, signature: relinkSignature }),
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      method: "POST"
+    });
+    expect(relink.status).toBe(200);
+    expect(await readJson<{ wallet: WalletDto }>(relink)).toMatchObject({
+      wallet: { address: account.address.toLowerCase(), alertsEnabled: true, isPrimary: false }
+    });
+
+    const removePrimary = await harness.app.request(`/wallets/${PRIMARY_WALLET}`, {
+      headers: { Cookie: cookie },
+      method: "DELETE"
+    });
+    expect(removePrimary.status).toBe(409);
+    expect(await readJson<{ error: { message: string } }>(removePrimary)).toEqual({
+      error: { message: "Primary wallet is required for sign-in and cannot be removed" }
+    });
+
+    const conflictedAccount = privateKeyToAccount(
+      "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd"
+    );
+    const conflictedAddress = conflictedAccount.address.toLowerCase() as AddressDto;
+    harness.store.conflictedWallets.add(conflictedAddress);
+    const conflictedNonceResponse = await harness.app.request("/wallets/nonce", {
+      body: JSON.stringify({ address: conflictedAccount.address, chainId: 1 }),
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      method: "POST"
+    });
+    const conflictedNonce = await readJson<{
+      domain: string;
+      expirationTime: string;
+      issuedAt: string;
+      nonce: string;
+      statement: string;
+      uri: string;
+    }>(conflictedNonceResponse);
+    const conflictedMessage = createSiweMessage({
+      address: conflictedAccount.address,
+      chainId: 1,
+      domain: conflictedNonce.domain,
+      expirationTime: new Date(conflictedNonce.expirationTime),
+      issuedAt: new Date(conflictedNonce.issuedAt),
+      nonce: conflictedNonce.nonce,
+      statement: conflictedNonce.statement,
+      uri: conflictedNonce.uri,
+      version: "1"
+    });
+    const conflictedSignature = await conflictedAccount.signMessage({ message: conflictedMessage });
+    const conflict = await harness.app.request("/wallets", {
+      body: JSON.stringify({ message: conflictedMessage, signature: conflictedSignature }),
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      method: "POST"
+    });
+
+    expect(conflict.status).toBe(409);
+    expect(await readJson<{ error: { message: string } }>(conflict)).toEqual({
+      error: { message: "Wallet is already linked to another alert account" }
+    });
+    expect(harness.store.lastLinkedWalletInput?.chainId).toBe(1);
   });
 
   test("updates subscriptions and manages Telegram channels", async () => {

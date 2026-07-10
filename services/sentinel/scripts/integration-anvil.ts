@@ -28,9 +28,9 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
+import { createBetterAuthAdapter } from "../src/api/better-auth";
 import { createApp } from "../src/api/server";
 import { createDrizzleApiStore } from "../src/api/store";
-import { createWorkOsAuthAdapter } from "../src/api/workos";
 import { runWatcherOnce } from "../src/chain/watcher";
 import { loadConfig } from "../src/config";
 import { createDbClient, type SentinelDbClient } from "../src/db/client";
@@ -119,6 +119,8 @@ try {
   tempDb = await createTempDatabase();
   const sentinelPort = await getAvailablePort();
   const config = loadConfig({
+    BETTER_AUTH_SECRET: "sentinel-integration-auth-secret-0000000000000000",
+    BETTER_AUTH_URL: `http://127.0.0.1:${sentinelPort.toString()}`,
     DATABASE_URL: tempDb.databaseUrl,
     SENTINEL_CHAIN_IDS: String(chainId),
     SENTINEL_HARNESS: "none",
@@ -398,7 +400,8 @@ async function linkShareholder(dbClient_: SentinelDbClient, holderAddress: Addre
     .insert(users)
     .values({
       email: "sentinel-holder@example.invalid",
-      workosUserId: "sentinel-integration-holder"
+      emailVerified: false,
+      name: "sentinel-integration-holder"
     })
     .returning();
   if (user === undefined) {
@@ -407,6 +410,8 @@ async function linkShareholder(dbClient_: SentinelDbClient, holderAddress: Addre
 
   await dbClient_.db.insert(wallets).values({
     address: holderAddress,
+    chainId,
+    isPrimary: true,
     siweMessage: "integration test wallet link",
     userId: user.id
   });
@@ -521,7 +526,7 @@ async function requirePolicyAdminEvent(dbClient_: SentinelDbClient, subject: Add
 
 async function requirePublicFeed(config: ReturnType<typeof loadConfig>, dbClient_: SentinelDbClient, actionId: string): Promise<void> {
   const app = createApp({
-    auth: createWorkOsAuthAdapter(config),
+    auth: createBetterAuthAdapter(config, dbClient_.db),
     config,
     store: createDrizzleApiStore(dbClient_.db)
   });

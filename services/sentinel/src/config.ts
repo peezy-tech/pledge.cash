@@ -23,10 +23,14 @@ export const sentinelEnvSchema = z
     SENTINEL_RPC_URL_31337: optionalStringSchema,
     SENTINEL_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(12_000),
     SENTINEL_MAX_BLOCK_RANGE: z.coerce.number().int().positive().default(2_000),
-    WORKOS_API_KEY: optionalStringSchema,
-    WORKOS_CLIENT_ID: optionalStringSchema,
-    WORKOS_COOKIE_PASSWORD: optionalStringSchema,
-    WORKOS_REDIRECT_URI: optionalStringSchema,
+    BETTER_AUTH_SECRET: z.string().min(32),
+    BETTER_AUTH_URL: z.string().url(),
+    GITHUB_CLIENT_ID: optionalStringSchema,
+    GITHUB_CLIENT_SECRET: optionalStringSchema,
+    GOOGLE_CLIENT_ID: optionalStringSchema,
+    GOOGLE_CLIENT_SECRET: optionalStringSchema,
+    APPLE_CLIENT_ID: optionalStringSchema,
+    APPLE_CLIENT_SECRET: optionalStringSchema,
     SENTINEL_HARNESS: z.enum(["claude", "codex", "none"]).default("claude"),
     SENTINEL_HARNESS_CMD: optionalStringSchema,
     SENTINEL_HARNESS_MODEL: z.string().trim().min(1).default("claude-opus-4-8"),
@@ -47,6 +51,12 @@ export const sentinelEnvSchema = z
 
 export type SentinelEnv = z.input<typeof sentinelEnvSchema>;
 export type HarnessName = "claude" | "codex" | "none";
+export type SocialProviderName = "apple" | "github" | "google";
+
+export type SocialProviderConfig = {
+  readonly clientId: string;
+  readonly clientSecret: string;
+};
 
 export type SentinelChainConfig = {
   readonly chainId: number;
@@ -56,6 +66,11 @@ export type SentinelChainConfig = {
 };
 
 export type Config = {
+  readonly auth: {
+    readonly baseUrl: string;
+    readonly secret: string;
+    readonly socialProviders: Partial<Record<SocialProviderName, SocialProviderConfig>>;
+  };
   readonly chains: SentinelChainConfig[];
   readonly databaseUrl: string;
   readonly harness: {
@@ -83,12 +98,6 @@ export type Config = {
     readonly enabled: boolean;
   };
   readonly webOrigin: string;
-  readonly workos: {
-    readonly apiKey?: string;
-    readonly clientId?: string;
-    readonly cookiePassword?: string;
-    readonly redirectUri?: string;
-  };
 };
 
 function parseChainIds(value: string): number[] {
@@ -143,6 +152,28 @@ function readUrl(env: Record<string, unknown>, key: string): string {
   return z.string().url().parse(value);
 }
 
+function readOrigin(value: string, key: string): string {
+  const url = new URL(value);
+  if (url.pathname !== "/" || url.search.length > 0 || url.hash.length > 0) {
+    throw new Error(`${key} must be an origin without a path, query, or fragment`);
+  }
+  return url.origin;
+}
+
+function readSocialProvider(
+  rawEnv: Record<string, unknown>,
+  provider: Uppercase<SocialProviderName>
+): SocialProviderConfig | undefined {
+  const clientId = readOptionalString(rawEnv, `${provider}_CLIENT_ID`);
+  const clientSecret = readOptionalString(rawEnv, `${provider}_CLIENT_SECRET`);
+
+  if ((clientId === undefined) !== (clientSecret === undefined)) {
+    throw new Error(`${provider}_CLIENT_ID and ${provider}_CLIENT_SECRET must be configured together`);
+  }
+
+  return clientId === undefined || clientSecret === undefined ? undefined : { clientId, clientSecret };
+}
+
 function withOptional<T extends object, K extends string, V>(
   target: T,
   key: K,
@@ -159,6 +190,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const raw = sentinelEnvSchema.parse(env);
   const rawEnv = raw as Record<string, unknown>;
   const chainIds = parseChainIds(raw.SENTINEL_CHAIN_IDS);
+  const apple = readSocialProvider(rawEnv, "APPLE");
+  const github = readSocialProvider(rawEnv, "GITHUB");
+  const google = readSocialProvider(rawEnv, "GOOGLE");
+  const authBaseUrl = readOrigin(raw.BETTER_AUTH_URL, "BETTER_AUTH_URL");
+  const webOrigin = readOrigin(raw.SENTINEL_WEB_ORIGIN, "SENTINEL_WEB_ORIGIN");
 
   const chains = chainIds.map((chainId): SentinelChainConfig => {
     const explorerUrl = readOptionalString(rawEnv, `SENTINEL_EXPLORER_URL_${chainId}`);
@@ -178,6 +214,15 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   });
 
   return {
+    auth: {
+      baseUrl: authBaseUrl,
+      secret: raw.BETTER_AUTH_SECRET,
+      socialProviders: {
+        ...(apple === undefined ? {} : { apple }),
+        ...(github === undefined ? {} : { github }),
+        ...(google === undefined ? {} : { google })
+      }
+    },
     chains,
     databaseUrl: raw.DATABASE_URL,
     harness: withOptional(
@@ -214,19 +259,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       "accessTokenSecret",
       raw.TWITTER_ACCESS_TOKEN_SECRET
     ),
-    webOrigin: raw.SENTINEL_WEB_ORIGIN,
-    workos: withOptional(
-      withOptional(
-        withOptional(
-          withOptional({}, "apiKey", raw.WORKOS_API_KEY),
-          "clientId",
-          raw.WORKOS_CLIENT_ID
-        ),
-        "cookiePassword",
-        raw.WORKOS_COOKIE_PASSWORD
-      ),
-      "redirectUri",
-      raw.WORKOS_REDIRECT_URI
-    )
+    webOrigin
   };
 }

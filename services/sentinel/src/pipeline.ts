@@ -120,6 +120,7 @@ export async function countActionSubscribers(
              AND lower(sb.holder) = lower(w.address)
              AND sb.balance::numeric > 0
             WHERE w.user_id = u.id
+              AND w.alerts_enabled = TRUE
           )
         )
       `
