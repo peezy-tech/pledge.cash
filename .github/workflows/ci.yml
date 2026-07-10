@@ -70,7 +70,7 @@ jobs:
 
       - name: Build
         working-directory: packages/contracts
-        run: forge build
+        run: forge build --sizes
 
       - name: Verify generated SDK is current
         run: |
