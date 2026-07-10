@@ -14,6 +14,7 @@ contract AmmFactory is Ownable {
         address initializer;
         address recipient;
         address reservationOwner;
+        address manager;
     }
 
     address public feeManager;
@@ -36,6 +37,7 @@ contract AmmFactory is Ownable {
     error PoolAlreadyInitialized(address pool);
     error InitialLiquidityAlreadyReserved(address pool, address reservationOwner);
     error InitialLiquidityReservationMismatch(address expected, address actual);
+    error InitialLiquidityReservationManagerMismatch(address expected, address actual);
 
     event PoolCreated(address indexed token0, address indexed token1, address indexed pool, uint256 poolCount);
     event FeeManagerSet(address indexed previousManager, address indexed newManager);
@@ -43,11 +45,21 @@ contract AmmFactory is Ownable {
     event LiquidityRouterSet(address indexed previousRouter, address indexed newRouter);
     event ReservationManagerSet(address indexed previousManager, address indexed newManager);
     event InitialLiquidityReserved(
-        address indexed pool, address indexed initializer, address indexed recipient, address reservationOwner
+        address indexed pool,
+        address indexed initializer,
+        address indexed recipient,
+        address reservationOwner,
+        address manager
     );
-    event InitialLiquidityReservationReleased(address indexed pool, address indexed reservationOwner);
+    event InitialLiquidityReservationReleased(
+        address indexed pool, address indexed reservationOwner, address indexed manager
+    );
     event InitialLiquidityReservationConsumed(
-        address indexed pool, address indexed initializer, address indexed recipient, address reservationOwner
+        address indexed pool,
+        address indexed initializer,
+        address indexed recipient,
+        address reservationOwner,
+        address manager
     );
 
     constructor(address feeManager_) {
@@ -108,40 +120,50 @@ contract AmmFactory is Ownable {
         if (AmmPool(pool).totalSupply() != 0) revert PoolAlreadyInitialized(pool);
 
         InitialLiquidityReservation memory existing = initialLiquidityReservation[pool];
-        if (existing.reservationOwner != address(0)) {
+        if (existing.manager != address(0)) {
             if (
                 existing.initializer == initializer && existing.recipient == recipient
-                    && existing.reservationOwner == reservationOwner
+                    && existing.reservationOwner == reservationOwner && existing.manager == msg.sender
             ) return pool;
             revert InitialLiquidityAlreadyReserved(pool, existing.reservationOwner);
         }
 
-        initialLiquidityReservation[pool] = InitialLiquidityReservation(initializer, recipient, reservationOwner);
-        emit InitialLiquidityReserved(pool, initializer, recipient, reservationOwner);
+        initialLiquidityReservation[pool] =
+            InitialLiquidityReservation(initializer, recipient, reservationOwner, msg.sender);
+        emit InitialLiquidityReserved(pool, initializer, recipient, reservationOwner, msg.sender);
     }
 
     function releaseInitialLiquidityReservation(address tokenA, address tokenB, address reservationOwner) external {
-        _requireReservationManager();
         address pool = getPool[tokenA][tokenB];
-        if (pool == address(0)) return;
+        if (pool == address(0)) {
+            _requireReservationManager();
+            return;
+        }
 
         InitialLiquidityReservation memory reservation = initialLiquidityReservation[pool];
-        if (reservation.reservationOwner == address(0)) return;
+        if (reservation.manager == address(0)) {
+            _requireReservationManager();
+            return;
+        }
+        if (msg.sender != reservation.manager) {
+            revert InitialLiquidityReservationManagerMismatch(reservation.manager, msg.sender);
+        }
         if (reservation.reservationOwner != reservationOwner) {
             revert InitialLiquidityReservationMismatch(reservation.reservationOwner, reservationOwner);
         }
 
         delete initialLiquidityReservation[pool];
-        emit InitialLiquidityReservationReleased(pool, reservationOwner);
+        emit InitialLiquidityReservationReleased(pool, reservationOwner, reservation.manager);
     }
 
     function consumeInitialLiquidityReservation(address initializer, address recipient, address liquidityCaller)
         external
+        returns (bool reserved, address reservationOwner)
     {
         if (!isPool[msg.sender]) revert OnlyPool();
 
         InitialLiquidityReservation memory reservation = initialLiquidityReservation[msg.sender];
-        if (reservation.reservationOwner == address(0)) return;
+        if (reservation.manager == address(0)) return (false, address(0));
         if (liquidityCaller != liquidityRouter) revert OnlyLiquidityRouter();
         if (initializer != reservation.initializer) {
             revert InitialLiquidityReservationMismatch(reservation.initializer, initializer);
@@ -152,17 +174,22 @@ contract AmmFactory is Ownable {
 
         delete initialLiquidityReservation[msg.sender];
         emit InitialLiquidityReservationConsumed(
-            msg.sender, reservation.initializer, reservation.recipient, reservation.reservationOwner
+            msg.sender,
+            reservation.initializer,
+            reservation.recipient,
+            reservation.reservationOwner,
+            reservation.manager
         );
+        return (true, reservation.reservationOwner);
     }
 
     function initialLiquidityReservationFor(address tokenA, address tokenB)
         external
         view
-        returns (address initializer, address recipient, address reservationOwner)
+        returns (address initializer, address recipient, address reservationOwner, address manager)
     {
         InitialLiquidityReservation memory reservation = initialLiquidityReservation[getPool[tokenA][tokenB]];
-        return (reservation.initializer, reservation.recipient, reservation.reservationOwner);
+        return (reservation.initializer, reservation.recipient, reservation.reservationOwner, reservation.manager);
     }
 
     function createPool(address tokenA, address tokenB) external returns (address pool) {

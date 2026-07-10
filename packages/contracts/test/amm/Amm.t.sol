@@ -278,11 +278,12 @@ contract AmmTest is Test {
 
         address pool = factory.reserveInitialLiquidity(address(tokenA), address(tokenB), lp, lp, receiver);
         assertEq(pool, factory.predictPoolAddress(address(tokenA), address(tokenB)));
-        (address initializer, address recipient, address reservationOwner) =
+        (address initializer, address recipient, address reservationOwner, address manager) =
             factory.initialLiquidityReservationFor(address(tokenA), address(tokenB));
         assertEq(initializer, lp);
         assertEq(recipient, lp);
         assertEq(reservationOwner, receiver);
+        assertEq(manager, address(this));
 
         vm.prank(trader);
         vm.expectRevert(AmmFactory.OnlyLiquidityRouter.selector);
@@ -308,11 +309,93 @@ contract AmmTest is Test {
         vm.stopPrank();
 
         assertGt(liquidity, 0);
-        (initializer, recipient, reservationOwner) =
+        (initializer, recipient, reservationOwner, manager) =
             factory.initialLiquidityReservationFor(address(tokenA), address(tokenB));
         assertEq(initializer, address(0));
         assertEq(recipient, address(0));
         assertEq(reservationOwner, address(0));
+        assertEq(manager, address(0));
+    }
+
+    function testReservedInitialMintSweepsOneSidedPreloadToReservationOwner() public {
+        factory.setLiquidityRouter(address(router));
+        factory.setReservationManager(address(this));
+
+        address pool = factory.reserveInitialLiquidity(address(tokenA), address(tokenB), lp, lp, receiver);
+        uint256 hostilePreload = 77 ether;
+        tokenA.mint(pool, hostilePreload);
+        uint256 receiverBefore = tokenA.balanceOf(receiver);
+
+        uint256 amountA = 1_000 ether;
+        uint256 amountB = 2_000 ether;
+        vm.startPrank(lp);
+        tokenA.approve(address(router), amountA);
+        tokenB.approve(address(router), amountB);
+        (,, uint256 liquidity) = router.addLiquidity(
+            address(tokenA), address(tokenB), amountA, amountB, amountA, amountB, lp, block.timestamp
+        );
+        vm.stopPrank();
+
+        assertEq(tokenA.balanceOf(receiver) - receiverBefore, hostilePreload);
+        assertEq(tokenA.balanceOf(pool), amountA);
+        assertEq(tokenB.balanceOf(pool), amountB);
+        assertEq(liquidity, (amountA * amountB).sqrt() - AmmPool(pool).MINIMUM_LIQUIDITY());
+    }
+
+    function testReservedInitialMintSweepsPreloadAboveUint112BeforeReserveCheck() public {
+        factory.setLiquidityRouter(address(router));
+        factory.setReservationManager(address(this));
+
+        address pool = factory.reserveInitialLiquidity(address(tokenA), address(tokenB), lp, lp, receiver);
+        uint256 hostilePreload = uint256(type(uint112).max) + 1;
+        tokenA.mint(pool, hostilePreload);
+        uint256 receiverBefore = tokenA.balanceOf(receiver);
+
+        uint256 amountA = 1_000 ether;
+        uint256 amountB = 2_000 ether;
+        vm.startPrank(lp);
+        tokenA.approve(address(router), amountA);
+        tokenB.approve(address(router), amountB);
+        (,, uint256 liquidity) = router.addLiquidity(
+            address(tokenA), address(tokenB), amountA, amountB, amountA, amountB, lp, block.timestamp
+        );
+        vm.stopPrank();
+
+        assertGt(liquidity, 0);
+        assertEq(tokenA.balanceOf(receiver) - receiverBefore, hostilePreload);
+        assertEq(tokenA.balanceOf(pool), amountA);
+        assertEq(tokenB.balanceOf(pool), amountB);
+    }
+
+    function testReservationCreatorCanReleaseAfterGlobalManagerRotation() public {
+        factory.setReservationManager(address(this));
+        factory.reserveInitialLiquidity(address(tokenA), address(tokenB), lp, lp, receiver);
+        factory.setReservationManager(trader);
+
+        vm.prank(trader);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AmmFactory.InitialLiquidityReservationManagerMismatch.selector, address(this), trader
+            )
+        );
+        factory.releaseInitialLiquidityReservation(address(tokenA), address(tokenB), receiver);
+
+        factory.releaseInitialLiquidityReservation(address(tokenA), address(tokenB), receiver);
+        (address initializer, address recipient, address reservationOwner, address manager) =
+            factory.initialLiquidityReservationFor(address(tokenA), address(tokenB));
+        assertEq(initializer, address(0));
+        assertEq(recipient, address(0));
+        assertEq(reservationOwner, address(0));
+        assertEq(manager, address(0));
+
+        AmmTestERC20 tokenC = new AmmTestERC20("Token C", "TKNC", 18);
+        vm.expectRevert(AmmFactory.OnlyReservationManager.selector);
+        factory.reserveInitialLiquidity(address(tokenA), address(tokenC), lp, lp, receiver);
+
+        vm.prank(trader);
+        factory.reserveInitialLiquidity(address(tokenA), address(tokenC), lp, lp, receiver);
+        (,,, manager) = factory.initialLiquidityReservationFor(address(tokenA), address(tokenC));
+        assertEq(manager, trader);
     }
 
     function testReservationReleaseRequiresOwnerAndInitializedPoolsCannotBeReserved() public {
@@ -326,11 +409,12 @@ contract AmmTest is Test {
         factory.releaseInitialLiquidityReservation(address(tokenA), address(tokenB), trader);
 
         factory.releaseInitialLiquidityReservation(address(tokenA), address(tokenB), receiver);
-        (address initializer, address recipient, address reservationOwner) =
+        (address initializer, address recipient, address reservationOwner, address manager) =
             factory.initialLiquidityReservationFor(address(tokenA), address(tokenB));
         assertEq(initializer, address(0));
         assertEq(recipient, address(0));
         assertEq(reservationOwner, address(0));
+        assertEq(manager, address(0));
 
         vm.startPrank(lp);
         tokenA.approve(address(router), 1_000 ether);

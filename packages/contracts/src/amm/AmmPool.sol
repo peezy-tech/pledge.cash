@@ -38,6 +38,16 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         uint256 amount1In;
     }
 
+    struct MintCache {
+        uint112 reserve0;
+        uint112 reserve1;
+        uint256 balance0;
+        uint256 balance1;
+        uint256 amount0;
+        uint256 amount1;
+        uint256 supply;
+    }
+
     address public factory;
     address public token0;
     address public token1;
@@ -89,6 +99,7 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     error InsufficientObservationHistory(uint256 requestedTimestamp, uint256 oldestTimestamp);
     error TooManySamplePoints(uint256 requested, uint256 maximum);
     error UnexpectedFeeTransfer(address token, uint256 expected, uint256 actual);
+    error UnexpectedInitialLiquidityBalance(address token, uint256 expected, uint256 actual);
 
     event Mint(address indexed sender, uint256 amount0, uint256 amount1);
     event Burn(address indexed sender, uint256 amount0, uint256 amount1, address indexed to);
@@ -105,6 +116,7 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     event ProtocolFeesAccrued(address indexed recipient, address indexed token, uint256 amount);
     event ExcessRecovered(address indexed recipient, uint256 amount0, uint256 amount1);
     event ExcessSynced(uint112 reserve0, uint112 reserve1);
+    event InitialLiquidityExcessSwept(address indexed recipient, uint256 amount0, uint256 amount1);
 
     constructor() {
         _disableInitializers();
@@ -207,41 +219,90 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     }
 
     function mint(address to) external nonReentrant returns (uint256 liquidity) {
-        return _mintLiquidity(to, msg.sender, msg.sender);
+        return _mintLiquidity(to, msg.sender, msg.sender, 0, 0);
     }
 
-    function mintFromRouter(address to, address initializer) external nonReentrant returns (uint256 liquidity) {
-        return _mintLiquidity(to, initializer, msg.sender);
-    }
-
-    function _mintLiquidity(address to, address initializer, address liquidityCaller)
-        internal
+    function mintFromRouter(address to, address initializer, uint256 seedAmount0, uint256 seedAmount1)
+        external
+        nonReentrant
         returns (uint256 liquidity)
     {
+        return _mintLiquidity(to, initializer, msg.sender, seedAmount0, seedAmount1);
+    }
+
+    function _mintLiquidity(
+        address to,
+        address initializer,
+        address liquidityCaller,
+        uint256 seedAmount0,
+        uint256 seedAmount1
+    ) internal returns (uint256 liquidity) {
         _requireNonZero(to);
         _requireNonZero(initializer);
         _updateFor(to);
 
-        (uint112 reserve0_, uint112 reserve1_,) = getReserves();
-        uint256 balance0 = _balance(token0);
-        uint256 balance1 = _balance(token1);
-        _requireBalancesAtLeastReserves(balance0, balance1);
-        _requireReserveBalances(balance0, balance1);
-        uint256 amount0 = balance0 - reserve0_;
-        uint256 amount1 = balance1 - reserve1_;
-        uint256 supply = totalSupply();
+        MintCache memory cache;
+        (cache.reserve0, cache.reserve1,) = getReserves();
+        cache.balance0 = _balance(token0);
+        cache.balance1 = _balance(token1);
+        _requireBalancesAtLeastReserves(cache.balance0, cache.balance1);
+        cache.supply = totalSupply();
 
-        if (supply == 0) {
-            AmmFactory(factory).consumeInitialLiquidityReservation(initializer, to, liquidityCaller);
-            liquidity = _mintInitialLiquidity(amount0, amount1);
+        if (cache.supply == 0) {
+            (bool reserved, address reservationOwner) =
+                AmmFactory(factory).consumeInitialLiquidityReservation(initializer, to, liquidityCaller);
+            if (reserved) {
+                (cache.balance0, cache.balance1) = _sweepReservedInitialLiquidityExcess(
+                    cache.balance0, cache.balance1, seedAmount0, seedAmount1, reservationOwner
+                );
+            }
+            _requireReserveBalances(cache.balance0, cache.balance1);
+            cache.amount0 = cache.balance0 - cache.reserve0;
+            cache.amount1 = cache.balance1 - cache.reserve1;
+            liquidity = _mintInitialLiquidity(cache.amount0, cache.amount1);
         } else {
-            liquidity = _mintAdditionalLiquidity(amount0, amount1, supply, reserve0_, reserve1_);
+            _requireReserveBalances(cache.balance0, cache.balance1);
+            cache.amount0 = cache.balance0 - cache.reserve0;
+            cache.amount1 = cache.balance1 - cache.reserve1;
+            liquidity =
+                _mintAdditionalLiquidity(cache.amount0, cache.amount1, cache.supply, cache.reserve0, cache.reserve1);
         }
         if (liquidity == 0) revert InsufficientLiquidityMinted();
 
         _mint(to, liquidity);
-        _update(balance0, balance1, reserve0_, reserve1_);
-        emit Mint(msg.sender, amount0, amount1);
+        _update(cache.balance0, cache.balance1, cache.reserve0, cache.reserve1);
+        emit Mint(msg.sender, cache.amount0, cache.amount1);
+    }
+
+    function _sweepReservedInitialLiquidityExcess(
+        uint256 balance0,
+        uint256 balance1,
+        uint256 seedAmount0,
+        uint256 seedAmount1,
+        address reservationOwner
+    ) internal returns (uint256 nextBalance0, uint256 nextBalance1) {
+        if (balance0 < seedAmount0) {
+            revert UnexpectedInitialLiquidityBalance(token0, seedAmount0, balance0);
+        }
+        if (balance1 < seedAmount1) {
+            revert UnexpectedInitialLiquidityBalance(token1, seedAmount1, balance1);
+        }
+
+        uint256 excess0 = balance0 - seedAmount0;
+        uint256 excess1 = balance1 - seedAmount1;
+        _transferExact(token0, reservationOwner, excess0);
+        _transferExact(token1, reservationOwner, excess1);
+
+        nextBalance0 = _balance(token0);
+        nextBalance1 = _balance(token1);
+        if (nextBalance0 != seedAmount0) {
+            revert UnexpectedInitialLiquidityBalance(token0, seedAmount0, nextBalance0);
+        }
+        if (nextBalance1 != seedAmount1) {
+            revert UnexpectedInitialLiquidityBalance(token1, seedAmount1, nextBalance1);
+        }
+
+        emit InitialLiquidityExcessSwept(reservationOwner, excess0, excess1);
     }
 
     function burn(address to) external nonReentrant returns (uint256 amount0, uint256 amount1) {
