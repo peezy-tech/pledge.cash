@@ -160,12 +160,17 @@ contract LockedLiquidityPoolTransferFeeToken {
     uint8 public decimals = 18;
     uint256 public totalSupply;
     address public taxedSender;
+    bool public suppressTaxedSenderTransfer;
 
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
     function setTaxedSender(address taxedSender_) external {
         taxedSender = taxedSender_;
+    }
+
+    function setSuppressTaxedSenderTransfer(bool suppress) external {
+        suppressTaxedSenderTransfer = suppress;
     }
 
     function mint(address to, uint256 amount) external {
@@ -191,6 +196,7 @@ contract LockedLiquidityPoolTransferFeeToken {
     }
 
     function _transfer(address from, address to, uint256 amount) internal {
+        if (from == taxedSender && suppressTaxedSenderTransfer) return;
         uint256 fee = from == taxedSender ? amount / 100 : 0;
         balanceOf[from] -= amount;
         balanceOf[to] += amount - fee;
@@ -720,7 +726,7 @@ contract LockedLiquidityTest is Test {
         boardroom.executeBatch(calls);
     }
 
-    function testLockedLiquidityExitEnforcesActualReceivedMinAmounts() public {
+    function testPartialUnderlyingTransferPreservesLpAndUsesTerminalFallback() public {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-exit-actual");
         LockedLiquidityPoolTransferFeeToken taxedQuote = new LockedLiquidityPoolTransferFeeToken();
 
@@ -738,19 +744,56 @@ contract LockedLiquidityTest is Test {
 
         vm.prank(owner);
         vm.expectRevert(AmmRouter.InsufficientAmount.selector);
-        boardroom.exitLockedLiquidity(created.locker, 1, 999 ether, block.timestamp);
+        boardroom.exitLockedLiquidity(created.locker, 0, 0, block.timestamp);
+        assertEq(LockedLiquidity(created.locker).lockedLiquidity(), created.liquidity);
+        assertEq(ERC20(created.pool).balanceOf(address(boardroom)), 0);
 
-        uint256 quoteBefore = taxedQuote.balanceOf(address(boardroom));
+        vm.warp(block.timestamp + 1 days);
         vm.prank(owner);
         (uint256 amountA, uint256 amountB, uint256 liquidity) =
-            boardroom.exitLockedLiquidity(created.locker, 1, 989 ether, block.timestamp);
+            boardroom.exitLockedLiquidity(created.locker, 0, 0, block.timestamp);
 
-        assertGt(amountA, 0);
-        assertGt(amountB, 989 ether);
-        assertLt(amountB, 999 ether);
+        assertEq(amountA, 0);
+        assertEq(amountB, 0);
         assertEq(liquidity, created.liquidity);
-        assertEq(taxedQuote.balanceOf(address(boardroom)) - quoteBefore, amountB);
         assertEq(LockedLiquidity(created.locker).lockedLiquidity(), 0);
+        assertEq(ERC20(created.pool).balanceOf(address(boardroom)), created.liquidity);
+        assertTrue(boardroom.isRedeemableAsset(created.pool));
+    }
+
+    function testNoOpUnderlyingTransferPreservesLpAndUsesTerminalFallback() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-exit-no-op-transfer");
+        LockedLiquidityPoolTransferFeeToken noOpQuote = new LockedLiquidityPoolTransferFeeToken();
+
+        vm.prank(owner);
+        boardroom.mint(address(boardroom), SHARE_SEED);
+        noOpQuote.mint(address(boardroom), QUOTE_SEED);
+        CreatedLocker memory created = _createLockedLiquidityFromBoardroomBalances(
+            boardroom, shareToken, address(noOpQuote), address(lockedLiquidityFactory), "exit-no-op-transfer"
+        );
+        noOpQuote.setTaxedSender(created.pool);
+        noOpQuote.setSuppressTaxedSenderTransfer(true);
+
+        vm.prank(owner);
+        boardroom.startWindDown();
+
+        vm.prank(owner);
+        vm.expectRevert(AmmRouter.InsufficientAmount.selector);
+        boardroom.exitLockedLiquidity(created.locker, 0, 0, block.timestamp);
+        assertEq(LockedLiquidity(created.locker).lockedLiquidity(), created.liquidity);
+        assertEq(ERC20(created.pool).balanceOf(address(boardroom)), 0);
+
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(owner);
+        (uint256 amountA, uint256 amountB, uint256 liquidity) =
+            boardroom.exitLockedLiquidity(created.locker, 0, 0, block.timestamp);
+
+        assertEq(amountA, 0);
+        assertEq(amountB, 0);
+        assertEq(liquidity, created.liquidity);
+        assertEq(LockedLiquidity(created.locker).lockedLiquidity(), 0);
+        assertEq(ERC20(created.pool).balanceOf(address(boardroom)), created.liquidity);
+        assertTrue(boardroom.isRedeemableAsset(created.pool));
     }
 
     function testLockedLiquidityPolicyRejectsPairWithoutShareToken() public {
