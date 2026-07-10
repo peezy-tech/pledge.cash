@@ -1,9 +1,16 @@
 import { describe, expect, test } from "bun:test";
+import { buildBoardroomShareGrantIssuanceBatch, type Address, type Hex } from "@pledge.cash/sdk";
 import { encodeFunctionData } from "viem";
-import { stageLabel } from "../src/features/transactions/transaction-center";
+import { transactionReviewCanContinue } from "../src/components/transaction-review";
+import { recoverInterruptedTransactions, stageLabel, type TransactionRecord } from "../src/features/transactions/transaction-center";
 import { contractCallPreview, contractCallReview } from "../src/lib/transaction-preview";
 
 const target = "0x1000000000000000000000000000000000000000" as const;
+const holder = "0x2000000000000000000000000000000000000000" as Address;
+const factory = "0x3000000000000000000000000000000000000000" as Address;
+const shareToken = "0x4000000000000000000000000000000000000000" as Address;
+const assetPolicy = "0x5000000000000000000000000000000000000000" as Address;
+const salt = `0x${"1".repeat(64)}` as Hex;
 const abi = [{
   type: "function",
   name: "setValue",
@@ -50,5 +57,104 @@ describe("transaction review", () => {
 
     expect(review.risk).toBe("irreversible");
     expect(review.parameters).toEqual([{ name: "delay", type: "uint256", value: "86400" }]);
+  });
+
+  test("marks hydrated pre-submission records as interrupted but resumes hashed submissions", () => {
+    const base = {
+      id: "tx-1",
+      chainId: 31337,
+      createdAt: "2026-07-10T00:00:00.000Z",
+      functionName: "setValue",
+      label: "Update value",
+      target,
+    } satisfies Omit<TransactionRecord, "stage">;
+    const hash = `0x${"12".repeat(32)}` as const;
+    const recovered = recoverInterruptedTransactions([
+      { ...base, stage: "review" },
+      { ...base, id: "tx-2", stage: "awaiting-signature" },
+      { ...base, id: "tx-3", hash, stage: "submitted" },
+    ]);
+
+    expect(recovered[0]?.stage).toBe("failed");
+    expect(recovered[0]?.error).toContain("interrupted");
+    expect(recovered[1]?.stage).toBe("failed");
+    expect(recovered[2]).toMatchObject({ hash, stage: "submitted" });
+  });
+
+  test("decodes every argument in a real Boardroom share-grant issuance batch", () => {
+    const request = buildBoardroomShareGrantIssuanceBatch({
+      boardroom: target,
+      factory,
+      shareToken,
+      assetPolicy,
+      terms: {
+        holder,
+        paymentToken: "0x0000000000000000000000000000000000000000",
+        amount: 1_000_000_000_000_000_000_000n,
+        price: 0n,
+        expiry: 2_000_000_000n,
+        vestingCliff: 1_900_000_000n,
+        vestingEnd: 1_900_100_000n,
+        transferable: false,
+        transferUnlockTime: 0n,
+        salt,
+      },
+    });
+    const review = contractCallReview("Boardroom grant batch", request);
+
+    expect(review.parameters[0]?.value).toBe("2 Boardroom calls — inspect every decoded argument below");
+    expect(review.boardroomCalls).toHaveLength(2);
+    expect(review.boardroomCalls?.[0]).toMatchObject({
+      functionName: "approve",
+      label: "Approve token spending",
+      verification: "verified",
+      parameters: [
+        { name: "spender", type: "address", value: factory },
+        { name: "amount", type: "uint256", value: "1000000000000000000000" },
+      ],
+    });
+    expect(review.boardroomCalls?.[1]).toMatchObject({
+      functionName: "createGrant",
+      label: "Create a token grant",
+      verification: "verified",
+    });
+    expect(review.boardroomCalls?.[1]?.parameters).toContainEqual({ name: "holder", type: "address", value: holder });
+    expect(review.boardroomCalls?.[1]?.parameters).toContainEqual({ name: "amount", type: "uint256", value: "1000000000000000000000" });
+    expect(review.boardroomCalls?.[1]?.parameters).toContainEqual({ name: "vestingEnd", type: "uint256", value: "1900100000" });
+    expect(review.boardroomCalls?.[1]?.parameters).toContainEqual({ name: "salt", type: "bytes32", value: salt });
+    expect(transactionReviewCanContinue(review, false)).toBe(true);
+  });
+
+  test("labels unknown inner calldata as unverified instead of guessing a function", () => {
+    const review = contractCallReview("Unknown Boardroom action", {
+      address: target,
+      abi: [{
+        type: "function",
+        name: "execute",
+        stateMutability: "payable",
+        inputs: [{
+          name: "call_",
+          type: "tuple",
+          components: [
+            { name: "policy", type: "address" },
+            { name: "target", type: "address" },
+            { name: "value", type: "uint256" },
+            { name: "data", type: "bytes" },
+          ],
+        }],
+        outputs: [],
+      }] as const,
+      functionName: "execute",
+      args: [{ policy: assetPolicy, target: shareToken, value: 0n, data: "0xdeadbeef" }],
+    });
+
+    expect(review.boardroomCalls?.[0]).toMatchObject({
+      label: "Unverified call 0xdeadbeef",
+      parameters: [],
+      verification: "unverified",
+    });
+    expect(review.boardroomCalls?.[0]?.functionName).toBeUndefined();
+    expect(review.boardroomCalls?.[0]?.verificationReason).toContain("does not match");
+    expect(transactionReviewCanContinue(review, false)).toBe(false);
   });
 });

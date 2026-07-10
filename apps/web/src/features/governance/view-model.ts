@@ -1,78 +1,34 @@
 import {
-  boardroomAbi,
-  boardroomTokenAbi,
   buildBoardroomCancelActionTransaction,
   buildBoardroomExecuteQueuedActionTransaction,
   buildBoardroomExecuteQueuedBatchTransaction,
   buildBoardroomLaunchTransaction,
   buildBoardroomSetExecutorTransaction,
-  distributionFactoryAbi,
-  erc20Abi,
-  fixedPriceSaleAbi,
-  lockedLiquidityAbi,
-  lockedLiquidityFactoryAbi,
-  merkleAirdropAbi,
-  migratingBondingCurveAbi,
-  tokenGrantAbi,
-  tokenGrantFactoryAbi,
   type BoardroomCall,
   type QueuedBoardroomAction,
   type QueuedBoardroomActionStatus,
 } from "@pledge.cash/sdk";
-import { decodeFunctionData, formatEther, isAddress, type Address, type Hex } from "viem";
+import { formatEther, isAddress, type Address, type Hex } from "viem";
+import { boardroomCallReview, type ContractParameterReview } from "../../lib/transaction-preview";
 import type { GovernanceTransactionRequest } from "./types";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const HOUR = 3_600n;
 const DAY = 86_400n;
 
-const CALL_ABIS = [
-  boardroomAbi,
-  boardroomTokenAbi,
-  distributionFactoryAbi,
-  erc20Abi,
-  fixedPriceSaleAbi,
-  lockedLiquidityAbi,
-  lockedLiquidityFactoryAbi,
-  merkleAirdropAbi,
-  migratingBondingCurveAbi,
-  tokenGrantAbi,
-  tokenGrantFactoryAbi,
-] as const;
-
-const FUNCTION_LABELS: Record<string, string> = {
-  approve: "Approve token spending",
-  burnTreasuryShares: "Burn treasury-held project shares",
-  cancel: "Cancel a participation contract",
-  claimFees: "Claim liquidity fees",
-  close: "Close a participation contract",
-  createFixedPriceSale: "Create a fixed-price sale",
-  createGrant: "Create a token grant",
-  createLockedLiquidity: "Create a locked liquidity position",
-  createMerkleAirdrop: "Create an airdrop",
-  createMigratingBondingCurve: "Create a bonding curve",
-  executeWindDownCall: "Run a wind-down operation",
-  exit: "Exit a liquidity position",
-  launch: "Launch holder governance",
-  mint: "Mint project shares",
-  openRedemptions: "Open holder redemptions",
-  registerRedeemableAsset: "Register a redemption asset",
-  setExecutor: "Change the governance executor",
-  startWindDown: "Start project wind-down",
-  transfer: "Transfer tokens",
-  transferFrom: "Transfer tokens",
-  wrapNativeBalance: "Wrap treasury native balance",
-};
-
 export type GovernanceCallView = {
   data: Hex;
   functionName?: string | undefined;
   label: string;
+  parameters: ContractParameterReview[];
   policy: Address;
   selector: string;
+  signature?: string | undefined;
   target: Address;
   value: bigint;
   valueLabel: string;
+  verification: "verified" | "unverified";
+  verificationReason?: string | undefined;
 };
 
 export type GovernanceActionView = {
@@ -101,7 +57,7 @@ export function governanceActionView(
   action: QueuedBoardroomAction,
   now = BigInt(Math.floor(Date.now() / 1_000)),
 ): GovernanceActionView {
-  const calls = (action.calls ?? []).map(governanceCallView);
+  const calls = (action.calls ?? []).map((call) => governanceCallView(call, action.boardroom));
   const status = governanceStatusView(action.status, action.eta, action.expiresAt, now);
   const title = calls.length === 0
     ? "Undecoded governance action"
@@ -121,20 +77,24 @@ export function governanceActionView(
   };
 }
 
-export function governanceCallView(call: BoardroomCall): GovernanceCallView {
-  const decoded = decodeKnownCall(call.data);
+export function governanceCallView(call: BoardroomCall, boardroom?: Address): GovernanceCallView {
+  const decoded = boardroomCallReview(call, boardroom);
   const selector = call.data.length >= 10 ? call.data.slice(0, 10) : "No selector";
   return {
     data: call.data,
-    ...(decoded ? { functionName: decoded.functionName } : {}),
-    label: decoded?.label ?? (call.value > 0n && call.data === "0x" ? "Transfer native value" : `Contract call ${selector}`),
+    ...(decoded.functionName ? { functionName: decoded.functionName } : {}),
+    label: decoded.label,
+    parameters: decoded.parameters,
     policy: call.policy,
     selector,
+    ...(decoded.signature ? { signature: decoded.signature } : {}),
     target: call.target,
     value: call.value,
     valueLabel: call.value === 0n
       ? "0 native"
       : `${formatEther(call.value)} native (${call.value.toString()} wei)`,
+    verification: decoded.verification,
+    ...(decoded.verificationReason ? { verificationReason: decoded.verificationReason } : {}),
   };
 }
 
@@ -277,31 +237,6 @@ export function formatGovernanceTimestamp(seconds: bigint): string {
     timeStyle: "short",
     timeZone: "UTC",
   }).format(date) + " UTC";
-}
-
-function decodeKnownCall(data: Hex): { functionName: string; label: string } | undefined {
-  if (data.length < 10) return undefined;
-  for (const abi of CALL_ABIS) {
-    try {
-      const decoded = decodeFunctionData({ abi, data });
-      const functionName = decoded.functionName;
-      return {
-        functionName,
-        label: FUNCTION_LABELS[functionName] ?? humanizeFunctionName(functionName),
-      };
-    } catch {
-      // A selector belongs to at most one of the known protocol ABIs. Try the next ABI.
-    }
-  }
-  return undefined;
-}
-
-function humanizeFunctionName(functionName: string): string {
-  const words = functionName
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/[_-]+/g, " ")
-    .toLowerCase();
-  return words.length > 0 ? words.charAt(0).toUpperCase() + words.slice(1) : "Contract call";
 }
 
 function formatRelativeTime(target: bigint, now: bigint): string {

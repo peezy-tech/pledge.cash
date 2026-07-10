@@ -120,7 +120,7 @@ export function GovernanceLaunchControl({
             onChange={(event) => setExecutor(event.target.value)}
           />
           <span className="font-normal leading-5" id={executorError ? "governance-executor-error" : "governance-executor-help"}>
-            {executorError ?? "This address prepares and queues future project changes."}
+            {executorError ?? "This address prepares and queues future project changes. Safe and other contract-executor queues cannot currently be reconstructed for in-app execution; use an EOA when that workflow is required."}
           </span>
         </Label>
 

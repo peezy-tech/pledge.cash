@@ -73,7 +73,9 @@ function GovernanceQueueRow({
   const vetoActionId = `governance-veto-${action.actionHash}`;
   const executeActionId = `governance-execute-${action.actionHash}`;
   const vetoAvailable = canVetoQueuedAction(action);
-  const executionVerified = canExecuteQueuedAction(action);
+  const executionVerified = canExecuteQueuedAction(action)
+    && view.calls.length > 0
+    && view.calls.every((call) => call.verification === "verified");
   const showActions = vetoAvailable || action.status === "ready";
 
   const veto = async (): Promise<void> => {
@@ -129,15 +131,36 @@ function GovernanceQueueRow({
           <ol className="m-0 mt-4 list-none space-y-4 p-0">
             {view.calls.map((call, index) => (
               <li className="border-l-2 border-[var(--pc-border-strong)] pl-3" key={`${call.target}:${index.toString()}`}>
-                <p className="m-0 text-sm font-semibold text-[var(--pc-text)]">
-                  {view.calls.length > 1 ? `${(index + 1).toString()}. ` : ""}{call.label}
-                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="m-0 text-sm font-semibold text-[var(--pc-text)]">
+                    {view.calls.length > 1 ? `${(index + 1).toString()}. ` : ""}{call.label}
+                  </p>
+                  <Badge variant={call.verification === "verified" ? "muted" : "warning"}>
+                    {call.verification === "verified" ? "Verified decode" : "Unverified call"}
+                  </Badge>
+                </div>
                 <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
                   <TechnicalFact label="Target"><AddressLink address={call.target} /></TechnicalFact>
                   <TechnicalFact label="Policy"><AddressLink address={call.policy} /></TechnicalFact>
                   <TechnicalFact label="Function selector"><code className="text-[var(--pc-text)]">{call.selector}</code></TechnicalFact>
                   <TechnicalFact label="Native value">{call.valueLabel}</TechnicalFact>
+                  {call.signature ? <TechnicalFact label="Decoded function"><code className="break-all text-[var(--pc-text)]">{call.signature}</code></TechnicalFact> : null}
                 </dl>
+                {call.verificationReason ? (
+                  <p className="mt-3 border-l-2 border-[var(--pc-warning)] pl-3 text-xs leading-5 text-[var(--pc-text-muted)]">
+                    {call.verificationReason} Review the raw calldata independently; this app will not offer execution for an unverified call.
+                  </p>
+                ) : null}
+                {call.parameters.length > 0 ? (
+                  <dl className="mt-3 grid gap-px overflow-hidden border border-[var(--pc-border)] bg-[var(--pc-border)] text-xs sm:grid-cols-2">
+                    {call.parameters.map((parameter, parameterIndex) => (
+                      <div className="min-w-0 bg-[var(--pc-surface)] p-3" key={`${parameter.name}:${parameterIndex.toString()}`}>
+                        <dt className="break-words text-[var(--pc-text-muted)]">{parameter.name} <span className="font-mono text-[10px]">({parameter.type})</span></dt>
+                        <dd className="m-0 mt-1 break-all font-mono leading-5 text-[var(--pc-text)]">{parameter.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : null}
                 <details className="mt-3">
                   <summary className="flex cursor-pointer list-none items-center gap-1 text-xs font-medium text-[var(--pc-text-muted)] hover:text-[var(--pc-text)]">
                     <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /> Raw calldata
@@ -221,7 +244,7 @@ function ActionAvailability({
   vetoCapability?: Capability | undefined;
 }): React.JSX.Element | null {
   const reasons = [
-    !executionVerified && executeCapability ? "Execution is disabled until the original queue calldata is verified." : undefined,
+    !executionVerified && executeCapability ? "Execution is disabled until the original queue calldata is verified and every inner call is decoded." : undefined,
     capabilityReason(vetoCapability),
     capabilityReason(executeCapability),
   ].filter((reason, index, all): reason is string => Boolean(reason) && all.indexOf(reason) === index);

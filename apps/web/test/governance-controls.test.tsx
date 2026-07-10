@@ -58,6 +58,15 @@ describe("governance controls", () => {
     const view = governanceActionView(readyAction, 1_700_100_000n);
     expect(view.title).toBe("Mint project shares");
     expect(view.statusLabel).toBe("Ready to execute");
+    expect(view.calls[0]).toMatchObject({
+      functionName: "mint",
+      signature: "mint(address,uint256)",
+      verification: "verified",
+      parameters: [
+        { name: "to", type: "address", value: recipient },
+        { name: "amount", type: "uint256", value: "1000" },
+      ],
+    });
 
     const html = renderToString(
       <GovernanceQueue
@@ -74,6 +83,10 @@ describe("governance controls", () => {
     expect(html).toContain("Mint project shares");
     expect(html).toContain("Ready to execute");
     expect(html).toContain("Function selector");
+    expect(html).toContain("Verified decode");
+    expect(html).toContain(recipient);
+    expect(html).toContain("amount");
+    expect(html).toContain("1000");
     expect(html).toContain("Raw calldata");
     expect(html).toContain("Veto action");
     expect(html).toContain("Execute now");
@@ -109,6 +122,28 @@ describe("governance controls", () => {
 
     expect(html).toContain("Calldata verification failed");
     expect(html).toContain("Execution is disabled until the original queue calldata is verified");
+    expect(html).toContain("disabled");
+  });
+
+  test("labels an unknown inner call as unverified and disables execution", () => {
+    const unknown: QueuedBoardroomAction = {
+      ...readyAction,
+      calls: [{ ...mintCall, target: recipient, data: "0xdeadbeef" }],
+    };
+    const html = renderToString(
+      <GovernanceQueue
+        actions={[unknown]}
+        capabilities={queueCapabilities}
+        pendingAction={undefined}
+        runAction={async (_id, action) => action()}
+        submitTransaction={async () => undefined}
+      />,
+    );
+
+    expect(html).toContain("Unverified call 0xdeadbeef");
+    expect(html).toContain("Unverified call");
+    expect(html).toContain("will not offer execution");
+    expect(html).toContain("every inner call is decoded");
     expect(html).toContain("disabled");
   });
 
@@ -151,6 +186,7 @@ describe("governance controls", () => {
     expect(html).toContain("Custom");
     expect(html).toContain("Launching is permanent");
     expect(html).toContain("owner authority cannot be restored");
+    expect(html).toContain("contract-executor queues cannot currently be reconstructed");
     expect(html).toContain("Launch governance");
     expect(html).toContain("disabled");
   });

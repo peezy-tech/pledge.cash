@@ -40,11 +40,11 @@ export function useTransactionCenter(chainId: number, account?: Address): {
   clearSettled: () => void;
 } {
   const identity = transactionIdentity(chainId, account);
-  const [records, setRecords] = useState<TransactionRecord[]>(() => readStoredTransactions()[identity] ?? []);
+  const [records, setRecords] = useState<TransactionRecord[]>(() => recoverInterruptedTransactions(readStoredTransactions()[identity] ?? []));
   const [loadedIdentity, setLoadedIdentity] = useState(identity);
 
   useEffect(() => {
-    setRecords(readStoredTransactions()[identity] ?? []);
+    setRecords(recoverInterruptedTransactions(readStoredTransactions()[identity] ?? []));
     setLoadedIdentity(identity);
   }, [identity]);
 
@@ -78,7 +78,32 @@ export function useTransactionCenter(chainId: number, account?: Address): {
     setRecords((current) => current.filter((record) => !isSettledStage(record.stage)));
   }, []);
 
-  return { records, startTransaction, updateTransaction, clearSettled };
+  return {
+    records: loadedIdentity === identity ? records : [],
+    startTransaction,
+    updateTransaction,
+    clearSettled,
+  };
+}
+
+export function recoverInterruptedTransactions(records: readonly TransactionRecord[]): TransactionRecord[] {
+  return records.map((record) => {
+    if (record.stage === "review" || record.stage === "simulating" || record.stage === "awaiting-signature") {
+      return {
+        ...record,
+        error: "This transaction was interrupted before submission. Review and start it again.",
+        stage: "failed",
+      };
+    }
+    if (record.stage === "submitted" && !record.hash) {
+      return {
+        ...record,
+        error: "This submitted transaction has no receipt hash and cannot be resumed.",
+        stage: "failed",
+      };
+    }
+    return record;
+  });
 }
 
 export function TransactionTray({
