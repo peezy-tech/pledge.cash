@@ -117,7 +117,8 @@ For `price > 0`:
 Effects:
 
 - factory validates exact native value equal to the configured creation fee,
-- for a paid Boardroom-issued grant, the payment token is registered immediately as a redeemable Boardroom asset,
+- for a Boardroom-issued grant, every non-share grant token and every nonzero payment token is registered immediately
+  as a redeemable Boardroom asset,
 - factory deploys the grant clone at an address derived from `issuer` and `salt`,
 - grant state is initialized once,
 - full grant is transferred from issuer into escrow by the factory,
@@ -223,6 +224,7 @@ rights. Partially settled grants preserve their settled accounting and record on
 - holder-only settlement cannot be called by issuer or random callers.
 - issuer-only transitions cannot be called by holder or random callers.
 - only a canonical Boardroom issuer can quarantine a grant, and only after settlement rights have expired.
+- a non-share grant asset that returns on halt or expiry remains inside the Boardroom redemption basket.
 - `price == 0` grants never call a payment token.
 - `price > 0` payment cost is rounded up to the nearest payment-token smallest unit.
 - configured native creation fees must be paid exactly.

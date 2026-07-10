@@ -368,6 +368,8 @@ contract BoardroomGovernanceLogic {
         TokenGrant tokenGrant = TokenGrant(grant);
         if (tokenGrant.issuer() != address(this) || tokenGrant.factory() != factory) revert InvalidIssuedGrant(grant);
 
+        address grantToken = tokenGrant.token();
+        if (grantToken != shareToken) _registerAssetIfNeeded(slots, grantToken, shareToken, maxAssets);
         address paymentToken = tokenGrant.paymentToken();
         if (paymentToken != address(0)) _registerAssetIfNeeded(slots, paymentToken, shareToken, maxAssets);
         _setMappingBool(slots.isIssuedGrant, grant, true);

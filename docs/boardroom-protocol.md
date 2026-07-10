@@ -138,10 +138,10 @@ Boardroom can mint or burn it. Checkpoint lookup is logarithmic and only permits
 6. `TokenGrantFactory` transfers the grant tokens from the Boardroom into the grant escrow.
 7. The factory mints the grant-right ERC721 token to the grant holder.
 
-For paid grants, settlement payment tokens are transferred to the Boardroom and atomically, permanently admitted to the
-bounded redemption basket when the grant is recorded. Distribution payment and curve quote assets are admitted the
-same way by their module factories. The Boardroom owner can use registry-approved policies to deploy or spend proceeds
-while active.
+Every non-share grant token and every paid-grant settlement token is atomically, permanently admitted to the bounded
+redemption basket when the grant is recorded. This covers both settlement revenue and grant assets that can return on
+halt, expiry, or quarantine recovery. Distribution payment and curve quote assets are admitted the same way by their
+module factories. The Boardroom owner can use registry-approved policies to deploy or spend proceeds while active.
 
 ## Fixed-Price Share Sale Flow
 

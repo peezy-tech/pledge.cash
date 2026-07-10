@@ -951,6 +951,40 @@ contract BoardroomTest is Test {
         assertEq(shareToken.balanceOf(holder), 10 ether);
     }
 
+    function testExternalGrantAssetReturnsIntoWindDownRedemptions() public {
+        (Boardroom boardroom,) = _createBoardroom("external-grant-asset-redemption");
+        BoardroomCurrency grantToken = new BoardroomCurrency("Grant Asset", "GAST", 18);
+        assetPolicy.setAssetAllowed(address(grantToken), true);
+        grantToken.mint(address(boardroom), GRANT_SIZE);
+
+        vm.prank(owner);
+        boardroom.mint(holder, 1 ether);
+        TokenGrant grant = _createBoardroomGrant(
+            boardroom,
+            _boardroomGrantCreate(
+                address(grantToken), holder, address(0), GRANT_SIZE, 0, keccak256("external-grant-asset"), 0
+            )
+        );
+        assertTrue(boardroom.isRedeemableAsset(address(grantToken)));
+
+        vm.prank(owner);
+        boardroom.startWindDown();
+        vm.prank(stranger);
+        boardroom.executeWindDownCall(
+            _tokenGrantFactoryCall(address(grant), 0, abi.encodeCall(TokenGrant.stopVestingAndWithdrawUnvested, ()))
+        );
+        vm.prank(stranger);
+        boardroom.openRedemptions();
+
+        uint256[] memory minimums = new uint256[](2);
+        vm.prank(holder);
+        uint256[] memory amounts = boardroom.redeem(1 ether, holder, minimums);
+
+        assertEq(amounts[1], GRANT_SIZE);
+        assertEq(grantToken.balanceOf(holder), GRANT_SIZE);
+        assertEq(grantToken.balanceOf(address(boardroom)), 0);
+    }
+
     function testBoardroomCanSellSharesAndFundPayrollGrant() public {
         (Boardroom boardroom,) = _createBoardroom("sell-shares-payroll");
         BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
