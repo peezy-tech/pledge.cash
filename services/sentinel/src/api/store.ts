@@ -14,19 +14,20 @@ import {
   walletOwners,
   wallets
 } from "../db/schema";
-import type {
-  AddressDto,
-  AnalysisDto,
-  AuthProviderDto,
-  BoardroomRef,
-  ChannelDto,
-  HealthResponse,
-  PublicActionDto,
-  PublicActionsQuery,
-  PublicActionsResponse,
-  RiskAssessmentDto,
-  SubscriptionDto,
-  WalletDto
+import {
+  AuthProviderSchema,
+  type AddressDto,
+  type AnalysisDto,
+  type AuthProviderDto,
+  type BoardroomRef,
+  type ChannelDto,
+  type HealthResponse,
+  type PublicActionDto,
+  type PublicActionsQuery,
+  type PublicActionsResponse,
+  type RiskAssessmentDto,
+  type SubscriptionDto,
+  type WalletDto
 } from "./dto";
 import type { SentinelApiStore, TelegramLinkCodeRecord, WalletNonceRecord } from "./auth";
 
@@ -510,9 +511,7 @@ async function listAuthProviders(db: SentinelDb, userId: string): Promise<AuthPr
     .where(eq(authAccounts.userId, userId));
   const providers = rows
     .map((row) => row.providerId)
-    .filter((provider): provider is AuthProviderDto =>
-      ["apple", "github", "google", "siwe"].includes(provider)
-    );
+    .filter((provider): provider is AuthProviderDto => AuthProviderSchema.safeParse(provider).success);
   return [...new Set(providers)].sort((left, right) => {
     if (left === "siwe") return -1;
     if (right === "siwe") return 1;

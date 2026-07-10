@@ -1,9 +1,15 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { organization, siwe } from "better-auth/plugins";
+import { genericOAuth, organization, siwe } from "better-auth/plugins";
 import { and, eq, sql } from "drizzle-orm";
+import {
+  createRemoteJWKSet,
+  jwtVerify,
+  type JWTPayload,
+  type JWTVerifyGetKey
+} from "jose";
 import { verifyMessage, type Address, type Hex } from "viem";
 import { parseSiweMessage } from "viem/siwe";
 
@@ -16,6 +22,15 @@ export const ALERTS_SIWE_STATEMENT = "Sign in to pledge.cash alerts.";
 export const WALLET_LINK_SIWE_STATEMENT = "Link this wallet to pledge.cash Sentinel notifications.";
 const SIWE_MAX_AGE_MS = 15 * 60 * 1_000;
 const SIWE_CLOCK_SKEW_MS = 5 * 60 * 1_000;
+const TELEGRAM_ISSUER = "https://oauth.telegram.org";
+const TELEGRAM_DISCOVERY_URL = `${TELEGRAM_ISSUER}/.well-known/openid-configuration`;
+const TELEGRAM_JWKS = createRemoteJWKSet(
+  new URL(`${TELEGRAM_ISSUER}/.well-known/jwks.json`)
+);
+
+type TelegramOAuthTokens = {
+  readonly idToken?: string | undefined;
+};
 
 export function createBetterAuthAdapter(
   config: Pick<Config, "auth" | "chains" | "webOrigin">,
@@ -26,6 +41,32 @@ export function createBetterAuthAdapter(
   const github = config.auth.socialProviders.github;
   const google = config.auth.socialProviders.google;
   const apple = config.auth.socialProviders.apple;
+  const discord = config.auth.socialProviders.discord;
+  const telegram = config.auth.socialProviders.telegram;
+  const twitter = config.auth.socialProviders.twitter;
+  const telegramPlugins =
+    telegram === undefined
+      ? []
+      : [
+          genericOAuth({
+            config: [
+              {
+                authentication: "basic",
+                clientId: telegram.clientId,
+                clientSecret: telegram.clientSecret,
+                disableImplicitSignUp: true,
+                disableSignUp: true,
+                discoveryUrl: TELEGRAM_DISCOVERY_URL,
+                getUserInfo: (tokens) => telegramUserInfo(tokens, telegram.clientId),
+                issuer: TELEGRAM_ISSUER,
+                pkce: true,
+                providerId: "telegram",
+                scopes: ["openid", "profile"],
+                tokenUrlParams: { client_id: telegram.clientId }
+              }
+            ]
+          })
+        ];
 
   const auth = betterAuth({
     appName: "pledge.cash",
@@ -70,6 +111,20 @@ export function createBetterAuthAdapter(
       }
     },
     socialProviders: {
+      ...(discord === undefined
+        ? {}
+        : {
+            discord: {
+              ...discord,
+              disableDefaultScope: true,
+              disableImplicitSignUp: true,
+              disableSignUp: true,
+              mapProfileToUser: (profile) => ({
+                email: socialProviderEmail("discord", profile.id)
+              }),
+              scope: ["identify"]
+            }
+          }),
       ...(github === undefined
         ? {}
         : {
@@ -98,6 +153,20 @@ export function createBetterAuthAdapter(
               disableImplicitSignUp: true,
               disableSignUp: true
             }
+          }),
+      ...(twitter === undefined
+        ? {}
+        : {
+            twitter: {
+              ...twitter,
+              disableDefaultScope: true,
+              disableImplicitSignUp: true,
+              disableSignUp: true,
+              mapProfileToUser: (profile) => ({
+                email: socialProviderEmail("twitter", profile.data.id)
+              }),
+              scope: ["users.read"]
+            }
           })
     },
     advanced: {
@@ -111,6 +180,7 @@ export function createBetterAuthAdapter(
     },
     telemetry: { enabled: false },
     plugins: [
+      ...telegramPlugins,
       siwe({
         anonymous: true,
         domain: new URL(config.webOrigin).host,
@@ -148,6 +218,70 @@ export function createBetterAuthAdapter(
     },
     handler: (request) => auth.handler(request)
   };
+}
+
+export async function verifyTelegramIdToken(
+  idToken: string,
+  clientId: string,
+  getKey: JWTVerifyGetKey = TELEGRAM_JWKS
+): Promise<JWTPayload> {
+  const { payload } = await jwtVerify(idToken, getKey, {
+    algorithms: ["RS256"],
+    audience: clientId,
+    issuer: TELEGRAM_ISSUER
+  });
+  return payload;
+}
+
+export async function telegramUserInfo(
+  tokens: TelegramOAuthTokens,
+  clientId: string,
+  getKey: JWTVerifyGetKey = TELEGRAM_JWKS
+): Promise<{
+  readonly email: string;
+  readonly emailVerified: false;
+  readonly id: string;
+  readonly image?: string | undefined;
+  readonly name: string;
+  readonly sub: string;
+} | null> {
+  if (tokens.idToken === undefined) return null;
+
+  let payload: JWTPayload;
+  try {
+    payload = await verifyTelegramIdToken(tokens.idToken, clientId, getKey);
+  } catch {
+    return null;
+  }
+
+  const subject = typeof payload.sub === "string" ? payload.sub.trim() : "";
+  const name = firstNonEmptyString(payload.name, payload.preferred_username);
+  if (subject.length === 0 || name === undefined) return null;
+
+  const image = firstNonEmptyString(payload.picture);
+  return {
+    email: socialProviderEmail("telegram", subject),
+    emailVerified: false,
+    id: subject,
+    ...(image === undefined ? {} : { image }),
+    name,
+    sub: subject
+  };
+}
+
+function socialProviderEmail(provider: SocialProviderName, accountId: string): string {
+  const digest = createHash("sha256")
+    .update(provider)
+    .update("\0")
+    .update(accountId)
+    .digest("hex");
+  return `${provider}-${digest}@social.pledge.cash.invalid`;
+}
+
+function firstNonEmptyString(...values: unknown[]): string | undefined {
+  return values.find(
+    (value): value is string => typeof value === "string" && value.trim().length > 0
+  )?.trim();
 }
 
 export function createPledgeCashSiweVerifier(
@@ -247,10 +381,10 @@ function createPrimarySiweVerifier(
   };
 }
 
-function configuredSocialProviders(
+export function configuredSocialProviders(
   providers: Config["auth"]["socialProviders"]
 ): SocialProviderName[] {
-  return (["github", "google", "apple"] as const).filter(
+  return (["discord", "google", "twitter", "telegram", "github", "apple"] as const).filter(
     (provider) => providers[provider] !== undefined
   );
 }

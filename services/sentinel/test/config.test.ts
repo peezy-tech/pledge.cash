@@ -15,18 +15,27 @@ describe("Sentinel config", () => {
   test("loads Better Auth and complete optional social provider credentials", () => {
     const config = loadConfig({
       ...baseEnv,
+      DISCORD_CLIENT_ID: "discord-client",
+      DISCORD_CLIENT_SECRET: "discord-secret",
       GITHUB_CLIENT_ID: "github-client",
       GITHUB_CLIENT_SECRET: "github-secret",
       GOOGLE_CLIENT_ID: "google-client",
-      GOOGLE_CLIENT_SECRET: "google-secret"
+      GOOGLE_CLIENT_SECRET: "google-secret",
+      TELEGRAM_OAUTH_CLIENT_ID: "telegram-client",
+      TELEGRAM_OAUTH_CLIENT_SECRET: "telegram-secret",
+      TWITTER_CLIENT_ID: "twitter-client",
+      TWITTER_CLIENT_SECRET: "twitter-secret"
     });
 
     expect(config.auth).toEqual({
       baseUrl: "https://api.pledge.cash",
       secret: baseEnv.BETTER_AUTH_SECRET,
       socialProviders: {
+        discord: { clientId: "discord-client", clientSecret: "discord-secret" },
         github: { clientId: "github-client", clientSecret: "github-secret" },
-        google: { clientId: "google-client", clientSecret: "google-secret" }
+        google: { clientId: "google-client", clientSecret: "google-secret" },
+        telegram: { clientId: "telegram-client", clientSecret: "telegram-secret" },
+        twitter: { clientId: "twitter-client", clientSecret: "twitter-secret" }
       }
     });
   });
@@ -35,7 +44,10 @@ describe("Sentinel config", () => {
     const incompleteProviders = [
       { GITHUB_CLIENT_ID: "github-client" },
       { GOOGLE_CLIENT_SECRET: "google-secret" },
-      { APPLE_CLIENT_ID: "apple-client" }
+      { APPLE_CLIENT_ID: "apple-client" },
+      { DISCORD_CLIENT_SECRET: "discord-secret" },
+      { TELEGRAM_OAUTH_CLIENT_ID: "telegram-client" },
+      { TWITTER_CLIENT_SECRET: "twitter-secret" }
     ];
 
     for (const provider of incompleteProviders) {

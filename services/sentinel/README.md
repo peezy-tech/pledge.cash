@@ -28,8 +28,11 @@ Copy `.env.example` and set values for your environment.
 | `SENTINEL_EXPLORER_URL_<chainId>` | no | Explorer base URL used in rendered notifications. |
 | `BETTER_AUTH_SECRET` | yes | Unique 32+ character secret used to protect self-hosted auth state and tokens. |
 | `BETTER_AUTH_URL` | yes | Public Sentinel API origin. Better Auth is mounted at `/auth`. |
+| `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | no | Enables Discord as an explicitly linked sign-in method. |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | no | Enables GitHub as an explicitly linked sign-in method. |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | no | Enables Google as an explicitly linked sign-in method. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | no | Enables Google / YouTube as an explicitly linked sign-in method. |
+| `TWITTER_CLIENT_ID`, `TWITTER_CLIENT_SECRET` | no | Enables X as an explicitly linked sign-in method; separate from Twitter notification credentials. |
+| `TELEGRAM_OAUTH_CLIENT_ID`, `TELEGRAM_OAUTH_CLIENT_SECRET` | no | Enables Telegram OIDC sign-in; separate from the Telegram notification bot token. |
 | `APPLE_CLIENT_ID`, `APPLE_CLIENT_SECRET` | no | Enables Apple as an explicitly linked sign-in method. |
 | `SENTINEL_HARNESS` | no | `claude`, `codex`, or `none`; default `claude`. |
 | `SENTINEL_HARNESS_CMD` | no | Harness binary override. |
@@ -48,7 +51,7 @@ Harness credentials such as API keys or CLI logins belong to the host environmen
 
 Authentication is wallet-first: the first SIWE signature creates a pseudonymous local account with no profile form, password, or deliverable email address. This release accepts EOA signatures only; ERC-1271 smart-account authentication needs a chain-scoped identity model and is rejected rather than merging the same contract address across chains. Configured social providers can be linked explicitly and can then sign back into that same wallet account; they cannot create walletless accounts. Better Auth organization tables are present as a dormant foundation for future group accounts, but organization creation and UI are disabled until group ownership semantics are defined.
 
-OAuth provider callbacks use `${BETTER_AUTH_URL}/auth/callback/<provider>`, for example `http://localhost:8787/auth/callback/github` in local development.
+Built-in OAuth provider callbacks use `${BETTER_AUTH_URL}/auth/callback/<provider>`, for example `http://localhost:8787/auth/callback/discord` in local development. Telegram uses Better Auth's Generic OAuth callback at `${BETTER_AUTH_URL}/auth/oauth2/callback/telegram`; keep the BotFather Web Login signing algorithm at its `RS256` default. Google / YouTube requests ordinary Google identity only; this integration does not request YouTube Data API access. Telegram authentication does not grant alert-delivery access, which remains an explicit bot-linking step.
 
 ## Local Commands
 

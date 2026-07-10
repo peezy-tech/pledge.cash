@@ -60,6 +60,9 @@ type JsonRequestOptions = {
 };
 
 type QueryValue = string | number | boolean | null | undefined;
+type GenericOAuthRedirectRequest = Omit<AuthRedirectRequest, "provider"> & {
+  providerId: "telegram";
+};
 
 export class SentinelApiError extends Error {
   readonly body: string | undefined;
@@ -124,14 +127,41 @@ export function createSentinelClient(options: SentinelClientOptions = {}) {
     listPublicActions: (query?: SentinelPublicActionsQuery | undefined, signal?: AbortSignal | undefined) =>
       sentinelJson<PublicActionsResponse>(baseUrl, fetcher, "/public/actions", { query: queryParams(query), signal }),
     linkSocial: (body: SocialAuthRequest) =>
-      sentinelJson<AuthRedirectResponse>(baseUrl, fetcher, "/auth/link-social", { method: "POST", body }),
+      sentinelJson<AuthRedirectResponse>(
+        baseUrl,
+        fetcher,
+        body.provider === "telegram" ? "/auth/oauth2/link" : "/auth/link-social",
+        {
+          method: "POST",
+          body: socialAuthBody(body),
+        },
+      ),
     logout: () => sentinelJson<AuthSignOutResponse>(baseUrl, fetcher, "/auth/sign-out", { method: "POST" }),
     putSubscription: (body: PutSubscriptionRequest) =>
       sentinelJson<SubscriptionResponse>(baseUrl, fetcher, "/subscriptions", { method: "PUT", body }),
     signInSocial: (body: SocialAuthRequest) =>
-      sentinelJson<AuthRedirectResponse>(baseUrl, fetcher, "/auth/sign-in/social", { method: "POST", body }),
+      sentinelJson<AuthRedirectResponse>(
+        baseUrl,
+        fetcher,
+        body.provider === "telegram" ? "/auth/sign-in/oauth2" : "/auth/sign-in/social",
+        {
+          method: "POST",
+          body: socialAuthBody(body),
+        },
+      ),
     verifyAuthSiwe: (body: AuthSiweVerifyRequest) =>
       sentinelJson<AuthSiweVerifyResponse>(baseUrl, fetcher, "/auth/siwe/verify", { method: "POST", body }),
+  };
+}
+
+function socialAuthBody(
+  body: SocialAuthRequest,
+): AuthRedirectRequest | GenericOAuthRedirectRequest {
+  if (body.provider !== "telegram") return body;
+  return {
+    callbackURL: body.callbackURL,
+    ...(body.errorCallbackURL === undefined ? {} : { errorCallbackURL: body.errorCallbackURL }),
+    providerId: "telegram",
   };
 }
 

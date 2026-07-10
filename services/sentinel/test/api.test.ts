@@ -38,7 +38,7 @@ type ForwardedAuthRequest = {
 
 class StubAuth implements AuthAdapter {
   readonly forwarded: ForwardedAuthRequest[] = [];
-  readonly socialProviders = ["github", "google"] as const;
+  readonly socialProviders = ["discord", "google", "twitter", "telegram"] as const;
 
   async getSession(input: { readonly headers: Headers }) {
     return input.headers.get("cookie")?.includes(SESSION_COOKIE) === true
@@ -78,7 +78,10 @@ class InMemoryStore implements SentinelApiStore {
       }
     | undefined;
   pingCount = 0;
-  providersByUser = new Map<string, Array<"apple" | "github" | "google" | "siwe">>();
+  providersByUser = new Map<
+    string,
+    Array<"apple" | "discord" | "github" | "google" | "siwe" | "telegram" | "twitter">
+  >();
   subscriptionsByUser = new Map<string, SubscriptionDto>();
   walletsByUser = new Map<string, WalletDto[]>();
 
@@ -390,7 +393,7 @@ describe("Sentinel WP5 API", () => {
     const capabilities = await harness.app.request("/auth/capabilities");
     expect(capabilities.status).toBe(200);
     expect(await readJson<{ socialProviders: string[] }>(capabilities)).toEqual({
-      socialProviders: ["github", "google"]
+      socialProviders: ["discord", "google", "twitter", "telegram"]
     });
 
     harness.store.providersByUser.set(USER_ID, ["siwe", "github"]);

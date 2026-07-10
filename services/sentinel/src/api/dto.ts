@@ -32,7 +32,14 @@ export const HealthResponseSchema = z.object({
   ok: z.literal(true)
 });
 
-export const SocialProviderSchema = z.enum(["apple", "github", "google"]);
+export const SocialProviderSchema = z.enum([
+  "apple",
+  "discord",
+  "github",
+  "google",
+  "telegram",
+  "twitter"
+]);
 export const AuthProviderSchema = z.enum(["siwe", ...SocialProviderSchema.options]);
 
 export const UserDtoSchema = z.object({
