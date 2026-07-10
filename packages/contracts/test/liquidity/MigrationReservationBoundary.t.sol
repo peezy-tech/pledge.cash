@@ -16,7 +16,7 @@ interface IMigrationReservationAmmFactory {
     function initialLiquidityReservationFor(address tokenA, address tokenB)
         external
         view
-        returns (address initializer, address recipient, address reservationOwner);
+        returns (address initializer, address recipient, address reservationOwner, address manager);
 }
 
 interface IMigrationReservationToken {
@@ -245,6 +245,19 @@ contract MigrationReservationBoundaryTest is Test {
         _assertAmmReservation(quoteToken, address(replacement), true);
     }
 
+    function testCreatingManagerCanReleaseReservationAfterGlobalManagerRotation() public {
+        address quoteToken = address(new MigrationReservationQuoteToken());
+        bytes32 migrationSalt = keccak256("manager-rotation-release");
+        MigrationReservationDistribution distribution = _createReservation(quoteToken, migrationSalt);
+        boardroom.setIssuedDistribution(address(distribution), true);
+
+        IMigrationReservationAmmFactory(address(ammFactory)).setReservationManager(address(0xBEEF));
+        distribution.releaseReservation(lockedLiquidityFactory);
+
+        assertEq(lockedLiquidityFactory.migrationReservationCount(address(boardroom)), 0);
+        _assertAmmReservation(quoteToken, address(0), false);
+    }
+
     function testThirtyTwoReservationsFillCapacityAndThirtyThirdReverts() public {
         uint256 capacity = lockedLiquidityFactory.MAX_LOCKERS_PER_BOARDROOM();
         assertEq(capacity, 32);
@@ -293,11 +306,12 @@ contract MigrationReservationBoundaryTest is Test {
     }
 
     function _assertAmmReservation(address quoteToken, address expectedOwner, bool expectedPresent) internal view {
-        (address initializer, address recipient, address reservationOwner) =
+        (address initializer, address recipient, address reservationOwner, address manager) =
             IMigrationReservationAmmFactory(address(ammFactory)).initialLiquidityReservationFor(shareToken, quoteToken);
         assertEq(reservationOwner, expectedOwner);
         assertEq(initializer != address(0), expectedPresent);
         assertEq(recipient, initializer);
+        assertEq(manager, expectedPresent ? address(lockedLiquidityFactory) : address(0));
     }
 
     function _pairKey(address tokenA, address tokenB) internal pure returns (bytes32) {
