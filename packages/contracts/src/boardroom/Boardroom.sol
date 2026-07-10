@@ -531,7 +531,12 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         BoardroomStatus currentStatus = status;
         _authorizeCallForStatus(currentStatus, policy, target, selector, call_.value, call_.data);
 
-        result = _executeExternalCall(call_);
+        if (_isSelfCallWithoutPolicy(policy, target) && selector == Boardroom.wrapNativeBalance.selector) {
+            if (call_.value != 0) revert CallNotAllowed(policy, target, selector);
+            _wrapNativeBalanceForWindDown();
+        } else {
+            result = _executeExternalCall(call_);
+        }
 
         _recordPostCallEffects(currentStatus, policy, target, selector, call_.value, call_.data, result);
 
@@ -859,10 +864,8 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     }
 
     function _requireGovernanceCaller() internal view {
-        if (launched) {
-            if (msg.sender != address(this)) revert Unauthorized();
-            return;
-        }
+        if (msg.sender == address(this)) return;
+        if (launched) revert Unauthorized();
 
         _requireOwner();
     }

@@ -428,6 +428,22 @@ contract BoardroomTest is Test {
         boardroom.executeBatch(tooManyCalls);
     }
 
+    function testPrelaunchOwnerCanExecuteGovernanceSelfCalls() public {
+        (Boardroom boardroom,) = _createBoardroom("prelaunch-governance-self-calls");
+        BoardroomCurrency redeemable = new BoardroomCurrency("Redeemable", "RDM", 18);
+
+        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        calls[0] = _rawCall(address(boardroom), 0, abi.encodeCall(Boardroom.mint, (holder, 1 ether)));
+        calls[1] =
+            _rawCall(address(boardroom), 0, abi.encodeCall(Boardroom.registerRedeemableAsset, (address(redeemable))));
+
+        vm.prank(owner);
+        boardroom.executeBatch(calls);
+
+        assertEq(BoardroomToken(boardroom.shareToken()).balanceOf(holder), 1 ether);
+        assertTrue(boardroom.isRedeemableAsset(address(redeemable)));
+    }
+
     function testLaunchedBoardroomQueuesAndAnyoneExecutesReadyAction() public {
         (Boardroom boardroom,) = _createBoardroom("launched-queue-execute");
         uint256 delay = 2 days;
@@ -575,6 +591,32 @@ contract BoardroomTest is Test {
         boardroom.executeQueuedAction(call_, salt);
 
         assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
+    }
+
+    function testLaunchedWindDownCanExecuteQueuedWrapNativeSelfCall() public {
+        (Boardroom boardroom,) = _createBoardroom("launched-wind-down-wrap-native");
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, 1 ether);
+        boardroom.launch(1 days);
+        vm.stopPrank();
+
+        vm.prank(holder);
+        boardroom.startWindDown();
+        _sendNative(address(boardroom), 1 ether);
+
+        Boardroom.Call memory call_ = _rawCall(address(boardroom), 0, abi.encodeCall(Boardroom.wrapNativeBalance, ()));
+        bytes32 salt = keccak256("wrap-native-after-launch");
+
+        vm.prank(owner);
+        (, uint256 eta) = boardroom.queueAction(call_, salt);
+
+        vm.warp(eta);
+        vm.prank(stranger);
+        boardroom.executeQueuedAction(call_, salt);
+
+        assertEq(address(boardroom).balance, 0);
+        assertEq(wrappedNative.balanceOf(address(boardroom)), 1 ether);
     }
 
     function testBoardroomCanIssueFreeGrantForItsShares() public {
