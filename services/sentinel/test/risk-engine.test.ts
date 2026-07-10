@@ -32,8 +32,8 @@ const ctx = {
 } satisfies RiskContext;
 
 describe("risk matrix", () => {
-  test("declares ruleset version 1 and all WP3 rule ids", () => {
-    expect(RULESET_VERSION).toBe(1);
+  test("declares ruleset version 2 and all WP3 rule ids", () => {
+    expect(RULESET_VERSION).toBe(2);
     expect(new Set(RISK_MATRIX.map((rule) => rule.id))).toEqual(
       new Set<RiskRuleId>([
         "set-executor",
@@ -48,6 +48,10 @@ describe("risk matrix", () => {
         "burn-treasury-shares",
         "wrap-native"
       ])
+    );
+
+    expect(RISK_MATRIX.find((rule) => rule.id === "set-executor")?.detail).toBe(
+      "Changes the boardroom executor that can queue governed actions; ready execution remains permissionless."
     );
   });
 });
@@ -75,6 +79,18 @@ describe("evaluateAction", () => {
         target: token
       }),
       ruleId: "external-approve",
+      severity: "high"
+    },
+    {
+      call: storedCall({
+        data: encodeFunctionData({
+          abi: boardroomPolicyRegistryAbi,
+          functionName: "registerModulePolicy",
+          args: [policy]
+        }),
+        target: policyRegistry
+      }),
+      ruleId: "policy-admin",
       severity: "high"
     },
     {

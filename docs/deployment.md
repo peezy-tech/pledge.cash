@@ -11,8 +11,9 @@ migrating bonding curve, AMM, and locked-liquidity primitives.
 | Monad Testnet | `10143` | `https://testnet-rpc.monad.xyz` | `0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541` | `packages/contracts/script/monad-testnet/deploy.sh` | `packages/contracts/deployments/10143.json` |
 
 The deploy script creates or reuses one `PledgeCashDeterministicDeployer`, then creates one
-`BoardroomPolicyRegistry`, one `AssetPolicy`, one `TokenGrantFactory`, one `DistributionFactory`, one `AmmFactory`, one
-`AmmRouter`, one `LockedLiquidityFactory`, and one `BoardroomFactory`. A wrapped-native address is required because
+`BoardroomPolicyRegistry`, one `AssetPolicy`, one `BoardroomFactory`, one `TokenGrantFactory`, one `AmmFactory`, one
+`AmmRouter`, one `LockedLiquidityFactory`, and one `DistributionFactory`. The Boardroom factory is deployed before the
+token-grant factory because its address is an immutable provenance constructor argument. A wrapped-native address is required because
 every Boardroom stores the canonical wrapped native token and wraps raw native funds before wind-down redemptions.
 
 Root protocol contracts are deployed through CREATE3 salts from `PledgeCashDeploymentSalts`. As long as the same
@@ -23,20 +24,29 @@ existing deployer from `PLEDGE_CASH_DETERMINISTIC_DEPLOYER`. The deterministic d
 arguments, so it cannot be captured by the first account to deploy the public salt. Use the same
 `PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER` on every chain that should share deterministic root addresses.
 
-The registry allows `AssetPolicy` for external asset operations and allows the token grant, distribution, and
-locked-liquidity factories as their own Boardroom call policies. Each factory authorizes its own calls and reports any
-created Boardroom obligation for redemption accounting. `AmmRouter` is deployed for user and protocol flows but is not a
-deployment-default Boardroom policy. The deploy script also registers the token grant, distribution, and
-locked-liquidity factories as allowed approval spenders in `AssetPolicy`. Boardroom-created share tokens and other
-project-specific assets still need to be registered in `AssetPolicy` before their approvals can be executed through a
-Boardroom.
+The security-remediated root stack uses the `pledge.cash.deterministic.v3` namespace. The deterministic deployer itself
+keeps its original v1 salt because its bytecode and cross-chain address are unchanged. Every mutable root moved together
+to v3 so a source or embedded-implementation change cannot collide with the init-code hashes already recorded under the
+v1 testnet salts. Future bytecode changes must use a fresh namespace before broadcast; the deployer's hash guard is a
+last line of defense, not a substitute for bumping salts during development.
+
+The registry allows `AssetPolicy` for external asset operations and permanently registers the token grant,
+distribution, and locked-liquidity factories as module policies. Permanent module identity prevents a disabled module
+from becoming an untracked raw-call target and preserves the canonical policy needed to finish or clean up obligations
+that the module created. A module's mutable status still controls whether it can create new obligations. Each factory
+authorizes its own calls and reports any created Boardroom obligation for redemption accounting. `AmmRouter` is deployed
+for user and protocol flows but is not a deployment-default Boardroom policy. The deploy script also registers the token
+grant, distribution, and locked-liquidity factories as allowed approval spenders in `AssetPolicy`. Boardroom-created
+share tokens and other project-specific assets still need to be registered in `AssetPolicy` before their approvals can
+be executed through a Boardroom.
 
 The checked-in testnet artifacts may model subsystems independently while deployment history is being rebuilt. If an
-existing artifact predates a current subsystem, mark that subsystem pending instead of keeping stale partial fields. For
-example, a TokenGrant deployment without a current `DistributionFactory` should set `boardroomStatus: "pending"` and
-omit Boardroom factory fields until a full Boardroom broadcast replaces the artifact. If root factory bytecode changes
-under deterministic deployment, use new salts for those roots and keep the published artifacts pending until the current
-stack is actually broadcast.
+existing artifact predates a current subsystem, mark that subsystem pending instead of keeping stale partial fields. A
+current TokenGrant deployment is no longer independent of Boardroom provenance: every artifact containing
+`tokenGrantFactory` must also contain the canonical `boardroomFactory` embedded in that factory. Other missing Boardroom
+or distribution fields may remain pending until a full stack broadcast replaces the artifact. If root factory bytecode
+changes under deterministic deployment, use new salts for those roots and keep the published artifacts pending until the
+current stack is actually broadcast.
 
 ## Environment
 
@@ -151,8 +161,11 @@ After a broadcast, verify each chain artifact contains:
 - `assetPolicyOwner`
 - `assetPolicyAllowed`
 - `tokenGrantPolicyAllowed`
+- `tokenGrantModulePolicy`
 - `distributionPolicyAllowed`
+- `distributionModulePolicy`
 - `lockedLiquidityPolicyAllowed`
+- `lockedLiquidityModulePolicy`
 - `assetWrappedNativeAllowed`
 - `assetTokenGrantSpenderAllowed`
 - `assetDistributionSpenderAllowed`
@@ -162,6 +175,13 @@ After a broadcast, verify each chain artifact contains:
 - `tokenGrantLogic`
 - `creationFee`
 - `deploymentTimestamp`
+
+The three `*ModulePolicy` identity fields must be `true`. Unlike the corresponding mutable `*PolicyAllowed` status,
+module identity is permanent and remains true if an operator later disables new calls to that module.
+
+`TokenGrantFactory.boardroomFactory()` is an immutable provenance link and must equal the artifact's `boardroomFactory`.
+The fee-exempt distribution-grant path accepts issuers only when that canonical factory reports them as deployed
+Boardrooms; artifact verification checks the link directly to prevent a miswired deployment.
 
 If `AMM_PROTOCOL_FEE_RECIPIENT` was configured, the artifact should also contain:
 

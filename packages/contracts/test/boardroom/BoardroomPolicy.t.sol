@@ -25,12 +25,22 @@ contract BoardroomPolicyTest is Test {
         assetPolicy = new AssetPolicy(owner, address(wrappedNative));
     }
 
-    function testPolicyRegistryTracksActiveAndLifecycleOnlyStatus() public {
+    function testPolicyRegistryTracksStatusWithoutTreatingPlainPolicyAsModule() public {
         assertFalse(policyRegistry.isPolicyAllowed(token));
         assertFalse(policyRegistry.isPolicyLifecycleAllowed(token));
+        assertFalse(policyRegistry.isModulePolicy(token));
 
         policyRegistry.setPolicyAllowed(token, true);
 
+        assertTrue(policyRegistry.isPolicyAllowed(token));
+        assertTrue(policyRegistry.isPolicyLifecycleAllowed(token));
+        assertFalse(policyRegistry.isModulePolicy(token));
+    }
+
+    function testModuleIdentityIsPermanentAcrossEveryStatus() public {
+        policyRegistry.registerModulePolicy(token);
+
+        assertTrue(policyRegistry.isModulePolicy(token));
         assertTrue(policyRegistry.isPolicyAllowed(token));
         assertTrue(policyRegistry.isPolicyLifecycleAllowed(token));
 
@@ -42,7 +52,11 @@ contract BoardroomPolicyTest is Test {
         policyRegistry.setPolicyAllowed(token, false);
 
         assertFalse(policyRegistry.isPolicyAllowed(token));
-        assertFalse(policyRegistry.isPolicyLifecycleAllowed(token));
+        assertTrue(policyRegistry.isPolicyLifecycleAllowed(token));
+        assertTrue(policyRegistry.isModulePolicy(token));
+
+        vm.expectRevert(abi.encodeWithSelector(BoardroomPolicyRegistry.ModulePolicyAlreadyRegistered.selector, token));
+        policyRegistry.registerModulePolicy(token);
     }
 
     function testPolicyRegistryOnlyOwnerCanManageStatus() public {
@@ -54,11 +68,18 @@ contract BoardroomPolicyTest is Test {
         vm.expectRevert(Ownable.Unauthorized.selector);
         policyRegistry.setPolicyStatus(token, BoardroomPolicyRegistry.PolicyStatus.LifecycleOnly);
 
+        vm.prank(stranger);
+        vm.expectRevert(Ownable.Unauthorized.selector);
+        policyRegistry.registerModulePolicy(token);
+
         vm.expectRevert(BoardroomPolicyRegistry.InvalidAddress.selector);
         policyRegistry.setPolicyAllowed(address(0), true);
 
         vm.expectRevert(BoardroomPolicyRegistry.InvalidAddress.selector);
         policyRegistry.setPolicyStatus(address(0), BoardroomPolicyRegistry.PolicyStatus.Active);
+
+        vm.expectRevert(BoardroomPolicyRegistry.InvalidAddress.selector);
+        policyRegistry.registerModulePolicy(address(0));
     }
 
     function testAssetPolicyAllowsWrappedNativeDepositOnly() public view {

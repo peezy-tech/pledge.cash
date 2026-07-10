@@ -129,6 +129,7 @@ export type LockedLiquidityPanelState = {
 export type WindDownPanelState = {
   form: WindDownForm;
   burnTreasuryShares: () => Promise<void>;
+  claimRedemptionAsset: () => Promise<void>;
   openRedemptions: () => Promise<void>;
   redeemShares: () => Promise<void>;
   registerRedeemableAsset: () => Promise<void>;

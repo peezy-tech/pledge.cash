@@ -44,7 +44,7 @@ describe("generated SDK exports", () => {
   test("includes checked-in deployment metadata", () => {
     expect(pledgeCashDeployments[998]?.chainId).toBe(998);
     expect(pledgeCashDeployments[998]?.status).toBe("pending");
-    expect(pledgeCashDeployments[998]?.reason).toContain("deterministic v2 deployment");
+    expect(pledgeCashDeployments[998]?.reason).toContain("deterministic v3 deployment");
     expect(pledgeCashDeployments[998]?.tokenGrantFactory).toBeUndefined();
     expect(pledgeCashDeployments[998]?.boardroomFactory).toBeUndefined();
     expect(pledgeCashDeployments[998]?.distributionFactory).toBeUndefined();

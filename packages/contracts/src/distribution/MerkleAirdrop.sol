@@ -19,10 +19,10 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
     uint8 internal constant BOARDROOM_STATUS_ACTIVE = 0;
 
     bytes32 public constant DIRECT_CLAIM_TYPEHASH = keccak256(
-        "MerkleAirdropDirectClaim(uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
+        "MerkleAirdropDirectClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
     );
     bytes32 public constant GRANT_CLAIM_TYPEHASH = keccak256(
-        "MerkleAirdropGrantClaim(uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)"
+        "MerkleAirdropGrantClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)"
     );
     bytes32 public constant GRANT_TERMS_TYPEHASH = keccak256(
         "MerkleAirdropGrantTerms(address paymentToken,uint256 price,uint256 expiry,uint256 vestingCliff,uint256 vestingEnd,bool transferable,uint256 transferUnlockTime,bytes32 salt)"
@@ -60,6 +60,7 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
     address public shareToken;
     address public tokenGrantFactory;
     uint256 public airdropSupply;
+    uint256 public claimedShares;
     uint256 public remainingShares;
     bytes32 public merkleRoot;
     uint64 public startTime;
@@ -147,7 +148,7 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         uint256 amount,
         GrantClaimParams calldata params,
         bytes32[] calldata proof
-    ) external payable nonReentrant returns (address grant) {
+    ) external nonReentrant returns (address grant) {
         uint16 nextClaimedGrantCount = _nextClaimedGrantCount();
 
         _claim(index, account, amount, getGrantClaimLeaf(index, account, amount, params), proof);
@@ -188,8 +189,11 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
     }
 
     function getDirectClaimLeaf(uint256 index, address account, uint256 amount) public view returns (bytes32) {
-        return
-            keccak256(abi.encode(DIRECT_CLAIM_TYPEHASH, index, address(this), boardroom, shareToken, account, amount));
+        return keccak256(
+            abi.encode(
+                DIRECT_CLAIM_TYPEHASH, block.chainid, index, address(this), boardroom, shareToken, account, amount
+            )
+        );
     }
 
     function getGrantClaimLeaf(uint256 index, address account, uint256 amount, GrantClaimParams calldata params)
@@ -200,6 +204,7 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         return keccak256(
             abi.encode(
                 GRANT_CLAIM_TYPEHASH,
+                block.chainid,
                 index,
                 address(this),
                 boardroom,
@@ -242,7 +247,9 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         _requireClaimable(index, account, amount, leaf, proof);
 
         _setClaimed(index);
-        remainingShares -= amount;
+        uint256 nextClaimedShares = claimedShares + amount;
+        claimedShares = nextClaimedShares;
+        remainingShares = airdropSupply - nextClaimedShares;
     }
 
     function _setClaimed(uint256 index) internal {
@@ -289,14 +296,16 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
 
     function _requireValidCreateParams(address boardroom_, address tokenGrantFactory_, CreateParams calldata params)
         internal
-        pure
+        view
     {
         if (boardroom_ == address(0) || params.shareToken == address(0) || tokenGrantFactory_ == address(0)) {
             revert InvalidAddress();
         }
         if (params.shareAmount == 0) revert InvalidAmount();
         if (params.merkleRoot == bytes32(0)) revert InvalidMerkleRoot();
-        if (params.endTime != 0 && params.endTime < params.startTime) revert InvalidTimeWindow();
+        if (params.endTime != 0 && (params.endTime <= params.startTime || uint256(params.endTime) <= block.timestamp)) {
+            revert InvalidTimeWindow();
+        }
     }
 
     function _requireClaimable(uint256 index, address account, uint256 amount, bytes32 leaf, bytes32[] calldata proof)
@@ -323,9 +332,8 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         address shareToken_ = shareToken;
         address tokenGrantFactory_ = tokenGrantFactory;
         shareToken_.safeApprove(tokenGrantFactory_, amount);
-        grant = TokenGrantFactory(tokenGrantFactory_).createGrantFromDistribution{value: msg.value}(
-            boardroom, _grantCreateParams(index, account, shareToken_, amount, params)
-        );
+        grant = TokenGrantFactory(tokenGrantFactory_)
+            .createGrantFromDistribution(boardroom, _grantCreateParams(index, account, shareToken_, amount, params));
         shareToken_.safeApprove(tokenGrantFactory_, 0);
     }
 

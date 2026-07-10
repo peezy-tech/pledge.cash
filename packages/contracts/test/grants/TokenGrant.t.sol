@@ -151,6 +151,46 @@ contract FeeOnTransferERC20 is GrantERC20 {
     }
 }
 
+contract SenderSurchargeERC20 is GrantERC20 {
+    uint256 internal immutable surchargeBps;
+    bool internal immutable surchargeTransfer;
+    bool internal immutable surchargeTransferFrom;
+
+    constructor(
+        string memory name_,
+        string memory symbol_,
+        uint8 decimals_,
+        uint256 surchargeBps_,
+        bool surchargeTransfer_,
+        bool surchargeTransferFrom_
+    ) GrantERC20(name_, symbol_, decimals_) {
+        surchargeBps = surchargeBps_;
+        surchargeTransfer = surchargeTransfer_;
+        surchargeTransferFrom = surchargeTransferFrom_;
+    }
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        _moveWithSenderSurcharge(msg.sender, to, amount, surchargeTransfer);
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
+        uint256 allowed = allowance[from][msg.sender];
+        if (allowed != type(uint256).max) {
+            allowance[from][msg.sender] = allowed - amount;
+        }
+        _moveWithSenderSurcharge(from, to, amount, surchargeTransferFrom);
+        return true;
+    }
+
+    function _moveWithSenderSurcharge(address from, address to, uint256 amount, bool applySurcharge) internal {
+        uint256 surcharge = applySurcharge ? (amount * surchargeBps) / 10_000 : 0;
+        balanceOf[from] -= amount + surcharge;
+        balanceOf[to] += amount;
+        totalSupply -= surcharge;
+    }
+}
+
 contract ReentrantPaymentERC20 is GrantERC20 {
     address public target;
     bytes public payload;
@@ -183,6 +223,10 @@ interface IERC721Transfer {
     function safeTransferFrom(address from, address to, uint256 tokenId) external;
 }
 
+contract TokenGrantTestBoardroomFactory {
+    mapping(address => bool) public isBoardroom;
+}
+
 contract TokenGrantTest is Test {
     string internal constant TOKEN_URI_PREFIX = "data:application/json;base64,";
 
@@ -197,6 +241,7 @@ contract TokenGrantTest is Test {
     }
 
     TokenGrantFactory internal factory;
+    TokenGrantTestBoardroomFactory internal boardroomFactory;
     GrantERC20 internal token;
     GrantERC20 internal paymentToken;
 
@@ -208,7 +253,7 @@ contract TokenGrantTest is Test {
     uint256 internal constant PRICE = 2_000000;
     uint256 internal constant CLIFF = 1_000;
     uint256 internal constant VESTING_END = 2_000;
-    uint256 internal constant EXPIRY = 3_000;
+    uint256 internal constant EXPIRY = VESTING_END + 1 days;
     bytes4 internal constant UNAUTHORIZED_SELECTOR = bytes4(keccak256("Unauthorized()"));
 
     event TokenGrantCreated(
@@ -235,7 +280,8 @@ contract TokenGrantTest is Test {
     event CreationFeePaid(address indexed payer, address indexed recipient, uint256 amount);
 
     function setUp() public {
-        factory = new TokenGrantFactory(address(this));
+        boardroomFactory = new TokenGrantTestBoardroomFactory();
+        factory = new TokenGrantFactory(address(this), address(boardroomFactory));
         token = new GrantERC20("Grant Token", "GRANT", 18);
         paymentToken = new GrantERC20("Payment", "PAY", 6);
 
@@ -300,11 +346,20 @@ contract TokenGrantTest is Test {
 
     function testFactoryOwnerIsDeployer() public view {
         assertEq(factory.owner(), address(this));
+        assertEq(factory.boardroomFactory(), address(boardroomFactory));
     }
 
     function testFactoryRejectsZeroOwner() public {
         vm.expectRevert(TokenGrantFactory.InvalidOwner.selector);
-        new TokenGrantFactory(address(0));
+        new TokenGrantFactory(address(0), address(boardroomFactory));
+    }
+
+    function testFactoryRejectsInvalidBoardroomFactory() public {
+        vm.expectRevert(abi.encodeWithSelector(TokenGrantFactory.InvalidBoardroomFactory.selector, address(0)));
+        new TokenGrantFactory(address(this), address(0));
+
+        vm.expectRevert(abi.encodeWithSelector(TokenGrantFactory.InvalidBoardroomFactory.selector, stranger));
+        new TokenGrantFactory(address(this), stranger);
     }
 
     function testOwnerCanSetUpdateAndClearCreationFee() public {
@@ -324,6 +379,28 @@ contract TokenGrantTest is Test {
         vm.prank(stranger);
         vm.expectRevert(UNAUTHORIZED_SELECTOR);
         factory.setCreationFee(0.01 ether);
+    }
+
+    function testBoardroomOwnerPolicyAllowsFeeUpdateAndOwnershipRotation() public {
+        address boardroom = address(0xB04D);
+        address nextOwner = address(0xA0A0);
+        factory.transferOwnership(boardroom);
+
+        bytes memory setFeeData = abi.encodeCall(TokenGrantFactory.setCreationFee, (0.02 ether));
+        bytes memory transferOwnershipData = abi.encodeWithSignature("transferOwnership(address)", nextOwner);
+
+        assertTrue(factory.canCall(boardroom, address(this), address(factory), 0, setFeeData));
+        assertTrue(factory.canCall(boardroom, address(this), address(factory), 0, transferOwnershipData));
+        assertFalse(factory.canCall(stranger, address(this), address(factory), 0, setFeeData));
+        assertFalse(factory.canCall(boardroom, address(this), address(factory), 1, setFeeData));
+
+        vm.prank(boardroom);
+        factory.setCreationFee(0.02 ether);
+        assertEq(factory.creationFee(), 0.02 ether);
+
+        vm.prank(boardroom);
+        factory.transferOwnership(nextOwner);
+        assertEq(factory.owner(), nextOwner);
     }
 
     function testCreationFeeIsSentToOwnerOnGrantCreation() public {
@@ -999,6 +1076,14 @@ contract TokenGrantTest is Test {
             _terms(GRANT_SIZE, 0, VESTING_END - 1, CLIFF, VESTING_END)
         );
         _createGrantExpectRevert(
+            abi.encodeWithSelector(TokenGrant.InvalidExpiry.selector),
+            "insufficient-settlement-grace",
+            address(token),
+            holder,
+            address(0),
+            _terms(GRANT_SIZE, 0, VESTING_END + 1 days - 1, CLIFF, VESTING_END)
+        );
+        _createGrantExpectRevert(
             abi.encodeWithSelector(TokenGrant.InvalidVestingSchedule.selector),
             "bad-schedule",
             address(token),
@@ -1199,6 +1284,152 @@ contract TokenGrantTest is Test {
             )
         );
         grant.settle(10 ether);
+    }
+
+    function testRejectsSenderSurchargeGrantTokenAtFundingAtomically() public {
+        SenderSurchargeERC20 surchargeToken = new SenderSurchargeERC20("Surcharge", "SUR", 18, 100, false, true);
+        uint256 issuerBalance = GRANT_SIZE + 1 ether;
+        surchargeToken.mint(issuer, issuerBalance);
+        bytes32 salt = keccak256("sender-surcharge-funding");
+        address predictedGrant = factory.predictGrantAddress(issuer, salt);
+        _approve(address(surchargeToken), issuer, address(factory), GRANT_SIZE);
+
+        vm.prank(issuer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                TokenGrantFactory.UnexpectedTokenBalanceChange.selector,
+                address(surchargeToken),
+                GRANT_SIZE,
+                GRANT_SIZE + 1 ether
+            )
+        );
+        factory.createGrant(
+            holder, address(surchargeToken), address(0), GRANT_SIZE, 0, EXPIRY, CLIFF, VESTING_END, false, 0, salt
+        );
+
+        assertEq(surchargeToken.balanceOf(issuer), issuerBalance);
+        assertEq(surchargeToken.balanceOf(predictedGrant), 0);
+        assertEq(predictedGrant.code.length, 0);
+        assertEq(factory.grantForTokenId(uint256(uint160(predictedGrant))), address(0));
+    }
+
+    function testRejectsSenderSurchargePaymentTokenAtSettlementAtomically() public {
+        SenderSurchargeERC20 surchargePayment =
+            new SenderSurchargeERC20("Surcharge Payment", "SPAY", 6, 100, false, true);
+        uint256 holderBalance = 1_000_000000;
+        surchargePayment.mint(holder, holderBalance);
+        TokenGrant grant = _createGrant(
+            _grantCreate(
+                keccak256("sender-surcharge-payment"),
+                holder,
+                address(token),
+                address(surchargePayment),
+                _terms(GRANT_SIZE, PRICE, EXPIRY, CLIFF, VESTING_END)
+            )
+        );
+        vm.warp(VESTING_END);
+        uint256 settleAmount = 10 ether;
+        uint256 expectedCost = grant.getSettlementCost(settleAmount);
+        vm.prank(holder);
+        surchargePayment.approve(address(grant), expectedCost);
+
+        vm.prank(holder);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                TokenGrant.UnexpectedTokenBalanceChange.selector,
+                address(surchargePayment),
+                expectedCost,
+                expectedCost + expectedCost / 100
+            )
+        );
+        grant.settle(settleAmount);
+
+        assertEq(grant.settledAmount(), 0);
+        assertEq(surchargePayment.balanceOf(holder), holderBalance);
+        assertEq(surchargePayment.balanceOf(issuer), 0);
+        assertEq(token.balanceOf(holder), 0);
+    }
+
+    function testRejectsSenderSurchargeGrantTokenAtDeliveryAtomically() public {
+        SenderSurchargeERC20 surchargeToken = new SenderSurchargeERC20("Surcharge", "SUR", 18, 100, true, false);
+        surchargeToken.mint(issuer, GRANT_SIZE);
+        TokenGrant grant = _createGrant(
+            _grantCreate(
+                keccak256("sender-surcharge-delivery"),
+                holder,
+                address(surchargeToken),
+                address(0),
+                _terms(GRANT_SIZE, 0, EXPIRY, CLIFF, VESTING_END)
+            )
+        );
+        surchargeToken.mint(address(grant), 1 ether);
+        vm.warp(VESTING_END);
+
+        vm.prank(holder);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                TokenGrant.UnexpectedTokenBalanceChange.selector, address(surchargeToken), 10 ether, 10.1 ether
+            )
+        );
+        grant.settle(10 ether);
+
+        assertEq(grant.settledAmount(), 0);
+        assertEq(surchargeToken.balanceOf(address(grant)), GRANT_SIZE + 1 ether);
+        assertEq(surchargeToken.balanceOf(holder), 0);
+    }
+
+    function testRejectsSenderSurchargeGrantTokenDuringHaltAtomically() public {
+        SenderSurchargeERC20 surchargeToken = new SenderSurchargeERC20("Surcharge", "SUR", 18, 100, true, false);
+        surchargeToken.mint(issuer, GRANT_SIZE);
+        TokenGrant grant = _createGrant(
+            _grantCreate(
+                keccak256("sender-surcharge-halt"),
+                holder,
+                address(surchargeToken),
+                address(0),
+                _terms(GRANT_SIZE, 0, EXPIRY, CLIFF, VESTING_END)
+            )
+        );
+        surchargeToken.mint(address(grant), 1 ether);
+        vm.warp(1_500);
+
+        vm.prank(issuer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                TokenGrant.UnexpectedTokenBalanceChange.selector, address(surchargeToken), 50 ether, 50.5 ether
+            )
+        );
+        grant.stopVestingAndWithdrawUnvested();
+
+        assertFalse(grant.vestingIsHalted());
+        assertEq(grant.claimable(), GRANT_SIZE);
+        assertEq(surchargeToken.balanceOf(address(grant)), GRANT_SIZE + 1 ether);
+        assertEq(surchargeToken.balanceOf(issuer), 0);
+    }
+
+    function testRejectsSenderSurchargeGrantTokenDuringExpiryWithdrawalAtomically() public {
+        SenderSurchargeERC20 surchargeToken = new SenderSurchargeERC20("Surcharge", "SUR", 18, 100, true, false);
+        surchargeToken.mint(issuer, GRANT_SIZE);
+        TokenGrant grant = _createGrant(
+            _grantCreate(
+                keccak256("sender-surcharge-expiry"),
+                holder,
+                address(surchargeToken),
+                address(0),
+                _terms(GRANT_SIZE, 0, EXPIRY, CLIFF, VESTING_END)
+            )
+        );
+        vm.warp(EXPIRY + 1);
+
+        vm.prank(issuer);
+        vm.expectRevert();
+        grant.withdrawExpiredTokens();
+
+        assertFalse(grant.isClosed());
+        assertEq(grant.holder(), holder);
+        assertEq(surchargeToken.balanceOf(address(grant)), GRANT_SIZE);
+        assertEq(surchargeToken.balanceOf(issuer), 0);
+        assertEq(factory.ownerOf(grant.tokenId()), holder);
     }
 
     function testPaymentTokenReentryCannotSettleAgain() public {

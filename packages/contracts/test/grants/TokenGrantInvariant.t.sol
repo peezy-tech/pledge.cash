@@ -6,6 +6,10 @@ import {Test} from "forge-std/Test.sol";
 import {TokenGrant} from "../../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
 
+contract TokenGrantInvariantBoardroomFactory {
+    mapping(address => bool) public isBoardroom;
+}
+
 contract InvariantERC20 {
     string public name;
     string public symbol;
@@ -120,10 +124,10 @@ contract TokenGrantInvariantTest is StdInvariant, Test {
     uint256 internal constant PRICE = 2_000000;
     uint256 internal constant CLIFF = 1_000;
     uint256 internal constant VESTING_END = 2_000;
-    uint256 internal constant EXPIRY = 3_000;
+    uint256 internal constant EXPIRY = VESTING_END + 1 days;
 
     function setUp() public {
-        factory = new TokenGrantFactory(address(this));
+        factory = new TokenGrantFactory(address(this), address(new TokenGrantInvariantBoardroomFactory()));
         token = new InvariantERC20("Grant Token", "GRANT", 18);
         paymentToken = new InvariantERC20("Payment", "PAY", 6);
 

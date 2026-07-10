@@ -336,6 +336,7 @@ const multicallAbi = [
 
 const policyAllowedSetEvent = getAbiItem({ abi: boardroomPolicyRegistryAbi, name: "PolicyAllowedSet" });
 const policyStatusSetEvent = getAbiItem({ abi: boardroomPolicyRegistryAbi, name: "PolicyStatusSet" });
+const modulePolicyRegisteredEvent = getAbiItem({ abi: boardroomPolicyRegistryAbi, name: "ModulePolicyRegistered" });
 const assetAllowedSetEvent = getAbiItem({ abi: assetPolicyAbi, name: "AssetAllowedSet" });
 const approvalSpenderAllowedSetEvent = getAbiItem({
   abi: assetPolicyAbi,
@@ -514,6 +515,7 @@ async function runWatcherPass(input: {
 
   const actionEvents = await input.store.transaction(async (tx) => {
     const pendingEvents: WatcherPipelineEvent[] = [];
+    const notifiedPolicyChanges = new Set<string>();
 
     await tx.upsertBoardrooms(input.chainId, discovery.items);
 
@@ -525,6 +527,9 @@ async function runWatcherPass(input: {
     for (const event of policyAdminEvents) {
       const inserted = await tx.insertPolicyAdminEvent(event);
       if (inserted && event.enabled && event.affectedQueuedActions) {
+        const notificationKey = policyAdminNotificationKey(event);
+        if (notifiedPolicyChanges.has(notificationKey)) continue;
+        notifiedPolicyChanges.add(notificationKey);
         const queued = await tx.listQueuedActions(input.chainId);
         const eventId = policyAdminEventId(event);
         pendingEvents.push(
@@ -634,6 +639,19 @@ async function fetchPolicyAdminEvents(
 
   const events: PolicyAdminEvent[] = [];
   if (deployment.boardroomPolicyRegistry) {
+    events.push(
+      ...(await getPolicyAdminLogs(client, {
+        address: deployment.boardroomPolicyRegistry,
+        chainId,
+        contract: "registry",
+        event: modulePolicyRegisteredEvent,
+        eventName: "ModulePolicyRegistered",
+        forcedEnabled: true,
+        fromBlock: window.fromBlock,
+        subjectKey: "policy",
+        toBlock: window.toBlock
+      }))
+    );
     events.push(
       ...(await getPolicyAdminLogs(client, {
         address: deployment.boardroomPolicyRegistry,
@@ -1055,6 +1073,10 @@ function policyAdminEventId(event: InsertPolicyAdminEventInput): string {
   return `${event.chainId}:${event.txHash.toLowerCase()}:${event.logIndex}`;
 }
 
+function policyAdminNotificationKey(event: InsertPolicyAdminEventInput): string {
+  return `${event.chainId}:${event.txHash.toLowerCase()}:${event.contract}:${event.subject}`;
+}
+
 function storedCallInput(call: BoardroomCall, callIndex: number): InsertActionCallInput {
   const decoded = decodeKnownCall(call.data);
   return {
@@ -1164,6 +1186,7 @@ async function getPolicyAdminLogs(
     readonly contract: "registry" | "asset-policy";
     readonly event: unknown;
     readonly eventName: string;
+    readonly forcedEnabled?: boolean;
     readonly fromBlock: bigint;
     readonly statusKey?: string;
     readonly subjectKey: string;
@@ -1196,6 +1219,7 @@ function toPolicyAdminEvent(
     readonly chainId: number;
     readonly contract: "registry" | "asset-policy";
     readonly eventName: string;
+    readonly forcedEnabled?: boolean;
     readonly statusKey?: string;
     readonly subjectKey: string;
   }
@@ -1206,9 +1230,10 @@ function toPolicyAdminEvent(
   if (!subject) return undefined;
 
   const enabled =
-    input.statusKey === undefined
+    input.forcedEnabled
+    ?? (input.statusKey === undefined
       ? booleanValue(args.allowed) === true
-      : bigintValue(args[input.statusKey]) !== 0n;
+      : bigintValue(args[input.statusKey]) !== 0n);
 
   return {
     affectedQueuedActions: true,

@@ -16,9 +16,11 @@ tokens into it.
 - Issuer: creates the grant, escrows tokens, receives paid-settlement proceeds, may halt unvested vesting, and may withdraw remaining tokens after expiry.
 - Holder: address recorded on the grant, mirrored by factory ERC721 ownership, and allowed to settle vested tokens.
 - Factory: deploys deterministic token grant clones, mints and transfers grant-right ERC721 tokens, mirrors ERC721 transfers
-  into the grant holder field, and optionally collects a native creation fee.
+  into the grant holder field, optionally collects a native creation fee, and stores an immutable canonical
+  `BoardroomFactory` for distribution-grant provenance.
 - Factory owner: authority that can update the native creation fee and receives paid creation fees. In the
-  Boardroom-owned protocol flow this owner is the pledge.cash Boardroom.
+  Boardroom-owned protocol flow this owner is the pledge.cash Boardroom. The canonical factory policy permits that
+  owning Boardroom to call `setCreationFee` and `transferOwnership`.
 
 ## Assets
 
@@ -36,7 +38,8 @@ Native HYPE is not escrowed by grants. It is only used for the optional creation
 - `paymentToken`: ERC20 paid by the holder when `price > 0`, or zero when `price == 0`.
 - `grantSize`: total token amount initially escrowed.
 - `price`: payment-token smallest units per one whole grant token, or zero for a free claim.
-- `expiry`: last timestamp at which settlement is allowed.
+- `expiry`: last timestamp at which settlement is allowed; it must provide at least `MIN_SETTLEMENT_GRACE` (one day)
+  after `vestingEnd`.
 - `vestingCliff`: timestamp before which vested amount is zero.
 - `vestingEnd`: timestamp at which the full grant has vested, unless vesting was halted.
 - `creationFee`: optional factory-level native fee amount.
@@ -83,11 +86,18 @@ Preconditions:
 - token is nonzero,
 - grant size is greater than zero,
 - vesting cliff is not after vesting end,
-- expiry is not before vesting end,
+- expiry is at least `MIN_SETTLEMENT_GRACE` (one day) after vesting end,
 - expiry is after the creation timestamp,
 - grant token exposes supported `decimals()`,
 - issuer has approved `TokenGrantFactory` to transfer the full grant,
 - if a creation fee is configured, the issuer pays exact native value equal to the fee.
+
+`createGrantFromDistribution` is a separate nonpayable path for issued distributions. Before granting the fee exemption,
+the token-grant factory requires its immutable canonical `BoardroomFactory` to recognize the issuer as a deployed
+Boardroom and requires that Boardroom to recognize the caller as one of its currently issued distributions. A contract
+cannot obtain the exemption merely by implementing `isIssuedDistribution` itself. The path always uses zero creation fee
+so a later factory fee update cannot censor a grant entitlement already committed in a Merkle root. Direct `createGrant`
+calls continue to require the current configured fee exactly.
 
 For `price == 0`:
 
@@ -199,20 +209,23 @@ Effects:
 - `price == 0` grants never call a payment token.
 - `price > 0` payment cost is rounded up to the nearest payment-token smallest unit.
 - configured native creation fees must be paid exactly.
+- distribution-created grants are always fee-exempt and nonpayable.
+- the immutable canonical Boardroom factory and issuer-side distribution tracking gate every fee-exempt grant creation.
 - creation fee configuration can only be updated by the factory owner.
 - after expiry withdrawal, no further settlement succeeds.
 
 ## External Call Failure Model
 
-The grant token transfer paths use exact recipient balance-delta checks. Native creation fee forwarding reverts if the
-owner cannot receive native value. Grant lifecycle transitions temporarily lock the factory ERC721 token before ERC20
-external calls, preventing malicious token callbacks from transferring the holder right mid-settlement or mid-withdrawal.
+Grant funding, payment, delivery, halt-return, and expiry-return paths verify both the exact sender decrease and exact
+recipient increase. Native creation fee forwarding reverts if the owner cannot receive native value. Grant lifecycle
+transitions temporarily lock the factory ERC721 token before ERC20 external calls, preventing malicious token callbacks
+from transferring the holder right mid-settlement or mid-withdrawal.
 
 Current token behavior policy:
 
 - missing return values are supported when exact balance deltas match the requested transfer amount,
 - false-return tokens are rejected by safe transfer handling,
-- fee-on-transfer tokens are rejected by exact recipient balance-delta checks,
+- fee-on-transfer and sender-surcharge tokens are rejected by exact two-sided balance-delta checks,
 - rebasing tokens are unsupported; asynchronous rebases remain a higher-level token-policy risk,
 - tokens with unsupported decimals are rejected at initialization,
 - `price == 0` has no payment token external call,

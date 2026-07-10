@@ -80,17 +80,17 @@ contract ProjectTokenLaunchScenario is Script {
     function _deployProject(address owner, uint256 nonce) internal returns (ScenarioState memory state) {
         state.nonce = nonce;
         state.policyRegistry = new BoardroomPolicyRegistry(owner);
-        state.tokenGrantFactory = new TokenGrantFactory(owner);
-        state.ammFactory = new AmmFactory(owner);
         state.wrappedHype = new WETH();
         state.assetPolicy = new AssetPolicy(owner, address(state.wrappedHype));
+        state.boardroomFactory = new BoardroomFactory(address(state.policyRegistry), address(state.wrappedHype));
+        state.tokenGrantFactory = new TokenGrantFactory(owner, address(state.boardroomFactory));
+        state.ammFactory = new AmmFactory(owner);
         state.ammRouter = new AmmRouter(address(state.ammFactory), address(state.wrappedHype));
         state.lockedLiquidityFactory = new LockedLiquidityFactory(address(state.ammRouter));
-        state.boardroomFactory = new BoardroomFactory(address(state.policyRegistry), address(state.wrappedHype));
 
         state.assetPolicy.setApprovalSpenderAllowed(address(state.lockedLiquidityFactory), true);
         state.policyRegistry.setPolicyAllowed(address(state.assetPolicy), true);
-        state.policyRegistry.setPolicyAllowed(address(state.lockedLiquidityFactory), true);
+        state.policyRegistry.registerModulePolicy(address(state.lockedLiquidityFactory));
 
         address boardroomAddress = state.boardroomFactory
             .createBoardroom(owner, "pledge.cash Project Token", "PLEDGE", _salt(nonce, "project-boardroom"));

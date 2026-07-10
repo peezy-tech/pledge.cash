@@ -90,32 +90,56 @@ type AbiItem = {
 
 function abiExcerpts(): Record<string, readonly unknown[]> {
   return {
-    AssetPolicy: selectAbi(assetPolicyAbi, ["isCallAllowed", "setApprovalSpenderAllowed", "setAssetAllowed"]),
+    AssetPolicy: selectAbi(assetPolicyAbi, ["canCall", "setApprovalSpenderAllowed", "setAssetAllowed"]),
     Boardroom: selectAbi(boardroomAbi, [
       "BoardroomActionCancelled",
       "BoardroomActionExecuted",
       "BoardroomActionQueued",
       "BoardroomLaunched",
+      "BoardroomRedemptionsOpened",
       "ExecutorSet",
+      "RedeemableAssetRegistered",
+      "RedemptionAssetClaimFailed",
+      "RedemptionAssetClaimed",
+      "SharesRedeemed",
       "cancelAction",
-      "executeAction",
+      "claimRedemptionAsset",
+      "execute",
       "executeBatch",
+      "executeQueuedAction",
+      "executeQueuedBatch",
       "mint",
       "queueAction",
       "queueBatch",
+      "redeem",
       "registerRedeemableAsset",
       "setExecutor",
       "startWindDown"
     ]),
-    BoardroomPolicyRegistry: selectAbi(boardroomPolicyRegistryAbi, ["setPolicyAllowed", "isPolicyAllowed"]),
+    BoardroomPolicyRegistry: selectAbi(boardroomPolicyRegistryAbi, [
+      "ModulePolicyRegistered",
+      "isModulePolicy",
+      "isPolicyAllowed",
+      "registerModulePolicy",
+      "setPolicyAllowed",
+      "setPolicyStatus"
+    ]),
     BoardroomToken: selectAbi(boardroomTokenAbi, ["approve", "burn", "mint", "transfer", "transferFrom"]),
     DistributionFactory: selectAbi(distributionFactoryAbi, [
-      "createFixedPriceSaleForBoardroom",
-      "createMigratingBondingCurveForBoardroom"
+      "createFixedPriceSale",
+      "createMerkleAirdrop",
+      "createMigratingBondingCurve",
+      "isDistribution",
+      "pruneClosedDistributions"
     ]),
     ERC20: selectAbi(erc20Abi, ["approve", "transfer", "transferFrom"]),
     LockedLiquidityFactory: selectAbi(lockedLiquidityFactoryAbi, ["createLockedLiquidityForBoardroom"]),
-    TokenGrantFactory: selectAbi(tokenGrantFactoryAbi, ["createGrantForBoardroom"])
+    TokenGrantFactory: selectAbi(tokenGrantFactoryAbi, [
+      "createGrant",
+      "createGrantFromDistribution",
+      "setCreationFee",
+      "transferOwnership"
+    ])
   };
 }
 

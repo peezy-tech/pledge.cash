@@ -12,6 +12,10 @@ interface IDistributionBoardroom {
     function shareToken() external view returns (address);
 }
 
+interface IDistributionLifecycle {
+    function isClosed() external view returns (bool);
+}
+
 contract DistributionFactory is IBoardroomObligationPolicy {
     uint256 internal constant FIXED_PRICE_SALE_CREATE_DATA_LENGTH = 4 + 32 * 8;
     uint256 internal constant MIGRATING_CURVE_CREATE_DATA_LENGTH = 4 + 32 * 12;
@@ -52,6 +56,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         uint256 shareAmount,
         bytes32 salt
     );
+    event ClosedDistributionsPruned(address indexed boardroom, uint256 count);
 
     constructor(address lockedLiquidityFactory_, address tokenGrantFactory_) {
         if (tokenGrantFactory_ == address(0)) revert InvalidAddress();
@@ -178,6 +183,30 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         return distributionsForBoardroom[boardroom];
     }
 
+    /// @notice Removes closed entries from the Boardroom's bounded active-distribution index.
+    /// @dev Distribution identity mappings remain permanent so historical addresses stay attributable.
+    function pruneClosedDistributions(address boardroom) public returns (uint256 pruned) {
+        address[] storage distributions = distributionsForBoardroom[boardroom];
+        uint256 index;
+
+        while (index < distributions.length) {
+            if (!_isClosedDistribution(distributions[index])) {
+                unchecked {
+                    ++index;
+                }
+                continue;
+            }
+
+            distributions[index] = distributions[distributions.length - 1];
+            distributions.pop();
+            unchecked {
+                ++pruned;
+            }
+        }
+
+        if (pruned != 0) emit ClosedDistributionsPruned(boardroom, pruned);
+    }
+
     function predictFixedPriceSaleAddress(address boardroom, bytes32 salt) external view returns (address) {
         return LibClone.predictDeterministicAddress(
             fixedPriceSaleLogic, _cloneSalt(boardroom, DistributionKind.FixedPriceSale, salt), address(this)
@@ -285,6 +314,9 @@ contract DistributionFactory is IBoardroomObligationPolicy {
             revert InvalidAddress();
         }
         if (distributionsForBoardroom[boardroom].length >= MAX_DISTRIBUTIONS_PER_BOARDROOM) {
+            pruneClosedDistributions(boardroom);
+        }
+        if (distributionsForBoardroom[boardroom].length >= MAX_DISTRIBUTIONS_PER_BOARDROOM) {
             revert TooManyBoardroomDistributions(boardroom);
         }
 
@@ -298,17 +330,31 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     }
 
     function _checkedTransferFrom(address token, address from, address to, uint256 expectedAmount) internal {
-        ExactTransferLib.RecipientDelta memory delta = ExactTransferLib.pullTo(token, from, to, expectedAmount);
-        if (delta.balanceDecreased) {
+        ExactTransferLib.ExactDelta memory delta = ExactTransferLib.pullBetween(token, from, to, expectedAmount);
+        if (delta.senderBalanceIncreased) {
             revert UnexpectedTokenBalanceChange(token, expectedAmount, 0);
         }
-        if (delta.received != expectedAmount) {
-            revert UnexpectedTokenBalanceChange(token, expectedAmount, delta.received);
+        if (delta.senderSpent != expectedAmount) {
+            revert UnexpectedTokenBalanceChange(token, expectedAmount, delta.senderSpent);
+        }
+        if (delta.recipientBalanceDecreased) {
+            revert UnexpectedTokenBalanceChange(token, expectedAmount, 0);
+        }
+        if (delta.recipientReceived != expectedAmount) {
+            revert UnexpectedTokenBalanceChange(token, expectedAmount, delta.recipientReceived);
         }
     }
 
-    function _hasValidTimeWindow(uint64 startTime, uint64 endTime) internal pure returns (bool) {
-        return endTime == 0 || endTime >= startTime;
+    function _hasValidTimeWindow(uint64 startTime, uint64 endTime) internal view returns (bool) {
+        return endTime == 0 || (endTime > startTime && uint256(endTime) > block.timestamp);
+    }
+
+    function _isClosedDistribution(address distribution) internal view returns (bool) {
+        try IDistributionLifecycle(distribution).isClosed() returns (bool closed) {
+            return closed;
+        } catch {
+            return false;
+        }
     }
 
     function _isCreateDistributionSelector(bytes4 selector) internal pure returns (bool) {

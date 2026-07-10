@@ -179,6 +179,9 @@ export type WindDownForm = {
   redeemShares: string;
   redeemRecipient: string;
   minAmountsOut: string;
+  claimAsset: string;
+  claimRecipient: string;
+  claimMinAmount: string;
 };
 
 export type LogEntry = {

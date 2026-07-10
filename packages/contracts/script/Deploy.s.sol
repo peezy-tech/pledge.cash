@@ -94,11 +94,23 @@ contract Deploy is Script {
                 abi.encodePacked(type(AssetPolicy).creationCode, abi.encode(state.deployer, state.wrappedNative))
             )
         );
+        state.boardroomFactory = BoardroomFactory(
+            _deployDeterministic(
+                state,
+                PledgeCashDeploymentSalts.boardroomFactory(),
+                abi.encodePacked(
+                    type(BoardroomFactory).creationCode,
+                    abi.encode(address(state.boardroomPolicyRegistry), state.wrappedNative)
+                )
+            )
+        );
         state.tokenGrantFactory = TokenGrantFactory(
             _deployDeterministic(
                 state,
                 PledgeCashDeploymentSalts.tokenGrantFactory(),
-                abi.encodePacked(type(TokenGrantFactory).creationCode, abi.encode(state.deployer))
+                abi.encodePacked(
+                    type(TokenGrantFactory).creationCode, abi.encode(state.deployer, address(state.boardroomFactory))
+                )
             )
         );
         state.ammFactory = AmmFactory(
@@ -137,16 +149,6 @@ contract Deploy is Script {
                 abi.encodePacked(
                     type(DistributionFactory).creationCode,
                     abi.encode(address(state.lockedLiquidityFactory), address(state.tokenGrantFactory))
-                )
-            )
-        );
-        state.boardroomFactory = BoardroomFactory(
-            _deployDeterministic(
-                state,
-                PledgeCashDeploymentSalts.boardroomFactory(),
-                abi.encodePacked(
-                    type(BoardroomFactory).creationCode,
-                    abi.encode(address(state.boardroomPolicyRegistry), state.wrappedNative)
                 )
             )
         );
@@ -209,9 +211,17 @@ contract Deploy is Script {
         state.assetPolicy.setApprovalSpenderAllowed(address(state.distributionFactory), true);
         state.assetPolicy.setApprovalSpenderAllowed(address(state.lockedLiquidityFactory), true);
         state.boardroomPolicyRegistry.setPolicyAllowed(address(state.assetPolicy), true);
-        state.boardroomPolicyRegistry.setPolicyAllowed(address(state.tokenGrantFactory), true);
-        state.boardroomPolicyRegistry.setPolicyAllowed(address(state.distributionFactory), true);
-        state.boardroomPolicyRegistry.setPolicyAllowed(address(state.lockedLiquidityFactory), true);
+        _configureModulePolicy(state.boardroomPolicyRegistry, address(state.tokenGrantFactory));
+        _configureModulePolicy(state.boardroomPolicyRegistry, address(state.distributionFactory));
+        _configureModulePolicy(state.boardroomPolicyRegistry, address(state.lockedLiquidityFactory));
+    }
+
+    function _configureModulePolicy(BoardroomPolicyRegistry registry, address policy) internal {
+        if (!registry.isModulePolicy(policy)) {
+            registry.registerModulePolicy(policy);
+            return;
+        }
+        if (!registry.isPolicyAllowed(policy)) registry.setPolicyAllowed(policy, true);
     }
 
     function _configureCreationFee(TokenGrantFactory tokenGrantFactory) internal {
@@ -279,8 +289,18 @@ contract Deploy is Script {
             "tokenGrantPolicyAllowed", state.boardroomPolicyRegistry.isPolicyAllowed(address(state.tokenGrantFactory))
         );
         json.serialize(
+            "tokenGrantModulePolicy", state.boardroomPolicyRegistry.isModulePolicy(address(state.tokenGrantFactory))
+        );
+        json.serialize(
             "distributionPolicyAllowed",
             state.boardroomPolicyRegistry.isPolicyAllowed(address(state.distributionFactory))
+        );
+        json.serialize(
+            "distributionModulePolicy", state.boardroomPolicyRegistry.isModulePolicy(address(state.distributionFactory))
+        );
+        json.serialize(
+            "lockedLiquidityModulePolicy",
+            state.boardroomPolicyRegistry.isModulePolicy(address(state.lockedLiquidityFactory))
         );
     }
 

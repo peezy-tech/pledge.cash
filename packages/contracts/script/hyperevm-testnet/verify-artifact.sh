@@ -109,8 +109,17 @@ chain_id="$(cast_retry cast chain-id --rpc-url "$RPC_URL" | first_token)"
 expect_equal "chain id" "$(field chainId)" "$chain_id"
 
 require_field tokenGrantFactory
+require_field boardroomFactory
 token_grant_factory="$(field tokenGrantFactory)"
+boardroom_factory="$(field boardroomFactory)"
 require_code "TokenGrantFactory" "$token_grant_factory"
+require_code "BoardroomFactory" "$boardroom_factory"
+
+actual_token_grant_boardroom_factory="$(call_address "$token_grant_factory" "boardroomFactory()(address)")"
+expect_address_equal \
+  "TokenGrantFactory immutable BoardroomFactory" \
+  "$boardroom_factory" \
+  "$actual_token_grant_boardroom_factory"
 
 if field_exists factoryOwner; then
   actual_owner="$(call_address "$token_grant_factory" "owner()(address)")"
@@ -132,6 +141,7 @@ fi
 if field_exists deterministicDeployment; then
   expect_equal "deterministic deployment flag" "true" "$(field deterministicDeployment)"
   require_field deterministicDeploymentVersion
+  expect_equal "deterministic deployment version" "pledge.cash.deterministic.v3" "$(field deterministicDeploymentVersion)"
   require_field deterministicDeployer
   require_field create2Factory
 
@@ -166,13 +176,17 @@ if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactor
   require_field assetPolicyOwner
   require_field assetPolicyAllowed
   require_field tokenGrantPolicyAllowed
+  require_field tokenGrantModulePolicy
   require_field distributionFactory
   require_field distributionPolicyAllowed
+  require_field distributionModulePolicy
   require_field assetWrappedNativeAllowed
   require_field assetTokenGrantSpenderAllowed
   require_field assetDistributionSpenderAllowed
 
-  boardroom_factory="$(field boardroomFactory)"
+  expect_equal "TokenGrantFactory module artifact" "true" "$(field tokenGrantModulePolicy)"
+  expect_equal "DistributionFactory module artifact" "true" "$(field distributionModulePolicy)"
+
   policy_registry="$(field boardroomPolicyRegistry)"
   asset_policy="$(field assetPolicy)"
   wrapped_native="$(field wrappedNative)"
@@ -200,8 +214,14 @@ if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactor
   actual_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$token_grant_factory")"
   expect_equal "Boardroom policy allowance" "$(field tokenGrantPolicyAllowed)" "$actual_policy_allowed"
 
+  actual_token_grant_module_policy="$(call_bool "$policy_registry" "isModulePolicy(address)(bool)" "$token_grant_factory")"
+  expect_equal "TokenGrantFactory permanent module identity" "$(field tokenGrantModulePolicy)" "$actual_token_grant_module_policy"
+
   actual_distribution_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$distribution_factory")"
   expect_equal "Distribution policy allowance" "$(field distributionPolicyAllowed)" "$actual_distribution_policy_allowed"
+
+  actual_distribution_module_policy="$(call_bool "$policy_registry" "isModulePolicy(address)(bool)" "$distribution_factory")"
+  expect_equal "DistributionFactory permanent module identity" "$(field distributionModulePolicy)" "$actual_distribution_module_policy"
 
   actual_asset_wrapped_native_allowed="$(call_bool "$asset_policy" "isAssetAllowed(address)(bool)" "$wrapped_native")"
   expect_equal "AssetPolicy wrapped native allowance" "$(field assetWrappedNativeAllowed)" "$actual_asset_wrapped_native_allowed"
@@ -235,7 +255,10 @@ if field_exists ammRouter || field_exists lockedLiquidityFactory; then
   require_field boardroomPolicyRegistry
   require_field assetPolicy
   require_field lockedLiquidityPolicyAllowed
+  require_field lockedLiquidityModulePolicy
   require_field assetLockedLiquiditySpenderAllowed
+
+  expect_equal "LockedLiquidityFactory module artifact" "true" "$(field lockedLiquidityModulePolicy)"
 
   amm_factory="$(field ammFactory)"
   wrapped_native="$(field wrappedNative)"
@@ -259,6 +282,9 @@ if field_exists ammRouter || field_exists lockedLiquidityFactory; then
 
   actual_locked_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$locked_liquidity_factory")"
   expect_equal "Locked liquidity policy allowance" "$(field lockedLiquidityPolicyAllowed)" "$actual_locked_policy_allowed"
+
+  actual_locked_module_policy="$(call_bool "$policy_registry" "isModulePolicy(address)(bool)" "$locked_liquidity_factory")"
+  expect_equal "LockedLiquidityFactory permanent module identity" "$(field lockedLiquidityModulePolicy)" "$actual_locked_module_policy"
 
   actual_asset_locked_liquidity_spender_allowed="$(call_bool "$asset_policy" "isApprovalSpenderAllowed(address)(bool)" "$locked_liquidity_factory")"
   expect_equal "AssetPolicy LockedLiquidityFactory spender allowance" "$(field assetLockedLiquiditySpenderAllowed)" "$actual_asset_locked_liquidity_spender_allowed"

@@ -693,6 +693,7 @@ describe("web app shell", () => {
         windDown={{
           form: defaultWindDownForm(),
           burnTreasuryShares: noop,
+          claimRedemptionAsset: noop,
           openRedemptions: noop,
           redeemShares: noop,
           registerRedeemableAsset: noop,

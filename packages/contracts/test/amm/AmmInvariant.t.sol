@@ -200,8 +200,8 @@ contract AmmInvariantTest is StdInvariant, Test {
 
     function invariantFeeClaimsAreBackedByFeeVault() public view {
         address fees = pool.poolFees();
-        uint256 pending0;
-        uint256 pending1;
+        uint256 pending0 = pool.pendingBurnRedistribution0();
+        uint256 pending1 = pool.pendingBurnRedistribution1();
         uint256 actorCount = handler.actorCount();
 
         for (uint256 i; i < actorCount; ++i) {
@@ -226,13 +226,13 @@ contract AmmInvariantTest is StdInvariant, Test {
     }
 
     function _pending0(address actor) internal view returns (uint256) {
-        uint256 accrued = pool.claimable0(actor);
+        uint256 accrued = pool.claimable0(actor) + pool.pendingClaimable0(actor);
         uint256 delta = pool.index0() - pool.supplyIndex0(actor);
         return accrued + pool.balanceOf(actor) * delta / 1e18;
     }
 
     function _pending1(address actor) internal view returns (uint256) {
-        uint256 accrued = pool.claimable1(actor);
+        uint256 accrued = pool.claimable1(actor) + pool.pendingClaimable1(actor);
         uint256 delta = pool.index1() - pool.supplyIndex1(actor);
         return accrued + pool.balanceOf(actor) * delta / 1e18;
     }

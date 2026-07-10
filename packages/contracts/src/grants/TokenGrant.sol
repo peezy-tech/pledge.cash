@@ -15,9 +15,8 @@ interface ITokenGrantFactory {
 }
 
 contract TokenGrant is Initializable {
-    using SafeTransferLib for address;
-
     uint8 internal constant MAX_SUPPORTED_DECIMALS = 77;
+    uint256 public constant MIN_SETTLEMENT_GRACE = 1 days;
 
     // Identity.
     address public factory;
@@ -219,7 +218,7 @@ contract TokenGrant is Initializable {
 
         transferLocked = true;
         if (unvestedToWithdraw > 0) {
-            SafeTransferLib.safeTransfer(token, issuer, unvestedToWithdraw);
+            _checkedTransfer(token, issuer, unvestedToWithdraw);
         }
         if (settledAmount >= claimable) {
             _closeAndBurnGrantRight();
@@ -238,7 +237,7 @@ contract TokenGrant is Initializable {
         uint256 remainingBalance = SafeTransferLib.balanceOf(token, address(this));
         transferLocked = true;
         if (remainingBalance > 0) {
-            SafeTransferLib.safeTransfer(token, issuer, remainingBalance);
+            _checkedTransfer(token, issuer, remainingBalance);
         }
         _closeAndBurnGrantRight();
         emit ExpiredTokensWithdrawn(issuer, remainingBalance);
@@ -273,7 +272,7 @@ contract TokenGrant is Initializable {
         view
     {
         if (amount_ == 0) revert InvalidAmount();
-        if (expiry_ < vestingEnd_) revert InvalidExpiry();
+        if (expiry_ < vestingEnd_ || expiry_ - vestingEnd_ < MIN_SETTLEMENT_GRACE) revert InvalidExpiry();
         if (expiry_ <= block.timestamp) revert InvalidExpiry();
         if (vestingCliff_ > vestingEnd_) revert InvalidVestingSchedule();
     }
@@ -354,22 +353,31 @@ contract TokenGrant is Initializable {
     }
 
     function _checkedTransferFrom(address token_, address from, address to, uint256 expectedAmount) internal {
-        _requireExactReceived(token_, expectedAmount, ExactTransferLib.pullTo(token_, from, to, expectedAmount));
+        _requireExactBalanceChanges(
+            token_, expectedAmount, ExactTransferLib.pullBetween(token_, from, to, expectedAmount)
+        );
     }
 
     function _checkedTransfer(address token_, address to, uint256 expectedAmount) internal {
-        _requireExactReceived(token_, expectedAmount, ExactTransferLib.sendTo(token_, to, expectedAmount));
+        _requireExactBalanceChanges(token_, expectedAmount, ExactTransferLib.sendFromSelfTo(token_, to, expectedAmount));
     }
 
-    function _requireExactReceived(address token_, uint256 expectedAmount, ExactTransferLib.RecipientDelta memory delta)
-        internal
-        pure
-    {
-        if (delta.balanceDecreased) {
+    function _requireExactBalanceChanges(
+        address token_,
+        uint256 expectedAmount,
+        ExactTransferLib.ExactDelta memory delta
+    ) internal pure {
+        if (delta.senderBalanceIncreased) {
             revert UnexpectedTokenBalanceChange(token_, expectedAmount, 0);
         }
-        if (delta.received != expectedAmount) {
-            revert UnexpectedTokenBalanceChange(token_, expectedAmount, delta.received);
+        if (delta.senderSpent != expectedAmount) {
+            revert UnexpectedTokenBalanceChange(token_, expectedAmount, delta.senderSpent);
+        }
+        if (delta.recipientBalanceDecreased) {
+            revert UnexpectedTokenBalanceChange(token_, expectedAmount, 0);
+        }
+        if (delta.recipientReceived != expectedAmount) {
+            revert UnexpectedTokenBalanceChange(token_, expectedAmount, delta.recipientReceived);
         }
     }
 }

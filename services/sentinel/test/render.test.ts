@@ -104,7 +104,7 @@ function makeRow(
         severityRationale: "Executor changes can redirect governance execution.",
         source: "template",
         summary:
-          "setExecutor changes execution authority for the Boardroom. This long summary intentionally exercises the public post truncation path while keeping the important veto link available."
+          "setExecutor changes queue authority for the Boardroom; ready execution remains permissionless. This long summary intentionally exercises the public post truncation path while keeping the important veto link available."
       },
       boardroom: {
         address: "0x0000000000000000000000000000000000000b0a",

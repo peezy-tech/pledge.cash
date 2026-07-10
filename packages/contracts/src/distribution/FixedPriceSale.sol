@@ -4,7 +4,6 @@ pragma solidity ^0.8.30;
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Initializable} from "solady/utils/Initializable.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
-import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 
 interface IFixedPriceSaleBoardroom {
@@ -12,8 +11,6 @@ interface IFixedPriceSaleBoardroom {
 }
 
 contract FixedPriceSale is Initializable, ReentrancyGuard {
-    using SafeTransferLib for address;
-
     uint8 internal constant BOARDROOM_STATUS_ACTIVE = 0;
 
     enum SaleStatus {
@@ -173,12 +170,14 @@ contract FixedPriceSale is Initializable, ReentrancyGuard {
         if (!_isWithinSaleWindow()) revert SaleNotOpen();
     }
 
-    function _requireValidCreateParams(address boardroom_, CreateParams calldata params) internal pure {
+    function _requireValidCreateParams(address boardroom_, CreateParams calldata params) internal view {
         if (boardroom_ == address(0) || params.shareToken == address(0) || params.paymentToken == address(0)) {
             revert InvalidAddress();
         }
         if (params.shareAmount == 0 || params.price == 0) revert InvalidAmount();
-        if (params.endTime != 0 && params.endTime < params.startTime) revert InvalidTimeWindow();
+        if (params.endTime != 0 && (params.endTime <= params.startTime || uint256(params.endTime) <= block.timestamp)) {
+            revert InvalidTimeWindow();
+        }
     }
 
     function _requirePurchasableShares(address recipient, uint256 shareAmount) internal view {
@@ -202,22 +201,31 @@ contract FixedPriceSale is Initializable, ReentrancyGuard {
     }
 
     function _checkedTransfer(address token, address to, uint256 expectedAmount) internal {
-        _requireExactReceived(token, expectedAmount, ExactTransferLib.sendTo(token, to, expectedAmount));
+        _requireExactBalanceChanges(token, expectedAmount, ExactTransferLib.sendFromSelfTo(token, to, expectedAmount));
     }
 
     function _checkedTransferFrom(address token, address from, address to, uint256 expectedAmount) internal {
-        _requireExactReceived(token, expectedAmount, ExactTransferLib.pullTo(token, from, to, expectedAmount));
+        _requireExactBalanceChanges(
+            token, expectedAmount, ExactTransferLib.pullBetween(token, from, to, expectedAmount)
+        );
     }
 
-    function _requireExactReceived(address token, uint256 expectedAmount, ExactTransferLib.RecipientDelta memory delta)
-        internal
-        pure
-    {
-        if (delta.balanceDecreased) {
+    function _requireExactBalanceChanges(
+        address token,
+        uint256 expectedAmount,
+        ExactTransferLib.ExactDelta memory delta
+    ) internal pure {
+        if (delta.senderBalanceIncreased) {
             revert UnexpectedTokenBalanceChange(token, expectedAmount, 0);
         }
-        if (delta.received != expectedAmount) {
-            revert UnexpectedTokenBalanceChange(token, expectedAmount, delta.received);
+        if (delta.senderSpent != expectedAmount) {
+            revert UnexpectedTokenBalanceChange(token, expectedAmount, delta.senderSpent);
+        }
+        if (delta.recipientBalanceDecreased) {
+            revert UnexpectedTokenBalanceChange(token, expectedAmount, 0);
+        }
+        if (delta.recipientReceived != expectedAmount) {
+            revert UnexpectedTokenBalanceChange(token, expectedAmount, delta.recipientReceived);
         }
     }
 }

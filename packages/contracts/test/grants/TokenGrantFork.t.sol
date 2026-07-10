@@ -5,6 +5,10 @@ import {Test} from "forge-std/Test.sol";
 import {TokenGrant} from "../../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
 
+contract TokenGrantForkBoardroomFactory {
+    mapping(address => bool) public isBoardroom;
+}
+
 interface IERC20ForkLike {
     function approve(address spender, uint256 amount) external returns (bool);
     function balanceOf(address account) external view returns (uint256);
@@ -22,7 +26,7 @@ contract TokenGrantForkTest is Test {
 
     function setUp() public {
         if (_hasMainnetTokens()) {
-            factory = new TokenGrantFactory(address(this));
+            factory = new TokenGrantFactory(address(this), address(new TokenGrantForkBoardroomFactory()));
         }
     }
 

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {LibClone} from "solady/utils/LibClone.sol";
+import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {LockedLiquidity} from "./LockedLiquidity.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
@@ -17,6 +18,8 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
     uint256 internal constant CREATE_LOCKED_LIQUIDITY_DATA_LENGTH = 4 + 32 * 8;
     uint256 internal constant CREATE_LOCKED_LIQUIDITY_RESULT_LENGTH = 32 * 5;
     uint256 public constant MAX_LOCKERS_PER_BOARDROOM = 32;
+    uint256 public constant MAX_SEED_SLIPPAGE_BPS = 500;
+    uint256 public constant BPS_DENOMINATOR = 10_000;
 
     struct CreateParams {
         address tokenA;
@@ -39,6 +42,7 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
 
     error InvalidAddress();
     error InvalidAmount();
+    error UnsafeLiquidityMinimums(uint256 amountAMin, uint256 requiredAMin, uint256 amountBMin, uint256 requiredBMin);
     error InvalidBoardroom(address boardroom);
     error MissingBoardroomShareToken(address tokenA, address tokenB, address shareToken);
     error UnauthorizedBoardroomPayer(address boardroom, address payer);
@@ -57,6 +61,7 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         uint256 liquidity,
         bytes32 salt
     );
+    event ClosedLockerPruned(address indexed boardroom, address indexed locker, address indexed pool);
 
     constructor(address ammRouter_) {
         if (ammRouter_ == address(0)) revert InvalidAddress();
@@ -128,6 +133,10 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         return lockersForBoardroom[boardroom];
     }
 
+    function pruneClosedLockers(address boardroom) external nonReentrant returns (uint256 pruned) {
+        return _pruneClosedLockers(boardroom);
+    }
+
     function predictLockedLiquidityAddress(address boardroom, bytes32 salt) external view returns (address) {
         return LibClone.predictDeterministicAddress(lockedLiquidityLogic, _cloneSalt(boardroom, salt), address(this));
     }
@@ -140,6 +149,7 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
 
         address shareToken = _boardroomShareToken(boardroom);
         _requirePairContainsShareToken(params, shareToken);
+        _pruneClosedLockers(boardroom);
         _requireLockerCapacity(boardroom);
 
         locker = _deployLocker(boardroom, params);
@@ -176,6 +186,7 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         CreateParams memory params = abi.decode(data[4:], (CreateParams));
         if (!_hasValidTokenPair(params.tokenA, params.tokenB)) return false;
         if (!_hasSeedAmounts(params.amountADesired, params.amountBDesired)) return false;
+        if (!_hasMeaningfulSeedMinimums(params)) return false;
 
         address shareToken = _verifiedBoardroomShareToken(boardroom);
         if (shareToken == address(0)) return false;
@@ -186,6 +197,7 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         if (boardroom == address(0) || payer == address(0)) revert InvalidAddress();
         if (!_hasValidTokenPair(params.tokenA, params.tokenB)) revert InvalidAddress();
         if (!_hasSeedAmounts(params.amountADesired, params.amountBDesired)) revert InvalidAmount();
+        _requireMeaningfulSeedMinimums(params);
     }
 
     function _requirePairContainsShareToken(CreateParams calldata params, address shareToken) internal pure {
@@ -197,6 +209,25 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
     function _requireLockerCapacity(address boardroom) internal view {
         if (lockersForBoardroom[boardroom].length >= MAX_LOCKERS_PER_BOARDROOM) {
             revert TooManyBoardroomLockers(boardroom);
+        }
+    }
+
+    function _pruneClosedLockers(address boardroom) internal returns (uint256 pruned) {
+        address[] storage lockers = lockersForBoardroom[boardroom];
+        uint256 index;
+        while (index < lockers.length) {
+            address locker = lockers[index];
+            LockedLiquidity position = LockedLiquidity(locker);
+            if (position.lockedLiquidity() != 0) {
+                ++index;
+                continue;
+            }
+
+            address pool = position.pool();
+            lockers[index] = lockers[lockers.length - 1];
+            lockers.pop();
+            ++pruned;
+            emit ClosedLockerPruned(boardroom, locker, pool);
         }
     }
 
@@ -276,6 +307,28 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         return amountADesired != 0 && amountBDesired != 0;
     }
 
+    function _hasMeaningfulSeedMinimums(CreateParams memory params) internal pure returns (bool) {
+        (uint256 requiredAMin, uint256 requiredBMin) = _requiredSeedMinimums(params);
+        return params.amountAMin >= requiredAMin && params.amountBMin >= requiredBMin;
+    }
+
+    function _requireMeaningfulSeedMinimums(CreateParams calldata params) internal pure {
+        (uint256 requiredAMin, uint256 requiredBMin) = _requiredSeedMinimums(params);
+        if (params.amountAMin < requiredAMin || params.amountBMin < requiredBMin) {
+            revert UnsafeLiquidityMinimums(params.amountAMin, requiredAMin, params.amountBMin, requiredBMin);
+        }
+    }
+
+    function _requiredSeedMinimums(CreateParams memory params)
+        internal
+        pure
+        returns (uint256 requiredAMin, uint256 requiredBMin)
+    {
+        uint256 retainedBps = BPS_DENOMINATOR - MAX_SEED_SLIPPAGE_BPS;
+        requiredAMin = FixedPointMathLib.fullMulDivUp(params.amountADesired, retainedBps, BPS_DENOMINATOR);
+        requiredBMin = FixedPointMathLib.fullMulDivUp(params.amountBDesired, retainedBps, BPS_DENOMINATOR);
+    }
+
     function _containsShareToken(address tokenA, address tokenB, address shareToken) internal pure returns (bool) {
         return tokenA == shareToken || tokenB == shareToken;
     }
@@ -286,10 +339,14 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
     }
 
     function _checkedTransferFrom(address token, address from, address to, uint256 expectedAmount) internal {
-        ExactTransferLib.RecipientDelta memory delta = ExactTransferLib.pullTo(token, from, to, expectedAmount);
-        if (delta.balanceDecreased) revert TransferAmountMismatch(token, expectedAmount, 0);
-        if (delta.received != expectedAmount) {
-            revert TransferAmountMismatch(token, expectedAmount, delta.received);
+        ExactTransferLib.ExactDelta memory delta = ExactTransferLib.pullBetween(token, from, to, expectedAmount);
+        if (delta.senderBalanceIncreased) revert TransferAmountMismatch(token, expectedAmount, 0);
+        if (delta.senderSpent != expectedAmount) {
+            revert TransferAmountMismatch(token, expectedAmount, delta.senderSpent);
+        }
+        if (delta.recipientBalanceDecreased) revert TransferAmountMismatch(token, expectedAmount, 0);
+        if (delta.recipientReceived != expectedAmount) {
+            revert TransferAmountMismatch(token, expectedAmount, delta.recipientReceived);
         }
     }
 

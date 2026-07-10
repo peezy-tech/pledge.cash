@@ -22,10 +22,12 @@ contract DeterministicDeploymentTest is Test {
 
     PledgeCashDeterministicDeployer internal deployer;
     WETH internal wrappedNative;
+    BoardroomFactory internal canonicalBoardroomFactory;
 
     function setUp() public {
         deployer = new PledgeCashDeterministicDeployer(owner);
         wrappedNative = new WETH();
+        canonicalBoardroomFactory = new BoardroomFactory(address(1), address(wrappedNative));
     }
 
     function testDeployerRejectsZeroOwnerAndEmptyInitCode() public {
@@ -60,7 +62,9 @@ contract DeterministicDeploymentTest is Test {
     }
 
     function testOnlyOwnerCanDeployDeterministicContracts() public {
-        bytes memory initCode = abi.encodePacked(type(TokenGrantFactory).creationCode, abi.encode(owner));
+        bytes memory initCode = abi.encodePacked(
+            type(TokenGrantFactory).creationCode, abi.encode(owner, address(canonicalBoardroomFactory))
+        );
 
         vm.prank(stranger);
         vm.expectRevert(Ownable.Unauthorized.selector);
@@ -94,6 +98,35 @@ contract DeterministicDeploymentTest is Test {
         assertEq(deployedA, deployedB);
     }
 
+    function testSecurityRemediationUsesFreshV3RootSalts() public pure {
+        assertEq(PledgeCashDeploymentSalts.version(), "pledge.cash.deterministic.v3");
+        assertEq(
+            PledgeCashDeploymentSalts.boardroomPolicyRegistry(),
+            keccak256("pledge.cash.deterministic.v3.BoardroomPolicyRegistry")
+        );
+        assertEq(PledgeCashDeploymentSalts.assetPolicy(), keccak256("pledge.cash.deterministic.v3.AssetPolicy"));
+        assertEq(
+            PledgeCashDeploymentSalts.tokenGrantFactory(), keccak256("pledge.cash.deterministic.v3.TokenGrantFactory")
+        );
+        assertEq(PledgeCashDeploymentSalts.ammFactory(), keccak256("pledge.cash.deterministic.v3.AmmFactory"));
+        assertEq(PledgeCashDeploymentSalts.ammRouter(), keccak256("pledge.cash.deterministic.v3.AmmRouter"));
+        assertEq(
+            PledgeCashDeploymentSalts.lockedLiquidityFactory(),
+            keccak256("pledge.cash.deterministic.v3.LockedLiquidityFactory")
+        );
+        assertEq(
+            PledgeCashDeploymentSalts.distributionFactory(),
+            keccak256("pledge.cash.deterministic.v3.DistributionFactory")
+        );
+        assertEq(
+            PledgeCashDeploymentSalts.boardroomFactory(), keccak256("pledge.cash.deterministic.v3.BoardroomFactory")
+        );
+
+        assertNotEq(PledgeCashDeploymentSalts.assetPolicy(), keccak256("pledge.cash.deterministic.v1.AssetPolicy"));
+        assertNotEq(PledgeCashDeploymentSalts.ammFactory(), keccak256("pledge.cash.deterministic.v1.AmmFactory"));
+        assertNotEq(PledgeCashDeploymentSalts.ammRouter(), keccak256("pledge.cash.deterministic.v1.AmmRouter"));
+    }
+
     function testDeploysFullRootStackAtPredictedAddresses() public {
         BoardroomPolicyRegistry policyRegistry = BoardroomPolicyRegistry(
             _deploy(
@@ -107,10 +140,18 @@ contract DeterministicDeploymentTest is Test {
                 abi.encodePacked(type(AssetPolicy).creationCode, abi.encode(owner, address(wrappedNative)))
             )
         );
+        BoardroomFactory boardroomFactory = BoardroomFactory(
+            _deploy(
+                PledgeCashDeploymentSalts.boardroomFactory(),
+                abi.encodePacked(
+                    type(BoardroomFactory).creationCode, abi.encode(address(policyRegistry), address(wrappedNative))
+                )
+            )
+        );
         TokenGrantFactory tokenGrantFactory = TokenGrantFactory(
             _deploy(
                 PledgeCashDeploymentSalts.tokenGrantFactory(),
-                abi.encodePacked(type(TokenGrantFactory).creationCode, abi.encode(owner))
+                abi.encodePacked(type(TokenGrantFactory).creationCode, abi.encode(owner, address(boardroomFactory)))
             )
         );
         AmmFactory ammFactory = AmmFactory(
@@ -142,18 +183,10 @@ contract DeterministicDeploymentTest is Test {
                 )
             )
         );
-        BoardroomFactory boardroomFactory = BoardroomFactory(
-            _deploy(
-                PledgeCashDeploymentSalts.boardroomFactory(),
-                abi.encodePacked(
-                    type(BoardroomFactory).creationCode, abi.encode(address(policyRegistry), address(wrappedNative))
-                )
-            )
-        );
-
         assertEq(policyRegistry.owner(), owner);
         assertEq(assetPolicy.owner(), owner);
         assertEq(tokenGrantFactory.owner(), owner);
+        assertEq(tokenGrantFactory.boardroomFactory(), address(boardroomFactory));
         assertEq(ammFactory.feeManager(), owner);
         assertEq(ammRouter.factory(), address(ammFactory));
         assertEq(ammRouter.wrappedNative(), address(wrappedNative));
@@ -164,15 +197,18 @@ contract DeterministicDeploymentTest is Test {
 
         vm.startPrank(owner);
         assetPolicy.setApprovalSpenderAllowed(address(tokenGrantFactory), true);
-        policyRegistry.setPolicyAllowed(address(tokenGrantFactory), true);
+        policyRegistry.registerModulePolicy(address(tokenGrantFactory));
         vm.stopPrank();
 
         assertTrue(assetPolicy.isApprovalSpenderAllowed(address(tokenGrantFactory)));
         assertTrue(policyRegistry.isPolicyAllowed(address(tokenGrantFactory)));
+        assertTrue(policyRegistry.isModulePolicy(address(tokenGrantFactory)));
     }
 
     function testRepeatedDeployReturnsExistingAddress() public {
-        bytes memory initCode = abi.encodePacked(type(TokenGrantFactory).creationCode, abi.encode(owner));
+        bytes memory initCode = abi.encodePacked(
+            type(TokenGrantFactory).creationCode, abi.encode(owner, address(canonicalBoardroomFactory))
+        );
         bytes32 salt = PledgeCashDeploymentSalts.tokenGrantFactory();
         address predicted = deployer.predict(salt);
 
@@ -184,8 +220,12 @@ contract DeterministicDeploymentTest is Test {
     }
 
     function testRepeatedDeployRejectsMismatchedInitCode() public {
-        bytes memory initCode = abi.encodePacked(type(TokenGrantFactory).creationCode, abi.encode(owner));
-        bytes memory mismatchedInitCode = abi.encodePacked(type(TokenGrantFactory).creationCode, abi.encode(stranger));
+        bytes memory initCode = abi.encodePacked(
+            type(TokenGrantFactory).creationCode, abi.encode(owner, address(canonicalBoardroomFactory))
+        );
+        bytes memory mismatchedInitCode = abi.encodePacked(
+            type(TokenGrantFactory).creationCode, abi.encode(stranger, address(canonicalBoardroomFactory))
+        );
         bytes32 salt = PledgeCashDeploymentSalts.tokenGrantFactory();
 
         _deploy(salt, initCode);
