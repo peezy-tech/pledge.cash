@@ -4,4 +4,3 @@ export * from "./merkle-airdrop-flow";
 export * from "./participation-flows";
 export * from "./participation-math";
 export * from "./types";
-

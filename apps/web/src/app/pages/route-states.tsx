@@ -40,7 +40,6 @@ export function NotFoundPage({
     </main>
   );
 }
-
 export function RedirectState({
   destination,
   message = "Opening the canonical workspace…",
@@ -58,4 +57,3 @@ export function RedirectState({
     </main>
   );
 }
-

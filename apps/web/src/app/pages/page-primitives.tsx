@@ -123,4 +123,3 @@ export function TableFrame({ children, label }: { children: ReactNode; label: st
 export const tableClassName = "w-full min-w-[680px] border-collapse text-left text-sm";
 export const tableHeadClassName = "border-b border-zinc-800 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500";
 export const tableCellClassName = "border-b border-zinc-900 px-3 py-3 align-top first:pl-0 last:pr-0";
-

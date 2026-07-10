@@ -100,4 +100,3 @@ function parseProofJson(value: string): string[] {
   }
   return parsed as string[];
 }
-
