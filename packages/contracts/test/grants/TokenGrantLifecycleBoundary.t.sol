@@ -19,6 +19,8 @@ contract TokenGrantLifecycleBoundaryTest is Test {
     uint256 internal constant VESTING_END = 2_000;
     uint256 internal constant EXPIRY = VESTING_END + 1 days;
 
+    event ExpiredTokensWithdrawn(address indexed issuer, uint256 amount);
+
     function setUp() public {
         boardroomFactory = new TokenGrantTestBoardroomFactory();
         factory = new TokenGrantFactory(address(this), address(boardroomFactory));
@@ -84,7 +86,7 @@ contract TokenGrantLifecycleBoundaryTest is Test {
         assertEq(TokenGrant(grant).expiry(), longExpiry);
     }
 
-    function testExpiredBoardroomGrantCanQuarantineMutatedTokenWithoutTokenCall() public {
+    function testExpiredBoardroomGrantCanQuarantineMutatedTokenAfterFailedRecovery() public {
         MutableFailureGrantERC20 mutableToken = new MutableFailureGrantERC20();
         mutableToken.mint(issuer, GRANT_SIZE);
         boardroomFactory.setBoardroom(issuer, true);
@@ -141,6 +143,23 @@ contract TokenGrantLifecycleBoundaryTest is Test {
         uint256 tokenId = grant.tokenId();
         vm.expectRevert();
         factory.ownerOf(tokenId);
+    }
+
+    function testExpiredBoardroomGrantQuarantineCallRecoversHealthyToken() public {
+        boardroomFactory.setBoardroom(issuer, true);
+        TokenGrant grant = _createFreeGrant(keccak256("healthy-boardroom-quarantine-call"));
+
+        vm.warp(EXPIRY + 1);
+        vm.expectEmit(true, false, false, true, address(grant));
+        emit ExpiredTokensWithdrawn(issuer, GRANT_SIZE);
+        vm.prank(issuer);
+        grant.quarantineAndClose();
+
+        assertTrue(grant.isClosed());
+        assertFalse(grant.isQuarantined());
+        assertEq(grant.quarantinedAmount(), 0);
+        assertEq(token.balanceOf(address(grant)), 0);
+        assertEq(token.balanceOf(issuer), GRANT_SIZE);
     }
 
     function _createFreeGrant(bytes32 salt) internal returns (TokenGrant grant) {

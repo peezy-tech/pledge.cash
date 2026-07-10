@@ -201,10 +201,11 @@ Effects:
 ### Quarantine An Expired Boardroom Grant
 
 If a grant token mutates so that even expiry withdrawal can no longer transfer safely, the Boardroom issuer may call
-`quarantineAndClose()` only after expiry. This path makes no token call, records `quarantinedAmount` as
-`claimable - settledAmount`, closes the obligation, and burns the grant-right NFT. It cannot be used by standalone
-issuers or before expiry, so it cannot forfeit live vested settlement rights. Partially settled grants preserve their
-settled accounting and record only the remaining stranded promise.
+`quarantineAndClose()` only after expiry. The path first attempts bounded-gas, exact-delta recovery of all remaining
+escrow to the Boardroom. A healthy token therefore follows normal expiry withdrawal semantics. Only a failed or
+non-exact recovery records the remaining promise in `quarantinedAmount`, closes the obligation, and burns the
+grant-right NFT. It cannot be used by standalone issuers or before expiry, so it cannot forfeit live vested settlement
+rights. Partially settled grants preserve their settled accounting and record only the remaining stranded promise.
 
 ## Invariants
 
