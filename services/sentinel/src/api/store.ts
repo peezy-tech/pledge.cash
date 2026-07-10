@@ -51,15 +51,18 @@ type PublicActionRow = {
   readonly boardroomStatus: "prelaunch" | "active" | "winddown";
   readonly chainId: number;
   readonly decodeStatus: "decoded" | "undecoded";
+  readonly epoch: bigint | string | null;
   readonly eta: Date | string;
+  readonly expiresAt: Date | string | null;
   readonly id: string;
+  readonly invalidatedByEpoch: bigint | string | null;
   readonly queueBlock: bigint | string;
   readonly queueTxHash: string;
   readonly riskEvaluatedAt: Date | string | null;
   readonly riskFindings: unknown;
   readonly riskRulesetVersion: number | null;
   readonly riskSeverity: "low" | "medium" | "high" | null;
-  readonly status: "queued" | "cancelled" | "executed";
+  readonly status: "queued" | "cancelled" | "executed" | "invalidated" | "expired";
 };
 
 type PublicActionCallRow = {
@@ -317,7 +320,13 @@ export async function getPublicActions(
   }
 
   if (query.status !== undefined) {
-    filters.push(sql`qa.status = ${query.status}::sentinel_queued_action_status`);
+    if (query.status === "expired") {
+      filters.push(sql`qa.status = 'queued' AND qa.expires_at IS NOT NULL AND qa.expires_at <= NOW()`);
+    } else if (query.status === "queued") {
+      filters.push(sql`qa.status = 'queued' AND (qa.expires_at IS NULL OR qa.expires_at > NOW())`);
+    } else {
+      filters.push(sql`qa.status = ${query.status}::sentinel_queued_action_status`);
+    }
   }
 
   if (query.minSeverity !== undefined) {
@@ -344,9 +353,16 @@ export async function getPublicActions(
           qa.action_hash AS "actionHash",
           qa.queue_tx_hash AS "queueTxHash",
           qa.queue_block AS "queueBlock",
-          qa.status,
+          CASE
+            WHEN qa.status = 'queued' AND qa.expires_at IS NOT NULL AND qa.expires_at <= NOW()
+              THEN 'expired'
+            ELSE qa.status::text
+          END AS status,
           qa.decode_status AS "decodeStatus",
+          qa.epoch,
           qa.eta,
+          qa.expires_at AS "expiresAt",
+          qa.invalidated_by_epoch AS "invalidatedByEpoch",
           b.name AS "boardroomName",
           b.share_token AS "boardroomShareToken",
           b.status AS "boardroomStatus",
@@ -506,9 +522,12 @@ function toPublicActionDto(
     })),
     chainId: row.chainId,
     decodeStatus: row.decodeStatus,
+    epoch: row.epoch === null ? null : row.epoch.toString(),
     eta: toIso(row.eta),
-    event: row.status,
+    ...(row.status === "expired" ? {} : { event: row.status }),
+    expiresAt: row.expiresAt === null ? null : toIso(row.expiresAt),
     id: row.id,
+    invalidatedByEpoch: row.invalidatedByEpoch === null ? null : row.invalidatedByEpoch.toString(),
     queueBlock: row.queueBlock.toString(),
     queueTxHash: row.queueTxHash as PublicActionDto["queueTxHash"],
     risk: toRiskDto(row),

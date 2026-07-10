@@ -102,7 +102,7 @@ describe("governance helpers", () => {
       ],
       BoardroomActionQueued: [
         rawLog({
-          args: { actionHash, executor, eta: 100_000n, salt },
+          args: { actionHash, executor, eta: 100_000n, expiresAt: 704_800n, epoch: 3n, salt },
           blockNumber: 12n,
           logIndex: 4,
           transactionHash: txHash(3n),
@@ -132,9 +132,17 @@ describe("governance helpers", () => {
           transactionHash: txHash(6n),
         }),
       ],
+      GovernanceEpochAdvanced: [
+        rawLog({
+          args: { epoch: 3n },
+          blockNumber: 12n,
+          logIndex: 2,
+          transactionHash: txHash(8n),
+        }),
+      ],
       BoardroomWindDownStarted: [
         rawLog({
-          args: { owner },
+          args: { caller: owner },
           blockNumber: 14n,
           logIndex: 0,
           transactionHash: txHash(7n),
@@ -171,6 +179,7 @@ describe("governance helpers", () => {
       "BoardroomActionCancelled",
       "BoardroomActionExecuted",
       "BoardroomCallExecuted",
+      "GovernanceEpochAdvanced",
       "BoardroomWindDownStarted",
     ]);
     expect(requests.every((request) => request.fromBlock === 10n && request.toBlock === 20n)).toBe(true);
@@ -178,6 +187,7 @@ describe("governance helpers", () => {
     expect(events.map((event) => event.kind)).toEqual([
       "launched",
       "executorSet",
+      "governanceEpochAdvanced",
       "callExecuted",
       "actionQueued",
       "actionCancelled",
@@ -194,6 +204,14 @@ describe("governance helpers", () => {
       transactionHash: txHash(1n),
     });
     expect(events[2]).toEqual({
+      kind: "governanceEpochAdvanced",
+      epoch: 3n,
+      boardroom,
+      blockNumber: 12n,
+      logIndex: 2,
+      transactionHash: txHash(8n),
+    });
+    expect(events[3]).toEqual({
       kind: "callExecuted",
       policy,
       target,
@@ -204,6 +222,19 @@ describe("governance helpers", () => {
       blockNumber: 12n,
       logIndex: 3,
       transactionHash: txHash(6n),
+    });
+    expect(events[4]).toEqual({
+      kind: "actionQueued",
+      actionHash,
+      executor,
+      eta: 100_000n,
+      expiresAt: 704_800n,
+      epoch: 3n,
+      salt,
+      boardroom,
+      blockNumber: 12n,
+      logIndex: 4,
+      transactionHash: txHash(3n),
     });
   });
 });

@@ -22,11 +22,20 @@ export type GovernanceLogMeta = {
 export type GovernanceEvent =
   | (GovernanceLogMeta & { kind: "launched"; executor: Address; governanceDelay: bigint })
   | (GovernanceLogMeta & { kind: "executorSet"; executor: Address })
-  | (GovernanceLogMeta & { kind: "actionQueued"; actionHash: Hex; executor: Address; eta: bigint; salt: Hex })
+  | (GovernanceLogMeta & {
+      kind: "actionQueued";
+      actionHash: Hex;
+      executor: Address;
+      eta: bigint;
+      expiresAt: bigint;
+      epoch: bigint;
+      salt: Hex;
+    })
   | (GovernanceLogMeta & { kind: "actionCancelled"; actionHash: Hex; caller: Address })
   | (GovernanceLogMeta & { kind: "actionExecuted"; actionHash: Hex; caller: Address })
   | (GovernanceLogMeta & { kind: "callExecuted"; policy: Address; target: Address; selector: Hex; value: bigint; dataHash: Hex })
-  | (GovernanceLogMeta & { kind: "windDownStarted"; owner: Address });
+  | (GovernanceLogMeta & { kind: "governanceEpochAdvanced"; epoch: bigint })
+  | (GovernanceLogMeta & { kind: "windDownStarted"; caller: Address });
 
 export type GovernanceEventsQuery = {
   boardrooms: readonly Address[];
@@ -52,6 +61,7 @@ const actionQueuedEvent = getAbiItem({ abi: boardroomAbi, name: "BoardroomAction
 const actionCancelledEvent = getAbiItem({ abi: boardroomAbi, name: "BoardroomActionCancelled" });
 const actionExecutedEvent = getAbiItem({ abi: boardroomAbi, name: "BoardroomActionExecuted" });
 const callExecutedEvent = getAbiItem({ abi: boardroomAbi, name: "BoardroomCallExecuted" });
+const governanceEpochAdvancedEvent = getAbiItem({ abi: boardroomAbi, name: "GovernanceEpochAdvanced" });
 const windDownStartedEvent = getAbiItem({ abi: boardroomAbi, name: "BoardroomWindDownStarted" });
 
 export async function queryGovernanceEvents(
@@ -60,14 +70,23 @@ export async function queryGovernanceEvents(
 ): Promise<GovernanceEvent[]> {
   if (input.boardrooms.length === 0) return [];
 
-  const [launchedLogs, executorSetLogs, queuedLogs, cancelledLogs, executedLogs, callExecutedLogs, windDownLogs] =
-    await Promise.all([
+  const [
+    launchedLogs,
+    executorSetLogs,
+    queuedLogs,
+    cancelledLogs,
+    executedLogs,
+    callExecutedLogs,
+    governanceEpochAdvancedLogs,
+    windDownLogs,
+  ] = await Promise.all([
       getGovernanceLogs(client, input, launchedEvent),
       getGovernanceLogs(client, input, executorSetEvent),
       getGovernanceLogs(client, input, actionQueuedEvent),
       getGovernanceLogs(client, input, actionCancelledEvent),
       getGovernanceLogs(client, input, actionExecutedEvent),
       getGovernanceLogs(client, input, callExecutedEvent),
+      getGovernanceLogs(client, input, governanceEpochAdvancedEvent),
       getGovernanceLogs(client, input, windDownStartedEvent),
     ]);
 
@@ -78,6 +97,7 @@ export async function queryGovernanceEvents(
     ...cancelledLogs.flatMap((log) => maybeArray(toActionCancelledEvent(log))),
     ...executedLogs.flatMap((log) => maybeArray(toActionExecutedEvent(log))),
     ...callExecutedLogs.flatMap((log) => maybeArray(toCallExecutedEvent(log))),
+    ...governanceEpochAdvancedLogs.flatMap((log) => maybeArray(toGovernanceEpochAdvancedEvent(log))),
     ...windDownLogs.flatMap((log) => maybeArray(toWindDownStartedEvent(log))),
   ].sort(compareGovernanceEvents);
 }
@@ -160,9 +180,21 @@ function toActionQueuedEvent(log: RawEventLog): GovernanceEvent | undefined {
   const actionHash = hexArg(log.args, "actionHash");
   const executor = addressArg(log.args, "executor");
   const eta = bigintArg(log.args, "eta");
+  const expiresAt = bigintArg(log.args, "expiresAt");
+  const epoch = bigintArg(log.args, "epoch");
   const salt = hexArg(log.args, "salt");
-  if (!meta || !actionHash || !executor || eta === undefined || !salt) return undefined;
-  return { kind: "actionQueued", actionHash, executor, eta, salt, ...meta };
+  if (
+    !meta
+    || !actionHash
+    || !executor
+    || eta === undefined
+    || expiresAt === undefined
+    || epoch === undefined
+    || !salt
+  ) {
+    return undefined;
+  }
+  return { kind: "actionQueued", actionHash, executor, eta, expiresAt, epoch, salt, ...meta };
 }
 
 function toActionCancelledEvent(log: RawEventLog): GovernanceEvent | undefined {
@@ -192,11 +224,18 @@ function toCallExecutedEvent(log: RawEventLog): GovernanceEvent | undefined {
   return { kind: "callExecuted", policy, target, selector, value, dataHash, ...meta };
 }
 
+function toGovernanceEpochAdvancedEvent(log: RawEventLog): GovernanceEvent | undefined {
+  const meta = governanceMeta(log);
+  const epoch = bigintArg(log.args, "epoch");
+  if (!meta || epoch === undefined) return undefined;
+  return { kind: "governanceEpochAdvanced", epoch, ...meta };
+}
+
 function toWindDownStartedEvent(log: RawEventLog): GovernanceEvent | undefined {
   const meta = governanceMeta(log);
-  const owner = addressArg(log.args, "owner");
-  if (!meta || !owner) return undefined;
-  return { kind: "windDownStarted", owner, ...meta };
+  const caller = addressArg(log.args, "caller");
+  if (!meta || !caller) return undefined;
+  return { kind: "windDownStarted", caller, ...meta };
 }
 
 function governanceMeta(log: RawEventLog): GovernanceLogMeta | undefined {

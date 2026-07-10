@@ -33,7 +33,8 @@ export const boardroomStatusEnum = pgEnum("sentinel_boardroom_status", [
 export const queuedActionStatusEnum = pgEnum("sentinel_queued_action_status", [
   "queued",
   "cancelled",
-  "executed"
+  "executed",
+  "invalidated"
 ]);
 
 export const decodeStatusEnum = pgEnum("sentinel_decode_status", ["decoded", "undecoded"]);
@@ -46,6 +47,7 @@ export const notificationEventEnum = pgEnum("sentinel_notification_event", [
   "queued",
   "cancelled",
   "executed",
+  "invalidated",
   "reminder",
   "policy-admin"
 ]);
@@ -109,6 +111,9 @@ export const queuedActions = pgTable(
     salt: text("salt").notNull(),
     executor: text("executor").notNull(),
     eta: timestamp("eta", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    epoch: bigint("epoch", { mode: "bigint" }),
+    invalidatedByEpoch: bigint("invalidated_by_epoch", { mode: "bigint" }),
     queueBlock: bigint("queue_block", { mode: "bigint" }).notNull(),
     queueLogIndex: integer("queue_log_index").notNull().default(0),
     status: queuedActionStatusEnum("status").notNull().default("queued"),

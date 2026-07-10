@@ -9,8 +9,8 @@ export const IntegerStringSchema = z.string().regex(/^-?\d+$/);
 export const UintStringSchema = z.string().regex(/^\d+$/);
 
 export const SeveritySchema = z.enum(["low", "medium", "high"]);
-export const ActionEventSchema = z.enum(["queued", "cancelled", "executed"]);
-export const ActionStatusSchema = z.enum(["queued", "cancelled", "executed"]);
+export const ActionEventSchema = z.enum(["queued", "cancelled", "executed", "invalidated"]);
+export const ActionStatusSchema = z.enum(["queued", "cancelled", "executed", "invalidated", "expired"]);
 export const DecodeStatusSchema = z.enum(["decoded", "undecoded"]);
 export const ChannelTypeSchema = z.enum(["telegram", "twitter"]);
 export const SubscriptionModeSchema = z.enum(["holdings", "explicit"]);
@@ -184,9 +184,12 @@ export const PublicActionDtoSchema = z.object({
   calls: z.array(ActionCallDtoSchema),
   chainId: z.number().int().positive(),
   decodeStatus: DecodeStatusSchema,
+  epoch: IntegerStringSchema.nullable(),
   eta: IsoDateSchema,
   event: ActionEventSchema.optional(),
+  expiresAt: IsoDateSchema.nullable(),
   id: UuidSchema,
+  invalidatedByEpoch: IntegerStringSchema.nullable(),
   queueBlock: IntegerStringSchema,
   queueTxHash: HexSchema,
   risk: RiskAssessmentDtoSchema.nullable(),

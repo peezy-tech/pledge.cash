@@ -12,7 +12,9 @@ describe("notification rendering", () => {
     });
 
     expect(rendered.html).toContain("HIGH Queued governance action");
-    expect(rendered.html).toContain("veto window ends in 12h");
+    expect(rendered.html).toContain("execution opens in 12h");
+    expect(rendered.html).toContain("Execution deadline");
+    expect(rendered.html).toContain("at least 1% of prior-block circulating shares held both now and in the prior block");
     expect(rendered.html).toContain("cancelAction(0x0000000000000000000000000000000000000000000000000000000000000abc)");
     expect(rendered.html).toContain("https://explorer.example/tx/0x0000000000000000000000000000000000000000000000000000000000000def");
     expect(rendered.text).toContain("setExecutor");
@@ -30,7 +32,7 @@ describe("notification rendering", () => {
 
     expect(rendered.text.length).toBeLessThanOrEqual(280);
     expect(rendered.text).toContain("HIGH-RISK action queued");
-    expect(rendered.text).toContain("Shareholders can veto");
+    expect(rendered.text).toContain("Eligible 1% holders may cancel");
     expect(rendered.text).toContain("https://sentinel.example/notifications?chain=998");
     expect(rendered.html).toBeUndefined();
   });
@@ -46,14 +48,43 @@ describe("notification rendering", () => {
     expect(rendered.subject).toContain("Policy Admin Updated action");
   });
 
-  test("renders reminder notifications as the last pre-eta veto prompt", () => {
+  test("renders reminders as execution-opening prompts with exact cancellation eligibility", () => {
     const rendered = renderNotification(makeRow("telegram", "reminder"), {
       now: new Date("2026-07-09T12:00:00.000Z")
     });
 
     expect(rendered.subject).toContain("Reminder");
-    expect(rendered.text).toContain("veto window ends in 12h");
+    expect(rendered.text).toContain("execution opens in 12h");
+    expect(rendered.text).toContain("at least 1% of prior-block circulating shares");
     expect(rendered.text).toContain("cancelAction");
+  });
+
+  test("renders epoch invalidation as terminal without cancellation instructions", () => {
+    const rendered = renderNotification(makeRow("telegram", "invalidated"), {
+      now: new Date("2026-07-09T12:00:00.000Z")
+    });
+
+    expect(rendered.subject).toContain("Invalidated");
+    expect(rendered.text).toContain("no longer executable");
+    expect(rendered.text).not.toContain("call cancelAction");
+  });
+
+  test("renders a delayed queued notification as expired instead of actionable", () => {
+    const row = makeRow("telegram");
+    const rendered = renderNotification(
+      {
+        ...row,
+        payload: {
+          ...row.payload,
+          action: { ...row.payload.action, expiresAt: "2026-07-08T00:00:00.000Z" }
+        }
+      },
+      { now: new Date("2026-07-09T12:00:00.000Z") }
+    );
+
+    expect(rendered.text).toContain("execution window has expired");
+    expect(rendered.text).toContain("This action is expired and is no longer executable");
+    expect(rendered.text).not.toContain("call cancelAction");
   });
 
   test("builds stable web and explorer links from render options", () => {
@@ -93,7 +124,9 @@ function makeRow(
         actionHash: "0x0000000000000000000000000000000000000000000000000000000000000abc",
         boardroom: "0x0000000000000000000000000000000000000b0a",
         chainId: 998,
+        epoch: "2",
         eta: "2026-07-10T00:00:00.000Z",
+        expiresAt: "2026-07-17T00:00:00.000Z",
         id: "00000000-0000-4000-8000-000000000001",
         queueTxHash: "0x0000000000000000000000000000000000000000000000000000000000000def",
         status: "queued"
