@@ -735,12 +735,15 @@ contract SeedLocal is Script {
     function _migrateCurve() internal {
         launch.quoteReserveAtMigration = launch.curve.quoteReserve();
         launch.sharesToLiquidity = launch.curve.migrationSupply() + launch.curve.remainingSaleShares();
+        uint256 quoteToLiquidity = launch.quoteReserveAtMigration * CURVE_QUOTE_TO_LP_BPS / BPS;
 
         Boardroom.Call memory call = Boardroom.Call({
             policy: address(deployment.distributionFactory),
             target: address(launch.curve),
             value: 0,
-            data: abi.encodeCall(MigratingBondingCurve.migrate, (1, 1, block.timestamp + 1 hours))
+            data: abi.encodeCall(
+                MigratingBondingCurve.migrate, (launch.sharesToLiquidity, quoteToLiquidity, block.timestamp + 1 hours)
+            )
         });
 
         vm.startBroadcast(BOARDROOM_OWNER_KEY);
@@ -961,8 +964,8 @@ contract SeedLocal is Script {
         );
         _check(launch.lockedLiquidity > 0, "curve-locked-liquidity");
         _check(locker.lockedLiquidity() == launch.lockedLiquidity, "locker-liquidity");
-        _check(boardroom.issuedDistributionCount() == 1, "boardroom-distribution-count");
-        _check(boardroom.issuedDistributionAt(0) == address(launch.curve), "boardroom-distribution");
+        _check(boardroom.issuedDistributionCount() == 0, "boardroom-distribution-count");
+        _check(!boardroom.isIssuedDistribution(address(launch.curve)), "boardroom-distribution-pruned");
         _check(boardroom.lockedLiquidityCount() == 1, "boardroom-locker-count");
         _check(boardroom.lockedLiquidityAt(0) == launch.locker, "boardroom-locker");
         _check(launch.optionStrikePrice == launch.quoteToLiquidity * PLEDGE / launch.sharesToLiquidity, "option-strike");
