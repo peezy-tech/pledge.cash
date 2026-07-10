@@ -1052,6 +1052,38 @@ contract DistributionTest is Test {
         assertEq(shareToken.balanceOf(address(boardroom)), 0);
     }
 
+    function testWindDownCannotMigrateGraduatedCurve() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("curve-wind-down-migration");
+        MigratingBondingCurve curve = _createMigratingCurve(boardroom, shareToken, "curve-wind-down-migration-create");
+
+        vm.prank(buyer);
+        paymentToken.approve(address(curve), CURVE_GRADUATION_TARGET);
+        vm.prank(buyer);
+        curve.buy(250 ether, buyer, CURVE_GRADUATION_TARGET, block.timestamp);
+        assertTrue(curve.canMigrate());
+
+        vm.startPrank(owner);
+        boardroom.startWindDown();
+        vm.expectRevert(MigratingBondingCurve.BoardroomNotActive.selector);
+        boardroom.execute(
+            _policyCall(
+                address(distributionFactory),
+                address(curve),
+                0,
+                abi.encodeCall(MigratingBondingCurve.migrate, (712.5 ether, 237_500000, block.timestamp))
+            )
+        );
+        boardroom.execute(
+            _policyCall(
+                address(distributionFactory), address(curve), 0, abi.encodeCall(MigratingBondingCurve.cancel, ())
+            )
+        );
+        vm.stopPrank();
+
+        assertTrue(curve.isClosed());
+        assertEq(boardroom.lockedLiquidityCount(), 0);
+    }
+
     function testMigratingBondingCurveRoundsBuyQuoteUpAndSellQuoteDown() public {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("curve-rounding");
         MigratingBondingCurve curve = _createMigratingCurve(boardroom, shareToken, "curve-rounding-create");

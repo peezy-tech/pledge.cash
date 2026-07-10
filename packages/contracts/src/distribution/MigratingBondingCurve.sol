@@ -229,6 +229,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         onlyBoardroom
         returns (address createdLocker, address createdPool, uint256 amountA, uint256 amountB, uint256 liquidity)
     {
+        _requireActiveBoardroom();
         _requireCurveActive();
         if (deadline < block.timestamp) revert Expired();
         _requireMigrationReady();

@@ -261,9 +261,11 @@ inventory, and migration amounts until the Boardroom migrates or cancels.
 
 ## Curve Migration Or Cancellation
 
-Migration is allowed through the issuing Boardroom only after graduation has latched. The share and quote allocations
-must fit the AMM's `uint112` reserves and produce more than permanently locked `MINIMUM_LIQUIDITY`. Caller minima for
-both assets must be at least 95% of the desired seed amounts; weaker slippage bounds revert before any external call.
+Migration is allowed through the issuing Boardroom only while that Boardroom is active and after graduation has
+latched. Once wind-down begins the only terminal path is cancellation, so a cleanup caller cannot burn redemption value
+into a fresh AMM position. The share and quote allocations must fit the AMM's `uint112` reserves and produce more than
+permanently locked `MINIMUM_LIQUIDITY`. Caller minima for both assets must be at least 95% of the desired seed amounts;
+weaker slippage bounds revert before any external call.
 
 Effects:
 
@@ -294,7 +296,7 @@ the quote asset was registered at creation, recovery remains safe even after red
 - Graduation is monotonic and freezes buys and sells once latched.
 - Only the creating Boardroom can close or cancel its sale.
 - Fixed-price sales cannot keep selling shares after the creating Boardroom starts wind-down.
-- Migrating curves cannot buy or sell after the creating Boardroom starts wind-down.
+- Migrating curves cannot buy, sell, or migrate after the creating Boardroom starts wind-down.
 - Curve sell refunds are limited by account-bound sell rights credited by curve buys.
 - A Boardroom policy call cannot create a sale for another share token.
 - A Boardroom policy call cannot create a curve for another share token.
