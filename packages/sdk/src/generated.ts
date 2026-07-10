@@ -5266,7 +5266,7 @@ export const boardroomAbi = [
     "name": "BoardroomRedemptionsOpened",
     "inputs": [
       {
-        "name": "owner",
+        "name": "caller",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -5279,7 +5279,7 @@ export const boardroomAbi = [
     "name": "BoardroomWindDownStarted",
     "inputs": [
       {
-        "name": "owner",
+        "name": "caller",
         "type": "address",
         "indexed": true,
         "internalType": "address"
