@@ -5,7 +5,9 @@ import {AmmFactory} from "../amm/AmmFactory.sol";
 import {AmmRouter} from "../amm/AmmRouter.sol";
 import {AssetPolicy} from "../policy/AssetPolicy.sol";
 import {BoardroomFactory} from "../boardroom/BoardroomFactory.sol";
+import {BoardroomGovernanceLogic} from "../boardroom/BoardroomGovernanceLogic.sol";
 import {BoardroomPolicyRegistry} from "../boardroom/BoardroomPolicyRegistry.sol";
+import {BoardroomRedemptionPayout} from "../boardroom/BoardroomRedemptionPayout.sol";
 import {DistributionFactory} from "../distribution/DistributionFactory.sol";
 import {ProtocolFeeRouter} from "../fees/ProtocolFeeRouter.sol";
 import {TokenGrantFactory} from "../grants/TokenGrantFactory.sol";
@@ -31,6 +33,14 @@ library PledgeCashDeploymentSalts {
 
     function assetPolicy() internal pure returns (bytes32) {
         return _releaseSalt("AssetPolicy", keccak256(type(AssetPolicy).creationCode));
+    }
+
+    function boardroomGovernanceLogic() internal pure returns (bytes32) {
+        return _releaseSalt("BoardroomGovernanceLogic", keccak256(type(BoardroomGovernanceLogic).creationCode));
+    }
+
+    function boardroomRedemptionPayout() internal pure returns (bytes32) {
+        return _releaseSalt("BoardroomRedemptionPayout", keccak256(type(BoardroomRedemptionPayout).creationCode));
     }
 
     function protocolFeeRouter() internal pure returns (bytes32) {
@@ -66,6 +76,8 @@ library PledgeCashDeploymentSalts {
             abi.encode(
                 keccak256(type(BoardroomPolicyRegistry).creationCode),
                 keccak256(type(AssetPolicy).creationCode),
+                keccak256(type(BoardroomGovernanceLogic).creationCode),
+                keccak256(type(BoardroomRedemptionPayout).creationCode),
                 keccak256(type(ProtocolFeeRouter).creationCode),
                 keccak256(type(TokenGrantFactory).creationCode),
                 keccak256(type(AmmFactory).creationCode),

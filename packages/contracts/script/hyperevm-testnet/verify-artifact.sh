@@ -131,6 +131,7 @@ for required in \
   create2Factory deterministicDeployer deterministicDeployerOwner \
   protocolGovernance protocolTreasury protocolFeeRouter protocolFeeRouterOwner protocolFeeRouterRecipient \
   boardroomPolicyRegistry policyRegistryOwner assetPolicy assetPolicyOwner boardroomFactory \
+  boardroomGovernanceLogic boardroomRedemptionPayout boardroomLogic \
   tokenGrantFactory factoryOwner tokenGrantFeeRecipient tokenGrantLogic creationFee \
   ammFactory ammFactoryOwner ammFeeManager ammProtocolFeeRecipient ammLiquidityRouter \
   ammReservationManager ammRouter wrappedNative \
@@ -219,6 +220,9 @@ fi
 
 if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactory || field_exists boardroomPolicyRegistry; }; then
   require_field boardroomFactory
+  require_field boardroomGovernanceLogic
+  require_field boardroomRedemptionPayout
+  require_field boardroomLogic
   require_field boardroomPolicyRegistry
   require_field assetPolicy
   require_field wrappedNative
@@ -241,7 +245,13 @@ if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactor
   asset_policy="$(field assetPolicy)"
   wrapped_native="$(field wrappedNative)"
   distribution_factory="$(field distributionFactory)"
+  boardroom_governance_logic="$(field boardroomGovernanceLogic)"
+  boardroom_redemption_payout="$(field boardroomRedemptionPayout)"
+  boardroom_logic="$(field boardroomLogic)"
   require_code "BoardroomFactory" "$boardroom_factory"
+  require_code "BoardroomGovernanceLogic" "$boardroom_governance_logic"
+  require_code "BoardroomRedemptionPayout" "$boardroom_redemption_payout"
+  require_code "Boardroom implementation" "$boardroom_logic"
   require_code "BoardroomPolicyRegistry" "$policy_registry"
   require_code "AssetPolicy" "$asset_policy"
   require_code "DistributionFactory" "$distribution_factory"
@@ -251,6 +261,33 @@ if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactor
 
   actual_boardroom_factory_wrapped_native="$(call_address "$boardroom_factory" "wrappedNative()(address)")"
   expect_address_equal "BoardroomFactory wrappedNative" "$wrapped_native" "$actual_boardroom_factory_wrapped_native"
+
+  actual_boardroom_factory_governance_logic="$(call_address "$boardroom_factory" "governanceLogic()(address)")"
+  expect_address_equal \
+    "BoardroomFactory governanceLogic" \
+    "$boardroom_governance_logic" \
+    "$actual_boardroom_factory_governance_logic"
+
+  actual_boardroom_factory_redemption_payout="$(call_address "$boardroom_factory" "redemptionPayoutLogic()(address)")"
+  expect_address_equal \
+    "BoardroomFactory redemptionPayoutLogic" \
+    "$boardroom_redemption_payout" \
+    "$actual_boardroom_factory_redemption_payout"
+
+  actual_boardroom_factory_logic="$(call_address "$boardroom_factory" "boardroomLogic()(address)")"
+  expect_address_equal "BoardroomFactory boardroomLogic" "$boardroom_logic" "$actual_boardroom_factory_logic"
+
+  actual_boardroom_governance_logic="$(call_address "$boardroom_logic" "governanceLogic()(address)")"
+  expect_address_equal \
+    "Boardroom implementation governanceLogic" \
+    "$boardroom_governance_logic" \
+    "$actual_boardroom_governance_logic"
+
+  actual_boardroom_redemption_payout="$(call_address "$boardroom_logic" "redemptionPayoutLogic()(address)")"
+  expect_address_equal \
+    "Boardroom implementation redemptionPayoutLogic" \
+    "$boardroom_redemption_payout" \
+    "$actual_boardroom_redemption_payout"
 
   actual_registry_owner="$(call_address "$policy_registry" "owner()(address)")"
   expect_address_equal "BoardroomPolicyRegistry owner" "$(field policyRegistryOwner)" "$actual_registry_owner"
@@ -348,6 +385,12 @@ if field_exists ammRouter || field_exists lockedLiquidityFactory; then
   actual_locker_router="$(call_address "$locked_liquidity_factory" "ammRouter()(address)")"
   expect_address_equal "LockedLiquidityFactory ammRouter" "$amm_router" "$actual_locker_router"
 
+  actual_locker_boardroom_factory="$(call_address "$locked_liquidity_factory" "boardroomFactory()(address)")"
+  expect_address_equal \
+    "LockedLiquidityFactory BoardroomFactory" \
+    "$boardroom_factory" \
+    "$actual_locker_boardroom_factory"
+
   actual_locked_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$locked_liquidity_factory")"
   expect_equal "Locked liquidity policy allowance" "$(field lockedLiquidityPolicyAllowed)" "$actual_locked_policy_allowed"
 
@@ -363,6 +406,9 @@ require_code_hash "BoardroomPolicyRegistry" "$(field boardroomPolicyRegistry)" b
 require_code_hash "AssetPolicy" "$(field assetPolicy)" assetPolicyCodeHash
 require_code_hash "ProtocolFeeRouter" "$protocol_fee_router" protocolFeeRouterCodeHash
 require_code_hash "BoardroomFactory" "$(field boardroomFactory)" boardroomFactoryCodeHash
+require_code_hash "BoardroomGovernanceLogic" "$(field boardroomGovernanceLogic)" boardroomGovernanceLogicCodeHash
+require_code_hash "BoardroomRedemptionPayout" "$(field boardroomRedemptionPayout)" boardroomRedemptionPayoutCodeHash
+require_code_hash "Boardroom implementation" "$(field boardroomLogic)" boardroomLogicCodeHash
 require_code_hash "TokenGrantFactory" "$(field tokenGrantFactory)" tokenGrantFactoryCodeHash
 require_code_hash "AmmFactory" "$(field ammFactory)" ammFactoryCodeHash
 require_code_hash "AmmRouter" "$(field ammRouter)" ammRouterCodeHash

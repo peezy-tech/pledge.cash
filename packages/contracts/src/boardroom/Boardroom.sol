@@ -122,8 +122,8 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     );
     event SharesMinted(address indexed to, uint256 amount);
     event NativeWrappedForWindDown(address indexed wrappedNative, uint256 amount);
-    event BoardroomWindDownStarted(address indexed owner);
-    event BoardroomRedemptionsOpened(address indexed owner);
+    event BoardroomWindDownStarted(address indexed caller);
+    event BoardroomRedemptionsOpened(address indexed caller);
     event RedeemableAssetRegistered(address indexed asset);
     event TreasurySharesBurned(uint256 amount);
     event BoardroomGrantRecorded(address indexed grant);

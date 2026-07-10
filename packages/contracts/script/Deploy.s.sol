@@ -6,6 +6,7 @@ import {stdJson} from "forge-std/StdJson.sol";
 import {AmmFactory} from "../src/amm/AmmFactory.sol";
 import {AmmRouter} from "../src/amm/AmmRouter.sol";
 import {AssetPolicy} from "../src/policy/AssetPolicy.sol";
+import {Boardroom} from "../src/boardroom/Boardroom.sol";
 import {BoardroomFactory} from "../src/boardroom/BoardroomFactory.sol";
 import {BoardroomGovernanceLogic} from "../src/boardroom/BoardroomGovernanceLogic.sol";
 import {BoardroomPolicyRegistry} from "../src/boardroom/BoardroomPolicyRegistry.sol";
@@ -61,6 +62,7 @@ contract Deploy is Script {
         BoardroomFactory boardroomFactory;
         BoardroomGovernanceLogic boardroomGovernanceLogic;
         BoardroomRedemptionPayout boardroomRedemptionPayout;
+        Boardroom boardroomLogic;
     }
 
     function run() external {
@@ -124,8 +126,18 @@ contract Deploy is Script {
                 abi.encodePacked(type(AssetPolicy).creationCode, abi.encode(state.deployer, state.wrappedNative))
             )
         );
-        state.boardroomGovernanceLogic = new BoardroomGovernanceLogic();
-        state.boardroomRedemptionPayout = new BoardroomRedemptionPayout();
+        state.boardroomGovernanceLogic = BoardroomGovernanceLogic(
+            _deployDeterministic(
+                state, PledgeCashDeploymentSalts.boardroomGovernanceLogic(), type(BoardroomGovernanceLogic).creationCode
+            )
+        );
+        state.boardroomRedemptionPayout = BoardroomRedemptionPayout(
+            _deployDeterministic(
+                state,
+                PledgeCashDeploymentSalts.boardroomRedemptionPayout(),
+                type(BoardroomRedemptionPayout).creationCode
+            )
+        );
         state.boardroomFactory = BoardroomFactory(
             _deployDeterministic(
                 state,
@@ -141,6 +153,7 @@ contract Deploy is Script {
                 )
             )
         );
+        state.boardroomLogic = Boardroom(payable(state.boardroomFactory.boardroomLogic()));
         state.protocolFeeRouter = ProtocolFeeRouter(
             payable(_deployDeterministic(
                     state,
@@ -179,7 +192,10 @@ contract Deploy is Script {
             _deployDeterministic(
                 state,
                 PledgeCashDeploymentSalts.lockedLiquidityFactory(),
-                abi.encodePacked(type(LockedLiquidityFactory).creationCode, abi.encode(address(state.ammRouter)))
+                abi.encodePacked(
+                    type(LockedLiquidityFactory).creationCode,
+                    abi.encode(address(state.ammRouter), address(state.boardroomFactory))
+                )
             )
         );
         state.distributionFactory = DistributionFactory(
@@ -352,6 +368,34 @@ contract Deploy is Script {
         _attestAddress(
             "ammFactory.reserveMgr", address(state.lockedLiquidityFactory), state.ammFactory.reservationManager()
         );
+        _attestAddress(
+            "factory.registry", address(state.boardroomPolicyRegistry), state.boardroomFactory.policyRegistry()
+        );
+        _attestAddress("factory.wrappedNative", state.wrappedNative, state.boardroomFactory.wrappedNative());
+        _attestAddress(
+            "factory.payoutLogic",
+            address(state.boardroomRedemptionPayout),
+            state.boardroomFactory.redemptionPayoutLogic()
+        );
+        _attestAddress(
+            "factory.governanceLogic", address(state.boardroomGovernanceLogic), state.boardroomFactory.governanceLogic()
+        );
+        _attestAddress("factory.boardroomLogic", address(state.boardroomLogic), state.boardroomFactory.boardroomLogic());
+        _attestAddress(
+            "boardroom.payoutLogic",
+            address(state.boardroomRedemptionPayout),
+            state.boardroomLogic.redemptionPayoutLogic()
+        );
+        _attestAddress(
+            "boardroom.governanceLogic", address(state.boardroomGovernanceLogic), state.boardroomLogic.governanceLogic()
+        );
+        _attestAddress(
+            "locker.boardroomFactory", address(state.boardroomFactory), state.lockedLiquidityFactory.boardroomFactory()
+        );
+        _attestAddress(
+            "grantFactory.boardroom", address(state.boardroomFactory), state.tokenGrantFactory.boardroomFactory()
+        );
+        _attestAddress("locker.ammRouter", address(state.ammRouter), state.lockedLiquidityFactory.ammRouter());
     }
 
     function _attestAddress(bytes32 field, address expected, address actual) internal pure {
@@ -381,6 +425,9 @@ contract Deploy is Script {
         json.serialize("assetPolicy", address(state.assetPolicy));
         json.serialize("protocolFeeRouter", address(state.protocolFeeRouter));
         json.serialize("boardroomFactory", address(state.boardroomFactory));
+        json.serialize("boardroomGovernanceLogic", address(state.boardroomGovernanceLogic));
+        json.serialize("boardroomRedemptionPayout", address(state.boardroomRedemptionPayout));
+        json.serialize("boardroomLogic", address(state.boardroomLogic));
         json.serialize("distributionFactory", address(state.distributionFactory));
         json.serialize("ammFactory", address(state.ammFactory));
         json.serialize("ammProtocolFeeRecipient", state.ammFactory.protocolFeeRecipient());
@@ -451,6 +498,9 @@ contract Deploy is Script {
         json.serialize("assetPolicyCodeHash", address(state.assetPolicy).codehash);
         json.serialize("protocolFeeRouterCodeHash", address(state.protocolFeeRouter).codehash);
         json.serialize("boardroomFactoryCodeHash", address(state.boardroomFactory).codehash);
+        json.serialize("boardroomGovernanceLogicCodeHash", address(state.boardroomGovernanceLogic).codehash);
+        json.serialize("boardroomRedemptionPayoutCodeHash", address(state.boardroomRedemptionPayout).codehash);
+        json.serialize("boardroomLogicCodeHash", address(state.boardroomLogic).codehash);
         json.serialize("tokenGrantFactoryCodeHash", address(state.tokenGrantFactory).codehash);
         json.serialize("ammFactoryCodeHash", address(state.ammFactory).codehash);
         json.serialize("ammRouterCodeHash", address(state.ammRouter).codehash);
@@ -471,6 +521,9 @@ contract Deploy is Script {
         console2.log("ProtocolGovernance", state.protocolGovernance);
         console2.log("ProtocolTreasury", state.protocolTreasury);
         console2.log("BoardroomFactory", address(state.boardroomFactory));
+        console2.log("BoardroomGovernanceLogic", address(state.boardroomGovernanceLogic));
+        console2.log("BoardroomRedemptionPayout", address(state.boardroomRedemptionPayout));
+        console2.log("BoardroomLogic", address(state.boardroomLogic));
         console2.log("DistributionFactory", address(state.distributionFactory));
         console2.log("AmmFactory", address(state.ammFactory));
         console2.log("AmmFactoryOwner", state.ammFactory.owner());

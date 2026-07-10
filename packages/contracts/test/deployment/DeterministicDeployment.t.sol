@@ -8,6 +8,7 @@ import {CREATE3} from "solady/utils/CREATE3.sol";
 import {AmmFactory} from "../../src/amm/AmmFactory.sol";
 import {AmmRouter} from "../../src/amm/AmmRouter.sol";
 import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
+import {Boardroom} from "../../src/boardroom/Boardroom.sol";
 import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
 import {BoardroomGovernanceLogic} from "../../src/boardroom/BoardroomGovernanceLogic.sol";
 import {BoardroomPolicyRegistry} from "../../src/boardroom/BoardroomPolicyRegistry.sol";
@@ -126,6 +127,14 @@ contract DeterministicDeploymentTest is Test {
             _releaseSalt("AssetPolicy", keccak256(type(AssetPolicy).creationCode))
         );
         assertEq(
+            PledgeCashDeploymentSalts.boardroomGovernanceLogic(),
+            _releaseSalt("BoardroomGovernanceLogic", keccak256(type(BoardroomGovernanceLogic).creationCode))
+        );
+        assertEq(
+            PledgeCashDeploymentSalts.boardroomRedemptionPayout(),
+            _releaseSalt("BoardroomRedemptionPayout", keccak256(type(BoardroomRedemptionPayout).creationCode))
+        );
+        assertEq(
             PledgeCashDeploymentSalts.protocolFeeRouter(),
             _releaseSalt("ProtocolFeeRouter", keccak256(type(ProtocolFeeRouter).creationCode))
         );
@@ -151,6 +160,24 @@ contract DeterministicDeploymentTest is Test {
             PledgeCashDeploymentSalts.boardroomFactory(),
             _releaseSalt("BoardroomFactory", keccak256(type(BoardroomFactory).creationCode))
         );
+        assertEq(
+            PledgeCashDeploymentSalts.releaseCodeHash(),
+            keccak256(
+                abi.encode(
+                    keccak256(type(BoardroomPolicyRegistry).creationCode),
+                    keccak256(type(AssetPolicy).creationCode),
+                    keccak256(type(BoardroomGovernanceLogic).creationCode),
+                    keccak256(type(BoardroomRedemptionPayout).creationCode),
+                    keccak256(type(ProtocolFeeRouter).creationCode),
+                    keccak256(type(TokenGrantFactory).creationCode),
+                    keccak256(type(AmmFactory).creationCode),
+                    keccak256(type(AmmRouter).creationCode),
+                    keccak256(type(LockedLiquidityFactory).creationCode),
+                    keccak256(type(DistributionFactory).creationCode),
+                    keccak256(type(BoardroomFactory).creationCode)
+                )
+            )
+        );
 
         assertNotEq(PledgeCashDeploymentSalts.assetPolicy(), keccak256("pledge.cash.deterministic.v1.AssetPolicy"));
         assertNotEq(PledgeCashDeploymentSalts.ammFactory(), keccak256("pledge.cash.deterministic.v1.AmmFactory"));
@@ -170,6 +197,12 @@ contract DeterministicDeploymentTest is Test {
                 abi.encodePacked(type(AssetPolicy).creationCode, abi.encode(owner, address(wrappedNative)))
             )
         );
+        BoardroomGovernanceLogic deployedGovernanceLogic = BoardroomGovernanceLogic(
+            _deploy(PledgeCashDeploymentSalts.boardroomGovernanceLogic(), type(BoardroomGovernanceLogic).creationCode)
+        );
+        BoardroomRedemptionPayout deployedRedemptionPayout = BoardroomRedemptionPayout(
+            _deploy(PledgeCashDeploymentSalts.boardroomRedemptionPayout(), type(BoardroomRedemptionPayout).creationCode)
+        );
         BoardroomFactory boardroomFactory = BoardroomFactory(
             _deploy(
                 PledgeCashDeploymentSalts.boardroomFactory(),
@@ -178,8 +211,8 @@ contract DeterministicDeploymentTest is Test {
                     abi.encode(
                         address(policyRegistry),
                         address(wrappedNative),
-                        address(redemptionPayoutLogic),
-                        address(governanceLogic)
+                        address(deployedRedemptionPayout),
+                        address(deployedGovernanceLogic)
                     )
                 )
             )
@@ -213,7 +246,9 @@ contract DeterministicDeploymentTest is Test {
         LockedLiquidityFactory lockedLiquidityFactory = LockedLiquidityFactory(
             _deploy(
                 PledgeCashDeploymentSalts.lockedLiquidityFactory(),
-                abi.encodePacked(type(LockedLiquidityFactory).creationCode, abi.encode(address(ammRouter)))
+                abi.encodePacked(
+                    type(LockedLiquidityFactory).creationCode, abi.encode(address(ammRouter), address(boardroomFactory))
+                )
             )
         );
         DistributionFactory distributionFactory = DistributionFactory(
@@ -237,9 +272,16 @@ contract DeterministicDeploymentTest is Test {
         assertEq(ammRouter.factory(), address(ammFactory));
         assertEq(ammRouter.wrappedNative(), address(wrappedNative));
         assertEq(lockedLiquidityFactory.ammRouter(), address(ammRouter));
+        assertEq(lockedLiquidityFactory.boardroomFactory(), address(boardroomFactory));
         assertEq(distributionFactory.lockedLiquidityFactory(), address(lockedLiquidityFactory));
         assertEq(boardroomFactory.policyRegistry(), address(policyRegistry));
         assertEq(boardroomFactory.wrappedNative(), address(wrappedNative));
+        assertEq(boardroomFactory.redemptionPayoutLogic(), address(deployedRedemptionPayout));
+        assertEq(boardroomFactory.governanceLogic(), address(deployedGovernanceLogic));
+        Boardroom boardroomLogic = Boardroom(payable(boardroomFactory.boardroomLogic()));
+        assertGt(address(boardroomLogic).code.length, 0);
+        assertEq(boardroomLogic.redemptionPayoutLogic(), address(deployedRedemptionPayout));
+        assertEq(boardroomLogic.governanceLogic(), address(deployedGovernanceLogic));
 
         vm.startPrank(owner);
         tokenGrantFactory.setFeeRecipient(address(protocolFeeRouter));

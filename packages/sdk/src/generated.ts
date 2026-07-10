@@ -16,6 +16,9 @@ export type PledgeCashDeployment = {
   boardroomStatus?: string;
   boardroomReason?: string;
   boardroomFactory?: Address;
+  boardroomGovernanceLogic?: Address;
+  boardroomRedemptionPayout?: Address;
+  boardroomLogic?: Address;
   boardroomPolicyRegistry?: Address;
   assetPolicy?: Address;
   protocolFeeRouter?: Address;
@@ -58,6 +61,9 @@ export type PledgeCashDeployment = {
   assetPolicyCodeHash?: string;
   protocolFeeRouterCodeHash?: string;
   boardroomFactoryCodeHash?: string;
+  boardroomGovernanceLogicCodeHash?: string;
+  boardroomRedemptionPayoutCodeHash?: string;
+  boardroomLogicCodeHash?: string;
   tokenGrantFactoryCodeHash?: string;
   ammFactoryCodeHash?: string;
   ammRouterCodeHash?: string;
@@ -189,7 +195,18 @@ export const ammFactoryAbi = [
         "internalType": "address"
       }
     ],
-    "outputs": [],
+    "outputs": [
+      {
+        "name": "reserved",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "reservationOwner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
     "stateMutability": "nonpayable"
   },
   {
@@ -278,6 +295,11 @@ export const ammFactoryAbi = [
         "name": "reservationOwner",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "manager",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -310,6 +332,11 @@ export const ammFactoryAbi = [
       },
       {
         "name": "reservationOwner",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "manager",
         "type": "address",
         "internalType": "address"
       }
@@ -659,6 +686,12 @@ export const ammFactoryAbi = [
         "type": "address",
         "indexed": false,
         "internalType": "address"
+      },
+      {
+        "name": "manager",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
       }
     ],
     "anonymous": false
@@ -675,6 +708,12 @@ export const ammFactoryAbi = [
       },
       {
         "name": "reservationOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "manager",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -706,6 +745,12 @@ export const ammFactoryAbi = [
       },
       {
         "name": "reservationOwner",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "manager",
         "type": "address",
         "indexed": false,
         "internalType": "address"
@@ -867,6 +912,22 @@ export const ammFactoryAbi = [
       },
       {
         "name": "reservationOwner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InitialLiquidityReservationManagerMismatch",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "actual",
         "type": "address",
         "internalType": "address"
       }
@@ -1356,6 +1417,16 @@ export const ammPoolAbi = [
         "name": "initializer",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "seedAmount0",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "seedAmount1",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [
@@ -2023,6 +2094,31 @@ export const ammPoolAbi = [
   },
   {
     "type": "event",
+    "name": "InitialLiquidityExcessSwept",
+    "inputs": [
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount0",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "amount1",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "Initialized",
     "inputs": [
       {
@@ -2357,6 +2453,27 @@ export const ammPoolAbi = [
   {
     "type": "error",
     "name": "UnexpectedFeeTransfer",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnexpectedInitialLiquidityBalance",
     "inputs": [
       {
         "name": "token",
@@ -3266,6 +3383,11 @@ export const boardroomAbi = [
         "name": "redemptionPayoutLogic_",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "governanceLogic_",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
@@ -3627,6 +3749,47 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "executeWindDownCall",
+    "inputs": [
+      {
+        "name": "call_",
+        "type": "tuple",
+        "internalType": "struct Boardroom.Call",
+        "components": [
+          {
+            "name": "policy",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "target",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "data",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "result",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "executor",
     "inputs": [],
     "outputs": [
@@ -3736,6 +3899,34 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "governanceConfig",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "minimumDelay",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actionGracePeriod",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "vetoBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "windDownBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
     "name": "governanceDelay",
     "inputs": [],
     "outputs": [
@@ -3743,6 +3934,58 @@ export const boardroomAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "governanceLogic",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "governanceState",
+    "inputs": [
+      {
+        "name": "actionHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "currentEpoch",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "eta",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "expiresAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actionEpoch",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actionStatus",
+        "type": "uint8",
+        "internalType": "uint8"
       }
     ],
     "stateMutability": "view"
@@ -4247,6 +4490,19 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "quarantineRedeemableAsset",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "queueAction",
     "inputs": [
       {
@@ -4349,25 +4605,6 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "queuedActionEta",
-    "inputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "recordGrantFromDistribution",
     "inputs": [
       {
@@ -4460,6 +4697,30 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "redemptionAssetState",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "snapshotBalance",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "paid",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "redemptionCredits",
     "inputs": [
       {
@@ -4473,6 +4734,19 @@ export const boardroomAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "redemptionExcessRecipient",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -4505,6 +4779,19 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "removeRedeemableAsset",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "renounceOwnership",
     "inputs": [],
     "outputs": [],
@@ -4519,10 +4806,36 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "reserveRedeemableAsset",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "setExecutor",
     "inputs": [
       {
         "name": "executor_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setRedemptionExcessRecipient",
+    "inputs": [
+      {
+        "name": "recipient",
         "type": "address",
         "internalType": "address"
       }
@@ -4562,6 +4875,25 @@ export const boardroomAbi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "sweepRedemptionExcess",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -4652,6 +4984,18 @@ export const boardroomAbi = [
       },
       {
         "name": "eta",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "expiresAt",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "epoch",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -4958,6 +5302,19 @@ export const boardroomAbi = [
   },
   {
     "type": "event",
+    "name": "GovernanceEpochAdvanced",
+    "inputs": [
+      {
+        "name": "epoch",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "Initialized",
     "inputs": [
       {
@@ -5035,7 +5392,33 @@ export const boardroomAbi = [
   },
   {
     "type": "event",
+    "name": "RedeemableAssetQuarantined",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "RedeemableAssetRegistered",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RedeemableAssetRemoved",
     "inputs": [
       {
         "name": "asset",
@@ -5098,6 +5481,44 @@ export const boardroomAbi = [
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RedemptionExcessRecipientSet",
+    "inputs": [
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RedemptionExcessSwept",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
       },
       {
         "name": "amount",
@@ -5190,6 +5611,38 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
+    "name": "ActionContextMismatch",
+    "inputs": [
+      {
+        "name": "actionHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ActionExpired",
+    "inputs": [
+      {
+        "name": "actionHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expiresAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "currentTime",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "ActionNotQueued",
     "inputs": [
       {
@@ -5274,6 +5727,32 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
+    "name": "InsufficientHolderPower",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "currentBalance",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "pastBalance",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "requiredBalance",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "InsufficientRedemptionAmount",
     "inputs": [
       {
@@ -5337,6 +5816,17 @@ export const boardroomAbi = [
         "name": "grant",
         "type": "address",
         "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidLaunchSupply",
+    "inputs": [
+      {
+        "name": "circulatingSupply",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ]
   },
@@ -5434,8 +5924,24 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
+    "name": "NoCirculatingShares",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "NoHandoverRequest",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoRedemptionExcess",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
   },
   {
     "type": "error",
@@ -5487,6 +5993,11 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
+    "name": "OwnershipRenunciationDisabled",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "PolicyNotAllowed",
     "inputs": [
       {
@@ -5499,6 +6010,33 @@ export const boardroomAbi = [
   {
     "type": "error",
     "name": "RedeemableAssetAlreadyRegistered",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RedeemableAssetHasBalance",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "balance",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RedeemableAssetStillValid",
     "inputs": [
       {
         "name": "asset",
@@ -5608,6 +6146,22 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
+    "name": "WindDownFinalizationNotReady",
+    "inputs": [
+      {
+        "name": "readyAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "currentTime",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "ZeroRedemptionAmount",
     "inputs": [
       {
@@ -5630,6 +6184,16 @@ export const boardroomFactoryAbi = [
       },
       {
         "name": "wrappedNative_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "redemptionPayoutLogic_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "governanceLogic_",
         "type": "address",
         "internalType": "address"
       }
@@ -5714,6 +6278,19 @@ export const boardroomFactoryAbi = [
       }
     ],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "governanceLogic",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -5866,6 +6443,1130 @@ export const boardroomFactoryAbi = [
     "type": "error",
     "name": "InvalidAddress",
     "inputs": []
+  }
+] as const;
+
+export const boardroomGovernanceLogicAbi = [
+  {
+    "type": "function",
+    "name": "advanceEpoch",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "epoch",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "cancelAction",
+    "inputs": [
+      {
+        "name": "actionHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "consumeReadyAction",
+    "inputs": [
+      {
+        "name": "actionHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "status",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "exitLockedLiquidity",
+    "inputs": [
+      {
+        "name": "config",
+        "type": "tuple",
+        "internalType": "struct BoardroomGovernanceLogic.LifecycleConfig",
+        "components": [
+          {
+            "name": "policyRegistry",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "shareToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "maxAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxGrants",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxDistributions",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxLockers",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "obligationSlots",
+        "type": "tuple",
+        "internalType": "struct BoardroomRedemptionPayout.ObligationSlots",
+        "components": [
+          {
+            "name": "issuedGrants",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "issuedDistributions",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "lockedLiquidityPositions",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "issuedGrantSlotReservations",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "isIssuedGrant",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "isIssuedDistribution",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "isLockedLiquidity",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "reservationsForDistribution",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct BoardroomGovernanceLogic.ExitParams",
+        "components": [
+          {
+            "name": "redemptionPayout",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "locker",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "amountAMin",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "amountBMin",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "amountA",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "amountB",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "liquidity",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "finalizeWindDown",
+    "inputs": [
+      {
+        "name": "obligationSlots",
+        "type": "tuple",
+        "internalType": "struct BoardroomRedemptionPayout.ObligationSlots",
+        "components": [
+          {
+            "name": "issuedGrants",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "issuedDistributions",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "lockedLiquidityPositions",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "issuedGrantSlotReservations",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "isIssuedGrant",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "isIssuedDistribution",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "isLockedLiquidity",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "reservationsForDistribution",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "redemptionPayout",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "wrappedNative",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "redeemableAssets",
+        "type": "address[]",
+        "internalType": "address[]"
+      },
+      {
+        "name": "governanceDelay",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "quarantineRedeemableAsset",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "wrappedNative",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "queueAction",
+    "inputs": [
+      {
+        "name": "actionHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "status",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "delay",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "gracePeriod",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "eta",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "recordGrantFromDistribution",
+    "inputs": [
+      {
+        "name": "policyRegistry",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "grant",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "maxAssets",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxGrants",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "recordIssuedObligation",
+    "inputs": [
+      {
+        "name": "config",
+        "type": "tuple",
+        "internalType": "struct BoardroomGovernanceLogic.LifecycleConfig",
+        "components": [
+          {
+            "name": "policyRegistry",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "shareToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "maxAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxGrants",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxDistributions",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxLockers",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "policy",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "target",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "data",
+        "type": "bytes",
+        "internalType": "bytes"
+      },
+      {
+        "name": "result",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "recordLockedLiquidityFromDistribution",
+    "inputs": [
+      {
+        "name": "config",
+        "type": "tuple",
+        "internalType": "struct BoardroomGovernanceLogic.LifecycleConfig",
+        "components": [
+          {
+            "name": "policyRegistry",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "shareToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "maxAssets",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxGrants",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxDistributions",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "maxLockers",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "locker",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "pool",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "registerRedeemableAsset",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "allowExisting",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "registered",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "releaseGrantSlotsForLifecycleCall",
+    "inputs": [
+      {
+        "name": "policy",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "target",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "removeEmptyRedeemableAsset",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "wrappedNative",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "requireHolderPower",
+    "inputs": [
+      {
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "thresholdBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "bpsDenominator",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "reserveRedeemableAsset",
+    "inputs": [
+      {
+        "name": "policyRegistry",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "startWindDown",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "epoch",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "validateRedeemableAsset",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "balance",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "BoardroomDistributionRecorded",
+    "inputs": [
+      {
+        "name": "distribution",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BoardroomGrantRecorded",
+    "inputs": [
+      {
+        "name": "grant",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BoardroomGrantSlotsReleased",
+    "inputs": [
+      {
+        "name": "distribution",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "count",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BoardroomGrantSlotsReserved",
+    "inputs": [
+      {
+        "name": "distribution",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "count",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BoardroomLockedLiquidityExited",
+    "inputs": [
+      {
+        "name": "locker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "pool",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "liquidity",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "amountA",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "amountB",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BoardroomLockedLiquidityRecorded",
+    "inputs": [
+      {
+        "name": "locker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RedeemableAssetQuarantined",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RedeemableAssetRegistered",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RedeemableAssetRemoved",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "ActionAlreadyQueued",
+    "inputs": [
+      {
+        "name": "actionHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ActionContextMismatch",
+    "inputs": [
+      {
+        "name": "actionHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ActionExpired",
+    "inputs": [
+      {
+        "name": "actionHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expiresAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "currentTime",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ActionNotQueued",
+    "inputs": [
+      {
+        "name": "actionHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ActionNotReady",
+    "inputs": [
+      {
+        "name": "actionHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "eta",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "currentTime",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "CallFailed",
+    "inputs": [
+      {
+        "name": "target",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InsufficientHolderPower",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "currentBalance",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "pastBalance",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "requiredBalance",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidIssuedDistribution",
+    "inputs": [
+      {
+        "name": "distribution",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidIssuedGrant",
+    "inputs": [
+      {
+        "name": "grant",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidLockedLiquidity",
+    "inputs": [
+      {
+        "name": "locker",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidRedeemableAsset",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "IssuedDistributionStillOpen",
+    "inputs": [
+      {
+        "name": "distribution",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "IssuedGrantStillOpen",
+    "inputs": [
+      {
+        "name": "grant",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "LockedLiquidityStillOpen",
+    "inputs": [
+      {
+        "name": "locker",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NoCirculatingShares",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoReservedIssuedGrantSlots",
+    "inputs": [
+      {
+        "name": "distribution",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "PolicyNotAllowed",
+    "inputs": [
+      {
+        "name": "policy",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RedeemableAssetAlreadyRegistered",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RedeemableAssetHasBalance",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "balance",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RedeemableAssetStillValid",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TooManyIssuedDistributions",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TooManyIssuedGrantReservations",
+    "inputs": [
+      {
+        "name": "requested",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "available",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TooManyIssuedGrants",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TooManyLockedLiquidityPositions",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TooManyRedeemableAssets",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "WindDownFinalizationNotReady",
+    "inputs": [
+      {
+        "name": "readyAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "currentTime",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   }
 ] as const;
 
@@ -6411,6 +8112,25 @@ export const boardroomTokenAbi = [
   },
   {
     "type": "function",
+    "name": "balanceCheckpointCount",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "balanceOf",
     "inputs": [
       {
@@ -6468,6 +8188,49 @@ export const boardroomTokenAbi = [
         "name": "",
         "type": "uint8",
         "internalType": "uint8"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPastBalance",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "blockNumber",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPastTotalSupply",
+    "inputs": [
+      {
+        "name": "blockNumber",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -6593,6 +8356,19 @@ export const boardroomTokenAbi = [
   },
   {
     "type": "function",
+    "name": "totalSupplyCheckpointCount",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "transfer",
     "inputs": [
       {
@@ -6706,6 +8482,33 @@ export const boardroomTokenAbi = [
   },
   {
     "type": "error",
+    "name": "CheckpointValueOverflow",
+    "inputs": [
+      {
+        "name": "value",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "FutureCheckpointLookup",
+    "inputs": [
+      {
+        "name": "requestedBlock",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "currentBlock",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "InsufficientAllowance",
     "inputs": []
   },
@@ -6748,6 +8551,586 @@ export const boardroomTokenAbi = [
     "type": "error",
     "name": "TotalSupplyOverflow",
     "inputs": []
+  }
+] as const;
+
+export const boardroomRedemptionPayoutAbi = [
+  {
+    "type": "function",
+    "name": "burnTreasuryShares",
+    "inputs": [
+      {
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "forfeit",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "burned",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "payout",
+    "inputs": [
+      {
+        "name": "holder",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "minAmountOut",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "amountOut",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "pruneClosedObligation",
+    "inputs": [
+      {
+        "name": "slots",
+        "type": "tuple",
+        "internalType": "struct BoardroomRedemptionPayout.ObligationSlots",
+        "components": [
+          {
+            "name": "issuedGrants",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "issuedDistributions",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "lockedLiquidityPositions",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "issuedGrantSlotReservations",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "isIssuedGrant",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "isIssuedDistribution",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "isLockedLiquidity",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "reservationsForDistribution",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "target",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "pruneClosedObligations",
+    "inputs": [
+      {
+        "name": "slots",
+        "type": "tuple",
+        "internalType": "struct BoardroomRedemptionPayout.ObligationSlots",
+        "components": [
+          {
+            "name": "issuedGrants",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "issuedDistributions",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "lockedLiquidityPositions",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "issuedGrantSlotReservations",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "isIssuedGrant",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "isIssuedDistribution",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "isLockedLiquidity",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "reservationsForDistribution",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "redeem",
+    "inputs": [
+      {
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "holder",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "assets",
+        "type": "address[]",
+        "internalType": "address[]"
+      },
+      {
+        "name": "minAmountsOut",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "amountsOut",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "snapshotAssets",
+    "inputs": [
+      {
+        "name": "assets",
+        "type": "address[]",
+        "internalType": "address[]"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "sweepExcess",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "wrapNative",
+    "inputs": [
+      {
+        "name": "wrappedNative",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "event",
+    "name": "BoardroomDistributionPruned",
+    "inputs": [
+      {
+        "name": "distribution",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BoardroomGrantPruned",
+    "inputs": [
+      {
+        "name": "grant",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BoardroomGrantSlotsReleased",
+    "inputs": [
+      {
+        "name": "distribution",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "count",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BoardroomLockedLiquidityPruned",
+    "inputs": [
+      {
+        "name": "locker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "NativeWrappedForWindDown",
+    "inputs": [
+      {
+        "name": "wrappedNative",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RedemptionAssetClaimFailed",
+    "inputs": [
+      {
+        "name": "holder",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RedemptionAssetClaimed",
+    "inputs": [
+      {
+        "name": "holder",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RedemptionExcessSwept",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SharesRedeemed",
+    "inputs": [
+      {
+        "name": "holder",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "shares",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "assets",
+        "type": "address[]",
+        "indexed": false,
+        "internalType": "address[]"
+      },
+      {
+        "name": "amounts",
+        "type": "uint256[]",
+        "indexed": false,
+        "internalType": "uint256[]"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "TreasurySharesBurned",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "InsufficientRedemptionAmount",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountOut",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "minAmountOut",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidRedeemableAsset",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidRedemptionInput",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoRedemptionExcess",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnexpectedRedeemableAssetBalanceChange",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnexpectedWrappedNativeBalanceChange",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ZeroRedemptionAmount",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
   }
 ] as const;
 
@@ -7484,6 +9867,17 @@ export const distributionFactoryAbi = [
     "type": "error",
     "name": "InvalidAddress",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidAsset",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
   },
   {
     "type": "error",
@@ -8379,6 +10773,17 @@ export const fixedPriceSaleAbi = [
   },
   {
     "type": "error",
+    "name": "InvalidPaymentAsset",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "InvalidTimeWindow",
     "inputs": []
   },
@@ -9031,6 +11436,11 @@ export const lockedLiquidityFactoryAbi = [
         "name": "ammRouter_",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "boardroomFactory_",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
@@ -9077,6 +11487,19 @@ export const lockedLiquidityFactoryAbi = [
   {
     "type": "function",
     "name": "ammRouter",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "boardroomFactory",
     "inputs": [],
     "outputs": [
       {
@@ -9490,6 +11913,73 @@ export const lockedLiquidityFactoryAbi = [
   },
   {
     "type": "function",
+    "name": "migrationReservationCount",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "migrationReservationForPair",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "migrationReservationForSalt",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "obligationForCall",
     "inputs": [
       {
@@ -9593,6 +12083,67 @@ export const lockedLiquidityFactoryAbi = [
     "stateMutability": "nonpayable"
   },
   {
+    "type": "function",
+    "name": "releaseMigrationReservation",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenA",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenB",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "reserveMigration",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "distribution",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenA",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenB",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
     "type": "event",
     "name": "ClosedLockerPruned",
     "inputs": [
@@ -9679,6 +12230,68 @@ export const lockedLiquidityFactoryAbi = [
     "anonymous": false
   },
   {
+    "type": "event",
+    "name": "MigrationReservationReleased",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "distribution",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "MigrationReserved",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "distribution",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "tokenA",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "tokenB",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
     "type": "error",
     "name": "InvalidAddress",
     "inputs": []
@@ -9694,6 +12307,17 @@ export const lockedLiquidityFactoryAbi = [
     "inputs": [
       {
         "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidBoardroomFactory",
+    "inputs": [
+      {
+        "name": "factory",
         "type": "address",
         "internalType": "address"
       }
@@ -9717,6 +12341,64 @@ export const lockedLiquidityFactoryAbi = [
   },
   {
     "type": "error",
+    "name": "MigrationLockerSaltUsed",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "locker",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "MigrationPairReserved",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenA",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenB",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "MigrationSaltReserved",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "MissingBoardroomShareToken",
     "inputs": [
       {
@@ -9731,6 +12413,22 @@ export const lockedLiquidityFactoryAbi = [
       },
       {
         "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "MissingMigrationReservation",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "distribution",
         "type": "address",
         "internalType": "address"
       }
@@ -9791,6 +12489,22 @@ export const lockedLiquidityFactoryAbi = [
   },
   {
     "type": "error",
+    "name": "UnauthorizedMigrationReservation",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "caller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "UnsafeLiquidityMinimums",
     "inputs": [
       {
@@ -9826,6 +12540,19 @@ export const migratingBondingCurveAbi = [
   {
     "type": "function",
     "name": "MAX_CURVE_SUPPLY",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "accountedQuoteReserve",
     "inputs": [],
     "outputs": [
       {
@@ -9989,6 +12716,19 @@ export const migratingBondingCurveAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "graduationLatched",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
@@ -10220,6 +12960,19 @@ export const migratingBondingCurveAbi = [
   },
   {
     "type": "function",
+    "name": "quoteQuarantined",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "quoteReserve",
     "inputs": [],
     "outputs": [
@@ -10256,6 +13009,19 @@ export const migratingBondingCurveAbi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "recoverQuarantinedQuote",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "returnedQuote",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -10389,6 +13155,19 @@ export const migratingBondingCurveAbi = [
     "stateMutability": "view"
   },
   {
+    "type": "function",
+    "name": "unrecoveredQuote",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
     "type": "event",
     "name": "CurveBuy",
     "inputs": [
@@ -10440,6 +13219,25 @@ export const migratingBondingCurveAbi = [
   },
   {
     "type": "event",
+    "name": "CurveGraduationLatched",
+    "inputs": [
+      {
+        "name": "quoteReserve",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "remainingShares",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "CurveMigrated",
     "inputs": [
       {
@@ -10477,6 +13275,68 @@ export const migratingBondingCurveAbi = [
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "CurveQuoteQuarantined",
+    "inputs": [
+      {
+        "name": "expectedQuote",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "observedQuote",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "returnedQuote",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "unrecoveredQuote",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "balanceReadable",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "CurveQuoteRecovered",
+    "inputs": [
+      {
+        "name": "returnedQuote",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "unrecoveredQuote",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "balanceReadable",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
       }
     ],
     "anonymous": false
@@ -10632,6 +13492,11 @@ export const migratingBondingCurveAbi = [
   },
   {
     "type": "error",
+    "name": "GraduationLatched",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InsufficientQuote",
     "inputs": [
       {
@@ -10705,8 +13570,40 @@ export const migratingBondingCurveAbi = [
   },
   {
     "type": "error",
+    "name": "InvalidMigrationConfiguration",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidQuoteAsset",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "InvalidTimeWindow",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MigrationMinimumTooLow",
+    "inputs": [
+      {
+        "name": "provided",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "required",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",
@@ -10737,6 +13634,11 @@ export const migratingBondingCurveAbi = [
   {
     "type": "error",
     "name": "OnlyBoardroom",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "QuoteNotQuarantined",
     "inputs": []
   },
   {
@@ -12337,6 +15239,19 @@ export const tokenGrantAbi = [
   },
   {
     "type": "function",
+    "name": "isQuarantined",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "issuer",
     "inputs": [],
     "outputs": [
@@ -12395,6 +15310,26 @@ export const tokenGrantAbi = [
   {
     "type": "function",
     "name": "price",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "quarantineAndClose",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "quarantinedAmount",
     "inputs": [],
     "outputs": [
       {
@@ -12613,6 +15548,31 @@ export const tokenGrantAbi = [
       },
       {
         "name": "amountWithdrawn",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "GrantQuarantined",
+    "inputs": [
+      {
+        "name": "issuer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "lastHolder",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "strandedAmount",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -12858,6 +15818,17 @@ export const tokenGrantAbi = [
   },
   {
     "type": "error",
+    "name": "QuarantineNotAllowed",
+    "inputs": [
+      {
+        "name": "issuer",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "UnexpectedTokenBalanceChange",
     "inputs": [
       {
@@ -12921,6 +15892,19 @@ export const tokenGrantFactoryAbi = [
       }
     ],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "MAX_BOARDROOM_GRANT_DURATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -13305,6 +16289,25 @@ export const tokenGrantFactoryAbi = [
     "outputs": [
       {
         "name": "result",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isCanonicalBoardroom",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
         "type": "bool",
         "internalType": "bool"
       }
@@ -14008,6 +17011,22 @@ export const tokenGrantFactoryAbi = [
   },
   {
     "type": "error",
+    "name": "BoardroomGrantExpiryTooFar",
+    "inputs": [
+      {
+        "name": "expiry",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "GrantStillOpen",
     "inputs": [
       {
@@ -14167,8 +17186,10 @@ export const pledgeCashAbis = {
   AssetPolicy: assetPolicyAbi,
   Boardroom: boardroomAbi,
   BoardroomFactory: boardroomFactoryAbi,
+  BoardroomGovernanceLogic: boardroomGovernanceLogicAbi,
   BoardroomPolicyRegistry: boardroomPolicyRegistryAbi,
   BoardroomToken: boardroomTokenAbi,
+  BoardroomRedemptionPayout: boardroomRedemptionPayoutAbi,
   DistributionFactory: distributionFactoryAbi,
   ERC20: erc20Abi,
   FixedPriceSale: fixedPriceSaleAbi,

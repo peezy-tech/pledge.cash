@@ -4,6 +4,8 @@ import {
   ammFactoryAbi,
   ammPoolAbi,
   ammRouterAbi,
+  boardroomGovernanceLogicAbi,
+  boardroomRedemptionPayoutAbi,
   distributionFactoryAbi,
   fixedPriceSaleAbi,
   lockedLiquidityAbi,
@@ -23,6 +25,8 @@ describe("generated SDK exports", () => {
     expect(pledgeCashAbis.AmmFactory).toBe(ammFactoryAbi);
     expect(pledgeCashAbis.AmmPool).toBe(ammPoolAbi);
     expect(pledgeCashAbis.AmmRouter).toBe(ammRouterAbi);
+    expect(pledgeCashAbis.BoardroomGovernanceLogic).toBe(boardroomGovernanceLogicAbi);
+    expect(pledgeCashAbis.BoardroomRedemptionPayout).toBe(boardroomRedemptionPayoutAbi);
     expect(pledgeCashAbis.FixedPriceSale).toBe(fixedPriceSaleAbi);
     expect(pledgeCashAbis.LockedLiquidity).toBe(lockedLiquidityAbi);
     expect(pledgeCashAbis.LockedLiquidityFactory).toBe(lockedLiquidityFactoryAbi);

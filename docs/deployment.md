@@ -11,11 +11,13 @@ migrating bonding curve, AMM, and locked-liquidity primitives.
 | Monad Testnet | `10143` | `https://testnet-rpc.monad.xyz` | `0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541` | `packages/contracts/script/monad-testnet/deploy.sh` | `packages/contracts/deployments/10143.json` |
 
 The deploy script creates or reuses one `PledgeCashDeterministicDeployer`, then creates one
-`BoardroomPolicyRegistry`, one `AssetPolicy`, one `ProtocolFeeRouter`, one `BoardroomFactory`, one `TokenGrantFactory`,
-one `AmmFactory`, one `AmmRouter`, one `LockedLiquidityFactory`, and one `DistributionFactory`. The Boardroom factory is
-deployed before the token-grant factory because its address is an immutable provenance constructor argument. A
-wrapped-native address is required because every Boardroom stores the canonical wrapped native token and wraps raw
-native funds before wind-down redemptions.
+`BoardroomPolicyRegistry`, one `AssetPolicy`, one `BoardroomGovernanceLogic`, one `BoardroomRedemptionPayout`, one
+`ProtocolFeeRouter`, one `BoardroomFactory`, one `TokenGrantFactory`, one `AmmFactory`, one `AmmRouter`, one
+`LockedLiquidityFactory`, and one `DistributionFactory`. The two Boardroom helpers are deterministic roots deployed
+before the factory and injected into its internally created `boardroomLogic` implementation. The Boardroom factory is
+deployed before the token-grant and locked-liquidity factories because its address is an immutable provenance
+constructor argument for both. A wrapped-native address is required because every Boardroom stores the canonical
+wrapped native token and wraps raw native funds before wind-down redemptions.
 
 Root protocol contracts are deployed through CREATE3 salts from `PledgeCashDeploymentSalts`. As long as the same
 `PledgeCashDeterministicDeployer` address is used on each chain, the root protocol addresses are the same even when
@@ -31,6 +33,8 @@ hash of that root's creation bytecode, including any embedded implementation byt
 changes the salt mechanically rather than depending on an operator to remember a manual version bump. The artifact also
 records one aggregate `deterministicReleaseCodeHash` and each deployed runtime code hash. Constructor arguments remain
 outside the release salt and continue to affect the CREATE3 initialization transaction rather than the root address.
+The factory-created Boardroom implementation is not a separate CREATE3 root, but its address and runtime code hash are
+serialized and verified together with both helper roots and their immutable wiring.
 
 ## Authority And Revenue Roles
 
@@ -182,6 +186,9 @@ After a broadcast, verify each chain artifact contains:
 - `assetPolicy`
 - `protocolFeeRouter`
 - `boardroomFactory`
+- `boardroomGovernanceLogic`
+- `boardroomRedemptionPayout`
+- `boardroomLogic`
 - `distributionFactory`
 - `ammFactory`
 - `wrappedNative`
@@ -220,6 +227,9 @@ After a broadcast, verify each chain artifact contains:
 - `assetPolicyCodeHash`
 - `protocolFeeRouterCodeHash`
 - `boardroomFactoryCodeHash`
+- `boardroomGovernanceLogicCodeHash`
+- `boardroomRedemptionPayoutCodeHash`
+- `boardroomLogicCodeHash`
 - `tokenGrantFactoryCodeHash`
 - `ammFactoryCodeHash`
 - `ammRouterCodeHash`
@@ -233,6 +243,10 @@ module identity is permanent and remains true if an operator later disables new 
 `TokenGrantFactory.boardroomFactory()` is an immutable provenance link and must equal the artifact's `boardroomFactory`.
 The fee-exempt distribution-grant path accepts issuers only when that canonical factory reports them as deployed
 Boardrooms; artifact verification checks the link directly to prevent a miswired deployment.
+
+`BoardroomFactory` must point to the artifact's governance helper, redemption helper, and Boardroom implementation.
+That implementation must point back to the same two helpers, and `LockedLiquidityFactory.boardroomFactory()` must equal
+the same canonical factory. The verifier checks each link against live contract state.
 
 The verifier also requires `TokenGrantFactory.feeRecipient()` and `AmmFactory.protocolFeeRecipient()` to equal the
 artifact's `protocolFeeRouter`, requires that router's destination to equal `protocolTreasury`, and requires the AMM

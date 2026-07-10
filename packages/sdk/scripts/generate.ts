@@ -21,11 +21,21 @@ const contracts = [
   ["Boardroom", "packages/contracts/out/Boardroom.sol/Boardroom.json", "boardroomAbi"],
   ["BoardroomFactory", "packages/contracts/out/BoardroomFactory.sol/BoardroomFactory.json", "boardroomFactoryAbi"],
   [
+    "BoardroomGovernanceLogic",
+    "packages/contracts/out/BoardroomGovernanceLogic.sol/BoardroomGovernanceLogic.json",
+    "boardroomGovernanceLogicAbi",
+  ],
+  [
     "BoardroomPolicyRegistry",
     "packages/contracts/out/BoardroomPolicyRegistry.sol/BoardroomPolicyRegistry.json",
     "boardroomPolicyRegistryAbi",
   ],
   ["BoardroomToken", "packages/contracts/out/BoardroomToken.sol/BoardroomToken.json", "boardroomTokenAbi"],
+  [
+    "BoardroomRedemptionPayout",
+    "packages/contracts/out/BoardroomRedemptionPayout.sol/BoardroomRedemptionPayout.json",
+    "boardroomRedemptionPayoutAbi",
+  ],
   ["DistributionFactory", "packages/contracts/out/DistributionFactory.sol/DistributionFactory.json", "distributionFactoryAbi"],
   ["ERC20", "packages/contracts/out/ERC20.sol/ERC20.json", "erc20Abi"],
   ["FixedPriceSale", "packages/contracts/out/FixedPriceSale.sol/FixedPriceSale.json", "fixedPriceSaleAbi"],
@@ -66,6 +76,9 @@ const deploymentFields = [
   ["boardroomStatus", "string"],
   ["boardroomReason", "string"],
   ["boardroomFactory", "address"],
+  ["boardroomGovernanceLogic", "address"],
+  ["boardroomRedemptionPayout", "address"],
+  ["boardroomLogic", "address"],
   ["boardroomPolicyRegistry", "address"],
   ["assetPolicy", "address"],
   ["protocolFeeRouter", "address"],
@@ -108,6 +121,9 @@ const deploymentFields = [
   ["assetPolicyCodeHash", "string"],
   ["protocolFeeRouterCodeHash", "string"],
   ["boardroomFactoryCodeHash", "string"],
+  ["boardroomGovernanceLogicCodeHash", "string"],
+  ["boardroomRedemptionPayoutCodeHash", "string"],
+  ["boardroomLogicCodeHash", "string"],
   ["tokenGrantFactoryCodeHash", "string"],
   ["ammFactoryCodeHash", "string"],
   ["ammRouterCodeHash", "string"],
@@ -132,6 +148,9 @@ const requiredTokenGrantDeploymentFields = [
 
 const requiredBoardroomDeploymentFields = [
   "boardroomFactory",
+  "boardroomGovernanceLogic",
+  "boardroomRedemptionPayout",
+  "boardroomLogic",
   "boardroomPolicyRegistry",
   "assetPolicy",
   "distributionFactory",
@@ -166,6 +185,9 @@ const requiredV4DeploymentFields = [
   "assetPolicyCodeHash",
   "protocolFeeRouterCodeHash",
   "boardroomFactoryCodeHash",
+  "boardroomGovernanceLogicCodeHash",
+  "boardroomRedemptionPayoutCodeHash",
+  "boardroomLogicCodeHash",
   "tokenGrantFactoryCodeHash",
   "ammFactoryCodeHash",
   "ammRouterCodeHash",
@@ -183,6 +205,9 @@ const requiredV4DeploymentFields = [
   "ammLiquidityRouter",
   "ammReservationManager",
   "ammProtocolFeeRecipient",
+  "boardroomGovernanceLogic",
+  "boardroomRedemptionPayout",
+  "boardroomLogic",
 ] as const;
 
 function literal(value: unknown): string {

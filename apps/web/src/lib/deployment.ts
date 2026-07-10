@@ -3,6 +3,9 @@ import type { Address, PledgeCashDeployment } from "@pledge.cash/sdk";
 const STRING_DEPLOYMENT_FIELDS = ["status", "reason", "boardroomStatus", "boardroomReason"] as const;
 const ADDRESS_DEPLOYMENT_FIELDS = [
   "boardroomFactory",
+  "boardroomGovernanceLogic",
+  "boardroomRedemptionPayout",
+  "boardroomLogic",
   "boardroomPolicyRegistry",
   "assetPolicy",
   "protocolFeeRouter",
