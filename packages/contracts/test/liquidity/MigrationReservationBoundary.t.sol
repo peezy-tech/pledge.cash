@@ -182,6 +182,7 @@ contract MigrationReservationBoundaryTest is Test {
 
     function testUnregisteredBoardroomCannotAcquireAmmReservationAuthority() public {
         MigrationReservationBoardroom unregistered = new MigrationReservationBoardroom(address(policyRegistry));
+        address unregisteredShareToken = unregistered.shareToken();
         address quoteToken = address(new MigrationReservationQuoteToken());
 
         vm.expectRevert(
@@ -194,7 +195,7 @@ contract MigrationReservationBoundaryTest is Test {
         distributionFactory.createAndReserve(
             lockedLiquidityFactory,
             address(unregistered),
-            unregistered.shareToken(),
+            unregisteredShareToken,
             quoteToken,
             keccak256("unregistered-boardroom")
         );
