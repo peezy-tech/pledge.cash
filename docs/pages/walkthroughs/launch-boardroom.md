@@ -1,89 +1,73 @@
 ---
 title: Launch A Boardroom In The App
-description: App-specific steps for creating a Boardroom, minting shares, and preparing grants, sales, or liquidity.
+description: App-specific steps for creating, configuring, and launching a governed Boardroom.
 ---
 
 # Launch A Boardroom In The App
 
-Use this walkthrough when you are the project operator and want to create a Boardroom from the app. It assumes your wallet is connected to the chain shown in the header.
+Use this walkthrough when you operate a project and want to create a Boardroom from the app. The public project pages are read-only by default; creation and lifecycle controls live in `Studio`.
 
-## 1. Confirm The Deployment
+## 1. Choose The Network
 
-Open the app and look at the left sidebar:
+Open `Studio` from the primary navigation and choose the intended network in the header. The selected network determines which deployment and factories the app reads.
 
-- `Deployment` shows the active chain and deployed factory addresses.
-- `Wallet` shows your connected account.
-- `Artifact` links the deployment artifact used by the frontend.
-
-Do not create a public Boardroom until the chain and deployment match the project you intend to use.
+Do not create a public Boardroom until the network and project owner are correct.
 
 ## 2. Connect The Operator Wallet
 
-Use `Connect` in the header. If the wallet is on the wrong chain, use `Switch`.
+Use `Connect Wallet` in the header. If the wallet is on a different network, the header offers `Switch` before a write can continue.
 
-The connected wallet is the default operator for app actions, but you still choose the Boardroom owner explicitly in the Boardroom form.
+Connecting does not grant authority. Each contract still verifies the owner, executor, or holder that is allowed to act.
 
-## 3. Open Boardroom Tools
+## 3. Create The Boardroom In Setup
 
-Select the `Boardroom Tools` tab.
+In `Studio`, open `Setup`. Fill:
 
-In `Create Boardroom`, fill:
-
-- `Owner`: the wallet or multisig that should control the Boardroom.
+- `Owner`: the wallet or multisig that should control the Boardroom before governance launch.
 - `Name`: the project token name.
 - `Symbol`: the project token symbol.
-- `Salt`: keep the generated salt or use `Salt` to create a new one.
+- `Salt`: keep the generated salt or create a new one.
 
-Use `Predict` first. This gives you the deterministic Boardroom address before you send the transaction.
+Use `Predict` first. This shows the deterministic Boardroom address before a transaction is sent. Then use `Create`, review the exact contract call, and continue to the wallet. The app simulates the call before submission and keeps the receipt visible while you navigate.
 
-## 4. Create And Load The Boardroom
+## 4. Issue Tokens Deliberately
 
-After reviewing the predicted address, use `Create`.
+Open the `Token` Studio section to mint project tokens. Common allocations include sale inventory, grants, locked liquidity, and an explicitly documented recipient allocation.
 
-When the transaction confirms, use `Load` in the same panel if the app has not already loaded the Boardroom. The facts panel should show the Boardroom address, owner, share token, status, and treasury context.
+Keep a reason for each mint. Supply and treasury inventory are visible on the project's `Transparency` page.
 
-## 5. Mint Initial Shares
+## 5. Configure Grants
 
-In the Boardroom panel, use the mint controls to mint project shares.
+Open `Grants` to prepare a Boardroom-issued grant. Enter the holder, amount, optional payment terms, vesting timestamps, expiry, transfer rules, and salt.
 
-Common early mints are:
+Use the batched path when approval and grant creation should be one Boardroom action. After governance launch, the same workflow prepares a delayed queued action instead of trying to bypass governance.
 
-- treasury-held supply for sale inventory,
-- supply needed for Boardroom-issued grants,
-- supply intended for locked liquidity,
-- supply sent to a known recipient.
+Use [Receive And Settle A Grant](receive-settle-grant) for the holder-side flow.
 
-Keep a written reason for each mint. Token issuance is one of the first things buyers and contributors inspect.
+## 6. Choose A Distribution
 
-## 6. Prepare Grants
+Open `Distributions` and choose the mechanism that matches the project:
 
-Use the Boardroom grant section when the Boardroom should issue a grant from its share token.
+- fixed-price sale for known unit pricing,
+- migrating bonding curve for live curve pricing and later liquidity migration,
+- Merkle airdrop for a published allocation manifest.
 
-Fill the holder, amount, optional payment token, price, vesting timestamps, expiry, transferability, and salt. Then use:
+Write down the payment token, inventory, limits, time window, and close or migration path before creating the distribution. Buyers use the project's `Participate` page rather than operator tools.
 
-1. `Predict` to inspect the grant address.
-2. `Approve Factory` so the factory can escrow the Boardroom shares.
-3. `Create Grant` or `Create Batch`.
+## 7. Configure Liquidity
 
-Use [Receive And Settle A Grant](receive-settle-grant) for the holder-side walkthrough.
+Open `Liquidity` to create or inspect Boardroom-owned locked liquidity. Review token ordering, desired amounts, protected minimums, deadline, and predicted locker address before signing.
 
-## 7. Prepare A Sale Or Curve
+## 8. Launch Governance
 
-Use `Fixed Price Sale` for simple priced inventory. Use `Migrating Bonding Curve` when the launch should sell along a curve and later migrate reserves into locked liquidity.
+Open `Governance` only after at least one whole governance-eligible project token is circulating. Confirm:
 
-Before creating either distribution, write down what buyers should understand:
+- the executor that will queue future changes,
+- the holder review delay,
+- holder veto and wind-down thresholds.
 
-- payment token,
-- price or curve parameters,
-- sale supply,
-- start and end time,
-- buyer cap if any,
-- cancellation or migration path.
+Launching is permanent: direct owner execution ends. The app requires a separate acknowledgement, simulates the launch, and then displays queued actions with timing, targets, value, and calldata.
 
-Use [Buy From A Sale Or Curve](buy-from-sale-or-curve) for the buyer-side walkthrough.
+## 9. Verify The Public Record
 
-## 8. Inspect With Discovery
-
-After transactions confirm, open `Discovery`, scan from the relevant block range, and verify the Boardroom appears under `My Boardrooms`. Use `Use Boardroom` to load it back into tools.
-
-Discovery is also where holders can find grants, distributions, lockers, and pools associated with their wallet.
+Open the project's canonical URL and review `Overview`, `Participate`, `Governance`, and `Transparency`. `Portfolio` discovers wallet-specific grants and roles; `Tools` retains raw diagnostics when a protocol-level investigation is necessary.

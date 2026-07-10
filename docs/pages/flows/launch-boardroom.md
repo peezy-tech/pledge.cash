@@ -54,7 +54,7 @@ Liquidity can make trading possible, but it also introduces price and reserve ri
 
 After launch, keep the Boardroom state legible:
 
-- refresh discovery,
+- share the canonical chain-and-Boardroom project URL,
 - inspect grants and distributions,
 - monitor treasury balances,
 - explain social or project claims outside the contracts,

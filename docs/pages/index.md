@@ -39,6 +39,15 @@ Then use the concept pages when you need to understand a specific primitive:
 - [Wind-down](concepts/wind-down)
 - [Protocol and service layer](concepts/protocol-and-service-layer)
 
+## App Navigation
+
+- `Explore` is the public project directory.
+- `Portfolio` orders wallet-specific grants and roles by urgency.
+- `Studio` contains project creation and operator workflows.
+- Every project has `Overview`, `Participate`, `Governance`, and `Transparency` sections at a chain-and-Boardroom-specific URL.
+
+Every write is reviewed and simulated before the wallet opens, then tracked through its on-chain receipt.
+
 ## Current Status
 
-The public app and docs are early. The protocol is being built around HyperEVM and Monad testnet deployments, local scenarios, and contract-level verification. Treat mainnet use, unsupported deployments, and claims made outside the contracts as separate risk.
+The protocol is being built around HyperEVM and Monad testnet deployments, local scenarios, and contract-level verification. Treat mainnet use, unsupported deployments, and claims made outside the contracts as separate risk.
