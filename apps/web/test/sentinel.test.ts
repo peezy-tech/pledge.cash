@@ -91,6 +91,38 @@ describe("sentinel web client", () => {
     expect(calls[0]?.init?.body).toBe(JSON.stringify(body));
   });
 
+  test("uses the Generic OAuth routes and providerId body for Telegram", async () => {
+    const calls: { input: string; init: RequestInit | undefined }[] = [];
+    const fetcher: SentinelFetch = async (input, init) => {
+      calls.push({ input: input.toString(), init });
+      return jsonResponse({ redirect: true, url: "https://oauth.telegram.org/auth" });
+    };
+    const client = createSentinelClient({ baseUrl: "https://api.example.test", fetcher });
+    const body = {
+      callbackURL: "https://pledge.cash/notifications/",
+      errorCallbackURL: "https://pledge.cash/notifications/",
+      provider: "telegram" as const,
+    };
+
+    await client.linkSocial(body);
+    await client.signInSocial(body);
+
+    expect(calls.map((call) => call.input)).toEqual([
+      "https://api.example.test/auth/oauth2/link",
+      "https://api.example.test/auth/sign-in/oauth2",
+    ]);
+    for (const call of calls) {
+      expect(call.init?.method).toBe("POST");
+      expect(call.init?.body).toBe(
+        JSON.stringify({
+          callbackURL: body.callbackURL,
+          errorCallbackURL: body.errorCallbackURL,
+          providerId: "telegram",
+        }),
+      );
+    }
+  });
+
   test("encodes public action filters without a network request dependency", async () => {
     const calls: string[] = [];
     const fetcher: SentinelFetch = async (input) => {
