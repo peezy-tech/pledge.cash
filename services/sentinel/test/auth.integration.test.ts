@@ -303,7 +303,7 @@ describeWithDatabase("Better Auth Postgres integration", () => {
         userId
       });
       await legacyClient.db.insert(wallets).values({
-        address: secondaryAccount.address,
+        address: secondaryAccount.address.toLowerCase(),
         alertsEnabled: false,
         chainId: 10,
         siweMessage: "legacy alert coverage",
@@ -327,7 +327,7 @@ describeWithDatabase("Better Auth Postgres integration", () => {
         )
         .limit(1);
       expect(credential).toEqual({
-        address: secondaryAccount.address,
+        address: secondaryAccount.address.toLowerCase(),
         isPrimary: false,
         userId
       });
