@@ -8,7 +8,7 @@ import {
   type Hex,
 } from "viem";
 import { boardroomAbi } from "../generated";
-import type { BoardroomCall, PledgeCashLogClient } from "./types";
+import type { BoardroomCall, PledgeCashGovernanceClient, PledgeCashLogClient } from "./types";
 
 export type { BoardroomCall } from "./types";
 
@@ -46,6 +46,37 @@ export type GovernanceEventsQuery = {
 export type DecodedQueueInput =
   | { kind: "queueAction"; call: BoardroomCall; salt: Hex }
   | { kind: "queueBatch"; calls: BoardroomCall[]; salt: Hex };
+
+export type QueuedBoardroomActionStatus =
+  | "waiting"
+  | "ready"
+  | "expired"
+  | "invalidated"
+  | "cancelled"
+  | "executed"
+  | "unknown";
+
+export type QueuedBoardroomAction = {
+  boardroom: Address;
+  actionHash: Hex;
+  executor: Address;
+  eta: bigint;
+  expiresAt: bigint;
+  epoch: bigint;
+  currentEpoch: bigint;
+  actionStatus: number;
+  salt: Hex;
+  queueBlockNumber: bigint;
+  queueTransactionHash: Hex;
+  status: QueuedBoardroomActionStatus;
+  kind?: DecodedQueueInput["kind"];
+  calls?: BoardroomCall[];
+  payloadError?: string;
+};
+
+export type QueuedBoardroomActionsQuery = GovernanceEventsQuery & {
+  currentTime?: bigint;
+};
 
 type RawEventLog = {
   address?: Address;
@@ -102,6 +133,63 @@ export async function queryGovernanceEvents(
   ].sort(compareGovernanceEvents);
 }
 
+export async function queryQueuedBoardroomActions(
+  client: PledgeCashGovernanceClient,
+  input: QueuedBoardroomActionsQuery,
+): Promise<QueuedBoardroomAction[]> {
+  const events = await queryGovernanceEvents(client, input);
+  const latestQueues = latestQueueEvents(events);
+  const currentTime = input.currentTime ?? BigInt(Math.floor(Date.now() / 1000));
+
+  const actions = await Promise.all(
+    latestQueues.map(async (queued) => {
+      const [governanceStateResult, payload] = await Promise.all([
+        client.readContract({
+          address: queued.boardroom,
+          abi: boardroomAbi,
+          functionName: "governanceState",
+          args: [queued.actionHash],
+        }),
+        readQueuedPayload(client, queued),
+      ]);
+      const [currentEpoch, eta, expiresAt, actionEpoch, actionStatus] = governanceStateResult as readonly [
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        number,
+      ];
+      const terminal = latestTerminalEvent(events, queued);
+      const status = queuedActionStatus({
+        terminal,
+        currentTime,
+        currentEpoch,
+        eta,
+        expiresAt,
+        actionEpoch,
+      });
+
+      return {
+        boardroom: queued.boardroom,
+        actionHash: queued.actionHash,
+        executor: queued.executor,
+        eta: queued.eta,
+        expiresAt: queued.expiresAt,
+        epoch: queued.epoch,
+        currentEpoch,
+        actionStatus: Number(actionStatus),
+        salt: queued.salt,
+        queueBlockNumber: queued.blockNumber,
+        queueTransactionHash: queued.transactionHash,
+        status,
+        ...payload,
+      } satisfies QueuedBoardroomAction;
+    }),
+  );
+
+  return actions.sort((left, right) => compareBigIntDesc(left.queueBlockNumber, right.queueBlockNumber));
+}
+
 export function decodeQueueCalldata(data: Hex): DecodedQueueInput | undefined {
   try {
     const decoded = decodeFunctionData({ abi: boardroomAbi, data });
@@ -144,6 +232,98 @@ export function hashBatch(calls: readonly BoardroomCall[], salt: Hex): Hex {
   return keccak256(
     encodeAbiParameters([{ type: "bytes32[]" }, { type: "bytes32" }], [calls.map((call) => hashCall(call)), salt]),
   );
+}
+
+type ActionQueuedEvent = Extract<GovernanceEvent, { kind: "actionQueued" }>;
+type ActionTerminalEvent = Extract<GovernanceEvent, { kind: "actionCancelled" | "actionExecuted" }>;
+
+function latestQueueEvents(events: readonly GovernanceEvent[]): ActionQueuedEvent[] {
+  const latest = new Map<string, ActionQueuedEvent>();
+  for (const event of events) {
+    if (event.kind !== "actionQueued") continue;
+    latest.set(actionKey(event.boardroom, event.actionHash), event);
+  }
+  return [...latest.values()];
+}
+
+function latestTerminalEvent(
+  events: readonly GovernanceEvent[],
+  queued: ActionQueuedEvent,
+): ActionTerminalEvent | undefined {
+  let terminal: ActionTerminalEvent | undefined;
+  for (const event of events) {
+    if (event.kind !== "actionCancelled" && event.kind !== "actionExecuted") continue;
+    if (actionKey(event.boardroom, event.actionHash) !== actionKey(queued.boardroom, queued.actionHash)) continue;
+    if (compareEventPosition(event, queued) <= 0) continue;
+    terminal = event;
+  }
+  return terminal;
+}
+
+async function readQueuedPayload(
+  client: PledgeCashGovernanceClient,
+  queued: ActionQueuedEvent,
+): Promise<Pick<QueuedBoardroomAction, "kind" | "calls"> | Pick<QueuedBoardroomAction, "payloadError">> {
+  try {
+    const transaction = await client.getTransaction({ hash: queued.transactionHash });
+    if (!transaction.to || !sameAddress(transaction.to, queued.boardroom)) {
+      return { payloadError: "Queue transaction does not directly target the Boardroom." };
+    }
+
+    const decoded = decodeQueueCalldata(transaction.input);
+    if (!decoded) return { payloadError: "Queue calldata could not be decoded." };
+    const calls = decoded.kind === "queueAction" ? [decoded.call] : decoded.calls;
+    const computedHash = decoded.kind === "queueAction"
+      ? hashAction(decoded.call, decoded.salt)
+      : hashBatch(decoded.calls, decoded.salt);
+    if (computedHash.toLowerCase() !== queued.actionHash.toLowerCase()) {
+      return { payloadError: "Queue calldata does not match the emitted action hash." };
+    }
+    if (decoded.salt.toLowerCase() !== queued.salt.toLowerCase()) {
+      return { payloadError: "Queue calldata does not match the emitted salt." };
+    }
+
+    return { kind: decoded.kind, calls };
+  } catch (error) {
+    return { payloadError: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function queuedActionStatus(input: {
+  terminal: ActionTerminalEvent | undefined;
+  currentTime: bigint;
+  currentEpoch: bigint;
+  eta: bigint;
+  expiresAt: bigint;
+  actionEpoch: bigint;
+}): QueuedBoardroomActionStatus {
+  if (input.terminal?.kind === "actionExecuted") return "executed";
+  if (input.terminal?.kind === "actionCancelled") return "cancelled";
+  if (input.eta === 0n) return "unknown";
+  if (input.currentEpoch !== input.actionEpoch) return "invalidated";
+  if (input.currentTime > input.expiresAt) return "expired";
+  if (input.currentTime >= input.eta) return "ready";
+  return "waiting";
+}
+
+function actionKey(boardroom: Address, actionHash: Hex): string {
+  return `${boardroom.toLowerCase()}:${actionHash.toLowerCase()}`;
+}
+
+function sameAddress(left: Address, right: Address): boolean {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
+function compareEventPosition(left: GovernanceLogMeta, right: GovernanceLogMeta): number {
+  if (left.blockNumber < right.blockNumber) return -1;
+  if (left.blockNumber > right.blockNumber) return 1;
+  return left.logIndex - right.logIndex;
+}
+
+function compareBigIntDesc(left: bigint, right: bigint): number {
+  if (left > right) return -1;
+  if (left < right) return 1;
+  return 0;
 }
 
 async function getGovernanceLogs(

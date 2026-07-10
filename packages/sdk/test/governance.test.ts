@@ -7,7 +7,9 @@ import {
   hashBatch,
   hashCall,
   queryGovernanceEvents,
+  queryQueuedBoardroomActions,
   type BoardroomCall,
+  type PledgeCashGovernanceClient,
   type PledgeCashLogClient,
 } from "../src";
 
@@ -236,6 +238,53 @@ describe("governance helpers", () => {
       logIndex: 4,
       transactionHash: txHash(3n),
     });
+  });
+
+  test("hydrates a ready queued action from direct transaction calldata", async () => {
+    const queuedHash = hashAction(call, salt);
+    const queueData = encodeFunctionData({ abi: boardroomAbi, functionName: "queueAction", args: [call, salt] });
+    const logsByEvent: Record<string, unknown[]> = {
+      BoardroomActionQueued: [
+        rawLog({
+          args: { actionHash: queuedHash, executor, eta: 100n, expiresAt: 200n, epoch: 3n, salt },
+          blockNumber: 12n,
+          logIndex: 1,
+          transactionHash: txHash(20n),
+        }),
+      ],
+    };
+    const client = {
+      async getLogs(input: { event: { name: string } }) {
+        return logsByEvent[input.event.name] ?? [];
+      },
+      async getTransaction() {
+        return { to: boardroom, input: queueData };
+      },
+      async readContract() {
+        return [3n, 100n, 200n, 3n, 0];
+      },
+    } as unknown as PledgeCashGovernanceClient;
+
+    await expect(
+      queryQueuedBoardroomActions(client, { boardrooms: [boardroom], fromBlock: 10n, toBlock: 20n, currentTime: 150n }),
+    ).resolves.toEqual([
+      {
+        boardroom,
+        actionHash: queuedHash,
+        executor,
+        eta: 100n,
+        expiresAt: 200n,
+        epoch: 3n,
+        currentEpoch: 3n,
+        actionStatus: 0,
+        salt,
+        queueBlockNumber: 12n,
+        queueTransactionHash: txHash(20n),
+        status: "ready",
+        kind: "queueAction",
+        calls: [call],
+      },
+    ]);
   });
 });
 
