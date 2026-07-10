@@ -644,6 +644,10 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     }
 
     function removeRedeemableAsset(address asset) external {
+        if (BoardroomGovernanceStorage.layout().redeemableAssetPins[asset] != 0) {
+            revert RedeemableAssetReserved(asset);
+        }
+        _requireNoOpenObligationsForAssetRemoval();
         if (status != BoardroomStatus.WindingDown) _requireAssetManager();
         _delegateGovernance(
             abi.encodeCall(BoardroomGovernanceLogic.removeEmptyRedeemableAsset, (asset, shareToken, wrappedNative))
@@ -772,6 +776,12 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
             abi.encodeCall(BoardroomRedemptionPayout.pruneClosedObligation, (_obligationSlots(), target))
         );
         if (!success) _revertCall(redemptionPayoutLogic, result);
+    }
+
+    function _requireNoOpenObligationsForAssetRemoval() internal view {
+        if (issuedGrants.length != 0) revert IssuedGrantStillOpen(issuedGrants[0]);
+        if (issuedDistributions.length != 0) revert IssuedDistributionStillOpen(issuedDistributions[0]);
+        if (lockedLiquidityPositions.length != 0) revert LockedLiquidityStillOpen(lockedLiquidityPositions[0]);
     }
 
     function _obligationSlots() internal pure returns (BoardroomRedemptionPayout.ObligationSlots memory slots) {

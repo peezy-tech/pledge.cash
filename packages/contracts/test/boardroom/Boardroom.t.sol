@@ -2089,6 +2089,49 @@ contract BoardroomTest is Test {
         assertEq(broken.balanceOf(owner), 5 ether);
     }
 
+    function testOpenGrantPreventsRemovingAssetThatCanReturnDuringWindDown() public {
+        (Boardroom boardroom,) = _createBoardroom("grant-return-asset-pin");
+        BoardroomToken shares = BoardroomToken(boardroom.shareToken());
+
+        vm.prank(owner);
+        boardroom.mint(address(boardroom), GRANT_SIZE);
+        TokenGrant grant = _createBoardroomGrant(
+            boardroom,
+            _boardroomGrantCreate(
+                address(shares), holder, address(paymentToken), GRANT_SIZE, PRICE, keccak256("grant-return-pin"), 0
+            )
+        );
+
+        assertTrue(boardroom.isRedeemableAsset(address(paymentToken)));
+        assertEq(paymentToken.balanceOf(address(boardroom)), 0);
+
+        vm.prank(owner);
+        boardroom.startWindDown();
+
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.IssuedGrantStillOpen.selector, address(grant)));
+        boardroom.removeRedeemableAsset(address(paymentToken));
+
+        vm.warp(VESTING_END);
+        uint256 cost = grant.getSettlementCost(GRANT_SIZE);
+        vm.startPrank(holder);
+        paymentToken.approve(address(grant), cost);
+        grant.settle(GRANT_SIZE);
+        vm.stopPrank();
+
+        assertTrue(grant.isClosed());
+        assertTrue(boardroom.isRedeemableAsset(address(paymentToken)));
+        assertEq(paymentToken.balanceOf(address(boardroom)), cost);
+
+        vm.prank(stranger);
+        boardroom.pruneClosedObligations();
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(Boardroom.RedeemableAssetHasBalance.selector, address(paymentToken), cost)
+        );
+        boardroom.removeRedeemableAsset(address(paymentToken));
+    }
+
     function testShareTokenCheckpointsTrackPastBalancesAndSupply() public {
         (Boardroom boardroom,) = _createBoardroom("share-checkpoints");
         BoardroomToken shares = BoardroomToken(boardroom.shareToken());

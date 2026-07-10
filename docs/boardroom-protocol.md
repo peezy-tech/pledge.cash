@@ -118,8 +118,10 @@ Wind-down transitions are one-way:
 2. `WindingDown`: entered only after `startWindDown()` wraps the Boardroom's full native HYPE balance into WHYPE. The
    Boardroom cannot mint shares or create new grants/distributions. Canonical zero-value lifecycle calls, locked
    liquidity exits, native wrapping, closed-obligation pruning, and treasury-share burns are permissionless. Qualified
-   holders can admit final assets or remove empty assets, and anyone can quarantine an admitted asset whose bounded
-   `balanceOf` probe has become unreadable; empty-asset removal is also permissionless during wind-down.
+   holders can admit final assets, and anyone can quarantine an admitted asset whose bounded `balanceOf` probe has
+   become unreadable. Empty-asset removal is permissionless during wind-down only after every grant, distribution, and
+   locked-liquidity obligation has closed and been pruned, so an obligation cannot later return value into an omitted
+   asset.
    Active fixed-price sales and migrating bonding curves stop accepting trades as soon as their Boardroom enters this
    state.
 3. `RedemptionsOpen`: share holders burn shares against the fixed opening snapshot. Each asset pays independently and
@@ -184,7 +186,8 @@ module factories. The Boardroom owner can use registry-approved policies to depl
 2. Before launch, the owner starts wind-down. After launch, a holder meeting the 10% historical/current threshold can
    start it even if the executor is lost. The transition is monotonic, wraps native HYPE, and invalidates queued actions.
 3. Anyone can execute canonical zero-value lifecycle cleanup, prune closed obligations, exit recorded liquidity, wrap
-   native balance, and burn treasury shares. Empty assets can be removed; unreadable admitted assets can be quarantined.
+   native balance, and burn treasury shares. Empty assets can be removed once no obligation remains; unreadable admitted
+   assets can be quarantined through the explicit liveness escape hatch.
 4. After the governance delay from wind-down start, anyone can call `openRedemptions`. It wraps native HYPE, prunes and
    rejects any remaining obligation, burns treasury shares, and snapshots total supply plus every admitted balance.
 5. A holder calls `redeem(shares, recipient, minAmountsOut)`. Shares burn into caller-owned credits; `recipient` only
