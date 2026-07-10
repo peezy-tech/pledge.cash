@@ -263,6 +263,8 @@ contract DistributionTest is Test {
         ammFactory = new AmmFactory(address(this));
         ammRouter = new AmmRouter(address(ammFactory), address(wrappedNative));
         lockedLiquidityFactory = new LockedLiquidityFactory(address(ammRouter));
+        ammFactory.setLiquidityRouter(address(ammRouter));
+        ammFactory.setReservationManager(address(lockedLiquidityFactory));
         tokenGrantFactory = new TokenGrantFactory(address(this), address(boardroomFactory));
         distributionFactory = new DistributionFactory(address(lockedLiquidityFactory), address(tokenGrantFactory));
         paymentToken = new DistributionCurrency("USD Coin", "USDC", 6);
