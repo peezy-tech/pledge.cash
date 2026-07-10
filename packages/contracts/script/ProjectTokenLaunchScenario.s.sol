@@ -9,7 +9,9 @@ import {AmmRouter} from "../src/amm/AmmRouter.sol";
 import {AssetPolicy} from "../src/policy/AssetPolicy.sol";
 import {Boardroom} from "../src/boardroom/Boardroom.sol";
 import {BoardroomFactory} from "../src/boardroom/BoardroomFactory.sol";
+import {BoardroomGovernanceLogic} from "../src/boardroom/BoardroomGovernanceLogic.sol";
 import {BoardroomPolicyRegistry} from "../src/boardroom/BoardroomPolicyRegistry.sol";
+import {BoardroomRedemptionPayout} from "../src/boardroom/BoardroomRedemptionPayout.sol";
 import {BoardroomToken} from "../src/boardroom/BoardroomToken.sol";
 import {LockedLiquidity} from "../src/liquidity/LockedLiquidity.sol";
 import {LockedLiquidityFactory} from "../src/liquidity/LockedLiquidityFactory.sol";
@@ -82,7 +84,12 @@ contract ProjectTokenLaunchScenario is Script {
         state.policyRegistry = new BoardroomPolicyRegistry(owner);
         state.wrappedHype = new WETH();
         state.assetPolicy = new AssetPolicy(owner, address(state.wrappedHype));
-        state.boardroomFactory = new BoardroomFactory(address(state.policyRegistry), address(state.wrappedHype));
+        state.boardroomFactory = new BoardroomFactory(
+            address(state.policyRegistry),
+            address(state.wrappedHype),
+            address(new BoardroomRedemptionPayout()),
+            address(new BoardroomGovernanceLogic())
+        );
         state.tokenGrantFactory = new TokenGrantFactory(owner, address(state.boardroomFactory));
         state.ammFactory = new AmmFactory(owner);
         state.ammRouter = new AmmRouter(address(state.ammFactory), address(state.wrappedHype));

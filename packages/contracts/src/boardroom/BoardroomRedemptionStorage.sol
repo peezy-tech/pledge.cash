@@ -10,6 +10,8 @@ library BoardroomRedemptionStorage {
         mapping(address holder => uint256 shares) credits;
         mapping(address asset => uint256 shares) allocatedShares;
         mapping(address holder => mapping(address asset => uint256 shares)) holderAllocatedShares;
+        mapping(address asset => uint256 amount) snapshotBalance;
+        mapping(address asset => uint256 amount) paid;
     }
 
     function layout() internal pure returns (Layout storage result) {

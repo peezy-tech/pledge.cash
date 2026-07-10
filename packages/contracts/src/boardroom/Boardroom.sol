@@ -5,23 +5,21 @@ import {Ownable} from "solady/auth/Ownable.sol";
 import {Initializable} from "solady/utils/Initializable.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {BoardroomToken} from "./BoardroomToken.sol";
+import {BoardroomGovernanceLogic} from "./BoardroomGovernanceLogic.sol";
+import {BoardroomGovernanceStorage} from "./BoardroomGovernanceStorage.sol";
 import {IBoardroomPolicyRegistry} from "./IBoardroomPolicyRegistry.sol";
 import {BoardroomRedemptionPayout} from "./BoardroomRedemptionPayout.sol";
 import {BoardroomRedemptionStorage} from "./BoardroomRedemptionStorage.sol";
-import {TokenGrant} from "../grants/TokenGrant.sol";
-import {LockedLiquidity} from "../liquidity/LockedLiquidity.sol";
-import {LockedLiquidityFactory} from "../liquidity/LockedLiquidityFactory.sol";
-import {IBoardroomObligationPolicy} from "../policy/IBoardroomObligationPolicy.sol";
-
-interface IBoardroomDistribution {
-    function factory() external view returns (address);
-    function boardroom() external view returns (address);
-    function isClosed() external view returns (bool);
-}
 
 contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     uint256 public constant MAX_BATCH_CALLS = 16;
     uint256 public constant MAX_GOVERNANCE_DELAY = 30 days;
+    uint256 internal constant MIN_GOVERNANCE_DELAY = 1 days;
+    uint256 internal constant ACTION_GRACE_PERIOD = 7 days;
+    uint256 internal constant GOVERNANCE_BPS_DENOMINATOR = 10_000;
+    uint256 internal constant VETO_BPS = 100;
+    uint256 internal constant WIND_DOWN_BPS = 1_000;
+    uint256 internal constant MIN_LAUNCH_CIRCULATING_SUPPLY = 1 ether;
     uint256 public constant MAX_REDEEMABLE_ASSETS = 32;
     uint256 public constant MAX_ISSUED_GRANTS = 128;
     uint256 public constant MAX_ISSUED_DISTRIBUTIONS = 128;
@@ -44,6 +42,8 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     address public shareToken;
     address public wrappedNative;
     address public immutable redemptionPayoutLogic;
+    address public immutable governanceLogic;
+    address public redemptionExcessRecipient;
     BoardroomStatus public status;
     bool public launched;
     address public executor;
@@ -55,7 +55,6 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     address[] internal lockedLiquidityPositions;
     uint256 public issuedGrantSlotReservations;
 
-    mapping(bytes32 => uint256) public queuedActionEta;
     mapping(address => bool) public isRedeemableAsset;
     mapping(address => bool) public isIssuedGrant;
     mapping(address => bool) public isIssuedDistribution;
@@ -93,13 +92,25 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     error BoardroomAlreadyLaunched();
     error BoardroomNotLaunched();
     error InvalidGovernanceDelay();
+    error InvalidLaunchSupply(uint256 circulatingSupply);
     error InvalidExecutor();
     error ActionAlreadyQueued(bytes32 actionHash);
     error ActionNotQueued(bytes32 actionHash);
     error ActionNotReady(bytes32 actionHash, uint256 eta, uint256 currentTime);
+    error ActionExpired(bytes32 actionHash, uint256 expiresAt, uint256 currentTime);
+    error ActionContextMismatch(bytes32 actionHash);
     error ModulePolicyRequired(address target);
     error ObligationPolicyMismatch(address target, address expectedPolicy, address actualPolicy);
     error NotShareholder(address account);
+    error InsufficientHolderPower(
+        address account, uint256 currentBalance, uint256 pastBalance, uint256 requiredBalance
+    );
+    error NoCirculatingShares();
+    error WindDownFinalizationNotReady(uint256 readyAt, uint256 currentTime);
+    error RedeemableAssetStillValid(address asset);
+    error RedeemableAssetHasBalance(address asset, uint256 balance);
+    error OwnershipRenunciationDisabled();
+    error NoRedemptionExcess(address asset);
 
     event BoardroomInitialized(
         address indexed owner,
@@ -128,7 +139,14 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     );
     event BoardroomLaunched(address indexed executor, uint256 governanceDelay);
     event ExecutorSet(address indexed executor);
-    event BoardroomActionQueued(bytes32 indexed actionHash, address indexed executor, uint256 eta, bytes32 salt);
+    event BoardroomActionQueued(
+        bytes32 indexed actionHash,
+        address indexed executor,
+        uint256 eta,
+        uint256 expiresAt,
+        uint256 epoch,
+        bytes32 salt
+    );
     event BoardroomActionCancelled(bytes32 indexed actionHash, address indexed caller);
     event BoardroomActionExecuted(bytes32 indexed actionHash, address indexed caller);
     event BoardroomCallExecuted(
@@ -141,10 +159,16 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         address indexed holder, address indexed recipient, address indexed asset, uint256 shares, uint256 amount
     );
     event RedemptionAssetClaimFailed(address indexed holder, address indexed recipient, address indexed asset);
+    event GovernanceEpochAdvanced(uint256 indexed epoch);
+    event RedeemableAssetRemoved(address indexed asset);
+    event RedeemableAssetQuarantined(address indexed asset);
+    event RedemptionExcessRecipientSet(address indexed recipient);
+    event RedemptionExcessSwept(address indexed asset, address indexed recipient, uint256 amount);
 
-    constructor(address redemptionPayoutLogic_) {
-        if (redemptionPayoutLogic_ == address(0)) revert InvalidAddress();
+    constructor(address redemptionPayoutLogic_, address governanceLogic_) {
+        if (redemptionPayoutLogic_ == address(0) || governanceLogic_ == address(0)) revert InvalidAddress();
         redemptionPayoutLogic = redemptionPayoutLogic_;
+        governanceLogic = governanceLogic_;
         _disableInitializers();
     }
 
@@ -153,13 +177,19 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     function transferOwnership(address newOwner) public payable override {
         address oldOwner = owner();
         super.transferOwnership(newOwner);
+        _syncExcessRecipientAfterOwnershipTransfer(oldOwner, newOwner);
         _syncExecutorAfterOwnershipTransfer(oldOwner, newOwner);
     }
 
     function completeOwnershipHandover(address pendingOwner) public payable override {
         address oldOwner = owner();
         super.completeOwnershipHandover(pendingOwner);
+        _syncExcessRecipientAfterOwnershipTransfer(oldOwner, pendingOwner);
         _syncExecutorAfterOwnershipTransfer(oldOwner, pendingOwner);
+    }
+
+    function renounceOwnership() public payable override {
+        revert OwnershipRenunciationDisabled();
     }
 
     function initialize(
@@ -177,12 +207,15 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         policyRegistry = policyRegistry_;
         wrappedNative = wrappedNative_;
         executor = owner_;
+        redemptionExcessRecipient = owner_;
+        BoardroomGovernanceStorage.layout().epoch = 1;
         shareToken = address(new BoardroomToken(address(this), name_, symbol_));
         isRedeemableAsset[wrappedNative_] = true;
         redeemableAssets.push(wrappedNative_);
 
         emit BoardroomInitialized(owner_, policyRegistry_, shareToken, wrappedNative_, name_, symbol_);
         emit ExecutorSet(owner_);
+        emit RedemptionExcessRecipientSet(owner_);
         emit RedeemableAssetRegistered(wrappedNative_);
     }
 
@@ -191,9 +224,26 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         _setExecutor(executor_);
     }
 
+    function setRedemptionExcessRecipient(address recipient) external {
+        _requireGovernanceCaller();
+        _requireStatus(BoardroomStatus.Active);
+        if (recipient == address(0) || recipient == address(this)) revert InvalidAddress();
+        redemptionExcessRecipient = recipient;
+        emit RedemptionExcessRecipientSet(recipient);
+    }
+
     function launch(uint256 governanceDelay_) external {
         _requirePrelaunchOwner();
-        if (governanceDelay_ == 0 || governanceDelay_ > MAX_GOVERNANCE_DELAY) revert InvalidGovernanceDelay();
+        _requireStatus(BoardroomStatus.Active);
+        if (governanceDelay_ < MIN_GOVERNANCE_DELAY || governanceDelay_ > MAX_GOVERNANCE_DELAY) {
+            revert InvalidGovernanceDelay();
+        }
+
+        BoardroomToken shares = BoardroomToken(shareToken);
+        uint256 supply = shares.totalSupply();
+        uint256 treasuryShares = shares.balanceOf(address(this));
+        uint256 circulating = supply > treasuryShares ? supply - treasuryShares : 0;
+        if (circulating < MIN_LAUNCH_CIRCULATING_SUPPLY) revert InvalidLaunchSupply(circulating);
 
         launched = true;
         governanceDelay = governanceDelay_;
@@ -226,7 +276,8 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
     function queueAction(Call calldata call_, bytes32 salt) external returns (bytes32 actionHash, uint256 eta) {
         _requireLaunchedExecutor();
-        _requireNotRedemptionsOpen();
+        _requireStatus(BoardroomStatus.Active);
+        _authorizeCallForStatus(status, call_.policy, call_.target, _selector(call_.data), call_.value, call_.data);
 
         actionHash = hashAction(call_, salt);
         eta = _queueAction(actionHash, salt);
@@ -234,8 +285,13 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
     function queueBatch(Call[] calldata calls, bytes32 salt) external returns (bytes32 actionHash, uint256 eta) {
         _requireLaunchedExecutor();
-        _requireNotRedemptionsOpen();
+        _requireStatus(BoardroomStatus.Active);
         _requireValidBatchLength(calls.length);
+        uint256 length = calls.length;
+        for (uint256 i; i < length; ++i) {
+            Call calldata call_ = calls[i];
+            _authorizeCallForStatus(status, call_.policy, call_.target, _selector(call_.data), call_.value, call_.data);
+        }
 
         actionHash = hashBatch(calls, salt);
         eta = _queueAction(actionHash, salt);
@@ -269,11 +325,29 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     }
 
     function cancelAction(bytes32 actionHash) external {
-        _requireLaunchedShareholder();
-
-        if (queuedActionEta[actionHash] == 0) revert ActionNotQueued(actionHash);
-        delete queuedActionEta[actionHash];
+        _requireBoardroomLaunched();
+        _requireStatus(BoardroomStatus.Active);
+        _requireHolderPower(msg.sender, VETO_BPS);
+        _delegateGovernance(abi.encodeCall(BoardroomGovernanceLogic.cancelAction, (actionHash)));
         emit BoardroomActionCancelled(actionHash, msg.sender);
+    }
+
+    function governanceConfig()
+        external
+        pure
+        returns (uint256 minimumDelay, uint256 actionGracePeriod, uint256 vetoBps, uint256 windDownBps)
+    {
+        return (MIN_GOVERNANCE_DELAY, ACTION_GRACE_PERIOD, VETO_BPS, WIND_DOWN_BPS);
+    }
+
+    function governanceState(bytes32 actionHash)
+        external
+        view
+        returns (uint256 currentEpoch, uint256 eta, uint256 expiresAt, uint256 actionEpoch, uint8 actionStatus)
+    {
+        BoardroomGovernanceStorage.Layout storage governance = BoardroomGovernanceStorage.layout();
+        BoardroomGovernanceStorage.ActionContext storage context = governance.actions[actionHash];
+        return (governance.epoch, context.eta, context.expiresAt, context.epoch, context.status);
     }
 
     function hashAction(Call calldata call_, bytes32 salt) public pure returns (bytes32) {
@@ -310,16 +384,19 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
         _wrapNativeBalanceForWindDown();
         status = BoardroomStatus.WindingDown;
+        uint256 epoch =
+            abi.decode(_delegateGovernance(abi.encodeCall(BoardroomGovernanceLogic.startWindDown, ())), (uint256));
+        emit GovernanceEpochAdvanced(epoch);
         emit BoardroomWindDownStarted(msg.sender);
     }
 
     function wrapNativeBalance() external nonReentrant {
-        _requireGovernanceCaller();
+        if (status != BoardroomStatus.WindingDown) _requireGovernanceCaller();
         _wrapNativeBalanceForWindDown();
     }
 
     function registerRedeemableAsset(address asset) external {
-        _requireGovernanceCaller();
+        _requireAssetManager();
         _registerRedeemableAssetGoverned(asset);
     }
 
@@ -332,20 +409,18 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     }
 
     function burnTreasuryShares() external returns (uint256 burned) {
-        _requireGovernanceCaller();
-        burned = _burnTreasurySharesGoverned();
-    }
-
-    function _burnTreasurySharesGoverned() internal returns (uint256 burned) {
-        _requireStatus(BoardroomStatus.WindingDown);
+        BoardroomStatus currentStatus = status;
+        if (currentStatus == BoardroomStatus.Active) {
+            revert InvalidStatus(BoardroomStatus.WindingDown, currentStatus);
+        }
         burned = _burnTreasuryShares();
     }
 
     function exitLockedLiquidity(address locker, uint256 amountAMin, uint256 amountBMin, uint256 deadline)
         external
+        nonReentrant
         returns (uint256 amountA, uint256 amountB, uint256 liquidity)
     {
-        _requireGovernanceCaller();
         (amountA, amountB, liquidity) = _exitLockedLiquidity(locker, amountAMin, amountBMin, deadline);
     }
 
@@ -354,39 +429,52 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         returns (uint256 amountA, uint256 amountB, uint256 liquidity)
     {
         _requireStatus(BoardroomStatus.WindingDown);
-        if (!isLockedLiquidity[locker]) revert InvalidLockedLiquidity(locker);
-
-        LockedLiquidity position = LockedLiquidity(locker);
-        address tokenA = position.tokenA();
-        address tokenB = position.tokenB();
-        address pool = position.pool();
-
-        (amountA, amountB, liquidity) = position.exitToBoardroom(amountAMin, amountBMin, deadline);
-
-        _registerRedeemableAssetIfNeeded(tokenA);
-        _registerRedeemableAssetIfNeeded(tokenB);
-        _burnTreasuryShares();
-        _pruneClosedObligation(locker);
-
-        emit BoardroomLockedLiquidityExited(locker, pool, liquidity, amountA, amountB);
+        bytes memory result = _delegateGovernance(
+            abi.encodeCall(
+                BoardroomGovernanceLogic.exitLockedLiquidity,
+                (
+                    _lifecycleConfig(),
+                    _obligationSlots(),
+                    BoardroomGovernanceLogic.ExitParams({
+                        redemptionPayout: redemptionPayoutLogic,
+                        locker: locker,
+                        amountAMin: amountAMin,
+                        amountBMin: amountBMin,
+                        deadline: deadline
+                    })
+                )
+            )
+        );
+        (amountA, amountB, liquidity) = abi.decode(result, (uint256, uint256, uint256));
     }
 
-    function openRedemptions() external {
-        _requireGovernanceCaller();
+    function openRedemptions() external nonReentrant {
         _openRedemptions();
+    }
+
+    function executeWindDownCall(Call calldata call_) external nonReentrant returns (bytes memory result) {
+        _requireStatus(BoardroomStatus.WindingDown);
+        if (call_.value != 0 || obligationPolicyOf[call_.target] == address(0)) {
+            revert CallNotAllowed(call_.policy, call_.target, _selector(call_.data));
+        }
+        result = _execute(call_);
     }
 
     function _openRedemptions() internal {
         _requireStatus(BoardroomStatus.WindingDown);
-        _wrapNativeBalanceForWindDown();
-        _pruneClosedObligations();
-        if (issuedGrants.length != 0) revert IssuedGrantStillOpen(issuedGrants[0]);
-        if (issuedDistributions.length != 0) revert IssuedDistributionStillOpen(issuedDistributions[0]);
-        if (lockedLiquidityPositions.length != 0) revert LockedLiquidityStillOpen(lockedLiquidityPositions[0]);
-
-        _registerRedeemableAssetIfNeeded(wrappedNative);
-        _burnTreasuryShares();
-        BoardroomRedemptionStorage.layout().supply = BoardroomToken(shareToken).totalSupply();
+        _delegateGovernance(
+            abi.encodeCall(
+                BoardroomGovernanceLogic.finalizeWindDown,
+                (
+                    _obligationSlots(),
+                    redemptionPayoutLogic,
+                    wrappedNative,
+                    shareToken,
+                    redeemableAssets,
+                    governanceDelay
+                )
+            )
+        );
         status = BoardroomStatus.RedemptionsOpen;
         emit BoardroomRedemptionsOpened(msg.sender);
     }
@@ -439,12 +527,29 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         amountOut = abi.decode(result, (uint256));
     }
 
+    function sweepRedemptionExcess(address asset) external nonReentrant returns (uint256 amount) {
+        _requireStatus(BoardroomStatus.RedemptionsOpen);
+        if (asset == address(0) || asset == shareToken || asset == address(this)) revert InvalidRedeemableAsset(asset);
+        _wrapNativeBalanceForWindDown();
+        address recipient = redemptionExcessRecipient;
+        (bool success, bytes memory result) = redemptionPayoutLogic.delegatecall(
+            abi.encodeCall(BoardroomRedemptionPayout.sweepExcess, (asset, recipient))
+        );
+        if (!success) _revertCall(redemptionPayoutLogic, result);
+        amount = abi.decode(result, (uint256));
+    }
+
     function redemptionCredits(address holder) external view returns (uint256) {
         return BoardroomRedemptionStorage.layout().credits[holder];
     }
 
     function allocatedRedemptionShares(address holder, address asset) external view returns (uint256) {
         return BoardroomRedemptionStorage.layout().holderAllocatedShares[holder][asset];
+    }
+
+    function redemptionAssetState(address asset) external view returns (uint256 snapshotBalance, uint256 paid) {
+        BoardroomRedemptionStorage.Layout storage redemption = BoardroomRedemptionStorage.layout();
+        return (redemption.snapshotBalance[asset], redemption.paid[asset]);
     }
 
     function redeemableAssetCount() external view returns (uint256) {
@@ -509,17 +614,45 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         if (currentStatus == BoardroomStatus.RedemptionsOpen) {
             revert InvalidStatus(BoardroomStatus.Active, currentStatus);
         }
-        if (!isIssuedDistribution[msg.sender]) revert InvalidIssuedDistribution(msg.sender);
-
-        _recordLockedLiquidityPosition(locker, pool, address(0));
+        _delegateGovernance(
+            abi.encodeCall(
+                BoardroomGovernanceLogic.recordLockedLiquidityFromDistribution, (_lifecycleConfig(), locker, pool)
+            )
+        );
     }
 
     function recordGrantFromDistribution(address grant) external {
         _requireStatus(BoardroomStatus.Active);
-        if (!isIssuedDistribution[msg.sender]) revert InvalidIssuedDistribution(msg.sender);
-        _consumeIssuedGrantReservation(msg.sender);
+        _delegateGovernance(
+            abi.encodeCall(
+                BoardroomGovernanceLogic.recordGrantFromDistribution,
+                (policyRegistry, shareToken, grant, MAX_REDEEMABLE_ASSETS, MAX_ISSUED_GRANTS)
+            )
+        );
+    }
 
-        _recordIssuedGrant(TokenGrant(grant).factory(), abi.encode(grant));
+    function reserveRedeemableAsset(address asset) external {
+        _requireStatus(BoardroomStatus.Active);
+        _delegateGovernance(
+            abi.encodeCall(
+                BoardroomGovernanceLogic.reserveRedeemableAsset,
+                (policyRegistry, asset, shareToken, MAX_REDEEMABLE_ASSETS)
+            )
+        );
+    }
+
+    function removeRedeemableAsset(address asset) external {
+        if (status != BoardroomStatus.WindingDown) _requireAssetManager();
+        _delegateGovernance(
+            abi.encodeCall(BoardroomGovernanceLogic.removeEmptyRedeemableAsset, (asset, shareToken, wrappedNative))
+        );
+    }
+
+    function quarantineRedeemableAsset(address asset) external {
+        _requireStatus(BoardroomStatus.WindingDown);
+        _delegateGovernance(
+            abi.encodeCall(BoardroomGovernanceLogic.quarantineRedeemableAsset, (asset, shareToken, wrappedNative))
+        );
     }
 
     function _execute(Call calldata call_) internal returns (bytes memory result) {
@@ -557,34 +690,17 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
         address canonicalPolicy = obligationPolicyOf[target];
         if (currentStatus == BoardroomStatus.WindingDown && canonicalPolicy == address(0)) {
-            if (!_isBoardroomWindDownGovernanceCall(policy, target, selector)) {
-                revert CallNotAllowed(policy, target, selector);
-            }
-            return;
+            revert CallNotAllowed(policy, target, selector);
         }
 
         IBoardroomPolicyRegistry(policyRegistry)
-            .authorizeCall(address(this), msg.sender, policy, target, value, data, canonicalPolicy);
-    }
-
-    function _isBoardroomWindDownGovernanceCall(address policy, address target, bytes4 selector)
-        internal
-        view
-        returns (bool)
-    {
-        if (!_isSelfCallWithoutPolicy(policy, target)) return false;
-        return _isWindDownGovernanceSelector(selector);
+            .authorizeCall(
+                address(this), launched ? executor : msg.sender, policy, target, value, data, canonicalPolicy
+            );
     }
 
     function _isSelfCallWithoutPolicy(address policy, address target) internal view returns (bool) {
         return policy == address(0) && target == address(this);
-    }
-
-    function _isWindDownGovernanceSelector(bytes4 selector) internal pure returns (bool) {
-        return selector == Boardroom.setExecutor.selector || selector == Boardroom.wrapNativeBalance.selector
-            || selector == Boardroom.registerRedeemableAsset.selector
-            || selector == Boardroom.burnTreasuryShares.selector || selector == Boardroom.exitLockedLiquidity.selector
-            || selector == Boardroom.openRedemptions.selector;
     }
 
     function _executeExternalCall(Call calldata call_) internal returns (bytes memory result) {
@@ -603,7 +719,10 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         bytes memory result
     ) internal {
         if (obligationPolicyOf[target] != address(0)) {
-            _recordLifecycleCall(policy, target, selector);
+            _delegateGovernance(
+                abi.encodeCall(BoardroomGovernanceLogic.releaseGrantSlotsForLifecycleCall, (policy, target, selector))
+            );
+            _pruneClosedObligation(target);
             return;
         }
 
@@ -611,166 +730,26 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
             currentStatus == BoardroomStatus.Active && policy != address(0)
                 && IBoardroomPolicyRegistry(policyRegistry).isModulePolicy(policy)
         ) {
-            _recordIssuedObligation(policy, target, value, data, result);
+            _delegateGovernance(
+                abi.encodeCall(
+                    BoardroomGovernanceLogic.recordIssuedObligation,
+                    (_lifecycleConfig(), policy, target, value, data, result)
+                )
+            );
         }
-    }
-
-    function _recordIssuedObligation(
-        address policy,
-        address target,
-        uint256 value,
-        bytes calldata data,
-        bytes memory result
-    ) internal {
-        IBoardroomObligationPolicy.Obligation memory obligation = IBoardroomObligationPolicy(policy)
-            .obligationForCall(address(this), target, value, data, result);
-        _recordObligation(policy, obligation);
-    }
-
-    function _recordObligation(address factory, IBoardroomObligationPolicy.Obligation memory obligation) internal {
-        if (obligation.kind == IBoardroomObligationPolicy.ObligationKind.None) {
-            return;
-        }
-        if (obligation.kind == IBoardroomObligationPolicy.ObligationKind.Grant) {
-            _recordIssuedGrant(factory, abi.encode(obligation.account));
-            return;
-        }
-        if (obligation.kind == IBoardroomObligationPolicy.ObligationKind.Distribution) {
-            _recordIssuedDistribution(factory, abi.encode(obligation.account));
-            _reserveIssuedGrantSlots(obligation.account, obligation.grantSlotReservations);
-            return;
-        }
-        if (obligation.kind == IBoardroomObligationPolicy.ObligationKind.LockedLiquidity) {
-            _recordLockedLiquidityPosition(obligation.account, obligation.aux, factory);
-        }
-    }
-
-    function _recordLifecycleCall(address policy, address target, bytes4 selector) internal {
-        address distribution =
-            IBoardroomObligationPolicy(policy).grantSlotReleaseForLifecycleCall(address(this), target, selector);
-        if (distribution != address(0)) _releaseIssuedGrantSlots(distribution);
-        _pruneClosedObligation(target);
-    }
-
-    function _recordIssuedGrant(address factory, bytes memory result) internal {
-        if (_remainingIssuedGrantSlots() == 0) revert TooManyIssuedGrants();
-
-        address grant = abi.decode(result, (address));
-        if (
-            grant == address(0) || obligationPolicyOf[grant] != address(0)
-                || !IBoardroomPolicyRegistry(policyRegistry).isModulePolicy(factory)
-        ) revert InvalidIssuedGrant(grant);
-
-        TokenGrant tokenGrant = TokenGrant(grant);
-        if (tokenGrant.issuer() != address(this) || tokenGrant.factory() != factory) revert InvalidIssuedGrant(grant);
-
-        isIssuedGrant[grant] = true;
-        obligationPolicyOf[grant] = factory;
-        issuedGrants.push(grant);
-        emit BoardroomGrantRecorded(grant);
-    }
-
-    function _recordIssuedDistribution(address factory, bytes memory result) internal returns (address distribution) {
-        if (issuedDistributions.length >= MAX_ISSUED_DISTRIBUTIONS) revert TooManyIssuedDistributions();
-
-        distribution = abi.decode(result, (address));
-        if (
-            distribution == address(0) || obligationPolicyOf[distribution] != address(0)
-                || !IBoardroomPolicyRegistry(policyRegistry).isModulePolicy(factory)
-        ) {
-            revert InvalidIssuedDistribution(distribution);
-        }
-
-        IBoardroomDistribution issuedDistribution = IBoardroomDistribution(distribution);
-        if (issuedDistribution.boardroom() != address(this) || issuedDistribution.factory() != factory) {
-            revert InvalidIssuedDistribution(distribution);
-        }
-
-        isIssuedDistribution[distribution] = true;
-        obligationPolicyOf[distribution] = factory;
-        issuedDistributions.push(distribution);
-        emit BoardroomDistributionRecorded(distribution);
-    }
-
-    function _reserveIssuedGrantSlots(address distribution, uint256 count) internal {
-        if (count == 0) return;
-
-        uint256 available = _remainingIssuedGrantSlots();
-        if (count > available) revert TooManyIssuedGrantReservations(count, available);
-
-        issuedGrantReservationsForDistribution[distribution] = count;
-        issuedGrantSlotReservations += count;
-        emit BoardroomGrantSlotsReserved(distribution, count);
-    }
-
-    function _consumeIssuedGrantReservation(address distribution) internal {
-        uint256 reserved = issuedGrantReservationsForDistribution[distribution];
-        if (reserved == 0) revert NoReservedIssuedGrantSlots(distribution);
-
-        issuedGrantReservationsForDistribution[distribution] = reserved - 1;
-        issuedGrantSlotReservations -= 1;
-    }
-
-    function _releaseIssuedGrantSlots(address distribution) internal {
-        uint256 reserved = issuedGrantReservationsForDistribution[distribution];
-        if (reserved == 0) return;
-
-        issuedGrantReservationsForDistribution[distribution] = 0;
-        issuedGrantSlotReservations -= reserved;
-        emit BoardroomGrantSlotsReleased(distribution, reserved);
-    }
-
-    function _remainingIssuedGrantSlots() internal view returns (uint256) {
-        uint256 usedAndReserved = issuedGrants.length + issuedGrantSlotReservations;
-        if (usedAndReserved >= MAX_ISSUED_GRANTS) return 0;
-        return MAX_ISSUED_GRANTS - usedAndReserved;
-    }
-
-    function _recordLockedLiquidityPosition(address locker, address pool, address expectedFactory) internal {
-        if (lockedLiquidityPositions.length >= MAX_LOCKED_LIQUIDITY_POSITIONS) {
-            revert TooManyLockedLiquidityPositions();
-        }
-
-        if (locker == address(0) || obligationPolicyOf[locker] != address(0)) revert InvalidLockedLiquidity(locker);
-
-        LockedLiquidity position = LockedLiquidity(locker);
-        address factory = position.factory();
-        if (expectedFactory != address(0) && factory != expectedFactory) revert InvalidLockedLiquidity(locker);
-        if (!IBoardroomPolicyRegistry(policyRegistry).isModulePolicy(factory)) revert InvalidLockedLiquidity(locker);
-
-        bool lockerMatchesBoardroom = position.boardroom() == address(this);
-        bool lockerMatchesPool = position.pool() == pool;
-        bool lockerIsFromFactory = LockedLiquidityFactory(factory).isLocker(locker);
-        if (!lockerMatchesBoardroom || !lockerMatchesPool || !lockerIsFromFactory) {
-            revert InvalidLockedLiquidity(locker);
-        }
-
-        _registerRedeemableAssetIfNeeded(position.tokenA());
-        _registerRedeemableAssetIfNeeded(position.tokenB());
-
-        isLockedLiquidity[locker] = true;
-        obligationPolicyOf[locker] = factory;
-        lockedLiquidityPositions.push(locker);
-        emit BoardroomLockedLiquidityRecorded(locker);
     }
 
     function _registerRedeemableAsset(address asset) internal {
-        if (!_isValidRedeemableAsset(asset)) revert InvalidRedeemableAsset(asset);
-        if (isRedeemableAsset[asset]) revert RedeemableAssetAlreadyRegistered(asset);
-        if (redeemableAssets.length >= MAX_REDEEMABLE_ASSETS) revert TooManyRedeemableAssets();
-
-        isRedeemableAsset[asset] = true;
-        redeemableAssets.push(asset);
-        emit RedeemableAssetRegistered(asset);
+        _delegateGovernance(
+            abi.encodeCall(
+                BoardroomGovernanceLogic.registerRedeemableAsset, (asset, shareToken, MAX_REDEEMABLE_ASSETS, false)
+            )
+        );
     }
 
     function _registerRedeemableAssetIfNeeded(address asset) internal {
-        if (!_isValidRedeemableAsset(asset) || isRedeemableAsset[asset]) return;
+        if (asset == address(0) || asset == shareToken || asset == address(this) || isRedeemableAsset[asset]) return;
         _registerRedeemableAsset(asset);
-    }
-
-    function _isValidRedeemableAsset(address asset) internal view returns (bool) {
-        return asset != address(0) && asset != shareToken && asset != address(this);
     }
 
     function _wrapNativeBalanceForWindDown() internal {
@@ -824,6 +803,17 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         });
     }
 
+    function _lifecycleConfig() internal view returns (BoardroomGovernanceLogic.LifecycleConfig memory config) {
+        config = BoardroomGovernanceLogic.LifecycleConfig({
+            policyRegistry: policyRegistry,
+            shareToken: shareToken,
+            maxAssets: MAX_REDEEMABLE_ASSETS,
+            maxGrants: MAX_ISSUED_GRANTS,
+            maxDistributions: MAX_ISSUED_DISTRIBUTIONS,
+            maxLockers: MAX_LOCKED_LIQUIDITY_POSITIONS
+        });
+    }
+
     function _burnTreasuryShares() internal returns (uint256 burned) {
         (bool success, bytes memory result) = redemptionPayoutLogic.delegatecall(
             abi.encodeCall(
@@ -835,10 +825,13 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     }
 
     function _setExecutor(address executor_) internal {
-        if (executor_ == address(0)) revert InvalidExecutor();
+        if (executor_ == address(0) || executor_ == address(this)) revert InvalidExecutor();
 
         executor = executor_;
+        uint256 epoch =
+            abi.decode(_delegateGovernance(abi.encodeCall(BoardroomGovernanceLogic.advanceEpoch, ())), (uint256));
         emit ExecutorSet(executor_);
+        emit GovernanceEpochAdvanced(epoch);
     }
 
     function _syncExecutorAfterOwnershipTransfer(address oldOwner, address newOwner) internal {
@@ -847,20 +840,29 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         _setExecutor(newOwner);
     }
 
-    function _queueAction(bytes32 actionHash, bytes32 salt) internal returns (uint256 eta) {
-        if (queuedActionEta[actionHash] != 0) revert ActionAlreadyQueued(actionHash);
+    function _syncExcessRecipientAfterOwnershipTransfer(address oldOwner, address newOwner) internal {
+        if (launched || redemptionExcessRecipient != oldOwner) return;
+        redemptionExcessRecipient = newOwner;
+        emit RedemptionExcessRecipientSet(newOwner);
+    }
 
-        eta = block.timestamp + governanceDelay;
-        queuedActionEta[actionHash] = eta;
-        emit BoardroomActionQueued(actionHash, msg.sender, eta, salt);
+    function _queueAction(bytes32 actionHash, bytes32 salt) internal returns (uint256 eta) {
+        eta = abi.decode(
+            _delegateGovernance(
+                abi.encodeCall(
+                    BoardroomGovernanceLogic.queueAction,
+                    (actionHash, uint8(status), governanceDelay, ACTION_GRACE_PERIOD)
+                )
+            ),
+            (uint256)
+        );
+        BoardroomGovernanceStorage.ActionContext storage context =
+            BoardroomGovernanceStorage.layout().actions[actionHash];
+        emit BoardroomActionQueued(actionHash, msg.sender, eta, context.expiresAt, context.epoch, salt);
     }
 
     function _consumeReadyAction(bytes32 actionHash) internal {
-        uint256 eta = queuedActionEta[actionHash];
-        if (eta == 0) revert ActionNotQueued(actionHash);
-        if (block.timestamp < eta) revert ActionNotReady(actionHash, eta, block.timestamp);
-
-        delete queuedActionEta[actionHash];
+        _delegateGovernance(abi.encodeCall(BoardroomGovernanceLogic.consumeReadyAction, (actionHash, uint8(status))));
     }
 
     function _requireGovernanceCaller() internal view {
@@ -872,7 +874,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
     function _requireWindDownStarter() internal view {
         if (launched) {
-            _requireShareholder(msg.sender);
+            _requireHolderPower(msg.sender, WIND_DOWN_BPS);
             return;
         }
 
@@ -893,24 +895,30 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         if (!launched) revert BoardroomNotLaunched();
     }
 
-    function _requireLaunchedShareholder() internal view {
-        if (!launched) revert BoardroomNotLaunched();
-        _requireShareholder(msg.sender);
-    }
-
     function _requireOwner() internal view {
         if (msg.sender != owner()) revert Unauthorized();
     }
 
-    function _requireShareholder(address account) internal view {
-        if (BoardroomToken(shareToken).balanceOf(account) == 0) revert NotShareholder(account);
+    function _requireHolderPower(address account, uint256 thresholdBps) internal view {
+        BoardroomGovernanceLogic(governanceLogic)
+            .requireHolderPower(shareToken, address(this), account, thresholdBps, GOVERNANCE_BPS_DENOMINATOR);
     }
 
-    function _requireNotRedemptionsOpen() internal view {
+    function _requireAssetManager() internal view {
         BoardroomStatus currentStatus = status;
-        if (currentStatus == BoardroomStatus.RedemptionsOpen) {
-            revert InvalidStatus(BoardroomStatus.Active, currentStatus);
+        if (currentStatus == BoardroomStatus.Active) {
+            _requireGovernanceCaller();
+            return;
         }
+        if (currentStatus == BoardroomStatus.WindingDown && launched) {
+            _requireHolderPower(msg.sender, WIND_DOWN_BPS);
+            return;
+        }
+        if (currentStatus == BoardroomStatus.WindingDown) {
+            _requireOwner();
+            return;
+        }
+        revert InvalidStatus(BoardroomStatus.WindingDown, currentStatus);
     }
 
     function _requireValidBatchLength(uint256 length) internal pure {
@@ -954,6 +962,12 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
             returndatacopy(add(result, 0x20), 0, size)
             mstore(0x40, and(add(add(result, 0x3f), size), not(0x1f)))
         }
+    }
+
+    function _delegateGovernance(bytes memory input) internal returns (bytes memory result) {
+        (bool success, bytes memory output) = governanceLogic.delegatecall(input);
+        if (!success) _revertCall(governanceLogic, output);
+        return output;
     }
 
     function _revertCall(address target, bytes memory returnData) internal pure {

@@ -81,6 +81,7 @@ contract BoardroomPolicyRegistry is Ownable, IBoardroomPolicyRegistry {
         bool targetIsModule = isModulePolicy[target];
         if (policy == address(0)) {
             if (targetIsModule) revert ModulePolicyRequired(target);
+            if (target != boardroom) revert CallNotAllowed(policy, target, selector);
             return;
         }
 

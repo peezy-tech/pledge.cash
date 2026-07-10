@@ -9,7 +9,9 @@ import {AmmRouter} from "../../src/amm/AmmRouter.sol";
 import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
 import {Boardroom} from "../../src/boardroom/Boardroom.sol";
 import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
+import {BoardroomGovernanceLogic} from "../../src/boardroom/BoardroomGovernanceLogic.sol";
 import {BoardroomPolicyRegistry} from "../../src/boardroom/BoardroomPolicyRegistry.sol";
+import {BoardroomRedemptionPayout} from "../../src/boardroom/BoardroomRedemptionPayout.sol";
 import {BoardroomToken} from "../../src/boardroom/BoardroomToken.sol";
 import {IBoardroomCallPolicy} from "../../src/policy/IBoardroomCallPolicy.sol";
 import {LockedLiquidity} from "../../src/liquidity/LockedLiquidity.sol";
@@ -237,7 +239,12 @@ contract LockedLiquidityTest is Test {
         wrappedNative = new WETH();
         policyRegistry = new BoardroomPolicyRegistry(address(this));
         assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
-        boardroomFactory = new BoardroomFactory(address(policyRegistry), address(wrappedNative));
+        boardroomFactory = new BoardroomFactory(
+            address(policyRegistry),
+            address(wrappedNative),
+            address(new BoardroomRedemptionPayout()),
+            address(new BoardroomGovernanceLogic())
+        );
         router = new AmmRouter(address(ammFactory), address(wrappedNative));
         lockedLiquidityFactory = new LockedLiquidityFactory(address(router), address(boardroomFactory));
         quoteToken = new LockedLiquidityTestERC20("Quote", "QUOTE", 18);
@@ -496,33 +503,23 @@ contract LockedLiquidityTest is Test {
         }
     }
 
-    function testLaunchedWindDownCanExecuteQueuedLockedLiquidityExitSelfCall() public {
+    function testLaunchedWindDownCanPermissionlesslyExitLockedLiquidity() public {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-launched-exit");
         CreatedLocker memory created = _createLockedLiquidity(
             boardroom, shareToken, address(quoteToken), address(lockedLiquidityFactory), "launched-exit"
         );
 
         vm.startPrank(owner);
-        boardroom.mint(holder, HOLDER_SHARES);
+        boardroom.mint(holder, 2 * HOLDER_SHARES);
         boardroom.launch(1 days);
         vm.stopPrank();
+        vm.roll(block.number + 1);
 
         vm.prank(holder);
         boardroom.startWindDown();
 
-        Boardroom.Call memory call_ = _policyCall(
-            address(0),
-            address(boardroom),
-            abi.encodeCall(Boardroom.exitLockedLiquidity, (created.locker, 1, 1, block.timestamp + 2 days))
-        );
-        bytes32 salt = keccak256("queued-exit-locked-liquidity");
-
-        vm.prank(owner);
-        (, uint256 eta) = boardroom.queueAction(call_, salt);
-
-        vm.warp(eta);
-        vm.prank(owner);
-        boardroom.executeQueuedAction(call_, salt);
+        vm.prank(trader);
+        boardroom.exitLockedLiquidity(created.locker, 1, 1, block.timestamp + 2 days);
 
         assertEq(LockedLiquidity(created.locker).lockedLiquidity(), 0);
     }
@@ -561,7 +558,8 @@ contract LockedLiquidityTest is Test {
         uint256 maxAssets = boardroom.MAX_REDEEMABLE_ASSETS();
         uint256 existingAssets = boardroom.redeemableAssetCount();
         for (uint256 i; i < maxAssets - existingAssets; ++i) {
-            boardroom.registerRedeemableAsset(vm.addr(0x1000 + i));
+            LockedLiquidityTestERC20 filler = new LockedLiquidityTestERC20("Filler", "FILL", 18);
+            boardroom.registerRedeemableAsset(address(filler));
         }
         boardroom.mint(address(boardroom), SHARE_SEED);
         vm.stopPrank();

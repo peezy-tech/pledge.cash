@@ -9,7 +9,9 @@ import {AmmFactory} from "../../src/amm/AmmFactory.sol";
 import {AmmRouter} from "../../src/amm/AmmRouter.sol";
 import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
 import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
+import {BoardroomGovernanceLogic} from "../../src/boardroom/BoardroomGovernanceLogic.sol";
 import {BoardroomPolicyRegistry} from "../../src/boardroom/BoardroomPolicyRegistry.sol";
+import {BoardroomRedemptionPayout} from "../../src/boardroom/BoardroomRedemptionPayout.sol";
 import {DistributionFactory} from "../../src/distribution/DistributionFactory.sol";
 import {ProtocolFeeRouter} from "../../src/fees/ProtocolFeeRouter.sol";
 import {LockedLiquidityFactory} from "../../src/liquidity/LockedLiquidityFactory.sol";
@@ -24,11 +26,17 @@ contract DeterministicDeploymentTest is Test {
     PledgeCashDeterministicDeployer internal deployer;
     WETH internal wrappedNative;
     BoardroomFactory internal canonicalBoardroomFactory;
+    BoardroomGovernanceLogic internal governanceLogic;
+    BoardroomRedemptionPayout internal redemptionPayoutLogic;
 
     function setUp() public {
         deployer = new PledgeCashDeterministicDeployer(owner);
         wrappedNative = new WETH();
-        canonicalBoardroomFactory = new BoardroomFactory(address(1), address(wrappedNative));
+        governanceLogic = new BoardroomGovernanceLogic();
+        redemptionPayoutLogic = new BoardroomRedemptionPayout();
+        canonicalBoardroomFactory = new BoardroomFactory(
+            address(1), address(wrappedNative), address(redemptionPayoutLogic), address(governanceLogic)
+        );
     }
 
     function testDeployerRejectsZeroOwnerAndEmptyInitCode() public {
@@ -73,10 +81,14 @@ contract DeterministicDeploymentTest is Test {
     }
 
     function testCreate3PredictionDoesNotDependOnConstructorArguments() public view {
-        bytes memory initCodeA =
-            abi.encodePacked(type(BoardroomFactory).creationCode, abi.encode(address(1), address(2)));
-        bytes memory initCodeB =
-            abi.encodePacked(type(BoardroomFactory).creationCode, abi.encode(address(3), address(4)));
+        bytes memory initCodeA = abi.encodePacked(
+            type(BoardroomFactory).creationCode,
+            abi.encode(address(1), address(2), address(redemptionPayoutLogic), address(governanceLogic))
+        );
+        bytes memory initCodeB = abi.encodePacked(
+            type(BoardroomFactory).creationCode,
+            abi.encode(address(3), address(4), address(redemptionPayoutLogic), address(governanceLogic))
+        );
         bytes32 salt = PledgeCashDeploymentSalts.boardroomFactory();
 
         assertNotEq(keccak256(initCodeA), keccak256(initCodeB));
@@ -84,10 +96,14 @@ contract DeterministicDeploymentTest is Test {
     }
 
     function testCreate3DeploymentDoesNotDependOnConstructorArguments() public {
-        bytes memory initCodeA =
-            abi.encodePacked(type(BoardroomFactory).creationCode, abi.encode(address(1), address(2)));
-        bytes memory initCodeB =
-            abi.encodePacked(type(BoardroomFactory).creationCode, abi.encode(address(3), address(4)));
+        bytes memory initCodeA = abi.encodePacked(
+            type(BoardroomFactory).creationCode,
+            abi.encode(address(1), address(2), address(redemptionPayoutLogic), address(governanceLogic))
+        );
+        bytes memory initCodeB = abi.encodePacked(
+            type(BoardroomFactory).creationCode,
+            abi.encode(address(3), address(4), address(redemptionPayoutLogic), address(governanceLogic))
+        );
         bytes32 salt = PledgeCashDeploymentSalts.boardroomFactory();
 
         uint256 snapshotId = vm.snapshotState();
@@ -158,7 +174,13 @@ contract DeterministicDeploymentTest is Test {
             _deploy(
                 PledgeCashDeploymentSalts.boardroomFactory(),
                 abi.encodePacked(
-                    type(BoardroomFactory).creationCode, abi.encode(address(policyRegistry), address(wrappedNative))
+                    type(BoardroomFactory).creationCode,
+                    abi.encode(
+                        address(policyRegistry),
+                        address(wrappedNative),
+                        address(redemptionPayoutLogic),
+                        address(governanceLogic)
+                    )
                 )
             )
         );

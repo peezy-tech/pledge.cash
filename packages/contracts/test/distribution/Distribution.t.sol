@@ -9,7 +9,9 @@ import {AmmRouter} from "../../src/amm/AmmRouter.sol";
 import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
 import {Boardroom} from "../../src/boardroom/Boardroom.sol";
 import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
+import {BoardroomGovernanceLogic} from "../../src/boardroom/BoardroomGovernanceLogic.sol";
 import {BoardroomPolicyRegistry} from "../../src/boardroom/BoardroomPolicyRegistry.sol";
+import {BoardroomRedemptionPayout} from "../../src/boardroom/BoardroomRedemptionPayout.sol";
 import {BoardroomToken} from "../../src/boardroom/BoardroomToken.sol";
 import {DistributionFactory} from "../../src/distribution/DistributionFactory.sol";
 import {FixedPriceSale} from "../../src/distribution/FixedPriceSale.sol";
@@ -259,7 +261,12 @@ contract DistributionTest is Test {
         wrappedNative = new WETH();
         policyRegistry = new BoardroomPolicyRegistry(address(this));
         assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
-        boardroomFactory = new BoardroomFactory(address(policyRegistry), address(wrappedNative));
+        boardroomFactory = new BoardroomFactory(
+            address(policyRegistry),
+            address(wrappedNative),
+            address(new BoardroomRedemptionPayout()),
+            address(new BoardroomGovernanceLogic())
+        );
         ammFactory = new AmmFactory(address(this));
         ammRouter = new AmmRouter(address(ammFactory), address(wrappedNative));
         lockedLiquidityFactory = new LockedLiquidityFactory(address(ammRouter), address(boardroomFactory));

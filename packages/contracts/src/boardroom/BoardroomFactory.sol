@@ -3,13 +3,13 @@ pragma solidity ^0.8.30;
 
 import {LibClone} from "solady/utils/LibClone.sol";
 import {Boardroom} from "./Boardroom.sol";
-import {BoardroomRedemptionPayout} from "./BoardroomRedemptionPayout.sol";
 
 contract BoardroomFactory {
     address public immutable policyRegistry;
     address public immutable wrappedNative;
     address public immutable boardroomLogic;
     address public immutable redemptionPayoutLogic;
+    address public immutable governanceLogic;
 
     address[] public allBoardrooms;
     mapping(address => bool) public isBoardroom;
@@ -27,14 +27,22 @@ contract BoardroomFactory {
         bytes32 salt
     );
 
-    constructor(address policyRegistry_, address wrappedNative_) {
+    constructor(
+        address policyRegistry_,
+        address wrappedNative_,
+        address redemptionPayoutLogic_,
+        address governanceLogic_
+    ) {
         _requireAddress(policyRegistry_);
         _requireAddress(wrappedNative_);
+        _requireContract(redemptionPayoutLogic_);
+        _requireContract(governanceLogic_);
 
         policyRegistry = policyRegistry_;
         wrappedNative = wrappedNative_;
-        redemptionPayoutLogic = address(new BoardroomRedemptionPayout());
-        boardroomLogic = address(new Boardroom(redemptionPayoutLogic));
+        redemptionPayoutLogic = redemptionPayoutLogic_;
+        governanceLogic = governanceLogic_;
+        boardroomLogic = address(new Boardroom(redemptionPayoutLogic, governanceLogic));
     }
 
     function createBoardroom(address owner, string calldata name, string calldata symbol, bytes32 salt)
@@ -79,5 +87,9 @@ contract BoardroomFactory {
 
     function _requireAddress(address account) internal pure {
         if (account == address(0)) revert InvalidAddress();
+    }
+
+    function _requireContract(address account) internal view {
+        if (account == address(0) || account.code.length == 0) revert InvalidAddress();
     }
 }

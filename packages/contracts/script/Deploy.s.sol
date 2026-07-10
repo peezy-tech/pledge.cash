@@ -7,7 +7,9 @@ import {AmmFactory} from "../src/amm/AmmFactory.sol";
 import {AmmRouter} from "../src/amm/AmmRouter.sol";
 import {AssetPolicy} from "../src/policy/AssetPolicy.sol";
 import {BoardroomFactory} from "../src/boardroom/BoardroomFactory.sol";
+import {BoardroomGovernanceLogic} from "../src/boardroom/BoardroomGovernanceLogic.sol";
 import {BoardroomPolicyRegistry} from "../src/boardroom/BoardroomPolicyRegistry.sol";
+import {BoardroomRedemptionPayout} from "../src/boardroom/BoardroomRedemptionPayout.sol";
 import {DistributionFactory} from "../src/distribution/DistributionFactory.sol";
 import {ProtocolFeeRouter} from "../src/fees/ProtocolFeeRouter.sol";
 import {LockedLiquidityFactory} from "../src/liquidity/LockedLiquidityFactory.sol";
@@ -57,6 +59,8 @@ contract Deploy is Script {
         LockedLiquidityFactory lockedLiquidityFactory;
         DistributionFactory distributionFactory;
         BoardroomFactory boardroomFactory;
+        BoardroomGovernanceLogic boardroomGovernanceLogic;
+        BoardroomRedemptionPayout boardroomRedemptionPayout;
     }
 
     function run() external {
@@ -120,13 +124,20 @@ contract Deploy is Script {
                 abi.encodePacked(type(AssetPolicy).creationCode, abi.encode(state.deployer, state.wrappedNative))
             )
         );
+        state.boardroomGovernanceLogic = new BoardroomGovernanceLogic();
+        state.boardroomRedemptionPayout = new BoardroomRedemptionPayout();
         state.boardroomFactory = BoardroomFactory(
             _deployDeterministic(
                 state,
                 PledgeCashDeploymentSalts.boardroomFactory(),
                 abi.encodePacked(
                     type(BoardroomFactory).creationCode,
-                    abi.encode(address(state.boardroomPolicyRegistry), state.wrappedNative)
+                    abi.encode(
+                        address(state.boardroomPolicyRegistry),
+                        state.wrappedNative,
+                        address(state.boardroomRedemptionPayout),
+                        address(state.boardroomGovernanceLogic)
+                    )
                 )
             )
         );
