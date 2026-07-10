@@ -87,6 +87,23 @@ describe("notification rendering", () => {
     expect(rendered.text).not.toContain("call cancelAction");
   });
 
+  test("renders a delayed queued Twitter notification as expired instead of actionable", () => {
+    const row = makeRow("twitter");
+    const rendered = renderNotification(
+      {
+        ...row,
+        payload: {
+          ...row.payload,
+          action: { ...row.payload.action, expiresAt: "2026-07-08T00:00:00.000Z" }
+        }
+      },
+      { now: new Date("2026-07-09T12:00:00.000Z") }
+    );
+
+    expect(rendered.text).toContain("expired and is no longer executable");
+    expect(rendered.text).not.toContain("may cancel");
+  });
+
   test("builds stable web and explorer links from render options", () => {
     const links = buildLinks(makeRow("telegram").payload, {
       explorerUrls: { 998: "https://explorer.example/" },

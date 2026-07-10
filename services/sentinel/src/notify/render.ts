@@ -180,8 +180,14 @@ function renderTwitter(
   const summary = oneLine(payload.analysis?.summary ?? "governance action pending");
   const eta = formatUtc(new Date(payload.action.eta));
   const event = row.event as NotificationRenderEvent;
+  const expiresAt = payload.action.expiresAt ? new Date(payload.action.expiresAt) : undefined;
+  const now = options.now ?? new Date();
+  const queuedActionExpired = event === "queued"
+    && expiresAt !== undefined
+    && Number.isFinite(expiresAt.getTime())
+    && expiresAt.getTime() <= now.getTime();
   const text =
-    event === "queued"
+    event === "queued" && !queuedActionExpired
       ? fitTweetParts(
           `${warningSign} HIGH-RISK action queued: `,
           summary,
@@ -189,9 +195,11 @@ function renderTwitter(
           links.webAction
         )
       : fitTweet(
-          `UPDATE: ${boardroom} action on ${chain} was ${eventLabel(
-            event
-          ).toLowerCase()}. Shareholders can review details.`,
+          queuedActionExpired
+            ? `UPDATE: ${boardroom} action on ${chain} expired and is no longer executable.`
+            : `UPDATE: ${boardroom} action on ${chain} was ${eventLabel(
+                event
+              ).toLowerCase()}. Shareholders can review details.`,
           links.webAction
         );
 
