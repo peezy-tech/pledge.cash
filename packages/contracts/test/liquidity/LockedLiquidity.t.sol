@@ -278,6 +278,15 @@ contract LockedLiquidityTest is Test {
         assertEq(quoteToken.allowance(address(boardroom), address(lockedLiquidityFactory)), 0);
     }
 
+    function testLockedLiquidityFactoryRejectsInvalidBoardroomFactory() public {
+        vm.expectRevert(abi.encodeWithSelector(LockedLiquidityFactory.InvalidBoardroomFactory.selector, address(0)));
+        new LockedLiquidityFactory(address(router), address(0));
+
+        address nonContract = address(0xBEEF);
+        vm.expectRevert(abi.encodeWithSelector(LockedLiquidityFactory.InvalidBoardroomFactory.selector, nonContract));
+        new LockedLiquidityFactory(address(router), nonContract);
+    }
+
     function testBoardroomRejectsWrapperPolicyForLockedLiquidityCreation() public {
         LockedLiquidityTestAllowAllPolicy wrapperPolicy = new LockedLiquidityTestAllowAllPolicy();
         policyRegistry.setPolicyAllowed(address(wrapperPolicy), true);

@@ -83,6 +83,7 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
     mapping(address => mapping(bytes32 => address)) public migrationReservationForPair;
 
     error InvalidAddress();
+    error InvalidBoardroomFactory(address factory);
     error InvalidAmount();
     error UnsafeLiquidityMinimums(uint256 amountAMin, uint256 requiredAMin, uint256 amountBMin, uint256 requiredBMin);
     error InvalidBoardroom(address boardroom);
@@ -115,7 +116,10 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
     event MigrationReservationReleased(address indexed boardroom, address indexed distribution, bytes32 indexed salt);
 
     constructor(address ammRouter_, address boardroomFactory_) {
-        if (ammRouter_ == address(0) || boardroomFactory_ == address(0)) revert InvalidAddress();
+        if (ammRouter_ == address(0)) revert InvalidAddress();
+        if (boardroomFactory_ == address(0) || boardroomFactory_.code.length == 0) {
+            revert InvalidBoardroomFactory(boardroomFactory_);
+        }
         ammRouter = ammRouter_;
         boardroomFactory = boardroomFactory_;
         lockedLiquidityLogic = address(new LockedLiquidity());
