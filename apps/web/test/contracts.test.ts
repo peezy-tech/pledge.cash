@@ -69,6 +69,7 @@ describe("web network profiles", () => {
 
     expect(transactionUrl(hash, hyperEvm.chainId)).toBe(`${hyperEvm.explorerUrl}/tx/${hash}`);
     expect(transactionUrl(hash, LOCAL_ANVIL_CHAIN_ID)).toBeUndefined();
+    expect(transactionUrl(hash, 999_999)).toBeUndefined();
   });
 
   test("treats selected-network storage as best effort", () => {

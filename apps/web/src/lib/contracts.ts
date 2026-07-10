@@ -62,7 +62,11 @@ export function initialSelectedNetwork(): PledgeCashNetwork {
 }
 
 export function networkForChainId(chainId: number): PledgeCashNetwork {
-  return PLEDGE_CASH_NETWORKS.find((network) => network.chainId === chainId) ?? PLEDGE_CASH_NETWORKS[0]!;
+  return supportedNetworkForChainId(chainId) ?? PLEDGE_CASH_NETWORKS[0]!;
+}
+
+export function supportedNetworkForChainId(chainId: number): PledgeCashNetwork | undefined {
+  return PLEDGE_CASH_NETWORKS.find((network) => network.chainId === chainId);
 }
 
 export function createPledgeCashPublicClient(network: PledgeCashNetwork): PublicClient {
@@ -95,7 +99,7 @@ export function addressUrl(address: Address): string | undefined {
 }
 
 export function transactionUrl(hash: Hex, chainId?: number): string | undefined {
-  const explorerUrl = (chainId === undefined ? selectedNetworkForLinks() : networkForChainId(chainId)).explorerUrl;
+  const explorerUrl = (chainId === undefined ? selectedNetworkForLinks() : supportedNetworkForChainId(chainId))?.explorerUrl;
   if (!explorerUrl) return undefined;
   return `${explorerUrl}/tx/${hash}`;
 }

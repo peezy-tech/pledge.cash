@@ -21,7 +21,7 @@ import {
   XCircle,
 } from "lucide-react";
 import type React from "react";
-import type { Dispatch, SetStateAction } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import { ActionButton, ActionRow, AddressLink, Facts, Field, Panel } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -60,6 +60,7 @@ import {
 import type { BoardroomPanelProps } from "./boardroom-panel-types";
 
 export function BoardroomPanel({
+  section = "all",
   boardroom,
   fixedPriceSale,
   grant,
@@ -69,6 +70,7 @@ export function BoardroomPanel({
   windDown,
   workflow,
 }: BoardroomPanelProps): React.JSX.Element {
+  const [distributionTool, setDistributionTool] = useState<"airdrop" | "curve" | "fixed-price">("fixed-price");
   const { deployment, pendingAction, runAction } = workflow;
   const {
     address: boardroomAddress,
@@ -179,9 +181,32 @@ export function BoardroomPanel({
     clearBoardroomGrantPrediction();
   };
 
+  const obligationList = (scope: "distributions" | "grants" | "liquidity"): React.JSX.Element => {
+    const count = scope === "grants"
+      ? boardroomSnapshot?.grantSummaries.length ?? 0
+      : scope === "distributions"
+        ? boardroomSnapshot?.distributionSummaries.length ?? 0
+        : boardroomSnapshot?.lockedLiquiditySummaries.length ?? 0;
+    const label = scope === "grants" ? "grants" : scope === "distributions" ? "distributions" : "liquidity positions";
+
+    return (
+      <details className="border-y border-zinc-800 bg-zinc-950/40">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-zinc-200">Existing {label} ({count.toString()})</summary>
+        <ObligationLists
+          boardroomSnapshot={boardroomSnapshot}
+          scope={scope}
+          setFixedPriceSaleAddress={setFixedPriceSaleAddress}
+          setMerkleAirdropAddress={setMerkleAirdropAddress}
+          setLockedLiquidityAddress={setLockedLiquidityAddress}
+          setMigratingCurveAddress={setMigratingCurveAddress}
+        />
+      </details>
+    );
+  };
+
   return (
     <div className="grid gap-4">
-      <Panel
+      {section === "all" || (section === "setup" && !boardroomSnapshot) ? <Panel
         title="Create Boardroom"
         action={
           <Button
@@ -238,9 +263,9 @@ export function BoardroomPanel({
             { label: "Factory", value: deployment?.boardroomFactory ? <AddressLink address={deployment.boardroomFactory} /> : deployment?.boardroomReason ?? "Not in artifact" },
           ]}
         />
-      </Panel>
+      </Panel> : null}
 
-      <BoardroomOverview
+      {section === "all" || section === "setup" || section === "token" || section === "close" ? <BoardroomOverview
         boardroomAddress={boardroomAddress}
         boardroomSnapshot={boardroomSnapshot}
         pendingAction={pendingAction}
@@ -249,11 +274,12 @@ export function BoardroomPanel({
         setMerkleAirdropAddress={setMerkleAirdropAddress}
         setLockedLiquidityAddress={setLockedLiquidityAddress}
         setMigratingCurveAddress={setMigratingCurveAddress}
+        obligationScope={section === "all" || section === "close" ? "all" : undefined}
         loadBoardroom={loadBoardroom}
         runAction={runAction}
-      />
+      /> : null}
 
-      <Panel title="Boardroom Shares">
+      {section === "all" || section === "token" ? <Panel title="Boardroom Shares">
         <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2">
           <Field label="Mint recipient">
             <Input value={boardroomMintTo} onChange={(event) => setBoardroomMintTo(event.target.value)} spellCheck={false} />
@@ -268,9 +294,9 @@ export function BoardroomPanel({
             Mint Shares
           </ActionButton>
         </ActionRow>
-      </Panel>
+      </Panel> : null}
 
-      <BoardroomGrantPanel
+      {section === "all" || section === "grants" ? <BoardroomGrantPanel
         boardroomGrantForm={boardroomGrantForm}
         boardroomSnapshot={boardroomSnapshot}
         pendingAction={pendingAction}
@@ -282,9 +308,29 @@ export function BoardroomPanel({
         boardroomCreateGrantBatch={boardroomCreateGrantBatch}
         predictBoardroomGrantAddress={predictBoardroomGrantAddress}
         runAction={runAction}
-      />
+      /> : null}
+      {section === "grants" ? obligationList("grants") : null}
 
-      <FixedPriceSalePanel
+      {section === "all" || section === "distributions" ? <>
+      {section === "distributions" ? (
+        <div aria-label="Distribution type" className="grid grid-cols-1 gap-2 border-y border-zinc-800 py-3 sm:grid-cols-3" role="group">
+          {([
+            ["fixed-price", "Fixed price"],
+            ["airdrop", "Airdrop"],
+            ["curve", "Bonding curve"],
+          ] as const).map(([value, label]) => (
+            <Button
+              aria-pressed={distributionTool === value}
+              key={value}
+              variant={distributionTool === value ? "default" : "secondary"}
+              onClick={() => setDistributionTool(value)}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+      ) : null}
+      {section === "all" || distributionTool === "fixed-price" ? <FixedPriceSalePanel
         boardroomSnapshot={boardroomSnapshot}
         deployment={deployment}
         fixedPriceSaleAddress={fixedPriceSaleAddress}
@@ -300,9 +346,9 @@ export function BoardroomPanel({
         loadFixedPriceSale={loadFixedPriceSale}
         predictFixedPriceSale={predictFixedPriceSale}
         runAction={runAction}
-      />
+      /> : null}
 
-      <MerkleAirdropPanel
+      {section === "all" || distributionTool === "airdrop" ? <MerkleAirdropPanel
         boardroomSnapshot={boardroomSnapshot}
         deployment={deployment}
         merkleAirdropAddress={merkleAirdropAddress}
@@ -318,9 +364,9 @@ export function BoardroomPanel({
         loadMerkleAirdrop={loadMerkleAirdrop}
         predictMerkleAirdrop={predictMerkleAirdrop}
         runAction={runAction}
-      />
+      /> : null}
 
-      <MigratingCurvePanel
+      {section === "all" || distributionTool === "curve" ? <MigratingCurvePanel
         boardroomSnapshot={boardroomSnapshot}
         curveMigrationForm={curveMigrationForm}
         deployment={deployment}
@@ -338,9 +384,11 @@ export function BoardroomPanel({
         migrateCurve={migrateCurve}
         predictMigratingCurve={predictMigratingCurve}
         runAction={runAction}
-      />
+      /> : null}
+      {section === "distributions" ? obligationList("distributions") : null}
+      </> : null}
 
-      <LockedLiquidityPanel
+      {section === "all" || section === "liquidity" ? <LockedLiquidityPanel
         boardroomSnapshot={boardroomSnapshot}
         deployment={deployment}
         lockedLiquidityAddress={lockedLiquidityAddress}
@@ -358,9 +406,10 @@ export function BoardroomPanel({
         loadLockedLiquidity={loadLockedLiquidity}
         predictLockedLiquidity={predictLockedLiquidity}
         runAction={runAction}
-      />
+      /> : null}
+      {section === "liquidity" ? obligationList("liquidity") : null}
 
-      <WindDownPanel
+      {section === "all" || section === "close" ? <WindDownPanel
         boardroomSnapshot={boardroomSnapshot}
         pendingAction={pendingAction}
         setWindDownForm={setWindDownForm}
@@ -372,7 +421,7 @@ export function BoardroomPanel({
         registerRedeemableAsset={registerRedeemableAsset}
         runAction={runAction}
         startWindDown={startWindDown}
-      />
+      /> : null}
     </div>
   );
 }
@@ -386,6 +435,7 @@ function BoardroomOverview({
   setMerkleAirdropAddress,
   setLockedLiquidityAddress,
   setMigratingCurveAddress,
+  obligationScope,
   loadBoardroom,
   runAction,
 }: {
@@ -397,6 +447,7 @@ function BoardroomOverview({
   setMerkleAirdropAddress: (address: string) => void;
   setLockedLiquidityAddress: (address: string) => void;
   setMigratingCurveAddress: (address: string) => void;
+  obligationScope: "all" | "distributions" | "grants" | "liquidity" | undefined;
   loadBoardroom: () => Promise<void>;
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
 }): React.JSX.Element {
@@ -421,13 +472,14 @@ function BoardroomOverview({
         columns="three"
         items={accountFacts}
       />
-      <ObligationLists
+      {obligationScope ? <ObligationLists
         boardroomSnapshot={boardroomSnapshot}
+        scope={obligationScope}
         setFixedPriceSaleAddress={setFixedPriceSaleAddress}
         setMerkleAirdropAddress={setMerkleAirdropAddress}
         setLockedLiquidityAddress={setLockedLiquidityAddress}
         setMigratingCurveAddress={setMigratingCurveAddress}
-      />
+      /> : null}
     </Panel>
   );
 }
@@ -451,6 +503,15 @@ function boardroomObligationCount(boardroomSnapshot: BoardroomSnapshot | undefin
   const distributionCount = boardroomSnapshot?.issuedDistributions.length ?? 0;
   const lockerCount = boardroomSnapshot?.lockedLiquidityPositions.length ?? 0;
   return `${grantCount} grants / ${distributionCount} distributions / ${lockerCount} lockers`;
+}
+
+function timestampPreview(value: unknown, zeroLabel = "Set a future date and time"): string {
+  try {
+    const timestamp = BigInt(String(value ?? ""));
+    return timestamp === 0n ? zeroLabel : dateString(timestamp);
+  } catch {
+    return "Enter a Unix timestamp in seconds.";
+  }
 }
 
 function fixedPriceSaleFacts(
@@ -576,7 +637,7 @@ function BoardroomGrantPanel({
 }): React.JSX.Element {
   return (
     <Panel
-      title="Boardroom Share Grant"
+      title="Issue Share Grant"
       action={
         <Button variant="secondary" onClick={() => setBoardroomGrantSalt(randomSalt())}>
           <Wand2 className="h-4 w-4" />
@@ -589,9 +650,9 @@ function BoardroomGrantPanel({
         <TextField form={boardroomGrantForm} field="paymentToken" label="Payment token" setForm={setBoardroomGrantForm} />
         <TextField form={boardroomGrantForm} field="amount" inputMode="decimal" label="Amount" setForm={setBoardroomGrantForm} />
         <TextField form={boardroomGrantForm} field="price" inputMode="decimal" label="Price" setForm={setBoardroomGrantForm} />
-        <TextField form={boardroomGrantForm} field="vestingCliff" inputMode="numeric" label="Vesting cliff timestamp" setForm={setBoardroomGrantForm} />
-        <TextField form={boardroomGrantForm} field="vestingEnd" inputMode="numeric" label="Vesting end timestamp" setForm={setBoardroomGrantForm} />
-        <TextField form={boardroomGrantForm} field="expiry" inputMode="numeric" label="Expiry timestamp" setForm={setBoardroomGrantForm} />
+        <TextField description={timestampPreview(boardroomGrantForm.vestingCliff)} form={boardroomGrantForm} field="vestingCliff" inputMode="numeric" label="Vesting cliff" setForm={setBoardroomGrantForm} />
+        <TextField description={timestampPreview(boardroomGrantForm.vestingEnd)} form={boardroomGrantForm} field="vestingEnd" inputMode="numeric" label="Vesting end" setForm={setBoardroomGrantForm} />
+        <TextField description={timestampPreview(boardroomGrantForm.expiry)} form={boardroomGrantForm} field="expiry" inputMode="numeric" label="Settlement expiry" setForm={setBoardroomGrantForm} />
         <Field label="Transferable">
           <label className="flex h-10 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-200">
             <input
@@ -605,10 +666,11 @@ function BoardroomGrantPanel({
         </Field>
         <TextField
           disabled={!boardroomGrantForm.transferable}
+          description={timestampPreview(boardroomGrantForm.transferUnlockTime, "Transfers unlock immediately")}
           form={boardroomGrantForm}
           field="transferUnlockTime"
           inputMode="numeric"
-          label="Transfer unlock timestamp"
+          label="Transfer unlock"
           setForm={setBoardroomGrantForm}
         />
         <TextField form={boardroomGrantForm} field="salt" label="Salt" setForm={setBoardroomGrantForm} className="md:col-span-2" />
@@ -621,7 +683,7 @@ function BoardroomGrantPanel({
           onClick={() => void runAction("predict-boardroom-grant", predictBoardroomGrantAddress)}
         >
           <Search className="h-4 w-4" />
-          Predict
+          Predict address
         </ActionButton>
         <ActionButton
           actionId="boardroom-approve-factory"
@@ -630,7 +692,7 @@ function BoardroomGrantPanel({
           onClick={() => void runAction("boardroom-approve-factory", boardroomApproveFactory)}
         >
           <CheckCircle2 className="h-4 w-4" />
-          Approve Only
+          Approve factory
         </ActionButton>
         <ActionButton
           actionId="boardroom-create-grant-batch"
@@ -638,7 +700,7 @@ function BoardroomGrantPanel({
           onClick={() => void runAction("boardroom-create-grant-batch", boardroomCreateGrantBatch)}
         >
           <Send className="h-4 w-4" />
-          Create Grant
+          Approve &amp; create
         </ActionButton>
         <ActionButton
           actionId="boardroom-create-grant"
@@ -647,7 +709,7 @@ function BoardroomGrantPanel({
           onClick={() => void runAction("boardroom-create-grant", boardroomCreateGrant)}
         >
           <Send className="h-4 w-4" />
-          Create Only
+          Create after approval
         </ActionButton>
       </ActionRow>
       <Facts
@@ -713,8 +775,8 @@ function FixedPriceSalePanel({
         <TextField form={fixedPriceSaleForm} field="shareAmount" inputMode="decimal" label="Share amount" setForm={setFixedPriceSaleForm} />
         <TextField form={fixedPriceSaleForm} field="price" inputMode="decimal" label="Price" setForm={setFixedPriceSaleForm} />
         <TextField form={fixedPriceSaleForm} field="maxPerBuyer" inputMode="decimal" label="Max per buyer" setForm={setFixedPriceSaleForm} />
-        <TextField form={fixedPriceSaleForm} field="startTime" inputMode="numeric" label="Start timestamp" setForm={setFixedPriceSaleForm} />
-        <TextField form={fixedPriceSaleForm} field="endTime" inputMode="numeric" label="End timestamp" setForm={setFixedPriceSaleForm} />
+        <TextField description={timestampPreview(fixedPriceSaleForm.startTime, "Starts immediately")} form={fixedPriceSaleForm} field="startTime" inputMode="numeric" label="Sale starts" setForm={setFixedPriceSaleForm} />
+        <TextField description={timestampPreview(fixedPriceSaleForm.endTime, "No scheduled end")} form={fixedPriceSaleForm} field="endTime" inputMode="numeric" label="Sale ends" setForm={setFixedPriceSaleForm} />
         <TextField form={fixedPriceSaleForm} field="salt" label="Salt" setForm={setFixedPriceSaleForm} className="md:col-span-2" />
       </div>
       <ActionRow>
@@ -815,8 +877,8 @@ function MerkleAirdropPanel({
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2">
         <TextField form={merkleAirdropForm} field="shareAmount" inputMode="decimal" label="Share amount" setForm={setMerkleAirdropForm} />
         <TextField form={merkleAirdropForm} field="merkleRoot" label="Merkle root" setForm={setMerkleAirdropForm} />
-        <TextField form={merkleAirdropForm} field="startTime" inputMode="numeric" label="Start timestamp" setForm={setMerkleAirdropForm} />
-        <TextField form={merkleAirdropForm} field="endTime" inputMode="numeric" label="End timestamp" setForm={setMerkleAirdropForm} />
+        <TextField description={timestampPreview(merkleAirdropForm.startTime, "Claims start immediately")} form={merkleAirdropForm} field="startTime" inputMode="numeric" label="Claims start" setForm={setMerkleAirdropForm} />
+        <TextField description={timestampPreview(merkleAirdropForm.endTime, "No scheduled end")} form={merkleAirdropForm} field="endTime" inputMode="numeric" label="Claims end" setForm={setMerkleAirdropForm} />
         <TextField form={merkleAirdropForm} field="maxGrantClaims" inputMode="numeric" label="Grant claim cap" setForm={setMerkleAirdropForm} />
         <TextField form={merkleAirdropForm} field="salt" label="Salt" setForm={setMerkleAirdropForm} className="md:col-span-2" />
       </div>
@@ -930,8 +992,8 @@ function MigratingCurvePanel({
         <TextField form={migratingCurveForm} field="slope" inputMode="decimal" label="Slope" setForm={setMigratingCurveForm} />
         <TextField form={migratingCurveForm} field="graduationQuoteTarget" inputMode="decimal" label="Graduation target" setForm={setMigratingCurveForm} />
         <TextField form={migratingCurveForm} field="quoteToLpBps" inputMode="numeric" label="Quote to LP bps" setForm={setMigratingCurveForm} />
-        <TextField form={migratingCurveForm} field="startTime" inputMode="numeric" label="Start timestamp" setForm={setMigratingCurveForm} />
-        <TextField form={migratingCurveForm} field="endTime" inputMode="numeric" label="End timestamp" setForm={setMigratingCurveForm} />
+        <TextField description={timestampPreview(migratingCurveForm.startTime, "Trading starts immediately")} form={migratingCurveForm} field="startTime" inputMode="numeric" label="Trading starts" setForm={setMigratingCurveForm} />
+        <TextField description={timestampPreview(migratingCurveForm.endTime, "No scheduled end")} form={migratingCurveForm} field="endTime" inputMode="numeric" label="Trading ends" setForm={setMigratingCurveForm} />
         <TextField form={migratingCurveForm} field="migrationSalt" label="Migration salt" setForm={setMigratingCurveForm} className="xl:col-span-3" />
         <TextField form={migratingCurveForm} field="salt" label="Curve salt" setForm={setMigratingCurveForm} className="xl:col-span-3" />
       </div>
@@ -978,7 +1040,7 @@ function MigratingCurvePanel({
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-3">
         <TextField form={curveMigrationForm} field="minShareLiquidity" inputMode="decimal" label="Min share liquidity" setForm={setCurveMigrationForm} />
         <TextField form={curveMigrationForm} field="minQuoteLiquidity" inputMode="decimal" label="Min quote liquidity" setForm={setCurveMigrationForm} />
-        <TextField form={curveMigrationForm} field="deadline" inputMode="numeric" label="Migration deadline" setForm={setCurveMigrationForm} />
+        <TextField description={timestampPreview(curveMigrationForm.deadline)} form={curveMigrationForm} field="deadline" inputMode="numeric" label="Migration deadline" setForm={setCurveMigrationForm} />
       </div>
       <ActionRow>
         <ActionButton actionId="migrate-curve" pendingAction={pendingAction} onClick={() => void runAction("migrate-curve", migrateCurve)}>
@@ -1047,7 +1109,7 @@ function LockedLiquidityPanel({
         <TextField form={lockedLiquidityForm} field="quoteAmountDesired" inputMode="decimal" label="Quote desired" setForm={setLockedLiquidityForm} />
         <TextField form={lockedLiquidityForm} field="shareAmountMin" inputMode="decimal" label="Share minimum" setForm={setLockedLiquidityForm} />
         <TextField form={lockedLiquidityForm} field="quoteAmountMin" inputMode="decimal" label="Quote minimum" setForm={setLockedLiquidityForm} />
-        <TextField form={lockedLiquidityForm} field="deadline" inputMode="numeric" label="Deadline" setForm={setLockedLiquidityForm} />
+        <TextField description={timestampPreview(lockedLiquidityForm.deadline)} form={lockedLiquidityForm} field="deadline" inputMode="numeric" label="Creation deadline" setForm={setLockedLiquidityForm} />
         <Field label="Share token side">
           <label className="flex h-10 items-center gap-4 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-200">
             <span className="flex items-center gap-2">
@@ -1117,7 +1179,7 @@ function LockedLiquidityPanel({
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-3">
         <TextField form={lockedLiquidityExitForm} field="amountAMin" inputMode="decimal" label="Exit amount A min" setForm={setLockedLiquidityExitForm} />
         <TextField form={lockedLiquidityExitForm} field="amountBMin" inputMode="decimal" label="Exit amount B min" setForm={setLockedLiquidityExitForm} />
-        <TextField form={lockedLiquidityExitForm} field="deadline" inputMode="numeric" label="Exit deadline" setForm={setLockedLiquidityExitForm} />
+        <TextField description={timestampPreview(lockedLiquidityExitForm.deadline)} form={lockedLiquidityExitForm} field="deadline" inputMode="numeric" label="Exit deadline" setForm={setLockedLiquidityExitForm} />
       </div>
       <ActionRow>
         <ActionButton actionId="exit-locked-liquidity" pendingAction={pendingAction} variant="danger" onClick={() => void runAction("exit-locked-liquidity", exitLockedLiquidity)}>
@@ -1181,15 +1243,15 @@ function WindDownPanel({
         <p className="m-0 border-t border-zinc-800 p-4 text-sm text-zinc-500">No loaded blockers.</p>
       )}
       <ActionRow>
-        <ActionButton actionId="start-wind-down" pendingAction={pendingAction} variant="danger" onClick={() => void runAction("start-wind-down", startWindDown)}>
+        <ActionButton actionId="start-wind-down" disabled={hasBlockers || boardroomSnapshot?.status !== 0} pendingAction={pendingAction} variant="danger" onClick={() => void runAction("start-wind-down", startWindDown)}>
           <Flame className="h-4 w-4" />
           Start Wind-Down
         </ActionButton>
-        <ActionButton actionId="burn-treasury-shares" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("burn-treasury-shares", burnTreasuryShares)}>
+        <ActionButton actionId="burn-treasury-shares" disabled={boardroomSnapshot?.status !== 1} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("burn-treasury-shares", burnTreasuryShares)}>
           <Flame className="h-4 w-4" />
           Burn Treasury Shares
         </ActionButton>
-        <ActionButton actionId="open-redemptions" pendingAction={pendingAction} onClick={() => void runAction("open-redemptions", openRedemptions)}>
+        <ActionButton actionId="open-redemptions" disabled={hasBlockers || boardroomSnapshot?.status !== 1} pendingAction={pendingAction} onClick={() => void runAction("open-redemptions", openRedemptions)}>
           <ShieldCheck className="h-4 w-4" />
           Open Redemptions
         </ActionButton>
@@ -1207,7 +1269,7 @@ function WindDownPanel({
         </Field>
       </div>
       <ActionRow>
-        <ActionButton actionId="register-redeemable-asset" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("register-redeemable-asset", registerRedeemableAsset)}>
+        <ActionButton actionId="register-redeemable-asset" disabled={!boardroomSnapshot || boardroomSnapshot.status === 2} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("register-redeemable-asset", registerRedeemableAsset)}>
           <Plus className="h-4 w-4" />
           Register Asset
         </ActionButton>
@@ -1218,7 +1280,7 @@ function WindDownPanel({
         <TextField form={windDownForm} field="minAmountsOut" label="Min amounts out" setForm={setWindDownForm} />
       </div>
       <ActionRow>
-        <ActionButton actionId="redeem-boardroom-shares" pendingAction={pendingAction} onClick={() => void runAction("redeem-boardroom-shares", redeemBoardroomShares)}>
+        <ActionButton actionId="redeem-boardroom-shares" disabled={boardroomSnapshot?.status !== 2} pendingAction={pendingAction} onClick={() => void runAction("redeem-boardroom-shares", redeemBoardroomShares)}>
           <Send className="h-4 w-4" />
           Redeem Shares
         </ActionButton>

@@ -1,5 +1,6 @@
 import {
   ammPoolAbi,
+  boardroomAbi,
   boardroomFactoryAbi,
   erc20Abi,
   fixedPriceSaleAbi,
@@ -10,7 +11,7 @@ import {
   type PledgeCashReadClient,
 } from "@pledge.cash/sdk";
 import { getAbiItem, isAddress, type PublicClient } from "viem";
-import { readBoardroomSnapshot } from "./boardroom-snapshot";
+import { readBoardroomDistributionSnapshot, readBoardroomSnapshot } from "./boardroom-snapshot";
 import { errorMessage } from "./forms";
 import { formatNativeTokenAmount, formatTokenAmount } from "./token-amounts";
 import type {
@@ -118,8 +119,8 @@ export type ProductBoardroomDashboardState = {
 
 type ProductBoardroomClient = PledgeCashReadClient & Pick<PublicClient, "getBalance"> & Partial<Pick<PublicClient, "getBlockNumber" | "getLogs">>;
 type ProductBoardroomEventLog = { args?: Record<string, unknown> };
-type ProductBoardroomEventAbi = typeof ammPoolAbi | typeof fixedPriceSaleAbi | typeof migratingBondingCurveAbi;
-type ProductBoardroomEventName = "CurveBuy" | "CurveMigrated" | "CurveSell" | "FixedPricePurchase" | "Swap";
+type ProductBoardroomEventAbi = typeof ammPoolAbi | typeof boardroomAbi | typeof fixedPriceSaleAbi | typeof migratingBondingCurveAbi;
+type ProductBoardroomEventName = "BoardroomDistributionRecorded" | "CurveBuy" | "CurveMigrated" | "CurveSell" | "FixedPricePurchase" | "Swap";
 
 const MAX_DISCOVERED_BOARDROOMS = 64;
 const WAD = 1_000_000_000_000_000_000n;
@@ -300,7 +301,7 @@ async function readProductBoardroomCatalogEntry(
 ): Promise<ProductBoardroomCatalogEntry> {
   try {
     const snapshot = await readBoardroomSnapshot(client, address);
-    const distribution = snapshot.distributionSummaries[0];
+    const distribution = snapshot.distributionSummaries[0] ?? await readHistoricalBoardroomDistribution(client, address);
     const distributionState = distribution ? deriveDistributionCatalogFields(distribution, snapshot.shareTokenMetadata?.decimals) : {};
     const locker = findCatalogLocker(snapshot, distributionState.pool);
     const pool = catalogPoolAddress(distributionState, locker);
@@ -364,7 +365,8 @@ export async function readProductBoardroomHistory(
   snapshot: BoardroomSnapshot,
   catalogEntry: ProductBoardroomCatalogEntry | undefined,
 ): Promise<ProductBoardroomHistory | undefined> {
-  const distribution = findHistoryDistribution(snapshot, catalogEntry?.distribution);
+  const distribution = findHistoryDistribution(snapshot, catalogEntry?.distribution)
+    ?? (catalogEntry?.distribution ? await readBoardroomDistributionSnapshot(client, catalogEntry.distribution) : undefined);
   if (!distribution) return undefined;
 
   try {
@@ -380,6 +382,22 @@ export async function readProductBoardroomHistory(
       pool: catalogEntry?.pool,
       scanError: errorMessage(error),
     };
+  }
+}
+
+async function readHistoricalBoardroomDistribution(
+  client: ProductBoardroomClient,
+  boardroom: Address,
+): Promise<BoardroomDistributionSnapshot | undefined> {
+  try {
+    const logs = await readEventLogs(client, boardroom, boardroomAbi, "BoardroomDistributionRecorded");
+    const distribution = logs
+      ?.map((log) => addressArg(log.args, "distribution"))
+      .filter((address): address is Address => address !== undefined)
+      .at(-1);
+    return distribution ? await readBoardroomDistributionSnapshot(client, distribution) : undefined;
+  } catch {
+    return undefined;
   }
 }
 

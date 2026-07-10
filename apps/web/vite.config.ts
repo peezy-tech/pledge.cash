@@ -7,6 +7,14 @@ import { defineConfig, type Plugin } from "vite";
 
 const allowedHosts = process.env.VITE_ALLOWED_HOSTS?.split(",").filter(Boolean);
 const outDir = process.env.VITE_OUT_DIR ?? "dist";
+const localRpcTarget = process.env.VITE_PLEDGE_CASH_DEV_RPC_TARGET ?? "http://127.0.0.1:8547";
+const localRpcProxy = {
+  "/pledge-cash/rpc": {
+    target: localRpcTarget,
+    changeOrigin: true,
+    rewrite: () => "/",
+  },
+};
 
 export default defineConfig({
   base: process.env.VITE_BASE_PATH ?? "/",
@@ -22,7 +30,14 @@ export default defineConfig({
     },
   },
   plugins: [deploymentArtifactsPlugin(), react(), tailwindcss()],
-  ...(allowedHosts?.length ? { preview: { allowedHosts }, server: { allowedHosts } } : {}),
+  preview: {
+    ...(allowedHosts?.length ? { allowedHosts } : {}),
+    proxy: localRpcProxy,
+  },
+  server: {
+    ...(allowedHosts?.length ? { allowedHosts } : {}),
+    proxy: localRpcProxy,
+  },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

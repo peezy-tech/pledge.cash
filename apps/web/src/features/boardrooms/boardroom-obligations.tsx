@@ -24,12 +24,14 @@ import {
 
 export function ObligationLists({
   boardroomSnapshot,
+  scope = "all",
   setFixedPriceSaleAddress,
   setMerkleAirdropAddress,
   setLockedLiquidityAddress,
   setMigratingCurveAddress,
 }: {
   boardroomSnapshot: BoardroomSnapshot | undefined;
+  scope?: "all" | "distributions" | "grants" | "liquidity";
   setFixedPriceSaleAddress: (address: string) => void;
   setMerkleAirdropAddress: (address: string) => void;
   setLockedLiquidityAddress: (address: string) => void;
@@ -40,13 +42,13 @@ export function ObligationLists({
   }
 
   return (
-    <div className="grid gap-px border-t border-zinc-800 bg-zinc-800 xl:grid-cols-3">
-      <ObligationColumn title="Issued Grants" emptyLabel="No grants">
+    <div className={`grid gap-px border-t border-zinc-800 bg-zinc-800 ${scope === "all" ? "xl:grid-cols-3" : "grid-cols-1"}`}>
+      {scope === "all" || scope === "grants" ? <ObligationColumn title="Issued Grants" emptyLabel="No grants">
         {boardroomSnapshot.grantSummaries.map((grant) => (
           <GrantRow grant={grant} key={grant.address} />
         ))}
-      </ObligationColumn>
-      <ObligationColumn title="Distributions" emptyLabel="No distributions">
+      </ObligationColumn> : null}
+      {scope === "all" || scope === "distributions" ? <ObligationColumn title="Distributions" emptyLabel="No distributions">
         {boardroomSnapshot.distributionSummaries.map((distribution) => (
           <DistributionRow
             distribution={distribution}
@@ -56,12 +58,12 @@ export function ObligationLists({
             setMigratingCurveAddress={setMigratingCurveAddress}
           />
         ))}
-      </ObligationColumn>
-      <ObligationColumn title="Locked Liquidity" emptyLabel="No lockers">
+      </ObligationColumn> : null}
+      {scope === "all" || scope === "liquidity" ? <ObligationColumn title="Locked Liquidity" emptyLabel="No lockers">
         {boardroomSnapshot.lockedLiquiditySummaries.map((locker) => (
           <LockerRow locker={locker} key={locker.address} setLockedLiquidityAddress={setLockedLiquidityAddress} />
         ))}
-      </ObligationColumn>
+      </ObligationColumn> : null}
     </div>
   );
 }

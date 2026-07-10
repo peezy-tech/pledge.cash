@@ -60,6 +60,27 @@ export async function readBoardroomSnapshot(client: PledgeCashReadClient, addres
   };
 }
 
+export async function readBoardroomDistributionSnapshot(
+  client: PledgeCashReadClient,
+  distribution: Address,
+): Promise<BoardroomDistributionSnapshot> {
+  const summary = await readDistributionSummary(client, distribution);
+  const metadataByAddress = await readTokenMetadataMap(client, distributionTokenAddresses(summary));
+
+  return {
+    ...summary,
+    shareTokenMetadata: tokenMetadataFor(metadataByAddress, summary.state?.shareToken),
+    paymentTokenMetadata: tokenMetadataFor(
+      metadataByAddress,
+      summary.state && "paymentToken" in summary.state ? summary.state.paymentToken : undefined,
+    ),
+    quoteTokenMetadata: tokenMetadataFor(
+      metadataByAddress,
+      summary.state && "quoteToken" in summary.state ? summary.state.quoteToken : undefined,
+    ),
+  };
+}
+
 async function readGrantSummary(client: PledgeCashReadClient, grant: Address): Promise<BoardroomGrantSnapshot> {
   try {
     return { address: grant, state: await readGrantState(client, grant) };

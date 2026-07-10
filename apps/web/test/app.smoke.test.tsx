@@ -220,17 +220,16 @@ describe("web app shell", () => {
     );
 
     expect(html).toContain("pledge.cash");
-    expect(html).toContain("Project workspace");
-    expect(html).toContain("Local Anvil");
-    expect(html).toContain("Pending");
-    expect(html).toContain("Overview");
-    expect(html).toContain("Market");
-    expect(html).toContain("Wallet");
-    expect(html).toContain("Grants");
-    expect(html).toContain("Manage");
-    expect(html).toContain("Activity");
-    expect(html).toContain("Tools");
-    expect(html).toContain("Read-only visitor");
+    expect(html).toContain("Project directory");
+    expect(html).toContain("Search projects");
+    expect(html).toContain("Explore");
+    expect(html).toContain("Portfolio");
+    expect(html).toContain("Studio");
+    expect(html).toContain("No projects discovered");
+    expect(html).not.toContain("Project workspace");
+    expect(html).not.toContain("Market");
+    expect(html).not.toContain("Manage");
+    expect(html).not.toContain("Activity");
     expect(html).not.toContain("Sentinel");
     expect(html).not.toContain("Alerts");
     expect(html).not.toContain("Deployment");
@@ -270,7 +269,7 @@ describe("web app shell", () => {
     );
 
     expect(html).toContain('aria-label="Network"');
-    expect(html.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(html.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
   test("renders discovery diagnostics with manual scan controls", () => {

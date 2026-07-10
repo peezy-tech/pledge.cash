@@ -58,6 +58,27 @@ describe("product boardroom runtime discovery", () => {
       treasuryCash: 2_100n * cash,
     });
   });
+
+  test("keeps pruned distribution history visible after a sale or curve closes", async () => {
+    const context = productBoardroomFixture();
+    const client = fakeProductBoardroomClient({ ...context, pruned: true, tokenReads: new Set<string>() });
+
+    const catalog = await readProductBoardroomCatalog(client, {
+      chainId: 31337,
+      boardroomFactory: context.boardroomFactory,
+    });
+    const dashboard = await readProductBoardroomDashboard(client, {
+      address: context.boardroom,
+      catalog,
+    });
+
+    expect(catalog[0]).toMatchObject({
+      distribution: context.sale,
+      cashRaised: 1_950n * 10n ** 6n,
+      soldShares: 650n * 10n ** 18n,
+    });
+    expect(dashboard.history?.fixedPriceSale?.purchaseCount).toBe(2);
+  });
 });
 
 type ProductBoardroomFixture = ReturnType<typeof productBoardroomFixture>;
@@ -75,7 +96,7 @@ function productBoardroomFixture() {
 }
 
 function fakeProductBoardroomClient(
-  context: ProductBoardroomFixture & { tokenReads: Set<string> },
+  context: ProductBoardroomFixture & { pruned?: boolean; tokenReads: Set<string> },
 ): PledgeCashReadClient & {
   getBalance: () => Promise<bigint>;
   getBlockNumber: () => Promise<bigint>;
@@ -101,6 +122,9 @@ function fakeProductBoardroomClient(
       return 100n;
     },
     async getLogs(parameters) {
+      if (parameters.address.toLowerCase() === context.boardroom.toLowerCase() && parameters.event?.name === "BoardroomDistributionRecorded") {
+        return [{ args: { distribution: context.sale } }];
+      }
       if (parameters.address.toLowerCase() !== context.sale.toLowerCase()) return [];
       if (parameters.event?.name !== "FixedPricePurchase") return [];
       return [
@@ -137,9 +161,14 @@ function fakeProductBoardroomClient(
         if (functionName === "wrappedNative") return context.wrappedNative;
         if (functionName === "shareToken") return context.shareToken;
         if (functionName === "status") return 0;
+        if (functionName === "launched") return false;
+        if (functionName === "executor") return "0x8000000000000000000000000000000000000000";
+        if (functionName === "governanceDelay") return 0n;
+        if (functionName === "governanceConfig") return [86_400n, 604_800n, 100n, 1_000n] as const;
+        if (functionName === "governanceState") return [0n, 0n, 0n, 0n, 0] as const;
         if (functionName === "getRedeemableAssets") return [context.redeemableAsset];
         if (functionName === "getIssuedGrants") return [];
-        if (functionName === "getIssuedDistributions") return [context.sale];
+        if (functionName === "getIssuedDistributions") return context.pruned ? [] : [context.sale];
         if (functionName === "getLockedLiquidityPositions") return [];
       }
 
@@ -159,6 +188,7 @@ function fakeProductBoardroomClient(
       }
 
       context.tokenReads.add(address.toLowerCase());
+      if (address.toLowerCase() === context.shareToken.toLowerCase() && functionName === "governanceEligibleSupply") return 0n;
       if (functionName === "name") return address.toLowerCase() === context.shareToken.toLowerCase() ? "Atlas Payroll Common" : "Token";
       if (functionName === "balanceOf") return address.toLowerCase() === context.cashToken.toLowerCase() ? 2_100n * cash : 0n;
       if (functionName === "symbol") return tokenSymbols.get(address.toLowerCase()) ?? "TOK";

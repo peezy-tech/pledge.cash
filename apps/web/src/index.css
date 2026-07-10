@@ -1,29 +1,96 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
 @import "tailwindcss";
+
+@theme inline {
+  --color-zinc-50: #f3f2e9;
+  --color-zinc-100: #ecebe2;
+  --color-zinc-200: #dcddd2;
+  --color-zinc-300: #c3c5b8;
+  --color-zinc-400: #a7aa9d;
+  --color-zinc-500: #777b70;
+  --color-zinc-600: #5e6258;
+  --color-zinc-700: #464a3e;
+  --color-zinc-800: #30332b;
+  --color-zinc-900: #20221d;
+  --color-zinc-950: #11120f;
+  --color-lime-100: #efffc9;
+  --color-lime-200: #dcff92;
+  --color-lime-300: #c9ff57;
+  --color-canvas: var(--pc-canvas);
+  --color-surface: var(--pc-surface);
+  --color-surface-raised: var(--pc-surface-raised);
+  --color-border: var(--pc-border);
+  --color-foreground: var(--pc-text);
+  --color-muted: var(--pc-text-muted);
+  --color-accent: var(--pc-accent);
+  --color-success: var(--pc-success);
+  --color-info: var(--pc-info);
+  --color-warning: var(--pc-warning);
+  --color-danger: var(--pc-danger);
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
 
 :root {
   color-scheme: dark;
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #090b0d;
-  color: #f4f4f5;
+  font-family: "DM Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #11120f;
+  color: #f3f2e9;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+
+  --pc-canvas: #11120f;
+  --pc-canvas-translucent: rgb(17 18 15 / 0.92);
+  --pc-surface: #181a16;
+  --pc-surface-raised: #20221d;
+  --pc-surface-subtle: #151612;
+  --pc-border: #30332b;
+  --pc-border-strong: #464a3e;
+  --pc-text: #f3f2e9;
+  --pc-text-muted: #a7aa9d;
+  --pc-text-subtle: #777b70;
+  --pc-accent: #c9ff57;
+  --pc-accent-ink: #172000;
+  --pc-success: #68d7a5;
+  --pc-info: #83b7ff;
+  --pc-warning: #f2bd63;
+  --pc-danger: #f47d73;
+  --pc-focus: #d7ff87;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html {
+  min-width: 320px;
+  background: var(--pc-canvas);
+}
+
 body {
   min-width: 320px;
+  min-height: 100svh;
   margin: 0;
   overflow-x: hidden;
-  background:
-    linear-gradient(180deg, rgba(63, 63, 70, 0.16), rgba(9, 11, 13, 0) 280px),
-    #090b0d;
+  background: var(--pc-canvas);
+  color: var(--pc-text);
+  -webkit-font-smoothing: antialiased;
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
+}
+
+button,
+a,
+input,
+select,
+textarea,
+summary {
+  -webkit-tap-highlight-color: transparent;
 }
 
 a {
@@ -33,6 +100,65 @@ a {
 
 code,
 pre,
-input {
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+kbd,
+samp,
+input[data-monospace="true"] {
+  font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+::selection {
+  background: rgb(201 255 87 / 0.24);
+  color: var(--pc-text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--pc-focus);
+  outline-offset: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--pc-border-strong);
+  background-clip: padding-box;
+}
+
+.page-enter {
+  animation: page-enter 150ms ease-out both;
+}
+
+.mobile-nav-safe-area {
+  padding-bottom: calc(4.5rem + env(safe-area-inset-bottom));
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

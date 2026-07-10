@@ -1,0 +1,84 @@
+import { describe, expect, test } from "bun:test";
+import type { Address } from "@pledge.cash/sdk";
+import {
+  appRouteHref,
+  primaryDestination,
+  projectRouteHref,
+  routeFromPath,
+  studioRouteHref,
+  viewFromPath,
+} from "../src/app/routing";
+
+const boardroom = "0xAbCd00000000000000000000000000000000aBcD" as Address;
+const normalizedBoardroom = boardroom.toLowerCase() as Address;
+
+describe("canonical application routing", () => {
+  test("parses canonical primary and exact project routes", () => {
+    expect(routeFromPath("/explore")).toEqual({ kind: "explore" });
+    expect(routeFromPath("/portfolio")).toEqual({ kind: "portfolio" });
+    expect(routeFromPath("/studio")).toEqual({ kind: "studio" });
+    expect(routeFromPath(`/projects/31337/${boardroom}/governance`)).toEqual({
+      kind: "project",
+      chainId: 31337,
+      boardroom: normalizedBoardroom,
+      section: "governance",
+    });
+    expect(routeFromPath(`/studio/31337/${boardroom}/liquidity`)).toEqual({
+      kind: "studio-project",
+      chainId: 31337,
+      boardroom: normalizedBoardroom,
+      section: "liquidity",
+    });
+  });
+
+  test("defaults only valid exact routes to their first section", () => {
+    expect(routeFromPath(`/projects/31337/${boardroom}`)).toMatchObject({ kind: "project", section: "overview" });
+    expect(routeFromPath(`/studio/31337/${boardroom}`)).toMatchObject({ kind: "studio-project", section: "setup" });
+  });
+
+  test("handles a deployed base path without accepting paths outside it", () => {
+    const env = { BASE_URL: "/pledge-cash/" };
+    expect(routeFromPath(`/pledge-cash/projects/31337/${boardroom}/overview`, env)).toMatchObject({
+      kind: "project",
+      boardroom: normalizedBoardroom,
+    });
+    expect(routeFromPath(`/projects/31337/${boardroom}/overview`, env)).toEqual({ kind: "not-found" });
+  });
+
+  test("rejects malformed identities and unknown nested sections", () => {
+    expect(routeFromPath(`/projects/not-a-chain/${boardroom}/overview`)).toEqual({ kind: "not-found" });
+    expect(routeFromPath("/projects/31337/not-an-address/overview")).toEqual({ kind: "not-found" });
+    expect(routeFromPath(`/projects/31337/${boardroom}/settings`)).toEqual({ kind: "not-found" });
+    expect(routeFromPath("/explore/extra")).toEqual({ kind: "not-found" });
+  });
+
+  test("maps legacy aliases without losing their intended project job", () => {
+    expect(routeFromPath("/market")).toEqual({ kind: "legacy-project", section: "participate", surface: "project" });
+    expect(routeFromPath("/activity")).toEqual({ kind: "legacy-project", section: "transparency", surface: "project" });
+    expect(routeFromPath("/manage")).toEqual({ kind: "legacy-project", section: "setup", surface: "studio" });
+    expect(routeFromPath("/wallet")).toEqual({ kind: "portfolio" });
+    expect(routeFromPath("/advanced")).toEqual({ kind: "tools" });
+  });
+
+  test("keeps hosted alerts optional", () => {
+    expect(routeFromPath("/notifications", {})).toEqual({ kind: "explore" });
+    expect(routeFromPath("/settings/alerts", { VITE_SENTINEL_API_URL: "https://alerts.example.test" })).toEqual({ kind: "alerts" });
+  });
+
+  test("builds stable canonical hrefs and preserves compatibility views", () => {
+    expect(projectRouteHref(31337, boardroom, "transparency", "/pledge-cash/")).toBe(
+      `/pledge-cash/projects/31337/${normalizedBoardroom}/transparency`,
+    );
+    expect(studioRouteHref(31337, boardroom, "grants", "/")).toBe(`/studio/31337/${normalizedBoardroom}/grants`);
+    expect(appRouteHref({ kind: "portfolio", chainId: 31337 }, "/pledge-cash/")).toBe("/pledge-cash/portfolio?chain=31337");
+    expect(viewFromPath(`/projects/31337/${boardroom}/participate`)).toBe("market");
+    expect(viewFromPath(`/projects/31337/${boardroom}/transparency`)).toBe("activity");
+  });
+
+  test("derives the three-destination product navigation state", () => {
+    expect(primaryDestination({ kind: "project", chainId: 31337, boardroom, section: "overview" })).toBe("explore");
+    expect(primaryDestination({ kind: "grant", chainId: 31337, grant: boardroom })).toBe("portfolio");
+    expect(primaryDestination({ kind: "studio-project", chainId: 31337, boardroom, section: "setup" })).toBe("studio");
+    expect(primaryDestination({ kind: "tools" })).toBeUndefined();
+  });
+});

@@ -3,12 +3,16 @@ import { join } from "node:path";
 
 const outDir = process.env.VITE_OUT_DIR ?? "dist";
 const appRoutes = [
+  "explore",
+  "portfolio",
+  "projects",
+  "studio",
+  "settings/alerts",
   "project",
   "boardroom",
   "market",
   "swap",
   "wallet",
-  "portfolio",
   "positions",
   "grants",
   "grant",

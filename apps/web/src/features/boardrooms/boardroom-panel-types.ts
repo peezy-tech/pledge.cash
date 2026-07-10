@@ -21,6 +21,7 @@ import type {
 } from "../../lib/types";
 
 export type BoardroomPanelProps = {
+  section?: "all" | "setup" | "token" | "grants" | "distributions" | "liquidity" | "governance" | "close";
   boardroom: BoardroomPanelState;
   fixedPriceSale: FixedPriceSalePanelState;
   grant: BoardroomGrantPanelState;

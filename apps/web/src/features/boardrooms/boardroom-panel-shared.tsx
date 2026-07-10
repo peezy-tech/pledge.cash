@@ -21,6 +21,7 @@ export type BoardroomFact = {
 export function TextField<T extends object, K extends keyof T & string>({
   className,
   disabled,
+  description,
   field,
   form,
   inputMode,
@@ -29,6 +30,7 @@ export function TextField<T extends object, K extends keyof T & string>({
 }: {
   className?: string;
   disabled?: boolean;
+  description?: string;
   field: K;
   form: T;
   inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
@@ -44,6 +46,7 @@ export function TextField<T extends object, K extends keyof T & string>({
         spellCheck={false}
         onChange={(event) => setFormField(field, event.target.value as T[K], setForm)}
       />
+      {description ? <span className="mt-1 block text-xs leading-5 text-zinc-500">{description}</span> : null}
     </Field>
   );
 }

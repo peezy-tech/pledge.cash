@@ -45,6 +45,7 @@ type SwapPanelProps = {
   tokenList: SwapTokenListState;
   tokenListLoading: boolean;
   wrappedNativeSymbol: string;
+  mode?: "all" | "liquidity" | "swap";
   addLiquidity: () => Promise<void>;
   approveLiquidityTokenA: () => Promise<void>;
   approveLiquidityTokenB: () => Promise<void>;
@@ -109,6 +110,7 @@ export function SwapPanel({
   tokenList,
   tokenListLoading,
   wrappedNativeSymbol,
+  mode = "all",
   addLiquidity,
   approveLiquidityTokenA,
   approveLiquidityTokenB,
@@ -173,7 +175,7 @@ export function SwapPanel({
 
   return (
     <div className="grid gap-4">
-      <Panel
+      {mode !== "liquidity" ? <Panel
         title="Swap"
         action={
           <ActionButton actionId="quote-swap" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("quote-swap", refreshQuote)}>
@@ -252,8 +254,9 @@ export function SwapPanel({
           columns="three"
           items={swapFacts}
         />
-      </Panel>
+      </Panel> : null}
 
+      {mode !== "swap" ? <>
       <Panel
         title="Liquidity"
         action={
@@ -406,6 +409,7 @@ export function SwapPanel({
           items={removeLiquidityFacts}
         />
       </Panel>
+      </> : null}
 
       {selectorSide ? (
         <TokenSelectorDialog

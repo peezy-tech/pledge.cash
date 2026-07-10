@@ -1,0 +1,349 @@
+import type { Address } from "@pledge.cash/sdk";
+import { ChevronDown } from "lucide-react";
+import type { ReactNode } from "react";
+import { AddressLink } from "../../components/shell";
+import { Badge } from "../../components/ui/badge";
+import {
+  formatNativeBalance,
+  formatTokenBalance,
+  type ProductBoardroomDashboardState,
+  type ProductTreasuryAsset,
+} from "../../lib/product-boardroom";
+import { formatTokenAmount } from "../../lib/token-amounts";
+import type {
+  BoardroomDistributionSnapshot,
+  BoardroomGrantSnapshot,
+  BoardroomLockedLiquiditySnapshot,
+} from "../../lib/types";
+import {
+  KeyValueList,
+  PageNotice,
+  RuledSection,
+  SectionHeading,
+  TableFrame,
+  tableCellClassName,
+  tableClassName,
+  tableHeadClassName,
+} from "./page-primitives";
+
+export type TransparencyPageProps = {
+  activityContent?: ReactNode;
+  dashboard?: ProductBoardroomDashboardState | undefined;
+  error?: string | undefined;
+  loading: boolean;
+  technicalContent?: ReactNode;
+};
+
+export function TransparencyPage({
+  activityContent,
+  dashboard,
+  error,
+  loading,
+  technicalContent,
+}: TransparencyPageProps): React.JSX.Element {
+  if (loading && !dashboard) return <TransparencyLoading />;
+  if (!dashboard) {
+    return (
+      <RuledSection>
+        <PageNotice title="Transparency data is not loaded">
+          Open a project to inspect its treasury, token supply, commitments, and protocol addresses.
+        </PageNotice>
+      </RuledSection>
+    );
+  }
+
+  const snapshot = dashboard.snapshot;
+  const shareAsset = dashboard.treasuryAssets.find((asset) => sameAddress(asset.address, snapshot.shareToken));
+  const catalogEntry = dashboard.catalog.find((entry) => sameAddress(entry.address, dashboard.address));
+  const cashMetadata = catalogEntry?.cashToken ? {
+    address: catalogEntry.cashToken,
+    ...(catalogEntry.cashTokenDecimals === undefined ? {} : { decimals: catalogEntry.cashTokenDecimals }),
+    ...(catalogEntry.cashTokenSymbol === undefined ? {} : { symbol: catalogEntry.cashTokenSymbol }),
+  } : undefined;
+  const totals = transparencyTotals(dashboard);
+
+  return (
+    <>
+      <RuledSection>
+        <SectionHeading
+          title="Treasury and supply"
+          description="Balances are held by the Boardroom. Token supply is shown separately from treasury inventory."
+        />
+        {error ? <div className="mt-4"><PageNotice title="Some evidence could not be read" tone="danger">{error}</PageNotice></div> : null}
+        <KeyValueList
+          columns={4}
+          items={[
+            { label: "Native treasury", value: formatNativeBalance(dashboard.nativeBalance) },
+            {
+              label: "Project token supply",
+              value: shareAsset?.totalSupply === undefined
+                ? "Unknown"
+                : formatTokenAmount(shareAsset.totalSupply, shareAsset),
+            },
+            { label: "Treasury asset types", value: String(dashboard.treasuryAssets.length) },
+            { label: "Redeemable assets", value: String(snapshot.redeemableAssets.length) },
+          ]}
+        />
+        <TreasuryTable assets={dashboard.treasuryAssets} />
+      </RuledSection>
+
+      <RuledSection>
+        <SectionHeading
+          title="Open commitments"
+          description="Tokens still owed through grants or reserved inside active distribution and liquidity contracts."
+        />
+        <KeyValueList
+          columns={4}
+          items={[
+            { label: "Unsettled grants", value: formatTokenAmount(totals.unsettledGrantShares, snapshot.shareTokenMetadata) },
+            { label: "Open grants", value: String(totals.openGrantCount) },
+            { label: "Distribution reserves", value: formatTokenAmount(totals.distributionShares, snapshot.shareTokenMetadata) },
+            { label: "Locked liquidity positions", value: String(snapshot.lockedLiquiditySummaries.length) },
+          ]}
+        />
+      </RuledSection>
+
+      <RuledSection>
+        <SectionHeading title="Grants" description="Issued token commitments, their holders, and settlement progress." />
+        <GrantTable grants={snapshot.grantSummaries} />
+      </RuledSection>
+
+      <RuledSection>
+        <SectionHeading title="Distributions" description="Sale, curve, and airdrop contracts still tracked by the Boardroom. Closed or migrated routes remain visible through onchain history." />
+        <DistributionTable distributions={snapshot.distributionSummaries} />
+      </RuledSection>
+
+      {dashboard.history || catalogEntry?.distribution ? (
+        <RuledSection>
+          <SectionHeading title="Participation history" description="Cumulative sale, curve, and market activity reconstructed from onchain events." />
+          <KeyValueList
+            columns={4}
+            items={[
+              { label: "Launch route", value: catalogEntry?.path ?? "Onchain distribution" },
+              { label: "Tokens allocated", value: formatTokenAmount(dashboard.history?.soldShares ?? catalogEntry?.soldShares, snapshot.shareTokenMetadata) },
+              { label: "Capital raised", value: formatTokenAmount(dashboard.history?.cashRaised ?? catalogEntry?.cashRaised, cashMetadata) },
+              { label: "Participants", value: String(dashboard.history?.buyerCount ?? catalogEntry?.buyerCount ?? "Unknown") },
+              { label: "Curve buys", value: String(dashboard.history?.curve?.buyCount ?? catalogEntry?.buyCount ?? 0) },
+              { label: "Curve sells", value: String(dashboard.history?.curve?.sellCount ?? catalogEntry?.sellCount ?? 0) },
+              { label: "AMM swaps", value: String(dashboard.history?.amm?.swapCount ?? catalogEntry?.swapCount ?? 0) },
+              { label: "Distribution", value: catalogEntry?.distribution ? <AddressLink address={catalogEntry.distribution} /> : "Unknown" },
+            ]}
+          />
+        </RuledSection>
+      ) : null}
+
+      <RuledSection>
+        <SectionHeading title="Liquidity" description="Positions the Boardroom has locked for project market liquidity." />
+        <LiquidityTable lockers={snapshot.lockedLiquiditySummaries} />
+      </RuledSection>
+
+      {activityContent ? (
+        <RuledSection>
+          <SectionHeading title="Onchain activity" description="Observed project events, presented separately from current balances." />
+          <div className="mt-4">{activityContent}</div>
+        </RuledSection>
+      ) : null}
+
+      <RuledSection>
+        <details className="group">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-1 text-sm font-semibold text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300/70">
+            Technical details
+            <ChevronDown className="h-4 w-4 text-zinc-500 transition-transform group-open:rotate-180" />
+          </summary>
+          <p className="m-0 mt-2 max-w-3xl text-sm leading-6 text-zinc-500">
+            Contract addresses and raw counts for independent verification. These details do not change who has authority.
+          </p>
+          <KeyValueList
+            columns={3}
+            items={[
+              { label: "Boardroom", value: <AddressLink address={dashboard.address} /> },
+              { label: "Policy registry", value: <AddressLink address={snapshot.policyRegistry} /> },
+              { label: "Wrapped native", value: <AddressLink address={snapshot.wrappedNative} /> },
+              { label: "Share token", value: <AddressLink address={snapshot.shareToken} /> },
+              { label: "Issued grants", value: String(snapshot.issuedGrants.length) },
+              { label: "Tracked distributions", value: String(snapshot.issuedDistributions.length) },
+            ]}
+          />
+          {technicalContent ? <div className="mt-5 border-t border-zinc-800 pt-5">{technicalContent}</div> : null}
+        </details>
+      </RuledSection>
+    </>
+  );
+}
+
+function TreasuryTable({ assets }: { assets: readonly ProductTreasuryAsset[] }): React.JSX.Element {
+  if (assets.length === 0) return <EmptyTable label="No ERC-20 treasury assets were read." />;
+  return (
+    <TableFrame label="Treasury assets">
+      <table className={tableClassName}>
+        <thead className={tableHeadClassName}>
+          <tr><th className={tableCellClassName}>Asset</th><th className={tableCellClassName}>Contract</th><th className={tableCellClassName}>Treasury balance</th><th className={tableCellClassName}>Total supply</th></tr>
+        </thead>
+        <tbody>
+          {assets.map((asset) => (
+            <tr key={asset.address}>
+              <td className={tableCellClassName}><span className="font-semibold text-zinc-100">{asset.symbol ?? asset.label}</span><span className="mt-1 block text-xs text-zinc-500">{asset.label}</span></td>
+              <td className={tableCellClassName}><AddressLink address={asset.address} /></td>
+              <td className={tableCellClassName}>{asset.error ? <span className="text-red-200">Read failed</span> : formatTokenBalance(asset)}</td>
+              <td className={tableCellClassName}>{asset.totalSupply === undefined ? "Unknown" : formatTokenAmount(asset.totalSupply, asset)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </TableFrame>
+  );
+}
+
+function GrantTable({ grants }: { grants: readonly BoardroomGrantSnapshot[] }): React.JSX.Element {
+  if (grants.length === 0) return <EmptyTable label="No grants have been issued by this Boardroom." />;
+  return (
+    <TableFrame label="Issued grants">
+      <table className={tableClassName}>
+        <thead className={tableHeadClassName}>
+          <tr><th className={tableCellClassName}>Grant</th><th className={tableCellClassName}>Holder</th><th className={tableCellClassName}>Committed</th><th className={tableCellClassName}>Settled</th><th className={tableCellClassName}>Status</th></tr>
+        </thead>
+        <tbody>
+          {grants.map((grant) => (
+            <tr key={grant.address}>
+              <td className={tableCellClassName}><AddressLink address={grant.address} />{grant.error ? <span className="mt-1 block text-xs text-red-200">Read failed</span> : null}</td>
+              <td className={tableCellClassName}>{grant.state ? <AddressLink address={grant.state.holder} /> : "Unknown"}</td>
+              <td className={tableCellClassName}>{formatTokenAmount(grant.state?.grantSize, grant.tokenMetadata)}</td>
+              <td className={tableCellClassName}>{formatTokenAmount(grant.state?.settledAmount, grant.tokenMetadata)}</td>
+              <td className={tableCellClassName}><GrantStatus grant={grant} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </TableFrame>
+  );
+}
+
+function DistributionTable({ distributions }: { distributions: readonly BoardroomDistributionSnapshot[] }): React.JSX.Element {
+  if (distributions.length === 0) return <EmptyTable label="No active distribution contracts are currently tracked. Closed or migrated routes may still appear in onchain history." />;
+  return (
+    <TableFrame label="Token distributions">
+      <table className={tableClassName}>
+        <thead className={tableHeadClassName}>
+          <tr><th className={tableCellClassName}>Type</th><th className={tableCellClassName}>Contract</th><th className={tableCellClassName}>Originally allocated</th><th className={tableCellClassName}>Remaining</th><th className={tableCellClassName}>Status</th></tr>
+        </thead>
+        <tbody>
+          {distributions.map((distribution) => (
+            <tr key={distribution.address}>
+              <td className={tableCellClassName}><span className="font-semibold text-zinc-100">{distributionKindLabel(distribution.kind)}</span></td>
+              <td className={tableCellClassName}><AddressLink address={distribution.address} />{distribution.error ? <span className="mt-1 block text-xs text-red-200">Read failed</span> : null}</td>
+              <td className={tableCellClassName}>{formatTokenAmount(distributionAllocated(distribution), distribution.shareTokenMetadata)}</td>
+              <td className={tableCellClassName}>{formatTokenAmount(distributionRemaining(distribution), distribution.shareTokenMetadata)}</td>
+              <td className={tableCellClassName}><DistributionStatus distribution={distribution} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </TableFrame>
+  );
+}
+
+function LiquidityTable({ lockers }: { lockers: readonly BoardroomLockedLiquiditySnapshot[] }): React.JSX.Element {
+  if (lockers.length === 0) return <EmptyTable label="No locked liquidity positions were read." />;
+  return (
+    <TableFrame label="Locked liquidity positions">
+      <table className={tableClassName}>
+        <thead className={tableHeadClassName}>
+          <tr><th className={tableCellClassName}>Locker</th><th className={tableCellClassName}>Pool</th><th className={tableCellClassName}>Locked LP</th><th className={tableCellClassName}>Claimable token A</th><th className={tableCellClassName}>Claimable token B</th></tr>
+        </thead>
+        <tbody>
+          {lockers.map((locker) => (
+            <tr key={locker.address}>
+              <td className={tableCellClassName}><AddressLink address={locker.address} />{locker.error ? <span className="mt-1 block text-xs text-red-200">Read failed</span> : null}</td>
+              <td className={tableCellClassName}>{locker.state?.pool ? <AddressLink address={locker.state.pool} /> : "Unknown"}</td>
+              <td className={tableCellClassName}>{formatTokenAmount(locker.state?.lockedLiquidity, locker.liquidityMetadata)}</td>
+              <td className={tableCellClassName}>{formatTokenAmount(locker.claimableA, locker.tokenAMetadata)}</td>
+              <td className={tableCellClassName}>{formatTokenAmount(locker.claimableB, locker.tokenBMetadata)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </TableFrame>
+  );
+}
+
+function EmptyTable({ label }: { label: string }): React.JSX.Element {
+  return <p className="m-0 mt-4 border-y border-zinc-800 py-5 text-sm text-zinc-500">{label}</p>;
+}
+
+function GrantStatus({ grant }: { grant: BoardroomGrantSnapshot }): React.JSX.Element {
+  if (grant.error || !grant.state) return <Badge variant="danger">Read issue</Badge>;
+  if (grant.state.quarantined) return <Badge variant="danger">Quarantined</Badge>;
+  if (grant.state.halted) return <Badge variant="warning">Halted</Badge>;
+  if (grant.state.closed) return <Badge variant="muted">Closed</Badge>;
+  if (grant.state.expired) return <Badge variant="warning">Expired</Badge>;
+  return <Badge variant="default">Open</Badge>;
+}
+
+function DistributionStatus({ distribution }: { distribution: BoardroomDistributionSnapshot }): React.JSX.Element {
+  if (distribution.error || !distribution.state) return <Badge variant="danger">Read issue</Badge>;
+  const status = "saleStatus" in distribution.state
+    ? distribution.state.saleStatus
+    : "curveStatus" in distribution.state
+      ? distribution.state.curveStatus
+      : distribution.state.airdropStatus;
+  if (status === 0 && !distribution.state.closed) return <Badge variant="default">Active</Badge>;
+  if (status === 2) return <Badge variant="warning">Cancelled</Badge>;
+  return <Badge variant="muted">Closed</Badge>;
+}
+
+function transparencyTotals(dashboard: ProductBoardroomDashboardState): {
+  distributionShares: bigint;
+  openGrantCount: number;
+  unsettledGrantShares: bigint;
+} {
+  return {
+    distributionShares: dashboard.snapshot.distributionSummaries.reduce(
+      (total, distribution) => total + (distributionIsOpen(distribution) ? distributionRemaining(distribution) ?? 0n : 0n),
+      0n,
+    ),
+    openGrantCount: dashboard.snapshot.grantSummaries.filter((grant) => grant.state && !grant.state.closed).length,
+    unsettledGrantShares: dashboard.snapshot.grantSummaries.reduce((total, grant) => total + (grant.state?.unsettledAmount ?? 0n), 0n),
+  };
+}
+
+function distributionIsOpen(distribution: BoardroomDistributionSnapshot): boolean {
+  if (!distribution.state || distribution.state.closed) return false;
+  if ("saleStatus" in distribution.state) return distribution.state.saleStatus === 0;
+  if ("curveStatus" in distribution.state) return distribution.state.curveStatus === 0;
+  return distribution.state.airdropStatus === 0;
+}
+
+function distributionAllocated(distribution: BoardroomDistributionSnapshot): bigint | undefined {
+  if (!distribution.state) return undefined;
+  if ("saleSupply" in distribution.state) return distribution.state.saleSupply;
+  if ("airdropSupply" in distribution.state) return distribution.state.airdropSupply;
+  return undefined;
+}
+
+function distributionRemaining(distribution: BoardroomDistributionSnapshot): bigint | undefined {
+  if (!distribution.state) return undefined;
+  if ("remainingSaleShares" in distribution.state) return distribution.state.remainingSaleShares;
+  if ("remainingShares" in distribution.state) return distribution.state.remainingShares;
+  return undefined;
+}
+
+function distributionKindLabel(kind: BoardroomDistributionSnapshot["kind"]): string {
+  if (kind === "fixed-price-sale") return "Fixed-price sale";
+  if (kind === "migrating-bonding-curve") return "Bonding curve";
+  if (kind === "merkle-airdrop") return "Airdrop";
+  return "Unknown distribution";
+}
+
+function TransparencyLoading(): React.JSX.Element {
+  return (
+    <div aria-label="Loading transparency data" aria-live="polite" className="grid animate-pulse gap-5 py-6" role="status">
+      <span className="h-40 rounded bg-zinc-900" />
+      <span className="h-56 rounded bg-zinc-900" />
+      <span className="h-56 rounded bg-zinc-900" />
+    </div>
+  );
+}
+
+function sameAddress(first: Address, second: Address): boolean {
+  return first.toLowerCase() === second.toLowerCase();
+}

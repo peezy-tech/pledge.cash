@@ -24,6 +24,30 @@ type WorkspaceHeaderProps = {
   children?: ReactNode;
 };
 
+type PageHeaderProps = {
+  title: string;
+  description?: string | undefined;
+  eyebrow?: string | undefined;
+  action?: ReactNode;
+  meta?: ReactNode;
+  className?: string | undefined;
+};
+
+type SectionProps = {
+  title?: string | undefined;
+  description?: string | undefined;
+  action?: ReactNode;
+  children: ReactNode;
+  className?: string | undefined;
+};
+
+type StatusNoticeProps = {
+  title: string;
+  children?: ReactNode;
+  tone?: "info" | "success" | "warning" | "danger";
+  className?: string | undefined;
+};
+
 type FieldProps = {
   label: string;
   children: ReactNode;
@@ -69,11 +93,11 @@ export function Panel({
   const hasDescription = description !== undefined && description.length > 0;
 
   return (
-    <section className={cn("min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/82", className)}>
+    <section className={cn("min-w-0 rounded-lg border border-[var(--pc-border)] bg-[var(--pc-surface-subtle)]", className)}>
       <div className="flex min-h-14 flex-col items-stretch justify-between gap-3 px-4 py-3 sm:flex-row sm:items-center">
         <div className="min-w-0">
-          <h2 className="m-0 text-base font-semibold tracking-normal text-zinc-50">{title}</h2>
-          {hasDescription ? <p className="m-0 mt-1 max-w-3xl text-sm leading-5 text-zinc-500">{description}</p> : null}
+          <h2 className="m-0 text-base font-semibold tracking-normal text-[var(--pc-text)]">{title}</h2>
+          {hasDescription ? <p className="m-0 mt-1 max-w-3xl text-sm leading-5 text-[var(--pc-text-muted)]">{description}</p> : null}
         </div>
         {action ? <div className="flex self-stretch sm:self-auto [&>*]:w-full sm:[&>*]:w-auto">{action}</div> : null}
       </div>
@@ -93,17 +117,89 @@ export function WorkspaceHeader({
   const hasChildren = Boolean(children);
 
   return (
-    <section className="mb-5 border-b border-zinc-800 pb-5">
+    <section className="mb-4 border-b border-[var(--pc-border)] pb-4">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0">
-          <p className="m-0 text-xs font-semibold uppercase tracking-normal text-lime-200/80">{eyebrow}</p>
-          <h1 className="m-0 mt-2 text-3xl font-semibold tracking-normal text-zinc-50 sm:text-4xl">{title}</h1>
-          <p className="m-0 mt-3 max-w-3xl text-sm leading-6 text-zinc-400">{description}</p>
+          <p className="m-0 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--pc-accent)]">{eyebrow}</p>
+          <h1 className="m-0 mt-1.5 text-2xl font-semibold tracking-tight text-[var(--pc-text)] sm:text-3xl">{title}</h1>
+          <p className="m-0 mt-2 max-w-3xl text-sm leading-6 text-[var(--pc-text-muted)]">{description}</p>
         </div>
         {hasAction ? <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div> : null}
       </div>
       {hasChildren ? <div className="mt-4">{children}</div> : null}
     </section>
+  );
+}
+
+export function PageHeader({
+  action,
+  className,
+  description,
+  eyebrow,
+  meta,
+  title,
+}: PageHeaderProps): React.JSX.Element {
+  return (
+    <header className={cn("border-b border-[var(--pc-border)] pb-5", className)}>
+      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div className="min-w-0">
+          {eyebrow ? <p className="m-0 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--pc-accent)]">{eyebrow}</p> : null}
+          <h1 className={cn("m-0 text-2xl font-semibold tracking-tight text-[var(--pc-text)] sm:text-3xl", eyebrow && "mt-1.5")}>{title}</h1>
+          {description ? <p className="m-0 mt-2 max-w-2xl text-sm leading-6 text-[var(--pc-text-muted)]">{description}</p> : null}
+          {meta ? <div className="mt-3 flex flex-wrap items-center gap-2">{meta}</div> : null}
+        </div>
+        {action ? <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div> : null}
+      </div>
+    </header>
+  );
+}
+
+export function Section({ action, children, className, description, title }: SectionProps): React.JSX.Element {
+  return (
+    <section className={cn("min-w-0 border-b border-[var(--pc-border)] py-6 last:border-b-0", className)}>
+      {title || description || action ? (
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            {title ? <h2 className="m-0 text-base font-semibold text-[var(--pc-text)]">{title}</h2> : null}
+            {description ? <p className="m-0 mt-1 max-w-2xl text-sm leading-5 text-[var(--pc-text-muted)]">{description}</p> : null}
+          </div>
+          {action ? <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div> : null}
+        </div>
+      ) : null}
+      {children}
+    </section>
+  );
+}
+
+export function StatusNotice({
+  children,
+  className,
+  title,
+  tone = "info",
+}: StatusNoticeProps): React.JSX.Element {
+  const toneClass = {
+    danger: "border-[color:var(--pc-danger)]/35 bg-[color:var(--pc-danger)]/8",
+    info: "border-[color:var(--pc-info)]/35 bg-[color:var(--pc-info)]/8",
+    success: "border-[color:var(--pc-success)]/35 bg-[color:var(--pc-success)]/8",
+    warning: "border-[color:var(--pc-warning)]/35 bg-[color:var(--pc-warning)]/8",
+  }[tone];
+
+  return (
+    <div className={cn("rounded-md border p-3", toneClass, className)} role={tone === "danger" ? "alert" : "status"}>
+      <p className="m-0 text-sm font-semibold text-[var(--pc-text)]">{title}</p>
+      {children ? <div className="mt-1 text-sm leading-5 text-[var(--pc-text-muted)]">{children}</div> : null}
+    </div>
+  );
+}
+
+export function TechnicalDetails({ children, summary = "Technical details" }: { children: ReactNode; summary?: string }): React.JSX.Element {
+  return (
+    <details className="group border-t border-[var(--pc-border)] py-3">
+      <summary className="cursor-pointer select-none text-sm font-medium text-[var(--pc-text-muted)] transition-colors hover:text-[var(--pc-text)]">
+        {summary}
+      </summary>
+      <div className="mt-3 text-sm text-[var(--pc-text-muted)]">{children}</div>
+    </details>
   );
 }
 
@@ -113,7 +209,7 @@ export function Field({
   className,
 }: FieldProps): React.JSX.Element {
   return (
-    <Label className={cn("min-w-0 border-b border-zinc-800 p-4 md:border-r [&:nth-child(2n)]:md:border-r-0", className)}>
+    <Label className={cn("min-w-0 border-b border-[var(--pc-border)] p-4 text-[var(--pc-text-muted)] md:border-r [&:nth-child(2n)]:md:border-r-0", className)}>
       <span>{label}</span>
       {children}
     </Label>
@@ -125,15 +221,15 @@ export function Facts({
   columns = "two",
 }: FactsProps): React.JSX.Element {
   if (items.length === 0) {
-    return <div className="border-t border-zinc-800 p-4 text-sm text-zinc-500">No data</div>;
+    return <div className="border-t border-[var(--pc-border)] p-4 text-sm text-[var(--pc-text-muted)]">No data</div>;
   }
 
   return (
-    <dl className={cn("grid gap-px border-t border-zinc-800 bg-transparent", factGridColumns[columns])}>
+    <dl className={cn("grid gap-px border-t border-[var(--pc-border)] bg-transparent", factGridColumns[columns])}>
       {items.map((item) => (
-        <div className="min-w-0 bg-zinc-950 p-4" key={item.label}>
-          <dt className="mb-1 text-xs font-medium text-zinc-500">{item.label}</dt>
-          <dd className="m-0 break-words text-sm font-semibold text-zinc-100">{item.value}</dd>
+        <div className="min-w-0 bg-[var(--pc-surface-subtle)] p-4" key={item.label}>
+          <dt className="mb-1 text-xs font-medium text-[var(--pc-text-muted)]">{item.label}</dt>
+          <dd className="m-0 break-words text-sm font-semibold text-[var(--pc-text)]">{item.value}</dd>
         </div>
       ))}
     </dl>
@@ -141,7 +237,7 @@ export function Facts({
 }
 
 export function ActionRow({ children }: { children: ReactNode }): React.JSX.Element {
-  return <div className="flex flex-wrap gap-2 border-t border-zinc-800 p-4">{children}</div>;
+  return <div className="flex flex-wrap gap-2 border-t border-[var(--pc-border)] p-4">{children}</div>;
 }
 
 export function ActionButton({
@@ -168,11 +264,12 @@ export function TabButton({
 }: TabButtonProps): React.JSX.Element {
   return (
     <button
+      aria-current={active ? "page" : undefined}
       className={cn(
         "h-10 shrink-0 border-b-2 px-3 text-sm font-semibold transition-colors",
         active
-          ? "border-lime-300 text-zinc-50"
-          : "border-transparent text-zinc-500 hover:border-zinc-700 hover:text-zinc-200",
+          ? "border-[var(--pc-accent)] text-[var(--pc-text)]"
+          : "border-transparent text-[var(--pc-text-muted)] hover:border-[var(--pc-border-strong)] hover:text-[var(--pc-text)]",
       )}
       type="button"
       onClick={onClick}

@@ -43,7 +43,11 @@ export function useActionRunner(): {
       try {
         await action();
       } catch (error) {
-        pushLog(errorMessage(error), "error");
+        if (error instanceof Error && error.name === "TransactionReviewCancelledError") {
+          pushLog("Transaction cancelled before it reached your wallet.", "info");
+        } else {
+          pushLog(errorMessage(error), "error");
+        }
       } finally {
         finishAction(label, pendingActionRef, setPendingAction);
       }
