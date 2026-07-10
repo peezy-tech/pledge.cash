@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {ERC20} from "solady/tokens/ERC20.sol";
+import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {AmmFactory} from "./AmmFactory.sol";
@@ -57,16 +58,21 @@ contract AmmRouter is ReentrancyGuard {
     function quote(uint256 amountA, uint256 reserveA, uint256 reserveB) public pure returns (uint256 amountB) {
         if (amountA == 0) revert InsufficientAmount();
         if (reserveA == 0 || reserveB == 0) revert InsufficientLiquidity();
-        amountB = amountA * reserveB / reserveA;
+        amountB = FixedPointMathLib.fullMulDiv(amountA, reserveB, reserveA);
     }
 
     function getAmountsOut(uint256 amountIn, address[] memory path) public view returns (uint256[] memory amounts) {
         _requireValidPath(path);
 
         amounts = new uint256[](path.length);
+        address[] memory pools = new address[](path.length - 1);
         amounts[0] = amountIn;
         for (uint256 i; i < path.length - 1; ++i) {
             address pool = _existingPool(path[i], path[i + 1]);
+            for (uint256 j; j < i; ++j) {
+                if (pools[j] == pool) revert InvalidPath();
+            }
+            pools[i] = pool;
             amounts[i + 1] = AmmPool(pool).getAmountOut(amounts[i], path[i]);
         }
     }
@@ -81,6 +87,7 @@ contract AmmRouter is ReentrancyGuard {
         address to,
         uint256 deadline
     ) external nonReentrant ensure(deadline) returns (uint256 amountA, uint256 amountB, uint256 liquidity) {
+        _requireNonZero(to);
         address pool = _poolOrCreate(tokenA, tokenB);
         (amountA, amountB) = _liquidityAmounts(tokenA, tokenB, amountADesired, amountBDesired, amountAMin, amountBMin);
 
@@ -103,6 +110,7 @@ contract AmmRouter is ReentrancyGuard {
         ensure(deadline)
         returns (uint256 amountToken, uint256 amountNative, uint256 liquidity)
     {
+        _requireNonZero(to);
         address pool = _poolOrCreate(token, wrappedNative);
         (amountToken, amountNative) =
             _liquidityAmounts(token, wrappedNative, amountTokenDesired, msg.value, amountTokenMin, amountNativeMin);
@@ -124,6 +132,7 @@ contract AmmRouter is ReentrancyGuard {
         address to,
         uint256 deadline
     ) external nonReentrant ensure(deadline) returns (uint256 amountA, uint256 amountB) {
+        _requireNonZero(to);
         address pool = _existingPool(tokenA, tokenB);
 
         uint256 balanceABefore = ERC20(tokenA).balanceOf(to);
@@ -143,6 +152,7 @@ contract AmmRouter is ReentrancyGuard {
         address to,
         uint256 deadline
     ) external nonReentrant ensure(deadline) returns (uint256 amountToken, uint256 amountNative) {
+        _requireNonZero(to);
         address pool = _existingPool(token, wrappedNative);
 
         uint256 tokenBalanceBefore = ERC20(token).balanceOf(address(this));
@@ -165,12 +175,13 @@ contract AmmRouter is ReentrancyGuard {
         address to,
         uint256 deadline
     ) external nonReentrant ensure(deadline) returns (uint256[] memory amounts) {
+        _requireNonZero(to);
         amounts = getAmountsOut(amountIn, path);
         if (amounts[amounts.length - 1] < amountOutMin) revert InsufficientOutputAmount();
 
         address tokenOut = path[path.length - 1];
-        uint256 balanceBefore = ERC20(tokenOut).balanceOf(to);
         _checkedTransferFrom(path[0], msg.sender, _firstPool(path), amounts[0]);
+        uint256 balanceBefore = ERC20(tokenOut).balanceOf(to);
         _swap(amounts, path, to);
         amounts[amounts.length - 1] = _receivedAtLeast(tokenOut, to, balanceBefore, amountOutMin);
     }
@@ -182,6 +193,7 @@ contract AmmRouter is ReentrancyGuard {
         ensure(deadline)
         returns (uint256[] memory amounts)
     {
+        _requireNonZero(to);
         if (msg.value == 0) revert InvalidNativeAmount();
         if (path.length < 2 || path[0] != wrappedNative) revert InvalidPath();
 
@@ -189,9 +201,9 @@ contract AmmRouter is ReentrancyGuard {
         if (amounts[amounts.length - 1] < amountOutMin) revert InsufficientOutputAmount();
 
         address tokenOut = path[path.length - 1];
-        uint256 balanceBefore = ERC20(tokenOut).balanceOf(to);
         IWrappedNative(wrappedNative).deposit{value: amounts[0]}();
         wrappedNative.safeTransfer(_firstPool(path), amounts[0]);
+        uint256 balanceBefore = ERC20(tokenOut).balanceOf(to);
         _swap(amounts, path, to);
         amounts[amounts.length - 1] = _receivedAtLeast(tokenOut, to, balanceBefore, amountOutMin);
     }
@@ -203,14 +215,15 @@ contract AmmRouter is ReentrancyGuard {
         address to,
         uint256 deadline
     ) external nonReentrant ensure(deadline) returns (uint256[] memory amounts) {
+        _requireNonZero(to);
         if (path.length < 2 || path[path.length - 1] != wrappedNative) revert InvalidPath();
 
         amounts = getAmountsOut(amountIn, path);
         uint256 amountOut = amounts[amounts.length - 1];
         if (amountOut < amountOutMin) revert InsufficientOutputAmount();
 
-        uint256 balanceBefore = ERC20(wrappedNative).balanceOf(address(this));
         _checkedTransferFrom(path[0], msg.sender, _firstPool(path), amounts[0]);
+        uint256 balanceBefore = ERC20(wrappedNative).balanceOf(address(this));
         _swap(amounts, path, address(this));
         amountOut = _receivedAtLeast(wrappedNative, address(this), balanceBefore, amountOutMin);
         amounts[amounts.length - 1] = amountOut;
@@ -271,11 +284,11 @@ contract AmmRouter is ReentrancyGuard {
     }
 
     function _checkedTransferFrom(address token, address from, address to, uint256 expectedAmount) internal {
-        _requireExactReceived(token, expectedAmount, ExactTransferLib.pullTo(token, from, to, expectedAmount));
+        _requireExactTransfer(token, expectedAmount, ExactTransferLib.pullBetween(token, from, to, expectedAmount));
     }
 
     function _checkedTransfer(address token, address to, uint256 expectedAmount) internal {
-        _requireExactReceived(token, expectedAmount, ExactTransferLib.sendTo(token, to, expectedAmount));
+        _requireExactTransfer(token, expectedAmount, ExactTransferLib.sendFromSelfTo(token, to, expectedAmount));
     }
 
     function _received(address token, address account, uint256 balanceBefore) internal view returns (uint256) {
@@ -294,18 +307,27 @@ contract AmmRouter is ReentrancyGuard {
         if (amount < minimumAmount) revert InsufficientOutputAmount();
     }
 
-    function _requireExactReceived(address token, uint256 expectedAmount, ExactTransferLib.RecipientDelta memory delta)
+    function _requireExactTransfer(address token, uint256 expectedAmount, ExactTransferLib.ExactDelta memory delta)
         internal
         pure
     {
-        if (delta.balanceDecreased) revert TransferAmountMismatch(token, expectedAmount, 0);
-        if (delta.received != expectedAmount) {
-            revert TransferAmountMismatch(token, expectedAmount, delta.received);
+        if (delta.senderBalanceIncreased) revert TransferAmountMismatch(token, expectedAmount, 0);
+        if (delta.senderSpent != expectedAmount) {
+            revert TransferAmountMismatch(token, expectedAmount, delta.senderSpent);
+        }
+        if (delta.recipientBalanceDecreased) revert TransferAmountMismatch(token, expectedAmount, 0);
+        if (delta.recipientReceived != expectedAmount) {
+            revert TransferAmountMismatch(token, expectedAmount, delta.recipientReceived);
         }
     }
 
     function _requireValidPath(address[] memory path) internal pure {
         if (path.length < 2 || path.length > MAX_SWAP_PATH_LENGTH) revert InvalidPath();
+        for (uint256 i; i < path.length - 1; ++i) {
+            if (path[i] == address(0) || path[i + 1] == address(0) || path[i] == path[i + 1]) {
+                revert InvalidPath();
+            }
+        }
     }
 
     function _requireMinimumAmounts(uint256 amountA, uint256 amountB, uint256 amountAMin, uint256 amountBMin)

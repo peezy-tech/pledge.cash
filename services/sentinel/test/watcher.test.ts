@@ -424,6 +424,35 @@ describe("runWatcherOnce", () => {
     expect(events[0]?.action.id).toBe("pending-action");
   });
 
+  test("records permanent module registration and deduplicates its paired active-status notification", async () => {
+    const store = new MemoryWatcherStore();
+    store.addBoardroom();
+    store.addQueuedAction({ id: "pending-action", queueBlock: 2n, queueTxHash: queueTx });
+    store.setCursor("factory-discovery", 5n);
+    store.setCursor("share-transfers", 5n);
+    const events: WatcherPipelineEvent[] = [];
+
+    const result = await runWatcherOnce(chainId, {
+      client: createClient({
+        latestBlock: 6n,
+        logs: [
+          rawLog("ModulePolicyRegistered", policyRegistry, 6n, 0, adminTx, { policy: target }),
+          rawLog("PolicyStatusSet", policyRegistry, 6n, 1, adminTx, { policy: target, status: 1n })
+        ],
+        txInputs: {}
+      }),
+      config: testConfig(10),
+      deployment: testDeployment(),
+      onActionEvent: (event) => events.push(event),
+      store
+    });
+
+    expect(result.policyAdminEvents).toBe(2);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.event).toBe("policy-admin");
+    expect(events[0]?.eventId).toBe(`${chainId}:${adminTx}:0`);
+  });
+
   test("rolls back writes and cursor advances when persistence fails", async () => {
     const store = new MemoryWatcherStore();
     store.failInsertQueuedAction = true;

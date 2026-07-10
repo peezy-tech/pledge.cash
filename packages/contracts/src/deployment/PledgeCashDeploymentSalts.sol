@@ -2,20 +2,20 @@
 pragma solidity ^0.8.30;
 
 library PledgeCashDeploymentSalts {
-    string internal constant VERSION = "pledge.cash.deterministic.v2";
+    string internal constant VERSION = "pledge.cash.deterministic.v3";
 
     bytes32 internal constant DETERMINISTIC_DEPLOYER =
         keccak256("pledge.cash.deterministic.v1.PledgeCashDeterministicDeployer");
     bytes32 internal constant BOARDROOM_POLICY_REGISTRY =
-        keccak256("pledge.cash.deterministic.v2.BoardroomPolicyRegistry");
-    bytes32 internal constant ASSET_POLICY = keccak256("pledge.cash.deterministic.v1.AssetPolicy");
-    bytes32 internal constant TOKEN_GRANT_FACTORY = keccak256("pledge.cash.deterministic.v2.TokenGrantFactory");
-    bytes32 internal constant AMM_FACTORY = keccak256("pledge.cash.deterministic.v1.AmmFactory");
-    bytes32 internal constant AMM_ROUTER = keccak256("pledge.cash.deterministic.v1.AmmRouter");
+        keccak256("pledge.cash.deterministic.v3.BoardroomPolicyRegistry");
+    bytes32 internal constant ASSET_POLICY = keccak256("pledge.cash.deterministic.v3.AssetPolicy");
+    bytes32 internal constant TOKEN_GRANT_FACTORY = keccak256("pledge.cash.deterministic.v3.TokenGrantFactory");
+    bytes32 internal constant AMM_FACTORY = keccak256("pledge.cash.deterministic.v3.AmmFactory");
+    bytes32 internal constant AMM_ROUTER = keccak256("pledge.cash.deterministic.v3.AmmRouter");
     bytes32 internal constant LOCKED_LIQUIDITY_FACTORY =
-        keccak256("pledge.cash.deterministic.v2.LockedLiquidityFactory");
-    bytes32 internal constant DISTRIBUTION_FACTORY = keccak256("pledge.cash.deterministic.v2.DistributionFactory");
-    bytes32 internal constant BOARDROOM_FACTORY = keccak256("pledge.cash.deterministic.v2.BoardroomFactory");
+        keccak256("pledge.cash.deterministic.v3.LockedLiquidityFactory");
+    bytes32 internal constant DISTRIBUTION_FACTORY = keccak256("pledge.cash.deterministic.v3.DistributionFactory");
+    bytes32 internal constant BOARDROOM_FACTORY = keccak256("pledge.cash.deterministic.v3.BoardroomFactory");
 
     function version() internal pure returns (string memory) {
         return VERSION;

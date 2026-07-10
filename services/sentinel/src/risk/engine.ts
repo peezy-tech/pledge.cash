@@ -59,7 +59,14 @@ function evaluateCall(call: StoredCall, ctx: RiskContext): RiskFinding[] {
   const targetIsBoardroom = sameAddress(call.target, ctx.boardroom);
 
   if (targetIsBoardroom && selector === SELECTORS.boardroom.setExecutor) {
-    findings.push(callFinding(call, "set-executor", "high", "Changes the boardroom executor."));
+    findings.push(
+      callFinding(
+        call,
+        "set-executor",
+        "high",
+        "Changes who can queue governed actions; ready execution remains permissionless."
+      )
+    );
   }
 
   if (targetIsBoardroom && selector === SELECTORS.boardroom.mint) {
@@ -125,7 +132,11 @@ function evaluateCall(call: StoredCall, ctx: RiskContext): RiskFinding[] {
 }
 
 function isPolicyAdminCall(call: StoredCall, ctx: RiskContext, selector: Hex | undefined): boolean {
-  if (selector === SELECTORS.policyRegistry.setPolicyAllowed || selector === SELECTORS.policyRegistry.setPolicyStatus) {
+  if (
+    selector === SELECTORS.policyRegistry.registerModulePolicy ||
+    selector === SELECTORS.policyRegistry.setPolicyAllowed ||
+    selector === SELECTORS.policyRegistry.setPolicyStatus
+  ) {
     return ctx.policyRegistry === undefined || sameAddress(call.target, ctx.policyRegistry);
   }
 

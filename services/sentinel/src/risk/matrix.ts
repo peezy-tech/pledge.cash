@@ -8,7 +8,7 @@ import { toFunctionSelector, type Abi, type AbiFunction, type Hex } from "viem";
 
 import type { Severity } from "../types";
 
-export const RULESET_VERSION = 1;
+export const RULESET_VERSION = 2;
 
 export type RiskRuleId =
   | "set-executor"
@@ -56,6 +56,7 @@ export const SELECTORS = {
     approve: selector(erc20Abi, "approve", ["address", "uint256"])
   },
   policyRegistry: {
+    registerModulePolicy: selector(boardroomPolicyRegistryAbi, "registerModulePolicy", ["address"]),
     setPolicyAllowed: selector(boardroomPolicyRegistryAbi, "setPolicyAllowed", ["address", "bool"]),
     setPolicyStatus: selector(boardroomPolicyRegistryAbi, "setPolicyStatus", ["address", "uint8"])
   }
@@ -63,7 +64,7 @@ export const SELECTORS = {
 
 export const RISK_MATRIX = [
   {
-    detail: "Changes the boardroom executor that can queue and execute governed actions.",
+    detail: "Changes the boardroom executor that can queue governed actions; ready execution remains permissionless.",
     id: "set-executor",
     selector: SELECTORS.boardroom.setExecutor,
     severity: "high",
@@ -82,6 +83,13 @@ export const RISK_MATRIX = [
     selector: SELECTORS.erc20.approve,
     severity: "high",
     target: "external"
+  },
+  {
+    detail: "Changes the global policy registry immediately, outside the boardroom veto queue.",
+    id: "policy-admin",
+    selector: SELECTORS.policyRegistry.registerModulePolicy,
+    severity: "high",
+    target: "policy-registry"
   },
   {
     detail: "Changes the global policy registry immediately, outside the boardroom veto queue.",

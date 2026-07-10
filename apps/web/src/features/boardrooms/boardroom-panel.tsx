@@ -156,6 +156,7 @@ export function BoardroomPanel({
   const {
     form: windDownForm,
     burnTreasuryShares,
+    claimRedemptionAsset,
     openRedemptions,
     redeemShares: redeemBoardroomShares,
     registerRedeemableAsset,
@@ -365,6 +366,7 @@ export function BoardroomPanel({
         setWindDownForm={setWindDownForm}
         windDownForm={windDownForm}
         burnTreasuryShares={burnTreasuryShares}
+        claimRedemptionAsset={claimRedemptionAsset}
         openRedemptions={openRedemptions}
         redeemBoardroomShares={redeemBoardroomShares}
         registerRedeemableAsset={registerRedeemableAsset}
@@ -1133,6 +1135,7 @@ function WindDownPanel({
   setWindDownForm,
   windDownForm,
   burnTreasuryShares,
+  claimRedemptionAsset,
   openRedemptions,
   redeemBoardroomShares,
   registerRedeemableAsset,
@@ -1144,6 +1147,7 @@ function WindDownPanel({
   setWindDownForm: Dispatch<SetStateAction<WindDownForm>>;
   windDownForm: WindDownForm;
   burnTreasuryShares: () => Promise<void>;
+  claimRedemptionAsset: () => Promise<void>;
   openRedemptions: () => Promise<void>;
   redeemBoardroomShares: () => Promise<void>;
   registerRedeemableAsset: () => Promise<void>;
@@ -1217,6 +1221,21 @@ function WindDownPanel({
         <ActionButton actionId="redeem-boardroom-shares" pendingAction={pendingAction} onClick={() => void runAction("redeem-boardroom-shares", redeemBoardroomShares)}>
           <Send className="h-4 w-4" />
           Redeem Shares
+        </ActionButton>
+      </ActionRow>
+      <p className="m-0 border-t border-zinc-800 p-4 text-sm text-zinc-500">
+        Assets settle independently. A failed or below-minimum asset remains credited to the connected holder and can
+        be retried below without burning shares again.
+      </p>
+      <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-3">
+        <TextField form={windDownForm} field="claimAsset" label="Retry asset" setForm={setWindDownForm} />
+        <TextField form={windDownForm} field="claimRecipient" label="Retry recipient" setForm={setWindDownForm} />
+        <TextField form={windDownForm} field="claimMinAmount" inputMode="decimal" label="Retry minimum" setForm={setWindDownForm} />
+      </div>
+      <ActionRow>
+        <ActionButton actionId="claim-redemption-asset" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("claim-redemption-asset", claimRedemptionAsset)}>
+          <Send className="h-4 w-4" />
+          Retry Asset Claim
         </ActionButton>
       </ActionRow>
     </Panel>

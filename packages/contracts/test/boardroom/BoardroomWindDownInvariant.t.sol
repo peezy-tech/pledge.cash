@@ -99,13 +99,13 @@ contract BoardroomWindDownInvariantHandler is Test {
         uint256 supplyBefore = shareToken.totalSupply();
         uint256 assetBefore = redeemableAsset.balanceOf(address(boardroom));
         uint256 expectedAmount = assetBefore * shares / supplyBefore;
-        uint256[] memory minimums = new uint256[](1);
+        uint256[] memory minimums = new uint256[](2);
 
         vm.prank(actor);
         try boardroom.redeem(shares, actor, minimums) returns (uint256[] memory amounts) {
-            assertEq(amounts.length, 1);
-            assertEq(amounts[0], expectedAmount);
-            totalRedeemed += amounts[0];
+            assertEq(amounts.length, 2);
+            assertEq(amounts[1], expectedAmount);
+            totalRedeemed += amounts[1];
         } catch {}
     }
 }

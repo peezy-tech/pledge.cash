@@ -46,17 +46,29 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     uint112 internal reserve0;
     uint112 internal reserve1;
     uint32 internal blockTimestampLast;
+    uint64 internal observationTimestampLast;
 
     uint256 public price0CumulativeLast;
     uint256 public price1CumulativeLast;
     Observation[] public observations;
+    uint64[] internal observationTimestamps;
 
     uint256 public index0;
     uint256 public index1;
+    uint256 public protocolFeeRemainder0;
+    uint256 public protocolFeeRemainder1;
+    uint256 public lpFeeIndexRemainder0;
+    uint256 public lpFeeIndexRemainder1;
+    uint256 public pendingBurnRedistribution0;
+    uint256 public pendingBurnRedistribution1;
     mapping(address => uint256) public supplyIndex0;
     mapping(address => uint256) public supplyIndex1;
     mapping(address => uint256) public claimable0;
     mapping(address => uint256) public claimable1;
+    mapping(address => uint256) public pendingClaimable0;
+    mapping(address => uint256) public pendingClaimable1;
+    mapping(address => uint256) public lastLpReceiptBlock;
+    mapping(address => bool) internal hasLpReceipt;
 
     error InvalidAddress();
     error InvalidInput();
@@ -69,6 +81,11 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     error InvalidRecipient();
     error KInvariant();
     error ReserveOverflow();
+    error TimestampOverflow();
+    error OnlyFeeManager();
+    error BalanceBelowReserve(address token, uint256 balance, uint256 reserve);
+    error NoExcessBalance();
+    error InsufficientObservationHistory(uint256 requestedTimestamp, uint256 oldestTimestamp);
     error TooManySamplePoints(uint256 requested, uint256 maximum);
     error UnexpectedFeeTransfer(address token, uint256 expected, uint256 actual);
 
@@ -85,6 +102,8 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     event Sync(uint112 reserve0, uint112 reserve1);
     event FeesClaimed(address indexed owner, uint256 amount0, uint256 amount1);
     event ProtocolFeesAccrued(address indexed recipient, address indexed token, uint256 amount);
+    event ExcessRecovered(address indexed recipient, uint256 amount0, uint256 amount1);
+    event ExcessSynced(uint112 reserve0, uint112 reserve1);
 
     constructor() {
         _disableInitializers();
@@ -97,8 +116,11 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         token0 = token0_;
         token1 = token1_;
         poolFees = address(new PoolFees(address(this), token0_, token1_));
-        blockTimestampLast = _blockTimestamp();
+        uint64 timestamp = _observationTimestamp();
+        observationTimestampLast = timestamp;
+        blockTimestampLast = _truncateTimestamp(timestamp);
         observations.push(Observation(blockTimestampLast, 0, 0, 0, 0));
+        observationTimestamps.push(timestamp);
     }
 
     function name() public pure override returns (string memory) {
@@ -121,16 +143,30 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         return observations.length;
     }
 
+    function observationTimestampAt(uint256 index) external view returns (uint64) {
+        return observationTimestamps[index];
+    }
+
     function currentCumulativePrices()
         public
         view
         returns (uint256 price0Cumulative, uint256 price1Cumulative, uint32 timestamp)
     {
-        timestamp = _blockTimestamp();
+        uint64 observationTimestamp;
+        (price0Cumulative, price1Cumulative, observationTimestamp) = _currentCumulativePrices();
+        timestamp = _truncateTimestamp(observationTimestamp);
+    }
+
+    function _currentCumulativePrices()
+        internal
+        view
+        returns (uint256 price0Cumulative, uint256 price1Cumulative, uint64 timestamp)
+    {
+        timestamp = _observationTimestamp();
         price0Cumulative = price0CumulativeLast;
         price1Cumulative = price1CumulativeLast;
 
-        uint32 timeElapsed = timestamp - blockTimestampLast;
+        uint256 timeElapsed = timestamp - observationTimestampLast;
         if (_hasCumulativePriceDelta(timeElapsed, reserve0, reserve1)) {
             (uint256 price0Delta, uint256 price1Delta) = _cumulativePriceDeltas(reserve0, reserve1, timeElapsed);
             price0Cumulative += price0Delta;
@@ -146,7 +182,7 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         _requireSampleInput(tokenIn, points, window);
 
         amountsOut = new uint256[](points);
-        uint32 nowTimestamp = _blockTimestamp();
+        uint256 nowTimestamp = _observationTimestamp();
         bool tokenInIsToken0 = tokenIn == token0;
 
         for (uint256 i; i < points; ++i) {
@@ -164,7 +200,9 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         _requireLiquidity(reserveIn, reserveOut);
 
         uint256 amountInWithFee = _amountInAfterSwapFee(amountIn);
-        amountOut = amountInWithFee * reserveOut / (reserveIn + amountInWithFee);
+        if (amountInWithFee == 0) return 0;
+        if (amountInWithFee > type(uint112).max - reserveIn) revert ReserveOverflow();
+        amountOut = FixedPointMathLib.fullMulDiv(amountInWithFee, reserveOut, reserveIn + amountInWithFee);
     }
 
     function mint(address to) external nonReentrant returns (uint256 liquidity) {
@@ -174,6 +212,8 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         (uint112 reserve0_, uint112 reserve1_,) = getReserves();
         uint256 balance0 = _balance(token0);
         uint256 balance1 = _balance(token1);
+        _requireBalancesAtLeastReserves(balance0, balance1);
+        _requireReserveBalances(balance0, balance1);
         uint256 amount0 = balance0 - reserve0_;
         uint256 amount1 = balance1 - reserve1_;
         uint256 supply = totalSupply();
@@ -204,6 +244,7 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         (amount0, amount1) = _burnedAmounts(liquidity, supply, balance0, balance1);
 
         _burn(address(this), liquidity);
+        _redistributePendingBurnFees();
         token0_.safeTransfer(to, amount0);
         token1_.safeTransfer(to, amount1);
 
@@ -239,6 +280,31 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         emit Swap(msg.sender, cache.amount0In, cache.amount1In, amount0Out, amount1Out, to);
     }
 
+    function recoverExcess(address recipient) external nonReentrant returns (uint256 recovered0, uint256 recovered1) {
+        _requireFeeManager();
+        _requireNonZero(recipient);
+
+        recovered0 = _excessBalance(token0, reserve0);
+        recovered1 = _excessBalance(token1, reserve1);
+        if (recovered0 == 0 && recovered1 == 0) revert NoExcessBalance();
+
+        _transferExact(token0, recipient, recovered0);
+        _transferExact(token1, recipient, recovered1);
+        emit ExcessRecovered(recipient, recovered0, recovered1);
+    }
+
+    function syncExcess() external nonReentrant {
+        _requireFeeManager();
+
+        uint256 balance0 = _balance(token0);
+        uint256 balance1 = _balance(token1);
+        _requireBalancesAtLeastReserves(balance0, balance1);
+        if (balance0 == reserve0 && balance1 == reserve1) revert NoExcessBalance();
+
+        _update(balance0, balance1, reserve0, reserve1);
+        emit ExcessSynced(reserve0, reserve1);
+    }
+
     function claimFees() external nonReentrant returns (uint256 claimed0, uint256 claimed1) {
         _updateFor(msg.sender);
 
@@ -266,6 +332,7 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         _requirePoolToken(tokenIn);
         if (points == 0 || window == 0) revert InvalidInput();
         if (points > MAX_SAMPLE_POINTS) revert TooManySamplePoints(points, MAX_SAMPLE_POINTS);
+        if (window > type(uint64).max / points) revert InvalidInput();
     }
 
     function _sampleAmountOut(uint256 amountIn, uint256 window, uint256 target, bool tokenInIsToken0)
@@ -276,7 +343,7 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         (uint256 start0, uint256 start1) = _cumulativeAt(target);
         (uint256 end0, uint256 end1) = _cumulativeAt(target + window);
         uint256 averagePrice = tokenInIsToken0 ? (end0 - start0) / window : (end1 - start1) / window;
-        return amountIn * averagePrice / FEE_INDEX_SCALE;
+        return FixedPointMathLib.fullMulDiv(amountIn, averagePrice, FEE_INDEX_SCALE);
     }
 
     function _reservesFor(address tokenIn) internal view returns (uint112 reserveIn, uint112 reserveOut) {
@@ -288,9 +355,12 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     }
 
     function _amountInAfterSwapFee(uint256 amountIn) internal view returns (uint256) {
+        return amountIn - _swapFee(amountIn);
+    }
+
+    function _swapFee(uint256 amountIn) internal view returns (uint256) {
         AmmFactory factory_ = AmmFactory(factory);
-        uint256 denominator = factory_.FEE_DENOMINATOR();
-        return amountIn * (denominator - factory_.SWAP_FEE_BPS()) / denominator;
+        return FixedPointMathLib.fullMulDivUp(amountIn, factory_.SWAP_FEE_BPS(), factory_.FEE_DENOMINATOR());
     }
 
     function _mintInitialLiquidity(uint256 amount0, uint256 amount1) internal returns (uint256 liquidity) {
@@ -305,7 +375,10 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         uint112 reserve0_,
         uint112 reserve1_
     ) internal pure returns (uint256) {
-        return FixedPointMathLib.min(amount0 * supply / reserve0_, amount1 * supply / reserve1_);
+        return FixedPointMathLib.min(
+            FixedPointMathLib.fullMulDiv(amount0, supply, reserve0_),
+            FixedPointMathLib.fullMulDiv(amount1, supply, reserve1_)
+        );
     }
 
     function _burnedAmounts(uint256 liquidity, uint256 supply, uint256 balance0, uint256 balance1)
@@ -313,8 +386,8 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         pure
         returns (uint256 amount0, uint256 amount1)
     {
-        amount0 = liquidity * balance0 / supply;
-        amount1 = liquidity * balance1 / supply;
+        amount0 = FixedPointMathLib.fullMulDiv(liquidity, balance0, supply);
+        amount1 = FixedPointMathLib.fullMulDiv(liquidity, balance1, supply);
         if (amount0 == 0 || amount1 == 0) revert InsufficientLiquidityBurned();
     }
 
@@ -354,6 +427,7 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     }
 
     function _requireKInvariant(SwapCache memory cache) internal pure {
+        _requireReserveBalances(cache.balance0, cache.balance1);
         if (cache.balance0 * cache.balance1 < uint256(cache.reserve0) * uint256(cache.reserve1)) revert KInvariant();
     }
 
@@ -371,16 +445,40 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         PoolFees(poolFees).claimFeesFor(recipient, claimed0, claimed1);
     }
 
-    function _beforeTokenTransfer(address from, address to, uint256) internal override {
-        if (from != address(0)) _updateFor(from);
-        if (to != address(0)) _updateFor(to);
+    function _beforeTokenTransfer(address from, address to, uint256 amount) internal override {
+        if (from == address(0)) {
+            if (to != address(0)) {
+                _updateFor(to);
+                _recordLpReceipt(to, amount);
+            }
+            return;
+        }
+        if (to == address(0)) return;
+
+        _updateFor(from);
+        if (to == address(this)) {
+            _forfeitPendingForBurn(from, amount, balanceOf(from));
+            return;
+        }
+        if (to == from) return;
+
+        _updateFor(to);
+        _moveFeeEntitlement(from, to, amount, balanceOf(from), claimable0, pendingClaimable0);
+        _moveFeeEntitlement(from, to, amount, balanceOf(from), claimable1, pendingClaimable1);
+        _recordLpReceipt(to, amount);
     }
 
     function _updateFor(address owner) internal {
+        _maturePendingFees(owner);
         uint256 ownerBalance = balanceOf(owner);
+        bool receiptInCurrentBlock = _receivedLpThisBlock(owner);
 
-        _applyFeeIndex(owner, ownerBalance, index0, supplyIndex0, claimable0);
-        _applyFeeIndex(owner, ownerBalance, index1, supplyIndex1, claimable1);
+        _applyFeeIndex(
+            owner, ownerBalance, index0, supplyIndex0, receiptInCurrentBlock ? pendingClaimable0 : claimable0
+        );
+        _applyFeeIndex(
+            owner, ownerBalance, index1, supplyIndex1, receiptInCurrentBlock ? pendingClaimable1 : claimable1
+        );
     }
 
     function _accrueFee(address token, uint256 amountIn, bool zeroForOne) internal returns (uint256 debitedFee) {
@@ -388,11 +486,10 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
 
         AmmFactory factory_ = AmmFactory(factory);
         uint256 denominator = factory_.FEE_DENOMINATOR();
-        debitedFee = amountIn * factory_.SWAP_FEE_BPS() / denominator;
-        if (debitedFee == 0) return 0;
+        debitedFee = _swapFee(amountIn);
 
         address protocolFeeRecipient = factory_.protocolFeeRecipient();
-        uint256 protocolFee = _protocolFee(factory_, protocolFeeRecipient, debitedFee, denominator);
+        uint256 protocolFee = _protocolFee(factory_, protocolFeeRecipient, debitedFee, denominator, zeroForOne);
         uint256 lpFee = debitedFee - protocolFee;
 
         (uint256 lpFeeSpent, uint256 lpFeeReceived) = _transferLpFee(token, lpFee);
@@ -411,19 +508,114 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         if (suppliedIndex == currentIndex) return;
 
         if (ownerBalance != 0) {
-            claimableAmounts[owner] += ownerBalance * (currentIndex - suppliedIndex) / FEE_INDEX_SCALE;
+            claimableAmounts[
+                owner
+            ] += FixedPointMathLib.fullMulDiv(ownerBalance, currentIndex - suppliedIndex, FEE_INDEX_SCALE);
         }
         suppliedIndexes[owner] = currentIndex;
     }
 
-    function _protocolFee(AmmFactory factory_, address protocolFeeRecipient, uint256 swapFee, uint256 denominator)
-        internal
-        view
-        returns (uint256)
-    {
+    function _moveFeeEntitlement(
+        address from,
+        address to,
+        uint256 amount,
+        uint256 fromBalance,
+        mapping(address => uint256) storage matureAmounts,
+        mapping(address => uint256) storage pendingAmounts
+    ) internal {
+        if (amount == 0) return;
+
+        uint256 fromMature = matureAmounts[from];
+        uint256 fromPending = pendingAmounts[from];
+        uint256 movedMature =
+            amount == fromBalance ? fromMature : FixedPointMathLib.fullMulDiv(fromMature, amount, fromBalance);
+        uint256 movedPending =
+            amount == fromBalance ? fromPending : FixedPointMathLib.fullMulDiv(fromPending, amount, fromBalance);
+        uint256 moved = movedMature + movedPending;
+        if (moved == 0) return;
+
+        matureAmounts[from] = fromMature - movedMature;
+        pendingAmounts[from] = fromPending - movedPending;
+        pendingAmounts[to] += moved;
+    }
+
+    function _recordLpReceipt(address owner, uint256 amount) internal {
+        if (amount == 0) return;
+        hasLpReceipt[owner] = true;
+        lastLpReceiptBlock[owner] = block.number;
+    }
+
+    function _receivedLpThisBlock(address owner) internal view returns (bool) {
+        return hasLpReceipt[owner] && lastLpReceiptBlock[owner] == block.number;
+    }
+
+    function _maturePendingFees(address owner) internal {
+        if (_receivedLpThisBlock(owner)) return;
+
+        uint256 pending0 = pendingClaimable0[owner];
+        uint256 pending1 = pendingClaimable1[owner];
+        if (pending0 != 0) {
+            pendingClaimable0[owner] = 0;
+            claimable0[owner] += pending0;
+        }
+        if (pending1 != 0) {
+            pendingClaimable1[owner] = 0;
+            claimable1[owner] += pending1;
+        }
+    }
+
+    function _forfeitPendingForBurn(address owner, uint256 amount, uint256 ownerBalance) internal {
+        if (amount == 0) return;
+
+        uint256 ownerPending0 = pendingClaimable0[owner];
+        uint256 ownerPending1 = pendingClaimable1[owner];
+        uint256 forfeited0 =
+            amount == ownerBalance ? ownerPending0 : FixedPointMathLib.fullMulDiv(ownerPending0, amount, ownerBalance);
+        uint256 forfeited1 =
+            amount == ownerBalance ? ownerPending1 : FixedPointMathLib.fullMulDiv(ownerPending1, amount, ownerBalance);
+
+        if (forfeited0 != 0) {
+            pendingClaimable0[owner] = ownerPending0 - forfeited0;
+            pendingBurnRedistribution0 += forfeited0;
+        }
+        if (forfeited1 != 0) {
+            pendingClaimable1[owner] = ownerPending1 - forfeited1;
+            pendingBurnRedistribution1 += forfeited1;
+        }
+    }
+
+    function _redistributePendingBurnFees() internal {
+        uint256 redistribution0 = pendingBurnRedistribution0;
+        uint256 redistribution1 = pendingBurnRedistribution1;
+        if (redistribution0 != 0) {
+            pendingBurnRedistribution0 = 0;
+            _increaseLpFeeIndex(true, redistribution0);
+        }
+        if (redistribution1 != 0) {
+            pendingBurnRedistribution1 = 0;
+            _increaseLpFeeIndex(false, redistribution1);
+        }
+    }
+
+    function _protocolFee(
+        AmmFactory factory_,
+        address protocolFeeRecipient,
+        uint256 swapFee,
+        uint256 denominator,
+        bool zeroForOne
+    ) internal returns (uint256) {
         if (protocolFeeRecipient == address(0)) return 0;
 
-        return swapFee * factory_.PROTOCOL_FEE_SHARE_BPS() / denominator;
+        uint256 share = factory_.PROTOCOL_FEE_SHARE_BPS();
+        uint256 protocolFee = FixedPointMathLib.fullMulDiv(swapFee, share, denominator);
+        uint256 remainder = zeroForOne ? protocolFeeRemainder0 : protocolFeeRemainder1;
+        uint256 carried = mulmod(swapFee, share, denominator) + remainder;
+        protocolFee += carried / denominator;
+        carried %= denominator;
+
+        if (zeroForOne) protocolFeeRemainder0 = carried;
+        else protocolFeeRemainder1 = carried;
+        return protocolFee;
     }
 
     function _transferLpFee(address token, uint256 amount) internal returns (uint256 spent, uint256 received) {
@@ -447,10 +639,25 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         if (supply == 0) return;
 
         if (zeroForOne) {
-            index0 += receivedFee * FEE_INDEX_SCALE / supply;
+            (uint256 indexDelta, uint256 remainder) = _feeIndexDelta(receivedFee, supply, lpFeeIndexRemainder0);
+            index0 += indexDelta;
+            lpFeeIndexRemainder0 = remainder;
         } else {
-            index1 += receivedFee * FEE_INDEX_SCALE / supply;
+            (uint256 indexDelta, uint256 remainder) = _feeIndexDelta(receivedFee, supply, lpFeeIndexRemainder1);
+            index1 += indexDelta;
+            lpFeeIndexRemainder1 = remainder;
         }
+    }
+
+    function _feeIndexDelta(uint256 receivedFee, uint256 supply, uint256 previousRemainder)
+        internal
+        pure
+        returns (uint256 indexDelta, uint256 nextRemainder)
+    {
+        indexDelta = FixedPointMathLib.fullMulDiv(receivedFee, FEE_INDEX_SCALE, supply);
+        uint256 carried = mulmod(receivedFee, FEE_INDEX_SCALE, supply) + previousRemainder;
+        indexDelta += carried / supply;
+        nextRemainder = carried % supply;
     }
 
     function _transferFee(address token, address recipient, uint256 amount)
@@ -474,14 +681,15 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         uint112 nextReserve0 = _toReserve(balance0);
         uint112 nextReserve1 = _toReserve(balance1);
 
-        uint32 timestamp = _blockTimestamp();
-        uint32 timeElapsed = timestamp - blockTimestampLast;
+        uint64 timestamp = _observationTimestamp();
+        uint256 timeElapsed = timestamp - observationTimestampLast;
         _accumulateCumulativePrices(timeElapsed, reserve0_, reserve1_);
         _recordObservation(timestamp, timeElapsed, nextReserve0, nextReserve1);
 
         reserve0 = nextReserve0;
         reserve1 = nextReserve1;
-        blockTimestampLast = timestamp;
+        observationTimestampLast = timestamp;
+        blockTimestampLast = _truncateTimestamp(timestamp);
         emit Sync(reserve0, reserve1);
     }
 
@@ -490,19 +698,25 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         view
         returns (uint256 price0Cumulative, uint256 price1Cumulative)
     {
-        (uint256 current0, uint256 current1, uint32 currentTimestamp) = currentCumulativePrices();
-        if (targetTimestamp >= currentTimestamp) return (current0, current1);
+        (uint256 current0, uint256 current1, uint64 currentTimestamp) = _currentCumulativePrices();
+        if (targetTimestamp > currentTimestamp) revert InvalidInput();
+        if (targetTimestamp == currentTimestamp) return (current0, current1);
 
         uint256 length = observations.length;
-        for (uint256 i = length; i > 0; --i) {
-            Observation memory observation = observations[i - 1];
-            if (targetTimestamp < observation.timestamp) continue;
-
-            return _cumulativeFromObservation(observation, targetTimestamp);
+        uint64 firstTimestamp = observationTimestamps[0];
+        if (targetTimestamp < firstTimestamp) {
+            revert InsufficientObservationHistory(targetTimestamp, firstTimestamp);
         }
 
-        Observation memory first = observations[0];
-        return (first.price0Cumulative, first.price1Cumulative);
+        uint256 low;
+        uint256 high = length - 1;
+        while (low < high) {
+            uint256 middle = (low + high + 1) >> 1;
+            if (observationTimestamps[middle] <= targetTimestamp) low = middle;
+            else high = middle - 1;
+        }
+
+        return _cumulativeFromObservation(observations[low], observationTimestamps[low], targetTimestamp);
     }
 
     function _toReserve(uint256 balance) internal pure returns (uint112) {
@@ -513,7 +727,7 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         return uint112(balance);
     }
 
-    function _accumulateCumulativePrices(uint32 timeElapsed, uint112 reserve0_, uint112 reserve1_) internal {
+    function _accumulateCumulativePrices(uint256 timeElapsed, uint112 reserve0_, uint112 reserve1_) internal {
         if (!_hasCumulativePriceDelta(timeElapsed, reserve0_, reserve1_)) return;
 
         (uint256 price0Delta, uint256 price1Delta) = _cumulativePriceDeltas(reserve0_, reserve1_, timeElapsed);
@@ -521,25 +735,32 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         price1CumulativeLast += price1Delta;
     }
 
-    function _recordObservation(uint32 timestamp, uint32 timeElapsed, uint112 nextReserve0, uint112 nextReserve1)
+    function _recordObservation(uint64 timestamp, uint256 timeElapsed, uint112 nextReserve0, uint112 nextReserve1)
         internal
     {
-        if (timeElapsed == 0) return;
-
-        observations.push(
-            Observation(timestamp, price0CumulativeLast, price1CumulativeLast, nextReserve0, nextReserve1)
+        Observation memory nextObservation = Observation(
+            _truncateTimestamp(timestamp), price0CumulativeLast, price1CumulativeLast, nextReserve0, nextReserve1
         );
+        if (timeElapsed == 0) {
+            uint256 lastIndex = observations.length - 1;
+            observations[lastIndex] = nextObservation;
+            observationTimestamps[lastIndex] = timestamp;
+            return;
+        }
+
+        observations.push(nextObservation);
+        observationTimestamps.push(timestamp);
     }
 
-    function _cumulativeFromObservation(Observation memory observation, uint256 targetTimestamp)
-        internal
-        pure
-        returns (uint256 price0Cumulative, uint256 price1Cumulative)
-    {
+    function _cumulativeFromObservation(
+        Observation memory observation,
+        uint64 observationTimestamp,
+        uint256 targetTimestamp
+    ) internal pure returns (uint256 price0Cumulative, uint256 price1Cumulative) {
         price0Cumulative = observation.price0Cumulative;
         price1Cumulative = observation.price1Cumulative;
 
-        uint256 elapsed = targetTimestamp - observation.timestamp;
+        uint256 elapsed = targetTimestamp - observationTimestamp;
         if (!_hasCumulativePriceDelta(elapsed, observation.reserve0, observation.reserve1)) {
             return (price0Cumulative, price1Cumulative);
         }
@@ -571,7 +792,55 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         return ERC20(token).balanceOf(address(this));
     }
 
-    function _blockTimestamp() internal view returns (uint32) {
-        return uint32(block.timestamp % 2 ** 32);
+    function _requireFeeManager() internal view {
+        if (msg.sender != AmmFactory(factory).feeManager()) revert OnlyFeeManager();
+    }
+
+    function _excessBalance(address token, uint112 reserve) internal view returns (uint256) {
+        uint256 balance = _balance(token);
+        if (balance < reserve) revert BalanceBelowReserve(token, balance, reserve);
+        return balance - reserve;
+    }
+
+    function _requireBalancesAtLeastReserves(uint256 balance0, uint256 balance1) internal view {
+        if (balance0 < reserve0) revert BalanceBelowReserve(token0, balance0, reserve0);
+        if (balance1 < reserve1) revert BalanceBelowReserve(token1, balance1, reserve1);
+    }
+
+    function _requireReserveBalances(uint256 balance0, uint256 balance1) internal pure {
+        if (balance0 > type(uint112).max || balance1 > type(uint112).max) revert ReserveOverflow();
+    }
+
+    function _transferExact(address token, address recipient, uint256 amount) internal {
+        if (amount == 0) return;
+
+        uint256 poolBalanceBefore = _balance(token);
+        uint256 recipientBalanceBefore = ERC20(token).balanceOf(recipient);
+        token.safeTransfer(recipient, amount);
+
+        uint256 poolBalanceAfter = _balance(token);
+        uint256 recipientBalanceAfter = ERC20(token).balanceOf(recipient);
+        if (poolBalanceAfter > poolBalanceBefore || recipientBalanceAfter < recipientBalanceBefore) {
+            revert UnexpectedFeeTransfer(token, amount, 0);
+        }
+
+        uint256 spent = poolBalanceBefore - poolBalanceAfter;
+        uint256 received = recipientBalanceAfter - recipientBalanceBefore;
+        if (spent != amount) revert UnexpectedFeeTransfer(token, amount, spent);
+        if (received != amount) revert UnexpectedFeeTransfer(token, amount, received);
+    }
+
+    function _observationTimestamp() internal view returns (uint64 timestamp) {
+        // forge-lint: disable-next-line(block-timestamp)
+        if (block.timestamp > type(uint64).max) revert TimestampOverflow();
+        // block.timestamp fits uint64 after the explicit bound above.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        timestamp = uint64(block.timestamp);
+    }
+
+    function _truncateTimestamp(uint64 timestamp) internal pure returns (uint32) {
+        // The legacy reserve API deliberately exposes the low 32 bits, while TWAP history uses the full uint64 value.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint32(timestamp);
     }
 }

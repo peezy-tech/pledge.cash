@@ -10,6 +10,7 @@ import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
 import {BoardroomPolicyRegistry} from "../../src/boardroom/BoardroomPolicyRegistry.sol";
 import {BoardroomToken} from "../../src/boardroom/BoardroomToken.sol";
 import {IBoardroomCallPolicy} from "../../src/policy/IBoardroomCallPolicy.sol";
+import {IBoardroomObligationPolicy} from "../../src/policy/IBoardroomObligationPolicy.sol";
 import {TokenGrant} from "../../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
 
@@ -38,7 +39,7 @@ contract BoardroomCurrency {
         return true;
     }
 
-    function transfer(address to, uint256 amount) external returns (bool) {
+    function transfer(address to, uint256 amount) external virtual returns (bool) {
         balanceOf[msg.sender] -= amount;
         balanceOf[to] += amount;
         return true;
@@ -91,6 +92,55 @@ contract BoardroomTestAllowAllPolicy is IBoardroomCallPolicy {
     }
 }
 
+contract ToggleRevertingRedeemableCurrency is BoardroomCurrency {
+    bool public transfersRevert = true;
+
+    constructor() BoardroomCurrency("Toggle", "TGL", 18) {}
+
+    function setTransfersRevert(bool transfersRevert_) external {
+        transfersRevert = transfersRevert_;
+    }
+
+    function transfer(address to, uint256 amount) external override returns (bool) {
+        if (transfersRevert) revert();
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+}
+
+contract BoardroomHookTarget {
+    uint256 public value;
+
+    function setValue(uint256 value_) external {
+        value = value_;
+    }
+}
+
+contract BoardroomFailingObligationPolicy is IBoardroomObligationPolicy {
+    error HookFailed();
+
+    function canCall(address, address, address, uint256, bytes calldata) external pure returns (bool) {
+        return true;
+    }
+
+    function obligationForCall(address, address, uint256, bytes calldata, bytes calldata)
+        external
+        pure
+        returns (Obligation memory)
+    {
+        revert HookFailed();
+    }
+
+    function isLifecycleCallAllowed(address, address, bytes4) external pure returns (bool) {
+        return false;
+    }
+
+    function grantSlotReleaseForLifecycleCall(address, address, bytes4) external pure returns (address) {
+        return address(0);
+    }
+}
+
 contract BoardroomTest is Test {
     struct BoardroomGrantCreate {
         address token;
@@ -118,7 +168,7 @@ contract BoardroomTest is Test {
     uint256 internal constant PAYROLL_AMOUNT = 20_000000;
     uint256 internal constant CLIFF = 1_000;
     uint256 internal constant VESTING_END = 2_000;
-    uint256 internal constant EXPIRY = 3_000;
+    uint256 internal constant EXPIRY = VESTING_END + 2 days;
 
     event PolicyAllowedSet(address indexed policy, bool allowed);
 
@@ -126,15 +176,15 @@ contract BoardroomTest is Test {
         wrappedNative = new WETH();
         policyRegistry = new BoardroomPolicyRegistry(address(this));
         assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
-        tokenGrantFactory = new TokenGrantFactory(address(this));
         boardroomFactory = new BoardroomFactory(address(policyRegistry), address(wrappedNative));
+        tokenGrantFactory = new TokenGrantFactory(address(this), address(boardroomFactory));
         paymentToken = new BoardroomCurrency("Payment", "PAY", 6);
 
         assetPolicy.setAssetAllowed(address(paymentToken), true);
         assetPolicy.setApprovalSpenderAllowed(address(tokenGrantFactory), true);
 
         policyRegistry.setPolicyAllowed(address(assetPolicy), true);
-        policyRegistry.setPolicyAllowed(address(tokenGrantFactory), true);
+        policyRegistry.registerModulePolicy(address(tokenGrantFactory));
 
         paymentToken.mint(holder, 1_000_000000);
     }
@@ -378,7 +428,7 @@ contract BoardroomTest is Test {
         boardroom.executeBatch(tooManyCalls);
     }
 
-    function testLaunchedBoardroomQueuesAndExecutorExecutesReadyAction() public {
+    function testLaunchedBoardroomQueuesAndAnyoneExecutesReadyAction() public {
         (Boardroom boardroom,) = _createBoardroom("launched-queue-execute");
         uint256 delay = 2 days;
 
@@ -405,7 +455,7 @@ contract BoardroomTest is Test {
         assertEq(boardroom.queuedActionEta(actionHash), eta);
 
         vm.prank(stranger);
-        vm.expectRevert(Ownable.Unauthorized.selector);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.ActionNotReady.selector, actionHash, eta, block.timestamp));
         boardroom.executeQueuedAction(call_, salt);
 
         vm.prank(owner);
@@ -414,15 +464,55 @@ contract BoardroomTest is Test {
 
         vm.warp(eta);
         vm.prank(stranger);
-        vm.expectRevert(Ownable.Unauthorized.selector);
         boardroom.executeQueuedAction(call_, salt);
 
         vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.ActionNotQueued.selector, actionHash));
         boardroom.executeQueuedAction(call_, salt);
 
         BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
         assertEq(shareToken.balanceOf(holder), 1 ether);
         assertEq(boardroom.queuedActionEta(actionHash), 0);
+    }
+
+    function testLaunchRejectsZeroAndExcessiveGovernanceDelay() public {
+        (Boardroom boardroom,) = _createBoardroom("launched-delay-bounds");
+        uint256 maximumDelay = boardroom.MAX_GOVERNANCE_DELAY();
+
+        vm.startPrank(owner);
+        vm.expectRevert(Boardroom.InvalidGovernanceDelay.selector);
+        boardroom.launch(0);
+
+        vm.expectRevert(Boardroom.InvalidGovernanceDelay.selector);
+        boardroom.launch(maximumDelay + 1);
+
+        boardroom.launch(maximumDelay);
+        vm.stopPrank();
+
+        assertEq(boardroom.governanceDelay(), 30 days);
+    }
+
+    function testAnyoneCanExecuteReadyQueuedBatch() public {
+        (Boardroom boardroom,) = _createBoardroom("launched-permissionless-batch");
+
+        vm.prank(owner);
+        boardroom.launch(1 days);
+
+        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        calls[0] = _rawCall(address(boardroom), 0, abi.encodeCall(Boardroom.mint, (holder, 1 ether)));
+        calls[1] = _rawCall(address(boardroom), 0, abi.encodeCall(Boardroom.mint, (stranger, 2 ether)));
+        bytes32 salt = keccak256("permissionless-batch");
+
+        vm.prank(owner);
+        (, uint256 eta) = boardroom.queueBatch(calls, salt);
+
+        vm.warp(eta);
+        vm.prank(stranger);
+        boardroom.executeQueuedBatch(calls, salt);
+
+        BoardroomToken shares = BoardroomToken(boardroom.shareToken());
+        assertEq(shares.balanceOf(holder), 1 ether);
+        assertEq(shares.balanceOf(stranger), 2 ether);
     }
 
     function testLaunchedShareholderCanCancelQueuedActionAndStartWindDown() public {
@@ -587,6 +677,47 @@ contract BoardroomTest is Test {
         assertTrue(grant.isClosed());
         assertEq(grant.claimable(), 0);
         assertEq(shareToken.balanceOf(address(boardroom)), GRANT_SIZE);
+        assertEq(boardroom.issuedGrantCount(), 0);
+        assertFalse(boardroom.isIssuedGrant(address(grant)));
+        assertEq(boardroom.obligationPolicyOf(address(grant)), address(tokenGrantFactory));
+    }
+
+    function testPermissionlessPruningRestoresCapacityAfterHolderClosesGrant() public {
+        (Boardroom boardroom,) = _createBoardroom("permissionless-grant-prune");
+        BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
+
+        vm.prank(owner);
+        boardroom.mint(address(boardroom), 2 * GRANT_SIZE);
+
+        TokenGrant firstGrant = _createBoardroomGrant(
+            boardroom,
+            _boardroomGrantCreate(
+                address(shareToken), holder, address(0), GRANT_SIZE, 0, keccak256("holder-closes-grant"), 0
+            )
+        );
+
+        vm.warp(VESTING_END);
+        vm.prank(holder);
+        firstGrant.settle(GRANT_SIZE);
+
+        assertTrue(firstGrant.isClosed());
+        assertEq(boardroom.issuedGrantCount(), 1);
+
+        vm.prank(stranger);
+        boardroom.pruneClosedObligations();
+
+        assertEq(boardroom.issuedGrantCount(), 0);
+        assertFalse(boardroom.isIssuedGrant(address(firstGrant)));
+        assertEq(boardroom.obligationPolicyOf(address(firstGrant)), address(tokenGrantFactory));
+
+        TokenGrant secondGrant = _createBoardroomGrant(
+            boardroom,
+            _boardroomGrantCreate(
+                address(shareToken), stranger, address(0), GRANT_SIZE, 0, keccak256("capacity-restored"), 0
+            )
+        );
+        assertEq(boardroom.issuedGrantCount(), 1);
+        assertTrue(boardroom.isIssuedGrant(address(secondGrant)));
     }
 
     function testBoardroomCannotCallGrantIssuedByAnotherAccount() public {
@@ -694,7 +825,6 @@ contract BoardroomTest is Test {
 
         vm.startPrank(owner);
         boardroom.mint(holder, holderShares);
-        boardroom.registerRedeemableAsset(address(wrappedNative));
         boardroom.startWindDown();
         boardroom.openRedemptions();
         vm.stopPrank();
@@ -721,7 +851,6 @@ contract BoardroomTest is Test {
         vm.startPrank(owner);
         boardroom.mint(holder, holderShares);
         boardroom.mint(stranger, strangerShares);
-        boardroom.registerRedeemableAsset(address(wrappedNative));
         vm.stopPrank();
 
         vm.deal(address(boardroom), nativeAmount);
@@ -797,23 +926,23 @@ contract BoardroomTest is Test {
         assertEq(shareToken.balanceOf(address(boardroom)), 0);
         assertEq(shareToken.totalSupply(), holderShares + strangerShares);
 
-        uint256[] memory minimums = new uint256[](1);
-        minimums[0] = 100_000000;
+        uint256[] memory minimums = new uint256[](2);
+        minimums[1] = 100_000000;
 
         vm.prank(holder);
         uint256[] memory holderAmounts = boardroom.redeem(holderShares, holder, minimums);
 
-        assertEq(holderAmounts.length, 1);
-        assertEq(holderAmounts[0], 100_000000);
+        assertEq(holderAmounts.length, 2);
+        assertEq(holderAmounts[1], 100_000000);
         assertEq(redeemable.balanceOf(holder), 100_000000);
         assertEq(shareToken.balanceOf(holder), 0);
 
-        minimums[0] = 300_000000;
+        minimums[1] = 300_000000;
 
         vm.prank(stranger);
         uint256[] memory strangerAmounts = boardroom.redeem(strangerShares, stranger, minimums);
 
-        assertEq(strangerAmounts[0], 300_000000);
+        assertEq(strangerAmounts[1], 300_000000);
         assertEq(redeemable.balanceOf(stranger), 300_000000);
         assertEq(redeemable.balanceOf(address(boardroom)), 0);
         assertEq(shareToken.totalSupply(), 0);
@@ -838,15 +967,15 @@ contract BoardroomTest is Test {
 
         BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
         vm.prank(holder);
-        shareToken.transfer(address(boardroom), holderShares);
+        assertTrue(shareToken.transfer(address(boardroom), holderShares));
 
-        uint256[] memory minimums = new uint256[](1);
-        minimums[0] = redeemableAmount;
+        uint256[] memory minimums = new uint256[](2);
+        minimums[1] = redeemableAmount;
 
         vm.prank(stranger);
         uint256[] memory amounts = boardroom.redeem(strangerShares, stranger, minimums);
 
-        assertEq(amounts[0], redeemableAmount);
+        assertEq(amounts[1], redeemableAmount);
         assertEq(redeemable.balanceOf(stranger), redeemableAmount);
         assertEq(redeemable.balanceOf(address(boardroom)), 0);
         assertEq(shareToken.balanceOf(address(boardroom)), 0);
@@ -870,14 +999,173 @@ contract BoardroomTest is Test {
 
         redeemable.mint(address(boardroom), redeemableAmount);
 
-        uint256[] memory minimums = new uint256[](1);
+        uint256[] memory minimums = new uint256[](2);
+        vm.prank(holder);
+        uint256[] memory amounts = boardroom.redeem(holderShares, holder, minimums);
+
+        assertEq(amounts[1], 0);
+        assertEq(boardroom.redemptionCredits(holder), holderShares);
+        assertEq(boardroom.allocatedRedemptionShares(holder, address(redeemable)), 0);
+        assertEq(BoardroomToken(boardroom.shareToken()).balanceOf(holder), 0);
+
         vm.prank(holder);
         vm.expectRevert(
             abi.encodeWithSelector(
                 Boardroom.UnexpectedRedeemableAssetBalanceChange.selector, address(redeemable), 50_000000, 50_000001
             )
         );
-        boardroom.redeem(holderShares, holder, minimums);
+        boardroom.claimRedemptionAsset(address(redeemable), holder, 0);
+    }
+
+    function testBadAssetDoesNotBlockOtherAssetsOrOtherHoldersAndCanRetry() public {
+        (Boardroom boardroom,) = _createBoardroom("isolated-redemption-failure");
+        ToggleRevertingRedeemableCurrency failing = new ToggleRevertingRedeemableCurrency();
+        BoardroomCurrency healthy = new BoardroomCurrency("Healthy", "HLT", 18);
+        uint256 holderShares = 50 ether;
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, holderShares);
+        boardroom.mint(stranger, holderShares);
+        boardroom.registerRedeemableAsset(address(failing));
+        boardroom.registerRedeemableAsset(address(healthy));
+        boardroom.startWindDown();
+        boardroom.openRedemptions();
+        vm.stopPrank();
+
+        failing.mint(address(boardroom), 100 ether);
+        healthy.mint(address(boardroom), 100 ether);
+
+        uint256[] memory minimums = new uint256[](3);
+        vm.prank(holder);
+        uint256[] memory holderAmounts = boardroom.redeem(holderShares, holder, minimums);
+        assertEq(holderAmounts[1], 0);
+        assertEq(holderAmounts[2], 50 ether);
+        assertEq(healthy.balanceOf(holder), 50 ether);
+
+        vm.prank(stranger);
+        uint256[] memory strangerAmounts = boardroom.redeem(holderShares, stranger, minimums);
+        assertEq(strangerAmounts[1], 0);
+        assertEq(strangerAmounts[2], 50 ether);
+        assertEq(healthy.balanceOf(stranger), 50 ether);
+
+        failing.setTransfersRevert(false);
+        vm.prank(holder);
+        assertEq(boardroom.claimRedemptionAsset(address(failing), holder, 50 ether), 50 ether);
+        vm.prank(stranger);
+        assertEq(boardroom.claimRedemptionAsset(address(failing), stranger, 50 ether), 50 ether);
+
+        vm.prank(holder);
+        vm.expectRevert(Boardroom.InvalidRedemptionInput.selector);
+        boardroom.claimRedemptionAsset(address(failing), holder, 0);
+    }
+
+    function testMinimumFailureRetainsAssetClaimForRetry() public {
+        (Boardroom boardroom,) = _createBoardroom("redemption-minimum-retry");
+        BoardroomCurrency redeemable = new BoardroomCurrency("Redeemable", "RDM", 18);
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, 50 ether);
+        boardroom.mint(stranger, 50 ether);
+        boardroom.registerRedeemableAsset(address(redeemable));
+        boardroom.startWindDown();
+        boardroom.openRedemptions();
+        vm.stopPrank();
+        redeemable.mint(address(boardroom), 100 ether);
+
+        uint256[] memory minimums = new uint256[](2);
+        minimums[1] = 51 ether;
+        vm.prank(holder);
+        uint256[] memory amounts = boardroom.redeem(50 ether, holder, minimums);
+
+        assertEq(amounts[1], 0);
+        assertEq(boardroom.allocatedRedemptionShares(holder, address(redeemable)), 0);
+
+        vm.prank(holder);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Boardroom.InsufficientRedemptionAmount.selector, address(redeemable), 50 ether, 51 ether
+            )
+        );
+        boardroom.claimRedemptionAsset(address(redeemable), holder, 51 ether);
+
+        vm.prank(holder);
+        assertEq(boardroom.claimRedemptionAsset(address(redeemable), holder, 50 ether), 50 ether);
+    }
+
+    function testLateAssetDepositIsAllocatedToRemainingEntitlementShares() public {
+        (Boardroom boardroom,) = _createBoardroom("redemption-late-deposit");
+        BoardroomCurrency redeemable = new BoardroomCurrency("Redeemable", "RDM", 18);
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, 50 ether);
+        boardroom.mint(stranger, 50 ether);
+        boardroom.registerRedeemableAsset(address(redeemable));
+        boardroom.startWindDown();
+        boardroom.openRedemptions();
+        vm.stopPrank();
+        redeemable.mint(address(boardroom), 100 ether);
+
+        uint256[] memory minimums = new uint256[](2);
+        vm.prank(holder);
+        uint256[] memory firstAmounts = boardroom.redeem(50 ether, holder, minimums);
+        assertEq(firstAmounts[1], 50 ether);
+
+        redeemable.mint(address(boardroom), 100 ether);
+        vm.prank(stranger);
+        uint256[] memory secondAmounts = boardroom.redeem(50 ether, stranger, minimums);
+        assertEq(secondAmounts[1], 150 ether);
+    }
+
+    function testZeroAssetPayoutRetainsCreditUntilLaterFunding() public {
+        (Boardroom boardroom,) = _createBoardroom("redemption-zero-retry");
+        BoardroomCurrency redeemable = new BoardroomCurrency("Redeemable", "RDM", 18);
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, 50 ether);
+        boardroom.registerRedeemableAsset(address(redeemable));
+        boardroom.startWindDown();
+        boardroom.openRedemptions();
+        vm.stopPrank();
+
+        uint256[] memory minimums = new uint256[](2);
+        vm.prank(holder);
+        uint256[] memory amounts = boardroom.redeem(50 ether, holder, minimums);
+
+        assertEq(amounts[1], 0);
+        assertEq(boardroom.redemptionCredits(holder), 50 ether);
+        assertEq(boardroom.allocatedRedemptionShares(holder, address(redeemable)), 0);
+
+        vm.prank(holder);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.ZeroRedemptionAmount.selector, address(redeemable)));
+        boardroom.claimRedemptionAsset(address(redeemable), holder, 0);
+
+        redeemable.mint(address(boardroom), 100 ether);
+
+        vm.prank(holder);
+        assertEq(boardroom.claimRedemptionAsset(address(redeemable), holder, 100 ether), 100 ether);
+        assertEq(boardroom.allocatedRedemptionShares(holder, address(redeemable)), 50 ether);
+    }
+
+    function testRedemptionUsesFullPrecisionMultiplication() public {
+        (Boardroom boardroom,) = _createBoardroom("redemption-full-precision");
+        BoardroomCurrency redeemable = new BoardroomCurrency("Redeemable", "RDM", 18);
+        uint256 holderShares = uint256(1) << 100;
+        uint256 assetBalance = uint256(1) << 200;
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, holderShares);
+        boardroom.mint(stranger, holderShares);
+        boardroom.registerRedeemableAsset(address(redeemable));
+        boardroom.startWindDown();
+        boardroom.openRedemptions();
+        vm.stopPrank();
+        redeemable.mint(address(boardroom), assetBalance);
+
+        uint256[] memory minimums = new uint256[](2);
+        vm.prank(holder);
+        uint256[] memory amounts = boardroom.redeem(holderShares, holder, minimums);
+
+        assertEq(amounts[1], uint256(1) << 199);
     }
 
     function testBoardroomRejectsMintAndNewGrantAfterWindDown() public {
@@ -996,6 +1284,84 @@ contract BoardroomTest is Test {
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(Boardroom.ModulePolicyRequired.selector, address(tokenGrantFactory)));
         boardroom.execute(_rawCall(address(tokenGrantFactory), 0, _createGrantData(create)));
+    }
+
+    function testDisabledModuleIdentityStillRejectsRawFactoryCalls() public {
+        policyRegistry.setPolicyAllowed(address(tokenGrantFactory), false);
+
+        (Boardroom boardroom,) = _createBoardroom("raw-disabled-module-target");
+        BoardroomGrantCreate memory create = _boardroomGrantCreate(
+            address(paymentToken), holder, address(0), PAYROLL_AMOUNT, 0, keccak256("raw-disabled"), 0
+        );
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.ModulePolicyRequired.selector, address(tokenGrantFactory)));
+        boardroom.execute(_rawCall(address(tokenGrantFactory), 0, _createGrantData(create)));
+    }
+
+    function testCanonicalLifecyclePolicyWorksAfterCentralDisableAndRejectsBypasses() public {
+        (Boardroom boardroom,) = _createBoardroom("disabled-canonical-cleanup");
+        BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
+
+        vm.prank(owner);
+        boardroom.mint(address(boardroom), GRANT_SIZE);
+
+        TokenGrant grant = _createBoardroomGrant(
+            boardroom,
+            _boardroomGrantCreate(
+                address(shareToken), holder, address(0), GRANT_SIZE, 0, keccak256("disabled-cleanup"), 0
+            )
+        );
+        policyRegistry.setPolicyAllowed(address(tokenGrantFactory), false);
+        assertTrue(policyRegistry.isPolicyLifecycleAllowed(address(tokenGrantFactory)));
+
+        bytes memory closeData = abi.encodeCall(TokenGrant.stopVestingAndWithdrawUnvested, ());
+        vm.startPrank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Boardroom.ObligationPolicyMismatch.selector, address(grant), address(tokenGrantFactory), address(0)
+            )
+        );
+        boardroom.execute(_rawCall(address(grant), 0, closeData));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Boardroom.ObligationPolicyMismatch.selector,
+                address(grant),
+                address(tokenGrantFactory),
+                address(assetPolicy)
+            )
+        );
+        boardroom.execute(_assetCall(address(grant), 0, closeData));
+
+        boardroom.execute(_tokenGrantFactoryCall(address(grant), 0, closeData));
+        vm.stopPrank();
+
+        assertTrue(grant.isClosed());
+        assertEq(boardroom.issuedGrantCount(), 0);
+        assertEq(boardroom.obligationPolicyOf(address(grant)), address(tokenGrantFactory));
+    }
+
+    function testObligationHookFailureRevertsModuleCallButPlainPolicyStillWorks() public {
+        BoardroomHookTarget target = new BoardroomHookTarget();
+        BoardroomFailingObligationPolicy failingPolicy = new BoardroomFailingObligationPolicy();
+        BoardroomTestAllowAllPolicy plainPolicy = new BoardroomTestAllowAllPolicy();
+        policyRegistry.registerModulePolicy(address(failingPolicy));
+        policyRegistry.setPolicyAllowed(address(plainPolicy), true);
+
+        (Boardroom boardroom,) = _createBoardroom("fail-closed-module-hook");
+        bytes memory data = abi.encodeCall(BoardroomHookTarget.setValue, (42));
+
+        vm.prank(owner);
+        vm.expectRevert(BoardroomFailingObligationPolicy.HookFailed.selector);
+        boardroom.execute(
+            Boardroom.Call({policy: address(failingPolicy), target: address(target), value: 0, data: data})
+        );
+        assertEq(target.value(), 0);
+
+        vm.prank(owner);
+        boardroom.execute(Boardroom.Call({policy: address(plainPolicy), target: address(target), value: 0, data: data}));
+        assertEq(target.value(), 42);
     }
 
     function testBoardroomRejectsInvalidRedeemableAssets() public {

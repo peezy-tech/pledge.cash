@@ -14,4 +14,17 @@ describe("runtime deployment artifacts", () => {
 
     expect(isRuntimeDeploymentForChain(deployment, 10143)).toBe(false);
   });
+
+  test("preserves permanent module-policy identity fields", () => {
+    const deployment = parseDeployment(`{
+      "chainId": 998,
+      "tokenGrantModulePolicy": true,
+      "distributionModulePolicy": false,
+      "lockedLiquidityModulePolicy": true
+    }`);
+
+    expect(deployment.tokenGrantModulePolicy).toBe(true);
+    expect(deployment.distributionModulePolicy).toBe(false);
+    expect(deployment.lockedLiquidityModulePolicy).toBe(true);
+  });
 });

@@ -15,6 +15,7 @@ import {
   buildBoardroomMerkleAirdropCancelAction,
   buildBoardroomMerkleAirdropCloseAction,
   buildBoardroomBurnTreasurySharesTransaction,
+  buildBoardroomClaimRedemptionAssetTransaction,
   buildBoardroomMintTransaction,
   buildBoardroomMigratingCurveBatch,
   buildBoardroomMigratingCurveCancelAction,
@@ -387,6 +388,18 @@ describe("SDK action and query helpers", () => {
       functionName: "redeem",
       args: [10n, holder, [1n, 2n]],
     });
+    expect(
+      buildBoardroomClaimRedemptionAssetTransaction({
+        boardroom,
+        asset: paymentToken,
+        recipient: holder,
+        minAmountOut: 5n,
+      }),
+    ).toMatchObject({
+      address: boardroom,
+      functionName: "claimRedemptionAsset",
+      args: [paymentToken, holder, 5n],
+    });
   });
 
   test("builds Boardroom fixed-price sale batch transaction inputs", () => {
@@ -605,14 +618,12 @@ describe("SDK action and query helpers", () => {
         amount: 250n,
         terms: airdropGrantTerms,
         proof,
-        creationFee: 10n,
       }),
     ).toMatchObject({
       address: airdrop,
       abi: merkleAirdropAbi,
       functionName: "claimGrant",
       args: [2n, holder, 250n, airdropGrantTerms, proof],
-      value: 10n,
     });
   });
 

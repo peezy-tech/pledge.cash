@@ -1,6 +1,7 @@
 import {
   boardroomFactoryAbi,
   buildBoardroomBurnTreasurySharesTransaction,
+  buildBoardroomClaimRedemptionAssetTransaction,
   buildBoardroomExecuteTransaction,
   buildBoardroomFixedPriceSaleBatch,
   buildBoardroomFixedPriceSaleCancelAction,
@@ -177,6 +178,7 @@ import type {
   MigratingCurveForm,
   WindDownForm,
 } from "../lib/types";
+
 import { initialView, viewFromPath, viewHref, viewUsesProjectDashboard, type AppView } from "./routing";
 import { ProjectContextBar } from "./views/project-context";
 import { SentinelSettingsView } from "./views/sentinel-settings";
@@ -194,6 +196,8 @@ export { parseDeployment } from "../lib/deployment";
 export { viewFromPath, viewHref, viewUsesProjectDashboard } from "./routing";
 export type { AppView } from "./routing";
 export { manageWorkspaceSummary } from "./views/workspace-helpers";
+
+const MIN_SETTLEMENT_GRACE_SECONDS = 86_400n;
 
 type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
 export type GrantIssuerBoardroomAccess = { boardroom: Address; owner: Address };
@@ -825,6 +829,9 @@ export function App(): React.JSX.Element {
     const expiry = uintInput(grantForm.expiry, "Expiry");
     const vestingCliff = uintInput(grantForm.vestingCliff, "Vesting cliff");
     const vestingEnd = uintInput(grantForm.vestingEnd, "Vesting end");
+    if (expiry < vestingEnd + MIN_SETTLEMENT_GRACE_SECONDS) {
+      throw new Error("Expiry must leave at least one day to settle after vesting ends.");
+    }
     const transferUnlockTime = grantForm.transferable
       ? uintInput(grantForm.transferUnlockTime, "Transfer unlock time")
       : 0n;
@@ -1043,6 +1050,9 @@ export function App(): React.JSX.Element {
     const expiry = uintInput(boardroomGrantForm.expiry, "Grant expiry");
     const vestingCliff = uintInput(boardroomGrantForm.vestingCliff, "Grant vesting cliff");
     const vestingEnd = uintInput(boardroomGrantForm.vestingEnd, "Grant vesting end");
+    if (expiry < vestingEnd + MIN_SETTLEMENT_GRACE_SECONDS) {
+      throw new Error("Grant expiry must leave at least one day to settle after vesting ends.");
+    }
     const transferUnlockTime = boardroomGrantForm.transferable
       ? uintInput(boardroomGrantForm.transferUnlockTime, "Grant transfer unlock time")
       : 0n;
@@ -1588,6 +1598,25 @@ export function App(): React.JSX.Element {
     await refreshBoardroom(boardroom.address);
   };
 
+  const claimBoardroomRedemptionAsset = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const asset = requireAddress(windDownForm.claimAsset, "Redemption claim asset");
+    const recipient = windDownForm.claimRecipient.trim()
+      ? requireAddress(windDownForm.claimRecipient, "Redemption claim recipient")
+      : activeAccount();
+    const minAmountOut = await parseErc20Amount(
+      publicClient,
+      windDownForm.claimMinAmount,
+      asset,
+      "Redemption claim minimum",
+    );
+    await submitContractTransaction(
+      "Boardroom redemption asset claim",
+      buildBoardroomClaimRedemptionAssetTransaction({ boardroom: boardroom.address, asset, recipient, minAmountOut }),
+    );
+    await refreshBoardroom(boardroom.address);
+  };
+
   const scanDiscoveryRange = async ({ chunkSize, fromBlock, toBlock, rangeMode = "manual" }: DiscoveryScanRange): Promise<void> => {
     if (!wallet.account) throw new Error("Connect wallet first.");
     if (!deployment) throw new Error("Load a deployment artifact first.");
@@ -1954,6 +1983,7 @@ export function App(): React.JSX.Element {
       windDown={{
         form: windDownForm,
         burnTreasuryShares,
+        claimRedemptionAsset: claimBoardroomRedemptionAsset,
         openRedemptions,
         redeemShares: redeemBoardroomShares,
         registerRedeemableAsset,

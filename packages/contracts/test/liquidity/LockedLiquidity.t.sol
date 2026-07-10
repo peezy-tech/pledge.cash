@@ -82,6 +82,50 @@ contract LockedLiquidityFeeToken {
     }
 }
 
+contract LockedLiquiditySenderSurchargeToken {
+    string public name = "Sender Surcharge Token";
+    string public symbol = "SST";
+    uint8 public decimals = 18;
+    uint256 public totalSupply;
+    address public surchargedSender;
+
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
+
+    function setSurchargedSender(address sender) external {
+        surchargedSender = sender;
+    }
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+        totalSupply += amount;
+    }
+
+    function approve(address spender, uint256 amount) external returns (bool) {
+        allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function transfer(address to, uint256 amount) external returns (bool) {
+        _transfer(msg.sender, to, amount);
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+        uint256 allowed = allowance[from][msg.sender];
+        if (allowed != type(uint256).max) allowance[from][msg.sender] = allowed - amount;
+        _transfer(from, to, amount);
+        return true;
+    }
+
+    function _transfer(address from, address to, uint256 amount) internal {
+        uint256 surcharge = from == surchargedSender ? amount / 100 : 0;
+        balanceOf[from] -= amount + surcharge;
+        balanceOf[to] += amount;
+        totalSupply -= surcharge;
+    }
+}
+
 contract LockedLiquidityPoolTransferFeeToken {
     string public name = "Pool Fee Token";
     string public symbol = "PFT";
@@ -132,6 +176,35 @@ contract LockedLiquidityTestAllowAllPolicy is IBoardroomCallPolicy {
     }
 }
 
+contract LockedLiquidityTestBoardroom {
+    address public immutable shareToken;
+    bool public lockedLiquidityExitAllowed;
+
+    constructor(address shareToken_) {
+        shareToken = shareToken_;
+    }
+
+    function isIssuedDistribution(address) external pure returns (bool) {
+        return false;
+    }
+
+    function approveToken(address token, address spender, uint256 amount) external {
+        ERC20(token).approve(spender, amount);
+    }
+
+    function createLockedLiquidity(LockedLiquidityFactory factory, LockedLiquidityFactory.CreateParams calldata params)
+        external
+        returns (address locker, address pool, uint256 amountA, uint256 amountB, uint256 liquidity)
+    {
+        return factory.createLockedLiquidity(params);
+    }
+
+    function exitLockedLiquidity(address locker) external {
+        lockedLiquidityExitAllowed = true;
+        LockedLiquidity(locker).exitToBoardroom(1, 1, block.timestamp);
+    }
+}
+
 contract LockedLiquidityTest is Test {
     struct CreatedLocker {
         address locker;
@@ -156,6 +229,7 @@ contract LockedLiquidityTest is Test {
 
     uint256 internal constant SHARE_SEED = 1_000 ether;
     uint256 internal constant QUOTE_SEED = 1_000 ether;
+    uint256 internal constant SEED_MINIMUM = 950 ether;
     uint256 internal constant HOLDER_SHARES = 100 ether;
 
     function setUp() public {
@@ -171,7 +245,7 @@ contract LockedLiquidityTest is Test {
         assetPolicy.setAssetAllowed(address(quoteToken), true);
         assetPolicy.setApprovalSpenderAllowed(address(lockedLiquidityFactory), true);
         policyRegistry.setPolicyAllowed(address(assetPolicy), true);
-        policyRegistry.setPolicyAllowed(address(lockedLiquidityFactory), true);
+        policyRegistry.registerModulePolicy(address(lockedLiquidityFactory));
     }
 
     function testBoardroomCreatesAndRecordsLockedLiquidity() public {
@@ -189,7 +263,8 @@ contract LockedLiquidityTest is Test {
         assertEq(boardroom.lockedLiquidityCount(), 1);
         assertEq(boardroom.lockedLiquidityAt(0), created.locker);
         assertTrue(boardroom.isLockedLiquidity(created.locker));
-        assertEq(boardroom.redeemableAssetCount(), 1);
+        assertEq(boardroom.redeemableAssetCount(), 2);
+        assertTrue(boardroom.isRedeemableAsset(address(wrappedNative)));
         assertTrue(boardroom.isRedeemableAsset(address(quoteToken)));
 
         LockedLiquidity locker = LockedLiquidity(created.locker);
@@ -218,8 +293,8 @@ contract LockedLiquidityTest is Test {
             tokenB: address(quoteToken),
             amountADesired: SHARE_SEED,
             amountBDesired: QUOTE_SEED,
-            amountAMin: 1,
-            amountBMin: 1,
+            amountAMin: SEED_MINIMUM,
+            amountBMin: SEED_MINIMUM,
             deadline: block.timestamp,
             salt: keccak256("wrapper")
         });
@@ -238,6 +313,88 @@ contract LockedLiquidityTest is Test {
             abi.encodeWithSelector(Boardroom.ModulePolicyRequired.selector, address(lockedLiquidityFactory))
         );
         boardroom.executeBatch(calls);
+    }
+
+    function testFactoryEnforcesFivePercentMaximumSeedSlippageOnBothTokens() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-slippage-bound");
+        LockedLiquidityFactory.CreateParams memory params = LockedLiquidityFactory.CreateParams({
+            tokenA: address(shareToken),
+            tokenB: address(quoteToken),
+            amountADesired: SHARE_SEED,
+            amountBDesired: QUOTE_SEED,
+            amountAMin: SEED_MINIMUM - 1,
+            amountBMin: SEED_MINIMUM,
+            deadline: block.timestamp,
+            salt: keccak256("unsafe-seed-minimum")
+        });
+
+        bytes memory data = abi.encodeCall(LockedLiquidityFactory.createLockedLiquidity, (params));
+        assertFalse(lockedLiquidityFactory.canCall(address(boardroom), owner, address(lockedLiquidityFactory), 0, data));
+
+        vm.prank(address(boardroom));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LockedLiquidityFactory.UnsafeLiquidityMinimums.selector,
+                SEED_MINIMUM - 1,
+                SEED_MINIMUM,
+                SEED_MINIMUM,
+                SEED_MINIMUM
+            )
+        );
+        lockedLiquidityFactory.createLockedLiquidity(params);
+    }
+
+    function testHostilePreseededPoolRatioCannotExtractBoardroomMigrationValue() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-hostile-preseed");
+
+        vm.prank(owner);
+        boardroom.mint(trader, SHARE_SEED);
+        quoteToken.mint(trader, 10 ether);
+        vm.startPrank(trader);
+        shareToken.approve(address(router), SHARE_SEED);
+        quoteToken.approve(address(router), 10 ether);
+        router.addLiquidity(
+            address(shareToken),
+            address(quoteToken),
+            SHARE_SEED,
+            10 ether,
+            SHARE_SEED,
+            10 ether,
+            trader,
+            block.timestamp
+        );
+        vm.stopPrank();
+
+        vm.prank(owner);
+        boardroom.mint(address(boardroom), SHARE_SEED);
+        quoteToken.mint(address(boardroom), QUOTE_SEED);
+
+        LockedLiquidityFactory.CreateParams memory params = LockedLiquidityFactory.CreateParams({
+            tokenA: address(shareToken),
+            tokenB: address(quoteToken),
+            amountADesired: SHARE_SEED,
+            amountBDesired: QUOTE_SEED,
+            amountAMin: SEED_MINIMUM,
+            amountBMin: SEED_MINIMUM,
+            deadline: block.timestamp,
+            salt: keccak256("hostile-preseed-migration")
+        });
+        Boardroom.Call[] memory calls = new Boardroom.Call[](3);
+        calls[0] = _approvalCall(address(shareToken), SHARE_SEED);
+        calls[1] = _approvalCall(address(quoteToken), QUOTE_SEED);
+        calls[2] = _policyCall(
+            address(lockedLiquidityFactory),
+            address(lockedLiquidityFactory),
+            abi.encodeCall(LockedLiquidityFactory.createLockedLiquidity, (params))
+        );
+
+        vm.prank(owner);
+        vm.expectRevert(AmmRouter.InsufficientAmount.selector);
+        boardroom.executeBatch(calls);
+
+        assertEq(lockedLiquidityFactory.lockerCountForBoardroom(address(boardroom)), 0);
+        assertEq(shareToken.balanceOf(address(boardroom)), SHARE_SEED);
+        assertEq(quoteToken.balanceOf(address(boardroom)), QUOTE_SEED);
     }
 
     function testWindDownRequiresLockedLiquidityExitBeforeRedemptions() public {
@@ -277,6 +434,59 @@ contract LockedLiquidityTest is Test {
         assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
     }
 
+    function testAnyoneCanPruneClosedLockerWithoutErasingFactoryIdentity() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-permissionless-prune");
+        CreatedLocker memory created = _createLockedLiquidity(
+            boardroom, shareToken, address(quoteToken), address(lockedLiquidityFactory), "permissionless-prune"
+        );
+
+        vm.prank(owner);
+        boardroom.startWindDown();
+        vm.prank(owner);
+        boardroom.exitLockedLiquidity(created.locker, 1, 1, block.timestamp);
+        assertEq(lockedLiquidityFactory.lockerCountForBoardroom(address(boardroom)), 1);
+
+        vm.prank(trader);
+        uint256 pruned = lockedLiquidityFactory.pruneClosedLockers(address(boardroom));
+        assertEq(pruned, 1);
+        assertEq(lockedLiquidityFactory.lockerCountForBoardroom(address(boardroom)), 0);
+        assertTrue(lockedLiquidityFactory.isLocker(created.locker));
+        assertEq(lockedLiquidityFactory.lockerBoardroom(created.locker), address(boardroom));
+        assertEq(lockedLiquidityFactory.lockerForBoardroomPool(address(boardroom), created.pool), created.locker);
+    }
+
+    function testCreationPrunesClosedLockerAndRestoresFactoryCapacity() public {
+        LockedLiquidityTestERC20 mockShare = new LockedLiquidityTestERC20("Mock Share", "MSHARE", 18);
+        LockedLiquidityTestBoardroom mockBoardroom = new LockedLiquidityTestBoardroom(address(mockShare));
+        mockShare.mint(address(mockBoardroom), 100 ether);
+        mockBoardroom.approveToken(address(mockShare), address(lockedLiquidityFactory), type(uint256).max);
+
+        uint256 capacity = lockedLiquidityFactory.MAX_LOCKERS_PER_BOARDROOM();
+        address firstLocker;
+        address firstPool;
+        for (uint256 i; i < capacity; ++i) {
+            (address locker, address pool) = _createMockLockedLiquidity(mockBoardroom, mockShare, i);
+            if (i == 0) {
+                firstLocker = locker;
+                firstPool = pool;
+            }
+        }
+        assertEq(lockedLiquidityFactory.lockerCountForBoardroom(address(mockBoardroom)), capacity);
+
+        mockBoardroom.exitLockedLiquidity(firstLocker);
+        assertEq(LockedLiquidity(firstLocker).lockedLiquidity(), 0);
+        assertEq(lockedLiquidityFactory.lockerCountForBoardroom(address(mockBoardroom)), capacity);
+
+        _createMockLockedLiquidity(mockBoardroom, mockShare, capacity);
+        assertEq(lockedLiquidityFactory.lockerCountForBoardroom(address(mockBoardroom)), capacity);
+        assertTrue(lockedLiquidityFactory.isLocker(firstLocker));
+        assertEq(lockedLiquidityFactory.lockerBoardroom(firstLocker), address(mockBoardroom));
+        assertEq(lockedLiquidityFactory.lockerForBoardroomPool(address(mockBoardroom), firstPool), firstLocker);
+        for (uint256 i; i < capacity; ++i) {
+            assertNotEq(lockedLiquidityFactory.lockerForBoardroomAt(address(mockBoardroom), i), firstLocker);
+        }
+    }
+
     function testLaunchedWindDownCanExecuteQueuedLockedLiquidityExitSelfCall() public {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-launched-exit");
         CreatedLocker memory created = _createLockedLiquidity(
@@ -312,6 +522,7 @@ contract LockedLiquidityTest is Test {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-fees");
         CreatedLocker memory created =
             _createLockedLiquidity(boardroom, shareToken, address(quoteToken), address(lockedLiquidityFactory), "fees");
+        vm.roll(block.number + 1);
 
         quoteToken.mint(trader, 100 ether);
         vm.startPrank(trader);
@@ -339,7 +550,8 @@ contract LockedLiquidityTest is Test {
 
         vm.startPrank(owner);
         uint256 maxAssets = boardroom.MAX_REDEEMABLE_ASSETS();
-        for (uint256 i; i < maxAssets; ++i) {
+        uint256 existingAssets = boardroom.redeemableAssetCount();
+        for (uint256 i; i < maxAssets - existingAssets; ++i) {
             boardroom.registerRedeemableAsset(vm.addr(0x1000 + i));
         }
         boardroom.mint(address(boardroom), SHARE_SEED);
@@ -351,8 +563,8 @@ contract LockedLiquidityTest is Test {
             tokenB: address(quoteToken),
             amountADesired: SHARE_SEED,
             amountBDesired: QUOTE_SEED,
-            amountAMin: 1,
-            amountBMin: 1,
+            amountAMin: SEED_MINIMUM,
+            amountBMin: SEED_MINIMUM,
             deadline: block.timestamp,
             salt: keccak256("capacity")
         });
@@ -413,8 +625,8 @@ contract LockedLiquidityTest is Test {
             tokenB: address(otherToken),
             amountADesired: QUOTE_SEED,
             amountBDesired: QUOTE_SEED,
-            amountAMin: 1,
-            amountBMin: 1,
+            amountAMin: SEED_MINIMUM,
+            amountBMin: SEED_MINIMUM,
             deadline: block.timestamp,
             salt: keccak256("without-share-token")
         });
@@ -445,8 +657,8 @@ contract LockedLiquidityTest is Test {
             tokenB: address(quoteToken),
             amountADesired: SHARE_SEED,
             amountBDesired: QUOTE_SEED,
-            amountAMin: 1,
-            amountBMin: 1,
+            amountAMin: SEED_MINIMUM,
+            amountBMin: SEED_MINIMUM,
             deadline: block.timestamp,
             salt: keccak256("direct-non-boardroom")
         });
@@ -469,8 +681,8 @@ contract LockedLiquidityTest is Test {
             tokenB: address(feeToken),
             amountADesired: SHARE_SEED,
             amountBDesired: QUOTE_SEED,
-            amountAMin: 1,
-            amountBMin: 1,
+            amountAMin: SEED_MINIMUM,
+            amountBMin: SEED_MINIMUM,
             deadline: block.timestamp,
             salt: keccak256("fee-token")
         });
@@ -495,6 +707,47 @@ contract LockedLiquidityTest is Test {
             )
         );
         boardroom.executeBatch(calls);
+    }
+
+    function testLockedLiquidityFactoryRejectsSenderSurchargeSeedToken() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-surcharge-token");
+        LockedLiquiditySenderSurchargeToken surchargeToken = new LockedLiquiditySenderSurchargeToken();
+
+        vm.prank(owner);
+        boardroom.mint(address(boardroom), SHARE_SEED);
+        surchargeToken.mint(address(boardroom), 1_010 ether);
+        surchargeToken.setSurchargedSender(address(boardroom));
+        assetPolicy.setAssetAllowed(address(surchargeToken), true);
+
+        LockedLiquidityFactory.CreateParams memory params = LockedLiquidityFactory.CreateParams({
+            tokenA: address(shareToken),
+            tokenB: address(surchargeToken),
+            amountADesired: SHARE_SEED,
+            amountBDesired: QUOTE_SEED,
+            amountAMin: SEED_MINIMUM,
+            amountBMin: SEED_MINIMUM,
+            deadline: block.timestamp,
+            salt: keccak256("sender-surcharge-token")
+        });
+        Boardroom.Call[] memory calls = new Boardroom.Call[](3);
+        calls[0] = _approvalCall(address(shareToken), SHARE_SEED);
+        calls[1] = _approvalCall(address(surchargeToken), QUOTE_SEED);
+        calls[2] = _policyCall(
+            address(lockedLiquidityFactory),
+            address(lockedLiquidityFactory),
+            abi.encodeCall(LockedLiquidityFactory.createLockedLiquidity, (params))
+        );
+
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LockedLiquidityFactory.TransferAmountMismatch.selector, address(surchargeToken), QUOTE_SEED, 1_010 ether
+            )
+        );
+        boardroom.executeBatch(calls);
+
+        assertEq(surchargeToken.balanceOf(address(boardroom)), 1_010 ether);
+        assertEq(lockedLiquidityFactory.lockerCountForBoardroom(address(boardroom)), 0);
     }
 
     function _createBoardroom(string memory saltLabel)
@@ -537,8 +790,8 @@ contract LockedLiquidityTest is Test {
             tokenB: quote,
             amountADesired: SHARE_SEED,
             amountBDesired: QUOTE_SEED,
-            amountAMin: 1,
-            amountBMin: 1,
+            amountAMin: SEED_MINIMUM,
+            amountBMin: SEED_MINIMUM,
             deadline: block.timestamp,
             salt: salt
         });
@@ -558,6 +811,28 @@ contract LockedLiquidityTest is Test {
             abi.decode(results[2], (address, address, uint256, uint256, uint256));
 
         assertEq(created.locker, predictedLocker);
+    }
+
+    function _createMockLockedLiquidity(
+        LockedLiquidityTestBoardroom mockBoardroom,
+        LockedLiquidityTestERC20 mockShare,
+        uint256 index
+    ) internal returns (address locker, address pool) {
+        LockedLiquidityTestERC20 mockQuote = new LockedLiquidityTestERC20("Mock Quote", "MQUOTE", 18);
+        mockQuote.mint(address(mockBoardroom), 2 ether);
+        mockBoardroom.approveToken(address(mockQuote), address(lockedLiquidityFactory), type(uint256).max);
+
+        LockedLiquidityFactory.CreateParams memory params = LockedLiquidityFactory.CreateParams({
+            tokenA: address(mockShare),
+            tokenB: address(mockQuote),
+            amountADesired: 1 ether,
+            amountBDesired: 1 ether,
+            amountAMin: 0.95 ether,
+            amountBMin: 0.95 ether,
+            deadline: block.timestamp,
+            salt: keccak256(abi.encode("mock-active-locker", index))
+        });
+        (locker, pool,,,) = mockBoardroom.createLockedLiquidity(lockedLiquidityFactory, params);
     }
 
     function _approvalCall(address token, uint256 amount) internal view returns (Boardroom.Call memory) {

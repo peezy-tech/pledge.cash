@@ -243,7 +243,9 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
 
     function canMigrate() public view returns (bool) {
         if (curveStatus != CurveStatus.Active) return false;
-        if (quoteReserve() >= graduationQuoteTarget) return true;
+        uint256 reserve = quoteReserve();
+        if (_quoteToLiquidity(reserve) == 0) return false;
+        if (reserve >= graduationQuoteTarget) return true;
         return remainingSaleShares == 0;
     }
 
@@ -293,11 +295,13 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         address boardroom_,
         address lockedLiquidityFactory_,
         CreateParams calldata params
-    ) internal pure {
+    ) internal view {
         _requireValidCreateAddresses(boardroom_, lockedLiquidityFactory_, params);
         _requireValidCurveParameters(params);
         if (params.quoteToLpBps == 0 || params.quoteToLpBps > BPS) revert InvalidBasisPoints();
-        if (params.endTime != 0 && params.endTime < params.startTime) revert InvalidTimeWindow();
+        if (params.endTime != 0 && (params.endTime <= params.startTime || uint256(params.endTime) <= block.timestamp)) {
+            revert InvalidTimeWindow();
+        }
     }
 
     function _requireValidCreateAddresses(
@@ -398,7 +402,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     }
 
     function _quoteToLiquidity(uint256 quoteBalance) internal view returns (uint256) {
-        return quoteBalance * quoteToLpBps / BPS;
+        return FixedPointMathLib.fullMulDiv(quoteBalance, quoteToLpBps, BPS);
     }
 
     function _isWithinBuyWindow() internal view returns (bool) {

@@ -32,6 +32,35 @@ describe("analyzeAction", () => {
       expect(existsSync(join(req.workspaceDir, "docs", "boardroom-protocol.md"))).toBe(true);
       expect(existsSync(join(req.workspaceDir, "docs", "abi-excerpts.json"))).toBe(true);
 
+      const abiExcerpts = JSON.parse(
+        await readFile(join(req.workspaceDir, "docs", "abi-excerpts.json"), "utf8")
+      ) as Record<string, Array<{ name?: string }>>;
+      expect(abiExcerpts.BoardroomPolicyRegistry?.map((item) => item.name)).toEqual(
+        expect.arrayContaining(["ModulePolicyRegistered", "isModulePolicy", "registerModulePolicy"])
+      );
+      expect(abiExcerpts.Boardroom?.map((item) => item.name)).toEqual(
+        expect.arrayContaining([
+          "claimRedemptionAsset",
+          "RedemptionAssetClaimFailed",
+          "RedemptionAssetClaimed",
+          "SharesRedeemed"
+        ])
+      );
+      expect(abiExcerpts.AssetPolicy?.map((item) => item.name)).toEqual(
+        expect.arrayContaining(["canCall", "setApprovalSpenderAllowed", "setAssetAllowed"])
+      );
+      expect(abiExcerpts.DistributionFactory?.map((item) => item.name)).toEqual(
+        expect.arrayContaining([
+          "createFixedPriceSale",
+          "createMerkleAirdrop",
+          "createMigratingBondingCurve",
+          "isDistribution"
+        ])
+      );
+      expect(abiExcerpts.TokenGrantFactory?.map((item) => item.name)).toEqual(
+        expect.arrayContaining(["createGrant", "createGrantFromDistribution", "setCreationFee"])
+      );
+
       await writeFile(
         join(req.workspaceDir, ANALYSIS_FILENAME),
         JSON.stringify({

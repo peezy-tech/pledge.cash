@@ -39,7 +39,7 @@ export function defaultTimes(): Pick<GrantForm, "vestingCliff" | "vestingEnd" | 
   return {
     vestingCliff: secondsAfter(now, SECONDS_PER_MINUTE),
     vestingEnd: secondsAfter(now, SECONDS_PER_HOUR),
-    expiry: secondsAfter(now, 2 * SECONDS_PER_HOUR),
+    expiry: secondsAfter(now, 2 * SECONDS_PER_DAY),
   };
 }
 
@@ -123,8 +123,8 @@ export function defaultLockedLiquidityForm(): LockedLiquidityForm {
     quoteToken: "",
     shareAmountDesired: "1",
     quoteAmountDesired: "1",
-    shareAmountMin: "0",
-    quoteAmountMin: "0",
+    shareAmountMin: "0.95",
+    quoteAmountMin: "0.95",
     deadline: defaultDeadline(),
     salt: randomSalt(),
     shareTokenSide: "tokenA",
@@ -133,8 +133,8 @@ export function defaultLockedLiquidityForm(): LockedLiquidityForm {
 
 export function defaultCurveMigrationForm(): CurveMigrationForm {
   return {
-    minShareLiquidity: "0",
-    minQuoteLiquidity: "0",
+    minShareLiquidity: "",
+    minQuoteLiquidity: "",
     deadline: defaultDeadline(),
   };
 }
@@ -153,6 +153,9 @@ export function defaultWindDownForm(): WindDownForm {
     redeemShares: "0",
     redeemRecipient: "",
     minAmountsOut: "",
+    claimAsset: "",
+    claimRecipient: "",
+    claimMinAmount: "0",
   };
 }
 

@@ -20,8 +20,11 @@ const ADDRESS_DEPLOYMENT_FIELDS = [
 ] as const;
 const BOOLEAN_DEPLOYMENT_FIELDS = [
   "tokenGrantPolicyAllowed",
+  "tokenGrantModulePolicy",
   "distributionPolicyAllowed",
+  "distributionModulePolicy",
   "lockedLiquidityPolicyAllowed",
+  "lockedLiquidityModulePolicy",
   "assetPolicyAllowed",
   "assetWrappedNativeAllowed",
   "assetTokenGrantSpenderAllowed",

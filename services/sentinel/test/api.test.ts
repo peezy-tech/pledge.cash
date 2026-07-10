@@ -118,7 +118,7 @@ class InMemoryStore implements SentinelApiStore {
         findings: [
           {
             callIndex: 0,
-            detail: "Executor update can redirect execution authority.",
+            detail: "Executor update can redirect queue authority; ready execution remains permissionless.",
             ruleId: "executor-change",
             severity: "high"
           }

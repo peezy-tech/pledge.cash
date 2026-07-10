@@ -24,7 +24,9 @@ This document describes the Boardroom distribution primitives in `packages/contr
   closed, or cancelled.
 - Locked liquidity: AMM LP tokens held by `LockedLiquidity` after a curve migrates.
 
-Native value is not used by these distribution flows.
+Native value is not used by these distribution flows. In particular, a Merkle grant claim is fee-exempt even when the
+shared `TokenGrantFactory` charges a native fee for direct grants. A mutable factory fee therefore cannot invalidate a
+committed airdrop entitlement.
 
 ## State Machines
 
@@ -41,7 +43,10 @@ State:
 - `isDistribution`: whether an address is a factory-created distribution.
 - `distributionBoardroom`: Boardroom that created a distribution.
 - `distributionKind`: distribution type.
-- `distributionsForBoardroom`: bounded list of distributions created by each Boardroom.
+- `distributionsForBoardroom`: bounded, prunable distribution index for each Boardroom. Closed entries may remain until
+  anyone explicitly prunes them or the factory needs capacity for another creation; permanent `isDistribution`,
+  Boardroom, and kind mappings preserve historical identity after pruning. The index uses swap-and-pop removal, so
+  callers must not treat its ordering as historical.
 
 As a Boardroom policy, the factory allows:
 
@@ -105,7 +110,7 @@ Preconditions:
 - share token is the Boardroom's own share token.
 - payment token is nonzero.
 - share amount and price are nonzero.
-- end time is zero or not before start time.
+- end time is zero for an open-ended sale, or is strictly after start time and in the future at creation.
 
 Effects:
 
@@ -136,7 +141,8 @@ Effects:
 - payment token transfers from buyer directly to Boardroom,
 - share token transfers from sale escrow to recipient.
 
-Both token transfers use exact recipient balance-delta checks, rejecting fee-on-transfer behavior.
+Both token transfers verify the exact sender decrease and recipient increase. Fee-on-transfer and sender-surcharge
+behavior therefore revert the complete purchase instead of overcharging a buyer or under-delivering inventory.
 
 ## Close Or Cancel
 
@@ -162,7 +168,7 @@ Preconditions:
   - call `createMerkleAirdrop`.
 - share token is the Boardroom's own share token.
 - share amount and Merkle root are nonzero.
-- end time is zero or not before start time.
+- end time is zero for an open-ended claim period, or is strictly after start time and in the future at creation.
 - `maxGrantClaims` is the maximum number of grant-claim leaves the airdrop can honor.
 
 Effects:
@@ -177,6 +183,20 @@ Direct claims transfer proven share amounts from airdrop escrow to the claimant 
 Boardroom-issued `TokenGrant` funded by the airdrop escrow, consume one reserved Boardroom grant slot, and record that
 grant so redemptions cannot open while it remains live. Grant-claim leaves are capped by `maxGrantClaims`; once the cap
 is reached, otherwise valid grant proofs revert instead of overflowing the Boardroom's bounded issued-grant list.
+Distribution-created grants always use the factory's explicit zero-fee path; `claimGrant` is nonpayable.
+The token-grant factory grants that exemption only when its immutable canonical `BoardroomFactory` recognizes the issuer
+and the issuer recognizes the calling airdrop as one of its active issued distributions.
+
+Both direct-claim and grant-claim leaves commit to `block.chainid`, the predicted airdrop address, Boardroom, share token,
+claim index, claimant, and amount. Grant leaves additionally commit to the token-grant factory and a hash of every grant
+term. Claims track `claimedShares`, and the contract rejects any claim that would take aggregate claimed inventory above
+the originally escrowed `airdropSupply`.
+
+The Merkle root is an opaque commitment, so several properties remain an offchain root-construction responsibility and
+cannot be proven during `createMerkleAirdrop`: use unique indices, encode the exact onchain type hashes and chain id, use
+sorted-pair hashing compatible with Solady `MerkleProofLib`, ensure the sum of intended claim amounts does not exceed
+`shareAmount`, and keep the number of grant leaves at or below `maxGrantClaims`. Onchain claim accounting and the bitmap
+still enforce the inventory cap and one successful claim per index if a malformed root is published.
 
 Closing or cancelling an airdrop returns unclaimed share inventory to the Boardroom and releases any unused reserved
 grant slots.
@@ -193,7 +213,7 @@ Preconditions:
 - quote token is nonzero and not the share token.
 - sale supply, migration supply, base price, graduation target, and LP quote basis points are nonzero.
 - total curve supply is at most `MAX_CURVE_SUPPLY`.
-- end time is zero or not before start time.
+- end time is zero for an open-ended sale, or is strictly after start time and in the future at creation.
 - the distribution factory has a nonzero locked-liquidity factory.
 
 Effects:
@@ -225,8 +245,10 @@ sell right but still needs enough shares to sell.
 
 ## Curve Migration Or Cancellation
 
-Migration is allowed through the issuing Boardroom when the curve is active and either the quote reserve has reached
-`graduationQuoteTarget` or all sellable shares have been bought.
+Migration is allowed through the issuing Boardroom when the curve is active, either the quote reserve has reached
+`graduationQuoteTarget` or all sellable shares have been bought, and applying `quoteToLpBps` produces a nonzero quote
+allocation. `canMigrate()` remains false when that allocation rounds to zero, and `migrate()` reverts before changing
+status in the same case.
 
 Effects:
 
@@ -258,8 +280,10 @@ Cancellation is Boardroom-only and returns all curve-held shares and quote reser
 - Grant-claim airdrops reserve Boardroom issued-grant capacity before claims can create grants.
 - Curve migration creates a locker owned by the originating Boardroom, not by the curve.
 - The Boardroom records migrated locked liquidity before redemptions can open.
-- Fee-on-transfer share or payment tokens fail safely through exact balance-delta checks.
-- Distribution lists are bounded by `MAX_DISTRIBUTIONS_PER_BOARDROOM`.
+- Fee-on-transfer and sender-surcharge share or payment tokens fail safely through exact two-sided balance-delta checks.
+- Aggregate Merkle claims never exceed the airdrop inventory committed at creation.
+- Distribution indexes are bounded by `MAX_DISTRIBUTIONS_PER_BOARDROOM`, and closed entries can be pruned without
+  erasing their permanent factory identity.
 
 ## Deterministic Proof
 

@@ -80,8 +80,11 @@ const deploymentFields = [
   ["assetPolicyOwner", "address"],
   ["assetPolicyAllowed", "boolean"],
   ["distributionPolicyAllowed", "boolean"],
+  ["distributionModulePolicy", "boolean"],
   ["lockedLiquidityPolicyAllowed", "boolean"],
+  ["lockedLiquidityModulePolicy", "boolean"],
   ["tokenGrantPolicyAllowed", "boolean"],
+  ["tokenGrantModulePolicy", "boolean"],
   ["assetWrappedNativeAllowed", "boolean"],
   ["assetTokenGrantSpenderAllowed", "boolean"],
   ["assetDistributionSpenderAllowed", "boolean"],
@@ -91,6 +94,7 @@ const deploymentFields = [
 ] as const satisfies readonly (readonly [string, DeploymentFieldKind])[];
 
 const requiredTokenGrantDeploymentFields = [
+  "boardroomFactory",
   "tokenGrantFactory",
   "tokenGrantLogic",
   "factoryOwner",
@@ -108,8 +112,11 @@ const requiredBoardroomDeploymentFields = [
   "assetPolicyOwner",
   "assetPolicyAllowed",
   "tokenGrantPolicyAllowed",
+  "tokenGrantModulePolicy",
   "distributionPolicyAllowed",
+  "distributionModulePolicy",
   "lockedLiquidityPolicyAllowed",
+  "lockedLiquidityModulePolicy",
   "assetWrappedNativeAllowed",
   "assetTokenGrantSpenderAllowed",
   "assetDistributionSpenderAllowed",

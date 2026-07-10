@@ -138,6 +138,20 @@ export function buildBoardroomRedeemTransaction(input: {
   };
 }
 
+export function buildBoardroomClaimRedemptionAssetTransaction(input: {
+  boardroom: Address;
+  asset: Address;
+  recipient: Address;
+  minAmountOut: bigint;
+}) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "claimRedemptionAsset",
+    args: [input.asset, input.recipient, input.minAmountOut] as const,
+  };
+}
+
 export function buildBoardroomCall(input: {
   policy: Address;
   target: Address;
@@ -582,14 +596,12 @@ export function buildMerkleAirdropGrantClaimTransaction(input: {
   amount: bigint;
   terms: MerkleAirdropGrantClaimTerms;
   proof: readonly Hex[];
-  creationFee?: bigint;
 }) {
   return {
     address: input.airdrop,
     abi: merkleAirdropAbi,
     functionName: "claimGrant",
     args: [input.index, input.account, input.amount, merkleAirdropGrantClaimArgs(input.terms), input.proof] as const,
-    value: input.creationFee ?? 0n,
   };
 }
 
