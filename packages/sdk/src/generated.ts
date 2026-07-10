@@ -5792,6 +5792,17 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
+    "name": "EmptyRedeemableAsset",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "InsufficientHolderPower",
     "inputs": [
       {
@@ -7062,6 +7073,11 @@ export const boardroomGovernanceLogicAbi = [
         "name": "allowExisting",
         "type": "bool",
         "internalType": "bool"
+      },
+      {
+        "name": "requirePositiveBalance",
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "outputs": [
@@ -7476,6 +7492,17 @@ export const boardroomGovernanceLogicAbi = [
     "inputs": [
       {
         "name": "target",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "EmptyRedeemableAsset",
+    "inputs": [
+      {
+        "name": "asset",
         "type": "address",
         "internalType": "address"
       }

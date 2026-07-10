@@ -74,6 +74,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     error TooManyLockedLiquidityPositions();
     error NoReservedIssuedGrantSlots(address distribution);
     error InvalidRedeemableAsset(address asset);
+    error EmptyRedeemableAsset(address asset);
     error InvalidIssuedGrant(address grant);
     error InvalidIssuedDistribution(address distribution);
     error InvalidLockedLiquidity(address locker);
@@ -748,7 +749,8 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     function _registerRedeemableAsset(address asset) internal {
         _delegateGovernance(
             abi.encodeCall(
-                BoardroomGovernanceLogic.registerRedeemableAsset, (asset, shareToken, MAX_REDEEMABLE_ASSETS, false)
+                BoardroomGovernanceLogic.registerRedeemableAsset,
+                (asset, shareToken, MAX_REDEEMABLE_ASSETS, false, status == BoardroomStatus.WindingDown)
             )
         );
     }

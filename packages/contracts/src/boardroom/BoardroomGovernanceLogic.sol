@@ -33,6 +33,7 @@ contract BoardroomGovernanceLogic {
     error NoCirculatingShares();
     error NotShareholder(address account);
     error InvalidRedeemableAsset(address asset);
+    error EmptyRedeemableAsset(address asset);
     error RedeemableAssetAlreadyRegistered(address asset);
     error RedeemableAssetStillValid(address asset);
     error RedeemableAssetHasBalance(address asset, uint256 balance);
@@ -211,12 +212,16 @@ contract BoardroomGovernanceLogic {
         _registerAssetIfNeeded(slots, asset, shareToken, maximum);
     }
 
-    function registerRedeemableAsset(address asset, address shareToken, uint256 maximum, bool allowExisting)
-        external
-        returns (bool registered)
-    {
+    function registerRedeemableAsset(
+        address asset,
+        address shareToken,
+        uint256 maximum,
+        bool allowExisting,
+        bool requirePositiveBalance
+    ) external returns (bool registered) {
         LifecycleSlots memory slots = _lifecycleSlots();
-        validateRedeemableAsset(asset, shareToken, address(this));
+        uint256 balance = validateRedeemableAsset(asset, shareToken, address(this));
+        if (requirePositiveBalance && balance == 0) revert EmptyRedeemableAsset(asset);
         if (_mappingBool(slots.isRedeemableAsset, asset)) {
             if (allowExisting) return false;
             revert RedeemableAssetAlreadyRegistered(asset);

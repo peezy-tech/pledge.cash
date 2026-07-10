@@ -118,10 +118,10 @@ Wind-down transitions are one-way:
 2. `WindingDown`: entered only after `startWindDown()` wraps the Boardroom's full native HYPE balance into WHYPE. The
    Boardroom cannot mint shares or create new grants/distributions. Canonical zero-value lifecycle calls, locked
    liquidity exits, native wrapping, closed-obligation pruning, and treasury-share burns are permissionless. Qualified
-   holders can admit final assets, and anyone can quarantine an admitted asset whose bounded `balanceOf` probe has
-   become unreadable. Empty-asset removal is permissionless during wind-down only after every grant, distribution, and
-   locked-liquidity obligation has closed and been pruned, so an obligation cannot later return value into an omitted
-   asset.
+   holders can admit final assets only when the Boardroom already has a positive balance, and anyone can quarantine an
+   admitted asset whose bounded `balanceOf` probe has become unreadable. Empty-asset removal is permissionless during
+   wind-down only after every grant, distribution, and locked-liquidity obligation has closed and been pruned, so an
+   obligation cannot later return value into an omitted asset.
    Active fixed-price sales and migrating bonding curves stop accepting trades as soon as their Boardroom enters this
    state.
 3. `RedemptionsOpen`: share holders burn shares against the fixed opening snapshot. Each asset pays independently and
@@ -182,7 +182,8 @@ module factories. The Boardroom owner can use registry-approved policies to depl
 ## Wind-Down And Redemption Flow
 
 1. Canonical WHYPE is admitted at initialization. Module factories atomically admit any asset that can later reach the
-   Boardroom, and governance can admit additional ERC20s only after a bounded exact-size `balanceOf` probe succeeds.
+   Boardroom, and governance can admit additional ERC20s only after a bounded exact-size `balanceOf` probe succeeds;
+   during wind-down the probed Boardroom balance must also be nonzero.
 2. Before launch, the owner starts wind-down. After launch, a holder meeting the 10% historical/current threshold can
    start it even if the executor is lost. The transition is monotonic, wraps native HYPE, and invalidates queued actions.
 3. Anyone can execute canonical zero-value lifecycle cleanup, prune closed obligations, exit recorded liquidity, wrap

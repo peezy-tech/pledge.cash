@@ -2089,6 +2089,31 @@ contract BoardroomTest is Test {
         assertEq(broken.balanceOf(owner), 5 ether);
     }
 
+    function testWindDownAssetRegistrationRequiresCurrentBoardroomValue() public {
+        (Boardroom boardroom,) = _createBoardroom("wind-down-funded-asset-registration");
+        BoardroomCurrency empty = new BoardroomCurrency("Empty", "EMPTY", 18);
+        BoardroomCurrency funded = new BoardroomCurrency("Funded", "FUNDED", 18);
+        funded.mint(address(boardroom), 1 ether);
+
+        vm.prank(owner);
+        boardroom.mint(holder, 10 ether);
+        vm.roll(block.number + 1);
+        vm.prank(owner);
+        boardroom.launch(1 days);
+        vm.roll(block.number + 1);
+        vm.prank(holder);
+        boardroom.startWindDown();
+
+        vm.startPrank(holder);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.EmptyRedeemableAsset.selector, address(empty)));
+        boardroom.registerRedeemableAsset(address(empty));
+        boardroom.registerRedeemableAsset(address(funded));
+        vm.stopPrank();
+
+        assertFalse(boardroom.isRedeemableAsset(address(empty)));
+        assertTrue(boardroom.isRedeemableAsset(address(funded)));
+    }
+
     function testOpenGrantPreventsRemovingAssetThatCanReturnDuringWindDown() public {
         (Boardroom boardroom,) = _createBoardroom("grant-return-asset-pin");
         BoardroomToken shares = BoardroomToken(boardroom.shareToken());
