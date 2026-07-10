@@ -5,9 +5,10 @@ import {
   readFactoryBoardrooms,
   readProductBoardroomCatalog,
   readProductBoardroomDashboard,
+  readProductBoardroomHistories,
   resolveProductBoardroomAddress,
 } from "../src/lib/product-boardroom";
-import type { BoardroomDistributionSnapshot } from "../src/lib/types";
+import type { BoardroomDistributionSnapshot, BoardroomSnapshot } from "../src/lib/types";
 
 describe("product boardroom runtime discovery", () => {
   test("uses claimed airdrop shares after unclaimed inventory is returned", () => {
@@ -114,6 +115,32 @@ describe("product boardroom runtime discovery", () => {
     expect(catalog[0]?.buyerCount).toBe(2);
     expect(successfulRanges.length).toBeGreaterThan(2);
     expect(successfulRanges.every(({ fromBlock, toBlock }) => toBlock - fromBlock + 1n <= 50_000n)).toBe(true);
+  });
+
+  test("shares a safe genesis fallback when concurrent history reads cannot query old code", async () => {
+    const curve = {
+      address: "0x6000000000000000000000000000000000000000",
+      kind: "migrating-bonding-curve",
+      state: {
+        pool: "0x0000000000000000000000000000000000000000",
+        quoteToken: "0x4000000000000000000000000000000000000000",
+      },
+    } as BoardroomDistributionSnapshot;
+    const client = {
+      async getBalance() { return 0n; },
+      async getBlockNumber() { return 200_000n; },
+      async getCode() { throw new Error("historical state unavailable"); },
+      async getLogs() { return []; },
+      async readContract() { throw new Error("unexpected read"); },
+    };
+
+    const histories = await readProductBoardroomHistories(client as never, {
+      distributionSummaries: [curve],
+    } as BoardroomSnapshot);
+
+    expect(histories).toHaveLength(1);
+    expect(histories[0]?.scanError).toBeUndefined();
+    expect(histories[0]?.curve).toMatchObject({ buyCount: 0, sellCount: 0 });
   });
 
   test("keeps pruned distribution history visible after a sale or curve closes", async () => {

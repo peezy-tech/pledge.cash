@@ -750,14 +750,12 @@ async function contractStartBlock(
   const cached = clientCache.get(key);
   if (cached) return await cached;
 
-  const request = findContractStartBlock(client, address, toBlock);
+  // Some local and pruned RPCs expose current state at a high block but cannot
+  // answer historical eth_getCode. Cache the safe fallback promise itself so
+  // concurrent event readers never observe a rejected start-block lookup.
+  const request = findContractStartBlock(client, address, toBlock).catch(() => 0n);
   clientCache.set(key, request);
-  try {
-    return await request;
-  } catch {
-    clientCache.delete(key);
-    return 0n;
-  }
+  return await request;
 }
 
 async function findContractStartBlock(
