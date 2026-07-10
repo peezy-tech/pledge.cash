@@ -422,7 +422,6 @@ export const wallets = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     address: text("address").notNull(),
     chainId: integer("chain_id").notNull(),
-    isPrimary: boolean("is_primary").notNull().default(false),
     alertsEnabled: boolean("alerts_enabled").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull().defaultNow(),

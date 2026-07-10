@@ -411,7 +411,6 @@ async function linkShareholder(dbClient_: SentinelDbClient, holderAddress: Addre
   await dbClient_.db.insert(wallets).values({
     address: holderAddress,
     chainId,
-    isPrimary: true,
     siweMessage: "integration test wallet link",
     userId: user.id
   });

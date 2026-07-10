@@ -37,7 +37,7 @@ export function createBetterAuthAdapter(
   db: SentinelDb
 ): AuthAdapter {
   const socialProviders = configuredSocialProviders(config.auth.socialProviders);
-  const verifySiweSignature = createPrimarySiweVerifier(config, db);
+  const verifySiweSignature = createWalletSiweVerifier(config, db);
   const github = config.auth.socialProviders.github;
   const apple = config.auth.socialProviders.apple;
   const discord = config.auth.socialProviders.discord;
@@ -73,10 +73,7 @@ export function createBetterAuthAdapter(
     baseURL: config.auth.baseUrl,
     secret: config.auth.secret,
     trustedOrigins: [new URL(config.webOrigin).origin],
-    database: drizzleAdapter(db, {
-      provider: "pg",
-      schema
-    }),
+    database: createSentinelAuthDatabaseAdapter(db),
     user: {
       modelName: "users"
     },
@@ -209,6 +206,36 @@ export function createBetterAuthAdapter(
   };
 }
 
+function createSentinelAuthDatabaseAdapter(db: SentinelDb) {
+  const createAdapter = drizzleAdapter(db, {
+    provider: "pg",
+    schema
+  });
+
+  return (...args: Parameters<typeof createAdapter>) => {
+    const adapter = createAdapter(...args);
+
+    return {
+      ...adapter,
+      findOne: async (...findOneArgs: Parameters<typeof adapter.findOne>) => {
+        const [input] = findOneArgs;
+        // Better Auth checksum-normalizes SIWE input, while a pre-existing credential
+        // may have been stored in another valid casing. Ownership is case-insensitive.
+        return adapter.findOne({
+          ...input,
+          ...(input.model === "walletAddress" && input.where !== undefined
+            ? {
+                where: input.where.map((condition) =>
+                  condition.field === "address" ? { ...condition, mode: "insensitive" } : condition
+                )
+              }
+            : {})
+        });
+      }
+    };
+  };
+}
+
 export async function verifyTelegramIdToken(
   idToken: string,
   clientId: string,
@@ -336,7 +363,7 @@ export function createPledgeCashSiweVerifier(
   };
 }
 
-function createPrimarySiweVerifier(
+function createWalletSiweVerifier(
   config: Pick<Config, "webOrigin">,
   db: SentinelDb
 ): SiweSignatureVerifier {

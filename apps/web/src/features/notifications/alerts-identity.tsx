@@ -109,7 +109,7 @@ export function AlertsIdentity({
         ) : state === "sign-wallet" ? (
           <Button aria-live="polite" disabled={pending !== undefined} onClick={() => void signInWithWallet()}>
             {pending === "siwe" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Fingerprint className="h-4 w-4" />}
-            {pending === "siwe" ? "Check your wallet" : "Sign to enable alerts"}
+            {pending === "siwe" ? "Check your wallet" : "Sign in with wallet"}
           </Button>
         ) : state === "active" ? (
           <Badge>
@@ -123,14 +123,11 @@ export function AlertsIdentity({
         <Facts
           columns="three"
           items={[
+            { label: "Wallet sign-ins", value: session.wallets.length.toString() },
+            { label: "Watching alerts", value: enabledWalletCount.toString() },
             {
-              label: "Primary identity",
-              value: primaryWallet(session) ? <AddressLink address={primaryWallet(session) as Address} /> : "Wallet",
-            },
-            { label: "Alert wallets", value: enabledWalletCount.toString() },
-            {
-              label: "Linked sign-ins",
-              value: linkedProviders.length > 0 ? linkedProviders.map(providerLabel).join(", ") : "Wallet",
+              label: "Social sign-ins",
+              value: linkedProviders.filter((provider) => provider !== "siwe").map(providerLabel).join(", ") || "None",
             },
           ]}
         />
@@ -148,12 +145,12 @@ export function AlertsIdentity({
         <div className="flex flex-col gap-3 border-t border-zinc-800 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <p className="m-0 text-sm font-medium text-zinc-300">
-              {session ? "Optional sign-ins" : "Already linked a social sign-in?"}
+              {session ? "Social sign-ins" : "Already linked a social sign-in?"}
             </p>
             <p className="m-0 mt-1 text-xs leading-5 text-zinc-500">
               {session
-                ? "Link a provider for account recovery without changing your wallet identity."
-                : "Social providers cannot create an Alerts account."}
+                ? "Link another way to sign in to this account. It never affects on-chain authority."
+                : "Social sign-ins open an existing account. Create one with a wallet first."}
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
@@ -210,18 +207,13 @@ function identityStatus(state: AlertsViewState): { description: string; title: s
   switch (state) {
     case "connect-wallet":
       return {
-        description: "Your wallet is your Alerts account. No name, email, or password required.",
+        description: "Create an account with a wallet. You can link more wallets or social sign-ins later.",
         title: "Connect a wallet",
       };
     case "sign-wallet":
       return {
         description: "One signature verifies wallet control. It costs no gas and stays on this page.",
         title: "Verify wallet control",
-      };
-    case "wallet-mismatch":
-      return {
-        description: "This session belongs to another wallet. Add the connected wallet below or reconnect your primary identity.",
-        title: "Different wallet connected",
       };
     case "link-delivery":
       return {
@@ -230,7 +222,7 @@ function identityStatus(state: AlertsViewState): { description: string; title: s
       };
     case "active":
       return {
-        description: "Your wallet identity and delivery channel are ready.",
+        description: "Your sign-in methods and delivery channel are ready.",
         title: "Alerts active",
       };
   }
@@ -242,11 +234,6 @@ function authProviders(session: AuthMeResponse | undefined): Array<"siwe" | Sent
 
 function providerLabel(provider: "siwe" | SentinelSocialProvider): string {
   return provider === "siwe" ? "Wallet" : SOCIAL_PROVIDER_LABELS[provider];
-}
-
-function primaryWallet(session: AuthMeResponse): string | undefined {
-  const primary = session.wallets.find((wallet) => wallet.isPrimary);
-  return primary?.address ?? session.wallets[0]?.address;
 }
 
 function browserAuthDomain(): string {

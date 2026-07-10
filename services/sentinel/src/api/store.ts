@@ -6,6 +6,7 @@ import { getAddress } from "viem";
 import type { SentinelDb } from "../db/client";
 import {
   authAccounts,
+  authWallets,
   channels,
   subscriptionBoardrooms,
   subscriptions,
@@ -173,38 +174,45 @@ export function createDrizzleApiStore(db: SentinelDb): SentinelApiStore {
           return null;
         }
 
-        const [created] = await tx
-          .insert(wallets)
+        await tx
+          .insert(authWallets)
           .values({
             address: checksumAddress,
-            alertsEnabled: true,
             chainId: input.chainId,
             isPrimary: false,
+            userId: input.userId
+          })
+          .onConflictDoNothing();
+
+        const [credential] = await tx
+          .select({ userId: authWallets.userId })
+          .from(authWallets)
+          .where(
+            and(
+              eq(authWallets.chainId, input.chainId),
+              sql`lower(${authWallets.address}) = lower(${checksumAddress})`
+            )
+          )
+          .limit(1);
+        if (credential === undefined || credential.userId !== input.userId) {
+          return null;
+        }
+
+        const [row] = await tx
+          .update(wallets)
+          .set({
+            alertsEnabled: true,
             siweMessage: input.siweMessage,
-            userId: input.userId,
             verifiedAt: input.verifiedAt
           })
-          .onConflictDoNothing()
+          .where(
+            and(
+              eq(wallets.userId, input.userId),
+              eq(wallets.chainId, input.chainId),
+              sql`lower(${wallets.address}) = lower(${checksumAddress})`
+            )
+          )
           .returning();
-
-        const [row] =
-          created === undefined
-            ? await tx
-                .update(wallets)
-                .set({
-                  alertsEnabled: true,
-                  siweMessage: input.siweMessage,
-                  verifiedAt: input.verifiedAt
-                })
-                .where(
-                  and(
-                    eq(wallets.userId, input.userId),
-                    eq(wallets.chainId, input.chainId),
-                    sql`lower(${wallets.address}) = lower(${checksumAddress})`
-                  )
-                )
-                .returning()
-            : [created];
 
         if (row === undefined) {
           return null;
@@ -253,38 +261,32 @@ export function createDrizzleApiStore(db: SentinelDb): SentinelApiStore {
         return readSubscription(tx as SentinelDb, input.userId);
       });
     },
-    async unlinkWallet(input) {
+    async setWalletAlerts(input) {
       return db.transaction(async (tx) => {
         const checksumAddress = getAddress(input.address);
         await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(lower(${checksumAddress})))`);
 
         const rows = await tx
-          .select({ isPrimary: wallets.isPrimary })
-          .from(wallets)
-          .where(
-            and(
-              eq(wallets.userId, input.userId),
-              sql`lower(${wallets.address}) = lower(${checksumAddress})`
-            )
-          );
-
-        if (rows.length === 0) {
-          return "not_found";
-        }
-        if (rows.some((row) => row.isPrimary)) {
-          return "primary_wallet";
-        }
-
-        await tx
           .update(wallets)
-          .set({ alertsEnabled: false })
+          .set({ alertsEnabled: input.alertsEnabled })
           .where(
             and(
               eq(wallets.userId, input.userId),
               sql`lower(${wallets.address}) = lower(${checksumAddress})`
             )
-          );
-        return "unlinked";
+          )
+          .returning({
+            address: wallets.address,
+            alertsEnabled: wallets.alertsEnabled,
+            verifiedAt: wallets.verifiedAt
+          });
+
+        const [wallet] = rows;
+        if (wallet === undefined) {
+          return null;
+        }
+
+        return toWalletDto(wallet);
       });
     }
   };
@@ -524,7 +526,6 @@ async function listWallets(db: SentinelDb, userId: string): Promise<WalletDto[]>
     .select({
       alertsEnabled: wallets.alertsEnabled,
       address: wallets.address,
-      isPrimary: wallets.isPrimary,
       verifiedAt: wallets.verifiedAt
     })
     .from(wallets)
@@ -543,7 +544,7 @@ async function listWallets(db: SentinelDb, userId: string): Promise<WalletDto[]>
     byAddress.set(key, {
       address: existing.address,
       alertsEnabled: existing.alertsEnabled || wallet.alertsEnabled,
-      isPrimary: existing.isPrimary || wallet.isPrimary,
+      canSignIn: true,
       verifiedAt:
         Date.parse(existing.verifiedAt) >= Date.parse(wallet.verifiedAt)
           ? existing.verifiedAt
@@ -551,7 +552,7 @@ async function listWallets(db: SentinelDb, userId: string): Promise<WalletDto[]>
     });
   }
 
-  return [...byAddress.values()].sort((left, right) => Number(right.isPrimary) - Number(left.isPrimary));
+  return [...byAddress.values()].sort((left, right) => left.address.localeCompare(right.address));
 }
 
 async function readSubscription(db: SentinelDb, userId: string): Promise<SubscriptionDto> {
@@ -656,13 +657,12 @@ function toAnalysisDto(row: PublicActionRow): AnalysisDto | null {
 function toWalletDto(row: {
   readonly address: string;
   readonly alertsEnabled: boolean;
-  readonly isPrimary: boolean;
   readonly verifiedAt: Date;
 }): WalletDto {
   return {
     address: getAddress(row.address).toLowerCase() as AddressDto,
     alertsEnabled: row.alertsEnabled,
-    isPrimary: row.isPrimary,
+    canSignIn: true,
     verifiedAt: row.verifiedAt.toISOString()
   };
 }

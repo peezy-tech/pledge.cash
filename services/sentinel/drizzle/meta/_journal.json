@@ -43,6 +43,13 @@
       "when": 1783697490649,
       "tag": "0005_wild_exiles",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783711047059,
+      "tag": "0006_cold_sandman",
+      "breakpoints": true
     }
   ]
 }

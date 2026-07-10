@@ -56,19 +56,29 @@ describe("sentinel web client", () => {
     );
   });
 
-  test("removes a secondary wallet from alert coverage", async () => {
+  test("updates alert coverage without changing wallet sign-in authority", async () => {
     const calls: { input: string; init: RequestInit | undefined }[] = [];
     const fetcher: SentinelFetch = async (input, init) => {
       calls.push({ input: input.toString(), init });
-      return jsonResponse({ alertsEnabled: false, ok: true });
+      return jsonResponse({
+        wallet: {
+          address: "0x1000000000000000000000000000000000000000",
+          alertsEnabled: false,
+          canSignIn: true,
+          verifiedAt: "2026-07-09T00:00:00.000Z",
+        },
+      });
     };
     const client = createSentinelClient({ baseUrl: "https://api.example.test", fetcher });
     const address = "0x1000000000000000000000000000000000000000";
 
-    await expect(client.deleteWallet(address)).resolves.toEqual({ alertsEnabled: false, ok: true });
+    await expect(client.setWalletAlerts(address, { alertsEnabled: false })).resolves.toMatchObject({
+      wallet: { alertsEnabled: false, canSignIn: true },
+    });
 
     expect(calls[0]?.input).toBe(`https://api.example.test/wallets/${address}`);
-    expect(calls[0]?.init?.method).toBe("DELETE");
+    expect(calls[0]?.init?.method).toBe("PATCH");
+    expect(calls[0]?.init?.body).toBe(JSON.stringify({ alertsEnabled: false }));
   });
 
   test("starts direct-provider social linking with the current callback", async () => {
@@ -223,20 +233,20 @@ describe("alerts view state", () => {
     expect(alertsViewState({ account: address, chainId: 8453 }, undefined)).toBe("sign-wallet");
   });
 
-  test("warns when the connected wallet is not part of the session", () => {
+  test("keeps an authenticated account active with an unlinked connected wallet", () => {
     expect(
       alertsViewState(
         { account: otherAddress, chainId: 8453 },
-        { channels: [{ enabled: true }], wallets: [{ address }] },
+        { channels: [{ enabled: true }] },
       ),
-    ).toBe("wallet-mismatch");
+    ).toBe("active");
   });
 
   test("moves a verified wallet to delivery setup", () => {
     expect(
       alertsViewState(
         { account: address, chainId: 8453 },
-        { channels: [], wallets: [{ address: address.toUpperCase() }] },
+        { channels: [] },
       ),
     ).toBe("link-delivery");
   });
@@ -245,7 +255,7 @@ describe("alerts view state", () => {
     expect(
       alertsViewState(
         { account: address, chainId: 8453 },
-        { channels: [{ enabled: true }], wallets: [{ address }] },
+        { channels: [{ enabled: true }] },
       ),
     ).toBe("active");
   });
