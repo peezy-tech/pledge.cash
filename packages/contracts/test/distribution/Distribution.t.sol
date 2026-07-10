@@ -1306,6 +1306,7 @@ contract DistributionTest is Test {
                 address(distributionFactory), address(curve), 0, abi.encodeCall(MigratingBondingCurve.cancel, ())
             )
         );
+        boardroom.quarantineRedeemableAsset(address(mutableQuote));
         boardroom.openRedemptions();
         vm.stopPrank();
 
@@ -1330,7 +1331,12 @@ contract DistributionTest is Test {
         assertEq(curve.unrecoveredQuote(), 0);
         assertEq(mutableQuote.balanceOf(address(curve)), 0);
         assertEq(mutableQuote.balanceOf(address(boardroom)), 200_000000);
-        assertTrue(boardroom.isRedeemableAsset(address(mutableQuote)));
+        assertFalse(boardroom.isRedeemableAsset(address(mutableQuote)));
+
+        vm.prank(recipient);
+        assertEq(boardroom.sweepRedemptionExcess(address(mutableQuote)), 200_000000);
+        assertEq(mutableQuote.balanceOf(address(boardroom)), 0);
+        assertEq(mutableQuote.balanceOf(owner), 200_000000);
     }
 
     function testMigratingBondingCurvePolicyRejectsAmmInfeasibleBounds() public {
