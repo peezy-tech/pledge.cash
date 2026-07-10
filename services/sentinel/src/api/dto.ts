@@ -48,7 +48,7 @@ export const UserDtoSchema = z.object({
 export const WalletDtoSchema = z.object({
   alertsEnabled: z.boolean(),
   address: AddressSchema,
-  isPrimary: z.boolean(),
+  canSignIn: z.literal(true),
   verifiedAt: IsoDateSchema
 });
 
@@ -140,6 +140,14 @@ export const LinkWalletResponseSchema = z.object({
 export const DeleteWalletResponseSchema = z.object({
   alertsEnabled: z.literal(false),
   ok: z.literal(true)
+});
+
+export const UpdateWalletAlertsRequestSchema = z.object({
+  alertsEnabled: z.boolean()
+});
+
+export const UpdateWalletAlertsResponseSchema = z.object({
+  wallet: WalletDtoSchema
 });
 
 export const WalletAddressParamsSchema = z.object({
@@ -287,6 +295,8 @@ export type WalletNonceResponse = z.infer<typeof WalletNonceResponseSchema>;
 export type LinkWalletRequest = z.infer<typeof LinkWalletRequestSchema>;
 export type LinkWalletResponse = z.infer<typeof LinkWalletResponseSchema>;
 export type DeleteWalletResponse = z.infer<typeof DeleteWalletResponseSchema>;
+export type UpdateWalletAlertsRequest = z.infer<typeof UpdateWalletAlertsRequestSchema>;
+export type UpdateWalletAlertsResponse = z.infer<typeof UpdateWalletAlertsResponseSchema>;
 export type WalletAddressParams = z.infer<typeof WalletAddressParamsSchema>;
 export type PutSubscriptionRequest = z.infer<typeof PutSubscriptionRequestSchema>;
 export type SubscriptionResponse = z.infer<typeof SubscriptionResponseSchema>;

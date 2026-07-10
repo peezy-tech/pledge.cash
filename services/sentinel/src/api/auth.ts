@@ -62,8 +62,6 @@ export type TelegramLinkCodeRecord = {
   readonly expiresAt: Date;
 };
 
-export type UnlinkWalletResult = "not_found" | "primary_wallet" | "unlinked";
-
 export type SentinelApiStore = {
   consumeWalletNonce(input: {
     readonly nonce: string;
@@ -101,10 +99,11 @@ export type SentinelApiStore = {
     readonly mode: SubscriptionDto["mode"];
     readonly userId: string;
   }): Promise<SubscriptionDto>;
-  unlinkWallet(input: {
+  setWalletAlerts(input: {
     readonly address: AddressDto;
+    readonly alertsEnabled: boolean;
     readonly userId: string;
-  }): Promise<UnlinkWalletResult>;
+  }): Promise<WalletDto | null>;
 };
 
 export type SiweSignatureVerifier = (input: {

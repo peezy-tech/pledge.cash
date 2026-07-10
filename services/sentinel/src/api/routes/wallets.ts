@@ -17,6 +17,8 @@ import {
   LinkWalletRequestSchema,
   LinkWalletResponseSchema,
   WalletAddressParamsSchema,
+  UpdateWalletAlertsRequestSchema,
+  UpdateWalletAlertsResponseSchema,
   WalletNonceRequestSchema,
   WalletNonceResponseSchema,
   type AddressDto,
@@ -182,29 +184,54 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     });
 
     if (wallet === null) {
-      return jsonError(c, 409, "Wallet is already linked to another alert account");
+      return jsonError(c, 409, "Wallet is already linked to another account");
     }
 
     return c.json(LinkWalletResponseSchema.parse({ wallet }));
   });
 
-  app.delete("/:address", async (c) => {
+  app.patch("/:address", rateLimit, async (c) => {
+    const parsed = WalletAddressParamsSchema.safeParse(c.req.param());
+    if (!parsed.success) {
+      return jsonError(c, 400, "address: Invalid wallet address");
+    }
+
+    const body = await parseJson(c, UpdateWalletAlertsRequestSchema);
+    if (!body.ok) {
+      return body.response;
+    }
+
+    const user = c.get("user");
+    const wallet = await deps.store.setWalletAlerts({
+      address: normalizeAddress(parsed.data.address),
+      alertsEnabled: body.value.alertsEnabled,
+      userId: user.id
+    });
+
+    if (wallet === null) {
+      return jsonError(c, 404, "Wallet link not found");
+    }
+
+    return c.json(UpdateWalletAlertsResponseSchema.parse({ wallet }));
+  });
+
+  // Retain the original route as a backwards-compatible alias for clients built
+  // before alert coverage became an explicit setting. It never unlinks a credential.
+  app.delete("/:address", rateLimit, async (c) => {
     const parsed = WalletAddressParamsSchema.safeParse(c.req.param());
     if (!parsed.success) {
       return jsonError(c, 400, "address: Invalid wallet address");
     }
 
     const user = c.get("user");
-    const result = await deps.store.unlinkWallet({
+    const wallet = await deps.store.setWalletAlerts({
       address: normalizeAddress(parsed.data.address),
+      alertsEnabled: false,
       userId: user.id
     });
 
-    if (result === "not_found") {
+    if (wallet === null) {
       return jsonError(c, 404, "Wallet link not found");
-    }
-    if (result === "primary_wallet") {
-      return jsonError(c, 409, "Primary wallet is required for sign-in and cannot be removed");
     }
 
     return c.json(DeleteWalletResponseSchema.parse({ alertsEnabled: false, ok: true }));

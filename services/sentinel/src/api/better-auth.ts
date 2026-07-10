@@ -37,7 +37,7 @@ export function createBetterAuthAdapter(
   db: SentinelDb
 ): AuthAdapter {
   const socialProviders = configuredSocialProviders(config.auth.socialProviders);
-  const verifySiweSignature = createPrimarySiweVerifier(config, db);
+  const verifySiweSignature = createWalletSiweVerifier(config, db);
   const github = config.auth.socialProviders.github;
   const apple = config.auth.socialProviders.apple;
   const discord = config.auth.socialProviders.discord;
@@ -336,7 +336,7 @@ export function createPledgeCashSiweVerifier(
   };
 }
 
-function createPrimarySiweVerifier(
+function createWalletSiweVerifier(
   config: Pick<Config, "webOrigin">,
   db: SentinelDb
 ): SiweSignatureVerifier {

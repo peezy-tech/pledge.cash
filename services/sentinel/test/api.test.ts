@@ -264,7 +264,7 @@ class InMemoryStore implements SentinelApiStore {
     const wallet = {
       alertsEnabled: true,
       address: input.address,
-      isPrimary: false,
+      canSignIn: true as const,
       verifiedAt: input.verifiedAt.toISOString()
     };
     const wallets = this.walletsByUser.get(input.userId) ?? [];
@@ -294,21 +294,22 @@ class InMemoryStore implements SentinelApiStore {
     return subscription;
   }
 
-  async unlinkWallet(input: { readonly address: AddressDto; readonly userId: string }) {
+  async setWalletAlerts(input: {
+    readonly address: AddressDto;
+    readonly alertsEnabled: boolean;
+    readonly userId: string;
+  }) {
     const wallets = this.walletsByUser.get(input.userId) ?? [];
     const matches = wallets.filter((wallet) => wallet.address === input.address);
     if (matches.length === 0) {
-      return "not_found" as const;
-    }
-    if (matches.some((wallet) => wallet.isPrimary)) {
-      return "primary_wallet" as const;
+      return null;
     }
 
     const nextWallets = wallets.map((wallet) =>
-      wallet.address === input.address ? { ...wallet, alertsEnabled: false } : wallet
+      wallet.address === input.address ? { ...wallet, alertsEnabled: input.alertsEnabled } : wallet
     );
     this.walletsByUser.set(input.userId, nextWallets);
-    return "unlinked" as const;
+    return nextWallets.find((wallet) => wallet.address === input.address) ?? null;
   }
 }
 
@@ -401,7 +402,7 @@ describe("Sentinel WP5 API", () => {
       {
         alertsEnabled: true,
         address: PRIMARY_WALLET,
-        isPrimary: true,
+        canSignIn: true,
         verifiedAt: FIXED_NOW.toISOString()
       }
     ]);
@@ -419,7 +420,7 @@ describe("Sentinel WP5 API", () => {
         {
           alertsEnabled: true,
           address: PRIMARY_WALLET,
-          isPrimary: true,
+          canSignIn: true,
           verifiedAt: FIXED_NOW.toISOString()
         }
       ]
@@ -478,13 +479,13 @@ describe("Sentinel WP5 API", () => {
     }
   });
 
-  test("links and disables secondary alert coverage with chain and conflict checks", async () => {
+  test("links equal wallet credentials and controls alert coverage with chain and conflict checks", async () => {
     const cookie = await signedInCookie(harness);
     harness.store.walletsByUser.set(USER_ID, [
       {
         alertsEnabled: true,
         address: PRIMARY_WALLET,
-        isPrimary: true,
+        canSignIn: true,
         verifiedAt: FIXED_NOW.toISOString()
       }
     ]);
@@ -541,7 +542,7 @@ describe("Sentinel WP5 API", () => {
     expect(linked.wallet).toEqual({
       alertsEnabled: true,
       address: account.address.toLowerCase(),
-      isPrimary: false,
+      canSignIn: true,
       verifiedAt: FIXED_NOW.toISOString()
     });
     expect(harness.store.lastLinkedWalletInput).toEqual({
@@ -557,56 +558,53 @@ describe("Sentinel WP5 API", () => {
     });
     expect(replay.status).toBe(409);
 
-    const unlink = await harness.app.request(`/wallets/${account.address}`, {
-      headers: { Cookie: cookie },
-      method: "DELETE"
+    const stopWatching = await harness.app.request(`/wallets/${account.address}`, {
+      body: JSON.stringify({ alertsEnabled: false }),
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      method: "PATCH"
     });
-    expect(unlink.status).toBe(200);
-    expect(await readJson<{ alertsEnabled: false; ok: true }>(unlink)).toEqual({
-      alertsEnabled: false,
-      ok: true
+    expect(stopWatching.status).toBe(200);
+    expect(await readJson<{ wallet: WalletDto }>(stopWatching)).toEqual({
+      wallet: { ...linked.wallet, alertsEnabled: false }
     });
     expect(harness.store.walletsByUser.get(USER_ID)).toContainEqual({
       ...linked.wallet,
       alertsEnabled: false
     });
 
-    const relinkNonceResponse = await harness.app.request("/wallets/nonce", {
-      body: JSON.stringify({ address: account.address, chainId: 31337 }),
+    const watchAgain = await harness.app.request(`/wallets/${account.address}`, {
+      body: JSON.stringify({ alertsEnabled: true }),
       headers: { "Content-Type": "application/json", Cookie: cookie },
-      method: "POST"
+      method: "PATCH"
     });
-    const relinkNonce = await readJson<typeof nonce>(relinkNonceResponse);
-    expect(relinkNonce.nonce).toBe("nonce0002");
-    const relinkMessage = createSiweMessage({
-      address: account.address,
-      chainId: 31337,
-      domain: relinkNonce.domain,
-      expirationTime: new Date(relinkNonce.expirationTime),
-      issuedAt: new Date(relinkNonce.issuedAt),
-      nonce: relinkNonce.nonce,
-      statement: relinkNonce.statement,
-      uri: relinkNonce.uri,
-      version: "1"
-    });
-    const relinkSignature = await account.signMessage({ message: relinkMessage });
-    const relink = await harness.app.request("/wallets", {
-      body: JSON.stringify({ message: relinkMessage, signature: relinkSignature }),
-      headers: { "Content-Type": "application/json", Cookie: cookie },
-      method: "POST"
-    });
-    expect(relink.status).toBe(200);
-    expect(await readJson<{ wallet: WalletDto }>(relink)).toMatchObject({
-      wallet: { address: account.address.toLowerCase(), alertsEnabled: true, isPrimary: false }
+    expect(watchAgain.status).toBe(200);
+    expect(await readJson<{ wallet: WalletDto }>(watchAgain)).toMatchObject({
+      wallet: { address: account.address.toLowerCase(), alertsEnabled: true, canSignIn: true }
     });
 
-    const removePrimary = await harness.app.request(`/wallets/${PRIMARY_WALLET}`, {
+    const stopWatchingInitial = await harness.app.request(`/wallets/${PRIMARY_WALLET}`, {
+      body: JSON.stringify({ alertsEnabled: false }),
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      method: "PATCH"
+    });
+    expect(stopWatchingInitial.status).toBe(200);
+    expect(await readJson<{ wallet: WalletDto }>(stopWatchingInitial)).toMatchObject({
+      wallet: { address: PRIMARY_WALLET, alertsEnabled: false, canSignIn: true }
+    });
+
+    const legacyStopWatching = await harness.app.request(`/wallets/${PRIMARY_WALLET}`, {
       headers: { Cookie: cookie },
       method: "DELETE"
     });
-    expect(removePrimary.status).toBe(409);
-    expect(await readJson<{ error: { message: string } }>(removePrimary)).toEqual({
-      error: { message: "Primary wallet is required for sign-in and cannot be removed" }
+    expect(legacyStopWatching.status).toBe(200);
+    expect(await readJson<{ alertsEnabled: false; ok: true }>(legacyStopWatching)).toEqual({
+      alertsEnabled: false,
+      ok: true
+    });
+    expect(harness.store.walletsByUser.get(USER_ID)).toContainEqual({
+      ...linked.wallet,
+      address: PRIMARY_WALLET,
+      alertsEnabled: false
     });
 
     const conflictedAccount = privateKeyToAccount(
@@ -647,7 +645,7 @@ describe("Sentinel WP5 API", () => {
 
     expect(conflict.status).toBe(409);
     expect(await readJson<{ error: { message: string } }>(conflict)).toEqual({
-      error: { message: "Wallet is already linked to another alert account" }
+      error: { message: "Wallet is already linked to another account" }
     });
     expect(harness.store.lastLinkedWalletInput?.chainId).toBe(1);
   });

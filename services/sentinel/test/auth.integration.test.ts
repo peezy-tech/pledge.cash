@@ -1,4 +1,8 @@
 import { randomBytes } from "node:crypto";
+import { copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { and, count, eq, sql } from "drizzle-orm";
@@ -35,6 +39,7 @@ const account = privateKeyToAccount(
 const secondaryAccount = privateKeyToAccount(
   "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd"
 );
+const migrationsDirectory = fileURLToPath(new URL("../drizzle", import.meta.url));
 
 describeWithDatabase("Better Auth Postgres integration", () => {
   let adminSql: Sql;
@@ -93,7 +98,7 @@ describeWithDatabase("Better Auth Postgres integration", () => {
         {
           address: account.address.toLowerCase(),
           alertsEnabled: true,
-          isPrimary: true
+          canSignIn: true
         }
       ]
     });
@@ -186,7 +191,7 @@ describeWithDatabase("Better Auth Postgres integration", () => {
     expect(await tableCount(dbClient, authSessions)).toBe(sessionsAfterFirst);
   });
 
-  test("keeps secondary alert wallets outside authentication authority", async () => {
+  test("makes every linked wallet an equal sign-in credential while preserving alert coverage", async () => {
     const primary = await signInWithWallet(app, 8453);
     const before = await authStorageCounts(dbClient);
 
@@ -196,48 +201,40 @@ describeWithDatabase("Better Auth Postgres integration", () => {
       wallet: {
         address: secondaryAccount.address.toLowerCase(),
         alertsEnabled: true,
-        isPrimary: false
+        canSignIn: true
       }
     });
 
     const afterLink = await authStorageCounts(dbClient);
-    expect(afterLink).toEqual(before);
+    expect(afterLink).toEqual({ ...before, wallets: before.wallets + 1 });
     const [linkedCoverage] = await secondaryCoverageRows(dbClient, primary.userId);
-    expect(linkedCoverage).toEqual({ alertsEnabled: true, isPrimary: false });
+    expect(linkedCoverage).toEqual({ alertsEnabled: true });
 
-    const secondarySignIn = await walletSignInResponse(app, 10, secondaryAccount);
-    expect(secondarySignIn.status).toBe(401);
-    expect(await authStorageCounts(dbClient)).toEqual(before);
+    const secondarySignIn = await signInWithWallet(app, 10, secondaryAccount);
+    expect(secondarySignIn.userId).toBe(primary.userId);
 
-    const removePrimary = await app.request(`${apiOrigin}/wallets/${account.address}`, {
-      headers: { Cookie: primary.cookie, Origin: webOrigin },
-      method: "DELETE"
+    const stopWatching = await app.request(`${apiOrigin}/wallets/${secondaryAccount.address}`, {
+      body: JSON.stringify({ alertsEnabled: false }),
+      headers: { "Content-Type": "application/json", Cookie: primary.cookie, Origin: webOrigin },
+      method: "PATCH"
     });
-    expect(removePrimary.status).toBe(409);
-
-    const removeSecondary = await app.request(
-      `${apiOrigin}/wallets/${secondaryAccount.address}`,
-      {
-        headers: { Cookie: primary.cookie, Origin: webOrigin },
-        method: "DELETE"
-      }
-    );
-    expect(removeSecondary.status).toBe(200);
-    expect(await removeSecondary.json()).toEqual({ alertsEnabled: false, ok: true });
+    expect(stopWatching.status).toBe(200);
+    expect(await stopWatching.json()).toMatchObject({
+      wallet: { alertsEnabled: false, canSignIn: true }
+    });
     expect(await secondaryCoverageRows(dbClient, primary.userId)).toEqual([
-      { alertsEnabled: false, isPrimary: false }
+      { alertsEnabled: false }
     ]);
-    expect(await authStorageCounts(dbClient)).toEqual(before);
 
-    const relink = await linkAlertWallet(app, primary.cookie, secondaryAccount, 10);
-    expect(relink.status).toBe(200);
+    const secondarySignInAfterStoppingAlerts = await signInWithWallet(app, 10, secondaryAccount);
+    expect(secondarySignInAfterStoppingAlerts.userId).toBe(primary.userId);
+
+    const secondarySignInOnAnotherChain = await signInWithWallet(app, 1, secondaryAccount);
+    expect(secondarySignInOnAnotherChain.userId).toBe(primary.userId);
     expect(await secondaryCoverageRows(dbClient, primary.userId)).toEqual([
-      { alertsEnabled: true, isPrimary: false }
+      { alertsEnabled: false },
+      { alertsEnabled: false }
     ]);
-    expect(await authStorageCounts(dbClient)).toEqual(before);
-
-    const secondarySignInAfterRelink = await walletSignInResponse(app, 10, secondaryAccount);
-    expect(secondarySignInAfterRelink.status).toBe(401);
   });
 
   test("prevents the same normalized address from crossing principal ownership", async () => {
@@ -268,7 +265,140 @@ describeWithDatabase("Better Auth Postgres integration", () => {
       .where(eq(wallets.userId, otherUser?.id ?? "00000000-0000-0000-0000-000000000000"));
     expect(crossOwned).toHaveLength(0);
   });
+
+  test("backfills legacy alert wallets into sign-in credentials without reenabling coverage", async () => {
+    if (!adminDatabaseUrl) return;
+
+    const legacyDatabaseName = `sentinel_wallet_migration_${randomBytes(6).toString("hex")}`;
+    const legacyDatabaseUrl = new URL(adminDatabaseUrl);
+    legacyDatabaseUrl.pathname = `/${legacyDatabaseName}`;
+    const legacyMigrationsDirectory = await createLegacyMigrationsDirectory();
+    let legacyClient: SentinelDbClient | undefined;
+
+    try {
+      await adminSql.unsafe(`CREATE DATABASE ${legacyDatabaseName}`);
+      legacyClient = createDbClient(legacyDatabaseUrl.toString());
+      await legacyClient.migrate(legacyMigrationsDirectory);
+
+      const [legacyUser] = await legacyClient.db
+        .insert(users)
+        .values({
+          email: "legacy@wallet.pledge.cash.invalid",
+          emailVerified: false,
+          name: "Legacy wallet account"
+        })
+        .returning({ id: users.id });
+      expect(legacyUser).toBeDefined();
+      const userId = legacyUser?.id ?? "00000000-0000-0000-0000-000000000000";
+
+      await legacyClient.db.insert(authWallets).values({
+        address: account.address,
+        chainId: 8453,
+        isPrimary: true,
+        userId
+      });
+      await legacyClient.db.insert(authAccounts).values({
+        accountId: `${account.address}:8453`,
+        providerId: "siwe",
+        userId
+      });
+      await legacyClient.db.insert(wallets).values({
+        address: secondaryAccount.address,
+        alertsEnabled: false,
+        chainId: 10,
+        siweMessage: "legacy alert coverage",
+        userId
+      });
+
+      await legacyClient.migrate();
+
+      const [credential] = await legacyClient.db
+        .select({
+          address: authWallets.address,
+          isPrimary: authWallets.isPrimary,
+          userId: authWallets.userId
+        })
+        .from(authWallets)
+        .where(
+          and(
+            eq(authWallets.chainId, 10),
+            sql`lower(${authWallets.address}) = lower(${secondaryAccount.address})`
+          )
+        )
+        .limit(1);
+      expect(credential).toEqual({
+        address: secondaryAccount.address,
+        isPrimary: false,
+        userId
+      });
+
+      const [coverage] = await legacyClient.db
+        .select({ alertsEnabled: wallets.alertsEnabled })
+        .from(wallets)
+        .where(
+          and(
+            eq(wallets.chainId, 10),
+            sql`lower(${wallets.address}) = lower(${secondaryAccount.address})`
+          )
+        )
+        .limit(1);
+      expect(coverage).toEqual({ alertsEnabled: false });
+      expect(await tableCount(legacyClient, authAccounts)).toBe(1);
+
+      const legacyConfig = loadConfig({
+        BETTER_AUTH_SECRET: "sentinel-auth-integration-secret-0000000000000000",
+        BETTER_AUTH_URL: apiOrigin,
+        DATABASE_URL: legacyDatabaseUrl.toString(),
+        SENTINEL_CHAIN_IDS: "31337",
+        SENTINEL_HARNESS: "none",
+        SENTINEL_RPC_URL_31337: "http://127.0.0.1:8545",
+        SENTINEL_WEB_ORIGIN: webOrigin,
+        SENTINEL_TWITTER_ENABLED: "0"
+      });
+      const legacyApp = createApp({
+        auth: createBetterAuthAdapter(legacyConfig, legacyClient.db),
+        config: legacyConfig,
+        store: createDrizzleApiStore(legacyClient.db),
+        verifySiweSignature: createPledgeCashSiweVerifier(legacyConfig, [WALLET_LINK_SIWE_STATEMENT])
+      });
+      const migratedSignIn = await signInWithWallet(legacyApp, 10, secondaryAccount);
+      expect(migratedSignIn.userId).toBe(userId);
+    } finally {
+      await legacyClient?.close();
+      await adminSql.unsafe(`DROP DATABASE IF EXISTS ${legacyDatabaseName} WITH (FORCE)`);
+      await rm(legacyMigrationsDirectory, { force: true, recursive: true });
+    }
+  });
 });
+
+async function createLegacyMigrationsDirectory(): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), "sentinel-wallet-migrations-"));
+  const metaDirectory = join(directory, "meta");
+  await mkdir(metaDirectory);
+
+  const journal = JSON.parse(
+    await readFile(join(migrationsDirectory, "meta", "_journal.json"), "utf8")
+  ) as {
+    dialect: string;
+    entries: Array<{ idx: number; tag: string; version: string; when: number; breakpoints: boolean }>;
+    version: string;
+  };
+  const entries = journal.entries.filter((entry) => entry.idx <= 5);
+  await writeFile(
+    join(metaDirectory, "_journal.json"),
+    `${JSON.stringify({ ...journal, entries }, null, 2)}\n`
+  );
+  await Promise.all(
+    entries.map((entry) =>
+      copyFile(
+        join(migrationsDirectory, `${entry.tag}.sql`),
+        join(directory, `${entry.tag}.sql`)
+      )
+    )
+  );
+
+  return directory;
+}
 
 async function signInWithWallet(
   app: ReturnType<typeof createApp>,
@@ -393,9 +523,9 @@ async function authStorageCounts(
 async function secondaryCoverageRows(
   dbClient: SentinelDbClient,
   userId: string
-): Promise<Array<{ readonly alertsEnabled: boolean; readonly isPrimary: boolean }>> {
+): Promise<Array<{ readonly alertsEnabled: boolean }>> {
   return dbClient.db
-    .select({ alertsEnabled: wallets.alertsEnabled, isPrimary: wallets.isPrimary })
+    .select({ alertsEnabled: wallets.alertsEnabled })
     .from(wallets)
     .where(
       and(

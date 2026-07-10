@@ -9,7 +9,6 @@ import type {
   BoardroomActionsQuery,
   ChannelsResponse,
   DeleteChannelResponse,
-  DeleteWalletResponse,
   LinkWalletRequest,
   LinkWalletResponse,
   PublicActionsQuery,
@@ -18,6 +17,8 @@ import type {
   SocialProviderDto,
   SubscriptionResponse,
   TelegramLinkCodeResponse,
+  UpdateWalletAlertsRequest,
+  UpdateWalletAlertsResponse,
   WalletNonceRequest,
   WalletNonceResponse,
 } from "@pledge.cash/sentinel/dto";
@@ -53,7 +54,7 @@ type SentinelClientOptions = {
 };
 
 type JsonRequestOptions = {
-  method?: "GET" | "POST" | "PUT" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   query?: Record<string, QueryValue>;
   signal?: AbortSignal | undefined;
@@ -102,10 +103,13 @@ export function createSentinelClient(options: SentinelClientOptions = {}) {
       sentinelJson<WalletNonceResponse>(baseUrl, fetcher, "/wallets/nonce", { method: "POST", body }),
     deleteChannel: (id: string) =>
       sentinelJson<DeleteChannelResponse>(baseUrl, fetcher, `/channels/${encodeURIComponent(id)}`, { method: "DELETE" }),
-    deleteWallet: (address: string) =>
-      sentinelJson<DeleteWalletResponse>(baseUrl, fetcher, `/wallets/${encodeURIComponent(address)}`, { method: "DELETE" }),
     linkWallet: (body: LinkWalletRequest) =>
       sentinelJson<LinkWalletResponse>(baseUrl, fetcher, "/wallets", { method: "POST", body }),
+    setWalletAlerts: (address: string, body: UpdateWalletAlertsRequest) =>
+      sentinelJson<UpdateWalletAlertsResponse>(baseUrl, fetcher, `/wallets/${encodeURIComponent(address)}`, {
+        method: "PATCH",
+        body,
+      }),
     listBoardroomActions: ({
       address,
       chainId,
