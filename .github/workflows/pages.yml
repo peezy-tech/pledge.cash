@@ -52,6 +52,9 @@ jobs:
           VITE_SENTINEL_API_URL: ${{ vars.VITE_SENTINEL_API_URL }}
         run: bun --cwd apps/web build:pages
 
+      - name: Verify Alerts return route
+        run: cmp apps/web/dist/index.html apps/web/dist/notifications/index.html
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5
         with:

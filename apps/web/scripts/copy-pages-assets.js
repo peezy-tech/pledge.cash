@@ -15,6 +15,7 @@ const appRoutes = [
   "manage",
   "boardroom-tools",
   "activity",
+  "notifications",
   "tools",
   "advanced",
   "direct",
