@@ -70,12 +70,12 @@ export function Panel({
 
   return (
     <section className={cn("min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/82", className)}>
-      <div className="flex min-h-14 items-center justify-between gap-3 px-4 py-3">
+      <div className="flex min-h-14 flex-col items-stretch justify-between gap-3 px-4 py-3 sm:flex-row sm:items-center">
         <div className="min-w-0">
           <h2 className="m-0 text-base font-semibold tracking-normal text-zinc-50">{title}</h2>
           {hasDescription ? <p className="m-0 mt-1 max-w-3xl text-sm leading-5 text-zinc-500">{description}</p> : null}
         </div>
-        {action}
+        {action ? <div className="flex self-stretch sm:self-auto [&>*]:w-full sm:[&>*]:w-auto">{action}</div> : null}
       </div>
       {children}
     </section>

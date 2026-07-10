@@ -8,32 +8,35 @@ import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { shortAddress } from "../../lib/forms";
 import type { SentinelClient } from "../../lib/sentinel";
+import type { WalletState } from "../../lib/types";
 import { errorMessage, formatSentinelDate } from "./hooks";
 
 type WalletLinkProps = {
-  account: Address | undefined;
-  chainId: number;
   client: SentinelClient;
   session: AuthMeResponse;
+  wallet: WalletState;
   onChanged: () => Promise<void>;
 };
 
 export function WalletLink({
-  account,
-  chainId,
   client,
   session,
+  wallet,
   onChanged,
 }: WalletLinkProps): React.JSX.Element {
   const { signMessageAsync } = useSignMessage();
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState<string>();
-  const linkedWallet = account
-    ? session.wallets.find((wallet) => wallet.address.toLowerCase() === account.toLowerCase())
+  const linkedWallet = wallet.account
+    ? session.wallets.find((linkedWallet) => linkedWallet.address.toLowerCase() === wallet.account?.toLowerCase())
     : undefined;
+  const alertWallet = linkedWallet?.alertsEnabled === true ? linkedWallet : undefined;
+  const enabledWalletCount = session.wallets.filter((linkedWallet) => linkedWallet.alertsEnabled).length;
 
   const linkWallet = async (): Promise<void> => {
-    if (!account) {
+    const account = wallet.account;
+    const chainId = wallet.chainId;
+    if (!account || !chainId) {
       setError("Connect wallet first.");
       return;
     }
@@ -43,7 +46,7 @@ export function WalletLink({
     try {
       const nonce = await client.createWalletNonce({ address: account, chainId });
       const message = buildSentinelSiweMessage(nonce, account, chainId);
-      const signature = await signMessageAsync({ message });
+      const signature = await signMessageAsync({ account, message });
       await client.linkWallet({ message, signature });
       await onChanged();
     } catch (error) {
@@ -68,21 +71,34 @@ export function WalletLink({
 
   return (
     <Panel
-      title="Linked Wallets"
-      description="Wallets determine which shareholder alerts can be delivered to this account."
+      title="Alert wallets"
+      description="Your primary wallet is your sign-in identity. Secondary wallets only expand alert coverage and never become sign-in methods."
       action={
-        <Button disabled={!account || pending !== undefined || Boolean(linkedWallet)} variant="secondary" onClick={() => void linkWallet()}>
+        <Button
+          disabled={!wallet.account || !wallet.chainId || pending !== undefined || Boolean(alertWallet)}
+          variant="secondary"
+          onClick={() => void linkWallet()}
+        >
           {pending === "link" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
-          Link wallet
+          {linkedWallet ? "Enable alerts" : "Add connected wallet"}
         </Button>
       }
     >
       <Facts
         columns="three"
         items={[
-          { label: "Connected wallet", value: account ? <AddressLink address={account} /> : "No wallet connected" },
-          { label: "Status", value: linkedWallet ? <Badge>Linked</Badge> : <Badge variant="muted">Not linked</Badge> },
-          { label: "Linked wallets", value: session.wallets.length.toString() },
+          { label: "Connected wallet", value: wallet.account ? <AddressLink address={wallet.account} /> : "No wallet connected" },
+          {
+            label: "Status",
+            value: !wallet.account ? (
+              <Badge variant="muted">No wallet connected</Badge>
+            ) : alertWallet ? (
+              <Badge>Alerts enabled</Badge>
+            ) : (
+              <Badge variant="muted">Not in alert coverage</Badge>
+            ),
+          },
+          { label: "Alert coverage", value: `${enabledWalletCount.toString()} wallet${enabledWalletCount === 1 ? "" : "s"}` },
         ]}
       />
       {error ? <p className="m-0 border-t border-red-950 bg-red-950/35 p-4 text-sm text-red-200">{error}</p> : null}
@@ -90,35 +106,47 @@ export function WalletLink({
         {session.wallets.length === 0 ? (
           <li className="bg-zinc-950 p-4 text-sm text-zinc-500">No linked wallets</li>
         ) : (
-          session.wallets.map((wallet) => (
+          session.wallets.map((linkedWalletRow) => (
             <li
               className="grid min-w-0 gap-3 bg-zinc-950 p-4 md:grid-cols-[minmax(0,1fr)_minmax(180px,0.35fr)_auto] md:items-center"
-              key={wallet.address}
+              key={linkedWalletRow.address}
             >
               <div className="min-w-0">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <WalletCards className="h-4 w-4 text-zinc-500" />
-                  <AddressLink address={wallet.address as Address} />
-                  {account && wallet.address.toLowerCase() === account.toLowerCase() ? (
+                  <AddressLink address={linkedWalletRow.address as Address} />
+                  {isPrimaryWallet(linkedWalletRow) ? <Badge>Primary identity</Badge> : null}
+                  {walletAlertsEnabled(linkedWalletRow) ? (
+                    <Badge variant="muted">Alerts enabled</Badge>
+                  ) : (
+                    <Badge variant="muted">Alerts disabled</Badge>
+                  )}
+                  {wallet.account && linkedWalletRow.address.toLowerCase() === wallet.account.toLowerCase() ? (
                     <Badge variant="default">
                       <CheckCircle2 className="h-3.5 w-3.5" />
                       Connected
                     </Badge>
                   ) : null}
                 </div>
-                <div className="mt-1 text-xs text-zinc-500">{shortAddress(wallet.address)}</div>
+                <div className="mt-1 text-xs text-zinc-500">{shortAddress(linkedWalletRow.address)}</div>
               </div>
-              <div className="text-sm text-zinc-400">Linked {formatSentinelDate(wallet.verifiedAt)}</div>
+              <div className="text-sm text-zinc-400">Linked {formatSentinelDate(linkedWalletRow.verifiedAt)}</div>
               <div className="flex md:justify-end">
-                <Button
-                  disabled={pending !== undefined}
-                  size="sm"
-                  variant="danger"
-                  onClick={() => void unlinkWallet(wallet.address as Address)}
-                >
-                  {pending === wallet.address ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                  Remove
-                </Button>
+                {isPrimaryWallet(linkedWalletRow) ? (
+                  <span className="text-xs font-medium text-zinc-500">Required for sign-in</span>
+                ) : !walletAlertsEnabled(linkedWalletRow) ? (
+                  <span className="text-xs font-medium text-zinc-500">Removed from coverage</span>
+                ) : (
+                  <Button
+                    disabled={pending !== undefined}
+                    size="sm"
+                    variant="danger"
+                    onClick={() => void unlinkWallet(linkedWalletRow.address as Address)}
+                  >
+                    {pending === linkedWalletRow.address ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    Remove alerts
+                  </Button>
+                )}
               </div>
             </li>
           ))
@@ -131,6 +159,14 @@ export function WalletLink({
       </ActionRow>
     </Panel>
   );
+}
+
+function isPrimaryWallet(wallet: AuthMeResponse["wallets"][number]): boolean {
+  return wallet.isPrimary;
+}
+
+function walletAlertsEnabled(wallet: AuthMeResponse["wallets"][number]): boolean {
+  return wallet.alertsEnabled;
 }
 
 export function buildSentinelSiweMessage(

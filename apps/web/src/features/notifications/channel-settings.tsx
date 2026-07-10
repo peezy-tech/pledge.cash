@@ -47,10 +47,14 @@ export function ChannelSettings({ channels, client, onChanged }: ChannelSettings
 
   return (
     <Panel
-      title="Delivery Channels"
-      description="Telegram channels receive governance alerts for linked shareholder wallets."
+      title="Delivery"
+      description="Telegram receives governance alerts for every wallet in your alert coverage."
       action={
-        <Button disabled={pending !== undefined} variant="secondary" onClick={() => void createTelegramLink()}>
+        <Button
+          disabled={pending !== undefined}
+          variant={enabledCount === 0 ? "default" : "secondary"}
+          onClick={() => void createTelegramLink()}
+        >
           {pending === "telegram" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           Link Telegram
         </Button>
