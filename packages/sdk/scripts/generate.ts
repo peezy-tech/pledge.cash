@@ -48,6 +48,7 @@ const contracts = [
   ],
   ["MerkleAirdrop", "packages/contracts/out/MerkleAirdrop.sol/MerkleAirdrop.json", "merkleAirdropAbi"],
   ["PoolFees", "packages/contracts/out/PoolFees.sol/PoolFees.json", "poolFeesAbi"],
+  ["ProtocolFeeRouter", "packages/contracts/out/ProtocolFeeRouter.sol/ProtocolFeeRouter.json", "protocolFeeRouterAbi"],
   ["TokenGrant", "packages/contracts/out/TokenGrant.sol/TokenGrant.json", "tokenGrantAbi"],
   ["TokenGrantFactory", "packages/contracts/out/TokenGrantFactory.sol/TokenGrantFactory.json", "tokenGrantFactoryAbi"],
 ] as const;
@@ -58,6 +59,7 @@ const deploymentFields = [
   ["reason", "string"],
   ["deterministicDeployment", "boolean"],
   ["deterministicDeploymentVersion", "string"],
+  ["deterministicReleaseCodeHash", "string"],
   ["deterministicDeployer", "address"],
   ["deterministicDeployerOwner", "address"],
   ["create2Factory", "address"],
@@ -66,6 +68,7 @@ const deploymentFields = [
   ["boardroomFactory", "address"],
   ["boardroomPolicyRegistry", "address"],
   ["assetPolicy", "address"],
+  ["protocolFeeRouter", "address"],
   ["distributionFactory", "address"],
   ["ammFactory", "address"],
   ["ammProtocolFeeRecipient", "address"],
@@ -78,6 +81,15 @@ const deploymentFields = [
   ["factoryOwner", "address"],
   ["policyRegistryOwner", "address"],
   ["assetPolicyOwner", "address"],
+  ["protocolGovernance", "address"],
+  ["protocolTreasury", "address"],
+  ["protocolFeeRouterOwner", "address"],
+  ["protocolFeeRouterRecipient", "address"],
+  ["tokenGrantFeeRecipient", "address"],
+  ["ammFactoryOwner", "address"],
+  ["ammFeeManager", "address"],
+  ["ammLiquidityRouter", "address"],
+  ["ammReservationManager", "address"],
   ["assetPolicyAllowed", "boolean"],
   ["distributionPolicyAllowed", "boolean"],
   ["distributionModulePolicy", "boolean"],
@@ -91,6 +103,17 @@ const deploymentFields = [
   ["assetLockedLiquiditySpenderAllowed", "boolean"],
   ["creationFee", "bigint"],
   ["deploymentTimestamp", "bigint"],
+  ["deterministicDeployerCodeHash", "string"],
+  ["boardroomPolicyRegistryCodeHash", "string"],
+  ["assetPolicyCodeHash", "string"],
+  ["protocolFeeRouterCodeHash", "string"],
+  ["boardroomFactoryCodeHash", "string"],
+  ["tokenGrantFactoryCodeHash", "string"],
+  ["ammFactoryCodeHash", "string"],
+  ["ammRouterCodeHash", "string"],
+  ["lockedLiquidityFactoryCodeHash", "string"],
+  ["distributionFactoryCodeHash", "string"],
+  ["wrappedNativeCodeHash", "string"],
 ] as const satisfies readonly (readonly [string, DeploymentFieldKind])[];
 
 const requiredTokenGrantDeploymentFields = [
@@ -98,6 +121,11 @@ const requiredTokenGrantDeploymentFields = [
   "tokenGrantFactory",
   "tokenGrantLogic",
   "factoryOwner",
+  "tokenGrantFeeRecipient",
+  "protocolFeeRouter",
+  "protocolFeeRouterRecipient",
+  "protocolGovernance",
+  "protocolTreasury",
   "creationFee",
   "deploymentTimestamp",
 ] as const;
@@ -110,6 +138,12 @@ const requiredBoardroomDeploymentFields = [
   "lockedLiquidityFactory",
   "policyRegistryOwner",
   "assetPolicyOwner",
+  "protocolFeeRouterOwner",
+  "ammFactoryOwner",
+  "ammFeeManager",
+  "ammLiquidityRouter",
+  "ammReservationManager",
+  "ammProtocolFeeRecipient",
   "assetPolicyAllowed",
   "tokenGrantPolicyAllowed",
   "tokenGrantModulePolicy",
@@ -124,6 +158,32 @@ const requiredBoardroomDeploymentFields = [
 ] as const;
 
 const boardroomDeploymentFields = new Set<string>(requiredBoardroomDeploymentFields);
+
+const requiredV4DeploymentFields = [
+  "deterministicReleaseCodeHash",
+  "deterministicDeployerCodeHash",
+  "boardroomPolicyRegistryCodeHash",
+  "assetPolicyCodeHash",
+  "protocolFeeRouterCodeHash",
+  "boardroomFactoryCodeHash",
+  "tokenGrantFactoryCodeHash",
+  "ammFactoryCodeHash",
+  "ammRouterCodeHash",
+  "lockedLiquidityFactoryCodeHash",
+  "distributionFactoryCodeHash",
+  "wrappedNativeCodeHash",
+  "protocolGovernance",
+  "protocolTreasury",
+  "protocolFeeRouter",
+  "protocolFeeRouterOwner",
+  "protocolFeeRouterRecipient",
+  "tokenGrantFeeRecipient",
+  "ammFactoryOwner",
+  "ammFeeManager",
+  "ammLiquidityRouter",
+  "ammReservationManager",
+  "ammProtocolFeeRecipient",
+] as const;
 
 function literal(value: unknown): string {
   return JSON.stringify(value, null, 2);
@@ -167,6 +227,13 @@ function serializeDeployment(raw: string): string | undefined {
   const parsed = JSON.parse(raw) as Record<string, unknown>;
   const chainId = numberLiteral(raw, "chainId");
   if (!chainId) return undefined;
+
+  if (parsed.deterministicDeploymentVersion === "pledge.cash.deterministic.v4" && parsed.status !== "pending") {
+    const missingV4Fields = requiredV4DeploymentFields.filter((field) => propertyToken(raw, field) === undefined);
+    if (missingV4Fields.length > 0) {
+      throw new Error(`Deployment ${chainId} is deterministic v4 but is missing attestations (${missingV4Fields.join(", ")}).`);
+    }
+  }
 
   const missingTokenGrantFields = requiredTokenGrantDeploymentFields.filter(
     (field) => propertyToken(raw, field) === undefined,

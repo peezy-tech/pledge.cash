@@ -18,18 +18,21 @@ tokens into it.
 - Factory: deploys deterministic token grant clones, mints and transfers grant-right ERC721 tokens, mirrors ERC721 transfers
   into the grant holder field, optionally collects a native creation fee, and stores an immutable canonical
   `BoardroomFactory` for distribution-grant provenance.
-- Factory owner: authority that can update the native creation fee and receives paid creation fees. In the
-  Boardroom-owned protocol flow this owner is the pledge.cash Boardroom. The canonical factory policy permits that
-  owning Boardroom to call `setCreationFee` and `transferOwnership`.
+- Factory owner: authority that can update the native creation fee, rotate its independent fee recipient, and transfer
+  factory ownership. The canonical deployment assigns this role to protocol governance.
+- Fee recipient: receives paid native creation fees. Factory ownership transfers do not change this address. The
+  canonical deployment points it at `ProtocolFeeRouter`, whose treasury destination is independently rotatable.
 
 ## Assets
 
 - Grant token: ERC20 token escrowed by the issuer and delivered to the holder on settlement.
 - Payment token: ERC20 token paid by the holder only when `price > 0`.
-- Creation fee: optional native token fee paid by the grant issuer to the factory owner when creating a grant.
+- Creation fee: optional native token fee paid by the grant issuer to the configured fee recipient when creating a
+  grant.
 - Grant-right NFT: ERC721 token minted by the factory. Its `tokenId` is `uint256(uint160(grantAddress))`.
 
-Native HYPE is not escrowed by grants. It is only used for the optional creation fee, which the factory forwards to the owner during grant creation.
+Native HYPE is not escrowed by grants. It is only used for the optional creation fee, which the factory forwards to the
+current `feeRecipient` during grant creation.
 
 ## Parameters
 
@@ -46,8 +49,8 @@ Native HYPE is not escrowed by grants. It is only used for the optional creation
 - `transferable`: whether the factory ERC721 holder right may be transferred before expiry and close.
 - `transferUnlockTime`: timestamp before which a transferable grant-right token cannot be transferred.
 
-The initial project-token launch scenario uses a `0.1 HYPE` creation fee. After ownership handoff, fees are sent to the
-project Boardroom and wrapped into WHYPE when wind-down starts.
+The local project-token scenario may explicitly direct a `0.1 HYPE` creation fee to its project Boardroom. That is a
+scenario-specific revenue choice, not an effect of factory ownership and not the canonical root deployment route.
 
 ## HyperEVM Testnet
 
@@ -115,7 +118,7 @@ Effects:
 - factory deploys the grant clone at an address derived from `issuer` and `salt`,
 - grant state is initialized once,
 - full grant is transferred from issuer into escrow by the factory,
-- when configured, the factory forwards the creation fee to the owner,
+- when configured, the factory forwards the creation fee to `feeRecipient`,
 - factory records the token id to grant clone mapping,
 - factory mints the grant-right ERC721 token to the holder,
 - creation event is emitted by the factory.
@@ -212,12 +215,15 @@ Effects:
 - distribution-created grants are always fee-exempt and nonpayable.
 - the immutable canonical Boardroom factory and issuer-side distribution tracking gate every fee-exempt grant creation.
 - creation fee configuration can only be updated by the factory owner.
+- creation-fee destination can only be updated by the factory owner, and ownership transfer does not implicitly change
+  it.
 - after expiry withdrawal, no further settlement succeeds.
 
 ## External Call Failure Model
 
 Grant funding, payment, delivery, halt-return, and expiry-return paths verify both the exact sender decrease and exact
-recipient increase. Native creation fee forwarding reverts if the owner cannot receive native value. Grant lifecycle
+recipient increase. Native creation fee forwarding reverts if the configured recipient cannot receive native value.
+Grant lifecycle
 transitions temporarily lock the factory ERC721 token before ERC20 external calls, preventing malicious token callbacks
 from transferring the holder right mid-settlement or mid-withdrawal.
 
@@ -229,4 +235,4 @@ Current token behavior policy:
 - rebasing tokens are unsupported; asynchronous rebases remain a higher-level token-policy risk,
 - tokens with unsupported decimals are rejected at initialization,
 - `price == 0` has no payment token external call,
-- native creation fee forwarding reverts if the owner cannot receive native value.
+- native creation fee forwarding reverts if the configured recipient cannot receive native value.

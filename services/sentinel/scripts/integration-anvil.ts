@@ -316,6 +316,9 @@ async function deployContracts(wrappedNative: Address): Promise<void> {
     env: {
       PRIVATE_KEY: deployerKey,
       PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER: deployer.address,
+      PLEDGE_CASH_PROTOCOL_GOVERNANCE: deployer.address,
+      PLEDGE_CASH_PROTOCOL_TREASURY: deployer.address,
+      PLEDGE_CASH_AMM_FEE_MANAGER: deployer.address,
       WRAPPED_NATIVE_ADDRESS: wrappedNative,
       WRITE_DEPLOYMENT_STATE: "true"
     }

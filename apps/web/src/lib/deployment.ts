@@ -5,6 +5,7 @@ const ADDRESS_DEPLOYMENT_FIELDS = [
   "boardroomFactory",
   "boardroomPolicyRegistry",
   "assetPolicy",
+  "protocolFeeRouter",
   "distributionFactory",
   "ammFactory",
   "ammProtocolFeeRecipient",
@@ -17,6 +18,15 @@ const ADDRESS_DEPLOYMENT_FIELDS = [
   "factoryOwner",
   "policyRegistryOwner",
   "assetPolicyOwner",
+  "protocolGovernance",
+  "protocolTreasury",
+  "protocolFeeRouterOwner",
+  "protocolFeeRouterRecipient",
+  "tokenGrantFeeRecipient",
+  "ammFactoryOwner",
+  "ammFeeManager",
+  "ammLiquidityRouter",
+  "ammReservationManager",
 ] as const;
 const BOOLEAN_DEPLOYMENT_FIELDS = [
   "tokenGrantPolicyAllowed",

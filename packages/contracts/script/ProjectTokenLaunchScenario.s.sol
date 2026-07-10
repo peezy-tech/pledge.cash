@@ -100,12 +100,16 @@ contract ProjectTokenLaunchScenario is Script {
         state.assetPolicy.setAssetAllowed(address(state.projectToken), true);
 
         state.ammFactory.setProtocolFeeRecipient(address(state.boardroom));
+        state.ammFactory.setLiquidityRouter(address(state.ammRouter));
+        state.ammFactory.setReservationManager(address(state.lockedLiquidityFactory));
         state.tokenGrantFactory.setCreationFee(GRANT_CREATION_FEE);
+        state.tokenGrantFactory.setFeeRecipient(address(state.boardroom));
         state.tokenGrantFactory.transferOwnership(address(state.boardroom));
 
         _check(state.ammFactory.protocolFeeRecipient() == address(state.boardroom), "protocol-fee-recipient");
         _check(state.tokenGrantFactory.creationFee() == GRANT_CREATION_FEE, "grant-creation-fee");
-        _check(state.tokenGrantFactory.owner() == state.grantFeeRecipient, "grant-fee-recipient");
+        _check(state.tokenGrantFactory.owner() == address(state.boardroom), "grant-factory-owner");
+        _check(state.tokenGrantFactory.feeRecipient() == state.grantFeeRecipient, "grant-fee-recipient");
     }
 
     function _seedProjectBalances(ScenarioState memory state, address grantIssuer) internal {

@@ -208,8 +208,9 @@ their own public lifecycle.
 - Boardroom-created grants approve `TokenGrantFactory` as spender for the requested grant amount through `AssetPolicy`.
 - A Boardroom-issued grant must have `issuer == boardroom`.
 - Boardroom-issued grants escrow tokens from the Boardroom before holders can settle.
-- Native grant creation fees flow to `TokenGrantFactory.owner()`. If that owner is the Boardroom, the raw native balance
-  is normalized into WHYPE on wind-down.
+- Native grant creation fees flow to `TokenGrantFactory.feeRecipient()`, independently of factory ownership. A bespoke
+  deployment may select a Boardroom recipient, in which case raw native balance is normalized into WHYPE on wind-down;
+  the canonical root deployment routes fees through the durable protocol fee router instead.
 - Boardroom-created fixed-price sales can only sell the Boardroom's own share token.
 - Boardroom-created migrating curves can only sell the Boardroom's own share token.
 - Fixed-price sale payments are transferred directly to the Boardroom treasury.

@@ -93,7 +93,7 @@ contract AmmRouter is ReentrancyGuard {
 
         _checkedTransferFrom(tokenA, msg.sender, pool, amountA);
         _checkedTransferFrom(tokenB, msg.sender, pool, amountB);
-        liquidity = AmmPool(pool).mint(to);
+        liquidity = AmmPool(pool).mintFromRouter(to, msg.sender);
     }
 
     function addLiquidityNative(
@@ -118,7 +118,7 @@ contract AmmRouter is ReentrancyGuard {
         _checkedTransferFrom(token, msg.sender, pool, amountToken);
         IWrappedNative(wrappedNative).deposit{value: amountNative}();
         wrappedNative.safeTransfer(pool, amountNative);
-        liquidity = AmmPool(pool).mint(to);
+        liquidity = AmmPool(pool).mintFromRouter(to, msg.sender);
 
         _refundNative(msg.sender, msg.value, amountNative);
     }

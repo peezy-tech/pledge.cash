@@ -11,6 +11,7 @@ import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
 import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
 import {BoardroomPolicyRegistry} from "../../src/boardroom/BoardroomPolicyRegistry.sol";
 import {DistributionFactory} from "../../src/distribution/DistributionFactory.sol";
+import {ProtocolFeeRouter} from "../../src/fees/ProtocolFeeRouter.sol";
 import {LockedLiquidityFactory} from "../../src/liquidity/LockedLiquidityFactory.sol";
 import {PledgeCashDeploymentSalts} from "../../src/deployment/PledgeCashDeploymentSalts.sol";
 import {PledgeCashDeterministicDeployer} from "../../src/deployment/PledgeCashDeterministicDeployer.sol";
@@ -98,28 +99,41 @@ contract DeterministicDeploymentTest is Test {
         assertEq(deployedA, deployedB);
     }
 
-    function testSecurityRemediationUsesFreshV3RootSalts() public pure {
-        assertEq(PledgeCashDeploymentSalts.version(), "pledge.cash.deterministic.v3");
+    function testV4RootSaltsAreMechanicallyCoupledToCreationCode() public pure {
+        assertEq(PledgeCashDeploymentSalts.version(), "pledge.cash.deterministic.v4");
         assertEq(
             PledgeCashDeploymentSalts.boardroomPolicyRegistry(),
-            keccak256("pledge.cash.deterministic.v3.BoardroomPolicyRegistry")
+            _releaseSalt("BoardroomPolicyRegistry", keccak256(type(BoardroomPolicyRegistry).creationCode))
         );
-        assertEq(PledgeCashDeploymentSalts.assetPolicy(), keccak256("pledge.cash.deterministic.v3.AssetPolicy"));
         assertEq(
-            PledgeCashDeploymentSalts.tokenGrantFactory(), keccak256("pledge.cash.deterministic.v3.TokenGrantFactory")
+            PledgeCashDeploymentSalts.assetPolicy(),
+            _releaseSalt("AssetPolicy", keccak256(type(AssetPolicy).creationCode))
         );
-        assertEq(PledgeCashDeploymentSalts.ammFactory(), keccak256("pledge.cash.deterministic.v3.AmmFactory"));
-        assertEq(PledgeCashDeploymentSalts.ammRouter(), keccak256("pledge.cash.deterministic.v3.AmmRouter"));
+        assertEq(
+            PledgeCashDeploymentSalts.protocolFeeRouter(),
+            _releaseSalt("ProtocolFeeRouter", keccak256(type(ProtocolFeeRouter).creationCode))
+        );
+        assertEq(
+            PledgeCashDeploymentSalts.tokenGrantFactory(),
+            _releaseSalt("TokenGrantFactory", keccak256(type(TokenGrantFactory).creationCode))
+        );
+        assertEq(
+            PledgeCashDeploymentSalts.ammFactory(), _releaseSalt("AmmFactory", keccak256(type(AmmFactory).creationCode))
+        );
+        assertEq(
+            PledgeCashDeploymentSalts.ammRouter(), _releaseSalt("AmmRouter", keccak256(type(AmmRouter).creationCode))
+        );
         assertEq(
             PledgeCashDeploymentSalts.lockedLiquidityFactory(),
-            keccak256("pledge.cash.deterministic.v3.LockedLiquidityFactory")
+            _releaseSalt("LockedLiquidityFactory", keccak256(type(LockedLiquidityFactory).creationCode))
         );
         assertEq(
             PledgeCashDeploymentSalts.distributionFactory(),
-            keccak256("pledge.cash.deterministic.v3.DistributionFactory")
+            _releaseSalt("DistributionFactory", keccak256(type(DistributionFactory).creationCode))
         );
         assertEq(
-            PledgeCashDeploymentSalts.boardroomFactory(), keccak256("pledge.cash.deterministic.v3.BoardroomFactory")
+            PledgeCashDeploymentSalts.boardroomFactory(),
+            _releaseSalt("BoardroomFactory", keccak256(type(BoardroomFactory).creationCode))
         );
 
         assertNotEq(PledgeCashDeploymentSalts.assetPolicy(), keccak256("pledge.cash.deterministic.v1.AssetPolicy"));
@@ -147,6 +161,12 @@ contract DeterministicDeploymentTest is Test {
                     type(BoardroomFactory).creationCode, abi.encode(address(policyRegistry), address(wrappedNative))
                 )
             )
+        );
+        ProtocolFeeRouter protocolFeeRouter = ProtocolFeeRouter(
+            payable(_deploy(
+                    PledgeCashDeploymentSalts.protocolFeeRouter(),
+                    abi.encodePacked(type(ProtocolFeeRouter).creationCode, abi.encode(owner, owner))
+                ))
         );
         TokenGrantFactory tokenGrantFactory = TokenGrantFactory(
             _deploy(
@@ -186,7 +206,11 @@ contract DeterministicDeploymentTest is Test {
         assertEq(policyRegistry.owner(), owner);
         assertEq(assetPolicy.owner(), owner);
         assertEq(tokenGrantFactory.owner(), owner);
+        assertEq(tokenGrantFactory.feeRecipient(), owner);
         assertEq(tokenGrantFactory.boardroomFactory(), address(boardroomFactory));
+        assertEq(protocolFeeRouter.owner(), owner);
+        assertEq(protocolFeeRouter.feeRecipient(), owner);
+        assertEq(ammFactory.owner(), owner);
         assertEq(ammFactory.feeManager(), owner);
         assertEq(ammRouter.factory(), address(ammFactory));
         assertEq(ammRouter.wrappedNative(), address(wrappedNative));
@@ -196,6 +220,8 @@ contract DeterministicDeploymentTest is Test {
         assertEq(boardroomFactory.wrappedNative(), address(wrappedNative));
 
         vm.startPrank(owner);
+        tokenGrantFactory.setFeeRecipient(address(protocolFeeRouter));
+        ammFactory.setProtocolFeeRecipient(address(protocolFeeRouter));
         assetPolicy.setApprovalSpenderAllowed(address(tokenGrantFactory), true);
         policyRegistry.registerModulePolicy(address(tokenGrantFactory));
         vm.stopPrank();
@@ -203,6 +229,8 @@ contract DeterministicDeploymentTest is Test {
         assertTrue(assetPolicy.isApprovalSpenderAllowed(address(tokenGrantFactory)));
         assertTrue(policyRegistry.isPolicyAllowed(address(tokenGrantFactory)));
         assertTrue(policyRegistry.isModulePolicy(address(tokenGrantFactory)));
+        assertEq(tokenGrantFactory.feeRecipient(), address(protocolFeeRouter));
+        assertEq(ammFactory.protocolFeeRecipient(), address(protocolFeeRouter));
     }
 
     function testRepeatedDeployReturnsExistingAddress() public {
@@ -251,5 +279,9 @@ contract DeterministicDeploymentTest is Test {
         assertEq(deployed, predicted);
         assertEq(deployer.initCodeHashForSalt(salt), keccak256(initCode));
         assertGt(deployed.code.length, 0);
+    }
+
+    function _releaseSalt(string memory contractName, bytes32 creationCodeHash) internal pure returns (bytes32) {
+        return keccak256(abi.encode("pledge.cash.deterministic.v4", contractName, creationCodeHash));
     }
 }

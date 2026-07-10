@@ -11,10 +11,11 @@ migrating bonding curve, AMM, and locked-liquidity primitives.
 | Monad Testnet | `10143` | `https://testnet-rpc.monad.xyz` | `0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541` | `packages/contracts/script/monad-testnet/deploy.sh` | `packages/contracts/deployments/10143.json` |
 
 The deploy script creates or reuses one `PledgeCashDeterministicDeployer`, then creates one
-`BoardroomPolicyRegistry`, one `AssetPolicy`, one `BoardroomFactory`, one `TokenGrantFactory`, one `AmmFactory`, one
-`AmmRouter`, one `LockedLiquidityFactory`, and one `DistributionFactory`. The Boardroom factory is deployed before the
-token-grant factory because its address is an immutable provenance constructor argument. A wrapped-native address is required because
-every Boardroom stores the canonical wrapped native token and wraps raw native funds before wind-down redemptions.
+`BoardroomPolicyRegistry`, one `AssetPolicy`, one `ProtocolFeeRouter`, one `BoardroomFactory`, one `TokenGrantFactory`,
+one `AmmFactory`, one `AmmRouter`, one `LockedLiquidityFactory`, and one `DistributionFactory`. The Boardroom factory is
+deployed before the token-grant factory because its address is an immutable provenance constructor argument. A
+wrapped-native address is required because every Boardroom stores the canonical wrapped native token and wraps raw
+native funds before wind-down redemptions.
 
 Root protocol contracts are deployed through CREATE3 salts from `PledgeCashDeploymentSalts`. As long as the same
 `PledgeCashDeterministicDeployer` address is used on each chain, the root protocol addresses are the same even when
@@ -24,11 +25,29 @@ existing deployer from `PLEDGE_CASH_DETERMINISTIC_DEPLOYER`. The deterministic d
 arguments, so it cannot be captured by the first account to deploy the public salt. Use the same
 `PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER` on every chain that should share deterministic root addresses.
 
-The security-remediated root stack uses the `pledge.cash.deterministic.v3` namespace. The deterministic deployer itself
-keeps its original v1 salt because its bytecode and cross-chain address are unchanged. Every mutable root moved together
-to v3 so a source or embedded-implementation change cannot collide with the init-code hashes already recorded under the
-v1 testnet salts. Future bytecode changes must use a fresh namespace before broadcast; the deployer's hash guard is a
-last line of defense, not a substitute for bumping salts during development.
+The security-remediated root stack uses the `pledge.cash.deterministic.v4` namespace. The deterministic deployer itself
+keeps its original v1 salt because its bytecode and cross-chain address are unchanged. Each v4 root salt includes the
+hash of that root's creation bytecode, including any embedded implementation bytecode. A bytecode change therefore
+changes the salt mechanically rather than depending on an operator to remember a manual version bump. The artifact also
+records one aggregate `deterministicReleaseCodeHash` and each deployed runtime code hash. Constructor arguments remain
+outside the release salt and continue to affect the CREATE3 initialization transaction rather than the root address.
+
+## Authority And Revenue Roles
+
+The broadcaster is a bootstrap operator, not the default long-term authority. `Deploy.s.sol` configures the complete
+stack and then transfers the registry, asset policy, protocol fee router, token-grant factory, and AMM factory to
+`PLEDGE_CASH_PROTOCOL_GOVERNANCE`. It independently configures:
+
+- `PLEDGE_CASH_PROTOCOL_TREASURY` as `ProtocolFeeRouter.feeRecipient()`;
+- `PLEDGE_CASH_AMM_FEE_MANAGER` as the operational authority for bounded AMM excess recovery and synchronization;
+- `ProtocolFeeRouter` as both the token-grant creation-fee recipient and the AMM protocol-fee recipient;
+- `AmmRouter` as the only router allowed to consume a reserved initial-liquidity mint;
+- `LockedLiquidityFactory` as the only initial-liquidity reservation manager.
+
+Governance can rotate the treasury destination, AMM fee manager, and AMM protocol recipient after deployment. Protocol
+revenue is not coupled to a wind-downable project Boardroom or to factory ownership. The deterministic deployer remains
+owned by `PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER`; the current script requires that role to match the broadcaster so it
+can deploy or reuse roots safely.
 
 The registry allows `AssetPolicy` for external asset operations and permanently registers the token grant,
 distribution, and locked-liquidity factories as module policies. Permanent module identity prevents a disabled module
@@ -44,9 +63,9 @@ The checked-in testnet artifacts may model subsystems independently while deploy
 existing artifact predates a current subsystem, mark that subsystem pending instead of keeping stale partial fields. A
 current TokenGrant deployment is no longer independent of Boardroom provenance: every artifact containing
 `tokenGrantFactory` must also contain the canonical `boardroomFactory` embedded in that factory. Other missing Boardroom
-or distribution fields may remain pending until a full stack broadcast replaces the artifact. If root factory bytecode
-changes under deterministic deployment, use new salts for those roots and keep the published artifacts pending until the
-current stack is actually broadcast.
+or distribution fields may remain pending until a full stack broadcast replaces the artifact. A v4 artifact is current
+only when it includes the authority, wiring, release-hash, and per-contract runtime-codehash attestations described
+below.
 
 ## Environment
 
@@ -60,6 +79,9 @@ Required for dry runs and broadcasts:
 
 ```sh
 PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0x...
+PLEDGE_CASH_PROTOCOL_GOVERNANCE=0x...
+PLEDGE_CASH_PROTOCOL_TREASURY=0x...
+PLEDGE_CASH_AMM_FEE_MANAGER=0x...
 HYPEREVM_WRAPPED_NATIVE_ADDRESS=0x5555555555555555555555555555555555555555
 ```
 
@@ -77,7 +99,6 @@ HYPEREVM_TESTNET_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
 MONAD_TESTNET_RPC_URL=https://testnet-rpc.monad.xyz
 MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS=0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541
 TOKEN_GRANT_CREATION_FEE_WEI=100000000000000000
-AMM_PROTOCOL_FEE_RECIPIENT=
 HYPEREVM_GAS_PRICE_WEI=
 HYPEREVM_GAS_ESTIMATE_MULTIPLIER=100
 MONAD_GAS_ESTIMATE_MULTIPLIER=100
@@ -115,6 +136,10 @@ the current script requires it to match the broadcaster. Set `PLEDGE_CASH_DETERM
 pledge.cash deterministic deployer already exists at the intended cross-chain address and its owner matches
 `PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER`.
 
+The three explicit protocol roles may use one development address locally, but production-like deployments should use
+durable, deliberately chosen accounts. In particular, do not use a project Boardroom as the canonical governance,
+treasury, or AMM operations role merely because the broadcaster controls it.
+
 ## Dry Run
 
 ```sh
@@ -136,7 +161,10 @@ bun run deploy:testnets
 ```
 
 Broadcasts require the chain-specific private key or `PRIVATE_KEY`. The wrappers copy the chain-specific key into
-`PRIVATE_KEY` for Foundry.
+`PRIVATE_KEY` for Foundry. The Foundry script first writes a chain-specific `.candidate.json` artifact. The wrapper then
+verifies all live wiring, owners, policy state, and runtime code hashes through the target RPC. It promotes the candidate
+to the checked-in artifact path only if every check succeeds; a failed verification never overwrites the last published
+artifact.
 
 ## Artifact Checks
 
@@ -146,19 +174,30 @@ After a broadcast, verify each chain artifact contains:
 - `deployer`
 - `deterministicDeployment`
 - `deterministicDeploymentVersion`
+- `deterministicReleaseCodeHash`
 - `create2Factory`
 - `deterministicDeployer`
 - `deterministicDeployerOwner`
 - `boardroomPolicyRegistry`
 - `assetPolicy`
+- `protocolFeeRouter`
 - `boardroomFactory`
 - `distributionFactory`
 - `ammFactory`
 - `wrappedNative`
 - `ammRouter`
 - `lockedLiquidityFactory`
+- `protocolGovernance`
+- `protocolTreasury`
 - `policyRegistryOwner`
 - `assetPolicyOwner`
+- `protocolFeeRouterOwner`
+- `protocolFeeRouterRecipient`
+- `ammFactoryOwner`
+- `ammFeeManager`
+- `ammProtocolFeeRecipient`
+- `ammLiquidityRouter`
+- `ammReservationManager`
 - `assetPolicyAllowed`
 - `tokenGrantPolicyAllowed`
 - `tokenGrantModulePolicy`
@@ -171,10 +210,22 @@ After a broadcast, verify each chain artifact contains:
 - `assetDistributionSpenderAllowed`
 - `assetLockedLiquiditySpenderAllowed`
 - `factoryOwner`
+- `tokenGrantFeeRecipient`
 - `tokenGrantFactory`
 - `tokenGrantLogic`
 - `creationFee`
 - `deploymentTimestamp`
+- `deterministicDeployerCodeHash`
+- `boardroomPolicyRegistryCodeHash`
+- `assetPolicyCodeHash`
+- `protocolFeeRouterCodeHash`
+- `boardroomFactoryCodeHash`
+- `tokenGrantFactoryCodeHash`
+- `ammFactoryCodeHash`
+- `ammRouterCodeHash`
+- `lockedLiquidityFactoryCodeHash`
+- `distributionFactoryCodeHash`
+- `wrappedNativeCodeHash`
 
 The three `*ModulePolicy` identity fields must be `true`. Unlike the corresponding mutable `*PolicyAllowed` status,
 module identity is permanent and remains true if an operator later disables new calls to that module.
@@ -183,9 +234,10 @@ module identity is permanent and remains true if an operator later disables new 
 The fee-exempt distribution-grant path accepts issuers only when that canonical factory reports them as deployed
 Boardrooms; artifact verification checks the link directly to prevent a miswired deployment.
 
-If `AMM_PROTOCOL_FEE_RECIPIENT` was configured, the artifact should also contain:
-
-- `ammProtocolFeeRecipient`
+The verifier also requires `TokenGrantFactory.feeRecipient()` and `AmmFactory.protocolFeeRecipient()` to equal the
+artifact's `protocolFeeRouter`, requires that router's destination to equal `protocolTreasury`, and requires the AMM
+liquidity router and reservation manager to equal `AmmRouter` and `LockedLiquidityFactory` respectively. Every serialized
+runtime code hash is recomputed from live bytecode.
 
 For a partial artifact, keep the deployed subsystem fields and add the relevant pending status/reason fields for the
 missing subsystem.
@@ -251,6 +303,9 @@ scenario matrix:
 cd packages/contracts
 PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
 PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+PLEDGE_CASH_PROTOCOL_GOVERNANCE=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+PLEDGE_CASH_PROTOCOL_TREASURY=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+PLEDGE_CASH_AMM_FEE_MANAGER=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
 WRAPPED_NATIVE_ADDRESS=0x... \
 WRITE_DEPLOYMENT_STATE=true \
 forge script script/Deploy.s.sol:Deploy \

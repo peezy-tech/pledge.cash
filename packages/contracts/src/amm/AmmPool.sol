@@ -85,6 +85,7 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     error OnlyFeeManager();
     error BalanceBelowReserve(address token, uint256 balance, uint256 reserve);
     error NoExcessBalance();
+    error PoolNotInitialized();
     error InsufficientObservationHistory(uint256 requestedTimestamp, uint256 oldestTimestamp);
     error TooManySamplePoints(uint256 requested, uint256 maximum);
     error UnexpectedFeeTransfer(address token, uint256 expected, uint256 actual);
@@ -206,7 +207,19 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
     }
 
     function mint(address to) external nonReentrant returns (uint256 liquidity) {
+        return _mintLiquidity(to, msg.sender, msg.sender);
+    }
+
+    function mintFromRouter(address to, address initializer) external nonReentrant returns (uint256 liquidity) {
+        return _mintLiquidity(to, initializer, msg.sender);
+    }
+
+    function _mintLiquidity(address to, address initializer, address liquidityCaller)
+        internal
+        returns (uint256 liquidity)
+    {
         _requireNonZero(to);
+        _requireNonZero(initializer);
         _updateFor(to);
 
         (uint112 reserve0_, uint112 reserve1_,) = getReserves();
@@ -219,6 +232,7 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
         uint256 supply = totalSupply();
 
         if (supply == 0) {
+            AmmFactory(factory).consumeInitialLiquidityReservation(initializer, to, liquidityCaller);
             liquidity = _mintInitialLiquidity(amount0, amount1);
         } else {
             liquidity = _mintAdditionalLiquidity(amount0, amount1, supply, reserve0_, reserve1_);
@@ -295,6 +309,7 @@ contract AmmPool is ERC20, Initializable, ReentrancyGuard {
 
     function syncExcess() external nonReentrant {
         _requireFeeManager();
+        if (totalSupply() == 0) revert PoolNotInitialized();
 
         uint256 balance0 = _balance(token0);
         uint256 balance1 = _balance(token1);

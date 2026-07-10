@@ -25,6 +25,7 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
     address public immutable boardroomFactory;
     address public immutable tokenGrantLogic;
     uint256 public creationFee;
+    address public feeRecipient;
 
     mapping(uint256 => address) public grantForTokenId;
 
@@ -62,6 +63,7 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
     error OnlyLinkedGrant(address caller);
     error GrantStillOpen(uint256 tokenId);
     error InvalidOwner();
+    error InvalidFeeRecipient();
     error InvalidBoardroomFactory(address factory);
     error InvalidCreationFeePayment(uint256 expected, uint256 actual);
     error UnauthorizedGrantIssuer(address issuer, address caller);
@@ -85,6 +87,7 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
     );
     event GrantClosed(address indexed grantAddress, uint256 indexed tokenId, address indexed lastHolder);
     event CreationFeeSet(uint256 amount);
+    event FeeRecipientSet(address indexed previousRecipient, address indexed newRecipient);
     event CreationFeePaid(address indexed payer, address indexed recipient, uint256 amount);
 
     constructor(address owner_, address boardroomFactory_) {
@@ -93,8 +96,10 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
             revert InvalidBoardroomFactory(boardroomFactory_);
         }
         _initializeOwner(owner_);
+        feeRecipient = owner_;
         boardroomFactory = boardroomFactory_;
         tokenGrantLogic = address(new TokenGrant());
+        emit FeeRecipientSet(address(0), owner_);
     }
 
     function name() public pure override returns (string memory) {
@@ -123,6 +128,14 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
     function setCreationFee(uint256 amount) external onlyOwner {
         creationFee = amount;
         emit CreationFeeSet(amount);
+    }
+
+    function setFeeRecipient(address recipient) external onlyOwner {
+        if (recipient == address(0)) revert InvalidFeeRecipient();
+
+        address previousRecipient = feeRecipient;
+        feeRecipient = recipient;
+        emit FeeRecipientSet(previousRecipient, recipient);
     }
 
     function createGrant(
@@ -279,7 +292,8 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
         if (selector == TokenGrantFactory.createGrant.selector) return value == creationFee;
         if (value != 0 || owner() != boardroom) return false;
 
-        return selector == TokenGrantFactory.setCreationFee.selector || selector == TRANSFER_OWNERSHIP_SELECTOR;
+        return selector == TokenGrantFactory.setCreationFee.selector
+            || selector == TokenGrantFactory.setFeeRecipient.selector || selector == TRANSFER_OWNERSHIP_SELECTOR;
     }
 
     function _isAuthorizedLifecycleCall(address boardroom, address grant, bytes4 selector)
@@ -385,7 +399,7 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
     function _payCreationFee(uint256 fee) internal {
         if (fee == 0) return;
 
-        address recipient = owner();
+        address recipient = feeRecipient;
         SafeTransferLib.safeTransferETH(recipient, fee);
         emit CreationFeePaid(msg.sender, recipient, fee);
     }

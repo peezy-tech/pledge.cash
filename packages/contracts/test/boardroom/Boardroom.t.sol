@@ -914,11 +914,12 @@ contract BoardroomTest is Test {
         assertEq(address(boardroom).balance, 0);
     }
 
-    function testCreationFeeReachesBoardroomAfterFactoryOwnershipTransfer() public {
+    function testCreationFeeReachesExplicitBoardroomRecipientAfterFactoryOwnershipTransfer() public {
         uint256 fee = 0.01 ether;
         tokenGrantFactory.setCreationFee(fee);
 
         (Boardroom boardroom,) = _createBoardroom("issue-fee-grant-owned-factory");
+        tokenGrantFactory.setFeeRecipient(address(boardroom));
         tokenGrantFactory.transferOwnership(address(boardroom));
 
         vm.prank(owner);
@@ -933,6 +934,7 @@ contract BoardroomTest is Test {
         assertEq(grant.issuer(), address(boardroom));
         assertEq(address(boardroom).balance, fee);
         assertEq(tokenGrantFactory.owner(), address(boardroom));
+        assertEq(tokenGrantFactory.feeRecipient(), address(boardroom));
 
         vm.prank(owner);
         boardroom.startWindDown();
