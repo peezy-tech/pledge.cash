@@ -210,7 +210,9 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         executor = owner_;
         redemptionExcessRecipient = owner_;
         BoardroomGovernanceStorage.layout().epoch = 1;
-        shareToken = address(new BoardroomToken(address(this), name_, symbol_));
+        shareToken = abi.decode(
+            _delegateGovernance(abi.encodeCall(BoardroomGovernanceLogic.deployShareToken, (name_, symbol_))), (address)
+        );
         isRedeemableAsset[wrappedNative_] = true;
         redeemableAssets.push(wrappedNative_);
 
@@ -241,9 +243,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         }
 
         BoardroomToken shares = BoardroomToken(shareToken);
-        uint256 supply = shares.totalSupply();
-        uint256 treasuryShares = shares.balanceOf(address(this));
-        uint256 circulating = supply > treasuryShares ? supply - treasuryShares : 0;
+        uint256 circulating = shares.governanceEligibleSupply();
         if (circulating < MIN_LAUNCH_CIRCULATING_SUPPLY) revert InvalidLaunchSupply(circulating);
 
         launched = true;
@@ -903,7 +903,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
     function _requireHolderPower(address account, uint256 thresholdBps) internal view {
         BoardroomGovernanceLogic(governanceLogic)
-            .requireHolderPower(shareToken, address(this), account, thresholdBps, GOVERNANCE_BPS_DENOMINATOR);
+            .requireHolderPower(shareToken, account, thresholdBps, GOVERNANCE_BPS_DENOMINATOR);
     }
 
     function _requireAssetManager() internal view {

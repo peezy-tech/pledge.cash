@@ -368,6 +368,82 @@ contract LockedLiquidityTest is Test {
         assertEq(AmmPool(created.pool).balanceOf(address(1)), 0);
         assertEq(shareToken.allowance(address(boardroom), address(lockedLiquidityFactory)), 0);
         assertEq(quoteToken.allowance(address(boardroom), address(lockedLiquidityFactory)), 0);
+        assertTrue(shareToken.isEncumberedAccount(created.pool));
+        assertTrue(shareToken.isEncumberedAccount(AmmPool(created.pool).poolFees()));
+        assertEq(
+            shareToken.encumberedSupply(),
+            shareToken.balanceOf(created.pool) + shareToken.balanceOf(AmmPool(created.pool).poolFees())
+        );
+        assertEq(shareToken.governanceEligibleSupply(), 0);
+    }
+
+    function testExecutorLossWindDownExcludesCanonicalLockedPoolInventory() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-executor-loss");
+
+        vm.prank(owner);
+        boardroom.mint(holder, HOLDER_SHARES);
+        CreatedLocker memory created = _createLockedLiquidity(
+            boardroom, shareToken, address(quoteToken), address(lockedLiquidityFactory), "locked-executor-loss-create"
+        );
+
+        vm.startPrank(owner);
+        boardroom.setExecutor(address(0xDEAD));
+        boardroom.launch(1 days);
+        vm.stopPrank();
+        vm.roll(block.number + 1);
+
+        assertTrue(shareToken.isEncumberedAccount(created.pool));
+        assertEq(shareToken.encumberedSupply(), SHARE_SEED);
+        assertEq(shareToken.governanceEligibleSupply(), HOLDER_SHARES);
+
+        vm.prank(holder);
+        boardroom.startWindDown();
+
+        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.WindingDown));
+    }
+
+    function testLockedPoolTradesMoveSharesAcrossGovernanceEligibilityBoundary() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-trade-accounting");
+        CreatedLocker memory created = _createLockedLiquidity(
+            boardroom, shareToken, address(quoteToken), address(lockedLiquidityFactory), "locked-trade-create"
+        );
+
+        quoteToken.mint(trader, 100 ether);
+        address[] memory buyPath = new address[](2);
+        buyPath[0] = address(quoteToken);
+        buyPath[1] = address(shareToken);
+
+        vm.startPrank(trader);
+        quoteToken.approve(address(router), 100 ether);
+        uint256[] memory buyAmounts = router.swapExactTokensForTokens(100 ether, 1, buyPath, trader, block.timestamp);
+        vm.stopPrank();
+
+        uint256 boughtShares = buyAmounts[1];
+        assertEq(shareToken.balanceOf(trader), boughtShares);
+        assertEq(shareToken.encumberedSupply(), SHARE_SEED - boughtShares);
+        assertEq(shareToken.governanceEligibleSupply(), boughtShares);
+        assertEq(
+            shareToken.encumberedSupply(),
+            shareToken.balanceOf(created.pool) + shareToken.balanceOf(AmmPool(created.pool).poolFees())
+        );
+
+        uint256 soldShares = boughtShares / 2;
+        address[] memory sellPath = new address[](2);
+        sellPath[0] = address(shareToken);
+        sellPath[1] = address(quoteToken);
+
+        vm.startPrank(trader);
+        shareToken.approve(address(router), soldShares);
+        router.swapExactTokensForTokens(soldShares, 1, sellPath, trader, block.timestamp);
+        vm.stopPrank();
+
+        assertEq(shareToken.balanceOf(trader), boughtShares - soldShares);
+        assertEq(shareToken.encumberedSupply(), SHARE_SEED - boughtShares + soldShares);
+        assertEq(shareToken.governanceEligibleSupply(), boughtShares - soldShares);
+        assertEq(
+            shareToken.encumberedSupply(),
+            shareToken.balanceOf(created.pool) + shareToken.balanceOf(AmmPool(created.pool).poolFees())
+        );
     }
 
     function testQueuedLockerCreationSeedsPubliclyPrecreatedEmptyPool() public {
@@ -595,6 +671,11 @@ contract LockedLiquidityTest is Test {
         assertFalse(boardroom.isRedeemableAsset(created.pool));
         assertEq(shareToken.balanceOf(address(boardroom)), 0);
         assertGt(quoteToken.balanceOf(address(boardroom)), 0);
+        assertEq(
+            shareToken.encumberedSupply(),
+            shareToken.balanceOf(created.pool) + shareToken.balanceOf(AmmPool(created.pool).poolFees())
+        );
+        assertEq(shareToken.governanceEligibleSupply(), HOLDER_SHARES);
 
         vm.prank(owner);
         boardroom.openRedemptions();

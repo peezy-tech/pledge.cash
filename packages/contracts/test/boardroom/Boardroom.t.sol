@@ -466,6 +466,9 @@ contract BoardroomTest is Test {
 
         vm.expectRevert(BoardroomToken.OnlyBoardroom.selector);
         shareToken.burn(holder, 1 ether);
+
+        vm.expectRevert(BoardroomToken.OnlyBoardroom.selector);
+        shareToken.registerEncumberedAccount(address(tokenGrantFactory));
     }
 
     function testMintRejectsZeroAddressAndZeroAmount() public {
@@ -951,12 +954,184 @@ contract BoardroomTest is Test {
         assertEq(shareToken.balanceOf(address(boardroom)), 0);
         assertEq(shareToken.balanceOf(grantAddress), GRANT_SIZE);
         assertEq(shareToken.allowance(address(boardroom), address(tokenGrantFactory)), 0);
+        assertTrue(shareToken.isEncumberedAccount(grantAddress));
+        assertEq(shareToken.encumberedSupply(), GRANT_SIZE);
+        assertEq(shareToken.governanceEligibleSupply(), 0);
 
         vm.warp(VESTING_END);
         vm.prank(holder);
         grant.settle(10 ether);
 
         assertEq(shareToken.balanceOf(holder), 10 ether);
+        assertEq(shareToken.encumberedSupply(), GRANT_SIZE - 10 ether);
+        assertEq(shareToken.governanceEligibleSupply(), 10 ether);
+    }
+
+    function testExecutorLossThresholdTracksCurrentAndPastGrantEncumbrance() public {
+        (Boardroom boardroom,) = _createBoardroom("grant-encumbrance-threshold");
+        BoardroomToken shares = BoardroomToken(boardroom.shareToken());
+        address lostExecutor = address(0xDEAD);
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, 1 ether);
+        boardroom.mint(address(boardroom), 99 ether);
+        vm.stopPrank();
+
+        TokenGrant grant = _createBoardroomGrant(
+            boardroom,
+            _boardroomGrantCreate(
+                address(shares), holder, address(0), 99 ether, 0, keccak256("encumbered-holder-grant"), 0
+            )
+        );
+
+        vm.startPrank(owner);
+        boardroom.setExecutor(lostExecutor);
+        boardroom.launch(1 days);
+        vm.stopPrank();
+        vm.roll(block.number + 1);
+
+        assertEq(shares.encumberedSupply(), 99 ether);
+        assertEq(shares.governanceEligibleSupply(), 1 ether);
+        assertEq(shares.getPastEncumberedSupply(block.number - 1), 99 ether);
+        assertEq(shares.getPastGovernanceEligibleSupply(block.number - 1), 1 ether);
+
+        vm.warp(VESTING_END);
+        vm.prank(holder);
+        grant.settle(90 ether);
+
+        assertEq(shares.encumberedSupply(), 9 ether);
+        assertEq(shares.governanceEligibleSupply(), 91 ether);
+
+        vm.prank(holder);
+        vm.expectRevert(
+            abi.encodeWithSelector(Boardroom.InsufficientHolderPower.selector, holder, 91 ether, 1 ether, 9.1 ether)
+        );
+        boardroom.startWindDown();
+
+        vm.roll(block.number + 1);
+        vm.prank(holder);
+        boardroom.startWindDown();
+
+        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.WindingDown));
+    }
+
+    function testExecutorLossWindDownExcludesCanonicalGrantInventory() public {
+        (Boardroom boardroom,) = _createBoardroom("grant-executor-loss");
+        BoardroomToken shares = BoardroomToken(boardroom.shareToken());
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, 1 ether);
+        boardroom.mint(address(boardroom), 99 ether);
+        vm.stopPrank();
+
+        TokenGrant grant = _createBoardroomGrant(
+            boardroom,
+            _boardroomGrantCreate(
+                address(shares), holder, address(0), 99 ether, 0, keccak256("executor-loss-share-grant"), 0
+            )
+        );
+
+        vm.startPrank(owner);
+        boardroom.setExecutor(address(0xDEAD));
+        boardroom.launch(1 days);
+        vm.stopPrank();
+        vm.roll(block.number + 1);
+
+        assertTrue(shares.isEncumberedAccount(address(grant)));
+        assertEq(shares.encumberedSupply(), 99 ether);
+        assertEq(shares.governanceEligibleSupply(), 1 ether);
+
+        vm.prank(address(grant));
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.NotShareholder.selector, address(grant)));
+        boardroom.startWindDown();
+
+        vm.prank(holder);
+        boardroom.startWindDown();
+
+        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.WindingDown));
+    }
+
+    function testCurrentAndPastEligibleSupplyBlockOneBlockCustodyRatioChange() public {
+        (Boardroom boardroom,) = _createBoardroom("custody-ratio-transition");
+        BoardroomToken shares = BoardroomToken(boardroom.shareToken());
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, 5 ether);
+        boardroom.mint(stranger, 94 ether);
+        boardroom.mint(address(boardroom), 1 ether);
+        vm.stopPrank();
+        TokenGrant grant = _createBoardroomGrant(
+            boardroom,
+            _boardroomGrantCreate(address(shares), holder, address(0), 1 ether, 0, keccak256("custody-ratio-grant"), 0)
+        );
+
+        vm.prank(owner);
+        boardroom.launch(1 days);
+        vm.roll(block.number + 1);
+
+        vm.prank(stranger);
+        shares.transfer(address(grant), 94 ether);
+        assertEq(shares.governanceEligibleSupply(), 5 ether);
+        assertEq(shares.getPastGovernanceEligibleSupply(block.number - 1), 99 ether);
+
+        vm.prank(holder);
+        vm.expectRevert(
+            abi.encodeWithSelector(Boardroom.InsufficientHolderPower.selector, holder, 5 ether, 5 ether, 9.9 ether)
+        );
+        boardroom.startWindDown();
+
+        vm.roll(block.number + 1);
+        vm.prank(holder);
+        boardroom.startWindDown();
+
+        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.WindingDown));
+    }
+
+    function testNonShareGrantCannotLowerGovernanceEligibleSupply() public {
+        (Boardroom boardroom,) = _createBoardroom("non-share-grant-encumbrance");
+        BoardroomToken shares = BoardroomToken(boardroom.shareToken());
+
+        paymentToken.mint(address(boardroom), PAYROLL_AMOUNT);
+        vm.prank(owner);
+        boardroom.mint(holder, 10 ether);
+
+        TokenGrant grant = _createBoardroomGrant(
+            boardroom,
+            _boardroomGrantCreate(
+                address(paymentToken), holder, address(0), PAYROLL_AMOUNT, 0, keccak256("non-share-grant"), 0
+            )
+        );
+
+        assertFalse(shares.isEncumberedAccount(address(grant)));
+        assertEq(shares.encumberedSupply(), 0);
+        assertEq(shares.governanceEligibleSupply(), 10 ether);
+    }
+
+    function testHealthyShareGrantQuarantineReturnsEncumberedInventoryToTreasury() public {
+        (Boardroom boardroom,) = _createBoardroom("share-grant-quarantine-accounting");
+        BoardroomToken shares = BoardroomToken(boardroom.shareToken());
+
+        vm.startPrank(owner);
+        boardroom.mint(holder, 1 ether);
+        boardroom.mint(address(boardroom), 99 ether);
+        vm.stopPrank();
+        TokenGrant grant = _createBoardroomGrant(
+            boardroom,
+            _boardroomGrantCreate(
+                address(shares), holder, address(0), 99 ether, 0, keccak256("healthy-share-quarantine"), 0
+            )
+        );
+
+        assertEq(shares.encumberedSupply(), 99 ether);
+        vm.warp(EXPIRY + 1);
+        vm.prank(owner);
+        boardroom.execute(_tokenGrantFactoryCall(address(grant), 0, abi.encodeCall(TokenGrant.quarantineAndClose, ())));
+
+        assertTrue(grant.isClosed());
+        assertFalse(grant.isQuarantined());
+        assertEq(shares.balanceOf(address(boardroom)), 99 ether);
+        assertEq(shares.encumberedSupply(), 0);
+        assertEq(shares.governanceEligibleSupply(), 1 ether);
     }
 
     function testExternalGrantAssetReturnsIntoWindDownRedemptions() public {

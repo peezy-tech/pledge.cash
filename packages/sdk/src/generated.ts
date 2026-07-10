@@ -6552,6 +6552,30 @@ export const boardroomGovernanceLogicAbi = [
   },
   {
     "type": "function",
+    "name": "deployShareToken",
+    "inputs": [
+      {
+        "name": "name",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "symbol",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "exitLockedLiquidity",
     "inputs": [
       {
@@ -7075,11 +7099,6 @@ export const boardroomGovernanceLogicAbi = [
         "internalType": "address"
       },
       {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
         "name": "account",
         "type": "address",
         "internalType": "address"
@@ -7521,6 +7540,17 @@ export const boardroomGovernanceLogicAbi = [
     "inputs": [
       {
         "name": "distribution",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NotShareholder",
+    "inputs": [
+      {
+        "name": "account",
         "type": "address",
         "internalType": "address"
       }
@@ -8253,6 +8283,32 @@ export const boardroomTokenAbi = [
   },
   {
     "type": "function",
+    "name": "encumberedSupply",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "encumberedSupplyCheckpointCount",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "getPastBalance",
     "inputs": [
       {
@@ -8260,6 +8316,44 @@ export const boardroomTokenAbi = [
         "type": "address",
         "internalType": "address"
       },
+      {
+        "name": "blockNumber",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPastEncumberedSupply",
+    "inputs": [
+      {
+        "name": "blockNumber",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPastGovernanceEligibleSupply",
+    "inputs": [
       {
         "name": "blockNumber",
         "type": "uint256",
@@ -8290,6 +8384,38 @@ export const boardroomTokenAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "governanceEligibleSupply",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isEncumberedAccount",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
@@ -8382,6 +8508,19 @@ export const boardroomTokenAbi = [
         "name": "s",
         "type": "bytes32",
         "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "registerEncumberedAccount",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
@@ -8506,6 +8645,25 @@ export const boardroomTokenAbi = [
   },
   {
     "type": "event",
+    "name": "EncumberedAccountRegistered",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "balance",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "Transfer",
     "inputs": [
       {
@@ -8552,6 +8710,17 @@ export const boardroomTokenAbi = [
   },
   {
     "type": "error",
+    "name": "EncumberedAccountAlreadyRegistered",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "FutureCheckpointLookup",
     "inputs": [
       {
@@ -8585,6 +8754,17 @@ export const boardroomTokenAbi = [
     "type": "error",
     "name": "InvalidAmount",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidEncumberedAccount",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
   },
   {
     "type": "error",

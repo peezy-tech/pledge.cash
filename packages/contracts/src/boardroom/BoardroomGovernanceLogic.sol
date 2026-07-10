@@ -6,6 +6,7 @@ import {BoardroomGovernanceStorage} from "./BoardroomGovernanceStorage.sol";
 import {IBoardroomPolicyRegistry} from "./IBoardroomPolicyRegistry.sol";
 import {BoardroomRedemptionPayout} from "./BoardroomRedemptionPayout.sol";
 import {BoardroomRedemptionStorage} from "./BoardroomRedemptionStorage.sol";
+import {AmmPool} from "../amm/AmmPool.sol";
 import {TokenGrant} from "../grants/TokenGrant.sol";
 import {LockedLiquidity} from "../liquidity/LockedLiquidity.sol";
 import {LockedLiquidityFactory} from "../liquidity/LockedLiquidityFactory.sol";
@@ -14,6 +15,7 @@ import {IBoardroomObligationPolicy} from "../policy/IBoardroomObligationPolicy.s
 interface IBoardroomGovernanceDistribution {
     function factory() external view returns (address);
     function boardroom() external view returns (address);
+    function shareToken() external view returns (address);
 }
 
 contract BoardroomGovernanceLogic {
@@ -29,6 +31,7 @@ contract BoardroomGovernanceLogic {
         address account, uint256 currentBalance, uint256 pastBalance, uint256 requiredBalance
     );
     error NoCirculatingShares();
+    error NotShareholder(address account);
     error InvalidRedeemableAsset(address asset);
     error RedeemableAssetAlreadyRegistered(address asset);
     error RedeemableAssetStillValid(address asset);
@@ -105,6 +108,10 @@ contract BoardroomGovernanceLogic {
         bool returnedAsLp;
     }
 
+    function deployShareToken(string calldata name, string calldata symbol) external returns (address token) {
+        token = address(new BoardroomToken(address(this), name, symbol));
+    }
+
     function queueAction(bytes32 actionHash, uint8 status, uint256 delay, uint256 gracePeriod)
         external
         returns (uint256 eta)
@@ -156,23 +163,23 @@ contract BoardroomGovernanceLogic {
         governance.epoch = epoch;
     }
 
-    function requireHolderPower(
-        address shareToken,
-        address boardroom,
-        address account,
-        uint256 thresholdBps,
-        uint256 bpsDenominator
-    ) external view {
+    function requireHolderPower(address shareToken, address account, uint256 thresholdBps, uint256 bpsDenominator)
+        external
+        view
+    {
         if (block.number == 0) revert NoCirculatingShares();
 
         BoardroomToken shares = BoardroomToken(shareToken);
+        if (shares.isEncumberedAccount(account)) revert NotShareholder(account);
         uint256 snapshotBlock = block.number - 1;
-        uint256 pastSupply = shares.getPastTotalSupply(snapshotBlock);
-        uint256 pastTreasury = shares.getPastBalance(boardroom, snapshotBlock);
-        if (pastSupply <= pastTreasury) revert NoCirculatingShares();
+        uint256 currentEligible = shares.governanceEligibleSupply();
+        uint256 pastEligible = shares.getPastGovernanceEligibleSupply(snapshotBlock);
+        if (currentEligible == 0 || pastEligible == 0) revert NoCirculatingShares();
 
-        uint256 circulating = pastSupply - pastTreasury;
-        uint256 required = (circulating * thresholdBps + bpsDenominator - 1) / bpsDenominator;
+        uint256 currentRequired = (currentEligible * thresholdBps + bpsDenominator - 1) / bpsDenominator;
+        uint256 pastRequired = (pastEligible * thresholdBps + bpsDenominator - 1) / bpsDenominator;
+        // A custody transition cannot lower the denominator for either side of the prior-block power check.
+        uint256 required = currentRequired > pastRequired ? currentRequired : pastRequired;
         uint256 currentBalance = shares.balanceOf(account);
         uint256 pastBalance = shares.getPastBalance(account, snapshotBlock);
         if (currentBalance < required || pastBalance < required) {
@@ -273,7 +280,9 @@ contract BoardroomGovernanceLogic {
             return;
         }
         if (obligation.kind == IBoardroomObligationPolicy.ObligationKind.Distribution) {
-            _recordIssuedDistribution(config.policyRegistry, policy, obligation.account, config.maxDistributions);
+            _recordIssuedDistribution(
+                config.policyRegistry, config.shareToken, policy, obligation.account, config.maxDistributions
+            );
             _reserveIssuedGrantSlots(obligation.account, obligation.grantSlotReservations, config.maxGrants);
             return;
         }
@@ -425,7 +434,8 @@ contract BoardroomGovernanceLogic {
         if (tokenGrant.issuer() != address(this) || tokenGrant.factory() != factory) revert InvalidIssuedGrant(grant);
 
         address grantToken = tokenGrant.token();
-        if (grantToken != shareToken) _registerAssetIfNeeded(slots, grantToken, shareToken, maxAssets);
+        if (grantToken == shareToken) BoardroomToken(shareToken).registerEncumberedAccount(grant);
+        else _registerAssetIfNeeded(slots, grantToken, shareToken, maxAssets);
         address paymentToken = tokenGrant.paymentToken();
         if (paymentToken != address(0)) _registerAssetIfNeeded(slots, paymentToken, shareToken, maxAssets);
         _setMappingBool(slots.isIssuedGrant, grant, true);
@@ -434,9 +444,13 @@ contract BoardroomGovernanceLogic {
         emit BoardroomGrantRecorded(grant);
     }
 
-    function _recordIssuedDistribution(address policyRegistry, address factory, address distribution, uint256 maximum)
-        private
-    {
+    function _recordIssuedDistribution(
+        address policyRegistry,
+        address shareToken,
+        address factory,
+        address distribution,
+        uint256 maximum
+    ) private {
         LifecycleSlots memory slots = _lifecycleSlots();
         if (_arrayLength(slots.issuedDistributions) >= maximum) revert TooManyIssuedDistributions();
         if (
@@ -445,9 +459,10 @@ contract BoardroomGovernanceLogic {
         ) revert InvalidIssuedDistribution(distribution);
 
         IBoardroomGovernanceDistribution issued = IBoardroomGovernanceDistribution(distribution);
-        if (issued.boardroom() != address(this) || issued.factory() != factory) {
+        if (issued.boardroom() != address(this) || issued.factory() != factory || issued.shareToken() != shareToken) {
             revert InvalidIssuedDistribution(distribution);
         }
+        BoardroomToken(shareToken).registerEncumberedAccount(distribution);
         _setMappingBool(slots.isIssuedDistribution, distribution, true);
         _setMappingAddress(slots.obligationPolicyOf, distribution, factory);
         _push(slots.issuedDistributions, distribution);
@@ -478,11 +493,16 @@ contract BoardroomGovernanceLogic {
             position.boardroom() != address(this) || position.pool() != pool
                 || !LockedLiquidityFactory(factory).isLocker(locker)
         ) revert InvalidLockedLiquidity(locker);
+        if (position.tokenA() != config.shareToken && position.tokenB() != config.shareToken) {
+            revert InvalidLockedLiquidity(locker);
+        }
 
         _registerAssetIfNeeded(slots, position.tokenA(), config.shareToken, config.maxAssets);
         _registerAssetIfNeeded(slots, position.tokenB(), config.shareToken, config.maxAssets);
         _registerAssetIfNeeded(slots, pool, config.shareToken, config.maxAssets);
         BoardroomGovernanceStorage.layout().redeemableAssetPins[pool] += 1;
+        BoardroomToken(config.shareToken).registerEncumberedAccount(pool);
+        BoardroomToken(config.shareToken).registerEncumberedAccount(AmmPool(pool).poolFees());
         _setMappingBool(slots.isLockedLiquidity, locker, true);
         _setMappingAddress(slots.obligationPolicyOf, locker, factory);
         _push(slots.lockedLiquidityPositions, locker);

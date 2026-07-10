@@ -15,12 +15,21 @@ contract BoardroomToken is ERC20 {
     string internal tokenSymbol;
     mapping(address => Checkpoint[]) internal balanceCheckpoints;
     Checkpoint[] internal totalSupplyCheckpoints;
+    /// @notice Permanent canonical-custody classification; accounts are never reclassified as voters.
+    mapping(address => bool) public isEncumberedAccount;
+    /// @notice Sum of all share balances held by registered non-voting custodians.
+    uint256 public encumberedSupply;
+    Checkpoint[] internal encumberedSupplyCheckpoints;
 
     error InvalidAddress();
     error InvalidAmount();
     error OnlyBoardroom();
     error FutureCheckpointLookup(uint256 requestedBlock, uint256 currentBlock);
     error CheckpointValueOverflow(uint256 value);
+    error InvalidEncumberedAccount(address account);
+    error EncumberedAccountAlreadyRegistered(address account);
+
+    event EncumberedAccountRegistered(address indexed account, uint256 balance);
 
     constructor(address boardroom_, string memory name_, string memory symbol_) {
         if (boardroom_ == address(0)) revert InvalidAddress();
@@ -54,12 +63,43 @@ contract BoardroomToken is ERC20 {
         _burn(from, amount);
     }
 
+    /// @notice Permanently classifies a canonically authenticated obligation custodian as non-voting.
+    /// @dev The existing balance is included because canonical obligations are funded before Boardroom records them.
+    function registerEncumberedAccount(address account) external {
+        _requireBoardroomCaller();
+        if (account == address(0) || account == boardroom || account.code.length == 0) {
+            revert InvalidEncumberedAccount(account);
+        }
+        if (isEncumberedAccount[account]) revert EncumberedAccountAlreadyRegistered(account);
+
+        isEncumberedAccount[account] = true;
+        uint256 balance = balanceOf(account);
+        if (balance != 0) _setEncumberedSupply(encumberedSupply + balance);
+        emit EncumberedAccountRegistered(account, balance);
+    }
+
+    /// @notice Current supply eligible for shareholder governance thresholds.
+    /// @dev Redemption accounting intentionally continues to use total supply after treasury burning.
+    function governanceEligibleSupply() public view returns (uint256) {
+        return totalSupply() - balanceOf(boardroom) - encumberedSupply;
+    }
+
     function getPastBalance(address account, uint256 blockNumber) external view returns (uint256) {
         return _checkpointLookup(balanceCheckpoints[account], blockNumber);
     }
 
     function getPastTotalSupply(uint256 blockNumber) external view returns (uint256) {
         return _checkpointLookup(totalSupplyCheckpoints, blockNumber);
+    }
+
+    function getPastEncumberedSupply(uint256 blockNumber) external view returns (uint256) {
+        return _checkpointLookup(encumberedSupplyCheckpoints, blockNumber);
+    }
+
+    function getPastGovernanceEligibleSupply(uint256 blockNumber) external view returns (uint256) {
+        return _checkpointLookup(totalSupplyCheckpoints, blockNumber)
+            - _checkpointLookup(balanceCheckpoints[boardroom], blockNumber)
+            - _checkpointLookup(encumberedSupplyCheckpoints, blockNumber);
     }
 
     function balanceCheckpointCount(address account) external view returns (uint256) {
@@ -70,10 +110,27 @@ contract BoardroomToken is ERC20 {
         return totalSupplyCheckpoints.length;
     }
 
-    function _afterTokenTransfer(address from, address to, uint256) internal override {
+    function encumberedSupplyCheckpointCount() external view returns (uint256) {
+        return encumberedSupplyCheckpoints.length;
+    }
+
+    function _afterTokenTransfer(address from, address to, uint256 amount) internal override {
         if (from != address(0)) _writeCheckpoint(balanceCheckpoints[from], balanceOf(from));
         if (to != address(0) && to != from) _writeCheckpoint(balanceCheckpoints[to], balanceOf(to));
         if (from == address(0) || to == address(0)) _writeCheckpoint(totalSupplyCheckpoints, totalSupply());
+
+        if (from == to) return;
+        bool fromEncumbered = isEncumberedAccount[from];
+        bool toEncumbered = isEncumberedAccount[to];
+        // Transfers inside or outside the custody set do not cross the governance eligibility boundary.
+        if (fromEncumbered == toEncumbered) return;
+        if (fromEncumbered) _setEncumberedSupply(encumberedSupply - amount);
+        else _setEncumberedSupply(encumberedSupply + amount);
+    }
+
+    function _setEncumberedSupply(uint256 value) internal {
+        encumberedSupply = value;
+        _writeCheckpoint(encumberedSupplyCheckpoints, value);
     }
 
     function _writeCheckpoint(Checkpoint[] storage checkpoints, uint256 value) internal {
