@@ -35,7 +35,6 @@ const SOCIAL_PROVIDER_LABELS: Record<SentinelSocialProvider, string> = {
   apple: "Apple",
   discord: "Discord",
   github: "GitHub",
-  google: "Google / YouTube",
   telegram: "Telegram",
   twitter: "X",
 };

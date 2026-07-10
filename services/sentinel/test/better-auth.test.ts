@@ -24,14 +24,12 @@ describe("Better Auth social providers", () => {
       apple: { clientId: "apple", clientSecret: "secret" },
       discord: { clientId: "discord", clientSecret: "secret" },
       github: { clientId: "github", clientSecret: "secret" },
-      google: { clientId: "google", clientSecret: "secret" },
       telegram: { clientId: "telegram", clientSecret: "secret" },
       twitter: { clientId: "twitter", clientSecret: "secret" }
     };
 
     expect(configuredSocialProviders(providers)).toEqual([
       "discord",
-      "google",
       "twitter",
       "telegram",
       "github",

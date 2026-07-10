@@ -39,7 +39,6 @@ export function createBetterAuthAdapter(
   const socialProviders = configuredSocialProviders(config.auth.socialProviders);
   const verifySiweSignature = createPrimarySiweVerifier(config, db);
   const github = config.auth.socialProviders.github;
-  const google = config.auth.socialProviders.google;
   const apple = config.auth.socialProviders.apple;
   const discord = config.auth.socialProviders.discord;
   const telegram = config.auth.socialProviders.telegram;
@@ -130,16 +129,6 @@ export function createBetterAuthAdapter(
         : {
             github: {
               ...github,
-              disableImplicitSignUp: true,
-              disableSignUp: true
-            }
-          }),
-      ...(google === undefined
-        ? {}
-        : {
-            google: {
-              ...google,
-              disableIdTokenSignIn: true,
               disableImplicitSignUp: true,
               disableSignUp: true
             }
@@ -384,7 +373,7 @@ function createPrimarySiweVerifier(
 export function configuredSocialProviders(
   providers: Config["auth"]["socialProviders"]
 ): SocialProviderName[] {
-  return (["discord", "google", "twitter", "telegram", "github", "apple"] as const).filter(
+  return (["discord", "twitter", "telegram", "github", "apple"] as const).filter(
     (provider) => providers[provider] !== undefined
   );
 }

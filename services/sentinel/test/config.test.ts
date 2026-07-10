@@ -19,8 +19,6 @@ describe("Sentinel config", () => {
       DISCORD_CLIENT_SECRET: "discord-secret",
       GITHUB_CLIENT_ID: "github-client",
       GITHUB_CLIENT_SECRET: "github-secret",
-      GOOGLE_CLIENT_ID: "google-client",
-      GOOGLE_CLIENT_SECRET: "google-secret",
       TELEGRAM_OAUTH_CLIENT_ID: "telegram-client",
       TELEGRAM_OAUTH_CLIENT_SECRET: "telegram-secret",
       TWITTER_CLIENT_ID: "twitter-client",
@@ -33,7 +31,6 @@ describe("Sentinel config", () => {
       socialProviders: {
         discord: { clientId: "discord-client", clientSecret: "discord-secret" },
         github: { clientId: "github-client", clientSecret: "github-secret" },
-        google: { clientId: "google-client", clientSecret: "google-secret" },
         telegram: { clientId: "telegram-client", clientSecret: "telegram-secret" },
         twitter: { clientId: "twitter-client", clientSecret: "twitter-secret" }
       }
@@ -43,7 +40,6 @@ describe("Sentinel config", () => {
   test("requires each social provider client id and secret as a pair", () => {
     const incompleteProviders = [
       { GITHUB_CLIENT_ID: "github-client" },
-      { GOOGLE_CLIENT_SECRET: "google-secret" },
       { APPLE_CLIENT_ID: "apple-client" },
       { DISCORD_CLIENT_SECRET: "discord-secret" },
       { TELEGRAM_OAUTH_CLIENT_ID: "telegram-client" },
@@ -55,6 +51,16 @@ describe("Sentinel config", () => {
         /_CLIENT_ID and .*_CLIENT_SECRET must be configured together/
       );
     }
+  });
+
+  test("does not configure Google from stale environment variables", () => {
+    const config = loadConfig({
+      ...baseEnv,
+      GOOGLE_CLIENT_ID: "stale-google-client",
+      GOOGLE_CLIENT_SECRET: "stale-google-secret"
+    });
+
+    expect(config.auth.socialProviders).toEqual({});
   });
 
   test("requires auth and web URLs to be bare origins", () => {

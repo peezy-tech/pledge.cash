@@ -36,7 +36,6 @@ export const SocialProviderSchema = z.enum([
   "apple",
   "discord",
   "github",
-  "google",
   "telegram",
   "twitter"
 ]);

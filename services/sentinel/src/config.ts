@@ -27,8 +27,6 @@ export const sentinelEnvSchema = z
     BETTER_AUTH_URL: z.string().url(),
     GITHUB_CLIENT_ID: optionalStringSchema,
     GITHUB_CLIENT_SECRET: optionalStringSchema,
-    GOOGLE_CLIENT_ID: optionalStringSchema,
-    GOOGLE_CLIENT_SECRET: optionalStringSchema,
     DISCORD_CLIENT_ID: optionalStringSchema,
     DISCORD_CLIENT_SECRET: optionalStringSchema,
     TWITTER_CLIENT_ID: optionalStringSchema,
@@ -61,7 +59,6 @@ export type SocialProviderName =
   | "apple"
   | "discord"
   | "github"
-  | "google"
   | "telegram"
   | "twitter";
 
@@ -207,7 +204,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const apple = readSocialProvider(rawEnv, "APPLE");
   const discord = readSocialProvider(rawEnv, "DISCORD");
   const github = readSocialProvider(rawEnv, "GITHUB");
-  const google = readSocialProvider(rawEnv, "GOOGLE");
   const telegram = readSocialProvider(rawEnv, "TELEGRAM_OAUTH");
   const twitter = readSocialProvider(rawEnv, "TWITTER");
   const authBaseUrl = readOrigin(raw.BETTER_AUTH_URL, "BETTER_AUTH_URL");
@@ -238,7 +234,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
         ...(apple === undefined ? {} : { apple }),
         ...(discord === undefined ? {} : { discord }),
         ...(github === undefined ? {} : { github }),
-        ...(google === undefined ? {} : { google }),
         ...(telegram === undefined ? {} : { telegram }),
         ...(twitter === undefined ? {} : { twitter })
       }
