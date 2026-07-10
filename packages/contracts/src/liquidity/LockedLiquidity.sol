@@ -6,6 +6,7 @@ import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {Initializable} from "solady/utils/Initializable.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {AmmPool} from "../amm/AmmPool.sol";
+import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 
 interface ILockedLiquidityRouter {
     function addLiquidity(
@@ -63,6 +64,7 @@ contract LockedLiquidity is Initializable {
     error NotSeeded();
     error BoardroomNotWindingDown();
     error UnexpectedExitAmount(address token, uint256 expected, uint256 received, uint256 poolSpent);
+    error UnexpectedTokenTransfer(address token, uint256 expected, uint256 senderSpent, uint256 recipientReceived);
 
     event LockedLiquidityInitialized(address indexed boardroom, address indexed router, address tokenA, address tokenB);
     event LiquidityLocked(address indexed pool, uint256 amountA, uint256 amountB, uint256 liquidity);
@@ -235,12 +237,12 @@ contract LockedLiquidity is Initializable {
 
     function _forwardTokenBalance(address token) internal returns (uint256 balance) {
         balance = ERC20(token).balanceOf(address(this));
-        if (balance != 0) token.safeTransfer(boardroom, balance);
+        if (balance != 0) _transferExactToBoardroom(token, balance);
     }
 
     function _refundDust(address token) internal {
         uint256 balance = ERC20(token).balanceOf(address(this));
-        if (balance != 0) token.safeTransfer(boardroom, balance);
+        if (balance != 0) _transferExactToBoardroom(token, balance);
     }
 
     function _quoteExit(address pool_) internal view returns (ExitQuote memory quote) {
@@ -265,6 +267,16 @@ contract LockedLiquidity is Initializable {
         uint256 poolSpent = poolBalanceAfter > poolBalanceBefore ? 0 : poolBalanceBefore - poolBalanceAfter;
         if (received != expected || poolSpent != expected) {
             revert UnexpectedExitAmount(token, expected, received, poolSpent);
+        }
+    }
+
+    function _transferExactToBoardroom(address token, uint256 amount) internal {
+        ExactTransferLib.ExactDelta memory delta = ExactTransferLib.sendFromSelfTo(token, boardroom, amount);
+        if (
+            delta.senderBalanceIncreased || delta.recipientBalanceDecreased || delta.senderSpent != amount
+                || delta.recipientReceived != amount
+        ) {
+            revert UnexpectedTokenTransfer(token, amount, delta.senderSpent, delta.recipientReceived);
         }
     }
 }

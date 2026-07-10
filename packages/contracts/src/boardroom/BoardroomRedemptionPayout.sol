@@ -29,7 +29,9 @@ interface IBoardroomRedemptionCallback {
 
 /// @notice Delegate-call payout logic kept outside Boardroom's EIP-170-constrained runtime.
 contract BoardroomRedemptionPayout {
-    uint256 internal constant PAYOUT_GAS = 200_000;
+    // Covers the canonical AMM LP fee-settlement path while keeping every
+    // redemption asset isolated behind a fixed, best-effort gas budget.
+    uint256 internal constant PAYOUT_GAS = 300_000;
     uint256 internal constant ASSET_PROBE_GAS = 30_000;
 
     error InvalidRedemptionInput();

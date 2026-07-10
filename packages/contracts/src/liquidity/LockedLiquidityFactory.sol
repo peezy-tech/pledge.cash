@@ -21,6 +21,7 @@ interface ILockedLiquidityFactoryPolicyRegistry {
 
 interface ILockedLiquidityFactoryBoardroomFactory {
     function isBoardroom(address boardroom) external view returns (bool);
+    function isShareToken(address token) external view returns (bool);
 }
 
 interface ILockedLiquidityFactoryShareToken {
@@ -88,6 +89,7 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
     error UnsafeLiquidityMinimums(uint256 amountAMin, uint256 requiredAMin, uint256 amountBMin, uint256 requiredBMin);
     error InvalidBoardroom(address boardroom);
     error MissingBoardroomShareToken(address tokenA, address tokenB, address shareToken);
+    error CanonicalSharePairNotAllowed(address tokenA, address tokenB);
     error UnauthorizedBoardroomPayer(address boardroom, address payer);
     error LockerAlreadyExists(address boardroom, address pool);
     error TooManyBoardroomLockers(address boardroom);
@@ -316,7 +318,7 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
 
         address shareToken = _verifiedBoardroomShareToken(boardroom);
         if (shareToken == address(0)) return false;
-        return _containsShareToken(params.tokenA, params.tokenB, shareToken);
+        return _isAllowedBoardroomPair(params.tokenA, params.tokenB, shareToken);
     }
 
     function _requireValidCreateRequest(address boardroom, address payer, CreateParams calldata params) internal pure {
@@ -326,9 +328,13 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         _requireMeaningfulSeedMinimums(params);
     }
 
-    function _requirePairContainsShareToken(CreateParams calldata params, address shareToken) internal pure {
+    function _requirePairContainsShareToken(CreateParams calldata params, address shareToken) internal view {
         if (!_containsShareToken(params.tokenA, params.tokenB, shareToken)) {
             revert MissingBoardroomShareToken(params.tokenA, params.tokenB, shareToken);
+        }
+        address pairedToken = params.tokenA == shareToken ? params.tokenB : params.tokenA;
+        if (_isCanonicalShareToken(pairedToken)) {
+            revert CanonicalSharePairNotAllowed(params.tokenA, params.tokenB);
         }
     }
 
@@ -359,7 +365,7 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         }
         if (
             ILockedLiquidityFactoryBoardroom(boardroom).shareToken() != tokenA
-                || ILockedLiquidityFactoryShareToken(tokenA).boardroom() != boardroom
+                || ILockedLiquidityFactoryShareToken(tokenA).boardroom() != boardroom || _isCanonicalShareToken(tokenB)
         ) {
             revert UnauthorizedMigrationReservation(boardroom, msg.sender);
         }
@@ -508,6 +514,12 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         return success && data.length == 32 && abi.decode(data, (bool));
     }
 
+    function _isCanonicalShareToken(address token) internal view returns (bool) {
+        (bool success, bytes memory data) =
+            boardroomFactory.staticcall(abi.encodeCall(ILockedLiquidityFactoryBoardroomFactory.isShareToken, (token)));
+        return success && data.length == 32 && abi.decode(data, (bool));
+    }
+
     function _isReciprocalShareToken(address boardroom, address shareToken) internal view returns (bool) {
         (bool success, bytes memory data) =
             shareToken.staticcall(abi.encodeCall(ILockedLiquidityFactoryShareToken.boardroom, ()));
@@ -562,6 +574,12 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
 
     function _containsShareToken(address tokenA, address tokenB, address shareToken) internal pure returns (bool) {
         return tokenA == shareToken || tokenB == shareToken;
+    }
+
+    function _isAllowedBoardroomPair(address tokenA, address tokenB, address shareToken) internal view returns (bool) {
+        if (!_containsShareToken(tokenA, tokenB, shareToken)) return false;
+        address pairedToken = tokenA == shareToken ? tokenB : tokenA;
+        return !_isCanonicalShareToken(pairedToken);
     }
 
     function _pullSeedTokens(address locker, address payer, CreateParams calldata params) internal {

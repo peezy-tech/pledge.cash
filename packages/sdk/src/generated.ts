@@ -11783,6 +11783,32 @@ export const lockedLiquidityAbi = [
         "internalType": "uint256"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "UnexpectedTokenTransfer",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "senderSpent",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "recipientReceived",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   }
 ] as const;
 
@@ -12648,6 +12674,22 @@ export const lockedLiquidityFactoryAbi = [
       }
     ],
     "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "CanonicalSharePairNotAllowed",
+    "inputs": [
+      {
+        "name": "tokenA",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenB",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
   },
   {
     "type": "error",
@@ -15032,6 +15074,32 @@ export const poolFeesAbi = [
     "type": "error",
     "name": "OnlyPool",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "UnexpectedFeeTransfer",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "senderSpent",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "recipientReceived",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   }
 ] as const;
 

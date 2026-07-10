@@ -838,6 +838,17 @@ contract LockedLiquidityTest is Test {
         vm.prank(trader);
         boardroom.openRedemptions();
         assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
+
+        address[] memory assets = boardroom.getRedeemableAssets();
+        uint256 poolAssetIndex;
+        for (uint256 i; i < assets.length; ++i) {
+            if (assets[i] == created.pool) poolAssetIndex = i;
+        }
+        uint256[] memory minimums = new uint256[](assets.length);
+        vm.prank(holder);
+        uint256[] memory amounts = boardroom.redeem(2 * HOLDER_SHARES, holder, minimums);
+        assertGt(amounts[poolAssetIndex], 0);
+        assertEq(ERC20(created.pool).balanceOf(holder), amounts[poolAssetIndex]);
     }
 
     function testUnreadableUnderlyingIsQuarantinedDuringTerminalLpFallback() public {
@@ -1004,6 +1015,74 @@ contract LockedLiquidityTest is Test {
         assertTrue(boardroom.isRedeemableAsset(created.pool));
     }
 
+    function testInexactLockerFeeForwardPreservesEntitlementAndUsesTerminalFallback() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("locked-fee-forward-fallback");
+        LockedLiquidityPoolTransferFeeToken mutableQuote = new LockedLiquidityPoolTransferFeeToken();
+
+        vm.prank(owner);
+        boardroom.mint(address(boardroom), SHARE_SEED);
+        mutableQuote.mint(address(boardroom), QUOTE_SEED);
+        CreatedLocker memory created = _createLockedLiquidityFromBoardroomBalances(
+            boardroom, shareToken, address(mutableQuote), address(lockedLiquidityFactory), "fee-forward-fallback"
+        );
+
+        mutableQuote.mint(trader, 100 ether);
+        vm.roll(block.number + 1);
+        vm.startPrank(trader);
+        mutableQuote.approve(address(router), 100 ether);
+        address[] memory path = new address[](2);
+        path[0] = address(mutableQuote);
+        path[1] = address(shareToken);
+        router.swapExactTokensForTokens(100 ether, 1, path, trader, block.timestamp);
+        vm.stopPrank();
+
+        address feeVault = AmmPool(created.pool).poolFees();
+        uint256 feeBalance = mutableQuote.balanceOf(feeVault);
+        assertGt(feeBalance, 0);
+        mutableQuote.setTaxedSender(created.locker);
+        mutableQuote.setSuppressTaxedSenderTransfer(true);
+
+        vm.prank(owner);
+        boardroom.startWindDown();
+        vm.prank(owner);
+        vm.expectPartialRevert(LockedLiquidity.UnexpectedTokenTransfer.selector);
+        boardroom.exitLockedLiquidity(created.locker, 0, 0, block.timestamp);
+        assertEq(mutableQuote.balanceOf(feeVault), feeBalance);
+        assertEq(LockedLiquidity(created.locker).lockedLiquidity(), created.liquidity);
+
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(trader);
+        boardroom.exitLockedLiquidity(created.locker, 0, 0, block.timestamp);
+
+        assertEq(mutableQuote.balanceOf(feeVault), feeBalance);
+        assertEq(LockedLiquidity(created.locker).lockedLiquidity(), 0);
+        assertEq(ERC20(created.pool).balanceOf(address(boardroom)), created.liquidity);
+        assertGt(
+            AmmPool(created.pool).pendingClaimable0(address(boardroom))
+                + AmmPool(created.pool).pendingClaimable1(address(boardroom)),
+            0
+        );
+
+        vm.prank(trader);
+        boardroom.openRedemptions();
+        address[] memory assets = boardroom.getRedeemableAssets();
+        uint256 poolAssetIndex;
+        bool foundPool;
+        for (uint256 i; i < assets.length; ++i) {
+            if (assets[i] == created.pool) {
+                poolAssetIndex = i;
+                foundPool = true;
+            }
+        }
+        assertTrue(foundPool);
+        uint256 traderShares = shareToken.balanceOf(trader);
+        uint256[] memory minimums = new uint256[](assets.length);
+        vm.prank(trader);
+        uint256[] memory amounts = boardroom.redeem(traderShares, trader, minimums);
+        assertGt(amounts[poolAssetIndex], 0);
+        assertEq(ERC20(created.pool).balanceOf(trader), amounts[poolAssetIndex]);
+    }
+
     function testLockedLiquidityPolicyRejectsPairWithoutShareToken() public {
         (Boardroom boardroom,) = _createBoardroom("locked-policy-share");
         LockedLiquidityTestERC20 otherToken = new LockedLiquidityTestERC20("Other", "OTHER", 18);
@@ -1035,6 +1114,35 @@ contract LockedLiquidityTest is Test {
                 abi.encodeCall(LockedLiquidityFactory.createLockedLiquidity, (params))
             )
         );
+    }
+
+    function testLockedLiquidityRejectsTwoCanonicalBoardroomShareTokens() public {
+        (Boardroom firstBoardroom, BoardroomToken firstShare) = _createBoardroom("locked-share-pair-first");
+        (, BoardroomToken secondShare) = _createBoardroom("locked-share-pair-second");
+
+        LockedLiquidityFactory.CreateParams memory params = LockedLiquidityFactory.CreateParams({
+            tokenA: address(firstShare),
+            tokenB: address(secondShare),
+            amountADesired: SHARE_SEED,
+            amountBDesired: QUOTE_SEED,
+            amountAMin: SEED_MINIMUM,
+            amountBMin: SEED_MINIMUM,
+            deadline: block.timestamp,
+            salt: keccak256("two-canonical-shares")
+        });
+        bytes memory data = abi.encodeCall(LockedLiquidityFactory.createLockedLiquidity, (params));
+
+        assertFalse(
+            lockedLiquidityFactory.canCall(address(firstBoardroom), owner, address(lockedLiquidityFactory), 0, data)
+        );
+
+        vm.prank(address(firstBoardroom));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LockedLiquidityFactory.CanonicalSharePairNotAllowed.selector, address(firstShare), address(secondShare)
+            )
+        );
+        lockedLiquidityFactory.createLockedLiquidity(params);
     }
 
     function testLockedLiquidityFactoryRejectsNonBoardroomCaller() public {

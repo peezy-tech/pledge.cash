@@ -164,6 +164,10 @@ If LP received in the current block is burned, its proportional pending entitlem
 the post-burn LP supply. This prevents a just-in-time provider from minting, generating its own swap fee, removing the
 liquidity, and claiming that pending fee later; mature fees on older liquidity remain claimable after a burn.
 
+Fee-vault payouts require both the vault's exact spend and the recipient's exact receipt. If a token later mutates into a
+taxed, partial, or success-without-transfer mode, the claim reverts atomically instead of clearing the LP holder's fee
+entitlement. The same revert protects a locker exit, allowing its delayed LP fallback to preserve principal and fees.
+
 ### Recover Or Synchronize Excess Balances
 
 Only the factory's current fee manager can call the explicit positive-balance reconciliation functions:
@@ -185,7 +189,10 @@ The Boardroom owner executes a batch:
 2. approve `LockedLiquidityFactory` for the quote token,
 3. call `createLockedLiquidity`.
 
-The factory policy only permits creation where one side is the Boardroom share token. The factory pulls exact seed amounts from the Boardroom to the locker, then asks the locker to add liquidity through the router. The Boardroom records the returned locker.
+The factory policy permits creation only when exactly one side is a canonical Boardroom share token and that share belongs
+to the creating Boardroom. Canonical share/share pairs are rejected because one Boardroom cannot authenticate AMM
+custody on behalf of the other token's governance. The factory pulls exact seed amounts from the Boardroom to the
+locker, then asks the locker to add liquidity through the router. The Boardroom records the returned locker.
 
 ### Claim Locked LP Fees
 

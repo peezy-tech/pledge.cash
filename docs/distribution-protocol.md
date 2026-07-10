@@ -217,8 +217,8 @@ Preconditions:
   - approve the distribution factory for the total share inventory,
   - call `createMigratingBondingCurve`.
 - share token is the Boardroom's own share token.
-- quote token is a deployed contract whose `balanceOf(address)` returns exactly one word under a bounded probe, and is
-  not the share token.
+- quote token is a deployed contract whose `balanceOf(address)` returns exactly one word under a bounded probe, is not
+  the share token, and is not another canonical Boardroom share token.
 - sale supply, migration supply, base price, graduation target, and LP quote basis points are nonzero.
 - total curve supply is at most the AMM `uint112` reserve limit.
 - a full sale must allocate nonzero quote no greater than the AMM reserve limit and produce an initial LP amount above

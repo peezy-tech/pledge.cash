@@ -9,6 +9,7 @@ import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {AmmFactory} from "../../src/amm/AmmFactory.sol";
 import {AmmPool} from "../../src/amm/AmmPool.sol";
 import {AmmRouter} from "../../src/amm/AmmRouter.sol";
+import {PoolFees} from "../../src/amm/PoolFees.sol";
 
 contract AmmTestERC20 is ERC20 {
     string internal tokenName;
@@ -87,12 +88,17 @@ contract AmmTestPoolTransferFeeToken {
     uint8 public decimals = 18;
     uint256 public totalSupply;
     address public taxedSender;
+    bool public suppressTaxedSenderTransfer;
 
     mapping(address => uint256) public balanceOf;
     mapping(address => mapping(address => uint256)) public allowance;
 
     function setTaxedSender(address taxedSender_) external {
         taxedSender = taxedSender_;
+    }
+
+    function setSuppressTaxedSenderTransfer(bool suppress) external {
+        suppressTaxedSenderTransfer = suppress;
     }
 
     function mint(address to, uint256 amount) external {
@@ -118,6 +124,7 @@ contract AmmTestPoolTransferFeeToken {
     }
 
     function _transfer(address from, address to, uint256 amount) internal {
+        if (from == taxedSender && suppressTaxedSenderTransfer) return;
         uint256 fee = from == taxedSender ? amount / 100 : 0;
         balanceOf[from] -= amount;
         balanceOf[to] += amount - fee;
@@ -1141,6 +1148,66 @@ contract AmmTest is Test {
         AmmPool(pool).claimFees();
         assertGt(taxedToken.balanceOf(lp), lpBefore);
         assertLe(taxedToken.balanceOf(fees), receivedFee);
+    }
+
+    function testInexactFeeVaultPayoutRevertsWithoutClearingLpEntitlement() public {
+        AmmTestPoolTransferFeeToken mutableToken = new AmmTestPoolTransferFeeToken();
+        AmmTestERC20 otherToken = new AmmTestERC20("Other", "OTHR", 18);
+        mutableToken.mint(lp, 1_000 ether);
+        otherToken.mint(lp, 1_000 ether);
+        mutableToken.mint(trader, 100 ether);
+
+        vm.startPrank(lp);
+        mutableToken.approve(address(router), 1_000 ether);
+        otherToken.approve(address(router), 1_000 ether);
+        router.addLiquidity(
+            address(mutableToken),
+            address(otherToken),
+            1_000 ether,
+            1_000 ether,
+            1_000 ether,
+            1_000 ether,
+            lp,
+            block.timestamp
+        );
+        vm.stopPrank();
+
+        address pool = factory.getPool(address(mutableToken), address(otherToken));
+        vm.roll(block.number + 1);
+        vm.startPrank(trader);
+        mutableToken.approve(address(router), 100 ether);
+        address[] memory path = new address[](2);
+        path[0] = address(mutableToken);
+        path[1] = address(otherToken);
+        router.swapExactTokensForTokens(100 ether, 1, path, trader, block.timestamp);
+        vm.stopPrank();
+
+        address fees = AmmPool(pool).poolFees();
+        uint256 vaultBalance = mutableToken.balanceOf(fees);
+        uint256 lpBalance = mutableToken.balanceOf(lp);
+        assertGt(vaultBalance, 0);
+
+        mutableToken.setTaxedSender(fees);
+        mutableToken.setSuppressTaxedSenderTransfer(true);
+        vm.prank(lp);
+        vm.expectPartialRevert(PoolFees.UnexpectedFeeTransfer.selector);
+        AmmPool(pool).claimFees();
+        assertEq(mutableToken.balanceOf(fees), vaultBalance);
+        assertEq(mutableToken.balanceOf(lp), lpBalance);
+
+        mutableToken.setSuppressTaxedSenderTransfer(false);
+        vm.prank(lp);
+        vm.expectPartialRevert(PoolFees.UnexpectedFeeTransfer.selector);
+        AmmPool(pool).claimFees();
+        assertEq(mutableToken.balanceOf(fees), vaultBalance);
+        assertEq(mutableToken.balanceOf(lp), lpBalance);
+
+        mutableToken.setTaxedSender(address(0));
+        vm.prank(lp);
+        (uint256 claimed0, uint256 claimed1) = AmmPool(pool).claimFees();
+        assertGt(claimed0 + claimed1, 0);
+        assertGt(mutableToken.balanceOf(lp), lpBalance);
+        assertLt(mutableToken.balanceOf(fees), vaultBalance);
     }
 
     function testRouterEnforcesSwapMinOutAgainstActualReceiverBalance() public {

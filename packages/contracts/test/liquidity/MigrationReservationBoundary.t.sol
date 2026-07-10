@@ -209,6 +209,23 @@ contract MigrationReservationBoundaryTest is Test {
         assertEq(lockedLiquidityFactory.migrationReservationCount(address(unregistered)), 0);
     }
 
+    function testMigrationCannotReservePairOfTwoCanonicalBoardroomShares() public {
+        address secondCanonicalShare = address(new MigrationReservationQuoteToken());
+        boardroomFactory.setShareToken(secondCanonicalShare, true);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LockedLiquidityFactory.UnauthorizedMigrationReservation.selector,
+                address(boardroom),
+                address(distributionFactory)
+            )
+        );
+        _createReservation(secondCanonicalShare, keccak256("canonical-share-pair"));
+
+        assertEq(lockedLiquidityFactory.migrationReservationCount(address(boardroom)), 0);
+        _assertAmmReservation(secondCanonicalShare, address(0), false);
+    }
+
     function testSameSaltCannotBeReservedForTwoPairs() public {
         address firstQuote = address(new MigrationReservationQuoteToken());
         address secondQuote = address(new MigrationReservationQuoteToken());
