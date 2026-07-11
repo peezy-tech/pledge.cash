@@ -24,7 +24,9 @@ import {
 import { actionErrorWasAlreadyHandled } from "../src/hooks/use-action-runner";
 import { contractCallPreview, contractCallReview } from "../src/lib/transaction-preview";
 import {
+  confirmedRefreshIsBlocked,
   confirmedReceiptInvalidationPlan,
+  confirmedScopedRefreshNeedsRetry,
   monitorTransactionReceipt,
   receiptBackgroundRetryDelay,
   transactionReceiptMonitorKey,
@@ -318,14 +320,22 @@ describe("transaction review", () => {
       target,
     } satisfies TransactionRecord;
     const refreshing = { ...base, refreshPending: true } satisfies TransactionRecord;
+    const blocked = {
+      ...base,
+      id: "tx-old-deployment",
+      refreshBlocked: true,
+      refreshPending: true,
+    } satisfies TransactionRecord;
     const cleared = clearSettledTransactions([
       refreshing,
+      blocked,
       { ...base, id: "tx-settled" },
       { ...base, id: "tx-failed", stage: "failed" },
     ]);
 
     expect(cleared).toEqual([refreshing]);
     expect(transactionStatusLabel(refreshing)).toBe("Confirmed — refreshing workspace data");
+    expect(transactionStatusLabel(blocked)).toBe("Confirmed — refresh waiting for the matching deployment");
   });
 
   test("shares one receipt monitor between live and hydrated callers", async () => {
@@ -364,16 +374,19 @@ describe("transaction review", () => {
 
   test("always refreshes shared caches while deferring only scoped provenance refresh", () => {
     expect(confirmedReceiptInvalidationPlan(false, false)).toEqual({
+      refreshBlocked: false,
       refreshPending: false,
       shared: true,
       scoped: false,
     });
     expect(confirmedReceiptInvalidationPlan(true, false)).toEqual({
+      refreshBlocked: true,
       refreshPending: true,
       shared: true,
       scoped: false,
     });
     expect(confirmedReceiptInvalidationPlan(true, true)).toEqual({
+      refreshBlocked: false,
       refreshPending: true,
       shared: true,
       scoped: true,
@@ -388,6 +401,19 @@ describe("transaction review", () => {
       30_000,
       30_000,
     ]);
+  });
+
+  test("keeps confirmed refresh pending until relevant project reads actually load", () => {
+    expect(confirmedScopedRefreshNeedsRetry("failed", true)).toBe(true);
+    expect(confirmedScopedRefreshNeedsRetry("stale", true)).toBe(true);
+    expect(confirmedScopedRefreshNeedsRetry("loaded", true)).toBe(false);
+    expect(confirmedScopedRefreshNeedsRetry("failed", false)).toBe(false);
+  });
+
+  test("reconciles an active confirmed refresh across A to B to A deployment changes", () => {
+    expect(confirmedRefreshIsBlocked("deployment-a", "deployment-a", true)).toBe(false);
+    expect(confirmedRefreshIsBlocked("deployment-a", "deployment-b", true)).toBe(true);
+    expect(confirmedRefreshIsBlocked("deployment-a", "deployment-a", true)).toBe(false);
   });
 
   test("keeps a monitor retryable after observation is deferred", async () => {

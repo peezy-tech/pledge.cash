@@ -26,6 +26,8 @@ export type TransactionReceiptOutcome =
   | { hash: Hex; kind: "replaced" }
   | { hash: Hex; kind: "reverted"; replacementReason?: ReceiptReplacementReason };
 
+export type ScopedRefreshLoadResult = "failed" | "loaded" | "stale";
+
 export class TransactionReceiptMonitoringDeferredError extends Error {
   constructor(cause?: unknown) {
     super("Confirmation tracking was interrupted. The transaction is still submitted and will be checked again automatically.", {
@@ -87,12 +89,30 @@ export function transactionReceiptMonitorKey(
 export function confirmedReceiptInvalidationPlan(
   hasRefreshRoute: boolean,
   allowScopedInvalidation: boolean,
-): { refreshPending: boolean; shared: true; scoped: boolean } {
+): { refreshBlocked: boolean; refreshPending: boolean; shared: true; scoped: boolean } {
   return {
+    refreshBlocked: hasRefreshRoute && !allowScopedInvalidation,
     refreshPending: hasRefreshRoute,
     shared: true,
     scoped: hasRefreshRoute && allowScopedInvalidation,
   };
+}
+
+export function confirmedScopedRefreshNeedsRetry(
+  result: ScopedRefreshLoadResult,
+  stillRelevant: boolean,
+): boolean {
+  return stillRelevant && result !== "loaded";
+}
+
+export function confirmedRefreshIsBlocked(
+  recordDeploymentIdentity: string | undefined,
+  activeDeploymentIdentity: string | undefined,
+  hasRefreshRoute: boolean,
+): boolean {
+  return !hasRefreshRoute
+    || !recordDeploymentIdentity
+    || recordDeploymentIdentity !== activeDeploymentIdentity;
 }
 
 export async function monitorTransactionReceipt({

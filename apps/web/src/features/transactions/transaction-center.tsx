@@ -27,6 +27,7 @@ export type TransactionRecord = {
   functionName: string;
   hash?: Hex | undefined;
   label: string;
+  refreshBlocked?: boolean | undefined;
   refreshPending?: boolean | undefined;
   refreshRoute?: AppRoute | undefined;
   replacementReason?: "cancelled" | "replaced" | "repriced" | undefined;
@@ -40,6 +41,7 @@ export type TransactionUpdate = Partial<Pick<
   | "deploymentIdentity"
   | "error"
   | "hash"
+  | "refreshBlocked"
   | "refreshPending"
   | "refreshRoute"
   | "replacementReason"
@@ -228,7 +230,7 @@ export function TransactionTray({
         type="button"
         onClick={() => setOpen((value) => !value)}
       >
-        <StageIcon refreshPending={latest.refreshPending} stage={latest.stage} />
+        <StageIcon refreshBlocked={latest.refreshBlocked} refreshPending={latest.refreshPending} stage={latest.stage} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-semibold text-zinc-100">{latest.label}</span>
           <span className="block text-xs text-zinc-400" aria-live="polite">{transactionStatusLabel(latest)}</span>
@@ -260,7 +262,7 @@ function TransactionRow({ record }: { record: TransactionRecord }): React.JSX.El
   const explorer = record.hash ? transactionUrl(record.hash, record.chainId) : undefined;
   return (
     <li className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 border-b border-zinc-800 px-4 py-3 last:border-b-0">
-      <StageIcon refreshPending={record.refreshPending} stage={record.stage} />
+      <StageIcon refreshBlocked={record.refreshBlocked} refreshPending={record.refreshPending} stage={record.stage} />
       <div className="min-w-0">
         <div className="flex items-start justify-between gap-3">
           <span className="truncate text-sm font-medium text-zinc-100">{record.label}</span>
@@ -281,8 +283,16 @@ function TransactionRow({ record }: { record: TransactionRecord }): React.JSX.El
   );
 }
 
-function StageIcon({ refreshPending, stage }: { refreshPending?: boolean | undefined; stage: TransactionStage }): React.JSX.Element {
-  if (stage === "confirmed" && refreshPending) {
+function StageIcon({
+  refreshBlocked,
+  refreshPending,
+  stage,
+}: {
+  refreshBlocked?: boolean | undefined;
+  refreshPending?: boolean | undefined;
+  stage: TransactionStage;
+}): React.JSX.Element {
+  if (stage === "confirmed" && refreshPending && !refreshBlocked) {
     return <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-teal-300" aria-hidden="true" />;
   }
   if (stage === "confirmed") return <CheckCircle2 className="mt-0.5 h-4 w-4 text-teal-300" aria-hidden="true" />;
@@ -307,18 +317,21 @@ export function stageLabel(stage: TransactionStage): string {
   }
 }
 
-export function transactionStatusLabel(record: Pick<TransactionRecord, "refreshPending" | "stage">): string {
-  return record.stage === "confirmed" && record.refreshPending
-    ? "Confirmed — refreshing workspace data"
-    : stageLabel(record.stage);
+export function transactionStatusLabel(record: Pick<TransactionRecord, "refreshBlocked" | "refreshPending" | "stage">): string {
+  if (record.stage === "confirmed" && record.refreshPending) {
+    return record.refreshBlocked
+      ? "Confirmed — refresh waiting for the matching deployment"
+      : "Confirmed — refreshing workspace data";
+  }
+  return stageLabel(record.stage);
 }
 
 export function transactionIdentity(chainId: number, account?: Address): string {
   return `${chainId.toString()}:${account?.toLowerCase() ?? "read-only"}`;
 }
 
-function isSettledRecord(record: Pick<TransactionRecord, "refreshPending" | "stage">): boolean {
-  if (record.stage === "confirmed" && record.refreshPending) return false;
+function isSettledRecord(record: Pick<TransactionRecord, "refreshBlocked" | "refreshPending" | "stage">): boolean {
+  if (record.stage === "confirmed" && record.refreshPending && !record.refreshBlocked) return false;
   return record.stage === "confirmed"
     || record.stage === "failed"
     || record.stage === "cancelled"

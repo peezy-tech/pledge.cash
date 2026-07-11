@@ -195,7 +195,9 @@ import {
 import { parseTokenAmountInput, readTokenMetadata, type TokenMetadata } from "../lib/token-amounts";
 import { contractCallPreview, contractCallReview } from "../lib/transaction-preview";
 import {
+  confirmedRefreshIsBlocked,
   confirmedReceiptInvalidationPlan,
+  confirmedScopedRefreshNeedsRetry,
   monitorTransactionReceipt,
   receiptBackgroundRetryDelay,
   transactionReceiptMonitorKey,
@@ -203,6 +205,7 @@ import {
   TransactionReceiptFinalizedError,
   TransactionReceiptMonitoringCancelledError,
   TransactionReceiptMonitoringDeferredError,
+  type ScopedRefreshLoadResult,
   type TransactionReceiptOutcome,
 } from "../lib/transaction-receipts";
 import {
@@ -1115,6 +1118,7 @@ export function App(): React.JSX.Element {
         updateTransaction(transaction.id, {
           error: "Cancelled in your wallet. The reviewed action was not executed.",
           hash: outcome.hash,
+          refreshBlocked: false,
           refreshPending: false,
           replacementReason: "cancelled",
           stage: "cancelled",
@@ -1126,6 +1130,7 @@ export function App(): React.JSX.Element {
         updateTransaction(transaction.id, {
           error: "Replaced in your wallet by a different transaction. The reviewed action was not executed.",
           hash: outcome.hash,
+          refreshBlocked: false,
           refreshPending: false,
           replacementReason: "replaced",
           stage: "replaced",
@@ -1137,6 +1142,7 @@ export function App(): React.JSX.Element {
         updateTransaction(transaction.id, {
           error: `${transaction.label} reverted after submission.`,
           hash: outcome.hash,
+          refreshBlocked: false,
           refreshPending: false,
           replacementReason: outcome.replacementReason,
           stage: "failed",
@@ -1155,6 +1161,7 @@ export function App(): React.JSX.Element {
       updateTransaction(transaction.id, {
         error: undefined,
         hash: outcome.hash,
+        refreshBlocked: invalidation.refreshBlocked,
         refreshPending: invalidation.refreshPending,
         replacementReason: outcome.replacementReason,
         stage: "confirmed",
@@ -1167,12 +1174,12 @@ export function App(): React.JSX.Element {
           throw new TransactionReceiptMonitoringCancelledError();
         }
         transactionRefreshRetryCountsRef.current.delete(refreshRetryKey);
-        updateTransaction(transaction.id, { refreshPending: false });
+        updateTransaction(transaction.id, { refreshBlocked: false, refreshPending: false });
       } catch (error) {
         if (transactionWatcherVersionRef.current !== watcherVersion) {
           throw new TransactionReceiptMonitoringCancelledError();
         }
-        updateTransaction(transaction.id, { refreshPending: true });
+        updateTransaction(transaction.id, { refreshBlocked: false, refreshPending: true });
         pushLog(
           `${transaction.label} confirmed, but current route data could not be refreshed: ${errorMessage(error)}`,
           "error",
@@ -1228,12 +1235,30 @@ export function App(): React.JSX.Element {
         });
     }
   }, [activeNetwork.chainId, publicClient, pushLog, runtimeDeploymentIdentity, transactionReceiptRetryGeneration, transactionWatcherIdentity, transactionWatcherRenderGeneration, transactions, updateTransaction, wallet.account]);
+  useCommittedLayoutEffect(() => {
+    for (const transaction of transactions) {
+      if (transaction.stage !== "confirmed" || !transaction.refreshPending || transaction.refreshBlocked) continue;
+      if (confirmedRefreshIsBlocked(
+        transaction.deploymentIdentity,
+        runtimeDeploymentIdentity,
+        Boolean(transaction.refreshRoute),
+      )) {
+        updateTransaction(transaction.id, { refreshBlocked: true });
+      }
+    }
+  }, [runtimeDeploymentIdentity, transactions, updateTransaction]);
   useEffect(() => {
     for (const transaction of transactions) {
       if (transaction.stage !== "confirmed" || !transaction.refreshPending) continue;
-      if (!transaction.deploymentIdentity
-        || transaction.deploymentIdentity !== runtimeDeploymentIdentity
-        || !transaction.refreshRoute) continue;
+      const refreshBlocked = confirmedRefreshIsBlocked(
+        transaction.deploymentIdentity,
+        runtimeDeploymentIdentity,
+        Boolean(transaction.refreshRoute),
+      );
+      if (refreshBlocked) {
+        continue;
+      }
+      if (!transaction.refreshRoute) continue;
       const refreshVersion = transactionWatcherVersionRef.current;
       const claimKey = [
         refreshVersion.toString(),
@@ -1243,12 +1268,13 @@ export function App(): React.JSX.Element {
       const refreshRetryKey = `${transaction.id}:${transaction.hash?.toLowerCase() ?? "no-hash"}`;
       if (transactionRefreshClaimIdsRef.current.has(claimKey)) continue;
       transactionRefreshClaimIdsRef.current.add(claimKey);
+      if (transaction.refreshBlocked) updateTransaction(transaction.id, { refreshBlocked: false });
       let retryScheduled = false;
       void invalidateConfirmedScopedRouteRef.current(transaction.refreshRoute)
         .then(() => {
           if (transactionWatcherVersionRef.current !== refreshVersion) return;
           transactionRefreshRetryCountsRef.current.delete(refreshRetryKey);
-          updateTransaction(transaction.id, { refreshPending: false });
+          updateTransaction(transaction.id, { refreshBlocked: false, refreshPending: false });
         })
         .catch((error: unknown) => {
           if (transactionWatcherVersionRef.current !== refreshVersion) return;
@@ -1392,7 +1418,7 @@ export function App(): React.JSX.Element {
     resetNetworkScopedState();
   }, [activeNetwork.chainId, runtimeDeploymentIdentity, resetNetworkScopedState]);
 
-  const loadProductBoardroom = useCallback(async (requestedAddress?: Address): Promise<void> => {
+  const loadProductBoardroom = useCallback(async (requestedAddress?: Address): Promise<ScopedRefreshLoadResult> => {
     productLoadAbortControllerRef.current?.abort(new DOMException("A newer project load started.", "AbortError"));
     const abortController = new AbortController();
     productLoadAbortControllerRef.current = abortController;
@@ -1418,7 +1444,7 @@ export function App(): React.JSX.Element {
         const catalogPage = await readProductBoardroomCatalogPage(publicClient, deployment, {
           signal: abortController.signal,
         });
-        if (!requestIsCurrent()) return;
+        if (!requestIsCurrent()) return "stale";
         setProductCatalog(catalogPage.entries);
         setProductCatalogLoaded(true);
         setProductCatalogNextCursor(catalogPage.nextCursor);
@@ -1426,17 +1452,17 @@ export function App(): React.JSX.Element {
         setProductBoardroom(undefined);
         setProductBoardroomVerifiedKey(undefined);
         pushLog(`Loaded ${catalogPage.entries.length.toString()} of ${catalogPage.totalCount.toString()} product Boardrooms`, "success");
-        return;
+        return "loaded";
       }
 
       await assertCanonicalBoardroom(publicClient, deployment, requestedAddress);
-      if (!requestIsCurrent()) return;
+      if (!requestIsCurrent()) return "stale";
       const next = await readProductBoardroomDashboard(publicClient, {
         address: requestedAddress,
         catalog: [...productCatalogRef.current],
         signal: abortController.signal,
       });
-      if (!requestIsCurrent()) return;
+      if (!requestIsCurrent()) return "stale";
       setProductCatalog((current) => mergeProductBoardroomCatalog(current, next.catalog));
       setProductBoardroom(next);
       setProductBoardroomVerifiedKey(canonicalProjectStateKey(
@@ -1478,12 +1504,14 @@ export function App(): React.JSX.Element {
           }
         }
       })();
+      return "loaded";
     } catch (error) {
-      if (!requestIsCurrent()) return;
+      if (!requestIsCurrent()) return "stale";
       const message = productReadErrorMessage(error, activeNetwork.name);
       setProductBoardroomError(message);
       setProductBoardroomFailureKind(error instanceof CanonicalProvenanceError ? "invalid" : "transient");
       pushLog(message, "error");
+      return "failed";
     } finally {
       if (productLoadAbortControllerRef.current === abortController) {
         productLoadAbortControllerRef.current = undefined;
@@ -1535,9 +1563,10 @@ export function App(): React.JSX.Element {
     }
   }, [activeNetwork.chainId, activeNetwork.name, deployment, isCurrentNetworkRequest, productCatalogLoadingMore, productCatalogNextCursor, productCatalogTotalCount, publicClient, pushLog, runtimeDeploymentIdentity]);
 
-  const loadProductGovernance = useCallback(async (address: Address): Promise<void> => {
+  const loadProductGovernance = useCallback(async (address: Address): Promise<ScopedRefreshLoadResult> => {
     const key = `${activeNetwork.chainId.toString()}:${runtimeDeploymentIdentity ?? "unconfigured"}:${address.toLowerCase()}:${wallet.account?.toLowerCase() ?? "read-only"}`;
-    if (activeGovernanceKeyRef.current !== key || productGovernanceLoadedKeyRef.current === key) return;
+    if (activeGovernanceKeyRef.current !== key) return "stale";
+    if (productGovernanceLoadedKeyRef.current === key) return "loaded";
     const requestVersion = ++governanceRequestVersionRef.current;
     governanceLoadAbortControllerRef.current?.abort(new DOMException("A newer governance load started.", "AbortError"));
     const abortController = new AbortController();
@@ -1579,7 +1608,7 @@ export function App(): React.JSX.Element {
             )
           : Promise.resolve(undefined),
       ]);
-      if (governanceRequestVersionRef.current !== requestVersion || activeGovernanceKeyRef.current !== key) return;
+      if (governanceRequestVersionRef.current !== requestVersion || activeGovernanceKeyRef.current !== key) return "stale";
       if (queuedResult.status === "fulfilled") {
         setQueuedBoardroomActions(queuedResult.value.actions.filter((action) => sameAddress(action.boardroom, address)));
         setProductGovernanceQueueComplete(queuedResult.value.complete);
@@ -1598,7 +1627,9 @@ export function App(): React.JSX.Element {
       if (errors.length > 0) {
         productGovernanceLoadedKeyRef.current = undefined;
         setProductGovernanceError(errors.join(" "));
+        return "failed";
       }
+      return "loaded";
     } finally {
       window.clearTimeout(deadline);
       if (governanceLoadAbortControllerRef.current === abortController) {
@@ -1962,6 +1993,7 @@ export function App(): React.JSX.Element {
         deploymentIdentity: transactionIdentity.deploymentIdentity,
         error: undefined,
         hash,
+        refreshBlocked: false,
         refreshPending: false,
         refreshRoute: transactionRoute,
         stage: "submitted",
@@ -2342,7 +2374,7 @@ export function App(): React.JSX.Element {
     expectedRouteKey?: string,
     requireCanonical = false,
     existingRequestVersion?: number,
-  ): Promise<void> => {
+  ): Promise<ScopedRefreshLoadResult> => {
     const requestVersion = existingRequestVersion ?? ++grantLoadVersionRef.current;
     const requestChainId = activeNetwork.chainId;
     const requestDeploymentIdentity = runtimeDeploymentIdentity;
@@ -2358,17 +2390,17 @@ export function App(): React.JSX.Element {
     if (requireCanonical && requestIsCurrent()) setGrantSnapshotVerifiedKey(undefined);
     const now = BigInt(Math.floor(Date.now() / 1000));
     const snapshot = await readGrantState(publicClient, grant, now);
-    if (!requestIsCurrent()) return;
+    if (!requestIsCurrent()) return "stale";
     if (requireCanonical) {
       await assertCanonicalGrant(publicClient, deployment, grant, snapshot);
-      if (!requestIsCurrent()) return;
+      if (!requestIsCurrent()) return "stale";
     }
     const [tokenMetadata, paymentTokenMetadata, issuerBoardroom] = await Promise.all([
       readTokenMetadata(publicClient, snapshot.token),
       isZeroAddress(snapshot.paymentToken) ? undefined : readTokenMetadata(publicClient, snapshot.paymentToken),
       readGrantIssuerBoardroomAccess(snapshot.issuer),
     ]);
-    if (!requestIsCurrent()) return;
+    if (!requestIsCurrent()) return "stale";
 
     setGrantSnapshot({
       address: grant,
@@ -2397,6 +2429,7 @@ export function App(): React.JSX.Element {
       setGrantRouteFailureKind(undefined);
     }
     pushLog(`Loaded grant ${grant}`, "success");
+    return "loaded";
   };
 
   const loadGrant = async (): Promise<void> => {
@@ -2532,7 +2565,11 @@ export function App(): React.JSX.Element {
       const key = canonicalGrantRouteKey(plan.chainId, plan.grant, runtimeDeploymentIdentity);
       grantRouteLoadedKeyRef.current = undefined;
       try {
-        await loadGrantAddress(plan.grant, key, true);
+        const grantResult = await loadGrantAddress(plan.grant, key, true);
+        const latestPlan = confirmedRouteRefreshPlan(routeAtSubmission, activeAppRouteRef.current);
+        if (confirmedScopedRefreshNeedsRetry(grantResult, latestPlan.kind === "grant")) {
+          throw new Error("The confirmed transaction is still waiting for fresh grant data.");
+        }
       } catch (error) {
         if (confirmedRouteRefreshPlan(routeAtSubmission, activeAppRouteRef.current).kind === "grant") {
           setGrantRouteError(canonicalGrantReadErrorMessage(error, activeNetwork.name));
@@ -2570,11 +2607,24 @@ export function App(): React.JSX.Element {
     setMerkleAirdropSnapshotVerifiedKey(invalidateCurrentProjectChild);
     setMigratingCurveSnapshotVerifiedKey(invalidateCurrentProjectChild);
     setLockedLiquiditySnapshotVerifiedKey(invalidateCurrentProjectChild);
-    await loadProductBoardroom(plan.boardroom);
+    const productResult = await loadProductBoardroom(plan.boardroom);
+    if (confirmedScopedRefreshNeedsRetry(
+      productResult,
+      confirmedRouteRefreshPlan(routeAtSubmission, activeAppRouteRef.current).kind !== "none",
+    )) {
+      throw new Error("The confirmed transaction is still waiting for fresh project data.");
+    }
     const currentPlan = confirmedRouteRefreshPlan(routeAtSubmission, activeAppRouteRef.current);
     if (currentPlan.kind === "product" && currentPlan.refreshGovernance) {
       productGovernanceLoadedKeyRef.current = undefined;
-      await loadProductGovernance(currentPlan.boardroom);
+      const governanceResult = await loadProductGovernance(currentPlan.boardroom);
+      const latestPlan = confirmedRouteRefreshPlan(routeAtSubmission, activeAppRouteRef.current);
+      if (confirmedScopedRefreshNeedsRetry(
+        governanceResult,
+        latestPlan.kind === "product" && latestPlan.refreshGovernance,
+      )) {
+        throw new Error("The confirmed transaction is still waiting for fresh governance data.");
+      }
     }
   }
   invalidateSettledSharedStateRef.current = invalidateSettledSharedState;
