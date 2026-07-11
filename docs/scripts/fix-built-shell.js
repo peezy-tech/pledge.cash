@@ -15,7 +15,15 @@ const publicPagefindPath = `${basePath}/_pagefind/pagefind.js` || "/_pagefind/pa
 const pagefindDir = join(outDir, "_pagefind");
 const pagefindEntry = join(pagefindDir, "pagefind.js");
 const pagefindCore = join(pagefindDir, "pagefind-core.js");
-const pagesDir = fileURLToPath(new URL("../pages/", import.meta.url));
+const docsDir = fileURLToPath(new URL("../", import.meta.url));
+const pagefindRunner = join(
+  docsDir,
+  "node_modules",
+  "pagefind",
+  "lib",
+  "runner",
+  "bin.cjs",
+);
 
 function baseAwarePath(value) {
   if (!value.startsWith("/") || !basePath) return value;
@@ -27,26 +35,25 @@ function rewriteMarkdownRootLinks(source) {
   return source.replace(/\]\((\/[^)\s]*)\)/g, (_match, path) => `](${baseAwarePath(path)})`);
 }
 
-function resolvePageMarkdownTarget(target, pageUrl, directoryUrl) {
+function resolvePageMarkdownTarget(target, pageUrl) {
   if (!target || target.startsWith("#") || target.startsWith("//") || /^[a-z][a-z\d+.-]*:/i.test(target)) {
     return target;
   }
   if (target.startsWith("/")) return baseAwarePath(target);
-  const baseUrl = directoryUrl && !pageUrl.endsWith("/") ? `${pageUrl}/` : pageUrl;
-  const resolved = new URL(target, `https://pledge-docs.invalid${baseUrl}`);
+  const resolved = new URL(target, `https://pledge-docs.invalid${pageUrl}`);
   return `${resolved.pathname}${resolved.search}${resolved.hash}`;
 }
 
-function rewritePageMarkdownLinks(source, pageUrl, directoryUrl) {
+function rewritePageMarkdownLinks(source, pageUrl) {
   return source
     .replace(/(!?\[[^\]\n]*\]\(\s*)(?:<([^>]+)>|([^\s)]+))/g, (_match, prefix, angleTarget, plainTarget) => {
       const target = angleTarget ?? plainTarget;
-      const rewritten = resolvePageMarkdownTarget(target, pageUrl, directoryUrl);
+      const rewritten = resolvePageMarkdownTarget(target, pageUrl);
       return `${prefix}${angleTarget === undefined ? rewritten : `<${rewritten}>`}`;
     })
     .replace(/^(\s*\[[^\]\n]+\]:\s*)(?:<([^>]+)>|(\S+))/gm, (_match, prefix, angleTarget, plainTarget) => {
       const target = angleTarget ?? plainTarget;
-      const rewritten = resolvePageMarkdownTarget(target, pageUrl, directoryUrl);
+      const rewritten = resolvePageMarkdownTarget(target, pageUrl);
       return `${prefix}${angleTarget === undefined ? rewritten : `<${rewritten}>`}`;
     });
 }
@@ -61,14 +68,75 @@ async function filesWithExtension(dir, extension) {
   return files;
 }
 
-async function isDirectoryPage(urlPath) {
-  if (urlPath === "/") return true;
-  try {
-    await access(join(pagesDir, urlPath.replace(/^\/+|\/+$/g, ""), "index.md"));
-    return true;
-  } catch {
-    return false;
-  }
+function escapeHtml(value) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function jsonForInlineScript(value) {
+  return JSON.stringify(value)
+    .replaceAll("<", "\\u003c")
+    .replaceAll(">", "\\u003e")
+    .replaceAll("&", "\\u0026")
+    .replaceAll("\u2028", "\\u2028")
+    .replaceAll("\u2029", "\\u2029");
+}
+
+const rawManifest = JSON.parse(await readFile(join(outDir, "mcp.json"), "utf8"));
+const rawSearchManifest = JSON.parse(await readFile(join(outDir, "search.json"), "utf8"));
+if (
+  !Array.isArray(rawSearchManifest.pages)
+  || rawSearchManifest.pages.length !== rawManifest.pages?.length
+  || rawSearchManifest.pages.some((page) => typeof page.id !== "string" || typeof page.description !== "string")
+) {
+  throw new Error("Generated search manifest is missing page descriptions for client-side metadata.");
+}
+const rootPage = rawManifest.pages?.find((page) => page.url === "/");
+if (
+  typeof rootPage?.title !== "string"
+  || typeof rootPage.description !== "string"
+  || typeof rootPage.content !== "string"
+) {
+  throw new Error("Generated MCP manifest is missing the documentation landing page.");
+}
+
+const rootCanonical = `${basePath}/` || "/";
+const rootTitle = `${rootPage.title} | ${rawManifest.name ?? "pledge.cash"}`;
+const rootMetadata = [
+  `<meta name="description" content="${escapeHtml(rootPage.description)}">`,
+  `<link rel="canonical" href="${rootCanonical}">`,
+  `<script id="pledge-docs-page-metadata">window.__PLEDGE_DOCS_PAGE_DESCRIPTIONS__=${jsonForInlineScript(Object.fromEntries(
+    (rawSearchManifest.pages ?? []).map((page) => [page.id, page.description]),
+  ))};</script>`,
+].join("\n");
+const rootSearchBody = `<div data-pagefind-body style="display:none"><h1>${escapeHtml(rootPage.title)}</h1>\n${escapeHtml(rootPage.content)}</div>`;
+const rootHtmlFile = join(outDir, "index.html");
+let rootHtml = await readFile(rootHtmlFile, "utf8");
+if (!rootHtml.includes("</head>") || !rootHtml.includes("</body>")) {
+  throw new Error("Generated documentation landing page is missing required HTML structure.");
+}
+rootHtml = rootHtml
+  .replace(/<meta\b(?=[^>]*\bname=["']description["'])[^>]*>\s*/gi, "")
+  .replace(/<link\b(?=[^>]*\brel=["']canonical["'])[^>]*>\s*/gi, "")
+  .replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtml(rootTitle)}</title>`)
+  .replace("</head>", `  ${rootMetadata}\n</head>`);
+if (!rootHtml.includes("data-pagefind-body")) {
+  rootHtml = rootHtml.replace("</body>", `  ${rootSearchBody}\n</body>`);
+}
+await writeFile(rootHtmlFile, rootHtml);
+
+const pagefindBuild = spawnSync(
+  process.execPath,
+  [pagefindRunner, "--site", outDir, "--output-subdir", "_pagefind"],
+  { cwd: docsDir, encoding: "utf8" },
+);
+if (pagefindBuild.status !== 0) {
+  const detail = pagefindBuild.error?.message || pagefindBuild.stderr?.trim() || "unknown error";
+  throw new Error(`Pagefind rebuild failed after landing-page injection:\n${detail}`);
 }
 
 const needle = "/_pagefind/pagefind.js";
@@ -76,6 +144,9 @@ let replacements = 0;
 
 for (const file of await filesWithExtension(join(outDir, "assets"), ".js")) {
   const source = await readFile(file, "utf8");
+  if (/<h[1-6](?![^>]*\bid=)[^>]*><a class="heading-anchor"/.test(source)) {
+    throw new Error(`Generated Markdown heading is missing its fragment id: ${file}`);
+  }
   const matches = source.split(needle).length - 1;
   if (matches === 0) continue;
   await writeFile(file, source.replaceAll(needle, publicPagefindPath));
@@ -154,6 +225,7 @@ const faviconPath = `${basePath}/favicon.svg` || "/favicon.svg";
 const builtRootHtml = await readFile(join(outDir, "index.html"), "utf8");
 const headFragments = [
   ["script", "pledge-docs-initial-hash"],
+  ["script", "pledge-docs-page-metadata"],
   ["style", "pledge-docs-theme"],
 ].map(([tag, id]) => {
   const match = builtRootHtml.match(new RegExp(`<${tag}\\b[^>]*\\bid=["']${id}["'][^>]*>[\\s\\S]*?</${tag}>`, "i"));
@@ -213,10 +285,9 @@ for (const filename of ["mcp.json", "search.json"]) {
       throw new Error(`Generated ${filename} contains an invalid page URL.`);
     }
     const generatedUrl = page.url;
-    const directoryUrl = await isDirectoryPage(generatedUrl);
     page.url = baseAwarePath(generatedUrl);
     if (typeof page.content === "string") {
-      page.content = rewritePageMarkdownLinks(page.content, page.url, directoryUrl);
+      page.content = rewritePageMarkdownLinks(page.content, page.url);
       if (filename === "mcp.json") {
         const markdownFile = generatedUrl === "/"
           ? join(outDir, "index.md")

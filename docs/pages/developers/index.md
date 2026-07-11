@@ -11,17 +11,17 @@ These pages bridge the product documentation to the repository's authoritative e
 
 | Area | Start here | Authoritative engineering note |
 | --- | --- | --- |
-| Boardroom, governance, wind-down, redemption | [Boardroom integration](boardroom) | [Boardroom protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/boardroom-protocol.md) |
-| Direct and Boardroom-issued grants | [Grant integration](grants) | [Token grant protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/token-grant-protocol.md) |
-| Fixed sales, curves, and Merkle airdrops | [Distribution and airdrop integration](distributions-and-airdrops) | [Distribution protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/distribution-protocol.md) |
-| Pools, router, fees, and locked liquidity | [AMM and liquidity integration](amm-and-liquidity) | [AMM and locked liquidity protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/amm-protocol.md) |
-| Broadcasts, artifacts, and local seeding | [Deployment and local scenarios](deployment-and-local-scenarios) | [Deployment](https://github.com/peezy-tech/pledge.cash/blob/main/docs/deployment.md) |
+| Boardroom, governance, wind-down, redemption | [Boardroom integration](developers/boardroom) | [Boardroom protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/boardroom-protocol.md) |
+| Direct and Boardroom-issued grants | [Grant integration](developers/grants) | [Token grant protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/token-grant-protocol.md) |
+| Fixed sales, curves, and Merkle airdrops | [Distribution and airdrop integration](developers/distributions-and-airdrops) | [Distribution protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/distribution-protocol.md) |
+| Pools, router, fees, and locked liquidity | [AMM and liquidity integration](developers/amm-and-liquidity) | [AMM and locked liquidity protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/amm-protocol.md) |
+| Broadcasts, artifacts, and local seeding | [Deployment and local scenarios](developers/deployment-and-local-scenarios) | [Deployment](https://github.com/peezy-tech/pledge.cash/blob/main/docs/deployment.md) |
 
 ## Repository surfaces
 
 - `packages/contracts`: Solidity contracts, Foundry tests, deployment scripts, and artifacts.
-- `packages/sdk`: generated ABIs plus readers, discovery helpers, provenance checks, and transaction builders.
-- `apps/web`: canonical routes, product workflows, transaction review, receipt recovery, and optional Sentinel client.
+- `packages/sdk`: generated ABIs plus readers, discovery helpers, governance utilities, types, and transaction builders.
+- `apps/web`: canonical provenance checks and routes, product workflows, transaction review, receipt recovery, and the optional Sentinel client.
 - `services/sentinel`: optional hosted indexing, authentication, risk, and wallet-alert service where configured.
 - `docs`: engineering specifications and this public guide.
 

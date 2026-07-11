@@ -139,7 +139,11 @@ export default function SiteHeader({
   setDark,
   setSbOpen,
 }) {
-  const pages = allPages(navigation);
+  const pageDescriptions = globalThis.__PLEDGE_DOCS_PAGE_DESCRIPTIONS__ ?? {};
+  const pages = allPages(navigation).map((page) => ({
+    ...page,
+    description: page.description ?? pageDescriptions[page.id],
+  }));
   const currentPage = pages.find((page) => page.id === currentPageId);
   const breadcrumbs = breadcrumbTrail(navigation, currentPageId);
   const appLink = config.topNav?.find((link) => link.label.toLowerCase() === "app");
@@ -153,8 +157,24 @@ export default function SiteHeader({
     document.title = currentPage?.title
       ? `${currentPage.title} | ${siteName}`
       : `${siteName} docs`;
+
+    let description = document.head.querySelector('meta[name="description"]');
+    if (!description) {
+      description = document.createElement("meta");
+      description.setAttribute("name", "description");
+      document.head.append(description);
+    }
+    description.setAttribute("content", currentPage?.description ?? `Documentation for ${siteName}`);
+
+    let canonical = document.head.querySelector('link[rel="canonical"]');
+    if (!canonical) {
+      canonical = document.createElement("link");
+      canonical.setAttribute("rel", "canonical");
+      document.head.append(canonical);
+    }
+    canonical.setAttribute("href", docsHref(basePath, currentPage?.urlPath ?? "/"));
     updateRenderedBreadcrumbs(basePath);
-  }, [basePath, config.name, currentPage?.title, currentPageId]);
+  }, [basePath, config.name, currentPage?.description, currentPage?.title, currentPage?.urlPath, currentPageId]);
 
   useEffect(() => {
     const initialSearch = window.__PLEDGE_DOCS_INITIAL_SEARCH__;
@@ -264,9 +284,16 @@ export default function SiteHeader({
   }, []);
 
   const openSearch = useCallback((trigger) => {
-    searchReturnFocusRef.current = trigger instanceof HTMLElement ? trigger : document.activeElement;
+    searchReturnFocusRef.current = mobile && sbOpen
+      ? searchButtonRef.current
+      : trigger instanceof HTMLElement ? trigger : document.activeElement;
+    if (mobile && sbOpen) {
+      setSbOpen(false);
+      window.setTimeout(() => setSearchOpen(true), 0);
+      return;
+    }
     setSearchOpen(true);
-  }, []);
+  }, [mobile, sbOpen, setSbOpen]);
 
   const closeSearch = useCallback(() => setSearchOpen(false), []);
 

@@ -1,5 +1,5 @@
 import { readdir, readFile } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { docsRedirects } from "../redirects.js";
@@ -94,6 +94,12 @@ function isExternalTarget(target) {
     || /^[a-z][a-z\d+.-]*:/i.test(target);
 }
 
+function canonicalPageRoute(page) {
+  if (page === "index") return "/";
+  if (page.endsWith("/index")) return `/${page.slice(0, -6)}`;
+  return `/${page}`;
+}
+
 function resolvePageLink(fromPage, target, filePages) {
   const cleaned = cleanTarget(target);
   const scheme = /^([a-z][a-z\d+.-]*):/i.exec(target)?.[1]?.toLocaleLowerCase();
@@ -115,26 +121,30 @@ function resolvePageLink(fromPage, target, filePages) {
       : { kind: "invalid-absolute", candidate };
   }
 
-  const fromDir = dirname(join(pagesRoot, `${fromPage}.md`));
-  const filesystemTarget = resolve(fromDir, cleaned);
-  const relativeToPages = relative(pagesRoot, filesystemTarget);
-  const escapesPages = relativeToPages === ".." || relativeToPages.startsWith(`..${sep}`);
+  // Tome renders source hrefs unchanged, so validate them against each page's
+  // canonical browser URL rather than the Markdown file's filesystem directory.
+  // The synthetic base preserves root-relative app handoffs when docs are built
+  // at `/` while keeping the same resolution behavior as nested deployments.
+  const validationBase = docsBase || "/__docs__";
+  const fromRoute = canonicalPageRoute(fromPage);
+  const destination = new URL(cleaned, `https://pledge-docs.invalid${validationBase}${fromRoute}`);
+  const insideDocs = destination.pathname === validationBase
+    || destination.pathname.startsWith(`${validationBase}/`);
 
-  // Relative links that leave docs/pages are app handoffs. Resolve them against
-  // docsRoot so typos or an accidental repository escape cannot pass silently.
-  if (escapesPages) {
-    const relativeToDocs = relative(docsRoot, filesystemTarget);
-    const escapesDocs = relativeToDocs === ".." || relativeToDocs.startsWith(`..${sep}`);
-    const candidate = relativeToDocs.split(sep).join("/").replace(/^\/+|\/+$/g, "");
-    return !escapesDocs && appRoutes.has(candidate)
-      ? { kind: "app-handoff", candidate }
-      : { kind: "invalid-app-handoff", candidate };
+  if (insideDocs) {
+    let route = destination.pathname.slice(validationBase.length) || "/";
+    if (route.length > 1) route = route.replace(/\/+$/, "");
+    const routes = new Map([...filePages].map((page) => [canonicalPageRoute(page), page]));
+    const candidate = routes.get(route);
+    return candidate
+      ? { kind: "ok" }
+      : { kind: "missing", candidate: route.replace(/^\/+/, "") || "index" };
   }
 
-  let candidate = relativeToPages.split(sep).join("/").replace(/\.md$/, "").replace(/\/$/, "");
-  if (candidate.endsWith("/index")) candidate = candidate.slice(0, -6) || "index";
-  if (candidate === "") candidate = "index";
-  return filePages.has(candidate) ? { kind: "ok" } : { kind: "missing", candidate };
+  const candidate = destination.pathname.replace(/^\/+|\/+$/g, "");
+  return appRoutes.has(candidate)
+    ? { kind: "app-handoff", candidate }
+    : { kind: "invalid-app-handoff", candidate };
 }
 
 function unsafeClaims(page, source) {

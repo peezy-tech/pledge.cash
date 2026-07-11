@@ -40,9 +40,11 @@ Boardroom, separately track any later ownership transfer that also moves the own
 Redemptions cannot open while active obligations remain. Cleanup is deliberately permissionless where possible.
 
 1. Close or cancel active fixed-price sales and airdrops; unallocated shares return to the Boardroom.
-2. Cancel non-migrated curves. Project shares return exactly. Hostile quote-token shortfalls are recorded as
-   `unrecoveredQuote` and remain retryable only to the Boardroom. The current Studio does not expose
-   `recoverQuarantinedQuote`; that retry requires a direct contract or developer integration against the verified curve.
+2. Cancel non-migrated curves. Project shares return exactly. For every verified closed curve—including a curve migrated
+   before wind-down and one cancelled during cleanup—inspect `quoteQuarantined` and `unrecoveredQuote`. Both terminal
+   paths return quote remainder best-effort, so a hostile quote-token shortfall can remain retryable only to the
+   Boardroom. The current Studio does not expose `recoverQuarantinedQuote`; that retry requires a direct contract or
+   developer integration against the verified curve.
 3. Settle, expire, halt, withdraw, or—only after expiry for a Boardroom-issued hostile-token grant—quarantine grants.
    The current Studio does not expose that quarantine call. An advanced integration must submit a zero-value
    `Boardroom.executeWindDownCall` whose policy is the configured TokenGrantFactory, target is the verified grant, and
@@ -66,7 +68,7 @@ direct integration boundary.
 The shipped Studio does not yet expose several protocol liveness and terminal-recovery calls, and the SDK has generated
 ABIs but no first-class transaction builders for them:
 
-- `recoverQuarantinedQuote()` on a verified cancelled curve;
+- `recoverQuarantinedQuote()` on a verified closed curve whose status is `Migrated` or `Cancelled`;
 - the Boardroom-mediated grant `quarantineAndClose()` call described above;
 - `Boardroom.quarantineRedeemableAsset(asset)` for an unreadable admitted asset during wind-down;
 - `Boardroom.removeRedeemableAsset(asset)` for an empty, unpinned asset after every obligation is closed and pruned;

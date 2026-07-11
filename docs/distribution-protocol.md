@@ -299,7 +299,8 @@ Effects:
 - reserved migration shares plus unsold sale shares are paired with `quoteToLpBps` of quote reserve,
 - `LockedLiquidityFactory.createLockedLiquidityForBoardroom` creates a Boardroom-owned locker,
 - the curve asks the issuing Boardroom to record the locker,
-- share or quote remainders return to the Boardroom treasury.
+- the share remainder returns exactly to the Boardroom treasury, while the quote remainder uses bounded best-effort
+  return and can be quarantined if the quote token becomes hostile.
 
 Only the reserved curve can consume its predicted locked-liquidity and AMM initializer reservation. This prevents
 untrusted contracts from filling another Boardroom's locker slots, pre-seeding the pair, or consuming a reserved salt.
@@ -308,12 +309,13 @@ The locked-liquidity factory accepts migration reservations only for Boardrooms 
 consumed atomically by migration.
 
 Cancellation is Boardroom-only and releases the unused migration reservation. Canonical Boardroom shares are returned
-first with exact transfer checks. Quote return is best-effort: bounded-gas balance and transfer calls cannot block
-closure if the quote token later reverts, burns gas, or returns malformed data. Any shortfall is quarantined explicitly
-in `unrecoveredQuote`; anyone can retry `recoverQuarantinedQuote`, but recovery can only pay the issuing Boardroom. Since
-the quote asset was registered at creation, recovery before `openRedemptions` joins holder entitlements only if that
-asset remains admitted or is re-admitted after recovery and before the snapshot. A cancelled curve can be pruned and its
-empty, unpinned quote asset removed first. Recovery after opening is a late Boardroom deposit: it does not increase
+first with exact transfer checks. Both migration and cancellation return quote remainder best-effort: bounded-gas
+balance and transfer calls cannot block either terminal transition if the quote token later reverts, burns gas, or
+returns malformed data. Any shortfall is quarantined explicitly in `unrecoveredQuote`; anyone can retry
+`recoverQuarantinedQuote` after the curve is `Migrated` or `Cancelled`, but recovery can only pay the issuing Boardroom.
+Since the quote asset was registered at creation, recovery before `openRedemptions` joins holder entitlements only if
+that asset remains admitted or is re-admitted after recovery and before the snapshot. A closed curve can be pruned and
+its empty, unpinned quote asset removed first. Recovery after opening is a late Boardroom deposit: it does not increase
 holder entitlements and is sweepable as excess to the current `redemptionExcessRecipient`.
 
 ## Invariants

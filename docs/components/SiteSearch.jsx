@@ -10,8 +10,20 @@ function excerptText(value) {
     ?.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
     .replace(/(^|\s)#{1,6}\s*/g, "$1")
     .replace(/[`*_]/g, "")
+    .replace(/\s*\|\s*/g, " ")
     .replace(/\s+/g, " ")
     .trim() ?? "";
+}
+
+function withoutDuplicateTitle(value, title) {
+  if (!value || !title) return value;
+  let excerpt = value;
+  while (excerpt.toLocaleLowerCase().startsWith(title.toLocaleLowerCase())) {
+    const next = excerpt.slice(title.length).replace(/^[\s:;,.\-–—]+/, "").trim();
+    if (!next || next === excerpt) break;
+    excerpt = next;
+  }
+  return excerpt;
 }
 
 function resultId(value) {
@@ -42,6 +54,7 @@ export default function SiteSearch({ basePath, mobile, onClose, onNavigate, page
   const requestGenerationRef = useRef(0);
   const pageById = useMemo(() => new Map(pages.map((page) => [page.id, page])), [pages]);
   const activeResults = resultQuery === query.trim() ? results : [];
+  const activeOptionId = activeResults[selected] ? `docs-search-result-${selected.toString()}` : undefined;
 
   useEffect(() => {
     const root = document.getElementById("tome-root");
@@ -108,7 +121,8 @@ export default function SiteSearch({ basePath, mobile, onClose, onNavigate, page
           const page = pageById.get(id);
           if (!page || seen.has(id)) continue;
           seen.add(id);
-          items.push({ ...page, excerpt: excerptText(data.excerpt) || page.description || "" });
+          const excerpt = withoutDuplicateTitle(excerptText(data.excerpt), page.title);
+          items.push({ ...page, excerpt: excerpt || page.description || "" });
         }
         if (!cancelled && requestGeneration === requestGenerationRef.current) {
           setResults(items);
@@ -140,7 +154,7 @@ export default function SiteSearch({ basePath, mobile, onClose, onNavigate, page
   const keepFocusInside = (event) => {
     if (event.key !== "Tab") return;
     const focusable = [...event.currentTarget.querySelectorAll(
-      'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      'a[href]:not([tabindex="-1"]), button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
     )].filter((element) => element.getClientRects().length > 0);
     if (focusable.length === 0) return;
     const first = focusable[0];
@@ -216,6 +230,10 @@ export default function SiteSearch({ basePath, mobile, onClose, onNavigate, page
               Search documentation
             </div>
             <input
+              aria-activedescendant={activeOptionId}
+              aria-autocomplete="list"
+              aria-controls="docs-search-results"
+              aria-expanded={activeResults.length > 0}
               aria-label="Search documentation"
               onChange={(event) => {
                 const value = event.target.value;
@@ -229,6 +247,7 @@ export default function SiteSearch({ basePath, mobile, onClose, onNavigate, page
               onKeyDown={moveSelection}
               placeholder="Search concepts, tasks, or contract behavior"
               ref={inputRef}
+              role="combobox"
               style={{ background: "none", border: 0, color: "var(--tx)", fontFamily: "var(--font-body)", fontSize: 16, outline: 0, width: "100%" }}
               type="search"
               value={query}
@@ -249,25 +268,30 @@ export default function SiteSearch({ basePath, mobile, onClose, onNavigate, page
         </div>
 
         <div style={{ flex: 1, overflow: "auto", padding: "8px" }}>
-          {activeResults.map((page, index) => (
-            <a
-              aria-current={index === selected ? "true" : undefined}
-              href={docsHref(basePath, page.urlPath)}
-              key={page.id}
-              onClick={(event) => chooseResult(event, page)}
-              onMouseEnter={() => setSelected(index)}
-              style={{
-                background: index === selected ? "var(--acD)" : "transparent",
-                color: "var(--tx)",
-                display: "block",
-                padding: "11px 12px",
-                textDecoration: "none",
-              }}
-            >
-              <span style={{ display: "block", fontSize: 14, fontWeight: 600, marginBottom: 3 }}>{page.title}</span>
-              {page.excerpt && <span style={{ color: "var(--txM)", display: "block", fontSize: 12, lineHeight: 1.4 }}>{page.excerpt}</span>}
-            </a>
-          ))}
+          <div aria-label="Search results" id="docs-search-results" role="listbox">
+            {activeResults.map((page, index) => (
+              <a
+                aria-selected={index === selected}
+                href={docsHref(basePath, page.urlPath)}
+                id={`docs-search-result-${index.toString()}`}
+                key={page.id}
+                onClick={(event) => chooseResult(event, page)}
+                onMouseEnter={() => setSelected(index)}
+                role="option"
+                style={{
+                  background: index === selected ? "var(--acD)" : "transparent",
+                  color: "var(--tx)",
+                  display: "block",
+                  padding: "11px 12px",
+                  textDecoration: "none",
+                }}
+                tabIndex={-1}
+              >
+                <span style={{ display: "block", fontSize: 14, fontWeight: 600, marginBottom: 3 }}>{page.title}</span>
+                {page.excerpt && <span style={{ color: "var(--txM)", display: "block", fontSize: 12, lineHeight: 1.4 }}>{page.excerpt}</span>}
+              </a>
+            ))}
+          </div>
           {query.trim() && status !== "Searching documentation" && activeResults.length === 0 && (
             <p style={{ color: "var(--txM)", fontSize: 14, padding: "28px 12px", textAlign: "center" }}>No results found.</p>
           )}

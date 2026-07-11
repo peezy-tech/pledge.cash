@@ -55,7 +55,7 @@ Use `Governance` to inspect the decision system, holder protections, and verifie
 
 For current pre-launch Boardrooms, the app shows `Secure governance launch is unavailable for this Boardroom version`. The deployed `launch(uint256)` call does not bind the expected executor, so there is no safe in-app launch action. Leave owner governance unchanged; do not bypass the block.
 
-## Close
+## Wind-down and redemptions
 
 Use `Close` for `Wind-Down` and redemptions. The safe sequence is:
 

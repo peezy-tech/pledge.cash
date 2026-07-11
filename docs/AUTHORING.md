@@ -34,6 +34,10 @@ Concept and reference pages should define their scope, identify the contract or 
 
 The same docs build is served at `/docs` on `pledge.cash` and `/pledge-cash/docs` on HQ. Use relative links between docs pages. From a grouped docs page, app destinations use two parent segments, for example `../../explore`; from the docs home, use one, for example `../explore`.
 
+Resolve links against the page's published URL, not the Markdown file's directory. A route backed by an `index.md` file is
+published without a trailing slash: links from `/developers` therefore use `developers/boardroom`, not `boardroom`.
+`docs:check` models this browser behavior.
+
 Every internal docs link must resolve to a page in `docs/pages`, every app handoff must resolve to a known product route, and every public page must appear exactly once in `docs/tome.config.js`. When a published route moves, add an entry to `docs/redirects.js` rather than breaking existing bookmarks and indexed URLs.
 
 ## Definition of done
@@ -46,4 +50,4 @@ bun run docs:build
 bun run format:check
 ```
 
-Then verify the generated site at both supported base paths in a real browser. Check search, breadcrumbs, page titles, app handoffs, desktop navigation, a fresh 320 px viewport, horizontal overflow, and console or page errors.
+The production build fails if canonical metadata, anchor ids, machine artifacts, Pagefind page counts, redirects, or base-aware resources are incomplete. PR CI builds both supported base paths. Then verify the generated site in a real browser. Check search, breadcrumbs, page titles and metadata, app handoffs, desktop navigation, a fresh 320 px viewport, horizontal overflow, and console or page errors.
