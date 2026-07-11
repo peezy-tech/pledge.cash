@@ -14,7 +14,7 @@ import { encodeFunctionData } from "viem";
 import { transactionReviewCanContinue } from "../src/components/transaction-review";
 import { recoverInterruptedTransactions, stageLabel, type TransactionRecord } from "../src/features/transactions/transaction-center";
 import { contractCallPreview, contractCallReview } from "../src/lib/transaction-preview";
-import { assertTransactionIdentity } from "../src/lib/transaction-identity";
+import { assertTransactionIdentity, TransactionContextGuard } from "../src/lib/transaction-identity";
 
 const target = "0x1000000000000000000000000000000000000000" as const;
 const holder = "0x2000000000000000000000000000000000000000" as Address;
@@ -167,15 +167,27 @@ describe("transaction review", () => {
   });
 
   test("rejects account or chain changes made while transaction review is open", () => {
-    const expected = { account: holder, chainId: 31337, deploymentIdentity: "factory-a", routeIdentity: "/projects/31337/project-a" };
+    const expected = { account: holder, chainId: 31337, contextGeneration: 7, deploymentIdentity: "factory-a", routeIdentity: "/projects/31337/project-a" };
 
-    const current = { account: holder, chainId: 31337, deploymentIdentity: expected.deploymentIdentity, routeIdentity: expected.routeIdentity, walletChainId: 31337 };
+    const current = { account: holder, chainId: 31337, contextGeneration: 7, deploymentIdentity: expected.deploymentIdentity, routeIdentity: expected.routeIdentity, walletChainId: 31337 };
     expect(() => assertTransactionIdentity(expected, current, "simulation")).not.toThrow();
+    expect(() => assertTransactionIdentity(expected, { ...current, contextGeneration: 9 }, "review")).toThrow("context changed");
     expect(() => assertTransactionIdentity(expected, { ...current, account: factory }, "simulation")).toThrow("account changed");
     expect(() => assertTransactionIdentity(expected, { ...current, walletChainId: 1 }, "submission")).toThrow("network changed");
     expect(() => assertTransactionIdentity(expected, { ...current, chainId: 1 }, "submission")).toThrow("network changed");
     expect(() => assertTransactionIdentity(expected, { ...current, routeIdentity: "/projects/31337/project-b" }, "submission")).toThrow("workspace changed");
     expect(() => assertTransactionIdentity(expected, { ...current, deploymentIdentity: "factory-b" }, "review")).toThrow("deployment changed");
+  });
+
+  test("rejects action context resurrection after A to B to A transitions", () => {
+    const guard = new TransactionContextGuard("grant:A");
+    const stale = guard.capture();
+
+    guard.sync("grant:B");
+    guard.sync("grant:A");
+
+    expect(guard.isCurrent(stale)).toBe(false);
+    expect(guard.isCurrent(guard.capture())).toBe(true);
   });
 
   test("marks hydrated pre-submission records as interrupted but resumes hashed submissions", () => {

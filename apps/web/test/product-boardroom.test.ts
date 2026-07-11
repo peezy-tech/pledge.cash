@@ -625,6 +625,30 @@ describe("product boardroom runtime discovery", () => {
     expect(dashboard.historyErrors?.join(" ")).toContain("Historical distribution scan failed");
   });
 
+  test("rebuilds exact project identity instead of trusting a stale catalog row", async () => {
+    const context = productBoardroomFixture();
+    const staleDistribution = "0x6000000000000000000000000000000000000000" as Address;
+    const client = fakeProductBoardroomClient({ ...context, tokenReads: new Set<string>() });
+    const dashboard = await readProductBoardroomDashboard(client, {
+      address: context.boardroom,
+      catalog: [{
+        address: context.boardroom,
+        cashToken: context.redeemableAsset,
+        distribution: staleDistribution,
+        name: "Cached project name",
+      }],
+    });
+
+    expect(dashboard.history?.distribution).toBe(context.sale);
+    expect(dashboard.catalog).toHaveLength(1);
+    expect(dashboard.catalog[0]).toMatchObject({
+      address: context.boardroom,
+      cashToken: context.cashToken,
+      distribution: context.sale,
+      name: "Cached project name",
+    });
+  });
+
   test("reports a historical distribution that cannot be reconstructed", async () => {
     const context = productBoardroomFixture();
     const recordedDistribution = "0x6000000000000000000000000000000000000000" as Address;
@@ -769,6 +793,36 @@ describe("product boardroom runtime discovery", () => {
 
     expect(await firstOutcome).toBe(reason);
     expect(await second).toEqual([expect.objectContaining({ completeness: "complete" })]);
+    expect(getLogsCalls).toBe(2);
+  });
+
+  test("does not let the first caller's deadline contaminate a live shared cache reader", async () => {
+    let getLogsCalls = 0;
+    let firstLogReadStarted: (() => void) | undefined;
+    const firstLogRead = new Promise<void>((resolve) => {
+      firstLogReadStarted = resolve;
+    });
+    const client = {
+      async getBlockNumber() { return 100n; },
+      async getLogs() {
+        getLogsCalls += 1;
+        if (getLogsCalls === 1) {
+          firstLogReadStarted?.();
+          return await new Promise<never>(() => undefined);
+        }
+        return [];
+      },
+    };
+    const snapshot = { distributionSummaries: [fixedPriceHistoryFixture()] } as BoardroomSnapshot;
+    const first = readProductBoardroomHistories(client as never, snapshot, { timeoutMs: 25 });
+    await firstLogRead;
+
+    const second = readProductBoardroomHistories(client as never, snapshot, { timeoutMs: 1_000 });
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(firstResult).toEqual([expect.objectContaining({ completeness: "partial" })]);
+    expect(firstResult[0]?.scanError).toContain("deadline");
+    expect(secondResult).toEqual([expect.objectContaining({ completeness: "complete" })]);
     expect(getLogsCalls).toBe(2);
   });
 

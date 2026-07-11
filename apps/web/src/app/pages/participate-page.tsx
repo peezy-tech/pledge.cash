@@ -182,13 +182,13 @@ function unavailableRouteGuidance(
   options: readonly ParticipationOption[],
 ): string {
   if (option.path === "migrating-bonding-curve" && options.some((candidate) => candidate.path === "amm" && candidate.available)) {
-    return "This curve has migrated. Choose the live AMM route to keep trading, or inspect this curve’s historical contract below.";
+    return "This curve has migrated. Choose the live AMM route to keep trading, or inspect its historical contract in the route details.";
   }
   if (option.path === "fixed-price-sale") {
-    return "This sale is closed or sold out. Its historical terms and contract remain visible below.";
+    return "This sale is closed or sold out. Its historical terms and contract remain visible in the route details.";
   }
   if (option.path === "merkle-airdrop") {
-    return "This claim route is closed or fully claimed. Its allocation contract remains visible below.";
+    return "This claim route is closed or fully claimed. Its allocation contract remains visible in the route details.";
   }
   return "You can inspect this route’s history and contract, but it is not currently accepting participation.";
 }

@@ -293,23 +293,11 @@ export function AddressLink({ address }: { address: Address }): React.JSX.Elemen
 
   return (
     <span className="inline-flex max-w-full items-center gap-1.5 align-middle">
-      {hasExplorerUrl ? (
-        <a
-          className="min-w-0 truncate text-lime-200 hover:text-lime-100"
-          href={explorerUrl}
-          rel="noreferrer"
-          target="_blank"
-          title={address}
-        >
-          {label}
-        </a>
-      ) : (
-        <span className="min-w-0 truncate text-lime-200" title={address}>
-          {label}
-        </span>
-      )}
+      <span className="min-w-0 truncate text-lime-200" title={address}>
+        {label}
+      </span>
       <button
-        aria-label="Copy address"
+        aria-label={`Copy address ${address}`}
         className="grid h-10 w-10 shrink-0 place-items-center rounded border border-zinc-800 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 sm:h-8 sm:w-8"
         type="button"
         onClick={() => void copyAddress()}
@@ -318,7 +306,7 @@ export function AddressLink({ address }: { address: Address }): React.JSX.Elemen
       </button>
       {hasExplorerUrl ? (
         <a
-          aria-label="Open in explorer"
+          aria-label={`Open address ${address} in explorer`}
           className="grid h-10 w-10 shrink-0 place-items-center rounded border border-zinc-800 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 sm:h-8 sm:w-8"
           href={explorerUrl}
           rel="noreferrer"
@@ -327,6 +315,9 @@ export function AddressLink({ address }: { address: Address }): React.JSX.Elemen
           <ExternalLink className="h-3.5 w-3.5" />
         </a>
       ) : null}
+      <span aria-live="polite" className="sr-only" role="status">
+        {copied ? `Copied address ${address}` : ""}
+      </span>
     </span>
   );
 }

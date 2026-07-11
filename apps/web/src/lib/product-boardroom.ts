@@ -193,7 +193,7 @@ type EventLogCacheEntry = {
   checkpointHash?: Hex | undefined;
   logs: ProductBoardroomEventLog[];
   pending?: Promise<void> | undefined;
-  pendingSignal?: AbortSignal | undefined;
+  pendingContext?: EventScanContext | undefined;
   toBlock?: bigint | undefined;
 };
 
@@ -249,7 +249,9 @@ export async function readProductBoardroomDashboard(
   const snapshot = hydration.snapshot;
   const inputCatalog = input.catalog ?? [];
   const activeCatalogEntry = inputCatalog.find((entry) => sameAddress(entry.address, input.address));
-  const catalogIdentity = activeCatalogEntry ?? catalogEntryFromSnapshot(snapshot);
+  // Exact routes must derive live identity from the exact Boardroom snapshot.
+  // A cached directory row may describe a distribution that has since closed.
+  const catalogIdentity = catalogEntryFromSnapshot(snapshot);
   const [treasuryAssets, histories, shareName] = await Promise.all([
     readTreasuryAssets(client, snapshot, catalogIdentity),
     readProductBoardroomHistoriesWithContext(client, snapshot, eventScan),
@@ -263,14 +265,15 @@ export async function readProductBoardroomDashboard(
   const catalogTreasuryCash = catalogIdentity.cashToken
     ? treasuryAssets.find((asset) => sameAddress(asset.address, catalogIdentity.cashToken))?.balance
     : undefined;
+  const freshCatalogEntry = catalogEntryFromSnapshot(snapshot, {
+    history,
+    historyError: historyErrors.length > 0 ? historyErrors.join(" ") : undefined,
+    name: shareName,
+    treasuryCash: catalogTreasuryCash,
+  });
   const catalog = activeCatalogEntry
-    ? inputCatalog
-    : [...inputCatalog, catalogEntryFromSnapshot(snapshot, {
-        history,
-        historyError: historyErrors.length > 0 ? historyErrors.join(" ") : undefined,
-        name: shareName,
-        treasuryCash: catalogTreasuryCash,
-      })];
+    ? inputCatalog.map((entry) => sameAddress(entry.address, input.address) ? freshCatalogEntry : entry)
+    : [...inputCatalog, freshCatalogEntry];
 
   return {
     address: input.address,
@@ -1055,13 +1058,13 @@ async function readEventLogs(
 
   while (cacheEntry.pending) {
     const pending = cacheEntry.pending;
-    const pendingSignal = cacheEntry.pendingSignal;
+    const pendingContext = cacheEntry.pendingContext;
     try {
       await waitForEventScanOperation(pending, eventScan, `${name} cached scan`);
       break;
     } catch (error) {
-      eventScan.signal?.throwIfAborted();
-      if (!pendingSignal?.aborted || error !== pendingSignal.reason) throw error;
+      assertEventScanActive(eventScan);
+      if (!pendingContext || !eventScanOwnsFailure(pendingContext, error)) throw error;
 
       const current = clientCache.get(cacheKey);
       if (current && current !== cacheEntry) {
@@ -1098,7 +1101,7 @@ async function readEventLogs(
   const entry = cacheEntry;
   const request = updateEventLogCacheEntry(client, address, abi, name, toBlock, entry, eventScan);
   entry.pending = request;
-  entry.pendingSignal = eventScan.signal;
+  entry.pendingContext = eventScan;
   try {
     await waitForEventScanOperation(request, eventScan, `${name} event scan`);
     return logsThroughBlock(entry.logs, toBlock);
@@ -1108,9 +1111,14 @@ async function readEventLogs(
   } finally {
     if (entry.pending === request) {
       entry.pending = undefined;
-      entry.pendingSignal = undefined;
+      entry.pendingContext = undefined;
     }
   }
+}
+
+function eventScanOwnsFailure(eventScan: EventScanContext, error: unknown): boolean {
+  return eventScan.failure === error
+    || Boolean(eventScan.signal?.aborted && eventScan.signal.reason === error);
 }
 
 async function updateEventLogCacheEntry(

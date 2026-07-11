@@ -599,10 +599,25 @@ describe("read-first product pages", () => {
     expect(html).not.toContain("Project lifecycle");
   });
 
+  test("renders one page-level Studio primary action", () => {
+    const html = renderToString(
+      <StudioPage
+        createAction={<button type="button">Connect test wallet</button>}
+        loading={false}
+        operatorTools={<div>Connect the operator wallet</div>}
+        projectDirectoryContent={<div>Project directory</div>}
+      />,
+    );
+
+    expect(html.match(/Connect test wallet/g)?.length).toBe(1);
+    expect(html).toContain("Next safe action");
+    expect(html).toContain("Projects");
+  });
+
   test("gives address actions mobile-safe touch targets", () => {
     const html = renderToString(<AddressLink address={boardroom} />);
 
-    expect(html).toContain('aria-label="Copy address"');
+    expect(html).toContain(`aria-label="Copy address ${boardroom}"`);
     expect(html).toContain("h-10 w-10");
     expect(html).toContain("sm:h-8 sm:w-8");
   });

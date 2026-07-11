@@ -72,7 +72,7 @@ export function ProjectLayout({
               <Badge variant={role.tone}>{role.label}</Badge>
               <span className="text-xs text-zinc-600">{chainName}</span>
             </div>
-            <h1 className="m-0 truncate text-3xl font-semibold tracking-[-0.03em] text-zinc-50 sm:text-5xl">{name}</h1>
+            <h1 className="m-0 whitespace-normal [overflow-wrap:anywhere] text-3xl font-semibold tracking-[-0.03em] text-zinc-50 sm:text-5xl">{name}</h1>
             <p className="m-0 mt-3 max-w-3xl text-sm leading-6 text-zinc-400">
               {snapshot
                 ? `${snapshot.launched ? "Holder governance is live." : "Holder governance has not launched; the owner still manages project changes directly."} Participation can be live independently. Current state is read from the Boardroom and the contracts it coordinates; lifetime activity is reconstructed from their onchain event history.`

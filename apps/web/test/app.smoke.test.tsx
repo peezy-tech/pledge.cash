@@ -17,6 +17,7 @@ import {
   appRouteTitle,
   canRunGrantIssuerActions,
   canonicalGrantReadErrorMessage,
+  canonicalProjectStateKey,
   contextualAppRouteTitle,
   isGovernanceBackgroundRefresh,
   manageWorkspaceSummary,
@@ -29,6 +30,10 @@ import {
   projectRouteFailure,
   raceWithGovernanceAbort,
   studioProjectSectionCapability,
+  studioReadScopeKey,
+  verifiedAddressState,
+  verifiedStateForKey,
+  verifiedStudioChildState,
   viewFromPath,
 } from "../src/App";
 import { Web3Provider } from "../src/components/web3-provider";
@@ -274,6 +279,30 @@ describe("web app shell", () => {
     expect(transient.title).toBe("Project temporarily unavailable");
     expect(throttled.retryable).toBe(true);
     expect(throttled.title).toBe("Project temporarily unavailable");
+  });
+
+  test("fails closed when cached route state belongs to another chain, deployment, or account", () => {
+    const address = "0x1000000000000000000000000000000000000000" as Address;
+    const child = "0x2000000000000000000000000000000000000000" as Address;
+    const currentKey = canonicalProjectStateKey(31337, address, "factory-a");
+    const sameAddressOtherChain = canonicalProjectStateKey(998, address, "factory-a");
+    const sameAddressOtherDeployment = canonicalProjectStateKey(31337, address, "factory-b");
+    const snapshot = { address };
+    const childSnapshot = { address: child, boardroom: address };
+
+    expect(verifiedAddressState(snapshot, currentKey, currentKey, address)).toBe(snapshot);
+    expect(verifiedAddressState(snapshot, currentKey, sameAddressOtherChain, address)).toBeUndefined();
+    expect(verifiedAddressState(snapshot, currentKey, sameAddressOtherDeployment, address)).toBeUndefined();
+    expect(verifiedAddressState(snapshot, undefined, currentKey, address)).toBeUndefined();
+    expect(verifiedStudioChildState(childSnapshot, currentKey, currentKey, address)).toBe(childSnapshot);
+    expect(verifiedStudioChildState(childSnapshot, currentKey, sameAddressOtherChain, address)).toBeUndefined();
+    expect(verifiedStateForKey({ canVeto: true }, "governance:account-a", "governance:account-b")).toBeUndefined();
+
+    const studioRoute = { kind: "studio-project", chainId: 31337, boardroom: address, section: "distributions" } as const;
+    expect(studioReadScopeKey(studioRoute, 31337, "factory-a"))
+      .not.toBe(studioReadScopeKey(studioRoute, 998, "factory-a"));
+    expect(studioReadScopeKey(studioRoute, 31337, "factory-a"))
+      .not.toBe(studioReadScopeKey(studioRoute, 31337, "factory-b"));
   });
 
   test("renders one canonical invalid-project state and offers retry only for transport failures", () => {

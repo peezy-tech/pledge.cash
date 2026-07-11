@@ -89,7 +89,6 @@ export function StudioPage({
             <p className="m-0 text-xs font-semibold uppercase tracking-[0.08em] text-lime-200">Next safe action</p>
             <p className="m-0 mt-2 text-sm font-semibold text-zinc-100">{guidance.nextStep}</p>
             <p className="m-0 mt-1 text-xs leading-5 text-zinc-500">{guidance.nextStepDetail}</p>
-            {nextAction ? <div className="mt-4">{nextAction}</div> : resolvedLifecycle === "empty" && createAction ? <div className="mt-4">{createAction}</div> : null}
           </div>
         </div>
       </RuledSection>
@@ -111,7 +110,7 @@ export function StudioPage({
       </> : null}
 
       {!loadingSelectedProject && (resolvedLifecycle === "empty" || projectDirectoryContent) ? <RuledSection>
-        <SectionHeading title="Projects" description="Choose an existing Boardroom or start a new setup workflow." action={createAction} />
+        <SectionHeading title="Projects" description="Choose an existing Boardroom or start a new setup workflow." />
         <div className="mt-4">
           {loading ? <StudioLoading /> : projectDirectoryContent ?? (
             <PageNotice title="No project directory attached">
