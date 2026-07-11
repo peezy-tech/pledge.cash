@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { normalizeDocsBasePath } from "../base-path.js";
 import { docsRedirects } from "../redirects.js";
+import { assertValidJavaScriptModule } from "./javascript-syntax.js";
 
 const outDir = resolve(process.env.PLEDGE_CASH_DOCS_OUT_DIR ?? "out");
 const basePath = normalizeDocsBasePath(
@@ -213,13 +214,7 @@ export async function filters() {
 }
 `);
 
-const syntaxCheck = spawnSync(process.execPath, ["--input-type=module", "--check"], {
-  encoding: "utf8",
-  input: await readFile(pagefindEntry, "utf8"),
-});
-if (syntaxCheck.status !== 0) {
-  throw new Error(`Generated Pagefind wrapper is invalid:\n${syntaxCheck.stderr.trim()}`);
-}
+assertValidJavaScriptModule(await readFile(pagefindEntry, "utf8"), "Generated Pagefind wrapper");
 
 const faviconPath = `${basePath}/favicon.svg` || "/favicon.svg";
 const builtRootHtml = await readFile(join(outDir, "index.html"), "utf8");
