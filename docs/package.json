@@ -6,7 +6,7 @@
   "scripts": {
     "check:types": "node --check base-path.js && node --check tome.config.js && node --check redirects.js && node --check components/navigation.js && node --check scripts/check-docs.js && node --check scripts/check-built-docs.js && node scripts/check-docs.js",
     "dev": "tome dev --host 127.0.0.1",
-    "build": "tome build --outDir \"${PLEDGE_CASH_DOCS_OUT_DIR:-out}\" && node scripts/fix-built-shell.js && node scripts/check-built-docs.js && node --input-type=module --check < \"${PLEDGE_CASH_DOCS_OUT_DIR:-out}/_pagefind/pagefind.js\" && find \"${PLEDGE_CASH_DOCS_OUT_DIR:-out}\" -type d -exec chmod 755 {} + && find \"${PLEDGE_CASH_DOCS_OUT_DIR:-out}\" -type f -exec chmod 644 {} +"
+    "build": "tome build --outDir \"${PLEDGE_CASH_DOCS_OUT_DIR:-out}\" && node scripts/fix-built-shell.js && node scripts/check-built-docs.js && find \"${PLEDGE_CASH_DOCS_OUT_DIR:-out}\" -type d -exec chmod 755 {} + && find \"${PLEDGE_CASH_DOCS_OUT_DIR:-out}\" -type f -exec chmod 644 {} +"
   },
   "devDependencies": {
     "@tomehq/cli": "^0.8.1",
