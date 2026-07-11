@@ -27,6 +27,7 @@ import {
 } from "./flow-primitives";
 import { parseBytes32, parseMerkleProof, parseUnsignedInteger, unixWindowStatus } from "./participation-math";
 import type { ParticipationFlowContext } from "./types";
+import { ParticipationActionGuard, type ParticipationActionTicket } from "./action-integrity";
 
 type MerkleAirdropFlowProps = ParticipationFlowContext & {
   distribution: BoardroomDistributionSnapshot;
@@ -102,23 +103,49 @@ export function MerkleAirdropFlow({
     }
   }, [proofInput]);
   const grantTerms = useMemo(() => parseGrantTerms(grantForm, state), [grantForm, state]);
+  const actionIdentity = merkleAirdropActionIdentity({
+    account,
+    airdrop: state?.address,
+    amount: amount.value,
+    grantTerms: mode === "grant" ? grantTerms.value : undefined,
+    index: index.value,
+    mode,
+    proof: proof.value,
+  });
+  const actionGuardRef = useRef<ParticipationActionGuard | undefined>(undefined);
+  actionGuardRef.current ??= new ParticipationActionGuard(actionIdentity);
+  const actionGuard = actionGuardRef.current;
+  actionGuard.sync(actionIdentity);
 
-  const refreshClaimState = useCallback(async (): Promise<void> => {
-    if (!state || index.value === undefined) return;
+  useEffect(() => {
+    actionGuard.activate();
+    return () => actionGuard.deactivate();
+  }, [actionGuard]);
+
+  const refreshClaimState = useCallback(async (expected?: {
+    airdrop: `0x${string}`;
+    index: bigint;
+    ticket: ParticipationActionTicket;
+  }): Promise<void> => {
+    const airdrop = expected?.airdrop ?? state?.address;
+    const claimIndex = expected?.index ?? index.value;
+    if (!airdrop || claimIndex === undefined || (expected && !actionGuard.isCurrent(expected.ticket))) return;
     const version = ++requestVersion.current;
     setClaimLoading(true);
     setClaimReadError(undefined);
     try {
-      const next = await readMerkleAirdropClaimState(publicClient, { airdrop: state.address, index: index.value });
-      if (requestVersion.current === version) setClaimed(next.claimed);
+      const next = await readMerkleAirdropClaimState(publicClient, { airdrop, index: claimIndex });
+      if (requestVersion.current === version && (!expected || actionGuard.isCurrent(expected.ticket))) {
+        setClaimed(next.claimed);
+      }
     } catch (error) {
-      if (requestVersion.current !== version) return;
+      if (requestVersion.current !== version || (expected && !actionGuard.isCurrent(expected.ticket))) return;
       setClaimed(undefined);
       setClaimReadError(errorMessage(error));
     } finally {
       if (requestVersion.current === version) setClaimLoading(false);
     }
-  }, [index.value, publicClient, state]);
+  }, [actionGuard, index.value, publicClient, state]);
 
   useEffect(() => {
     requestVersion.current += 1;
@@ -165,6 +192,8 @@ export function MerkleAirdropFlow({
     if (!account || index.value === undefined || amount.value === undefined || proof.value === undefined) {
       throw new Error("Complete the allocation details before claiming.");
     }
+    const actionTicket = actionGuard.capture();
+    const claimedAllocation = { airdrop: state.address, index: index.value, ticket: actionTicket };
     if (mode === "direct") {
       await submitTransaction("Direct airdrop claim", buildMerkleAirdropClaimTransaction({
         airdrop: state.address,
@@ -172,7 +201,7 @@ export function MerkleAirdropFlow({
         account,
         amount: amount.value,
         proof: proof.value,
-      }));
+      }), { isCurrent: () => actionGuard.isCurrent(actionTicket) });
     } else {
       if (!grantTerms.value) throw new Error(grantTerms.error ?? "Grant terms are incomplete.");
       await submitTransaction("Vested airdrop claim", buildMerkleAirdropGrantClaimTransaction({
@@ -182,9 +211,9 @@ export function MerkleAirdropFlow({
         amount: amount.value,
         terms: grantTerms.value,
         proof: proof.value,
-      }));
+      }), { isCurrent: () => actionGuard.isCurrent(actionTicket) });
     }
-    await refreshClaimState();
+    if (actionGuard.isCurrent(actionTicket)) await refreshClaimState(claimedAllocation);
   };
 
   return (
@@ -296,13 +325,41 @@ export function MerkleAirdropFlow({
         actionLabel={actionLabel}
         disabled={Boolean(blocker || claimReadError || !account)}
         onAction={submitClaim}
-        onRefresh={index.value === undefined ? undefined : refreshClaimState}
+        onRefresh={index.value === undefined ? undefined : async () => await refreshClaimState()}
         pendingAction={pendingAction}
         refreshLabel="Refresh claim status"
         runAction={runAction}
       />
     </div>
   );
+}
+
+export function merkleAirdropActionIdentity(input: {
+  account: `0x${string}` | undefined;
+  airdrop: `0x${string}` | undefined;
+  amount: bigint | undefined;
+  grantTerms: MerkleAirdropGrantClaimTerms | undefined;
+  index: bigint | undefined;
+  mode: ClaimMode;
+  proof: readonly `0x${string}`[] | undefined;
+}): string {
+  const terms = input.grantTerms;
+  return [
+    input.account?.toLowerCase() ?? "",
+    input.airdrop?.toLowerCase() ?? "",
+    input.amount?.toString() ?? "",
+    input.index?.toString() ?? "",
+    input.mode,
+    input.proof?.join(",").toLowerCase() ?? "",
+    terms?.paymentToken.toLowerCase() ?? "",
+    terms?.price.toString() ?? "",
+    terms?.expiry.toString() ?? "",
+    terms?.vestingCliff.toString() ?? "",
+    terms?.vestingEnd.toString() ?? "",
+    terms?.transferable ? "transferable" : "non-transferable",
+    terms?.transferUnlockTime.toString() ?? "",
+    terms?.salt.toLowerCase() ?? "",
+  ].join(":");
 }
 
 function GrantClaimFields({

@@ -17,6 +17,7 @@ export {
   ProjectRouteFailureState,
   projectRouteFailure,
   raceWithGovernanceAbort,
+  requireVerifiedChildState,
   studioProjectSectionCapability,
   studioReadScopeKey,
   viewFromPath,

@@ -13,6 +13,7 @@ import {
   createParticipationFlowContent,
   findParticipationDistribution,
   maximumWithSlippage,
+  merkleAirdropActionIdentity,
   minimumWithSlippage,
   parseMerkleProof,
   parseSlippageBps,
@@ -303,6 +304,53 @@ describe("participation bounds and proof parsing", () => {
     pending.resolve(bondingCurveBuyQuote(state, { quoteAllowance: 1_000n }));
 
     await expect(prepared).rejects.toThrow("Trade details changed");
+  });
+
+  test("keeps a Merkle claim ticket stale after allocation inputs change away and back", () => {
+    const base = {
+      account: owner,
+      airdrop,
+      amount: 10n,
+      grantTerms: undefined,
+      index: 1n,
+      mode: "direct" as const,
+      proof: [zeroHash],
+    };
+    const identity = merkleAirdropActionIdentity(base);
+    const guard = new ParticipationActionGuard(identity);
+    const stale = guard.capture();
+    const changed = merkleAirdropActionIdentity({ ...base, index: 2n });
+
+    guard.sync(changed);
+    guard.sync(identity);
+
+    expect(changed).not.toBe(identity);
+    expect(guard.isCurrent(stale)).toBe(false);
+    expect(merkleAirdropActionIdentity({ ...base, account: paymentToken })).not.toBe(identity);
+    expect(merkleAirdropActionIdentity({ ...base, airdrop: sale })).not.toBe(identity);
+    expect(merkleAirdropActionIdentity({ ...base, amount: 11n })).not.toBe(identity);
+    expect(merkleAirdropActionIdentity({ ...base, mode: "grant" })).not.toBe(identity);
+    expect(merkleAirdropActionIdentity({ ...base, proof: [] })).not.toBe(identity);
+
+    const grantBase = {
+      ...base,
+      grantTerms: {
+        expiry: 200_000n,
+        paymentToken: zeroAddress,
+        price: 0n,
+        salt: zeroHash,
+        transferable: false,
+        transferUnlockTime: 0n,
+        vestingCliff: 100_000n,
+        vestingEnd: 110_000n,
+      },
+      mode: "grant" as const,
+    };
+    const grantIdentity = merkleAirdropActionIdentity(grantBase);
+    expect(merkleAirdropActionIdentity({
+      ...grantBase,
+      grantTerms: { ...grantBase.grantTerms, transferable: true },
+    })).not.toBe(grantIdentity);
   });
 
   test("uses one fresh curve quote for both action selection and transaction bounds", async () => {

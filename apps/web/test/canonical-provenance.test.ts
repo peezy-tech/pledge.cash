@@ -1,13 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import type {
   Address,
+  BoardroomState,
+  FixedPriceSaleState,
   GrantState,
+  LockedLiquidityState,
+  MerkleAirdropState,
+  MigratingBondingCurveState,
   PledgeCashDeployment,
   PledgeCashReadClient,
 } from "@pledge.cash/sdk";
 import {
   assertCanonicalBoardroom,
+  assertCanonicalFixedPriceSale,
   assertCanonicalGrant,
+  assertCanonicalLockedLiquidity,
+  assertCanonicalMerkleAirdrop,
+  assertCanonicalMigratingBondingCurve,
   CanonicalProvenanceError,
 } from "../src/lib/canonical-provenance";
 
@@ -16,7 +25,57 @@ const tokenGrantFactory = "0x2000000000000000000000000000000000000000" as Addres
 const boardroom = "0x3000000000000000000000000000000000000000" as Address;
 const grant = "0x4000000000000000000000000000000000000000" as Address;
 const spoof = "0x5000000000000000000000000000000000000000" as Address;
-const deployment = { chainId: 31337, boardroomFactory, tokenGrantFactory } as PledgeCashDeployment;
+const distributionFactory = "0x6000000000000000000000000000000000000000" as Address;
+const lockedLiquidityFactory = "0x7000000000000000000000000000000000000000" as Address;
+const ammRouter = "0x8000000000000000000000000000000000000000" as Address;
+const shareToken = "0x9000000000000000000000000000000000000000" as Address;
+const paymentToken = "0xa000000000000000000000000000000000000000" as Address;
+const sale = "0xb000000000000000000000000000000000000000" as Address;
+const airdrop = "0xc000000000000000000000000000000000000000" as Address;
+const curve = "0xd000000000000000000000000000000000000000" as Address;
+const locker = "0xe000000000000000000000000000000000000000" as Address;
+const deployment = {
+  ammRouter,
+  boardroomFactory,
+  chainId: 31337,
+  distributionFactory,
+  lockedLiquidityFactory,
+  tokenGrantFactory,
+} as PledgeCashDeployment;
+const boardroomState = {
+  address: boardroom,
+  issuedDistributions: [sale, airdrop, curve],
+  lockedLiquidityPositions: [locker],
+  shareToken,
+} as BoardroomState;
+const saleState = {
+  address: sale,
+  boardroom,
+  factory: distributionFactory,
+  shareToken,
+} as FixedPriceSaleState;
+const airdropState = {
+  address: airdrop,
+  boardroom,
+  factory: distributionFactory,
+  shareToken,
+  tokenGrantFactory,
+} as MerkleAirdropState;
+const curveState = {
+  address: curve,
+  boardroom,
+  factory: distributionFactory,
+  lockedLiquidityFactory,
+  shareToken,
+} as MigratingBondingCurveState;
+const lockerState = {
+  address: locker,
+  boardroom,
+  factory: lockedLiquidityFactory,
+  router: ammRouter,
+  tokenA: shareToken,
+  tokenB: paymentToken,
+} as LockedLiquidityState;
 
 describe("canonical product provenance", () => {
   test("rejects a spoof Boardroom that is absent from the configured factory", async () => {
@@ -36,7 +95,161 @@ describe("canonical product provenance", () => {
     await expect(assertCanonicalGrant(mappingClient, deployment, grant, state)).rejects.toThrow("token record");
     await expect(assertCanonicalGrant(readClient(async () => grant), deployment, grant, state)).resolves.toBeUndefined();
   });
+
+  test("accepts only factory-issued distributions that use the Boardroom share token", async () => {
+    const client = registryClient({ distributionKind: 0 });
+    await expect(assertCanonicalFixedPriceSale(client, deployment, boardroomState, saleState)).resolves.toBeUndefined();
+    await expect(assertCanonicalFixedPriceSale(
+      client,
+      deployment,
+      boardroomState,
+      { ...saleState, factory: spoof },
+    )).rejects.toThrow("configured DistributionFactory");
+    await expect(assertCanonicalFixedPriceSale(
+      registryClient({ distributionRegistered: false, distributionKind: 0 }),
+      deployment,
+      boardroomState,
+      saleState,
+    )).rejects.toThrow("not registered");
+    await expect(assertCanonicalFixedPriceSale(
+      registryClient({ distributionBoardroom: spoof, distributionKind: 0 }),
+      deployment,
+      boardroomState,
+      saleState,
+    )).rejects.toThrow("Boardroom record");
+    await expect(assertCanonicalFixedPriceSale(
+      client,
+      deployment,
+      boardroomState,
+      { ...saleState, boardroom: spoof },
+    )).rejects.toThrow("verified Boardroom");
+    await expect(assertCanonicalFixedPriceSale(
+      registryClient({ distributionKind: 1 }),
+      deployment,
+      boardroomState,
+      saleState,
+    )).rejects.toThrow("type record");
+    await expect(assertCanonicalFixedPriceSale(
+      client,
+      deployment,
+      boardroomState,
+      { ...saleState, shareToken: spoof },
+    )).rejects.toThrow("Boardroom share token");
+
+    // Factory registration persists after a closed child is pruned from the Boardroom's active list.
+    await expect(assertCanonicalFixedPriceSale(
+      client,
+      deployment,
+      { ...boardroomState, issuedDistributions: [] },
+      saleState,
+    )).resolves.toBeUndefined();
+  });
+
+  test("verifies airdrop and curve deployment dependencies", async () => {
+    await expect(assertCanonicalMerkleAirdrop(
+      registryClient({ distributionKind: 2 }),
+      deployment,
+      boardroomState,
+      airdropState,
+    )).resolves.toBeUndefined();
+    await expect(assertCanonicalMerkleAirdrop(
+      registryClient({ distributionKind: 2 }),
+      deployment,
+      boardroomState,
+      { ...airdropState, tokenGrantFactory: spoof },
+    )).rejects.toThrow("configured TokenGrantFactory");
+    await expect(assertCanonicalMerkleAirdrop(
+      registryClient({ distributionKind: 2 }),
+      deployment,
+      boardroomState,
+      { ...airdropState, shareToken: spoof },
+    )).rejects.toThrow("Boardroom share token");
+
+    await expect(assertCanonicalMigratingBondingCurve(
+      registryClient({ distributionKind: 1 }),
+      deployment,
+      boardroomState,
+      curveState,
+    )).resolves.toBeUndefined();
+    await expect(assertCanonicalMigratingBondingCurve(
+      registryClient({ distributionKind: 1 }),
+      deployment,
+      boardroomState,
+      { ...curveState, lockedLiquidityFactory: spoof },
+    )).rejects.toThrow("configured LockedLiquidityFactory");
+    await expect(assertCanonicalMigratingBondingCurve(
+      registryClient({ distributionKind: 1 }),
+      deployment,
+      boardroomState,
+      { ...curveState, shareToken: spoof },
+    )).rejects.toThrow("Boardroom share token");
+  });
+
+  test("accepts only factory-registered liquidity positions with canonical wiring", async () => {
+    const client = registryClient({ lockerRegistered: true });
+    await expect(assertCanonicalLockedLiquidity(client, deployment, boardroomState, lockerState)).resolves.toBeUndefined();
+    await expect(assertCanonicalLockedLiquidity(
+      client,
+      deployment,
+      boardroomState,
+      { ...lockerState, factory: spoof },
+    )).rejects.toThrow("configured LockedLiquidityFactory");
+    await expect(assertCanonicalLockedLiquidity(
+      registryClient({ lockerRegistered: false }),
+      deployment,
+      boardroomState,
+      lockerState,
+    )).rejects.toThrow("not registered");
+    await expect(assertCanonicalLockedLiquidity(
+      registryClient({ lockerBoardroom: spoof, lockerRegistered: true }),
+      deployment,
+      boardroomState,
+      lockerState,
+    )).rejects.toThrow("Boardroom record");
+    await expect(assertCanonicalLockedLiquidity(
+      client,
+      deployment,
+      boardroomState,
+      { ...lockerState, boardroom: spoof },
+    )).rejects.toThrow("verified Boardroom");
+    await expect(assertCanonicalLockedLiquidity(
+      client,
+      deployment,
+      boardroomState,
+      { ...lockerState, router: spoof },
+    )).rejects.toThrow("configured AMM router");
+    await expect(assertCanonicalLockedLiquidity(
+      client,
+      deployment,
+      boardroomState,
+      { ...lockerState, tokenA: paymentToken, tokenB: spoof },
+    )).rejects.toThrow("Boardroom share token");
+
+    await expect(assertCanonicalLockedLiquidity(
+      client,
+      deployment,
+      { ...boardroomState, lockedLiquidityPositions: [] },
+      lockerState,
+    )).resolves.toBeUndefined();
+  });
 });
+
+function registryClient(options: {
+  distributionBoardroom?: Address;
+  distributionKind?: number;
+  distributionRegistered?: boolean;
+  lockerBoardroom?: Address;
+  lockerRegistered?: boolean;
+}): PledgeCashReadClient {
+  return readClient(async (functionName) => {
+    if (functionName === "isDistribution") return options.distributionRegistered ?? true;
+    if (functionName === "distributionBoardroom") return options.distributionBoardroom ?? boardroom;
+    if (functionName === "distributionKind") return options.distributionKind ?? 0;
+    if (functionName === "isLocker") return options.lockerRegistered ?? true;
+    if (functionName === "lockerBoardroom") return options.lockerBoardroom ?? boardroom;
+    return undefined;
+  });
+}
 
 function readClient(read: (functionName: string) => Promise<unknown>): PledgeCashReadClient {
   return {

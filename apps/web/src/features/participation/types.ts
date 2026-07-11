@@ -2,6 +2,7 @@ import type { Address } from "@pledge.cash/sdk";
 import type { PublicClient } from "viem";
 import type { ProductBoardroomDashboardState } from "../../lib/product-boardroom";
 import type { BoardroomDistributionSnapshot } from "../../lib/types";
+import type { TransactionActionGuard } from "../../lib/transaction-identity";
 
 export type ParticipationPath = "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop";
 export type ParticipationRoutePath = ParticipationPath | "amm";
@@ -35,6 +36,7 @@ export type RunParticipationAction = (
 export type SubmitParticipationTransaction = (
   label: string,
   request: Record<string, unknown>,
+  guard?: TransactionActionGuard | undefined,
 ) => Promise<unknown>;
 
 export type ParticipationFlowContext = {

@@ -255,6 +255,7 @@ export function BondingCurveFlow({
         ? "Bonding curve token approval"
         : mode === "buy" ? "Bonding curve purchase" : "Bonding curve sale",
       prepared.request,
+      { isCurrent: () => actionGuard.isCurrent(actionTicket) },
     );
     if (actionGuard.isCurrent(actionTicket)) await refreshQuote();
   };

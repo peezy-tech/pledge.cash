@@ -17,6 +17,19 @@ export type LiveTransactionIdentity = {
   walletChainId: number | undefined;
 };
 
+export type TransactionActionGuard = {
+  isCurrent: () => boolean;
+};
+
+export function assertTransactionActionCurrent(
+  guard: TransactionActionGuard | undefined,
+  phase: "review" | "simulation" | "submission",
+): void {
+  if (guard && !guard.isCurrent()) {
+    throw new Error(`The action details changed before transaction ${phase}. Review the current values and try again.`);
+  }
+}
+
 export function assertTransactionIdentity(
   expected: TransactionIdentity,
   current: LiveTransactionIdentity,
@@ -65,4 +78,28 @@ export class TransactionContextGuard {
     this.#identity = identity;
     this.#generation += 1;
   }
+}
+
+export function transactionContextIdentity(input: {
+  account: Address | undefined;
+  actionInputIdentity: string;
+  deploymentIdentity: string | undefined;
+  routeIdentity: string;
+  selectedChainId: number;
+  walletChainId: number | undefined;
+  walletClientGeneration: number;
+}): string {
+  return JSON.stringify([
+    input.selectedChainId,
+    input.deploymentIdentity ?? "unconfigured",
+    input.account?.toLowerCase() ?? "read-only",
+    input.walletChainId ?? "wallet-disconnected",
+    input.walletClientGeneration,
+    input.routeIdentity,
+    input.actionInputIdentity,
+  ]);
+}
+
+export function actionInputIdentity(values: readonly unknown[]): string {
+  return JSON.stringify(values);
 }

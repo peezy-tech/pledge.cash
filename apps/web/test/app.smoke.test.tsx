@@ -29,6 +29,7 @@ import {
   ProjectRouteFailureState,
   projectRouteFailure,
   raceWithGovernanceAbort,
+  requireVerifiedChildState,
   studioProjectSectionCapability,
   studioReadScopeKey,
   verifiedAddressState,
@@ -262,6 +263,8 @@ describe("web app shell", () => {
     expect(committed).toBeUndefined();
     const currentRequest = coordinator.begin("swap-quote", firstKey);
     expect(coordinator.isCurrent(currentRequest)).toBe(true);
+    coordinator.invalidate();
+    expect(coordinator.isCurrent(currentRequest)).toBe(false);
   });
 
   test("classifies invalid project provenance as terminal and RPC failures as retryable", () => {
@@ -297,6 +300,8 @@ describe("web app shell", () => {
     expect(verifiedStudioChildState(childSnapshot, currentKey, currentKey, address)).toBe(childSnapshot);
     expect(verifiedStudioChildState(childSnapshot, currentKey, sameAddressOtherChain, address)).toBeUndefined();
     expect(verifiedStateForKey({ canVeto: true }, "governance:account-a", "governance:account-b")).toBeUndefined();
+    expect(requireVerifiedChildState(childSnapshot, child, "sale")).toBe(childSnapshot);
+    expect(() => requireVerifiedChildState(childSnapshot, address, "sale")).toThrow("Load and verify");
 
     const studioRoute = { kind: "studio-project", chainId: 31337, boardroom: address, section: "distributions" } as const;
     expect(studioReadScopeKey(studioRoute, 31337, "factory-a"))

@@ -14,7 +14,12 @@ import { encodeFunctionData } from "viem";
 import { transactionReviewCanContinue } from "../src/components/transaction-review";
 import { recoverInterruptedTransactions, stageLabel, type TransactionRecord } from "../src/features/transactions/transaction-center";
 import { contractCallPreview, contractCallReview } from "../src/lib/transaction-preview";
-import { assertTransactionIdentity, TransactionContextGuard } from "../src/lib/transaction-identity";
+import {
+  assertTransactionActionCurrent,
+  assertTransactionIdentity,
+  transactionContextIdentity,
+  TransactionContextGuard,
+} from "../src/lib/transaction-identity";
 
 const target = "0x1000000000000000000000000000000000000000" as const;
 const holder = "0x2000000000000000000000000000000000000000" as Address;
@@ -188,6 +193,46 @@ describe("transaction review", () => {
 
     expect(guard.isCurrent(stale)).toBe(false);
     expect(guard.isCurrent(guard.capture())).toBe(true);
+  });
+
+  test("includes wallet-chain and wallet-client transitions in the monotonic context", () => {
+    const base = {
+      account: holder,
+      actionInputIdentity: "form-a",
+      deploymentIdentity: "factory-a",
+      routeIdentity: "/projects/31337/project-a",
+      selectedChainId: 31337,
+      walletChainId: 31337,
+      walletClientGeneration: 1,
+    };
+    const guard = new TransactionContextGuard(transactionContextIdentity(base));
+    const stale = guard.capture();
+
+    guard.sync(transactionContextIdentity({ ...base, walletChainId: 1, walletClientGeneration: 2 }));
+    guard.sync(transactionContextIdentity({ ...base, walletClientGeneration: 3 }));
+
+    expect(guard.isCurrent(stale)).toBe(false);
+  });
+
+  test("does not revive a submitted action after its form changes away and back", () => {
+    const base = {
+      account: holder,
+      actionInputIdentity: "sale-a",
+      deploymentIdentity: "factory-a",
+      routeIdentity: "/studio/31337/project-a/distributions",
+      selectedChainId: 31337,
+      walletChainId: 31337,
+      walletClientGeneration: 1,
+    };
+    const guard = new TransactionContextGuard(transactionContextIdentity(base));
+    const stale = guard.capture();
+
+    guard.sync(transactionContextIdentity({ ...base, actionInputIdentity: "sale-b" }));
+    guard.sync(transactionContextIdentity(base));
+
+    expect(guard.isCurrent(stale)).toBe(false);
+    expect(() => assertTransactionActionCurrent({ isCurrent: () => guard.isCurrent(stale) }, "submission"))
+      .toThrow("action details changed");
   });
 
   test("marks hydrated pre-submission records as interrupted but resumes hashed submissions", () => {

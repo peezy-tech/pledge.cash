@@ -216,6 +216,7 @@ export function FixedPriceSaleFlow({
     await submitTransaction(
       prepared.kind === "approve" ? "Fixed-price payment approval" : "Fixed-price purchase",
       prepared.request,
+      { isCurrent: () => actionGuard.isCurrent(actionTicket) },
     );
     if (actionGuard.isCurrent(actionTicket)) await refreshQuote();
   };

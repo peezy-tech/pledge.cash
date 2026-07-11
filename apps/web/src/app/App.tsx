@@ -95,8 +95,12 @@ import { useTransactionReview } from "../hooks/use-transaction-review";
 import { useWagmiWallet } from "../hooks/use-wagmi-wallet";
 import { readBoardroomSnapshot } from "../lib/boardroom-snapshot";
 import {
+  assertCanonicalFixedPriceSale,
   assertCanonicalBoardroom,
   assertCanonicalGrant,
+  assertCanonicalLockedLiquidity,
+  assertCanonicalMerkleAirdrop,
+  assertCanonicalMigratingBondingCurve,
   CanonicalProvenanceError,
 } from "../lib/canonical-provenance";
 import {
@@ -190,7 +194,15 @@ import {
 } from "../lib/swap";
 import { parseTokenAmountInput, readTokenMetadata, type TokenMetadata } from "../lib/token-amounts";
 import { contractCallPreview, contractCallReview } from "../lib/transaction-preview";
-import { assertTransactionIdentity, TransactionContextGuard, type TransactionIdentity } from "../lib/transaction-identity";
+import {
+  actionInputIdentity,
+  assertTransactionActionCurrent,
+  assertTransactionIdentity,
+  transactionContextIdentity,
+  TransactionContextGuard,
+  type TransactionActionGuard,
+  type TransactionIdentity,
+} from "../lib/transaction-identity";
 import { TransactionTray, useTransactionCenter } from "../features/transactions/transaction-center";
 import type {
   BoardroomForm,
@@ -295,6 +307,17 @@ export function verifiedStudioChildState<T extends { boardroom: Address }>(
     : undefined;
 }
 
+export function requireVerifiedChildState<T extends { address: Address }>(
+  state: T | undefined,
+  expectedAddress: Address,
+  label: string,
+): T {
+  if (!state || !sameAddress(state.address, expectedAddress)) {
+    throw new Error(`Load and verify the current ${label} before managing it.`);
+  }
+  return state;
+}
+
 export function verifiedStateForKey<T>(
   state: T,
   verifiedKey: string | undefined,
@@ -336,6 +359,12 @@ export class AmmReadCoordinator {
   isCurrent(request: AmmReadRequest): boolean {
     return this.#activeKeys.get(request.kind) === request.key
       && this.#versions.get(request.kind) === request.version;
+  }
+
+  invalidate(): void {
+    for (const kind of this.#activeKeys.keys()) {
+      this.#versions.set(kind, (this.#versions.get(kind) ?? 0) + 1);
+    }
   }
 }
 
@@ -566,6 +595,8 @@ export function App(): React.JSX.Element {
   const productGovernanceSnapshotKeyRef = useRef<string | undefined>(undefined);
   const grantRouteLoadedKeyRef = useRef<string | undefined>(undefined);
   const watchedTransactionIdsRef = useRef(new Map<string, number>());
+  const liveSubmissionIdsRef = useRef(new Set<string>());
+  const liveConfirmedTransactionIdsRef = useRef(new Set<string>());
   const transactionWatcherIdentityRef = useRef<string | undefined>(undefined);
   const transactionWatcherVersionRef = useRef(0);
   const activeChainIdRef = useRef(activeNetwork.chainId);
@@ -573,9 +604,11 @@ export function App(): React.JSX.Element {
   const activeAccountRef = useRef<Address | undefined>(undefined);
   const activeWalletChainIdRef = useRef<number | undefined>(undefined);
   const walletClientRef = useRef<(() => WalletClient) | undefined>(undefined);
+  const walletClientGenerationRef = useRef(0);
   const activeDiscoveryKeyRef = useRef<string | undefined>(undefined);
   const activeDeploymentIdentityRef = useRef<string | undefined>(undefined);
   const activeActionOriginRef = useRef<ActiveActionOrigin | undefined>(undefined);
+  const invalidateConfirmedRouteRef = useRef<(route: AppRoute) => Promise<void>>(async () => undefined);
   const transactionContextGuardRef = useRef(new TransactionContextGuard("initial"));
   const publicClient = useMemo(() => createPledgeCashPublicClient(activeNetwork), [activeNetwork]);
   const generatedDeployment = getPledgeCashDeployment(activeNetwork.chainId);
@@ -698,6 +731,28 @@ export function App(): React.JSX.Element {
   const [swapTokenList, setSwapTokenList] = useState<SwapTokenListState>(() => emptySwapTokenList());
   const [swapTokenListLoading, setSwapTokenListLoading] = useState(false);
   const [selectedParticipationRoute, setSelectedParticipationRoute] = useState<ParticipationContentKey>();
+  const activeActionInputIdentity = actionInputIdentity([
+    grantForm,
+    grantAddress,
+    settleAmount,
+    paymentApproval,
+    boardroomForm,
+    boardroomAddress,
+    boardroomMintAmount,
+    boardroomMintTo,
+    boardroomGrantForm,
+    fixedPriceSaleForm,
+    fixedPriceSaleAddress,
+    merkleAirdropForm,
+    merkleAirdropAddress,
+    migratingCurveForm,
+    migratingCurveAddress,
+    curveMigrationForm,
+    lockedLiquidityForm,
+    lockedLiquidityAddress,
+    lockedLiquidityExitForm,
+    windDownForm,
+  ]);
   const exactProjectAddress = appRoute.kind === "project" || appRoute.kind === "studio-project" ? appRoute.boardroom : undefined;
   const exactProjectVerifiedKey = exactProjectAddress
     ? canonicalProjectStateKey(activeNetwork.chainId, exactProjectAddress, runtimeDeploymentIdentity)
@@ -885,14 +940,18 @@ export function App(): React.JSX.Element {
   });
   activeAccountRef.current = wallet.account;
   activeWalletChainIdRef.current = wallet.chainId;
+  if (walletClientRef.current !== walletClient) walletClientGenerationRef.current += 1;
   walletClientRef.current = walletClient;
   activeDeploymentIdentityRef.current = runtimeDeploymentIdentity;
-  transactionContextGuardRef.current.sync(ammReadIdentityKey([
-    activeNetwork.chainId,
-    runtimeDeploymentIdentity ?? "unconfigured",
-    wallet.account?.toLowerCase() ?? "read-only",
-    activeRouteIdentity,
-  ]));
+  transactionContextGuardRef.current.sync(transactionContextIdentity({
+    account: wallet.account,
+    actionInputIdentity: activeActionInputIdentity,
+    deploymentIdentity: runtimeDeploymentIdentity,
+    routeIdentity: activeRouteIdentity,
+    selectedChainId: activeNetwork.chainId,
+    walletChainId: wallet.chainId,
+    walletClientGeneration: walletClientGenerationRef.current,
+  }));
   const ammWalletScopeKey = ammReadIdentityKey([
     activeNetwork.chainId,
     runtimeDeploymentIdentity ?? "unconfigured",
@@ -936,6 +995,7 @@ export function App(): React.JSX.Element {
     transactionWatcherIdentityRef.current = transactionWatcherIdentity;
     transactionWatcherVersionRef.current += 1;
     watchedTransactionIdsRef.current.clear();
+    liveConfirmedTransactionIdsRef.current.clear();
   }
   const activeGovernanceKey = governanceRouteKey(appRoute, wallet.account, runtimeDeploymentIdentity);
   activeGovernanceKeyRef.current = activeGovernanceKey;
@@ -966,12 +1026,26 @@ export function App(): React.JSX.Element {
       const watcherVersion = transactionWatcherVersionRef.current;
       watchedTransactionIdsRef.current.set(watcherKey, watcherVersion);
       void publicClient.waitForTransactionReceipt({ hash: transaction.hash })
-        .then((receipt) => {
+        .then(async (receipt) => {
           if (transactionWatcherVersionRef.current !== watcherVersion) return;
           updateTransaction(transaction.id, {
             ...(receipt.status === "success" ? {} : { error: `${transaction.label} failed after submission.` }),
             stage: receipt.status === "success" ? "confirmed" : "failed",
           });
+          const receiptOwnedByLiveSubmission = liveSubmissionIdsRef.current.has(transaction.id)
+            || liveConfirmedTransactionIdsRef.current.has(transaction.id);
+          if (receipt.status === "success" && !receiptOwnedByLiveSubmission) {
+            try {
+              await invalidateConfirmedRouteRef.current(activeAppRouteRef.current);
+            } catch (error) {
+              pushLog(
+                `${transaction.label} confirmed, but current route data could not be refreshed: ${errorMessage(error)}`,
+                "error",
+                transaction.hash,
+                transaction.chainId,
+              );
+            }
+          }
         })
         .catch(() => undefined)
         .finally(() => {
@@ -980,7 +1054,7 @@ export function App(): React.JSX.Element {
           }
         });
     }
-  }, [activeNetwork.chainId, publicClient, transactions, updateTransaction, wallet.account]);
+  }, [activeNetwork.chainId, publicClient, pushLog, transactions, updateTransaction, wallet.account]);
   const factorySnapshot = useFactorySnapshot(publicClient, deployment, pushLog);
   const creationFee = factorySnapshot.creationFee ?? deployment?.creationFee ?? 0n;
   const discoveryKey = discoveryStorageKey(activeNetwork.chainId, wallet.account, discoveryDeploymentIdentity);
@@ -1608,6 +1682,7 @@ export function App(): React.JSX.Element {
   const submitContractTransaction = async (
     label: string,
     request: Record<string, unknown>,
+    actionGuard?: TransactionActionGuard,
   ): Promise<Hex> => {
     const actionOrigin = activeActionOriginRef.current;
     const contextTicket = transactionContextGuardRef.current.capture();
@@ -1631,17 +1706,11 @@ export function App(): React.JSX.Element {
     });
     const assertLiveIdentity = (phase: "review" | "simulation" | "submission"): void => {
       assertTransactionIdentity(transactionIdentity, liveTransactionIdentity(), phase);
-    };
-    const transactionContextIsLive = (): boolean => {
-      try {
-        assertTransactionIdentity(transactionIdentity, liveTransactionIdentity(), "submission");
-        return true;
-      } catch {
-        return false;
-      }
+      assertTransactionActionCurrent(actionGuard, phase);
     };
     assertLiveIdentity("review");
     const transactionId = startTransaction(callReview);
+    liveSubmissionIdsRef.current.add(transactionId);
     try {
       await requestReview(callReview);
       assertLiveIdentity("simulation");
@@ -1668,14 +1737,13 @@ export function App(): React.JSX.Element {
         throw new Error(`${label} failed after submission.`);
       }
 
+      liveConfirmedTransactionIdsRef.current.add(transactionId);
       updateTransaction(transactionId, { stage: "confirmed" });
       pushLog(`${label} confirmed`, "success", hash, txChainId);
-      if (transactionContextIsLive()) {
-        try {
-          await invalidateConfirmedRoute(transactionRoute);
-        } catch (refreshError) {
-          pushLog(`${label} confirmed, but fresh route data could not be loaded: ${errorMessage(refreshError)}`, "error", hash, txChainId);
-        }
+      try {
+        await invalidateConfirmedRouteRef.current(transactionRoute);
+      } catch (refreshError) {
+        pushLog(`${label} confirmed, but fresh route data could not be loaded: ${errorMessage(refreshError)}`, "error", hash, txChainId);
       }
       return hash;
     } catch (error) {
@@ -1685,6 +1753,8 @@ export function App(): React.JSX.Element {
         stage: cancelled ? "cancelled" : "failed",
       });
       throw error;
+    } finally {
+      liveSubmissionIdsRef.current.delete(transactionId);
     }
   };
 
@@ -1728,6 +1798,11 @@ export function App(): React.JSX.Element {
     if (!ammReadCoordinatorRef.current.isCurrent(request)) {
       throw new Error("AMM account, project, or form changed while data was loading. Refresh the current quote.");
     }
+  };
+
+  const ammActionGuard = (kind: AmmReadKind, key: string): TransactionActionGuard => {
+    const request = beginAmmRead(kind, key);
+    return { isCurrent: () => ammReadCoordinatorRef.current.isCurrent(request) };
   };
 
   const refreshSwapQuote = async (): Promise<void> => {
@@ -1783,7 +1858,11 @@ export function App(): React.JSX.Element {
     if (!quote.tokenIn || quote.amountIn === undefined) throw new Error("Refresh the swap quote before approving.");
     if (swapNativeMode(deployment, swapForm) === "input") throw new Error("Native swap input does not need ERC20 approval.");
 
-    await submitContractTransaction("Swap input approval", buildErc20Approval({ token: quote.tokenIn.address, spender: router, amount: quote.amountIn }));
+    await submitContractTransaction(
+      "Swap input approval",
+      buildErc20Approval({ token: quote.tokenIn.address, spender: router, amount: quote.amountIn }),
+      ammActionGuard("swap-quote", ammSwapQuoteReadKey),
+    );
   };
 
   const executeSwap = async (): Promise<void> => {
@@ -1793,7 +1872,11 @@ export function App(): React.JSX.Element {
     if (swapNativeMode(deployment, swapForm) !== "input") {
       requireFreshAllowance("Swap input", quote.tokenIn?.allowance, quote.amountIn);
     }
-    await submitContractTransaction("Swap", buildSwapTransaction({ deployment, form: swapForm, quote, account }));
+    await submitContractTransaction(
+      "Swap",
+      buildSwapTransaction({ deployment, form: swapForm, quote, account }),
+      ammActionGuard("swap-quote", ammSwapQuoteReadKey),
+    );
     if (!activeActionOriginIsCurrent()) return;
     await refreshSwapQuote();
   };
@@ -1836,7 +1919,11 @@ export function App(): React.JSX.Element {
     const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
     const quote = await requireFreshLiquidityQuote();
     if (!quote.tokenA || quote.amountA === undefined) throw new Error("Refresh the liquidity quote before approving token A.");
-    await submitContractTransaction("Liquidity token A approval", buildErc20Approval({ token: quote.tokenA.address, spender: router, amount: quote.amountA }));
+    await submitContractTransaction(
+      "Liquidity token A approval",
+      buildErc20Approval({ token: quote.tokenA.address, spender: router, amount: quote.amountA }),
+      ammActionGuard("liquidity-quote", ammLiquidityQuoteReadKey),
+    );
   };
 
   const approveLiquidityTokenB = async (): Promise<void> => {
@@ -1844,7 +1931,11 @@ export function App(): React.JSX.Element {
     const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
     const quote = await requireFreshLiquidityQuote();
     if (!quote.tokenB || quote.amountB === undefined) throw new Error("Refresh the liquidity quote before approving token B.");
-    await submitContractTransaction("Liquidity token B approval", buildErc20Approval({ token: quote.tokenB.address, spender: router, amount: quote.amountB }));
+    await submitContractTransaction(
+      "Liquidity token B approval",
+      buildErc20Approval({ token: quote.tokenB.address, spender: router, amount: quote.amountB }),
+      ammActionGuard("liquidity-quote", ammLiquidityQuoteReadKey),
+    );
   };
 
   const addLiquidity = async (): Promise<void> => {
@@ -1857,7 +1948,11 @@ export function App(): React.JSX.Element {
     if (!liquidityTokenUsesNative(quote.tokenB?.address)) {
       requireFreshAllowance("Liquidity token B", quote.tokenB?.allowance, quote.amountB);
     }
-    await submitContractTransaction("Add liquidity", buildAddLiquidityTransaction({ deployment, form: liquidityForm, quote, account }));
+    await submitContractTransaction(
+      "Add liquidity",
+      buildAddLiquidityTransaction({ deployment, form: liquidityForm, quote, account }),
+      ammActionGuard("liquidity-quote", ammLiquidityQuoteReadKey),
+    );
     if (!activeActionOriginIsCurrent()) return;
     await Promise.all([refreshLiquidityQuote(), loadSwapTokens()]);
   };
@@ -1908,7 +2003,11 @@ export function App(): React.JSX.Element {
     const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
     const quote = await requireFreshRemoveLiquidityQuote();
     if (!quote.position?.pool || quote.liquidity === undefined) throw new Error("Refresh the remove-liquidity quote before approving LP.");
-    await submitContractTransaction("LP token approval", buildErc20Approval({ token: quote.position.pool.address, spender: router, amount: quote.liquidity }));
+    await submitContractTransaction(
+      "LP token approval",
+      buildErc20Approval({ token: quote.position.pool.address, spender: router, amount: quote.liquidity }),
+      ammActionGuard("remove-liquidity-quote", ammRemoveLiquidityQuoteReadKey),
+    );
   };
 
   const removeLiquidity = async (): Promise<void> => {
@@ -1916,7 +2015,11 @@ export function App(): React.JSX.Element {
     assertFutureSwapDeadline(removeLiquidityForm.deadline);
     const quote = await requireFreshRemoveLiquidityQuote();
     requireFreshAllowance("LP token", quote.position?.lpAllowance, quote.liquidity);
-    await submitContractTransaction("Remove liquidity", buildRemoveLiquidityTransaction({ deployment, form: removeLiquidityForm, quote, account }));
+    await submitContractTransaction(
+      "Remove liquidity",
+      buildRemoveLiquidityTransaction({ deployment, form: removeLiquidityForm, quote, account }),
+      ammActionGuard("remove-liquidity-quote", ammRemoveLiquidityQuoteReadKey),
+    );
     if (!activeActionOriginIsCurrent()) return;
     await Promise.all([refreshAmmPosition(), refreshLiquidityQuote()]);
   };
@@ -1931,7 +2034,11 @@ export function App(): React.JSX.Element {
     if (activeAppRouteRef.current.kind === "studio-project" && activeAppRouteRef.current.section === "liquidity") {
       assertProjectPoolAllowed(position.pool, studioProjectPoolsRef.current, "This fee claim");
     }
-    await submitContractTransaction("AMM fee claim", buildClaimAmmFeesTransaction(position));
+    await submitContractTransaction(
+      "AMM fee claim",
+      buildClaimAmmFeesTransaction(position),
+      { isCurrent: () => ammReadCoordinatorRef.current.isCurrent(request) },
+    );
     if (!activeActionOriginIsCurrent()) return;
     await refreshAmmPosition();
   };
@@ -2066,7 +2173,10 @@ export function App(): React.JSX.Element {
   const loadGrant = async (): Promise<void> => {
     const route = activeAppRouteRef.current;
     if (route.kind === "grant") {
-      await loadGrantAddress(route.grant, canonicalGrantRouteKey(route.chainId, route.grant, runtimeDeploymentIdentity), true);
+      await loadCanonicalGrantRoute(
+        route.grant,
+        canonicalGrantRouteKey(route.chainId, route.grant, runtimeDeploymentIdentity),
+      );
       return;
     }
     await loadGrantAddress(requireAddress(grantAddress, "Grant address"));
@@ -2175,6 +2285,15 @@ export function App(): React.JSX.Element {
   }, [activeNetwork.chainId, appRoute, deployment?.tokenGrantFactory, pushLog, runtimeDeploymentIdentity]);
 
   async function invalidateConfirmedRoute(routeAtSubmission: AppRoute): Promise<void> {
+    ammReadCoordinatorRef.current.invalidate();
+    ammTokenLoadAbortControllerRef.current?.abort(new DOMException("Confirmed transaction invalidated AMM data.", "AbortError"));
+    ammTokenLoadAbortControllerRef.current = undefined;
+    setSwapTokenList(emptySwapTokenList());
+    setSwapTokenListLoading(false);
+    setSwapQuote(undefined);
+    setLiquidityQuote(undefined);
+    setRemoveLiquidityQuote(undefined);
+    setAmmPosition(undefined);
     const plan = confirmedRouteRefreshPlan(routeAtSubmission, activeAppRouteRef.current);
     if (plan.kind === "none") return;
     if (plan.kind === "grant") {
@@ -2194,6 +2313,31 @@ export function App(): React.JSX.Element {
       }
       return;
     }
+    const activeProjectKey = canonicalProjectStateKey(
+      activeNetwork.chainId,
+      plan.boardroom,
+      runtimeDeploymentIdentity,
+    );
+    boardroomLoadVersionRef.current += 1;
+    fixedPriceSaleLoadVersionRef.current += 1;
+    merkleAirdropLoadVersionRef.current += 1;
+    migratingCurveLoadVersionRef.current += 1;
+    lockedLiquidityLoadVersionRef.current += 1;
+    governanceRequestVersionRef.current += 1;
+    governanceLoadAbortControllerRef.current?.abort(new DOMException("Confirmed transaction invalidated governance data.", "AbortError"));
+    governanceLoadAbortControllerRef.current = undefined;
+    productGovernanceLoadedKeyRef.current = undefined;
+    productGovernanceSnapshotKeyRef.current = undefined;
+    setProductGovernanceQueueVerifiedKey(undefined);
+    setBoardroomHolderPowerVerifiedKey(undefined);
+    setProductGovernanceLoading(false);
+    const invalidateCurrentProjectChild = (current: string | undefined): string | undefined =>
+      current === activeProjectKey ? undefined : current;
+    setBoardroomSnapshotVerifiedKey(invalidateCurrentProjectChild);
+    setFixedPriceSaleSnapshotVerifiedKey(invalidateCurrentProjectChild);
+    setMerkleAirdropSnapshotVerifiedKey(invalidateCurrentProjectChild);
+    setMigratingCurveSnapshotVerifiedKey(invalidateCurrentProjectChild);
+    setLockedLiquiditySnapshotVerifiedKey(invalidateCurrentProjectChild);
     await loadProductBoardroom(plan.boardroom);
     const currentPlan = confirmedRouteRefreshPlan(routeAtSubmission, activeAppRouteRef.current);
     if (currentPlan.kind === "product" && currentPlan.refreshGovernance) {
@@ -2201,6 +2345,7 @@ export function App(): React.JSX.Element {
       await loadProductGovernance(currentPlan.boardroom);
     }
   }
+  invalidateConfirmedRouteRef.current = invalidateConfirmedRoute;
 
   const runGrantIssuerAction = async (functionName: GrantIssuerAction, successMessage: string): Promise<void> => {
     const grant = selectedGrantAddress();
@@ -2427,6 +2572,26 @@ export function App(): React.JSX.Element {
     return displayedBoardroomSnapshot;
   };
 
+  const requireLoadedFixedPriceSale = (): FixedPriceSaleState => {
+    const address = requireAddress(fixedPriceSaleAddress, "Fixed-price sale address");
+    return requireVerifiedChildState(displayedFixedPriceSaleSnapshot, address, "fixed-price sale");
+  };
+
+  const requireLoadedMerkleAirdrop = (): MerkleAirdropState => {
+    const address = requireAddress(merkleAirdropAddress, "Merkle airdrop address");
+    return requireVerifiedChildState(displayedMerkleAirdropSnapshot, address, "Merkle airdrop");
+  };
+
+  const requireLoadedMigratingCurve = (): MigratingBondingCurveState => {
+    const address = requireAddress(migratingCurveAddress, "Migrating curve address");
+    return requireVerifiedChildState(displayedMigratingCurveSnapshot, address, "bonding curve");
+  };
+
+  const requireLoadedLockedLiquidity = (): LockedLiquidityState => {
+    const address = requireAddress(lockedLiquidityAddress, "Locked-liquidity address");
+    return requireVerifiedChildState(displayedLockedLiquiditySnapshot, address, "locked-liquidity position");
+  };
+
   const fixedPriceSaleTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomFixedPriceSaleTerms> => {
     const paymentToken = requireAddress(fixedPriceSaleForm.paymentToken, "Payment token");
     const [shareAmount, price, maxPerBuyer] = await Promise.all([
@@ -2462,12 +2627,24 @@ export function App(): React.JSX.Element {
     const requestScope = activeStudioReadScopeKeyRef.current;
     const requestChainId = activeNetwork.chainId;
     const requestDeploymentIdentity = runtimeDeploymentIdentity;
+    const routeAtRequest = activeAppRouteRef.current;
+    const requestIsCurrent = (): boolean =>
+      activeStudioReadScopeKeyRef.current === requestScope
+      && fixedPriceSaleLoadVersionRef.current === requestVersion;
     setFixedPriceSaleSnapshotVerifiedKey(undefined);
-    const snapshot = await readFixedPriceSaleState(publicClient, sale);
-    if (activeStudioReadScopeKeyRef.current !== requestScope || fixedPriceSaleLoadVersionRef.current !== requestVersion) return snapshot;
-    const route = activeAppRouteRef.current;
-    if (route.kind === "studio-project" && !sameAddress(snapshot.boardroom, route.boardroom)) {
-      throw new Error("This fixed-price sale does not belong to the current Studio project.");
+    const [snapshot, canonicalBoardroom] = await Promise.all([
+      readFixedPriceSaleState(publicClient, sale),
+      routeAtRequest.kind === "studio-project" ? readBoardroomState(publicClient, routeAtRequest.boardroom) : undefined,
+    ]);
+    if (!requestIsCurrent()) return snapshot;
+    if (routeAtRequest.kind === "studio-project" && canonicalBoardroom) {
+      try {
+        await assertCanonicalFixedPriceSale(publicClient, deployment, canonicalBoardroom, snapshot);
+      } catch (error) {
+        if (!requestIsCurrent()) return snapshot;
+        throw error;
+      }
+      if (!requestIsCurrent()) return snapshot;
     }
     setFixedPriceSaleSnapshot(snapshot);
     setFixedPriceSaleSnapshotVerifiedKey(canonicalProjectStateKey(
@@ -2512,7 +2689,7 @@ export function App(): React.JSX.Element {
   const closeFixedPriceSale = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
-    const sale = requireAddress(fixedPriceSaleAddress, "Fixed-price sale address");
+    const sale = requireLoadedFixedPriceSale().address;
     await submitBoardroomExecution(
       "Fixed-price sale close",
       boardroom,
@@ -2525,7 +2702,7 @@ export function App(): React.JSX.Element {
   const cancelFixedPriceSale = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
-    const sale = requireAddress(fixedPriceSaleAddress, "Fixed-price sale address");
+    const sale = requireLoadedFixedPriceSale().address;
     await submitBoardroomExecution(
       "Fixed-price sale cancel",
       boardroom,
@@ -2568,12 +2745,24 @@ export function App(): React.JSX.Element {
     const requestScope = activeStudioReadScopeKeyRef.current;
     const requestChainId = activeNetwork.chainId;
     const requestDeploymentIdentity = runtimeDeploymentIdentity;
+    const routeAtRequest = activeAppRouteRef.current;
+    const requestIsCurrent = (): boolean =>
+      activeStudioReadScopeKeyRef.current === requestScope
+      && merkleAirdropLoadVersionRef.current === requestVersion;
     setMerkleAirdropSnapshotVerifiedKey(undefined);
-    const snapshot = await readMerkleAirdropState(publicClient, airdrop);
-    if (activeStudioReadScopeKeyRef.current !== requestScope || merkleAirdropLoadVersionRef.current !== requestVersion) return snapshot;
-    const route = activeAppRouteRef.current;
-    if (route.kind === "studio-project" && !sameAddress(snapshot.boardroom, route.boardroom)) {
-      throw new Error("This airdrop does not belong to the current Studio project.");
+    const [snapshot, canonicalBoardroom] = await Promise.all([
+      readMerkleAirdropState(publicClient, airdrop),
+      routeAtRequest.kind === "studio-project" ? readBoardroomState(publicClient, routeAtRequest.boardroom) : undefined,
+    ]);
+    if (!requestIsCurrent()) return snapshot;
+    if (routeAtRequest.kind === "studio-project" && canonicalBoardroom) {
+      try {
+        await assertCanonicalMerkleAirdrop(publicClient, deployment, canonicalBoardroom, snapshot);
+      } catch (error) {
+        if (!requestIsCurrent()) return snapshot;
+        throw error;
+      }
+      if (!requestIsCurrent()) return snapshot;
     }
     setMerkleAirdropSnapshot(snapshot);
     setMerkleAirdropSnapshotVerifiedKey(canonicalProjectStateKey(
@@ -2618,7 +2807,7 @@ export function App(): React.JSX.Element {
   const closeMerkleAirdrop = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
-    const airdrop = requireAddress(merkleAirdropAddress, "Merkle airdrop address");
+    const airdrop = requireLoadedMerkleAirdrop().address;
     await submitBoardroomExecution(
       "Merkle airdrop close",
       boardroom,
@@ -2631,7 +2820,7 @@ export function App(): React.JSX.Element {
   const cancelMerkleAirdrop = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
-    const airdrop = requireAddress(merkleAirdropAddress, "Merkle airdrop address");
+    const airdrop = requireLoadedMerkleAirdrop().address;
     await submitBoardroomExecution(
       "Merkle airdrop cancel",
       boardroom,
@@ -2684,12 +2873,24 @@ export function App(): React.JSX.Element {
     const requestScope = activeStudioReadScopeKeyRef.current;
     const requestChainId = activeNetwork.chainId;
     const requestDeploymentIdentity = runtimeDeploymentIdentity;
+    const routeAtRequest = activeAppRouteRef.current;
+    const requestIsCurrent = (): boolean =>
+      activeStudioReadScopeKeyRef.current === requestScope
+      && migratingCurveLoadVersionRef.current === requestVersion;
     setMigratingCurveSnapshotVerifiedKey(undefined);
-    const snapshot = await readMigratingBondingCurveState(publicClient, curve);
-    if (activeStudioReadScopeKeyRef.current !== requestScope || migratingCurveLoadVersionRef.current !== requestVersion) return snapshot;
-    const route = activeAppRouteRef.current;
-    if (route.kind === "studio-project" && !sameAddress(snapshot.boardroom, route.boardroom)) {
-      throw new Error("This bonding curve does not belong to the current Studio project.");
+    const [snapshot, canonicalBoardroom] = await Promise.all([
+      readMigratingBondingCurveState(publicClient, curve),
+      routeAtRequest.kind === "studio-project" ? readBoardroomState(publicClient, routeAtRequest.boardroom) : undefined,
+    ]);
+    if (!requestIsCurrent()) return snapshot;
+    if (routeAtRequest.kind === "studio-project" && canonicalBoardroom) {
+      try {
+        await assertCanonicalMigratingBondingCurve(publicClient, deployment, canonicalBoardroom, snapshot);
+      } catch (error) {
+        if (!requestIsCurrent()) return snapshot;
+        throw error;
+      }
+      if (!requestIsCurrent()) return snapshot;
     }
     setMigratingCurveSnapshot(snapshot);
     setMigratingCurveSnapshotVerifiedKey(canonicalProjectStateKey(
@@ -2734,7 +2935,7 @@ export function App(): React.JSX.Element {
   const cancelMigratingCurve = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
-    const curve = requireAddress(migratingCurveAddress, "Migrating curve address");
+    const curve = requireLoadedMigratingCurve().address;
     await submitBoardroomExecution(
       "Migrating curve cancel",
       boardroom,
@@ -2747,14 +2948,8 @@ export function App(): React.JSX.Element {
   const migrateCurve = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
-    const curve = requireAddress(migratingCurveAddress, "Migrating curve address");
-    const curveState =
-      displayedMigratingCurveSnapshot && displayedMigratingCurveSnapshot.address.toLowerCase() === curve.toLowerCase()
-        ? displayedMigratingCurveSnapshot
-        : await readMigratingBondingCurveState(publicClient, curve);
-    if (!sameAddress(curveState.boardroom, boardroom.address)) {
-      throw new Error("This bonding curve does not belong to the current Studio project.");
-    }
+    const curveState = requireLoadedMigratingCurve();
+    const curve = curveState.address;
     const [minShareLiquidity, minQuoteLiquidity] = await Promise.all([
       parseErc20Amount(publicClient, curveMigrationForm.minShareLiquidity, curveState.shareToken, "Minimum share liquidity"),
       parseErc20Amount(publicClient, curveMigrationForm.minQuoteLiquidity, curveState.quoteToken, "Minimum quote liquidity"),
@@ -2812,12 +3007,24 @@ export function App(): React.JSX.Element {
     const requestScope = activeStudioReadScopeKeyRef.current;
     const requestChainId = activeNetwork.chainId;
     const requestDeploymentIdentity = runtimeDeploymentIdentity;
+    const routeAtRequest = activeAppRouteRef.current;
+    const requestIsCurrent = (): boolean =>
+      activeStudioReadScopeKeyRef.current === requestScope
+      && lockedLiquidityLoadVersionRef.current === requestVersion;
     setLockedLiquiditySnapshotVerifiedKey(undefined);
-    const snapshot = await readLockedLiquidityState(publicClient, locker);
-    if (activeStudioReadScopeKeyRef.current !== requestScope || lockedLiquidityLoadVersionRef.current !== requestVersion) return snapshot;
-    const route = activeAppRouteRef.current;
-    if (route.kind === "studio-project" && !sameAddress(snapshot.boardroom, route.boardroom)) {
-      throw new Error("This locked-liquidity position does not belong to the current Studio project.");
+    const [snapshot, canonicalBoardroom] = await Promise.all([
+      readLockedLiquidityState(publicClient, locker),
+      routeAtRequest.kind === "studio-project" ? readBoardroomState(publicClient, routeAtRequest.boardroom) : undefined,
+    ]);
+    if (!requestIsCurrent()) return snapshot;
+    if (routeAtRequest.kind === "studio-project" && canonicalBoardroom) {
+      try {
+        await assertCanonicalLockedLiquidity(publicClient, deployment, canonicalBoardroom, snapshot);
+      } catch (error) {
+        if (!requestIsCurrent()) return snapshot;
+        throw error;
+      }
+      if (!requestIsCurrent()) return snapshot;
     }
     setLockedLiquiditySnapshot(snapshot);
     setLockedLiquiditySnapshotVerifiedKey(canonicalProjectStateKey(
@@ -2862,7 +3069,7 @@ export function App(): React.JSX.Element {
   const claimLockedLiquidityFees = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
-    const locker = requireAddress(lockedLiquidityAddress, "Locked-liquidity address");
+    const locker = requireLoadedLockedLiquidity().address;
     await submitBoardroomExecution(
       "Locked-liquidity fee claim",
       boardroom,
@@ -2874,14 +3081,8 @@ export function App(): React.JSX.Element {
 
   const exitLockedLiquidity = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
-    const locker = requireAddress(lockedLiquidityAddress, "Locked-liquidity address");
-    const lockerState =
-      displayedLockedLiquiditySnapshot && displayedLockedLiquiditySnapshot.address.toLowerCase() === locker.toLowerCase()
-        ? displayedLockedLiquiditySnapshot
-        : await readLockedLiquidityState(publicClient, locker);
-    if (!sameAddress(lockerState.boardroom, boardroom.address)) {
-      throw new Error("This locked-liquidity position does not belong to the current Studio project.");
-    }
+    const lockerState = requireLoadedLockedLiquidity();
+    const locker = lockerState.address;
     const [amountAMin, amountBMin] = await Promise.all([
       parseErc20Amount(publicClient, lockedLiquidityExitForm.amountAMin, lockerState.tokenA, "Exit amount A minimum"),
       parseErc20Amount(publicClient, lockedLiquidityExitForm.amountBMin, lockerState.tokenB, "Exit amount B minimum"),
