@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   LOCAL_ANVIL_CHAIN_ID,
   PLEDGE_CASH_NETWORKS,
+  PUBLIC_RPC_BATCH_SIZE,
+  PUBLIC_RPC_RETRY_COUNT,
   createPledgeCashNetworks,
   initialSelectedNetwork,
   networkForChainId,
@@ -22,6 +24,11 @@ describe("web network profiles", () => {
 
   test("keeps HyperEVM, Monad, and local selectable", () => {
     expect(PLEDGE_CASH_NETWORKS.map((network) => network.chainId)).toEqual([998, 10143, 31337]);
+  });
+
+  test("keeps JSON-RPC batches within the strictest configured provider limit", () => {
+    expect(PUBLIC_RPC_BATCH_SIZE).toBe(20);
+    expect(PUBLIC_RPC_RETRY_COUNT).toBe(0);
   });
 
   test("preserves custom legacy env chain IDs as selectable profiles", () => {
@@ -69,6 +76,7 @@ describe("web network profiles", () => {
 
     expect(transactionUrl(hash, hyperEvm.chainId)).toBe(`${hyperEvm.explorerUrl}/tx/${hash}`);
     expect(transactionUrl(hash, LOCAL_ANVIL_CHAIN_ID)).toBeUndefined();
+    expect(transactionUrl(hash, 999_999)).toBeUndefined();
   });
 
   test("treats selected-network storage as best effort", () => {

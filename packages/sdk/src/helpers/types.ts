@@ -2,7 +2,13 @@ import type { Address, Hex, PublicClient } from "viem";
 
 export type PledgeCashReadClient = Pick<PublicClient, "readContract">;
 
-export type PledgeCashLogClient = Pick<PublicClient, "getLogs"> & Partial<Pick<PublicClient, "getBlockNumber">>;
+export type PledgeCashLogClient = Pick<PublicClient, "getLogs">
+  & Partial<Pick<PublicClient, "getBlockNumber" | "getCode">>;
+
+export type PledgeCashBlockReadClient = Pick<PublicClient, "getBlockNumber" | "readContract">;
+
+export type PledgeCashGovernanceClient = Pick<PublicClient, "getLogs" | "getTransaction" | "readContract">
+  & Partial<Pick<PublicClient, "getBlockNumber" | "getCode" | "getTransactionReceipt">>;
 
 export type DiscoveryRange = {
   fromBlock?: bigint;
@@ -138,6 +144,17 @@ export type FixedPriceSaleState = {
   closed: boolean;
 };
 
+export type FixedPriceSaleParticipationQuote = {
+  state: FixedPriceSaleState;
+  buyer: Address;
+  shareAmount: bigint;
+  paymentAmount: bigint;
+  purchasedBy: bigint;
+  remainingBuyerCapacity: bigint;
+  paymentBalance: bigint;
+  paymentAllowance: bigint;
+};
+
 export type MigratingBondingCurveState = {
   address: Address;
   factory: Address;
@@ -160,8 +177,28 @@ export type MigratingBondingCurveState = {
   curveStatus: number;
   soldShares: bigint;
   quoteReserve: bigint;
+  graduationLatched: boolean;
   canMigrate: boolean;
   closed: boolean;
+};
+
+export type MigratingBondingCurveBuyQuote = {
+  state: MigratingBondingCurveState;
+  buyer: Address;
+  shareAmount: bigint;
+  quoteIn: bigint;
+  quoteBalance: bigint;
+  quoteAllowance: bigint;
+};
+
+export type MigratingBondingCurveSellQuote = {
+  state: MigratingBondingCurveState;
+  seller: Address;
+  shareAmount: bigint;
+  quoteOut: bigint;
+  sellableShares: bigint;
+  shareBalance: bigint;
+  shareAllowance: bigint;
 };
 
 export type MerkleAirdropState = {
@@ -171,6 +208,7 @@ export type MerkleAirdropState = {
   shareToken: Address;
   tokenGrantFactory: Address;
   airdropSupply: bigint;
+  claimedShares: bigint;
   remainingShares: bigint;
   merkleRoot: Hex;
   startTime: bigint;
@@ -179,6 +217,12 @@ export type MerkleAirdropState = {
   claimedGrantCount: number;
   airdropStatus: number;
   closed: boolean;
+};
+
+export type MerkleAirdropClaimState = {
+  airdrop: Address;
+  index: bigint;
+  claimed: boolean;
 };
 
 export type LockedLiquidityState = {
@@ -202,10 +246,14 @@ export type FactoryState = {
 
 export type GrantState = {
   address: Address;
+  factory: Address;
   issuer: Address;
   holder: Address;
   token: Address;
   paymentToken: Address;
+  tokenId: bigint;
+  tokenDecimals: number;
+  paymentTokenDecimals: number;
   grantSize: bigint;
   claimable: bigint;
   price: bigint;
@@ -214,8 +262,32 @@ export type GrantState = {
   expiry: bigint;
   settledAmount: bigint;
   settleable: bigint;
+  settlementCost: bigint;
+  unsettledAmount: bigint;
+  transferable: boolean;
+  transferUnlockTime: bigint;
+  transferLocked: boolean;
+  expired: boolean;
   halted: boolean;
+  quarantined: boolean;
+  quarantinedAmount: bigint;
   closed: boolean;
+};
+
+export type GrantSettlementQuote = {
+  state: GrantState;
+  holder: Address;
+  amount: bigint;
+  settlementCost: bigint;
+  paymentBalance?: bigint;
+  paymentAllowance?: bigint;
+};
+
+export type BoardroomGovernanceConfig = {
+  minimumDelay: bigint;
+  actionGracePeriod: bigint;
+  vetoBps: bigint;
+  windDownBps: bigint;
 };
 
 export type BoardroomState = {
@@ -225,10 +297,33 @@ export type BoardroomState = {
   wrappedNative: Address;
   shareToken: Address;
   status: number;
+  launched: boolean;
+  executor: Address;
+  governanceDelay: bigint;
+  governanceEpoch: bigint;
+  governanceEligibleSupply: bigint;
+  governanceConfig: BoardroomGovernanceConfig;
   redeemableAssets: Address[];
   issuedGrants: Address[];
   issuedDistributions: Address[];
   lockedLiquidityPositions: Address[];
+};
+
+export type BoardroomHolderPower = {
+  boardroom: Address;
+  shareToken: Address;
+  account: Address;
+  blockNumber: bigint;
+  snapshotBlock: bigint;
+  encumbered: boolean;
+  currentBalance: bigint;
+  pastBalance: bigint;
+  currentEligibleSupply: bigint;
+  pastEligibleSupply: bigint;
+  vetoRequired: bigint;
+  windDownRequired: bigint;
+  canVeto: boolean;
+  canStartWindDown: boolean;
 };
 
 export type GrantDiscoveryRange = DiscoveryRange & {

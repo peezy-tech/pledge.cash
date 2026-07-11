@@ -53,6 +53,9 @@ export type SwapTokenMetadata = {
 export type SwapTokenSource = "pool" | "deployment" | "custom";
 
 export type SwapTokenListOptions = {
+  discoveryMode?: "global" | "pinned-only" | undefined;
+  pinnedPools?: readonly Address[] | undefined;
+  signal?: AbortSignal | undefined;
   wrappedNativeLabel?: string;
 };
 
@@ -198,6 +201,8 @@ const DEFAULT_SLIPPAGE_BPS = 50;
 const FULL_BPS = 10_000;
 const FULL_BPS_BIGINT = 10_000n;
 const MAX_DISCOVERED_POOLS = 500;
+const MAX_PINNED_POOLS = 64;
+const SWAP_DISCOVERY_CONCURRENCY = 8;
 
 export function defaultSwapForm(): SwapForm {
   return {
@@ -284,6 +289,17 @@ export async function readSwapTokenList(
   account?: Address | undefined,
   listOptions: SwapTokenListOptions = {},
 ): Promise<SwapTokenListState> {
+  throwIfSwapReadAborted(listOptions.signal);
+  const read = readSwapTokenListState(client, deployment, account, listOptions);
+  return listOptions.signal ? await raceWithSwapReadAbort(read, listOptions.signal) : await read;
+}
+
+async function readSwapTokenListState(
+  client: PledgeCashReadClient,
+  deployment: PledgeCashDeployment | undefined,
+  account: Address | undefined,
+  listOptions: SwapTokenListOptions,
+): Promise<SwapTokenListState> {
   const tokens = new Map<string, TokenAccumulator>();
   const wrappedNativeLabel = listOptions.wrappedNativeLabel || "Wrapped native";
   addTokenAccumulator(tokens, deployment?.wrappedNative, { label: wrappedNativeLabel, source: "deployment", rank: 0 });
@@ -291,19 +307,60 @@ export async function readSwapTokenList(
   let pools: SwapPoolSummary[] = [];
   let listError: string | undefined;
 
-  try {
-    const factory = requireDeploymentAddress(deployment?.ammFactory, "AMM factory");
-    const discovered = await readPoolSummaries(client, factory);
-    pools = discovered.pools;
-    listError = discovered.error;
-  } catch (error) {
-    listError = errorMessage(error);
+  if ((listOptions.discoveryMode ?? "global") === "global") {
+    try {
+      const factory = requireDeploymentAddress(deployment?.ammFactory, "AMM factory");
+      const discovered = await readPoolSummaries(client, factory, listOptions.signal);
+      pools = discovered.pools;
+      listError = discovered.error;
+    } catch (error) {
+      listError = errorMessage(error);
+    }
   }
+  throwIfSwapReadAborted(listOptions.signal);
+
+  const pinnedPools = uniquePoolAddresses(listOptions.pinnedPools ?? []);
+  const boundedPinnedPools = pinnedPools.slice(-MAX_PINNED_POOLS);
+  const missingPinnedPools = boundedPinnedPools.filter((address) =>
+    !pools.some((pool) => sameAddress(pool.address, address)));
+  const pinnedResults = await mapInBatches(
+    missingPinnedPools,
+    SWAP_DISCOVERY_CONCURRENCY,
+    async (address): Promise<{ error?: string | undefined; pool?: SwapPoolSummary | undefined }> => {
+      try {
+        return { pool: await readPoolSummary(client, address) };
+      } catch (error) {
+        return { error: errorMessage(error) };
+      }
+    },
+    listOptions.signal,
+  );
+  throwIfSwapReadAborted(listOptions.signal);
+  pools = uniquePoolSummaries([
+    ...pools,
+    ...pinnedResults.flatMap((result) => result.pool ? [result.pool] : []),
+  ]);
+  const pinnedFailures = pinnedResults.filter((result) => result.error).length;
+  const listErrors = [
+    listError,
+    pinnedPools.length > boundedPinnedPools.length
+      ? `Only the newest ${MAX_PINNED_POOLS.toString()} project pools can be pinned at once.`
+      : undefined,
+    pinnedFailures > 0
+      ? `${pinnedFailures.toString()} ${pinnedFailures === 1 ? "project pool could" : "project pools could"} not be read.`
+      : undefined,
+  ].filter((message): message is string => Boolean(message));
+  listError = listErrors.length > 0 ? listErrors.join(" ") : undefined;
 
   addPoolTokens(tokens, pools);
 
   const rankedTokens = Array.from(tokens.values()).sort((left, right) => left.rank - right.rank);
-  const options = await Promise.all(rankedTokens.map(async (token) => await tokenOptionFromAccumulator(client, token, account)));
+  const options = await mapInBatches(
+    rankedTokens,
+    SWAP_DISCOVERY_CONCURRENCY,
+    async (token) => await tokenOptionFromAccumulator(client, token, account),
+    listOptions.signal,
+  );
   options.sort(compareTokenOptions);
 
   const result: SwapTokenListState = { tokens: options, pools, loaded: true };
@@ -731,6 +788,13 @@ export function swapQuoteReady(quote: SwapQuoteState | undefined): quote is Exec
 
 export function defaultSwapDeadline(): string {
   return String(Math.floor(Date.now() / 1000) + 1200);
+}
+
+export function assertFutureSwapDeadline(value: string, currentUnixTime = Math.floor(Date.now() / 1000)): void {
+  const deadline = parseSwapDeadline(value);
+  if (deadline <= BigInt(currentUnixTime)) {
+    throw new Error("The transaction window expired. Choose a fresh quote expiry before submitting.");
+  }
 }
 
 function requireExecutableQuote(quote: SwapQuoteState): ExecutableSwapQuote {
@@ -1170,33 +1234,44 @@ async function readPoolCount(client: PledgeCashReadClient, factory: Address): Pr
 async function readPoolSummaries(
   client: PledgeCashReadClient,
   factory: Address,
+  signal?: AbortSignal | undefined,
 ): Promise<{ pools: SwapPoolSummary[]; error?: string | undefined }> {
+  throwIfSwapReadAborted(signal);
   const poolCount = await readPoolCount(client, factory);
   const cappedPoolCount = Math.min(poolCount, MAX_DISCOVERED_POOLS);
-  const poolAddresses = await readPoolAddresses(client, factory, cappedPoolCount);
-  const pools = await Promise.all(poolAddresses.map(async (address) => await readPoolSummary(client, address)));
+  const firstPoolIndex = poolCount - cappedPoolCount;
+  const poolAddresses = await readPoolAddresses(client, factory, firstPoolIndex, cappedPoolCount, signal);
+  const pools = await mapInBatches(
+    poolAddresses,
+    SWAP_DISCOVERY_CONCURRENCY,
+    async (address) => await readPoolSummary(client, address),
+    signal,
+  );
 
   if (poolCount <= cappedPoolCount) return { pools };
   return {
     pools,
-    error: `Showing the first ${cappedPoolCount.toString()} pools. Narrow by token address for anything older.`,
+    error: `Showing the newest ${cappedPoolCount.toString()} pools. Enter a token address to work with an older pool.`,
   };
 }
 
 async function readPoolAddresses(
   client: PledgeCashReadClient,
   factory: Address,
+  start: number,
   count: number,
+  signal?: AbortSignal | undefined,
 ): Promise<Address[]> {
-  return await Promise.all(
-    Array.from({ length: count }, (_, index) =>
-      client.readContract({
+  return await mapInBatches(
+    Array.from({ length: count }, (_, index) => index),
+    SWAP_DISCOVERY_CONCURRENCY,
+    async (index) => await client.readContract({
         address: factory,
         abi: ammFactoryAbi,
         functionName: "allPools",
-        args: [BigInt(index)],
-      }) as Promise<Address>
-    ),
+        args: [BigInt(start + index)],
+      }) as Address,
+    signal,
   );
 }
 
@@ -1246,6 +1321,67 @@ function tokenName(token: SwapTokenOption): string {
 
 function sortTokenAddresses(tokenA: Address, tokenB: Address): readonly [Address, Address] {
   return BigInt(tokenA) < BigInt(tokenB) ? [tokenA, tokenB] : [tokenB, tokenA];
+}
+
+function uniquePoolAddresses(addresses: readonly Address[]): Address[] {
+  const seen = new Set<string>();
+  return addresses.filter((address) => {
+    const key = address.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function uniquePoolSummaries(pools: readonly SwapPoolSummary[]): SwapPoolSummary[] {
+  const seen = new Set<string>();
+  return pools.filter((pool) => {
+    const key = pool.address.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function mapInBatches<Input, Output>(
+  values: readonly Input[],
+  concurrency: number,
+  mapper: (value: Input) => Promise<Output>,
+  signal?: AbortSignal | undefined,
+): Promise<Output[]> {
+  const results: Output[] = [];
+  for (let index = 0; index < values.length; index += concurrency) {
+    throwIfSwapReadAborted(signal);
+    results.push(...await Promise.all(values.slice(index, index + concurrency).map(mapper)));
+  }
+  throwIfSwapReadAborted(signal);
+  return results;
+}
+
+function throwIfSwapReadAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  throw signal.reason ?? new DOMException("AMM loading was cancelled.", "AbortError");
+}
+
+function raceWithSwapReadAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException("AMM loading was cancelled.", "AbortError"));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      signal.removeEventListener("abort", onAbort);
+      reject(signal.reason ?? new DOMException("AMM loading was cancelled.", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    void promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
 }
 
 function sameAddress(left: string, right: string): boolean {

@@ -1,7 +1,9 @@
 import { hyperEvmTestnet, monadTestnet, type Address } from "@pledge.cash/sdk";
-import { createPublicClient, defineChain, http, type Chain, type Hex, type PublicClient } from "viem";
+import { createPublicClient, defineChain, fallback, http, type Chain, type Hex, type PublicClient } from "viem";
 
 export const LOCAL_ANVIL_CHAIN_ID = 31337;
+export const PUBLIC_RPC_BATCH_SIZE = 20;
+export const PUBLIC_RPC_RETRY_COUNT = 0;
 const SELECTED_NETWORK_STORAGE_KEY = "pledge.cash.selectedNetwork";
 
 export type PledgeCashNetwork = {
@@ -62,13 +64,24 @@ export function initialSelectedNetwork(): PledgeCashNetwork {
 }
 
 export function networkForChainId(chainId: number): PledgeCashNetwork {
-  return PLEDGE_CASH_NETWORKS.find((network) => network.chainId === chainId) ?? PLEDGE_CASH_NETWORKS[0]!;
+  return supportedNetworkForChainId(chainId) ?? PLEDGE_CASH_NETWORKS[0]!;
+}
+
+export function supportedNetworkForChainId(chainId: number): PledgeCashNetwork | undefined {
+  return PLEDGE_CASH_NETWORKS.find((network) => network.chainId === chainId);
 }
 
 export function createPledgeCashPublicClient(network: PledgeCashNetwork): PublicClient {
   return createPublicClient({
     chain: network.chain,
-    transport: http(network.rpcUrl),
+    transport: fallback([
+      http(network.rpcUrl, {
+        batch: { batchSize: PUBLIC_RPC_BATCH_SIZE, wait: 8 },
+        key: "batched-http",
+        retryCount: PUBLIC_RPC_RETRY_COUNT,
+      }),
+      http(network.rpcUrl, { key: "unbatched-http", retryCount: PUBLIC_RPC_RETRY_COUNT }),
+    ], { retryCount: PUBLIC_RPC_RETRY_COUNT }),
   });
 }
 
@@ -95,7 +108,7 @@ export function addressUrl(address: Address): string | undefined {
 }
 
 export function transactionUrl(hash: Hex, chainId?: number): string | undefined {
-  const explorerUrl = (chainId === undefined ? selectedNetworkForLinks() : networkForChainId(chainId)).explorerUrl;
+  const explorerUrl = (chainId === undefined ? selectedNetworkForLinks() : supportedNetworkForChainId(chainId))?.explorerUrl;
   if (!explorerUrl) return undefined;
   return `${explorerUrl}/tx/${hash}`;
 }

@@ -10,7 +10,7 @@ export function useFactorySnapshot(
   deployment: PledgeCashDeployment | undefined,
   pushLog: PushLog,
 ): FactorySnapshot {
-  const [factorySnapshot, setFactorySnapshot] = useState<FactorySnapshot>({});
+  const [factorySnapshot, setFactorySnapshot] = useState<ScopedFactorySnapshot>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -24,7 +24,11 @@ export function useFactorySnapshot(
         const snapshot = await readFactoryState(client, factoryAddress);
         if (cancelled) return;
 
-        setFactorySnapshot(factoryStateSnapshot(snapshot));
+        setFactorySnapshot({
+          ...factoryStateSnapshot(snapshot),
+          client,
+          factoryAddress,
+        });
       } catch (error) {
         pushLog(`Factory reads failed: ${errorMessage(error)}`, "error");
       }
@@ -36,8 +40,16 @@ export function useFactorySnapshot(
     };
   }, [client, deployment?.tokenGrantFactory, pushLog]);
 
-  return factorySnapshot;
+  return factorySnapshot.client === client
+    && factorySnapshot.factoryAddress?.toLowerCase() === deployment?.tokenGrantFactory?.toLowerCase()
+    ? factorySnapshot
+    : {};
 }
+
+type ScopedFactorySnapshot = FactorySnapshot & {
+  client?: PublicClient | undefined;
+  factoryAddress?: `0x${string}` | undefined;
+};
 
 type ReadFactoryState = Awaited<ReturnType<typeof readFactoryState>>;
 

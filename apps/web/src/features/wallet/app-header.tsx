@@ -3,6 +3,7 @@ import type React from "react";
 import { ConnectWalletButton } from "../../components/simplekit";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
+import { appRouteHref } from "../../app/routing";
 import type { PledgeCashNetwork } from "../../lib/contracts";
 import type { WalletState } from "../../lib/types";
 
@@ -35,12 +36,13 @@ export function AppHeader({
   const walletOnActiveChain = wallet.chainId === chainId;
   const walletReady = walletConnected && walletOnActiveChain;
   const baseHref = import.meta.env.BASE_URL || "/";
+  const homeHref = appRouteHref({ kind: "explore" }, baseHref);
   const docsHref = `${baseHref}docs/`;
 
   return (
-    <header className="sticky top-0 z-20 border-b border-zinc-800 bg-zinc-950/88 backdrop-blur">
-      <div className="flex min-h-16 flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
-        <HeaderHomeLink href={baseHref} />
+    <header className="sticky top-0 z-30 border-b border-[var(--pc-border)] bg-[color:var(--pc-canvas-translucent)] backdrop-blur-xl">
+      <div className="flex h-14 items-center justify-between gap-2 px-3 sm:px-5">
+        <HeaderHomeLink href={homeHref} />
         <HeaderActions
           actionPending={actionPending}
           chainId={chainId}
@@ -50,6 +52,7 @@ export function AppHeader({
           onNetworkChange={onNetworkChange}
           runAction={runAction}
           switchChain={switchChain}
+          walletConnected={walletConnected}
           walletReady={walletReady}
         />
       </div>
@@ -59,11 +62,11 @@ export function AppHeader({
 
 function HeaderHomeLink({ href }: { href: string }): React.JSX.Element {
   return (
-    <a className="flex items-center gap-3 font-bold tracking-normal text-zinc-50" href={href} aria-label="pledge.cash">
-      <span className="grid h-8 w-8 place-items-center rounded-md border border-lime-300/40 bg-lime-300/10 text-lime-200">
+    <a className="flex shrink-0 items-center gap-2.5 font-bold tracking-tight text-[var(--pc-text)]" href={href} aria-label="pledge.cash Explore">
+      <span className="grid h-7 w-7 place-items-center rounded-md border border-[color:rgb(201_255_87_/_0.36)] bg-[color:rgb(201_255_87_/_0.08)] text-sm text-[var(--pc-accent)]">
         p
       </span>
-      <span>pledge.cash</span>
+      <span className="hidden min-[420px]:inline">pledge.cash</span>
     </a>
   );
 }
@@ -74,6 +77,7 @@ type HeaderActionsProps = Pick<
 > & {
   actionPending: boolean;
   docsHref: string;
+  walletConnected: boolean;
   walletReady: boolean;
 };
 
@@ -86,10 +90,11 @@ function HeaderActions({
   onNetworkChange,
   runAction,
   switchChain,
+  walletConnected,
   walletReady,
 }: HeaderActionsProps): React.JSX.Element {
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex min-w-0 items-center justify-end gap-1.5 sm:gap-2">
       <NetworkSelect
         actionPending={actionPending}
         chainId={chainId}
@@ -97,9 +102,13 @@ function HeaderActions({
         onNetworkChange={onNetworkChange}
       />
       <DocsLink href={docsHref} />
-      <Badge variant={walletReady ? "default" : "warning"}>{chainName}</Badge>
-      <SwitchChainButton actionPending={actionPending} runAction={runAction} switchChain={switchChain} />
-      <ConnectWalletButton disabled={actionPending} />
+      <Badge className="hidden xl:inline-flex" variant={walletReady ? "default" : "warning"}>{chainName}</Badge>
+      {walletConnected && !walletReady ? <SwitchChainButton actionPending={actionPending} runAction={runAction} switchChain={switchChain} /> : null}
+      <ConnectWalletButton
+        className="min-w-28 max-w-28 px-2 min-[420px]:min-w-[9.5rem] min-[420px]:max-w-[9.5rem] sm:max-w-none sm:px-3"
+        compactOnMobile
+        disabled={actionPending}
+      />
     </div>
   );
 }
@@ -119,25 +128,30 @@ function NetworkSelect({
   return (
     <select
       aria-label="Network"
-      className="h-10 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm font-medium text-zinc-100 outline-none transition-colors hover:bg-zinc-900 focus:border-lime-300/70 focus:ring-2 focus:ring-lime-300/10 disabled:cursor-not-allowed disabled:opacity-60"
+      className="block h-9 max-w-24 rounded-md border border-[var(--pc-border)] bg-[var(--pc-surface)] px-2 text-xs font-medium text-[var(--pc-text)] outline-none transition-colors hover:border-[var(--pc-border-strong)] focus:border-[var(--pc-focus)] disabled:cursor-not-allowed disabled:opacity-60 min-[360px]:max-w-32 sm:max-w-36 md:max-w-44 md:px-3 md:text-sm"
       disabled={actionPending}
-      title={actionPending ? NETWORK_PENDING_TITLE : undefined}
+      title={actionPending ? NETWORK_PENDING_TITLE : networks.find((network) => network.chainId === chainId)?.name}
       value={chainId}
       onChange={handleNetworkChange}
     >
       {networks.map((network) => (
         <option key={network.chainId} value={network.chainId}>
-          {network.name}
+          {networkOptionLabel(network)}
         </option>
       ))}
     </select>
   );
 }
 
+function networkOptionLabel(network: PledgeCashNetwork): string {
+  if (network.chainId === 31337) return "Local";
+  return network.name.replace(/\s+Testnet$/i, "");
+}
+
 function DocsLink({ href }: { href: string }): React.JSX.Element {
   return (
     <a
-      className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-4 py-2 text-sm font-medium text-zinc-100 transition-colors hover:bg-zinc-900 hover:text-zinc-50"
+      className="hidden h-9 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium text-[var(--pc-text-muted)] transition-colors hover:bg-[var(--pc-surface)] hover:text-[var(--pc-text)] lg:inline-flex"
       href={href}
     >
       <BookOpen className="h-4 w-4" />
@@ -155,13 +169,15 @@ function SwitchChainButton({
 }): React.JSX.Element {
   return (
     <Button
+      aria-label="Switch wallet network"
+      className="h-9 w-9 px-0 sm:w-auto sm:px-3"
       disabled={actionPending}
       title={actionPending ? WALLET_PENDING_TITLE : undefined}
       variant="secondary"
       onClick={() => void runAction("switch-chain", switchChain)}
     >
       <RefreshCw className="h-4 w-4" />
-      Switch
+      <span className="hidden sm:inline">Switch</span>
     </Button>
   );
 }

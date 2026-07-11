@@ -19,11 +19,11 @@ Ask the issuer for:
 
 Open the app, connect the wallet that should hold the grant, and confirm the header shows the right chain.
 
-## 2. Open Inspect Grant
+## 2. Open Portfolio
 
-Select `Inspect Grant`.
+Open `Portfolio`. Wallet discovery puts grants that need attention first. Select `Open grant` to use the grant's canonical URL.
 
-Paste the grant address into `Grant address` and use `Load`. The app should show:
+If discovery has not found the grant yet, the raw address scanner remains available under `Tools`. The grant page should show:
 
 - issuer,
 - holder,
@@ -40,7 +40,7 @@ If the holder is not your wallet, your wallet cannot settle the grant unless the
 
 ## 3. Read The Grant Facts
 
-Use the facts panel to compare `Grant size`, `Claimable`, `Settled`, and `Settleable now`.
+Compare `Grant size`, `Claimable`, `Settled`, `Settleable now`, the exact settlement cost, transfer state, and quarantine or expiry status.
 
 Do not rely on the project message alone. The grant contract controls how much can be settled now.
 
@@ -53,7 +53,7 @@ If the grant has a payment token, check `Price` and fill:
 - `Settle amount`: the grant-token amount you want to settle.
 - `Payment approval`: the payment-token amount to approve.
 
-Use `Approve Payment` first, then `Settle`.
+Use `Approve Payment` first, then `Settle`. Each call is reviewed and simulated before the wallet opens.
 
 ## 5. Watch Expiry
 
@@ -63,12 +63,12 @@ Use `Approve Payment` first, then `Settle`.
 
 The issuer may be able to halt unvested vesting or withdraw expired tokens. If a grant is halted, inspect the facts again before assuming future vesting will continue.
 
-## 7. Find Grants With Discovery
+## 7. Find Grants With Portfolio
 
-If you do not have the grant address, open `Discovery`, set the block range, and use `Scan`. Grants can appear in:
+If you do not have the grant address, connect the wallet and refresh `Portfolio`. Grants can appear when the wallet is the:
 
 - `Current Holder`,
 - `Issuer`,
 - `Original Holder`.
 
-Use `Inspect` on a discovered grant to load it into `Inspect Grant`.
+Use `Open grant` on a discovered item. Manual block-range controls are intentionally kept in `Tools` for diagnostics rather than the normal holder flow.

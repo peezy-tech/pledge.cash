@@ -332,7 +332,7 @@ function LaunchPanel({ dashboard }: { dashboard: ProductBoardroomDashboardState 
             {
               label: "Swaps",
               value: history?.amm?.swapCount === undefined ? "Unknown" : String(history.amm.swapCount),
-              detail: history?.amm?.traderCount === undefined ? "Unknown traders" : `${history.amm.traderCount} traders`,
+              detail: history?.amm?.traderCount === undefined ? "Unknown pool callers" : `${history.amm.traderCount} unique pool callers`,
             },
             {
               label: "Locker fees",

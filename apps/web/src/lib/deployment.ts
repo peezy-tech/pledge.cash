@@ -1,7 +1,31 @@
 import type { Address, PledgeCashDeployment } from "@pledge.cash/sdk";
 
-const STRING_DEPLOYMENT_FIELDS = ["status", "reason", "boardroomStatus", "boardroomReason"] as const;
+const STRING_DEPLOYMENT_FIELDS = [
+  "status",
+  "reason",
+  "deterministicDeploymentVersion",
+  "deterministicReleaseCodeHash",
+  "boardroomStatus",
+  "boardroomReason",
+  "deterministicDeployerCodeHash",
+  "boardroomPolicyRegistryCodeHash",
+  "assetPolicyCodeHash",
+  "protocolFeeRouterCodeHash",
+  "boardroomFactoryCodeHash",
+  "boardroomGovernanceLogicCodeHash",
+  "boardroomRedemptionPayoutCodeHash",
+  "boardroomLogicCodeHash",
+  "tokenGrantFactoryCodeHash",
+  "ammFactoryCodeHash",
+  "ammRouterCodeHash",
+  "lockedLiquidityFactoryCodeHash",
+  "distributionFactoryCodeHash",
+  "wrappedNativeCodeHash",
+] as const;
 const ADDRESS_DEPLOYMENT_FIELDS = [
+  "deterministicDeployer",
+  "deterministicDeployerOwner",
+  "create2Factory",
   "boardroomFactory",
   "boardroomGovernanceLogic",
   "boardroomRedemptionPayout",
@@ -32,6 +56,7 @@ const ADDRESS_DEPLOYMENT_FIELDS = [
   "ammReservationManager",
 ] as const;
 const BOOLEAN_DEPLOYMENT_FIELDS = [
+  "deterministicDeployment",
   "tokenGrantPolicyAllowed",
   "tokenGrantModulePolicy",
   "distributionPolicyAllowed",
@@ -50,6 +75,23 @@ const JSON_PRIMITIVE_TOKEN_PATTERN = '"([^"\\\\]|\\\\.)*"|-?\\d+|true|false|null
 export function deploymentText(deployment: PledgeCashDeployment | undefined): string {
   if (!deployment) return "{}";
   return JSON.stringify(deployment, (_, value: unknown) => (typeof value === "bigint" ? value.toString() : value), 2);
+}
+
+/**
+ * Stable identity for every value in the active deployment artifact.
+ *
+ * Discovery deliberately uses a smaller factory identity so a cache can survive
+ * irrelevant artifact metadata changes. Runtime reads and writes must instead
+ * invalidate whenever any artifact value changes: transaction targets, spenders,
+ * fees, policy flags, and implementation/code provenance all live here.
+ */
+export function deploymentRuntimeIdentity(deployment: PledgeCashDeployment | undefined): string | undefined {
+  if (!deployment) return undefined;
+  return JSON.stringify(
+    Object.entries(deployment)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => [key, typeof value === "bigint" ? value.toString() : value]),
+  );
 }
 
 export function parseDeployment(raw: string): PledgeCashDeployment {

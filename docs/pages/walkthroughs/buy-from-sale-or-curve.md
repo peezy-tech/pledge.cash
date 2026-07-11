@@ -1,70 +1,47 @@
 ---
 title: Buy From A Sale Or Curve
-description: App-specific steps for inspecting Boardroom distributions and using swap or Boardroom tools safely.
+description: App-specific steps for comparing and using a project's live participation routes safely.
 ---
 
 # Buy From A Sale Or Curve
 
-Use this walkthrough when a project is distributing Boardroom share tokens through a fixed-price sale, migrating bonding curve, or AMM route.
+Use this walkthrough when a project distributes Boardroom tokens through a fixed-price sale, bonding curve, airdrop, or AMM.
 
-The app is still early. Some buyer actions may happen through project-specific pages or direct contracts while the general tools expose inspection and operator flows. Always verify addresses and transaction previews before signing.
+## 1. Open The Exact Project
 
-## 1. Start From A Boardroom Address
+Find the project in `Explore` or use its canonical project URL. The URL includes both the chain ID and Boardroom address, so a shared link cannot silently load a different catalog entry.
 
-Get the Boardroom address and chain from the project. Open the app, connect your wallet, and confirm the header chain.
+You can inspect every project section without connecting a wallet.
 
-Open `Discovery` if you need to find project objects from your wallet history. Otherwise open `Boardroom Tools`, paste the Boardroom address into `Boardroom address`, and use `Load`.
+## 2. Review The Project First
 
-## 2. Inspect Distributions
+Start on `Overview`, then inspect `Transparency` for treasury balances, token supply, grants, distributions, liquidity, and contract addresses. `Governance` shows whether the owner still acts directly or an executor must queue delayed changes.
 
-After loading the Boardroom, check `Boardroom Obligations`.
+Token ownership does not automatically create equity, dividends, employment rights, or other off-chain entitlements. Read any separate project terms independently.
 
-For a fixed-price sale, use `Use Sale` to load the sale panel. Inspect:
+## 3. Compare Participation Routes
 
-- sale status,
-- share token,
-- payment token,
-- remaining shares,
-- price,
-- sale window.
+Open `Participate`. The app lists the routes discovered for this exact Boardroom and prioritizes active ones:
 
-For a migrating curve, use `Use Curve` to load the curve panel. Inspect:
+- a fixed-price sale shows the expected tokens, payment, buyer capacity, balance, and allowance;
+- a bonding curve supports live buy and sell quotes, protected bounds, and sellable-share checks;
+- an airdrop checks a supplied allocation index and proof before claiming;
+- an AMM route shows the current pool quote after migration.
 
-- curve status,
-- whether it can migrate,
-- remaining sale shares,
-- sold shares,
-- quote reserve,
-- quote token,
-- locker and pool after migration.
+Only connect the wallet when you are ready to quote or act.
 
-## 3. Separate Sale Terms From Project Claims
+## 4. Review Approval Separately
 
-The sale or curve tells you payment token, price mechanics, inventory, and status. It does not automatically give you equity, dividends, employment rights, or legal governance.
+An ERC-20 purchase may need approval first. The primary action explains whether the next transaction is an approval or the purchase itself. Approve only the amount required for the protected quote.
 
-If the project promises rights outside the contracts, read those documents separately before buying.
+## 5. Confirm The Transaction
 
-## 4. Use Swap For AMM Buys
+Before the wallet opens, the review surface shows the action, contract function, destination, native value, risk level, and raw calldata. The app simulates the exact call. A failed simulation never opens the wallet.
 
-If the project token trades in an AMM pool, open `Swap`.
+After signing, the transaction tray remains visible across navigation until the receipt confirms or fails.
 
-Use the token selectors for `From token` and `To token`, enter `Amount in`, set `Slippage bps`, and use `Quote`. The facts panel shows expected output, minimum received, fee, pool, reserves, and approval state.
+## 6. Recheck State
 
-If approval is required, use `Approve` first. Then use `Swap`.
+After confirmation, recheck your wallet balance and the project's `Overview` or `Transparency` state. Quotes can change between reads, and operators may close, cancel, migrate, or queue changes according to the current lifecycle.
 
-Native HYPE routes use the `Native swap` control when the pair supports wrapped native.
-
-## 5. Recheck After The Transaction
-
-After buying or swapping, verify:
-
-- your token balance in the wallet,
-- the sale, curve, or pool state,
-- the Boardroom treasury or reserve effects,
-- whether the Boardroom has changed status.
-
-For fixed-price sales and curves, project operators may still close, cancel, or migrate according to contract state. For AMM swaps, price and liquidity can move between quote and execution.
-
-## 6. Monitor Wind-Down
-
-If the Boardroom later enters wind-down, open `Boardroom Tools` and inspect `Wind-Down`. Redemptions only apply to registered redeemable assets after redemptions open.
+If the project enters wind-down, `Governance` explains the transition and `Transparency` shows the declared redemption assets once redemptions open.

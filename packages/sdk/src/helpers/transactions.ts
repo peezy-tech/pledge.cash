@@ -28,6 +28,8 @@ import type {
   MigratingBondingCurveTerms,
 } from "./types";
 
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const satisfies Address;
+
 function requireAssetPolicy(assetPolicy: Address | undefined): Address {
   if (!assetPolicy) {
     throw new Error("assetPolicy is required for Boardroom approval calls.");
@@ -60,6 +62,29 @@ export function buildErc20Approval(input: { token: Address; spender: Address; am
   };
 }
 
+export function buildGrantSettlementTransaction(input: { grant: Address; amount: bigint }) {
+  return {
+    address: input.grant,
+    abi: tokenGrantAbi,
+    functionName: "settle",
+    args: [input.amount] as const,
+  };
+}
+
+export function buildGrantRightTransferTransaction(input: {
+  factory: Address;
+  from: Address;
+  to: Address;
+  tokenId: bigint;
+}) {
+  return {
+    address: input.factory,
+    abi: tokenGrantFactoryAbi,
+    functionName: "safeTransferFrom",
+    args: [input.from, input.to, input.tokenId] as const,
+  };
+}
+
 export function buildDirectGrantCreationTransaction(input: {
   factory: Address;
   terms: GrantCreationTerms;
@@ -80,6 +105,24 @@ export function buildBoardroomMintTransaction(input: { boardroom: Address; to: A
     abi: boardroomAbi,
     functionName: "mint",
     args: [input.to, input.amount] as const,
+  };
+}
+
+export function buildBoardroomLaunchTransaction(input: { boardroom: Address; governanceDelay: bigint }) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "launch",
+    args: [input.governanceDelay] as const,
+  };
+}
+
+export function buildBoardroomSetExecutorTransaction(input: { boardroom: Address; executor: Address }) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "setExecutor",
+    args: [input.executor] as const,
   };
 }
 
@@ -166,6 +209,15 @@ export function buildBoardroomCall(input: {
   };
 }
 
+export function buildBoardroomSelfCall(input: { boardroom: Address; data: Hex; value?: bigint }): BoardroomCall {
+  return buildBoardroomCall({
+    policy: ZERO_ADDRESS,
+    target: input.boardroom,
+    data: input.data,
+    ...(input.value === undefined ? {} : { value: input.value }),
+  });
+}
+
 export function buildBoardroomExecuteTransaction(input: { boardroom: Address; call: BoardroomCall; value?: bigint }) {
   return {
     address: input.boardroom,
@@ -188,6 +240,165 @@ export function buildBoardroomExecuteBatchTransaction(input: {
     args: [input.calls] as const,
     value: input.value ?? input.calls.reduce((total, call) => total + call.value, 0n),
   };
+}
+
+export function buildBoardroomQueueActionTransaction(input: {
+  boardroom: Address;
+  call: BoardroomCall;
+  salt: Hex;
+}) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "queueAction",
+    args: [input.call, input.salt] as const,
+  };
+}
+
+export function buildBoardroomQueueBatchTransaction(input: {
+  boardroom: Address;
+  calls: readonly BoardroomCall[];
+  salt: Hex;
+}) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "queueBatch",
+    args: [input.calls, input.salt] as const,
+  };
+}
+
+export function buildBoardroomCancelActionTransaction(input: { boardroom: Address; actionHash: Hex }) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "cancelAction",
+    args: [input.actionHash] as const,
+  };
+}
+
+export function buildBoardroomExecuteQueuedActionTransaction(input: {
+  boardroom: Address;
+  call: BoardroomCall;
+  salt: Hex;
+  value?: bigint;
+}) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "executeQueuedAction",
+    args: [input.call, input.salt] as const,
+    value: input.value ?? input.call.value,
+  };
+}
+
+export function buildBoardroomExecuteQueuedBatchTransaction(input: {
+  boardroom: Address;
+  calls: readonly BoardroomCall[];
+  salt: Hex;
+  value?: bigint;
+}) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "executeQueuedBatch",
+    args: [input.calls, input.salt] as const,
+    value: input.value ?? totalCallValue(input.calls),
+  };
+}
+
+export function buildBoardroomExecuteWindDownCallTransaction(input: {
+  boardroom: Address;
+  call: BoardroomCall;
+}) {
+  if (input.call.value !== 0n) throw new Error("Wind-down calls cannot transfer native value.");
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "executeWindDownCall",
+    args: [input.call] as const,
+  };
+}
+
+export type BoardroomCallExecutionPlan =
+  | { kind: "execute"; transaction: ReturnType<typeof buildBoardroomExecuteTransaction> | ReturnType<typeof buildBoardroomExecuteBatchTransaction> }
+  | { kind: "queue"; transaction: ReturnType<typeof buildBoardroomQueueActionTransaction> | ReturnType<typeof buildBoardroomQueueBatchTransaction> }
+  | { kind: "windDown"; transaction: ReturnType<typeof buildBoardroomExecuteWindDownCallTransaction> };
+
+export function planBoardroomCallExecution(input: {
+  boardroom: Address;
+  calls: readonly BoardroomCall[];
+  lifecycle: { launched: boolean; status: number };
+  salt?: Hex;
+}): BoardroomCallExecutionPlan {
+  if (input.calls.length === 0) throw new Error("At least one Boardroom call is required.");
+
+  if (input.lifecycle.status === 0) {
+    if (input.lifecycle.launched) {
+      if (!input.salt) throw new Error("A governance salt is required after launch.");
+      return input.calls.length === 1
+        ? {
+            kind: "queue",
+            transaction: buildBoardroomQueueActionTransaction({
+              boardroom: input.boardroom,
+              call: input.calls[0]!,
+              salt: input.salt,
+            }),
+          }
+        : {
+            kind: "queue",
+            transaction: buildBoardroomQueueBatchTransaction({
+              boardroom: input.boardroom,
+              calls: input.calls,
+              salt: input.salt,
+            }),
+          };
+    }
+
+    return input.calls.length === 1
+      ? {
+          kind: "execute",
+          transaction: buildBoardroomExecuteTransaction({ boardroom: input.boardroom, call: input.calls[0]! }),
+        }
+      : {
+          kind: "execute",
+          transaction: buildBoardroomExecuteBatchTransaction({ boardroom: input.boardroom, calls: input.calls }),
+        };
+  }
+
+  if (input.lifecycle.status === 1) {
+    if (input.calls.length !== 1) throw new Error("Wind-down calls must be submitted one at a time.");
+    return {
+      kind: "windDown",
+      transaction: buildBoardroomExecuteWindDownCallTransaction({ boardroom: input.boardroom, call: input.calls[0]! }),
+    };
+  }
+
+  throw new Error("Boardroom calls are unavailable after redemptions open.");
+}
+
+export function buildBoardroomSetExecutorCall(input: { boardroom: Address; executor: Address }): BoardroomCall {
+  return buildBoardroomSelfCall({
+    boardroom: input.boardroom,
+    data: encodeFunctionData({ abi: boardroomAbi, functionName: "setExecutor", args: [input.executor] }),
+  });
+}
+
+export function buildBoardroomMintCall(input: { boardroom: Address; to: Address; amount: bigint }): BoardroomCall {
+  return buildBoardroomSelfCall({
+    boardroom: input.boardroom,
+    data: encodeFunctionData({ abi: boardroomAbi, functionName: "mint", args: [input.to, input.amount] }),
+  });
+}
+
+export function buildBoardroomRegisterRedeemableAssetCall(input: {
+  boardroom: Address;
+  asset: Address;
+}): BoardroomCall {
+  return buildBoardroomSelfCall({
+    boardroom: input.boardroom,
+    data: encodeFunctionData({ abi: boardroomAbi, functionName: "registerRedeemableAsset", args: [input.asset] }),
+  });
 }
 
 export function buildBoardroomGrantApprovalCall(input: {
@@ -222,6 +433,21 @@ export function fixedPriceSaleArgs(terms: FixedPriceSaleTerms) {
   ] as const;
 }
 
+export function buildFixedPriceSaleBuyTransaction(input: {
+  sale: Address;
+  shareAmount: bigint;
+  recipient: Address;
+  maxPayment: bigint;
+  deadline: bigint;
+}) {
+  return {
+    address: input.sale,
+    abi: fixedPriceSaleAbi,
+    functionName: "buy",
+    args: [input.shareAmount, input.recipient, input.maxPayment, input.deadline] as const,
+  };
+}
+
 export function migratingBondingCurveArgs(terms: MigratingBondingCurveTerms) {
   return [
     {
@@ -239,6 +465,36 @@ export function migratingBondingCurveArgs(terms: MigratingBondingCurveTerms) {
       salt: terms.salt,
     },
   ] as const;
+}
+
+export function buildMigratingBondingCurveBuyTransaction(input: {
+  curve: Address;
+  shareAmount: bigint;
+  recipient: Address;
+  maxQuoteIn: bigint;
+  deadline: bigint;
+}) {
+  return {
+    address: input.curve,
+    abi: migratingBondingCurveAbi,
+    functionName: "buy",
+    args: [input.shareAmount, input.recipient, input.maxQuoteIn, input.deadline] as const,
+  };
+}
+
+export function buildMigratingBondingCurveSellTransaction(input: {
+  curve: Address;
+  shareAmount: bigint;
+  recipient: Address;
+  minQuoteOut: bigint;
+  deadline: bigint;
+}) {
+  return {
+    address: input.curve,
+    abi: migratingBondingCurveAbi,
+    functionName: "sell",
+    args: [input.shareAmount, input.recipient, input.minQuoteOut, input.deadline] as const,
+  };
 }
 
 export function merkleAirdropArgs(terms: MerkleAirdropTerms) {
@@ -354,11 +610,15 @@ export function buildBoardroomFixedPriceSaleCloseAction(input: {
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
-    call: buildBoardroomCall({
-      policy: input.policy,
-      target: input.sale,
-      data: encodeFunctionData({ abi: fixedPriceSaleAbi, functionName: "close" }),
-    }),
+    call: buildBoardroomFixedPriceSaleCloseCall(input),
+  });
+}
+
+export function buildBoardroomFixedPriceSaleCloseCall(input: { policy: Address; sale: Address }): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.sale,
+    data: encodeFunctionData({ abi: fixedPriceSaleAbi, functionName: "close" }),
   });
 }
 
@@ -369,11 +629,15 @@ export function buildBoardroomFixedPriceSaleCancelAction(input: {
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
-    call: buildBoardroomCall({
-      policy: input.policy,
-      target: input.sale,
-      data: encodeFunctionData({ abi: fixedPriceSaleAbi, functionName: "cancel" }),
-    }),
+    call: buildBoardroomFixedPriceSaleCancelCall(input),
+  });
+}
+
+export function buildBoardroomFixedPriceSaleCancelCall(input: { policy: Address; sale: Address }): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.sale,
+    data: encodeFunctionData({ abi: fixedPriceSaleAbi, functionName: "cancel" }),
   });
 }
 
@@ -450,11 +714,15 @@ export function buildBoardroomMigratingCurveCancelAction(input: {
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
-    call: buildBoardroomCall({
-      policy: input.policy,
-      target: input.curve,
-      data: encodeFunctionData({ abi: migratingBondingCurveAbi, functionName: "cancel" }),
-    }),
+    call: buildBoardroomMigratingCurveCancelCall(input),
+  });
+}
+
+export function buildBoardroomMigratingCurveCancelCall(input: { policy: Address; curve: Address }): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.curve,
+    data: encodeFunctionData({ abi: migratingBondingCurveAbi, functionName: "cancel" }),
   });
 }
 
@@ -468,14 +736,24 @@ export function buildBoardroomMigratingCurveMigrationAction(input: {
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
-    call: buildBoardroomCall({
-      policy: input.policy,
-      target: input.curve,
-      data: encodeFunctionData({
-        abi: migratingBondingCurveAbi,
-        functionName: "migrate",
-        args: [input.minShareLiquidity, input.minQuoteLiquidity, input.deadline],
-      }),
+    call: buildBoardroomMigratingCurveMigrationCall(input),
+  });
+}
+
+export function buildBoardroomMigratingCurveMigrationCall(input: {
+  policy: Address;
+  curve: Address;
+  minShareLiquidity: bigint;
+  minQuoteLiquidity: bigint;
+  deadline: bigint;
+}): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.curve,
+    data: encodeFunctionData({
+      abi: migratingBondingCurveAbi,
+      functionName: "migrate",
+      args: [input.minShareLiquidity, input.minQuoteLiquidity, input.deadline],
     }),
   });
 }
@@ -551,11 +829,15 @@ export function buildBoardroomMerkleAirdropCloseAction(input: {
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
-    call: buildBoardroomCall({
-      policy: input.policy,
-      target: input.airdrop,
-      data: encodeFunctionData({ abi: merkleAirdropAbi, functionName: "close" }),
-    }),
+    call: buildBoardroomMerkleAirdropCloseCall(input),
+  });
+}
+
+export function buildBoardroomMerkleAirdropCloseCall(input: { policy: Address; airdrop: Address }): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.airdrop,
+    data: encodeFunctionData({ abi: merkleAirdropAbi, functionName: "close" }),
   });
 }
 
@@ -566,11 +848,15 @@ export function buildBoardroomMerkleAirdropCancelAction(input: {
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
-    call: buildBoardroomCall({
-      policy: input.policy,
-      target: input.airdrop,
-      data: encodeFunctionData({ abi: merkleAirdropAbi, functionName: "cancel" }),
-    }),
+    call: buildBoardroomMerkleAirdropCancelCall(input),
+  });
+}
+
+export function buildBoardroomMerkleAirdropCancelCall(input: { policy: Address; airdrop: Address }): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.airdrop,
+    data: encodeFunctionData({ abi: merkleAirdropAbi, functionName: "cancel" }),
   });
 }
 
@@ -719,11 +1005,15 @@ export function buildBoardroomLockedLiquidityFeeClaimAction(input: {
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
-    call: buildBoardroomCall({
-      policy: input.policy,
-      target: input.locker,
-      data: encodeFunctionData({ abi: lockedLiquidityAbi, functionName: "claimFees" }),
-    }),
+    call: buildBoardroomLockedLiquidityFeeClaimCall(input),
+  });
+}
+
+export function buildBoardroomLockedLiquidityFeeClaimCall(input: { policy: Address; locker: Address }): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.locker,
+    data: encodeFunctionData({ abi: lockedLiquidityAbi, functionName: "claimFees" }),
   });
 }
 
@@ -787,10 +1077,22 @@ export function buildGrantIssuerBoardroomAction(input: {
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
-    call: buildBoardroomCall({
-      policy: input.policy,
-      target: input.grant,
-      data: encodeFunctionData({ abi: tokenGrantAbi, functionName: input.functionName }),
-    }),
+    call: buildGrantIssuerBoardroomCall(input),
   });
+}
+
+export function buildGrantIssuerBoardroomCall(input: {
+  policy: Address;
+  grant: Address;
+  functionName: "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
+}): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.grant,
+    data: encodeFunctionData({ abi: tokenGrantAbi, functionName: input.functionName }),
+  });
+}
+
+function totalCallValue(calls: readonly BoardroomCall[]): bigint {
+  return calls.reduce((total, call) => total + call.value, 0n);
 }

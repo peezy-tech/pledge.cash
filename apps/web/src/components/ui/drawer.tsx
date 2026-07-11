@@ -1,9 +1,22 @@
 import { Drawer as DrawerPrimitive } from "vaul";
+import { X } from "lucide-react";
 import * as React from "react";
 import { cn } from "../../lib/utils";
 
-function Drawer({ shouldScaleBackground = true, ...props }: React.ComponentProps<typeof DrawerPrimitive.Root>): React.JSX.Element {
-  return <DrawerPrimitive.Root shouldScaleBackground={shouldScaleBackground} {...props} />;
+function Drawer({
+  autoFocus = true,
+  modal = true,
+  shouldScaleBackground = true,
+  ...props
+}: React.ComponentProps<typeof DrawerPrimitive.Root>): React.JSX.Element {
+  return (
+    <DrawerPrimitive.Root
+      autoFocus={autoFocus}
+      modal={modal}
+      shouldScaleBackground={shouldScaleBackground}
+      {...props}
+    />
+  );
 }
 Drawer.displayName = "Drawer";
 
@@ -26,6 +39,7 @@ const DrawerContent = React.forwardRef<
   <DrawerPortal>
     <DrawerOverlay />
     <DrawerPrimitive.Content
+      aria-modal="true"
       ref={ref}
       className={cn(
         "fixed inset-x-0 bottom-0 z-50 mt-24 flex max-h-[92svh] flex-col rounded-t-lg border border-zinc-800 bg-zinc-950 text-zinc-100 outline-none",
@@ -35,6 +49,10 @@ const DrawerContent = React.forwardRef<
     >
       <div className="mx-auto mt-4 h-1.5 w-20 rounded-full bg-zinc-700" />
       {children}
+      <DrawerPrimitive.Close className="absolute right-3 top-3 grid h-11 w-11 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-lime-300/70">
+        <X className="h-4 w-4" />
+        <span className="sr-only">Close</span>
+      </DrawerPrimitive.Close>
     </DrawerPrimitive.Content>
   </DrawerPortal>
 ));

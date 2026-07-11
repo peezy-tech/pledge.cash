@@ -1,5 +1,6 @@
 import {
   ammPoolAbi,
+  boardroomAbi,
   erc20Abi,
   type Address,
   type LockedLiquidityState,
@@ -12,17 +13,83 @@ import {
   type PledgeCashReadClient,
 } from "@pledge.cash/sdk";
 import { errorMessage } from "./forms";
-import { readTokenMetadataMap, tokenMetadataFor } from "./token-amounts";
+import { readTokenMetadataMap, tokenMetadataFor, type TokenMetadata } from "./token-amounts";
 import type { BoardroomDistributionSnapshot, BoardroomGrantSnapshot, BoardroomLockedLiquiditySnapshot, BoardroomSnapshot } from "./types";
 
 const FEE_INDEX_SCALE = 1_000_000_000_000_000_000n;
+export const PRODUCT_CATALOG_CHILD_READ_LIMIT = 12;
+const PRODUCT_CATALOG_CHILD_READ_CONCURRENCY = 4;
+export const PRODUCT_DETAIL_CHILD_READ_LIMIT = 64;
+const PRODUCT_DETAIL_CHILD_READ_CONCURRENCY = 4;
+
+export type BoardroomCatalogSnapshot = {
+  address: Address;
+  distributionCount: number;
+  distributionSummaries: BoardroomDistributionSnapshot[];
+  lockedLiquidityCount: number;
+  lockedLiquiditySummaries: BoardroomLockedLiquiditySnapshot[];
+  shareToken: Address;
+  shareTokenMetadata?: TokenMetadata | undefined;
+};
+
+/** Reads only the newest bounded set of child contracts needed for an Explore row. */
+export async function readBoardroomCatalogSnapshot(
+  client: PledgeCashReadClient,
+  address: Address,
+): Promise<BoardroomCatalogSnapshot> {
+  const [shareToken, rawDistributionCount, rawLockedLiquidityCount] = await Promise.all([
+    client.readContract({ address, abi: boardroomAbi, functionName: "shareToken" }) as Promise<Address>,
+    client.readContract({ address, abi: boardroomAbi, functionName: "issuedDistributionCount" }),
+    client.readContract({ address, abi: boardroomAbi, functionName: "lockedLiquidityCount" }),
+  ]);
+  const distributionCount = safeChildCount(rawDistributionCount, "Issued distribution count");
+  const lockedLiquidityCount = safeChildCount(rawLockedLiquidityCount, "Locked liquidity count");
+  const [distributionAddresses, lockedLiquidityAddresses, metadataByAddress] = await Promise.all([
+    readNewestChildAddresses(client, address, "issuedDistributionAt", distributionCount),
+    readNewestChildAddresses(client, address, "lockedLiquidityAt", lockedLiquidityCount),
+    readTokenMetadataMap(client, [shareToken]),
+  ]);
+  const [distributionSummaries, lockedLiquiditySummaries] = await Promise.all([
+    mapInBatches(
+      distributionAddresses,
+      PRODUCT_CATALOG_CHILD_READ_CONCURRENCY,
+      async (distribution) => await readBoardroomDistributionSnapshot(client, distribution),
+    ),
+    mapInBatches(
+      lockedLiquidityAddresses,
+      PRODUCT_CATALOG_CHILD_READ_CONCURRENCY,
+      async (locker) => await readBoardroomLockedLiquiditySnapshot(client, locker),
+    ),
+  ]);
+
+  return {
+    address,
+    distributionCount,
+    distributionSummaries,
+    lockedLiquidityCount,
+    lockedLiquiditySummaries,
+    shareToken,
+    shareTokenMetadata: tokenMetadataFor(metadataByAddress, shareToken),
+  };
+}
 
 export async function readBoardroomSnapshot(client: PledgeCashReadClient, address: Address): Promise<BoardroomSnapshot> {
   const state = await readBoardroomState(client, address);
+  const grantAddresses = newestAddresses(state.issuedGrants, PRODUCT_DETAIL_CHILD_READ_LIMIT);
+  const distributionAddresses = newestAddresses(state.issuedDistributions, PRODUCT_DETAIL_CHILD_READ_LIMIT);
+  const lockedLiquidityAddresses = newestAddresses(state.lockedLiquidityPositions, PRODUCT_DETAIL_CHILD_READ_LIMIT);
   const [grantSummaries, distributionSummaries, lockedLiquiditySummaries] = await Promise.all([
-    Promise.all(state.issuedGrants.map((grant) => readGrantSummary(client, grant))),
-    Promise.all(state.issuedDistributions.map((distribution) => readDistributionSummary(client, distribution))),
-    Promise.all(state.lockedLiquidityPositions.map((locker) => readLockedLiquiditySummary(client, locker))),
+    mapInBatches(grantAddresses, PRODUCT_DETAIL_CHILD_READ_CONCURRENCY, async (grant) => await readGrantSummary(client, grant)),
+    mapInBatches(
+      distributionAddresses,
+      PRODUCT_DETAIL_CHILD_READ_CONCURRENCY,
+      async (distribution) => await readDistributionSummary(client, distribution),
+    ),
+    mapInBatches(
+      lockedLiquidityAddresses,
+      PRODUCT_DETAIL_CHILD_READ_CONCURRENCY,
+      async (locker) => await readLockedLiquiditySummary(client, locker),
+    ),
   ]);
   const metadataByAddress = await readTokenMetadataMap(client, [
     state.shareToken,
@@ -33,6 +100,7 @@ export async function readBoardroomSnapshot(client: PledgeCashReadClient, addres
 
   return {
     ...state,
+    ...childSummaryWarnings(state, grantSummaries.length, distributionSummaries.length, lockedLiquiditySummaries.length),
     shareTokenMetadata: tokenMetadataFor(metadataByAddress, state.shareToken),
     grantSummaries: grantSummaries.map((grant) => ({
       ...grant,
@@ -57,6 +125,66 @@ export async function readBoardroomSnapshot(client: PledgeCashReadClient, addres
       tokenBMetadata: tokenMetadataFor(metadataByAddress, locker.state?.tokenB),
       liquidityMetadata: tokenMetadataFor(metadataByAddress, locker.state?.pool),
     })),
+  };
+}
+
+function childSummaryWarnings(
+  state: Pick<BoardroomSnapshot, "issuedGrants" | "issuedDistributions" | "lockedLiquidityPositions" | "redeemableAssets">,
+  grantCount: number,
+  distributionCount: number,
+  lockerCount: number,
+): Pick<BoardroomSnapshot, "summaryWarnings"> {
+  const warnings = [
+    childSummaryWarning("grants", state.issuedGrants.length, grantCount),
+    childSummaryWarning("distributions", state.issuedDistributions.length, distributionCount),
+    childSummaryWarning("locked-liquidity positions", state.lockedLiquidityPositions.length, lockerCount),
+    childSummaryWarning("redeemable assets", state.redeemableAssets.length, Math.min(state.redeemableAssets.length, PRODUCT_DETAIL_CHILD_READ_LIMIT)),
+  ].filter((warning): warning is string => warning !== undefined);
+  return warnings.length > 0 ? { summaryWarnings: warnings } : {};
+}
+
+function childSummaryWarning(label: string, total: number, shown: number): string | undefined {
+  if (total <= shown) return undefined;
+  return `Showing the newest ${shown.toString()} of ${total.toString()} ${label}; older records are omitted from this browser view.`;
+}
+
+function newestAddresses(addresses: readonly Address[], limit: number): Address[] {
+  return addresses.length <= limit ? [...addresses] : addresses.slice(addresses.length - limit);
+}
+
+export async function readBoardroomDistributionSnapshot(
+  client: PledgeCashReadClient,
+  distribution: Address,
+): Promise<BoardroomDistributionSnapshot> {
+  const summary = await readDistributionSummary(client, distribution);
+  const metadataByAddress = await readTokenMetadataMap(client, distributionTokenAddresses(summary));
+
+  return {
+    ...summary,
+    shareTokenMetadata: tokenMetadataFor(metadataByAddress, summary.state?.shareToken),
+    paymentTokenMetadata: tokenMetadataFor(
+      metadataByAddress,
+      summary.state && "paymentToken" in summary.state ? summary.state.paymentToken : undefined,
+    ),
+    quoteTokenMetadata: tokenMetadataFor(
+      metadataByAddress,
+      summary.state && "quoteToken" in summary.state ? summary.state.quoteToken : undefined,
+    ),
+  };
+}
+
+export async function readBoardroomLockedLiquiditySnapshot(
+  client: PledgeCashReadClient,
+  locker: Address,
+): Promise<BoardroomLockedLiquiditySnapshot> {
+  const summary = await readLockedLiquiditySummary(client, locker);
+  const metadataByAddress = await readTokenMetadataMap(client, lockedLiquidityTokenAddresses(summary));
+
+  return {
+    ...summary,
+    tokenAMetadata: tokenMetadataFor(metadataByAddress, summary.state?.tokenA),
+    tokenBMetadata: tokenMetadataFor(metadataByAddress, summary.state?.tokenB),
+    liquidityMetadata: tokenMetadataFor(metadataByAddress, summary.state?.pool),
   };
 }
 
@@ -158,6 +286,50 @@ async function readLockedLiquidityClaimable(
 
 function pendingFee(balance: bigint, index: bigint, supplyIndex: bigint): bigint {
   return index > supplyIndex ? (balance * (index - supplyIndex)) / FEE_INDEX_SCALE : 0n;
+}
+
+async function readNewestChildAddresses(
+  client: PledgeCashReadClient,
+  boardroom: Address,
+  functionName: "issuedDistributionAt" | "lockedLiquidityAt",
+  count: number,
+): Promise<Address[]> {
+  const readCount = Math.min(count, PRODUCT_CATALOG_CHILD_READ_LIMIT);
+  const indexes = Array.from({ length: readCount }, (_, offset) => count - offset - 1);
+  return await mapInBatches(
+    indexes,
+    PRODUCT_CATALOG_CHILD_READ_CONCURRENCY,
+    async (index) => await client.readContract({
+      address: boardroom,
+      abi: boardroomAbi,
+      functionName,
+      args: [BigInt(index)],
+    }) as Address,
+  );
+}
+
+function safeChildCount(value: unknown, label: string): number {
+  if (typeof value !== "bigint" && typeof value !== "number") throw new Error(`${label} is invalid.`);
+  if (typeof value === "number" && (!Number.isSafeInteger(value) || value < 0)) {
+    throw new Error(`${label} exceeds the browser's safe discovery range.`);
+  }
+  const parsed = typeof value === "number" ? BigInt(value) : value;
+  if (parsed < 0n || parsed > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(`${label} exceeds the browser's safe discovery range.`);
+  }
+  return Number(parsed);
+}
+
+async function mapInBatches<Input, Output>(
+  values: readonly Input[],
+  batchSize: number,
+  mapper: (value: Input) => Promise<Output>,
+): Promise<Output[]> {
+  const output: Output[] = [];
+  for (let index = 0; index < values.length; index += batchSize) {
+    output.push(...await Promise.all(values.slice(index, index + batchSize).map(mapper)));
+  }
+  return output;
 }
 
 function grantTokenAddresses(grant: BoardroomGrantSnapshot): (Address | undefined)[] {

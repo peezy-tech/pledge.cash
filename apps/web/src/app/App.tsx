@@ -17,7 +17,7 @@ import {
   buildBoardroomMigratingCurveBatch,
   buildBoardroomMigratingCurveCancelAction,
   buildBoardroomMigratingCurveMigrationAction,
-  buildBoardroomMintTransaction,
+  buildBoardroomMintCall,
   buildBoardroomOpenRedemptionsTransaction,
   buildBoardroomRedeemTransaction,
   buildBoardroomRegisterRedeemableAssetTransaction,
@@ -40,7 +40,9 @@ import {
   predictLockedLiquidityAddress as sdkPredictLockedLiquidityAddress,
   predictMerkleAirdropAddress as sdkPredictMerkleAirdropAddress,
   predictMigratingBondingCurveAddress as sdkPredictMigratingBondingCurveAddress,
+  planBoardroomCallExecution,
   readBoardroomState,
+  readBoardroomHolderPower,
   readFixedPriceSaleState,
   readGrantState,
   readLockedLiquidityState,
@@ -49,6 +51,8 @@ import {
   tokenGrantAbi,
   type Address,
   type BoardroomFixedPriceSaleTerms,
+  type BoardroomCall,
+  type BoardroomHolderPower,
   type BoardroomLockedLiquidityTerms,
   type BoardroomMerkleAirdropTerms,
   type BoardroomMigratingBondingCurveTerms,
@@ -65,29 +69,47 @@ import {
   type MerkleAirdropState,
   type MigratingBondingCurveState,
   type PledgeCashDeployment,
+  type QueuedBoardroomAction,
 } from "@pledge.cash/sdk";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Hex, PublicClient } from "viem";
-import { WorkspaceHeader } from "../components/shell";
-import { BoardroomPanel } from "../features/boardrooms/boardroom-panel";
-import { ProductBoardroomDashboard } from "../features/boardrooms/product-boardroom-dashboard";
-import { DiscoveryPanel, WalletAccessPanel } from "../features/discovery/discovery-panel";
-import { DirectGrantPanel } from "../features/grants/direct-grant-panel";
-import { GrantInspector } from "../features/grants/grant-inspector";
-import { GovernanceActivity } from "../features/notifications/governance-activity";
-import { SwapPanel } from "../features/swap/swap-panel";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { Hex, PublicClient, WalletClient } from "viem";
+import { TransactionReview } from "../components/transaction-review";
+import { ConnectWalletButton } from "../components/simplekit";
+import { Button, ButtonLink } from "../components/ui/button";
+import { windDownBlockers } from "../features/boardrooms/boardroom-panel-shared";
+import {
+  resolveProjectCapabilities,
+  type Capability,
+  type CapabilityOpportunity,
+  type ProjectCapabilityContext,
+  type ProjectCapabilityMap,
+} from "../features/capabilities/project-capabilities";
+import type { BoardroomPanelCapabilities } from "../features/boardrooms/boardroom-panel-types";
+import { GovernanceLaunchControl, GovernanceQueue } from "../features/governance";
+import { createParticipationFlowContent, participationAmmKey, type ParticipationContentKey } from "../features/participation";
 import { AppHeader } from "../features/wallet/app-header";
 import { useActionRunner } from "../hooks/use-action-runner";
 import { useFactorySnapshot } from "../hooks/use-factory-snapshot";
 import { useRuntimeDeployment } from "../hooks/use-runtime-deployment";
+import { useTransactionReview } from "../hooks/use-transaction-review";
 import { useWagmiWallet } from "../hooks/use-wagmi-wallet";
 import { readBoardroomSnapshot } from "../lib/boardroom-snapshot";
+import {
+  assertCanonicalFixedPriceSale,
+  assertCanonicalBoardroom,
+  assertCanonicalGrant,
+  assertCanonicalLockedLiquidity,
+  assertCanonicalMerkleAirdrop,
+  assertCanonicalMigratingBondingCurve,
+  CanonicalProvenanceError,
+} from "../lib/canonical-provenance";
 import {
   PLEDGE_CASH_NETWORKS,
   createPledgeCashPublicClient,
   initialSelectedNetwork,
   networkForChainId,
   persistSelectedNetwork,
+  supportedNetworkForChainId,
   syncSelectedNetworkSearch,
 } from "../lib/contracts";
 import {
@@ -127,18 +149,28 @@ import {
   shortAddress,
   uintInput,
 } from "../lib/forms";
+import { deploymentRuntimeIdentity } from "../lib/deployment";
 import {
-  readProductBoardroomCatalog,
+  readProductBoardroomCatalogPage,
   readProductBoardroomDashboard,
   resolveProductBoardroomAddress,
+  type ProductBoardroomCatalogEntry,
   type ProductBoardroomDashboardState,
 } from "../lib/product-boardroom";
-import { getSentinelBaseUrl } from "../lib/sentinel";
+import { createSentinelClient, getSentinelBaseUrl } from "../lib/sentinel";
+import { governanceRefreshDelay } from "../lib/governance-refresh";
+import {
+  assertProjectPoolAllowed,
+  participationPoolAddress,
+  projectPoolAddresses,
+  scopeSwapTokenList,
+} from "../lib/project-pools";
 import {
   buildAddLiquidityTransaction,
   buildClaimAmmFeesTransaction,
   buildRemoveLiquidityTransaction,
   buildSwapTransaction,
+  assertFutureSwapDeadline,
   defaultLiquidityForm,
   defaultRemoveLiquidityForm,
   defaultSwapForm,
@@ -161,7 +193,35 @@ import {
   type SwapTokenListState,
 } from "../lib/swap";
 import { parseTokenAmountInput, readTokenMetadata, type TokenMetadata } from "../lib/token-amounts";
-import { contractCallPreview } from "../lib/transaction-preview";
+import { contractCallPreview, contractCallReview } from "../lib/transaction-preview";
+import {
+  confirmedRefreshIsBlocked,
+  confirmedReceiptInvalidationPlan,
+  confirmedScopedRefreshNeedsRetry,
+  monitorTransactionReceipt,
+  receiptBackgroundRetryDelay,
+  transactionReceiptMonitorKey,
+  TransactionReceiptCoordinator,
+  TransactionReceiptFinalizedError,
+  TransactionReceiptMonitoringCancelledError,
+  TransactionReceiptMonitoringDeferredError,
+  type ScopedRefreshLoadResult,
+  type TransactionReceiptOutcome,
+} from "../lib/transaction-receipts";
+import {
+  actionInputIdentity,
+  assertTransactionActionCurrent,
+  assertTransactionIdentity,
+  transactionContextIdentity,
+  TransactionContextGuard,
+  type TransactionActionGuard,
+  type TransactionIdentity,
+} from "../lib/transaction-identity";
+import {
+  TransactionTray,
+  useTransactionCenter,
+  type TransactionRecord,
+} from "../features/transactions/transaction-center";
 import type {
   BoardroomForm,
   BoardroomGrantForm,
@@ -179,18 +239,50 @@ import type {
   WindDownForm,
 } from "../lib/types";
 
-import { initialView, viewFromPath, viewHref, viewUsesProjectDashboard, type AppView } from "./routing";
-import { ProjectContextBar } from "./views/project-context";
-import { SentinelSettingsView } from "./views/sentinel-settings";
-import { sameAddress } from "./views/workspace-helpers";
 import {
-  ActivityWorkspace,
-  AdvancedWorkspace,
-  ManageWorkspace,
-  PositionsWorkspace,
-  ProjectDiagnostics,
-  WorkspaceNav,
-} from "./views/workspaces";
+  appRouteHref,
+  initialRoute,
+  primaryDestination,
+  projectRouteHref,
+  routeFromLocation,
+  type AppRoute,
+  type AppView,
+  type CanonicalAppRoute,
+  type PrimaryDestination,
+  type StudioSection,
+} from "./routing";
+import { DesktopPrimaryNav, MobilePrimaryNav, StudioSectionNav } from "./product-navigation";
+import { confirmedRouteRefreshPlan } from "./confirmed-route-refresh";
+import {
+  ExplorePage,
+  GovernancePage,
+  GrantDetailPage,
+  GrantVerificationFailureState,
+  GrantVerificationLoadingState,
+  NotFoundPage,
+  PageNotice,
+  ParticipatePage,
+  PortfolioPage,
+  ProjectLayout,
+  ProjectOverviewPage,
+  RedirectState,
+  StudioPage,
+  TransparencyPage,
+  type PortfolioTask,
+} from "./pages";
+import { sameAddress } from "./views/workspace-helpers";
+
+const useCommittedLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+const AdvancedWorkspace = lazy(async () => ({ default: (await import("./views/workspaces")).AdvancedWorkspace }));
+const BoardroomPanel = lazy(async () => ({ default: (await import("../features/boardrooms/boardroom-panel")).BoardroomPanel }));
+const DirectGrantPanel = lazy(async () => ({ default: (await import("../features/grants/direct-grant-panel")).DirectGrantPanel }));
+const DiscoveryPanel = lazy(async () => ({ default: (await import("../features/discovery/discovery-panel")).DiscoveryPanel }));
+const GovernanceActivity = lazy(async () => ({ default: (await import("../features/notifications/governance-activity")).GovernanceActivity }));
+const GrantInspector = lazy(async () => ({ default: (await import("../features/grants/grant-inspector")).GrantInspector }));
+const ProjectDiagnostics = lazy(async () => ({ default: (await import("./views/workspaces")).ProjectDiagnostics }));
+const SentinelSettingsView = lazy(async () => ({ default: (await import("./views/sentinel-settings")).SentinelSettingsView }));
+const SwapPanel = lazy(async () => ({ default: (await import("../features/swap/swap-panel")).SwapPanel }));
+const WalletAccessPanel = lazy(async () => ({ default: (await import("../features/discovery/discovery-panel")).WalletAccessPanel }));
 
 export { parseDeployment } from "../lib/deployment";
 export { viewFromPath, viewHref, viewUsesProjectDashboard } from "./routing";
@@ -198,9 +290,120 @@ export type { AppView } from "./routing";
 export { manageWorkspaceSummary } from "./views/workspace-helpers";
 
 const MIN_SETTLEMENT_GRACE_SECONDS = 86_400n;
+const GOVERNANCE_LOAD_DEADLINE_MS = 30_000;
+const AMM_TOKEN_LOAD_DEADLINE_MS = 30_000;
+const TRANSACTION_RECEIPT_WAIT_TIMEOUT_MS = 60_000;
 
 type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
-export type GrantIssuerBoardroomAccess = { boardroom: Address; owner: Address };
+type ActiveActionOrigin = {
+  account: Address | undefined;
+  chainId: number;
+  contextGeneration: number;
+  deploymentIdentity: string | undefined;
+  routeIdentity: string;
+};
+
+export function verifiedAddressState<T extends { address: Address }>(
+  state: T | undefined,
+  verifiedKey: string | undefined,
+  expectedKey: string | undefined,
+  expectedAddress: Address | undefined,
+): T | undefined {
+  return state && verifiedKey && verifiedKey === expectedKey && expectedAddress
+    && sameAddress(state.address, expectedAddress)
+    ? state
+    : undefined;
+}
+
+export function verifiedStudioChildState<T extends { boardroom: Address }>(
+  state: T | undefined,
+  verifiedKey: string | undefined,
+  expectedKey: string | undefined,
+  expectedBoardroom: Address | undefined,
+): T | undefined {
+  return state && verifiedKey && verifiedKey === expectedKey && expectedBoardroom
+    && sameAddress(state.boardroom, expectedBoardroom)
+    ? state
+    : undefined;
+}
+
+export function requireVerifiedChildState<T extends { address: Address }>(
+  state: T | undefined,
+  expectedAddress: Address,
+  label: string,
+): T {
+  if (!state || !sameAddress(state.address, expectedAddress)) {
+    throw new Error(`Load and verify the current ${label} before managing it.`);
+  }
+  return state;
+}
+
+export function verifiedStateForKey<T>(
+  state: T,
+  verifiedKey: string | undefined,
+  activeKey: string | undefined,
+): T | undefined {
+  return verifiedKey && verifiedKey === activeKey ? state : undefined;
+}
+export type GrantIssuerBoardroomAccess = {
+  boardroom: Address;
+  executor: Address;
+  launched: boolean;
+  owner: Address;
+  status: number;
+};
+
+type AmmReadKind = "token-list" | "swap-quote" | "liquidity-quote" | "position" | "remove-liquidity-quote";
+export type AmmReadRequest = {
+  key: string;
+  kind: AmmReadKind;
+  version: number;
+};
+
+export class AmmReadCoordinator {
+  readonly #activeKeys = new Map<AmmReadKind, string>();
+  readonly #versions = new Map<AmmReadKind, number>();
+
+  sync(kind: AmmReadKind, key: string): void {
+    if (this.#activeKeys.get(kind) === key) return;
+    this.#activeKeys.set(kind, key);
+    this.#versions.set(kind, (this.#versions.get(kind) ?? 0) + 1);
+  }
+
+  begin(kind: AmmReadKind, key: string): AmmReadRequest {
+    const version = (this.#versions.get(kind) ?? 0) + 1;
+    this.#versions.set(kind, version);
+    return { key, kind, version };
+  }
+
+  isCurrent(request: AmmReadRequest): boolean {
+    return this.#activeKeys.get(request.kind) === request.key
+      && this.#versions.get(request.kind) === request.version;
+  }
+
+  invalidate(): void {
+    for (const kind of this.#activeKeys.keys()) {
+      this.#versions.set(kind, (this.#versions.get(kind) ?? 0) + 1);
+    }
+  }
+}
+
+export function ammReadIdentityKey(parts: readonly unknown[]): string {
+  return JSON.stringify(parts);
+}
+
+type SwapTokenLoadScope = {
+  key: string;
+  mode: "global" | "pinned-only";
+  pinnedPools: readonly Address[];
+};
+
+export function isGovernanceBackgroundRefresh(
+  verifiedSnapshotKey: string | undefined,
+  requestKey: string,
+): boolean {
+  return verifiedSnapshotKey === requestKey;
+}
 
 async function parseMinAmountsOut(client: PublicClient, value: string, assets: readonly Address[]): Promise<bigint[]> {
   const trimmed = value.trim();
@@ -218,6 +421,27 @@ async function parseMinAmountsOut(client: PublicClient, value: string, assets: r
       return parseErc20Amount(client, part, asset, `Minimum amount ${index + 1}`);
     }),
   );
+}
+
+export function raceWithGovernanceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException("Governance loading was cancelled.", "AbortError"));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      signal.removeEventListener("abort", onAbort);
+      reject(signal.reason ?? new DOMException("Governance loading was cancelled.", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    void promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
 }
 
 function defaultDiscoveryForm(): DiscoveryForm {
@@ -257,37 +481,104 @@ function emptySwapTokenList(): SwapTokenListState {
   return { tokens: [], pools: [], loaded: false };
 }
 
+export type ProjectRouteFailure = {
+  description: string;
+  retryable: boolean;
+  title: string;
+};
+
+export function projectRouteFailure(
+  error: string,
+  kind: "invalid" | "transient" = /not a Boardroom created by the configured BoardroomFactory/i.test(error)
+    ? "invalid"
+    : "transient",
+): ProjectRouteFailure {
+  if (kind === "invalid") {
+    return {
+      description: "This address is not a project created by the configured pledge.cash deployment on this network.",
+      retryable: false,
+      title: "Project not found",
+    };
+  }
+  return {
+    description: error,
+    retryable: true,
+    title: "Project temporarily unavailable",
+  };
+}
+
+export function ProjectRouteFailureState({
+  failure,
+  onRetry,
+  onReturn,
+  returnHref,
+}: {
+  failure: ProjectRouteFailure;
+  onRetry?: (() => void) | undefined;
+  onReturn: () => void;
+  returnHref: string;
+}): React.JSX.Element {
+  return (
+    <div className="grid min-h-[58vh] place-items-center py-12">
+      <div className="max-w-xl text-center">
+        <p className="m-0 text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">Project verification</p>
+        <h1 className="m-0 mt-2 text-3xl font-semibold tracking-[-0.025em] text-zinc-50">{failure.title}</h1>
+        <p className="m-0 mt-3 text-sm leading-6 text-zinc-400">{failure.description}</p>
+        <div className="mt-6 flex flex-wrap justify-center gap-2">
+          <ButtonLink
+            href={returnHref}
+            onClick={(event) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              event.preventDefault();
+              onReturn();
+            }}
+          >
+            Return to Explore
+          </ButtonLink>
+          {failure.retryable && onRetry ? <Button variant="secondary" onClick={onRetry}>Retry verification</Button> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function shouldLoadProductBoardroom({
-  activeView,
+  activeRoute,
   deployment,
+  requestedAddress,
   productBoardroom,
   productBoardroomError,
   productBoardroomLoading,
+  productCatalogLoaded,
 }: {
-  activeView: AppView;
+  activeRoute: AppRoute;
   deployment: PledgeCashDeployment | undefined;
+  requestedAddress: Address | undefined;
   productBoardroom: ProductBoardroomDashboardState | undefined;
   productBoardroomError: string | undefined;
   productBoardroomLoading: boolean;
+  productCatalogLoaded: boolean;
 }): boolean {
-  if (!viewUsesProjectDashboard(activeView)) return false;
+  if (!routeUsesProductData(activeRoute)) return false;
   if (!deployment?.boardroomFactory) return false;
-  if (productBoardroom || productBoardroomError || productBoardroomLoading) return false;
+  if (requestedAddress && productBoardroom?.address.toLowerCase() === requestedAddress.toLowerCase()) return false;
+  if (!requestedAddress && productCatalogLoaded) return false;
+  if (productBoardroomError || productBoardroomLoading) return false;
   return true;
 }
 
 function shouldLoadSwapTokens({
-  activeView,
   deployment,
+  loadScope,
   swapTokenList,
   swapTokenListLoading,
 }: {
-  activeView: AppView;
   deployment: PledgeCashDeployment | undefined;
+  loadScope: SwapTokenLoadScope | undefined;
   swapTokenList: SwapTokenListState;
   swapTokenListLoading: boolean;
 }): boolean {
-  if (activeView !== "market") return false;
+  if (!loadScope) return false;
   if (!deployment?.ammFactory) return false;
   if (swapTokenList.loaded || swapTokenListLoading) return false;
   return true;
@@ -298,26 +589,116 @@ function discoveryLoadedForWallet(discovery: DiscoverySnapshot, account: Address
 }
 
 export function App(): React.JSX.Element {
-  const { clearLogs, logs, pendingAction, pushLog, runAction } = useActionRunner();
+  const { pendingAction, pushLog, runAction: runUnscopedAction } = useActionRunner();
+  const { approveReview, cancelReview, requestReview, review } = useTransactionReview();
   const [selectedChainId, setSelectedChainId] = useState(() => initialSelectedNetwork().chainId);
   const activeNetwork = useMemo(() => networkForChainId(selectedChainId), [selectedChainId]);
   const networkRequestVersion = useRef(0);
+  const ammReadCoordinatorRef = useRef(new AmmReadCoordinator());
+  const ammTokenLoadAbortControllerRef = useRef<AbortController | undefined>(undefined);
+  const activeAmmTokenReadKeyRef = useRef("inactive");
+  const activeSwapTokenLoadScopeRef = useRef<SwapTokenLoadScope | undefined>(undefined);
+  const productCatalogLoadMoreAbortControllerRef = useRef<AbortController | undefined>(undefined);
+  const productLoadAbortControllerRef = useRef<AbortController | undefined>(undefined);
+  const productRequestVersionRef = useRef(0);
   const discoveryWriteVersion = useRef(0);
+  const grantLoadVersionRef = useRef(0);
+  const boardroomLoadVersionRef = useRef(0);
+  const fixedPriceSaleLoadVersionRef = useRef(0);
+  const merkleAirdropLoadVersionRef = useRef(0);
+  const migratingCurveLoadVersionRef = useRef(0);
+  const lockedLiquidityLoadVersionRef = useRef(0);
+  const governanceRequestVersionRef = useRef(0);
+  const governanceLoadAbortControllerRef = useRef<AbortController | undefined>(undefined);
+  const activeGovernanceKeyRef = useRef<string | undefined>(undefined);
+  const productGovernanceLoadedKeyRef = useRef<string | undefined>(undefined);
+  const productGovernanceSnapshotKeyRef = useRef<string | undefined>(undefined);
+  const grantRouteLoadedKeyRef = useRef<string | undefined>(undefined);
+  const watchedTransactionIdsRef = useRef(new Map<string, number>());
+  const transactionReceiptCoordinatorRef = useRef(new TransactionReceiptCoordinator());
+  const transactionReceiptRetryCountsRef = useRef(new Map<string, number>());
+  const transactionReceiptRetryTimersRef = useRef(new Map<string, ReturnType<typeof globalThis.setTimeout>>());
+  const transactionRefreshClaimIdsRef = useRef(new Set<string>());
+  const transactionRefreshRetryCountsRef = useRef(new Map<string, number>());
+  const transactionWatcherAbortControllerRef = useRef(new AbortController());
+  const transactionWatcherIdentityRef = useRef<string | undefined>(undefined);
+  const transactionWatcherVersionRef = useRef(0);
+  const transactionReceiptMonitorMountedRef = useRef(false);
+  const [transactionReceiptRetryGeneration, setTransactionReceiptRetryGeneration] = useState(0);
+  const [transactionWatcherRenderGeneration, setTransactionWatcherRenderGeneration] = useState(0);
+  useEffect(() => {
+    transactionReceiptMonitorMountedRef.current = true;
+    if (transactionWatcherAbortControllerRef.current.signal.aborted) {
+      transactionWatcherAbortControllerRef.current = new AbortController();
+      transactionWatcherVersionRef.current += 1;
+      setTransactionWatcherRenderGeneration((generation) => generation + 1);
+    }
+    return () => {
+      transactionReceiptMonitorMountedRef.current = false;
+      globalThis.queueMicrotask(() => {
+        if (transactionReceiptMonitorMountedRef.current) return;
+        transactionWatcherAbortControllerRef.current.abort();
+        for (const timer of transactionReceiptRetryTimersRef.current.values()) globalThis.clearTimeout(timer);
+        transactionReceiptRetryTimersRef.current.clear();
+      });
+    };
+  }, []);
   const activeChainIdRef = useRef(activeNetwork.chainId);
   activeChainIdRef.current = activeNetwork.chainId;
   const activeAccountRef = useRef<Address | undefined>(undefined);
+  const activeWalletChainIdRef = useRef<number | undefined>(undefined);
+  const walletClientRef = useRef<(() => WalletClient) | undefined>(undefined);
+  const walletClientGenerationRef = useRef(0);
   const activeDiscoveryKeyRef = useRef<string | undefined>(undefined);
   const activeDeploymentIdentityRef = useRef<string | undefined>(undefined);
+  const activeActionOriginRef = useRef<ActiveActionOrigin | undefined>(undefined);
+  const invalidateSettledSharedStateRef = useRef<() => void>(() => undefined);
+  const invalidateConfirmedScopedRouteRef = useRef<(route: AppRoute) => Promise<void>>(async () => undefined);
+  const transactionContextGuardRef = useRef(new TransactionContextGuard("initial"));
   const publicClient = useMemo(() => createPledgeCashPublicClient(activeNetwork), [activeNetwork]);
-  const chain = activeNetwork.chain;
   const generatedDeployment = getPledgeCashDeployment(activeNetwork.chainId);
   const deployment = useRuntimeDeployment(activeNetwork.chainId, generatedDeployment);
-  const [activeView, setActiveView] = useState<AppView>(() => initialView());
+  const discoveryDeploymentIdentity = deploymentDiscoveryIdentity(deployment);
+  const runtimeDeploymentIdentity = deploymentRuntimeIdentity(deployment);
+  const [appRoute, setAppRoute] = useState<AppRoute>(() => initialRoute());
+  const activeRouteIdentity = appRouteIdentityKey(appRoute);
+  const activeAppRouteRef = useRef<AppRoute>(appRoute);
+  activeAppRouteRef.current = appRoute;
+  const activeStudioReadScopeKey = studioReadScopeKey(appRoute, activeNetwork.chainId, runtimeDeploymentIdentity);
+  const activeStudioReadScopeKeyRef = useRef(activeStudioReadScopeKey);
+  activeStudioReadScopeKeyRef.current = activeStudioReadScopeKey;
+  const runAction = useCallback(
+    async (label: string, action: () => Promise<void>): Promise<void> => {
+      await runUnscopedAction(label, async () => {
+        const origin: ActiveActionOrigin = {
+          account: activeAccountRef.current,
+          chainId: activeChainIdRef.current,
+          contextGeneration: transactionContextGuardRef.current.capture().generation,
+          deploymentIdentity: activeDeploymentIdentityRef.current,
+          routeIdentity: appRouteIdentityKey(activeAppRouteRef.current),
+        };
+        activeActionOriginRef.current = origin;
+        try {
+          await action();
+        } finally {
+          if (activeActionOriginRef.current === origin) activeActionOriginRef.current = undefined;
+        }
+      });
+    },
+    [runUnscopedAction],
+  );
+  const activeView = appRouteView(appRoute);
+  const requestedProductBoardroom = appRoute.kind === "project" || appRoute.kind === "studio-project"
+    ? appRoute.boardroom
+    : undefined;
   const [grantForm, setGrantForm] = useState<GrantForm>(() => defaultGrantForm());
   const [predictedGrant, setPredictedGrant] = useState<Address>();
   const [grantAddress, setGrantAddress] = useState("");
   const [grantSnapshot, setGrantSnapshot] = useState<GrantSnapshot>();
+  const [grantSnapshotVerifiedKey, setGrantSnapshotVerifiedKey] = useState<string>();
   const [grantIssuerBoardroom, setGrantIssuerBoardroom] = useState<GrantIssuerBoardroomAccess>();
+  const [grantRouteError, setGrantRouteError] = useState<string>();
+  const [grantRouteFailureKind, setGrantRouteFailureKind] = useState<"invalid" | "transient">();
   const [settleAmount, setSettleAmount] = useState("1");
   const [paymentApproval, setPaymentApproval] = useState("0");
   const [boardroomForm, setBoardroomForm] = useState<BoardroomForm>(() => ({
@@ -329,6 +710,7 @@ export function App(): React.JSX.Element {
   const [predictedBoardroom, setPredictedBoardroom] = useState<Address>();
   const [boardroomAddress, setBoardroomAddress] = useState("");
   const [boardroomSnapshot, setBoardroomSnapshot] = useState<BoardroomSnapshot>();
+  const [boardroomSnapshotVerifiedKey, setBoardroomSnapshotVerifiedKey] = useState<string>();
   const [boardroomMintAmount, setBoardroomMintAmount] = useState("1");
   const [boardroomMintTo, setBoardroomMintTo] = useState("");
   const [boardroomGrantForm, setBoardroomGrantForm] = useState<BoardroomGrantForm>(() => defaultBoardroomGrantForm());
@@ -336,19 +718,23 @@ export function App(): React.JSX.Element {
   const [fixedPriceSaleForm, setFixedPriceSaleForm] = useState<FixedPriceSaleForm>(() => defaultFixedPriceSaleForm());
   const [fixedPriceSaleAddress, setFixedPriceSaleAddress] = useState("");
   const [fixedPriceSaleSnapshot, setFixedPriceSaleSnapshot] = useState<FixedPriceSaleState>();
+  const [fixedPriceSaleSnapshotVerifiedKey, setFixedPriceSaleSnapshotVerifiedKey] = useState<string>();
   const [predictedFixedPriceSale, setPredictedFixedPriceSale] = useState<Address>();
   const [merkleAirdropForm, setMerkleAirdropForm] = useState<MerkleAirdropForm>(() => defaultMerkleAirdropForm());
   const [merkleAirdropAddress, setMerkleAirdropAddress] = useState("");
   const [merkleAirdropSnapshot, setMerkleAirdropSnapshot] = useState<MerkleAirdropState>();
+  const [merkleAirdropSnapshotVerifiedKey, setMerkleAirdropSnapshotVerifiedKey] = useState<string>();
   const [predictedMerkleAirdrop, setPredictedMerkleAirdrop] = useState<Address>();
   const [migratingCurveForm, setMigratingCurveForm] = useState<MigratingCurveForm>(() => defaultMigratingCurveForm());
   const [migratingCurveAddress, setMigratingCurveAddress] = useState("");
   const [migratingCurveSnapshot, setMigratingCurveSnapshot] = useState<MigratingBondingCurveState>();
+  const [migratingCurveSnapshotVerifiedKey, setMigratingCurveSnapshotVerifiedKey] = useState<string>();
   const [predictedMigratingCurve, setPredictedMigratingCurve] = useState<Address>();
   const [curveMigrationForm, setCurveMigrationForm] = useState<CurveMigrationForm>(() => defaultCurveMigrationForm());
   const [lockedLiquidityForm, setLockedLiquidityForm] = useState<LockedLiquidityForm>(() => defaultLockedLiquidityForm());
   const [lockedLiquidityAddress, setLockedLiquidityAddress] = useState("");
   const [lockedLiquiditySnapshot, setLockedLiquiditySnapshot] = useState<LockedLiquidityState>();
+  const [lockedLiquiditySnapshotVerifiedKey, setLockedLiquiditySnapshotVerifiedKey] = useState<string>();
   const [predictedLockedLiquidity, setPredictedLockedLiquidity] = useState<Address>();
   const [lockedLiquidityExitForm, setLockedLiquidityExitForm] = useState<LockedLiquidityExitForm>(() => defaultLockedLiquidityExitForm());
   const [windDownForm, setWindDownForm] = useState<WindDownForm>(() => defaultWindDownForm());
@@ -359,8 +745,27 @@ export function App(): React.JSX.Element {
   const autoDiscoveryKeyRef = useRef<string | undefined>(undefined);
   const autoDiscoveryRunningRef = useRef(false);
   const [productBoardroom, setProductBoardroom] = useState<ProductBoardroomDashboardState>();
+  const [productBoardroomVerifiedKey, setProductBoardroomVerifiedKey] = useState<string>();
   const [productBoardroomError, setProductBoardroomError] = useState<string>();
+  const [productBoardroomFailureKind, setProductBoardroomFailureKind] = useState<"invalid" | "transient">();
   const [productBoardroomLoading, setProductBoardroomLoading] = useState(false);
+  const [productCatalog, setProductCatalog] = useState<ProductBoardroomCatalogEntry[]>([]);
+  const [productCatalogLoaded, setProductCatalogLoaded] = useState(false);
+  const [productCatalogLoadMoreError, setProductCatalogLoadMoreError] = useState<string>();
+  const [productCatalogLoadingMore, setProductCatalogLoadingMore] = useState(false);
+  const [productCatalogNextCursor, setProductCatalogNextCursor] = useState<number>();
+  const [productCatalogTotalCount, setProductCatalogTotalCount] = useState<number>();
+  const productCatalogRef = useRef<readonly ProductBoardroomCatalogEntry[]>(productCatalog);
+  productCatalogRef.current = productCatalog;
+  const [boardroomHolderPower, setBoardroomHolderPower] = useState<BoardroomHolderPower>();
+  const [boardroomHolderPowerVerifiedKey, setBoardroomHolderPowerVerifiedKey] = useState<string>();
+  const [queuedBoardroomActions, setQueuedBoardroomActions] = useState<QueuedBoardroomAction[]>([]);
+  const [productGovernanceQueueVerifiedKey, setProductGovernanceQueueVerifiedKey] = useState<string>();
+  const [productGovernanceQueueComplete, setProductGovernanceQueueComplete] = useState(false);
+  const [productGovernanceQueueLoaded, setProductGovernanceQueueLoaded] = useState(false);
+  const [productGovernanceError, setProductGovernanceError] = useState<string>();
+  const [productGovernanceWarning, setProductGovernanceWarning] = useState<string>();
+  const [productGovernanceLoading, setProductGovernanceLoading] = useState(false);
   const [swapForm, setSwapForm] = useState<SwapForm>(() => defaultSwapForm());
   const [swapQuote, setSwapQuote] = useState<SwapQuoteState>();
   const [liquidityForm, setLiquidityForm] = useState<LiquidityForm>(() => defaultLiquidityForm());
@@ -370,39 +775,183 @@ export function App(): React.JSX.Element {
   const [ammPosition, setAmmPosition] = useState<AmmPositionState>();
   const [swapTokenList, setSwapTokenList] = useState<SwapTokenListState>(() => emptySwapTokenList());
   const [swapTokenListLoading, setSwapTokenListLoading] = useState(false);
+  const [selectedParticipationRoute, setSelectedParticipationRoute] = useState<ParticipationContentKey>();
+  const activeActionInputIdentity = actionInputIdentity([
+    grantForm,
+    grantAddress,
+    settleAmount,
+    paymentApproval,
+    boardroomForm,
+    boardroomAddress,
+    boardroomMintAmount,
+    boardroomMintTo,
+    boardroomGrantForm,
+    fixedPriceSaleForm,
+    fixedPriceSaleAddress,
+    merkleAirdropForm,
+    merkleAirdropAddress,
+    migratingCurveForm,
+    migratingCurveAddress,
+    curveMigrationForm,
+    lockedLiquidityForm,
+    lockedLiquidityAddress,
+    lockedLiquidityExitForm,
+    windDownForm,
+  ]);
+  const exactProjectAddress = appRoute.kind === "project" || appRoute.kind === "studio-project" ? appRoute.boardroom : undefined;
+  const exactProjectVerifiedKey = exactProjectAddress
+    ? canonicalProjectStateKey(activeNetwork.chainId, exactProjectAddress, runtimeDeploymentIdentity)
+    : undefined;
+  const exactProjectDashboard = verifiedAddressState(
+    productBoardroom,
+    productBoardroomVerifiedKey,
+    exactProjectVerifiedKey,
+    exactProjectAddress,
+  );
+  const canonicalStudioBoardroom = appRoute.kind === "studio-project" ? appRoute.boardroom : undefined;
+  const displayedBoardroomSnapshot = canonicalStudioBoardroom
+    ? verifiedAddressState(
+        boardroomSnapshot,
+        boardroomSnapshotVerifiedKey,
+        exactProjectVerifiedKey,
+        canonicalStudioBoardroom,
+      )
+    : boardroomSnapshot;
+  const displayedFixedPriceSaleSnapshot = canonicalStudioBoardroom
+    ? verifiedStudioChildState(
+        fixedPriceSaleSnapshot,
+        fixedPriceSaleSnapshotVerifiedKey,
+        exactProjectVerifiedKey,
+        canonicalStudioBoardroom,
+      )
+    : fixedPriceSaleSnapshot;
+  const displayedMerkleAirdropSnapshot = canonicalStudioBoardroom
+    ? verifiedStudioChildState(
+        merkleAirdropSnapshot,
+        merkleAirdropSnapshotVerifiedKey,
+        exactProjectVerifiedKey,
+        canonicalStudioBoardroom,
+      )
+    : merkleAirdropSnapshot;
+  const displayedMigratingCurveSnapshot = canonicalStudioBoardroom
+    ? verifiedStudioChildState(
+        migratingCurveSnapshot,
+        migratingCurveSnapshotVerifiedKey,
+        exactProjectVerifiedKey,
+        canonicalStudioBoardroom,
+      )
+    : migratingCurveSnapshot;
+  const displayedLockedLiquiditySnapshot = canonicalStudioBoardroom
+    ? verifiedStudioChildState(
+        lockedLiquiditySnapshot,
+        lockedLiquiditySnapshotVerifiedKey,
+        exactProjectVerifiedKey,
+        canonicalStudioBoardroom,
+      )
+    : lockedLiquiditySnapshot;
+  const exactProjectPools = useMemo(() => projectPoolAddresses(exactProjectDashboard), [exactProjectDashboard]);
+  const selectedProjectPool = participationPoolAddress(selectedParticipationRoute, exactProjectPools) ?? exactProjectPools[0];
+  const exactProjectPoolRef = useRef<Address | undefined>(selectedProjectPool);
+  const studioProjectPoolsRef = useRef<readonly Address[]>(exactProjectPools);
+  exactProjectPoolRef.current = selectedProjectPool;
+  studioProjectPoolsRef.current = exactProjectPools;
+  const exactProjectIdentity = exactProjectDashboard
+    ? `${activeNetwork.chainId.toString()}:${exactProjectDashboard.address.toLowerCase()}`
+    : undefined;
+  const projectScopedAmmRoute = (appRoute.kind === "project" && appRoute.section === "participate")
+    || (appRoute.kind === "studio-project" && appRoute.section === "liquidity");
+  const exactProjectPoolsKey = exactProjectPools.map((candidate) => candidate.toLowerCase()).join(",");
+  const swapTokenLoadScope: SwapTokenLoadScope | undefined = projectScopedAmmRoute
+    ? exactProjectIdentity && exactProjectPools.length > 0
+      ? {
+          key: `project:${exactProjectIdentity}:${exactProjectPoolsKey}`,
+          mode: "pinned-only",
+          pinnedPools: exactProjectPools,
+        }
+      : undefined
+    : activeView === "market" && appRoute.kind !== "legacy-project"
+      ? { key: `global:${activeNetwork.chainId.toString()}`, mode: "global", pinnedPools: [] }
+      : undefined;
+  activeSwapTokenLoadScopeRef.current = swapTokenLoadScope;
   const sentinelBaseUrl = getSentinelBaseUrl();
+  const sentinelClient = useMemo(
+    () => sentinelBaseUrl ? createSentinelClient({ baseUrl: sentinelBaseUrl }) : undefined,
+    [sentinelBaseUrl],
+  );
 
   const syncSelectedChainFromLocation = useCallback((): void => {
     const nextChainId = initialSelectedNetwork().chainId;
     setSelectedChainId((currentChainId) => (currentChainId === nextChainId ? currentChainId : nextChainId));
   }, []);
 
+  const focusRouteContent = useCallback((): void => {
+    if (typeof window === "undefined") return;
+    window.requestAnimationFrame(() => {
+      document.getElementById("app-main-content")?.focus({ preventScroll: true });
+    });
+  }, []);
+
   useEffect(() => {
     if (pendingAction) return;
+    const routeChainId = appRouteChainId(appRoute);
+    if (routeChainId !== undefined && supportedNetworkForChainId(routeChainId)) {
+      setSelectedChainId((current) => current === routeChainId ? current : routeChainId);
+      return;
+    }
     syncSelectedChainFromLocation();
-  }, [pendingAction, syncSelectedChainFromLocation]);
+  }, [appRoute, pendingAction, syncSelectedChainFromLocation]);
 
   useEffect(() => {
-    const syncView = (): void => {
-      setActiveView(viewFromPath(window.location.pathname));
-      if (!pendingAction) syncSelectedChainFromLocation();
+    const syncRoute = (): void => {
+      const nextRoute = routeFromLocation(window.location.pathname, window.location.search);
+      activeAppRouteRef.current = nextRoute;
+      activeStudioReadScopeKeyRef.current = studioReadScopeKey(
+        nextRoute,
+        appRouteChainId(nextRoute) ?? activeChainIdRef.current,
+        activeDeploymentIdentityRef.current,
+      );
+      setAppRoute(nextRoute);
+      focusRouteContent();
+      const routeChainId = appRouteChainId(nextRoute);
+      if (routeChainId !== undefined && supportedNetworkForChainId(routeChainId)) {
+        setSelectedChainId(routeChainId);
+      } else if (!pendingAction) {
+        syncSelectedChainFromLocation();
+      }
     };
-    window.addEventListener("popstate", syncView);
-    return () => window.removeEventListener("popstate", syncView);
-  }, [pendingAction, syncSelectedChainFromLocation]);
+    window.addEventListener("popstate", syncRoute);
+    return () => window.removeEventListener("popstate", syncRoute);
+  }, [focusRouteContent, pendingAction, syncSelectedChainFromLocation]);
 
-  const navigateView = useCallback((view: AppView): void => {
-    setActiveView(view);
+  const navigateRoute = useCallback((route: CanonicalAppRoute, replace = false): void => {
+    activeAppRouteRef.current = route;
+    activeStudioReadScopeKeyRef.current = studioReadScopeKey(
+      route,
+      appRouteChainId(route) ?? activeChainIdRef.current,
+      activeDeploymentIdentityRef.current,
+    );
+    setAppRoute(route);
     if (typeof window === "undefined") return;
-    const href = viewHref(view);
+    const href = appRouteHref(route);
     if (`${window.location.pathname}${window.location.search}` !== href) {
-      window.history.pushState({}, "", href);
+      window.history[replace ? "replaceState" : "pushState"]({}, "", href);
     }
-  }, []);
+    window.scrollTo({ behavior: "auto", left: 0, top: 0 });
+    focusRouteContent();
+  }, [focusRouteContent]);
+
+  useEffect(() => {
+    if (!isCanonicalAppRoute(appRoute) || typeof window === "undefined") return;
+    const canonicalHref = appRouteHref(appRoute);
+    if (`${window.location.pathname}${window.location.search}` !== canonicalHref) {
+      window.history.replaceState({}, "", canonicalHref);
+    }
+  }, [appRoute]);
 
   const updateGrantAddress = useCallback((address: string): void => {
     setGrantAddress(address);
     setGrantSnapshot(undefined);
+    setGrantSnapshotVerifiedKey(undefined);
     setGrantIssuerBoardroom(undefined);
   }, []);
 
@@ -418,10 +967,15 @@ export function App(): React.JSX.Element {
       const nextNetwork = networkForChainId(chainId);
       setSelectedChainId(nextNetwork.chainId);
       persistSelectedNetwork(nextNetwork.chainId);
-      syncSelectedNetworkSearch(nextNetwork.chainId);
+      const nextRoute = networkSwitchDestination(appRoute, nextNetwork.chainId);
+      if (nextRoute) {
+        navigateRoute(nextRoute);
+      } else {
+        syncSelectedNetworkSearch(nextNetwork.chainId);
+      }
       pushLog(`Selected ${nextNetwork.name}`, "info");
     },
-    [pushLog],
+    [appRoute, navigateRoute, pushLog],
   );
 
   const { activeAccount, switchChain, wallet, walletClient } = useWagmiWallet({
@@ -429,17 +983,355 @@ export function App(): React.JSX.Element {
     onAccountChanged: clearDirectGrantPrediction,
     pushLog,
   });
+  activeAccountRef.current = wallet.account;
+  activeWalletChainIdRef.current = wallet.chainId;
+  if (walletClientRef.current !== walletClient) walletClientGenerationRef.current += 1;
+  walletClientRef.current = walletClient;
+  activeDeploymentIdentityRef.current = runtimeDeploymentIdentity;
+  transactionContextGuardRef.current.sync(transactionContextIdentity({
+    account: wallet.account,
+    actionInputIdentity: activeActionInputIdentity,
+    deploymentIdentity: runtimeDeploymentIdentity,
+    routeIdentity: activeRouteIdentity,
+    selectedChainId: activeNetwork.chainId,
+    walletChainId: wallet.chainId,
+    walletClientGeneration: walletClientGenerationRef.current,
+  }));
+  const ammWalletScopeKey = ammReadIdentityKey([
+    activeNetwork.chainId,
+    runtimeDeploymentIdentity ?? "unconfigured",
+    wallet.account?.toLowerCase() ?? "read-only",
+  ]);
+  const ammProjectScopeKey = ammReadIdentityKey([
+    exactProjectAddress?.toLowerCase() ?? "global",
+    exactProjectPoolsKey,
+    selectedProjectPool?.toLowerCase() ?? "no-selected-pool",
+  ]);
+  const ammTokenReadKey = ammReadIdentityKey([
+    ammWalletScopeKey,
+    swapTokenLoadScope?.key ?? (projectScopedAmmRoute ? `project-waiting:${exactProjectAddress?.toLowerCase() ?? "unknown"}` : "inactive"),
+  ]);
+  const ammSwapQuoteReadKey = ammReadIdentityKey([ammWalletScopeKey, ammProjectScopeKey, swapForm]);
+  const ammLiquidityQuoteReadKey = ammReadIdentityKey([ammWalletScopeKey, ammProjectScopeKey, liquidityForm]);
+  const ammPositionReadKey = ammReadIdentityKey([
+    ammWalletScopeKey,
+    ammProjectScopeKey,
+    liquidityForm.tokenA,
+    liquidityForm.tokenB,
+  ]);
+  const ammRemoveLiquidityQuoteReadKey = ammReadIdentityKey([
+    ammWalletScopeKey,
+    ammProjectScopeKey,
+    liquidityForm,
+    removeLiquidityForm,
+  ]);
+  const ammReadCoordinator = ammReadCoordinatorRef.current;
+  ammReadCoordinator.sync("token-list", ammTokenReadKey);
+  ammReadCoordinator.sync("swap-quote", ammSwapQuoteReadKey);
+  ammReadCoordinator.sync("liquidity-quote", ammLiquidityQuoteReadKey);
+  ammReadCoordinator.sync("position", ammPositionReadKey);
+  ammReadCoordinator.sync("remove-liquidity-quote", ammRemoveLiquidityQuoteReadKey);
+  activeAmmTokenReadKeyRef.current = ammTokenReadKey;
+  useEffect(() => {
+    cancelReview();
+  }, [activeNetwork.chainId, activeRouteIdentity, cancelReview, wallet.account, wallet.chainId]);
+  const transactionWatcherIdentity = [
+    activeNetwork.chainId.toString(),
+    wallet.account?.toLowerCase() ?? "read-only",
+    runtimeDeploymentIdentity ?? "unconfigured",
+  ].join(":");
+  useCommittedLayoutEffect(() => {
+    if (transactionWatcherIdentityRef.current === transactionWatcherIdentity) return;
+    transactionWatcherAbortControllerRef.current.abort();
+    transactionWatcherAbortControllerRef.current = new AbortController();
+    transactionWatcherIdentityRef.current = transactionWatcherIdentity;
+    transactionWatcherVersionRef.current += 1;
+    watchedTransactionIdsRef.current.clear();
+    for (const timer of transactionReceiptRetryTimersRef.current.values()) globalThis.clearTimeout(timer);
+    transactionReceiptRetryTimersRef.current.clear();
+    transactionReceiptRetryCountsRef.current.clear();
+    transactionRefreshClaimIdsRef.current.clear();
+    transactionRefreshRetryCountsRef.current.clear();
+    setTransactionWatcherRenderGeneration((generation) => generation + 1);
+  }, [transactionWatcherIdentity]);
+  const activeGovernanceKey = governanceRouteKey(appRoute, wallet.account, runtimeDeploymentIdentity);
+  activeGovernanceKeyRef.current = activeGovernanceKey;
+  const verifiedBoardroomHolderPower = boardroomHolderPower
+    ? verifiedStateForKey(boardroomHolderPower, boardroomHolderPowerVerifiedKey, activeGovernanceKey)
+    : undefined;
+  const verifiedQueuedBoardroomActions = verifiedStateForKey(
+    queuedBoardroomActions,
+    productGovernanceQueueVerifiedKey,
+    activeGovernanceKey,
+  ) ?? [];
+  const verifiedProductGovernanceQueueLoaded = productGovernanceQueueVerifiedKey === activeGovernanceKey
+    && productGovernanceQueueLoaded;
+  const verifiedProductGovernanceQueueComplete = productGovernanceQueueVerifiedKey === activeGovernanceKey
+    && productGovernanceQueueComplete;
+  const verifiedProductGovernanceWarning = productGovernanceQueueVerifiedKey === activeGovernanceKey
+    ? productGovernanceWarning
+    : undefined;
+  const {
+    records: transactions,
+    startTransaction,
+    updateTransaction,
+    updateTransactionForIdentity,
+    clearSettled,
+  } = useTransactionCenter(activeNetwork.chainId, wallet.account);
+  const ensureTransactionReceipt = (
+    transaction: Pick<TransactionRecord, "chainId" | "hash" | "id" | "label" | "refreshRoute" | "submittedHash">,
+    watcherIdentity: string,
+    watcherVersion: number,
+    routeAtSubmission?: AppRoute,
+    allowInvalidation = true,
+    watcherSignal = transactionWatcherAbortControllerRef.current.signal,
+  ): Promise<TransactionReceiptOutcome> => {
+    const submittedHash = transaction.submittedHash ?? transaction.hash;
+    if (!submittedHash) return Promise.reject(new Error("Submitted transaction is missing its original hash."));
+    const monitorKey = transactionReceiptMonitorKey(watcherIdentity, watcherVersion, transaction.id, submittedHash);
+
+    return transactionReceiptCoordinatorRef.current.ensure(monitorKey, async () => {
+      const outcome = await monitorTransactionReceipt({
+        hash: submittedHash,
+        isCurrent: () => transactionWatcherVersionRef.current === watcherVersion,
+        maxAttempts: 1,
+        onMonitoringError: () => {
+          if (transactionWatcherVersionRef.current !== watcherVersion) return;
+          updateTransaction(transaction.id, {
+            error: "Confirmation tracking was interrupted. This transaction is still submitted and is being checked again automatically.",
+            stage: "submitted",
+          });
+        },
+        signal: watcherSignal,
+        waitForReceipt: async ({ hash, onReplaced }) => await publicClient.waitForTransactionReceipt({
+          hash,
+          onReplaced,
+          timeout: TRANSACTION_RECEIPT_WAIT_TIMEOUT_MS,
+        }),
+      });
+      if (transactionWatcherVersionRef.current !== watcherVersion) {
+        throw new TransactionReceiptMonitoringCancelledError();
+      }
+      invalidateSettledSharedStateRef.current();
+
+      if (outcome.kind === "cancelled") {
+        updateTransaction(transaction.id, {
+          error: "Cancelled in your wallet. The reviewed action was not executed.",
+          hash: outcome.hash,
+          refreshBlocked: false,
+          refreshPending: false,
+          replacementReason: "cancelled",
+          stage: "cancelled",
+        });
+        pushLog(`${transaction.label} was cancelled in the wallet.`, "info", outcome.hash, transaction.chainId);
+        return outcome;
+      }
+      if (outcome.kind === "replaced") {
+        updateTransaction(transaction.id, {
+          error: "Replaced in your wallet by a different transaction. The reviewed action was not executed.",
+          hash: outcome.hash,
+          refreshBlocked: false,
+          refreshPending: false,
+          replacementReason: "replaced",
+          stage: "replaced",
+        });
+        pushLog(`${transaction.label} was replaced by a different wallet transaction.`, "error", outcome.hash, transaction.chainId);
+        return outcome;
+      }
+      if (outcome.kind === "reverted") {
+        updateTransaction(transaction.id, {
+          error: `${transaction.label} reverted after submission.`,
+          hash: outcome.hash,
+          refreshBlocked: false,
+          refreshPending: false,
+          replacementReason: outcome.replacementReason,
+          stage: "failed",
+        });
+        pushLog(`${transaction.label} reverted onchain.`, "error", outcome.hash, transaction.chainId);
+        return outcome;
+      }
+
+      const refreshRoute = routeAtSubmission ?? transaction.refreshRoute;
+      const invalidation = confirmedReceiptInvalidationPlan(Boolean(refreshRoute), allowInvalidation);
+      const refreshClaimKey = invalidation.scoped
+        ? [watcherVersion.toString(), transaction.id, outcome.hash.toLowerCase()].join(":")
+        : undefined;
+      const refreshRetryKey = `${transaction.id}:${outcome.hash.toLowerCase()}`;
+      if (refreshClaimKey) transactionRefreshClaimIdsRef.current.add(refreshClaimKey);
+      updateTransaction(transaction.id, {
+        error: undefined,
+        hash: outcome.hash,
+        refreshBlocked: invalidation.refreshBlocked,
+        refreshPending: invalidation.refreshPending,
+        replacementReason: outcome.replacementReason,
+        stage: "confirmed",
+      });
+      pushLog(`${transaction.label} confirmed`, "success", outcome.hash, transaction.chainId);
+      if (!refreshClaimKey || !refreshRoute) return outcome;
+      try {
+        await invalidateConfirmedScopedRouteRef.current(refreshRoute);
+        if (transactionWatcherVersionRef.current !== watcherVersion) {
+          throw new TransactionReceiptMonitoringCancelledError();
+        }
+        transactionRefreshRetryCountsRef.current.delete(refreshRetryKey);
+        updateTransaction(transaction.id, { refreshBlocked: false, refreshPending: false });
+      } catch (error) {
+        if (transactionWatcherVersionRef.current !== watcherVersion) {
+          throw new TransactionReceiptMonitoringCancelledError();
+        }
+        updateTransaction(transaction.id, { refreshBlocked: false, refreshPending: true });
+        pushLog(
+          `${transaction.label} confirmed, but current route data could not be refreshed: ${errorMessage(error)}`,
+          "error",
+          outcome.hash,
+          transaction.chainId,
+        );
+      } finally {
+        transactionRefreshClaimIdsRef.current.delete(refreshClaimKey);
+      }
+      return outcome;
+    });
+  };
+  useEffect(() => {
+    for (const transaction of transactions) {
+      if (transaction.chainId !== activeNetwork.chainId || transaction.stage !== "submitted" || !transaction.hash) continue;
+      const watcherIdentity = transactionWatcherIdentity;
+      const submittedHash = transaction.submittedHash ?? transaction.hash;
+      const watcherVersion = transactionWatcherVersionRef.current;
+      const watcherKey = transactionReceiptMonitorKey(watcherIdentity, watcherVersion, transaction.id, submittedHash);
+      if (watchedTransactionIdsRef.current.has(watcherKey)) continue;
+      watchedTransactionIdsRef.current.set(watcherKey, watcherVersion);
+      let monitoringDeferred = false;
+      const allowInvalidation = Boolean(
+        transaction.deploymentIdentity
+        && transaction.deploymentIdentity === runtimeDeploymentIdentity,
+      );
+      void ensureTransactionReceipt(transaction, watcherIdentity, watcherVersion, transaction.refreshRoute, allowInvalidation)
+        .catch((error: unknown) => {
+          if (error instanceof TransactionReceiptMonitoringDeferredError
+            && transactionWatcherVersionRef.current === watcherVersion) {
+            monitoringDeferred = true;
+            const retryAttempt = (transactionReceiptRetryCountsRef.current.get(watcherKey) ?? 0) + 1;
+            transactionReceiptRetryCountsRef.current.set(watcherKey, retryAttempt);
+            if (!transactionReceiptRetryTimersRef.current.has(watcherKey)) {
+              const timer = globalThis.setTimeout(() => {
+                transactionReceiptRetryTimersRef.current.delete(watcherKey);
+                if (transactionWatcherVersionRef.current !== watcherVersion) return;
+                if (watchedTransactionIdsRef.current.get(watcherKey) === watcherVersion) {
+                  watchedTransactionIdsRef.current.delete(watcherKey);
+                }
+                setTransactionReceiptRetryGeneration((generation) => generation + 1);
+              }, receiptBackgroundRetryDelay(retryAttempt));
+              transactionReceiptRetryTimersRef.current.set(watcherKey, timer);
+            }
+          }
+        })
+        .finally(() => {
+          if (monitoringDeferred) return;
+          if (watchedTransactionIdsRef.current.get(watcherKey) === watcherVersion) {
+            watchedTransactionIdsRef.current.delete(watcherKey);
+          }
+          transactionReceiptRetryCountsRef.current.delete(watcherKey);
+        });
+    }
+  }, [activeNetwork.chainId, publicClient, pushLog, runtimeDeploymentIdentity, transactionReceiptRetryGeneration, transactionWatcherIdentity, transactionWatcherRenderGeneration, transactions, updateTransaction, wallet.account]);
+  useCommittedLayoutEffect(() => {
+    for (const transaction of transactions) {
+      if (transaction.stage !== "confirmed" || !transaction.refreshPending || transaction.refreshBlocked) continue;
+      if (confirmedRefreshIsBlocked(
+        transaction.deploymentIdentity,
+        runtimeDeploymentIdentity,
+        Boolean(transaction.refreshRoute),
+      )) {
+        updateTransaction(transaction.id, { refreshBlocked: true });
+      }
+    }
+  }, [runtimeDeploymentIdentity, transactions, updateTransaction]);
+  useEffect(() => {
+    for (const transaction of transactions) {
+      if (transaction.stage !== "confirmed" || !transaction.refreshPending) continue;
+      const refreshBlocked = confirmedRefreshIsBlocked(
+        transaction.deploymentIdentity,
+        runtimeDeploymentIdentity,
+        Boolean(transaction.refreshRoute),
+      );
+      if (refreshBlocked) {
+        continue;
+      }
+      if (!transaction.refreshRoute) continue;
+      const refreshVersion = transactionWatcherVersionRef.current;
+      const claimKey = [
+        refreshVersion.toString(),
+        transaction.id,
+        transaction.hash?.toLowerCase() ?? "no-hash",
+      ].join(":");
+      const refreshRetryKey = `${transaction.id}:${transaction.hash?.toLowerCase() ?? "no-hash"}`;
+      if (transactionRefreshClaimIdsRef.current.has(claimKey)) continue;
+      transactionRefreshClaimIdsRef.current.add(claimKey);
+      if (transaction.refreshBlocked) updateTransaction(transaction.id, { refreshBlocked: false });
+      let retryScheduled = false;
+      void invalidateConfirmedScopedRouteRef.current(transaction.refreshRoute)
+        .then(() => {
+          if (transactionWatcherVersionRef.current !== refreshVersion) return;
+          transactionRefreshRetryCountsRef.current.delete(refreshRetryKey);
+          updateTransaction(transaction.id, { refreshBlocked: false, refreshPending: false });
+        })
+        .catch((error: unknown) => {
+          if (transactionWatcherVersionRef.current !== refreshVersion) return;
+          retryScheduled = true;
+          pushLog(
+            `${transaction.label} confirmed, but current route data could not be refreshed: ${errorMessage(error)}`,
+            "error",
+            transaction.hash,
+            transaction.chainId,
+          );
+          const timerKey = `refresh:${claimKey}`;
+          if (transactionReceiptRetryTimersRef.current.has(timerKey)) return;
+          const retryAttempt = (transactionRefreshRetryCountsRef.current.get(refreshRetryKey) ?? 0) + 1;
+          transactionRefreshRetryCountsRef.current.set(refreshRetryKey, retryAttempt);
+          const timer = globalThis.setTimeout(() => {
+            transactionReceiptRetryTimersRef.current.delete(timerKey);
+            transactionRefreshClaimIdsRef.current.delete(claimKey);
+            if (transactionWatcherVersionRef.current !== refreshVersion) return;
+            setTransactionReceiptRetryGeneration((generation) => generation + 1);
+          }, receiptBackgroundRetryDelay(retryAttempt));
+          transactionReceiptRetryTimersRef.current.set(timerKey, timer);
+        })
+        .finally(() => {
+          if (!retryScheduled) transactionRefreshClaimIdsRef.current.delete(claimKey);
+        });
+    }
+  }, [pushLog, runtimeDeploymentIdentity, transactionReceiptRetryGeneration, transactionWatcherRenderGeneration, transactions, updateTransaction]);
   const factorySnapshot = useFactorySnapshot(publicClient, deployment, pushLog);
   const creationFee = factorySnapshot.creationFee ?? deployment?.creationFee ?? 0n;
-  const deploymentIdentity = deploymentDiscoveryIdentity(deployment);
-  const discoveryKey = discoveryStorageKey(activeNetwork.chainId, wallet.account, deploymentIdentity);
-  activeAccountRef.current = wallet.account;
+  const discoveryKey = discoveryStorageKey(activeNetwork.chainId, wallet.account, discoveryDeploymentIdentity);
   activeDiscoveryKeyRef.current = discoveryKey;
-  activeDeploymentIdentityRef.current = deploymentIdentity;
+  activeDeploymentIdentityRef.current = runtimeDeploymentIdentity;
 
   useEffect(() => {
     networkRequestVersion.current += 1;
-  }, [activeNetwork.chainId]);
+  }, [activeNetwork.chainId, runtimeDeploymentIdentity]);
+
+  useEffect(() => {
+    ammTokenLoadAbortControllerRef.current?.abort(new DOMException("AMM account or project scope changed.", "AbortError"));
+    ammTokenLoadAbortControllerRef.current = undefined;
+    setSwapTokenList(emptySwapTokenList());
+    setSwapTokenListLoading(false);
+    setSwapQuote(undefined);
+    setLiquidityQuote(undefined);
+    setRemoveLiquidityQuote(undefined);
+    setAmmPosition(undefined);
+  }, [ammTokenReadKey]);
+
+  useEffect(() => () => {
+    productRequestVersionRef.current += 1;
+    ammTokenLoadAbortControllerRef.current?.abort(new DOMException("AMM workspace closed.", "AbortError"));
+    ammTokenLoadAbortControllerRef.current = undefined;
+    productLoadAbortControllerRef.current?.abort(new DOMException("Project workspace closed.", "AbortError"));
+    productLoadAbortControllerRef.current = undefined;
+    productCatalogLoadMoreAbortControllerRef.current?.abort(new DOMException("Project catalog closed.", "AbortError"));
+    productCatalogLoadMoreAbortControllerRef.current = undefined;
+  }, []);
 
   useEffect(() => {
     discoveryWriteVersion.current += 1;
@@ -455,29 +1347,57 @@ export function App(): React.JSX.Element {
     setPredictedGrant(undefined);
     setGrantAddress("");
     setGrantSnapshot(undefined);
+    setGrantSnapshotVerifiedKey(undefined);
     setGrantIssuerBoardroom(undefined);
+    setGrantRouteError(undefined);
+    setGrantRouteFailureKind(undefined);
     setPaymentApproval("0");
     setPredictedBoardroom(undefined);
     setBoardroomAddress("");
     setBoardroomSnapshot(undefined);
+    setBoardroomSnapshotVerifiedKey(undefined);
     setBoardroomMintTo("");
     setPredictedBoardroomGrant(undefined);
     setFixedPriceSaleAddress("");
     setFixedPriceSaleSnapshot(undefined);
+    setFixedPriceSaleSnapshotVerifiedKey(undefined);
     setPredictedFixedPriceSale(undefined);
     setMerkleAirdropAddress("");
     setMerkleAirdropSnapshot(undefined);
+    setMerkleAirdropSnapshotVerifiedKey(undefined);
     setPredictedMerkleAirdrop(undefined);
     setMigratingCurveAddress("");
     setMigratingCurveSnapshot(undefined);
+    setMigratingCurveSnapshotVerifiedKey(undefined);
     setPredictedMigratingCurve(undefined);
     setLockedLiquidityAddress("");
     setLockedLiquiditySnapshot(undefined);
+    setLockedLiquiditySnapshotVerifiedKey(undefined);
     setPredictedLockedLiquidity(undefined);
     setDiscovery(emptyDiscoverySnapshot());
     setProductBoardroom(undefined);
+    setProductBoardroomVerifiedKey(undefined);
     setProductBoardroomError(undefined);
+    setProductBoardroomFailureKind(undefined);
     setProductBoardroomLoading(false);
+    setProductCatalog([]);
+    setProductCatalogLoaded(false);
+    setProductCatalogLoadMoreError(undefined);
+    setProductCatalogLoadingMore(false);
+    setProductCatalogNextCursor(undefined);
+    setProductCatalogTotalCount(undefined);
+    setBoardroomHolderPower(undefined);
+    setBoardroomHolderPowerVerifiedKey(undefined);
+    setQueuedBoardroomActions([]);
+    setProductGovernanceQueueVerifiedKey(undefined);
+    setProductGovernanceQueueComplete(false);
+    setProductGovernanceQueueLoaded(false);
+    setProductGovernanceError(undefined);
+    setProductGovernanceWarning(undefined);
+    setProductGovernanceLoading(false);
+    productGovernanceLoadedKeyRef.current = undefined;
+    productGovernanceSnapshotKeyRef.current = undefined;
+    grantRouteLoadedKeyRef.current = undefined;
     setSwapForm(defaultSwapForm());
     setSwapQuote(undefined);
     setLiquidityForm(defaultLiquidityForm());
@@ -487,6 +1407,7 @@ export function App(): React.JSX.Element {
     setAmmPosition(undefined);
     setSwapTokenList(emptySwapTokenList());
     setSwapTokenListLoading(false);
+    setSelectedParticipationRoute(undefined);
   }, []);
 
   useEffect(() => {
@@ -495,36 +1416,230 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     resetNetworkScopedState();
-  }, [activeNetwork.chainId, resetNetworkScopedState]);
+  }, [activeNetwork.chainId, runtimeDeploymentIdentity, resetNetworkScopedState]);
 
-  const loadProductBoardroom = useCallback(async (): Promise<void> => {
-    const requestVersion = networkRequestVersion.current;
+  const loadProductBoardroom = useCallback(async (requestedAddress?: Address): Promise<ScopedRefreshLoadResult> => {
+    productLoadAbortControllerRef.current?.abort(new DOMException("A newer project load started.", "AbortError"));
+    const abortController = new AbortController();
+    productLoadAbortControllerRef.current = abortController;
+    const networkRequest = networkRequestVersion.current;
+    const productRequest = ++productRequestVersionRef.current;
     const requestChainId = activeNetwork.chainId;
+    const requestDeploymentIdentity = runtimeDeploymentIdentity;
+    const requestIsCurrent = (): boolean =>
+      productRequestVersionRef.current === productRequest
+      && isCurrentNetworkRequest(networkRequest, requestChainId)
+      && activeDeploymentIdentityRef.current === requestDeploymentIdentity;
     setProductBoardroomLoading(true);
     setProductBoardroomError(undefined);
+    setProductBoardroomFailureKind(undefined);
+    if (requestedAddress) setProductBoardroomVerifiedKey(undefined);
+    setProductCatalogLoadMoreError(undefined);
+    setProductCatalogLoadingMore(false);
     try {
       if (!deployment?.boardroomFactory) {
         throw new Error("Runtime deployment is still loading for this chain.");
       }
-      const catalog = await readProductBoardroomCatalog(publicClient, deployment);
-      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
-      const address = resolveProductBoardroomAddress(catalog);
-      if (!address) {
-        throw new Error("No product Boardroom address is configured for this chain.");
+      if (!requestedAddress) {
+        const catalogPage = await readProductBoardroomCatalogPage(publicClient, deployment, {
+          signal: abortController.signal,
+        });
+        if (!requestIsCurrent()) return "stale";
+        setProductCatalog(catalogPage.entries);
+        setProductCatalogLoaded(true);
+        setProductCatalogNextCursor(catalogPage.nextCursor);
+        setProductCatalogTotalCount(catalogPage.totalCount);
+        setProductBoardroom(undefined);
+        setProductBoardroomVerifiedKey(undefined);
+        pushLog(`Loaded ${catalogPage.entries.length.toString()} of ${catalogPage.totalCount.toString()} product Boardrooms`, "success");
+        return "loaded";
       }
-      const next = await readProductBoardroomDashboard(publicClient, { address, catalog, deployment });
-      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
+
+      await assertCanonicalBoardroom(publicClient, deployment, requestedAddress);
+      if (!requestIsCurrent()) return "stale";
+      const next = await readProductBoardroomDashboard(publicClient, {
+        address: requestedAddress,
+        catalog: [...productCatalogRef.current],
+        signal: abortController.signal,
+      });
+      if (!requestIsCurrent()) return "stale";
+      setProductCatalog((current) => mergeProductBoardroomCatalog(current, next.catalog));
       setProductBoardroom(next);
-      pushLog(`Loaded product Boardroom ${address}`, "success");
+      setProductBoardroomVerifiedKey(canonicalProjectStateKey(
+        requestChainId,
+        requestedAddress,
+        requestDeploymentIdentity,
+      ));
+      productGovernanceLoadedKeyRef.current = undefined;
+      pushLog(`Loaded product Boardroom ${requestedAddress}`, "success");
+
+      productCatalogLoadMoreAbortControllerRef.current?.abort(
+        new DOMException("A newer project directory enrichment started.", "AbortError"),
+      );
+      const catalogAbortController = new AbortController();
+      productCatalogLoadMoreAbortControllerRef.current = catalogAbortController;
+      void (async (): Promise<void> => {
+        try {
+          const catalogPage = await readProductBoardroomCatalogPage(publicClient, deployment, {
+            signal: catalogAbortController.signal,
+          });
+          if (!requestIsCurrent()) return;
+          // This page is read after the exact dashboard, so it owns duplicate entries.
+          const mergedCatalog = mergeProductBoardroomCatalog(next.catalog, catalogPage.entries);
+          setProductCatalog(mergedCatalog);
+          setProductCatalogLoaded(true);
+          setProductCatalogNextCursor(catalogPage.nextCursor);
+          setProductCatalogTotalCount(catalogPage.totalCount);
+          setProductBoardroom((current) => current && sameAddress(current.address, requestedAddress)
+            ? { ...current, catalog: mergedCatalog }
+            : current);
+        } catch (catalogError) {
+          if (catalogAbortController.signal.aborted || !requestIsCurrent()) return;
+          const message = productReadErrorMessage(catalogError, activeNetwork.name);
+          setProductCatalogLoadMoreError(`The project loaded, but the wider directory is unavailable. ${message}`);
+          pushLog(`Project loaded without the wider directory: ${message}`, "error");
+        } finally {
+          if (productCatalogLoadMoreAbortControllerRef.current === catalogAbortController) {
+            productCatalogLoadMoreAbortControllerRef.current = undefined;
+          }
+        }
+      })();
+      return "loaded";
     } catch (error) {
-      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
-      const message = errorMessage(error);
+      if (!requestIsCurrent()) return "stale";
+      const message = productReadErrorMessage(error, activeNetwork.name);
       setProductBoardroomError(message);
+      setProductBoardroomFailureKind(error instanceof CanonicalProvenanceError ? "invalid" : "transient");
+      pushLog(message, "error");
+      return "failed";
+    } finally {
+      if (productLoadAbortControllerRef.current === abortController) {
+        productLoadAbortControllerRef.current = undefined;
+      }
+      if (requestIsCurrent()) setProductBoardroomLoading(false);
+    }
+  }, [activeNetwork.chainId, activeNetwork.name, deployment, isCurrentNetworkRequest, publicClient, pushLog, runtimeDeploymentIdentity]);
+
+  const loadMoreProductBoardrooms = useCallback(async (): Promise<void> => {
+    if (productCatalogNextCursor === undefined || productCatalogLoadingMore || !deployment?.boardroomFactory) return;
+    productCatalogLoadMoreAbortControllerRef.current?.abort(new DOMException("A newer project catalog load started.", "AbortError"));
+    const abortController = new AbortController();
+    productCatalogLoadMoreAbortControllerRef.current = abortController;
+    const networkRequest = networkRequestVersion.current;
+    const productRequest = productRequestVersionRef.current;
+    const requestChainId = activeNetwork.chainId;
+    const requestDeploymentIdentity = runtimeDeploymentIdentity;
+    const cursor = productCatalogNextCursor;
+    const requestIsCurrent = (): boolean =>
+      productRequestVersionRef.current === productRequest
+      && isCurrentNetworkRequest(networkRequest, requestChainId)
+      && activeDeploymentIdentityRef.current === requestDeploymentIdentity;
+    setProductCatalogLoadingMore(true);
+    setProductCatalogLoadMoreError(undefined);
+    try {
+      const page = await readProductBoardroomCatalogPage(publicClient, deployment, {
+        cursor,
+        signal: abortController.signal,
+        snapshotCount: productCatalogTotalCount,
+      });
+      if (!requestIsCurrent()) return;
+      setProductCatalog((current) => mergeProductBoardroomCatalog(current, page.entries));
+      setProductBoardroom((current) => current ? {
+        ...current,
+        catalog: mergeProductBoardroomCatalog(current.catalog, page.entries),
+      } : current);
+      setProductCatalogNextCursor(page.nextCursor);
+      setProductCatalogTotalCount(page.totalCount);
+    } catch (error) {
+      if (!requestIsCurrent()) return;
+      const message = productReadErrorMessage(error, activeNetwork.name);
+      setProductCatalogLoadMoreError(message);
       pushLog(message, "error");
     } finally {
-      if (isCurrentNetworkRequest(requestVersion, requestChainId)) setProductBoardroomLoading(false);
+      if (productCatalogLoadMoreAbortControllerRef.current === abortController) {
+        productCatalogLoadMoreAbortControllerRef.current = undefined;
+      }
+      if (requestIsCurrent()) setProductCatalogLoadingMore(false);
     }
-  }, [activeNetwork.chainId, deployment, isCurrentNetworkRequest, publicClient, pushLog]);
+  }, [activeNetwork.chainId, activeNetwork.name, deployment, isCurrentNetworkRequest, productCatalogLoadingMore, productCatalogNextCursor, productCatalogTotalCount, publicClient, pushLog, runtimeDeploymentIdentity]);
+
+  const loadProductGovernance = useCallback(async (address: Address): Promise<ScopedRefreshLoadResult> => {
+    const key = `${activeNetwork.chainId.toString()}:${runtimeDeploymentIdentity ?? "unconfigured"}:${address.toLowerCase()}:${wallet.account?.toLowerCase() ?? "read-only"}`;
+    if (activeGovernanceKeyRef.current !== key) return "stale";
+    if (productGovernanceLoadedKeyRef.current === key) return "loaded";
+    const requestVersion = ++governanceRequestVersionRef.current;
+    governanceLoadAbortControllerRef.current?.abort(new DOMException("A newer governance load started.", "AbortError"));
+    const abortController = new AbortController();
+    governanceLoadAbortControllerRef.current = abortController;
+    const deadline = window.setTimeout(() => {
+      const error = new Error("Governance loading timed out. Try again.");
+      error.name = "TimeoutError";
+      abortController.abort(error);
+    }, GOVERNANCE_LOAD_DEADLINE_MS);
+    const backgroundRefresh = isGovernanceBackgroundRefresh(productGovernanceSnapshotKeyRef.current, key);
+    productGovernanceLoadedKeyRef.current = key;
+    if (!backgroundRefresh) {
+      setQueuedBoardroomActions([]);
+      setProductGovernanceQueueVerifiedKey(undefined);
+      setProductGovernanceQueueComplete(false);
+      setProductGovernanceQueueLoaded(false);
+      setBoardroomHolderPower(undefined);
+      setBoardroomHolderPowerVerifiedKey(undefined);
+      setProductGovernanceWarning(undefined);
+    }
+    setProductGovernanceLoading(true);
+    setProductGovernanceError(undefined);
+    try {
+      const [queuedResult, holderResult] = await Promise.allSettled([
+        raceWithGovernanceAbort(
+          import("../lib/governance-actions").then(({ loadQueuedGovernanceActions }) =>
+            loadQueuedGovernanceActions(publicClient, {
+              boardroom: address,
+              chainId: activeNetwork.chainId,
+              signal: abortController.signal,
+              sentinelClient,
+            })),
+          abortController.signal,
+        ),
+        wallet.account
+          ? raceWithGovernanceAbort(
+              readBoardroomHolderPower(publicClient, { boardroom: address, account: wallet.account }),
+              abortController.signal,
+            )
+          : Promise.resolve(undefined),
+      ]);
+      if (governanceRequestVersionRef.current !== requestVersion || activeGovernanceKeyRef.current !== key) return "stale";
+      if (queuedResult.status === "fulfilled") {
+        setQueuedBoardroomActions(queuedResult.value.actions.filter((action) => sameAddress(action.boardroom, address)));
+        setProductGovernanceQueueComplete(queuedResult.value.complete);
+        setProductGovernanceQueueLoaded(true);
+        setProductGovernanceWarning(queuedResult.value.warning);
+        setProductGovernanceQueueVerifiedKey(key);
+        productGovernanceSnapshotKeyRef.current = key;
+      }
+      if (holderResult.status === "fulfilled" && holderResult.value?.boardroom && sameAddress(holderResult.value.boardroom, address)) {
+        setBoardroomHolderPower(holderResult.value);
+        setBoardroomHolderPowerVerifiedKey(key);
+      }
+      const errors = [...new Set([queuedResult, holderResult]
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => errorMessage(result.reason)))];
+      if (errors.length > 0) {
+        productGovernanceLoadedKeyRef.current = undefined;
+        setProductGovernanceError(errors.join(" "));
+        return "failed";
+      }
+      return "loaded";
+    } finally {
+      window.clearTimeout(deadline);
+      if (governanceLoadAbortControllerRef.current === abortController) {
+        governanceLoadAbortControllerRef.current = undefined;
+      }
+      if (governanceRequestVersionRef.current === requestVersion && activeGovernanceKeyRef.current === key) {
+        setProductGovernanceLoading(false);
+      }
+    }
+  }, [activeNetwork.chainId, publicClient, runtimeDeploymentIdentity, sentinelClient, wallet.account]);
 
   useEffect(() => {
     setDiscovery(loadDiscoverySnapshot(discoveryKey));
@@ -532,9 +1647,82 @@ export function App(): React.JSX.Element {
   }, [discoveryKey]);
 
   useEffect(() => {
-    if (!shouldLoadProductBoardroom({ activeView, deployment, productBoardroom, productBoardroomError, productBoardroomLoading })) return;
-    void loadProductBoardroom();
-  }, [activeView, deployment, loadProductBoardroom, productBoardroom, productBoardroomError, productBoardroomLoading]);
+    productLoadAbortControllerRef.current?.abort(new DOMException("Project route changed.", "AbortError"));
+    productLoadAbortControllerRef.current = undefined;
+    productCatalogLoadMoreAbortControllerRef.current?.abort(new DOMException("Project route changed.", "AbortError"));
+    productCatalogLoadMoreAbortControllerRef.current = undefined;
+    productRequestVersionRef.current += 1;
+    setProductBoardroomError(undefined);
+    setProductBoardroomFailureKind(undefined);
+    setProductBoardroomLoading(false);
+    setProductBoardroomVerifiedKey(undefined);
+    setProductBoardroom((current) => {
+      if (!requestedProductBoardroom) return undefined;
+      return current && sameAddress(current.address, requestedProductBoardroom) ? current : undefined;
+    });
+  }, [activeNetwork.chainId, requestedProductBoardroom, runtimeDeploymentIdentity]);
+
+  useEffect(() => {
+    if (appRouteChainId(appRoute) !== undefined && appRouteChainId(appRoute) !== activeNetwork.chainId) return;
+    if (!shouldLoadProductBoardroom({
+      activeRoute: appRoute,
+      deployment,
+      requestedAddress: requestedProductBoardroom,
+      productBoardroom: exactProjectDashboard,
+      productBoardroomError,
+      productBoardroomLoading,
+      productCatalogLoaded,
+    })) return;
+    void loadProductBoardroom(requestedProductBoardroom);
+  }, [activeNetwork.chainId, appRoute, deployment, exactProjectDashboard, loadProductBoardroom, productBoardroomError, productBoardroomLoading, productCatalogLoaded, requestedProductBoardroom]);
+
+  useEffect(() => {
+    if (appRoute.kind !== "legacy-project" || !productCatalogLoaded) return;
+    const address = resolveProductBoardroomAddress(productCatalog);
+    if (!address) return;
+    navigateRoute(legacyProjectDestination(appRoute, activeNetwork.chainId, address), true);
+  }, [activeNetwork.chainId, appRoute, navigateRoute, productCatalog, productCatalogLoaded]);
+
+  useEffect(() => {
+    governanceLoadAbortControllerRef.current?.abort(new DOMException("Governance route changed.", "AbortError"));
+    governanceLoadAbortControllerRef.current = undefined;
+    governanceRequestVersionRef.current += 1;
+    productGovernanceLoadedKeyRef.current = undefined;
+    productGovernanceSnapshotKeyRef.current = undefined;
+    setQueuedBoardroomActions([]);
+    setProductGovernanceQueueVerifiedKey(undefined);
+    setProductGovernanceQueueComplete(false);
+    setProductGovernanceQueueLoaded(false);
+    setBoardroomHolderPower(undefined);
+    setBoardroomHolderPowerVerifiedKey(undefined);
+    setProductGovernanceError(undefined);
+    setProductGovernanceWarning(undefined);
+    setProductGovernanceLoading(false);
+    return () => {
+      governanceLoadAbortControllerRef.current?.abort(new DOMException("Governance view closed.", "AbortError"));
+      governanceLoadAbortControllerRef.current = undefined;
+      governanceRequestVersionRef.current += 1;
+    };
+  }, [activeGovernanceKey]);
+
+  useEffect(() => {
+    const governanceRoute = (appRoute.kind === "project" && appRoute.section === "governance")
+      || (appRoute.kind === "studio-project" && (appRoute.section === "governance" || appRoute.section === "close"));
+    if (!governanceRoute || !exactProjectDashboard) return;
+    void loadProductGovernance(exactProjectDashboard.address);
+  }, [appRoute, exactProjectDashboard, loadProductGovernance]);
+
+  useEffect(() => {
+    if (!activeGovernanceKey || productGovernanceLoading) return;
+    const delay = governanceRefreshDelay(verifiedQueuedBoardroomActions);
+    const timer = window.setTimeout(() => {
+      const route = activeAppRouteRef.current;
+      if (activeGovernanceKeyRef.current !== activeGovernanceKey || route.kind !== "project" && route.kind !== "studio-project") return;
+      productGovernanceLoadedKeyRef.current = undefined;
+      void loadProductGovernance(route.boardroom);
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [activeGovernanceKey, loadProductGovernance, productGovernanceLoading, verifiedQueuedBoardroomActions]);
 
   useEffect(() => {
     setSwapQuote(undefined);
@@ -543,6 +1731,7 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     setLiquidityQuote(undefined);
     setRemoveLiquidityQuote(undefined);
+    setAmmPosition(undefined);
   }, [liquidityForm]);
 
   useEffect(() => {
@@ -566,15 +1755,30 @@ export function App(): React.JSX.Element {
   }, [deployment, liquidityForm.tokenA, liquidityForm.tokenB, liquidityForm.useNative, removeLiquidityForm.useNative, swapForm.tokenIn, swapForm.tokenOut, swapForm.useNative]);
 
   const loadSwapTokens = useCallback(async (): Promise<void> => {
-    const requestVersion = networkRequestVersion.current;
-    const requestChainId = activeNetwork.chainId;
+    const loadScope = activeSwapTokenLoadScopeRef.current;
+    if (!loadScope) return;
+    const request = ammReadCoordinatorRef.current.begin("token-list", activeAmmTokenReadKeyRef.current);
+    if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
+    ammTokenLoadAbortControllerRef.current?.abort(new DOMException("A newer AMM token load started.", "AbortError"));
+    const abortController = new AbortController();
+    ammTokenLoadAbortControllerRef.current = abortController;
+    const deadline = window.setTimeout(() => {
+      const timeout = new Error("AMM token loading timed out. Try again.");
+      timeout.name = "TimeoutError";
+      abortController.abort(timeout);
+    }, AMM_TOKEN_LOAD_DEADLINE_MS);
     setSwapTokenListLoading(true);
     try {
       if (!deployment?.ammFactory) {
         throw new Error("Runtime deployment is still loading for this chain.");
       }
-      const next = await readSwapTokenList(publicClient, deployment, wallet.account, { wrappedNativeLabel: activeNetwork.wrappedNativeSymbol });
-      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
+      const next = await readSwapTokenList(publicClient, deployment, activeAccountRef.current, {
+        discoveryMode: loadScope.mode,
+        pinnedPools: loadScope.pinnedPools,
+        signal: abortController.signal,
+        wrappedNativeLabel: activeNetwork.wrappedNativeSymbol,
+      });
+      if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
       setSwapTokenList(next);
       setSwapForm((current) => withSwapTokenListDefaults(current, next, deployment));
       setLiquidityForm((current) => withLiquidityTokenListDefaults(current, next, deployment));
@@ -584,19 +1788,23 @@ export function App(): React.JSX.Element {
         pushLog(`Loaded ${next.tokens.length.toString()} swap tokens across ${next.pools.length.toString()} pools`, "success");
       }
     } catch (error) {
+      if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
       const message = errorMessage(error);
-      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
       setSwapTokenList({ tokens: [], pools: [], loaded: true, error: message });
       pushLog(message, "error");
     } finally {
-      if (isCurrentNetworkRequest(requestVersion, requestChainId)) setSwapTokenListLoading(false);
+      window.clearTimeout(deadline);
+      if (ammTokenLoadAbortControllerRef.current === abortController) {
+        ammTokenLoadAbortControllerRef.current = undefined;
+        setSwapTokenListLoading(false);
+      }
     }
-  }, [activeNetwork.chainId, activeNetwork.wrappedNativeSymbol, deployment, isCurrentNetworkRequest, publicClient, pushLog, wallet.account]);
+  }, [activeNetwork.wrappedNativeSymbol, deployment, publicClient, pushLog]);
 
   useEffect(() => {
-    if (!shouldLoadSwapTokens({ activeView, deployment, swapTokenList, swapTokenListLoading })) return;
+    if (!shouldLoadSwapTokens({ deployment, loadScope: swapTokenLoadScope, swapTokenList, swapTokenListLoading })) return;
     void loadSwapTokens();
-  }, [activeView, deployment, loadSwapTokens, swapTokenList, swapTokenListLoading]);
+  }, [ammTokenReadKey, deployment, loadSwapTokens, swapTokenList, swapTokenListLoading, swapTokenLoadScope]);
 
   useEffect(() => {
     if (!wallet.account || boardroomForm.owner) return;
@@ -604,34 +1812,77 @@ export function App(): React.JSX.Element {
   }, [boardroomForm.owner, wallet.account]);
 
   const updateBoardroomAddress = useCallback((address: string): void => {
+    boardroomLoadVersionRef.current += 1;
+    fixedPriceSaleLoadVersionRef.current += 1;
+    merkleAirdropLoadVersionRef.current += 1;
+    migratingCurveLoadVersionRef.current += 1;
+    lockedLiquidityLoadVersionRef.current += 1;
     setBoardroomAddress(address);
     setBoardroomSnapshot(undefined);
+    setBoardroomSnapshotVerifiedKey(undefined);
+    setBoardroomMintAmount("1");
     setBoardroomMintTo("");
+    setBoardroomGrantForm(defaultBoardroomGrantForm());
+    setFixedPriceSaleAddress("");
+    setFixedPriceSaleForm(defaultFixedPriceSaleForm());
+    setFixedPriceSaleSnapshot(undefined);
+    setFixedPriceSaleSnapshotVerifiedKey(undefined);
+    setMerkleAirdropAddress("");
+    setMerkleAirdropForm(defaultMerkleAirdropForm());
+    setMerkleAirdropSnapshot(undefined);
+    setMerkleAirdropSnapshotVerifiedKey(undefined);
+    setMigratingCurveAddress("");
+    setMigratingCurveForm(defaultMigratingCurveForm());
+    setMigratingCurveSnapshot(undefined);
+    setMigratingCurveSnapshotVerifiedKey(undefined);
+    setCurveMigrationForm(defaultCurveMigrationForm());
+    setLockedLiquidityAddress("");
+    setLockedLiquidityForm(defaultLockedLiquidityForm());
+    setLockedLiquidityExitForm(defaultLockedLiquidityExitForm());
+    setLockedLiquiditySnapshot(undefined);
+    setLockedLiquiditySnapshotVerifiedKey(undefined);
+    setWindDownForm(defaultWindDownForm());
     setPredictedBoardroomGrant(undefined);
     setPredictedFixedPriceSale(undefined);
     setPredictedMerkleAirdrop(undefined);
     setPredictedMigratingCurve(undefined);
     setPredictedLockedLiquidity(undefined);
+    setSwapForm(defaultSwapForm());
+    setSwapQuote(undefined);
+    setLiquidityForm(defaultLiquidityForm());
+    setLiquidityQuote(undefined);
+    setRemoveLiquidityForm(defaultRemoveLiquidityForm());
+    setRemoveLiquidityQuote(undefined);
+    setAmmPosition(undefined);
+    setSelectedParticipationRoute(undefined);
   }, []);
 
   const updateFixedPriceSaleAddress = useCallback((address: string): void => {
+    fixedPriceSaleLoadVersionRef.current += 1;
     setFixedPriceSaleAddress(address);
     setFixedPriceSaleSnapshot(undefined);
+    setFixedPriceSaleSnapshotVerifiedKey(undefined);
   }, []);
 
   const updateMerkleAirdropAddress = useCallback((address: string): void => {
+    merkleAirdropLoadVersionRef.current += 1;
     setMerkleAirdropAddress(address);
     setMerkleAirdropSnapshot(undefined);
+    setMerkleAirdropSnapshotVerifiedKey(undefined);
   }, []);
 
   const updateMigratingCurveAddress = useCallback((address: string): void => {
+    migratingCurveLoadVersionRef.current += 1;
     setMigratingCurveAddress(address);
     setMigratingCurveSnapshot(undefined);
+    setMigratingCurveSnapshotVerifiedKey(undefined);
   }, []);
 
   const updateLockedLiquidityAddress = useCallback((address: string): void => {
+    lockedLiquidityLoadVersionRef.current += 1;
     setLockedLiquidityAddress(address);
     setLockedLiquiditySnapshot(undefined);
+    setLockedLiquiditySnapshotVerifiedKey(undefined);
   }, []);
 
   const clearBoardroomGrantPrediction = useCallback((): void => {
@@ -643,35 +1894,191 @@ export function App(): React.JSX.Element {
 
   const refreshBoardroom = async (address?: Address): Promise<BoardroomSnapshot> => {
     const boardroom = address ?? boardroomSnapshot?.address ?? requireAddress(boardroomAddress, "Boardroom address");
+    const requestVersion = ++boardroomLoadVersionRef.current;
+    const requestScope = activeStudioReadScopeKeyRef.current;
+    const requestChainId = activeNetwork.chainId;
+    const requestDeploymentIdentity = runtimeDeploymentIdentity;
+    const route = activeAppRouteRef.current;
+    if (route.kind === "studio-project" && !sameAddress(route.boardroom, boardroom)) {
+      throw new Error("Studio project identity changed. Reload the Boardroom from its canonical route before continuing.");
+    }
+    setBoardroomSnapshotVerifiedKey(undefined);
     const snapshot = await readBoardroomSnapshot(publicClient, boardroom);
+    if (activeStudioReadScopeKeyRef.current !== requestScope || boardroomLoadVersionRef.current !== requestVersion) return snapshot;
     setBoardroomSnapshot(snapshot);
+    setBoardroomSnapshotVerifiedKey(canonicalProjectStateKey(
+      requestChainId,
+      boardroom,
+      requestDeploymentIdentity,
+    ));
     setBoardroomMintTo((current) => current || snapshot.address);
+    await loadProductBoardroom(boardroom);
     return snapshot;
   };
 
-  const submitContractTransaction = async (label: string, request: Record<string, unknown>): Promise<Hex> => {
-    const client = walletClient();
-    const txChainId = activeNetwork.chainId;
-    pushLog(contractCallPreview(label, request), "info");
-    const hash = (await client.writeContract({
-      account: activeAccount(),
-      chain,
-      ...request,
-    } as unknown as Parameters<typeof client.writeContract>[0])) as Hex;
-
-    pushLog(`${label} submitted`, "info", hash, txChainId);
-    const receipt = await publicClient.waitForTransactionReceipt({ hash });
-    if (receipt.status !== "success") {
-      pushLog(`${label} failed`, "error", hash, txChainId);
-      throw new Error(`${label} failed after submission.`);
+  useEffect(() => {
+    if (appRoute.kind !== "studio-project" || appRoute.chainId !== activeNetwork.chainId) return;
+    const address = appRoute.boardroom;
+    if (boardroomAddress.toLowerCase() !== address.toLowerCase()) {
+      updateBoardroomAddress(address);
+      return;
     }
+    if (!exactProjectDashboard || !sameAddress(exactProjectDashboard.address, address)) return;
+    if (boardroomSnapshot === exactProjectDashboard.snapshot
+      && boardroomSnapshotVerifiedKey === exactProjectVerifiedKey) return;
+    setBoardroomSnapshot(exactProjectDashboard.snapshot);
+    setBoardroomSnapshotVerifiedKey(exactProjectVerifiedKey);
+    setBoardroomMintTo(exactProjectDashboard.snapshot.address);
+  }, [activeNetwork.chainId, appRoute, boardroomAddress, boardroomSnapshot, boardroomSnapshotVerifiedKey, exactProjectDashboard, exactProjectVerifiedKey, updateBoardroomAddress]);
 
-    pushLog(`${label} confirmed`, "success", hash, txChainId);
-    return hash;
+  const submitContractTransaction = async (
+    label: string,
+    request: Record<string, unknown>,
+    actionGuard?: TransactionActionGuard,
+  ): Promise<Hex> => {
+    const actionOrigin = activeActionOriginRef.current;
+    const contextTicket = transactionContextGuardRef.current.capture();
+    const transactionIdentity: TransactionIdentity = {
+      account: actionOrigin?.account ?? activeAccount(),
+      chainId: actionOrigin?.chainId ?? activeNetwork.chainId,
+      contextGeneration: actionOrigin?.contextGeneration ?? contextTicket.generation,
+      deploymentIdentity: actionOrigin?.deploymentIdentity ?? activeDeploymentIdentityRef.current,
+      routeIdentity: actionOrigin?.routeIdentity ?? appRouteIdentityKey(activeAppRouteRef.current),
+    };
+    const transactionRoute = activeAppRouteRef.current;
+    const callReview = contractCallReview(label, request);
+    const txChainId = transactionIdentity.chainId;
+    const liveTransactionIdentity = () => ({
+        account: activeAccountRef.current,
+        chainId: activeChainIdRef.current,
+        contextGeneration: transactionContextGuardRef.current.capture().generation,
+        deploymentIdentity: activeDeploymentIdentityRef.current,
+        routeIdentity: appRouteIdentityKey(activeAppRouteRef.current),
+        walletChainId: activeWalletChainIdRef.current,
+    });
+    const assertLiveIdentity = (phase: "review" | "simulation" | "submission"): void => {
+      assertTransactionIdentity(transactionIdentity, liveTransactionIdentity(), phase);
+      assertTransactionActionCurrent(actionGuard, phase);
+    };
+    assertLiveIdentity("review");
+    const transactionId = startTransaction(callReview);
+    let submittedHash: Hex | undefined;
+    try {
+      await requestReview(callReview);
+      assertLiveIdentity("simulation");
+      updateTransaction(transactionId, { stage: "simulating" });
+      pushLog(contractCallPreview(label, request), "info");
+      const simulation = await publicClient.simulateContract({
+        account: transactionIdentity.account,
+        ...request,
+      } as unknown as Parameters<typeof publicClient.simulateContract>[0]);
+      updateTransaction(transactionId, { stage: "awaiting-signature" });
+
+      assertLiveIdentity("submission");
+      const client = walletClientRef.current?.();
+      if (!client) throw new Error("Wallet client is not ready yet.");
+      assertLiveIdentity("submission");
+      const receiptWatcherIdentity = [
+        txChainId.toString(),
+        transactionIdentity.account.toLowerCase(),
+        transactionIdentity.deploymentIdentity ?? "unconfigured",
+      ].join(":");
+      const receiptWatcherVersion = transactionWatcherVersionRef.current;
+      const hash = (await client.writeContract({
+        ...simulation.request,
+      } as unknown as Parameters<typeof client.writeContract>[0])) as Hex;
+
+      submittedHash = hash;
+      updateTransactionForIdentity(txChainId, transactionIdentity.account, transactionId, {
+        deploymentIdentity: transactionIdentity.deploymentIdentity,
+        error: undefined,
+        hash,
+        refreshBlocked: false,
+        refreshPending: false,
+        refreshRoute: transactionRoute,
+        stage: "submitted",
+        submittedHash: hash,
+      });
+      pushLog(`${label} submitted`, "info", hash, txChainId);
+      const outcome = await ensureTransactionReceipt(
+        { chainId: txChainId, hash, id: transactionId, label, refreshRoute: transactionRoute, submittedHash: hash },
+        receiptWatcherIdentity,
+        receiptWatcherVersion,
+        transactionRoute,
+      );
+      if (outcome.kind === "confirmed") return outcome.hash;
+      throw new TransactionReceiptFinalizedError(outcome);
+    } catch (error) {
+      if (submittedHash) throw error;
+      const cancelled = error instanceof Error && error.name === "TransactionReviewCancelledError";
+      updateTransaction(transactionId, {
+        error: cancelled ? undefined : errorMessage(error),
+        stage: cancelled ? "cancelled" : "failed",
+      });
+      throw error;
+    }
+  };
+
+  const submitBoardroomExecution = async (
+    label: string,
+    boardroom: { address: Address; launched: boolean; status: number },
+    request: Record<string, unknown>,
+  ): Promise<"execute" | "queue" | "windDown"> => {
+    const calls = boardroomCallsFromExecution(request);
+    const plan = planBoardroomCallExecution({
+      boardroom: boardroom.address,
+      calls,
+      lifecycle: { launched: boardroom.launched, status: boardroom.status },
+      ...(boardroom.launched && boardroom.status === 0 ? { salt: randomSalt() } : {}),
+    });
+    const transactionLabel = plan.kind === "queue" ? `Queue ${label.toLowerCase()}` : label;
+    await submitContractTransaction(transactionLabel, plan.transaction);
+    if (plan.kind === "queue") {
+      pushLog(`${label} is queued. It can execute after the project governance delay.`, "success");
+    }
+    return plan.kind;
+  };
+
+  const activeActionOriginIsCurrent = (): boolean => {
+    const origin = activeActionOriginRef.current;
+    if (!origin) return true;
+    const accountMatches = origin.account
+      ? Boolean(activeAccountRef.current && sameAddress(origin.account, activeAccountRef.current))
+      : activeAccountRef.current === undefined;
+    return accountMatches
+      && origin.chainId === activeChainIdRef.current
+      && origin.contextGeneration === transactionContextGuardRef.current.capture().generation
+      && origin.deploymentIdentity === activeDeploymentIdentityRef.current
+      && origin.routeIdentity === appRouteIdentityKey(activeAppRouteRef.current);
+  };
+
+  const beginAmmRead = (kind: AmmReadKind, key: string): AmmReadRequest =>
+    ammReadCoordinatorRef.current.begin(kind, key);
+
+  const assertCurrentAmmRead = (request: AmmReadRequest): void => {
+    if (!ammReadCoordinatorRef.current.isCurrent(request)) {
+      throw new Error("AMM account, project, or form changed while data was loading. Refresh the current quote.");
+    }
+  };
+
+  const ammActionGuard = (kind: AmmReadKind, key: string): TransactionActionGuard => {
+    const request = beginAmmRead(kind, key);
+    return { isCurrent: () => ammReadCoordinatorRef.current.isCurrent(request) };
   };
 
   const refreshSwapQuote = async (): Promise<void> => {
+    const request = beginAmmRead("swap-quote", ammSwapQuoteReadKey);
+    if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
     const next = await readSwapQuote(publicClient, deployment, swapForm, wallet.account);
+    if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
+    const route = activeAppRouteRef.current;
+    const expectedPool = route.kind === "project" && route.section === "participate" ? exactProjectPoolRef.current : undefined;
+    if (expectedPool && (!next.pool || !sameAddress(next.pool.address, expectedPool))) {
+      const message = "This quote does not use the project pool. Refresh the project before swapping.";
+      setSwapQuote({ ...next, error: message });
+      pushLog(message, "error");
+      return;
+    }
     setSwapQuote(next);
     if (next.error) {
       pushLog(next.error, next.error.startsWith("No AMM pool") ? "info" : "error");
@@ -681,9 +2088,17 @@ export function App(): React.JSX.Element {
   };
 
   const requireFreshSwapQuote = async (): Promise<SwapQuoteState> => {
+    const request = beginAmmRead("swap-quote", ammSwapQuoteReadKey);
+    assertCurrentAmmRead(request);
     const next = await readSwapQuote(publicClient, deployment, swapForm, wallet.account);
+    assertCurrentAmmRead(request);
     setSwapQuote(next);
     if (next.error) throw new Error(next.error);
+    const route = activeAppRouteRef.current;
+    const expectedPool = route.kind === "project" && route.section === "participate" ? exactProjectPoolRef.current : undefined;
+    if (expectedPool && (!next.pool || !sameAddress(next.pool.address, expectedPool))) {
+      throw new Error("The current quote does not use this project’s AMM pool.");
+    }
     return next;
   };
 
@@ -704,23 +2119,41 @@ export function App(): React.JSX.Element {
     if (!quote.tokenIn || quote.amountIn === undefined) throw new Error("Refresh the swap quote before approving.");
     if (swapNativeMode(deployment, swapForm) === "input") throw new Error("Native swap input does not need ERC20 approval.");
 
-    await submitContractTransaction("Swap input approval", buildErc20Approval({ token: quote.tokenIn.address, spender: router, amount: quote.amountIn }));
+    await submitContractTransaction(
+      "Swap input approval",
+      buildErc20Approval({ token: quote.tokenIn.address, spender: router, amount: quote.amountIn }),
+      ammActionGuard("swap-quote", ammSwapQuoteReadKey),
+    );
   };
 
   const executeSwap = async (): Promise<void> => {
     const account = activeAccount();
+    assertFutureSwapDeadline(swapForm.deadline);
     const quote = await requireFreshSwapQuote();
     if (swapNativeMode(deployment, swapForm) !== "input") {
       requireFreshAllowance("Swap input", quote.tokenIn?.allowance, quote.amountIn);
     }
-    await submitContractTransaction("Swap", buildSwapTransaction({ deployment, form: swapForm, quote, account }));
+    await submitContractTransaction(
+      "Swap",
+      buildSwapTransaction({ deployment, form: swapForm, quote, account }),
+      ammActionGuard("swap-quote", ammSwapQuoteReadKey),
+    );
+    if (!activeActionOriginIsCurrent()) return;
     await refreshSwapQuote();
   };
 
   const refreshLiquidityQuote = async (): Promise<void> => {
-    const next = await readLiquidityQuote(publicClient, deployment, liquidityForm, wallet.account);
+    const quoteRequest = beginAmmRead("liquidity-quote", ammLiquidityQuoteReadKey);
+    const positionRequest = beginAmmRead("position", ammPositionReadKey);
+    if (!ammReadCoordinatorRef.current.isCurrent(quoteRequest)
+      || !ammReadCoordinatorRef.current.isCurrent(positionRequest)) return;
+    const [next, position] = await Promise.all([
+      readLiquidityQuote(publicClient, deployment, liquidityForm, wallet.account),
+      readAmmPosition(publicClient, deployment, liquidityForm.tokenA, liquidityForm.tokenB, wallet.account),
+    ]);
+    if (!ammReadCoordinatorRef.current.isCurrent(quoteRequest)
+      || !ammReadCoordinatorRef.current.isCurrent(positionRequest)) return;
     setLiquidityQuote(next);
-    const position = await readAmmPosition(publicClient, deployment, liquidityForm.tokenA, liquidityForm.tokenB, wallet.account);
     setAmmPosition(position);
     if (next.error) {
       pushLog(next.error, next.error.includes("No AMM pool") ? "info" : "error");
@@ -730,9 +2163,15 @@ export function App(): React.JSX.Element {
   };
 
   const requireFreshLiquidityQuote = async (): Promise<LiquidityQuoteState> => {
+    const request = beginAmmRead("liquidity-quote", ammLiquidityQuoteReadKey);
+    assertCurrentAmmRead(request);
     const next = await readLiquidityQuote(publicClient, deployment, liquidityForm, wallet.account);
+    assertCurrentAmmRead(request);
     setLiquidityQuote(next);
     if (next.error) throw new Error(next.error);
+    if (activeAppRouteRef.current.kind === "studio-project" && activeAppRouteRef.current.section === "liquidity") {
+      assertProjectPoolAllowed(next.pool, studioProjectPoolsRef.current, "This liquidity quote");
+    }
     return next;
   };
 
@@ -741,7 +2180,11 @@ export function App(): React.JSX.Element {
     const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
     const quote = await requireFreshLiquidityQuote();
     if (!quote.tokenA || quote.amountA === undefined) throw new Error("Refresh the liquidity quote before approving token A.");
-    await submitContractTransaction("Liquidity token A approval", buildErc20Approval({ token: quote.tokenA.address, spender: router, amount: quote.amountA }));
+    await submitContractTransaction(
+      "Liquidity token A approval",
+      buildErc20Approval({ token: quote.tokenA.address, spender: router, amount: quote.amountA }),
+      ammActionGuard("liquidity-quote", ammLiquidityQuoteReadKey),
+    );
   };
 
   const approveLiquidityTokenB = async (): Promise<void> => {
@@ -749,11 +2192,16 @@ export function App(): React.JSX.Element {
     const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
     const quote = await requireFreshLiquidityQuote();
     if (!quote.tokenB || quote.amountB === undefined) throw new Error("Refresh the liquidity quote before approving token B.");
-    await submitContractTransaction("Liquidity token B approval", buildErc20Approval({ token: quote.tokenB.address, spender: router, amount: quote.amountB }));
+    await submitContractTransaction(
+      "Liquidity token B approval",
+      buildErc20Approval({ token: quote.tokenB.address, spender: router, amount: quote.amountB }),
+      ammActionGuard("liquidity-quote", ammLiquidityQuoteReadKey),
+    );
   };
 
   const addLiquidity = async (): Promise<void> => {
     const account = activeAccount();
+    assertFutureSwapDeadline(liquidityForm.deadline);
     const quote = await requireFreshLiquidityQuote();
     if (!liquidityTokenUsesNative(quote.tokenA?.address)) {
       requireFreshAllowance("Liquidity token A", quote.tokenA?.allowance, quote.amountA);
@@ -761,12 +2209,20 @@ export function App(): React.JSX.Element {
     if (!liquidityTokenUsesNative(quote.tokenB?.address)) {
       requireFreshAllowance("Liquidity token B", quote.tokenB?.allowance, quote.amountB);
     }
-    await submitContractTransaction("Add liquidity", buildAddLiquidityTransaction({ deployment, form: liquidityForm, quote, account }));
+    await submitContractTransaction(
+      "Add liquidity",
+      buildAddLiquidityTransaction({ deployment, form: liquidityForm, quote, account }),
+      ammActionGuard("liquidity-quote", ammLiquidityQuoteReadKey),
+    );
+    if (!activeActionOriginIsCurrent()) return;
     await Promise.all([refreshLiquidityQuote(), loadSwapTokens()]);
   };
 
   const refreshAmmPosition = async (): Promise<void> => {
+    const request = beginAmmRead("position", ammPositionReadKey);
+    if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
     const next = await readAmmPosition(publicClient, deployment, liquidityForm.tokenA, liquidityForm.tokenB, wallet.account);
+    if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
     setAmmPosition(next);
     if (next?.error) {
       pushLog(next.error, "error");
@@ -776,7 +2232,10 @@ export function App(): React.JSX.Element {
   };
 
   const refreshRemoveLiquidityQuote = async (): Promise<void> => {
+    const request = beginAmmRead("remove-liquidity-quote", ammRemoveLiquidityQuoteReadKey);
+    if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
     const next = await readRemoveLiquidityQuote(publicClient, deployment, liquidityForm, removeLiquidityForm, wallet.account);
+    if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
     setRemoveLiquidityQuote(next);
     if (next.position) setAmmPosition(next.position);
     if (next.error) {
@@ -787,10 +2246,16 @@ export function App(): React.JSX.Element {
   };
 
   const requireFreshRemoveLiquidityQuote = async (): Promise<RemoveLiquidityQuoteState> => {
+    const request = beginAmmRead("remove-liquidity-quote", ammRemoveLiquidityQuoteReadKey);
+    assertCurrentAmmRead(request);
     const next = await readRemoveLiquidityQuote(publicClient, deployment, liquidityForm, removeLiquidityForm, wallet.account);
+    assertCurrentAmmRead(request);
     setRemoveLiquidityQuote(next);
     if (next.position) setAmmPosition(next.position);
     if (next.error) throw new Error(next.error);
+    if (activeAppRouteRef.current.kind === "studio-project" && activeAppRouteRef.current.section === "liquidity") {
+      assertProjectPoolAllowed(next.position?.pool, studioProjectPoolsRef.current, "This remove-liquidity quote");
+    }
     return next;
   };
 
@@ -799,22 +2264,43 @@ export function App(): React.JSX.Element {
     const router = requireDeploymentAddress(deployment?.ammRouter, "AMM router");
     const quote = await requireFreshRemoveLiquidityQuote();
     if (!quote.position?.pool || quote.liquidity === undefined) throw new Error("Refresh the remove-liquidity quote before approving LP.");
-    await submitContractTransaction("LP token approval", buildErc20Approval({ token: quote.position.pool.address, spender: router, amount: quote.liquidity }));
+    await submitContractTransaction(
+      "LP token approval",
+      buildErc20Approval({ token: quote.position.pool.address, spender: router, amount: quote.liquidity }),
+      ammActionGuard("remove-liquidity-quote", ammRemoveLiquidityQuoteReadKey),
+    );
   };
 
   const removeLiquidity = async (): Promise<void> => {
     const account = activeAccount();
+    assertFutureSwapDeadline(removeLiquidityForm.deadline);
     const quote = await requireFreshRemoveLiquidityQuote();
     requireFreshAllowance("LP token", quote.position?.lpAllowance, quote.liquidity);
-    await submitContractTransaction("Remove liquidity", buildRemoveLiquidityTransaction({ deployment, form: removeLiquidityForm, quote, account }));
+    await submitContractTransaction(
+      "Remove liquidity",
+      buildRemoveLiquidityTransaction({ deployment, form: removeLiquidityForm, quote, account }),
+      ammActionGuard("remove-liquidity-quote", ammRemoveLiquidityQuoteReadKey),
+    );
+    if (!activeActionOriginIsCurrent()) return;
     await Promise.all([refreshAmmPosition(), refreshLiquidityQuote()]);
   };
 
   const claimAmmFees = async (): Promise<void> => {
     activeAccount();
+    const request = beginAmmRead("position", ammPositionReadKey);
+    assertCurrentAmmRead(request);
     const position = await readAmmPosition(publicClient, deployment, liquidityForm.tokenA, liquidityForm.tokenB, wallet.account);
+    assertCurrentAmmRead(request);
     if (!position) throw new Error("Select a pool before claiming fees.");
-    await submitContractTransaction("AMM fee claim", buildClaimAmmFeesTransaction(position));
+    if (activeAppRouteRef.current.kind === "studio-project" && activeAppRouteRef.current.section === "liquidity") {
+      assertProjectPoolAllowed(position.pool, studioProjectPoolsRef.current, "This fee claim");
+    }
+    await submitContractTransaction(
+      "AMM fee claim",
+      buildClaimAmmFeesTransaction(position),
+      { isCurrent: () => ammReadCoordinatorRef.current.isCurrent(request) },
+    );
+    if (!activeActionOriginIsCurrent()) return;
     await refreshAmmPosition();
   };
 
@@ -883,15 +2369,38 @@ export function App(): React.JSX.Element {
     );
   };
 
-  const loadGrant = async (): Promise<void> => {
-    const grant = requireAddress(grantAddress, "Grant address");
+  const loadGrantAddress = async (
+    grant: Address,
+    expectedRouteKey?: string,
+    requireCanonical = false,
+    existingRequestVersion?: number,
+  ): Promise<ScopedRefreshLoadResult> => {
+    const requestVersion = existingRequestVersion ?? ++grantLoadVersionRef.current;
+    const requestChainId = activeNetwork.chainId;
+    const requestDeploymentIdentity = runtimeDeploymentIdentity;
+    const requestIsCurrent = (): boolean => {
+      if (grantLoadVersionRef.current !== requestVersion
+        || activeChainIdRef.current !== requestChainId
+        || activeDeploymentIdentityRef.current !== requestDeploymentIdentity) return false;
+      if (!expectedRouteKey) return true;
+      const route = activeAppRouteRef.current;
+      return route.kind === "grant"
+        && canonicalGrantRouteKey(route.chainId, route.grant, requestDeploymentIdentity) === expectedRouteKey;
+    };
+    if (requireCanonical && requestIsCurrent()) setGrantSnapshotVerifiedKey(undefined);
     const now = BigInt(Math.floor(Date.now() / 1000));
     const snapshot = await readGrantState(publicClient, grant, now);
+    if (!requestIsCurrent()) return "stale";
+    if (requireCanonical) {
+      await assertCanonicalGrant(publicClient, deployment, grant, snapshot);
+      if (!requestIsCurrent()) return "stale";
+    }
     const [tokenMetadata, paymentTokenMetadata, issuerBoardroom] = await Promise.all([
       readTokenMetadata(publicClient, snapshot.token),
       isZeroAddress(snapshot.paymentToken) ? undefined : readTokenMetadata(publicClient, snapshot.paymentToken),
       readGrantIssuerBoardroomAccess(snapshot.issuer),
     ]);
+    if (!requestIsCurrent()) return "stale";
 
     setGrantSnapshot({
       address: grant,
@@ -912,13 +2421,37 @@ export function App(): React.JSX.Element {
       tokenMetadata,
       paymentTokenMetadata,
     });
+    setGrantSnapshotVerifiedKey(requireCanonical ? expectedRouteKey : undefined);
     setGrantIssuerBoardroom(issuerBoardroom);
+    setGrantAddress(grant);
+    if (requireCanonical) {
+      setGrantRouteError(undefined);
+      setGrantRouteFailureKind(undefined);
+    }
     pushLog(`Loaded grant ${grant}`, "success");
+    return "loaded";
+  };
+
+  const loadGrant = async (): Promise<void> => {
+    const route = activeAppRouteRef.current;
+    if (route.kind === "grant") {
+      await loadCanonicalGrantRoute(
+        route.grant,
+        canonicalGrantRouteKey(route.chainId, route.grant, runtimeDeploymentIdentity),
+      );
+      return;
+    }
+    await loadGrantAddress(requireAddress(grantAddress, "Grant address"));
+  };
+
+  const selectedGrantAddress = (): Address => {
+    const route = activeAppRouteRef.current;
+    return route.kind === "grant" ? route.grant : requireAddress(grantAddress, "Grant address");
   };
 
   const approvePayment = async (): Promise<void> => {
     if (!grantSnapshot) throw new Error("Load a grant first.");
-    const grant = requireAddress(grantAddress, "Grant address");
+    const grant = selectedGrantAddress();
     if (grantSnapshot.address.toLowerCase() !== grant.toLowerCase()) throw new Error("Reload the grant after changing the address.");
     if (isZeroAddress(grantSnapshot.paymentToken)) throw new Error("Selected grant has no payment token.");
 
@@ -930,7 +2463,7 @@ export function App(): React.JSX.Element {
   };
 
   const settleGrant = async (): Promise<void> => {
-    const grant = requireAddress(grantAddress, "Grant address");
+    const grant = selectedGrantAddress();
     const snapshot =
       grantSnapshot && grantSnapshot.address.toLowerCase() === grant.toLowerCase()
         ? grantSnapshot
@@ -946,24 +2479,169 @@ export function App(): React.JSX.Element {
 
   const readGrantIssuerBoardroomAccess = async (issuer: Address): Promise<GrantIssuerBoardroomAccess | undefined> => {
     try {
+      await assertCanonicalBoardroom(publicClient, deployment, issuer);
       const snapshot = await readBoardroomState(publicClient, issuer);
       if (isZeroAddress(snapshot.policyRegistry)) return undefined;
-      return { boardroom: issuer, owner: snapshot.owner };
+      return {
+        boardroom: issuer,
+        executor: snapshot.executor,
+        launched: snapshot.launched,
+        owner: snapshot.owner,
+        status: snapshot.status,
+      };
     } catch {
       return undefined;
     }
   };
 
-  const isBoardroomIssuer = async (issuer: Address): Promise<boolean> => Boolean(await readGrantIssuerBoardroomAccess(issuer));
+  async function loadCanonicalGrantRoute(grant: Address, key: string): Promise<void> {
+    const requestVersion = ++grantLoadVersionRef.current;
+    grantRouteLoadedKeyRef.current = key;
+    setGrantSnapshotVerifiedKey(undefined);
+    setGrantRouteError(undefined);
+    setGrantRouteFailureKind(undefined);
+    try {
+      const code = await publicClient.getCode({ address: grant });
+      if (grantLoadVersionRef.current !== requestVersion) return;
+      if (!code || code === "0x") {
+        throw new CanonicalProvenanceError(
+          "grant",
+          "This address does not contain a grant contract on the selected network.",
+        );
+      }
+      await loadGrantAddress(grant, key, true, requestVersion);
+    } catch (error) {
+      if (grantLoadVersionRef.current !== requestVersion) return;
+      const route = activeAppRouteRef.current;
+      if (route.kind !== "grant"
+        || canonicalGrantRouteKey(route.chainId, route.grant, activeDeploymentIdentityRef.current ?? "") !== key) return;
+      grantRouteLoadedKeyRef.current = undefined;
+      const message = canonicalGrantReadErrorMessage(error, activeNetwork.name);
+      setGrantRouteError(message);
+      setGrantRouteFailureKind(error instanceof CanonicalProvenanceError ? "invalid" : "transient");
+      pushLog(message, "error");
+    }
+  }
+
+  useEffect(() => {
+    grantLoadVersionRef.current += 1;
+    if (appRoute.kind !== "grant" || appRoute.chainId !== activeNetwork.chainId) {
+      grantRouteLoadedKeyRef.current = undefined;
+      setGrantSnapshot(undefined);
+      setGrantSnapshotVerifiedKey(undefined);
+      setGrantIssuerBoardroom(undefined);
+      setGrantRouteError(undefined);
+      setGrantRouteFailureKind(undefined);
+      return;
+    }
+    const key = canonicalGrantRouteKey(appRoute.chainId, appRoute.grant, runtimeDeploymentIdentity);
+    if (!deployment?.tokenGrantFactory) {
+      grantRouteLoadedKeyRef.current = undefined;
+      setGrantRouteError(undefined);
+      setGrantRouteFailureKind(undefined);
+      return;
+    }
+    if (grantRouteLoadedKeyRef.current === key) return;
+    updateGrantAddress(appRoute.grant);
+    void loadCanonicalGrantRoute(appRoute.grant, key);
+  }, [activeNetwork.chainId, appRoute, deployment?.tokenGrantFactory, pushLog, runtimeDeploymentIdentity]);
+
+  function invalidateSettledSharedState(): void {
+    ammReadCoordinatorRef.current.invalidate();
+    ammTokenLoadAbortControllerRef.current?.abort(new DOMException("Settled transaction invalidated AMM data.", "AbortError"));
+    ammTokenLoadAbortControllerRef.current = undefined;
+    setSwapTokenList(emptySwapTokenList());
+    setSwapTokenListLoading(false);
+    setSwapQuote(undefined);
+    setLiquidityQuote(undefined);
+    setRemoveLiquidityQuote(undefined);
+    setAmmPosition(undefined);
+  }
+
+  async function invalidateConfirmedScopedRoute(routeAtSubmission: AppRoute): Promise<void> {
+    const plan = confirmedRouteRefreshPlan(routeAtSubmission, activeAppRouteRef.current);
+    if (plan.kind === "none") return;
+    if (plan.kind === "grant") {
+      const key = canonicalGrantRouteKey(plan.chainId, plan.grant, runtimeDeploymentIdentity);
+      grantRouteLoadedKeyRef.current = undefined;
+      try {
+        const grantResult = await loadGrantAddress(plan.grant, key, true);
+        const latestPlan = confirmedRouteRefreshPlan(routeAtSubmission, activeAppRouteRef.current);
+        if (confirmedScopedRefreshNeedsRetry(grantResult, latestPlan.kind === "grant")) {
+          throw new Error("The confirmed transaction is still waiting for fresh grant data.");
+        }
+      } catch (error) {
+        if (confirmedRouteRefreshPlan(routeAtSubmission, activeAppRouteRef.current).kind === "grant") {
+          setGrantRouteError(canonicalGrantReadErrorMessage(error, activeNetwork.name));
+          setGrantRouteFailureKind(error instanceof CanonicalProvenanceError ? "invalid" : "transient");
+        }
+        throw error;
+      }
+      if (confirmedRouteRefreshPlan(routeAtSubmission, activeAppRouteRef.current).kind === "grant") {
+        grantRouteLoadedKeyRef.current = key;
+      }
+      return;
+    }
+    const activeProjectKey = canonicalProjectStateKey(
+      activeNetwork.chainId,
+      plan.boardroom,
+      runtimeDeploymentIdentity,
+    );
+    boardroomLoadVersionRef.current += 1;
+    fixedPriceSaleLoadVersionRef.current += 1;
+    merkleAirdropLoadVersionRef.current += 1;
+    migratingCurveLoadVersionRef.current += 1;
+    lockedLiquidityLoadVersionRef.current += 1;
+    governanceRequestVersionRef.current += 1;
+    governanceLoadAbortControllerRef.current?.abort(new DOMException("Confirmed transaction invalidated governance data.", "AbortError"));
+    governanceLoadAbortControllerRef.current = undefined;
+    productGovernanceLoadedKeyRef.current = undefined;
+    productGovernanceSnapshotKeyRef.current = undefined;
+    setProductGovernanceQueueVerifiedKey(undefined);
+    setBoardroomHolderPowerVerifiedKey(undefined);
+    setProductGovernanceLoading(false);
+    const invalidateCurrentProjectChild = (current: string | undefined): string | undefined =>
+      current === activeProjectKey ? undefined : current;
+    setBoardroomSnapshotVerifiedKey(invalidateCurrentProjectChild);
+    setFixedPriceSaleSnapshotVerifiedKey(invalidateCurrentProjectChild);
+    setMerkleAirdropSnapshotVerifiedKey(invalidateCurrentProjectChild);
+    setMigratingCurveSnapshotVerifiedKey(invalidateCurrentProjectChild);
+    setLockedLiquiditySnapshotVerifiedKey(invalidateCurrentProjectChild);
+    const productResult = await loadProductBoardroom(plan.boardroom);
+    if (confirmedScopedRefreshNeedsRetry(
+      productResult,
+      confirmedRouteRefreshPlan(routeAtSubmission, activeAppRouteRef.current).kind !== "none",
+    )) {
+      throw new Error("The confirmed transaction is still waiting for fresh project data.");
+    }
+    const currentPlan = confirmedRouteRefreshPlan(routeAtSubmission, activeAppRouteRef.current);
+    if (currentPlan.kind === "product" && currentPlan.refreshGovernance) {
+      productGovernanceLoadedKeyRef.current = undefined;
+      const governanceResult = await loadProductGovernance(currentPlan.boardroom);
+      const latestPlan = confirmedRouteRefreshPlan(routeAtSubmission, activeAppRouteRef.current);
+      if (confirmedScopedRefreshNeedsRetry(
+        governanceResult,
+        latestPlan.kind === "product" && latestPlan.refreshGovernance,
+      )) {
+        throw new Error("The confirmed transaction is still waiting for fresh governance data.");
+      }
+    }
+  }
+  invalidateSettledSharedStateRef.current = invalidateSettledSharedState;
+  invalidateConfirmedScopedRouteRef.current = invalidateConfirmedScopedRoute;
 
   const runGrantIssuerAction = async (functionName: GrantIssuerAction, successMessage: string): Promise<void> => {
-    const grant = requireAddress(grantAddress, "Grant address");
+    const grant = selectedGrantAddress();
     const { issuer } = await readGrantState(publicClient, grant);
+    const issuerBoardroom = await assertCanonicalBoardroom(publicClient, deployment, issuer)
+      .then(async () => await readBoardroomState(publicClient, issuer))
+      .catch(() => undefined);
 
-    if (await isBoardroomIssuer(issuer)) {
+    if (issuerBoardroom && !isZeroAddress(issuerBoardroom.policyRegistry)) {
       const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
-      await submitContractTransaction(
+      await submitBoardroomExecution(
         `${successMessage} through Boardroom`,
+        issuerBoardroom,
         buildGrantIssuerBoardroomAction({ boardroom: issuer, policy: factory, grant, functionName }),
       );
       return;
@@ -1017,34 +2695,40 @@ export function App(): React.JSX.Element {
       functionName: "createBoardroom",
       args: [owner, boardroomForm.name, boardroomForm.symbol, salt],
     });
+    if (!activeActionOriginIsCurrent()) return;
     setPredictedBoardroom(predicted);
     setBoardroomAddress(predicted);
-    await refreshBoardroom(predicted);
+    navigateRoute({ kind: "studio-project", chainId: activeNetwork.chainId, boardroom: predicted, section: "setup" });
   };
 
   const loadBoardroom = async (): Promise<void> => {
-    const address = requireAddress(boardroomAddress, "Boardroom address");
+    const route = activeAppRouteRef.current;
+    const address = route.kind === "studio-project"
+      ? route.boardroom
+      : requireAddress(boardroomAddress, "Boardroom address");
     await refreshBoardroom(address);
     pushLog(`Loaded Boardroom ${address}`, "success");
   };
 
   const mintBoardroomShares = async (): Promise<void> => {
-    const boardroom = boardroomSnapshot?.address ?? requireAddress(boardroomAddress, "Boardroom address");
+    const lifecycle = requireLoadedBoardroom();
+    const boardroom = lifecycle.address;
     const to = boardroomMintTo.trim() ? requireAddress(boardroomMintTo, "Mint recipient") : boardroom;
-    const shareToken = boardroomSnapshot?.address.toLowerCase() === boardroom.toLowerCase()
-      ? boardroomSnapshot.shareToken
-      : (await readBoardroomState(publicClient, boardroom)).shareToken;
+    const shareToken = lifecycle.shareToken;
     const amount = await parseErc20Amount(publicClient, boardroomMintAmount, shareToken, "Mint amount");
-    await submitContractTransaction("Share mint", buildBoardroomMintTransaction({ boardroom, to, amount }));
-    await refreshBoardroom(boardroom);
+    await submitBoardroomExecution(
+      "Share mint",
+      lifecycle,
+      buildBoardroomExecuteTransaction({ boardroom, call: buildBoardroomMintCall({ boardroom, to, amount }) }),
+    );
   };
 
   const boardroomShareGrantTerms = async (): Promise<BoardroomShareGrantTerms> => {
-    if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
+    const loadedBoardroom = requireLoadedBoardroom();
     const holder = requireAddress(boardroomGrantForm.holder, "Grant holder");
     const paymentToken = optionalPaymentToken(boardroomGrantForm.paymentToken);
     const [amount, price] = await Promise.all([
-      parseErc20Amount(publicClient, boardroomGrantForm.amount, boardroomSnapshot.shareToken, "Grant amount"),
+      parseErc20Amount(publicClient, boardroomGrantForm.amount, loadedBoardroom.shareToken, "Grant amount"),
       parsePaymentAmount(publicClient, boardroomGrantForm.price, paymentToken, "Grant price"),
     ]);
     const expiry = uintInput(boardroomGrantForm.expiry, "Grant expiry");
@@ -1073,12 +2757,12 @@ export function App(): React.JSX.Element {
   };
 
   const predictBoardroomGrantAddress = async (): Promise<void> => {
-    if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
+    const loadedBoardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
     const { salt } = await boardroomShareGrantTerms();
     const predicted = await sdkPredictBoardroomGrantAddress(publicClient, {
       factory,
-      boardroom: boardroomSnapshot.address,
+      boardroom: loadedBoardroom.address,
       salt,
     });
     setPredictedBoardroomGrant(predicted);
@@ -1087,82 +2771,108 @@ export function App(): React.JSX.Element {
   };
 
   const boardroomApproveFactory = async (): Promise<void> => {
-    if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
+    const loadedBoardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const { amount } = await boardroomShareGrantTerms();
-    await submitContractTransaction(
+    await submitBoardroomExecution(
       "Boardroom approval",
+      loadedBoardroom,
       buildBoardroomExecuteTransaction({
-        boardroom: boardroomSnapshot.address,
+        boardroom: loadedBoardroom.address,
         call: buildBoardroomGrantApprovalCall({
           policy: assetPolicy,
-          shareToken: boardroomSnapshot.shareToken,
+          shareToken: loadedBoardroom.shareToken,
           factory,
           amount,
         }),
       }),
     );
-    await refreshBoardroom(boardroomSnapshot.address);
   };
 
   const boardroomCreateGrant = async (): Promise<void> => {
-    if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
+    const loadedBoardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
     const terms = await boardroomShareGrantTerms();
     const predicted = await sdkPredictBoardroomGrantAddress(publicClient, {
       factory,
-      boardroom: boardroomSnapshot.address,
+      boardroom: loadedBoardroom.address,
       salt: terms.salt,
     });
-    await submitContractTransaction(
+    await submitBoardroomExecution(
       "Boardroom grant creation",
+      loadedBoardroom,
       buildBoardroomExecuteTransaction({
-        boardroom: boardroomSnapshot.address,
+        boardroom: loadedBoardroom.address,
         call: buildBoardroomGrantCreationCall({
           policy: factory,
           factory,
-          terms: { ...terms, token: boardroomSnapshot.shareToken },
+          terms: { ...terms, token: loadedBoardroom.shareToken },
           creationFee,
         }),
         value: creationFee,
       }),
     );
+    if (!activeActionOriginIsCurrent()) return;
     setPredictedBoardroomGrant(predicted);
     updateGrantAddress(predicted);
-    await refreshBoardroom(boardroomSnapshot.address);
   };
 
   const boardroomCreateGrantBatch = async (): Promise<void> => {
-    if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
+    const loadedBoardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.tokenGrantFactory, "TokenGrantFactory");
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const terms = await boardroomShareGrantTerms();
     const predicted = await sdkPredictBoardroomGrantAddress(publicClient, {
       factory,
-      boardroom: boardroomSnapshot.address,
+      boardroom: loadedBoardroom.address,
       salt: terms.salt,
     });
-    await submitContractTransaction(
+    await submitBoardroomExecution(
       "Boardroom grant batch",
+      loadedBoardroom,
       buildBoardroomShareGrantIssuanceBatch({
-        boardroom: boardroomSnapshot.address,
+        boardroom: loadedBoardroom.address,
         factory,
-        shareToken: boardroomSnapshot.shareToken,
+        shareToken: loadedBoardroom.shareToken,
         terms,
         creationFee,
         policy: factory,
         assetPolicy,
       }),
     );
+    if (!activeActionOriginIsCurrent()) return;
     setPredictedBoardroomGrant(predicted);
     updateGrantAddress(predicted);
-    await refreshBoardroom(boardroomSnapshot.address);
   };
 
   const requireLoadedBoardroom = (): BoardroomSnapshot => {
-    if (!boardroomSnapshot) throw new Error("Load a Boardroom first.");
-    return boardroomSnapshot;
+    if (!displayedBoardroomSnapshot) throw new Error("Load and verify the current Boardroom first.");
+    const route = activeAppRouteRef.current;
+    if (route.kind === "studio-project" && !sameAddress(route.boardroom, displayedBoardroomSnapshot.address)) {
+      throw new Error("The loaded Boardroom does not match this Studio route. Refresh the project before continuing.");
+    }
+    return displayedBoardroomSnapshot;
+  };
+
+  const requireLoadedFixedPriceSale = (): FixedPriceSaleState => {
+    const address = requireAddress(fixedPriceSaleAddress, "Fixed-price sale address");
+    return requireVerifiedChildState(displayedFixedPriceSaleSnapshot, address, "fixed-price sale");
+  };
+
+  const requireLoadedMerkleAirdrop = (): MerkleAirdropState => {
+    const address = requireAddress(merkleAirdropAddress, "Merkle airdrop address");
+    return requireVerifiedChildState(displayedMerkleAirdropSnapshot, address, "Merkle airdrop");
+  };
+
+  const requireLoadedMigratingCurve = (): MigratingBondingCurveState => {
+    const address = requireAddress(migratingCurveAddress, "Migrating curve address");
+    return requireVerifiedChildState(displayedMigratingCurveSnapshot, address, "bonding curve");
+  };
+
+  const requireLoadedLockedLiquidity = (): LockedLiquidityState => {
+    const address = requireAddress(lockedLiquidityAddress, "Locked-liquidity address");
+    return requireVerifiedChildState(displayedLockedLiquiditySnapshot, address, "locked-liquidity position");
   };
 
   const fixedPriceSaleTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomFixedPriceSaleTerms> => {
@@ -1196,8 +2906,35 @@ export function App(): React.JSX.Element {
 
   const loadFixedPriceSaleAddress = async (address?: Address): Promise<FixedPriceSaleState> => {
     const sale = address ?? requireAddress(fixedPriceSaleAddress, "Fixed-price sale address");
-    const snapshot = await readFixedPriceSaleState(publicClient, sale);
+    const requestVersion = ++fixedPriceSaleLoadVersionRef.current;
+    const requestScope = activeStudioReadScopeKeyRef.current;
+    const requestChainId = activeNetwork.chainId;
+    const requestDeploymentIdentity = runtimeDeploymentIdentity;
+    const routeAtRequest = activeAppRouteRef.current;
+    const requestIsCurrent = (): boolean =>
+      activeStudioReadScopeKeyRef.current === requestScope
+      && fixedPriceSaleLoadVersionRef.current === requestVersion;
+    setFixedPriceSaleSnapshotVerifiedKey(undefined);
+    const [snapshot, canonicalBoardroom] = await Promise.all([
+      readFixedPriceSaleState(publicClient, sale),
+      routeAtRequest.kind === "studio-project" ? readBoardroomState(publicClient, routeAtRequest.boardroom) : undefined,
+    ]);
+    if (!requestIsCurrent()) return snapshot;
+    if (routeAtRequest.kind === "studio-project" && canonicalBoardroom) {
+      try {
+        await assertCanonicalFixedPriceSale(publicClient, deployment, canonicalBoardroom, snapshot);
+      } catch (error) {
+        if (!requestIsCurrent()) return snapshot;
+        throw error;
+      }
+      if (!requestIsCurrent()) return snapshot;
+    }
     setFixedPriceSaleSnapshot(snapshot);
+    setFixedPriceSaleSnapshotVerifiedKey(canonicalProjectStateKey(
+      requestChainId,
+      snapshot.boardroom,
+      requestDeploymentIdentity,
+    ));
     setFixedPriceSaleAddress(sale);
     return snapshot;
   };
@@ -1214,8 +2951,9 @@ export function App(): React.JSX.Element {
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const terms = await fixedPriceSaleTerms(boardroom);
     const predicted = await sdkPredictFixedPriceSaleAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
-    await submitContractTransaction(
+    const executionKind = await submitBoardroomExecution(
       "Fixed-price sale creation",
+      boardroom,
       buildBoardroomFixedPriceSaleBatch({
         boardroom: boardroom.address,
         factory,
@@ -1225,31 +2963,36 @@ export function App(): React.JSX.Element {
         assetPolicy,
       }),
     );
+    if (!activeActionOriginIsCurrent()) return;
     setPredictedFixedPriceSale(predicted);
     updateFixedPriceSaleAddress(predicted);
-    await Promise.all([refreshBoardroom(boardroom.address), loadFixedPriceSaleAddress(predicted)]);
+    if (executionKind !== "queue") await loadFixedPriceSaleAddress(predicted);
   };
 
   const closeFixedPriceSale = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
-    const sale = requireAddress(fixedPriceSaleAddress, "Fixed-price sale address");
-    await submitContractTransaction(
+    const sale = requireLoadedFixedPriceSale().address;
+    await submitBoardroomExecution(
       "Fixed-price sale close",
+      boardroom,
       buildBoardroomFixedPriceSaleCloseAction({ boardroom: boardroom.address, policy: factory, sale }),
     );
-    await Promise.all([refreshBoardroom(boardroom.address), loadFixedPriceSaleAddress(sale)]);
+    if (!activeActionOriginIsCurrent()) return;
+    await loadFixedPriceSaleAddress(sale);
   };
 
   const cancelFixedPriceSale = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
-    const sale = requireAddress(fixedPriceSaleAddress, "Fixed-price sale address");
-    await submitContractTransaction(
+    const sale = requireLoadedFixedPriceSale().address;
+    await submitBoardroomExecution(
       "Fixed-price sale cancel",
+      boardroom,
       buildBoardroomFixedPriceSaleCancelAction({ boardroom: boardroom.address, policy: factory, sale }),
     );
-    await Promise.all([refreshBoardroom(boardroom.address), loadFixedPriceSaleAddress(sale)]);
+    if (!activeActionOriginIsCurrent()) return;
+    await loadFixedPriceSaleAddress(sale);
   };
 
   const merkleAirdropTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomMerkleAirdropTerms> => {
@@ -1281,8 +3024,35 @@ export function App(): React.JSX.Element {
 
   const loadMerkleAirdropAddress = async (address?: Address): Promise<MerkleAirdropState> => {
     const airdrop = address ?? requireAddress(merkleAirdropAddress, "Merkle airdrop address");
-    const snapshot = await readMerkleAirdropState(publicClient, airdrop);
+    const requestVersion = ++merkleAirdropLoadVersionRef.current;
+    const requestScope = activeStudioReadScopeKeyRef.current;
+    const requestChainId = activeNetwork.chainId;
+    const requestDeploymentIdentity = runtimeDeploymentIdentity;
+    const routeAtRequest = activeAppRouteRef.current;
+    const requestIsCurrent = (): boolean =>
+      activeStudioReadScopeKeyRef.current === requestScope
+      && merkleAirdropLoadVersionRef.current === requestVersion;
+    setMerkleAirdropSnapshotVerifiedKey(undefined);
+    const [snapshot, canonicalBoardroom] = await Promise.all([
+      readMerkleAirdropState(publicClient, airdrop),
+      routeAtRequest.kind === "studio-project" ? readBoardroomState(publicClient, routeAtRequest.boardroom) : undefined,
+    ]);
+    if (!requestIsCurrent()) return snapshot;
+    if (routeAtRequest.kind === "studio-project" && canonicalBoardroom) {
+      try {
+        await assertCanonicalMerkleAirdrop(publicClient, deployment, canonicalBoardroom, snapshot);
+      } catch (error) {
+        if (!requestIsCurrent()) return snapshot;
+        throw error;
+      }
+      if (!requestIsCurrent()) return snapshot;
+    }
     setMerkleAirdropSnapshot(snapshot);
+    setMerkleAirdropSnapshotVerifiedKey(canonicalProjectStateKey(
+      requestChainId,
+      snapshot.boardroom,
+      requestDeploymentIdentity,
+    ));
     setMerkleAirdropAddress(airdrop);
     return snapshot;
   };
@@ -1299,8 +3069,9 @@ export function App(): React.JSX.Element {
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const terms = await merkleAirdropTerms(boardroom);
     const predicted = await sdkPredictMerkleAirdropAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
-    await submitContractTransaction(
+    const executionKind = await submitBoardroomExecution(
       "Merkle airdrop creation",
+      boardroom,
       buildBoardroomMerkleAirdropBatch({
         boardroom: boardroom.address,
         factory,
@@ -1310,31 +3081,36 @@ export function App(): React.JSX.Element {
         assetPolicy,
       }),
     );
+    if (!activeActionOriginIsCurrent()) return;
     setPredictedMerkleAirdrop(predicted);
     updateMerkleAirdropAddress(predicted);
-    await Promise.all([refreshBoardroom(boardroom.address), loadMerkleAirdropAddress(predicted)]);
+    if (executionKind !== "queue") await loadMerkleAirdropAddress(predicted);
   };
 
   const closeMerkleAirdrop = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
-    const airdrop = requireAddress(merkleAirdropAddress, "Merkle airdrop address");
-    await submitContractTransaction(
+    const airdrop = requireLoadedMerkleAirdrop().address;
+    await submitBoardroomExecution(
       "Merkle airdrop close",
+      boardroom,
       buildBoardroomMerkleAirdropCloseAction({ boardroom: boardroom.address, policy: factory, airdrop }),
     );
-    await Promise.all([refreshBoardroom(boardroom.address), loadMerkleAirdropAddress(airdrop)]);
+    if (!activeActionOriginIsCurrent()) return;
+    await loadMerkleAirdropAddress(airdrop);
   };
 
   const cancelMerkleAirdrop = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
-    const airdrop = requireAddress(merkleAirdropAddress, "Merkle airdrop address");
-    await submitContractTransaction(
+    const airdrop = requireLoadedMerkleAirdrop().address;
+    await submitBoardroomExecution(
       "Merkle airdrop cancel",
+      boardroom,
       buildBoardroomMerkleAirdropCancelAction({ boardroom: boardroom.address, policy: factory, airdrop }),
     );
-    await Promise.all([refreshBoardroom(boardroom.address), loadMerkleAirdropAddress(airdrop)]);
+    if (!activeActionOriginIsCurrent()) return;
+    await loadMerkleAirdropAddress(airdrop);
   };
 
   const migratingCurveTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomMigratingBondingCurveTerms> => {
@@ -1376,8 +3152,35 @@ export function App(): React.JSX.Element {
 
   const loadMigratingCurveAddress = async (address?: Address): Promise<MigratingBondingCurveState> => {
     const curve = address ?? requireAddress(migratingCurveAddress, "Migrating curve address");
-    const snapshot = await readMigratingBondingCurveState(publicClient, curve);
+    const requestVersion = ++migratingCurveLoadVersionRef.current;
+    const requestScope = activeStudioReadScopeKeyRef.current;
+    const requestChainId = activeNetwork.chainId;
+    const requestDeploymentIdentity = runtimeDeploymentIdentity;
+    const routeAtRequest = activeAppRouteRef.current;
+    const requestIsCurrent = (): boolean =>
+      activeStudioReadScopeKeyRef.current === requestScope
+      && migratingCurveLoadVersionRef.current === requestVersion;
+    setMigratingCurveSnapshotVerifiedKey(undefined);
+    const [snapshot, canonicalBoardroom] = await Promise.all([
+      readMigratingBondingCurveState(publicClient, curve),
+      routeAtRequest.kind === "studio-project" ? readBoardroomState(publicClient, routeAtRequest.boardroom) : undefined,
+    ]);
+    if (!requestIsCurrent()) return snapshot;
+    if (routeAtRequest.kind === "studio-project" && canonicalBoardroom) {
+      try {
+        await assertCanonicalMigratingBondingCurve(publicClient, deployment, canonicalBoardroom, snapshot);
+      } catch (error) {
+        if (!requestIsCurrent()) return snapshot;
+        throw error;
+      }
+      if (!requestIsCurrent()) return snapshot;
+    }
     setMigratingCurveSnapshot(snapshot);
+    setMigratingCurveSnapshotVerifiedKey(canonicalProjectStateKey(
+      requestChainId,
+      snapshot.boardroom,
+      requestDeploymentIdentity,
+    ));
     setMigratingCurveAddress(curve);
     return snapshot;
   };
@@ -1394,8 +3197,9 @@ export function App(): React.JSX.Element {
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const terms = await migratingCurveTerms(boardroom);
     const predicted = await sdkPredictMigratingBondingCurveAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
-    await submitContractTransaction(
+    const executionKind = await submitBoardroomExecution(
       "Migrating curve creation",
+      boardroom,
       buildBoardroomMigratingCurveBatch({
         boardroom: boardroom.address,
         factory,
@@ -1405,36 +3209,37 @@ export function App(): React.JSX.Element {
         assetPolicy,
       }),
     );
+    if (!activeActionOriginIsCurrent()) return;
     setPredictedMigratingCurve(predicted);
     updateMigratingCurveAddress(predicted);
-    await Promise.all([refreshBoardroom(boardroom.address), loadMigratingCurveAddress(predicted)]);
+    if (executionKind !== "queue") await loadMigratingCurveAddress(predicted);
   };
 
   const cancelMigratingCurve = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
-    const curve = requireAddress(migratingCurveAddress, "Migrating curve address");
-    await submitContractTransaction(
+    const curve = requireLoadedMigratingCurve().address;
+    await submitBoardroomExecution(
       "Migrating curve cancel",
+      boardroom,
       buildBoardroomMigratingCurveCancelAction({ boardroom: boardroom.address, policy: factory, curve }),
     );
-    await Promise.all([refreshBoardroom(boardroom.address), loadMigratingCurveAddress(curve)]);
+    if (!activeActionOriginIsCurrent()) return;
+    await loadMigratingCurveAddress(curve);
   };
 
   const migrateCurve = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
-    const curve = requireAddress(migratingCurveAddress, "Migrating curve address");
-    const curveState =
-      migratingCurveSnapshot && migratingCurveSnapshot.address.toLowerCase() === curve.toLowerCase()
-        ? migratingCurveSnapshot
-        : await readMigratingBondingCurveState(publicClient, curve);
+    const curveState = requireLoadedMigratingCurve();
+    const curve = curveState.address;
     const [minShareLiquidity, minQuoteLiquidity] = await Promise.all([
       parseErc20Amount(publicClient, curveMigrationForm.minShareLiquidity, curveState.shareToken, "Minimum share liquidity"),
       parseErc20Amount(publicClient, curveMigrationForm.minQuoteLiquidity, curveState.quoteToken, "Minimum quote liquidity"),
     ]);
-    await submitContractTransaction(
+    await submitBoardroomExecution(
       "Migrating curve migration",
+      boardroom,
       buildBoardroomMigratingCurveMigrationAction({
         boardroom: boardroom.address,
         policy: factory,
@@ -1444,7 +3249,8 @@ export function App(): React.JSX.Element {
         deadline: uintInput(curveMigrationForm.deadline, "Migration deadline"),
       }),
     );
-    await Promise.all([refreshBoardroom(boardroom.address), loadMigratingCurveAddress(curve)]);
+    if (!activeActionOriginIsCurrent()) return;
+    await loadMigratingCurveAddress(curve);
   };
 
   const lockedLiquidityTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomLockedLiquidityTerms> => {
@@ -1480,8 +3286,35 @@ export function App(): React.JSX.Element {
 
   const loadLockedLiquidityAddress = async (address?: Address): Promise<LockedLiquidityState> => {
     const locker = address ?? requireAddress(lockedLiquidityAddress, "Locked-liquidity address");
-    const snapshot = await readLockedLiquidityState(publicClient, locker);
+    const requestVersion = ++lockedLiquidityLoadVersionRef.current;
+    const requestScope = activeStudioReadScopeKeyRef.current;
+    const requestChainId = activeNetwork.chainId;
+    const requestDeploymentIdentity = runtimeDeploymentIdentity;
+    const routeAtRequest = activeAppRouteRef.current;
+    const requestIsCurrent = (): boolean =>
+      activeStudioReadScopeKeyRef.current === requestScope
+      && lockedLiquidityLoadVersionRef.current === requestVersion;
+    setLockedLiquiditySnapshotVerifiedKey(undefined);
+    const [snapshot, canonicalBoardroom] = await Promise.all([
+      readLockedLiquidityState(publicClient, locker),
+      routeAtRequest.kind === "studio-project" ? readBoardroomState(publicClient, routeAtRequest.boardroom) : undefined,
+    ]);
+    if (!requestIsCurrent()) return snapshot;
+    if (routeAtRequest.kind === "studio-project" && canonicalBoardroom) {
+      try {
+        await assertCanonicalLockedLiquidity(publicClient, deployment, canonicalBoardroom, snapshot);
+      } catch (error) {
+        if (!requestIsCurrent()) return snapshot;
+        throw error;
+      }
+      if (!requestIsCurrent()) return snapshot;
+    }
     setLockedLiquiditySnapshot(snapshot);
+    setLockedLiquiditySnapshotVerifiedKey(canonicalProjectStateKey(
+      requestChainId,
+      snapshot.boardroom,
+      requestDeploymentIdentity,
+    ));
     setLockedLiquidityAddress(locker);
     return snapshot;
   };
@@ -1498,8 +3331,9 @@ export function App(): React.JSX.Element {
     const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
     const terms = await lockedLiquidityTerms(boardroom);
     const predicted = await sdkPredictLockedLiquidityAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
-    await submitContractTransaction(
+    const executionKind = await submitBoardroomExecution(
       "Locked-liquidity creation",
+      boardroom,
       buildBoardroomLockedLiquidityBatch({
         boardroom: boardroom.address,
         factory,
@@ -1509,29 +3343,29 @@ export function App(): React.JSX.Element {
         assetPolicy,
       }),
     );
+    if (!activeActionOriginIsCurrent()) return;
     setPredictedLockedLiquidity(predicted);
     updateLockedLiquidityAddress(predicted);
-    await Promise.all([refreshBoardroom(boardroom.address), loadLockedLiquidityAddress(predicted)]);
+    if (executionKind !== "queue") await loadLockedLiquidityAddress(predicted);
   };
 
   const claimLockedLiquidityFees = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
-    const locker = requireAddress(lockedLiquidityAddress, "Locked-liquidity address");
-    await submitContractTransaction(
+    const locker = requireLoadedLockedLiquidity().address;
+    await submitBoardroomExecution(
       "Locked-liquidity fee claim",
+      boardroom,
       buildBoardroomLockedLiquidityFeeClaimAction({ boardroom: boardroom.address, policy: factory, locker }),
     );
-    await Promise.all([refreshBoardroom(boardroom.address), loadLockedLiquidityAddress(locker)]);
+    if (!activeActionOriginIsCurrent()) return;
+    await loadLockedLiquidityAddress(locker);
   };
 
   const exitLockedLiquidity = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
-    const locker = requireAddress(lockedLiquidityAddress, "Locked-liquidity address");
-    const lockerState =
-      lockedLiquiditySnapshot && lockedLiquiditySnapshot.address.toLowerCase() === locker.toLowerCase()
-        ? lockedLiquiditySnapshot
-        : await readLockedLiquidityState(publicClient, locker);
+    const lockerState = requireLoadedLockedLiquidity();
+    const locker = lockerState.address;
     const [amountAMin, amountBMin] = await Promise.all([
       parseErc20Amount(publicClient, lockedLiquidityExitForm.amountAMin, lockerState.tokenA, "Exit amount A minimum"),
       parseErc20Amount(publicClient, lockedLiquidityExitForm.amountBMin, lockerState.tokenB, "Exit amount B minimum"),
@@ -1546,19 +3380,18 @@ export function App(): React.JSX.Element {
         deadline: uintInput(lockedLiquidityExitForm.deadline, "Exit deadline"),
       }),
     );
-    await Promise.all([refreshBoardroom(boardroom.address), loadLockedLiquidityAddress(locker)]);
+    if (!activeActionOriginIsCurrent()) return;
+    await loadLockedLiquidityAddress(locker);
   };
 
   const startWindDown = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     await submitContractTransaction("Boardroom wind-down start", buildBoardroomStartWindDownTransaction({ boardroom: boardroom.address }));
-    await refreshBoardroom(boardroom.address);
   };
 
   const burnTreasuryShares = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     await submitContractTransaction("Treasury share burn", buildBoardroomBurnTreasurySharesTransaction({ boardroom: boardroom.address }));
-    await refreshBoardroom(boardroom.address);
   };
 
   const registerRedeemableAsset = async (): Promise<void> => {
@@ -1568,13 +3401,11 @@ export function App(): React.JSX.Element {
       "Redeemable asset registration",
       buildBoardroomRegisterRedeemableAssetTransaction({ boardroom: boardroom.address, asset }),
     );
-    await refreshBoardroom(boardroom.address);
   };
 
   const openRedemptions = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     await submitContractTransaction("Boardroom redemptions open", buildBoardroomOpenRedemptionsTransaction({ boardroom: boardroom.address }));
-    await refreshBoardroom(boardroom.address);
   };
 
   const redeemBoardroomShares = async (): Promise<void> => {
@@ -1595,7 +3426,6 @@ export function App(): React.JSX.Element {
         minAmountsOut,
       }),
     );
-    await refreshBoardroom(boardroom.address);
   };
 
   const claimBoardroomRedemptionAsset = async (): Promise<void> => {
@@ -1614,7 +3444,6 @@ export function App(): React.JSX.Element {
       "Boardroom redemption asset claim",
       buildBoardroomClaimRedemptionAssetTransaction({ boardroom: boardroom.address, asset, recipient, minAmountOut }),
     );
-    await refreshBoardroom(boardroom.address);
   };
 
   const scanDiscoveryRange = async ({ chunkSize, fromBlock, toBlock, rangeMode = "manual" }: DiscoveryScanRange): Promise<void> => {
@@ -1625,7 +3454,7 @@ export function App(): React.JSX.Element {
     const requestChainId = activeNetwork.chainId;
     const requestAccount = wallet.account;
     const requestDiscoveryKey = discoveryKey;
-    const requestDeploymentIdentity = deploymentIdentity;
+    const requestDeploymentIdentity = runtimeDeploymentIdentity;
     const requestDiscoveryWriteVersion = discoveryWriteVersion.current;
     const range = toBlock === undefined ? { fromBlock, chunkSize } : { fromBlock, toBlock, chunkSize };
     const knownGrants = discoveryItems(discovery.grantsByAddress);
@@ -1779,17 +3608,17 @@ export function App(): React.JSX.Element {
   const inspectDiscoveredGrant = useCallback(
     (grant: Address): void => {
       updateGrantAddress(grant);
-      navigateView("grants");
+      navigateRoute({ kind: "grant", chainId: activeNetwork.chainId, grant });
     },
-    [navigateView, updateGrantAddress],
+    [activeNetwork.chainId, navigateRoute, updateGrantAddress],
   );
 
   const useDiscoveredBoardroom = useCallback(
     (boardroom: Address): void => {
       updateBoardroomAddress(boardroom);
-      navigateView("manage");
+      navigateRoute({ kind: "studio-project", chainId: activeNetwork.chainId, boardroom, section: "setup" });
     },
-    [navigateView, updateBoardroomAddress],
+    [activeNetwork.chainId, navigateRoute, updateBoardroomAddress],
   );
 
   const useDiscoveredDistribution = useCallback(
@@ -1805,28 +3634,135 @@ export function App(): React.JSX.Element {
         default:
           updateFixedPriceSaleAddress(distribution.distribution);
       }
-      navigateView("manage");
+      navigateRoute({ kind: "studio-project", chainId: activeNetwork.chainId, boardroom: distribution.boardroom, section: "distributions" });
     },
-    [navigateView, updateBoardroomAddress, updateFixedPriceSaleAddress, updateMerkleAirdropAddress, updateMigratingCurveAddress],
+    [activeNetwork.chainId, navigateRoute, updateBoardroomAddress, updateFixedPriceSaleAddress, updateMerkleAirdropAddress, updateMigratingCurveAddress],
   );
 
   const useDiscoveredLockedLiquidity = useCallback(
     (locker: DiscoveredLockedLiquidity): void => {
       updateBoardroomAddress(locker.boardroom);
       updateLockedLiquidityAddress(locker.locker);
-      navigateView("manage");
+      navigateRoute({ kind: "studio-project", chainId: activeNetwork.chainId, boardroom: locker.boardroom, section: "liquidity" });
     },
-    [navigateView, updateBoardroomAddress, updateLockedLiquidityAddress],
+    [activeNetwork.chainId, navigateRoute, updateBoardroomAddress, updateLockedLiquidityAddress],
   );
 
-  const openProductBoardroomWorkspace = (boardroom: Address): void => {
-    updateBoardroomAddress(boardroom);
-    void refreshBoardroom(boardroom);
-    navigateView("manage");
-  };
+  const exactProjectCatalogEntry = exactProjectDashboard?.catalog.find((entry) => sameAddress(entry.address, exactProjectDashboard.address));
+  const activeRouteTitle = contextualAppRouteTitle(
+    appRoute,
+    exactProjectCatalogEntry?.name ?? exactProjectCatalogEntry?.symbol,
+  );
+  useEffect(() => {
+    if (typeof document !== "undefined") document.title = `${activeRouteTitle} · pledge.cash`;
+  }, [activeRouteTitle]);
+  useEffect(() => {
+    setSelectedParticipationRoute(undefined);
+  }, [exactProjectIdentity]);
+  const projectCapabilities = resolveProjectCapabilities({
+    account: wallet.account,
+    routeChainId: appRouteChainId(appRoute) ?? activeNetwork.chainId,
+    walletChainId: wallet.chainId,
+    project: exactProjectDashboard ? {
+      owner: exactProjectDashboard.snapshot.owner,
+      executor: exactProjectDashboard.snapshot.executor,
+      launched: exactProjectDashboard.snapshot.launched,
+      status: capabilityLifecycle(exactProjectDashboard.snapshot.status),
+      launchReady: boardroomLaunchReady(exactProjectDashboard.snapshot),
+      launchBlockedReason: boardroomLaunchReady(exactProjectDashboard.snapshot)
+        ? undefined
+        : "Distribute at least one whole governance-eligible project token before launch.",
+      windDownBlockers: windDownBlockers(exactProjectDashboard.snapshot).length,
+    } : undefined,
+    wallet: {
+      shareBalance: verifiedBoardroomHolderPower?.currentBalance,
+      vetoEligible: verifiedBoardroomHolderPower?.canVeto,
+      windDownEligible: verifiedBoardroomHolderPower?.canStartWindDown,
+    },
+    governance: {
+      queuedActionCount: verifiedQueuedBoardroomActions.filter((action) => action.status === "waiting" || action.status === "ready").length,
+      readyActionCount: verifiedQueuedBoardroomActions.filter((action) => action.status === "ready").length,
+    },
+    opportunities: participationCapabilityOpportunities(exactProjectDashboard),
+  });
+  const routeWalletCapability = walletWriteCapability(wallet.account, wallet.chainId, appRouteChainId(appRoute) ?? activeNetwork.chainId);
+  const projectLifecycle = exactProjectDashboard?.snapshot.status;
+  const lifecycleUnavailable: Capability = { status: "hidden" };
+  const boardroomPanelCapabilities: BoardroomPanelCapabilities | undefined = appRoute.kind === "studio"
+    ? {
+        claimRedemption: lifecycleUnavailable,
+        createBoardroom: routeWalletCapability,
+        createDistribution: lifecycleUnavailable,
+        createGrant: lifecycleUnavailable,
+        createLiquidity: lifecycleUnavailable,
+        manageDistribution: lifecycleUnavailable,
+        manageLiquidity: lifecycleUnavailable,
+        mint: lifecycleUnavailable,
+        permissionlessWindDown: lifecycleUnavailable,
+        redeem: lifecycleUnavailable,
+        registerRedeemableAsset: lifecycleUnavailable,
+        startWindDown: lifecycleUnavailable,
+      }
+    : appRoute.kind === "studio-project"
+      ? {
+        claimRedemption: projectLifecycle === 2 ? routeWalletCapability : lifecycleUnavailable,
+        createBoardroom: lifecycleUnavailable,
+        createDistribution: projectCapabilities["studio.createDistribution"],
+        createGrant: projectCapabilities["studio.createGrant"],
+        createLiquidity: projectCapabilities["studio.manageLiquidity"],
+        manageDistribution: projectLifecycle === 1
+          ? routeWalletCapability
+          : projectCapabilities["studio.createDistribution"],
+        manageLiquidity: projectLifecycle === 1
+          ? routeWalletCapability
+          : projectCapabilities["studio.manageLiquidity"],
+        mint: projectCapabilities["studio.mint"],
+        permissionlessWindDown: projectCapabilities["windDown.openRedemptions"],
+        redeem: projectCapabilities["redemption.redeem"],
+        registerRedeemableAsset: projectCapabilities["windDown.registerAsset"],
+        startWindDown: projectCapabilities["windDown.start"],
+        }
+      : undefined;
+  const studioOperatorCapability: Capability = routeWalletCapability.status !== "enabled"
+    ? routeWalletCapability
+    : !exactProjectDashboard
+      ? { status: "blocked", reason: "Verified project state is still loading." }
+      : sameAddress(
+          wallet.account,
+          exactProjectDashboard.snapshot.launched
+            ? exactProjectDashboard.snapshot.executor
+            : exactProjectDashboard.snapshot.owner,
+        )
+        ? { status: "enabled" }
+        : {
+            status: "blocked",
+            reason: exactProjectDashboard.snapshot.launched
+              ? "Only the project executor can manage this Studio section after launch."
+              : "Only the project owner can manage this Studio section before launch.",
+          };
+  const studioSectionCapability = appRoute.kind === "studio-project"
+    ? studioProjectSectionCapability(
+        appRoute.section,
+        routeWalletCapability,
+        studioOperatorCapability,
+        projectCapabilities,
+        boardroomPanelCapabilities,
+      )
+    : routeWalletCapability;
 
-  const grantIssuerActionsAvailable = canRunGrantIssuerActions(wallet.account, grantSnapshot, productBoardroom, boardroomSnapshot, grantIssuerBoardroom);
+  const activeGrantVerifiedKey = appRoute.kind === "grant"
+    ? canonicalGrantRouteKey(appRoute.chainId, appRoute.grant, runtimeDeploymentIdentity)
+    : undefined;
+  const displayedGrantSnapshot = appRoute.kind === "grant"
+    ? verifiedAddressState(grantSnapshot, grantSnapshotVerifiedKey, activeGrantVerifiedKey, appRoute.grant)
+    : grantSnapshot;
+  const grantIssuerActionsAvailable = canRunGrantIssuerActions(wallet.account, displayedGrantSnapshot, grantIssuerBoardroom);
+  const scopedStudioTokenList = useMemo(
+    () => scopeSwapTokenList(swapTokenList, exactProjectPools),
+    [exactProjectPools, swapTokenList],
+  );
   const marketPanel = (
+    <Suspense fallback={<div aria-live="polite" className="border-y border-zinc-800 py-6 text-sm text-zinc-500">Loading market tools…</div>}>
     <SwapPanel
       account={wallet.account}
       deployment={deployment}
@@ -1841,9 +3777,11 @@ export function App(): React.JSX.Element {
       setLiquidityForm={setLiquidityForm}
       setRemoveLiquidityForm={setRemoveLiquidityForm}
       setForm={setSwapForm}
-      tokenList={swapTokenList}
+      tokenList={appRoute.kind === "studio-project" && appRoute.section === "liquidity" ? scopedStudioTokenList : swapTokenList}
       tokenListLoading={swapTokenListLoading}
       wrappedNativeSymbol={activeNetwork.wrappedNativeSymbol}
+      mode={appRoute.kind === "project" ? "swap" : appRoute.kind === "studio-project" && appRoute.section === "liquidity" ? "liquidity" : "all"}
+      lockSwapPair={appRoute.kind === "project" && appRoute.section === "participate"}
       addLiquidity={addLiquidity}
       approveLiquidityTokenA={approveLiquidityTokenA}
       approveLiquidityTokenB={approveLiquidityTokenB}
@@ -1859,6 +3797,7 @@ export function App(): React.JSX.Element {
       removeLiquidity={removeLiquidity}
       runAction={runAction}
     />
+    </Suspense>
   );
   const directGrantPanel = (
     <DirectGrantPanel
@@ -1878,8 +3817,10 @@ export function App(): React.JSX.Element {
   const grantPanel = (
     <GrantInspector
       account={wallet.account}
-      grantAddress={grantAddress}
-      grantSnapshot={grantSnapshot}
+      actionCapability={walletWriteCapability(wallet.account, wallet.chainId, appRouteChainId(appRoute) ?? activeNetwork.chainId)}
+      addressLocked={appRoute.kind === "grant"}
+      grantAddress={appRoute.kind === "grant" ? appRoute.grant : grantAddress}
+      grantSnapshot={displayedGrantSnapshot}
       issuerActionsAvailable={grantIssuerActionsAvailable}
       paymentApproval={paymentApproval}
       pendingAction={pendingAction}
@@ -1896,14 +3837,18 @@ export function App(): React.JSX.Element {
     />
   );
   const boardroomToolsPanel = (
+    <Suspense fallback={<div aria-live="polite" className="border-y border-zinc-800 py-6 text-sm text-zinc-500">Loading operator tools…</div>}>
     <BoardroomPanel
+      section={appRoute.kind === "studio-project" ? appRoute.section : "setup"}
+      boardroomIdentityLocked={appRoute.kind === "studio-project"}
+      capabilities={boardroomPanelCapabilities}
       boardroom={{
-        address: boardroomAddress,
+        address: canonicalStudioBoardroom ?? boardroomAddress,
         form: boardroomForm,
         mintAmount: boardroomMintAmount,
         mintTo: boardroomMintTo,
         predicted: predictedBoardroom,
-        snapshot: boardroomSnapshot,
+        snapshot: displayedBoardroomSnapshot,
         create: createBoardroom,
         load: loadBoardroom,
         mintShares: mintBoardroomShares,
@@ -1918,7 +3863,7 @@ export function App(): React.JSX.Element {
         address: fixedPriceSaleAddress,
         form: fixedPriceSaleForm,
         predicted: predictedFixedPriceSale,
-        snapshot: fixedPriceSaleSnapshot,
+        snapshot: displayedFixedPriceSaleSnapshot,
         cancel: cancelFixedPriceSale,
         close: closeFixedPriceSale,
         create: createFixedPriceSale,
@@ -1942,7 +3887,7 @@ export function App(): React.JSX.Element {
         exitForm: lockedLiquidityExitForm,
         form: lockedLiquidityForm,
         predicted: predictedLockedLiquidity,
-        snapshot: lockedLiquiditySnapshot,
+        snapshot: displayedLockedLiquiditySnapshot,
         claimFees: claimLockedLiquidityFees,
         create: createLockedLiquidity,
         exit: exitLockedLiquidity,
@@ -1956,7 +3901,7 @@ export function App(): React.JSX.Element {
         address: merkleAirdropAddress,
         form: merkleAirdropForm,
         predicted: predictedMerkleAirdrop,
-        snapshot: merkleAirdropSnapshot,
+        snapshot: displayedMerkleAirdropSnapshot,
         cancel: cancelMerkleAirdrop,
         close: closeMerkleAirdrop,
         create: createMerkleAirdrop,
@@ -1970,7 +3915,7 @@ export function App(): React.JSX.Element {
         form: migratingCurveForm,
         migrationForm: curveMigrationForm,
         predicted: predictedMigratingCurve,
-        snapshot: migratingCurveSnapshot,
+        snapshot: displayedMigratingCurveSnapshot,
         cancel: cancelMigratingCurve,
         create: createMigratingCurve,
         load: loadMigratingCurve,
@@ -1992,6 +3937,7 @@ export function App(): React.JSX.Element {
       }}
       workflow={{ deployment, pendingAction, runAction }}
     />
+    </Suspense>
   );
   const discoveryPendingAction = pendingAction ?? (autoDiscoveryPending ? "scan-discovery" : undefined);
   const discoveryPanel = (
@@ -2037,78 +3983,413 @@ export function App(): React.JSX.Element {
     />
   );
 
+  const governanceQueueControls = exactProjectDashboard?.snapshot.launched && verifiedProductGovernanceQueueLoaded ? (
+    !verifiedProductGovernanceQueueComplete && verifiedQueuedBoardroomActions.length === 0 ? (
+      <PageNotice title="No verified queued decisions" tone="warning">
+        Queue coverage is incomplete, and no candidate was safe to display. The app checks again every 30 seconds; retry before assuming the queue is empty.
+      </PageNotice>
+    ) : (
+      <GovernanceQueue
+        account={wallet.account}
+        actions={verifiedQueuedBoardroomActions}
+        capabilities={projectCapabilities}
+        pendingAction={pendingAction}
+        runAction={runAction}
+        submitTransaction={submitContractTransaction}
+      />
+    )
+  ) : undefined;
+  const governanceLaunchControls = exactProjectDashboard && !exactProjectDashboard.snapshot.launched ? (
+    <GovernanceLaunchControl
+      boardroom={exactProjectDashboard.address}
+      currentExecutor={exactProjectDashboard.snapshot.executor}
+      minimumDelay={exactProjectDashboard.snapshot.governanceConfig.minimumDelay}
+    />
+  ) : undefined;
+  const retryGovernanceAction = productGovernanceError && exactProjectDashboard ? (
+    <Button
+      size="sm"
+      variant="secondary"
+      onClick={() => {
+        productGovernanceLoadedKeyRef.current = undefined;
+        void loadProductGovernance(exactProjectDashboard.address);
+      }}
+    >
+      Retry governance
+    </Button>
+  ) : undefined;
+  useEffect(() => {
+    if (appRoute.kind !== "project" || appRoute.section !== "participate" || !selectedProjectPool) return;
+    const pool = swapTokenList.pools.find((candidate) => sameAddress(candidate.address, selectedProjectPool));
+    if (!pool) return;
+    setSwapForm((current) => {
+      const alreadyScoped = (sameAddress(current.tokenIn as Address, pool.token0) && sameAddress(current.tokenOut as Address, pool.token1))
+        || (sameAddress(current.tokenIn as Address, pool.token1) && sameAddress(current.tokenOut as Address, pool.token0));
+      return alreadyScoped ? current : { ...current, tokenIn: pool.token0, tokenOut: pool.token1 };
+    });
+    setSwapQuote((current) => current?.pool && sameAddress(current.pool.address, selectedProjectPool) ? current : undefined);
+  }, [appRoute, selectedProjectPool, swapTokenList.pools]);
+  useEffect(() => {
+    if (appRoute.kind !== "studio-project" || appRoute.section !== "liquidity" || exactProjectPools.length === 0) return;
+    setLiquidityForm((current) => {
+      const selectedPool = swapTokenList.pools.find((pool) =>
+        exactProjectPools.some((allowed) => sameAddress(allowed, pool.address))
+        && ((sameAddress(current.tokenA as Address, pool.token0) && sameAddress(current.tokenB as Address, pool.token1))
+          || (sameAddress(current.tokenA as Address, pool.token1) && sameAddress(current.tokenB as Address, pool.token0))));
+      if (selectedPool) return current;
+      const firstPool = swapTokenList.pools.find((pool) => sameAddress(pool.address, exactProjectPools[0]));
+      return firstPool ? { ...current, tokenA: firstPool.token0, tokenB: firstPool.token1 } : current;
+    });
+  }, [appRoute, exactProjectPools, swapTokenList.pools]);
+  const participationAmmContent = Object.fromEntries(
+    exactProjectPools.map((pool) => [participationAmmKey(pool), marketPanel]),
+  ) as Partial<Record<ParticipationContentKey, React.JSX.Element>>;
+  const participationContent = exactProjectDashboard ? {
+    ...createParticipationFlowContent({
+      account: wallet.account,
+      dashboard: exactProjectDashboard,
+      pendingAction,
+      publicClient,
+      runAction,
+      submitTransaction: submitContractTransaction,
+    }),
+    ...participationAmmContent,
+  } : {};
+  const portfolioTasks = walletPortfolioTasks({
+    account: wallet.account,
+    discovery,
+    inspectGrant: inspectDiscoveredGrant,
+    openBoardroom: useDiscoveredBoardroom,
+  });
+  const studioDirectory = productCatalog.length ? (
+    <>
+      <ol className="m-0 list-none border-t border-zinc-800 p-0">
+        {productCatalog.map((project) => (
+          <li className="border-b border-zinc-800" key={project.address}>
+            <a
+              className="flex w-full items-center justify-between gap-4 px-3 py-4 text-left transition-colors hover:bg-zinc-900/45"
+              href={appRouteHref({ kind: "studio-project", chainId: activeNetwork.chainId, boardroom: project.address, section: "setup" })}
+              onClick={(event) => {
+                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+                updateBoardroomAddress(project.address);
+                navigateRoute({ kind: "studio-project", chainId: activeNetwork.chainId, boardroom: project.address, section: "setup" });
+              }}
+            >
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-semibold text-zinc-100">{project.name ?? project.symbol ?? "Project"}</span>
+                <span className="mt-1 block truncate text-xs text-zinc-500">{project.symbol ?? "Boardroom"} · {shortAddress(project.address)}</span>
+              </span>
+              <span className="text-xs font-semibold text-lime-200">Open Studio</span>
+            </a>
+          </li>
+        ))}
+      </ol>
+      {productCatalogNextCursor !== undefined ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 py-4">
+          <span className="text-xs text-zinc-500">
+            Showing {productCatalog.length.toLocaleString()} of {(productCatalogTotalCount ?? productCatalog.length).toLocaleString()} projects
+          </span>
+          <Button disabled={productCatalogLoadingMore} size="sm" variant="secondary" onClick={() => void loadMoreProductBoardrooms()}>
+            {productCatalogLoadingMore ? "Loading projects…" : "Load more projects"}
+          </Button>
+        </div>
+      ) : null}
+      {productCatalogLoadMoreError ? <p className="m-0 mt-3 text-xs text-red-300">{productCatalogLoadMoreError}</p> : null}
+    </>
+  ) : undefined;
+
   const renderActiveWorkspace = (): React.JSX.Element | null => {
-    switch (activeView) {
-      case "project":
+    const routeChainId = appRouteChainId(appRoute);
+    if (routeChainId !== undefined && !supportedNetworkForChainId(routeChainId)) {
+      return (
+        <NotFoundPage
+          title="Unsupported network"
+          description={`pledge.cash is not configured for chain ${routeChainId.toString()} in this build.`}
+          returnHref={appRouteHref({ kind: "explore", chainId: activeNetwork.chainId })}
+          onReturn={() => navigateRoute({ kind: "explore", chainId: activeNetwork.chainId })}
+        />
+      );
+    }
+
+    switch (appRoute.kind) {
+      case "explore":
         return (
-          <ProductBoardroomDashboard
-            account={wallet.account}
-            dashboard={productBoardroom}
+          <ExplorePage
+            canLoadMore={productCatalogNextCursor !== undefined}
+            chainId={activeNetwork.chainId}
+            chainName={activeNetwork.name}
+            emptyAction={(
+              <ButtonLink
+                href={appRouteHref({ kind: "studio", chainId: activeNetwork.chainId })}
+                onClick={(event) => {
+                  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  navigateRoute({ kind: "studio", chainId: activeNetwork.chainId });
+                }}
+              >
+                Open Studio
+              </ButtonLink>
+            )}
             error={productBoardroomError}
-            governanceActivity={
-              sentinelBaseUrl ? (
-                <GovernanceActivity boardroom={productBoardroom?.address} chainId={activeNetwork.chainId} />
-              ) : undefined
-            }
-            loading={productBoardroomLoading}
-            pendingAction={pendingAction}
-            inspectGrant={inspectDiscoveredGrant}
-            openAdvanced={() => navigateView("advanced")}
-            openGrants={() => navigateView("grants")}
-            openManage={openProductBoardroomWorkspace}
-            openMarket={() => navigateView("market")}
-            openTools={openProductBoardroomWorkspace}
-            refresh={loadProductBoardroom}
-            runAction={runAction}
+            loadMoreError={productCatalogLoadMoreError}
+            loading={productBoardroomLoading && !productCatalogLoaded}
+            loadingMore={productCatalogLoadingMore}
+            projects={productCatalog}
+            totalProjects={productCatalogTotalCount}
+            onLoadMore={() => void loadMoreProductBoardrooms()}
+            onOpenProject={(project) => navigateRoute({ kind: "project", chainId: activeNetwork.chainId, boardroom: project.address, section: "overview" })}
+            onRetry={() => void loadProductBoardroom()}
+            projectHref={(project) => projectRouteHref(activeNetwork.chainId, project.address)}
           />
         );
-      case "market":
-        return (
-          <>
-            <WorkspaceHeader
-              eyebrow="Market"
-              title="Trade and Liquidity"
-              description="Buy, sell, inspect pool reserves, and manage LP positions without leaving the project context."
+      case "project": {
+        const failure = productBoardroomError && !productBoardroomLoading && !exactProjectDashboard
+          ? projectRouteFailure(productBoardroomError, productBoardroomFailureKind)
+          : undefined;
+        if (failure) {
+          return (
+            <ProjectRouteFailureState
+              failure={failure}
+              onRetry={failure.retryable ? () => void loadProductBoardroom(appRoute.boardroom) : undefined}
+              onReturn={() => navigateRoute({ kind: "explore", chainId: appRoute.chainId })}
+              returnHref={appRouteHref({ kind: "explore", chainId: appRoute.chainId })}
             />
-            {marketPanel}
-          </>
+          );
+        }
+        return (
+          <ProjectLayout
+            account={wallet.account}
+            activeSection={appRoute.section}
+            chainName={activeNetwork.name}
+            dashboard={exactProjectDashboard}
+            error={productBoardroomError}
+            loading={productBoardroomLoading}
+            mastheadAction={
+              exactProjectDashboard ? (
+                <ButtonLink
+                  href={appRouteHref({ kind: "studio-project", chainId: appRoute.chainId, boardroom: appRoute.boardroom, section: "setup" })}
+                  variant="secondary"
+                  onClick={(event) => {
+                    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                    event.preventDefault();
+                    navigateRoute({ kind: "studio-project", chainId: appRoute.chainId, boardroom: appRoute.boardroom, section: "setup" });
+                  }}
+                >
+                  Open Studio
+                </ButtonLink>
+              ) : undefined
+            }
+            onNavigateSection={(section) => navigateRoute({ kind: "project", chainId: appRoute.chainId, boardroom: appRoute.boardroom, section })}
+            onRetry={() => void loadProductBoardroom(appRoute.boardroom)}
+            sectionHref={(section) => projectRouteHref(appRoute.chainId, appRoute.boardroom, section)}
+          >
+            {appRoute.section === "overview" ? (
+              <ProjectOverviewPage
+                account={wallet.account}
+                dashboard={exactProjectDashboard}
+                loading={productBoardroomLoading}
+                onOpenParticipation={() => navigateRoute({ kind: "project", chainId: appRoute.chainId, boardroom: appRoute.boardroom, section: "participate" })}
+                participationHref={projectRouteHref(appRoute.chainId, appRoute.boardroom, "participate")}
+                onRefresh={() => void loadProductBoardroom(appRoute.boardroom)}
+              />
+            ) : appRoute.section === "participate" ? (
+              <ParticipatePage
+                content={participationContent}
+                dashboard={exactProjectDashboard}
+                error={productBoardroomError}
+                loading={productBoardroomLoading}
+                onSelectRoute={setSelectedParticipationRoute}
+                selectedRoute={selectedParticipationRoute}
+              />
+            ) : appRoute.section === "governance" ? (
+              <GovernancePage
+                activityContent={sentinelBaseUrl ? <GovernanceActivity boardroom={appRoute.boardroom} chainId={appRoute.chainId} /> : undefined}
+                dashboard={exactProjectDashboard}
+                error={productGovernanceError}
+                holderPower={verifiedBoardroomHolderPower}
+                loading={productBoardroomLoading || productGovernanceLoading}
+                primaryAction={retryGovernanceAction}
+                queueContent={governanceQueueControls}
+                warning={verifiedProductGovernanceWarning}
+              />
+            ) : (
+              <TransparencyPage
+                dashboard={exactProjectDashboard}
+                error={productBoardroomError}
+                grantHref={(grant) => appRouteHref({ kind: "grant", chainId: appRoute.chainId, grant })}
+                loading={productBoardroomLoading}
+                onOpenGrant={(grant) => navigateRoute({ kind: "grant", chainId: appRoute.chainId, grant })}
+              />
+            )}
+          </ProjectLayout>
         );
-      case "wallet":
-        return <PositionsWorkspace>{walletAccessPanel}</PositionsWorkspace>;
-      case "grants":
+      }
+      case "portfolio":
         return (
-          <>
-            <WorkspaceHeader
-              eyebrow="Grants"
-              title="Grant Settlement"
-              description="Inspect a grant, verify holder and payment terms, then settle vested tokens from the current holder wallet."
+          <PortfolioPage
+            account={wallet.account}
+            connectAction={wallet.account ? undefined : <ConnectWalletButton />}
+            discoveryContent={walletAccessPanel}
+            error={discovery.errors.length ? discovery.errors.join(" ") : undefined}
+            loading={Boolean(discoveryPendingAction)}
+            refreshAction={wallet.account ? <Button variant="secondary" onClick={() => void runAction("scan-wallet-access", scanWalletAccess)}>Refresh portfolio</Button> : undefined}
+            tasks={portfolioTasks}
+          />
+        );
+      case "grant":
+        if (grantRouteError) {
+          const failureKind = grantRouteFailureKind ?? "transient";
+          return (
+            <GrantVerificationFailureState
+              backHref={appRouteHref({ kind: "portfolio", chainId: appRoute.chainId })}
+              grant={appRoute.grant}
+              kind={failureKind}
+              message={grantRouteError}
+              onBack={() => navigateRoute({ kind: "portfolio", chainId: appRoute.chainId })}
+              onRetry={failureKind === "transient" ? () => void loadCanonicalGrantRoute(
+                appRoute.grant,
+                canonicalGrantRouteKey(appRoute.chainId, appRoute.grant, runtimeDeploymentIdentity),
+              ) : undefined}
             />
+          );
+        }
+        if (!displayedGrantSnapshot) {
+          return <GrantVerificationLoadingState grant={appRoute.grant} />;
+        }
+        return (
+          <GrantDetailPage
+            account={wallet.account}
+            backHref={appRouteHref({ kind: "portfolio", chainId: appRoute.chainId })}
+            grant={appRoute.grant}
+            onBack={() => navigateRoute({ kind: "portfolio", chainId: appRoute.chainId })}
+          >
             {grantPanel}
-          </>
+          </GrantDetailPage>
         );
-      case "manage":
-        return (
-          <ManageWorkspace account={wallet.account} boardroomAddress={boardroomAddress} boardroomSnapshot={boardroomSnapshot}>
+      case "studio":
+      case "studio-project": {
+        const selectedDashboard = appRoute.kind === "studio-project" ? exactProjectDashboard : undefined;
+        const exactOperatorStateReady = appRoute.kind !== "studio-project"
+          || Boolean(selectedDashboard && (
+            appRoute.section === "governance"
+            || displayedBoardroomSnapshot && sameAddress(displayedBoardroomSnapshot.address, appRoute.boardroom)
+          ));
+        const studioAccessNotice = appRoute.kind === "studio-project" ? (
+          <PageNotice title={`Studio ${studioSectionLabel(appRoute.section)} is locked`} tone="warning">
+            <div className="grid gap-3">
+              <span>{studioSectionCapability.reason ?? "This wallet is not authorized for an action in this section."}</span>
+              <div className="flex flex-wrap gap-2">
+                {studioSectionCapability.status === "connect" ? <ConnectWalletButton /> : null}
+                {studioSectionCapability.status === "switch" ? (
+                  <Button variant="secondary" onClick={() => void runAction("switch-studio-chain", switchChain)}>Switch wallet network</Button>
+                ) : null}
+                {studioSectionCapability.status === "blocked" || studioSectionCapability.status === "hidden" ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => navigateRoute({ kind: "project", chainId: appRoute.chainId, boardroom: appRoute.boardroom, section: "overview" })}
+                  >
+                    Open public project
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          </PageNotice>
+        ) : null;
+        const operatorTools = !exactOperatorStateReady ? (
+          <PageNotice title="Loading the exact project state">
+            Studio will not expose transaction controls until the loaded Boardroom matches this canonical project URL.
+          </PageNotice>
+        ) : appRoute.kind === "studio" && !wallet.account ? (
+          <PageNotice title="Connect the operator wallet">
+            Studio keeps transaction controls hidden until a wallet is connected. The project’s public state remains available in its Overview and Transparency pages.
+          </PageNotice>
+        ) : appRoute.kind === "studio-project" && studioSectionCapability.status !== "enabled" ? (
+          studioAccessNotice
+        ) : appRoute.kind === "studio-project" && appRoute.section === "governance" ? (
+          <GovernancePage
+            dashboard={selectedDashboard}
+            error={productGovernanceError}
+            holderPower={verifiedBoardroomHolderPower}
+            loading={productBoardroomLoading || productGovernanceLoading}
+            primaryAction={retryGovernanceAction}
+            queueContent={governanceQueueControls ?? governanceLaunchControls}
+            warning={verifiedProductGovernanceWarning}
+          />
+        ) : appRoute.kind === "studio-project" && appRoute.section === "liquidity" ? (
+          <div className="grid gap-4">
             {boardroomToolsPanel}
-          </ManageWorkspace>
-        );
-      case "activity":
-        return <ActivityWorkspace clearLogs={clearLogs} dashboard={productBoardroom} logs={logs} />;
-      case "notifications":
-        return <SentinelSettingsView governanceChainId={activeNetwork.chainId} wallet={wallet} />;
-      case "advanced":
+            {exactProjectPools.length > 0 ? marketPanel : (
+              <PageNotice title="No project AMM pool is available">
+                Create or migrate project liquidity before adding public AMM liquidity or managing an LP position.
+              </PageNotice>
+            )}
+          </div>
+        ) : boardroomToolsPanel;
         return (
-          <AdvancedWorkspace>
-            {diagnosticsPanel}
-            {directGrantPanel}
-            {discoveryPanel}
-          </AdvancedWorkspace>
+          <StudioPage
+            account={wallet.account}
+            dashboard={selectedDashboard}
+            error={productBoardroomError ?? (appRoute.kind === "studio-project" && appRoute.section === "close" ? productGovernanceError : undefined)}
+            loading={productBoardroomLoading}
+            createAction={appRoute.kind === "studio" ? (
+              wallet.account ? (
+                <Button onClick={() => document.getElementById("studio-operator-tools")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+                  Start project setup
+                </Button>
+              ) : <ConnectWalletButton />
+            ) : undefined}
+            onRetry={appRoute.kind === "studio-project"
+              ? () => {
+                  void loadProductBoardroom(appRoute.boardroom);
+                  if (appRoute.section === "close") {
+                    productGovernanceLoadedKeyRef.current = undefined;
+                    void loadProductGovernance(appRoute.boardroom);
+                  }
+                }
+              : () => void loadProductBoardroom()}
+            operatorTools={operatorTools}
+            projectDirectoryContent={appRoute.kind === "studio" ? studioDirectory : undefined}
+            showLifecycleOverview={appRoute.kind === "studio" || appRoute.section === "setup"}
+            sectionNavigation={appRoute.kind === "studio-project" ? (
+              <StudioSectionNav
+                active={appRoute.section}
+                boardroom={appRoute.boardroom}
+                chainId={appRoute.chainId}
+                onNavigate={(section) => navigateRoute({ kind: "studio-project", chainId: appRoute.chainId, boardroom: appRoute.boardroom, section })}
+              />
+            ) : undefined}
+          />
+        );
+      }
+      case "alerts":
+        return <SentinelSettingsView governanceChainId={activeNetwork.chainId} wallet={wallet} />;
+      case "tools":
+        return <AdvancedWorkspace>{diagnosticsPanel}{directGrantPanel}{discoveryPanel}</AdvancedWorkspace>;
+      case "legacy-project":
+        return <RedirectState destination="Project workspace" />;
+      case "not-found":
+        return (
+          <NotFoundPage
+            returnHref={appRouteHref({ kind: "explore", chainId: activeNetwork.chainId })}
+            onReturn={() => navigateRoute({ kind: "explore", chainId: activeNetwork.chainId })}
+          />
         );
     }
   };
 
   return (
-    <div className="min-h-svh text-zinc-100">
+    <div className="min-h-svh text-[var(--pc-text)]">
+      <a
+        className="fixed left-3 top-3 z-[100] -translate-y-24 rounded-md border border-[var(--pc-border-strong)] bg-[var(--pc-surface-raised)] px-4 py-2 text-sm font-semibold text-[var(--pc-text)] shadow-lg transition-transform focus:translate-y-0 focus:outline-none focus:ring-2 focus:ring-[var(--pc-accent)]"
+        href="#app-main-content"
+        onClick={(event) => {
+          event.preventDefault();
+          document.getElementById("app-main-content")?.focus();
+        }}
+      >
+        Skip to main content
+      </a>
       <AppHeader
         wallet={wallet}
         chainId={activeNetwork.chainId}
@@ -2120,28 +4401,39 @@ export function App(): React.JSX.Element {
         switchChain={switchChain}
       />
 
-      <main className="min-h-[calc(100svh-64px)]">
-        <section className="mx-auto w-full max-w-[1480px] min-w-0 px-4 py-4 sm:px-6 sm:py-5">
-          {activeView === "notifications" ? null : (
-            <ProjectContextBar
-              activeView={activeView}
-              chainName={activeNetwork.name}
-              dashboard={productBoardroom}
-              deployment={deployment}
-              error={productBoardroomError}
-              loading={productBoardroomLoading}
-              pendingAction={pendingAction}
-              wallet={wallet}
-              navigateView={navigateView}
-              refresh={loadProductBoardroom}
-              runAction={runAction}
-            />
-          )}
-          <WorkspaceNav activeView={activeView} navigateView={navigateView} />
+      <div className="sticky top-14 z-20 hidden border-b border-[var(--pc-border)] bg-[color:var(--pc-canvas-translucent)] px-5 py-2 backdrop-blur-xl md:block">
+        <div className="mx-auto flex w-full max-w-[1240px] items-center justify-between">
+          <DesktopPrimaryNav
+            active={primaryDestination(appRoute)}
+            chainId={activeNetwork.chainId}
+            onNavigate={(destination) => navigateRoute(primaryRoute(destination, activeNetwork.chainId))}
+          />
+          {appRoute.kind === "project" || appRoute.kind === "studio-project" ? (
+            <span className="font-mono text-[11px] text-[var(--pc-text-subtle)]">{shortAddress(appRoute.boardroom)}</span>
+          ) : null}
+        </div>
+      </div>
 
-          {renderActiveWorkspace()}
+      <div aria-atomic="true" aria-live="polite" className="sr-only">{activeRouteTitle}</div>
+      <main
+        aria-label={activeRouteTitle}
+        className="mobile-nav-safe-area min-h-[calc(100svh-56px)] outline-none md:pb-0"
+        id="app-main-content"
+        tabIndex={-1}
+      >
+        <section className="page-enter mx-auto w-full max-w-[1240px] min-w-0 px-4 py-5 sm:px-6 sm:py-7">
+          <Suspense fallback={<div aria-live="polite" className="border-y border-zinc-800 py-8 text-sm text-zinc-500">Loading workspace…</div>}>
+            {renderActiveWorkspace()}
+          </Suspense>
         </section>
       </main>
+      <MobilePrimaryNav
+        active={primaryDestination(appRoute)}
+        chainId={activeNetwork.chainId}
+        onNavigate={(destination) => navigateRoute(primaryRoute(destination, activeNetwork.chainId))}
+      />
+      <TransactionReview review={review} approve={approveReview} cancel={cancelReview} />
+      <TransactionTray records={transactions} clearSettled={clearSettled} />
     </div>
   );
 }
@@ -2149,13 +4441,407 @@ export function App(): React.JSX.Element {
 export function canRunGrantIssuerActions(
   account: Address | undefined,
   grantSnapshot: GrantSnapshot | undefined,
-  dashboard: ProductBoardroomDashboardState | undefined,
-  boardroomSnapshot: BoardroomSnapshot | undefined,
   grantIssuerBoardroom: GrantIssuerBoardroomAccess | undefined,
 ): boolean {
   if (!account || !grantSnapshot) return false;
   if (sameAddress(account, grantSnapshot.issuer)) return true;
-  if (sameAddress(grantSnapshot.issuer, dashboard?.address) && sameAddress(account, dashboard?.snapshot.owner)) return true;
-  if (sameAddress(grantSnapshot.issuer, grantIssuerBoardroom?.boardroom) && sameAddress(account, grantIssuerBoardroom?.owner)) return true;
-  return sameAddress(grantSnapshot.issuer, boardroomSnapshot?.address) && sameAddress(account, boardroomSnapshot?.owner);
+  if (grantIssuerBoardroom && sameAddress(grantSnapshot.issuer, grantIssuerBoardroom.boardroom)) {
+    if (grantIssuerBoardroom.status === 1) return true;
+    if (grantIssuerBoardroom.status !== 0) return false;
+    const authority = grantIssuerBoardroom?.launched ? grantIssuerBoardroom.executor : grantIssuerBoardroom?.owner;
+    if (sameAddress(account, authority)) return true;
+  }
+  return false;
+}
+
+function boardroomCallsFromExecution(request: Record<string, unknown>): readonly BoardroomCall[] {
+  const args = request.args;
+  if (!Array.isArray(args)) throw new Error("Boardroom execution is missing its calls.");
+  if (request.functionName === "execute") {
+    const call = args[0];
+    if (!call || typeof call !== "object") throw new Error("Boardroom execution is missing its call.");
+    return [call as BoardroomCall];
+  }
+  if (request.functionName === "executeBatch") {
+    const calls = args[0];
+    if (!Array.isArray(calls) || calls.length === 0) throw new Error("Boardroom execution batch is empty.");
+    return calls as BoardroomCall[];
+  }
+  throw new Error("Expected a Boardroom execute or executeBatch transaction.");
+}
+
+function walletPortfolioTasks({
+  account,
+  discovery,
+  inspectGrant,
+  openBoardroom,
+}: {
+  account: Address | undefined;
+  discovery: DiscoverySnapshot;
+  inspectGrant: (grant: Address) => void;
+  openBoardroom: (boardroom: Address) => void;
+}): PortfolioTask[] {
+  if (!account) return [];
+  const tasks: PortfolioTask[] = [];
+  for (const grant of Object.values(discovery.grantsByAddress)) {
+    if (!sameAddress(grant.currentHolder, account)) continue;
+    tasks.push({
+      id: `grant:${grant.grantAddress}`,
+      title: grant.closed ? "Grant record" : "Review token grant",
+      description: grant.closed
+        ? "This grant is closed and remains available as an onchain record."
+        : "Check vesting, the settleable amount, payment requirements, and expiry.",
+      project: shortAddress(grant.issuer),
+      status: grant.closed ? "complete" : "attention",
+      action: <Button size="sm" variant="secondary" onClick={() => inspectGrant(grant.grantAddress)}>Open grant</Button>,
+    });
+  }
+  for (const boardroom of Object.values(discovery.boardroomsByAddress)) {
+    if (!sameAddress(boardroom.owner, account)) continue;
+    tasks.push({
+      id: `boardroom:${boardroom.boardroom}`,
+      title: `Operate ${boardroom.name || boardroom.symbol || "project"}`,
+      description: "This wallet is the recorded project owner. Studio shows the next lifecycle-safe operation.",
+      project: boardroom.symbol,
+      status: "informational",
+      action: <Button size="sm" variant="secondary" onClick={() => openBoardroom(boardroom.boardroom)}>Open Studio</Button>,
+    });
+  }
+  return tasks;
+}
+
+function capabilityLifecycle(status: number): NonNullable<ProjectCapabilityContext["project"]>["status"] {
+  if (status === 0) return "active";
+  if (status === 1) return "winding-down";
+  if (status === 2) return "redemptions-open";
+  return "closed";
+}
+
+export function studioProjectSectionCapability(
+  section: StudioSection,
+  walletCapability: Capability,
+  operatorCapability: Capability,
+  projectCapabilities: ProjectCapabilityMap,
+  boardroomCapabilities: BoardroomPanelCapabilities | undefined,
+): Capability {
+  if (walletCapability.status !== "enabled") return walletCapability;
+  if (section === "setup") return operatorCapability;
+
+  const candidates: Capability[] = section === "token"
+    ? compactCapabilities([
+        boardroomCapabilities?.mint,
+        boardroomCapabilities?.redeem,
+        boardroomCapabilities?.claimRedemption,
+      ])
+    : section === "grants"
+      ? compactCapabilities([boardroomCapabilities?.createGrant])
+      : section === "distributions"
+        ? compactCapabilities([
+            boardroomCapabilities?.createDistribution,
+            boardroomCapabilities?.manageDistribution,
+          ])
+        : section === "liquidity"
+          ? compactCapabilities([
+              boardroomCapabilities?.createLiquidity,
+              boardroomCapabilities?.manageLiquidity,
+            ])
+          : section === "governance"
+            ? [
+                projectCapabilities["governance.launch"],
+                projectCapabilities["governance.queue"],
+                projectCapabilities["governance.veto"],
+                projectCapabilities["governance.executeReady"],
+              ]
+            : compactCapabilities([
+                boardroomCapabilities?.startWindDown,
+                boardroomCapabilities?.registerRedeemableAsset,
+                boardroomCapabilities?.permissionlessWindDown,
+                boardroomCapabilities?.redeem,
+                boardroomCapabilities?.claimRedemption,
+              ]);
+
+  const enabled = candidates.find((capability) => capability.status === "enabled");
+  if (enabled) return enabled;
+  const actionable = candidates.find((capability) => capability.status !== "hidden");
+  return actionable ?? {
+    status: "blocked",
+    reason: `No ${studioSectionLabel(section)} action is available to this wallet right now.`,
+  };
+}
+
+function compactCapabilities(capabilities: Array<Capability | undefined>): Capability[] {
+  return capabilities.filter((capability): capability is Capability => capability !== undefined);
+}
+
+function studioSectionLabel(section: StudioSection): string {
+  if (section === "setup") return "project setup";
+  if (section === "token") return "token management";
+  if (section === "grants") return "grant management";
+  if (section === "distributions") return "distribution management";
+  if (section === "liquidity") return "liquidity management";
+  if (section === "governance") return "governance";
+  return "wind-down or redemption";
+}
+
+function walletWriteCapability(
+  account: Address | undefined,
+  walletChainId: number | undefined,
+  routeChainId: number,
+): Capability {
+  if (!account) return { status: "connect", reason: "Connect a wallet to continue." };
+  if (walletChainId !== routeChainId) {
+    return { status: "switch", reason: `Switch your wallet to chain ${routeChainId.toString()} to continue.` };
+  }
+  return { status: "enabled" };
+}
+
+function boardroomLaunchReady(snapshot: BoardroomSnapshot): boolean {
+  const decimals = snapshot.shareTokenMetadata?.decimals ?? 18;
+  return snapshot.governanceEligibleSupply >= 10n ** BigInt(decimals);
+}
+
+function participationCapabilityOpportunities(
+  dashboard: ProductBoardroomDashboardState | undefined,
+): NonNullable<ProjectCapabilityContext["opportunities"]> {
+  const opportunities: NonNullable<ProjectCapabilityContext["opportunities"]> = {};
+  for (const distribution of dashboard?.snapshot.distributionSummaries ?? []) {
+    if (!distribution.state) continue;
+    if (distribution.kind === "fixed-price-sale" && "saleStatus" in distribution.state) {
+      const available = distribution.state.saleStatus === 0 && !distribution.state.closed && distribution.state.remainingShares > 0n;
+      opportunities["participate.fixedSale.buy"] = mergeCapabilityOpportunity(
+        opportunities["participate.fixedSale.buy"],
+        { available, ...(!available ? { reason: "The fixed-price sale is not accepting purchases." } : {}) },
+      );
+    }
+    if (distribution.kind === "migrating-bonding-curve" && "curveStatus" in distribution.state) {
+      const available = distribution.state.curveStatus === 0 && !distribution.state.closed;
+      opportunities["participate.curve.buy"] = mergeCapabilityOpportunity(
+        opportunities["participate.curve.buy"],
+        {
+          available: available && distribution.state.remainingSaleShares > 0n,
+          ...(!available || distribution.state.remainingSaleShares === 0n ? { reason: "The curve is no longer selling project tokens." } : {}),
+        },
+      );
+      opportunities["participate.curve.sell"] = mergeCapabilityOpportunity(
+        opportunities["participate.curve.sell"],
+        { available, ...(!available ? { reason: "The curve is no longer accepting sells." } : {}) },
+      );
+    }
+    if (distribution.kind === "merkle-airdrop" && "airdropStatus" in distribution.state) {
+      const available = distribution.state.airdropStatus === 0 && !distribution.state.closed && distribution.state.remainingShares > 0n;
+      const opportunity = { available, ...(!available ? { reason: "The airdrop claim window is not active." } : {}) };
+      opportunities["participate.airdrop.claim"] = mergeCapabilityOpportunity(
+        opportunities["participate.airdrop.claim"],
+        opportunity,
+      );
+      opportunities["participate.airdrop.claimGrant"] = mergeCapabilityOpportunity(
+        opportunities["participate.airdrop.claimGrant"],
+        opportunity,
+      );
+    }
+  }
+  const hasAmm = Boolean(dashboard?.history?.pool || dashboard?.snapshot.lockedLiquiditySummaries.some((locker) => locker.state?.pool));
+  opportunities["participate.amm.swap"] = {
+    available: hasAmm,
+    ...(!hasAmm ? { reason: "No project AMM pool has been discovered." } : {}),
+  };
+  return opportunities;
+}
+
+export function mergeCapabilityOpportunity(
+  current: CapabilityOpportunity | undefined,
+  next: CapabilityOpportunity,
+): CapabilityOpportunity {
+  if (!current) return next;
+  if (current.available || next.available) return { available: true };
+  return { available: false, reason: current.reason ?? next.reason };
+}
+
+export function mergeProductBoardroomCatalog(
+  current: readonly ProductBoardroomCatalogEntry[],
+  next: readonly ProductBoardroomCatalogEntry[],
+): ProductBoardroomCatalogEntry[] {
+  const merged = [...current];
+  const positions = new Map(merged.map((entry, index) => [entry.address.toLowerCase(), index]));
+  for (const entry of next) {
+    const key = entry.address.toLowerCase();
+    const existing = positions.get(key);
+    if (existing === undefined) {
+      positions.set(key, merged.length);
+      merged.push(entry);
+    } else {
+      merged[existing] = entry;
+    }
+  }
+  return merged;
+}
+
+export function productReadErrorMessage(error: unknown, networkName: string): string {
+  const message = errorMessage(error);
+  if (/(?:http request failed|failed to fetch|fetch failed|network ?error|rpc request|timed? ?out|timeout)/i.test(message)) {
+    return `Could not reach ${networkName}. Check the RPC connection and try again.`;
+  }
+  return message;
+}
+
+export function canonicalGrantReadErrorMessage(error: unknown, networkName: string): string {
+  const message = errorMessage(error);
+  if (/(?:http request failed|failed to fetch|fetch failed|network ?error|rpc request|timed? ?out|timeout)/i.test(message)) {
+    return `Could not reach ${networkName} to verify this grant. Check the RPC connection and try again.`;
+  }
+  return "pledge.cash could not confirm that this address is a grant from the active deployment. Check the address and network, then try again.";
+}
+
+function appRouteChainId(route: AppRoute): number | undefined {
+  return "chainId" in route ? route.chainId : undefined;
+}
+
+export function networkSwitchDestination(route: AppRoute, chainId: number): CanonicalAppRoute | undefined {
+  if (route.kind === "portfolio" || route.kind === "grant") return { kind: "portfolio", chainId };
+  if (route.kind === "studio" || route.kind === "studio-project") return { kind: "studio", chainId };
+  if (route.kind === "explore" || route.kind === "project" || route.kind === "legacy-project") return { kind: "explore", chainId };
+  return undefined;
+}
+
+function governanceRouteKey(
+  route: AppRoute,
+  account: Address | undefined,
+  deploymentIdentity: string | undefined,
+): string | undefined {
+  const governanceRoute = (route.kind === "project" && route.section === "governance")
+    || (route.kind === "studio-project" && (route.section === "governance" || route.section === "close"));
+  if (!governanceRoute) return undefined;
+  return `${route.chainId.toString()}:${deploymentIdentity ?? "unconfigured"}:${route.boardroom.toLowerCase()}:${account?.toLowerCase() ?? "read-only"}`;
+}
+
+function canonicalGrantRouteKey(
+  chainId: number,
+  grant: Address,
+  deploymentIdentity: string | undefined,
+): string {
+  return `${chainId.toString()}:${deploymentIdentity ?? "unconfigured"}:${grant.toLowerCase()}`;
+}
+
+export function canonicalProjectStateKey(
+  chainId: number,
+  boardroom: Address,
+  deploymentIdentity: string | undefined,
+): string {
+  return `${chainId.toString()}:${deploymentIdentity ?? "unconfigured"}:${boardroom.toLowerCase()}`;
+}
+
+export function studioReadScopeKey(
+  route: AppRoute,
+  chainId: number,
+  deploymentIdentity: string | undefined,
+): string {
+  return `${chainId.toString()}:${deploymentIdentity ?? "unconfigured"}:${appRouteIdentityKey(route)}`;
+}
+
+function appRouteIdentityKey(route: AppRoute): string {
+  if (isCanonicalAppRoute(route)) return appRouteHref(route);
+  if (route.kind === "legacy-project") {
+    return `${route.kind}:${route.surface}:${route.section}`;
+  }
+  return route.kind;
+}
+
+export function appRouteTitle(route: AppRoute): string {
+  switch (route.kind) {
+    case "explore": return "Project directory";
+    case "portfolio": return "Wallet portfolio";
+    case "grant": return "Grant details";
+    case "studio": return "Project Studio";
+    case "studio-project": return `Studio ${studioSectionLabel(route.section)}`;
+    case "project": {
+      if (route.section === "participate") return "Project participation";
+      if (route.section === "governance") return "Project governance";
+      if (route.section === "transparency") return "Project transparency";
+      return "Project overview";
+    }
+    case "alerts": return "Alerts";
+    case "tools": return "Advanced tools";
+    case "legacy-project": return "Opening project";
+    case "not-found": return "Page not found";
+  }
+}
+
+export function contextualAppRouteTitle(route: AppRoute, projectName?: string | undefined): string {
+  if (route.kind === "project") {
+    const identity = projectName ?? `Project ${shortAddress(route.boardroom)}`;
+    return `${identity} — ${projectSectionTitle(route.section)}`;
+  }
+  if (route.kind === "studio-project") {
+    const identity = projectName ?? `Project ${shortAddress(route.boardroom)}`;
+    return `${identity} — Studio ${studioSectionLabel(route.section)}`;
+  }
+  if (route.kind === "grant") return `Grant ${shortAddress(route.grant)}`;
+  return appRouteTitle(route);
+}
+
+function projectSectionTitle(section: "overview" | "participate" | "governance" | "transparency"): string {
+  if (section === "participate") return "Participation";
+  return `${section[0]?.toUpperCase() ?? ""}${section.slice(1)}`;
+}
+
+function isCanonicalAppRoute(route: AppRoute): route is CanonicalAppRoute {
+  return route.kind !== "legacy-project" && route.kind !== "not-found";
+}
+
+function appRouteView(route: AppRoute): AppView {
+  switch (route.kind) {
+    case "portfolio":
+    case "grant":
+      return "wallet";
+    case "studio":
+    case "studio-project":
+      return "manage";
+    case "project":
+      if (route.section === "participate") return "market";
+      if (route.section === "governance" || route.section === "transparency") return "activity";
+      return "project";
+    case "legacy-project":
+      if (route.surface === "studio") return "manage";
+      if (route.section === "participate") return "market";
+      if (route.section === "governance" || route.section === "transparency") return "activity";
+      return "project";
+    case "alerts":
+      return "notifications";
+    case "tools":
+      return "advanced";
+    case "explore":
+    case "not-found":
+      return "project";
+  }
+}
+
+function routeUsesProductData(route: AppRoute): boolean {
+  return route.kind === "explore"
+    || route.kind === "project"
+    || route.kind === "studio"
+    || route.kind === "studio-project"
+    || route.kind === "legacy-project";
+}
+
+function legacyProjectDestination(
+  route: Extract<AppRoute, { kind: "legacy-project" }>,
+  chainId: number,
+  boardroom: Address,
+): CanonicalAppRoute {
+  if (route.surface === "studio") {
+    const section = ["setup", "token", "grants", "distributions", "liquidity", "governance", "close"].includes(route.section)
+      ? route.section as Extract<CanonicalAppRoute, { kind: "studio-project" }>["section"]
+      : "setup";
+    return { kind: "studio-project", chainId, boardroom, section };
+  }
+  const section = ["overview", "participate", "governance", "transparency"].includes(route.section)
+    ? route.section as Extract<CanonicalAppRoute, { kind: "project" }>["section"]
+    : "overview";
+  return { kind: "project", chainId, boardroom, section };
+}
+
+function primaryRoute(destination: PrimaryDestination, chainId: number): CanonicalAppRoute {
+  if (destination === "portfolio") return { kind: "portfolio", chainId };
+  if (destination === "studio") return { kind: "studio", chainId };
+  return { kind: "explore", chainId };
 }
