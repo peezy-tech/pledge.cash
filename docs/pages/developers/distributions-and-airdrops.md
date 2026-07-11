@@ -19,7 +19,9 @@ same type.
 
 Fixed-price buys round payment up. Curve buys round cost up and sells round refund down. Use contract or SDK quote helpers immediately before submission and bind maximum/minimum plus deadline onchain.
 
-Persist curve sell rights by recipient account; do not derive them from current ERC20 balance. Once graduation latches, disable buy and sell. Migration is active-Boardroom only. Cancellation returns shares exactly and may leave explicitly quarantined quote for retry.
+Persist curve sell rights by recipient account; do not derive them from current ERC20 balance. Once graduation latches,
+disable buy and sell. Migration is active-Boardroom only. Migration and cancellation return remaining canonical shares
+exactly, while either terminal path can leave explicitly quarantined quote for retry only to the Boardroom.
 
 ## Merkle manifests
 

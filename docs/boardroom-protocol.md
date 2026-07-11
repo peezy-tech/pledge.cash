@@ -199,7 +199,9 @@ after launch.
    through `Boardroom.execute` before launch or a queued action after launch.
 5. Migration creates Boardroom-owned locked AMM liquidity through `LockedLiquidityFactory` and records the locker on the
    Boardroom. The Boardroom-controlled call supplies the AMM slippage bounds.
-6. Any quote or share remainder returns to the Boardroom treasury.
+6. The remaining canonical shares return exactly to the Boardroom treasury. Quote remainder return is bounded and
+   best-effort; a hostile-token shortfall is quarantined in the migrated curve and remains retryable only to the
+   Boardroom.
 
 ## Wind-Down And Redemption Flow
 

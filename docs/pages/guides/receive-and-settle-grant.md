@@ -15,7 +15,8 @@ A grant is an escrow-backed right, represented by an ERC721 grant-right token. I
 - For a paid grant, enough payment token and native token for approval, settlement, and gas.
 - A decision about how much of the currently settleable amount to receive.
 
-Only the current grant holder can settle. The issuer can halt future vesting or withdraw expired escrow; those are different authorities.
+Only the current grant holder can settle. The issuer can halt future vesting or withdraw expired escrow; those are
+different authorities, although one address may occupy both roles.
 
 ## 1. Verify the grant
 

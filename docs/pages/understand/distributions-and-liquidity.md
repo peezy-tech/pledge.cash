@@ -28,7 +28,10 @@ A curve prices buys and sells from an integral over sold supply:
 - sell rights do not follow ERC20 transfers;
 - buy quotes round up and sell refunds round down.
 
-When graduation becomes feasible, it latches and freezes trading. The active Boardroom can migrate reserved shares and quote into Boardroom-owned locked liquidity. If the Boardroom cancels instead, shares return exactly; hostile quote-token recovery is bounded and any shortfall remains recorded and retryable to the Boardroom.
+When graduation becomes feasible, it latches and freezes trading. The active Boardroom can migrate reserved shares and
+quote into Boardroom-owned locked liquidity. Migration and cancellation both return remaining canonical shares exactly;
+quote remainder return is bounded and best-effort, and any hostile-token shortfall remains recorded in the closed curve
+and retryable only to the Boardroom.
 
 ## AMM pool
 

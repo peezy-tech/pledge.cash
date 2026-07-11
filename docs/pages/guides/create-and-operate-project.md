@@ -66,7 +66,9 @@ See [Distributions and liquidity](../understand/distributions-and-liquidity), [G
 - Prune closed obligations so they stop consuming bounded active capacity.
 - Keep Sentinel wallet coverage, Boardroom subscriptions, severity thresholds, and delivery channels current, but never treat an alert as onchain authority.
 
-For a migrating curve, graduation latches and freezes trading. Cancellation returns canonical shares exactly; quote-token recovery is best effort if the quote token has become hostile, and any shortfall is tracked for retry.
+For a migrating curve, graduation latches and freezes trading. Migration and cancellation both return remaining
+canonical shares exactly. Each terminal path returns quote remainder through a bounded best-effort path; a hostile quote
+token can leave a shortfall tracked in the closed curve for retry only to the Boardroom.
 
 ## 5. Governance launch boundary
 

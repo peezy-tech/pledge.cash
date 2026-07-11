@@ -142,7 +142,8 @@ When a transferable grant-right token moves, the factory calls `TokenGrant.onGra
 `TokenGrant.holder()` to the new ERC721 owner.
 
 When a grant closes, `TokenGrant.holder()` is cleared to `address(0)` because no address retains settlement authority.
-The final holder is recorded in the factory `GrantClosed` event emitted before the ERC721 burn.
+The factory captures the final holder, burns the grant-right ERC721, and then records that captured address in the
+`GrantClosed` event.
 
 ### Settle
 
@@ -214,8 +215,9 @@ rights. Partially settled grants preserve their settled accounting and record on
 - transferable grant-right ERC721 tokens cannot move before their transfer unlock time.
 - grant lifecycle transitions lock transferable grant-right ERC721 movement during external token calls.
 - grant-right ERC721 ownership does not silently disappear at expiry.
-- holder-only settlement cannot be called by issuer or random callers.
-- issuer-only transitions cannot be called by holder or random callers.
+- settlement accepts only the current holder address; unrelated callers cannot settle.
+- issuer-only transitions accept only the configured issuer address; unrelated callers cannot invoke them.
+- issuer and holder are address-based roles, not mutually exclusive identities; one address can satisfy both gates.
 - only a canonical Boardroom issuer can quarantine a grant, and only after settlement rights have expired.
 - a non-share grant asset that returns on halt or expiry remains inside the Boardroom redemption basket.
 - `price == 0` grants never call a payment token.
