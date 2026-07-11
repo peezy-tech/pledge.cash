@@ -1,7 +1,7 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { access, readFile } from "node:fs/promises";
-import { extname, join, normalize, relative } from "node:path";
+import { extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 
@@ -29,7 +29,7 @@ export default defineConfig({
       },
     },
   },
-  plugins: [deploymentArtifactsPlugin(), react(), tailwindcss()],
+  plugins: [previewDirectoryIndexPlugin(), deploymentArtifactsPlugin(), react(), tailwindcss()],
   preview: {
     ...(allowedHosts?.length ? { allowedHosts } : {}),
     proxy: localRpcProxy,
@@ -44,6 +44,66 @@ export default defineConfig({
     },
   },
 });
+
+export function previewDirectoryIndexRoute(requestUrl: string, base: string, outputRoot: string) {
+  if (!base.startsWith("/")) return undefined;
+
+  const basePath = base === "/" ? "/" : `/${base.replace(/^\/+|\/+$/g, "")}/`;
+  const url = new URL(requestUrl, "http://localhost");
+  let pathname: string;
+  try {
+    pathname = decodeURIComponent(url.pathname);
+  } catch {
+    return undefined;
+  }
+
+  const docsRoot = `${basePath}docs`;
+  if ((pathname !== docsRoot && !pathname.startsWith(`${docsRoot}/`)) || pathname.endsWith("/")) {
+    return undefined;
+  }
+  if (extname(pathname)) return undefined;
+
+  const relativePath = pathname.slice(basePath.length);
+  const indexFile = normalize(join(outputRoot, relativePath, "index.html"));
+  const relativeIndex = relative(outputRoot, indexFile);
+  if (relativeIndex === ".." || relativeIndex.startsWith(`..${sep}`) || isAbsolute(relativeIndex)) {
+    return undefined;
+  }
+
+  return {
+    indexFile,
+    rewrittenUrl: `${url.pathname}/${url.search}`,
+  };
+}
+
+function previewDirectoryIndexPlugin(): Plugin {
+  return {
+    name: "pledge-cash-preview-directory-index",
+    configurePreviewServer(server) {
+      const outputRoot = resolve(server.config.root, server.config.build.outDir);
+      server.middlewares.use(async (request, _response, next) => {
+        if (request.method !== "GET" && request.method !== "HEAD") {
+          next();
+          return;
+        }
+
+        const route = previewDirectoryIndexRoute(request.url ?? "/", server.config.base, outputRoot);
+        if (!route) {
+          next();
+          return;
+        }
+
+        try {
+          await access(route.indexFile);
+          request.url = route.rewrittenUrl;
+        } catch {
+          // Preserve the application SPA fallback when no static directory route exists.
+        }
+        next();
+      });
+    },
+  };
+}
 
 function deploymentArtifactsPlugin(): Plugin {
   const deploymentDir = fileURLToPath(new URL("../../packages/contracts/deployments", import.meta.url));
