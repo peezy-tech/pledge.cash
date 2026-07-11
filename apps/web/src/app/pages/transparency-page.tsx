@@ -6,6 +6,7 @@ import { Badge } from "../../components/ui/badge";
 import {
   formatNativeBalance,
   formatTokenBalance,
+  type ProductBoardroomChildCoverage,
   type ProductBoardroomDashboardState,
   type ProductBoardroomHistory,
   type ProductTreasuryAsset,
@@ -64,6 +65,8 @@ export function TransparencyPage({
     ? dashboard.histories ?? []
     : dashboard.history ? [dashboard.history] : [];
   const totals = transparencyTotals(dashboard);
+  const treasuryAssetTypesKnown = dashboard.currentStateCoverage?.redeemableAssets.complete !== false
+    && dashboard.treasuryAssets.every((asset) => !asset.error);
 
   return (
     <>
@@ -83,8 +86,16 @@ export function TransparencyPage({
                 ? "Unknown"
                 : formatTokenAmount(shareAsset.totalSupply, shareAsset),
             },
-            { label: "Treasury asset types", value: String(dashboard.treasuryAssets.length) },
-            { label: "Redeemable assets", value: String(snapshot.redeemableAssets.length) },
+            {
+              label: "Treasury asset types",
+              value: treasuryAssetTypesKnown ? String(dashboard.treasuryAssets.length) : "Unknown",
+              detail: treasuryAssetTypesKnown ? undefined : "Redeemable-asset coverage or an asset read is incomplete",
+            },
+            {
+              label: "Redeemable assets",
+              value: coverageValue(dashboard.currentStateCoverage?.redeemableAssets, snapshot.redeemableAssets.length),
+              detail: coverageDetail(dashboard.currentStateCoverage?.redeemableAssets),
+            },
           ]}
         />
         <TreasuryTable assets={dashboard.treasuryAssets} />
@@ -99,20 +110,34 @@ export function TransparencyPage({
           columns={4}
           items={[
             { label: "Unsettled project-token grants", value: formatTokenAmount(totals.unsettledShareGrantShares, snapshot.shareTokenMetadata) },
-            { label: "Open grants", value: String(totals.openGrantCount) },
-            { label: "Distribution reserves", value: formatTokenAmount(totals.distributionShares, snapshot.shareTokenMetadata) },
-            { label: "Locked liquidity positions", value: String(snapshot.lockedLiquiditySummaries.length) },
+            {
+              label: "Open grants",
+              value: totals.openGrantCount === undefined ? "Unknown" : String(totals.openGrantCount),
+              detail: coverageDetail(dashboard.currentStateCoverage?.grants),
+            },
+            {
+              label: "Distribution reserves",
+              value: formatTokenAmount(totals.distributionShares, snapshot.shareTokenMetadata),
+              detail: coverageDetail(dashboard.currentStateCoverage?.distributions),
+            },
+            {
+              label: "Locked liquidity positions",
+              value: coverageValue(dashboard.currentStateCoverage?.lockedLiquidity, snapshot.lockedLiquiditySummaries.length),
+              detail: coverageDetail(dashboard.currentStateCoverage?.lockedLiquidity),
+            },
           ]}
         />
       </RuledSection>
 
       <RuledSection>
         <SectionHeading title="Grants" description="Issued token commitments, their holders, and settlement progress." />
+        <CoverageStatement coverage={dashboard.currentStateCoverage?.grants} label="grant" />
         <GrantTable grants={snapshot.grantSummaries} grantHref={grantHref} onOpenGrant={onOpenGrant} />
       </RuledSection>
 
       <RuledSection>
         <SectionHeading title="Distributions" description="Sale, curve, and airdrop contracts still tracked by the Boardroom. Closed or migrated routes remain visible through onchain history." />
+        <CoverageStatement coverage={dashboard.currentStateCoverage?.distributions} label="distribution" />
         <DistributionTable distributions={snapshot.distributionSummaries} />
       </RuledSection>
 
@@ -138,6 +163,7 @@ export function TransparencyPage({
 
       <RuledSection>
         <SectionHeading title="Liquidity" description="Positions the Boardroom has locked for project market liquidity." />
+        <CoverageStatement coverage={dashboard.currentStateCoverage?.lockedLiquidity} label="locked-liquidity position" />
         <LiquidityTable lockers={snapshot.lockedLiquiditySummaries} />
       </RuledSection>
 
@@ -195,24 +221,68 @@ function ParticipationHistoryRow({
     <div className="py-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="m-0 text-sm font-semibold text-zinc-100">{route}</h3>
-        {history.scanError ? <Badge variant="danger">Partial history</Badge> : <Badge variant="muted">Onchain record</Badge>}
+        {history.completeness === "partial" || history.scanError
+          ? <Badge variant="danger">Partial history</Badge>
+          : history.completeness === "state-derived"
+            ? <Badge variant="muted">State-derived totals</Badge>
+            : history.completeness === "complete"
+              ? <Badge variant="muted">Complete event history</Badge>
+              : <Badge variant="warning">Completeness unknown</Badge>}
       </div>
       <KeyValueList
         columns={4}
         items={[
           { label: "Tokens allocated", value: formatTokenAmount(history.soldShares, dashboard.snapshot.shareTokenMetadata) },
-          { label: "Capital raised", value: history.cashRaised === undefined ? "Not applicable" : formatTokenAmount(history.cashRaised, cashMetadata) },
+          {
+            label: "Capital raised",
+            value: history.cashRaised === undefined
+              ? definitiveNotApplicable(history, distribution?.kind === "merkle-airdrop")
+              : formatTokenAmount(history.cashRaised, cashMetadata),
+          },
           { label: "Buyers", value: history.buyerCount === undefined ? "Unknown" : String(history.buyerCount) },
-          { label: "Purchases", value: String(history.fixedPriceSale?.purchaseCount ?? history.curve?.buyCount ?? 0) },
-          { label: "Curve sells", value: String(history.curve?.sellCount ?? 0) },
-          { label: "AMM swaps", value: String(history.amm?.swapCount ?? 0) },
-          { label: "Unique pool callers", value: history.amm?.traderCount === undefined ? "Not applicable" : String(history.amm.traderCount) },
+          {
+            label: "Purchases",
+            value: historyCount(
+              history,
+              history.fixedPriceSale?.purchaseCount ?? history.curve?.buyCount,
+              distribution?.kind === "merkle-airdrop",
+            ),
+          },
+          {
+            label: "Curve sells",
+            value: historyCount(
+              history,
+              history.curve?.sellCount,
+              distribution !== undefined && distribution.kind !== "migrating-bonding-curve",
+            ),
+          },
+          { label: "AMM swaps", value: historyCount(history, history.amm?.swapCount, !history.pool && !history.curve?.migration) },
+          { label: "Unique pool callers", value: historyCount(history, history.amm?.traderCount, !history.pool && !history.curve?.migration) },
           { label: "Distribution", value: history.distribution ? <AddressLink address={history.distribution} /> : "Unknown" },
         ]}
       />
-      {history.scanError ? <p className="m-0 mt-3 text-xs leading-5 text-red-300">{history.scanError}</p> : null}
+      {history.scanError ? (
+        <p className="m-0 mt-3 text-xs leading-5 text-red-300">
+          {history.scanError} Unknown fields are not treated as zero.
+        </p>
+      ) : null}
     </div>
   );
+}
+
+function historyCount(
+  history: ProductBoardroomHistory,
+  value: number | undefined,
+  notApplicable: boolean,
+): string {
+  if (value !== undefined) return value.toString();
+  if (history.completeness === "partial" || history.scanError) return "Unknown";
+  return notApplicable ? "Not applicable" : "Unknown";
+}
+
+function definitiveNotApplicable(history: ProductBoardroomHistory, notApplicable: boolean): string {
+  if (history.completeness === "partial" || history.scanError) return "Unknown";
+  return notApplicable ? "Not applicable" : "Unknown";
 }
 
 function TreasuryTable({ assets }: { assets: readonly ProductTreasuryAsset[] }): React.JSX.Element {
@@ -340,6 +410,22 @@ function EmptyTable({ label }: { label: string }): React.JSX.Element {
   return <p className="m-0 mt-4 border-y border-zinc-800 py-5 text-sm text-zinc-500">{label}</p>;
 }
 
+function CoverageStatement({
+  coverage,
+  label,
+}: {
+  coverage: ProductBoardroomChildCoverage | undefined;
+  label: string;
+}): React.JSX.Element | null {
+  if (!coverage || coverage.complete) return null;
+  const recordLabel = `${label}${coverage.total === 1 ? " record" : " records"}`;
+  return (
+    <p className="m-0 mt-3 text-xs leading-5 text-amber-200">
+      {`Current-state coverage: ${coverage.shown.toString()} of ${coverage.total.toString()} ${recordLabel} read. Missing records remain unknown.`}
+    </p>
+  );
+}
+
 function GrantStatus({ grant }: { grant: BoardroomGrantSnapshot }): React.JSX.Element {
   if (grant.error || !grant.state) return <Badge variant="danger">Read issue</Badge>;
   if (grant.state.quarantined) return <Badge variant="danger">Quarantined</Badge>;
@@ -362,19 +448,44 @@ function DistributionStatus({ distribution }: { distribution: BoardroomDistribut
 }
 
 function transparencyTotals(dashboard: ProductBoardroomDashboardState): {
-  distributionShares: bigint;
-  openGrantCount: number;
-  unsettledShareGrantShares: bigint;
+  distributionShares?: bigint | undefined;
+  openGrantCount?: number | undefined;
+  unsettledShareGrantShares?: bigint | undefined;
 } {
+  const snapshot = dashboard.snapshot;
+  const grantAddresses = new Set(snapshot.issuedGrants.map((address) => address.toLowerCase()));
+  const distributionAddresses = new Set(snapshot.issuedDistributions.map((address) => address.toLowerCase()));
+  const grants = snapshot.grantSummaries.filter((grant) => grantAddresses.has(grant.address.toLowerCase()));
+  const distributions = snapshot.distributionSummaries.filter((distribution) =>
+    distributionAddresses.has(distribution.address.toLowerCase()));
+  const grantsComplete = dashboard.currentStateCoverage?.grants.complete !== false
+    && grants.length === grantAddresses.size
+    && grants.every((grant) => Boolean(grant.state) && !grant.error);
+  const distributionsComplete = dashboard.currentStateCoverage?.distributions.complete !== false
+    && distributions.length === distributionAddresses.size
+    && distributions.every((distribution) => Boolean(distribution.state) && !distribution.error);
+
   return {
-    distributionShares: dashboard.snapshot.distributionSummaries.reduce(
+    ...(distributionsComplete ? { distributionShares: distributions.reduce(
       (total, distribution) => total + (distributionIsOpen(distribution) ? distributionRemaining(distribution) ?? 0n : 0n),
       0n,
-    ),
-    openGrantCount: dashboard.snapshot.grantSummaries.filter((grant) => grant.state && !grant.state.closed).length,
-    unsettledShareGrantShares: dashboard.snapshot.grantSummaries.reduce((total, grant) =>
-      total + (sameAddress(grant.state?.token, dashboard.snapshot.shareToken) ? grant.state?.unsettledAmount ?? 0n : 0n), 0n),
+    ) } : {}),
+    ...(grantsComplete ? {
+      openGrantCount: grants.filter((grant) => grant.state && !grant.state.closed).length,
+      unsettledShareGrantShares: grants.reduce((total, grant) =>
+        total + (sameAddress(grant.state?.token, snapshot.shareToken) ? grant.state?.unsettledAmount ?? 0n : 0n), 0n),
+    } : {}),
   };
+}
+
+function coverageValue(coverage: ProductBoardroomChildCoverage | undefined, fallback: number): string {
+  if (!coverage) return fallback.toString();
+  return coverage.complete ? coverage.total.toString() : "Unknown";
+}
+
+function coverageDetail(coverage: ProductBoardroomChildCoverage | undefined): string | undefined {
+  if (!coverage || coverage.complete) return undefined;
+  return `${coverage.shown.toString()} of ${coverage.total.toString()} records read`;
 }
 
 function distributionIsOpen(distribution: BoardroomDistributionSnapshot): boolean {

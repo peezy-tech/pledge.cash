@@ -11,6 +11,8 @@ import {
   GovernanceQueue,
   buildGovernanceExecutionRequest,
   buildGovernanceLaunchSteps,
+  buildGovernanceVetoRequest,
+  effectiveGovernanceActionStatus,
   governanceActionView,
   governanceDelayPresets,
 } from "../src/features/governance";
@@ -95,14 +97,14 @@ describe("governance controls", () => {
   });
 
   test("preserves queueAction versus queueBatch execution semantics", () => {
-    expect(buildGovernanceExecutionRequest(readyAction).functionName).toBe("executeQueuedAction");
+    expect(buildGovernanceExecutionRequest(readyAction, 1_700_100_000n).functionName).toBe("executeQueuedAction");
 
     const batch: QueuedBoardroomAction = {
       ...readyAction,
       kind: "queueBatch",
       calls: [mintCall, mintCall],
     };
-    expect(buildGovernanceExecutionRequest(batch).functionName).toBe("executeQueuedBatch");
+    expect(buildGovernanceExecutionRequest(batch, 1_700_100_000n).functionName).toBe("executeQueuedBatch");
   });
 
   test("does not expose execution when the original calldata is unverified", () => {
@@ -116,6 +118,7 @@ describe("governance controls", () => {
       <GovernanceQueue
         actions={[unverified]}
         capabilities={queueCapabilities}
+        now={1_700_100_000n}
         pendingAction={undefined}
         runAction={async (_id, action) => action()}
         submitTransaction={async () => undefined}
@@ -136,6 +139,7 @@ describe("governance controls", () => {
       <GovernanceQueue
         actions={[unknown]}
         capabilities={queueCapabilities}
+        now={1_700_100_000n}
         pendingAction={undefined}
         runAction={async (_id, action) => action()}
         submitTransaction={async () => undefined}
@@ -149,15 +153,15 @@ describe("governance controls", () => {
     expect(html).toContain("disabled");
   });
 
-  test("builds executor update before the irreversible launch when needed", () => {
+  test("requires an executor checkpoint before building the irreversible launch", () => {
     const steps = buildGovernanceLaunchSteps({
       boardroom,
       currentExecutor: owner,
       governanceDelay: 86_400n,
       nextExecutor: executor,
     });
-    expect(steps.map((step) => step.kind)).toEqual(["setExecutor", "launch"]);
-    expect(steps.map((step) => step.request.functionName)).toEqual(["setExecutor", "launch"]);
+    expect(steps.map((step) => step.kind)).toEqual(["setExecutor"]);
+    expect(steps.map((step) => step.request.functionName)).toEqual(["setExecutor"]);
 
     const unchanged = buildGovernanceLaunchSteps({
       boardroom,
@@ -166,9 +170,9 @@ describe("governance controls", () => {
       nextExecutor: executor,
     });
     expect(unchanged.map((step) => step.kind)).toEqual(["launch"]);
-    const launchReview = contractCallReview(steps[1]!.label, steps[1]!.request);
+    const launchReview = contractCallReview(unchanged[0]!.label, unchanged[0]!.request);
     expect(launchReview.parameters).toEqual([
-      { name: "Governance executor", type: "address", value: executor },
+      { name: "Required current executor (rechecked)", type: "address", value: executor },
       { name: "Holder review period", type: "duration", value: "1 day" },
     ]);
   });
@@ -181,8 +185,34 @@ describe("governance controls", () => {
     expect(governanceRefreshDelay([waiting], 1_000_000)).toBe(11_000);
     expect(governanceRefreshDelay([ready], 1_000_000)).toBe(21_000);
     expect(governanceRefreshDelay([distant], 1_000_000)).toBe(30_000);
-    expect(governanceRefreshDelay([waiting], 1_020_000)).toBe(1_000);
+    expect(governanceRefreshDelay([waiting], 1_020_000)).toBe(30_000);
+    expect(governanceRefreshDelay([{ ...ready, eta: 1_000n, status: "waiting" }], 1_010_000)).toBe(11_000);
+    expect(governanceRefreshDelay([ready], 1_021_000)).toBe(30_000);
     expect(governanceRefreshDelay([], 1_000_000)).toBe(30_000);
+  });
+
+  test("derives queue status at render and blocks expired actions locally", () => {
+    const staleReady = { ...readyAction, eta: 100n, expiresAt: 200n, status: "ready" } as QueuedBoardroomAction;
+    const staleWaiting = { ...staleReady, status: "waiting" } as QueuedBoardroomAction;
+
+    expect(effectiveGovernanceActionStatus(staleWaiting, 150n)).toBe("ready");
+    expect(effectiveGovernanceActionStatus(staleReady, 201n)).toBe("expired");
+    expect(() => buildGovernanceExecutionRequest(staleReady, 201n)).toThrow("expired");
+    expect(() => buildGovernanceVetoRequest(staleReady, 201n)).toThrow("no longer available");
+
+    const html = renderToString(
+      <GovernanceQueue
+        actions={[staleReady]}
+        capabilities={queueCapabilities}
+        now={201n}
+        pendingAction={undefined}
+        runAction={async (_id, action) => action()}
+        submitTransaction={async () => undefined}
+      />,
+    );
+    expect(html).toContain("Expired");
+    expect(html).not.toContain("Execute now");
+    expect(html).not.toContain("Veto action");
   });
 
   test("renders a confirmed one-way launch workflow with human delay presets", () => {

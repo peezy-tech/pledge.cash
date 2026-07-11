@@ -7,7 +7,7 @@ import {
   type FixedPriceSaleState,
 } from "@pledge.cash/sdk";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getAddress, isAddress } from "viem";
+import { getAddress, isAddress, type PublicClient } from "viem";
 import { Input } from "../../components/ui/input";
 import { errorMessage } from "../../lib/forms";
 import { formatTokenAmount, parseTokenAmountInput } from "../../lib/token-amounts";
@@ -32,6 +32,37 @@ type FixedPriceSaleFlowProps = ParticipationFlowContext & {
 };
 
 type ParsedAmount = { error?: string; value?: bigint };
+export type FixedPriceSaleActionKind = "approve" | "trade";
+
+export type FixedPriceSaleActionIntent = {
+  account: Address;
+  boardroom: Address;
+  boardroomStatus: number;
+  deadlineMinutes: string;
+  factory: Address;
+  paymentToken: Address;
+  recipient: Address;
+  sale: Address;
+  shareAmount: bigint;
+  shareToken: Address;
+  slippageBps: bigint;
+};
+
+export type PreparedFixedPriceSaleAction = {
+  kind: FixedPriceSaleActionKind;
+  maxPayment: bigint;
+  quote: FixedPriceSaleParticipationQuote;
+  request: Record<string, unknown>;
+};
+
+type PrepareFixedPriceSaleActionOptions = {
+  clock?: (() => number) | undefined;
+  expectedAction: FixedPriceSaleActionKind;
+  intent: FixedPriceSaleActionIntent;
+  isCurrent?: ((intent: FixedPriceSaleActionIntent) => boolean) | undefined;
+  onQuote?: ((quote: FixedPriceSaleParticipationQuote) => void) | undefined;
+  readQuote?: typeof readFixedPriceSaleParticipationQuote | undefined;
+};
 
 export function FixedPriceSaleFlow({
   account,
@@ -70,6 +101,21 @@ export function FixedPriceSaleFlow({
   const maxPayment = quote && slippage.value !== undefined
     ? maximumWithSlippage(quote.paymentAmount, slippage.value)
     : undefined;
+  const actionIdentity = fixedPriceSaleActionIdentity({
+    account,
+    boardroom: state?.boardroom,
+    boardroomStatus: dashboard.snapshot.status,
+    deadlineMinutes,
+    factory: state?.factory,
+    paymentToken: state?.paymentToken,
+    recipient,
+    sale: state?.address,
+    shareAmount: parsedAmount.value,
+    shareToken: state?.shareToken,
+    slippageBps: slippage.value,
+  });
+  const actionIdentityRef = useRef(actionIdentity);
+  actionIdentityRef.current = actionIdentity;
 
   const refreshQuote = useCallback(async (): Promise<void> => {
     if (!state || !account || parsedAmount.value === undefined || parsedAmount.value === 0n) return;
@@ -134,25 +180,34 @@ export function FixedPriceSaleFlow({
   const actionLabel = needsApproval ? `Approve ${paymentMetadata?.symbol ?? "payment token"}` : "Buy project tokens";
 
   const submitAction = async (): Promise<void> => {
-    if (!quote || maxPayment === undefined || !recipient || parsedAmount.value === undefined) {
+    if (!account || !quote || maxPayment === undefined || !recipient || parsedAmount.value === undefined || slippage.value === undefined) {
       throw new Error("Refresh a valid quote before continuing.");
     }
-    if (needsApproval) {
-      await submitTransaction("Fixed-price payment approval", buildErc20Approval({
-        token: state.paymentToken,
-        spender: state.address,
-        amount: maxPayment,
-      }));
-    } else {
-      await submitTransaction("Fixed-price purchase", buildFixedPriceSaleBuyTransaction({
-        sale: state.address,
-        shareAmount: parsedAmount.value,
-        recipient,
-        maxPayment,
-        deadline: transactionDeadline(deadlineMinutes),
-      }));
-    }
-    await refreshQuote();
+    const intent: FixedPriceSaleActionIntent = {
+      account,
+      boardroom: state.boardroom,
+      boardroomStatus: dashboard.snapshot.status,
+      deadlineMinutes,
+      factory: state.factory,
+      paymentToken: state.paymentToken,
+      recipient,
+      sale: state.address,
+      shareAmount: parsedAmount.value,
+      shareToken: state.shareToken,
+      slippageBps: slippage.value,
+    };
+    const expectedIdentity = fixedPriceSaleActionIdentity(intent);
+    const prepared = await prepareFixedPriceSaleAction(publicClient, {
+      expectedAction: needsApproval ? "approve" : "trade",
+      intent,
+      isCurrent: () => actionIdentityRef.current === expectedIdentity,
+      onQuote: setQuote,
+    });
+    await submitTransaction(
+      prepared.kind === "approve" ? "Fixed-price payment approval" : "Fixed-price purchase",
+      prepared.request,
+    );
+    if (actionIdentityRef.current === expectedIdentity) await refreshQuote();
   };
 
   return (
@@ -252,6 +307,103 @@ export function FixedPriceSaleFlow({
   );
 }
 
+export async function prepareFixedPriceSaleAction(
+  client: PublicClient,
+  options: PrepareFixedPriceSaleActionOptions,
+): Promise<PreparedFixedPriceSaleAction> {
+  const { intent } = options;
+  if (intent.boardroomStatus !== 0) throw new Error("This project is no longer active.");
+  if (intent.shareAmount <= 0n) throw new Error("Purchase amount must be greater than zero.");
+
+  const readQuote = options.readQuote ?? readFixedPriceSaleParticipationQuote;
+  const quote = await readQuote(client, {
+    sale: intent.sale,
+    buyer: intent.account,
+    shareAmount: intent.shareAmount,
+  });
+  assertFixedPriceQuoteIdentity(quote, intent);
+  if (options.isCurrent && !options.isCurrent(intent)) {
+    throw new Error("Purchase details changed while the quote was refreshing. Review the updated order and try again.");
+  }
+  options.onQuote?.(quote);
+
+  const nowSeconds = options.clock?.() ?? Math.floor(Date.now() / 1_000);
+  if (quote.state.saleStatus !== 0 || quote.state.closed) throw new Error("This sale closed while the quote was refreshing.");
+  const window = unixWindowStatus(quote.state.startTime, quote.state.endTime, nowSeconds);
+  if (window !== "open") throw new Error(window === "ended" ? "This sale window has ended." : "This sale has not started yet.");
+  if (intent.shareAmount > quote.state.remainingShares || intent.shareAmount > quote.remainingBuyerCapacity) {
+    throw new Error("The requested amount is no longer available to this wallet.");
+  }
+
+  const maxPayment = maximumWithSlippage(quote.paymentAmount, intent.slippageBps);
+  if (quote.paymentBalance < maxPayment) throw new Error("The wallet balance no longer covers the refreshed maximum payment.");
+  const kind: FixedPriceSaleActionKind = quote.paymentAllowance < maxPayment ? "approve" : "trade";
+  if (kind !== options.expectedAction) {
+    throw new Error(
+      kind === "approve"
+        ? "The refreshed order now requires approval. Review the updated action and try again."
+        : "Approval is now sufficient. Review the refreshed purchase before submitting it.",
+    );
+  }
+
+  return {
+    kind,
+    maxPayment,
+    quote,
+    request: kind === "approve"
+      ? buildErc20Approval({ token: quote.state.paymentToken, spender: quote.state.address, amount: maxPayment })
+      : buildFixedPriceSaleBuyTransaction({
+          sale: quote.state.address,
+          shareAmount: intent.shareAmount,
+          recipient: intent.recipient,
+          maxPayment,
+          deadline: transactionDeadline(intent.deadlineMinutes, nowSeconds),
+        }),
+  };
+}
+
+export function fixedPriceSaleActionIdentity(input: {
+  account: Address | undefined;
+  boardroom: Address | undefined;
+  boardroomStatus: number;
+  deadlineMinutes: string;
+  factory: Address | undefined;
+  paymentToken: Address | undefined;
+  recipient: Address | undefined;
+  sale: Address | undefined;
+  shareAmount: bigint | undefined;
+  shareToken: Address | undefined;
+  slippageBps: bigint | undefined;
+}): string {
+  return [
+    input.account?.toLowerCase() ?? "",
+    input.boardroom?.toLowerCase() ?? "",
+    input.boardroomStatus.toString(),
+    input.deadlineMinutes,
+    input.factory?.toLowerCase() ?? "",
+    input.paymentToken?.toLowerCase() ?? "",
+    input.recipient?.toLowerCase() ?? "",
+    input.sale?.toLowerCase() ?? "",
+    input.shareAmount?.toString() ?? "",
+    input.shareToken?.toLowerCase() ?? "",
+    input.slippageBps?.toString() ?? "",
+  ].join(":");
+}
+
+function assertFixedPriceQuoteIdentity(
+  quote: FixedPriceSaleParticipationQuote,
+  intent: FixedPriceSaleActionIntent,
+): void {
+  const matches = quote.shareAmount === intent.shareAmount
+    && sameAddress(quote.buyer, intent.account)
+    && sameAddress(quote.state.address, intent.sale)
+    && sameAddress(quote.state.factory, intent.factory)
+    && sameAddress(quote.state.boardroom, intent.boardroom)
+    && sameAddress(quote.state.shareToken, intent.shareToken)
+    && sameAddress(quote.state.paymentToken, intent.paymentToken);
+  if (!matches) throw new Error("The refreshed quote does not match this wallet, sale, or exact purchase amount.");
+}
+
 function fixedPriceSaleState(distribution: BoardroomDistributionSnapshot): FixedPriceSaleState | undefined {
   const state = distribution.state;
   return distribution.kind === "fixed-price-sale" && state && "saleStatus" in state ? state : undefined;
@@ -261,6 +413,10 @@ function resolveRecipient(value: string, account: Address | undefined): Address 
   const normalized = value.trim();
   if (!normalized) return account;
   return isAddress(normalized) ? getAddress(normalized) : undefined;
+}
+
+function sameAddress(left: Address, right: Address): boolean {
+  return left.toLowerCase() === right.toLowerCase();
 }
 
 function safeSlippage(value: string): { error?: string; value?: bigint } {

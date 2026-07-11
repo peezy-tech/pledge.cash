@@ -7,9 +7,11 @@ export function governanceRefreshDelay(
   actions: readonly QueuedBoardroomAction[],
   nowMs = Date.now(),
 ): number {
+  const nowSeconds = BigInt(Math.floor(nowMs / 1_000));
   const boundaries = actions.flatMap((action) => {
-    if (action.status === "waiting" && action.eta > 0n) return [action.eta];
-    if (action.status === "ready" && action.expiresAt > 0n) return [action.expiresAt];
+    if (["cancelled", "executed", "expired", "invalidated", "unknown"].includes(action.status)) return [];
+    if (action.status === "waiting" && action.eta > nowSeconds) return [action.eta];
+    if (action.expiresAt >= nowSeconds) return [action.expiresAt];
     return [];
   });
   if (boundaries.length === 0) return GOVERNANCE_BASELINE_REFRESH_MS;

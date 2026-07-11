@@ -1,5 +1,7 @@
 export {
   App,
+  AmmReadCoordinator,
+  ammReadIdentityKey,
   appRouteTitle,
   canonicalGrantReadErrorMessage,
   canRunGrantIssuerActions,
@@ -11,10 +13,12 @@ export {
   networkSwitchDestination,
   parseDeployment,
   productReadErrorMessage,
+  ProjectRouteFailureState,
+  projectRouteFailure,
   raceWithGovernanceAbort,
   studioProjectSectionCapability,
   viewFromPath,
   viewHref,
   viewUsesProjectDashboard,
 } from "./app/App";
-export type { AppView, GrantIssuerBoardroomAccess } from "./app/App";
+export type { AmmReadRequest, AppView, GrantIssuerBoardroomAccess, ProjectRouteFailure } from "./app/App";

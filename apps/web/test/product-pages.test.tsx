@@ -13,9 +13,12 @@ import {
   RedirectState,
   StudioPage,
   TransparencyPage,
+  exploreSearchHref,
+  exploreSearchState,
   filterProjects,
   orderPortfolioTasks,
   participationOptions,
+  replaceExploreSearchState,
   studioGuidance,
   studioLifecycle,
   type PortfolioTask,
@@ -187,6 +190,47 @@ describe("read-first product pages", () => {
     expect(html).toContain("Load more projects");
   });
 
+  test("stores Explore query and type in a shareable URL without adding filter history entries", () => {
+    const calls: Array<{ state: unknown; href: string | URL | null | undefined }> = [];
+    const href = replaceExploreSearchState(
+      { filter: "fixed-price-sale", query: "Atlas treasury" },
+      {
+        history: {
+          state: { route: "explore" },
+          replaceState(state, _title, nextHref) { calls.push({ state, href: nextHref }); },
+        },
+        location: { hash: "", pathname: "/pledge-cash/explore", search: "?chain=31337" },
+      },
+    );
+
+    expect(href).toBe("/pledge-cash/explore?chain=31337&q=Atlas+treasury&type=fixed-price-sale");
+    expect(calls).toEqual([{
+      state: { route: "explore" },
+      href: "/pledge-cash/explore?chain=31337&q=Atlas+treasury&type=fixed-price-sale",
+    }]);
+    expect(exploreSearchState("?chain=31337&q=Atlas+treasury&type=fixed-price-sale")).toEqual({
+      filter: "fixed-price-sale",
+      query: "Atlas treasury",
+    });
+  });
+
+  test("restores the exact Explore filters after opening a project and going Back", () => {
+    const exploreEntry = exploreSearchHref(
+      "/pledge-cash/explore",
+      "?chain=31337",
+      { filter: "amm", query: "Atlas" },
+    );
+    const historyEntries = [
+      exploreEntry,
+      `/pledge-cash/projects/31337/${boardroom}/overview`,
+    ];
+    const restored = new URL(historyEntries[0]!, "https://pledge.cash");
+
+    expect(exploreSearchState(restored.search)).toEqual({ filter: "amm", query: "Atlas" });
+    expect(historyEntries[1]).not.toContain("q=");
+    expect(exploreSearchState("?chain=31337&q=Atlas&type=not-a-filter")).toEqual({ filter: "all", query: "Atlas" });
+  });
+
   test("renders one project workspace with human-readable overview and participation", () => {
     const overview = renderToString(
       <ProjectLayout
@@ -225,6 +269,44 @@ describe("read-first product pages", () => {
     );
     expect(partialHistory).toContain("Historical activity is incomplete");
     expect(partialHistory).toContain("event-derived totals may be partial");
+
+    const boundedCurrentState = {
+      ...dashboard,
+      currentStateCoverage: {
+        distributions: { complete: false, shown: 1, total: 7 },
+        grants: { complete: false, shown: 1, total: 9 },
+        lockedLiquidity: { complete: true, shown: 0, total: 0 },
+        redeemableAssets: { complete: true, shown: 1, total: 1 },
+      },
+    } satisfies ProductBoardroomDashboardState;
+    const partialCurrentState = renderToString(
+      <ProjectLayout
+        activeSection="transparency"
+        chainName="Local Anvil"
+        dashboard={boundedCurrentState}
+        loading={false}
+        onNavigateSection={() => undefined}
+      >
+        <TransparencyPage dashboard={boundedCurrentState} loading={false} />
+      </ProjectLayout>,
+    );
+    expect(partialCurrentState).toContain("Current contract-state detail is incomplete");
+    expect(partialCurrentState).toContain("Grants: 1 of 9 records read");
+    expect(partialCurrentState).toContain("Distributions: 1 of 7 records read");
+    expect(partialCurrentState).toContain("Current-state coverage: 1 of 9 grant records read");
+    expect(partialCurrentState).not.toContain("Historical activity is incomplete");
+    expect(partialCurrentState).not.toContain("Redeemable-asset coverage or an asset read is incomplete");
+
+    const failedTreasuryAsset = renderToString(
+      <TransparencyPage
+        dashboard={{
+          ...boundedCurrentState,
+          treasuryAssets: [{ ...boundedCurrentState.treasuryAssets[0]!, error: "balance read failed" }],
+        }}
+        loading={false}
+      />,
+    );
+    expect(failedTreasuryAsset).toContain("Redeemable-asset coverage or an asset read is incomplete");
 
     const options = participationOptions(dashboard);
     expect(options[0]?.path).toBe("fixed-price-sale");
@@ -354,6 +436,25 @@ describe("read-first product pages", () => {
     expect(transparency).toContain(`/pledge-cash/grants/31337/${grant}`);
     expect(transparency).toContain("Issued grants");
     expect(transparency).toContain("Technical details");
+  });
+
+  test("renders failed history fields as unknown instead of factual zeroes", () => {
+    const partialDashboard: ProductBoardroomDashboardState = {
+      ...dashboard,
+      histories: [{
+        completeness: "partial",
+        distribution: sale,
+        scanError: "FixedPricePurchase history exceeded the bounded scan deadline.",
+        soldShares: 2_000_000_000_000_000_000n,
+      }],
+    };
+
+    const transparency = renderToString(<TransparencyPage dashboard={partialDashboard} loading={false} />);
+
+    expect(transparency).toContain("Partial history");
+    expect(transparency).toContain("Unknown fields are not treated as zero");
+    expect(transparency).not.toContain("Not applicable");
+    expect(transparency).toContain("Unknown");
   });
 
   test("never adds grants from different token contracts into one amount", () => {

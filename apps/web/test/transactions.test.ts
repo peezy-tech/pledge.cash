@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { buildBoardroomShareGrantIssuanceBatch, type Address, type Hex } from "@pledge.cash/sdk";
+import {
+  boardroomAbi,
+  buildBoardroomExecuteTransaction,
+  buildBoardroomQueueActionTransaction,
+  buildBoardroomSelfCall,
+  buildBoardroomShareGrantIssuanceBatch,
+  buildBoardroomCall,
+  tokenGrantAbi,
+  type Address,
+  type Hex,
+} from "@pledge.cash/sdk";
 import { encodeFunctionData } from "viem";
 import { transactionReviewCanContinue } from "../src/components/transaction-review";
 import { recoverInterruptedTransactions, stageLabel, type TransactionRecord } from "../src/features/transactions/transaction-center";
@@ -77,6 +87,71 @@ describe("transaction review", () => {
       { name: "Holder review period", type: "duration", value: "3 days" },
     ]);
     expect(review.parameters.some((parameter) => parameter.name.endsWith("_"))).toBe(false);
+  });
+
+  test("requires irreversible acknowledgement when queued Boardroom calldata opens redemptions", () => {
+    const request = buildBoardroomQueueActionTransaction({
+      boardroom: target,
+      call: buildBoardroomSelfCall({
+        boardroom: target,
+        data: encodeFunctionData({ abi: boardroomAbi, functionName: "openRedemptions" }),
+      }),
+      salt,
+    });
+    const review = contractCallReview("Queue redemption opening", request);
+
+    expect(review.boardroomCalls?.[0]).toMatchObject({
+      functionName: "openRedemptions",
+      verification: "verified",
+    });
+    expect(review.risk).toBe("irreversible");
+    expect(transactionReviewCanContinue(review, false)).toBe(false);
+    expect(transactionReviewCanContinue(review, true)).toBe(true);
+  });
+
+  test("takes the maximum risk of immediate verified Boardroom inner calls", () => {
+    const grant = "0x6000000000000000000000000000000000000000" as Address;
+    const request = buildBoardroomExecuteTransaction({
+      boardroom: target,
+      call: buildBoardroomCall({
+        policy: assetPolicy,
+        target: grant,
+        data: encodeFunctionData({ abi: tokenGrantAbi, functionName: "stopVestingAndWithdrawUnvested" }),
+      }),
+    });
+    const review = contractCallReview("Stop grant vesting", request);
+
+    expect(review.boardroomCalls?.[0]).toMatchObject({
+      functionName: "stopVestingAndWithdrawUnvested",
+      verification: "verified",
+    });
+    expect(review.risk).toBe("irreversible");
+    expect(transactionReviewCanContinue(review, false)).toBe(false);
+  });
+
+  test.each([
+    "cancel",
+    "close",
+    "migrate",
+    "exit",
+    "quarantineAndClose",
+    "withdrawExpiredTokens",
+  ])("marks direct %s lifecycle calls as irreversible", (functionName) => {
+    const directAbi = [{
+      type: "function",
+      name: functionName,
+      stateMutability: "nonpayable",
+      inputs: [],
+      outputs: [],
+    }] as const;
+    const review = contractCallReview(`Direct ${functionName}`, {
+      address: target,
+      abi: directAbi,
+      functionName,
+    });
+
+    expect(review.risk).toBe("irreversible");
+    expect(transactionReviewCanContinue(review, false)).toBe(false);
   });
 
   test("rejects account or chain changes made while transaction review is open", () => {

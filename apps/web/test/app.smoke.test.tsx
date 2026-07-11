@@ -11,7 +11,9 @@ import type {
 } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
 import {
+  AmmReadCoordinator,
   App,
+  ammReadIdentityKey,
   appRouteTitle,
   canRunGrantIssuerActions,
   canonicalGrantReadErrorMessage,
@@ -23,6 +25,8 @@ import {
   networkSwitchDestination,
   parseDeployment,
   productReadErrorMessage,
+  ProjectRouteFailureState,
+  projectRouteFailure,
   raceWithGovernanceAbort,
   studioProjectSectionCapability,
   viewFromPath,
@@ -230,6 +234,69 @@ const discoverySnapshot: DiscoverySnapshot = {
 };
 
 describe("web app shell", () => {
+  test("rejects deferred AMM results after account, project, or form identity changes", async () => {
+    const coordinator = new AmmReadCoordinator();
+    const firstKey = ammReadIdentityKey(["31337:deployment:account-a", "project-a", { amountIn: "1" }]);
+    const nextKey = ammReadIdentityKey(["31337:deployment:account-b", "project-b", { amountIn: "2" }]);
+    coordinator.sync("swap-quote", firstKey);
+    const firstRequest = coordinator.begin("swap-quote", firstKey);
+    let resolveDeferred: ((value: string) => void) | undefined;
+    const deferred = new Promise<string>((resolve) => {
+      resolveDeferred = resolve;
+    });
+    let committed: string | undefined;
+    const pendingCommit = deferred.then((value) => {
+      if (coordinator.isCurrent(firstRequest)) committed = value;
+    });
+
+    coordinator.sync("swap-quote", nextKey);
+    coordinator.sync("swap-quote", firstKey);
+    resolveDeferred?.("stale account A quote");
+    await pendingCommit;
+
+    expect(committed).toBeUndefined();
+    const currentRequest = coordinator.begin("swap-quote", firstKey);
+    expect(coordinator.isCurrent(currentRequest)).toBe(true);
+  });
+
+  test("classifies invalid project provenance as terminal and RPC failures as retryable", () => {
+    const invalid = projectRouteFailure("This address is not a Boardroom created by the configured BoardroomFactory.");
+    const transient = projectRouteFailure("Could not reach Local Anvil. Check the RPC connection and try again.");
+
+    expect(invalid).toEqual({
+      description: "This address is not a project created by the configured pledge.cash deployment on this network.",
+      retryable: false,
+      title: "Project not found",
+    });
+    expect(invalid.description).not.toContain("Transparency");
+    expect(transient.retryable).toBe(true);
+    expect(transient.title).toBe("Project temporarily unavailable");
+  });
+
+  test("renders one canonical invalid-project state and offers retry only for transport failures", () => {
+    const invalid = renderToString(
+      <ProjectRouteFailureState
+        failure={projectRouteFailure("This address is not a Boardroom created by the configured BoardroomFactory.")}
+        onReturn={() => undefined}
+        returnHref="/pledge-cash/explore?chain=31337"
+      />,
+    );
+    const transient = renderToString(
+      <ProjectRouteFailureState
+        failure={projectRouteFailure("Could not reach Local Anvil. Check the RPC connection and try again.")}
+        onRetry={() => undefined}
+        onReturn={() => undefined}
+        returnHref="/pledge-cash/explore?chain=31337"
+      />,
+    );
+
+    expect(invalid.match(/Project not found/g)?.length).toBe(1);
+    expect(invalid.match(/Return to Explore/g)?.length).toBe(1);
+    expect(invalid).not.toContain("Retry verification");
+    expect(invalid).not.toContain("Transparency");
+    expect(transient.match(/Retry verification/g)?.length).toBe(1);
+  });
+
   test("preserves the verified governance snapshot only for same-key background refreshes", () => {
     const key = "998:deployment:0xboardroom:read-only";
 

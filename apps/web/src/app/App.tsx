@@ -142,6 +142,7 @@ import {
   uintInput,
 } from "../lib/forms";
 import { deploymentRuntimeIdentity } from "../lib/deployment";
+import { assertGovernanceLaunchPrecondition } from "../lib/governance-launch-integrity";
 import {
   readProductBoardroomCatalogPage,
   readProductBoardroomDashboard,
@@ -254,6 +255,7 @@ export { manageWorkspaceSummary } from "./views/workspace-helpers";
 
 const MIN_SETTLEMENT_GRACE_SECONDS = 86_400n;
 const GOVERNANCE_LOAD_DEADLINE_MS = 30_000;
+const AMM_TOKEN_LOAD_DEADLINE_MS = 30_000;
 
 type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
 type ActiveActionOrigin = {
@@ -268,6 +270,48 @@ export type GrantIssuerBoardroomAccess = {
   launched: boolean;
   owner: Address;
   status: number;
+};
+
+type AmmReadKind = "token-list" | "swap-quote" | "liquidity-quote" | "position" | "remove-liquidity-quote";
+type ContractTransactionOptions = {
+  assertState?: ((phase: "simulation" | "submission") => Promise<void>) | undefined;
+};
+export type AmmReadRequest = {
+  key: string;
+  kind: AmmReadKind;
+  version: number;
+};
+
+export class AmmReadCoordinator {
+  readonly #activeKeys = new Map<AmmReadKind, string>();
+  readonly #versions = new Map<AmmReadKind, number>();
+
+  sync(kind: AmmReadKind, key: string): void {
+    if (this.#activeKeys.get(kind) === key) return;
+    this.#activeKeys.set(kind, key);
+    this.#versions.set(kind, (this.#versions.get(kind) ?? 0) + 1);
+  }
+
+  begin(kind: AmmReadKind, key: string): AmmReadRequest {
+    const version = (this.#versions.get(kind) ?? 0) + 1;
+    this.#versions.set(kind, version);
+    return { key, kind, version };
+  }
+
+  isCurrent(request: AmmReadRequest): boolean {
+    return this.#activeKeys.get(request.kind) === request.key
+      && this.#versions.get(request.kind) === request.version;
+  }
+}
+
+export function ammReadIdentityKey(parts: readonly unknown[]): string {
+  return JSON.stringify(parts);
+}
+
+type SwapTokenLoadScope = {
+  key: string;
+  mode: "global" | "pinned-only";
+  pinnedPools: readonly Address[];
 };
 
 export function isGovernanceBackgroundRefresh(
@@ -353,6 +397,63 @@ function emptySwapTokenList(): SwapTokenListState {
   return { tokens: [], pools: [], loaded: false };
 }
 
+export type ProjectRouteFailure = {
+  description: string;
+  retryable: boolean;
+  title: string;
+};
+
+export function projectRouteFailure(error: string): ProjectRouteFailure {
+  const retryable = /(?:could not reach|failed to fetch|network ?error|rpc request|timed? ?out|timeout)/i.test(error);
+  if (retryable) {
+    return {
+      description: error,
+      retryable: true,
+      title: "Project temporarily unavailable",
+    };
+  }
+  return {
+    description: "This address is not a project created by the configured pledge.cash deployment on this network.",
+    retryable: false,
+    title: "Project not found",
+  };
+}
+
+export function ProjectRouteFailureState({
+  failure,
+  onRetry,
+  onReturn,
+  returnHref,
+}: {
+  failure: ProjectRouteFailure;
+  onRetry?: (() => void) | undefined;
+  onReturn: () => void;
+  returnHref: string;
+}): React.JSX.Element {
+  return (
+    <div className="grid min-h-[58vh] place-items-center py-12">
+      <div className="max-w-xl text-center">
+        <p className="m-0 text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">Project verification</p>
+        <h1 className="m-0 mt-2 text-3xl font-semibold tracking-[-0.025em] text-zinc-50">{failure.title}</h1>
+        <p className="m-0 mt-3 text-sm leading-6 text-zinc-400">{failure.description}</p>
+        <div className="mt-6 flex flex-wrap justify-center gap-2">
+          <ButtonLink
+            href={returnHref}
+            onClick={(event) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              event.preventDefault();
+              onReturn();
+            }}
+          >
+            Return to Explore
+          </ButtonLink>
+          {failure.retryable && onRetry ? <Button variant="secondary" onClick={onRetry}>Retry verification</Button> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function shouldLoadProductBoardroom({
   activeRoute,
   deployment,
@@ -379,19 +480,17 @@ function shouldLoadProductBoardroom({
 }
 
 function shouldLoadSwapTokens({
-  activeView,
   deployment,
-  studioLiquidityRoute,
+  loadScope,
   swapTokenList,
   swapTokenListLoading,
 }: {
-  activeView: AppView;
   deployment: PledgeCashDeployment | undefined;
-  studioLiquidityRoute: boolean;
+  loadScope: SwapTokenLoadScope | undefined;
   swapTokenList: SwapTokenListState;
   swapTokenListLoading: boolean;
 }): boolean {
-  if (activeView !== "market" && !studioLiquidityRoute) return false;
+  if (!loadScope) return false;
   if (!deployment?.ammFactory) return false;
   if (swapTokenList.loaded || swapTokenListLoading) return false;
   return true;
@@ -407,6 +506,12 @@ export function App(): React.JSX.Element {
   const [selectedChainId, setSelectedChainId] = useState(() => initialSelectedNetwork().chainId);
   const activeNetwork = useMemo(() => networkForChainId(selectedChainId), [selectedChainId]);
   const networkRequestVersion = useRef(0);
+  const ammReadCoordinatorRef = useRef(new AmmReadCoordinator());
+  const ammTokenLoadAbortControllerRef = useRef<AbortController | undefined>(undefined);
+  const activeAmmTokenReadKeyRef = useRef("inactive");
+  const activeSwapTokenLoadScopeRef = useRef<SwapTokenLoadScope | undefined>(undefined);
+  const productCatalogLoadMoreAbortControllerRef = useRef<AbortController | undefined>(undefined);
+  const productLoadAbortControllerRef = useRef<AbortController | undefined>(undefined);
   const productRequestVersionRef = useRef(0);
   const discoveryWriteVersion = useRef(0);
   const grantLoadVersionRef = useRef(0);
@@ -532,6 +637,34 @@ export function App(): React.JSX.Element {
   const [swapTokenList, setSwapTokenList] = useState<SwapTokenListState>(() => emptySwapTokenList());
   const [swapTokenListLoading, setSwapTokenListLoading] = useState(false);
   const [selectedParticipationRoute, setSelectedParticipationRoute] = useState<ParticipationContentKey>();
+  const exactProjectAddress = appRoute.kind === "project" || appRoute.kind === "studio-project" ? appRoute.boardroom : undefined;
+  const exactProjectDashboard = exactProjectAddress && productBoardroom?.address.toLowerCase() === exactProjectAddress.toLowerCase()
+    ? productBoardroom
+    : undefined;
+  const exactProjectPools = useMemo(() => projectPoolAddresses(exactProjectDashboard), [exactProjectDashboard]);
+  const selectedProjectPool = participationPoolAddress(selectedParticipationRoute, exactProjectPools) ?? exactProjectPools[0];
+  const exactProjectPoolRef = useRef<Address | undefined>(selectedProjectPool);
+  const studioProjectPoolsRef = useRef<readonly Address[]>(exactProjectPools);
+  exactProjectPoolRef.current = selectedProjectPool;
+  studioProjectPoolsRef.current = exactProjectPools;
+  const exactProjectIdentity = exactProjectDashboard
+    ? `${activeNetwork.chainId.toString()}:${exactProjectDashboard.address.toLowerCase()}`
+    : undefined;
+  const projectScopedAmmRoute = (appRoute.kind === "project" && appRoute.section === "participate")
+    || (appRoute.kind === "studio-project" && appRoute.section === "liquidity");
+  const exactProjectPoolsKey = exactProjectPools.map((candidate) => candidate.toLowerCase()).join(",");
+  const swapTokenLoadScope: SwapTokenLoadScope | undefined = projectScopedAmmRoute
+    ? exactProjectIdentity && exactProjectPools.length > 0
+      ? {
+          key: `project:${exactProjectIdentity}:${exactProjectPoolsKey}`,
+          mode: "pinned-only",
+          pinnedPools: exactProjectPools,
+        }
+      : undefined
+    : activeView === "market" && appRoute.kind !== "legacy-project"
+      ? { key: `global:${activeNetwork.chainId.toString()}`, mode: "global", pinnedPools: [] }
+      : undefined;
+  activeSwapTokenLoadScopeRef.current = swapTokenLoadScope;
   const sentinelBaseUrl = getSentinelBaseUrl();
   const sentinelClient = useMemo(
     () => sentinelBaseUrl ? createSentinelClient({ baseUrl: sentinelBaseUrl }) : undefined,
@@ -634,6 +767,41 @@ export function App(): React.JSX.Element {
   activeAccountRef.current = wallet.account;
   activeWalletChainIdRef.current = wallet.chainId;
   walletClientRef.current = walletClient;
+  const ammWalletScopeKey = ammReadIdentityKey([
+    activeNetwork.chainId,
+    runtimeDeploymentIdentity ?? "unconfigured",
+    wallet.account?.toLowerCase() ?? "read-only",
+  ]);
+  const ammProjectScopeKey = ammReadIdentityKey([
+    exactProjectAddress?.toLowerCase() ?? "global",
+    exactProjectPoolsKey,
+    selectedProjectPool?.toLowerCase() ?? "no-selected-pool",
+  ]);
+  const ammTokenReadKey = ammReadIdentityKey([
+    ammWalletScopeKey,
+    swapTokenLoadScope?.key ?? (projectScopedAmmRoute ? `project-waiting:${exactProjectAddress?.toLowerCase() ?? "unknown"}` : "inactive"),
+  ]);
+  const ammSwapQuoteReadKey = ammReadIdentityKey([ammWalletScopeKey, ammProjectScopeKey, swapForm]);
+  const ammLiquidityQuoteReadKey = ammReadIdentityKey([ammWalletScopeKey, ammProjectScopeKey, liquidityForm]);
+  const ammPositionReadKey = ammReadIdentityKey([
+    ammWalletScopeKey,
+    ammProjectScopeKey,
+    liquidityForm.tokenA,
+    liquidityForm.tokenB,
+  ]);
+  const ammRemoveLiquidityQuoteReadKey = ammReadIdentityKey([
+    ammWalletScopeKey,
+    ammProjectScopeKey,
+    liquidityForm,
+    removeLiquidityForm,
+  ]);
+  const ammReadCoordinator = ammReadCoordinatorRef.current;
+  ammReadCoordinator.sync("token-list", ammTokenReadKey);
+  ammReadCoordinator.sync("swap-quote", ammSwapQuoteReadKey);
+  ammReadCoordinator.sync("liquidity-quote", ammLiquidityQuoteReadKey);
+  ammReadCoordinator.sync("position", ammPositionReadKey);
+  ammReadCoordinator.sync("remove-liquidity-quote", ammRemoveLiquidityQuoteReadKey);
+  activeAmmTokenReadKeyRef.current = ammTokenReadKey;
   useEffect(() => {
     cancelReview();
   }, [activeNetwork.chainId, activeRouteIdentity, cancelReview, wallet.account, wallet.chainId]);
@@ -681,6 +849,27 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     networkRequestVersion.current += 1;
   }, [activeNetwork.chainId, runtimeDeploymentIdentity]);
+
+  useEffect(() => {
+    ammTokenLoadAbortControllerRef.current?.abort(new DOMException("AMM account or project scope changed.", "AbortError"));
+    ammTokenLoadAbortControllerRef.current = undefined;
+    setSwapTokenList(emptySwapTokenList());
+    setSwapTokenListLoading(false);
+    setSwapQuote(undefined);
+    setLiquidityQuote(undefined);
+    setRemoveLiquidityQuote(undefined);
+    setAmmPosition(undefined);
+  }, [ammTokenReadKey]);
+
+  useEffect(() => () => {
+    productRequestVersionRef.current += 1;
+    ammTokenLoadAbortControllerRef.current?.abort(new DOMException("AMM workspace closed.", "AbortError"));
+    ammTokenLoadAbortControllerRef.current = undefined;
+    productLoadAbortControllerRef.current?.abort(new DOMException("Project workspace closed.", "AbortError"));
+    productLoadAbortControllerRef.current = undefined;
+    productCatalogLoadMoreAbortControllerRef.current?.abort(new DOMException("Project catalog closed.", "AbortError"));
+    productCatalogLoadMoreAbortControllerRef.current = undefined;
+  }, []);
 
   useEffect(() => {
     discoveryWriteVersion.current += 1;
@@ -758,6 +947,9 @@ export function App(): React.JSX.Element {
   }, [activeNetwork.chainId, runtimeDeploymentIdentity, resetNetworkScopedState]);
 
   const loadProductBoardroom = useCallback(async (requestedAddress?: Address): Promise<void> => {
+    productLoadAbortControllerRef.current?.abort(new DOMException("A newer project load started.", "AbortError"));
+    const abortController = new AbortController();
+    productLoadAbortControllerRef.current = abortController;
     const networkRequest = networkRequestVersion.current;
     const productRequest = ++productRequestVersionRef.current;
     const requestChainId = activeNetwork.chainId;
@@ -774,7 +966,9 @@ export function App(): React.JSX.Element {
       if (!deployment?.boardroomFactory) {
         throw new Error("Runtime deployment is still loading for this chain.");
       }
-      const catalogPage = await readProductBoardroomCatalogPage(publicClient, deployment);
+      const catalogPage = await readProductBoardroomCatalogPage(publicClient, deployment, {
+        signal: abortController.signal,
+      });
       if (!requestIsCurrent()) return;
       setProductCatalog(catalogPage.entries);
       setProductCatalogLoaded(true);
@@ -790,6 +984,7 @@ export function App(): React.JSX.Element {
       const next = await readProductBoardroomDashboard(publicClient, {
         address: requestedAddress,
         catalog: catalogPage.entries,
+        signal: abortController.signal,
       });
       if (!requestIsCurrent()) return;
       setProductCatalog(next.catalog);
@@ -802,12 +997,18 @@ export function App(): React.JSX.Element {
       setProductBoardroomError(message);
       pushLog(message, "error");
     } finally {
+      if (productLoadAbortControllerRef.current === abortController) {
+        productLoadAbortControllerRef.current = undefined;
+      }
       if (requestIsCurrent()) setProductBoardroomLoading(false);
     }
   }, [activeNetwork.chainId, activeNetwork.name, deployment, isCurrentNetworkRequest, publicClient, pushLog, runtimeDeploymentIdentity]);
 
   const loadMoreProductBoardrooms = useCallback(async (): Promise<void> => {
     if (productCatalogNextCursor === undefined || productCatalogLoadingMore || !deployment?.boardroomFactory) return;
+    productCatalogLoadMoreAbortControllerRef.current?.abort(new DOMException("A newer project catalog load started.", "AbortError"));
+    const abortController = new AbortController();
+    productCatalogLoadMoreAbortControllerRef.current = abortController;
     const networkRequest = networkRequestVersion.current;
     const productRequest = productRequestVersionRef.current;
     const requestChainId = activeNetwork.chainId;
@@ -822,6 +1023,7 @@ export function App(): React.JSX.Element {
     try {
       const page = await readProductBoardroomCatalogPage(publicClient, deployment, {
         cursor,
+        signal: abortController.signal,
         snapshotCount: productCatalogTotalCount,
       });
       if (!requestIsCurrent()) return;
@@ -838,6 +1040,9 @@ export function App(): React.JSX.Element {
       setProductCatalogLoadMoreError(message);
       pushLog(message, "error");
     } finally {
+      if (productCatalogLoadMoreAbortControllerRef.current === abortController) {
+        productCatalogLoadMoreAbortControllerRef.current = undefined;
+      }
       if (requestIsCurrent()) setProductCatalogLoadingMore(false);
     }
   }, [activeNetwork.chainId, activeNetwork.name, deployment, isCurrentNetworkRequest, productCatalogLoadingMore, productCatalogNextCursor, productCatalogTotalCount, publicClient, pushLog, runtimeDeploymentIdentity]);
@@ -919,6 +1124,10 @@ export function App(): React.JSX.Element {
   }, [discoveryKey]);
 
   useEffect(() => {
+    productLoadAbortControllerRef.current?.abort(new DOMException("Project route changed.", "AbortError"));
+    productLoadAbortControllerRef.current = undefined;
+    productCatalogLoadMoreAbortControllerRef.current?.abort(new DOMException("Project route changed.", "AbortError"));
+    productCatalogLoadMoreAbortControllerRef.current = undefined;
     productRequestVersionRef.current += 1;
     setProductBoardroomError(undefined);
     setProductBoardroomLoading(false);
@@ -994,6 +1203,7 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     setLiquidityQuote(undefined);
     setRemoveLiquidityQuote(undefined);
+    setAmmPosition(undefined);
   }, [liquidityForm]);
 
   useEffect(() => {
@@ -1017,18 +1227,30 @@ export function App(): React.JSX.Element {
   }, [deployment, liquidityForm.tokenA, liquidityForm.tokenB, liquidityForm.useNative, removeLiquidityForm.useNative, swapForm.tokenIn, swapForm.tokenOut, swapForm.useNative]);
 
   const loadSwapTokens = useCallback(async (): Promise<void> => {
-    const requestVersion = networkRequestVersion.current;
-    const requestChainId = activeNetwork.chainId;
+    const loadScope = activeSwapTokenLoadScopeRef.current;
+    if (!loadScope) return;
+    const request = ammReadCoordinatorRef.current.begin("token-list", activeAmmTokenReadKeyRef.current);
+    if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
+    ammTokenLoadAbortControllerRef.current?.abort(new DOMException("A newer AMM token load started.", "AbortError"));
+    const abortController = new AbortController();
+    ammTokenLoadAbortControllerRef.current = abortController;
+    const deadline = window.setTimeout(() => {
+      const timeout = new Error("AMM token loading timed out. Try again.");
+      timeout.name = "TimeoutError";
+      abortController.abort(timeout);
+    }, AMM_TOKEN_LOAD_DEADLINE_MS);
     setSwapTokenListLoading(true);
     try {
       if (!deployment?.ammFactory) {
         throw new Error("Runtime deployment is still loading for this chain.");
       }
-      const next = await readSwapTokenList(publicClient, deployment, wallet.account, {
-        pinnedPools: studioProjectPoolsRef.current,
+      const next = await readSwapTokenList(publicClient, deployment, activeAccountRef.current, {
+        discoveryMode: loadScope.mode,
+        pinnedPools: loadScope.pinnedPools,
+        signal: abortController.signal,
         wrappedNativeLabel: activeNetwork.wrappedNativeSymbol,
       });
-      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
+      if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
       setSwapTokenList(next);
       setSwapForm((current) => withSwapTokenListDefaults(current, next, deployment));
       setLiquidityForm((current) => withLiquidityTokenListDefaults(current, next, deployment));
@@ -1038,20 +1260,23 @@ export function App(): React.JSX.Element {
         pushLog(`Loaded ${next.tokens.length.toString()} swap tokens across ${next.pools.length.toString()} pools`, "success");
       }
     } catch (error) {
+      if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
       const message = errorMessage(error);
-      if (!isCurrentNetworkRequest(requestVersion, requestChainId)) return;
       setSwapTokenList({ tokens: [], pools: [], loaded: true, error: message });
       pushLog(message, "error");
     } finally {
-      if (isCurrentNetworkRequest(requestVersion, requestChainId)) setSwapTokenListLoading(false);
+      window.clearTimeout(deadline);
+      if (ammTokenLoadAbortControllerRef.current === abortController) {
+        ammTokenLoadAbortControllerRef.current = undefined;
+        setSwapTokenListLoading(false);
+      }
     }
-  }, [activeNetwork.chainId, activeNetwork.wrappedNativeSymbol, deployment, isCurrentNetworkRequest, publicClient, pushLog, wallet.account]);
+  }, [activeNetwork.wrappedNativeSymbol, deployment, publicClient, pushLog]);
 
   useEffect(() => {
-    const studioLiquidityRoute = appRoute.kind === "studio-project" && appRoute.section === "liquidity";
-    if (!shouldLoadSwapTokens({ activeView, deployment, studioLiquidityRoute, swapTokenList, swapTokenListLoading })) return;
+    if (!shouldLoadSwapTokens({ deployment, loadScope: swapTokenLoadScope, swapTokenList, swapTokenListLoading })) return;
     void loadSwapTokens();
-  }, [activeView, appRoute, deployment, loadSwapTokens, swapTokenList, swapTokenListLoading]);
+  }, [ammTokenReadKey, deployment, loadSwapTokens, swapTokenList, swapTokenListLoading, swapTokenLoadScope]);
 
   useEffect(() => {
     if (!wallet.account || boardroomForm.owner) return;
@@ -1147,7 +1372,11 @@ export function App(): React.JSX.Element {
     setBoardroomMintTo(productBoardroom.snapshot.address);
   }, [activeNetwork.chainId, appRoute, boardroomAddress, boardroomSnapshot?.address, productBoardroom, updateBoardroomAddress]);
 
-  const submitContractTransaction = async (label: string, request: Record<string, unknown>): Promise<Hex> => {
+  const submitContractTransaction = async (
+    label: string,
+    request: Record<string, unknown>,
+    options: ContractTransactionOptions = {},
+  ): Promise<Hex> => {
     const actionOrigin = activeActionOriginRef.current;
     const transactionIdentity: TransactionIdentity = {
       account: actionOrigin?.account ?? activeAccount(),
@@ -1172,6 +1401,7 @@ export function App(): React.JSX.Element {
     try {
       await requestReview(callReview);
       assertLiveIdentity("simulation");
+      await options.assertState?.("simulation");
       updateTransaction(transactionId, { stage: "simulating" });
       pushLog(contractCallPreview(label, request), "info");
       const simulation = await publicClient.simulateContract({
@@ -1184,6 +1414,7 @@ export function App(): React.JSX.Element {
       const client = walletClientRef.current?.();
       if (!client) throw new Error("Wallet client is not ready yet.");
       assertLiveIdentity("submission");
+      await options.assertState?.("submission");
       const hash = (await client.writeContract({
         ...simulation.request,
       } as unknown as Parameters<typeof client.writeContract>[0])) as Hex;
@@ -1233,8 +1464,20 @@ export function App(): React.JSX.Element {
     return plan.kind;
   };
 
+  const beginAmmRead = (kind: AmmReadKind, key: string): AmmReadRequest =>
+    ammReadCoordinatorRef.current.begin(kind, key);
+
+  const assertCurrentAmmRead = (request: AmmReadRequest): void => {
+    if (!ammReadCoordinatorRef.current.isCurrent(request)) {
+      throw new Error("AMM account, project, or form changed while data was loading. Refresh the current quote.");
+    }
+  };
+
   const refreshSwapQuote = async (): Promise<void> => {
+    const request = beginAmmRead("swap-quote", ammSwapQuoteReadKey);
+    if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
     const next = await readSwapQuote(publicClient, deployment, swapForm, wallet.account);
+    if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
     const route = activeAppRouteRef.current;
     const expectedPool = route.kind === "project" && route.section === "participate" ? exactProjectPoolRef.current : undefined;
     if (expectedPool && (!next.pool || !sameAddress(next.pool.address, expectedPool))) {
@@ -1252,7 +1495,10 @@ export function App(): React.JSX.Element {
   };
 
   const requireFreshSwapQuote = async (): Promise<SwapQuoteState> => {
+    const request = beginAmmRead("swap-quote", ammSwapQuoteReadKey);
+    assertCurrentAmmRead(request);
     const next = await readSwapQuote(publicClient, deployment, swapForm, wallet.account);
+    assertCurrentAmmRead(request);
     setSwapQuote(next);
     if (next.error) throw new Error(next.error);
     const route = activeAppRouteRef.current;
@@ -1295,9 +1541,17 @@ export function App(): React.JSX.Element {
   };
 
   const refreshLiquidityQuote = async (): Promise<void> => {
-    const next = await readLiquidityQuote(publicClient, deployment, liquidityForm, wallet.account);
+    const quoteRequest = beginAmmRead("liquidity-quote", ammLiquidityQuoteReadKey);
+    const positionRequest = beginAmmRead("position", ammPositionReadKey);
+    if (!ammReadCoordinatorRef.current.isCurrent(quoteRequest)
+      || !ammReadCoordinatorRef.current.isCurrent(positionRequest)) return;
+    const [next, position] = await Promise.all([
+      readLiquidityQuote(publicClient, deployment, liquidityForm, wallet.account),
+      readAmmPosition(publicClient, deployment, liquidityForm.tokenA, liquidityForm.tokenB, wallet.account),
+    ]);
+    if (!ammReadCoordinatorRef.current.isCurrent(quoteRequest)
+      || !ammReadCoordinatorRef.current.isCurrent(positionRequest)) return;
     setLiquidityQuote(next);
-    const position = await readAmmPosition(publicClient, deployment, liquidityForm.tokenA, liquidityForm.tokenB, wallet.account);
     setAmmPosition(position);
     if (next.error) {
       pushLog(next.error, next.error.includes("No AMM pool") ? "info" : "error");
@@ -1307,7 +1561,10 @@ export function App(): React.JSX.Element {
   };
 
   const requireFreshLiquidityQuote = async (): Promise<LiquidityQuoteState> => {
+    const request = beginAmmRead("liquidity-quote", ammLiquidityQuoteReadKey);
+    assertCurrentAmmRead(request);
     const next = await readLiquidityQuote(publicClient, deployment, liquidityForm, wallet.account);
+    assertCurrentAmmRead(request);
     setLiquidityQuote(next);
     if (next.error) throw new Error(next.error);
     if (activeAppRouteRef.current.kind === "studio-project" && activeAppRouteRef.current.section === "liquidity") {
@@ -1347,7 +1604,10 @@ export function App(): React.JSX.Element {
   };
 
   const refreshAmmPosition = async (): Promise<void> => {
+    const request = beginAmmRead("position", ammPositionReadKey);
+    if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
     const next = await readAmmPosition(publicClient, deployment, liquidityForm.tokenA, liquidityForm.tokenB, wallet.account);
+    if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
     setAmmPosition(next);
     if (next?.error) {
       pushLog(next.error, "error");
@@ -1357,7 +1617,10 @@ export function App(): React.JSX.Element {
   };
 
   const refreshRemoveLiquidityQuote = async (): Promise<void> => {
+    const request = beginAmmRead("remove-liquidity-quote", ammRemoveLiquidityQuoteReadKey);
+    if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
     const next = await readRemoveLiquidityQuote(publicClient, deployment, liquidityForm, removeLiquidityForm, wallet.account);
+    if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
     setRemoveLiquidityQuote(next);
     if (next.position) setAmmPosition(next.position);
     if (next.error) {
@@ -1368,7 +1631,10 @@ export function App(): React.JSX.Element {
   };
 
   const requireFreshRemoveLiquidityQuote = async (): Promise<RemoveLiquidityQuoteState> => {
+    const request = beginAmmRead("remove-liquidity-quote", ammRemoveLiquidityQuoteReadKey);
+    assertCurrentAmmRead(request);
     const next = await readRemoveLiquidityQuote(publicClient, deployment, liquidityForm, removeLiquidityForm, wallet.account);
+    assertCurrentAmmRead(request);
     setRemoveLiquidityQuote(next);
     if (next.position) setAmmPosition(next.position);
     if (next.error) throw new Error(next.error);
@@ -1397,7 +1663,10 @@ export function App(): React.JSX.Element {
 
   const claimAmmFees = async (): Promise<void> => {
     activeAccount();
+    const request = beginAmmRead("position", ammPositionReadKey);
+    assertCurrentAmmRead(request);
     const position = await readAmmPosition(publicClient, deployment, liquidityForm.tokenA, liquidityForm.tokenB, wallet.account);
+    assertCurrentAmmRead(request);
     if (!position) throw new Error("Select a pool before claiming fees.");
     if (activeAppRouteRef.current.kind === "studio-project" && activeAppRouteRef.current.section === "liquidity") {
       assertProjectPoolAllowed(position.pool, studioProjectPoolsRef.current, "This fee claim");
@@ -2556,10 +2825,6 @@ export function App(): React.JSX.Element {
     [activeNetwork.chainId, navigateRoute, updateBoardroomAddress, updateLockedLiquidityAddress],
   );
 
-  const exactProjectAddress = appRoute.kind === "project" || appRoute.kind === "studio-project" ? appRoute.boardroom : undefined;
-  const exactProjectDashboard = exactProjectAddress && productBoardroom?.address.toLowerCase() === exactProjectAddress.toLowerCase()
-    ? productBoardroom
-    : undefined;
   const exactProjectCatalogEntry = exactProjectDashboard?.catalog.find((entry) => sameAddress(entry.address, exactProjectDashboard.address));
   const activeRouteTitle = contextualAppRouteTitle(
     appRoute,
@@ -2568,35 +2833,6 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     if (typeof document !== "undefined") document.title = `${activeRouteTitle} · pledge.cash`;
   }, [activeRouteTitle]);
-  const exactProjectPools = useMemo(() => projectPoolAddresses(exactProjectDashboard), [exactProjectDashboard]);
-  const selectedProjectPool = participationPoolAddress(selectedParticipationRoute, exactProjectPools) ?? exactProjectPools[0];
-  const exactProjectPoolRef = useRef<Address | undefined>(selectedProjectPool);
-  const studioProjectPoolsRef = useRef<readonly Address[]>(exactProjectPools);
-  exactProjectPoolRef.current = selectedProjectPool;
-  studioProjectPoolsRef.current = exactProjectPools;
-  const exactProjectIdentity = exactProjectDashboard
-    ? `${activeNetwork.chainId.toString()}:${exactProjectDashboard.address.toLowerCase()}`
-    : undefined;
-  const swapPinnedPoolsLoadKeyRef = useRef<string | undefined>(undefined);
-  const exactProjectPoolsLoadKey = exactProjectIdentity && exactProjectPools.length > 0
-    ? `${exactProjectIdentity}:${exactProjectPools.map((pool) => pool.toLowerCase()).join(",")}`
-    : undefined;
-  useEffect(() => {
-    if (!exactProjectPoolsLoadKey) {
-      swapPinnedPoolsLoadKeyRef.current = undefined;
-      return;
-    }
-    if (!swapTokenList.loaded || swapTokenListLoading) return;
-    const missingPinnedPool = exactProjectPools.some((pool) =>
-      !swapTokenList.pools.some((candidate) => sameAddress(candidate.address, pool)));
-    if (!missingPinnedPool) {
-      swapPinnedPoolsLoadKeyRef.current = exactProjectPoolsLoadKey;
-      return;
-    }
-    if (swapPinnedPoolsLoadKeyRef.current === exactProjectPoolsLoadKey) return;
-    swapPinnedPoolsLoadKeyRef.current = exactProjectPoolsLoadKey;
-    void loadSwapTokens();
-  }, [exactProjectPools, exactProjectPoolsLoadKey, loadSwapTokens, swapTokenList.loaded, swapTokenList.pools, swapTokenListLoading]);
   useEffect(() => {
     setSelectedParticipationRoute(undefined);
   }, [exactProjectIdentity]);
@@ -2951,6 +3187,16 @@ export function App(): React.JSX.Element {
       pendingAction={pendingAction}
       runAction={runAction}
       submitTransaction={submitContractTransaction}
+      onLaunch={async (_governanceDelay, request) => {
+        const boardroom = exactProjectDashboard.address;
+        const expectedExecutor = exactProjectDashboard.snapshot.executor;
+        await assertGovernanceLaunchPrecondition(publicClient, boardroom, expectedExecutor, "review");
+        await submitContractTransaction("Launch holder governance", request, {
+          assertState: async (phase) => {
+            await assertGovernanceLaunchPrecondition(publicClient, boardroom, expectedExecutor, phase);
+          },
+        });
+      }}
       onComplete={async () => {
         productGovernanceLoadedKeyRef.current = undefined;
         await loadProductBoardroom(exactProjectDashboard.address);
@@ -3094,7 +3340,20 @@ export function App(): React.JSX.Element {
             projectHref={(project) => projectRouteHref(activeNetwork.chainId, project.address)}
           />
         );
-      case "project":
+      case "project": {
+        const failure = productBoardroomError && !productBoardroomLoading && !exactProjectDashboard
+          ? projectRouteFailure(productBoardroomError)
+          : undefined;
+        if (failure) {
+          return (
+            <ProjectRouteFailureState
+              failure={failure}
+              onRetry={failure.retryable ? () => void loadProductBoardroom(appRoute.boardroom) : undefined}
+              onReturn={() => navigateRoute({ kind: "explore", chainId: appRoute.chainId })}
+              returnHref={appRouteHref({ kind: "explore", chainId: appRoute.chainId })}
+            />
+          );
+        }
         return (
           <ProjectLayout
             account={wallet.account}
@@ -3162,6 +3421,7 @@ export function App(): React.JSX.Element {
             )}
           </ProjectLayout>
         );
+      }
       case "portfolio":
         return (
           <PortfolioPage

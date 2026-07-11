@@ -10,7 +10,7 @@ import {
   type MigratingBondingCurveState,
 } from "@pledge.cash/sdk";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getAddress, isAddress } from "viem";
+import { getAddress, isAddress, type PublicClient } from "viem";
 import { Input } from "../../components/ui/input";
 import { errorMessage } from "../../lib/forms";
 import { formatTokenAmount, parseTokenAmountInput } from "../../lib/token-amounts";
@@ -44,6 +44,39 @@ type BondingCurveFlowProps = ParticipationFlowContext & {
 type CurveMode = "buy" | "sell";
 type CurveQuote = MigratingBondingCurveBuyQuote | MigratingBondingCurveSellQuote;
 type ParsedAmount = { error?: string; value?: bigint };
+export type BondingCurveActionKind = "approve" | "trade";
+
+export type BondingCurveActionIntent = {
+  account: Address;
+  boardroom: Address;
+  boardroomStatus: number;
+  curve: Address;
+  deadlineMinutes: string;
+  factory: Address;
+  lockedLiquidityFactory: Address;
+  mode: CurveMode;
+  quoteToken: Address;
+  recipient: Address;
+  shareAmount: bigint;
+  shareToken: Address;
+  slippageBps: bigint;
+};
+
+export type PreparedBondingCurveAction = {
+  kind: BondingCurveActionKind;
+  quote: CurveQuote;
+  request: Record<string, unknown>;
+};
+
+type PrepareBondingCurveActionOptions = {
+  clock?: (() => number) | undefined;
+  expectedAction: BondingCurveActionKind;
+  intent: BondingCurveActionIntent;
+  isCurrent?: ((intent: BondingCurveActionIntent) => boolean) | undefined;
+  onQuote?: ((quote: CurveQuote) => void) | undefined;
+  readBuyQuote?: typeof readMigratingBondingCurveBuyQuote | undefined;
+  readSellQuote?: typeof readMigratingBondingCurveSellQuote | undefined;
+};
 
 export function BondingCurveFlow({
   account,
@@ -88,6 +121,23 @@ export function BondingCurveFlow({
   const minimumQuoteOut = sellQuote && slippage.value !== undefined
     ? minimumWithSlippage(sellQuote.quoteOut, slippage.value)
     : undefined;
+  const actionIdentity = bondingCurveActionIdentity({
+    account,
+    boardroom: state?.boardroom,
+    boardroomStatus: dashboard.snapshot.status,
+    curve: state?.address,
+    deadlineMinutes,
+    factory: state?.factory,
+    lockedLiquidityFactory: state?.lockedLiquidityFactory,
+    mode,
+    quoteToken: state?.quoteToken,
+    recipient,
+    shareAmount: parsedAmount.value,
+    shareToken: state?.shareToken,
+    slippageBps: slippage.value,
+  });
+  const actionIdentityRef = useRef(actionIdentity);
+  actionIdentityRef.current = actionIdentity;
 
   const refreshQuote = useCallback(async (): Promise<void> => {
     if (!state || !account || parsedAmount.value === undefined || parsedAmount.value === 0n) return;
@@ -165,34 +215,38 @@ export function BondingCurveFlow({
     : mode === "buy" ? "Buy project tokens" : "Sell project tokens";
 
   const submitAction = async (): Promise<void> => {
-    if (!recipient || parsedAmount.value === undefined) throw new Error("Refresh a valid quote before continuing.");
-    if (approval.required) {
-      if (approval.amount === undefined) throw new Error("Approval amount is unavailable.");
-      await submitTransaction("Bonding curve token approval", buildErc20Approval({
-        token: mode === "buy" ? state.quoteToken : state.shareToken,
-        spender: state.address,
-        amount: approval.amount,
-      }));
-    } else if (mode === "buy") {
-      if (!buyQuote || maximumQuoteIn === undefined) throw new Error("Refresh a valid buy quote before continuing.");
-      await submitTransaction("Bonding curve purchase", buildMigratingBondingCurveBuyTransaction({
-        curve: state.address,
-        shareAmount: parsedAmount.value,
-        recipient,
-        maxQuoteIn: maximumQuoteIn,
-        deadline: transactionDeadline(deadlineMinutes),
-      }));
-    } else {
-      if (!sellQuote || minimumQuoteOut === undefined) throw new Error("Refresh a valid sell quote before continuing.");
-      await submitTransaction("Bonding curve sale", buildMigratingBondingCurveSellTransaction({
-        curve: state.address,
-        shareAmount: parsedAmount.value,
-        recipient,
-        minQuoteOut: minimumQuoteOut,
-        deadline: transactionDeadline(deadlineMinutes),
-      }));
+    if (!account || !recipient || parsedAmount.value === undefined || slippage.value === undefined) {
+      throw new Error("Refresh a valid quote before continuing.");
     }
-    await refreshQuote();
+    const intent: BondingCurveActionIntent = {
+      account,
+      boardroom: state.boardroom,
+      boardroomStatus: dashboard.snapshot.status,
+      curve: state.address,
+      deadlineMinutes,
+      factory: state.factory,
+      lockedLiquidityFactory: state.lockedLiquidityFactory,
+      mode,
+      quoteToken: state.quoteToken,
+      recipient,
+      shareAmount: parsedAmount.value,
+      shareToken: state.shareToken,
+      slippageBps: slippage.value,
+    };
+    const expectedIdentity = bondingCurveActionIdentity(intent);
+    const prepared = await prepareBondingCurveAction(publicClient, {
+      expectedAction: approval.required ? "approve" : "trade",
+      intent,
+      isCurrent: () => actionIdentityRef.current === expectedIdentity,
+      onQuote: setQuote,
+    });
+    await submitTransaction(
+      prepared.kind === "approve"
+        ? "Bonding curve token approval"
+        : mode === "buy" ? "Bonding curve purchase" : "Bonding curve sale",
+      prepared.request,
+    );
+    if (actionIdentityRef.current === expectedIdentity) await refreshQuote();
   };
 
   const expectedPayment = mode === "buy" ? buyQuote?.quoteIn : parsedAmount.value;
@@ -323,6 +377,145 @@ export function BondingCurveFlow({
   );
 }
 
+export async function prepareBondingCurveAction(
+  client: PublicClient,
+  options: PrepareBondingCurveActionOptions,
+): Promise<PreparedBondingCurveAction> {
+  const { intent } = options;
+  if (intent.boardroomStatus !== 0) throw new Error("This project is no longer active.");
+  if (intent.shareAmount <= 0n) throw new Error("Trade amount must be greater than zero.");
+
+  const quote: CurveQuote = intent.mode === "buy"
+    ? await (options.readBuyQuote ?? readMigratingBondingCurveBuyQuote)(client, {
+        curve: intent.curve,
+        buyer: intent.account,
+        shareAmount: intent.shareAmount,
+      })
+    : await (options.readSellQuote ?? readMigratingBondingCurveSellQuote)(client, {
+        curve: intent.curve,
+        seller: intent.account,
+        shareAmount: intent.shareAmount,
+      });
+  assertBondingCurveQuoteIdentity(quote, intent);
+  if (options.isCurrent && !options.isCurrent(intent)) {
+    throw new Error("Trade details changed while the quote was refreshing. Review the updated order and try again.");
+  }
+  options.onQuote?.(quote);
+
+  const nowSeconds = options.clock?.() ?? Math.floor(Date.now() / 1_000);
+  if (quote.state.curveStatus !== 0 || quote.state.closed) throw new Error("This bonding curve closed while the quote was refreshing.");
+  if (intent.mode === "buy") {
+    if (quote.state.graduationLatched) throw new Error("This curve reached graduation while the quote was refreshing.");
+    const window = unixWindowStatus(quote.state.startTime, quote.state.endTime, nowSeconds);
+    if (window !== "open") throw new Error(window === "ended" ? "The curve purchase window has ended." : "Curve purchases have not started yet.");
+  }
+
+  const prepared = intent.mode === "buy"
+    ? prepareBondingCurveBuyAction(quote as MigratingBondingCurveBuyQuote, intent, nowSeconds)
+    : prepareBondingCurveSellAction(quote as MigratingBondingCurveSellQuote, intent, nowSeconds);
+  if (prepared.kind !== options.expectedAction) {
+    throw new Error(
+      prepared.kind === "approve"
+        ? "The refreshed trade now requires approval. Review the updated action and try again."
+        : "Approval is now sufficient. Review the refreshed trade before submitting it.",
+    );
+  }
+  return { ...prepared, quote };
+}
+
+export function bondingCurveActionIdentity(input: {
+  account: Address | undefined;
+  boardroom: Address | undefined;
+  boardroomStatus: number;
+  curve: Address | undefined;
+  deadlineMinutes: string;
+  factory: Address | undefined;
+  lockedLiquidityFactory: Address | undefined;
+  mode: CurveMode;
+  quoteToken: Address | undefined;
+  recipient: Address | undefined;
+  shareAmount: bigint | undefined;
+  shareToken: Address | undefined;
+  slippageBps: bigint | undefined;
+}): string {
+  return [
+    input.account?.toLowerCase() ?? "",
+    input.boardroom?.toLowerCase() ?? "",
+    input.boardroomStatus.toString(),
+    input.curve?.toLowerCase() ?? "",
+    input.deadlineMinutes,
+    input.factory?.toLowerCase() ?? "",
+    input.lockedLiquidityFactory?.toLowerCase() ?? "",
+    input.mode,
+    input.quoteToken?.toLowerCase() ?? "",
+    input.recipient?.toLowerCase() ?? "",
+    input.shareAmount?.toString() ?? "",
+    input.shareToken?.toLowerCase() ?? "",
+    input.slippageBps?.toString() ?? "",
+  ].join(":");
+}
+
+function prepareBondingCurveBuyAction(
+  quote: MigratingBondingCurveBuyQuote,
+  intent: BondingCurveActionIntent,
+  nowSeconds: number,
+): Pick<PreparedBondingCurveAction, "kind" | "request"> {
+  if (intent.shareAmount > quote.state.remainingSaleShares) throw new Error("The requested amount is no longer available on this curve.");
+  const maxQuoteIn = maximumWithSlippage(quote.quoteIn, intent.slippageBps);
+  if (quote.quoteBalance < maxQuoteIn) throw new Error("The wallet balance no longer covers the refreshed maximum payment.");
+  const kind: BondingCurveActionKind = quote.quoteAllowance < maxQuoteIn ? "approve" : "trade";
+  return {
+    kind,
+    request: kind === "approve"
+      ? buildErc20Approval({ token: quote.state.quoteToken, spender: quote.state.address, amount: maxQuoteIn })
+      : buildMigratingBondingCurveBuyTransaction({
+          curve: quote.state.address,
+          shareAmount: intent.shareAmount,
+          recipient: intent.recipient,
+          maxQuoteIn,
+          deadline: transactionDeadline(intent.deadlineMinutes, nowSeconds),
+        }),
+  };
+}
+
+function prepareBondingCurveSellAction(
+  quote: MigratingBondingCurveSellQuote,
+  intent: BondingCurveActionIntent,
+  nowSeconds: number,
+): Pick<PreparedBondingCurveAction, "kind" | "request"> {
+  if (intent.shareAmount > quote.sellableShares) throw new Error("This wallet no longer has enough curve-acquired tokens to sell.");
+  if (intent.shareAmount > quote.shareBalance) throw new Error("The wallet project-token balance is now too low for this trade.");
+  const minQuoteOut = minimumWithSlippage(quote.quoteOut, intent.slippageBps);
+  const kind: BondingCurveActionKind = quote.shareAllowance < intent.shareAmount ? "approve" : "trade";
+  return {
+    kind,
+    request: kind === "approve"
+      ? buildErc20Approval({ token: quote.state.shareToken, spender: quote.state.address, amount: intent.shareAmount })
+      : buildMigratingBondingCurveSellTransaction({
+          curve: quote.state.address,
+          shareAmount: intent.shareAmount,
+          recipient: intent.recipient,
+          minQuoteOut,
+          deadline: transactionDeadline(intent.deadlineMinutes, nowSeconds),
+        }),
+  };
+}
+
+function assertBondingCurveQuoteIdentity(quote: CurveQuote, intent: BondingCurveActionIntent): void {
+  const actor = "buyer" in quote ? quote.buyer : quote.seller;
+  const quoteMode: CurveMode = "quoteIn" in quote ? "buy" : "sell";
+  const matches = quoteMode === intent.mode
+    && quote.shareAmount === intent.shareAmount
+    && sameAddress(actor, intent.account)
+    && sameAddress(quote.state.address, intent.curve)
+    && sameAddress(quote.state.factory, intent.factory)
+    && sameAddress(quote.state.boardroom, intent.boardroom)
+    && sameAddress(quote.state.lockedLiquidityFactory, intent.lockedLiquidityFactory)
+    && sameAddress(quote.state.shareToken, intent.shareToken)
+    && sameAddress(quote.state.quoteToken, intent.quoteToken);
+  if (!matches) throw new Error("The refreshed quote does not match this wallet, curve, direction, or exact trade amount.");
+}
+
 function bondingCurveState(distribution: BoardroomDistributionSnapshot): MigratingBondingCurveState | undefined {
   const state = distribution.state;
   return distribution.kind === "migrating-bonding-curve" && state && "curveStatus" in state ? state : undefined;
@@ -332,6 +525,10 @@ function resolveRecipient(value: string, account: Address | undefined): Address 
   const normalized = value.trim();
   if (!normalized) return account;
   return isAddress(normalized) ? getAddress(normalized) : undefined;
+}
+
+function sameAddress(left: Address, right: Address): boolean {
+  return left.toLowerCase() === right.toLowerCase();
 }
 
 function safeSlippage(value: string): { error?: string; value?: bigint } {

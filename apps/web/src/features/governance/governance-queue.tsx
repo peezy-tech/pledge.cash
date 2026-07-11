@@ -12,6 +12,7 @@ import {
   buildGovernanceVetoRequest,
   canExecuteQueuedAction,
   canVetoQueuedAction,
+  effectiveGovernanceActionStatus,
   formatGovernanceTimestamp,
   governanceActionView,
 } from "./view-model";
@@ -69,21 +70,26 @@ function GovernanceQueueRow({
   runAction,
   submitTransaction,
 }: Omit<GovernanceQueueProps, "actions"> & { action: QueuedBoardroomAction }): React.JSX.Element {
-  const view = governanceActionView(action, now);
+  const renderNow = now ?? BigInt(Math.floor(Date.now() / 1_000));
+  const effectiveStatus = effectiveGovernanceActionStatus(action, renderNow);
+  const effectiveAction = effectiveStatus === action.status ? action : { ...action, status: effectiveStatus };
+  const view = governanceActionView(effectiveAction, renderNow);
   const vetoActionId = `governance-veto-${action.actionHash}`;
   const executeActionId = `governance-execute-${action.actionHash}`;
-  const vetoAvailable = canVetoQueuedAction(action);
-  const executionVerified = canExecuteQueuedAction(action)
+  const vetoAvailable = canVetoQueuedAction(effectiveAction, renderNow);
+  const executionVerified = canExecuteQueuedAction(effectiveAction, renderNow)
     && view.calls.length > 0
     && view.calls.every((call) => call.verification === "verified");
-  const showActions = vetoAvailable || action.status === "ready";
+  const showActions = vetoAvailable || effectiveStatus === "ready";
+
+  const actionTime = (): bigint => now ?? BigInt(Math.floor(Date.now() / 1_000));
 
   const veto = async (): Promise<void> => {
-    await submitTransaction("Veto queued governance action", buildGovernanceVetoRequest(action));
+    await submitTransaction("Veto queued governance action", buildGovernanceVetoRequest(effectiveAction, actionTime()));
   };
 
   const execute = async (): Promise<void> => {
-    await submitTransaction("Execute queued governance action", buildGovernanceExecutionRequest(action));
+    await submitTransaction("Execute queued governance action", buildGovernanceExecutionRequest(effectiveAction, actionTime()));
   };
 
   return (
@@ -193,7 +199,7 @@ function GovernanceQueueRow({
                 {pendingAction === vetoActionId ? "Vetoing" : "Veto action"}
               </ActionButton>
             ) : null}
-            {action.status === "ready" ? (
+            {effectiveStatus === "ready" ? (
               <ActionButton
                 actionId={executeActionId}
                 disabled={!executionVerified || !capabilityEnabled(capabilities["governance.executeReady"])}
@@ -206,7 +212,7 @@ function GovernanceQueueRow({
             ) : null}
           </div>
           <ActionAvailability
-            executeCapability={action.status === "ready" ? capabilities["governance.executeReady"] : undefined}
+            executeCapability={effectiveStatus === "ready" ? capabilities["governance.executeReady"] : undefined}
             executionVerified={executionVerified}
             vetoCapability={vetoAvailable ? capabilities["governance.veto"] : undefined}
           />

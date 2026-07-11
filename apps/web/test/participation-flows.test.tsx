@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import type { Address } from "@pledge.cash/sdk";
+import type {
+  Address,
+  FixedPriceSaleParticipationQuote,
+  FixedPriceSaleState,
+  MigratingBondingCurveBuyQuote,
+  MigratingBondingCurveState,
+} from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
 import type { PublicClient } from "viem";
 import {
@@ -11,6 +17,8 @@ import {
   parseMerkleProof,
   parseSlippageBps,
   participationDistributionKey,
+  prepareBondingCurveAction,
+  prepareFixedPriceSaleAction,
   transactionDeadline,
 } from "../src/features/participation";
 import { ParticipatePage, participationOptions } from "../src/app/pages";
@@ -175,6 +183,130 @@ describe("participation bounds and proof parsing", () => {
     expect(parseMerkleProof("")).toEqual([]);
     expect(() => parseMerkleProof("0x1234")).toThrow("32-byte hex");
   });
+
+  test("re-quotes fixed-price orders and binds the transaction to the fresh payment bound", async () => {
+    const state = fixedSaleDistribution.state as FixedPriceSaleState;
+    let quoteInput: Record<string, unknown> | undefined;
+    const result = await prepareFixedPriceSaleAction(publicClient, {
+      clock: () => 1_000,
+      expectedAction: "trade",
+      intent: fixedPriceIntent(state),
+      async readQuote(_client, input) {
+        quoteInput = input;
+        return fixedPriceQuote(state, { paymentAmount: 101n, paymentAllowance: 1_000n });
+      },
+    });
+
+    expect(quoteInput).toEqual({ sale, buyer: owner, shareAmount: 1n });
+    expect(result.maxPayment).toBe(103n);
+    expect(result.request).toMatchObject({ address: sale, functionName: "buy" });
+    expect(result.request.args).toEqual([1n, owner, 103n, 2_200n]);
+  });
+
+  test("fails a deferred fixed-price action when the input changes mid-quote", async () => {
+    const state = fixedSaleDistribution.state as FixedPriceSaleState;
+    const pending = deferred<FixedPriceSaleParticipationQuote>();
+    let current = true;
+    const prepared = prepareFixedPriceSaleAction(publicClient, {
+      expectedAction: "trade",
+      intent: fixedPriceIntent(state),
+      isCurrent: () => current,
+      async readQuote() { return await pending.promise; },
+    });
+
+    current = false;
+    pending.resolve(fixedPriceQuote(state, { paymentAllowance: 1_000n }));
+    await expect(prepared).rejects.toThrow("Purchase details changed");
+  });
+
+  test("rejects a fixed-price quote for a different wallet, sale, or exact amount", async () => {
+    const state = fixedSaleDistribution.state as FixedPriceSaleState;
+    await expect(prepareFixedPriceSaleAction(publicClient, {
+      expectedAction: "trade",
+      intent: fixedPriceIntent(state),
+      async readQuote() {
+        return fixedPriceQuote({ ...state, address: curve }, { buyer: paymentToken, shareAmount: 2n });
+      },
+    })).rejects.toThrow("does not match this wallet, sale, or exact purchase amount");
+  });
+
+  test("requires a new review when a fresh fixed-price quote changes approval into trade or trade into approval", async () => {
+    const state = fixedSaleDistribution.state as FixedPriceSaleState;
+    let surfacedQuote = false;
+    await expect(prepareFixedPriceSaleAction(publicClient, {
+      expectedAction: "trade",
+      intent: fixedPriceIntent(state),
+      onQuote: () => { surfacedQuote = true; },
+      async readQuote() { return fixedPriceQuote(state, { paymentAllowance: 0n }); },
+    })).rejects.toThrow("now requires approval");
+    expect(surfacedQuote).toBe(true);
+
+    await expect(prepareFixedPriceSaleAction(publicClient, {
+      expectedAction: "approve",
+      intent: fixedPriceIntent(state),
+      async readQuote() { return fixedPriceQuote(state, { paymentAllowance: 1_000n }); },
+    })).rejects.toThrow("Approval is now sufficient");
+  });
+
+  test("fails a deferred curve action when the connected account changes mid-quote", async () => {
+    const state = curveDistribution.state as MigratingBondingCurveState;
+    const pending = deferred<MigratingBondingCurveBuyQuote>();
+    let currentAccount: Address = owner;
+    const intent = bondingCurveIntent(state);
+    const prepared = prepareBondingCurveAction(publicClient, {
+      expectedAction: "trade",
+      intent,
+      isCurrent: () => currentAccount.toLowerCase() === intent.account.toLowerCase(),
+      async readBuyQuote() { return await pending.promise; },
+    });
+
+    currentAccount = paymentToken;
+    pending.resolve(bondingCurveBuyQuote(state, { quoteAllowance: 1_000n }));
+    await expect(prepared).rejects.toThrow("Trade details changed");
+  });
+
+  test("uses one fresh curve quote for both action selection and transaction bounds", async () => {
+    const state = curveDistribution.state as MigratingBondingCurveState;
+    const intent = bondingCurveIntent(state);
+    const result = await prepareBondingCurveAction(publicClient, {
+      clock: () => 1_000,
+      expectedAction: "trade",
+      intent,
+      async readBuyQuote(_client, input) {
+        expect(input).toEqual({ curve, buyer: owner, shareAmount: 1n });
+        return bondingCurveBuyQuote(state, { quoteIn: 101n, quoteAllowance: 1_000n });
+      },
+    });
+
+    expect(result.request).toMatchObject({ address: curve, functionName: "buy" });
+    expect(result.request.args).toEqual([1n, owner, 103n, 2_200n]);
+  });
+
+  test("requires a new review when a refreshed curve quote changes the approval action", async () => {
+    const state = curveDistribution.state as MigratingBondingCurveState;
+    await expect(prepareBondingCurveAction(publicClient, {
+      expectedAction: "trade",
+      intent: bondingCurveIntent(state),
+      async readBuyQuote() { return bondingCurveBuyQuote(state, { quoteAllowance: 0n }); },
+    })).rejects.toThrow("now requires approval");
+
+    await expect(prepareBondingCurveAction(publicClient, {
+      expectedAction: "approve",
+      intent: bondingCurveIntent(state),
+      async readBuyQuote() { return bondingCurveBuyQuote(state, { quoteAllowance: 1_000n }); },
+    })).rejects.toThrow("Approval is now sufficient");
+  });
+
+  test("rejects a curve quote for a different immutable distribution identity", async () => {
+    const state = curveDistribution.state as MigratingBondingCurveState;
+    await expect(prepareBondingCurveAction(publicClient, {
+      expectedAction: "trade",
+      intent: bondingCurveIntent(state),
+      async readBuyQuote() {
+        return bondingCurveBuyQuote({ ...state, lockedLiquidityFactory: sale });
+      },
+    })).rejects.toThrow("does not match this wallet, curve, direction, or exact trade amount");
+  });
 });
 
 describe("participation flow composition", () => {
@@ -327,3 +459,75 @@ describe("participation flow composition", () => {
     expect(pageHtml).toContain('aria-pressed="true"');
   });
 });
+
+function fixedPriceIntent(state: FixedPriceSaleState) {
+  return {
+    account: owner,
+    boardroom,
+    boardroomStatus: 0,
+    deadlineMinutes: "20",
+    factory: state.factory,
+    paymentToken: state.paymentToken,
+    recipient: owner,
+    sale: state.address,
+    shareAmount: 1n,
+    shareToken: state.shareToken,
+    slippageBps: 100n,
+  } as const;
+}
+
+function fixedPriceQuote(
+  state: FixedPriceSaleState,
+  overrides: Partial<FixedPriceSaleParticipationQuote> = {},
+): FixedPriceSaleParticipationQuote {
+  return {
+    state,
+    buyer: owner,
+    shareAmount: 1n,
+    paymentAmount: 100n,
+    purchasedBy: 0n,
+    remainingBuyerCapacity: state.remainingShares,
+    paymentBalance: 1_000n,
+    paymentAllowance: 1_000n,
+    ...overrides,
+  };
+}
+
+function bondingCurveIntent(state: MigratingBondingCurveState) {
+  return {
+    account: owner,
+    boardroom,
+    boardroomStatus: 0,
+    curve: state.address,
+    deadlineMinutes: "20",
+    factory: state.factory,
+    lockedLiquidityFactory: state.lockedLiquidityFactory,
+    mode: "buy",
+    quoteToken: state.quoteToken,
+    recipient: owner,
+    shareAmount: 1n,
+    shareToken: state.shareToken,
+    slippageBps: 100n,
+  } as const;
+}
+
+function bondingCurveBuyQuote(
+  state: MigratingBondingCurveState,
+  overrides: Partial<MigratingBondingCurveBuyQuote> = {},
+): MigratingBondingCurveBuyQuote {
+  return {
+    state,
+    buyer: owner,
+    shareAmount: 1n,
+    quoteIn: 100n,
+    quoteBalance: 1_000n,
+    quoteAllowance: 1_000n,
+    ...overrides,
+  };
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
+}

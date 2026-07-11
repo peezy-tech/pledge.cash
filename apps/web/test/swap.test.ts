@@ -115,6 +115,60 @@ describe("swap token discovery", () => {
     expect(state.tokens.find((token) => token.address === share)?.pools).toContain(oldestPool);
   });
 
+  test("reads only exact pinned project pools without enumerating a 500-pool global market", async () => {
+    const pinnedPool = indexedPoolAddress(501n);
+    let globalPoolReads = 0;
+    const poolSummaryReads: string[] = [];
+    const client = {
+      async readContract(rawRequest: unknown): Promise<unknown> {
+        const request = rawRequest as { address: Address; functionName: string };
+        if (request.functionName === "allPoolsLength" || request.functionName === "allPools") {
+          globalPoolReads += 1;
+          return request.functionName === "allPoolsLength" ? 500n : indexedPoolAddress(0n);
+        }
+        if (["token0", "token1", "getReserves"].includes(request.functionName)) {
+          poolSummaryReads.push(`${request.address}:${request.functionName}`);
+          expect(request.address).toBe(pinnedPool);
+          if (request.functionName === "token0") return usdc;
+          if (request.functionName === "token1") return share;
+          return [1_000_000n, 2_000_000_000_000_000_000n, 0] as const;
+        }
+        if (request.functionName === "symbol") return request.address === usdc ? "USDC" : request.address === share ? "PLDG" : "WHYPE";
+        if (request.functionName === "decimals") return request.address === usdc ? 6 : 18;
+        throw new Error(`Unexpected read ${request.functionName} on ${request.address}`);
+      },
+    } as PledgeCashReadClient;
+
+    const state = await readSwapTokenList(client, deployment, undefined, {
+      discoveryMode: "pinned-only",
+      pinnedPools: [pinnedPool],
+    });
+
+    expect(globalPoolReads).toBe(0);
+    expect(poolSummaryReads).toHaveLength(3);
+    expect(state.pools.map((candidate) => candidate.address)).toEqual([pinnedPool]);
+    expect(state.tokens.find((token) => token.address === share)?.pools).toEqual([pinnedPool]);
+  });
+
+  test("cancels pinned discovery before issuing RPC reads", async () => {
+    const controller = new AbortController();
+    controller.abort(new DOMException("Project changed.", "AbortError"));
+    let reads = 0;
+    const client = {
+      async readContract(): Promise<unknown> {
+        reads += 1;
+        throw new Error("should not read");
+      },
+    } as PledgeCashReadClient;
+
+    await expect(readSwapTokenList(client, deployment, account, {
+      discoveryMode: "pinned-only",
+      pinnedPools: [pool],
+      signal: controller.signal,
+    })).rejects.toThrow("Project changed");
+    expect(reads).toBe(0);
+  });
+
   test("bounds pool address and summary discovery concurrency", async () => {
     let activeAddressReads = 0;
     let activeSummaryReads = 0;

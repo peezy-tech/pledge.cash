@@ -723,17 +723,19 @@ async function governanceContractStartBlock(
     clientCache.delete(key);
     clientCache.set(key, cached);
     try {
-      const start = await cached;
-      throwIfAborted(signal);
+      const start = await waitForGovernanceStartBlock(cached, signal);
       return start;
     } catch {
-      if (clientCache.get(key) === cached) clientCache.delete(key);
       throwIfAborted(signal);
+      if (clientCache.get(key) === cached) clientCache.delete(key);
       return undefined;
     }
   }
 
-  const request = findGovernanceContractStartBlock(client, address, toBlock, signal);
+  // The cached lookup is deliberately independent from any one caller's
+  // cancellation signal. Each caller races its own wait against its signal,
+  // so an abandoned route cannot poison a concurrent or later lookup.
+  const request = findGovernanceContractStartBlock(client, address, toBlock);
   while (clientCache.size >= MAX_CONTRACT_START_CACHE_ENTRIES) {
     const oldest = clientCache.keys().next().value as string | undefined;
     if (oldest === undefined) break;
@@ -741,13 +743,12 @@ async function governanceContractStartBlock(
   }
   clientCache.set(key, request);
   try {
-    const start = await request;
-    throwIfAborted(signal);
+    const start = await waitForGovernanceStartBlock(request, signal);
     if (start > toBlock && clientCache.get(key) === request) clientCache.delete(key);
     return start;
   } catch {
-    if (clientCache.get(key) === request) clientCache.delete(key);
     throwIfAborted(signal);
+    if (clientCache.get(key) === request) clientCache.delete(key);
     return undefined;
   }
 }
@@ -756,22 +757,17 @@ async function findGovernanceContractStartBlock(
   client: PledgeCashLogClient,
   address: Address,
   toBlock: bigint,
-  signal?: AbortSignal,
 ): Promise<bigint> {
-  throwIfAborted(signal);
   if (!client.getCode) return 0n;
   const latestCode = await client.getCode({ address, blockNumber: toBlock });
-  throwIfAborted(signal);
   if (!latestCode || latestCode === "0x") return toBlock + 1n;
 
   let low = 0n;
   let high = toBlock;
   let steps = 0;
   while (low < high && steps < MAX_CONTRACT_START_SEARCH_STEPS) {
-    throwIfAborted(signal);
     const middle = (low + high) / 2n;
     const code = await client.getCode({ address, blockNumber: middle });
-    throwIfAborted(signal);
     if (code && code !== "0x") high = middle;
     else low = middle + 1n;
     steps += 1;
@@ -780,6 +776,17 @@ async function findGovernanceContractStartBlock(
     throw new Error(`Governance contract start-block search exceeded ${MAX_CONTRACT_START_SEARCH_STEPS.toString()} steps.`);
   }
   return low;
+}
+
+async function waitForGovernanceStartBlock(request: Promise<bigint>, signal?: AbortSignal): Promise<bigint> {
+  throwIfAborted(signal);
+  if (!signal) return await request;
+
+  return await new Promise<bigint>((resolve, reject) => {
+    const onAbort = (): void => reject(signal.reason ?? new DOMException("The operation was aborted.", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    request.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
 }
 
 async function governanceLaunchStartBlock(

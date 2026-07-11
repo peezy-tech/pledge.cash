@@ -160,7 +160,13 @@ export function contractCallReview(label: string, request: Record<string, unknow
     functionName,
     label,
     parameters,
-    risk: transactionRisk(functionName),
+    risk: maximumTransactionRisk([
+      transactionRisk(functionName),
+      ...(boardroomCalls ?? []).flatMap((call) =>
+        call.verification === "verified" && call.functionName
+          ? [transactionRisk(call.functionName)]
+          : []),
+    ]),
     target,
     value: bigintField(request, "value") ?? 0n,
   };
@@ -428,8 +434,28 @@ function formatParameterValue(value: unknown): string {
   }
 }
 
+const IRREVERSIBLE_FUNCTIONS = new Set([
+  "burnTreasuryShares",
+  "cancel",
+  "close",
+  "closeGrant",
+  "exit",
+  "exitLockedLiquidity",
+  "exitToBoardroom",
+  "finalizeWindDown",
+  "launch",
+  "migrate",
+  "openRedemptions",
+  "quarantineAndClose",
+  "quarantineRedeemableAsset",
+  "returnLpToBoardroom",
+  "startWindDown",
+  "stopVestingAndWithdrawUnvested",
+  "withdrawExpiredTokens",
+]);
+
 function transactionRisk(functionName: string): ContractCallReview["risk"] {
-  if (["launch", "startWindDown", "openRedemptions", "burnTreasuryShares"].includes(functionName)) {
+  if (IRREVERSIBLE_FUNCTIONS.has(functionName)) {
     return "irreversible";
   }
   if ([
@@ -447,6 +473,14 @@ function transactionRisk(functionName: string): ContractCallReview["risk"] {
   ].includes(functionName)) {
     return "important";
   }
+  return "routine";
+}
+
+function maximumTransactionRisk(
+  risks: readonly ContractCallReview["risk"][],
+): ContractCallReview["risk"] {
+  if (risks.includes("irreversible")) return "irreversible";
+  if (risks.includes("important")) return "important";
   return "routine";
 }
 

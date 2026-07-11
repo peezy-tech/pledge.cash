@@ -8,6 +8,7 @@ import { shortAddress } from "../../lib/forms";
 import {
   formatNativeBalance,
   formatTokenBalance,
+  type ProductBoardroomChildCoverage,
   type ProductBoardroomCatalogEntry,
   type ProductBoardroomDashboardState,
 } from "../../lib/product-boardroom";
@@ -58,6 +59,8 @@ export function ProjectLayout({
   const name = projectName ?? catalogEntry?.name ?? catalogEntry?.symbol ?? (loading ? "Loading project" : "Project");
   const lifecycle = boardroomLifecycle(snapshot?.status);
   const role = projectRole(account, dashboard);
+  const incompleteCoverage = currentStateCoverageRows(dashboard)
+    .filter((entry) => !entry.coverage.complete);
 
   return (
     <div>
@@ -126,6 +129,19 @@ export function ProjectLayout({
           </PageNotice>
         </div>
       ) : null}
+      {!error && incompleteCoverage.length > 0 ? (
+        <div className="pt-5">
+          <PageNotice title="Current contract-state detail is incomplete" tone="warning">
+            <p className="m-0">Counts remain onchain facts, but some child records could not be hydrated in this bounded browser read.</p>
+            <ul className="m-0 mt-2 list-none space-y-1 p-0">
+              {incompleteCoverage.map(({ coverage, label }) => (
+                <li key={label}>{`${label}: ${coverage.shown.toString()} of ${coverage.total.toString()} records read.`}</li>
+              ))}
+            </ul>
+            {onRetry ? <Button className="mt-3" size="sm" variant="secondary" onClick={onRetry}>Retry current state</Button> : null}
+          </PageNotice>
+        </div>
+      ) : null}
       {!error && dashboard?.historyErrors?.length ? (
         <div className="pt-5">
           <PageNotice title="Historical activity is incomplete" tone="warning">
@@ -164,7 +180,7 @@ export function ProjectOverviewPage({
   const shareAsset = dashboard?.treasuryAssets.find((asset) => sameAddress(asset.address, snapshot?.shareToken));
   const cashAssets = dashboard?.treasuryAssets.filter((asset) => !sameAddress(asset.address, snapshot?.shareToken)) ?? [];
   const commitments = commitmentSummary(dashboard);
-  const hasParticipation = commitments.openDistributions > 0;
+  const hasParticipation = (commitments.openDistributions ?? 0) > 0;
 
   if (loading && !dashboard) {
     return <OverviewLoading />;
@@ -235,8 +251,20 @@ export function ProjectOverviewPage({
                 ? "Unknown"
                 : formatTokenBalance({ ...shareAsset, balance: shareAsset.totalSupply }),
             },
-            { label: "Open grants", value: String(commitments.openGrants), detail: `${commitments.unsettledGrants} unsettled project tokens` },
-            { label: "Participation routes", value: String(commitments.openDistributions) },
+            {
+              label: "Open grants",
+              value: commitments.openGrants === undefined ? "Unknown" : String(commitments.openGrants),
+              detail: commitments.unsettledGrants === undefined
+                ? coverageDetail(dashboard.currentStateCoverage?.grants)
+                : `${commitments.unsettledGrants} unsettled project tokens`,
+            },
+            {
+              label: "Participation routes",
+              value: commitments.openDistributions === undefined ? "Unknown" : String(commitments.openDistributions),
+              detail: commitments.openDistributions === undefined
+                ? coverageDetail(dashboard.currentStateCoverage?.distributions)
+                : undefined,
+            },
           ]}
         />
       </RuledSection>
@@ -311,12 +339,18 @@ function projectRole(
 }
 
 function commitmentSummary(dashboard: ProductBoardroomDashboardState | undefined): {
-  openDistributions: number;
-  openGrants: number;
-  unsettledGrants: string;
+  openDistributions?: number | undefined;
+  openGrants?: number | undefined;
+  unsettledGrants?: string | undefined;
 } {
-  const grants = dashboard?.snapshot.grantSummaries ?? [];
-  const distributions = dashboard?.snapshot.distributionSummaries ?? [];
+  const grantAddresses = new Set(dashboard?.snapshot.issuedGrants.map((address) => address.toLowerCase()) ?? []);
+  const distributionAddresses = new Set(
+    dashboard?.snapshot.issuedDistributions.map((address) => address.toLowerCase()) ?? [],
+  );
+  const grants = dashboard?.snapshot.grantSummaries.filter((grant) =>
+    grantAddresses.has(grant.address.toLowerCase())) ?? [];
+  const distributions = dashboard?.snapshot.distributionSummaries.filter((distribution) =>
+    distributionAddresses.has(distribution.address.toLowerCase())) ?? [];
   const unsettled = grants.reduce((total, grant) =>
     total + (sameAddress(grant.state?.token, dashboard?.snapshot.shareToken) ? grant.state?.unsettledAmount ?? 0n : 0n), 0n);
   const hasAmm = Boolean(
@@ -324,11 +358,39 @@ function commitmentSummary(dashboard: ProductBoardroomDashboardState | undefined
     ?? dashboard?.history?.pool
     ?? selectedCatalogEntry(dashboard)?.pool,
   );
+  const grantsComplete = Boolean(dashboard)
+    && dashboard?.currentStateCoverage?.grants.complete !== false
+    && grants.every((grant) => Boolean(grant.state) && !grant.error);
+  const distributionsComplete = Boolean(dashboard)
+    && dashboard?.currentStateCoverage?.distributions.complete !== false
+    && distributions.every((distribution) => Boolean(distribution.state) && !distribution.error);
   return {
-    openDistributions: distributions.filter(distributionIsActive).length + (hasAmm ? 1 : 0),
-    openGrants: grants.filter((grant) => grant.state && !grant.state.closed).length,
-    unsettledGrants: formatTokenAmount(unsettled, dashboard?.snapshot.shareTokenMetadata),
+    ...(distributionsComplete
+      ? { openDistributions: distributions.filter(distributionIsActive).length + (hasAmm ? 1 : 0) }
+      : {}),
+    ...(grantsComplete ? {
+      openGrants: grants.filter((grant) => grant.state && !grant.state.closed).length,
+      unsettledGrants: formatTokenAmount(unsettled, dashboard?.snapshot.shareTokenMetadata),
+    } : {}),
   };
+}
+
+function currentStateCoverageRows(
+  dashboard: ProductBoardroomDashboardState | undefined,
+): Array<{ coverage: ProductBoardroomChildCoverage; label: string }> {
+  const coverage = dashboard?.currentStateCoverage;
+  if (!coverage) return [];
+  return [
+    { coverage: coverage.grants, label: "Grants" },
+    { coverage: coverage.distributions, label: "Distributions" },
+    { coverage: coverage.lockedLiquidity, label: "Locked liquidity" },
+    { coverage: coverage.redeemableAssets, label: "Redeemable assets" },
+  ];
+}
+
+function coverageDetail(coverage: ProductBoardroomChildCoverage | undefined): string | undefined {
+  if (!coverage || coverage.complete) return undefined;
+  return `${coverage.shown.toString()} of ${coverage.total.toString()} records read`;
 }
 
 function distributionIsActive(distribution: ProductBoardroomDashboardState["snapshot"]["distributionSummaries"][number]): boolean {

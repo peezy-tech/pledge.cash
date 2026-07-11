@@ -717,6 +717,48 @@ describe("governance helpers", () => {
     expect(successfulRanges.every(({ fromBlock, toBlock }) => toBlock - fromBlock + 1n <= 25_000n)).toBe(true);
   });
 
+  test("does not let the first caller's abort signal poison the shared start-block cache", async () => {
+    const deploymentBlock = 700n;
+    const headBlock = 1_000n;
+    const firstController = new AbortController();
+    const abortReason = new Error("first route was abandoned");
+    let releaseLatestCode!: () => void;
+    const latestCodeGate = new Promise<void>((resolve) => {
+      releaseLatestCode = resolve;
+    });
+    let latestCodeReads = 0;
+    const logRanges: Array<{ fromBlock: bigint; toBlock: bigint }> = [];
+    const client = {
+      async getCode(input: { blockNumber: bigint }) {
+        if (input.blockNumber === headBlock) {
+          latestCodeReads += 1;
+          if (latestCodeReads === 1) await latestCodeGate;
+        }
+        return input.blockNumber >= deploymentBlock ? "0x6000" : "0x";
+      },
+      async getLogs(input: { fromBlock: bigint; toBlock: bigint }) {
+        logRanges.push({ fromBlock: input.fromBlock, toBlock: input.toBlock });
+        return [];
+      },
+    } as unknown as PledgeCashLogClient;
+
+    const first = queryGovernanceEvents(client, {
+      boardrooms: [secondBoardroom],
+      signal: firstController.signal,
+      toBlock: headBlock,
+    });
+    await Promise.resolve();
+    const second = queryGovernanceEvents(client, { boardrooms: [secondBoardroom], toBlock: headBlock });
+    firstController.abort(abortReason);
+
+    await expect(first).rejects.toBe(abortReason);
+    releaseLatestCode();
+    await expect(second).resolves.toEqual([]);
+
+    expect(latestCodeReads).toBe(1);
+    expect(logRanges).toEqual([{ fromBlock: deploymentBlock, toBlock: headBlock }]);
+  });
+
   test("falls back to the launch event when historical contract code is pruned", async () => {
     const launchBlock = 43_800_000n;
     const headBlock = 43_841_919n;

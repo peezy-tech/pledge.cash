@@ -1,5 +1,5 @@
 import { ArrowRight, RefreshCw, Search } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Address } from "@pledge.cash/sdk";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -11,6 +11,7 @@ import { cn } from "../../lib/utils";
 import { PageHeading, PageNotice, RuledSection, SectionHeading } from "./page-primitives";
 
 export type ExploreFilter = "all" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "amm";
+export type ExploreSearchState = { filter: ExploreFilter; query: string };
 
 export type ExplorePageProps = {
   chainId: number;
@@ -37,6 +38,7 @@ const filters: readonly { label: string; value: ExploreFilter }[] = [
   { label: "Airdrop", value: "merkle-airdrop" },
   { label: "AMM", value: "amm" },
 ];
+const filterValues = new Set<ExploreFilter>(filters.map((filter) => filter.value));
 
 export function ExplorePage({
   chainId,
@@ -55,9 +57,29 @@ export function ExplorePage({
   selectedAddress,
   totalProjects,
 }: ExplorePageProps): React.JSX.Element {
-  const [filter, setFilter] = useState<ExploreFilter>("all");
-  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<ExploreFilter>(() => initialExploreSearchState().filter);
+  const [query, setQuery] = useState(() => initialExploreSearchState().query);
   const visibleProjects = useMemo(() => filterProjects(projects, query, filter), [filter, projects, query]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const restoreSearch = (): void => {
+      const restored = exploreSearchState(window.location.search);
+      setFilter(restored.filter);
+      setQuery(restored.query);
+    };
+    window.addEventListener("popstate", restoreSearch);
+    return () => window.removeEventListener("popstate", restoreSearch);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const pathname = window.location.pathname;
+    queueMicrotask(() => {
+      if (window.location.pathname !== pathname) return;
+      replaceExploreSearchState({ filter, query });
+    });
+  }, [chainId, filter, query]);
 
   return (
     <div className="grid gap-0">
@@ -191,6 +213,59 @@ export function ExplorePage({
       </RuledSection>
     </div>
   );
+}
+
+export function exploreSearchState(search: string): ExploreSearchState {
+  try {
+    const parameters = new URLSearchParams(search);
+    const requestedFilter = parameters.get("type") as ExploreFilter | null;
+    return {
+      filter: requestedFilter && filterValues.has(requestedFilter) ? requestedFilter : "all",
+      query: parameters.get("q") ?? "",
+    };
+  } catch {
+    return { filter: "all", query: "" };
+  }
+}
+
+export function exploreSearchHref(
+  pathname: string,
+  search: string,
+  state: ExploreSearchState,
+  hash = "",
+): string {
+  const parameters = new URLSearchParams(search);
+  if (state.query) parameters.set("q", state.query);
+  else parameters.delete("q");
+  if (state.filter === "all") parameters.delete("type");
+  else parameters.set("type", state.filter);
+  const nextSearch = parameters.toString();
+  return `${pathname}${nextSearch ? `?${nextSearch}` : ""}${hash}`;
+}
+
+export function replaceExploreSearchState(
+  state: ExploreSearchState,
+  navigation: {
+    history: Pick<History, "replaceState" | "state">;
+    location: Pick<Location, "hash" | "pathname" | "search">;
+  } | undefined = typeof window === "undefined"
+    ? undefined
+    : { history: window.history, location: window.location },
+): string | undefined {
+  if (!navigation) return undefined;
+  const href = exploreSearchHref(
+    navigation.location.pathname,
+    navigation.location.search,
+    state,
+    navigation.location.hash,
+  );
+  const current = `${navigation.location.pathname}${navigation.location.search}${navigation.location.hash}`;
+  if (href !== current) navigation.history.replaceState(navigation.history.state, "", href);
+  return href;
+}
+
+function initialExploreSearchState(): ExploreSearchState {
+  return typeof window === "undefined" ? { filter: "all", query: "" } : exploreSearchState(window.location.search);
 }
 
 function directoryCountLabel(loaded: number, total: number | undefined): string {

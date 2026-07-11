@@ -46,12 +46,13 @@ describe("product boardroom runtime discovery", () => {
     const first = await readFactoryBoardroomPage(client as never, factory, { limit: 64 });
     const second = await readFactoryBoardroomPage(client as never, factory, { cursor: first.nextCursor, limit: 64 });
 
-    expect(first).toMatchObject({ totalCount: 65, nextCursor: 1 });
-    expect(first.addresses).toHaveLength(64);
+    expect(first).toMatchObject({ totalCount: 65, nextCursor: 49 });
+    expect(first.addresses).toHaveLength(16);
     expect(first.addresses[0]).toBe(addresses[64]);
-    expect(first.addresses[63]).toBe(addresses[1]);
-    expect(second.addresses).toEqual([addresses[0]]);
-    expect(second.nextCursor).toBeUndefined();
+    expect(first.addresses[15]).toBe(addresses[49]);
+    expect(second.addresses).toHaveLength(16);
+    expect(second.addresses[0]).toBe(addresses[48]);
+    expect(second.nextCursor).toBe(33);
   });
 
   test("keeps cursor pagination on the factory high-water snapshot when new Boardrooms append", async () => {
@@ -219,6 +220,29 @@ describe("product boardroom runtime discovery", () => {
     expect(tokenReads.has(seedOnlyEquity.toLowerCase())).toBe(false);
   });
 
+  test("counts only successfully hydrated current child records as covered", async () => {
+    const context = productBoardroomFixture();
+    const base = fakeProductBoardroomClient({ ...context, tokenReads: new Set<string>() });
+    const client = {
+      ...base,
+      async readContract(parameters: Parameters<typeof base.readContract>[0]) {
+        if (
+          parameters.address.toLowerCase() === context.sale.toLowerCase()
+          && parameters.functionName === "factory"
+        ) {
+          throw new Error("distribution child unavailable");
+        }
+        return await base.readContract(parameters);
+      },
+    };
+
+    const dashboard = await readProductBoardroomDashboard(client, { address: context.boardroom });
+
+    expect(dashboard.snapshot.distributionSummaries[0]?.error).toContain("distribution child unavailable");
+    expect(dashboard.currentStateCoverage.distributions).toEqual({ complete: false, shown: 0, total: 1 });
+    expect(dashboard.currentStateCoverage.grants).toEqual({ complete: true, shown: 0, total: 0 });
+  });
+
   test("synthesizes exact catalog identity for a deep-linked project outside the newest page", async () => {
     const context = productBoardroomFixture();
     const newest = {
@@ -301,6 +325,47 @@ describe("product boardroom runtime discovery", () => {
     expect(successfulRanges.every(({ fromBlock, toBlock }) => toBlock - fromBlock + 1n <= 50_000n)).toBe(true);
   });
 
+  test("supports providers that cap eth_getLogs at exactly 100 blocks", async () => {
+    const context = productBoardroomFixture();
+    const successfulRanges: Array<{ fromBlock: bigint; toBlock: bigint }> = [];
+    const client = fakeProductBoardroomClient({
+      ...context,
+      latestBlock: 399n,
+      maxLogRange: 100n,
+      successfulRanges,
+      tokenReads: new Set<string>(),
+    });
+
+    const catalog = await readFirstCatalogPageEntries(client, {
+      chainId: 31337,
+      boardroomFactory: context.boardroomFactory,
+    });
+
+    expect(catalog[0]?.buyerCount).toBe(2);
+    expect(successfulRanges.length).toBeGreaterThan(2);
+    expect(successfulRanges.every(({ fromBlock, toBlock }) => toBlock - fromBlock + 1n <= 100n)).toBe(true);
+  });
+
+  test("enforces one aggregate request budget across an adaptive history scan", async () => {
+    let requests = 0;
+    const client = {
+      async getBlockNumber() { return 99_999n; },
+      async getLogs(input: { fromBlock: bigint; toBlock: bigint }) {
+        requests += 1;
+        if (input.toBlock > input.fromBlock) throw new Error("RPC block range limit exceeded");
+        return [];
+      },
+    };
+
+    const histories = await readProductBoardroomHistories(client as never, {
+      distributionSummaries: [fixedPriceHistoryFixture()],
+    } as BoardroomSnapshot);
+
+    expect(histories[0]?.completeness).toBe("partial");
+    expect(histories[0]?.scanError).toContain("aggregate 512-request safety bound");
+    expect(requests).toBe(512);
+  });
+
   test("does not recursively amplify generic event provider failures", async () => {
     let calls = 0;
     const distribution = {
@@ -322,7 +387,7 @@ describe("product boardroom runtime discovery", () => {
       distributionSummaries: [distribution],
     } as BoardroomSnapshot);
 
-    expect(calls).toBe(3);
+    expect(calls).toBe(2);
     expect(histories[0]?.scanError).toContain("provider unavailable");
   });
 
@@ -474,7 +539,7 @@ describe("product boardroom runtime discovery", () => {
 
   test("bounds retained event history and recovers after an oversized stream", async () => {
     const distribution = fixedPriceHistoryFixture();
-    let canonicalLogs = Array(25_001).fill(fixedPricePurchaseLog(10n));
+    let canonicalLogs = Array(5_001).fill(fixedPricePurchaseLog(10n));
     const client = {
       async getBlockNumber() { return 100n; },
       async getLogs() { return canonicalLogs; },
@@ -488,7 +553,7 @@ describe("product boardroom runtime discovery", () => {
       distributionSummaries: [distribution],
     } as BoardroomSnapshot);
 
-    expect(oversized[0]?.scanError).toContain("25,000-event safety bound");
+    expect(oversized[0]?.scanError).toContain("5,000-event safety bound");
     expect(recovered[0]?.scanError).toBeUndefined();
     expect(recovered[0]?.fixedPriceSale?.purchaseCount).toBe(0);
   });
@@ -503,7 +568,7 @@ describe("product boardroom runtime discovery", () => {
           const toBlock = parameters.toBlock ?? 0n;
           const size = toBlock - fromBlock + 1n;
           if (mode === "recursive" && size > 50_000n) throw new Error("RPC block range limit exceeded");
-          const count = mode === "chunks" ? 13_000 : fromBlock === 0n ? 20_000 : 6_000;
+          const count = mode === "chunks" ? 3_000 : fromBlock === 0n ? 4_000 : 2_000;
           return guardedLogPage(count, () => { iteratedOversizedPage = true; });
         },
       };
@@ -512,7 +577,7 @@ describe("product boardroom runtime discovery", () => {
         distributionSummaries: [fixedPriceHistoryFixture()],
       } as BoardroomSnapshot);
 
-      expect(histories[0]?.scanError).toContain("25,000-event safety bound");
+      expect(histories[0]?.scanError).toContain("5,000-event safety bound");
       expect(iteratedOversizedPage).toBe(false);
     }
   });
@@ -598,6 +663,66 @@ describe("product boardroom runtime discovery", () => {
     expect(dashboard.snapshot.distributionSummaries).toHaveLength(PRODUCT_DETAIL_CHILD_READ_LIMIT);
     expect(reconstructed.size).toBe(PRODUCT_DETAIL_CHILD_READ_LIMIT);
     expect(dashboard.historyErrors?.join(" ")).toContain("36 older historical records are omitted");
+  });
+
+  test("marks the bounded Explore lifetime summary as partial with an exact count", async () => {
+    const context = productBoardroomFixture();
+    const recordedDistributions = Array.from({ length: 100 }, (_, index) =>
+      `0x${(20_000 + index).toString(16).padStart(40, "0")}` as Address);
+    const distributionFactoryReads: Address[] = [];
+    const client = fakeProductBoardroomClient({
+      ...context,
+      distributionFactoryReads,
+      pruned: true,
+      recordedDistributions,
+      tokenReads: new Set<string>(),
+    });
+
+    const entries = await readFirstCatalogPageEntries(client, {
+      chainId: 31337,
+      boardroomFactory: context.boardroomFactory,
+    });
+
+    expect(entries[0]?.distributionAddresses).toHaveLength(PRODUCT_CATALOG_CHILD_READ_LIMIT);
+    expect(entries[0]?.distributionCount).toBe(100);
+    expect(entries[0]?.historyError).toContain("newest 12 of 100 lifetime distributions");
+    expect(new Set(distributionFactoryReads.map((address) => address.toLowerCase())).size)
+      .toBe(PRODUCT_CATALOG_CHILD_READ_LIMIT);
+  });
+
+  test("returns partial history promptly when one event stream misses the aggregate deadline", async () => {
+    const pool = "0x7000000000000000000000000000000000000000" as Address;
+    const startedAt = Date.now();
+
+    const histories = await readProductBoardroomHistories(
+      curveHistoryClient(pool, new Set(), new Set(["CurveSell"])),
+      { distributionSummaries: [curveHistoryFixture(pool)] } as BoardroomSnapshot,
+      { timeoutMs: 25 },
+    );
+
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(histories[0]?.completeness).toBe("partial");
+    expect(histories[0]?.curve?.buyCount).toBe(1);
+    expect(histories[0]?.curve?.sellCount).toBeUndefined();
+    expect(histories[0]?.scanError).toContain("deadline");
+  });
+
+  test("propagates caller cancellation instead of returning a stale partial result", async () => {
+    const controller = new AbortController();
+    const reason = new Error("project route changed");
+    const client = {
+      async getBlockNumber() { return 100n; },
+      async getLogs() {
+        controller.abort(reason);
+        return await new Promise<never>(() => undefined);
+      },
+    };
+
+    await expect(readProductBoardroomHistories(
+      client as never,
+      { distributionSummaries: [fixedPriceHistoryFixture()] } as BoardroomSnapshot,
+      { signal: controller.signal, timeoutMs: 1_000 },
+    )).rejects.toBe(reason);
   });
 
   test("keeps state-derived catalog metrics and marks partial history failures", async () => {
@@ -752,12 +877,13 @@ function curveHistoryFixture(pool: Address): BoardroomDistributionSnapshot {
   } as BoardroomDistributionSnapshot;
 }
 
-function curveHistoryClient(pool: Address, failEvents: Set<string>) {
+function curveHistoryClient(pool: Address, failEvents: Set<string>, hangEvents = new Set<string>()) {
   return {
     async getBlockNumber() { return 100n; },
     async getLogs(parameters: { event?: { name?: string } }) {
       const name = parameters.event?.name;
       if (name && failEvents.has(name)) throw new Error(`generic ${name} failure`);
+      if (name && hangEvents.has(name)) return await new Promise<never>(() => undefined);
       switch (name) {
         case "CurveBuy":
           return [{

@@ -76,7 +76,7 @@ export function GovernanceLaunchControl({
     : launchCapability.reason ?? "Governance launch is not available right now.";
   const changesExecutor = isAddress(executor, { strict: false })
     && currentExecutor.toLowerCase() !== executor.toLowerCase();
-  const disabled = Boolean(executorError || delayError || capabilityError || !confirmed || pendingAction);
+  const disabled = Boolean(executorError || delayError || capabilityError || (!changesExecutor && !confirmed) || pendingAction);
 
   const launch = async (): Promise<void> => {
     if (executorError || delayError || !selectedDelay || !isAddress(executor, { strict: false })) return;
@@ -95,6 +95,11 @@ export function GovernanceLaunchControl({
         await onLaunch(selectedDelay, step.request);
       } else {
         await submitTransaction(step.label, step.request);
+      }
+      if (step.kind === "setExecutor") {
+        setConfirmed(false);
+        await onComplete?.();
+        return;
       }
     }
     await onComplete?.();
@@ -190,21 +195,27 @@ export function GovernanceLaunchControl({
             </p>
             {changesExecutor ? (
               <p className="m-0 mt-2 text-xs leading-5 text-[var(--pc-text-muted)]">
-                This workflow submits two transactions: update the executor first, then launch governance. If the second transaction is cancelled, the executor update remains onchain.
+                Executor setup and launch are separate checkpoints. This action only updates the executor; after it confirms, review the refreshed project state and confirm the permanent launch separately.
               </p>
             ) : null}
           </div>
         </div>
-        <label className="mt-4 flex cursor-pointer items-start gap-3 text-sm font-medium text-[var(--pc-text)]">
-          <input
-            aria-describedby="governance-launch-warning"
-            checked={confirmed}
-            className="mt-0.5 h-4 w-4 accent-[var(--pc-accent)]"
-            type="checkbox"
-            onChange={(event) => setConfirmed(event.target.checked)}
-          />
-          I understand that owner authority cannot be restored after launch.
-        </label>
+        {changesExecutor ? (
+          <p className="m-0 mt-4 text-sm font-medium text-[var(--pc-text)]">
+            The permanent launch confirmation appears only after this executor update is confirmed and the project is refreshed.
+          </p>
+        ) : (
+          <label className="mt-4 flex cursor-pointer items-start gap-3 text-sm font-medium text-[var(--pc-text)]">
+            <input
+              aria-describedby="governance-launch-warning"
+              checked={confirmed}
+              className="mt-0.5 h-4 w-4 accent-[var(--pc-accent)]"
+              type="checkbox"
+              onChange={(event) => setConfirmed(event.target.checked)}
+            />
+            I understand that owner authority cannot be restored after launch.
+          </label>
+        )}
       </div>
 
       <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -226,11 +237,11 @@ export function GovernanceLaunchControl({
           type="submit"
         >
           {pendingAction === LAUNCH_ACTION_ID ? (
-            "Launching governance"
+            changesExecutor ? "Updating executor" : "Launching governance"
           ) : (
             <>
               <LockKeyhole className="h-4 w-4" aria-hidden="true" />
-              {changesExecutor ? "Set executor and launch" : "Launch governance"}
+              {changesExecutor ? "Update executor first" : "Launch governance"}
               <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </>
           )}

@@ -62,7 +62,7 @@ export function governanceActionView(
   now = BigInt(Math.floor(Date.now() / 1_000)),
 ): GovernanceActionView {
   const calls = (action.calls ?? []).map((call) => governanceCallView(call, action.boardroom));
-  const status = governanceStatusView(action.status, action.eta, action.expiresAt, now);
+  const status = governanceStatusView(effectiveGovernanceActionStatus(action, now), action.eta, action.expiresAt, now);
   const title = calls.length === 0
     ? "Undecoded governance action"
     : calls.length === 1
@@ -134,20 +134,55 @@ export function governanceStatusView(
   }
 }
 
-export function canVetoQueuedAction(action: QueuedBoardroomAction): boolean {
-  return action.status === "waiting" || action.status === "ready";
+export function effectiveGovernanceActionStatus(
+  action: QueuedBoardroomAction,
+  now = BigInt(Math.floor(Date.now() / 1_000)),
+): QueuedBoardroomActionStatus {
+  if (
+    action.status === "cancelled"
+    || action.status === "executed"
+    || action.status === "expired"
+    || action.status === "invalidated"
+    || action.status === "unknown"
+  ) {
+    return action.status;
+  }
+  if (action.eta === 0n || action.expiresAt === 0n) return "unknown";
+  if (now > action.expiresAt) return "expired";
+  if (now >= action.eta) return "ready";
+  return "waiting";
 }
 
-export function canExecuteQueuedAction(action: QueuedBoardroomAction): boolean {
-  return action.status === "ready" && action.calls !== undefined && action.calls.length > 0 && action.kind !== undefined;
+export function canVetoQueuedAction(action: QueuedBoardroomAction, now?: bigint): boolean {
+  const status = effectiveGovernanceActionStatus(action, now);
+  return status === "waiting" || status === "ready";
 }
 
-export function buildGovernanceVetoRequest(action: QueuedBoardroomAction): GovernanceTransactionRequest {
+export function canExecuteQueuedAction(action: QueuedBoardroomAction, now?: bigint): boolean {
+  return effectiveGovernanceActionStatus(action, now) === "ready"
+    && action.calls !== undefined
+    && action.calls.length > 0
+    && action.kind !== undefined;
+}
+
+export function buildGovernanceVetoRequest(
+  action: QueuedBoardroomAction,
+  now = BigInt(Math.floor(Date.now() / 1_000)),
+): GovernanceTransactionRequest {
+  if (!canVetoQueuedAction(action, now)) {
+    throw new Error("This governance action is no longer available for veto.");
+  }
   return buildBoardroomCancelActionTransaction({ boardroom: action.boardroom, actionHash: action.actionHash });
 }
 
-export function buildGovernanceExecutionRequest(action: QueuedBoardroomAction): GovernanceTransactionRequest {
-  if (!canExecuteQueuedAction(action) || !action.calls || !action.kind) {
+export function buildGovernanceExecutionRequest(
+  action: QueuedBoardroomAction,
+  now = BigInt(Math.floor(Date.now() / 1_000)),
+): GovernanceTransactionRequest {
+  if (effectiveGovernanceActionStatus(action, now) === "expired") {
+    throw new Error("This governance action has expired and cannot be executed.");
+  }
+  if (!canExecuteQueuedAction(action, now) || !action.calls || !action.kind) {
     throw new Error("Verified queued calldata is required before execution.");
   }
 
@@ -176,11 +211,11 @@ export function buildGovernanceLaunchSteps(input: {
 }): GovernanceLaunchStep[] {
   const steps: GovernanceLaunchStep[] = [];
   if (!sameAddress(input.currentExecutor, input.nextExecutor)) {
-    steps.push({
+    return [{
       kind: "setExecutor",
       label: "Set governance executor",
       request: buildBoardroomSetExecutorTransaction({ boardroom: input.boardroom, executor: input.nextExecutor }),
-    });
+    }];
   }
   steps.push({
     kind: "launch",
@@ -188,7 +223,7 @@ export function buildGovernanceLaunchSteps(input: {
     request: withTransactionReviewParameters(
       buildBoardroomLaunchTransaction({ boardroom: input.boardroom, governanceDelay: input.governanceDelay }),
       [
-        { name: "Governance executor", type: "address", value: input.nextExecutor },
+        { name: "Required current executor (rechecked)", type: "address", value: input.nextExecutor },
         { name: "Holder review period", type: "duration", value: formatGovernanceDuration(input.governanceDelay) },
       ],
     ),
