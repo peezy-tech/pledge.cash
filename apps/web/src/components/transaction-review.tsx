@@ -68,8 +68,14 @@ function ReviewDetails({
   riskAccepted: boolean;
   setRiskAccepted: (accepted: boolean) => void;
 }): React.JSX.Element {
+  const verificationIssue = transactionReviewBlockReason(review);
   return (
     <div className="grid gap-3">
+      {verificationIssue ? (
+        <p className="m-0 rounded-lg border border-amber-400/30 bg-amber-400/8 px-4 py-3 text-xs leading-5 text-amber-100">
+          {verificationIssue} This app will not continue to the wallet until the transaction can be verified.
+        </p>
+      ) : null}
       <dl className="grid overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/45 text-sm">
         <ReviewRow label="Action" value={review.label} />
         <ReviewRow label="Contract function" value={humanizeFunctionName(review.functionName)} />
@@ -146,8 +152,18 @@ function ReviewDetails({
 }
 
 export function transactionReviewCanContinue(review: ContractCallReview, riskAccepted: boolean): boolean {
-  if (review.boardroomCalls?.some((call) => call.verification !== "verified")) return false;
+  if (transactionReviewBlockReason(review)) return false;
   return review.risk !== "irreversible" || riskAccepted;
+}
+
+export function transactionReviewBlockReason(review: ContractCallReview): string | undefined {
+  if (review.target === "unknown") return "The destination contract address is invalid or missing.";
+  if (review.functionName === "unknown") return "The contract function is missing.";
+  if (review.data === "unavailable") return "The exact contract call could not be encoded.";
+  if (review.boardroomCalls?.some((call) => call.verification !== "verified")) {
+    return "At least one inner Boardroom call could not be uniquely decoded.";
+  }
+  return undefined;
 }
 
 function CallFact({ label, value }: { label: string; value: string }): React.JSX.Element {
@@ -177,6 +193,8 @@ function ReviewRow({ label, title, value }: { label: string; title?: string; val
 function humanizeFunctionName(value: string): string {
   if (value === "unknown") return "Unknown function";
   return value
+    .replace(/_+$/g, "")
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
     .replace(/^./, (character) => character.toUpperCase());
 }

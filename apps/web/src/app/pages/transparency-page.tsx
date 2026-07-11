@@ -31,7 +31,9 @@ export type TransparencyPageProps = {
   activityContent?: ReactNode;
   dashboard?: ProductBoardroomDashboardState | undefined;
   error?: string | undefined;
+  grantHref?: ((grant: Address) => string) | undefined;
   loading: boolean;
+  onOpenGrant?: ((grant: Address) => void) | undefined;
   technicalContent?: ReactNode;
 };
 
@@ -39,7 +41,9 @@ export function TransparencyPage({
   activityContent,
   dashboard,
   error,
+  grantHref,
   loading,
+  onOpenGrant,
   technicalContent,
 }: TransparencyPageProps): React.JSX.Element {
   if (loading && !dashboard) return <TransparencyLoading />;
@@ -94,7 +98,7 @@ export function TransparencyPage({
         <KeyValueList
           columns={4}
           items={[
-            { label: "Unsettled grants", value: formatTokenAmount(totals.unsettledGrantShares, snapshot.shareTokenMetadata) },
+            { label: "Unsettled project-token grants", value: formatTokenAmount(totals.unsettledShareGrantShares, snapshot.shareTokenMetadata) },
             { label: "Open grants", value: String(totals.openGrantCount) },
             { label: "Distribution reserves", value: formatTokenAmount(totals.distributionShares, snapshot.shareTokenMetadata) },
             { label: "Locked liquidity positions", value: String(snapshot.lockedLiquiditySummaries.length) },
@@ -104,7 +108,7 @@ export function TransparencyPage({
 
       <RuledSection>
         <SectionHeading title="Grants" description="Issued token commitments, their holders, and settlement progress." />
-        <GrantTable grants={snapshot.grantSummaries} />
+        <GrantTable grants={snapshot.grantSummaries} grantHref={grantHref} onOpenGrant={onOpenGrant} />
       </RuledSection>
 
       <RuledSection>
@@ -202,7 +206,7 @@ function ParticipationHistoryRow({
           { label: "Purchases", value: String(history.fixedPriceSale?.purchaseCount ?? history.curve?.buyCount ?? 0) },
           { label: "Curve sells", value: String(history.curve?.sellCount ?? 0) },
           { label: "AMM swaps", value: String(history.amm?.swapCount ?? 0) },
-          { label: "AMM traders", value: history.amm?.traderCount === undefined ? "Not applicable" : String(history.amm.traderCount) },
+          { label: "Unique pool callers", value: history.amm?.traderCount === undefined ? "Not applicable" : String(history.amm.traderCount) },
           { label: "Distribution", value: history.distribution ? <AddressLink address={history.distribution} /> : "Unknown" },
         ]}
       />
@@ -234,7 +238,15 @@ function TreasuryTable({ assets }: { assets: readonly ProductTreasuryAsset[] }):
   );
 }
 
-function GrantTable({ grants }: { grants: readonly BoardroomGrantSnapshot[] }): React.JSX.Element {
+function GrantTable({
+  grants,
+  grantHref,
+  onOpenGrant,
+}: {
+  grants: readonly BoardroomGrantSnapshot[];
+  grantHref?: ((grant: Address) => string) | undefined;
+  onOpenGrant?: ((grant: Address) => void) | undefined;
+}): React.JSX.Element {
   if (grants.length === 0) return <EmptyTable label="No grants have been issued by this Boardroom." />;
   return (
     <TableFrame label="Issued grants">
@@ -245,7 +257,25 @@ function GrantTable({ grants }: { grants: readonly BoardroomGrantSnapshot[] }): 
         <tbody>
           {grants.map((grant) => (
             <tr key={grant.address}>
-              <td className={tableCellClassName}><AddressLink address={grant.address} />{grant.error ? <span className="mt-1 block text-xs text-red-200">Read failed</span> : null}</td>
+              <td className={tableCellClassName}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <AddressLink address={grant.address} />
+                  {grantHref ? (
+                    <a
+                      className="inline-flex min-h-10 items-center rounded-md px-2 text-xs font-semibold text-lime-300 transition-colors hover:bg-zinc-900 hover:text-lime-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300/70"
+                      href={grantHref(grant.address)}
+                      onClick={(event) => {
+                        if (!onOpenGrant || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                        event.preventDefault();
+                        onOpenGrant(grant.address);
+                      }}
+                    >
+                      View grant
+                    </a>
+                  ) : null}
+                </div>
+                {grant.error ? <span className="mt-1 block text-xs text-red-200">Read failed</span> : null}
+              </td>
               <td className={tableCellClassName}>{grant.state ? <AddressLink address={grant.state.holder} /> : "Unknown"}</td>
               <td className={tableCellClassName}>{formatTokenAmount(grant.state?.grantSize, grant.tokenMetadata)}</td>
               <td className={tableCellClassName}>{formatTokenAmount(grant.state?.settledAmount, grant.tokenMetadata)}</td>
@@ -334,7 +364,7 @@ function DistributionStatus({ distribution }: { distribution: BoardroomDistribut
 function transparencyTotals(dashboard: ProductBoardroomDashboardState): {
   distributionShares: bigint;
   openGrantCount: number;
-  unsettledGrantShares: bigint;
+  unsettledShareGrantShares: bigint;
 } {
   return {
     distributionShares: dashboard.snapshot.distributionSummaries.reduce(
@@ -342,7 +372,8 @@ function transparencyTotals(dashboard: ProductBoardroomDashboardState): {
       0n,
     ),
     openGrantCount: dashboard.snapshot.grantSummaries.filter((grant) => grant.state && !grant.state.closed).length,
-    unsettledGrantShares: dashboard.snapshot.grantSummaries.reduce((total, grant) => total + (grant.state?.unsettledAmount ?? 0n), 0n),
+    unsettledShareGrantShares: dashboard.snapshot.grantSummaries.reduce((total, grant) =>
+      total + (sameAddress(grant.state?.token, dashboard.snapshot.shareToken) ? grant.state?.unsettledAmount ?? 0n : 0n), 0n),
   };
 }
 

@@ -10,8 +10,15 @@ import {
   type PledgeCashDeployment,
   type PledgeCashReadClient,
 } from "@pledge.cash/sdk";
-import { getAbiItem, isAddress, type AbiEvent, type PublicClient } from "viem";
-import { readBoardroomDistributionSnapshot, readBoardroomSnapshot } from "./boardroom-snapshot";
+import { getAbiItem, isAddress, type AbiEvent, type Hex, type PublicClient } from "viem";
+import {
+  PRODUCT_CATALOG_CHILD_READ_LIMIT,
+  PRODUCT_DETAIL_CHILD_READ_LIMIT,
+  readBoardroomCatalogSnapshot,
+  readBoardroomDistributionSnapshot,
+  readBoardroomSnapshot,
+  type BoardroomCatalogSnapshot,
+} from "./boardroom-snapshot";
 import { errorMessage } from "./forms";
 import { formatNativeTokenAmount, formatTokenAmount } from "./token-amounts";
 import type {
@@ -34,6 +41,7 @@ export type ProductBoardroomCatalogEntry = {
   distributionCount?: number | undefined;
   distributionKind?: string | undefined;
   error?: string | undefined;
+  historyError?: string | undefined;
   liquidity?: bigint | undefined;
   locker?: Address | undefined;
   name?: string | undefined;
@@ -50,6 +58,29 @@ export type ProductBoardroomCatalogEntry = {
   swapCount?: number | undefined;
   symbol?: string | undefined;
   treasuryCash?: bigint | undefined;
+};
+
+export type ProductBoardroomCatalogPageInput = {
+  /** Exclusive factory index to continue reading toward older Boardrooms. */
+  cursor?: number | undefined;
+  /** Requested page size. Values above the runtime maximum are capped. */
+  limit?: number | undefined;
+  /** Factory count captured by the first page. Keeps later cursors on the same append-only snapshot. */
+  snapshotCount?: number | undefined;
+};
+
+export type ProductBoardroomCatalogPage = {
+  entries: ProductBoardroomCatalogEntry[];
+  nextCursor?: number | undefined;
+  snapshotCount: number;
+  totalCount: number;
+};
+
+export type ProductBoardroomFactoryPage = {
+  addresses: Address[];
+  nextCursor?: number | undefined;
+  snapshotCount: number;
+  totalCount: number;
 };
 
 export type ProductBoardroomHistory = {
@@ -72,14 +103,14 @@ export type ProductBoardroomFixedPriceSaleHistory = {
 };
 
 export type ProductBoardroomCurveHistory = {
-  buyerCount: number;
-  buyCount: number;
-  cashRaised: bigint;
+  buyerCount?: number | undefined;
+  buyCount?: number | undefined;
+  cashRaised?: bigint | undefined;
   migration?: ProductBoardroomCurveMigrationHistory | undefined;
-  quotePaid: bigint;
-  quoteReturned: bigint;
-  sellCount: number;
-  soldShares: bigint;
+  quotePaid?: bigint | undefined;
+  quoteReturned?: bigint | undefined;
+  sellCount?: number | undefined;
+  soldShares?: bigint | undefined;
 };
 
 export type ProductBoardroomCurveMigrationHistory = {
@@ -114,50 +145,103 @@ export type ProductBoardroomDashboardState = {
   address: Address;
   catalog: ProductBoardroomCatalogEntry[];
   history?: ProductBoardroomHistory | undefined;
+  historyErrors?: string[] | undefined;
   histories?: ProductBoardroomHistory[] | undefined;
   nativeBalance: bigint;
   snapshot: BoardroomSnapshot;
   treasuryAssets: ProductTreasuryAsset[];
 };
 
-type ProductBoardroomClient = PledgeCashReadClient & Pick<PublicClient, "getBalance"> & Partial<Pick<PublicClient, "getBlockNumber" | "getCode" | "getLogs">>;
-type ProductBoardroomEventLog = { args?: Record<string, unknown> };
+type ProductBoardroomClient = PledgeCashReadClient & Pick<PublicClient, "getBalance"> & Partial<Pick<PublicClient, "getBlock" | "getBlockNumber" | "getCode" | "getLogs">>;
+type ProductBoardroomEventLog = {
+  args?: Record<string, unknown>;
+  blockNumber?: bigint | null | undefined;
+};
 type ProductBoardroomEventAbi = typeof ammPoolAbi | typeof boardroomAbi | typeof fixedPriceSaleAbi | typeof migratingBondingCurveAbi;
 type ProductBoardroomEventName = "BoardroomDistributionRecorded" | "CurveBuy" | "CurveMigrated" | "CurveSell" | "FixedPricePurchase" | "Swap";
 
+type HistoricalDistributionHydration = {
+  error?: string | undefined;
+  snapshot: BoardroomSnapshot;
+};
+
+type EventLogCacheEntry = {
+  checkpointHash?: Hex | undefined;
+  logs: ProductBoardroomEventLog[];
+  pending?: Promise<void> | undefined;
+  toBlock?: bigint | undefined;
+};
+
+type EventLogRequestBudget = {
+  logsUsed: number;
+  name: ProductBoardroomEventName;
+  requestsUsed: number;
+};
+
+type CurveHistoryReadResult = {
+  errors: string[];
+  history?: ProductBoardroomCurveHistory | undefined;
+};
+
 const CATALOG_READ_CONCURRENCY = 8;
+const DEFAULT_CATALOG_PAGE_SIZE = 4;
+const MAX_CATALOG_PAGE_SIZE = 64;
 const EVENT_LOG_CHUNK_SIZE = 100_000n;
 const EVENT_LOG_CONCURRENCY = 4;
+const EVENT_LOG_REORG_OVERLAP = 12n;
+const MAX_CONTRACT_START_BLOCK_CACHE_ENTRIES = 512;
+const MAX_EVENT_LOG_CACHE_ENTRIES = 512;
+const MAX_EVENT_LOGS_PER_STREAM = 25_000;
+const MAX_EVENT_LOG_REQUESTS_PER_SCAN = 256;
+const MAX_EVENT_LOG_REORG_RETRIES = 1;
 const MIN_EVENT_LOG_CHUNK_SIZE = 1_000n;
-const FACTORY_PAGE_SIZE = 64;
 const WAD = 1_000_000_000_000_000_000n;
 const contractStartBlockCache = new WeakMap<object, Map<string, Promise<bigint>>>();
-const eventLogCache = new WeakMap<object, Map<string, Promise<ProductBoardroomEventLog[]>>>();
+const eventLogCache = new WeakMap<object, Map<string, EventLogCacheEntry>>();
 
 export async function readProductBoardroomDashboard(
   client: ProductBoardroomClient,
   input: {
     address: Address;
     catalog?: ProductBoardroomCatalogEntry[] | undefined;
-    deployment?: PledgeCashDeployment | undefined;
   },
 ): Promise<ProductBoardroomDashboardState> {
   const [currentSnapshot, nativeBalance] = await Promise.all([
     readBoardroomSnapshot(client, input.address),
     client.getBalance({ address: input.address }),
   ]);
-  const snapshot = await hydrateHistoricalDistributions(client, currentSnapshot);
-  const catalog = input.catalog ?? await readProductBoardroomCatalog(client, input.deployment);
-  const activeCatalogEntry = catalog.find((entry) => sameAddress(entry.address, input.address));
-  const [treasuryAssets, histories] = await Promise.all([
-    readTreasuryAssets(client, snapshot, activeCatalogEntry),
+  const hydration = await hydrateHistoricalDistributions(client, currentSnapshot);
+  const snapshot = hydration.snapshot;
+  const inputCatalog = input.catalog ?? [];
+  const activeCatalogEntry = inputCatalog.find((entry) => sameAddress(entry.address, input.address));
+  const catalogIdentity = activeCatalogEntry ?? catalogEntryFromSnapshot(snapshot);
+  const [treasuryAssets, histories, shareName] = await Promise.all([
+    readTreasuryAssets(client, snapshot, catalogIdentity),
     readProductBoardroomHistories(client, snapshot),
+    activeCatalogEntry?.name ? Promise.resolve(activeCatalogEntry.name) : readOptionalTokenName(client, snapshot.shareToken),
   ]);
-  const history = selectPrimaryHistory(histories, activeCatalogEntry);
+  const history = selectPrimaryHistory(histories, catalogIdentity);
+  const historyErrors = uniqueMessages([
+    ...(snapshot.summaryWarnings ?? []),
+    hydration.error,
+    ...histories.map((entry) => entry.scanError),
+  ]);
+  const catalogTreasuryCash = catalogIdentity.cashToken
+    ? treasuryAssets.find((asset) => sameAddress(asset.address, catalogIdentity.cashToken))?.balance
+    : undefined;
+  const catalog = activeCatalogEntry
+    ? inputCatalog
+    : [...inputCatalog, catalogEntryFromSnapshot(snapshot, {
+        history,
+        historyError: historyErrors.length > 0 ? historyErrors.join(" ") : undefined,
+        name: shareName,
+        treasuryCash: catalogTreasuryCash,
+      })];
 
   return {
     address: input.address,
     catalog,
+    ...(historyErrors.length > 0 ? { historyErrors } : {}),
     histories,
     history,
     nativeBalance,
@@ -166,17 +250,13 @@ export async function readProductBoardroomDashboard(
   };
 }
 
-export async function readProductBoardroomCatalog(
+export async function readProductBoardroomCatalogPage(
   client: ProductBoardroomClient,
   deployment: PledgeCashDeployment | undefined,
-): Promise<ProductBoardroomCatalogEntry[]> {
-  if (!deployment?.boardroomFactory) return [];
-
-  try {
-    return await discoverProductBoardroomCatalog(client, deployment.boardroomFactory);
-  } catch {
-    return [];
-  }
+  input: ProductBoardroomCatalogPageInput = {},
+): Promise<ProductBoardroomCatalogPage> {
+  if (!deployment?.boardroomFactory) return { entries: [], snapshotCount: 0, totalCount: 0 };
+  return await discoverProductBoardroomCatalogPage(client, deployment.boardroomFactory, input);
 }
 
 export function resolveProductBoardroomAddress(catalog: ProductBoardroomCatalogEntry[] = []): Address | undefined {
@@ -200,8 +280,10 @@ async function readTreasuryAssets(
 ): Promise<ProductTreasuryAsset[]> {
   const labels = treasuryAssetLabels(snapshot, catalogEntry);
 
-  return await Promise.all(
-    Array.from(labels.entries()).map(async ([address, label]) => await readTreasuryAsset(client, snapshot.address, address, label)),
+  return await mapInBatches(
+    Array.from(labels.entries()),
+    CATALOG_READ_CONCURRENCY,
+    async ([address, label]) => await readTreasuryAsset(client, snapshot.address, address, label),
   );
 }
 
@@ -219,7 +301,7 @@ function treasuryAssetLabels(
     addAsset(labels, distributionPaymentToken(distribution), "Cash / quote");
   }
 
-  for (const asset of snapshot.redeemableAssets) {
+  for (const asset of snapshot.redeemableAssets.slice(-PRODUCT_DETAIL_CHILD_READ_LIMIT)) {
     addAsset(labels, asset, "Redeemable asset");
   }
 
@@ -276,68 +358,88 @@ function addGrantAssets(labels: Map<Address, string>, grant: BoardroomGrantSnaps
   }
 }
 
-async function discoverProductBoardroomCatalog(
+async function discoverProductBoardroomCatalogPage(
   client: ProductBoardroomClient,
   factory: Address,
-): Promise<ProductBoardroomCatalogEntry[]> {
-  const addresses = await readFactoryBoardrooms(client, factory);
-  return await mapInBatches(
-    uniqueAddresses(addresses),
+  input: ProductBoardroomCatalogPageInput,
+): Promise<ProductBoardroomCatalogPage> {
+  const factoryPage = await readFactoryBoardroomPage(client, factory, input);
+  const entries = await mapInBatches(
+    uniqueAddresses(factoryPage.addresses),
     CATALOG_READ_CONCURRENCY,
     async (address) => await readProductBoardroomCatalogEntry(client, address),
   );
+  return {
+    entries,
+    ...(factoryPage.nextCursor === undefined ? {} : { nextCursor: factoryPage.nextCursor }),
+    snapshotCount: factoryPage.snapshotCount,
+    totalCount: factoryPage.totalCount,
+  };
 }
 
-export async function readFactoryBoardrooms(client: ProductBoardroomClient, factory: Address): Promise<Address[]> {
+export async function readFactoryBoardroomPage(
+  client: ProductBoardroomClient,
+  factory: Address,
+  input: ProductBoardroomCatalogPageInput = {},
+): Promise<ProductBoardroomFactoryPage> {
   const rawCount = await client.readContract({
     address: factory,
     abi: boardroomFactoryAbi,
     functionName: "allBoardroomsLength",
   });
-  const count = safeCount(rawCount, "Boardroom count");
-  const addresses: Address[] = [];
+  const currentCount = safeCount(rawCount, "Boardroom count");
+  const count = input.snapshotCount === undefined
+    ? currentCount
+    : Math.min(currentCount, safeSnapshotCount(input.snapshotCount));
+  const limit = catalogPageLimit(input.limit);
+  const end = catalogPageCursor(input.cursor, count);
+  const start = Math.max(0, end - limit);
+  const indexes = Array.from({ length: end - start }, (_, offset) => end - offset - 1);
+  const addresses = await mapInBatches(indexes, CATALOG_READ_CONCURRENCY, async (index) =>
+    (await client.readContract({
+      address: factory,
+      abi: boardroomFactoryAbi,
+      functionName: "allBoardrooms",
+      args: [BigInt(index)],
+    })) as Address
+  );
 
-  // Read newest projects first, one bounded page at a time. This avoids the old
-  // silent 64-project truncation without fanning an unbounded RPC burst.
-  for (let end = count; end > 0; end = Math.max(0, end - FACTORY_PAGE_SIZE)) {
-    const start = Math.max(0, end - FACTORY_PAGE_SIZE);
-    const indexes = Array.from({ length: end - start }, (_, offset) => end - offset - 1);
-    addresses.push(...await Promise.all(indexes.map(async (index) =>
-      (await client.readContract({
-        address: factory,
-        abi: boardroomFactoryAbi,
-        functionName: "allBoardrooms",
-        args: [BigInt(index)],
-      })) as Address
-    )));
-  }
-
-  return addresses;
+  return {
+    addresses,
+    ...(start > 0 ? { nextCursor: start } : {}),
+    snapshotCount: count,
+    totalCount: count,
+  };
 }
 
-async function readProductBoardroomCatalogEntry(
+export async function readProductBoardroomCatalogEntry(
   client: ProductBoardroomClient,
   address: Address,
 ): Promise<ProductBoardroomCatalogEntry> {
   try {
-    const snapshot = await hydrateHistoricalDistributions(client, await readBoardroomSnapshot(client, address));
+    const hydration = await hydrateCatalogHistoricalDistributions(client, await readBoardroomCatalogSnapshot(client, address));
+    const snapshot = hydration.snapshot;
     const distribution = findCatalogDistribution(snapshot.distributionSummaries);
     const distributionState = distribution ? deriveDistributionCatalogFields(distribution, snapshot.shareTokenMetadata?.decimals) : {};
     const locker = findCatalogLocker(snapshot, distributionState.pool);
     const pool = catalogPoolAddress(distributionState, locker);
-    const histories = await readProductBoardroomHistories(client, snapshot);
-    const history = selectPrimaryHistory(histories, {
-      distribution: distribution?.address,
-      pool,
-    });
+    let history: ProductBoardroomHistory | undefined;
+    if (distribution) {
+      try {
+        history = await readDistributionHistory(client, distribution, pool);
+      } catch (error) {
+        history = { distribution: distribution.address, scanError: errorMessage(error) };
+      }
+    }
     const cashToken = distributionState.cashToken;
     const treasuryCash = await readCatalogTreasuryCash(client, address, cashToken);
     const shareName = await readOptionalTokenName(client, snapshot.shareToken);
+    const historyErrors = uniqueMessages([hydration.error, history?.scanError]);
 
     return {
       address,
       distributionAddresses: snapshot.distributionSummaries.map((entry) => entry.address),
-      distributionCount: snapshot.distributionSummaries.length,
+      distributionCount: snapshot.distributionCount,
       name: shareName,
       shareToken: snapshot.shareToken,
       shareTokenDecimals: snapshot.shareTokenMetadata?.decimals,
@@ -345,6 +447,7 @@ async function readProductBoardroomCatalogEntry(
       treasuryCash,
       ...distributionState,
       ...catalogHistoryFields(history),
+      ...(historyErrors.length > 0 ? { historyError: historyErrors.join(" ") } : {}),
       locker: catalogLockerAddress(history, distributionState, locker),
       pool: history?.pool ?? pool,
     };
@@ -355,6 +458,36 @@ async function readProductBoardroomCatalogEntry(
       status: "Read failed",
     };
   }
+}
+
+function catalogEntryFromSnapshot(
+  snapshot: Pick<BoardroomSnapshot, "address" | "distributionSummaries" | "lockedLiquiditySummaries" | "shareToken" | "shareTokenMetadata">,
+  additions: {
+    history?: ProductBoardroomHistory | undefined;
+    historyError?: string | undefined;
+    name?: string | undefined;
+    treasuryCash?: bigint | undefined;
+  } = {},
+): ProductBoardroomCatalogEntry {
+  const distribution = findCatalogDistribution(snapshot.distributionSummaries);
+  const distributionState = distribution ? deriveDistributionCatalogFields(distribution, snapshot.shareTokenMetadata?.decimals) : {};
+  const locker = findCatalogLocker(snapshot, distributionState.pool);
+  const pool = catalogPoolAddress(distributionState, locker);
+  return {
+    address: snapshot.address,
+    distributionAddresses: snapshot.distributionSummaries.map((entry) => entry.address),
+    distributionCount: snapshot.distributionSummaries.length,
+    name: additions.name,
+    shareToken: snapshot.shareToken,
+    shareTokenDecimals: snapshot.shareTokenMetadata?.decimals,
+    symbol: snapshot.shareTokenMetadata?.symbol,
+    treasuryCash: additions.treasuryCash,
+    ...distributionState,
+    ...catalogHistoryFields(additions.history),
+    ...(additions.historyError ? { historyError: additions.historyError } : {}),
+    locker: catalogLockerAddress(additions.history, distributionState, locker),
+    pool: additions.history?.pool ?? pool,
+  };
 }
 
 async function readCatalogTreasuryCash(
@@ -418,23 +551,93 @@ export async function readProductBoardroomHistories(
 async function hydrateHistoricalDistributions(
   client: ProductBoardroomClient,
   snapshot: BoardroomSnapshot,
-): Promise<BoardroomSnapshot> {
-  const logs = await readEventLogs(client, snapshot.address, boardroomAbi, "BoardroomDistributionRecorded");
-  if (!logs) return snapshot;
+): Promise<HistoricalDistributionHydration> {
+  let logs: ProductBoardroomEventLog[] | undefined;
+  try {
+    logs = await readEventLogs(client, snapshot.address, boardroomAbi, "BoardroomDistributionRecorded");
+  } catch (error) {
+    return {
+      error: `Historical distribution scan failed: ${errorMessage(error)}`,
+      snapshot,
+    };
+  }
+  if (!logs) return { snapshot };
   const recorded = uniqueAddresses(logs
     .map((log) => addressArg(log.args, "distribution"))
     .filter((address): address is Address => address !== undefined));
-  const missing = recorded.filter((address) =>
+  const allMissing = recorded.filter((address) =>
     !snapshot.distributionSummaries.some((distribution) => sameAddress(distribution.address, address)));
-  if (missing.length === 0) return snapshot;
+  if (allMissing.length === 0) return { snapshot };
+  const remainingCapacity = Math.max(0, PRODUCT_DETAIL_CHILD_READ_LIMIT - snapshot.distributionSummaries.length);
+  const missing = allMissing.slice(Math.max(0, allMissing.length - remainingCapacity));
+  const omittedCount = allMissing.length - missing.length;
   const historical = await mapInBatches(
     missing,
     CATALOG_READ_CONCURRENCY,
     async (distribution) => await readBoardroomDistributionSnapshot(client, distribution),
   );
+  const reconstructionErrors = historical
+    .filter((distribution) => Boolean(distribution.error))
+    .map((distribution) => `${distribution.address}: ${distribution.error ?? "Unknown read failure"}`);
+  const errors = uniqueMessages([
+    omittedCount > 0
+      ? `Showing the newest ${PRODUCT_DETAIL_CHILD_READ_LIMIT.toString()} distributions; ${omittedCount.toString()} older historical ${omittedCount === 1 ? "record is" : "records are"} omitted from this browser view.`
+      : undefined,
+    reconstructionErrors.length > 0
+      ? `Historical distribution reconstruction failed: ${reconstructionErrors.join("; ")}`
+      : undefined,
+  ]);
   return {
-    ...snapshot,
-    distributionSummaries: [...snapshot.distributionSummaries, ...historical],
+    ...(errors.length > 0 ? { error: errors.join(" ") } : {}),
+    snapshot: {
+      ...snapshot,
+      distributionSummaries: [...snapshot.distributionSummaries, ...historical],
+    },
+  };
+}
+
+async function hydrateCatalogHistoricalDistributions(
+  client: ProductBoardroomClient,
+  snapshot: BoardroomCatalogSnapshot,
+): Promise<{ error?: string | undefined; snapshot: BoardroomCatalogSnapshot }> {
+  let logs: ProductBoardroomEventLog[] | undefined;
+  try {
+    logs = await readEventLogs(client, snapshot.address, boardroomAbi, "BoardroomDistributionRecorded");
+  } catch (error) {
+    return {
+      error: `Historical distribution scan failed: ${errorMessage(error)}`,
+      snapshot,
+    };
+  }
+  if (!logs || snapshot.distributionSummaries.length >= PRODUCT_CATALOG_CHILD_READ_LIMIT) return { snapshot };
+
+  const known = new Set(snapshot.distributionSummaries.map((distribution) => distribution.address.toLowerCase()));
+  const missing: Address[] = [];
+  for (let index = logs.length - 1; index >= 0 && known.size < PRODUCT_CATALOG_CHILD_READ_LIMIT; index -= 1) {
+    const address = addressArg(logs[index]?.args, "distribution");
+    if (!address || known.has(address.toLowerCase())) continue;
+    known.add(address.toLowerCase());
+    missing.push(address);
+  }
+  if (missing.length === 0) return { snapshot };
+
+  const historical = await mapInBatches(
+    missing,
+    CATALOG_READ_CONCURRENCY,
+    async (distribution) => await readBoardroomDistributionSnapshot(client, distribution),
+  );
+  const reconstructionErrors = historical
+    .filter((distribution) => Boolean(distribution.error))
+    .map((distribution) => `${distribution.address}: ${distribution.error ?? "Unknown read failure"}`);
+  return {
+    ...(reconstructionErrors.length > 0
+      ? { error: `Historical distribution reconstruction failed: ${reconstructionErrors.join("; ")}` }
+      : {}),
+    snapshot: {
+      ...snapshot,
+      distributionCount: Math.max(snapshot.distributionCount, snapshot.distributionSummaries.length + historical.length),
+      distributionSummaries: [...snapshot.distributionSummaries, ...historical],
+    },
   };
 }
 
@@ -534,10 +737,19 @@ async function readDistributionHistory(
 
   if (!("quoteToken" in distribution.state)) return undefined;
 
-  const curve = await readCurveHistory(client, distribution.address);
+  const curveResult = await readCurveHistory(client, distribution.address);
+  const curve = curveResult.history;
   const historyPool = curve?.migration?.pool ?? pool ?? nonZeroAddress(distribution.state.pool);
-  const amm = historyPool ? await readAmmHistory(client, historyPool) : undefined;
-  if (!curve && !amm) return undefined;
+  const errors = [...curveResult.errors];
+  let amm: ProductBoardroomAmmHistory | undefined;
+  if (historyPool) {
+    try {
+      amm = await readAmmHistory(client, historyPool);
+    } catch (error) {
+      errors.push(`AMM Swap history failed: ${errorMessage(error)}`);
+    }
+  }
+  if (!curve && !amm && errors.length === 0) return undefined;
 
   return {
     amm,
@@ -546,6 +758,7 @@ async function readDistributionHistory(
     curve,
     distribution: distribution.address,
     pool: historyPool,
+    ...(errors.length > 0 ? { scanError: uniqueMessages(errors).join("; ") } : {}),
     soldShares: curve?.soldShares,
   };
 }
@@ -579,13 +792,21 @@ async function readFixedPriceSaleHistory(
 async function readCurveHistory(
   client: ProductBoardroomClient,
   curve: Address,
-): Promise<ProductBoardroomCurveHistory | undefined> {
-  const [buyLogs, sellLogs, migrationLogs] = await Promise.all([
+): Promise<CurveHistoryReadResult> {
+  const [buyResult, sellResult, migrationResult] = await Promise.allSettled([
     readEventLogs(client, curve, migratingBondingCurveAbi, "CurveBuy"),
     readEventLogs(client, curve, migratingBondingCurveAbi, "CurveSell"),
     readEventLogs(client, curve, migratingBondingCurveAbi, "CurveMigrated"),
   ]);
-  if (!buyLogs || !sellLogs || !migrationLogs) return undefined;
+  const errors = uniqueMessages([
+    buyResult.status === "rejected" ? `CurveBuy history failed: ${errorMessage(buyResult.reason)}` : undefined,
+    sellResult.status === "rejected" ? `CurveSell history failed: ${errorMessage(sellResult.reason)}` : undefined,
+    migrationResult.status === "rejected" ? `CurveMigrated history failed: ${errorMessage(migrationResult.reason)}` : undefined,
+  ]);
+  const buyLogs = buyResult.status === "fulfilled" ? buyResult.value : undefined;
+  const sellLogs = sellResult.status === "fulfilled" ? sellResult.value : undefined;
+  const migrationLogs = migrationResult.status === "fulfilled" ? migrationResult.value : undefined;
+  if (!buyLogs && !sellLogs && !migrationLogs) return { errors };
 
   const buyers = new Set<string>();
   let boughtShares = 0n;
@@ -593,33 +814,38 @@ async function readCurveHistory(
   let quotePaid = 0n;
   let quoteReturned = 0n;
 
-  for (const log of buyLogs) {
-    const buyer = addressArg(log.args, "buyer");
-    if (buyer) buyers.add(buyer.toLowerCase());
-    boughtShares += bigintArg(log.args, "shares");
-    quotePaid += bigintArg(log.args, "quotePaid");
+  if (buyLogs) {
+    for (const log of buyLogs) {
+      const buyer = addressArg(log.args, "buyer");
+      if (buyer) buyers.add(buyer.toLowerCase());
+      boughtShares += bigintArg(log.args, "shares");
+      quotePaid += bigintArg(log.args, "quotePaid");
+    }
   }
-  for (const log of sellLogs) {
-    soldBackShares += bigintArg(log.args, "shares");
-    quoteReturned += bigintArg(log.args, "quoteReturned");
+  if (sellLogs) {
+    for (const log of sellLogs) {
+      soldBackShares += bigintArg(log.args, "shares");
+      quoteReturned += bigintArg(log.args, "quoteReturned");
+    }
   }
 
-  const migrationLog = migrationLogs[migrationLogs.length - 1];
+  const migrationLog = migrationLogs?.[migrationLogs.length - 1];
   const migration = migrationLog
     ? curveMigrationHistory(migrationLog.args)
     : undefined;
-  const soldShares = boughtShares > soldBackShares ? boughtShares - soldBackShares : 0n;
-  const cashRaised = quotePaid > quoteReturned ? quotePaid - quoteReturned : 0n;
+  const completeTradingHistory = buyLogs !== undefined && sellLogs !== undefined;
 
   return {
-    buyerCount: buyers.size,
-    buyCount: buyLogs.length,
-    cashRaised,
-    migration,
-    quotePaid,
-    quoteReturned,
-    sellCount: sellLogs.length,
-    soldShares,
+    errors,
+    history: {
+      ...(buyLogs ? { buyerCount: buyers.size, buyCount: buyLogs.length, quotePaid } : {}),
+      ...(completeTradingHistory ? {
+        cashRaised: quotePaid > quoteReturned ? quotePaid - quoteReturned : 0n,
+        soldShares: boughtShares > soldBackShares ? boughtShares - soldBackShares : 0n,
+      } : {}),
+      ...(migration ? { migration } : {}),
+      ...(sellLogs ? { quoteReturned, sellCount: sellLogs.length } : {}),
+    },
   };
 }
 
@@ -663,23 +889,109 @@ async function readEventLogs(
 ): Promise<ProductBoardroomEventLog[] | undefined> {
   if (!client.getBlockNumber || !client.getLogs) return undefined;
   const toBlock = await client.getBlockNumber();
-  const cacheKey = `${address.toLowerCase()}:${name}:${toBlock.toString()}`;
-  let clientCache = eventLogCache.get(client);
-  if (!clientCache) {
-    clientCache = new Map();
-    eventLogCache.set(client, clientCache);
+  const cacheKey = `${address.toLowerCase()}:${name}`;
+  const clientCache = eventLogClientCache(client);
+  let cacheEntry = clientCache.get(cacheKey);
+  if (!cacheEntry) {
+    cacheEntry = { logs: [] };
+    insertEventLogCacheEntry(clientCache, cacheKey, cacheEntry);
+  } else {
+    touchEventLogCacheEntry(clientCache, cacheKey, cacheEntry);
   }
-  const cached = clientCache.get(cacheKey);
-  if (cached) return await cached;
 
-  const request = readEventLogsInChunks(client, address, abi, name, toBlock);
-  clientCache.set(cacheKey, request);
-  try {
-    return await request;
-  } catch (error) {
-    clientCache.delete(cacheKey);
-    throw error;
+  if (cacheEntry.pending) await cacheEntry.pending;
+  const checkpointChanged = cacheEntry.toBlock !== undefined && toBlock >= cacheEntry.toBlock
+    ? await eventLogCheckpointChanged(client, cacheEntry)
+    : false;
+  const sameHeadWithoutCheckpoint = cacheEntry.toBlock === toBlock
+    && (!client.getBlock || cacheEntry.checkpointHash === undefined);
+  if ((cacheEntry.toBlock !== undefined && toBlock < cacheEntry.toBlock) || checkpointChanged || sameHeadWithoutCheckpoint) {
+    cacheEntry.logs = [];
+    cacheEntry.toBlock = undefined;
+    cacheEntry.checkpointHash = undefined;
+    contractStartBlockCache.get(client)?.delete(address.toLowerCase());
+  } else if (cacheEntry.toBlock === toBlock) {
+    return logsThroughBlock(cacheEntry.logs, toBlock);
   }
+
+  const entry = cacheEntry;
+  const request = updateEventLogCacheEntry(client, address, abi, name, toBlock, entry);
+  entry.pending = request;
+  try {
+    await request;
+    return logsThroughBlock(entry.logs, toBlock);
+  } catch (error) {
+    if (entry.toBlock === undefined && clientCache.get(cacheKey) === entry) clientCache.delete(cacheKey);
+    throw error;
+  } finally {
+    if (entry.pending === request) entry.pending = undefined;
+  }
+}
+
+async function updateEventLogCacheEntry(
+  client: ProductBoardroomClient,
+  address: Address,
+  abi: ProductBoardroomEventAbi,
+  name: ProductBoardroomEventName,
+  toBlock: bigint,
+  entry: EventLogCacheEntry,
+): Promise<void> {
+  for (let attempt = 0; attempt <= MAX_EVENT_LOG_REORG_RETRIES; attempt += 1) {
+    const checkpointBefore = await eventLogBlockHash(client, toBlock);
+    const contractBlock = await contractStartBlock(client, address, toBlock);
+    const fromBlock = entry.toBlock === undefined
+      ? contractBlock
+      : maxBigInt(contractBlock, saturatingSubBigInt(entry.toBlock, EVENT_LOG_REORG_OVERLAP - 1n));
+    const retained = entry.toBlock === undefined || fromBlock > toBlock
+      ? []
+      : entry.logs.filter((log) => typeof log.blockNumber === "bigint" && log.blockNumber < fromBlock);
+    const budget: EventLogRequestBudget = { logsUsed: 0, name, requestsUsed: 0 };
+    reserveEventLogResults(budget, retained.length);
+    const scanned = fromBlock > toBlock
+      ? []
+      : await readEventLogsInChunks(client, address, abi, name, fromBlock, toBlock, budget);
+    const checkpointAfter = await eventLogBlockHash(client, toBlock);
+
+    if (checkpointBefore !== checkpointAfter) {
+      resetEventLogCacheEntry(client, address, entry);
+      if (attempt < MAX_EVENT_LOG_REORG_RETRIES) continue;
+      throw new Error(`Historical ${name} scan could not stabilize because the chain checkpoint changed during the scan.`);
+    }
+
+    entry.logs = [...retained, ...scanned];
+    entry.toBlock = toBlock;
+    entry.checkpointHash = checkpointAfter ?? checkpointBefore;
+    return;
+  }
+}
+
+function resetEventLogCacheEntry(
+  client: ProductBoardroomClient,
+  address: Address,
+  entry: EventLogCacheEntry,
+): void {
+  entry.logs = [];
+  entry.toBlock = undefined;
+  entry.checkpointHash = undefined;
+  contractStartBlockCache.get(client)?.delete(address.toLowerCase());
+}
+
+async function eventLogCheckpointChanged(
+  client: ProductBoardroomClient,
+  entry: EventLogCacheEntry,
+): Promise<boolean> {
+  if (entry.toBlock === undefined || entry.checkpointHash === undefined) return false;
+  const canonicalHash = await eventLogBlockHash(client, entry.toBlock);
+  return canonicalHash !== undefined && canonicalHash !== entry.checkpointHash;
+}
+
+async function eventLogBlockHash(
+  client: ProductBoardroomClient,
+  blockNumber: bigint,
+): Promise<Hex | undefined> {
+  if (!client.getBlock) return undefined;
+  const block = await client.getBlock({ blockNumber });
+  return block.hash ?? undefined;
 }
 
 async function readEventLogsInChunks(
@@ -687,11 +999,11 @@ async function readEventLogsInChunks(
   address: Address,
   abi: ProductBoardroomEventAbi,
   name: ProductBoardroomEventName,
+  fromBlock: bigint,
   toBlock: bigint,
+  budget: EventLogRequestBudget,
 ): Promise<ProductBoardroomEventLog[]> {
-  if (!client.getLogs) return [];
-  const fromBlock = await contractStartBlock(client, address, toBlock);
-  if (fromBlock > toBlock) return [];
+  if (!client.getLogs || fromBlock > toBlock) return [];
   const event = getAbiItem({ abi, name }) as AbiEvent;
   const logs: ProductBoardroomEventLog[] = [];
   let nextBlock = fromBlock;
@@ -703,7 +1015,7 @@ async function readEventLogsInChunks(
       return start <= toBlock ? { start, end } : undefined;
     }).filter((range): range is { start: bigint; end: bigint } => range !== undefined);
     const pages = await Promise.all(ranges.map(async ({ start, end }) =>
-      await readLogRangeAdaptive(client, address, event, start, end)));
+      await readLogRangeAdaptive(client, address, event, start, end, budget)));
     for (const page of pages) logs.push(...page);
     const last = ranges.at(-1);
     if (!last) break;
@@ -719,18 +1031,20 @@ async function readLogRangeAdaptive(
   event: AbiEvent,
   fromBlock: bigint,
   toBlock: bigint,
+  budget: EventLogRequestBudget,
 ): Promise<ProductBoardroomEventLog[]> {
   if (!client.getLogs) return [];
+  reserveEventLogRequest(budget);
   try {
-    return await client.getLogs({ address, event, fromBlock, toBlock }) as ProductBoardroomEventLog[];
+    const logs = await client.getLogs({ address, event, fromBlock, toBlock }) as ProductBoardroomEventLog[];
+    reserveEventLogResults(budget, logs.length);
+    return logs;
   } catch (error) {
     const size = toBlock - fromBlock + 1n;
-    if (size <= MIN_EVENT_LOG_CHUNK_SIZE) throw error;
+    if (!isLogRangeLimitError(error) || size <= MIN_EVENT_LOG_CHUNK_SIZE) throw error;
     const middle = fromBlock + (toBlock - fromBlock) / 2n;
-    const [first, second] = await Promise.all([
-      readLogRangeAdaptive(client, address, event, fromBlock, middle),
-      readLogRangeAdaptive(client, address, event, middle + 1n, toBlock),
-    ]);
+    const first = await readLogRangeAdaptive(client, address, event, fromBlock, middle, budget);
+    const second = await readLogRangeAdaptive(client, address, event, middle + 1n, toBlock, budget);
     return [...first, ...second];
   }
 }
@@ -748,12 +1062,21 @@ async function contractStartBlock(
   }
   const key = address.toLowerCase();
   const cached = clientCache.get(key);
-  if (cached) return await cached;
+  if (cached) {
+    clientCache.delete(key);
+    clientCache.set(key, cached);
+    return await cached;
+  }
 
   // Some local and pruned RPCs expose current state at a high block but cannot
   // answer historical eth_getCode. Cache the safe fallback promise itself so
   // concurrent event readers never observe a rejected start-block lookup.
   const request = findContractStartBlock(client, address, toBlock).catch(() => 0n);
+  while (clientCache.size >= MAX_CONTRACT_START_BLOCK_CACHE_ENTRIES) {
+    const oldest = clientCache.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    clientCache.delete(oldest);
+  }
   clientCache.set(key, request);
   return await request;
 }
@@ -793,19 +1116,19 @@ function curveMigrationHistory(args: Record<string, unknown> | undefined): Produ
 
 function catalogHistoryFields(history: ProductBoardroomHistory | undefined): Partial<ProductBoardroomCatalogEntry> {
   if (!history) return {};
-  return {
-    buyerCount: history.buyerCount,
-    buyCount: history.curve?.buyCount,
-    cashRaised: history.cashRaised,
-    liquidity: history.curve?.migration?.liquidity,
-    pool: history.pool,
-    quoteToBoardroom: history.curve?.migration?.quoteToBoardroom,
-    quoteToLiquidity: history.curve?.migration?.quoteToLiquidity,
-    sellCount: history.curve?.sellCount,
-    sharesToLiquidity: history.curve?.migration?.sharesToLiquidity,
-    soldShares: history.soldShares,
-    swapCount: history.amm?.swapCount,
-  };
+  const fields: Partial<ProductBoardroomCatalogEntry> = {};
+  if (history.buyerCount !== undefined) fields.buyerCount = history.buyerCount;
+  if (history.curve?.buyCount !== undefined) fields.buyCount = history.curve.buyCount;
+  if (history.cashRaised !== undefined) fields.cashRaised = history.cashRaised;
+  if (history.curve?.migration?.liquidity !== undefined) fields.liquidity = history.curve.migration.liquidity;
+  if (history.pool !== undefined) fields.pool = history.pool;
+  if (history.curve?.migration?.quoteToBoardroom !== undefined) fields.quoteToBoardroom = history.curve.migration.quoteToBoardroom;
+  if (history.curve?.migration?.quoteToLiquidity !== undefined) fields.quoteToLiquidity = history.curve.migration.quoteToLiquidity;
+  if (history.curve?.sellCount !== undefined) fields.sellCount = history.curve.sellCount;
+  if (history.curve?.migration?.sharesToLiquidity !== undefined) fields.sharesToLiquidity = history.curve.migration.sharesToLiquidity;
+  if (history.soldShares !== undefined) fields.soldShares = history.soldShares;
+  if (history.amm?.swapCount !== undefined) fields.swapCount = history.amm.swapCount;
+  return fields;
 }
 
 function findCatalogDistribution(
@@ -841,7 +1164,10 @@ function selectPrimaryHistory(
     ?? histories[0];
 }
 
-function findCatalogLocker(snapshot: BoardroomSnapshot, pool: Address | undefined) {
+function findCatalogLocker(
+  snapshot: Pick<BoardroomSnapshot, "lockedLiquiditySummaries">,
+  pool: Address | undefined,
+) {
   if (pool) {
     const matching = snapshot.lockedLiquiditySummaries.find(
       (locker) => locker.state?.pool.toLowerCase() === pool.toLowerCase(),
@@ -912,12 +1238,128 @@ async function readOptionalTokenName(client: PledgeCashReadClient, address: Addr
   }
 }
 
+function catalogPageLimit(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_CATALOG_PAGE_SIZE;
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error("Catalog page size must be a positive safe integer.");
+  return Math.min(value, MAX_CATALOG_PAGE_SIZE);
+}
+
+function catalogPageCursor(value: number | undefined, count: number): number {
+  if (value === undefined) return count;
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error("Catalog cursor must be a non-negative safe integer.");
+  return Math.min(value, count);
+}
+
 function safeCount(value: unknown, label: string): number {
   const parsed = bigintCount(value);
   if (parsed > BigInt(Number.MAX_SAFE_INTEGER)) {
     throw new Error(`${label} exceeds the browser's safe discovery range.`);
   }
   return Number(parsed);
+}
+
+function safeSnapshotCount(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error("Catalog snapshot count must be a non-negative safe integer.");
+  }
+  return value;
+}
+
+function eventLogClientCache(client: ProductBoardroomClient): Map<string, EventLogCacheEntry> {
+  let clientCache = eventLogCache.get(client);
+  if (!clientCache) {
+    clientCache = new Map();
+    eventLogCache.set(client, clientCache);
+  }
+  return clientCache;
+}
+
+function insertEventLogCacheEntry(
+  clientCache: Map<string, EventLogCacheEntry>,
+  key: string,
+  entry: EventLogCacheEntry,
+): void {
+  while (clientCache.size >= MAX_EVENT_LOG_CACHE_ENTRIES) {
+    const oldest = clientCache.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    clientCache.delete(oldest);
+  }
+  clientCache.set(key, entry);
+}
+
+function touchEventLogCacheEntry(
+  clientCache: Map<string, EventLogCacheEntry>,
+  key: string,
+  entry: EventLogCacheEntry,
+): void {
+  clientCache.delete(key);
+  clientCache.set(key, entry);
+}
+
+function logsThroughBlock(logs: readonly ProductBoardroomEventLog[], toBlock: bigint): ProductBoardroomEventLog[] {
+  return logs.filter((log) => typeof log.blockNumber !== "bigint" || log.blockNumber <= toBlock);
+}
+
+function reserveEventLogRequest(budget: EventLogRequestBudget): void {
+  if (budget.requestsUsed >= MAX_EVENT_LOG_REQUESTS_PER_SCAN) {
+    throw new Error(`Historical event scan exceeded its ${MAX_EVENT_LOG_REQUESTS_PER_SCAN.toString()}-request safety bound.`);
+  }
+  budget.requestsUsed += 1;
+}
+
+function reserveEventLogResults(budget: EventLogRequestBudget, count: number): void {
+  if (count > MAX_EVENT_LOGS_PER_STREAM - budget.logsUsed) {
+    throw new Error(`Historical ${budget.name} activity exceeds the browser's ${MAX_EVENT_LOGS_PER_STREAM.toLocaleString()}-event safety bound.`);
+  }
+  budget.logsUsed += count;
+}
+
+function isLogRangeLimitError(error: unknown): boolean {
+  const message = logErrorText(error).toLowerCase();
+  if (/(?:rate[ -]?limit|too many requests|\b429\b|quota|throttl)/.test(message)) return false;
+  return [
+    /(?:exceed|maximum|max|limit|limited)[^.\n]*block range/,
+    /block range[^.\n]*(?:exceed|maximum|max|limit|too (?:large|wide))/,
+    /range[^.\n]*(?:too (?:large|wide)|exceed|limit)/,
+    /query returned more than/,
+    /too many (?:logs|results)/,
+    /response size[^.\n]*(?:exceed|limit|too large)/,
+    /please (?:reduce|limit)[^.\n]*(?:block|range)/,
+    /eth_getlogs[^.\n]*(?:exceed|limit|too (?:large|wide))/,
+  ].some((pattern) => pattern.test(message));
+}
+
+function logErrorText(error: unknown): string {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current !== undefined && current !== null && !seen.has(current); depth += 1) {
+    seen.add(current);
+    if (typeof current === "string") {
+      parts.push(current);
+      break;
+    }
+    if (current instanceof Error) {
+      parts.push(current.message);
+      current = current.cause;
+      continue;
+    }
+    if (typeof current === "object") {
+      const record = current as Record<string, unknown>;
+      for (const field of ["shortMessage", "details", "message"] as const) {
+        if (typeof record[field] === "string") parts.push(record[field]);
+      }
+      current = record.cause;
+      continue;
+    }
+    parts.push(String(current));
+    break;
+  }
+  return parts.join(" ");
+}
+
+function uniqueMessages(messages: readonly (string | undefined)[]): string[] {
+  return Array.from(new Set(messages.filter((message): message is string => Boolean(message))));
 }
 
 async function mapInBatches<T, U>(
@@ -935,6 +1377,14 @@ async function mapInBatches<T, U>(
 
 function minBigInt(first: bigint, second: bigint): bigint {
   return first < second ? first : second;
+}
+
+function maxBigInt(first: bigint, second: bigint): bigint {
+  return first > second ? first : second;
+}
+
+function saturatingSubBigInt(value: bigint, decrement: bigint): bigint {
+  return value > decrement ? value - decrement : 0n;
 }
 
 function uniqueAddresses(addresses: Address[]): Address[] {

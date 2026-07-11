@@ -16,6 +16,7 @@ export type GovernancePageProps = {
   loading: boolean;
   primaryAction?: ReactNode;
   queueContent?: ReactNode;
+  warning?: string | undefined;
 };
 
 export function GovernancePage({
@@ -26,6 +27,7 @@ export function GovernancePage({
   loading,
   primaryAction,
   queueContent,
+  warning,
 }: GovernancePageProps): React.JSX.Element {
   if (loading && !dashboard) return <GovernanceLoading />;
   if (!dashboard) {
@@ -51,6 +53,7 @@ export function GovernancePage({
           action={primaryAction}
         />
         {error ? <div className="mt-4"><PageNotice title="Governance data is incomplete" tone="danger">{error}</PageNotice></div> : null}
+        {warning ? <div className="mt-4"><PageNotice title="Some queued decisions were not shown" tone="warning">{warning}</PageNotice></div> : null}
         <div className="mt-5 flex flex-wrap items-center gap-2">
           <Badge variant={snapshot.launched ? "default" : "warning"}>{snapshot.launched ? "Holder governance live" : "Pre-launch authority"}</Badge>
           <Badge variant={lifecycle.tone}>{lifecycle.label}</Badge>
@@ -103,9 +106,13 @@ export function GovernancePage({
         />
         <div className="mt-4">
           {queueContent ?? (
-            <PageNotice title={snapshot.launched ? "No queue data attached" : "Queue starts after launch"}>
+            <PageNotice title={snapshot.launched ? (error ? "Queued decisions are unavailable" : warning ? "No verified queued decisions" : "No queue data attached") : "Queue starts after launch"}>
               {snapshot.launched
-                ? "The governance state is readable, but decoded queue events have not been attached to this view."
+                ? error
+                  ? "The current queue could not be checked. Retry before concluding that no decisions are pending."
+                  : warning
+                    ? "Queue coverage is incomplete. Retry before assuming no decisions are pending."
+                    : "The governance state is readable, but decoded queue events have not been attached to this view."
                 : "Launching is a one-way authority transition. Review the executor and governance settings before continuing."}
             </PageNotice>
           )}

@@ -69,6 +69,15 @@ export type ContractCallReview = {
   value: bigint;
 };
 
+const TRANSACTION_REVIEW_PARAMETERS = "transactionReviewParameters";
+
+export function withTransactionReviewParameters(
+  request: Record<string, unknown>,
+  parameters: readonly ContractParameterReview[],
+): Record<string, unknown> {
+  return { ...request, [TRANSACTION_REVIEW_PARAMETERS]: parameters };
+}
+
 const BOARDROOM_SINGLE_CALL_FUNCTIONS = new Set([
   "execute",
   "executeQueuedAction",
@@ -124,9 +133,20 @@ const FUNCTION_LABELS: Record<string, string> = {
 
 export function contractCallReview(label: string, request: Record<string, unknown>): ContractCallReview {
   const functionName = stringField(request, "functionName") ?? "unknown";
-  const target = (stringField(request, "address") as Address | undefined) ?? "unknown";
+  const requestedTarget = stringField(request, "address");
+  const target = requestedTarget && isAddress(requestedTarget) ? requestedTarget : "unknown";
   const boardroomCalls = extractBoardroomCallReviews(request, functionName, target);
-  const parameters = callParameters(request, functionName);
+  const declaredParameters = callParameters(request, functionName);
+  const boundParameters = transactionReviewParameters(request);
+  const boundNames = new Set(boundParameters.map((parameter) => normalizedParameterName(parameter.name)));
+  const launchDelayIsBound = functionName === "launch" && boundNames.has("holderreviewperiod");
+  const parameters = [
+    ...boundParameters,
+    ...declaredParameters.filter((parameter) => {
+      const name = normalizedParameterName(parameter.name);
+      return !boundNames.has(name) && !(launchDelayIsBound && name === "governancedelay");
+    }),
+  ];
   if (boardroomCalls) {
     const callsParameter = parameters[0];
     if (callsParameter) {
@@ -207,10 +227,29 @@ function callParameters(
   const args = Array.isArray(request.args) ? request.args : [];
 
   return inputs.map((input, index) => ({
-    name: input.name || `Argument ${index + 1}`,
+    name: cleanParameterName(input.name) || `Argument ${index + 1}`,
     type: input.type ?? "unknown",
     value: formatParameterValue(args[index]),
   }));
+}
+
+function transactionReviewParameters(request: Record<string, unknown>): ContractParameterReview[] {
+  const parameters = request[TRANSACTION_REVIEW_PARAMETERS];
+  if (!Array.isArray(parameters)) return [];
+  return parameters.flatMap((parameter) => {
+    if (!parameter || typeof parameter !== "object") return [];
+    const record = parameter as Record<string, unknown>;
+    if (typeof record.name !== "string" || typeof record.type !== "string" || typeof record.value !== "string") return [];
+    return [{ name: cleanParameterName(record.name), type: record.type, value: record.value }];
+  });
+}
+
+function cleanParameterName(name: string | undefined): string {
+  return (name ?? "").replace(/_+$/g, "");
+}
+
+function normalizedParameterName(name: string): string {
+  return cleanParameterName(name).replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
 
 function extractBoardroomCallReviews(

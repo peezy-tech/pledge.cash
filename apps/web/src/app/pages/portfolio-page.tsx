@@ -62,7 +62,6 @@ export function PortfolioPage({
           <div className="mt-5 border-l-2 border-zinc-700 px-4 py-2">
             <div className="flex items-center gap-2 text-zinc-300"><WalletCards className="h-4 w-4" /><span className="text-sm font-semibold">No wallet connected</span></div>
             <p className="m-0 mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Connecting is used to discover positions and authorize actions; it does not grant pledge.cash custody or project authority.</p>
-            {connectAction ? <div className="mt-4">{connectAction}</div> : null}
           </div>
         ) : loading && orderedTasks.length === 0 ? (
           <PortfolioLoading />

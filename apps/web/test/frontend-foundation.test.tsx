@@ -5,6 +5,7 @@ import {
   DesktopPrimaryNav,
   MobilePrimaryNav,
   ProjectSectionNav,
+  shouldHandleClientNavigation,
   StudioSectionNav,
 } from "../src/app/product-navigation";
 import { Web3Provider } from "../src/components/web3-provider";
@@ -53,6 +54,16 @@ describe("frontend foundation", () => {
     expect(html).toContain('aria-current="page"');
   });
 
+  test("only intercepts unmodified primary-button anchor navigation", () => {
+    const plainClick = { altKey: false, button: 0, ctrlKey: false, metaKey: false, shiftKey: false };
+    expect(shouldHandleClientNavigation(plainClick)).toBe(true);
+    expect(shouldHandleClientNavigation({ ...plainClick, button: 1 })).toBe(false);
+    expect(shouldHandleClientNavigation({ ...plainClick, ctrlKey: true })).toBe(false);
+    expect(shouldHandleClientNavigation({ ...plainClick, metaKey: true })).toBe(false);
+    expect(shouldHandleClientNavigation({ ...plainClick, shiftKey: true })).toBe(false);
+    expect(shouldHandleClientNavigation({ ...plainClick, altKey: true })).toBe(false);
+  });
+
   test("keeps the compact header usable and gates all wallet controls while pending", () => {
     const html = renderToString(
       <Web3Provider>
@@ -85,6 +96,13 @@ describe("frontend foundation", () => {
     for (const token of ["--color-zinc-500", "--color-zinc-600", "--pc-text-subtle"]) {
       expect(contrastRatio(cssColor(css, token), raisedSurface)).toBeGreaterThanOrEqual(4.5);
     }
+  });
+
+  test("keeps strict governance index validation out of the initial application chunk", async () => {
+    const source = await Bun.file(new URL("../src/app/App.tsx", import.meta.url)).text();
+
+    expect(source).toContain('import("../lib/governance-actions")');
+    expect(source).not.toMatch(/^import .*governance-actions/m);
   });
 });
 

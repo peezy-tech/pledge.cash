@@ -1,7 +1,9 @@
 import { hyperEvmTestnet, monadTestnet, type Address } from "@pledge.cash/sdk";
-import { createPublicClient, defineChain, http, type Chain, type Hex, type PublicClient } from "viem";
+import { createPublicClient, defineChain, fallback, http, type Chain, type Hex, type PublicClient } from "viem";
 
 export const LOCAL_ANVIL_CHAIN_ID = 31337;
+export const PUBLIC_RPC_BATCH_SIZE = 20;
+export const PUBLIC_RPC_RETRY_COUNT = 0;
 const SELECTED_NETWORK_STORAGE_KEY = "pledge.cash.selectedNetwork";
 
 export type PledgeCashNetwork = {
@@ -72,7 +74,14 @@ export function supportedNetworkForChainId(chainId: number): PledgeCashNetwork |
 export function createPledgeCashPublicClient(network: PledgeCashNetwork): PublicClient {
   return createPublicClient({
     chain: network.chain,
-    transport: http(network.rpcUrl),
+    transport: fallback([
+      http(network.rpcUrl, {
+        batch: { batchSize: PUBLIC_RPC_BATCH_SIZE, wait: 8 },
+        key: "batched-http",
+        retryCount: PUBLIC_RPC_RETRY_COUNT,
+      }),
+      http(network.rpcUrl, { key: "unbatched-http", retryCount: PUBLIC_RPC_RETRY_COUNT }),
+    ], { retryCount: PUBLIC_RPC_RETRY_COUNT }),
   });
 }
 

@@ -16,6 +16,7 @@ import { errorMessage } from "../../lib/forms";
 import { formatTokenAmount, parseTokenAmountInput } from "../../lib/token-amounts";
 import type { BoardroomDistributionSnapshot } from "../../lib/types";
 import { cn } from "../../lib/utils";
+import { ConnectWalletPrompt } from "../wallet/connect-wallet-prompt";
 import {
   AdvancedFields,
   AmountField,
@@ -271,6 +272,9 @@ export function BondingCurveFlow({
 
       {distribution.error ? <ReadError>{distribution.error}</ReadError> : null}
       {quoteError ? <ReadError>{quoteError}</ReadError> : null}
+      {!account ? (
+        <ConnectWalletPrompt description="Curve quotes depend on the connected wallet’s balance, allowance, and eligible sellable amount." />
+      ) : null}
       {blocker && !quoteError ? <FlowError>{blocker}</FlowError> : null}
 
       <AdvancedFields summary="Advanced trade settings">

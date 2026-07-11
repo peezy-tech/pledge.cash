@@ -9,6 +9,7 @@ import type {
   BoardroomActionsQuery,
   ChannelsResponse,
   DeleteChannelResponse,
+  HealthResponse,
   LinkWalletRequest,
   LinkWalletResponse,
   PublicActionsQuery,
@@ -56,6 +57,7 @@ type SentinelClientOptions = {
 type JsonRequestOptions = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
+  cache?: RequestCache | undefined;
   query?: Record<string, QueryValue>;
   signal?: AbortSignal | undefined;
 };
@@ -92,6 +94,8 @@ export function createSentinelClient(options: SentinelClientOptions = {}) {
   const fetcher = options.fetcher ?? fetch;
 
   return {
+    health: (signal?: AbortSignal) =>
+      sentinelJson<HealthResponse>(baseUrl, fetcher, "/health", { cache: "no-store", signal }),
     authCapabilities: (signal?: AbortSignal) =>
       sentinelJson<AuthCapabilitiesResponse>(baseUrl, fetcher, "/auth/capabilities", { signal }),
     authMe: (signal?: AbortSignal) => sentinelJson<AuthMeResponse | null>(baseUrl, fetcher, "/auth/me", { signal }),
@@ -125,7 +129,7 @@ export function createSentinelClient(options: SentinelClientOptions = {}) {
         baseUrl,
         fetcher,
         `/public/chains/${chainId.toString()}/boardrooms/${encodeURIComponent(address)}/actions`,
-        { query: queryParams(query), signal },
+        { cache: "no-store", query: queryParams(query), signal },
       ),
     listChannels: () => sentinelJson<ChannelsResponse>(baseUrl, fetcher, "/channels"),
     listPublicActions: (query?: SentinelPublicActionsQuery | undefined, signal?: AbortSignal | undefined) =>
@@ -177,6 +181,7 @@ async function sentinelJson<T>(
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   const init: RequestInit = {
+    ...(options.cache === undefined ? {} : { cache: options.cache }),
     credentials: "include",
     headers,
     method: options.method ?? "GET",

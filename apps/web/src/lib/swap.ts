@@ -53,6 +53,7 @@ export type SwapTokenMetadata = {
 export type SwapTokenSource = "pool" | "deployment" | "custom";
 
 export type SwapTokenListOptions = {
+  pinnedPools?: readonly Address[] | undefined;
   wrappedNativeLabel?: string;
 };
 
@@ -198,6 +199,8 @@ const DEFAULT_SLIPPAGE_BPS = 50;
 const FULL_BPS = 10_000;
 const FULL_BPS_BIGINT = 10_000n;
 const MAX_DISCOVERED_POOLS = 500;
+const MAX_PINNED_POOLS = 64;
+const SWAP_DISCOVERY_CONCURRENCY = 8;
 
 export function defaultSwapForm(): SwapForm {
   return {
@@ -300,10 +303,45 @@ export async function readSwapTokenList(
     listError = errorMessage(error);
   }
 
+  const pinnedPools = uniquePoolAddresses(listOptions.pinnedPools ?? []);
+  const boundedPinnedPools = pinnedPools.slice(-MAX_PINNED_POOLS);
+  const missingPinnedPools = boundedPinnedPools.filter((address) =>
+    !pools.some((pool) => sameAddress(pool.address, address)));
+  const pinnedResults = await mapInBatches(
+    missingPinnedPools,
+    SWAP_DISCOVERY_CONCURRENCY,
+    async (address): Promise<{ error?: string | undefined; pool?: SwapPoolSummary | undefined }> => {
+      try {
+        return { pool: await readPoolSummary(client, address) };
+      } catch (error) {
+        return { error: errorMessage(error) };
+      }
+    },
+  );
+  pools = uniquePoolSummaries([
+    ...pools,
+    ...pinnedResults.flatMap((result) => result.pool ? [result.pool] : []),
+  ]);
+  const pinnedFailures = pinnedResults.filter((result) => result.error).length;
+  const listErrors = [
+    listError,
+    pinnedPools.length > boundedPinnedPools.length
+      ? `Only the newest ${MAX_PINNED_POOLS.toString()} project pools can be pinned at once.`
+      : undefined,
+    pinnedFailures > 0
+      ? `${pinnedFailures.toString()} ${pinnedFailures === 1 ? "project pool could" : "project pools could"} not be read.`
+      : undefined,
+  ].filter((message): message is string => Boolean(message));
+  listError = listErrors.length > 0 ? listErrors.join(" ") : undefined;
+
   addPoolTokens(tokens, pools);
 
   const rankedTokens = Array.from(tokens.values()).sort((left, right) => left.rank - right.rank);
-  const options = await Promise.all(rankedTokens.map(async (token) => await tokenOptionFromAccumulator(client, token, account)));
+  const options = await mapInBatches(
+    rankedTokens,
+    SWAP_DISCOVERY_CONCURRENCY,
+    async (token) => await tokenOptionFromAccumulator(client, token, account),
+  );
   options.sort(compareTokenOptions);
 
   const result: SwapTokenListState = { tokens: options, pools, loaded: true };
@@ -731,6 +769,13 @@ export function swapQuoteReady(quote: SwapQuoteState | undefined): quote is Exec
 
 export function defaultSwapDeadline(): string {
   return String(Math.floor(Date.now() / 1000) + 1200);
+}
+
+export function assertFutureSwapDeadline(value: string, currentUnixTime = Math.floor(Date.now() / 1000)): void {
+  const deadline = parseSwapDeadline(value);
+  if (deadline <= BigInt(currentUnixTime)) {
+    throw new Error("The transaction window expired. Choose a fresh quote expiry before submitting.");
+  }
 }
 
 function requireExecutableQuote(quote: SwapQuoteState): ExecutableSwapQuote {
@@ -1173,30 +1218,36 @@ async function readPoolSummaries(
 ): Promise<{ pools: SwapPoolSummary[]; error?: string | undefined }> {
   const poolCount = await readPoolCount(client, factory);
   const cappedPoolCount = Math.min(poolCount, MAX_DISCOVERED_POOLS);
-  const poolAddresses = await readPoolAddresses(client, factory, cappedPoolCount);
-  const pools = await Promise.all(poolAddresses.map(async (address) => await readPoolSummary(client, address)));
+  const firstPoolIndex = poolCount - cappedPoolCount;
+  const poolAddresses = await readPoolAddresses(client, factory, firstPoolIndex, cappedPoolCount);
+  const pools = await mapInBatches(
+    poolAddresses,
+    SWAP_DISCOVERY_CONCURRENCY,
+    async (address) => await readPoolSummary(client, address),
+  );
 
   if (poolCount <= cappedPoolCount) return { pools };
   return {
     pools,
-    error: `Showing the first ${cappedPoolCount.toString()} pools. Narrow by token address for anything older.`,
+    error: `Showing the newest ${cappedPoolCount.toString()} pools. Enter a token address to work with an older pool.`,
   };
 }
 
 async function readPoolAddresses(
   client: PledgeCashReadClient,
   factory: Address,
+  start: number,
   count: number,
 ): Promise<Address[]> {
-  return await Promise.all(
-    Array.from({ length: count }, (_, index) =>
-      client.readContract({
+  return await mapInBatches(
+    Array.from({ length: count }, (_, index) => index),
+    SWAP_DISCOVERY_CONCURRENCY,
+    async (index) => await client.readContract({
         address: factory,
         abi: ammFactoryAbi,
         functionName: "allPools",
-        args: [BigInt(index)],
-      }) as Promise<Address>
-    ),
+        args: [BigInt(start + index)],
+      }) as Address,
   );
 }
 
@@ -1246,6 +1297,38 @@ function tokenName(token: SwapTokenOption): string {
 
 function sortTokenAddresses(tokenA: Address, tokenB: Address): readonly [Address, Address] {
   return BigInt(tokenA) < BigInt(tokenB) ? [tokenA, tokenB] : [tokenB, tokenA];
+}
+
+function uniquePoolAddresses(addresses: readonly Address[]): Address[] {
+  const seen = new Set<string>();
+  return addresses.filter((address) => {
+    const key = address.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function uniquePoolSummaries(pools: readonly SwapPoolSummary[]): SwapPoolSummary[] {
+  const seen = new Set<string>();
+  return pools.filter((pool) => {
+    const key = pool.address.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function mapInBatches<Input, Output>(
+  values: readonly Input[],
+  concurrency: number,
+  mapper: (value: Input) => Promise<Output>,
+): Promise<Output[]> {
+  const results: Output[] = [];
+  for (let index = 0; index < values.length; index += concurrency) {
+    results.push(...await Promise.all(values.slice(index, index + concurrency).map(mapper)));
+  }
+  return results;
 }
 
 function sameAddress(left: string, right: string): boolean {

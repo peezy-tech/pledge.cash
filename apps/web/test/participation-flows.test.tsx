@@ -14,8 +14,11 @@ import {
   transactionDeadline,
 } from "../src/features/participation";
 import { ParticipatePage, participationOptions } from "../src/app/pages";
+import { Web3Provider } from "../src/components/web3-provider";
+import { SwapPanel, deadlineIsFuture, remainingDeadlineMinutes } from "../src/features/swap/swap-panel";
 import { shortAddress } from "../src/lib/forms";
 import type { ProductBoardroomDashboardState } from "../src/lib/product-boardroom";
+import { defaultLiquidityForm, defaultRemoveLiquidityForm, defaultSwapForm } from "../src/lib/swap";
 import type { BoardroomDistributionSnapshot } from "../src/lib/types";
 
 const boardroom = "0x1000000000000000000000000000000000000000" as Address;
@@ -147,6 +150,15 @@ const context = {
 };
 
 describe("participation bounds and proof parsing", () => {
+  test("never presents an expired transaction deadline as future time", () => {
+    expect(deadlineIsFuture("1000", 1000)).toBe(false);
+    expect(remainingDeadlineMinutes("1000", 1000)).toBeUndefined();
+    expect(deadlineIsFuture("2200.5", 1000)).toBe(false);
+    expect(remainingDeadlineMinutes("2200.5", 1000)).toBeUndefined();
+    expect(deadlineIsFuture("2200", 1000)).toBe(true);
+    expect(remainingDeadlineMinutes("2200", 1000)).toBe(20);
+  });
+
   test("rounds protective maximums up and minimums down", () => {
     expect(parseSlippageBps("0.25")).toBe(25n);
     expect(maximumWithSlippage(101n, 100n)).toBe(103n);
@@ -199,6 +211,74 @@ describe("participation flow composition", () => {
     expect(airdropHtml).toContain("Claim an airdrop allocation");
     expect(airdropHtml).toContain("Proof and claim details");
     expect(airdropHtml).toContain("Grant claim slots");
+  });
+
+  test("puts a contextual wallet connection action inside disconnected sale and curve flows", () => {
+    const disconnected = { ...context, account: undefined };
+    const html = renderToString(
+      <Web3Provider>
+        <ParticipationFlows {...disconnected} path="fixed-price-sale" />
+        <ParticipationFlows {...disconnected} path="migrating-bonding-curve" />
+      </Web3Provider>,
+    );
+
+    expect(html).toContain("Connect wallet to continue");
+    expect(html).toContain("purchase limit, payment balance, and allowance");
+    expect(html).toContain("eligible sellable amount");
+    expect(html.match(/aria-label="Connect Wallet"/g)?.length).toBe(2);
+  });
+
+  test("puts a contextual wallet connection action inside a disconnected AMM swap", () => {
+    const noop = async (): Promise<void> => undefined;
+    const html = renderToString(
+      <Web3Provider>
+        <SwapPanel
+          account={undefined}
+          deployment={undefined}
+          form={defaultSwapForm()}
+          liquidityForm={defaultLiquidityForm()}
+          liquidityQuote={undefined}
+          position={undefined}
+          pendingAction={undefined}
+          quote={undefined}
+          removeLiquidityForm={defaultRemoveLiquidityForm()}
+          removeLiquidityQuote={undefined}
+          setLiquidityForm={() => undefined}
+          setRemoveLiquidityForm={() => undefined}
+          setForm={() => undefined}
+          tokenList={{ loaded: false, pools: [], tokens: [] }}
+          tokenListLoading={false}
+          wrappedNativeSymbol="WETH"
+          mode="swap"
+          addLiquidity={noop}
+          approveLiquidityTokenA={noop}
+          approveLiquidityTokenB={noop}
+          approveLpToken={noop}
+          approveInput={noop}
+          claimAmmFees={noop}
+          executeSwap={noop}
+          refreshLiquidityQuote={noop}
+          refreshPosition={noop}
+          refreshQuote={noop}
+          refreshRemoveLiquidityQuote={noop}
+          refreshTokens={noop}
+          removeLiquidity={noop}
+          runAction={async (_label, action) => action()}
+        />
+      </Web3Provider>,
+    );
+
+    expect(html).toContain("Connect wallet to continue");
+    expect(html).toContain("fund the swap");
+    expect(html).toContain('aria-label="Connect Wallet"');
+    expect(html).toContain("Slippage tolerance");
+    expect(html).toContain("0.5%");
+    expect(html).toContain("Quote expires in");
+    expect(html).toContain('<option value="20" selected="">20');
+    expect(html).toContain("Advanced transaction details");
+    expect(html).not.toContain("Slippage bps");
+    expect(html).not.toContain("Native swap");
+    expect(html).not.toContain("Native asset handling");
   });
 
   test("keeps every same-type distribution address-scoped and renders the selected contract", () => {

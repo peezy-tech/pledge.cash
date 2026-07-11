@@ -1325,7 +1325,7 @@ function WindDownPanel({
         <p className="m-0 border-t border-zinc-800 p-4 text-sm text-zinc-500">No loaded blockers.</p>
       )}
       <ActionRow>
-        <ActionButton actionId="start-wind-down" disabled={hasBlockers || boardroomSnapshot?.status !== 0 || !capabilityEnabled(startCapability)} pendingAction={pendingAction} title={capabilityReason(startCapability)} variant="danger" onClick={() => void runAction("start-wind-down", startWindDown)}>
+        <ActionButton actionId="start-wind-down" disabled={boardroomSnapshot?.status !== 0 || !capabilityEnabled(startCapability)} pendingAction={pendingAction} title={capabilityReason(startCapability)} variant="danger" onClick={() => void runAction("start-wind-down", startWindDown)}>
           <Flame className="h-4 w-4" />
           Start Wind-Down
         </ActionButton>
@@ -1338,6 +1338,11 @@ function WindDownPanel({
           Open Redemptions
         </ActionButton>
       </ActionRow>
+      {boardroomSnapshot?.status === 0 && hasBlockers ? (
+        <p className="m-0 border-t border-amber-400/25 bg-amber-400/8 p-4 text-sm leading-6 text-amber-100">
+          Starting wind-down is allowed now. The obligations above become the permissionless cleanup plan and must be closed before redemptions can open.
+        </p>
+      ) : null}
       <CapabilityNotice capability={startCapability} fallback={permissionlessCapability} />
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2">
         <TextField form={windDownForm} field="redeemableAsset" label="Redeemable asset" setForm={setWindDownForm} />

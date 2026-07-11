@@ -2,16 +2,18 @@ import type { Address } from "@pledge.cash/sdk";
 import { ArrowLeft } from "lucide-react";
 import type { ReactNode } from "react";
 import { AddressLink } from "../../components/shell";
-import { Button } from "../../components/ui/button";
+import { ButtonLink } from "../../components/ui/button";
 import { PageHeading, PageNotice, RuledSection, SectionHeading } from "./page-primitives";
 
 export function GrantDetailPage({
   account,
+  backHref,
   children,
   grant,
   onBack,
 }: {
   account: Address | undefined;
+  backHref: string;
   children: ReactNode;
   grant: Address;
   onBack: () => void;
@@ -19,7 +21,20 @@ export function GrantDetailPage({
   return (
     <div>
       <PageHeading
-        actions={<Button variant="secondary" onClick={onBack}><ArrowLeft className="h-4 w-4" />Portfolio</Button>}
+        actions={(
+          <ButtonLink
+            href={backHref}
+            variant="secondary"
+            onClick={(event) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              event.preventDefault();
+              onBack();
+            }}
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Portfolio
+          </ButtonLink>
+        )}
         eyebrow="Portfolio / Grant"
         title="Review grant settlement"
         description="Confirm the holder, vesting progress, settleable tokens, payment cost, and expiry before asking the wallet to act."

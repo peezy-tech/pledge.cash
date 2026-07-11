@@ -4,12 +4,14 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AddressLink } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
 import {
+  participationAmmKey,
   participationDistributionKey,
   participationPathFromContentKey,
   type ParticipationContentKey,
   type ParticipationRoutePath,
 } from "../../features/participation/types";
 import { shortAddress } from "../../lib/forms";
+import { projectPoolAddresses } from "../../lib/project-pools";
 import type { ProductBoardroomDashboardState } from "../../lib/product-boardroom";
 import { formatTokenAmount } from "../../lib/token-amounts";
 import { cn } from "../../lib/utils";
@@ -64,6 +66,7 @@ export function ParticipatePage({
     ?? options[0]?.id;
   const activeOption = options.find((option) => option.id === activeRoute);
   const activeContent = activeOption ? content[activeOption.id] ?? content[activeOption.path] : undefined;
+  const actionableContent = activeOption?.available ? activeContent : undefined;
 
   const selectRoute = (option: ParticipationOption): void => {
     setLocalSelection(option.id);
@@ -94,11 +97,11 @@ export function ParticipatePage({
         ) : options.length === 1 && activeOption ? (
           <div className="mt-5">
             <section aria-label={`${activeOption.label} participation workflow`}>
-              {activeContent ?? (
+              {actionableContent ?? (
                 <PageNotice title={activeOption.available ? "Action controls are not loaded" : "This route is not active"}>
                   {activeOption.available
                     ? "The project data is readable, but the transaction workflow has not been attached to this page."
-                    : "You can inspect this route’s history and contract, but it is not currently accepting participation."}
+                    : unavailableRouteGuidance(activeOption, options)}
                 </PageNotice>
               )}
             </section>
@@ -140,12 +143,12 @@ export function ParticipatePage({
               role="region"
             >
               {activeOption ? <ParticipationSummary dashboard={dashboard} option={activeOption} /> : null}
-              {activeContent ? <div className="mt-5 border-t border-zinc-800 pt-5">{activeContent}</div> : (
+              {actionableContent ? <div className="mt-5 border-t border-zinc-800 pt-5">{actionableContent}</div> : (
                 <div className="mt-5 border-t border-zinc-800 pt-5">
                   <PageNotice title={activeOption?.available ? "Action controls are not loaded" : "This route is not active"}>
                     {activeOption?.available
                       ? "The project data is readable, but the transaction workflow has not been attached to this page."
-                      : "You can inspect this route’s history and contract, but it is not currently accepting participation."}
+                      : activeOption ? unavailableRouteGuidance(activeOption, options) : "This route is not currently accepting participation."}
                   </PageNotice>
                 </div>
               )}
@@ -172,6 +175,22 @@ export function ParticipatePage({
       </RuledSection>
     </>
   );
+}
+
+function unavailableRouteGuidance(
+  option: ParticipationOption,
+  options: readonly ParticipationOption[],
+): string {
+  if (option.path === "migrating-bonding-curve" && options.some((candidate) => candidate.path === "amm" && candidate.available)) {
+    return "This curve has migrated. Choose the live AMM route to keep trading, or inspect this curve’s historical contract below.";
+  }
+  if (option.path === "fixed-price-sale") {
+    return "This sale is closed or sold out. Its historical terms and contract remain visible below.";
+  }
+  if (option.path === "merkle-airdrop") {
+    return "This claim route is closed or fully claimed. Its allocation contract remains visible below.";
+  }
+  return "You can inspect this route’s history and contract, but it is not currently accepting participation.";
 }
 
 export function participationOptions(
@@ -221,18 +240,28 @@ export function participationOptions(
     }
   }
 
-  const pool = dashboard.histories?.find((history) => history.pool)?.pool
-    ?? dashboard.history?.pool
-    ?? selectedPool(dashboard);
-  if (pool || content.amm) {
+  const pools = projectPoolAddresses(dashboard);
+  for (const pool of pools) {
     options.push({
-      ...(pool ? { address: pool } : {}),
-      available: Boolean(pool),
+      address: pool,
+      available: true,
+      description: pools.length > 1
+        ? `Swap against project pool ${shortAddress(pool)}.`
+        : "Swap against the project’s migrated liquidity pool.",
+      id: participationAmmKey(pool),
+      label: pools.length > 1 ? `AMM · ${shortAddress(pool)}` : "AMM market",
+      path: "amm",
+      status: "Live",
+    });
+  }
+  if (pools.length === 0 && content.amm) {
+    options.push({
+      available: false,
       description: "Swap against the project’s migrated liquidity pool.",
       id: "amm",
       label: "AMM market",
       path: "amm",
-      status: pool ? "Live" : "Unavailable",
+      status: "Unavailable",
     });
   }
 
@@ -342,7 +371,7 @@ function fallbackOption(id: ParticipationContentKey): ParticipationOption {
   if (path === "fixed-price-sale") return { ...(address ? { address } : {}), available: false, description: "Buy at a published unit price.", id, label: "Fixed-price sale", path, status: "Not loaded" };
   if (path === "migrating-bonding-curve") return { ...(address ? { address } : {}), available: false, description: "Buy or sell against a price curve.", id, label: "Bonding curve", path, status: "Not loaded" };
   if (path === "merkle-airdrop") return { ...(address ? { address } : {}), available: false, description: "Claim a published allocation.", id, label: "Airdrop", path, status: "Not loaded" };
-  return { available: false, description: "Swap through the project liquidity pool.", id, label: "AMM market", path, status: "Not loaded" };
+  return { ...(address ? { address } : {}), available: false, description: "Swap through the project liquidity pool.", id, label: "AMM market", path, status: "Not loaded" };
 }
 
 function distributionAddressFromContentKey(key: ParticipationContentKey): Address | undefined {
@@ -352,8 +381,4 @@ function distributionAddressFromContentKey(key: ParticipationContentKey): Addres
 
 function routeDomId(route: ParticipationContentKey): string {
   return route.replace(/[^a-zA-Z0-9_-]/g, "-");
-}
-
-function selectedPool(dashboard: ProductBoardroomDashboardState): Address | undefined {
-  return dashboard.catalog.find((entry) => entry.address.toLowerCase() === dashboard.address.toLowerCase())?.pool;
 }

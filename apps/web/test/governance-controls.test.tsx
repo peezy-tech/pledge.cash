@@ -14,6 +14,8 @@ import {
   governanceActionView,
   governanceDelayPresets,
 } from "../src/features/governance";
+import { governanceRefreshDelay } from "../src/lib/governance-refresh";
+import { contractCallReview } from "../src/lib/transaction-preview";
 
 const boardroom = "0x1000000000000000000000000000000000000000" as Address;
 const owner = "0x2000000000000000000000000000000000000000" as Address;
@@ -164,6 +166,23 @@ describe("governance controls", () => {
       nextExecutor: executor,
     });
     expect(unchanged.map((step) => step.kind)).toEqual(["launch"]);
+    const launchReview = contractCallReview(steps[1]!.label, steps[1]!.request);
+    expect(launchReview.parameters).toEqual([
+      { name: "Governance executor", type: "address", value: executor },
+      { name: "Holder review period", type: "duration", value: "1 day" },
+    ]);
+  });
+
+  test("polls for external queue changes while refreshing sooner at ETA and expiry boundaries", () => {
+    const waiting = { ...readyAction, status: "waiting", eta: 1_010n } as QueuedBoardroomAction;
+    const ready = { ...readyAction, status: "ready", expiresAt: 1_020n } as QueuedBoardroomAction;
+    const distant = { ...readyAction, status: "waiting", eta: 2_000n } as QueuedBoardroomAction;
+
+    expect(governanceRefreshDelay([waiting], 1_000_000)).toBe(11_000);
+    expect(governanceRefreshDelay([ready], 1_000_000)).toBe(21_000);
+    expect(governanceRefreshDelay([distant], 1_000_000)).toBe(30_000);
+    expect(governanceRefreshDelay([waiting], 1_020_000)).toBe(1_000);
+    expect(governanceRefreshDelay([], 1_000_000)).toBe(30_000);
   });
 
   test("renders a confirmed one-way launch workflow with human delay presets", () => {

@@ -4,6 +4,7 @@ import {
   buildAddLiquidityTransaction,
   buildRemoveLiquidityTransaction,
   buildSwapTransaction,
+  assertFutureSwapDeadline,
   readAmmPosition,
   readLiquidityQuote,
   readRemoveLiquidityQuote,
@@ -58,9 +59,106 @@ describe("swap token discovery", () => {
     expect(wrappedNative?.label).toBe("WMON");
     expect(wrappedNative?.sources).toEqual(["deployment"]);
   });
+
+  test("keeps the newest canonical pool when the factory has more than 500 pools", async () => {
+    const requestedIndices: bigint[] = [];
+    const newestPool = indexedPoolAddress(500n);
+    const client = {
+      async readContract(rawRequest: unknown): Promise<unknown> {
+        const request = rawRequest as { address: Address; functionName: string; args?: readonly unknown[] };
+        if (request.address === factory && request.functionName === "allPoolsLength") return 501n;
+        if (request.address === factory && request.functionName === "allPools") {
+          const index = request.args?.[0] as bigint;
+          requestedIndices.push(index);
+          return indexedPoolAddress(index);
+        }
+        if (request.functionName === "token0") return usdc;
+        if (request.functionName === "token1") return share;
+        if (request.functionName === "getReserves") return [1_000_000n, 2_000_000_000_000_000_000n, 0] as const;
+        if (request.functionName === "symbol") return request.address === usdc ? "USDC" : request.address === share ? "PLDG" : "WHYPE";
+        if (request.functionName === "decimals") return request.address === usdc ? 6 : 18;
+        throw new Error(`Unexpected read ${request.functionName} on ${request.address}`);
+      },
+    } as PledgeCashReadClient;
+
+    const state = await readSwapTokenList(client, deployment);
+
+    expect(requestedIndices).toHaveLength(500);
+    expect(requestedIndices[0]).toBe(1n);
+    expect(requestedIndices.at(-1)).toBe(500n);
+    expect(requestedIndices).not.toContain(0n);
+    expect(state.pools).toHaveLength(500);
+    expect(state.pools.some((candidate) => candidate.address === newestPool)).toBe(true);
+    expect(state.error).toBe("Showing the newest 500 pools. Enter a token address to work with an older pool.");
+  });
+
+  test("unions an older exact project pool beyond the global discovery window", async () => {
+    const oldestPool = indexedPoolAddress(0n);
+    const client = {
+      async readContract(rawRequest: unknown): Promise<unknown> {
+        const request = rawRequest as { address: Address; functionName: string; args?: readonly unknown[] };
+        if (request.address === factory && request.functionName === "allPoolsLength") return 501n;
+        if (request.address === factory && request.functionName === "allPools") return indexedPoolAddress(request.args?.[0] as bigint);
+        if (request.functionName === "token0") return usdc;
+        if (request.functionName === "token1") return share;
+        if (request.functionName === "getReserves") return [1_000_000n, 2_000_000_000_000_000_000n, 0] as const;
+        if (request.functionName === "symbol") return request.address === usdc ? "USDC" : "PLDG";
+        if (request.functionName === "decimals") return request.address === usdc ? 6 : 18;
+        throw new Error(`Unexpected read ${request.functionName} on ${request.address}`);
+      },
+    } as PledgeCashReadClient;
+
+    const state = await readSwapTokenList(client, deployment, undefined, { pinnedPools: [oldestPool] });
+
+    expect(state.pools).toHaveLength(501);
+    expect(state.pools.some((candidate) => candidate.address === oldestPool)).toBe(true);
+    expect(state.tokens.find((token) => token.address === share)?.pools).toContain(oldestPool);
+  });
+
+  test("bounds pool address and summary discovery concurrency", async () => {
+    let activeAddressReads = 0;
+    let activeSummaryReads = 0;
+    let maxAddressReads = 0;
+    let maxSummaryReads = 0;
+    const client = {
+      async readContract(rawRequest: unknown): Promise<unknown> {
+        const request = rawRequest as { address: Address; functionName: string; args?: readonly unknown[] };
+        if (request.address === factory && request.functionName === "allPoolsLength") return 40n;
+        if (request.address === factory && request.functionName === "allPools") {
+          activeAddressReads += 1;
+          maxAddressReads = Math.max(maxAddressReads, activeAddressReads);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          activeAddressReads -= 1;
+          return indexedPoolAddress(request.args?.[0] as bigint);
+        }
+        if (["token0", "token1", "getReserves"].includes(request.functionName)) {
+          activeSummaryReads += 1;
+          maxSummaryReads = Math.max(maxSummaryReads, activeSummaryReads);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          activeSummaryReads -= 1;
+          if (request.functionName === "token0") return usdc;
+          if (request.functionName === "token1") return share;
+          return [1_000_000n, 2_000_000_000_000_000_000n, 0] as const;
+        }
+        if (request.functionName === "symbol") return request.address === usdc ? "USDC" : "PLDG";
+        if (request.functionName === "decimals") return request.address === usdc ? 6 : 18;
+        throw new Error(`Unexpected read ${request.functionName} on ${request.address}`);
+      },
+    } as PledgeCashReadClient;
+
+    await readSwapTokenList(client, deployment);
+
+    expect(maxAddressReads).toBeLessThanOrEqual(8);
+    expect(maxSummaryReads).toBeLessThanOrEqual(24);
+  });
 });
 
 describe("AMM liquidity helpers", () => {
+  test("fails closed before building a transaction with an expired deadline", () => {
+    expect(() => assertFutureSwapDeadline("1000", 1000)).toThrow("transaction window expired");
+    expect(() => assertFutureSwapDeadline("1001", 1000)).not.toThrow();
+  });
+
   test("builds native swap router calls when wrapped native is selected", async () => {
     const nativeInputQuote = await readSwapQuote(fakeReadClient(), deployment, {
       tokenIn: whype,
@@ -397,4 +495,8 @@ function pairPool(args: readonly unknown[] | undefined): Address {
   const [tokenA, tokenB] = args ?? [];
   if ((tokenA === whype && tokenB === share) || (tokenA === share && tokenB === whype)) return nativePool;
   return pool;
+}
+
+function indexedPoolAddress(index: bigint): Address {
+  return `0x${(index + 1_000n).toString(16).padStart(40, "0")}` as Address;
 }

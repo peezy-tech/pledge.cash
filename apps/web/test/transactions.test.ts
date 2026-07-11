@@ -3,7 +3,8 @@ import { buildBoardroomShareGrantIssuanceBatch, type Address, type Hex } from "@
 import { encodeFunctionData } from "viem";
 import { transactionReviewCanContinue } from "../src/components/transaction-review";
 import { recoverInterruptedTransactions, stageLabel, type TransactionRecord } from "../src/features/transactions/transaction-center";
-import { contractCallPreview, contractCallReview } from "../src/lib/transaction-preview";
+import { contractCallPreview, contractCallReview, withTransactionReviewParameters } from "../src/lib/transaction-preview";
+import { assertTransactionIdentity } from "../src/lib/transaction-identity";
 
 const target = "0x1000000000000000000000000000000000000000" as const;
 const holder = "0x2000000000000000000000000000000000000000" as Address;
@@ -57,6 +58,37 @@ describe("transaction review", () => {
 
     expect(review.risk).toBe("irreversible");
     expect(review.parameters).toEqual([{ name: "delay", type: "uint256", value: "86400" }]);
+  });
+
+  test("binds executor and a human review period into irreversible launch review", () => {
+    const request = withTransactionReviewParameters({
+      address: target,
+      abi: [{ type: "function", name: "launch", stateMutability: "nonpayable", inputs: [{ name: "governanceDelay_", type: "uint256" }], outputs: [] }] as const,
+      functionName: "launch",
+      args: [259_200n] as const,
+    }, [
+      { name: "Governance executor", type: "address", value: holder },
+      { name: "Holder review period", type: "duration", value: "3 days" },
+    ]);
+
+    const review = contractCallReview("Launch holder governance", request);
+    expect(review.parameters).toEqual([
+      { name: "Governance executor", type: "address", value: holder },
+      { name: "Holder review period", type: "duration", value: "3 days" },
+    ]);
+    expect(review.parameters.some((parameter) => parameter.name.endsWith("_"))).toBe(false);
+  });
+
+  test("rejects account or chain changes made while transaction review is open", () => {
+    const expected = { account: holder, chainId: 31337, deploymentIdentity: "factory-a", routeIdentity: "/projects/31337/project-a" };
+
+    const current = { account: holder, chainId: 31337, deploymentIdentity: expected.deploymentIdentity, routeIdentity: expected.routeIdentity, walletChainId: 31337 };
+    expect(() => assertTransactionIdentity(expected, current, "simulation")).not.toThrow();
+    expect(() => assertTransactionIdentity(expected, { ...current, account: factory }, "simulation")).toThrow("account changed");
+    expect(() => assertTransactionIdentity(expected, { ...current, walletChainId: 1 }, "submission")).toThrow("network changed");
+    expect(() => assertTransactionIdentity(expected, { ...current, chainId: 1 }, "submission")).toThrow("network changed");
+    expect(() => assertTransactionIdentity(expected, { ...current, routeIdentity: "/projects/31337/project-b" }, "submission")).toThrow("workspace changed");
+    expect(() => assertTransactionIdentity(expected, { ...current, deploymentIdentity: "factory-b" }, "review")).toThrow("deployment changed");
   });
 
   test("marks hydrated pre-submission records as interrupted but resumes hashed submissions", () => {
@@ -156,5 +188,25 @@ describe("transaction review", () => {
     expect(review.boardroomCalls?.[0]?.functionName).toBeUndefined();
     expect(review.boardroomCalls?.[0]?.verificationReason).toContain("does not match");
     expect(transactionReviewCanContinue(review, false)).toBe(false);
+  });
+
+  test("fails closed when the top-level destination or encoded call is unverifiable", () => {
+    const invalidTarget = contractCallReview("Invalid destination", {
+      address: "not-an-address",
+      abi,
+      functionName: "setValue",
+      args: [42n],
+    });
+    const unavailableData = contractCallReview("Unknown function", {
+      address: target,
+      abi,
+      functionName: "missingFunction",
+      args: [],
+    });
+
+    expect(invalidTarget.target).toBe("unknown");
+    expect(transactionReviewCanContinue(invalidTarget, false)).toBe(false);
+    expect(unavailableData.data).toBe("unavailable");
+    expect(transactionReviewCanContinue(unavailableData, false)).toBe(false);
   });
 });

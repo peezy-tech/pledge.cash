@@ -12,6 +12,7 @@ import { Input } from "../../components/ui/input";
 import { errorMessage } from "../../lib/forms";
 import { formatTokenAmount, parseTokenAmountInput } from "../../lib/token-amounts";
 import type { BoardroomDistributionSnapshot } from "../../lib/types";
+import { ConnectWalletPrompt } from "../wallet/connect-wallet-prompt";
 import {
   AdvancedFields,
   AmountField,
@@ -200,6 +201,9 @@ export function FixedPriceSaleFlow({
 
       {distribution.error ? <ReadError>{distribution.error}</ReadError> : null}
       {quoteError ? <ReadError>{quoteError}</ReadError> : null}
+      {!account ? (
+        <ConnectWalletPrompt description="This sale quote depends on the connected wallet’s purchase limit, payment balance, and allowance." />
+      ) : null}
       {blocker && !quoteError ? <FlowError>{blocker}</FlowError> : null}
 
       <AdvancedFields summary="Advanced purchase settings">

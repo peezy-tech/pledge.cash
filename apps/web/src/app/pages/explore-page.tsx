@@ -15,14 +15,19 @@ export type ExploreFilter = "all" | "fixed-price-sale" | "migrating-bonding-curv
 export type ExplorePageProps = {
   chainId: number;
   chainName: string;
+  canLoadMore?: boolean | undefined;
   emptyAction?: ReactNode;
   error?: string | undefined;
+  loadMoreError?: string | undefined;
   loading: boolean;
+  loadingMore?: boolean | undefined;
+  onLoadMore?: (() => void) | undefined;
   onOpenProject: (project: ProductBoardroomCatalogEntry) => void;
   onRetry?: (() => void) | undefined;
   projectHref?: ((project: ProductBoardroomCatalogEntry) => string) | undefined;
   projects: readonly ProductBoardroomCatalogEntry[];
   selectedAddress?: Address | undefined;
+  totalProjects?: number | undefined;
 };
 
 const filters: readonly { label: string; value: ExploreFilter }[] = [
@@ -36,14 +41,19 @@ const filters: readonly { label: string; value: ExploreFilter }[] = [
 export function ExplorePage({
   chainId,
   chainName,
+  canLoadMore = false,
   emptyAction,
   error,
+  loadMoreError,
   loading,
+  loadingMore = false,
+  onLoadMore,
   onOpenProject,
   onRetry,
   projectHref,
   projects,
   selectedAddress,
+  totalProjects,
 }: ExplorePageProps): React.JSX.Element {
   const [filter, setFilter] = useState<ExploreFilter>("all");
   const [query, setQuery] = useState("");
@@ -73,7 +83,7 @@ export function ExplorePage({
             </span>
           </label>
           <p className="m-0 text-xs text-zinc-500 lg:pb-3">
-            Chain {chainId} · {projects.length} {projects.length === 1 ? "project" : "projects"}
+            Chain {chainId} · {directoryCountLabel(projects.length, totalProjects)}
           </p>
         </div>
         <div aria-label="Participation type" className="mt-4 flex flex-wrap gap-2" role="group">
@@ -123,7 +133,9 @@ export function ExplorePage({
             <p className="m-0 mt-2 max-w-2xl text-sm leading-6 text-zinc-500">
               {projects.length === 0
                 ? "This network has not returned a Boardroom yet. You can still open Studio to create or inspect one by address."
-                : "Clear the search or choose All to see the full directory."}
+                : canLoadMore
+                  ? "No loaded projects match yet. Clear the filters or load more of the directory."
+                  : "Clear the search or choose All to see the full directory."}
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               {projects.length > 0 ? (
@@ -131,24 +143,61 @@ export function ExplorePage({
                   Clear filters
                 </Button>
               ) : emptyAction}
+              {canLoadMore && onLoadMore ? (
+                <Button disabled={loadingMore} variant="secondary" onClick={onLoadMore}>
+                  {loadingMore ? "Loading projects…" : "Load more projects"}
+                </Button>
+              ) : null}
             </div>
           </div>
         ) : (
-          <ol className="m-0 mt-4 list-none border-t border-zinc-800 p-0">
-            {visibleProjects.map((project) => (
-              <ProjectDirectoryRow
-                active={sameAddress(project.address, selectedAddress)}
-                key={project.address}
-                project={project}
-                onOpen={() => onOpenProject(project)}
-                {...(projectHref ? { href: projectHref(project) } : {})}
-              />
-            ))}
-          </ol>
+          <>
+            <ol className="m-0 mt-4 list-none border-t border-zinc-800 p-0">
+              {visibleProjects.map((project) => (
+                <ProjectDirectoryRow
+                  active={sameAddress(project.address, selectedAddress)}
+                  key={project.address}
+                  project={project}
+                  onOpen={() => onOpenProject(project)}
+                  {...(projectHref ? { href: projectHref(project) } : {})}
+                />
+              ))}
+            </ol>
+            {canLoadMore && onLoadMore ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 py-4">
+                <p className="m-0 text-xs text-zinc-500">
+                  Showing {projects.length.toLocaleString()} of {(totalProjects ?? projects.length).toLocaleString()} projects
+                </p>
+                <Button disabled={loadingMore} size="sm" variant="secondary" onClick={onLoadMore}>
+                  {loadingMore ? "Loading projects…" : "Load more projects"}
+                </Button>
+              </div>
+            ) : null}
+          </>
         )}
+        {loadMoreError ? (
+          <div className="mt-4">
+            <PageNotice title="More projects could not be loaded" tone="danger">
+              <p className="m-0">{loadMoreError}</p>
+              {canLoadMore && onLoadMore ? (
+                <Button className="mt-3" disabled={loadingMore} size="sm" variant="secondary" onClick={onLoadMore}>
+                  <RefreshCw className="h-4 w-4" />
+                  Try loading more again
+                </Button>
+              ) : null}
+            </PageNotice>
+          </div>
+        ) : null}
       </RuledSection>
     </div>
   );
+}
+
+function directoryCountLabel(loaded: number, total: number | undefined): string {
+  if (total !== undefined && total > loaded) {
+    return `${loaded.toLocaleString()} of ${total.toLocaleString()} projects loaded`;
+  }
+  return `${loaded.toLocaleString()} ${loaded === 1 ? "project" : "projects"}`;
 }
 
 export function filterProjects(
@@ -183,14 +232,15 @@ function ProjectDirectoryRow({
           <Badge variant={active ? "default" : project.error ? "danger" : "muted"}>
             {active ? "Open" : project.error ? "Read issue" : project.status ?? "Discovered"}
           </Badge>
+          {project.historyError ? <Badge variant="danger">Partial history</Badge> : null}
         </div>
         <p className="m-0 mt-1 truncate text-xs text-zinc-500">
           {project.symbol ? `${project.symbol} · ` : ""}{shortAddress(project.address)} · {participationLabel(project)}
         </p>
       </div>
-      <DirectoryValue label="Sold" value={formatTokenAmount(project.soldShares, catalogShareMetadata(project))} />
+      <DirectoryValue label={allocationMetricLabel(project)} value={formatTokenAmount(project.soldShares, catalogShareMetadata(project))} />
       <DirectoryValue label="Raised" value={formatTokenAmount(project.cashRaised, catalogCashMetadata(project))} />
-      <DirectoryValue label="Participants" value={project.buyerCount === undefined ? "Unknown" : String(project.buyerCount)} />
+      <DirectoryValue label={participantMetricLabel(project)} value={project.buyerCount === undefined ? "Unknown" : String(project.buyerCount)} />
       <ArrowRight className="h-4 w-4 shrink-0 text-zinc-600 transition-transform group-hover:translate-x-0.5 group-hover:text-lime-200" />
     </>
   );
@@ -218,6 +268,18 @@ function ProjectDirectoryRow({
       )}
     </li>
   );
+}
+
+function allocationMetricLabel(project: ProductBoardroomCatalogEntry): string {
+  if (project.distributionKind === "merkle-airdrop") return "Claimed";
+  if (project.distributionKind === "fixed-price-sale" || project.distributionKind === "migrating-bonding-curve") return "Sold";
+  return "Distributed";
+}
+
+function participantMetricLabel(project: ProductBoardroomCatalogEntry): string {
+  if (project.distributionKind === "merkle-airdrop") return "Claimants";
+  if (project.distributionKind === "fixed-price-sale" || project.distributionKind === "migrating-bonding-curve") return "Buyers";
+  return "Participants";
 }
 
 function DirectoryValue({ label, value }: { label: string; value: string }): React.JSX.Element {

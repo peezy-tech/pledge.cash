@@ -20,6 +20,7 @@ const DECIMAL_INPUT_PATTERN = /^\d+(?:\.\d+)?$/;
 const COMPACT_SUFFIXES = ["", "k", "m", "b", "t", "q"] as const;
 const DEFAULT_COMPACT_FRACTION_DIGITS = 4;
 const DEFAULT_FULL_FRACTION_DIGITS = 6;
+const TOKEN_METADATA_READ_CONCURRENCY = 8;
 
 export async function readTokenMetadata(
   client: PledgeCashReadClient,
@@ -47,7 +48,11 @@ export async function readTokenMetadataMap(
   addresses: readonly (Address | undefined)[],
 ): Promise<Record<string, TokenMetadata>> {
   const unique = uniqueTokenAddresses(addresses);
-  const entries = await Promise.all(unique.map(async (address) => [address.toLowerCase(), await readTokenMetadata(client, address)] as const));
+  const entries: Array<readonly [string, TokenMetadata]> = [];
+  for (let index = 0; index < unique.length; index += TOKEN_METADATA_READ_CONCURRENCY) {
+    entries.push(...await Promise.all(unique.slice(index, index + TOKEN_METADATA_READ_CONCURRENCY)
+      .map(async (address) => [address.toLowerCase(), await readTokenMetadata(client, address)] as const)));
+  }
   return Object.fromEntries(entries);
 }
 

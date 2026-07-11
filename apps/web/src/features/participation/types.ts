@@ -6,7 +6,8 @@ import type { BoardroomDistributionSnapshot } from "../../lib/types";
 export type ParticipationPath = "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop";
 export type ParticipationRoutePath = ParticipationPath | "amm";
 export type DistributionParticipationKey = `${ParticipationPath}:${Address}`;
-export type ParticipationContentKey = ParticipationRoutePath | DistributionParticipationKey;
+export type AmmParticipationKey = `amm:${Address}`;
+export type ParticipationContentKey = ParticipationRoutePath | DistributionParticipationKey | AmmParticipationKey;
 
 export function participationDistributionKey(
   path: ParticipationPath,
@@ -15,8 +16,12 @@ export function participationDistributionKey(
   return `${path}:${address.toLowerCase()}` as DistributionParticipationKey;
 }
 
+export function participationAmmKey(address: Address): AmmParticipationKey {
+  return `amm:${address.toLowerCase()}` as AmmParticipationKey;
+}
+
 export function participationPathFromContentKey(key: ParticipationContentKey): ParticipationRoutePath {
-  if (key === "amm") return key;
+  if (key === "amm" || key.startsWith("amm:")) return "amm";
   if (key.startsWith("fixed-price-sale")) return "fixed-price-sale";
   if (key.startsWith("migrating-bonding-curve")) return "migrating-bonding-curve";
   return "merkle-airdrop";

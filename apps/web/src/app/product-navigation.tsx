@@ -1,6 +1,6 @@
 import type { Address } from "@pledge.cash/sdk";
 import { Compass, Landmark, WalletCards } from "lucide-react";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { cn } from "../lib/utils";
 import {
   appRouteHref,
@@ -69,7 +69,7 @@ export function DesktopPrimaryNav({ active, chainId, className, onNavigate }: Pr
           href={primaryHref(item.destination, chainId)}
           key={item.destination}
           onClick={(event) => {
-            if (!onNavigate) return;
+            if (!onNavigate || !shouldHandleClientNavigation(event)) return;
             event.preventDefault();
             onNavigate(item.destination);
           }}
@@ -103,7 +103,7 @@ export function MobilePrimaryNav({ active, chainId, className, onNavigate }: Pri
           href={primaryHref(item.destination, chainId)}
           key={item.destination}
           onClick={(event) => {
-            if (!onNavigate) return;
+            if (!onNavigate || !shouldHandleClientNavigation(event)) return;
             event.preventDefault();
             onNavigate(item.destination);
           }}
@@ -190,7 +190,7 @@ export function StudioSectionNav({
             href={studioRouteHref(chainId, boardroom, item.section)}
             key={item.section}
             onClick={(event) => {
-              if (!onNavigate) return;
+              if (!onNavigate || !shouldHandleClientNavigation(event)) return;
               event.preventDefault();
               onNavigate(item.section);
             }}
@@ -205,4 +205,10 @@ export function StudioSectionNav({
 
 function primaryHref(destination: PrimaryDestination, chainId: number | undefined): string {
   return appRouteHref({ kind: destination, ...(chainId === undefined ? {} : { chainId }) });
+}
+
+export function shouldHandleClientNavigation(
+  event: Pick<MouseEvent<HTMLAnchorElement>, "altKey" | "button" | "ctrlKey" | "metaKey" | "shiftKey">,
+): boolean {
+  return event.button === 0 && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
 }

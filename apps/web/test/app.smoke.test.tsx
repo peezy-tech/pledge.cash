@@ -10,8 +10,26 @@ import type {
   MerkleAirdropState,
 } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
-import { App, canRunGrantIssuerActions, manageWorkspaceSummary, mergeCapabilityOpportunity, parseDeployment, viewFromPath } from "../src/App";
+import {
+  App,
+  appRouteTitle,
+  canRunGrantIssuerActions,
+  canonicalGrantReadErrorMessage,
+  contextualAppRouteTitle,
+  isGovernanceBackgroundRefresh,
+  manageWorkspaceSummary,
+  mergeCapabilityOpportunity,
+  mergeProductBoardroomCatalog,
+  networkSwitchDestination,
+  parseDeployment,
+  productReadErrorMessage,
+  raceWithGovernanceAbort,
+  studioProjectSectionCapability,
+  viewFromPath,
+} from "../src/App";
 import { Web3Provider } from "../src/components/web3-provider";
+import type { BoardroomPanelCapabilities } from "../src/features/boardrooms/boardroom-panel-types";
+import type { ProjectCapabilityMap } from "../src/features/capabilities/project-capabilities";
 import { BoardroomPanel } from "../src/features/boardrooms/boardroom-panel";
 import { DiscoveryPanel, WalletAccessPanel } from "../src/features/discovery/discovery-panel";
 import { GrantInspector } from "../src/features/grants/grant-inspector";
@@ -212,6 +230,26 @@ const discoverySnapshot: DiscoverySnapshot = {
 };
 
 describe("web app shell", () => {
+  test("preserves the verified governance snapshot only for same-key background refreshes", () => {
+    const key = "998:deployment:0xboardroom:read-only";
+
+    expect(isGovernanceBackgroundRefresh(key, key)).toBe(true);
+    expect(isGovernanceBackgroundRefresh(undefined, key)).toBe(false);
+    expect(isGovernanceBackgroundRefresh("10143:other", key)).toBe(false);
+  });
+
+  test("governance deadlines reject even when route loading ignores cancellation", async () => {
+    const controller = new AbortController();
+    const routeLoad = new Promise<never>(() => undefined);
+    const guarded = raceWithGovernanceAbort(routeLoad, controller.signal);
+    const timeout = new Error("Governance loading timed out. Try again.");
+    timeout.name = "TimeoutError";
+
+    controller.abort(timeout);
+
+    await expect(guarded).rejects.toBe(timeout);
+  });
+
   test("renders product workspace sections without a browser", () => {
     const html = renderToString(
       <Web3Provider>
@@ -565,7 +603,7 @@ describe("web app shell", () => {
   test("allows Boardroom owners to operate directly loaded Boardroom grants", () => {
     const grant = boardroomSnapshot.grantSummaries[0].state;
 
-    expect(canRunGrantIssuerActions(oldGrant.issuer, grant, undefined, undefined, {
+    expect(canRunGrantIssuerActions(oldGrant.issuer, grant, {
       boardroom,
       executor: oldGrant.issuer,
       launched: false,
@@ -573,7 +611,7 @@ describe("web app shell", () => {
       status: 0,
     })).toBe(true);
     expect(
-      canRunGrantIssuerActions("0x5000000000000000000000000000000000000000", grant, undefined, undefined, {
+      canRunGrantIssuerActions("0x5000000000000000000000000000000000000000", grant, {
         boardroom,
         executor: oldGrant.issuer,
         launched: false,
@@ -588,8 +626,46 @@ describe("web app shell", () => {
     const executor = "0x6000000000000000000000000000000000000000";
     const access = { boardroom, executor, launched: true, owner: oldGrant.issuer, status: 0 };
 
-    expect(canRunGrantIssuerActions(executor, grant, undefined, undefined, access)).toBe(true);
-    expect(canRunGrantIssuerActions(oldGrant.issuer, grant, undefined, undefined, access)).toBe(false);
+    expect(canRunGrantIssuerActions(executor, grant, access)).toBe(true);
+    expect(canRunGrantIssuerActions(oldGrant.issuer, grant, access)).toBe(false);
+  });
+
+  test("gates every canonical Studio action section before mounting controls", () => {
+    const hidden = { status: "hidden" as const };
+    const blocked = { status: "blocked" as const, reason: "Only the project operator can continue." };
+    const enabled = { status: "enabled" as const };
+    const projectCapabilities = new Proxy({}, { get: () => hidden }) as ProjectCapabilityMap;
+    const boardroomCapabilities = {
+      claimRedemption: blocked,
+      createBoardroom: hidden,
+      createDistribution: blocked,
+      createGrant: blocked,
+      createLiquidity: blocked,
+      manageDistribution: blocked,
+      manageLiquidity: blocked,
+      mint: blocked,
+      permissionlessWindDown: blocked,
+      redeem: blocked,
+      registerRedeemableAsset: blocked,
+      startWindDown: blocked,
+    } satisfies BoardroomPanelCapabilities;
+    const sections = ["setup", "token", "grants", "distributions", "liquidity", "governance", "close"] as const;
+
+    for (const section of sections) {
+      expect(studioProjectSectionCapability(
+        section,
+        { status: "connect", reason: "Connect a wallet to continue." },
+        blocked,
+        projectCapabilities,
+        boardroomCapabilities,
+      ).status).toBe("connect");
+    }
+    expect(studioProjectSectionCapability("setup", enabled, blocked, projectCapabilities, boardroomCapabilities)).toEqual(blocked);
+    expect(studioProjectSectionCapability("grants", enabled, blocked, projectCapabilities, boardroomCapabilities)).toEqual(blocked);
+    expect(studioProjectSectionCapability("grants", enabled, enabled, projectCapabilities, {
+      ...boardroomCapabilities,
+      createGrant: enabled,
+    })).toEqual(enabled);
   });
 
   test("allows permissionless Boardroom grant cleanup during wind-down", () => {
@@ -597,7 +673,7 @@ describe("web app shell", () => {
     const observer = "0x5000000000000000000000000000000000000000";
     const access = { boardroom, executor: oldGrant.issuer, launched: true, owner: oldGrant.issuer, status: 1 };
 
-    expect(canRunGrantIssuerActions(observer, grant, undefined, undefined, access)).toBe(true);
+    expect(canRunGrantIssuerActions(observer, grant, access)).toBe(true);
   });
 
   test("bases Manage badges on the selected Boardroom state", () => {
@@ -779,6 +855,47 @@ describe("web app shell", () => {
       { available: true },
       { available: false, reason: "The historical sale is closed." },
     )).toEqual({ available: true });
+  });
+
+  test("accumulates catalog pages without duplicating refreshed projects", () => {
+    const first = { address: "0x1000000000000000000000000000000000000000" as Address, name: "First" };
+    const second = { address: "0x2000000000000000000000000000000000000000" as Address, name: "Second" };
+
+    expect(mergeProductBoardroomCatalog([first], [{ ...first, name: "First refreshed" }, second])).toEqual([
+      { ...first, name: "First refreshed" },
+      second,
+    ]);
+  });
+
+  test("turns RPC transport failures into a concise recovery message", () => {
+    expect(productReadErrorMessage(new Error("HTTP request failed. Raw Call Arguments: 0x1234"), "Local RPC"))
+      .toBe("Could not reach Local RPC. Check the RPC connection and try again.");
+  });
+
+  test("keeps canonical grant failures concise while preserving the underlying detail separately", () => {
+    const raw = new Error("ContractFunctionExecutionError: Contract Call: 0x1234567890 docs.example/version/2.0.0");
+
+    expect(canonicalGrantReadErrorMessage(raw, "Local RPC"))
+      .toBe("pledge.cash could not confirm that this address is a grant from the active deployment. Check the address and network, then try again.");
+    expect(canonicalGrantReadErrorMessage(new Error("HTTP request failed"), "Local RPC"))
+      .toBe("Could not reach Local RPC to verify this grant. Check the RPC connection and try again.");
+  });
+
+  test("names canonical routes for browser titles and assistive announcements", () => {
+    expect(appRouteTitle({ kind: "explore", chainId: 31337 })).toBe("Project directory");
+    expect(appRouteTitle({ kind: "project", chainId: 31337, boardroom, section: "governance" })).toBe("Project governance");
+    expect(appRouteTitle({ kind: "studio-project", chainId: 31337, boardroom, section: "grants" })).toBe("Studio grant management");
+    expect(contextualAppRouteTitle({ kind: "project", chainId: 31337, boardroom, section: "overview" }, "Seed Labs Common"))
+      .toBe("Seed Labs Common — Overview");
+    expect(contextualAppRouteTitle({ kind: "studio-project", chainId: 31337, boardroom, section: "grants" }, "Seed Labs Common"))
+      .toBe("Seed Labs Common — Studio grant management");
+    expect(contextualAppRouteTitle({ kind: "grant", chainId: 31337, grant: oldGrant.grantAddress }))
+      .toContain("Grant 0x1000");
+  });
+
+  test("leaves a chain-bound grant route before switching networks", () => {
+    expect(networkSwitchDestination({ kind: "grant", chainId: 31337, grant: oldGrant.grantAddress }, 998))
+      .toEqual({ kind: "portfolio", chainId: 998 });
   });
 
 });

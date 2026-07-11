@@ -100,6 +100,7 @@ export type BoardroomLockedLiquiditySnapshot = {
 
 export type BoardroomSnapshot = BoardroomState & {
   shareTokenMetadata?: TokenMetadata | undefined;
+  summaryWarnings?: string[] | undefined;
   grantSummaries: BoardroomGrantSnapshot[];
   distributionSummaries: BoardroomDistributionSnapshot[];
   lockedLiquiditySummaries: BoardroomLockedLiquiditySnapshot[];

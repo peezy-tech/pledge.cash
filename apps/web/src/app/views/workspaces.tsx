@@ -147,7 +147,7 @@ export function ActivityWorkspace({
           { label: "Purchases", value: purchaseCount.toString() },
           { label: "Curve sells", value: sellCount.toString() },
           { label: "AMM swaps", value: history?.amm?.swapCount === undefined ? "Unknown" : history.amm.swapCount.toString() },
-          { label: "AMM traders", value: history?.amm?.traderCount === undefined ? "Unknown" : history.amm.traderCount.toString() },
+          { label: "Unique pool callers", value: history?.amm?.traderCount === undefined ? "Unknown" : history.amm.traderCount.toString() },
         ]} />
       </Panel>
       <div className="mt-4">

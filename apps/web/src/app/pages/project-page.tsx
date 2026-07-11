@@ -3,7 +3,7 @@ import { ArrowRight, RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
 import { AddressLink } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
-import { Button } from "../../components/ui/button";
+import { Button, ButtonLink } from "../../components/ui/button";
 import { shortAddress } from "../../lib/forms";
 import {
   formatNativeBalance,
@@ -72,7 +72,7 @@ export function ProjectLayout({
             <h1 className="m-0 truncate text-3xl font-semibold tracking-[-0.03em] text-zinc-50 sm:text-5xl">{name}</h1>
             <p className="m-0 mt-3 max-w-3xl text-sm leading-6 text-zinc-400">
               {snapshot
-                ? `${snapshot.launched ? "Holder governance is live." : "Owner operations are still in the pre-launch phase."} Every balance, commitment, and decision below is read from the Boardroom.`
+                ? `${snapshot.launched ? "Holder governance is live." : "Holder governance has not launched; the owner still manages project changes directly."} Participation can be live independently. Every balance, commitment, and decision below is read from the Boardroom.`
                 : "Read a project’s state, participation paths, governance, and treasury evidence in one place."}
             </p>
             {dashboard ? <p className="m-0 mt-2 font-mono text-xs text-zinc-600">{shortAddress(dashboard.address)}</p> : null}
@@ -126,6 +126,14 @@ export function ProjectLayout({
           </PageNotice>
         </div>
       ) : null}
+      {!error && dashboard?.historyErrors?.length ? (
+        <div className="pt-5">
+          <PageNotice title="Historical activity is incomplete" tone="warning">
+            <p className="m-0">Current balances and contract state are available, but some event-derived totals may be partial.</p>
+            {onRetry ? <Button className="mt-3" size="sm" variant="secondary" onClick={onRetry}>Retry history</Button> : null}
+          </PageNotice>
+        </div>
+      ) : null}
       <div aria-busy={loading}>{children}</div>
     </div>
   );
@@ -138,6 +146,7 @@ export type ProjectOverviewPageProps = {
   loading: boolean;
   nextAction?: ReactNode;
   onOpenParticipation?: (() => void) | undefined;
+  participationHref?: string | undefined;
   onRefresh?: (() => void) | undefined;
 };
 
@@ -148,6 +157,7 @@ export function ProjectOverviewPage({
   loading,
   nextAction,
   onOpenParticipation,
+  participationHref,
   onRefresh,
 }: ProjectOverviewPageProps): React.JSX.Element {
   const snapshot = dashboard?.snapshot;
@@ -189,10 +199,22 @@ export function ProjectOverviewPage({
             <p className="m-0 mt-1 max-w-2xl text-sm leading-6 text-zinc-400">{nextActionDescription(account, dashboard, hasParticipation)}</p>
           </div>
           {nextAction ?? (hasParticipation && onOpenParticipation ? (
-            <Button onClick={onOpenParticipation}>
-              View participation
-              <ArrowRight className="h-4 w-4" />
-            </Button>
+            participationHref ? (
+              <ButtonLink
+                href={participationHref}
+                onClick={(event) => {
+                  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  onOpenParticipation();
+                }}
+              >
+                View participation
+                <ArrowRight className="h-4 w-4" />
+              </ButtonLink>
+            ) : <Button onClick={onOpenParticipation}>
+                View participation
+                <ArrowRight className="h-4 w-4" />
+              </Button>
           ) : null)}
         </div>
       </RuledSection>
@@ -213,7 +235,7 @@ export function ProjectOverviewPage({
                 ? "Unknown"
                 : formatTokenBalance({ ...shareAsset, balance: shareAsset.totalSupply }),
             },
-            { label: "Open grants", value: String(commitments.openGrants), detail: `${commitments.unsettledGrants} unsettled units` },
+            { label: "Open grants", value: String(commitments.openGrants), detail: `${commitments.unsettledGrants} unsettled project tokens` },
             { label: "Participation routes", value: String(commitments.openDistributions) },
           ]}
         />
@@ -295,7 +317,8 @@ function commitmentSummary(dashboard: ProductBoardroomDashboardState | undefined
 } {
   const grants = dashboard?.snapshot.grantSummaries ?? [];
   const distributions = dashboard?.snapshot.distributionSummaries ?? [];
-  const unsettled = grants.reduce((total, grant) => total + (grant.state?.unsettledAmount ?? 0n), 0n);
+  const unsettled = grants.reduce((total, grant) =>
+    total + (sameAddress(grant.state?.token, dashboard?.snapshot.shareToken) ? grant.state?.unsettledAmount ?? 0n : 0n), 0n);
   const hasAmm = Boolean(
     dashboard?.histories?.find((history) => history.pool)?.pool
     ?? dashboard?.history?.pool

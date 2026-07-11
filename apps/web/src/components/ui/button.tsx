@@ -26,7 +26,12 @@ const buttonVariants = cva(
 );
 
 export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & VariantProps<typeof buttonVariants>;
+export type ButtonLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & VariantProps<typeof buttonVariants>;
 
 export function Button({ className, variant, size, ...props }: ButtonProps): React.JSX.Element {
   return <button className={cn(buttonVariants({ variant, size }), className)} {...props} />;
+}
+
+export function ButtonLink({ className, variant, size, ...props }: ButtonLinkProps): React.JSX.Element {
+  return <a className={cn(buttonVariants({ variant, size }), className)} {...props} />;
 }

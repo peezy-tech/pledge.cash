@@ -214,9 +214,6 @@ function windDownStartCapability(context: ProjectCapabilityContext): Capability 
   if (!project || project.status !== "active") return hidden();
   const wallet = walletGate(context);
   if (wallet.status !== "enabled") return wallet;
-  const blockers = project.windDownBlockers ?? 0;
-  if (blockers > 0) return blocked(`Resolve ${blockers.toString()} project obligation${blockers === 1 ? "" : "s"} before wind-down.`);
-
   if (project.launched) {
     return context.wallet?.windDownEligible
       ? enabled()

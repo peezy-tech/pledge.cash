@@ -2,11 +2,13 @@ import type { Address, Hex, PublicClient } from "viem";
 
 export type PledgeCashReadClient = Pick<PublicClient, "readContract">;
 
-export type PledgeCashLogClient = Pick<PublicClient, "getLogs"> & Partial<Pick<PublicClient, "getBlockNumber">>;
+export type PledgeCashLogClient = Pick<PublicClient, "getLogs">
+  & Partial<Pick<PublicClient, "getBlockNumber" | "getCode">>;
 
 export type PledgeCashBlockReadClient = Pick<PublicClient, "getBlockNumber" | "readContract">;
 
-export type PledgeCashGovernanceClient = Pick<PublicClient, "getLogs" | "getTransaction" | "readContract">;
+export type PledgeCashGovernanceClient = Pick<PublicClient, "getLogs" | "getTransaction" | "readContract">
+  & Partial<Pick<PublicClient, "getBlockNumber" | "getCode" | "getTransactionReceipt">>;
 
 export type DiscoveryRange = {
   fromBlock?: bigint;

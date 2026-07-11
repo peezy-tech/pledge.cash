@@ -9,7 +9,11 @@ import {
   type QueuedBoardroomActionStatus,
 } from "@pledge.cash/sdk";
 import { formatEther, isAddress, type Address, type Hex } from "viem";
-import { boardroomCallReview, type ContractParameterReview } from "../../lib/transaction-preview";
+import {
+  boardroomCallReview,
+  withTransactionReviewParameters,
+  type ContractParameterReview,
+} from "../../lib/transaction-preview";
 import type { GovernanceTransactionRequest } from "./types";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -181,7 +185,13 @@ export function buildGovernanceLaunchSteps(input: {
   steps.push({
     kind: "launch",
     label: "Launch holder governance",
-    request: buildBoardroomLaunchTransaction({ boardroom: input.boardroom, governanceDelay: input.governanceDelay }),
+    request: withTransactionReviewParameters(
+      buildBoardroomLaunchTransaction({ boardroom: input.boardroom, governanceDelay: input.governanceDelay }),
+      [
+        { name: "Governance executor", type: "address", value: input.nextExecutor },
+        { name: "Holder review period", type: "duration", value: formatGovernanceDuration(input.governanceDelay) },
+      ],
+    ),
   });
   return steps;
 }

@@ -129,14 +129,11 @@ describe("project capability resolver", () => {
     expect(ineligible["governance.executeReady"].status).toBe("enabled");
   });
 
-  test("blocks wind-down until obligations and authority requirements are satisfied", () => {
-    const blocked = resolveProjectCapabilities(context({
+  test("allows authorized wind-down before obligations are cleaned up", () => {
+    const ownerCanStart = resolveProjectCapabilities(context({
       project: { owner, executor, launched: false, status: "active", windDownBlockers: 2 },
     }));
-    expect(blocked["windDown.start"]).toEqual({
-      status: "blocked",
-      reason: "Resolve 2 project obligations before wind-down.",
-    });
+    expect(ownerCanStart["windDown.start"].status).toBe("enabled");
 
     const holderCanStart = resolveProjectCapabilities(context({
       account: holder,

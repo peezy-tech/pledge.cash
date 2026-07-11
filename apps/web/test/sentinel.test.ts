@@ -19,6 +19,22 @@ describe("sentinel web client", () => {
     );
   });
 
+  test("reads uncached index health with cancellation support", async () => {
+    const calls: { input: string; init: RequestInit | undefined }[] = [];
+    const fetcher: SentinelFetch = async (input, init) => {
+      calls.push({ input: input.toString(), init });
+      return jsonResponse({ chains: [{ chainId: 998, governanceBlock: "200" }], database: "ok", ok: true });
+    };
+    const controller = new AbortController();
+    const client = createSentinelClient({ baseUrl: "https://api.example.test", fetcher });
+
+    await client.health(controller.signal);
+
+    expect(calls[0]?.input).toBe("https://api.example.test/health");
+    expect(calls[0]?.init?.cache).toBe("no-store");
+    expect(calls[0]?.init?.signal).toBe(controller.signal);
+  });
+
   test("sends JSON requests with session credentials", async () => {
     const calls: { input: string; init: RequestInit | undefined }[] = [];
     const fetcher: SentinelFetch = async (input, init) => {

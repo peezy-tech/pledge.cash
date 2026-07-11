@@ -6,8 +6,8 @@ import { ActionButton, ActionRow, AddressLink, Facts, Field, Panel } from "../..
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { ConnectWalletPrompt } from "../wallet/connect-wallet-prompt";
 import {
-  defaultSwapDeadline,
   formatPoolShareBps,
   formatSwapAmount,
   liquidityQuoteReady,
@@ -130,13 +130,20 @@ export function SwapPanel({
 }: SwapPanelProps): React.JSX.Element {
   const [selectorSide, setSelectorSide] = useState<TokenSide>();
   const [tokenSearch, setTokenSearch] = useState("");
+  const [currentUnixTime, setCurrentUnixTime] = useState(() => Math.floor(Date.now() / 1000));
   const walletConnected = account !== undefined;
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setCurrentUnixTime(Math.floor(Date.now() / 1000)), 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const swapNativeAvailable = pairHasWrappedNative(deployment, form.tokenIn, form.tokenOut);
   const swapNative = swapNativeMode(deployment, form);
   const swapWrappedSide = wrappedSwapSide(deployment, form);
   const swapInputIsNative = swapNative === "input";
-  const swapActions = swapActionState(walletConnected, quote, swapInputIsNative);
+  const swapDeadlineValid = deadlineIsFuture(form.deadline, currentUnixTime);
+  const swapActions = swapActionState(walletConnected, quote, swapInputIsNative, swapDeadlineValid);
   const inputToken = selectedTokenOption(form.tokenIn, tokenList.tokens, quote?.tokenIn);
   const outputToken = selectedTokenOption(form.tokenOut, tokenList.tokens, quote?.tokenOut);
 
@@ -145,8 +152,10 @@ export function SwapPanel({
   const liquidityNativeAvailable = pairHasWrappedNative(deployment, liquidityForm.tokenA, liquidityForm.tokenB);
   const tokenAIsNative = liquidityForm.useNative && liquidityNativeAvailable && deployment?.wrappedNative !== undefined && sameAddress(liquidityForm.tokenA, deployment.wrappedNative);
   const tokenBIsNative = liquidityForm.useNative && liquidityNativeAvailable && deployment?.wrappedNative !== undefined && sameAddress(liquidityForm.tokenB, deployment.wrappedNative);
-  const liquidityActions = liquidityActionState(walletConnected, liquidityQuote, tokenAIsNative, tokenBIsNative);
-  const positionActions = positionActionState(walletConnected, position, removeLiquidityQuote);
+  const liquidityDeadlineValid = deadlineIsFuture(liquidityForm.deadline, currentUnixTime);
+  const removeDeadlineValid = deadlineIsFuture(removeLiquidityForm.deadline, currentUnixTime);
+  const liquidityActions = liquidityActionState(walletConnected, liquidityQuote, tokenAIsNative, tokenBIsNative, liquidityDeadlineValid);
+  const positionActions = positionActionState(walletConnected, position, removeLiquidityQuote, removeDeadlineValid);
 
   const selectorLabel = tokenSelectorLabel(selectorSide);
   const selectorValue = tokenSelectorValue(selectorSide, form, liquidityForm);
@@ -154,7 +163,7 @@ export function SwapPanel({
   const selectorQuoteToken = selectedTokenForSide(selectorSide, quote, liquidityQuote, position);
   const selectorSelected = selectedTokenOption(selectorValue, tokenList.tokens, selectorQuoteToken);
 
-  const swapFacts = swapTransactionFacts(deployment, quote, swapInputIsNative);
+  const swapFacts = swapTransactionFacts(quote, swapInputIsNative);
   const liquidityFacts = liquidityTransactionFacts(liquidityQuote, tokenAIsNative, tokenBIsNative);
   const positionFacts = lpPositionFacts(position, removeLiquidityQuote);
   const removeLiquidityFacts = removeLiquidityTransactionFacts(removeLiquidityQuote);
@@ -197,7 +206,7 @@ export function SwapPanel({
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
               <div className="mb-2 flex flex-wrap items-center gap-2">
-                <Badge variant={swapTone(quote)}>{swapStatus(quote)}</Badge>
+                <Badge variant={swapTone(quote, swapDeadlineValid)}>{swapStatus(quote, swapDeadlineValid)}</Badge>
                 <Badge variant="muted">{swapPairLabel(quote, form)}</Badge>
               </div>
               <h3 className="m-0 text-2xl font-semibold tracking-normal text-zinc-50 sm:text-3xl">AMM Swap</h3>
@@ -206,12 +215,12 @@ export function SwapPanel({
               <Button aria-label="Flip swap direction" title="Flip swap direction" size="icon" variant="secondary" onClick={() => flipSwap(setForm)}>
                 <ArrowDownUp className="h-4 w-4" />
               </Button>
-              <Button variant="secondary" onClick={() => setForm((current) => ({ ...current, deadline: defaultSwapDeadline() }))}>
-                Reset Deadline
-              </Button>
             </div>
           </div>
           {quote?.error ? <p className="m-0 mt-4 rounded-md border border-amber-950 bg-amber-950/30 p-3 text-sm text-amber-100">{quote.error}</p> : null}
+          {!walletConnected ? (
+            <ConnectWalletPrompt description="Connect the wallet that will fund the swap to load its balance, allowance, and account-specific quote." />
+          ) : null}
         </div>
 
         <div className="grid gap-px border-t border-zinc-800 bg-zinc-800 md:grid-cols-2">
@@ -238,17 +247,23 @@ export function SwapPanel({
             onOpen={() => openSelector("tokenOut")}
           />
           <TextField form={form} field="amountIn" inputMode="decimal" label="Amount in" setForm={setForm} />
-          <TextField form={form} field="slippageBps" inputMode="numeric" label="Slippage bps" setForm={setForm} />
-          <TextField form={form} field="recipient" label="Recipient" placeholder={account ?? "Wallet"} setForm={setForm} />
-          <TextField form={form} field="deadline" inputMode="numeric" label="Deadline" setForm={setForm} />
-          <NativeModeField
-            checked={form.useNative}
-            disabled={!swapNativeAvailable}
-            label="Native swap"
-            text={nativeSwapText(swapNativeAvailable, swapNative ?? swapWrappedSide)}
-            onChange={(checked) => setForm((current) => ({ ...current, useNative: checked }))}
-          />
+          <TextField form={form} field="recipient" label="Receive tokens at" placeholder={account ?? "Connected wallet"} setForm={setForm} />
+          <ExecutionPreferences currentUnixTime={currentUnixTime} form={form} setForm={setForm} />
         </div>
+
+        <TransactionTechnicalDetails
+          deadline={form.deadline}
+          router={deployment?.ammRouter}
+          nativeControl={swapNativeAvailable ? (
+            <NativeModeField
+              checked={form.useNative}
+              disabled={false}
+              label="Native asset handling"
+              text={nativeSwapText(true, swapNative ?? swapWrappedSide)}
+              onChange={(checked) => setForm((current) => ({ ...current, useNative: checked }))}
+            />
+          ) : undefined}
+        />
 
         <ActionRow>
           <ActionButton actionId="approve-swap-input" disabled={!swapActions.canApproveInput} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("approve-swap-input", approveInput)}>
@@ -281,7 +296,7 @@ export function SwapPanel({
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
               <div className="mb-2 flex flex-wrap items-center gap-2">
-                <Badge variant={liquidityTone(liquidityQuote)}>{liquidityStatus(liquidityQuote)}</Badge>
+                <Badge variant={liquidityTone(liquidityQuote, liquidityDeadlineValid)}>{liquidityStatus(liquidityQuote, liquidityDeadlineValid)}</Badge>
                 <Badge variant="muted">{liquidityPairLabel(liquidityQuote, liquidityForm)}</Badge>
               </div>
               <h2 className="m-0 text-xl font-semibold tracking-normal text-zinc-50 sm:text-2xl">Add Liquidity</h2>
@@ -289,9 +304,6 @@ export function SwapPanel({
             <div className="flex flex-wrap items-center gap-2">
               <Button aria-label="Flip liquidity pair" title="Flip liquidity pair" size="icon" variant="secondary" onClick={() => flipLiquidityPair(setLiquidityForm)}>
                 <ArrowDownUp className="h-4 w-4" />
-              </Button>
-              <Button variant="secondary" onClick={() => setLiquidityForm((current) => ({ ...current, deadline: defaultSwapDeadline() }))}>
-                Reset Deadline
               </Button>
             </div>
           </div>
@@ -321,17 +333,23 @@ export function SwapPanel({
           />
           <TextField form={liquidityForm} field="amountA" inputMode="decimal" label="Amount A" setForm={setLiquidityForm} />
           <TextField form={liquidityForm} field="amountB" inputMode="decimal" label="Amount B" setForm={setLiquidityForm} />
-          <TextField form={liquidityForm} field="slippageBps" inputMode="numeric" label="Slippage bps" setForm={setLiquidityForm} />
           <TextField form={liquidityForm} field="recipient" label="LP recipient" placeholder={account ?? "Wallet"} setForm={setLiquidityForm} />
-          <TextField form={liquidityForm} field="deadline" inputMode="numeric" label="Deadline" setForm={setLiquidityForm} />
-          <NativeModeField
-            checked={liquidityForm.useNative}
-            disabled={!liquidityNativeAvailable}
-            label="Use native"
-            text={liquidityNativeAvailable ? "Supply native instead of wrapped native" : "Select the wrapped-native token pair"}
-            onChange={(checked) => setLiquidityForm((current) => ({ ...current, useNative: checked }))}
-          />
+          <ExecutionPreferences currentUnixTime={currentUnixTime} form={liquidityForm} setForm={setLiquidityForm} />
         </div>
+
+        <TransactionTechnicalDetails
+          deadline={liquidityForm.deadline}
+          router={deployment?.ammRouter}
+          nativeControl={liquidityNativeAvailable ? (
+            <NativeModeField
+              checked={liquidityForm.useNative}
+              disabled={false}
+              label="Native asset handling"
+              text="Supply native currency instead of its wrapped token"
+              onChange={(checked) => setLiquidityForm((current) => ({ ...current, useNative: checked }))}
+            />
+          ) : undefined}
+        />
 
         <ActionRow>
           <ActionButton actionId="approve-liquidity-token-a" disabled={!liquidityActions.canApproveTokenA} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("approve-liquidity-token-a", approveLiquidityTokenA)}>
@@ -388,17 +406,23 @@ export function SwapPanel({
 
         <div className="grid gap-px border-t border-zinc-800 bg-zinc-800 md:grid-cols-2">
           <TextField form={removeLiquidityForm} field="liquidity" inputMode="decimal" label="LP amount" setForm={setRemoveLiquidityForm} />
-          <TextField form={removeLiquidityForm} field="slippageBps" inputMode="numeric" label="Slippage bps" setForm={setRemoveLiquidityForm} />
           <TextField form={removeLiquidityForm} field="recipient" label="Withdraw recipient" placeholder={account ?? "Wallet"} setForm={setRemoveLiquidityForm} />
-          <TextField form={removeLiquidityForm} field="deadline" inputMode="numeric" label="Deadline" setForm={setRemoveLiquidityForm} />
-          <NativeModeField
-            checked={removeLiquidityForm.useNative}
-            disabled={!liquidityNativeAvailable}
-            label="Receive native"
-            text={liquidityNativeAvailable ? "Unwrap wrapped native on removal" : "Select the wrapped-native token pair"}
-            onChange={(checked) => setRemoveLiquidityForm((current) => ({ ...current, useNative: checked }))}
-          />
+          <ExecutionPreferences currentUnixTime={currentUnixTime} form={removeLiquidityForm} setForm={setRemoveLiquidityForm} />
         </div>
+
+        <TransactionTechnicalDetails
+          deadline={removeLiquidityForm.deadline}
+          router={deployment?.ammRouter}
+          nativeControl={liquidityNativeAvailable ? (
+            <NativeModeField
+              checked={removeLiquidityForm.useNative}
+              disabled={false}
+              label="Native asset handling"
+              text="Receive native currency instead of its wrapped token"
+              onChange={(checked) => setRemoveLiquidityForm((current) => ({ ...current, useNative: checked }))}
+            />
+          ) : undefined}
+        />
 
         <ActionRow>
           <ActionButton actionId="quote-remove-liquidity" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("quote-remove-liquidity", refreshRemoveLiquidityQuote)}>
@@ -657,6 +681,117 @@ type StringField<TForm> = {
   [K in keyof TForm]: TForm[K] extends string ? K : never;
 }[keyof TForm] & string;
 
+type ExecutionPreferenceForm = {
+  deadline: string;
+  slippageBps: string;
+};
+
+const SLIPPAGE_BPS_CHOICES = ["10", "50", "100", "200"] as const;
+const DEADLINE_MINUTE_CHOICES = [10, 20, 30, 60] as const;
+
+function ExecutionPreferences<TForm extends ExecutionPreferenceForm>({
+  currentUnixTime,
+  form,
+  setForm,
+}: {
+  currentUnixTime: number;
+  form: TForm;
+  setForm: Dispatch<SetStateAction<TForm>>;
+}): React.JSX.Element {
+  const slippageChoices = SLIPPAGE_BPS_CHOICES.includes(form.slippageBps as typeof SLIPPAGE_BPS_CHOICES[number])
+    ? SLIPPAGE_BPS_CHOICES
+    : [form.slippageBps, ...SLIPPAGE_BPS_CHOICES];
+  const deadlineMinutes = remainingDeadlineMinutes(form.deadline, currentUnixTime);
+  const deadlineChoices = deadlineMinutes !== undefined
+    && !DEADLINE_MINUTE_CHOICES.includes(deadlineMinutes as typeof DEADLINE_MINUTE_CHOICES[number])
+    ? [deadlineMinutes, ...DEADLINE_MINUTE_CHOICES]
+    : DEADLINE_MINUTE_CHOICES;
+  const deadlineValue = deadlineMinutes === undefined ? "expired" : deadlineMinutes.toString();
+
+  return (
+    <>
+      <Field label="Slippage tolerance">
+        <select
+          aria-label="Slippage tolerance"
+          className="h-10 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none transition-colors hover:border-zinc-700 focus:border-lime-300/70 focus:ring-2 focus:ring-lime-300/10"
+          value={form.slippageBps}
+          onChange={(event) => setForm((current) => ({ ...current, slippageBps: event.target.value }))}
+        >
+          {slippageChoices.map((basisPoints) => (
+            <option key={basisPoints} value={basisPoints}>{formatSlippagePercent(basisPoints)}</option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Quote expires in">
+        <select
+          aria-label="Quote expires in"
+          className="h-10 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none transition-colors hover:border-zinc-700 focus:border-lime-300/70 focus:ring-2 focus:ring-lime-300/10"
+          value={deadlineValue}
+          onChange={(event) => setForm((current) => ({
+            ...current,
+            deadline: deadlineFromMinutes(Number(event.target.value), currentUnixTime),
+          }))}
+        >
+          {deadlineMinutes === undefined ? <option disabled value="expired">Expired — choose a new window</option> : null}
+          {deadlineChoices.map((minutes) => (
+            <option key={minutes} value={minutes}>{minutes.toString()} min</option>
+          ))}
+        </select>
+        {deadlineMinutes === undefined ? (
+          <span className="text-xs font-normal leading-5 text-amber-200">Choose a fresh window before submitting.</span>
+        ) : null}
+      </Field>
+    </>
+  );
+}
+
+function TransactionTechnicalDetails({
+  deadline,
+  nativeControl,
+  router,
+}: {
+  deadline: string;
+  nativeControl?: ReactNode | undefined;
+  router?: Address | undefined;
+}): React.JSX.Element {
+  return (
+    <details className="border-t border-zinc-800 px-4 py-3 text-sm text-zinc-400">
+      <summary className="flex min-h-11 cursor-pointer items-center font-semibold text-zinc-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300/70">
+        Advanced transaction details
+      </summary>
+      <div className="grid min-w-0 gap-3 pb-1 pt-3 md:grid-cols-2">
+        <div className="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 p-3">
+          <span className="block text-xs font-semibold uppercase tracking-[0.1em] text-zinc-600">Router contract</span>
+          <span className="mt-1 block min-w-0 [overflow-wrap:anywhere]">{router ? <AddressLink address={router} /> : "Not configured"}</span>
+        </div>
+        <div className="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 p-3">
+          <span className="block text-xs font-semibold uppercase tracking-[0.1em] text-zinc-600">Raw Unix deadline</span>
+          <code className="mt-1 block [overflow-wrap:anywhere]">{deadline}</code>
+        </div>
+        {nativeControl ? <div className="min-w-0 md:col-span-2">{nativeControl}</div> : null}
+      </div>
+    </details>
+  );
+}
+
+function formatSlippagePercent(value: string): string {
+  if (!/^\d+$/.test(value)) return `Custom (${value})`;
+  const basisPoints = BigInt(value);
+  const whole = basisPoints / 100n;
+  const fraction = (basisPoints % 100n).toString().padStart(2, "0").replace(/0+$/, "");
+  return `${whole.toString()}${fraction ? `.${fraction}` : ""}%`;
+}
+
+export function remainingDeadlineMinutes(deadline: string, currentUnixTime: number): number | undefined {
+  const timestamp = Number(deadline);
+  if (!Number.isSafeInteger(timestamp) || timestamp <= currentUnixTime) return undefined;
+  return Math.max(1, Math.ceil((timestamp - currentUnixTime) / 60));
+}
+
+function deadlineFromMinutes(minutes: number, currentUnixTime: number): string {
+  return String(currentUnixTime + minutes * 60);
+}
+
 function TextField<TForm extends Record<string, unknown>, K extends StringField<TForm>>({
   form,
   field,
@@ -717,7 +852,17 @@ function NativeModeField({
   );
 }
 
-function swapActionState(walletConnected: boolean, quote: SwapQuoteState | undefined, inputIsNative: boolean): SwapActionState {
+export function deadlineIsFuture(deadline: string, currentUnixTime: number): boolean {
+  const timestamp = Number(deadline);
+  return Number.isSafeInteger(timestamp) && timestamp > currentUnixTime;
+}
+
+function swapActionState(
+  walletConnected: boolean,
+  quote: SwapQuoteState | undefined,
+  inputIsNative: boolean,
+  deadlineValid: boolean,
+): SwapActionState {
   const quoteReady = swapQuoteReady(quote);
   let needsApproval = false;
 
@@ -729,7 +874,7 @@ function swapActionState(walletConnected: boolean, quote: SwapQuoteState | undef
     quoteReady,
     needsApproval,
     canApproveInput: walletConnected && quoteReady && !inputIsNative,
-    canSwap: walletConnected && quoteReady && !needsApproval,
+    canSwap: walletConnected && quoteReady && !needsApproval && deadlineValid,
   };
 }
 
@@ -738,6 +883,7 @@ function liquidityActionState(
   quote: LiquidityQuoteState | undefined,
   tokenAIsNative: boolean,
   tokenBIsNative: boolean,
+  deadlineValid: boolean,
 ): LiquidityActionState {
   const quoteReady = liquidityQuoteReady(quote);
   let needsTokenAApproval = false;
@@ -754,7 +900,7 @@ function liquidityActionState(
     needsTokenBApproval,
     canApproveTokenA: walletConnected && quoteReady && !tokenAIsNative,
     canApproveTokenB: walletConnected && quoteReady && !tokenBIsNative,
-    canAddLiquidity: walletConnected && quoteReady && !needsTokenAApproval && !needsTokenBApproval,
+    canAddLiquidity: walletConnected && quoteReady && !needsTokenAApproval && !needsTokenBApproval && deadlineValid,
   };
 }
 
@@ -762,6 +908,7 @@ function positionActionState(
   walletConnected: boolean,
   position: AmmPositionState | undefined,
   quote: RemoveLiquidityQuoteState | undefined,
+  deadlineValid: boolean,
 ): PositionActionState {
   const removeReady = removeLiquidityQuoteReady(quote);
   let needsLpApproval = false;
@@ -774,20 +921,15 @@ function positionActionState(
     removeReady,
     needsLpApproval,
     canApproveLp: walletConnected && removeReady,
-    canRemoveLiquidity: walletConnected && removeReady && !needsLpApproval,
+    canRemoveLiquidity: walletConnected && removeReady && !needsLpApproval && deadlineValid,
     canClaimFees: walletConnected && Boolean(position?.pool?.exists),
   };
 }
 
-function swapTransactionFacts(
-  deployment: PledgeCashDeployment | undefined,
-  quote: SwapQuoteState | undefined,
-  inputIsNative: boolean,
-): FactItem[] {
+function swapTransactionFacts(quote: SwapQuoteState | undefined, inputIsNative: boolean): FactItem[] {
   return [
-    { label: "Router", value: deployment?.ammRouter ? <AddressLink address={deployment.ammRouter} /> : "Missing" },
     { label: "Pool", value: quote?.pool ? <AddressLink address={quote.pool.address} /> : "None" },
-    { label: "Fee", value: quote?.feeBps !== undefined ? `${quote.feeBps.toString()} bps` : "Unknown" },
+    { label: "Fee", value: quote?.feeBps !== undefined ? formatSlippagePercent(quote.feeBps.toString()) : "Unknown" },
     { label: "Expected output", value: formatSwapAmount(quote?.amountOut, quote?.tokenOut) },
     { label: "Minimum received", value: formatSwapAmount(quote?.amountOutMin, quote?.tokenOut) },
     { label: "Approval", value: inputIsNative ? "Native value" : approvalLabel(quote?.tokenIn, quote?.amountIn) },
@@ -901,27 +1043,31 @@ function lpApprovalLabel(position: AmmPositionState | undefined, liquidity: bigi
   return allowance >= liquidity ? "Approved" : `${formatSwapAmount(allowance, position.lpToken)} approved`;
 }
 
-function swapStatus(quote: SwapQuoteState | undefined): string {
+function swapStatus(quote: SwapQuoteState | undefined, deadlineValid: boolean): string {
+  if (!deadlineValid) return "New expiry needed";
   if (!quote) return "Not quoted";
   if (swapQuoteReady(quote)) return "Ready";
   if (quote.error?.startsWith("No AMM pool")) return "No pool";
   return "Blocked";
 }
 
-function swapTone(quote: SwapQuoteState | undefined): "default" | "muted" | "warning" | "danger" {
+function swapTone(quote: SwapQuoteState | undefined, deadlineValid: boolean): "default" | "muted" | "warning" | "danger" {
+  if (!deadlineValid) return "warning";
   if (!quote) return "muted";
   if (swapQuoteReady(quote)) return "default";
   if (quote.error?.startsWith("No AMM pool")) return "warning";
   return "danger";
 }
 
-function liquidityStatus(quote: LiquidityQuoteState | undefined): string {
+function liquidityStatus(quote: LiquidityQuoteState | undefined, deadlineValid: boolean): string {
+  if (!deadlineValid) return "New expiry needed";
   if (!quote) return "Not quoted";
   if (liquidityQuoteReady(quote)) return quote.pool.exists ? "Ready" : "New pool";
   return "Blocked";
 }
 
-function liquidityTone(quote: LiquidityQuoteState | undefined): "default" | "muted" | "warning" | "danger" {
+function liquidityTone(quote: LiquidityQuoteState | undefined, deadlineValid: boolean): "default" | "muted" | "warning" | "danger" {
+  if (!deadlineValid) return "warning";
   if (!quote) return "muted";
   if (liquidityQuoteReady(quote)) return quote.pool.exists ? "default" : "warning";
   return "danger";

@@ -320,7 +320,7 @@ function BackChevron(): React.JSX.Element | null {
 
   return (
     <button
-      className="absolute left-5 top-5 z-50 grid h-8 w-8 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-lime-300/70"
+      className="absolute left-4 top-4 z-50 grid h-11 w-11 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-lime-300/70"
       type="button"
       onClick={cancelConnection}
     >
@@ -340,7 +340,9 @@ function RetryConnectorButton(): React.JSX.Element {
 
   return (
     <Button
-      className="group absolute -bottom-2 -right-2 h-9 w-9 rounded-full border-zinc-800 bg-zinc-950 p-0"
+      aria-label="Retry wallet connection"
+      className="group absolute -bottom-3 -right-3 h-11 w-11 rounded-full border-zinc-800 bg-zinc-950 p-0"
+      title="Retry wallet connection"
       type="button"
       variant="secondary"
       onClick={() => retryConnector(context, connect)}

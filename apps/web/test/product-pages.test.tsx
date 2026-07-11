@@ -3,6 +3,7 @@ import type { Address, BoardroomHolderPower } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
 import {
   ExplorePage,
+  GrantDetailPage,
   GovernancePage,
   NotFoundPage,
   ParticipatePage,
@@ -19,6 +20,7 @@ import {
   studioLifecycle,
   type PortfolioTask,
 } from "../src/app/pages";
+import { participationDistributionKey } from "../src/features/participation/types";
 import type { ProductBoardroomCatalogEntry, ProductBoardroomDashboardState } from "../src/lib/product-boardroom";
 
 const boardroom = "0x1000000000000000000000000000000000000000" as Address;
@@ -168,16 +170,21 @@ describe("read-first product pages", () => {
 
     const html = renderToString(
       <ExplorePage
+        canLoadMore
         chainId={31337}
         chainName="Local Anvil"
         loading={false}
+        totalProjects={10_000}
         projects={[catalogEntry]}
+        onLoadMore={() => undefined}
         onOpenProject={() => undefined}
       />,
     );
     expect(html).toContain("Project directory");
     expect(html).toContain("Atlas Cooperative");
-    expect(html).toContain("Participants");
+    expect(html).toContain("Buyers");
+    expect(html).toContain("1 of 10,000 projects loaded");
+    expect(html).toContain("Load more projects");
   });
 
   test("renders one project workspace with human-readable overview and participation", () => {
@@ -190,31 +197,68 @@ describe("read-first product pages", () => {
         loading={false}
         onNavigateSection={() => undefined}
       >
-        <ProjectOverviewPage account={owner} dashboard={dashboard} loading={false} />
+        <ProjectOverviewPage
+          account={owner}
+          dashboard={dashboard}
+          loading={false}
+          onOpenParticipation={() => undefined}
+          participationHref="/projects/31337/atlas/participate"
+        />
       </ProjectLayout>,
     );
     expect(overview).toContain("Atlas Cooperative");
     expect(overview).toContain("What needs attention");
     expect(overview).toContain("Holder governance is live");
     expect(overview).toContain("Treasury at a glance");
+    expect(overview).toContain('href="/projects/31337/atlas/participate"');
+
+    const partialHistory = renderToString(
+      <ProjectLayout
+        activeSection="overview"
+        chainName="Local Anvil"
+        dashboard={{ ...dashboard, historyErrors: ["RPC history unavailable"] }}
+        loading={false}
+        onNavigateSection={() => undefined}
+      >
+        <ProjectOverviewPage dashboard={dashboard} loading={false} />
+      </ProjectLayout>,
+    );
+    expect(partialHistory).toContain("Historical activity is incomplete");
+    expect(partialHistory).toContain("event-derived totals may be partial");
 
     const options = participationOptions(dashboard);
     expect(options[0]?.path).toBe("fixed-price-sale");
     expect(options[0]?.available).toBe(true);
     const activeDistribution = dashboard.snapshot.distributionSummaries[0];
     if (!activeDistribution?.state || !("saleStatus" in activeDistribution.state)) throw new Error("Fixture sale missing");
+    const closedSale = {
+      ...activeDistribution,
+      address: "0xd000000000000000000000000000000000000000" as Address,
+      state: { ...activeDistribution.state, closed: true, saleStatus: 1 },
+    };
     const dashboardWithOlderClosedSale: ProductBoardroomDashboardState = {
       ...dashboard,
       snapshot: {
         ...dashboard.snapshot,
-        distributionSummaries: [{
-          ...activeDistribution,
-          address: "0xd000000000000000000000000000000000000000" as Address,
-          state: { ...activeDistribution.state, closed: true, saleStatus: 1 },
-        }, activeDistribution],
+        distributionSummaries: [closedSale, activeDistribution],
       },
     };
     expect(participationOptions(dashboardWithOlderClosedSale)[0]?.address).toBe(sale);
+    const closedRoute = participationDistributionKey("fixed-price-sale", closedSale.address);
+    const closedOnlyDashboard = {
+      ...dashboardWithOlderClosedSale,
+      snapshot: { ...dashboardWithOlderClosedSale.snapshot, distributionSummaries: [closedSale] },
+    };
+    const closedParticipation = renderToString(
+      <ParticipatePage
+        content={{ [closedRoute]: <button type="button">Review closed purchase</button> }}
+        dashboard={closedOnlyDashboard}
+        loading={false}
+        selectedRoute={closedRoute}
+      />,
+    );
+    expect(closedParticipation).toContain("This sale is closed or sold out");
+    expect(closedParticipation).not.toContain("Review closed purchase");
     const participate = renderToString(
       <ParticipatePage
         content={{ "fixed-price-sale": <button type="button">Review purchase</button> }}
@@ -251,6 +295,24 @@ describe("read-first product pages", () => {
     expect(participate).not.toContain('role="tabpanel"');
   });
 
+  test("keeps every project AMM pool as a distinct participation route", () => {
+    const firstPool = "0xf100000000000000000000000000000000000000" as Address;
+    const secondPool = "0xf200000000000000000000000000000000000000" as Address;
+    const multiPoolDashboard: ProductBoardroomDashboardState = {
+      ...dashboard,
+      histories: [
+        { distribution: "0xf300000000000000000000000000000000000000" as Address, pool: secondPool },
+        { distribution: sale, pool: firstPool },
+      ],
+    };
+
+    const options = participationOptions(multiPoolDashboard, { amm: <button type="button">Review swap</button> });
+    const ammOptions = options.filter((option) => option.path === "amm");
+
+    expect(ammOptions.map((option) => option.address)).toEqual([firstPool, secondPool]);
+    expect(new Set(ammOptions.map((option) => option.id)).size).toBe(2);
+  });
+
   test("explains governance thresholds and exposes transparency tables", () => {
     const governance = renderToString(<GovernancePage dashboard={dashboard} holderPower={holderPower} loading={false} />);
     expect(governance).toContain("Decision system");
@@ -258,11 +320,74 @@ describe("read-first product pages", () => {
     expect(governance).toContain("20%");
     expect(governance).toContain("This wallet can veto");
 
-    const transparency = renderToString(<TransparencyPage dashboard={dashboard} loading={false} />);
+    const partialGovernance = renderToString(
+      <GovernancePage
+        dashboard={dashboard}
+        loading={false}
+        warning="1 indexed decision could not be verified and was ignored."
+      />,
+    );
+    expect(partialGovernance).toContain("Some queued decisions were not shown");
+    expect(partialGovernance).toContain("1 indexed decision could not be verified and was ignored");
+    expect(partialGovernance).toContain("No verified queued decisions");
+    expect(partialGovernance).toContain("Retry before assuming no decisions are pending");
+    expect(partialGovernance).not.toContain("Governance data is incomplete");
+
+    const unavailableGovernance = renderToString(
+      <GovernancePage dashboard={dashboard} error="The governance index could not be reached." loading={false} />,
+    );
+    expect(unavailableGovernance).toContain("Queued decisions are unavailable");
+    expect(unavailableGovernance).toContain("Retry before concluding that no decisions are pending");
+    expect(unavailableGovernance).not.toContain("No queued decisions");
+
+    const transparency = renderToString(
+      <TransparencyPage
+        dashboard={dashboard}
+        grantHref={(address) => `/pledge-cash/grants/31337/${address}`}
+        loading={false}
+        onOpenGrant={() => undefined}
+      />,
+    );
     expect(transparency).toContain("Treasury and supply");
     expect(transparency).toContain("Open commitments");
+    expect(transparency).toContain("View grant");
+    expect(transparency).toContain(`/pledge-cash/grants/31337/${grant}`);
     expect(transparency).toContain("Issued grants");
     expect(transparency).toContain("Technical details");
+  });
+
+  test("never adds grants from different token contracts into one amount", () => {
+    const shareGrant = dashboard.snapshot.grantSummaries[0];
+    if (!shareGrant?.state) throw new Error("Fixture grant missing");
+    const externalGrant = {
+      ...shareGrant,
+      address: "0xe000000000000000000000000000000000000000" as Address,
+      state: {
+        ...shareGrant.state,
+        address: "0xe000000000000000000000000000000000000000" as Address,
+        token: paymentToken,
+        tokenDecimals: 6,
+        grantSize: 2_000_000n,
+        settledAmount: 500_000n,
+        unsettledAmount: 1_500_000n,
+      },
+      tokenMetadata: { address: paymentToken, decimals: 6, symbol: "USDC" },
+    };
+    const mixedTokenDashboard: ProductBoardroomDashboardState = {
+      ...dashboard,
+      snapshot: {
+        ...dashboard.snapshot,
+        grantSummaries: [shareGrant, externalGrant],
+      },
+    };
+
+    const overview = renderToString(<ProjectOverviewPage account={owner} dashboard={mixedTokenDashboard} loading={false} />);
+    const transparency = renderToString(<TransparencyPage dashboard={mixedTokenDashboard} loading={false} />);
+
+    expect(overview).toContain("0.75 ATLAS unsettled project tokens");
+    expect(transparency).toContain("Unsettled project-token grants");
+    expect(transparency).toContain("0.75 ATLAS");
+    expect(transparency).toContain("2 USDC");
   });
 
   test("orders portfolio tasks by urgency and gives Studio lifecycle guidance", () => {
@@ -284,7 +409,28 @@ describe("read-first product pages", () => {
   });
 
   test("renders explicit not-found and redirect states", () => {
-    expect(renderToString(<NotFoundPage />)).toContain("This page does not exist");
-    expect(renderToString(<RedirectState destination="/explore" />)).toContain("Opening the canonical workspace");
+    const notFound = renderToString(<NotFoundPage />);
+    const redirect = renderToString(<RedirectState destination="/explore" />);
+
+    expect(notFound).toContain("This page does not exist");
+    expect(redirect).toContain("Opening the canonical workspace");
+    expect(notFound).not.toContain("<main");
+    expect(redirect).not.toContain("<main");
+  });
+
+  test("uses a canonical anchor for grant-to-portfolio navigation", () => {
+    const html = renderToString(
+      <GrantDetailPage
+        account={undefined}
+        backHref="/pledge-cash/portfolio?chain=31337"
+        grant={grant}
+        onBack={() => undefined}
+      >
+        Grant settlement
+      </GrantDetailPage>,
+    );
+
+    expect(html).toContain('href="/pledge-cash/portfolio?chain=31337"');
+    expect(html).not.toContain(">Portfolio</button>");
   });
 });
