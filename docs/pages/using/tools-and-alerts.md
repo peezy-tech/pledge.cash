@@ -1,0 +1,53 @@
+---
+title: Tools and Alerts
+description: Know when to use protocol-level diagnostics and how optional governance notifications work.
+---
+
+# Tools and Alerts
+
+Most work belongs in `Explore`, `Portfolio`, a project workspace, or `Studio`. `Tools and Diagnostics` and `Governance alerts` are supporting surfaces for advanced inspection and optional notifications.
+
+## Tools and Diagnostics
+
+[Open Tools and Diagnostics](../../tools)
+
+The Tools page contains:
+
+- `Deployment`: active chain ID, factory state, creation fee, and configured deployment addresses.
+- `Wallet`: the connected address and wallet chain.
+- `Artifact`: the raw deployment artifact used by the app.
+- `Create Direct Grant`: a protocol-level direct grant workflow that is not attached to a Boardroom project.
+- `Discovery Diagnostics`: explicit scan ranges, cached results, and contract read errors.
+
+Use these tools to diagnose a deployment, verify an address, or resume bounded discovery. They do not override canonical provenance, wallet authority, network matching, simulation, or transaction review.
+
+If an artifact says `pending`, missing contract addresses are intentional. Do not substitute addresses from an older deployment.
+
+## Governance alerts
+
+[Open Governance alerts](../../settings/alerts)
+
+Alerts are available only when the app build has the optional Sentinel API configured. Without it, alert URLs return to `Explore`. Sentinel is an offchain notification service; it does not queue, veto, execute, or change onchain authority.
+
+To configure alerts:
+
+1. To create a Sentinel account, connect a browser wallet and choose `Sign in with wallet`. The first account is always created by a SIWE wallet signature.
+2. If you previously linked a social sign-in to that account, you can use the offered social method to reopen it. A social provider cannot create a walletless account.
+3. Under `Wallets`, link the connected wallet and choose `Watch alerts`.
+4. Under `Delivery`, choose `Link Telegram` and complete the expiring link flow.
+5. Under `Alert rules`, choose `Wallet holdings` or `Specific Boardrooms`, set `Minimum severity`, and `Save`.
+
+Every linked wallet can sign in, but only wallets marked `Watching alerts` contribute wallet-based coverage. `Specific Boardrooms` accepts an explicit chain ID and Boardroom address.
+
+## Public governance activity
+
+When Sentinel is configured, a project’s `Governance` section can show observed `Decision history` without giving the viewer transaction authority. Treat an alert as a prompt to inspect the canonical project, decoded action, and current onchain status—not as proof that an action remains pending or safe.
+
+## Recovery and privacy
+
+- `Alert service` with `Retry` means the Sentinel request failed; onchain project pages remain usable.
+- Use `Refresh`, `Refresh wallets`, or `Refresh channels` after completing an external sign-in or Telegram flow.
+- A linked wallet and notification destination are offchain account data. Use `Stop watching`, remove a delivery channel, or `Sign out` when access is no longer wanted.
+- Never sign a message whose domain, URI, wallet, chain ID, or purpose does not match the pledge.cash alert flow shown in the browser.
+
+[Read the project Governance guide](project-workspace) · [Review safety boundaries](../start/use-safely)

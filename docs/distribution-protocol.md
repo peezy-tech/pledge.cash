@@ -5,13 +5,15 @@ This document describes the Boardroom distribution primitives in `packages/contr
 
 ## Actors
 
-- Boardroom owner: mints treasury-held Boardroom shares, approves the distribution factory, and creates distributions through `Boardroom.executeBatch`.
+- Boardroom governance: mints treasury-held Boardroom shares, approves the distribution factory, and creates
+  distributions. Before launch the owner may call `Boardroom.executeBatch` directly; after launch the executor must
+  queue the same Boardroom calls and anyone may execute the ready action.
 - Boardroom: owns sale inventory before creation and receives buyer payments directly into its treasury.
 - Distribution factory: deploys deterministic distribution clones, records which Boardroom created each one, and acts as the Boardroom call policy for distribution actions.
 - Buyer: purchases Boardroom shares from a fixed-price sale or migrating bonding curve.
 - Seller: sells curve-issued shares back to an active migrating bonding curve.
-- Boardroom owner as migrator: calls a ready curve through `Boardroom.execute` to migrate reserves into Boardroom-owned
-  locked AMM liquidity.
+- Boardroom governance as migrator: asks a ready curve to migrate reserves into Boardroom-owned locked AMM liquidity,
+  using direct owner execution only before launch or a queued action after launch.
 - Distribution recipient: receives purchased Boardroom shares.
 - Airdrop claimant: proves inclusion in a Merkle root and receives Boardroom shares directly or through a Boardroom-issued grant.
 
@@ -109,8 +111,9 @@ State:
 
 Preconditions:
 
-- Boardroom owner has minted share inventory to the Boardroom.
-- Boardroom executes a policy-approved batch:
+- Boardroom governance has minted share inventory to the Boardroom.
+- The Boardroom executes a policy-approved batch, directly by its owner before launch or as a queued action after
+  launch:
   - approve the distribution factory for the share inventory,
   - call `createFixedPriceSale`.
 - share token is the Boardroom's own share token.
@@ -153,8 +156,9 @@ behavior therefore revert the complete purchase instead of overcharging a buyer 
 
 ## Close Or Cancel
 
-Only the creating Boardroom can close or cancel a sale, and in normal operation this happens through
-`Boardroom.execute` with `DistributionFactory` as policy.
+Only the creating Boardroom contract can close or cancel a sale. Before launch its owner can request this through
+`Boardroom.execute`; after launch the executor queues the policy-checked action and any caller may execute it once ready.
+`DistributionFactory` remains the required policy in either phase.
 
 Effects:
 
@@ -169,8 +173,9 @@ sale.
 
 Preconditions:
 
-- Boardroom owner has minted share inventory to the Boardroom.
-- Boardroom executes a policy-approved batch:
+- Boardroom governance has minted share inventory to the Boardroom.
+- The Boardroom executes a policy-approved batch, directly by its owner before launch or as a queued action after
+  launch:
   - approve the distribution factory for the airdrop inventory,
   - call `createMerkleAirdrop`.
 - share token is the Boardroom's own share token.
@@ -186,18 +191,21 @@ Effects:
 - airdrop initializes lifecycle and Merkle parameters,
 - factory transfers the full share inventory from the Boardroom into airdrop escrow.
 
-Direct claims transfer proven share amounts from airdrop escrow to the claimant account. Grant claims create a
+Anyone may submit a valid direct or grant proof; the leaf-bound `account`, not `msg.sender`, receives the shares or grant
+right. Direct claims transfer proven share amounts from airdrop escrow to that account. Grant claims create a
 Boardroom-issued `TokenGrant` funded by the airdrop escrow, consume one reserved Boardroom grant slot, and record that
 grant so redemptions cannot open while it remains live. Grant-claim leaves are capped by `maxGrantClaims`; once the cap
 is reached, otherwise valid grant proofs revert instead of overflowing the Boardroom's bounded issued-grant list.
 Distribution-created grants always use the factory's explicit zero-fee path; `claimGrant` is nonpayable.
 The token-grant factory grants that exemption only when its immutable canonical `BoardroomFactory` recognizes the issuer
-and the issuer recognizes the calling airdrop as one of its active issued distributions.
+and the issuer permanently recognizes the calling airdrop as one of its issued distributions. The airdrop itself still
+requires both its own status and the Boardroom status to be active for any claim.
 
 Both direct-claim and grant-claim leaves commit to `block.chainid`, the predicted airdrop address, Boardroom, share token,
 claim index, claimant, and amount. Grant leaves additionally commit to the token-grant factory and a hash of every grant
-term. Claims track `claimedShares`, and the contract rejects any claim that would take aggregate claimed inventory above
-the originally escrowed `airdropSupply`.
+term. The deployed grant salt is further derived from the airdrop address, claim index, account, and leaf-bound salt.
+Claims track `claimedShares`, and the contract rejects any claim that would take aggregate claimed inventory above the
+originally escrowed `airdropSupply`.
 
 The Merkle root is an opaque commitment, so several properties remain an offchain root-construction responsibility and
 cannot be proven during `createMerkleAirdrop`: use unique indices, encode the exact onchain type hashes and chain id, use
@@ -206,14 +214,16 @@ sorted-pair hashing compatible with Solady `MerkleProofLib`, ensure the sum of i
 still enforce the inventory cap and one successful claim per index if a malformed root is published.
 
 Closing or cancelling an airdrop returns unclaimed share inventory to the Boardroom and releases any unused reserved
-grant slots.
+grant slots. Starting Boardroom wind-down stops claims immediately even if the airdrop has not yet been explicitly
+closed or cancelled.
 
 ## Curve Create
 
 Preconditions:
 
-- Boardroom owner has minted `saleSupply + migrationSupply` shares to the Boardroom.
-- Boardroom executes a policy-approved batch:
+- Boardroom governance has minted `saleSupply + migrationSupply` shares to the Boardroom.
+- The Boardroom executes a policy-approved batch, directly by its owner before launch or as a queued action after
+  launch:
   - approve the distribution factory for the total share inventory,
   - call `createMigratingBondingCurve`.
 - share token is the Boardroom's own share token.
@@ -310,6 +320,7 @@ the quote asset was registered at creation, recovery remains safe even after red
 - The Boardroom records migrated locked liquidity before redemptions can open.
 - Fee-on-transfer and sender-surcharge share or payment tokens fail safely through exact two-sided balance-delta checks.
 - Aggregate Merkle claims never exceed the airdrop inventory committed at creation.
+- Merkle claims require both the airdrop and its creating Boardroom to remain active.
 - Distribution indexes are bounded by `MAX_DISTRIBUTIONS_PER_BOARDROOM`, and closed entries can be pruned without
   erasing their permanent factory identity.
 

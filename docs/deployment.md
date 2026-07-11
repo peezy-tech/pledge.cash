@@ -1,14 +1,19 @@
 # Deployment
 
-This document covers the current contract deployment surface for TokenGrant, Boardroom, fixed-price distribution,
-migrating bonding curve, AMM, and locked-liquidity primitives.
+This document covers the current contract deployment surface for TokenGrant, Boardroom, fixed-price sale, Merkle
+airdrop, migrating bonding curve, AMM, and locked-liquidity primitives.
 
 ## Testnet Targets
 
-| Network | Chain id | Default RPC | Wrapped native | Wrapper | Artifact |
+| Network | Chain id | Default RPC | Wrapped native | Wrapper | Artifact status |
 | --- | ---: | --- | --- | --- | --- |
-| HyperEVM Testnet | `998` | `https://rpc.hyperliquid-testnet.xyz/evm` | `0x5555555555555555555555555555555555555555` | `packages/contracts/script/hyperevm-testnet/deploy.sh` | `packages/contracts/deployments/998.json` |
-| Monad Testnet | `10143` | `https://testnet-rpc.monad.xyz` | `0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541` | `packages/contracts/script/monad-testnet/deploy.sh` | `packages/contracts/deployments/10143.json` |
+| HyperEVM Testnet | `998` | `https://rpc.hyperliquid-testnet.xyz/evm` | `0x5555555555555555555555555555555555555555` | `packages/contracts/script/hyperevm-testnet/deploy.sh` | `998.json`: `pending` |
+| Monad Testnet | `10143` | `https://testnet-rpc.monad.xyz` | `0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541` | `packages/contracts/script/monad-testnet/deploy.sh` | `10143.json`: `pending` |
+
+Target support is not deployment evidence. Both checked-in artifacts currently say
+`Authority-hardened deterministic v4 deployment has not been broadcast yet`; each contains a chain id, `status`, and
+`reason`, but no protocol addresses. Treat HyperEVM and Monad as supported broadcast targets, not live pledge.cash
+deployments, until a wrapper has promoted a fully verified candidate artifact.
 
 The deploy script creates or reuses one `PledgeCashDeterministicDeployer`, then creates one
 `BoardroomPolicyRegistry`, one `AssetPolicy`, one `BoardroomGovernanceLogic`, one `BoardroomRedemptionPayout`, one
@@ -54,14 +59,15 @@ owned by `PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER`; the current script requires
 can deploy or reuse roots safely.
 
 The registry allows `AssetPolicy` for external asset operations and permanently registers the token grant,
-distribution, and locked-liquidity factories as module policies. Permanent module identity prevents a disabled module
-from becoming an untracked raw-call target and preserves the canonical policy needed to finish or clean up obligations
-that the module created. A module's mutable status still controls whether it can create new obligations. Each factory
-authorizes its own calls and reports any created Boardroom obligation for redemption accounting. `AmmRouter` is deployed
-for user and protocol flows but is not a deployment-default Boardroom policy. The deploy script also registers the token
-grant, distribution, and locked-liquidity factories as allowed approval spenders in `AssetPolicy`. Boardroom-created
-share tokens and other project-specific assets still need to be registered in `AssetPolicy` before their approvals can
-be executed through a Boardroom.
+distribution, and locked-liquidity factories as module policies. Registration starts each module in `Active` status.
+Protocol governance may later set a policy to `LifecycleOnly` or `Disabled`; either status blocks new active calls, but
+permanent module identity and each obligation's canonical-policy binding preserve its approved cleanup calls. A disabled
+module therefore cannot become an untracked raw-call target. Each factory authorizes its own calls and reports any
+created Boardroom obligation for redemption accounting. `AmmRouter` is deployed for user and protocol flows but is not
+a deployment-default Boardroom policy. The deploy script also registers the token grant, distribution, and
+locked-liquidity factories as allowed approval spenders in `AssetPolicy`. Boardroom-created share tokens and other
+project-specific assets still need protocol-governance registration in `AssetPolicy` before a Boardroom can approve them
+through that policy.
 
 The checked-in testnet artifacts may model subsystems independently while deployment history is being rebuilt. If an
 existing artifact predates a current subsystem, mark that subsystem pending instead of keeping stale partial fields. A
@@ -272,6 +278,10 @@ The web app can switch between the checked-in HyperEVM testnet, Monad testnet, a
 The selected chain is stored in browser local storage and can also be opened directly with `?chain=998`, `?chain=10143`,
 or `?chain=31337`.
 
+A selectable network profile proves only RPC and chain metadata. With the current pending `998.json` and `10143.json`
+artifacts, the app has no verified root contracts to transact with on either testnet. Local Anvil is the current complete
+interactive scenario when its ignored deployment and seed artifacts have been generated.
+
 Local Anvil uses chain id `31337` and reads ignored runtime artifacts from:
 
 - `packages/contracts/deployments/31337.json`
@@ -301,19 +311,21 @@ adding a custom selectable profile from `VITE_PLEDGE_CASH_RPC_URL`, `VITE_PLEDGE
 ## Local Anvil Seed
 
 For a semi-persistent local deployment, run Anvil on chain id `31337`, broadcast
-`Deploy.s.sol` with a predeployed wrapped-native contract, then seed a repeatable
-scenario matrix:
+`Deploy.s.sol` with a predeployed wrapped-native contract, then seed the repeatable
+scenario matrix implemented by `SeedLocal.s.sol`:
 
 - direct grant variations: free partially settled, paid transferred and settled,
   and halted before cliff;
-- project launch path: Boardroom-issued migrating curve, two curve buyers,
-  migration into locked AMM liquidity, several post-migration AMM buys, and
-  claimable locked-liquidity fees for the Boardroom;
-- local product network: additional Boardrooms with an active fixed-price
-  sale, an active bonding curve with buy/sell history, and a closed
-  fixed-price sale with treasury cash already raised;
-- employee option variations: partially settled active option, unvested future
-  cliff option, and vested partially settled advisor option.
+- Seed Labs: Boardroom-issued migrating curve, two curve buyers, migration into locked AMM liquidity, three
+  post-migration AMM buys, claimable locked-liquidity fees, and three employee option variants (partially settled
+  active, unvested future-cliff, and vested partially settled);
+- Atlas Payroll: active fixed-price sale with two buyers;
+- Northstar Robotics: active bonding curve with three buys and one sell;
+- Harbor Analytics: closed fixed-price sale with two historical buyers and treasury cash already raised.
+
+All four seeded Boardrooms remain prelaunch: `SeedLocal` does not call `Boardroom.launch()`. Its setup transactions use
+direct owner execution, and it does not seed a Merkle airdrop. This distinction matters when using the local data to test
+the launched executor/timelock UI or airdrop claim flows.
 
 ```sh
 cd packages/contracts

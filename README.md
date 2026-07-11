@@ -1,17 +1,18 @@
 # pledge.cash
 
-pledge.cash is a smart contract workspace for token-backed pledges and grants. The product direction is a protocol where issuers escrow assets, holders earn or settle rights over time, and every asset movement is explainable from contract state.
+pledge.cash is a permissionless protocol and product workspace for token-backed project accounts. Projects can issue tokens, create grants and distributions, govern delayed actions, own liquidity, and wind down into redemptions while keeping the resulting authority and asset movement explainable from contract state.
 
 ## Repository Layout
 
 - `packages/contracts`: Foundry contracts, tests, and contract-specific configuration.
-- `docs/pages`: public user documentation published under `/docs`.
-- `docs/*.md`: protocol and engineering reference notes.
+- `docs/pages`: public product and developer documentation published under `/docs`.
+- `docs/*.md`: deep protocol and engineering source notes linked from the public developer reference.
 
 ## Start Here
 
+- [Public Docs](docs/pages/index.md): task-oriented product documentation for exploring, participating, operating, governing, and closing projects.
+- [Developer Docs](docs/pages/developers/index.md): public integration map and links into the deep protocol references.
 - [Token Grant Protocol](docs/token-grant-protocol.md): escrow-backed free-claim and paid-settlement token grants.
-- [Public Docs](docs/pages/index.md): user-facing docs for founders, buyers, holders, advisors, and contractors.
 - [Boardroom Protocol](docs/boardroom-protocol.md): owned issuer accounts with native share tokens.
 - [Distribution Protocol](docs/distribution-protocol.md): fixed-price Boardroom share sales.
 - [AMM Protocol](docs/amm-protocol.md): Boardroom-owned liquidity, trading, and fee accounting.
@@ -20,6 +21,7 @@ pledge.cash is a smart contract workspace for token-backed pledges and grants. T
 - [Contributing](CONTRIBUTING.md): local setup, PR expectations, and contract-change checklist.
 - [Security](SECURITY.md): supported scope and vulnerability reporting process.
 - [Agent Guide](AGENTS.md): operating rules for coding agents and humans making repo changes.
+- [Docs Authoring Standard](docs/AUTHORING.md): truth, structure, linking, and verification rules for public documentation.
 
 ## Local Development
 
