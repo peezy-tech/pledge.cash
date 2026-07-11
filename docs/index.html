@@ -4,12 +4,28 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>pledge.cash docs</title>
+    <script id="pledge-docs-initial-hash">window.__PLEDGE_DOCS_INITIAL_SEARCH__ = window.location.search; window.__PLEDGE_DOCS_INITIAL_HASH__ = window.location.hash;</script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-    <style>
+    <style id="pledge-docs-theme">
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
       body { -webkit-font-smoothing: antialiased; }
+      .tome-grain {
+        --ac: #3f6212 !important;
+        --acD: rgba(63, 98, 18, 0.09) !important;
+        --acT: #365314 !important;
+      }
+      html.dark .tome-grain {
+        --ac: #a3e635 !important;
+        --acD: rgba(163, 230, 53, 0.12) !important;
+        --acT: #bef264 !important;
+      }
+      .tome-content a {
+        text-decoration: underline !important;
+        text-decoration-thickness: 0.08em !important;
+        text-underline-offset: 0.18em !important;
+      }
       ::-webkit-scrollbar { width: 6px; height: 6px; }
       ::-webkit-scrollbar-track { background: transparent; }
       ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }

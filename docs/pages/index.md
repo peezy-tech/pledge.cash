@@ -1,53 +1,59 @@
 ---
-title: pledge.cash
-description: User-facing documentation for Boardrooms, token grants, token sales, liquidity, and wind-down flows.
+title: Start Here
+description: Understand pledge.cash, choose the right workspace, and verify what is available before connecting a wallet.
 ---
 
 # pledge.cash
 
-`pledge.cash` is a protocol for creating token-backed Boardrooms, selling or granting tokens, and keeping the resulting asset movements visible on-chain.
+Inspect the project before you act.
 
-A Boardroom is an on-chain project account. It can hold treasury assets, mint its own project token, create grants, run token distribution flows, seed liquidity, and eventually wind down into redemptions. The important product promise is not that every project is good. The promise is that the project account, token movements, grants, sales, liquidity, and redemptions can be inspected from contract state.
+pledge.cash is an onchain workspace for token-backed project accounts. It makes project tokens, grants, distributions, governance actions, treasury assets, liquidity, and redemptions inspectable from contract state.
 
-## What You Can Do
+It does **not** certify a team, guarantee a token's value, or turn project claims into legal rights.
 
-| User | Common job |
-| --- | --- |
-| Founder or project operator | Create a Boardroom, issue a project token, run a token sale, grant tokens to contributors, and manage treasury-owned liquidity. |
-| Buyer or holder | Buy tokens or paid grants, inspect what the contract says you hold, and understand what rights are actually encoded. |
-| Advisor or contractor | Receive a vesting token grant, settle vested tokens over time, and understand expiry, transferability, and payment terms. |
+## Choose Where To Start
 
-## What A Token Means
+| Your job | Start here | What you will find |
+| --- | --- | --- |
+| Understand or join a project | [Explore](using/explore) | Canonical projects and their current participation routes. |
+| Review your grants and roles | [Portfolio](using/portfolio) | Wallet-specific items ordered by what needs attention. |
+| Create or operate a project | [Studio](using/studio) | Setup, token, grant, distribution, liquidity, governance, and close workflows. |
 
-Tokens created or distributed through pledge.cash are protocol assets. They do not automatically represent equity, debt, dividends, employment, voting rights, legal membership, or any other off-chain entitlement. A project may describe additional terms somewhere else, but those terms are not created merely because a wallet holds a token.
+[Open the app](../explore) when you are ready to inspect live state.
 
-When these docs use words like buyer, holder, investor, advisor, or contractor, they refer to how a person interacts with the protocol. They do not imply rights beyond the deployed contracts and any separate agreements a project makes outside the protocol.
+## Read A Project In Four Passes
 
-## How To Read These Docs
+Every canonical project workspace uses the same sequence:
 
-Start with the persona closest to your role:
+1. **Overview** — identify the Boardroom, project token, lifecycle, and available actions.
+2. **Participate** — compare the exact sale, curve, airdrop, or AMM routes discovered for that project.
+3. **Governance** — see who can act, what is queued, and when holders can intervene.
+4. **Transparency** — inspect treasury assets, supply, obligations, distributions, liquidity, and provenance.
 
-- [Founders and project operators](personas/founders)
-- [Buyers and holders](personas/buyers-holders)
-- [Advisors and contractors](personas/advisors-contractors)
+See [Project workspace](using/project-workspace) for what each section proves—and what it does not.
 
-Then use the concept pages when you need to understand a specific primitive:
+## Before A Wallet Opens
 
-- [Boardrooms](concepts/boardrooms)
-- [Token grants](concepts/token-grants)
-- [Sales and liquidity](concepts/sales-liquidity)
-- [Wind-down](concepts/wind-down)
-- [Protocol and service layer](concepts/protocol-and-service-layer)
+- Confirm the network and the chain ID embedded in the route.
+- Use canonical project and grant URLs instead of copying an address into an unrelated screen.
+- Treat `Unknown`, partial history, and failed reads as incomplete information—not zero.
+- Read the transaction review, target, value, and calldata summary. After you continue, the app simulates the call and stops before opening the wallet if simulation fails; it does not show a separate successful simulation result inside the review.
+- Expect a submitted transaction to remain visible while it confirms, is replaced, or the workspace refreshes.
 
-## App Navigation
+Read [Use pledge.cash safely](start/use-safely) and [Transactions and wallet activity](using/transactions-and-wallet) before your first write.
 
-- `Explore` is the public project directory.
-- `Portfolio` orders wallet-specific grants and roles by urgency.
-- `Studio` contains project creation and operator workflows.
-- Every project has `Overview`, `Participate`, `Governance`, and `Transparency` sections at a chain-and-Boardroom-specific URL.
+## Current Availability
 
-Every write is reviewed and simulated before the wallet opens, then tracked through its on-chain receipt.
+The public HyperEVM testnet and Monad testnet deployment artifacts are currently marked **pending**. They do not contain a usable current contract stack. The HQ environment exposes a seeded local Anvil scenario for product testing, not a durable public deployment.
 
-## Current Status
+Secure governance launch is also unavailable for the current legacy Boardroom version because its launch calldata does not bind the expected executor. The app intentionally refuses to submit or certify that permanent transition.
 
-The protocol is being built around HyperEVM and Monad testnet deployments, local scenarios, and contract-level verification. Treat mainnet use, unsupported deployments, and claims made outside the contracts as separate risk.
+Read [Networks and current limitations](start/networks-and-limitations) before interacting with any claimed deployment.
+
+## Understand The Boundary
+
+Project tokens are ERC-20 protocol assets. Depending on Boardroom lifecycle, eligible holders can have limited onchain veto and wind-down powers. Tokens do not automatically create equity, debt, dividends, employment, legal membership, or offchain governance rights.
+
+Hosted services such as Sentinel can index public governance actions and deliver configured alerts. They are optional context, not settlement authority. Contract state remains the source of truth for protocol actions.
+
+Continue with [What pledge.cash is](start/what-is-pledge-cash), [Choose your path](start/choose-your-path), or the [Glossary](reference/glossary).

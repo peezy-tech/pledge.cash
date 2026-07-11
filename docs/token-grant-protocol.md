@@ -19,9 +19,9 @@ tokens into it.
   into the grant holder field, optionally collects a native creation fee, and stores an immutable canonical
   `BoardroomFactory` for distribution-grant provenance.
 - Factory owner: authority that can update the native creation fee, rotate its independent fee recipient, and transfer
-  factory ownership. The canonical deployment assigns this role to protocol governance.
+  factory ownership. The canonical deployment script assigns this role to protocol governance.
 - Fee recipient: receives paid native creation fees. Factory ownership transfers do not change this address. The
-  canonical deployment points it at `ProtocolFeeRouter`, whose treasury destination is independently rotatable.
+  canonical deployment script points it at `ProtocolFeeRouter`, whose treasury destination is independently rotatable.
 
 ## Assets
 
@@ -31,8 +31,8 @@ tokens into it.
   grant.
 - Grant-right NFT: ERC721 token minted by the factory. Its `tokenId` is `uint256(uint160(grantAddress))`.
 
-Native HYPE is not escrowed by grants. It is only used for the optional creation fee, which the factory forwards to the
-current `feeRecipient` during grant creation.
+The chain's native gas token is not escrowed by grants. Native value is used only for the optional creation fee, which
+the factory forwards to the current `feeRecipient` during grant creation.
 
 ## Parameters
 
@@ -49,34 +49,27 @@ current `feeRecipient` during grant creation.
 - `transferable`: whether the factory ERC721 holder right may be transferred before expiry and close.
 - `transferUnlockTime`: timestamp before which a transferable grant-right token cannot be transferred.
 
-The local project-token scenario may explicitly direct a `0.1 HYPE` creation fee to its project Boardroom. That is a
-scenario-specific revenue choice, not an effect of factory ownership and not the canonical root deployment route.
+The local project-token scenario labels Anvil's native gas token as HYPE and explicitly directs a `0.1 HYPE` creation
+fee to its project Boardroom. That is a scenario-specific revenue choice, not an effect of factory ownership and not
+the canonical root deployment route.
 
-## HyperEVM Testnet
+## Testnet Deployment Status
 
-The rewrite deployment target is HyperEVM testnet:
+The creation fee is chain-native and does not hard-code a gas-token symbol. The wider root stack supplies a
+chain-specific wrapped-native address for Boardroom and AMM accounting. The repository has deployment wrappers for
+HyperEVM testnet (`998`) and Monad testnet (`10143`), but the current checked-in artifacts contain only their chain id
+plus this pending state:
 
-- Chain id: `998`
-- Default RPC: `https://rpc.hyperliquid-testnet.xyz/evm`
-- Public page: `https://pledge.cash/`
-- Deployment artifact: `packages/contracts/deployments/998.json`
-
-Dry-run deployment:
-
-```sh
-bun run simulate:hyperevm-testnet
+```json
+{
+  "status": "pending",
+  "reason": "Authority-hardened deterministic v4 deployment has not been broadcast yet"
+}
 ```
 
-Broadcast deployment:
-
-```sh
-BROADCAST=1 bun --cwd packages/contracts deploy:hyperevm-testnet
-```
-
-The wrapper refuses RPC endpoints that do not report chain id `998`. Broadcasts
-require `HYPEREVM_TESTNET_PRIVATE_KEY` or `PRIVATE_KEY`. Foundry writes the
-deployment artifact during the broadcast script run, so verify the artifact
-against on-chain bytecode before publishing it.
+These pending files are not contract addresses or evidence of a live TokenGrant deployment. The wrappers write a
+candidate artifact, verify its live code, wiring, policy state, and authorities, and only then promote it to the
+checked-in path. See `docs/deployment.md` for both networks' dry-run, broadcast, and verification procedures.
 
 ## Lifecycle
 
@@ -99,7 +92,7 @@ Preconditions:
 
 `createGrantFromDistribution` is a separate nonpayable path for issued distributions. Before granting the fee exemption,
 the token-grant factory requires its immutable canonical `BoardroomFactory` to recognize the issuer as a deployed
-Boardroom and requires that Boardroom to recognize the caller as one of its currently issued distributions. A contract
+Boardroom and requires that Boardroom to recognize the caller as one of its recorded issued distributions. A contract
 cannot obtain the exemption merely by implementing `isIssuedDistribution` itself. The path always uses zero creation fee
 so a later factory fee update cannot censor a grant entitlement already committed in a Merkle root. Direct `createGrant`
 calls continue to require the current configured fee exactly.
@@ -149,7 +142,8 @@ When a transferable grant-right token moves, the factory calls `TokenGrant.onGra
 `TokenGrant.holder()` to the new ERC721 owner.
 
 When a grant closes, `TokenGrant.holder()` is cleared to `address(0)` because no address retains settlement authority.
-The final holder is recorded in the factory `GrantClosed` event emitted before the ERC721 burn.
+The factory captures the final holder, burns the grant-right ERC721, and then records that captured address in the
+`GrantClosed` event.
 
 ### Settle
 
@@ -221,8 +215,9 @@ rights. Partially settled grants preserve their settled accounting and record on
 - transferable grant-right ERC721 tokens cannot move before their transfer unlock time.
 - grant lifecycle transitions lock transferable grant-right ERC721 movement during external token calls.
 - grant-right ERC721 ownership does not silently disappear at expiry.
-- holder-only settlement cannot be called by issuer or random callers.
-- issuer-only transitions cannot be called by holder or random callers.
+- settlement accepts only the current holder address; unrelated callers cannot settle.
+- issuer-only transitions accept only the configured issuer address; unrelated callers cannot invoke them.
+- issuer and holder are address-based roles, not mutually exclusive identities; one address can satisfy both gates.
 - only a canonical Boardroom issuer can quarantine a grant, and only after settlement rights have expired.
 - a non-share grant asset that returns on halt or expiry remains inside the Boardroom redemption basket.
 - `price == 0` grants never call a payment token.

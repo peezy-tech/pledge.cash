@@ -35,9 +35,10 @@ silently synchronized into LP accounting.
 
 `AmmFactory.owner()` is protocol governance. Governance may rotate the protocol fee recipient and the operational fee
 manager independently. The fee manager can reconcile untracked pool balances but cannot redirect protocol revenue.
-When the recipient is unset, all swap fees accrue to LPs. Canonical deployments set it to `ProtocolFeeRouter`, and
-`PROTOCOL_FEE_SHARE_BPS` of each nominal swap fee is transferred there. Anyone may forward a router-held token or native
-balance to its current treasury; only router governance may rotate that treasury.
+When the recipient is unset, all swap fees accrue to LPs. The canonical deployment script sets it to
+`ProtocolFeeRouter`, and
+`PROTOCOL_FEE_SHARE_BPS` of each nominal swap fee is transferred there. Anyone may call `ProtocolFeeRouter` to forward
+its token or native balance to the configured treasury; only the fee router's owner may rotate that treasury.
 
 The nominal swap fee rounds up. Consequently, splitting one input across smaller swaps cannot reduce the total nominal
 fee. The pool carries both protocol-share division remainders and LP-index numerator remainders forward so repeated
@@ -124,8 +125,9 @@ The locked-liquidity factory reserves an empty pool before pulling seed assets a
 seed slippage in contract, including migrations from a bonding curve. A permissionless caller may pre-create the
 canonical pair, but cannot take the first mint after reservation. If a pool is already initialized, a hostile reserve
 ratio cannot reduce either Boardroom contribution below the configured bounds; the transaction reverts atomically
-instead. Token donations can still delay a reserved initialization until the fee manager recovers them, so the
-reservation is an ownership-integrity guarantee rather than an availability guarantee.
+instead. During a reserved first mint, supported exact-transfer token donations are swept atomically to the reservation
+owner before the seed balances are verified. A hostile or inexact token can still make that initialization revert, so
+the reservation protects first-mint ownership without making arbitrary token behavior safe.
 
 ### Swap
 
@@ -183,7 +185,8 @@ router or pool interaction with the expectation that they remain recoverable.
 
 ### Create Boardroom Locked Liquidity
 
-The Boardroom owner executes a batch:
+Boardroom governance executes a batch, directly by the owner before launch or through an executor-queued action after
+launch:
 
 1. approve `LockedLiquidityFactory` for the Boardroom share token,
 2. approve `LockedLiquidityFactory` for the quote token,
@@ -196,7 +199,10 @@ locker, then asks the locker to add liquidity through the router. The Boardroom 
 
 ### Claim Locked LP Fees
 
-The Boardroom may call `LockedLiquidity.claimFees` through policy while active or winding down. The locker claims its LP fees from the pool and forwards token balances to the Boardroom.
+The Boardroom may call `LockedLiquidity.claimFees` through policy while active or winding down. Before launch its owner
+can request the call directly; after launch active-state calls are queued, while a recorded locker's canonical
+zero-value lifecycle call can be submitted permissionlessly during wind-down. The locker claims its LP fees from the
+pool and forwards token balances to the Boardroom.
 
 ### Exit Locked LP
 
@@ -254,7 +260,8 @@ full-precision multiply/divide where user-controlled multiplication could otherw
 ## Invariants
 
 - one pool exists per sorted token pair,
-- pool reserves equal pool token balances after fees are moved to `PoolFees` and the protocol recipient,
+- for supported tokens, recorded reserves equal pool balances minus any positive untracked excess after fees are moved
+  to `PoolFees` and the protocol recipient,
 - LP fee claims cannot exceed `PoolFees` balances,
 - protocol fee routing and the operational fee manager can be rotated only by factory governance,
 - reserved initial liquidity can be minted only through the canonical router by the expected payer to the expected LP

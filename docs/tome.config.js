@@ -1,56 +1,92 @@
+import { fileURLToPath } from "node:url";
+
+import { normalizeDocsBasePath } from "./base-path.js";
+
+const basePath = normalizeDocsBasePath(
+  process.env.PLEDGE_CASH_DOCS_BASE_PATH ?? "/docs",
+  "PLEDGE_CASH_DOCS_BASE_PATH",
+);
+
 /** @type {import('@tomehq/core').TomeConfig} */
 export default {
   name: "pledge.cash",
-  basePath: process.env.PLEDGE_CASH_DOCS_BASE_PATH ?? "/docs",
+  basePath,
   branding: {
     powered: false,
+  },
+  overrides: {
+    Header: fileURLToPath(new URL("./components/SiteHeader.jsx", import.meta.url)),
+    PageFooter: fileURLToPath(new URL("./components/SitePageFooter.jsx", import.meta.url)),
+    Sidebar: fileURLToPath(new URL("./components/SiteSidebar.jsx", import.meta.url)),
+    Toc: fileURLToPath(new URL("./components/SiteToc.jsx", import.meta.url)),
   },
   theme: {
     preset: "editorial",
     mode: "auto",
-    accent: "#84cc16",
   },
   navigation: [
-    { group: "Start", pages: ["index"] },
     {
-      group: "Personas",
+      group: "Start",
       pages: [
-        "personas/founders",
-        "personas/buyers-holders",
-        "personas/advisors-contractors",
+        "index",
+        "start/what-is-pledge-cash",
+        "start/choose-your-path",
+        "start/use-safely",
+        "start/networks-and-limitations",
       ],
     },
     {
-      group: "Concepts",
+      group: "Using The App",
       pages: [
-        "concepts/boardrooms",
-        "concepts/token-grants",
-        "concepts/sales-liquidity",
-        "concepts/wind-down",
-        "concepts/protocol-and-service-layer",
+        "using/explore",
+        "using/project-workspace",
+        "using/portfolio",
+        "using/grant-details",
+        "using/studio",
+        "using/transactions-and-wallet",
+        "using/tools-and-alerts",
       ],
     },
     {
-      group: "Walkthroughs",
+      group: "Guides",
       pages: [
-        "walkthroughs/launch-boardroom",
-        "walkthroughs/receive-settle-grant",
-        "walkthroughs/buy-from-sale-or-curve",
+        "guides/evaluate-and-join",
+        "guides/receive-and-settle-grant",
+        "guides/claim-airdrop",
+        "guides/create-and-operate-project",
+        "guides/govern-a-project",
+        "guides/wind-down-and-redeem",
       ],
     },
     {
-      group: "Flows",
+      group: "Understand",
       pages: [
-        "flows/launch-boardroom",
-        "flows/buy-or-hold",
-        "flows/receive-grant",
+        "understand/boardrooms-and-project-tokens",
+        "understand/grants-and-vesting",
+        "understand/distributions-and-liquidity",
+        "understand/governance-and-holder-protections",
+        "understand/treasury-obligations-and-redemptions",
+        "understand/provenance-and-hosted-context",
       ],
     },
     {
       group: "Reference",
       pages: [
+        "reference/networks-and-deployments",
+        "reference/canonical-identity",
+        "reference/troubleshooting",
         "reference/glossary",
-        "reference/deployments",
+      ],
+    },
+    {
+      group: "Developers",
+      pages: [
+        "developers/index",
+        "developers/boardroom",
+        "developers/grants",
+        "developers/distributions-and-airdrops",
+        "developers/amm-and-liquidity",
+        "developers/deployment-and-local-scenarios",
       ],
     },
   ],

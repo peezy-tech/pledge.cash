@@ -1,0 +1,52 @@
+---
+title: Deployment and local scenarios
+description: Developer bridge for deterministic broadcasts, pending artifacts, local Anvil deployment, seeding, and browser verification.
+---
+
+# Deployment and local scenarios
+
+Use the [deployment specification](https://github.com/peezy-tech/pledge.cash/blob/main/docs/deployment.md) for environment variables, authority wiring, deterministic salts, broadcast wrappers, artifact schema, and verification commands.
+
+## Public testnet status
+
+Artifacts for HyperEVM testnet `998` and Monad testnet `10143` are pending because the authority-hardened deterministic v4 stack has not been broadcast. Clients must withhold stale root addresses while pending.
+
+Do not develop against guessed legacy addresses. A candidate artifact becomes publishable only after live code, ownership, policy, helper, factory, router, fee, and immutable-wiring verification succeeds.
+
+## Deterministic deployment flow
+
+1. Configure deterministic deployer owner, protocol governance, treasury, AMM fee manager, wrapped native, and broadcaster.
+2. Run the chain-specific dry-run wrapper and confirm chain id.
+3. Broadcast through the maintained wrapper.
+4. Verify the candidate against live RPC state and runtime code hashes.
+5. Promote only the verified candidate to the checked-in artifact.
+6. Build the web app and confirm it resolves the promoted deployment.
+
+Use the exact commands in the engineering deployment note; network gas behavior and Foundry variants differ.
+
+## Local Anvil scenario
+
+Local Anvil uses chain id `31337`, normally on port `8547`. Deploy the full stack with a local wrapped-native contract, write the ignored local artifact, then run the maintained seed scenario.
+
+The seed covers standalone grant variants and Boardroom project flows. Its addresses belong only to that Anvil state. Resetting Anvil invalidates the artifact, seed manifest, browser cache, and prior receipt-refresh context together.
+
+For a subpath browser deployment, use the repository's `build:local` or `dev:local` flow so app base path and RPC proxy agree.
+
+## Verification
+
+```sh
+bun run test
+bun run format:check
+bun run docs:check
+```
+
+Then verify in a real browser:
+
+- Explore discovery and canonical project routes;
+- project Overview, Participate, Governance, and Transparency;
+- Portfolio grant/role discovery;
+- Studio operator actions without sending unintended writes;
+- 320 px layout, titles, headings, overflow, and console errors;
+- the durable served app route and RPC route, not only a temporary dev server.
+
+Preserve the artifact and seed output with any reproducible bug report.
