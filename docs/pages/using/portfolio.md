@@ -34,6 +34,9 @@ Choose `Refresh portfolio` after a new grant, settlement, or network update. Ref
 - `Nothing needs your wallet right now` means the current scan found no open settlement or operator action. It is not a guarantee that no unscanned contract exists.
 - After switching networks, Portfolio intentionally resets to that network’s discovery scope.
 
-Grant settlement is available only to the current holder wallet. Issuer controls appear only for an authorized issuer or Boardroom authority.
+Grant settlement is available only to the current holder wallet. Grant issuer controls normally require the standalone
+issuer or, for an Active Boardroom, its current owner or executor. During Boardroom wind-down, the app also exposes
+canonical zero-value grant cleanup to any connected wallet through the Boardroom's permissionless
+`executeWindDownCall`; the contract restricts that path to recorded obligation policies and targets.
 
 [Review a grant safely](grant-details) · [Learn about wallet and transaction recovery](transactions-and-wallet)

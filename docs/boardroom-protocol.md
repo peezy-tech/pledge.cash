@@ -17,8 +17,10 @@ obligations.
 - Executor: queues delayed governance actions after launch. This can be an EOA, multisig, or governance contract;
   execution becomes permissionless when an action is ready.
 - Boardroom: owns assets, creates its share token, and acts as grant issuer.
-- Policy registry: protocol-governance-controlled registry of call status plus permanent module identity. Disabling a
-  module blocks new obligations without erasing the cleanup authority of obligations it already created.
+- Policy registry: protocol-governance-controlled registry of call status plus permanent module identity. Moving a
+  module to `LifecycleOnly` or `Disabled` blocks new top-level, unreserved Boardroom module creations without erasing
+  existing obligations, their reserved downstream fulfillment, or cleanup authority. It is not an emergency pause for
+  already-created child contracts.
 - Module policies: pledge.cash factories that authorize their own Boardroom calls and report created obligations.
 - Asset policy: protocol-governance-managed allowlist of supported assets and approval spenders. A Boardroom owner uses
   the policy but does not administer the canonical root policy merely by owning a Boardroom.
@@ -87,20 +89,26 @@ State:
   never erases this binding.
 - redemption snapshot: fixed per-asset balances and total share supply captured after treasury shares burn when
   redemptions open. Governance-only custody exclusions do not change economic redemption supply.
-- redemption credits: burned shares retained per holder until each snapshot asset has allocated and paid that holder's
-  corresponding entitlement.
-- `redemptionExcessRecipient`: fixed recipient for post-snapshot deposits and terminally unowed snapshot balances. It
-  defaults to the prelaunch owner, follows prelaunch ownership transfers, can be governed while active, and freezes
-  when wind-down starts.
+- redemption credits: cumulative burned shares recorded per holder. They are not cleared after payment; a holder's
+  outstanding shares for one asset are `redemptionCredits(holder) - allocatedRedemptionShares(holder, asset)`, so a
+  nonzero credit alone is not proof of an unpaid claim.
+- `redemptionExcessRecipient`: current recipient for post-snapshot deposits and terminally unowed snapshot balances. It
+  defaults to the prelaunch owner and can be governed while active. The direct setter closes when wind-down starts, but
+  on an unlaunched Boardroom a recipient that still equals the outgoing owner continues to follow ownership transfers in
+  later lifecycle states. Excess sweeps read the current recipient; opening redemptions does not snapshot it.
 
 The owner can mint shares through `Boardroom.mint` before launch. The owner can also call `Boardroom.execute` or
 `Boardroom.executeBatch` before launch. Each call names a policy, target, native value, and calldata. Raw calls may omit
 the policy only when the target is the Boardroom itself. Every external target requires an explicit registered policy;
 calls to a registered pledge.cash module must use that module even when its current status is disabled.
 Module identity is one-way and independent of `Active`, `LifecycleOnly`, or `Disabled` status, so disabling a module
-cannot reopen a raw-call bypass. New module calls require active status. Calls to a recorded obligation must use its
-permanent canonical policy, and only selectors approved by that policy's lifecycle hook may run. This cleanup route
-continues to work after the central registry disables the module.
+cannot reopen a raw-call bypass. New top-level Boardroom module calls require active registry status. Calls to a recorded
+obligation must use its permanent canonical policy, and only selectors approved by that policy's lifecycle hook may run.
+Reserved downstream fulfillment—such as an airdrop-created grant or curve-created locker—also remains possible through
+its authenticated obligation path after the central registry disables the module.
+
+Registry status does not pause direct child-contract participation. Fixed-sale buys, airdrop claims, and curve buys or
+sells continue whenever that child and its Boardroom lifecycle allow them.
 
 Obligation hooks are fail-closed: a registered module must successfully report the obligation created by a call, and a
 lifecycle hook must successfully classify cleanup and reservation release. A reverting or malformed hook reverts the
@@ -122,15 +130,18 @@ Wind-down transitions are one-way:
 2. `WindingDown`: entered only after `startWindDown()` wraps the Boardroom's full native balance. The
    Boardroom cannot mint shares or create new grants/distributions. Canonical zero-value lifecycle calls, locked
    liquidity exits, native wrapping, closed-obligation pruning, and treasury-share burns are permissionless. Qualified
-   holders can admit final assets only when the Boardroom already has a positive balance, and anyone can quarantine an
-   admitted asset whose bounded `balanceOf` probe has become unreadable. Empty-asset removal is permissionless during
-   wind-down only after every grant, distribution, and locked-liquidity obligation has closed and been pruned, so an
-   obligation cannot later return value into an omitted asset.
+   final assets can be admitted only when the Boardroom already has a positive balance. Before governance launch, only
+   the owner can admit one; after launch, the caller must meet the 10% current-and-previous-block holder threshold. Anyone
+   can quarantine an admitted asset whose bounded `balanceOf` probe has become unreadable. Empty-asset removal is
+   permissionless during wind-down only after every grant, distribution, and locked-liquidity obligation has closed and
+   been pruned, so no still-active obligation can later return value into an omitted asset. A closed curve's best-effort
+   `unrecoveredQuote` retry is the exception: if its empty quote asset was removed after prune, recovery must be followed
+   by positive-balance re-admission before opening or that value is omitted from the snapshot.
    Active fixed-price sales and migrating bonding curves stop accepting trades as soon as their Boardroom enters this
    state.
 3. `RedemptionsOpen`: share holders burn shares against the fixed opening snapshot. Each asset pays independently and
    failed snapshot claims remain retryable. Late deposits never change redemption economics and are permissionlessly
-   swept to the frozen excess recipient. Owner execution is closed.
+   swept to the current excess recipient. Owner execution is closed.
 
 ### BoardroomToken
 
@@ -153,11 +164,15 @@ accounting affects governance power only, not redemption ownership.
 6. `TokenGrantFactory` transfers the grant tokens from the Boardroom into the grant escrow.
 7. The factory mints the grant-right ERC721 token to the grant holder.
 
-Every non-share grant token and every paid-grant settlement token is atomically, permanently admitted to the bounded
-redemption basket when the grant is recorded. This covers both settlement revenue and grant assets that can return on
-halt, expiry, or quarantine recovery. Distribution payment and curve quote assets are admitted the same way by their
-module factories. While active, Boardroom governance can use registry-approved policies to deploy or spend proceeds:
-directly by the owner before launch or through a queued action after launch.
+Every non-share grant token and every paid-grant settlement token is atomically admitted to the bounded redemption
+basket when the grant is recorded. This covers both settlement revenue and grant assets that can return on halt, expiry,
+or quarantine recovery. Distribution payment and curve quote assets are admitted the same way by their module
+factories. Admission persists while active obligations can return value, but it is not permanent: during wind-down,
+after all obligations close and are pruned, an empty unpinned asset can be removed through the bounded removal path, and
+an unreadable admitted asset can be quarantined. A closed curve can still recover `unrecoveredQuote`; that late recovery
+does not preserve or restore admission automatically after prune. While active, Boardroom governance can use
+registry-approved policies to deploy or spend proceeds: directly by the owner before launch or through a queued action
+after launch.
 
 ## Fixed-Price Share Sale Flow
 
@@ -207,7 +222,7 @@ directly by the owner before launch or through a queued action after launch.
    receive the indivisible remainder instead of deadlocking it.
 7. The credit owner retries with `claimRedemptionAsset`. An asset cannot allocate the same burned shares twice.
 8. Deposits received after opening are never owed to redeemers. Anyone can sweep only balance above the still-owed
-   snapshot amount to the frozen `redemptionExcessRecipient`. When all shares for an asset are paid or forfeited, any
+   snapshot amount to the current `redemptionExcessRecipient`. When all shares for an asset are paid or forfeited, any
    remaining snapshot balance also becomes sweepable.
 
 Redemption loops are bounded by `MAX_REDEEMABLE_ASSETS`. Wind-down gates are bounded by active, rather than lifetime,
@@ -271,9 +286,10 @@ their own public lifecycle.
 - Redemption multiplication is full precision, each asset's burned-share allocation is single-use, and zero-rounded
   allocations advance accounting when the caller permits zero output so indivisible dust cannot remain reserved forever.
 - Post-snapshot deposits cannot dilute or enrich any redemption; only excess above outstanding snapshot obligations can
-  be swept to the frozen recipient.
+  be swept to the current recipient.
 - Once all snapshot shares are paid or forfeited, no remaining asset balance can be trapped as a phantom obligation.
-- Ownership cannot be renounced, and the excess recipient cannot be changed after wind-down starts.
+- Ownership cannot be renounced. The direct excess-recipient setter cannot run after wind-down starts, but an unlaunched
+  Boardroom's owner-following recipient can still rotate when ownership transfers.
 - Fee-on-transfer and sender-surcharge redeemable assets fail safely through exact Boardroom and recipient balance-delta
   checks without discarding their failed claims.
 

@@ -9,7 +9,11 @@ Use the [Distribution protocol specification](https://github.com/peezy-tech/pled
 
 ## Canonical discovery
 
-Verify the DistributionFactory from the active deployment, its type mapping, the distribution's Boardroom/share-token fields, and the Boardroom obligation record. Preserve a distinct identity per distribution address; one project can have several of the same type.
+Verify the DistributionFactory from the active deployment, its permanent distribution, Boardroom, and type mappings,
+and the distribution's reciprocal factory, Boardroom, and share-token fields. While the distribution is active, also
+require the Boardroom's live obligation record; after close and prune that record is intentionally cleared and is not a
+terminal provenance failure. Preserve a distinct identity per distribution address; one project can have several of the
+same type.
 
 ## Fixed-price and curve quotes
 
@@ -28,7 +32,14 @@ Manifest requirements:
 - unique indices;
 - raw integer amounts, plus separately documented decimals;
 - explicit `direct` or `grant` mode;
-- full grant terms where applicable;
+- full grant terms where applicable: cliff no later than vesting end, expiry still in the future and at least one day
+  after vesting end, and canonical Boardroom expiry no more than `5 * 365 days` after intended claim time because the
+  factory enforces those conditions at claim execution;
+- exact free/paid pairing: zero price with zero payment token, or positive price with a nonzero payment token different
+  from the share token and readable `decimals() <= 77`;
+- supported bounded-read ERC-20 payment tokens, with every distinct nonzero token pre-admitted or budgeted inside the
+  Boardroom's 32-asset redemption basket for the full claim period; airdrop grant-slot reservation does not reserve
+  redeemable-asset capacity;
 - sorted-pair Merkle tree compatible with Solady `MerkleProofLib`;
 - aggregate intended amount no greater than escrow;
 - grant leaves no greater than `maxGrantClaims`;

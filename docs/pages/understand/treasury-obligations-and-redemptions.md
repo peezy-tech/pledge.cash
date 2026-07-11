@@ -11,7 +11,9 @@ A Boardroom cannot snapshot only the tokens visible in its wallet today. Grants,
 
 Canonical wrapped native is admitted when a Boardroom initializes. Module creation admits assets that can later reach the treasury, such as grant tokens, payment tokens, distribution quote tokens, and liquidity sides. Governance can admit additional supported ERC20s within a bounded list.
 
-An arbitrary transfer to the Boardroom does not automatically prove the asset belongs in the redemption basket. During wind-down, a qualified holder can admit a positive-balance final asset, and an unreadable admitted asset has a quarantine escape hatch.
+An arbitrary transfer to the Boardroom does not automatically prove the asset belongs in the redemption basket. During
+wind-down, the prelaunch owner can admit a positive-balance final asset; after governance launch, the caller must meet
+the 10% current-and-previous-block holder threshold. An unreadable admitted asset has a quarantine escape hatch.
 
 ## Why obligations must close
 
@@ -24,7 +26,9 @@ Redemptions open only after these active obligations report closed and are prune
 
 ## The opening snapshot
 
-Opening redemptions burns treasury shares, fixes economic share supply, and snapshots every admitted asset balance. Late deposits do not change entitlement. They are excess payable to the frozen excess recipient.
+Opening redemptions burns treasury shares, fixes economic share supply, and snapshots every admitted asset balance. Late
+deposits do not change entitlement. They are excess payable to the recipient recorded when the excess is swept. Opening
+does not snapshot that recipient; on an unlaunched Boardroom, an owner-following recipient can still move with ownership.
 
 Holder payout uses remaining snapshot balance and remaining entitlement shares, preserving the final indivisible remainder for the final claimant.
 

@@ -60,6 +60,7 @@ Coverage notices disclose when only some child contracts or events were read. `U
 - `Current contract-state detail is incomplete`: choose `Retry current state`; do not infer missing records.
 - `Historical activity is incomplete`: current balances may still be readable, but lifetime totals are partial.
 - `Unsupported network`: return to `Explore` and choose a configured network.
-- A provenance failure returns to `Explore` instead of showing controls for an unverified address.
+- A non-retryable provenance failure keeps the canonical URL visible, blocks project controls, and shows `Project not
+  found` with a `Return to Explore` button. It does not redirect automatically.
 
 [Read the safety checklist](../start/use-safely) · [Open Explore](../../explore)

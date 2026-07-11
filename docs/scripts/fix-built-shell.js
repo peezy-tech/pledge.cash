@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { docsRedirects } from "../redirects.js";
 
@@ -10,6 +11,7 @@ const publicPagefindPath = `${basePath}/_pagefind/pagefind.js` || "/_pagefind/pa
 const pagefindDir = join(outDir, "_pagefind");
 const pagefindEntry = join(pagefindDir, "pagefind.js");
 const pagefindCore = join(pagefindDir, "pagefind-core.js");
+const pagesDir = fileURLToPath(new URL("../pages/", import.meta.url));
 
 function normalizeBasePath(value) {
   const trimmed = value.trim();
@@ -20,6 +22,40 @@ function normalizeBasePath(value) {
   return `/${trimmed.replace(/^\/+|\/+$/g, "")}`;
 }
 
+function baseAwarePath(value) {
+  if (!value.startsWith("/") || !basePath) return value;
+  if (value === basePath || value.startsWith(`${basePath}/`)) return value;
+  return `${basePath}${value}`;
+}
+
+function rewriteMarkdownRootLinks(source) {
+  return source.replace(/\]\((\/[^)\s]*)\)/g, (_match, path) => `](${baseAwarePath(path)})`);
+}
+
+function resolvePageMarkdownTarget(target, pageUrl, directoryUrl) {
+  if (!target || target.startsWith("#") || target.startsWith("//") || /^[a-z][a-z\d+.-]*:/i.test(target)) {
+    return target;
+  }
+  if (target.startsWith("/")) return baseAwarePath(target);
+  const baseUrl = directoryUrl && !pageUrl.endsWith("/") ? `${pageUrl}/` : pageUrl;
+  const resolved = new URL(target, `https://pledge-docs.invalid${baseUrl}`);
+  return `${resolved.pathname}${resolved.search}${resolved.hash}`;
+}
+
+function rewritePageMarkdownLinks(source, pageUrl, directoryUrl) {
+  return source
+    .replace(/(!?\[[^\]\n]*\]\(\s*)(?:<([^>]+)>|([^\s)]+))/g, (_match, prefix, angleTarget, plainTarget) => {
+      const target = angleTarget ?? plainTarget;
+      const rewritten = resolvePageMarkdownTarget(target, pageUrl, directoryUrl);
+      return `${prefix}${angleTarget === undefined ? rewritten : `<${rewritten}>`}`;
+    })
+    .replace(/^(\s*\[[^\]\n]+\]:\s*)(?:<([^>]+)>|(\S+))/gm, (_match, prefix, angleTarget, plainTarget) => {
+      const target = angleTarget ?? plainTarget;
+      const rewritten = resolvePageMarkdownTarget(target, pageUrl, directoryUrl);
+      return `${prefix}${angleTarget === undefined ? rewritten : `<${rewritten}>`}`;
+    });
+}
+
 async function filesWithExtension(dir, extension) {
   const files = [];
   for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -28,6 +64,16 @@ async function filesWithExtension(dir, extension) {
     else if (entry.isFile() && entry.name.endsWith(extension)) files.push(path);
   }
   return files;
+}
+
+async function isDirectoryPage(urlPath) {
+  if (urlPath === "/") return true;
+  try {
+    await access(join(pagesDir, urlPath.replace(/^\/+|\/+$/g, ""), "index.md"));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const needle = "/_pagefind/pagefind.js";
@@ -124,6 +170,9 @@ let faviconPages = 0;
 for (const file of await filesWithExtension(outDir, ".html")) {
   const source = await readFile(file, "utf8");
   let fixed = source.replace(/<link\b[^>]*\brel=["']icon["'][^>]*>\s*/gi, "");
+  fixed = fixed
+    .replaceAll('href="/llms.txt"', `href="${baseAwarePath("/llms.txt")}"`)
+    .replaceAll("href='/llms.txt'", `href='${baseAwarePath("/llms.txt")}'`);
   if (!fixed.includes("</head>")) {
     throw new Error(`Generated page has no </head> for favicon injection: ${file}`);
   }
@@ -136,6 +185,70 @@ for (const file of await filesWithExtension(outDir, ".html")) {
   await writeFile(file, fixed);
   faviconPages += 1;
 }
+
+const machineResourcePaths = [
+  "/llms.txt",
+  "/llms-full.txt",
+  "/skill.md",
+  "/mcp.json",
+  "/robots.txt",
+  "/search.json",
+];
+
+for (const filename of ["llms.txt", "skill.md", "robots.txt"]) {
+  const file = join(outDir, filename);
+  let source = await readFile(file, "utf8");
+  source = source.replaceAll("/pagefind/pagefind.js", baseAwarePath("/_pagefind/pagefind.js"));
+  for (const resourcePath of machineResourcePaths) {
+    source = source.replaceAll(resourcePath, baseAwarePath(resourcePath));
+  }
+  source = rewriteMarkdownRootLinks(source);
+  await writeFile(file, source);
+}
+
+let mcpManifest;
+for (const filename of ["mcp.json", "search.json"]) {
+  const file = join(outDir, filename);
+  const value = JSON.parse(await readFile(file, "utf8"));
+  if (!Array.isArray(value.pages) || value.pages.length === 0) {
+    throw new Error(`Generated ${filename} has no pages.`);
+  }
+  for (const page of value.pages) {
+    if (typeof page.url !== "string" || !page.url.startsWith("/")) {
+      throw new Error(`Generated ${filename} contains an invalid page URL.`);
+    }
+    const generatedUrl = page.url;
+    const directoryUrl = await isDirectoryPage(generatedUrl);
+    page.url = baseAwarePath(generatedUrl);
+    if (typeof page.content === "string") {
+      page.content = rewritePageMarkdownLinks(page.content, page.url, directoryUrl);
+      if (filename === "mcp.json") {
+        const markdownFile = generatedUrl === "/"
+          ? join(outDir, "index.md")
+          : join(outDir, `${generatedUrl.replace(/^\//, "")}.md`);
+        await access(markdownFile);
+        await writeFile(markdownFile, `${page.content.trim()}\n`);
+      }
+    }
+  }
+  if (filename === "search.json") {
+    value.searchEndpoint = baseAwarePath("/_pagefind/pagefind.js");
+  }
+  if (filename === "mcp.json") mcpManifest = value;
+  await writeFile(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+if (!mcpManifest) throw new Error("Generated MCP manifest was not processed.");
+const llmsFull = [
+  `# ${mcpManifest.name}`,
+  ...mcpManifest.pages.map((page) => [
+    "---",
+    `<!-- Source: ${page.url} -->`,
+    `## ${page.title}`,
+    page.content.trim(),
+  ].join("\n\n")),
+].join("\n\n");
+await writeFile(join(outDir, "llms-full.txt"), `${llmsFull}\n`);
 
 let redirectPages = 0;
 for (const [from, to] of Object.entries(docsRedirects)) {

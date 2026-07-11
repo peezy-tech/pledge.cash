@@ -89,7 +89,9 @@ Never interpret a slow refresh as proof that execution failed. Check the receipt
 - **Action not ready:** wait until ETA; changing the local clock does nothing.
 - **Action expired:** the executor must queue a new action with a new valid lifecycle.
 - **Executor lost:** holders cannot queue ordinary actions, but a qualified holder can still start wind-down.
-- **Policy/module disabled:** new calls may be blocked while canonical lifecycle cleanup for previously recorded obligations remains possible.
+- **Policy/module disabled:** new top-level Boardroom module calls may be blocked, but this is not an emergency pause for
+  existing children. Their direct buys, claims, or trades can continue while lifecycle permits, and authenticated
+  reserved fulfillment and cleanup remain possible.
 
 ## Next steps
 

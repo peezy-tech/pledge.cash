@@ -197,9 +197,21 @@ Boardroom-issued `TokenGrant` funded by the airdrop escrow, consume one reserved
 grant so redemptions cannot open while it remains live. Grant-claim leaves are capped by `maxGrantClaims`; once the cap
 is reached, otherwise valid grant proofs revert instead of overflowing the Boardroom's bounded issued-grant list.
 Distribution-created grants always use the factory's explicit zero-fee path; `claimGrant` is nonpayable.
+At claim execution, `TokenGrantFactory` still validates the committed Boardroom grant schedule: cliff cannot be after
+vesting end, expiry must be in the future and at least one day after vesting ends, and expiry can be no more than
+`5 * 365 days` after the claim block. Merkle validity does not bypass those factory checks; as time advances, the
+five-year upper bound becomes easier while the future-expiry requirement eventually closes the claimable schedule.
+For a paid claim, the factory also calls the issuing Boardroom's `reserveRedeemableAsset(paymentToken)` before grant
+creation. Free terms require zero price and zero payment token; paid terms require positive price, a nonzero payment
+token different from the share token, and readable `decimals() <= 77`. The token must also pass bounded ERC-20 reads even
+if already admitted, and a newly admitted payment token needs a free slot in the 32-asset redemption basket. Airdrop
+creation reserves issued-grant capacity but does not reserve these asset slots, so an otherwise valid Merkle leaf can
+still revert on grant terms, token support, or basket capacity at claim time.
 The token-grant factory grants that exemption only when its immutable canonical `BoardroomFactory` recognizes the issuer
-and the issuer permanently recognizes the calling airdrop as one of its issued distributions. The airdrop itself still
-requires both its own status and the Boardroom status to be active for any claim.
+and the issuer currently recognizes the calling airdrop in its recorded issued-distribution set. That Boardroom
+membership is removed when the closed distribution obligation is pruned, so it is not permanent; the distribution
+factory's identity mapping remains permanent for historical attribution. The airdrop itself still requires both its own
+status and the Boardroom status to be active for any claim.
 
 Both direct-claim and grant-claim leaves commit to `block.chainid`, the predicted airdrop address, Boardroom, share token,
 claim index, claimant, and amount. Grant leaves additionally commit to the token-grant factory and a hash of every grant
@@ -210,7 +222,10 @@ originally escrowed `airdropSupply`.
 The Merkle root is an opaque commitment, so several properties remain an offchain root-construction responsibility and
 cannot be proven during `createMerkleAirdrop`: use unique indices, encode the exact onchain type hashes and chain id, use
 sorted-pair hashing compatible with Solady `MerkleProofLib`, ensure the sum of intended claim amounts does not exceed
-`shareAmount`, and keep the number of grant leaves at or below `maxGrantClaims`. Onchain claim accounting and the bitmap
+`shareAmount`, keep the number of grant leaves at or below `maxGrantClaims`, and design each grant expiry to remain no
+more than `5 * 365 days` after its intended claim time. Root construction must also budget every paid-grant payment token
+inside the Boardroom's bounded redemption basket for the entire claim period. The token-grant factory enforces the expiry,
+token-read, and asset-capacity conditions relative to the actual claim block. Onchain claim accounting and the bitmap
 still enforce the inventory cap and one successful claim per index if a malformed root is published.
 
 Closing or cancelling an airdrop returns unclaimed share inventory to the Boardroom and releases any unused reserved
@@ -296,7 +311,10 @@ Cancellation is Boardroom-only and releases the unused migration reservation. Ca
 first with exact transfer checks. Quote return is best-effort: bounded-gas balance and transfer calls cannot block
 closure if the quote token later reverts, burns gas, or returns malformed data. Any shortfall is quarantined explicitly
 in `unrecoveredQuote`; anyone can retry `recoverQuarantinedQuote`, but recovery can only pay the issuing Boardroom. Since
-the quote asset was registered at creation, recovery remains safe even after redemptions have opened.
+the quote asset was registered at creation, recovery before `openRedemptions` joins holder entitlements only if that
+asset remains admitted or is re-admitted after recovery and before the snapshot. A cancelled curve can be pruned and its
+empty, unpinned quote asset removed first. Recovery after opening is a late Boardroom deposit: it does not increase
+holder entitlements and is sweepable as excess to the current `redemptionExcessRecipient`.
 
 ## Invariants
 
@@ -313,6 +331,8 @@ the quote asset was registered at creation, recovery remains safe even after red
 - A Boardroom policy call cannot create a curve for another share token.
 - A Boardroom policy call cannot create an airdrop for another share token.
 - Grant-claim airdrops reserve Boardroom issued-grant capacity before claims can create grants.
+- Grant-claim proofs do not bypass the token-grant factory's claim-time expiry and settlement-grace bounds.
+- Paid grant claims do not bypass payment-token validation or the Boardroom's bounded redeemable-asset capacity.
 - Curve migration creates a locker owned by the originating Boardroom, not by the curve.
 - Active curve migration salts, token pairs, locker slots, and initial AMM liquidity are reserved before share escrow.
 - Curve cancellation cannot be blocked by a subsequently hostile quote token; unrecovered quote remains explicitly
@@ -331,3 +351,8 @@ bun --cwd packages/contracts build
 bun --cwd packages/contracts test
 cd packages/contracts && forge fmt --check
 ```
+
+The current distribution-specific suite does not yet exercise Merkle-valid grant claims rejected by the five-year
+claim-time maximum, ordinary expiry or settlement-grace validation, unsupported payment tokens, or a full redemption
+basket. Those end-to-end cases remain an explicit coverage gap; add them before changing grant-claim or asset-reservation
+behavior rather than inferring them from direct TokenGrantFactory tests alone.

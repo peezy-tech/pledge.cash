@@ -14,14 +14,19 @@ Canonical identity is a relationship, not a logo or address-shaped string. It al
 | Boardroom | The selected BoardroomFactory reports that it created the address |
 | Project token | The Boardroom reports the token, and the token reports that Boardroom as its authority |
 | Grant | The selected TokenGrantFactory maps its token id to the grant and the grant reports that factory |
-| Boardroom-issued grant | The grant issuer is the Boardroom and the Boardroom records the grant obligation |
-| Distribution | The selected DistributionFactory recognizes its type and the Boardroom records it |
-| Merkle airdrop | Factory, Boardroom, share token, TokenGrantFactory, and distribution record agree |
-| Migrating curve | Factory, Boardroom, project share token, quote token, and migration reservation agree |
-| Locked liquidity | LockerFactory, Boardroom, pool, token pair, and recorded obligation agree |
+| Boardroom-issued grant | The grant has the factory proof above and reports the verified Boardroom as issuer; the Boardroom's obligation record is an additional live-state check only while the grant remains active |
+| Distribution | The selected DistributionFactory permanently records the address, Boardroom, and kind, while the distribution reports that factory, Boardroom, and verified project share token |
+| Merkle airdrop | The distribution proof above and the configured TokenGrantFactory agree |
+| Migrating curve | The distribution proof above holds and the curve reports the configured LockedLiquidityFactory; a migration reservation exists only before it is consumed or released |
+| Locked liquidity | The LockerFactory's permanent locker and Boardroom mappings agree with the locker-reported factory and Boardroom, its router is the configured AMM router, and its token pair contains the verified project share token |
 | AMM pool | The configured AmmFactory recognizes the sorted pair and pool address |
 
 No single display field proves the whole row.
+
+Active obligation lists and migration reservations prove current lifecycle state, not permanent identity. They are cleared
+when obligations are pruned or reservations are consumed or released. A terminal grant, distribution, or locker can
+remain canonical through its permanent factory and reciprocal contract records; after curve migration, verify the
+resulting locker and pool rather than requiring the spent reservation.
 
 ## Canonical routes
 

@@ -79,7 +79,8 @@ Verify all of the following onchain:
 - `settledAmount` increased by the requested amount;
 - the holder received the exact grant-token amount;
 - for a paid grant, the issuer received the exact computed payment;
-- **Settleable now** decreased accordingly;
+- **Settleable now** was recomputed from the refreshed vesting and settled state. During active linear vesting it need not
+  fall by the requested amount and can rise if more tokens vested before the refresh;
 - if fully settled, the grant is closed and its grant-right NFT no longer exists.
 
 Token transfers require exact balance changes. Fee-on-transfer, sender-taxed, or no-op tokens can cause settlement to revert rather than silently underpay either side.
@@ -91,7 +92,10 @@ Token transfers require exact balance changes. Fee-on-transfer, sender-taxed, or
 - **Allowance is too low:** submit a deliberate replacement approval, then retry settlement.
 - **Settlement reverted after approval:** inspect the current holder, expiry, vesting, balance, allowance, and token behavior. The approval may still exist.
 - **Issuer halted vesting:** already vested rights remain claimable, but future vesting is permanently capped and unvested escrow returns to the issuer.
-- **Grant expired:** settlement is closed after expiry. The issuer can withdraw remaining escrow; a Boardroom issuer has a bounded quarantine path if a hostile token prevents exact recovery.
+- **Grant expired:** settlement is closed after expiry. The issuer can withdraw remaining escrow; a Boardroom issuer has
+  a bounded quarantine path if a hostile token prevents exact recovery. The current grant page and Studio do not expose
+  that path. An advanced integration must submit a zero-value `Boardroom.executeWindDownCall` using the configured
+  TokenGrantFactory policy, the verified grant target, and `quarantineAndClose()` calldata.
 - **Wrong wallet owns the grant right:** only that current owner can settle. A transfer is possible only if the grant was created transferable, is unlocked, live, and unexpired.
 
 ## Next steps

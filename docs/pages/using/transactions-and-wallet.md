@@ -39,7 +39,7 @@ After an action starts, `Transaction activity` stays visible across navigation. 
 | `Submitted — waiting for confirmation` | A hash exists, but no final receipt has been accepted. |
 | `Confirmed onchain` | The canonical receipt succeeded. |
 | `Needs attention` | Simulation, submission, receipt, or contract execution failed. Read the attached error. |
-| `Cancelled` | The wallet cancelled or replaced the transaction with a cancellation. |
+| `Cancelled` | You cancelled the app review before the wallet opened, or a submitted transaction was replaced by a wallet cancellation. |
 | `Replaced in wallet` | A different transaction replaced the submitted action. Refresh state before retrying. |
 
 A repriced transaction continues under its canonical replacement hash. Use the `Receipt` link when the selected network has an explorer.

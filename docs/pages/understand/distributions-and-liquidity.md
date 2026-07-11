@@ -32,7 +32,9 @@ When graduation becomes feasible, it latches and freezes trading. The active Boa
 
 ## AMM pool
 
-The pledge.cash AMM is a constant-product pool with a nominal 30-basis-point input fee. The protocol may route a configured share of that fee to its fee recipient; the remainder accrues to LP holders through a separate fee vault.
+The pledge.cash AMM is a constant-product pool with a nominal 30-basis-point input fee. When a protocol fee recipient is
+set, a fixed 5% of that nominal swap fee—nominally 1.5 basis points of input before rounding effects—routes there; the
+remainder accrues to LP holders through a separate fee vault. When the recipient is unset, all swap fees accrue to LPs.
 
 User protections are exact input, minimum output, route, and deadline. Supported tokens must transfer requested amounts exactly. Direct token transfers to a pool are not a safe deposit method and can be consumed before operational excess recovery.
 

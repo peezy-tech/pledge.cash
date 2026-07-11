@@ -25,7 +25,9 @@ For an `Irreversible lifecycle change`, the app requires the acknowledgement “
 
 ## Asset and approval safety
 
-- ERC-20 approval and the action that spends it are separate transactions. Approve only the amount you intend to use.
+- Holder participation and grant-settlement approvals are separate transactions from the action that spends them.
+  Studio can instead batch a Boardroom approval call with module creation in one `executeBatch` or queued batch. Inspect
+  every nested call in the review to determine atomicity, and approve only the amount the workflow needs.
 - Quotes and limits can change between reading, simulation, and mining.
 - A grant can require payment; verify `Payment token`, `Price`, `Settleable now`, and `Expiry`.
 - An airdrop proof and grant terms come from the project. The app verifies the submitted values against the contract, but it does not author the allocation.

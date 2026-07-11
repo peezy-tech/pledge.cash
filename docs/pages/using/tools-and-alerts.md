@@ -29,15 +29,18 @@ If an artifact says `pending`, missing contract addresses are intentional. Do no
 
 Alerts are available only when the app build has the optional Sentinel API configured. Without it, alert URLs return to `Explore`. Sentinel is an offchain notification service; it does not queue, veto, execute, or change onchain authority.
 
+Sentinel currently verifies EOA wallet signatures only. ERC-1271 smart-account signatures are not supported for SIWE
+sign-in or wallet linking. That limitation applies to Sentinel identity—not to ordinary read-only use of project pages.
+
 To configure alerts:
 
-1. To create a Sentinel account, connect a browser wallet and choose `Sign in with wallet`. The first account is always created by a SIWE wallet signature.
+1. To create a Sentinel account, connect an EOA browser wallet and choose `Sign in with wallet`. The first account is always created by a SIWE wallet signature.
 2. If you previously linked a social sign-in to that account, you can use the offered social method to reopen it. A social provider cannot create a walletless account.
 3. Under `Wallets`, link the connected wallet and choose `Watch alerts`.
 4. Under `Delivery`, choose `Link Telegram` and complete the expiring link flow.
 5. Under `Alert rules`, choose `Wallet holdings` or `Specific Boardrooms`, set `Minimum severity`, and `Save`.
 
-Every linked wallet can sign in, but only wallets marked `Watching alerts` contribute wallet-based coverage. `Specific Boardrooms` accepts an explicit chain ID and Boardroom address.
+Every linked EOA wallet can sign in, but only wallets marked `Watching alerts` contribute wallet-based coverage. `Specific Boardrooms` accepts an explicit chain ID and Boardroom address.
 
 ## Public governance activity
 

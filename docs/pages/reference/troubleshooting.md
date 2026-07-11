@@ -48,7 +48,7 @@ If the error is explicitly transient, retry. If it is invalid provenance, stop.
 | Confirmed onchain | The canonical receipt succeeded, including after a same-action fee replacement | Use the displayed receipt hash |
 | Confirmed — refreshing workspace data | Receipt succeeded; scoped reads are retrying | Wait or refresh, but do not resubmit |
 | Confirmed — refresh waiting for the matching deployment | Receipt belongs to another deployment context | Return to that chain and deployment |
-| Cancelled | Wallet cancellation replaced the transaction | Reviewed action did not execute |
+| Cancelled | App review was cancelled before the wallet opened, or a submitted transaction was replaced by a wallet cancellation | In the first case nothing was submitted; in the second, inspect the cancellation replacement |
 | Replaced in wallet | A different wallet transaction replaced it | Inspect replacement; reviewed action did not execute |
 | Needs attention | Simulation, signature, submission, or receipt failed | Read the exact error and receipt |
 

@@ -31,10 +31,18 @@ Install dependencies:
 bun install
 ```
 
-Run the full workspace checks:
+Run the core contract, SDK, and web tests:
 
 ```sh
 bun run test
+```
+
+Run the remaining service, docs, and formatting checks:
+
+```sh
+bun run sentinel:test
+bun run docs:check
+bun run format:check
 ```
 
 Run only the contracts package:

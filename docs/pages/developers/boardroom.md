@@ -19,7 +19,11 @@ SDK readers and discovery helpers live in `packages/sdk/src/helpers/`. A current
 
 ## Write model
 
-Before launch, the owner uses policy-checked `execute` or `executeBatch`. After launch, the executor queues an action and any caller executes it after delay. Every external target requires the correct policy. Calls to recorded obligations retain their permanent module-policy identity for cleanup even if new module calls are disabled.
+Before launch, the owner uses policy-checked `execute` or `executeBatch`. After launch, the executor queues an action and
+any caller executes it after delay. Every external target requires the correct policy. Calls to recorded obligations
+retain their permanent module-policy identity for cleanup and reserved downstream fulfillment even if new top-level
+Boardroom module calls are disabled. Registry disable is not a pause for direct interaction with existing child
+contracts; enforce each child's and the Boardroom's lifecycle independently.
 
 Do not expose governance launch for the legacy `launch(uint256)` interface. It does not bind expected executor calldata and cannot support a race-safe permanent transition. Require a future interface that includes expected executor and reverts on mismatch.
 

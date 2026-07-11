@@ -99,7 +99,9 @@ For each operation, preserve:
 - **Creation approval succeeds but creation fails:** inspect and revoke the remaining allowance.
 - **Predicted and emitted child differ:** stop; verify factory, salt, owner, network, and deployment identity.
 - **A child read is incomplete:** do not operate from guessed state. Restore a capable RPC or inspect the child contract directly.
-- **A module is disabled:** new obligations stop, while canonical cleanup for obligations it already created remains available.
+- **A module is disabled:** new top-level Boardroom module creations are blocked. Existing child contracts are not
+  paused: fixed-sale buys, airdrop claims, and curve trades can continue while their own and the Boardroom lifecycle
+  allow them. Reserved downstream grant/locker fulfillment and canonical cleanup also remain available.
 - **Project must close:** stop new commitments and follow [Wind down and redeem](wind-down-and-redeem).
 
 ## Next steps

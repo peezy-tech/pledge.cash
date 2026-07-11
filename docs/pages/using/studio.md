@@ -59,15 +59,25 @@ For current pre-launch Boardrooms, the app shows `Secure governance launch is un
 
 Use `Close` for `Wind-Down` and redemptions. The safe sequence is:
 
-1. `Start Wind-Down` when authorized or holder-threshold eligible.
+1. `Start Wind-Down` as the owner before launch or after launch when the wallet meets the 10% current-and-previous-block
+   holder threshold.
 2. Resolve grants, distributions, and locked-liquidity blockers.
 3. `Burn Treasury Shares` where applicable.
-4. `Register Redeemable Asset` for each asset included in redemption.
-5. `Open Redemptions` only when the app reports no blockers.
+4. Verify the full admitted redemption basket. Wrapped native is admitted at initialization, and canonical module
+   lifecycle actions admit assets they return while those obligations are recorded. A late recovery from a closed,
+   pruned curve does not re-admit a quote asset that was removed while empty. Use `Register Asset` only for a missing
+   supported asset with a positive Boardroom balance, as the prelaunch owner or—after launch—a wallet meeting the 10%
+   threshold in both current and previous-block snapshots. Registering an existing asset reverts.
+5. `Open Redemptions` only when the app reports no loaded blockers and the wind-down delay has elapsed. The current app
+   does not precompute that time gate; an early attempt is rejected during simulation.
 6. Holders enter `Redeem shares` and a recipient, then redeem.
 7. Use the retry claim fields only when an asset transfer from a prior redemption needs recovery.
 
 Lifecycle transitions and asset minimums can be irreversible. Treat every contract and recipient as exact data.
+
+Studio does not yet expose curve quote recovery, Boardroom-grant quarantine, redeemable-asset quarantine/removal, or
+redemption-excess sweeping. Those protocol liveness and terminal-recovery functions currently require a verified direct
+contract or developer integration; see [Wind down and redeem](../guides/wind-down-and-redeem) for the exact boundary.
 
 ## Recovery
 

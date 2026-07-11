@@ -11,7 +11,11 @@ Use the [Token grant protocol specification](https://github.com/peezy-tech/pledg
 
 Verify the selected TokenGrantFactory before accepting a grant route. Read issuer, holder, token, payment token, grant size, claimable, settled amount, price, cliff, vesting end, expiry, halted/closed state, settleable amount, and grant-right ownership.
 
-For Boardroom provenance, verify that the canonical Boardroom is the issuer and records the grant. Do not infer a canonical grant from ABI compatibility alone.
+Permanent grant identity comes from the configured TokenGrantFactory's token-id mapping and the grant's reciprocal
+factory field. When a grant is presented as Boardroom-issued, also verify that its issuer is the canonical Boardroom.
+While the grant is active, require the Boardroom's live obligation record as a lifecycle check; after close and prune,
+that record is intentionally cleared and its absence does not erase factory provenance. Do not infer a canonical grant
+from ABI compatibility alone.
 
 ## Quote settlement, do not display only price
 

@@ -11,6 +11,7 @@ const repoRoot = dirname(docsRoot);
 const pagesRoot = join(docsRoot, "pages");
 const deploymentsRoot = join(repoRoot, "packages", "contracts", "deployments");
 const appRoutes = new Set(["explore", "portfolio", "settings/alerts", "studio", "tools"]);
+const safeExternalSchemes = new Set(["http", "https", "mailto"]);
 
 const errors = [];
 
@@ -90,12 +91,15 @@ function cleanTarget(target) {
 function isExternalTarget(target) {
   return target === ""
     || target.startsWith("#")
-    || target.startsWith("//")
     || /^[a-z][a-z\d+.-]*:/i.test(target);
 }
 
 function resolvePageLink(fromPage, target, filePages) {
   const cleaned = cleanTarget(target);
+  const scheme = /^([a-z][a-z\d+.-]*):/i.exec(target)?.[1]?.toLocaleLowerCase();
+  if (target.startsWith("//") || (scheme && !safeExternalSchemes.has(scheme))) {
+    return { kind: "unsafe-scheme", candidate: scheme ?? "protocol-relative" };
+  }
   if (isExternalTarget(target) || cleaned === "") return { kind: "skip" };
 
   const docsBase = normalizedDocsBase();
@@ -104,10 +108,11 @@ function resolvePageLink(fromPage, target, filePages) {
       return { kind: "hardcoded-base" };
     }
     const candidate = cleaned.replace(/^\/+|\/+$/g, "").replace(/\.md$/, "") || "index";
+    if (appRoutes.has(candidate)) return { kind: "hardcoded-app-handoff", candidate };
     const roots = new Set([...filePages].map((page) => page.split("/", 1)[0]));
     return filePages.has(candidate) || roots.has(candidate.split("/", 1)[0])
       ? { kind: "hardcoded-base" }
-      : { kind: "skip" };
+      : { kind: "invalid-absolute", candidate };
   }
 
   const fromDir = dirname(join(pagesRoot, `${fromPage}.md`));
@@ -266,6 +271,12 @@ for (const file of files) {
       errors.push(`${page}:${lineNumber(source, index)} links to missing docs page ${result.candidate} (${target})`);
     } else if (result.kind === "invalid-app-handoff") {
       errors.push(`${page}:${lineNumber(source, index)} links to an unknown or escaping app route ${result.candidate} (${target})`);
+    } else if (result.kind === "hardcoded-app-handoff") {
+      errors.push(`${page}:${lineNumber(source, index)} hard-codes app route ${target}; use a relative handoff so every deployed base path works`);
+    } else if (result.kind === "invalid-absolute") {
+      errors.push(`${page}:${lineNumber(source, index)} links to unsupported absolute route ${target}`);
+    } else if (result.kind === "unsafe-scheme") {
+      errors.push(`${page}:${lineNumber(source, index)} uses unsafe or unsupported link scheme ${result.candidate} (${target})`);
     }
   }
 

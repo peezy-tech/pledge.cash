@@ -35,7 +35,9 @@ Module factories record obligations so the Boardroom cannot open redemptions whi
 
 1. **Active, pre-launch:** the owner mints and executes policy-checked calls directly.
 2. **Active, launched:** the executor queues delayed actions; holders gain veto and wind-down protections.
-3. **Winding down:** issuance and participation stop; obligations close and assets are prepared.
+3. **Winding down:** new issuance, fixed-price buys, airdrop claims, curve buys/sells, and curve migration stop while
+   obligations close and assets are prepared. An already-created public AMM pool is independent of Boardroom lifecycle;
+   its permissionless swaps and liquidity actions can continue.
 4. **Redemptions open:** shares burn for fixed snapshot entitlements. Owner execution is closed.
 
 These transitions are one-way. See [Governance and holder protections](governance-and-holder-protections) and [Treasury obligations and redemptions](treasury-obligations-and-redemptions).

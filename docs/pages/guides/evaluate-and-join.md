@@ -62,7 +62,8 @@ The Transaction Center distinguishes:
 - **Submitted — waiting for confirmation:** the hash exists, but there is no confirmed receipt yet.
 - **Confirmed — refreshing workspace data:** the receipt succeeded; the visible project data is still catching up.
 - **Confirmed — refresh waiting for the matching deployment:** the transaction succeeded in an earlier network or deployment context. Return to that context to refresh it.
-- **Cancelled:** the wallet cancellation transaction replaced the reviewed transaction.
+- **Cancelled:** you cancelled the app review before the wallet opened, or a submitted transaction was replaced by a
+  wallet cancellation.
 - **Replaced in wallet:** a different transaction replaced it; the reviewed action was not executed.
 - **Needs attention:** simulation, signature, submission, or the receipt failed.
 
