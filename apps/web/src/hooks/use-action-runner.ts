@@ -45,7 +45,7 @@ export function useActionRunner(): {
       } catch (error) {
         if (error instanceof Error && error.name === "TransactionReviewCancelledError") {
           pushLog("Transaction cancelled before it reached your wallet.", "info");
-        } else {
+        } else if (!actionErrorWasAlreadyHandled(error)) {
           pushLog(errorMessage(error), "error");
         }
       } finally {
@@ -58,6 +58,13 @@ export function useActionRunner(): {
   const clearLogs = useCallback((): void => setLogs([]), []);
 
   return { clearLogs, logs, pendingAction, pushLog, runAction };
+}
+
+export function actionErrorWasAlreadyHandled(error: unknown): boolean {
+  return error instanceof Error && (
+    error.name === "TransactionReceiptFinalizedError"
+    || error.name === "TransactionReceiptMonitoringCancelledError"
+  );
 }
 
 function createLogEntry(

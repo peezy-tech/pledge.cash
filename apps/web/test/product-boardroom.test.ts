@@ -826,6 +826,133 @@ describe("product boardroom runtime discovery", () => {
     expect(getLogsCalls).toBe(2);
   });
 
+  test("retries a hung contract start lookup after the first scan deadline", async () => {
+    let providerHealthy = false;
+    let getCodeCalls = 0;
+    let firstLookupStarted: (() => void) | undefined;
+    const firstLookup = new Promise<void>((resolve) => {
+      firstLookupStarted = resolve;
+    });
+    const client = {
+      async getBlockNumber() { return 100n; },
+      async getCode(parameters: { blockNumber: bigint }) {
+        getCodeCalls += 1;
+        if (!providerHealthy) {
+          firstLookupStarted?.();
+          return await new Promise<never>(() => undefined);
+        }
+        return parameters.blockNumber >= 50n ? "0x01" : "0x";
+      },
+      async getLogs() { return []; },
+    };
+    const snapshot = { distributionSummaries: [fixedPriceHistoryFixture()] } as BoardroomSnapshot;
+    const first = readProductBoardroomHistories(client as never, snapshot, { timeoutMs: 25 });
+    await firstLookup;
+
+    const firstResult = await first;
+    expect(firstResult).toEqual([expect.objectContaining({ completeness: "partial" })]);
+    expect(firstResult[0]?.scanError).toContain("deadline");
+    expect(getCodeCalls).toBe(1);
+
+    providerHealthy = true;
+    const secondResult = await readProductBoardroomHistories(client as never, snapshot, { timeoutMs: 1_000 });
+
+    expect(secondResult).toEqual([expect.objectContaining({ completeness: "complete" })]);
+    expect(secondResult[0]?.scanError).toBeUndefined();
+    expect(getCodeCalls).toBeGreaterThan(1);
+  });
+
+  test("does not retain a transient genesis fallback after getCode recovers", async () => {
+    const sharedAddress = fixedPriceHistoryFixture().address;
+    const noPool = "0x0000000000000000000000000000000000000000" as Address;
+    const curve = { ...curveHistoryFixture(noPool), address: sharedAddress } as BoardroomDistributionSnapshot;
+    let providerHealthy = false;
+    let getCodeCalls = 0;
+    const client = {
+      async getBlockNumber() { return 100n; },
+      async getCode(parameters: { blockNumber: bigint }) {
+        getCodeCalls += 1;
+        if (!providerHealthy) throw new Error("temporary historical state failure");
+        return parameters.blockNumber >= 50n ? "0x01" : "0x";
+      },
+      async getLogs() { return []; },
+    };
+
+    const firstResult = await readProductBoardroomHistories(client as never, {
+      distributionSummaries: [fixedPriceHistoryFixture()],
+    } as BoardroomSnapshot);
+    expect(firstResult).toEqual([expect.objectContaining({ completeness: "complete" })]);
+    expect(getCodeCalls).toBe(1);
+
+    providerHealthy = true;
+    const secondResult = await readProductBoardroomHistories(client as never, {
+      distributionSummaries: [curve],
+    } as BoardroomSnapshot);
+
+    expect(secondResult).toEqual([expect.objectContaining({ completeness: "complete" })]);
+    expect(getCodeCalls).toBeGreaterThan(1);
+  });
+
+  test("keeps concurrent contract start waiters alive when another caller aborts", async () => {
+    const sharedAddress = fixedPriceHistoryFixture().address;
+    const noPool = "0x0000000000000000000000000000000000000000" as Address;
+    const curve = { ...curveHistoryFixture(noPool), address: sharedAddress } as BoardroomDistributionSnapshot;
+    const firstController = new AbortController();
+    const reason = new DOMException("first project route changed", "AbortError");
+    let releaseFirstLookup: ((code: string) => void) | undefined;
+    let firstLookupStarted: (() => void) | undefined;
+    let allHeadReadsStarted: (() => void) | undefined;
+    const firstLookup = new Promise<string>((resolve) => {
+      releaseFirstLookup = resolve;
+    });
+    const lookupStarted = new Promise<void>((resolve) => {
+      firstLookupStarted = resolve;
+    });
+    const allHeadReads = new Promise<void>((resolve) => {
+      allHeadReadsStarted = resolve;
+    });
+    let getCodeCalls = 0;
+    let headReads = 0;
+    const client = {
+      async getBlockNumber() {
+        headReads += 1;
+        if (headReads === 4) allHeadReadsStarted?.();
+        return 100n;
+      },
+      async getCode(parameters: { blockNumber: bigint }) {
+        getCodeCalls += 1;
+        if (getCodeCalls === 1) {
+          firstLookupStarted?.();
+          return await firstLookup;
+        }
+        return parameters.blockNumber >= 50n ? "0x01" : "0x";
+      },
+      async getLogs() { return []; },
+    };
+    const first = readProductBoardroomHistories(client as never, {
+      distributionSummaries: [fixedPriceHistoryFixture()],
+    } as BoardroomSnapshot, {
+      signal: firstController.signal,
+      timeoutMs: 1_000,
+    });
+    const firstOutcome = first.catch((error: unknown) => error);
+    await lookupStarted;
+
+    const second = readProductBoardroomHistories(client as never, {
+      distributionSummaries: [curve],
+    } as BoardroomSnapshot, { timeoutMs: 1_000 });
+    await allHeadReads;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(getCodeCalls).toBe(1);
+
+    firstController.abort(reason);
+    expect(await firstOutcome).toBe(reason);
+    releaseFirstLookup?.("0x01");
+
+    expect(await second).toEqual([expect.objectContaining({ completeness: "complete" })]);
+    expect(getCodeCalls).toBe(7);
+  });
+
   test("keeps state-derived catalog metrics and marks partial history failures", async () => {
     const context = productBoardroomFixture();
     const client = fakeProductBoardroomClient({

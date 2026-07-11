@@ -12,8 +12,29 @@ import {
 } from "@pledge.cash/sdk";
 import { encodeFunctionData } from "viem";
 import { transactionReviewCanContinue } from "../src/components/transaction-review";
-import { recoverInterruptedTransactions, stageLabel, type TransactionRecord } from "../src/features/transactions/transaction-center";
+import {
+  clearSettledTransactions,
+  recoverInterruptedTransactions,
+  stageLabel,
+  transactionIdentity,
+  transactionStatusLabel,
+  updateStoredTransactionsForIdentity,
+  type TransactionRecord,
+} from "../src/features/transactions/transaction-center";
+import { actionErrorWasAlreadyHandled } from "../src/hooks/use-action-runner";
 import { contractCallPreview, contractCallReview } from "../src/lib/transaction-preview";
+import {
+  confirmedReceiptInvalidationPlan,
+  monitorTransactionReceipt,
+  receiptBackgroundRetryDelay,
+  transactionReceiptMonitorKey,
+  TransactionReceiptCoordinator,
+  TransactionReceiptFinalizedError,
+  TransactionReceiptMonitoringCancelledError,
+  TransactionReceiptMonitoringDeferredError,
+  type ReceiptReplacementLike,
+  type ReceiptWait,
+} from "../src/lib/transaction-receipts";
 import {
   assertTransactionActionCurrent,
   assertTransactionIdentity,
@@ -61,6 +82,7 @@ describe("transaction review", () => {
     expect(stageLabel("confirmed")).toBe("Confirmed onchain");
     expect(stageLabel("failed")).toBe("Needs attention");
     expect(stageLabel("cancelled")).toBe("Cancelled");
+    expect(stageLabel("replaced")).toBe("Replaced in wallet");
   });
 
   test("marks one-way lifecycle calls as irreversible", () => {
@@ -254,7 +276,290 @@ describe("transaction review", () => {
     expect(recovered[0]?.stage).toBe("failed");
     expect(recovered[0]?.error).toContain("interrupted");
     expect(recovered[1]?.stage).toBe("failed");
-    expect(recovered[2]).toMatchObject({ hash, stage: "submitted" });
+    expect(recovered[2]).toMatchObject({ hash, stage: "submitted", submittedHash: hash });
+  });
+
+  test("persists a submitted hash to its origin identity after the active wallet changes", () => {
+    const record = {
+      id: "tx-origin-a",
+      chainId: 31337,
+      createdAt: "2026-07-10T00:00:00.000Z",
+      functionName: "setValue",
+      label: "Update value",
+      stage: "awaiting-signature",
+      target,
+    } satisfies TransactionRecord;
+    const hash = `0x${"49".repeat(32)}` as Hex;
+    const originIdentity = transactionIdentity(31337, holder);
+    const activeIdentity = transactionIdentity(31337, factory);
+    const stored = {
+      [originIdentity]: [record],
+      [activeIdentity]: [],
+    };
+
+    const updated = updateStoredTransactionsForIdentity(stored, 31337, holder, record.id, {
+      hash,
+      stage: "submitted",
+      submittedHash: hash,
+    });
+
+    expect(updated[originIdentity]?.[0]).toMatchObject({ hash, stage: "submitted", submittedHash: hash });
+    expect(updated[activeIdentity]).toEqual([]);
+  });
+
+  test("does not clear a confirmed transaction while its scoped refresh is pending", () => {
+    const base = {
+      id: "tx-refresh",
+      chainId: 31337,
+      createdAt: "2026-07-10T00:00:00.000Z",
+      functionName: "setValue",
+      label: "Update value",
+      stage: "confirmed",
+      target,
+    } satisfies TransactionRecord;
+    const refreshing = { ...base, refreshPending: true } satisfies TransactionRecord;
+    const cleared = clearSettledTransactions([
+      refreshing,
+      { ...base, id: "tx-settled" },
+      { ...base, id: "tx-failed", stage: "failed" },
+    ]);
+
+    expect(cleared).toEqual([refreshing]);
+    expect(transactionStatusLabel(refreshing)).toBe("Confirmed — refreshing workspace data");
+  });
+
+  test("shares one receipt monitor between live and hydrated callers", async () => {
+    const coordinator = new TransactionReceiptCoordinator();
+    const hash = `0x${"34".repeat(32)}` as Hex;
+    let monitors = 0;
+    let invalidations = 0;
+    const operation = async () => {
+      monitors += 1;
+      const outcome = await monitorTransactionReceipt({
+        hash,
+        waitForReceipt: async () => ({ status: "success", transactionHash: hash }),
+      });
+      if (outcome.kind === "confirmed") invalidations += 1;
+      return outcome;
+    };
+
+    const [live, hydrated] = await Promise.all([
+      coordinator.ensure("31337:holder:tx-1:hash", operation),
+      coordinator.ensure("31337:holder:tx-1:hash", operation),
+    ]);
+
+    expect(live).toEqual({ hash, kind: "confirmed" });
+    expect(hydrated).toEqual(live);
+    expect(monitors).toBe(1);
+    expect(invalidations).toBe(1);
+  });
+
+  test("isolates A to B to A receipt monitors by monotonic watcher version", () => {
+    const hash = `0x${"48".repeat(32)}` as Hex;
+    const firstA = transactionReceiptMonitorKey("31337:holder:deployment-a", 1, "tx-1", hash);
+    const returnedA = transactionReceiptMonitorKey("31337:holder:deployment-a", 3, "tx-1", hash);
+
+    expect(returnedA).not.toBe(firstA);
+  });
+
+  test("always refreshes shared caches while deferring only scoped provenance refresh", () => {
+    expect(confirmedReceiptInvalidationPlan(false, false)).toEqual({
+      refreshPending: false,
+      shared: true,
+      scoped: false,
+    });
+    expect(confirmedReceiptInvalidationPlan(true, false)).toEqual({
+      refreshPending: true,
+      shared: true,
+      scoped: false,
+    });
+    expect(confirmedReceiptInvalidationPlan(true, true)).toEqual({
+      refreshPending: true,
+      shared: true,
+      scoped: true,
+    });
+  });
+
+  test("caps background receipt and refresh retries with exponential backoff", () => {
+    expect([1, 2, 3, 4, 5].map(receiptBackgroundRetryDelay)).toEqual([
+      5_000,
+      10_000,
+      20_000,
+      30_000,
+      30_000,
+    ]);
+  });
+
+  test("keeps a monitor retryable after observation is deferred", async () => {
+    const coordinator = new TransactionReceiptCoordinator();
+    const hash = `0x${"35".repeat(32)}` as Hex;
+    let attempts = 0;
+    const deferred = () => coordinator.ensure("tx-retry", async () => {
+      attempts += 1;
+      throw new TransactionReceiptMonitoringDeferredError();
+    });
+
+    await expect(deferred()).rejects.toBeInstanceOf(TransactionReceiptMonitoringDeferredError);
+    const recovered = await coordinator.ensure("tx-retry", async () => {
+      attempts += 1;
+      return { hash, kind: "confirmed" } as const;
+    });
+
+    expect(recovered).toEqual({ hash, kind: "confirmed" });
+    expect(attempts).toBe(2);
+  });
+
+  test("retries a transient receipt error without turning the submission terminal", async () => {
+    const hash = `0x${"36".repeat(32)}` as Hex;
+    let waits = 0;
+    const monitoringErrors: number[] = [];
+    const outcome = await monitorTransactionReceipt({
+      hash,
+      onMonitoringError: (_error, attempt) => monitoringErrors.push(attempt),
+      sleep: async () => undefined,
+      waitForReceipt: async () => {
+        waits += 1;
+        if (waits === 1) throw new Error("temporary RPC failure");
+        return { status: "success", transactionHash: hash };
+      },
+    });
+
+    expect(outcome).toEqual({ hash, kind: "confirmed" });
+    expect(monitoringErrors).toEqual([1]);
+    expect(waits).toBe(2);
+  });
+
+  test("defers receipt monitoring after bounded observation failures", async () => {
+    const hash = `0x${"37".repeat(32)}` as Hex;
+    await expect(monitorTransactionReceipt({
+      hash,
+      maxAttempts: 2,
+      sleep: async () => undefined,
+      waitForReceipt: async () => {
+        throw new Error("RPC unavailable");
+      },
+    })).rejects.toBeInstanceOf(TransactionReceiptMonitoringDeferredError);
+  });
+
+  test("treats an original reverted receipt as terminal failure", async () => {
+    const hash = `0x${"47".repeat(32)}` as Hex;
+    const outcome = await monitorTransactionReceipt({
+      hash,
+      waitForReceipt: async () => ({ status: "reverted", transactionHash: hash }),
+    });
+
+    expect(outcome).toEqual({ hash, kind: "reverted" });
+  });
+
+  test("ignores a receipt that resolves after its wallet identity becomes stale", async () => {
+    const hash = `0x${"38".repeat(32)}` as Hex;
+    let current = true;
+    await expect(monitorTransactionReceipt({
+      hash,
+      isCurrent: () => current,
+      waitForReceipt: async () => {
+        current = false;
+        return { status: "success", transactionHash: hash };
+      },
+    })).rejects.toBeInstanceOf(TransactionReceiptMonitoringCancelledError);
+  });
+
+  test("releases receipt monitoring immediately when its identity is cancelled", async () => {
+    const hash = `0x${"43".repeat(32)}` as Hex;
+    const controller = new AbortController();
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const monitoring = monitorTransactionReceipt({
+      hash,
+      signal: controller.signal,
+      waitForReceipt: async () => {
+        markStarted?.();
+        return await new Promise<never>(() => undefined);
+      },
+    });
+    await started;
+
+    controller.abort();
+
+    await expect(monitoring).rejects.toBeInstanceOf(TransactionReceiptMonitoringCancelledError);
+  });
+
+  test.each([
+    ["cancelled", "cancelled"],
+    ["replaced", "replaced"],
+    ["repriced", "confirmed"],
+  ] as const)("normalizes a %s wallet replacement without claiming the original hash", async (reason, kind) => {
+    const originalHash = `0x${"39".repeat(32)}` as Hex;
+    const replacementHash = `0x${"40".repeat(32)}` as Hex;
+    const replacementReceipt = { status: "success", transactionHash: replacementHash } as const;
+    const waitForReceipt: ReceiptWait = async ({ onReplaced }) => {
+      onReplaced({
+        reason,
+        transaction: { hash: replacementHash },
+        transactionReceipt: replacementReceipt,
+      } satisfies ReceiptReplacementLike);
+      return replacementReceipt;
+    };
+
+    const outcome = await monitorTransactionReceipt({ hash: originalHash, waitForReceipt });
+
+    expect(outcome).toMatchObject({ hash: replacementHash, kind });
+    if (reason === "repriced") expect(outcome).toMatchObject({ replacementReason: "repriced" });
+  });
+
+  test("treats a reverted repricing as a failed reviewed transaction", async () => {
+    const originalHash = `0x${"41".repeat(32)}` as Hex;
+    const replacementHash = `0x${"42".repeat(32)}` as Hex;
+    const replacementReceipt = { status: "reverted", transactionHash: replacementHash } as const;
+    const outcome = await monitorTransactionReceipt({
+      hash: originalHash,
+      waitForReceipt: async ({ onReplaced }) => {
+        onReplaced({
+          reason: "repriced",
+          transaction: { hash: replacementHash },
+          transactionReceipt: replacementReceipt,
+        });
+        return replacementReceipt;
+      },
+    });
+
+    expect(outcome).toEqual({
+      hash: replacementHash,
+      kind: "reverted",
+      replacementReason: "repriced",
+    });
+  });
+
+  test.each(["cancelled", "replaced"] as const)(
+    "does not call the reviewed action reverted when a %s replacement reverts",
+    async (reason) => {
+      const originalHash = `0x${"44".repeat(32)}` as Hex;
+      const replacementHash = `0x${"45".repeat(32)}` as Hex;
+      const replacementReceipt = { status: "reverted", transactionHash: replacementHash } as const;
+      const outcome = await monitorTransactionReceipt({
+        hash: originalHash,
+        waitForReceipt: async ({ onReplaced }) => {
+          onReplaced({
+            reason,
+            transaction: { hash: replacementHash },
+            transactionReceipt: replacementReceipt,
+          });
+          return replacementReceipt;
+        },
+      });
+
+      expect(outcome).toEqual({ hash: replacementHash, kind: reason });
+    },
+  );
+
+  test("silences only receipt outcomes that already have a finalizer log", () => {
+    const hash = `0x${"46".repeat(32)}` as Hex;
+    expect(actionErrorWasAlreadyHandled(new TransactionReceiptFinalizedError({ hash, kind: "cancelled" }))).toBe(true);
+    expect(actionErrorWasAlreadyHandled(new TransactionReceiptMonitoringCancelledError())).toBe(true);
+    expect(actionErrorWasAlreadyHandled(new TransactionReceiptMonitoringDeferredError())).toBe(false);
+    expect(actionErrorWasAlreadyHandled(new Error("unhandled"))).toBe(false);
   });
 
   test("decodes every argument in a real Boardroom share-grant issuance batch", () => {

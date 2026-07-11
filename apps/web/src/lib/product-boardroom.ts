@@ -197,6 +197,10 @@ type EventLogCacheEntry = {
   toBlock?: bigint | undefined;
 };
 
+type ContractStartBlockCacheEntry =
+  | { state: "pending"; request: Promise<bigint> }
+  | { state: "resolved"; value: bigint };
+
 type EventLogRequestBudget = {
   logsUsed: number;
   requestsUsed: number;
@@ -207,6 +211,7 @@ type EventScanContext = {
   deadlineAt?: number | undefined;
   failure?: Error | undefined;
   signal?: AbortSignal | undefined;
+  terminationListeners: Set<() => void>;
   timeoutMs: number;
 };
 
@@ -229,7 +234,7 @@ const MAX_EVENT_LOG_REQUESTS_PER_SCAN = 512;
 const MAX_EVENT_LOG_REORG_RETRIES = 1;
 const MIN_EVENT_LOG_CHUNK_SIZE = 1n;
 const WAD = 1_000_000_000_000_000_000n;
-const contractStartBlockCache = new WeakMap<object, Map<string, Promise<bigint>>>();
+const contractStartBlockCache = new WeakMap<object, Map<string, ContractStartBlockCacheEntry>>();
 const eventLogCache = new WeakMap<object, Map<string, EventLogCacheEntry>>();
 const eventLogRangeLimitCache = new WeakMap<object, bigint>();
 
@@ -1290,20 +1295,54 @@ async function contractStartBlock(
   if (cached) {
     clientCache.delete(key);
     clientCache.set(key, cached);
-    return await waitForEventScanOperation(cached, eventScan, "contract start block");
+    if (cached.state === "resolved") return cached.value;
+    return await waitForContractStartBlock(cached, clientCache, key, eventScan);
   }
 
-  // Some local and pruned RPCs expose current state at a high block but cannot
-  // answer historical eth_getCode. Cache the safe fallback promise itself so
-  // concurrent event readers never observe a rejected start-block lookup.
-  const request = findContractStartBlock(client, address, toBlock).catch(() => 0n);
+  const request = findContractStartBlock(client, address, toBlock);
+  const entry: ContractStartBlockCacheEntry = { state: "pending", request };
   while (clientCache.size >= MAX_CONTRACT_START_BLOCK_CACHE_ENTRIES) {
     const oldest = clientCache.keys().next().value as string | undefined;
     if (oldest === undefined) break;
     clientCache.delete(oldest);
   }
-  clientCache.set(key, request);
-  return await waitForEventScanOperation(request, eventScan, "contract start block");
+  clientCache.set(key, entry);
+  void request.then(
+    (value) => {
+      if (clientCache.get(key) !== entry) return;
+      clientCache.delete(key);
+      clientCache.set(key, { state: "resolved", value });
+    },
+    () => {
+      if (clientCache.get(key) === entry) clientCache.delete(key);
+    },
+  );
+  return await waitForContractStartBlock(entry, clientCache, key, eventScan);
+}
+
+async function waitForContractStartBlock(
+  entry: Extract<ContractStartBlockCacheEntry, { state: "pending" }>,
+  clientCache: Map<string, ContractStartBlockCacheEntry>,
+  key: string,
+  eventScan: EventScanContext,
+): Promise<bigint> {
+  const evictPendingLookup = (): void => {
+    if (clientCache.get(key) === entry) clientCache.delete(key);
+  };
+  eventScan.terminationListeners.add(evictPendingLookup);
+  try {
+    return await waitForEventScanOperation(entry.request, eventScan, "contract start block");
+  } catch (error) {
+    // Removing the shared entry does not cancel its promise, so callers that
+    // already hold it may still finish. A later caller can retry immediately.
+    evictPendingLookup();
+    if (eventScanOwnsFailure(eventScan, error)) throw error;
+    // Pruned RPCs may reject historical eth_getCode. Fall back for this scan,
+    // but do not make a transient provider failure permanent for this client.
+    return 0n;
+  } finally {
+    eventScan.terminationListeners.delete(evictPendingLookup);
+  }
 }
 
 async function findContractStartBlock(
@@ -1534,18 +1573,24 @@ function createEventScanContext(options: ProductBoardroomHistoryReadOptions): Ev
   return {
     budget: { logsUsed: 0, requestsUsed: 0 },
     ...(options.signal ? { signal: options.signal } : {}),
+    terminationListeners: new Set(),
     timeoutMs,
   };
 }
 
 function assertEventScanActive(eventScan: EventScanContext): void {
-  eventScan.signal?.throwIfAborted();
-  if (eventScan.failure) throw eventScan.failure;
+  if (eventScan.signal?.aborted) {
+    notifyEventScanTermination(eventScan);
+    eventScan.signal.throwIfAborted();
+  }
+  if (eventScan.failure) {
+    notifyEventScanTermination(eventScan);
+    throw eventScan.failure;
+  }
   eventScan.deadlineAt ??= Date.now() + eventScan.timeoutMs;
   if (Date.now() < eventScan.deadlineAt) return;
   const error = new Error(`Historical event scan exceeded its ${eventScan.timeoutMs.toLocaleString()}ms deadline.`);
-  eventScan.failure = error;
-  throw error;
+  throw recordEventScanFailure(eventScan, error);
 }
 
 async function waitForEventScanOperation<T>(
@@ -1564,12 +1609,17 @@ async function waitForEventScanOperation<T>(
       eventScan.signal?.removeEventListener("abort", onAbort);
       callback();
     };
-    const onAbort = (): void => finish(() => reject(
-      eventScan.signal?.reason ?? new DOMException("The operation was aborted.", "AbortError"),
-    ));
+    const onAbort = (): void => {
+      notifyEventScanTermination(eventScan);
+      finish(() => reject(
+        eventScan.signal?.reason ?? new DOMException("The operation was aborted.", "AbortError"),
+      ));
+    };
     const timeout = setTimeout(() => {
-      const error = new Error(`Historical ${label} exceeded the event scan deadline.`);
-      eventScan.failure = error;
+      const error = recordEventScanFailure(
+        eventScan,
+        new Error(`Historical ${label} exceeded the event scan deadline.`),
+      );
       finish(() => reject(error));
     }, remainingMs);
     eventScan.signal?.addEventListener("abort", onAbort, { once: true });
@@ -1580,14 +1630,23 @@ async function waitForEventScanOperation<T>(
   });
 }
 
+function recordEventScanFailure(eventScan: EventScanContext, error: Error): Error {
+  eventScan.failure ??= error;
+  notifyEventScanTermination(eventScan);
+  return eventScan.failure;
+}
+
+function notifyEventScanTermination(eventScan: EventScanContext): void {
+  for (const listener of [...eventScan.terminationListeners]) listener();
+}
+
 function reserveEventLogRequest(eventScan: EventScanContext, name: ProductBoardroomEventName): void {
   assertEventScanActive(eventScan);
   if (eventScan.budget.requestsUsed >= MAX_EVENT_LOG_REQUESTS_PER_SCAN) {
     const error = new Error(
       `Historical ${name} activity exceeded the aggregate ${MAX_EVENT_LOG_REQUESTS_PER_SCAN.toString()}-request safety bound.`,
     );
-    eventScan.failure = error;
-    throw error;
+    throw recordEventScanFailure(eventScan, error);
   }
   eventScan.budget.requestsUsed += 1;
 }
@@ -1602,8 +1661,7 @@ function reserveEventLogResults(
     const error = new Error(
       `Historical ${name} activity exceeds the aggregate ${MAX_EVENT_LOGS_PER_SCAN.toLocaleString()}-event safety bound.`,
     );
-    eventScan.failure = error;
-    throw error;
+    throw recordEventScanFailure(eventScan, error);
   }
   eventScan.budget.logsUsed += count;
 }

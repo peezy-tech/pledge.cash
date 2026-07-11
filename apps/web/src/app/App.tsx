@@ -71,7 +71,7 @@ import {
   type PledgeCashDeployment,
   type QueuedBoardroomAction,
 } from "@pledge.cash/sdk";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Hex, PublicClient, WalletClient } from "viem";
 import { TransactionReview } from "../components/transaction-review";
 import { ConnectWalletButton } from "../components/simplekit";
@@ -195,6 +195,17 @@ import {
 import { parseTokenAmountInput, readTokenMetadata, type TokenMetadata } from "../lib/token-amounts";
 import { contractCallPreview, contractCallReview } from "../lib/transaction-preview";
 import {
+  confirmedReceiptInvalidationPlan,
+  monitorTransactionReceipt,
+  receiptBackgroundRetryDelay,
+  transactionReceiptMonitorKey,
+  TransactionReceiptCoordinator,
+  TransactionReceiptFinalizedError,
+  TransactionReceiptMonitoringCancelledError,
+  TransactionReceiptMonitoringDeferredError,
+  type TransactionReceiptOutcome,
+} from "../lib/transaction-receipts";
+import {
   actionInputIdentity,
   assertTransactionActionCurrent,
   assertTransactionIdentity,
@@ -203,7 +214,11 @@ import {
   type TransactionActionGuard,
   type TransactionIdentity,
 } from "../lib/transaction-identity";
-import { TransactionTray, useTransactionCenter } from "../features/transactions/transaction-center";
+import {
+  TransactionTray,
+  useTransactionCenter,
+  type TransactionRecord,
+} from "../features/transactions/transaction-center";
 import type {
   BoardroomForm,
   BoardroomGrantForm,
@@ -254,6 +269,7 @@ import {
 } from "./pages";
 import { sameAddress } from "./views/workspace-helpers";
 
+const useCommittedLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 const AdvancedWorkspace = lazy(async () => ({ default: (await import("./views/workspaces")).AdvancedWorkspace }));
 const BoardroomPanel = lazy(async () => ({ default: (await import("../features/boardrooms/boardroom-panel")).BoardroomPanel }));
 const DirectGrantPanel = lazy(async () => ({ default: (await import("../features/grants/direct-grant-panel")).DirectGrantPanel }));
@@ -273,6 +289,7 @@ export { manageWorkspaceSummary } from "./views/workspace-helpers";
 const MIN_SETTLEMENT_GRACE_SECONDS = 86_400n;
 const GOVERNANCE_LOAD_DEADLINE_MS = 30_000;
 const AMM_TOKEN_LOAD_DEADLINE_MS = 30_000;
+const TRANSACTION_RECEIPT_WAIT_TIMEOUT_MS = 60_000;
 
 type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
 type ActiveActionOrigin = {
@@ -595,10 +612,34 @@ export function App(): React.JSX.Element {
   const productGovernanceSnapshotKeyRef = useRef<string | undefined>(undefined);
   const grantRouteLoadedKeyRef = useRef<string | undefined>(undefined);
   const watchedTransactionIdsRef = useRef(new Map<string, number>());
-  const liveSubmissionIdsRef = useRef(new Set<string>());
-  const liveConfirmedTransactionIdsRef = useRef(new Set<string>());
+  const transactionReceiptCoordinatorRef = useRef(new TransactionReceiptCoordinator());
+  const transactionReceiptRetryCountsRef = useRef(new Map<string, number>());
+  const transactionReceiptRetryTimersRef = useRef(new Map<string, ReturnType<typeof globalThis.setTimeout>>());
+  const transactionRefreshClaimIdsRef = useRef(new Set<string>());
+  const transactionRefreshRetryCountsRef = useRef(new Map<string, number>());
+  const transactionWatcherAbortControllerRef = useRef(new AbortController());
   const transactionWatcherIdentityRef = useRef<string | undefined>(undefined);
   const transactionWatcherVersionRef = useRef(0);
+  const transactionReceiptMonitorMountedRef = useRef(false);
+  const [transactionReceiptRetryGeneration, setTransactionReceiptRetryGeneration] = useState(0);
+  const [transactionWatcherRenderGeneration, setTransactionWatcherRenderGeneration] = useState(0);
+  useEffect(() => {
+    transactionReceiptMonitorMountedRef.current = true;
+    if (transactionWatcherAbortControllerRef.current.signal.aborted) {
+      transactionWatcherAbortControllerRef.current = new AbortController();
+      transactionWatcherVersionRef.current += 1;
+      setTransactionWatcherRenderGeneration((generation) => generation + 1);
+    }
+    return () => {
+      transactionReceiptMonitorMountedRef.current = false;
+      globalThis.queueMicrotask(() => {
+        if (transactionReceiptMonitorMountedRef.current) return;
+        transactionWatcherAbortControllerRef.current.abort();
+        for (const timer of transactionReceiptRetryTimersRef.current.values()) globalThis.clearTimeout(timer);
+        transactionReceiptRetryTimersRef.current.clear();
+      });
+    };
+  }, []);
   const activeChainIdRef = useRef(activeNetwork.chainId);
   activeChainIdRef.current = activeNetwork.chainId;
   const activeAccountRef = useRef<Address | undefined>(undefined);
@@ -608,7 +649,8 @@ export function App(): React.JSX.Element {
   const activeDiscoveryKeyRef = useRef<string | undefined>(undefined);
   const activeDeploymentIdentityRef = useRef<string | undefined>(undefined);
   const activeActionOriginRef = useRef<ActiveActionOrigin | undefined>(undefined);
-  const invalidateConfirmedRouteRef = useRef<(route: AppRoute) => Promise<void>>(async () => undefined);
+  const invalidateSettledSharedStateRef = useRef<() => void>(() => undefined);
+  const invalidateConfirmedScopedRouteRef = useRef<(route: AppRoute) => Promise<void>>(async () => undefined);
   const transactionContextGuardRef = useRef(new TransactionContextGuard("initial"));
   const publicClient = useMemo(() => createPledgeCashPublicClient(activeNetwork), [activeNetwork]);
   const generatedDeployment = getPledgeCashDeployment(activeNetwork.chainId);
@@ -990,13 +1032,25 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     cancelReview();
   }, [activeNetwork.chainId, activeRouteIdentity, cancelReview, wallet.account, wallet.chainId]);
-  const transactionWatcherIdentity = `${activeNetwork.chainId.toString()}:${wallet.account?.toLowerCase() ?? "read-only"}`;
-  if (transactionWatcherIdentityRef.current !== transactionWatcherIdentity) {
+  const transactionWatcherIdentity = [
+    activeNetwork.chainId.toString(),
+    wallet.account?.toLowerCase() ?? "read-only",
+    runtimeDeploymentIdentity ?? "unconfigured",
+  ].join(":");
+  useCommittedLayoutEffect(() => {
+    if (transactionWatcherIdentityRef.current === transactionWatcherIdentity) return;
+    transactionWatcherAbortControllerRef.current.abort();
+    transactionWatcherAbortControllerRef.current = new AbortController();
     transactionWatcherIdentityRef.current = transactionWatcherIdentity;
     transactionWatcherVersionRef.current += 1;
     watchedTransactionIdsRef.current.clear();
-    liveConfirmedTransactionIdsRef.current.clear();
-  }
+    for (const timer of transactionReceiptRetryTimersRef.current.values()) globalThis.clearTimeout(timer);
+    transactionReceiptRetryTimersRef.current.clear();
+    transactionReceiptRetryCountsRef.current.clear();
+    transactionRefreshClaimIdsRef.current.clear();
+    transactionRefreshRetryCountsRef.current.clear();
+    setTransactionWatcherRenderGeneration((generation) => generation + 1);
+  }, [transactionWatcherIdentity]);
   const activeGovernanceKey = governanceRouteKey(appRoute, wallet.account, runtimeDeploymentIdentity);
   activeGovernanceKeyRef.current = activeGovernanceKey;
   const verifiedBoardroomHolderPower = boardroomHolderPower
@@ -1014,47 +1068,214 @@ export function App(): React.JSX.Element {
   const verifiedProductGovernanceWarning = productGovernanceQueueVerifiedKey === activeGovernanceKey
     ? productGovernanceWarning
     : undefined;
-  const { records: transactions, startTransaction, updateTransaction, clearSettled } = useTransactionCenter(
-    activeNetwork.chainId,
-    wallet.account,
-  );
+  const {
+    records: transactions,
+    startTransaction,
+    updateTransaction,
+    updateTransactionForIdentity,
+    clearSettled,
+  } = useTransactionCenter(activeNetwork.chainId, wallet.account);
+  const ensureTransactionReceipt = (
+    transaction: Pick<TransactionRecord, "chainId" | "hash" | "id" | "label" | "refreshRoute" | "submittedHash">,
+    watcherIdentity: string,
+    watcherVersion: number,
+    routeAtSubmission?: AppRoute,
+    allowInvalidation = true,
+    watcherSignal = transactionWatcherAbortControllerRef.current.signal,
+  ): Promise<TransactionReceiptOutcome> => {
+    const submittedHash = transaction.submittedHash ?? transaction.hash;
+    if (!submittedHash) return Promise.reject(new Error("Submitted transaction is missing its original hash."));
+    const monitorKey = transactionReceiptMonitorKey(watcherIdentity, watcherVersion, transaction.id, submittedHash);
+
+    return transactionReceiptCoordinatorRef.current.ensure(monitorKey, async () => {
+      const outcome = await monitorTransactionReceipt({
+        hash: submittedHash,
+        isCurrent: () => transactionWatcherVersionRef.current === watcherVersion,
+        maxAttempts: 1,
+        onMonitoringError: () => {
+          if (transactionWatcherVersionRef.current !== watcherVersion) return;
+          updateTransaction(transaction.id, {
+            error: "Confirmation tracking was interrupted. This transaction is still submitted and is being checked again automatically.",
+            stage: "submitted",
+          });
+        },
+        signal: watcherSignal,
+        waitForReceipt: async ({ hash, onReplaced }) => await publicClient.waitForTransactionReceipt({
+          hash,
+          onReplaced,
+          timeout: TRANSACTION_RECEIPT_WAIT_TIMEOUT_MS,
+        }),
+      });
+      if (transactionWatcherVersionRef.current !== watcherVersion) {
+        throw new TransactionReceiptMonitoringCancelledError();
+      }
+      invalidateSettledSharedStateRef.current();
+
+      if (outcome.kind === "cancelled") {
+        updateTransaction(transaction.id, {
+          error: "Cancelled in your wallet. The reviewed action was not executed.",
+          hash: outcome.hash,
+          refreshPending: false,
+          replacementReason: "cancelled",
+          stage: "cancelled",
+        });
+        pushLog(`${transaction.label} was cancelled in the wallet.`, "info", outcome.hash, transaction.chainId);
+        return outcome;
+      }
+      if (outcome.kind === "replaced") {
+        updateTransaction(transaction.id, {
+          error: "Replaced in your wallet by a different transaction. The reviewed action was not executed.",
+          hash: outcome.hash,
+          refreshPending: false,
+          replacementReason: "replaced",
+          stage: "replaced",
+        });
+        pushLog(`${transaction.label} was replaced by a different wallet transaction.`, "error", outcome.hash, transaction.chainId);
+        return outcome;
+      }
+      if (outcome.kind === "reverted") {
+        updateTransaction(transaction.id, {
+          error: `${transaction.label} reverted after submission.`,
+          hash: outcome.hash,
+          refreshPending: false,
+          replacementReason: outcome.replacementReason,
+          stage: "failed",
+        });
+        pushLog(`${transaction.label} reverted onchain.`, "error", outcome.hash, transaction.chainId);
+        return outcome;
+      }
+
+      const refreshRoute = routeAtSubmission ?? transaction.refreshRoute;
+      const invalidation = confirmedReceiptInvalidationPlan(Boolean(refreshRoute), allowInvalidation);
+      const refreshClaimKey = invalidation.scoped
+        ? [watcherVersion.toString(), transaction.id, outcome.hash.toLowerCase()].join(":")
+        : undefined;
+      const refreshRetryKey = `${transaction.id}:${outcome.hash.toLowerCase()}`;
+      if (refreshClaimKey) transactionRefreshClaimIdsRef.current.add(refreshClaimKey);
+      updateTransaction(transaction.id, {
+        error: undefined,
+        hash: outcome.hash,
+        refreshPending: invalidation.refreshPending,
+        replacementReason: outcome.replacementReason,
+        stage: "confirmed",
+      });
+      pushLog(`${transaction.label} confirmed`, "success", outcome.hash, transaction.chainId);
+      if (!refreshClaimKey || !refreshRoute) return outcome;
+      try {
+        await invalidateConfirmedScopedRouteRef.current(refreshRoute);
+        if (transactionWatcherVersionRef.current !== watcherVersion) {
+          throw new TransactionReceiptMonitoringCancelledError();
+        }
+        transactionRefreshRetryCountsRef.current.delete(refreshRetryKey);
+        updateTransaction(transaction.id, { refreshPending: false });
+      } catch (error) {
+        if (transactionWatcherVersionRef.current !== watcherVersion) {
+          throw new TransactionReceiptMonitoringCancelledError();
+        }
+        updateTransaction(transaction.id, { refreshPending: true });
+        pushLog(
+          `${transaction.label} confirmed, but current route data could not be refreshed: ${errorMessage(error)}`,
+          "error",
+          outcome.hash,
+          transaction.chainId,
+        );
+      } finally {
+        transactionRefreshClaimIdsRef.current.delete(refreshClaimKey);
+      }
+      return outcome;
+    });
+  };
   useEffect(() => {
     for (const transaction of transactions) {
       if (transaction.chainId !== activeNetwork.chainId || transaction.stage !== "submitted" || !transaction.hash) continue;
-      const watcherKey = `${activeNetwork.chainId.toString()}:${wallet.account?.toLowerCase() ?? "read-only"}:${transaction.id}`;
-      if (watchedTransactionIdsRef.current.has(watcherKey)) continue;
+      const watcherIdentity = transactionWatcherIdentity;
+      const submittedHash = transaction.submittedHash ?? transaction.hash;
       const watcherVersion = transactionWatcherVersionRef.current;
+      const watcherKey = transactionReceiptMonitorKey(watcherIdentity, watcherVersion, transaction.id, submittedHash);
+      if (watchedTransactionIdsRef.current.has(watcherKey)) continue;
       watchedTransactionIdsRef.current.set(watcherKey, watcherVersion);
-      void publicClient.waitForTransactionReceipt({ hash: transaction.hash })
-        .then(async (receipt) => {
-          if (transactionWatcherVersionRef.current !== watcherVersion) return;
-          updateTransaction(transaction.id, {
-            ...(receipt.status === "success" ? {} : { error: `${transaction.label} failed after submission.` }),
-            stage: receipt.status === "success" ? "confirmed" : "failed",
-          });
-          const receiptOwnedByLiveSubmission = liveSubmissionIdsRef.current.has(transaction.id)
-            || liveConfirmedTransactionIdsRef.current.has(transaction.id);
-          if (receipt.status === "success" && !receiptOwnedByLiveSubmission) {
-            try {
-              await invalidateConfirmedRouteRef.current(activeAppRouteRef.current);
-            } catch (error) {
-              pushLog(
-                `${transaction.label} confirmed, but current route data could not be refreshed: ${errorMessage(error)}`,
-                "error",
-                transaction.hash,
-                transaction.chainId,
-              );
+      let monitoringDeferred = false;
+      const allowInvalidation = Boolean(
+        transaction.deploymentIdentity
+        && transaction.deploymentIdentity === runtimeDeploymentIdentity,
+      );
+      void ensureTransactionReceipt(transaction, watcherIdentity, watcherVersion, transaction.refreshRoute, allowInvalidation)
+        .catch((error: unknown) => {
+          if (error instanceof TransactionReceiptMonitoringDeferredError
+            && transactionWatcherVersionRef.current === watcherVersion) {
+            monitoringDeferred = true;
+            const retryAttempt = (transactionReceiptRetryCountsRef.current.get(watcherKey) ?? 0) + 1;
+            transactionReceiptRetryCountsRef.current.set(watcherKey, retryAttempt);
+            if (!transactionReceiptRetryTimersRef.current.has(watcherKey)) {
+              const timer = globalThis.setTimeout(() => {
+                transactionReceiptRetryTimersRef.current.delete(watcherKey);
+                if (transactionWatcherVersionRef.current !== watcherVersion) return;
+                if (watchedTransactionIdsRef.current.get(watcherKey) === watcherVersion) {
+                  watchedTransactionIdsRef.current.delete(watcherKey);
+                }
+                setTransactionReceiptRetryGeneration((generation) => generation + 1);
+              }, receiptBackgroundRetryDelay(retryAttempt));
+              transactionReceiptRetryTimersRef.current.set(watcherKey, timer);
             }
           }
         })
-        .catch(() => undefined)
         .finally(() => {
+          if (monitoringDeferred) return;
           if (watchedTransactionIdsRef.current.get(watcherKey) === watcherVersion) {
             watchedTransactionIdsRef.current.delete(watcherKey);
           }
+          transactionReceiptRetryCountsRef.current.delete(watcherKey);
         });
     }
-  }, [activeNetwork.chainId, publicClient, pushLog, transactions, updateTransaction, wallet.account]);
+  }, [activeNetwork.chainId, publicClient, pushLog, runtimeDeploymentIdentity, transactionReceiptRetryGeneration, transactionWatcherIdentity, transactionWatcherRenderGeneration, transactions, updateTransaction, wallet.account]);
+  useEffect(() => {
+    for (const transaction of transactions) {
+      if (transaction.stage !== "confirmed" || !transaction.refreshPending) continue;
+      if (!transaction.deploymentIdentity
+        || transaction.deploymentIdentity !== runtimeDeploymentIdentity
+        || !transaction.refreshRoute) continue;
+      const refreshVersion = transactionWatcherVersionRef.current;
+      const claimKey = [
+        refreshVersion.toString(),
+        transaction.id,
+        transaction.hash?.toLowerCase() ?? "no-hash",
+      ].join(":");
+      const refreshRetryKey = `${transaction.id}:${transaction.hash?.toLowerCase() ?? "no-hash"}`;
+      if (transactionRefreshClaimIdsRef.current.has(claimKey)) continue;
+      transactionRefreshClaimIdsRef.current.add(claimKey);
+      let retryScheduled = false;
+      void invalidateConfirmedScopedRouteRef.current(transaction.refreshRoute)
+        .then(() => {
+          if (transactionWatcherVersionRef.current !== refreshVersion) return;
+          transactionRefreshRetryCountsRef.current.delete(refreshRetryKey);
+          updateTransaction(transaction.id, { refreshPending: false });
+        })
+        .catch((error: unknown) => {
+          if (transactionWatcherVersionRef.current !== refreshVersion) return;
+          retryScheduled = true;
+          pushLog(
+            `${transaction.label} confirmed, but current route data could not be refreshed: ${errorMessage(error)}`,
+            "error",
+            transaction.hash,
+            transaction.chainId,
+          );
+          const timerKey = `refresh:${claimKey}`;
+          if (transactionReceiptRetryTimersRef.current.has(timerKey)) return;
+          const retryAttempt = (transactionRefreshRetryCountsRef.current.get(refreshRetryKey) ?? 0) + 1;
+          transactionRefreshRetryCountsRef.current.set(refreshRetryKey, retryAttempt);
+          const timer = globalThis.setTimeout(() => {
+            transactionReceiptRetryTimersRef.current.delete(timerKey);
+            transactionRefreshClaimIdsRef.current.delete(claimKey);
+            if (transactionWatcherVersionRef.current !== refreshVersion) return;
+            setTransactionReceiptRetryGeneration((generation) => generation + 1);
+          }, receiptBackgroundRetryDelay(retryAttempt));
+          transactionReceiptRetryTimersRef.current.set(timerKey, timer);
+        })
+        .finally(() => {
+          if (!retryScheduled) transactionRefreshClaimIdsRef.current.delete(claimKey);
+        });
+    }
+  }, [pushLog, runtimeDeploymentIdentity, transactionReceiptRetryGeneration, transactionWatcherRenderGeneration, transactions, updateTransaction]);
   const factorySnapshot = useFactorySnapshot(publicClient, deployment, pushLog);
   const creationFee = factorySnapshot.creationFee ?? deployment?.creationFee ?? 0n;
   const discoveryKey = discoveryStorageKey(activeNetwork.chainId, wallet.account, discoveryDeploymentIdentity);
@@ -1710,7 +1931,7 @@ export function App(): React.JSX.Element {
     };
     assertLiveIdentity("review");
     const transactionId = startTransaction(callReview);
-    liveSubmissionIdsRef.current.add(transactionId);
+    let submittedHash: Hex | undefined;
     try {
       await requestReview(callReview);
       assertLiveIdentity("simulation");
@@ -1726,35 +1947,43 @@ export function App(): React.JSX.Element {
       const client = walletClientRef.current?.();
       if (!client) throw new Error("Wallet client is not ready yet.");
       assertLiveIdentity("submission");
+      const receiptWatcherIdentity = [
+        txChainId.toString(),
+        transactionIdentity.account.toLowerCase(),
+        transactionIdentity.deploymentIdentity ?? "unconfigured",
+      ].join(":");
+      const receiptWatcherVersion = transactionWatcherVersionRef.current;
       const hash = (await client.writeContract({
         ...simulation.request,
       } as unknown as Parameters<typeof client.writeContract>[0])) as Hex;
 
-      updateTransaction(transactionId, { hash, stage: "submitted" });
+      submittedHash = hash;
+      updateTransactionForIdentity(txChainId, transactionIdentity.account, transactionId, {
+        deploymentIdentity: transactionIdentity.deploymentIdentity,
+        error: undefined,
+        hash,
+        refreshPending: false,
+        refreshRoute: transactionRoute,
+        stage: "submitted",
+        submittedHash: hash,
+      });
       pushLog(`${label} submitted`, "info", hash, txChainId);
-      const receipt = await publicClient.waitForTransactionReceipt({ hash });
-      if (receipt.status !== "success") {
-        throw new Error(`${label} failed after submission.`);
-      }
-
-      liveConfirmedTransactionIdsRef.current.add(transactionId);
-      updateTransaction(transactionId, { stage: "confirmed" });
-      pushLog(`${label} confirmed`, "success", hash, txChainId);
-      try {
-        await invalidateConfirmedRouteRef.current(transactionRoute);
-      } catch (refreshError) {
-        pushLog(`${label} confirmed, but fresh route data could not be loaded: ${errorMessage(refreshError)}`, "error", hash, txChainId);
-      }
-      return hash;
+      const outcome = await ensureTransactionReceipt(
+        { chainId: txChainId, hash, id: transactionId, label, refreshRoute: transactionRoute, submittedHash: hash },
+        receiptWatcherIdentity,
+        receiptWatcherVersion,
+        transactionRoute,
+      );
+      if (outcome.kind === "confirmed") return outcome.hash;
+      throw new TransactionReceiptFinalizedError(outcome);
     } catch (error) {
+      if (submittedHash) throw error;
       const cancelled = error instanceof Error && error.name === "TransactionReviewCancelledError";
       updateTransaction(transactionId, {
         error: cancelled ? undefined : errorMessage(error),
         stage: cancelled ? "cancelled" : "failed",
       });
       throw error;
-    } finally {
-      liveSubmissionIdsRef.current.delete(transactionId);
     }
   };
 
@@ -2284,9 +2513,9 @@ export function App(): React.JSX.Element {
     void loadCanonicalGrantRoute(appRoute.grant, key);
   }, [activeNetwork.chainId, appRoute, deployment?.tokenGrantFactory, pushLog, runtimeDeploymentIdentity]);
 
-  async function invalidateConfirmedRoute(routeAtSubmission: AppRoute): Promise<void> {
+  function invalidateSettledSharedState(): void {
     ammReadCoordinatorRef.current.invalidate();
-    ammTokenLoadAbortControllerRef.current?.abort(new DOMException("Confirmed transaction invalidated AMM data.", "AbortError"));
+    ammTokenLoadAbortControllerRef.current?.abort(new DOMException("Settled transaction invalidated AMM data.", "AbortError"));
     ammTokenLoadAbortControllerRef.current = undefined;
     setSwapTokenList(emptySwapTokenList());
     setSwapTokenListLoading(false);
@@ -2294,6 +2523,9 @@ export function App(): React.JSX.Element {
     setLiquidityQuote(undefined);
     setRemoveLiquidityQuote(undefined);
     setAmmPosition(undefined);
+  }
+
+  async function invalidateConfirmedScopedRoute(routeAtSubmission: AppRoute): Promise<void> {
     const plan = confirmedRouteRefreshPlan(routeAtSubmission, activeAppRouteRef.current);
     if (plan.kind === "none") return;
     if (plan.kind === "grant") {
@@ -2345,7 +2577,8 @@ export function App(): React.JSX.Element {
       await loadProductGovernance(currentPlan.boardroom);
     }
   }
-  invalidateConfirmedRouteRef.current = invalidateConfirmedRoute;
+  invalidateSettledSharedStateRef.current = invalidateSettledSharedState;
+  invalidateConfirmedScopedRouteRef.current = invalidateConfirmedScopedRoute;
 
   const runGrantIssuerAction = async (functionName: GrantIssuerAction, successMessage: string): Promise<void> => {
     const grant = selectedGrantAddress();
