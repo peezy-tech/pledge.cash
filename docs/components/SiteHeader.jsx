@@ -159,30 +159,108 @@ export default function SiteHeader({
   useEffect(() => {
     const initialSearch = window.__PLEDGE_DOCS_INITIAL_SEARCH__;
     const initialHash = window.__PLEDGE_DOCS_INITIAL_HASH__;
-    if (!initialSearch && !initialHash) return;
+    if (!initialSearch && !initialHash) return undefined;
     window.__PLEDGE_DOCS_INITIAL_SEARCH__ = "";
     window.__PLEDGE_DOCS_INITIAL_HASH__ = "";
-    const timer = window.setTimeout(() => {
-      requestAnimationFrame(() => {
-        const search = window.location.search || initialSearch;
-        const hash = window.location.hash || initialHash;
-        if (search !== window.location.search || hash !== window.location.hash) {
-          window.history.replaceState(
-            window.history.state,
-            "",
-            `${window.location.pathname}${search}${hash}`,
-          );
-        }
-        if (initialHash) {
-          try {
-            document.getElementById(decodeURIComponent(initialHash.slice(1)))?.scrollIntoView();
-          } catch {
-            // An invalid fragment remains visible in the URL but cannot name an element.
-          }
-        }
-      });
-    }, 0);
-    return () => window.clearTimeout(timer);
+    let active = true;
+    let settling = false;
+    let observer;
+    const timers = new Set();
+    let targetId;
+
+    if (initialHash) {
+      try {
+        targetId = decodeURIComponent(initialHash.slice(1));
+      } catch {
+        targetId = null;
+      }
+    }
+
+    const finish = () => {
+      if (!active) return;
+      active = false;
+      observer?.disconnect();
+      for (const timer of timers) window.clearTimeout(timer);
+      timers.clear();
+      document.removeEventListener("visibilitychange", restoreWhenVisible);
+      window.removeEventListener("focus", restoreWhenVisible);
+      window.removeEventListener("keydown", finish, true);
+      window.removeEventListener("pointerdown", finish, true);
+      window.removeEventListener("touchstart", finish, true);
+      window.removeEventListener("wheel", finish, true);
+    };
+
+    const restore = () => {
+      if (!active) return false;
+      if (initialHash && window.location.hash && window.location.hash !== initialHash) {
+        finish();
+        return false;
+      }
+      const search = window.location.search || initialSearch;
+      const hash = window.location.hash || initialHash;
+      if (search !== window.location.search || hash !== window.location.hash) {
+        window.history.replaceState(
+          window.history.state,
+          "",
+          `${window.location.pathname}${search}${hash}`,
+        );
+      }
+      if (!initialHash || targetId === null) return true;
+      const target = document.getElementById(targetId);
+      if (!target) return false;
+      target.scrollIntoView();
+      return true;
+    };
+
+    const schedule = (callback, delay) => {
+      const timer = window.setTimeout(() => {
+        timers.delete(timer);
+        callback();
+      }, delay);
+      timers.add(timer);
+    };
+
+    const beginSettling = () => {
+      if (settling || !active) return;
+      settling = true;
+      schedule(restore, 50);
+      schedule(restore, 250);
+      schedule(restore, 750);
+      schedule(restore, 1500);
+      schedule(() => {
+        observer?.disconnect();
+        if (document.visibilityState === "visible" && document.hasFocus()) finish();
+      }, 2000);
+    };
+
+    const restoreAfterMutation = () => {
+      if (restore()) beginSettling();
+    };
+
+    function restoreWhenVisible() {
+      if (document.visibilityState !== "visible" || !active) return;
+      const restored = restore();
+      if (restored) beginSettling();
+      schedule(restore, 50);
+      schedule(restore, 250);
+      schedule(restore, 750);
+      if (restored && document.hasFocus()) schedule(finish, 2000);
+    }
+
+    observer = new MutationObserver(restoreAfterMutation);
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    document.addEventListener("visibilitychange", restoreWhenVisible);
+    window.addEventListener("focus", restoreWhenVisible);
+    window.addEventListener("keydown", finish, true);
+    window.addEventListener("pointerdown", finish, true);
+    window.addEventListener("touchstart", finish, { capture: true, passive: true });
+    window.addEventListener("wheel", finish, { capture: true, passive: true });
+    schedule(restoreAfterMutation, 0);
+    schedule(restoreAfterMutation, 100);
+    schedule(restoreAfterMutation, 500);
+    schedule(finish, 300000);
+    restoreWhenVisible();
+    return finish;
   }, []);
 
   const openSearch = useCallback((trigger) => {

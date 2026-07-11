@@ -1,9 +1,16 @@
 import { fileURLToPath } from "node:url";
 
+import { normalizeDocsBasePath } from "./base-path.js";
+
+const basePath = normalizeDocsBasePath(
+  process.env.PLEDGE_CASH_DOCS_BASE_PATH ?? "/docs",
+  "PLEDGE_CASH_DOCS_BASE_PATH",
+);
+
 /** @type {import('@tomehq/core').TomeConfig} */
 export default {
   name: "pledge.cash",
-  basePath: process.env.PLEDGE_CASH_DOCS_BASE_PATH ?? "/docs",
+  basePath,
   branding: {
     powered: false,
   },

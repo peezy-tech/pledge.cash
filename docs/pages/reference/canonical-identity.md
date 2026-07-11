@@ -12,7 +12,7 @@ Canonical identity is a relationship, not a logo or address-shaped string. It al
 | Object | Canonical proof |
 | --- | --- |
 | Boardroom | The selected BoardroomFactory reports that it created the address |
-| Project token | The Boardroom reports the token, and the token reports that Boardroom as its authority |
+| Project token | Full reciprocal proof is that the Boardroom reports the token and the token reports that Boardroom as authority. The current app uses the factory-verified Boardroom's token field but does not separately read the reverse token authority |
 | Grant | The selected TokenGrantFactory maps its token id to the grant and the grant reports that factory |
 | Boardroom-issued grant | The grant has the factory proof above and reports the verified Boardroom as issuer; the Boardroom's obligation record is an additional live-state check only while the grant remains active |
 | Distribution | The selected DistributionFactory permanently records the address, Boardroom, and kind, while the distribution reports that factory, Boardroom, and verified project share token |

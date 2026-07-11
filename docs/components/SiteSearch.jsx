@@ -34,11 +34,14 @@ function fallbackResults(pages, query) {
 export default function SiteSearch({ basePath, mobile, onClose, onNavigate, pages, returnFocus }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
+  const [resultQuery, setResultQuery] = useState("");
   const [selected, setSelected] = useState(0);
   const [status, setStatus] = useState("Type to search all documentation");
   const dialogRef = useRef(null);
   const inputRef = useRef(null);
+  const requestGenerationRef = useRef(0);
   const pageById = useMemo(() => new Map(pages.map((page) => [page.id, page])), [pages]);
+  const activeResults = resultQuery === query.trim() ? results : [];
 
   useEffect(() => {
     const root = document.getElementById("tome-root");
@@ -79,8 +82,10 @@ export default function SiteSearch({ basePath, mobile, onClose, onNavigate, page
 
   useEffect(() => {
     const trimmed = query.trim();
+    const requestGeneration = requestGenerationRef.current;
     if (!trimmed) {
       setResults([]);
+      setResultQuery("");
       setSelected(0);
       setStatus("Type to search all documentation");
       return undefined;
@@ -88,6 +93,7 @@ export default function SiteSearch({ basePath, mobile, onClose, onNavigate, page
 
     let cancelled = false;
     const timer = window.setTimeout(async () => {
+      if (cancelled || requestGeneration !== requestGenerationRef.current) return;
       setStatus("Searching documentation");
       try {
         const base = normalizeBasePath(basePath);
@@ -104,15 +110,17 @@ export default function SiteSearch({ basePath, mobile, onClose, onNavigate, page
           seen.add(id);
           items.push({ ...page, excerpt: excerptText(data.excerpt) || page.description || "" });
         }
-        if (!cancelled) {
+        if (!cancelled && requestGeneration === requestGenerationRef.current) {
           setResults(items);
+          setResultQuery(trimmed);
           setSelected(0);
           setStatus(items.length === 1 ? "1 result" : `${items.length.toString()} results`);
         }
       } catch {
         const items = fallbackResults(pages, trimmed);
-        if (!cancelled) {
+        if (!cancelled && requestGeneration === requestGenerationRef.current) {
           setResults(items);
+          setResultQuery(trimmed);
           setSelected(0);
           setStatus(items.length === 1 ? "1 title match" : `${items.length.toString()} title matches`);
         }
@@ -147,21 +155,21 @@ export default function SiteSearch({ basePath, mobile, onClose, onNavigate, page
   };
 
   const moveSelection = (event) => {
-    if (event.key === "ArrowDown" && results.length > 0) {
+    if (event.key === "ArrowDown" && activeResults.length > 0) {
       event.preventDefault();
-      setSelected((current) => Math.min(current + 1, results.length - 1));
-    } else if (event.key === "ArrowUp" && results.length > 0) {
+      setSelected((current) => Math.min(current + 1, activeResults.length - 1));
+    } else if (event.key === "ArrowUp" && activeResults.length > 0) {
       event.preventDefault();
       setSelected((current) => Math.max(current - 1, 0));
-    } else if (event.key === "Enter" && results[selected]) {
+    } else if (event.key === "Enter" && activeResults[selected]) {
       event.preventDefault();
-      onNavigate(results[selected].id);
+      onNavigate(activeResults[selected].id);
       onClose();
     }
   };
 
   const chooseResult = (event, page) => {
-    if (!isUnmodifiedPrimaryClick(event)) return;
+    if (!isUnmodifiedPrimaryClick(event) || resultQuery !== query.trim()) return;
     event.preventDefault();
     onNavigate(page.id);
     onClose();
@@ -209,7 +217,15 @@ export default function SiteSearch({ basePath, mobile, onClose, onNavigate, page
             </div>
             <input
               aria-label="Search documentation"
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => {
+                const value = event.target.value;
+                requestGenerationRef.current += 1;
+                setQuery(value);
+                setResults([]);
+                setResultQuery("");
+                setSelected(0);
+                setStatus(value.trim() ? "Searching documentation" : "Type to search all documentation");
+              }}
               onKeyDown={moveSelection}
               placeholder="Search concepts, tasks, or contract behavior"
               ref={inputRef}
@@ -233,7 +249,7 @@ export default function SiteSearch({ basePath, mobile, onClose, onNavigate, page
         </div>
 
         <div style={{ flex: 1, overflow: "auto", padding: "8px" }}>
-          {results.map((page, index) => (
+          {activeResults.map((page, index) => (
             <a
               aria-current={index === selected ? "true" : undefined}
               href={docsHref(basePath, page.urlPath)}
@@ -252,7 +268,7 @@ export default function SiteSearch({ basePath, mobile, onClose, onNavigate, page
               {page.excerpt && <span style={{ color: "var(--txM)", display: "block", fontSize: 12, lineHeight: 1.4 }}>{page.excerpt}</span>}
             </a>
           ))}
-          {query.trim() && status !== "Searching documentation" && results.length === 0 && (
+          {query.trim() && status !== "Searching documentation" && activeResults.length === 0 && (
             <p style={{ color: "var(--txM)", fontSize: 14, padding: "28px 12px", textAlign: "center" }}>No results found.</p>
           )}
         </div>

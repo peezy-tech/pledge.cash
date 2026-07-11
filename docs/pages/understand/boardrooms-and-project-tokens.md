@@ -44,7 +44,10 @@ These transitions are one-way. See [Governance and holder protections](governanc
 
 ## Canonical identity
 
-An ERC20 that calls itself a project token is not enough. The app verifies the Boardroom through the selected deployment's BoardroomFactory and verifies that the share token points back to that Boardroom. Child grants, distributions, and lockers have their own provenance links.
+An ERC20 that calls itself a project token is not enough. The current app verifies the Boardroom through the selected
+deployment's BoardroomFactory and uses the share-token address reported by that verified Boardroom. It does not yet make
+a separate reverse `BoardroomToken.boardroom()` read in the project-route check; verify that reciprocal authority
+directly when independent token provenance matters. Child grants, distributions, and lockers have their own links.
 
 Read [Canonical identity](../reference/canonical-identity) before relying on a copied contract address.
 

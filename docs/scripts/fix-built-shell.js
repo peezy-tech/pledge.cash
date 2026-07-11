@@ -3,24 +3,19 @@ import { access, mkdir, readdir, readFile, rename, writeFile } from "node:fs/pro
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { normalizeDocsBasePath } from "../base-path.js";
 import { docsRedirects } from "../redirects.js";
 
 const outDir = resolve(process.env.PLEDGE_CASH_DOCS_OUT_DIR ?? "out");
-const basePath = normalizeBasePath(process.env.PLEDGE_CASH_DOCS_BASE_PATH ?? "/docs");
+const basePath = normalizeDocsBasePath(
+  process.env.PLEDGE_CASH_DOCS_BASE_PATH ?? "/docs",
+  "PLEDGE_CASH_DOCS_BASE_PATH",
+);
 const publicPagefindPath = `${basePath}/_pagefind/pagefind.js` || "/_pagefind/pagefind.js";
 const pagefindDir = join(outDir, "_pagefind");
 const pagefindEntry = join(pagefindDir, "pagefind.js");
 const pagefindCore = join(pagefindDir, "pagefind-core.js");
 const pagesDir = fileURLToPath(new URL("../pages/", import.meta.url));
-
-function normalizeBasePath(value) {
-  const trimmed = value.trim();
-  if (trimmed === "" || trimmed === "/") return "";
-  if (trimmed.includes("?") || trimmed.includes("#") || trimmed.split("/").includes("..")) {
-    throw new Error(`Invalid PLEDGE_CASH_DOCS_BASE_PATH: ${value}`);
-  }
-  return `/${trimmed.replace(/^\/+|\/+$/g, "")}`;
-}
 
 function baseAwarePath(value) {
   if (!value.startsWith("/") || !basePath) return value;
