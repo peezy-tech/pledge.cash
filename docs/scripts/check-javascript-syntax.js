@@ -1,16 +1,22 @@
 import { assertValidJavaScriptModule } from "./javascript-syntax.js";
 
-assertValidJavaScriptModule("export const valid = true;", "Valid syntax fixture");
+assertValidJavaScriptModule("export const valid = async () => import.meta.url;", "Valid syntax fixture");
 
-let rejectedInvalidFixture = false;
-try {
-  assertValidJavaScriptModule("export const = ;", "Invalid syntax fixture");
-} catch (error) {
-  rejectedInvalidFixture = error instanceof Error && error.message.startsWith("Invalid syntax fixture is invalid:");
+const invalidFixtures = [
+  ["Malformed syntax fixture", "export const = ;"],
+  ["Top-level return fixture", "return 1;"],
+  ["Strict with-statement fixture", "with ({}) {}"],
+  ["Strict delete fixture", "const value = 1; delete value;"],
+];
+
+for (const [label, source] of invalidFixtures) {
+  let rejected = false;
+  try {
+    assertValidJavaScriptModule(source, label);
+  } catch (error) {
+    rejected = error instanceof Error && error.message.startsWith(`${label} is invalid:`);
+  }
+  if (!rejected) throw new Error(`JavaScript syntax validator accepted ${label.toLowerCase()}.`);
 }
 
-if (!rejectedInvalidFixture) {
-  throw new Error("JavaScript syntax validator accepted an invalid module fixture.");
-}
-
-console.log(`JavaScript syntax validator rejected invalid input under ${typeof Bun === "undefined" ? "Node" : "Bun"}.`);
+console.log(`JavaScript module validator rejected ${invalidFixtures.length.toString()} invalid fixtures under ${typeof Bun === "undefined" ? "Node" : "Bun"}.`);

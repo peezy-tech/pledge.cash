@@ -11,6 +11,7 @@
   "devDependencies": {
     "@tomehq/cli": "^0.8.1",
     "@tomehq/theme": "^0.8.1",
+    "acorn": "8.17.0",
     "pagefind": "1.5.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
