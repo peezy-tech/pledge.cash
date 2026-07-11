@@ -49,9 +49,10 @@ export function previewDirectoryIndexRoute(requestUrl: string, base: string, out
   if (!base.startsWith("/")) return undefined;
 
   const basePath = base === "/" ? "/" : `/${base.replace(/^\/+|\/+$/g, "")}/`;
-  const url = new URL(requestUrl, "http://localhost");
+  let url: URL;
   let pathname: string;
   try {
+    url = new URL(requestUrl, "http://localhost");
     pathname = decodeURIComponent(url.pathname);
   } catch {
     return undefined;
@@ -82,24 +83,19 @@ function previewDirectoryIndexPlugin(): Plugin {
     configurePreviewServer(server) {
       const outputRoot = resolve(server.config.root, server.config.build.outDir);
       server.middlewares.use(async (request, _response, next) => {
-        if (request.method !== "GET" && request.method !== "HEAD") {
-          next();
-          return;
-        }
-
-        const route = previewDirectoryIndexRoute(request.url ?? "/", server.config.base, outputRoot);
-        if (!route) {
-          next();
-          return;
-        }
-
         try {
+          if (request.method !== "GET" && request.method !== "HEAD") return;
+
+          const route = previewDirectoryIndexRoute(request.url ?? "/", server.config.base, outputRoot);
+          if (!route) return;
+
           await access(route.indexFile);
           request.url = route.rewrittenUrl;
         } catch {
-          // Preserve the application SPA fallback when no static directory route exists.
+          // Malformed requests and missing static routes must retain the application fallback.
+        } finally {
+          next();
         }
-        next();
       });
     },
   };
