@@ -75,7 +75,7 @@ export function ProjectLayout({
             <h1 className="m-0 truncate text-3xl font-semibold tracking-[-0.03em] text-zinc-50 sm:text-5xl">{name}</h1>
             <p className="m-0 mt-3 max-w-3xl text-sm leading-6 text-zinc-400">
               {snapshot
-                ? `${snapshot.launched ? "Holder governance is live." : "Holder governance has not launched; the owner still manages project changes directly."} Participation can be live independently. Every balance, commitment, and decision below is read from the Boardroom.`
+                ? `${snapshot.launched ? "Holder governance is live." : "Holder governance has not launched; the owner still manages project changes directly."} Participation can be live independently. Current state is read from the Boardroom and the contracts it coordinates; lifetime activity is reconstructed from their onchain event history.`
                 : "Read a project’s state, participation paths, governance, and treasury evidence in one place."}
             </p>
             {dashboard ? <p className="m-0 mt-2 font-mono text-xs text-zinc-600">{shortAddress(dashboard.address)}</p> : null}

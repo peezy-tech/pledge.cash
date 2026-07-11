@@ -193,6 +193,7 @@ type EventLogCacheEntry = {
   checkpointHash?: Hex | undefined;
   logs: ProductBoardroomEventLog[];
   pending?: Promise<void> | undefined;
+  pendingSignal?: AbortSignal | undefined;
   toBlock?: bigint | undefined;
 };
 
@@ -1052,7 +1053,32 @@ async function readEventLogs(
     touchEventLogCacheEntry(clientCache, cacheKey, cacheEntry);
   }
 
-  if (cacheEntry.pending) await waitForEventScanOperation(cacheEntry.pending, eventScan, `${name} cached scan`);
+  while (cacheEntry.pending) {
+    const pending = cacheEntry.pending;
+    const pendingSignal = cacheEntry.pendingSignal;
+    try {
+      await waitForEventScanOperation(pending, eventScan, `${name} cached scan`);
+      break;
+    } catch (error) {
+      eventScan.signal?.throwIfAborted();
+      if (!pendingSignal?.aborted || error !== pendingSignal.reason) throw error;
+
+      const current = clientCache.get(cacheKey);
+      if (current && current !== cacheEntry) {
+        cacheEntry = current;
+        touchEventLogCacheEntry(clientCache, cacheKey, cacheEntry);
+        continue;
+      }
+
+      if (current === cacheEntry) clientCache.delete(cacheKey);
+      cacheEntry = {
+        ...(cacheEntry.checkpointHash === undefined ? {} : { checkpointHash: cacheEntry.checkpointHash }),
+        logs: [...cacheEntry.logs],
+        ...(cacheEntry.toBlock === undefined ? {} : { toBlock: cacheEntry.toBlock }),
+      };
+      insertEventLogCacheEntry(clientCache, cacheKey, cacheEntry);
+    }
+  }
   const checkpointChanged = cacheEntry.toBlock !== undefined && toBlock >= cacheEntry.toBlock
     ? await eventLogCheckpointChanged(client, cacheEntry, eventScan)
     : false;
@@ -1072,6 +1098,7 @@ async function readEventLogs(
   const entry = cacheEntry;
   const request = updateEventLogCacheEntry(client, address, abi, name, toBlock, entry, eventScan);
   entry.pending = request;
+  entry.pendingSignal = eventScan.signal;
   try {
     await waitForEventScanOperation(request, eventScan, `${name} event scan`);
     return logsThroughBlock(entry.logs, toBlock);
@@ -1079,7 +1106,10 @@ async function readEventLogs(
     if (entry.toBlock === undefined && clientCache.get(cacheKey) === entry) clientCache.delete(cacheKey);
     throw error;
   } finally {
-    if (entry.pending === request) entry.pending = undefined;
+    if (entry.pending === request) {
+      entry.pending = undefined;
+      entry.pendingSignal = undefined;
+    }
   }
 }
 

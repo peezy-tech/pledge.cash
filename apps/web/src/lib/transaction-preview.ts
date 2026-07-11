@@ -69,15 +69,6 @@ export type ContractCallReview = {
   value: bigint;
 };
 
-const TRANSACTION_REVIEW_PARAMETERS = "transactionReviewParameters";
-
-export function withTransactionReviewParameters(
-  request: Record<string, unknown>,
-  parameters: readonly ContractParameterReview[],
-): Record<string, unknown> {
-  return { ...request, [TRANSACTION_REVIEW_PARAMETERS]: parameters };
-}
-
 const BOARDROOM_SINGLE_CALL_FUNCTIONS = new Set([
   "execute",
   "executeQueuedAction",
@@ -136,17 +127,7 @@ export function contractCallReview(label: string, request: Record<string, unknow
   const requestedTarget = stringField(request, "address");
   const target = requestedTarget && isAddress(requestedTarget) ? requestedTarget : "unknown";
   const boardroomCalls = extractBoardroomCallReviews(request, functionName, target);
-  const declaredParameters = callParameters(request, functionName);
-  const boundParameters = transactionReviewParameters(request);
-  const boundNames = new Set(boundParameters.map((parameter) => normalizedParameterName(parameter.name)));
-  const launchDelayIsBound = functionName === "launch" && boundNames.has("holderreviewperiod");
-  const parameters = [
-    ...boundParameters,
-    ...declaredParameters.filter((parameter) => {
-      const name = normalizedParameterName(parameter.name);
-      return !boundNames.has(name) && !(launchDelayIsBound && name === "governancedelay");
-    }),
-  ];
+  const parameters = callParameters(request, functionName);
   if (boardroomCalls) {
     const callsParameter = parameters[0];
     if (callsParameter) {
@@ -239,23 +220,8 @@ function callParameters(
   }));
 }
 
-function transactionReviewParameters(request: Record<string, unknown>): ContractParameterReview[] {
-  const parameters = request[TRANSACTION_REVIEW_PARAMETERS];
-  if (!Array.isArray(parameters)) return [];
-  return parameters.flatMap((parameter) => {
-    if (!parameter || typeof parameter !== "object") return [];
-    const record = parameter as Record<string, unknown>;
-    if (typeof record.name !== "string" || typeof record.type !== "string" || typeof record.value !== "string") return [];
-    return [{ name: cleanParameterName(record.name), type: record.type, value: record.value }];
-  });
-}
-
 function cleanParameterName(name: string | undefined): string {
   return (name ?? "").replace(/_+$/g, "");
-}
-
-function normalizedParameterName(name: string): string {
-  return cleanParameterName(name).replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
 
 function extractBoardroomCallReviews(
@@ -454,23 +420,53 @@ const IRREVERSIBLE_FUNCTIONS = new Set([
   "withdrawExpiredTokens",
 ]);
 
+const IMPORTANT_FUNCTIONS = new Set([
+  "addLiquidity",
+  "addLiquidityNative",
+  "approve",
+  "buy",
+  "cancelAction",
+  "claim",
+  "claimFees",
+  "claimGrant",
+  "claimRedemptionAsset",
+  "createBoardroom",
+  "createFixedPriceSale",
+  "createGrant",
+  "createLockedLiquidity",
+  "createMerkleAirdrop",
+  "createMigratingBondingCurve",
+  "execute",
+  "executeBatch",
+  "executeQueuedAction",
+  "executeQueuedBatch",
+  "executeWindDownCall",
+  "mint",
+  "queueAction",
+  "queueBatch",
+  "redeem",
+  "registerRedeemableAsset",
+  "removeLiquidity",
+  "removeLiquidityNative",
+  "safeTransferFrom",
+  "sell",
+  "setApprovalForAll",
+  "setExecutor",
+  "setRedemptionExcessRecipient",
+  "settle",
+  "swapExactNativeForTokens",
+  "swapExactTokensForNative",
+  "swapExactTokensForTokens",
+  "transfer",
+  "transferFrom",
+  "wrapNativeBalance",
+]);
+
 function transactionRisk(functionName: string): ContractCallReview["risk"] {
   if (IRREVERSIBLE_FUNCTIONS.has(functionName)) {
     return "irreversible";
   }
-  if ([
-    "approve",
-    "createGrant",
-    "execute",
-    "executeBatch",
-    "executeQueuedAction",
-    "executeQueuedBatch",
-    "queueAction",
-    "queueBatch",
-    "redeem",
-    "setApprovalForAll",
-    "setExecutor",
-  ].includes(functionName)) {
+  if (IMPORTANT_FUNCTIONS.has(functionName)) {
     return "important";
   }
   return "routine";

@@ -17,6 +17,7 @@ import { formatTokenAmount, parseTokenAmountInput } from "../../lib/token-amount
 import type { BoardroomDistributionSnapshot } from "../../lib/types";
 import { cn } from "../../lib/utils";
 import { ConnectWalletPrompt } from "../wallet/connect-wallet-prompt";
+import { ParticipationActionGuard } from "./action-integrity";
 import {
   AdvancedFields,
   AmountField,
@@ -136,8 +137,15 @@ export function BondingCurveFlow({
     shareToken: state?.shareToken,
     slippageBps: slippage.value,
   });
-  const actionIdentityRef = useRef(actionIdentity);
-  actionIdentityRef.current = actionIdentity;
+  const actionGuardRef = useRef<ParticipationActionGuard | undefined>(undefined);
+  actionGuardRef.current ??= new ParticipationActionGuard(actionIdentity);
+  const actionGuard = actionGuardRef.current;
+  actionGuard.sync(actionIdentity);
+
+  useEffect(() => {
+    actionGuard.activate();
+    return () => actionGuard.deactivate();
+  }, [actionGuard]);
 
   const refreshQuote = useCallback(async (): Promise<void> => {
     if (!state || !account || parsedAmount.value === undefined || parsedAmount.value === 0n) return;
@@ -234,10 +242,12 @@ export function BondingCurveFlow({
       slippageBps: slippage.value,
     };
     const expectedIdentity = bondingCurveActionIdentity(intent);
+    actionGuard.sync(expectedIdentity);
+    const actionTicket = actionGuard.capture();
     const prepared = await prepareBondingCurveAction(publicClient, {
       expectedAction: approval.required ? "approve" : "trade",
       intent,
-      isCurrent: () => actionIdentityRef.current === expectedIdentity,
+      isCurrent: () => actionGuard.isCurrent(actionTicket),
       onQuote: setQuote,
     });
     await submitTransaction(
@@ -246,7 +256,7 @@ export function BondingCurveFlow({
         : mode === "buy" ? "Bonding curve purchase" : "Bonding curve sale",
       prepared.request,
     );
-    if (actionIdentityRef.current === expectedIdentity) await refreshQuote();
+    if (actionGuard.isCurrent(actionTicket)) await refreshQuote();
   };
 
   const expectedPayment = mode === "buy" ? buyQuote?.quoteIn : parsedAmount.value;

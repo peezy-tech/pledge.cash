@@ -4,6 +4,8 @@ import { renderToString } from "react-dom/server";
 import {
   ExplorePage,
   GrantDetailPage,
+  GrantVerificationFailureState,
+  GrantVerificationLoadingState,
   GovernancePage,
   NotFoundPage,
   ParticipatePage,
@@ -23,6 +25,7 @@ import {
   studioLifecycle,
   type PortfolioTask,
 } from "../src/app/pages";
+import { AddressLink } from "../src/components/shell";
 import { participationDistributionKey } from "../src/features/participation/types";
 import type { ProductBoardroomCatalogEntry, ProductBoardroomDashboardState } from "../src/lib/product-boardroom";
 
@@ -253,6 +256,7 @@ describe("read-first product pages", () => {
     expect(overview).toContain("Atlas Cooperative");
     expect(overview).toContain("What needs attention");
     expect(overview).toContain("Holder governance is live");
+    expect(overview).toContain("lifetime activity is reconstructed from their onchain event history");
     expect(overview).toContain("Treasury at a glance");
     expect(overview).toContain('href="/projects/31337/atlas/participate"');
 
@@ -436,6 +440,9 @@ describe("read-first product pages", () => {
     expect(transparency).toContain(`/pledge-cash/grants/31337/${grant}`);
     expect(transparency).toContain("Issued grants");
     expect(transparency).toContain("Technical details");
+    expect(transparency).toContain("Currently registered distributions");
+    expect(transparency).toContain("Closed, removed, or migrated distribution records shown above remain separate historical evidence");
+    expect(transparency).not.toContain("Tracked distributions");
   });
 
   test("renders failed history fields as unknown instead of factual zeroes", () => {
@@ -533,5 +540,70 @@ describe("read-first product pages", () => {
 
     expect(html).toContain('href="/pledge-cash/portfolio?chain=31337"');
     expect(html).not.toContain(">Portfolio</button>");
+  });
+
+  test("renders one honest terminal grant-verification state with transient-only retry", () => {
+    const invalid = renderToString(
+      <GrantVerificationFailureState
+        backHref="/pledge-cash/portfolio?chain=31337"
+        grant={grant}
+        kind="invalid"
+        message="This address is not a grant created by the active deployment."
+        onBack={() => undefined}
+      />,
+    );
+    const transient = renderToString(
+      <GrantVerificationFailureState
+        backHref="/pledge-cash/explore?chain=31337"
+        grant={grant}
+        kind="transient"
+        message="Could not reach Local Anvil to verify this grant."
+        onBack={() => undefined}
+        onRetry={() => undefined}
+        returnLabel="Return to Explore"
+      />,
+    );
+    const loading = renderToString(<GrantVerificationLoadingState grant={grant} />);
+
+    expect(invalid).toContain("Grant not found");
+    expect(invalid).toContain("Return to Portfolio");
+    expect(invalid).toContain('href="/pledge-cash/portfolio?chain=31337"');
+    expect(invalid).not.toContain("Retry verification");
+    expect(invalid).not.toContain("source of truth");
+    expect(invalid).not.toContain("Connect");
+    expect(invalid).not.toContain("Settlement");
+    expect(transient).toContain("Grant temporarily unavailable");
+    expect(transient).toContain("Retry verification");
+    expect(transient).toContain("Return to Explore");
+    expect(loading).toContain("Verifying grant");
+    expect(loading).toContain("factory provenance");
+    expect(loading).not.toContain("source of truth");
+    expect(loading).not.toContain("Connect");
+  });
+
+  test("uses loading-aware Studio copy for a selected project route", () => {
+    const html = renderToString(
+      <StudioPage
+        loading
+        operatorTools={<div>Loading the exact project state</div>}
+        sectionNavigation={<nav aria-label="Studio sections">Setup</nav>}
+      />,
+    );
+
+    expect(html).toContain("Loading selected project");
+    expect(html).toContain("Verifying the selected project");
+    expect(html).toContain("Wait for verified state");
+    expect(html).not.toContain("No project selected");
+    expect(html).not.toContain("Start with a project");
+    expect(html).not.toContain("Create and operate projects");
+    expect(html).not.toContain("Project lifecycle");
+  });
+
+  test("gives address actions mobile-safe touch targets", () => {
+    const html = renderToString(<AddressLink address={boardroom} />);
+
+    expect(html).toContain('aria-label="Copy address"');
+    expect(html).toContain("h-10 w-10");
+    expect(html).toContain("sm:h-8 sm:w-8");
   });
 });

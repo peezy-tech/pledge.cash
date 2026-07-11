@@ -94,7 +94,11 @@ import { useRuntimeDeployment } from "../hooks/use-runtime-deployment";
 import { useTransactionReview } from "../hooks/use-transaction-review";
 import { useWagmiWallet } from "../hooks/use-wagmi-wallet";
 import { readBoardroomSnapshot } from "../lib/boardroom-snapshot";
-import { assertCanonicalBoardroom, assertCanonicalGrant } from "../lib/canonical-provenance";
+import {
+  assertCanonicalBoardroom,
+  assertCanonicalGrant,
+  CanonicalProvenanceError,
+} from "../lib/canonical-provenance";
 import {
   PLEDGE_CASH_NETWORKS,
   createPledgeCashPublicClient,
@@ -142,7 +146,6 @@ import {
   uintInput,
 } from "../lib/forms";
 import { deploymentRuntimeIdentity } from "../lib/deployment";
-import { assertGovernanceLaunchPrecondition } from "../lib/governance-launch-integrity";
 import {
   readProductBoardroomCatalogPage,
   readProductBoardroomDashboard,
@@ -224,6 +227,8 @@ import {
   ExplorePage,
   GovernancePage,
   GrantDetailPage,
+  GrantVerificationFailureState,
+  GrantVerificationLoadingState,
   NotFoundPage,
   PageNotice,
   ParticipatePage,
@@ -273,9 +278,6 @@ export type GrantIssuerBoardroomAccess = {
 };
 
 type AmmReadKind = "token-list" | "swap-quote" | "liquidity-quote" | "position" | "remove-liquidity-quote";
-type ContractTransactionOptions = {
-  assertState?: ((phase: "simulation" | "submission") => Promise<void>) | undefined;
-};
 export type AmmReadRequest = {
   key: string;
   kind: AmmReadKind;
@@ -403,19 +405,23 @@ export type ProjectRouteFailure = {
   title: string;
 };
 
-export function projectRouteFailure(error: string): ProjectRouteFailure {
-  const retryable = /(?:could not reach|failed to fetch|network ?error|rpc request|timed? ?out|timeout)/i.test(error);
-  if (retryable) {
+export function projectRouteFailure(
+  error: string,
+  kind: "invalid" | "transient" = /not a Boardroom created by the configured BoardroomFactory/i.test(error)
+    ? "invalid"
+    : "transient",
+): ProjectRouteFailure {
+  if (kind === "invalid") {
     return {
-      description: error,
-      retryable: true,
-      title: "Project temporarily unavailable",
+      description: "This address is not a project created by the configured pledge.cash deployment on this network.",
+      retryable: false,
+      title: "Project not found",
     };
   }
   return {
-    description: "This address is not a project created by the configured pledge.cash deployment on this network.",
-    retryable: false,
-    title: "Project not found",
+    description: error,
+    retryable: true,
+    title: "Project temporarily unavailable",
   };
 }
 
@@ -570,7 +576,7 @@ export function App(): React.JSX.Element {
   const [grantSnapshot, setGrantSnapshot] = useState<GrantSnapshot>();
   const [grantIssuerBoardroom, setGrantIssuerBoardroom] = useState<GrantIssuerBoardroomAccess>();
   const [grantRouteError, setGrantRouteError] = useState<string>();
-  const [grantRouteErrorDetail, setGrantRouteErrorDetail] = useState<string>();
+  const [grantRouteFailureKind, setGrantRouteFailureKind] = useState<"invalid" | "transient">();
   const [settleAmount, setSettleAmount] = useState("1");
   const [paymentApproval, setPaymentApproval] = useState("0");
   const [boardroomForm, setBoardroomForm] = useState<BoardroomForm>(() => ({
@@ -613,6 +619,7 @@ export function App(): React.JSX.Element {
   const autoDiscoveryRunningRef = useRef(false);
   const [productBoardroom, setProductBoardroom] = useState<ProductBoardroomDashboardState>();
   const [productBoardroomError, setProductBoardroomError] = useState<string>();
+  const [productBoardroomFailureKind, setProductBoardroomFailureKind] = useState<"invalid" | "transient">();
   const [productBoardroomLoading, setProductBoardroomLoading] = useState(false);
   const [productCatalog, setProductCatalog] = useState<ProductBoardroomCatalogEntry[]>([]);
   const [productCatalogLoaded, setProductCatalogLoaded] = useState(false);
@@ -620,6 +627,8 @@ export function App(): React.JSX.Element {
   const [productCatalogLoadingMore, setProductCatalogLoadingMore] = useState(false);
   const [productCatalogNextCursor, setProductCatalogNextCursor] = useState<number>();
   const [productCatalogTotalCount, setProductCatalogTotalCount] = useState<number>();
+  const productCatalogRef = useRef<readonly ProductBoardroomCatalogEntry[]>(productCatalog);
+  productCatalogRef.current = productCatalog;
   const [boardroomHolderPower, setBoardroomHolderPower] = useState<BoardroomHolderPower>();
   const [queuedBoardroomActions, setQueuedBoardroomActions] = useState<QueuedBoardroomAction[]>([]);
   const [productGovernanceQueueComplete, setProductGovernanceQueueComplete] = useState(false);
@@ -887,7 +896,7 @@ export function App(): React.JSX.Element {
     setGrantSnapshot(undefined);
     setGrantIssuerBoardroom(undefined);
     setGrantRouteError(undefined);
-    setGrantRouteErrorDetail(undefined);
+    setGrantRouteFailureKind(undefined);
     setPaymentApproval("0");
     setPredictedBoardroom(undefined);
     setBoardroomAddress("");
@@ -909,6 +918,7 @@ export function App(): React.JSX.Element {
     setDiscovery(emptyDiscoverySnapshot());
     setProductBoardroom(undefined);
     setProductBoardroomError(undefined);
+    setProductBoardroomFailureKind(undefined);
     setProductBoardroomLoading(false);
     setProductCatalog([]);
     setProductCatalogLoaded(false);
@@ -960,41 +970,75 @@ export function App(): React.JSX.Element {
       && activeDeploymentIdentityRef.current === requestDeploymentIdentity;
     setProductBoardroomLoading(true);
     setProductBoardroomError(undefined);
+    setProductBoardroomFailureKind(undefined);
     setProductCatalogLoadMoreError(undefined);
     setProductCatalogLoadingMore(false);
     try {
       if (!deployment?.boardroomFactory) {
         throw new Error("Runtime deployment is still loading for this chain.");
       }
-      const catalogPage = await readProductBoardroomCatalogPage(publicClient, deployment, {
-        signal: abortController.signal,
-      });
-      if (!requestIsCurrent()) return;
-      setProductCatalog(catalogPage.entries);
-      setProductCatalogLoaded(true);
-      setProductCatalogNextCursor(catalogPage.nextCursor);
-      setProductCatalogTotalCount(catalogPage.totalCount);
       if (!requestedAddress) {
+        const catalogPage = await readProductBoardroomCatalogPage(publicClient, deployment, {
+          signal: abortController.signal,
+        });
+        if (!requestIsCurrent()) return;
+        setProductCatalog(catalogPage.entries);
+        setProductCatalogLoaded(true);
+        setProductCatalogNextCursor(catalogPage.nextCursor);
+        setProductCatalogTotalCount(catalogPage.totalCount);
         setProductBoardroom(undefined);
         pushLog(`Loaded ${catalogPage.entries.length.toString()} of ${catalogPage.totalCount.toString()} product Boardrooms`, "success");
         return;
       }
+
       await assertCanonicalBoardroom(publicClient, deployment, requestedAddress);
       if (!requestIsCurrent()) return;
       const next = await readProductBoardroomDashboard(publicClient, {
         address: requestedAddress,
-        catalog: catalogPage.entries,
+        catalog: [...productCatalogRef.current],
         signal: abortController.signal,
       });
       if (!requestIsCurrent()) return;
-      setProductCatalog(next.catalog);
+      setProductCatalog((current) => mergeProductBoardroomCatalog(current, next.catalog));
       setProductBoardroom(next);
       productGovernanceLoadedKeyRef.current = undefined;
       pushLog(`Loaded product Boardroom ${requestedAddress}`, "success");
+
+      productCatalogLoadMoreAbortControllerRef.current?.abort(
+        new DOMException("A newer project directory enrichment started.", "AbortError"),
+      );
+      const catalogAbortController = new AbortController();
+      productCatalogLoadMoreAbortControllerRef.current = catalogAbortController;
+      void (async (): Promise<void> => {
+        try {
+          const catalogPage = await readProductBoardroomCatalogPage(publicClient, deployment, {
+            signal: catalogAbortController.signal,
+          });
+          if (!requestIsCurrent()) return;
+          const mergedCatalog = mergeProductBoardroomCatalog(catalogPage.entries, next.catalog);
+          setProductCatalog(mergedCatalog);
+          setProductCatalogLoaded(true);
+          setProductCatalogNextCursor(catalogPage.nextCursor);
+          setProductCatalogTotalCount(catalogPage.totalCount);
+          setProductBoardroom((current) => current && sameAddress(current.address, requestedAddress)
+            ? { ...current, catalog: mergedCatalog }
+            : current);
+        } catch (catalogError) {
+          if (catalogAbortController.signal.aborted || !requestIsCurrent()) return;
+          const message = productReadErrorMessage(catalogError, activeNetwork.name);
+          setProductCatalogLoadMoreError(`The project loaded, but the wider directory is unavailable. ${message}`);
+          pushLog(`Project loaded without the wider directory: ${message}`, "error");
+        } finally {
+          if (productCatalogLoadMoreAbortControllerRef.current === catalogAbortController) {
+            productCatalogLoadMoreAbortControllerRef.current = undefined;
+          }
+        }
+      })();
     } catch (error) {
       if (!requestIsCurrent()) return;
       const message = productReadErrorMessage(error, activeNetwork.name);
       setProductBoardroomError(message);
+      setProductBoardroomFailureKind(error instanceof CanonicalProvenanceError ? "invalid" : "transient");
       pushLog(message, "error");
     } finally {
       if (productLoadAbortControllerRef.current === abortController) {
@@ -1130,11 +1174,13 @@ export function App(): React.JSX.Element {
     productCatalogLoadMoreAbortControllerRef.current = undefined;
     productRequestVersionRef.current += 1;
     setProductBoardroomError(undefined);
+    setProductBoardroomFailureKind(undefined);
     setProductBoardroomLoading(false);
-    if (requestedProductBoardroom && productBoardroom?.address.toLowerCase() !== requestedProductBoardroom.toLowerCase()) {
-      setProductBoardroom(undefined);
-    }
-  }, [requestedProductBoardroom, productBoardroom?.address]);
+    setProductBoardroom((current) => {
+      if (!requestedProductBoardroom) return undefined;
+      return current && sameAddress(current.address, requestedProductBoardroom) ? current : undefined;
+    });
+  }, [activeNetwork.chainId, requestedProductBoardroom, runtimeDeploymentIdentity]);
 
   useEffect(() => {
     if (appRouteChainId(appRoute) !== undefined && appRouteChainId(appRoute) !== activeNetwork.chainId) return;
@@ -1375,7 +1421,6 @@ export function App(): React.JSX.Element {
   const submitContractTransaction = async (
     label: string,
     request: Record<string, unknown>,
-    options: ContractTransactionOptions = {},
   ): Promise<Hex> => {
     const actionOrigin = activeActionOriginRef.current;
     const transactionIdentity: TransactionIdentity = {
@@ -1401,7 +1446,6 @@ export function App(): React.JSX.Element {
     try {
       await requestReview(callReview);
       assertLiveIdentity("simulation");
-      await options.assertState?.("simulation");
       updateTransaction(transactionId, { stage: "simulating" });
       pushLog(contractCallPreview(label, request), "info");
       const simulation = await publicClient.simulateContract({
@@ -1414,7 +1458,6 @@ export function App(): React.JSX.Element {
       const client = walletClientRef.current?.();
       if (!client) throw new Error("Wallet client is not ready yet.");
       assertLiveIdentity("submission");
-      await options.assertState?.("submission");
       const hash = (await client.writeContract({
         ...simulation.request,
       } as unknown as Parameters<typeof client.writeContract>[0])) as Hex;
@@ -1794,7 +1837,7 @@ export function App(): React.JSX.Element {
     setGrantAddress(grant);
     if (requireCanonical) {
       setGrantRouteError(undefined);
-      setGrantRouteErrorDetail(undefined);
+      setGrantRouteFailureKind(undefined);
     }
     pushLog(`Loaded grant ${grant}`, "success");
   };
@@ -1861,18 +1904,24 @@ export function App(): React.JSX.Element {
   async function loadCanonicalGrantRoute(grant: Address, key: string): Promise<void> {
     grantRouteLoadedKeyRef.current = key;
     setGrantRouteError(undefined);
-    setGrantRouteErrorDetail(undefined);
+    setGrantRouteFailureKind(undefined);
     try {
+      const code = await publicClient.getCode({ address: grant });
+      if (!code || code === "0x") {
+        throw new CanonicalProvenanceError(
+          "grant",
+          "This address does not contain a grant contract on the selected network.",
+        );
+      }
       await loadGrantAddress(grant, key, true);
     } catch (error) {
       const route = activeAppRouteRef.current;
       if (route.kind !== "grant"
         || canonicalGrantRouteKey(route.chainId, route.grant, activeDeploymentIdentityRef.current ?? "") !== key) return;
       grantRouteLoadedKeyRef.current = undefined;
-      const detail = errorMessage(error);
       const message = canonicalGrantReadErrorMessage(error, activeNetwork.name);
       setGrantRouteError(message);
-      setGrantRouteErrorDetail(detail);
+      setGrantRouteFailureKind(error instanceof CanonicalProvenanceError ? "invalid" : "transient");
       pushLog(message, "error");
     }
   }
@@ -1884,14 +1933,14 @@ export function App(): React.JSX.Element {
       setGrantSnapshot(undefined);
       setGrantIssuerBoardroom(undefined);
       setGrantRouteError(undefined);
-      setGrantRouteErrorDetail(undefined);
+      setGrantRouteFailureKind(undefined);
       return;
     }
     const key = canonicalGrantRouteKey(appRoute.chainId, appRoute.grant, runtimeDeploymentIdentity);
     if (!deployment?.tokenGrantFactory) {
       grantRouteLoadedKeyRef.current = undefined;
       setGrantRouteError(undefined);
-      setGrantRouteErrorDetail(undefined);
+      setGrantRouteFailureKind(undefined);
       return;
     }
     if (grantRouteLoadedKeyRef.current === key) return;
@@ -1910,7 +1959,7 @@ export function App(): React.JSX.Element {
       } catch (error) {
         if (confirmedRouteRefreshPlan(routeAtSubmission, activeAppRouteRef.current).kind === "grant") {
           setGrantRouteError(canonicalGrantReadErrorMessage(error, activeNetwork.name));
-          setGrantRouteErrorDetail(errorMessage(error));
+          setGrantRouteFailureKind(error instanceof CanonicalProvenanceError ? "invalid" : "transient");
         }
         throw error;
       }
@@ -3179,28 +3228,9 @@ export function App(): React.JSX.Element {
   ) : undefined;
   const governanceLaunchControls = exactProjectDashboard && !exactProjectDashboard.snapshot.launched ? (
     <GovernanceLaunchControl
-      account={wallet.account}
       boardroom={exactProjectDashboard.address}
-      capabilities={projectCapabilities}
       currentExecutor={exactProjectDashboard.snapshot.executor}
       minimumDelay={exactProjectDashboard.snapshot.governanceConfig.minimumDelay}
-      pendingAction={pendingAction}
-      runAction={runAction}
-      submitTransaction={submitContractTransaction}
-      onLaunch={async (_governanceDelay, request) => {
-        const boardroom = exactProjectDashboard.address;
-        const expectedExecutor = exactProjectDashboard.snapshot.executor;
-        await assertGovernanceLaunchPrecondition(publicClient, boardroom, expectedExecutor, "review");
-        await submitContractTransaction("Launch holder governance", request, {
-          assertState: async (phase) => {
-            await assertGovernanceLaunchPrecondition(publicClient, boardroom, expectedExecutor, phase);
-          },
-        });
-      }}
-      onComplete={async () => {
-        productGovernanceLoadedKeyRef.current = undefined;
-        await loadProductBoardroom(exactProjectDashboard.address);
-      }}
     />
   ) : undefined;
   const retryGovernanceAction = productGovernanceError && exactProjectDashboard ? (
@@ -3342,7 +3372,7 @@ export function App(): React.JSX.Element {
         );
       case "project": {
         const failure = productBoardroomError && !productBoardroomLoading && !exactProjectDashboard
-          ? projectRouteFailure(productBoardroomError)
+          ? projectRouteFailure(productBoardroomError, productBoardroomFailureKind)
           : undefined;
         if (failure) {
           return (
@@ -3435,6 +3465,25 @@ export function App(): React.JSX.Element {
           />
         );
       case "grant":
+        if (grantRouteError) {
+          const failureKind = grantRouteFailureKind ?? "transient";
+          return (
+            <GrantVerificationFailureState
+              backHref={appRouteHref({ kind: "portfolio", chainId: appRoute.chainId })}
+              grant={appRoute.grant}
+              kind={failureKind}
+              message={grantRouteError}
+              onBack={() => navigateRoute({ kind: "portfolio", chainId: appRoute.chainId })}
+              onRetry={failureKind === "transient" ? () => void loadCanonicalGrantRoute(
+                appRoute.grant,
+                canonicalGrantRouteKey(appRoute.chainId, appRoute.grant, runtimeDeploymentIdentity),
+              ) : undefined}
+            />
+          );
+        }
+        if (!displayedGrantSnapshot) {
+          return <GrantVerificationLoadingState grant={appRoute.grant} />;
+        }
         return (
           <GrantDetailPage
             account={wallet.account}
@@ -3442,33 +3491,7 @@ export function App(): React.JSX.Element {
             grant={appRoute.grant}
             onBack={() => navigateRoute({ kind: "portfolio", chainId: appRoute.chainId })}
           >
-            {grantRouteError ? (
-              <PageNotice title="This grant could not be verified" tone="danger">
-                <div className="grid gap-3">
-                  <span>{grantRouteError}</span>
-                  {grantRouteErrorDetail ? (
-                    <details className="min-w-0 text-xs text-zinc-400">
-                      <summary className="cursor-pointer font-semibold text-zinc-300">Technical details</summary>
-                      <pre className="mt-2 max-w-full whitespace-pre-wrap break-words font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">
-                        {grantRouteErrorDetail}
-                      </pre>
-                    </details>
-                  ) : null}
-                  <div>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => void loadCanonicalGrantRoute(
-                        appRoute.grant,
-                        canonicalGrantRouteKey(appRoute.chainId, appRoute.grant, runtimeDeploymentIdentity),
-                      )}
-                    >
-                      Verify again
-                    </Button>
-                  </div>
-                </div>
-              </PageNotice>
-            ) : grantPanel}
+            {grantPanel}
           </GrantDetailPage>
         );
       case "studio":
@@ -3584,6 +3607,16 @@ export function App(): React.JSX.Element {
 
   return (
     <div className="min-h-svh text-[var(--pc-text)]">
+      <a
+        className="fixed left-3 top-3 z-[100] -translate-y-24 rounded-md border border-[var(--pc-border-strong)] bg-[var(--pc-surface-raised)] px-4 py-2 text-sm font-semibold text-[var(--pc-text)] shadow-lg transition-transform focus:translate-y-0 focus:outline-none focus:ring-2 focus:ring-[var(--pc-accent)]"
+        href="#app-main-content"
+        onClick={(event) => {
+          event.preventDefault();
+          document.getElementById("app-main-content")?.focus();
+        }}
+      >
+        Skip to main content
+      </a>
       <AppHeader
         wallet={wallet}
         chainId={activeNetwork.chainId}

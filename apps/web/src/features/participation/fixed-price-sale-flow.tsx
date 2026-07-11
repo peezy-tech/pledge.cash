@@ -13,6 +13,7 @@ import { errorMessage } from "../../lib/forms";
 import { formatTokenAmount, parseTokenAmountInput } from "../../lib/token-amounts";
 import type { BoardroomDistributionSnapshot } from "../../lib/types";
 import { ConnectWalletPrompt } from "../wallet/connect-wallet-prompt";
+import { ParticipationActionGuard } from "./action-integrity";
 import {
   AdvancedFields,
   AmountField,
@@ -114,8 +115,15 @@ export function FixedPriceSaleFlow({
     shareToken: state?.shareToken,
     slippageBps: slippage.value,
   });
-  const actionIdentityRef = useRef(actionIdentity);
-  actionIdentityRef.current = actionIdentity;
+  const actionGuardRef = useRef<ParticipationActionGuard | undefined>(undefined);
+  actionGuardRef.current ??= new ParticipationActionGuard(actionIdentity);
+  const actionGuard = actionGuardRef.current;
+  actionGuard.sync(actionIdentity);
+
+  useEffect(() => {
+    actionGuard.activate();
+    return () => actionGuard.deactivate();
+  }, [actionGuard]);
 
   const refreshQuote = useCallback(async (): Promise<void> => {
     if (!state || !account || parsedAmount.value === undefined || parsedAmount.value === 0n) return;
@@ -197,17 +205,19 @@ export function FixedPriceSaleFlow({
       slippageBps: slippage.value,
     };
     const expectedIdentity = fixedPriceSaleActionIdentity(intent);
+    actionGuard.sync(expectedIdentity);
+    const actionTicket = actionGuard.capture();
     const prepared = await prepareFixedPriceSaleAction(publicClient, {
       expectedAction: needsApproval ? "approve" : "trade",
       intent,
-      isCurrent: () => actionIdentityRef.current === expectedIdentity,
+      isCurrent: () => actionGuard.isCurrent(actionTicket),
       onQuote: setQuote,
     });
     await submitTransaction(
       prepared.kind === "approve" ? "Fixed-price payment approval" : "Fixed-price purchase",
       prepared.request,
     );
-    if (actionIdentityRef.current === expectedIdentity) await refreshQuote();
+    if (actionGuard.isCurrent(actionTicket)) await refreshQuote();
   };
 
   return (

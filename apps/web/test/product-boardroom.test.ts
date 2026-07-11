@@ -725,6 +725,53 @@ describe("product boardroom runtime discovery", () => {
     )).rejects.toBe(reason);
   });
 
+  test("does not let the first caller's abort contaminate a live shared cache reader", async () => {
+    const firstController = new AbortController();
+    const reason = new DOMException("first project route changed", "AbortError");
+    let getLogsCalls = 0;
+    let firstLogReadStarted: (() => void) | undefined;
+    let secondHeadReadStarted: (() => void) | undefined;
+    const firstLogRead = new Promise<void>((resolve) => {
+      firstLogReadStarted = resolve;
+    });
+    const secondHeadRead = new Promise<void>((resolve) => {
+      secondHeadReadStarted = resolve;
+    });
+    let headReads = 0;
+    const client = {
+      async getBlockNumber() {
+        headReads += 1;
+        if (headReads === 2) secondHeadReadStarted?.();
+        return 100n;
+      },
+      async getLogs() {
+        getLogsCalls += 1;
+        if (getLogsCalls === 1) {
+          firstLogReadStarted?.();
+          return await new Promise<never>(() => undefined);
+        }
+        return [];
+      },
+    };
+    const snapshot = { distributionSummaries: [fixedPriceHistoryFixture()] } as BoardroomSnapshot;
+    const first = readProductBoardroomHistories(client as never, snapshot, {
+      signal: firstController.signal,
+      timeoutMs: 1_000,
+    });
+    const firstOutcome = first.catch((error: unknown) => error);
+    await firstLogRead;
+
+    const second = readProductBoardroomHistories(client as never, snapshot, { timeoutMs: 1_000 });
+    await secondHeadRead;
+    await Promise.resolve();
+    await Promise.resolve();
+    firstController.abort(reason);
+
+    expect(await firstOutcome).toBe(reason);
+    expect(await second).toEqual([expect.objectContaining({ completeness: "complete" })]);
+    expect(getLogsCalls).toBe(2);
+  });
+
   test("keeps state-derived catalog metrics and marks partial history failures", async () => {
     const context = productBoardroomFixture();
     const client = fakeProductBoardroomClient({

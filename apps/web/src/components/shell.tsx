@@ -310,7 +310,7 @@ export function AddressLink({ address }: { address: Address }): React.JSX.Elemen
       )}
       <button
         aria-label="Copy address"
-        className="grid h-6 w-6 shrink-0 place-items-center rounded border border-zinc-800 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+        className="grid h-10 w-10 shrink-0 place-items-center rounded border border-zinc-800 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 sm:h-8 sm:w-8"
         type="button"
         onClick={() => void copyAddress()}
       >
@@ -319,7 +319,7 @@ export function AddressLink({ address }: { address: Address }): React.JSX.Elemen
       {hasExplorerUrl ? (
         <a
           aria-label="Open in explorer"
-          className="grid h-6 w-6 shrink-0 place-items-center rounded border border-zinc-800 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+          className="grid h-10 w-10 shrink-0 place-items-center rounded border border-zinc-800 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 sm:h-8 sm:w-8"
           href={explorerUrl}
           rel="noreferrer"
           target="_blank"

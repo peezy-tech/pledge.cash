@@ -2,18 +2,12 @@ import {
   buildBoardroomCancelActionTransaction,
   buildBoardroomExecuteQueuedActionTransaction,
   buildBoardroomExecuteQueuedBatchTransaction,
-  buildBoardroomLaunchTransaction,
-  buildBoardroomSetExecutorTransaction,
   type BoardroomCall,
   type QueuedBoardroomAction,
   type QueuedBoardroomActionStatus,
 } from "@pledge.cash/sdk";
 import { formatEther, isAddress, type Address, type Hex } from "viem";
-import {
-  boardroomCallReview,
-  withTransactionReviewParameters,
-  type ContractParameterReview,
-} from "../../lib/transaction-preview";
+import { boardroomCallReview, type ContractParameterReview } from "../../lib/transaction-preview";
 import type { GovernanceTransactionRequest } from "./types";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -49,12 +43,6 @@ export type GovernanceActionView = {
 export type GovernanceDelayPreset = {
   label: string;
   seconds: bigint;
-};
-
-export type GovernanceLaunchStep = {
-  kind: "setExecutor" | "launch";
-  label: string;
-  request: GovernanceTransactionRequest;
 };
 
 export function governanceActionView(
@@ -203,34 +191,6 @@ export function buildGovernanceExecutionRequest(
   });
 }
 
-export function buildGovernanceLaunchSteps(input: {
-  boardroom: Address;
-  currentExecutor: Address;
-  governanceDelay: bigint;
-  nextExecutor: Address;
-}): GovernanceLaunchStep[] {
-  const steps: GovernanceLaunchStep[] = [];
-  if (!sameAddress(input.currentExecutor, input.nextExecutor)) {
-    return [{
-      kind: "setExecutor",
-      label: "Set governance executor",
-      request: buildBoardroomSetExecutorTransaction({ boardroom: input.boardroom, executor: input.nextExecutor }),
-    }];
-  }
-  steps.push({
-    kind: "launch",
-    label: "Launch holder governance",
-    request: withTransactionReviewParameters(
-      buildBoardroomLaunchTransaction({ boardroom: input.boardroom, governanceDelay: input.governanceDelay }),
-      [
-        { name: "Required current executor (rechecked)", type: "address", value: input.nextExecutor },
-        { name: "Holder review period", type: "duration", value: formatGovernanceDuration(input.governanceDelay) },
-      ],
-    ),
-  });
-  return steps;
-}
-
 export function governanceDelayPresets(minimumDelay: bigint): GovernanceDelayPreset[] {
   const safeMinimum = minimumDelay > 0n ? minimumDelay : HOUR;
   const values = [safeMinimum, 2n * DAY, 3n * DAY, 7n * DAY, 14n * DAY, safeMinimum * 2n]
@@ -293,8 +253,4 @@ function formatRelativeTime(target: bigint, now: bigint): string {
       ? formatGovernanceDuration((absolute / HOUR) * HOUR)
       : formatGovernanceDuration(((absolute + 59n) / 60n) * 60n);
   return difference >= 0n ? `in ${duration}` : `${duration} ago`;
-}
-
-function sameAddress(left: Address, right: Address): boolean {
-  return left.toLowerCase() === right.toLowerCase();
 }

@@ -262,6 +262,7 @@ describe("web app shell", () => {
   test("classifies invalid project provenance as terminal and RPC failures as retryable", () => {
     const invalid = projectRouteFailure("This address is not a Boardroom created by the configured BoardroomFactory.");
     const transient = projectRouteFailure("Could not reach Local Anvil. Check the RPC connection and try again.");
+    const throttled = projectRouteFailure("429 Too Many Requests");
 
     expect(invalid).toEqual({
       description: "This address is not a project created by the configured pledge.cash deployment on this network.",
@@ -271,6 +272,8 @@ describe("web app shell", () => {
     expect(invalid.description).not.toContain("Transparency");
     expect(transient.retryable).toBe(true);
     expect(transient.title).toBe("Project temporarily unavailable");
+    expect(throttled.retryable).toBe(true);
+    expect(throttled.title).toBe("Project temporarily unavailable");
   });
 
   test("renders one canonical invalid-project state and offers retry only for transport failures", () => {
@@ -330,6 +333,8 @@ describe("web app shell", () => {
     expect(html).toContain("Explore");
     expect(html).toContain("Portfolio");
     expect(html).toContain("Studio");
+    expect(html).toContain('href="#app-main-content"');
+    expect(html).toContain("Skip to main content");
     expect(html).toContain("No projects discovered");
     expect(html).not.toContain("Project workspace");
     expect(html).not.toContain("Market");
@@ -939,7 +944,7 @@ describe("web app shell", () => {
       .toBe("Could not reach Local RPC. Check the RPC connection and try again.");
   });
 
-  test("keeps canonical grant failures concise while preserving the underlying detail separately", () => {
+  test("keeps canonical grant failures concise and distinguishes transport errors", () => {
     const raw = new Error("ContractFunctionExecutionError: Contract Call: 0x1234567890 docs.example/version/2.0.0");
 
     expect(canonicalGrantReadErrorMessage(raw, "Local RPC"))

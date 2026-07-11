@@ -13,7 +13,7 @@ import {
 import { encodeFunctionData } from "viem";
 import { transactionReviewCanContinue } from "../src/components/transaction-review";
 import { recoverInterruptedTransactions, stageLabel, type TransactionRecord } from "../src/features/transactions/transaction-center";
-import { contractCallPreview, contractCallReview, withTransactionReviewParameters } from "../src/lib/transaction-preview";
+import { contractCallPreview, contractCallReview } from "../src/lib/transaction-preview";
 import { assertTransactionIdentity } from "../src/lib/transaction-identity";
 
 const target = "0x1000000000000000000000000000000000000000" as const;
@@ -68,25 +68,6 @@ describe("transaction review", () => {
 
     expect(review.risk).toBe("irreversible");
     expect(review.parameters).toEqual([{ name: "delay", type: "uint256", value: "86400" }]);
-  });
-
-  test("binds executor and a human review period into irreversible launch review", () => {
-    const request = withTransactionReviewParameters({
-      address: target,
-      abi: [{ type: "function", name: "launch", stateMutability: "nonpayable", inputs: [{ name: "governanceDelay_", type: "uint256" }], outputs: [] }] as const,
-      functionName: "launch",
-      args: [259_200n] as const,
-    }, [
-      { name: "Governance executor", type: "address", value: holder },
-      { name: "Holder review period", type: "duration", value: "3 days" },
-    ]);
-
-    const review = contractCallReview("Launch holder governance", request);
-    expect(review.parameters).toEqual([
-      { name: "Governance executor", type: "address", value: holder },
-      { name: "Holder review period", type: "duration", value: "3 days" },
-    ]);
-    expect(review.parameters.some((parameter) => parameter.name.endsWith("_"))).toBe(false);
   });
 
   test("requires irreversible acknowledgement when queued Boardroom calldata opens redemptions", () => {
@@ -152,6 +133,37 @@ describe("transaction review", () => {
 
     expect(review.risk).toBe("irreversible");
     expect(transactionReviewCanContinue(review, false)).toBe(false);
+  });
+
+  test.each([
+    "mint",
+    "setRedemptionExcessRecipient",
+    "registerRedeemableAsset",
+    "cancelAction",
+    "claimFees",
+    "executeWindDownCall",
+    "buy",
+    "sell",
+    "addLiquidity",
+    "removeLiquidity",
+    "swapExactTokensForTokens",
+    "settle",
+    "transfer",
+  ])("marks non-irreversible asset or authority call %s as important", (functionName) => {
+    const directAbi = [{
+      type: "function",
+      name: functionName,
+      stateMutability: "nonpayable",
+      inputs: [],
+      outputs: [],
+    }] as const;
+    const review = contractCallReview(`Direct ${functionName}`, {
+      address: target,
+      abi: directAbi,
+      functionName,
+    });
+
+    expect(review.risk).toBe("important");
   });
 
   test("rejects account or chain changes made while transaction review is open", () => {

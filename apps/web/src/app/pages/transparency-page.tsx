@@ -191,7 +191,11 @@ export function TransparencyPage({
               { label: "Wrapped native", value: <AddressLink address={snapshot.wrappedNative} /> },
               { label: "Share token", value: <AddressLink address={snapshot.shareToken} /> },
               { label: "Issued grants", value: String(snapshot.issuedGrants.length) },
-              { label: "Tracked distributions", value: String(snapshot.issuedDistributions.length) },
+              {
+                label: "Currently registered distributions",
+                value: String(snapshot.issuedDistributions.length),
+                detail: "Closed, removed, or migrated distribution records shown above remain separate historical evidence.",
+              },
             ]}
           />
           {technicalContent ? <div className="mt-5 border-t border-zinc-800 pt-5">{technicalContent}</div> : null}

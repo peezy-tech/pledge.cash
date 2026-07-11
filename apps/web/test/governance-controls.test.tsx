@@ -10,14 +10,12 @@ import {
   GovernanceLaunchControl,
   GovernanceQueue,
   buildGovernanceExecutionRequest,
-  buildGovernanceLaunchSteps,
   buildGovernanceVetoRequest,
   effectiveGovernanceActionStatus,
   governanceActionView,
   governanceDelayPresets,
 } from "../src/features/governance";
 import { governanceRefreshDelay } from "../src/lib/governance-refresh";
-import { contractCallReview } from "../src/lib/transaction-preview";
 
 const boardroom = "0x1000000000000000000000000000000000000000" as Address;
 const owner = "0x2000000000000000000000000000000000000000" as Address;
@@ -153,30 +151,6 @@ describe("governance controls", () => {
     expect(html).toContain("disabled");
   });
 
-  test("requires an executor checkpoint before building the irreversible launch", () => {
-    const steps = buildGovernanceLaunchSteps({
-      boardroom,
-      currentExecutor: owner,
-      governanceDelay: 86_400n,
-      nextExecutor: executor,
-    });
-    expect(steps.map((step) => step.kind)).toEqual(["setExecutor"]);
-    expect(steps.map((step) => step.request.functionName)).toEqual(["setExecutor"]);
-
-    const unchanged = buildGovernanceLaunchSteps({
-      boardroom,
-      currentExecutor: executor,
-      governanceDelay: 86_400n,
-      nextExecutor: executor,
-    });
-    expect(unchanged.map((step) => step.kind)).toEqual(["launch"]);
-    const launchReview = contractCallReview(unchanged[0]!.label, unchanged[0]!.request);
-    expect(launchReview.parameters).toEqual([
-      { name: "Required current executor (rechecked)", type: "address", value: executor },
-      { name: "Holder review period", type: "duration", value: "1 day" },
-    ]);
-  });
-
   test("polls for external queue changes while refreshing sooner at ETA and expiry boundaries", () => {
     const waiting = { ...readyAction, status: "waiting", eta: 1_010n } as QueuedBoardroomAction;
     const ready = { ...readyAction, status: "ready", expiresAt: 1_020n } as QueuedBoardroomAction;
@@ -215,28 +189,22 @@ describe("governance controls", () => {
     expect(html).not.toContain("Veto action");
   });
 
-  test("renders a confirmed one-way launch workflow with human delay presets", () => {
+  test("blocks unbound legacy launches and explains the required contract upgrade", () => {
     expect(governanceDelayPresets(86_400n)[0]?.label).toBe("Minimum — 1 day");
     const html = renderToString(
       <GovernanceLaunchControl
-        account={owner}
         boardroom={boardroom}
-        capabilities={{ "governance.launch": { status: "enabled" } }}
         currentExecutor={executor}
         minimumDelay={86_400n}
-        pendingAction={undefined}
-        runAction={async (_id, action) => action()}
-        submitTransaction={async () => undefined}
       />,
     );
 
-    expect(html).toContain("Governance executor");
-    expect(html).toContain("Minimum — 1 day");
-    expect(html).toContain("Custom");
-    expect(html).toContain("Launching is permanent");
-    expect(html).toContain("owner authority cannot be restored");
-    expect(html).toContain("contract-executor queues cannot currently be reconstructed");
-    expect(html).toContain("Launch governance");
-    expect(html).toContain("disabled");
+    expect(html).toContain("Secure governance launch is unavailable");
+    expect(html).toContain("launch(uint256)");
+    expect(html).toContain("pending owner transaction could change the executor");
+    expect(html).toContain("will not submit or certify");
+    expect(html).toContain(executor);
+    expect(html).toContain("1 day");
+    expect(html).not.toContain("<button");
   });
 });

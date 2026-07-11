@@ -40,16 +40,19 @@ export function StudioPage({
   showLifecycleOverview = true,
 }: StudioPageProps): React.JSX.Element {
   const resolvedLifecycle = lifecycle ?? studioLifecycle(dashboard);
-  const guidance = studioGuidance(resolvedLifecycle, dashboard);
+  const loadingSelectedProject = loading && !dashboard && Boolean(sectionNavigation);
+  const guidance = loadingSelectedProject ? selectedProjectLoadingGuidance() : studioGuidance(resolvedLifecycle, dashboard);
   const project = selectedCatalogEntry(dashboard);
   const isOwner = Boolean(account && dashboard && sameAddress(account, dashboard.snapshot.owner));
 
   return (
     <div>
       <PageHeading
-        actions={resolvedLifecycle === "empty" ? createAction : nextAction}
+        actions={loadingSelectedProject ? undefined : resolvedLifecycle === "empty" ? createAction : nextAction}
         eyebrow="Studio"
-        title={dashboard ? project?.name ?? project?.symbol ?? "Project workspace" : "Create and operate projects"}
+        title={loadingSelectedProject
+          ? "Loading selected project"
+          : dashboard ? project?.name ?? project?.symbol ?? "Project workspace" : "Create and operate projects"}
         description="A guided workspace for project setup and lifecycle changes. Public project pages stay separate from operator controls."
       />
 
@@ -91,7 +94,7 @@ export function StudioPage({
         </div>
       </RuledSection>
 
-      <RuledSection>
+      {!loadingSelectedProject ? <RuledSection>
         <SectionHeading title="Project lifecycle" description="Completed stages stay visible so the next authority transition is never ambiguous." />
         <ol className="m-0 mt-5 list-none border-l border-zinc-800 p-0">
           {studioSteps(resolvedLifecycle).map((step) => (
@@ -104,10 +107,10 @@ export function StudioPage({
             </li>
           ))}
         </ol>
-      </RuledSection>
+      </RuledSection> : null}
       </> : null}
 
-      {resolvedLifecycle === "empty" || projectDirectoryContent ? <RuledSection>
+      {!loadingSelectedProject && (resolvedLifecycle === "empty" || projectDirectoryContent) ? <RuledSection>
         <SectionHeading title="Projects" description="Choose an existing Boardroom or start a new setup workflow." action={createAction} />
         <div className="mt-4">
           {loading ? <StudioLoading /> : projectDirectoryContent ?? (
@@ -205,6 +208,17 @@ export function studioGuidance(
     nextStep: "Monitor redemptions and residual assets",
     nextStepDetail: "Creation and routine governance are over; keep the public transparency record current.",
     title: "The project is in redemption mode",
+    tone: "muted",
+  };
+}
+
+function selectedProjectLoadingGuidance(): ReturnType<typeof studioGuidance> {
+  return {
+    description: "Reading the canonical Boardroom state before showing lifecycle or operator controls.",
+    label: "Loading project",
+    nextStep: "Wait for verified state",
+    nextStepDetail: "Transaction controls stay hidden until the selected project’s identity and authority are confirmed.",
+    title: "Verifying the selected project",
     tone: "muted",
   };
 }

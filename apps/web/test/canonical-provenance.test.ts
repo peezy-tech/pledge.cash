@@ -5,7 +5,11 @@ import type {
   PledgeCashDeployment,
   PledgeCashReadClient,
 } from "@pledge.cash/sdk";
-import { assertCanonicalBoardroom, assertCanonicalGrant } from "../src/lib/canonical-provenance";
+import {
+  assertCanonicalBoardroom,
+  assertCanonicalGrant,
+  CanonicalProvenanceError,
+} from "../src/lib/canonical-provenance";
 
 const boardroomFactory = "0x1000000000000000000000000000000000000000" as Address;
 const tokenGrantFactory = "0x2000000000000000000000000000000000000000" as Address;
@@ -19,6 +23,7 @@ describe("canonical product provenance", () => {
     const client = readClient(async (functionName) => functionName === "isBoardroom" ? false : undefined);
 
     await expect(assertCanonicalBoardroom(client, deployment, spoof)).rejects.toThrow("not a Boardroom");
+    await expect(assertCanonicalBoardroom(client, deployment, spoof)).rejects.toBeInstanceOf(CanonicalProvenanceError);
     await expect(assertCanonicalBoardroom(readClient(async () => true), deployment, boardroom)).resolves.toBeUndefined();
   });
 

@@ -7,6 +7,16 @@ import {
   type PledgeCashReadClient,
 } from "@pledge.cash/sdk";
 
+export class CanonicalProvenanceError extends Error {
+  readonly entity: "Boardroom" | "grant";
+
+  constructor(entity: "Boardroom" | "grant", message: string) {
+    super(message);
+    this.name = "CanonicalProvenanceError";
+    this.entity = entity;
+  }
+}
+
 export async function assertCanonicalBoardroom(
   client: PledgeCashReadClient,
   deployment: PledgeCashDeployment | undefined,
@@ -24,7 +34,10 @@ export async function assertCanonicalBoardroom(
     args: [boardroom],
   });
   if (!registered) {
-    throw new Error("This address is not a Boardroom created by the configured BoardroomFactory.");
+    throw new CanonicalProvenanceError(
+      "Boardroom",
+      "This address is not a Boardroom created by the configured BoardroomFactory.",
+    );
   }
 }
 
@@ -39,7 +52,10 @@ export async function assertCanonicalGrant(
     throw new Error("The configured TokenGrantFactory is unavailable, so this grant cannot be verified.");
   }
   if (!sameAddress(state.factory, factory)) {
-    throw new Error("This grant was not created by the configured TokenGrantFactory.");
+    throw new CanonicalProvenanceError(
+      "grant",
+      "This grant was not created by the configured TokenGrantFactory.",
+    );
   }
 
   const registeredGrant = await client.readContract({
@@ -49,7 +65,10 @@ export async function assertCanonicalGrant(
     args: [state.tokenId],
   });
   if (!sameAddress(registeredGrant, grant)) {
-    throw new Error("This grant does not match the TokenGrantFactory token record.");
+    throw new CanonicalProvenanceError(
+      "grant",
+      "This grant does not match the TokenGrantFactory token record.",
+    );
   }
 }
 

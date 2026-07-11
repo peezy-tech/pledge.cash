@@ -16,6 +16,7 @@ import {
   minimumWithSlippage,
   parseMerkleProof,
   parseSlippageBps,
+  ParticipationActionGuard,
   participationDistributionKey,
   prepareBondingCurveAction,
   prepareFixedPriceSaleAction,
@@ -219,6 +220,25 @@ describe("participation bounds and proof parsing", () => {
     await expect(prepared).rejects.toThrow("Purchase details changed");
   });
 
+  test("rejects a deferred fixed-price action after an A-to-B-to-A identity change", async () => {
+    const state = fixedSaleDistribution.state as FixedPriceSaleState;
+    const pending = deferred<FixedPriceSaleParticipationQuote>();
+    const guard = new ParticipationActionGuard("fixed:A");
+    const ticket = guard.capture();
+    const prepared = prepareFixedPriceSaleAction(publicClient, {
+      expectedAction: "trade",
+      intent: fixedPriceIntent(state),
+      isCurrent: () => guard.isCurrent(ticket),
+      async readQuote() { return await pending.promise; },
+    });
+
+    guard.sync("fixed:B");
+    guard.sync("fixed:A");
+    pending.resolve(fixedPriceQuote(state, { paymentAllowance: 1_000n }));
+
+    await expect(prepared).rejects.toThrow("Purchase details changed");
+  });
+
   test("rejects a fixed-price quote for a different wallet, sale, or exact amount", async () => {
     const state = fixedSaleDistribution.state as FixedPriceSaleState;
     await expect(prepareFixedPriceSaleAction(publicClient, {
@@ -262,6 +282,26 @@ describe("participation bounds and proof parsing", () => {
 
     currentAccount = paymentToken;
     pending.resolve(bondingCurveBuyQuote(state, { quoteAllowance: 1_000n }));
+    await expect(prepared).rejects.toThrow("Trade details changed");
+  });
+
+  test("does not let an unmounted curve flow revive its action after an identical remount", async () => {
+    const state = curveDistribution.state as MigratingBondingCurveState;
+    const pending = deferred<MigratingBondingCurveBuyQuote>();
+    const unmountedGuard = new ParticipationActionGuard("curve:A");
+    const staleTicket = unmountedGuard.capture();
+    const prepared = prepareBondingCurveAction(publicClient, {
+      expectedAction: "trade",
+      intent: bondingCurveIntent(state),
+      isCurrent: () => unmountedGuard.isCurrent(staleTicket),
+      async readBuyQuote() { return await pending.promise; },
+    });
+
+    unmountedGuard.deactivate();
+    const remountedGuard = new ParticipationActionGuard("curve:A");
+    expect(remountedGuard.isCurrent(remountedGuard.capture())).toBe(true);
+    pending.resolve(bondingCurveBuyQuote(state, { quoteAllowance: 1_000n }));
+
     await expect(prepared).rejects.toThrow("Trade details changed");
   });
 
