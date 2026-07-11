@@ -125,8 +125,9 @@ The locked-liquidity factory reserves an empty pool before pulling seed assets a
 seed slippage in contract, including migrations from a bonding curve. A permissionless caller may pre-create the
 canonical pair, but cannot take the first mint after reservation. If a pool is already initialized, a hostile reserve
 ratio cannot reduce either Boardroom contribution below the configured bounds; the transaction reverts atomically
-instead. Token donations can still delay a reserved initialization until the fee manager recovers them, so the
-reservation is an ownership-integrity guarantee rather than an availability guarantee.
+instead. During a reserved first mint, supported exact-transfer token donations are swept atomically to the reservation
+owner before the seed balances are verified. A hostile or inexact token can still make that initialization revert, so
+the reservation protects first-mint ownership without making arbitrary token behavior safe.
 
 ### Swap
 

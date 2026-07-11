@@ -47,7 +47,7 @@ When Sentinel is configured, a project’s `Governance` section can show observe
 
 - `Alert service` with `Retry` means the Sentinel request failed; onchain project pages remain usable.
 - Use `Refresh`, `Refresh wallets`, or `Refresh channels` after completing an external sign-in or Telegram flow.
-- A linked wallet and notification destination are offchain account data. Use `Stop watching`, remove a delivery channel, or `Sign out` when access is no longer wanted.
+- A linked wallet and notification destination are offchain account data. `Stop watching` disables that wallet's alert coverage, removing a delivery channel stops delivery there, and `Sign out` ends only the current browser session. The current product does not expose wallet-credential unlinking or account deletion; none of those three controls removes the Sentinel account or its sign-in credential.
 - Never sign a message whose domain, URI, wallet, chain ID, or purpose does not match the pledge.cash alert flow shown in the browser.
 
 [Read the project Governance guide](project-workspace) · [Review safety boundaries](../start/use-safely)

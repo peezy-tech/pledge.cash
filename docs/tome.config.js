@@ -11,11 +11,11 @@ export default {
     Header: fileURLToPath(new URL("./components/SiteHeader.jsx", import.meta.url)),
     PageFooter: fileURLToPath(new URL("./components/SitePageFooter.jsx", import.meta.url)),
     Sidebar: fileURLToPath(new URL("./components/SiteSidebar.jsx", import.meta.url)),
+    Toc: fileURLToPath(new URL("./components/SiteToc.jsx", import.meta.url)),
   },
   theme: {
     preset: "editorial",
     mode: "auto",
-    accent: "#84cc16",
   },
   navigation: [
     {

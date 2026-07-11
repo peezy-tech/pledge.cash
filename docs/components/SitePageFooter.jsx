@@ -1,5 +1,7 @@
 import React from "react";
 
+import { isUnmodifiedPrimaryClick } from "./navigation.js";
+
 function runtimeBasePath(currentPageId) {
   if (typeof window === "undefined") return "";
   const pathname = window.location.pathname.replace(/\/+$/, "");
@@ -20,6 +22,7 @@ function PageLink({ align, basePath, direction, mobile, onNavigate, page }) {
     <a
       href={pageHref(basePath, page)}
       onClick={(event) => {
+        if (!isUnmodifiedPrimaryClick(event)) return;
         event.preventDefault();
         onNavigate(page.id);
       }}

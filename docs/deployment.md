@@ -79,7 +79,7 @@ below.
 
 ## Environment
 
-Start from `.env.example` and provide a funded deployment key when broadcasting:
+Start from `.env.example`. Each wrapper requires its matching funded deployment key for both dry-run simulation and broadcast because it derives and verifies the deployer before running Foundry:
 
 ```sh
 cp .env.example .env
@@ -92,15 +92,22 @@ PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0x...
 PLEDGE_CASH_PROTOCOL_GOVERNANCE=0x...
 PLEDGE_CASH_PROTOCOL_TREASURY=0x...
 PLEDGE_CASH_AMM_FEE_MANAGER=0x...
-HYPEREVM_WRAPPED_NATIVE_ADDRESS=0x5555555555555555555555555555555555555555
 ```
 
-Required for broadcast:
+Required for the HyperEVM wrapper, including dry runs:
 
 ```sh
 HYPEREVM_TESTNET_PRIVATE_KEY=...
+HYPEREVM_WRAPPED_NATIVE_ADDRESS=0x5555555555555555555555555555555555555555
+```
+
+Required for the Monad wrapper, including dry runs:
+
+```sh
 MONAD_TESTNET_PRIVATE_KEY=...
 ```
+
+Monad uses its canonical WMON default unless `MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS` is set.
 
 Optional:
 

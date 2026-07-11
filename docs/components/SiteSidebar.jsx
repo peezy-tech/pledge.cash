@@ -1,20 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+
+import { docsHref, isUnmodifiedPrimaryClick } from "./navigation.js";
 
 function isGroup(entry) {
   return Boolean(entry && "section" in entry);
-}
-
-function normalizeBasePath(basePath) {
-  if (!basePath || basePath === "/") return "";
-  return `/${basePath.replace(/^\/+|\/+$/g, "")}`;
-}
-
-function docsHref(basePath, urlPath) {
-  const base = normalizeBasePath(basePath);
-  const path = !urlPath || urlPath === "/"
-    ? "/"
-    : `/${urlPath.replace(/^\/+|\/+$/g, "")}`;
-  return `${base}${path}` || "/";
 }
 
 function groupContainsPage(group, currentPageId) {
@@ -60,6 +49,8 @@ export default function SiteSidebar({
   const [expanded, setExpanded] = useState(() => (
     navigation.filter((section) => groupContainsPage(section, currentPageId)).map((section) => section.section)
   ));
+  const asideRef = useRef(null);
+  const closeButtonRef = useRef(null);
 
   useEffect(() => {
     const active = navigation.filter((section) => groupContainsPage(section, currentPageId)).map((section) => section.section);
@@ -69,14 +60,38 @@ export default function SiteSidebar({
   useEffect(() => {
     if (!mobile || !sbOpen) return undefined;
 
+    const aside = asideRef.current;
+    const background = aside?.nextElementSibling;
+    const previousInert = background?.inert ?? false;
+    const previousAriaHidden = background?.getAttribute("aria-hidden");
+    if (background) {
+      background.inert = true;
+      background.setAttribute("aria-hidden", "true");
+    }
+    requestAnimationFrame(() => closeButtonRef.current?.focus());
+
     const closeOnEscape = (event) => {
-      if (event.key === "Escape") setSbOpen(false);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setSbOpen(false);
+      }
     };
     window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape);
+      if (background) {
+        background.inert = previousInert;
+        if (previousAriaHidden === null) background.removeAttribute("aria-hidden");
+        else background.setAttribute("aria-hidden", previousAriaHidden);
+      }
+      requestAnimationFrame(() => {
+        document.querySelector('header button[aria-label="Open documentation navigation"]')?.focus();
+      });
+    };
   }, [mobile, sbOpen, setSbOpen]);
 
   const navigate = (event, page) => {
+    if (!isUnmodifiedPrimaryClick(event)) return;
     event.preventDefault();
     onNavigate(page.id);
     if (mobile) setSbOpen(false);
@@ -84,7 +99,27 @@ export default function SiteSidebar({
 
   const openSearch = () => {
     if (mobile) setSbOpen(false);
-    window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ctrlKey: true, key: "k" }));
+    window.setTimeout(() => {
+      const trigger = document.querySelector('header button[aria-label="Search documentation"]');
+      window.dispatchEvent(new CustomEvent("pledge:docs-search", { detail: { trigger } }));
+    }, 0);
+  };
+
+  const keepFocusInside = (event) => {
+    if (!mobile || event.key !== "Tab") return;
+    const focusable = [...event.currentTarget.querySelectorAll(
+      'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )].filter((element) => element.getClientRects().length > 0);
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   };
 
   const renderEntries = (entries, depth = 0) => entries.map((entry) => {
@@ -153,6 +188,10 @@ export default function SiteSidebar({
   return (
     <aside
       aria-label="Documentation"
+      aria-modal={mobile && sbOpen ? "true" : undefined}
+      onKeyDown={keepFocusInside}
+      ref={asideRef}
+      role={mobile ? "dialog" : undefined}
       style={{
         background: "var(--sbBg)",
         borderRight: "1px solid var(--bd)",
@@ -194,6 +233,7 @@ export default function SiteSidebar({
         <button
           aria-label="Close documentation navigation"
           onClick={() => setSbOpen(false)}
+          ref={closeButtonRef}
           style={{
             alignItems: "center",
             background: "none",

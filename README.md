@@ -14,10 +14,10 @@ pledge.cash is a permissionless protocol and product workspace for token-backed 
 - [Developer Docs](docs/pages/developers/index.md): public integration map and links into the deep protocol references.
 - [Token Grant Protocol](docs/token-grant-protocol.md): escrow-backed free-claim and paid-settlement token grants.
 - [Boardroom Protocol](docs/boardroom-protocol.md): owned issuer accounts with native share tokens.
-- [Distribution Protocol](docs/distribution-protocol.md): fixed-price Boardroom share sales.
+- [Distribution Protocol](docs/distribution-protocol.md): fixed-price sales, Merkle airdrops, and migrating bonding curves for Boardroom shares.
 - [AMM Protocol](docs/amm-protocol.md): Boardroom-owned liquidity, trading, and fee accounting.
 - [Project Token Launch](docs/project-token-launch.md): local dogfood scenario for a Boardroom-backed project token.
-- [Deployment](docs/deployment.md): grant factory deployment and HyperEVM testnet operator flow.
+- [Deployment](docs/deployment.md): deterministic full-stack deployment, simulation, verification, and HyperEVM/Monad testnet operator flows.
 - [Contributing](CONTRIBUTING.md): local setup, PR expectations, and contract-change checklist.
 - [Security](SECURITY.md): supported scope and vulnerability reporting process.
 - [Agent Guide](AGENTS.md): operating rules for coding agents and humans making repo changes.
@@ -55,7 +55,7 @@ Broadcast the testnet factory deployment after loading the deployment key:
 BROADCAST=1 bun --cwd packages/contracts deploy:hyperevm-testnet
 ```
 
-Build the static contract interface for GitHub Pages:
+Build the product workspace and its public docs for GitHub Pages:
 
 ```sh
 bun --cwd apps/web build

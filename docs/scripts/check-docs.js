@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { docsRedirects } from "../redirects.js";
 import config from "../tome.config.js";
 
 const root = dirname(fileURLToPath(import.meta.url));
@@ -9,6 +10,7 @@ const docsRoot = dirname(root);
 const repoRoot = dirname(docsRoot);
 const pagesRoot = join(docsRoot, "pages");
 const deploymentsRoot = join(repoRoot, "packages", "contracts", "deployments");
+const appRoutes = new Set(["explore", "portfolio", "settings/alerts", "studio", "tools"]);
 
 const errors = [];
 
@@ -113,9 +115,16 @@ function resolvePageLink(fromPage, target, filePages) {
   const relativeToPages = relative(pagesRoot, filesystemTarget);
   const escapesPages = relativeToPages === ".." || relativeToPages.startsWith(`..${sep}`);
 
-  // Relative links that leave docs/pages are app handoffs. The authoring standard
-  // deliberately uses ../../explore-style URLs so one source works at both bases.
-  if (escapesPages) return { kind: "skip" };
+  // Relative links that leave docs/pages are app handoffs. Resolve them against
+  // docsRoot so typos or an accidental repository escape cannot pass silently.
+  if (escapesPages) {
+    const relativeToDocs = relative(docsRoot, filesystemTarget);
+    const escapesDocs = relativeToDocs === ".." || relativeToDocs.startsWith(`..${sep}`);
+    const candidate = relativeToDocs.split(sep).join("/").replace(/^\/+|\/+$/g, "");
+    return !escapesDocs && appRoutes.has(candidate)
+      ? { kind: "app-handoff", candidate }
+      : { kind: "invalid-app-handoff", candidate };
+  }
 
   let candidate = relativeToPages.split(sep).join("/").replace(/\.md$/, "").replace(/\/$/, "");
   if (candidate.endsWith("/index")) candidate = candidate.slice(0, -6) || "index";
@@ -222,6 +231,14 @@ for (const page of filePages) {
   if (!navSet.has(page)) errors.push(`Markdown page is missing from navigation: ${page}`);
 }
 
+for (const [from, to] of Object.entries(docsRedirects)) {
+  if (!/^[a-z0-9/-]+$/.test(from) || !/^[a-z0-9/-]+$/.test(to)) {
+    errors.push(`Invalid compatibility redirect: ${from} -> ${to}`);
+  }
+  if (filePages.has(from)) errors.push(`Compatibility redirect still has a source page: ${from}`);
+  if (!filePages.has(to)) errors.push(`Compatibility redirect points to a missing page: ${from} -> ${to}`);
+}
+
 const titles = new Map();
 const pageSources = [];
 
@@ -247,6 +264,8 @@ for (const file of files) {
       errors.push(`${page}:${lineNumber(source, index)} hard-codes docs link ${target}; use a relative link so every deployed base path works`);
     } else if (result.kind === "missing") {
       errors.push(`${page}:${lineNumber(source, index)} links to missing docs page ${result.candidate} (${target})`);
+    } else if (result.kind === "invalid-app-handoff") {
+      errors.push(`${page}:${lineNumber(source, index)} links to an unknown or escaping app route ${result.candidate} (${target})`);
     }
   }
 

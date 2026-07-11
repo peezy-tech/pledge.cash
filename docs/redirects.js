@@ -1,0 +1,17 @@
+export const docsRedirects = Object.freeze({
+  "concepts/boardrooms": "understand/boardrooms-and-project-tokens",
+  "concepts/protocol-and-service-layer": "understand/provenance-and-hosted-context",
+  "concepts/sales-liquidity": "understand/distributions-and-liquidity",
+  "concepts/token-grants": "understand/grants-and-vesting",
+  "concepts/wind-down": "understand/treasury-obligations-and-redemptions",
+  "flows/buy-or-hold": "guides/evaluate-and-join",
+  "flows/launch-boardroom": "guides/create-and-operate-project",
+  "flows/receive-grant": "guides/receive-and-settle-grant",
+  "personas/advisors-contractors": "start/choose-your-path",
+  "personas/buyers-holders": "start/choose-your-path",
+  "personas/founders": "start/choose-your-path",
+  "reference/deployments": "reference/networks-and-deployments",
+  "walkthroughs/buy-from-sale-or-curve": "guides/evaluate-and-join",
+  "walkthroughs/launch-boardroom": "guides/create-and-operate-project",
+  "walkthroughs/receive-settle-grant": "guides/receive-and-settle-grant",
+});

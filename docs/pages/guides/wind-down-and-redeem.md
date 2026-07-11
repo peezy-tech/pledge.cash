@@ -26,10 +26,11 @@ Review the permanent effects before signing:
 - status moves from Active to Winding down;
 - queued governance actions are invalidated;
 - native balance is wrapped into the canonical wrapped-native asset;
+- the redemption excess recipient becomes immutable;
 - share minting and new grants, sales, airdrops, curves, and lockers stop;
 - fixed-price buys, airdrop claims, curve buys and sells, and curve migration stop.
 
-**Success proof:** Boardroom status is Winding down, governance epoch advanced, and canonical wrapped-native balance reflects the normalized native treasury value.
+**Success proof:** Boardroom status is Winding down, governance epoch advanced, the excess recipient is frozen, and canonical wrapped-native balance reflects the normalized native treasury value.
 
 ## 2. Close and prune obligations
 
@@ -54,8 +55,9 @@ Opening:
 - rejects unresolved obligations;
 - burns treasury-held project shares;
 - fixes redemption supply;
-- snapshots each admitted asset's opening balance;
-- freezes the excess recipient.
+- snapshots each admitted asset's opening balance.
+
+The excess recipient was already frozen when wind-down started. Opening redemptions uses that immutable recipient; it does not choose or change one.
 
 Late deposits do not increase holder entitlements. They are excess and can be swept to the frozen recipient.
 

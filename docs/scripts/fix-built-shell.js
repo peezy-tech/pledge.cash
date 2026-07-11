@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+
+import { docsRedirects } from "../redirects.js";
 
 const outDir = resolve(process.env.PLEDGE_CASH_DOCS_OUT_DIR ?? "out");
 const basePath = normalizeBasePath(process.env.PLEDGE_CASH_DOCS_BASE_PATH ?? "/docs");
@@ -39,8 +41,8 @@ for (const file of await filesWithExtension(join(outDir, "assets"), ".js")) {
   replacements += matches;
 }
 
-if (replacements === 0) {
-  throw new Error("Tome's Pagefind loader signature changed; refusing to publish a build with unverified search paths.");
+if (replacements !== 1) {
+  throw new Error(`Tome's Pagefind loader signature changed (${replacements.toString()} references); refusing to publish a build with unverified search paths.`);
 }
 
 await rename(pagefindEntry, pagefindCore);
@@ -108,21 +110,63 @@ if (syntaxCheck.status !== 0) {
 }
 
 const faviconPath = `${basePath}/favicon.svg` || "/favicon.svg";
+const builtRootHtml = await readFile(join(outDir, "index.html"), "utf8");
+const headFragments = [
+  ["script", "pledge-docs-initial-hash"],
+  ["style", "pledge-docs-theme"],
+].map(([tag, id]) => {
+  const match = builtRootHtml.match(new RegExp(`<${tag}\\b[^>]*\\bid=["']${id}["'][^>]*>[\\s\\S]*?</${tag}>`, "i"));
+  if (!match) throw new Error(`Generated root page is missing required head element #${id}.`);
+  return { id, markup: match[0] };
+});
+
 let faviconPages = 0;
 for (const file of await filesWithExtension(outDir, ".html")) {
   const source = await readFile(file, "utf8");
-  if (/rel=["']icon["']/.test(source)) {
-    faviconPages += 1;
-    continue;
-  }
-  if (!source.includes("</head>")) {
+  let fixed = source.replace(/<link\b[^>]*\brel=["']icon["'][^>]*>\s*/gi, "");
+  if (!fixed.includes("</head>")) {
     throw new Error(`Generated page has no </head> for favicon injection: ${file}`);
   }
-  await writeFile(file, source.replace("</head>", `  <link rel="icon" href="${faviconPath}" type="image/svg+xml" />\n</head>`));
+  for (const fragment of headFragments) {
+    if (!fixed.includes(`id="${fragment.id}"`) && !fixed.includes(`id='${fragment.id}'`)) {
+      fixed = fixed.replace("</head>", `  ${fragment.markup}\n</head>`);
+    }
+  }
+  fixed = fixed.replace("</head>", `  <link rel="icon" href="${faviconPath}" type="image/svg+xml" />\n</head>`);
+  await writeFile(file, fixed);
   faviconPages += 1;
 }
-if (faviconPages === 0) {
-  throw new Error("Tome produced no HTML pages for favicon verification.");
+
+let redirectPages = 0;
+for (const [from, to] of Object.entries(docsRedirects)) {
+  if (!/^[a-z0-9/-]+$/.test(from) || !/^[a-z0-9/-]+$/.test(to)) {
+    throw new Error(`Invalid docs redirect: ${from} -> ${to}`);
+  }
+  const target = `${basePath}/${to}` || `/${to}`;
+  const redirectDir = join(outDir, from);
+  await mkdir(redirectDir, { recursive: true });
+  await writeFile(join(redirectDir, "index.html"), `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex" />
+    <script>window.location.replace(${JSON.stringify(target)} + window.location.search + window.location.hash);</script>
+    <meta http-equiv="refresh" content="1; url=${target}" />
+    <link rel="canonical" href="${target}" />
+    <link rel="icon" href="${faviconPath}" type="image/svg+xml" />
+    <title>Documentation moved | pledge.cash</title>
+  </head>
+  <body>
+    <p>This documentation moved to <a href="${target}">${target}</a>.</p>
+  </body>
+</html>
+`);
+  redirectPages += 1;
+  faviconPages += 1;
 }
 
-console.log(`Fixed Tome shell for ${basePath || "/"}: ${replacements.toString()} search loader reference(s), ${faviconPages.toString()} favicon page(s).`);
+if (faviconPages === 0 || redirectPages !== Object.keys(docsRedirects).length) {
+  throw new Error("Tome produced no HTML pages or a compatibility redirect was not written.");
+}
+
+console.log(`Fixed Tome shell for ${basePath || "/"}: ${replacements.toString()} search loader reference(s), ${faviconPages.toString()} favicon page(s), ${redirectPages.toString()} compatibility redirect(s).`);

@@ -1,4 +1,7 @@
-import React, { useLayoutEffect } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+
+import { docsHref, isUnmodifiedPrimaryClick, normalizeBasePath } from "./navigation.js";
+import SiteSearch from "./SiteSearch.jsx";
 
 function isGroup(entry) {
   return Boolean(entry && "section" in entry);
@@ -45,19 +48,6 @@ function breadcrumbTrail(navigation, currentPageId) {
     if (found) return found;
   }
   return [];
-}
-
-function normalizeBasePath(basePath) {
-  if (!basePath || basePath === "/") return "";
-  return `/${basePath.replace(/^\/+|\/+$/g, "")}`;
-}
-
-function docsHref(basePath, urlPath) {
-  const base = normalizeBasePath(basePath);
-  const path = !urlPath || urlPath === "/"
-    ? "/"
-    : `/${urlPath.replace(/^\/+|\/+$/g, "")}`;
-  return `${base}${path}` || "/";
 }
 
 function updateRenderedBreadcrumbs(basePath) {
@@ -111,11 +101,12 @@ function ThemeIcon({ dark }) {
   );
 }
 
-function HeaderButton({ label, onClick, children }) {
+function HeaderButton({ buttonRef, label, onClick, children }) {
   return (
     <button
       aria-label={label}
       onClick={onClick}
+      ref={buttonRef}
       style={{
         alignItems: "center",
         background: "none",
@@ -144,7 +135,6 @@ export default function SiteHeader({
   mobile,
   navigation,
   onNavigate,
-  onSearchOpen,
   sbOpen,
   setDark,
   setSbOpen,
@@ -154,6 +144,9 @@ export default function SiteHeader({
   const breadcrumbs = breadcrumbTrail(navigation, currentPageId);
   const appLink = config.topNav?.find((link) => link.label.toLowerCase() === "app");
   const extraLinks = config.topNav?.filter((link) => link !== appLink) ?? [];
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchButtonRef = useRef(null);
+  const searchReturnFocusRef = useRef(null);
 
   useLayoutEffect(() => {
     const siteName = config.name || "pledge.cash";
@@ -163,12 +156,109 @@ export default function SiteHeader({
     updateRenderedBreadcrumbs(basePath);
   }, [basePath, config.name, currentPage?.title, currentPageId]);
 
+  useEffect(() => {
+    const initialSearch = window.__PLEDGE_DOCS_INITIAL_SEARCH__;
+    const initialHash = window.__PLEDGE_DOCS_INITIAL_HASH__;
+    if (!initialSearch && !initialHash) return;
+    window.__PLEDGE_DOCS_INITIAL_SEARCH__ = "";
+    window.__PLEDGE_DOCS_INITIAL_HASH__ = "";
+    const timer = window.setTimeout(() => {
+      requestAnimationFrame(() => {
+        const search = window.location.search || initialSearch;
+        const hash = window.location.hash || initialHash;
+        if (search !== window.location.search || hash !== window.location.hash) {
+          window.history.replaceState(
+            window.history.state,
+            "",
+            `${window.location.pathname}${search}${hash}`,
+          );
+        }
+        if (initialHash) {
+          try {
+            document.getElementById(decodeURIComponent(initialHash.slice(1)))?.scrollIntoView();
+          } catch {
+            // An invalid fragment remains visible in the URL but cannot name an element.
+          }
+        }
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const openSearch = useCallback((trigger) => {
+    searchReturnFocusRef.current = trigger instanceof HTMLElement ? trigger : document.activeElement;
+    setSearchOpen(true);
+  }, []);
+
+  const closeSearch = useCallback(() => setSearchOpen(false), []);
+
+  useEffect(() => {
+    const openFromSidebar = (event) => openSearch(event.detail?.trigger ?? document.activeElement);
+    const openFromKeyboard = (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === "k") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        openSearch(document.activeElement);
+      }
+    };
+    window.addEventListener("pledge:docs-search", openFromSidebar);
+    window.addEventListener("keydown", openFromKeyboard, true);
+    return () => {
+      window.removeEventListener("pledge:docs-search", openFromSidebar);
+      window.removeEventListener("keydown", openFromKeyboard, true);
+    };
+  }, [openSearch]);
+
+  useEffect(() => {
+    const base = normalizeBasePath(basePath);
+    const pageByPath = new Map(pages.map((page) => [
+      `/${page.urlPath.replace(/^\/+|\/+$/g, "")}`,
+      page,
+    ]));
+    pageByPath.set("/", { id: "index" });
+
+    const handleContentLink = (event) => {
+      if (!(event.target instanceof Element)) return;
+      const anchor = event.target.closest(".tome-content a");
+      if (!anchor) return;
+      const href = anchor.getAttribute("href");
+      if (!href || href.startsWith("#") || href.startsWith("//") || /^[a-z][a-z\d+.-]*:/i.test(href)) return;
+
+      const destination = new URL(anchor.href, window.location.href);
+      if (destination.origin !== window.location.origin) return;
+
+      // Tome 0.8.1 treats every relative Markdown URL as a root page id. Stop
+      // its bubble handler, then preserve native behavior for app handoffs,
+      // fragments, downloads, and modified clicks.
+      event.stopPropagation();
+      if (anchor.hasAttribute("download") || anchor.target) return;
+
+      const insideDocs = base
+        ? destination.pathname === base || destination.pathname.startsWith(`${base}/`)
+        : true;
+      if (!insideDocs || !isUnmodifiedPrimaryClick(event) || destination.search || destination.hash) return;
+
+      const relativePath = base ? destination.pathname.slice(base.length) || "/" : destination.pathname;
+      const normalizedPath = relativePath.length > 1 ? relativePath.replace(/\/+$/, "") : relativePath;
+      const page = pageByPath.get(normalizedPath);
+      if (!page) return;
+
+      event.preventDefault();
+      onNavigate(page.id);
+    };
+
+    document.addEventListener("click", handleContentLink, true);
+    return () => document.removeEventListener("click", handleContentLink, true);
+  }, [basePath, onNavigate, pages]);
+
   const navigate = (event, page) => {
+    if (!isUnmodifiedPrimaryClick(event)) return;
     event.preventDefault();
     onNavigate(page.id);
   };
 
   return (
+    <>
     <header
       style={{
         alignItems: "center",
@@ -280,7 +370,11 @@ export default function SiteHeader({
         </a>
       ))}
 
-      <HeaderButton label="Search documentation" onClick={onSearchOpen}>
+      <HeaderButton
+        buttonRef={searchButtonRef}
+        label="Search documentation"
+        onClick={(event) => openSearch(event.currentTarget)}
+      >
         <SearchIcon />
       </HeaderButton>
 
@@ -293,5 +387,16 @@ export default function SiteHeader({
         </HeaderButton>
       )}
     </header>
+    {searchOpen && (
+      <SiteSearch
+        basePath={basePath}
+        mobile={mobile}
+        onClose={closeSearch}
+        onNavigate={onNavigate}
+        pages={pages}
+        returnFocus={searchReturnFocusRef.current ?? searchButtonRef.current}
+      />
+    )}
+    </>
   );
 }

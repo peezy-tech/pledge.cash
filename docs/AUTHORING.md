@@ -34,7 +34,7 @@ Concept and reference pages should define their scope, identify the contract or 
 
 The same docs build is served at `/docs` on `pledge.cash` and `/pledge-cash/docs` on HQ. Use relative links between docs pages. From a grouped docs page, app destinations use two parent segments, for example `../../explore`; from the docs home, use one, for example `../explore`.
 
-Every internal docs link must resolve to a page in `docs/pages`, and every public page must appear exactly once in `docs/tome.config.js`.
+Every internal docs link must resolve to a page in `docs/pages`, every app handoff must resolve to a known product route, and every public page must appear exactly once in `docs/tome.config.js`. When a published route moves, add an entry to `docs/redirects.js` rather than breaking existing bookmarks and indexed URLs.
 
 ## Definition of done
 

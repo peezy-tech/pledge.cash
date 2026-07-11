@@ -91,7 +91,7 @@ State:
   corresponding entitlement.
 - `redemptionExcessRecipient`: fixed recipient for post-snapshot deposits and terminally unowed snapshot balances. It
   defaults to the prelaunch owner, follows prelaunch ownership transfers, can be governed while active, and freezes
-  once redemptions open.
+  when wind-down starts.
 
 The owner can mint shares through `Boardroom.mint` before launch. The owner can also call `Boardroom.execute` or
 `Boardroom.executeBatch` before launch. Each call names a policy, target, native value, and calldata. Raw calls may omit
@@ -273,7 +273,7 @@ their own public lifecycle.
 - Post-snapshot deposits cannot dilute or enrich any redemption; only excess above outstanding snapshot obligations can
   be swept to the frozen recipient.
 - Once all snapshot shares are paid or forfeited, no remaining asset balance can be trapped as a phantom obligation.
-- Ownership cannot be renounced, and the excess recipient cannot be changed after redemptions open.
+- Ownership cannot be renounced, and the excess recipient cannot be changed after wind-down starts.
 - Fee-on-transfer and sender-surcharge redeemable assets fail safely through exact Boardroom and recipient balance-delta
   checks without discarding their failed claims.
 
