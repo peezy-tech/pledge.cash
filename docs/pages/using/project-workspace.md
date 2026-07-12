@@ -54,6 +54,8 @@ For a pre-launch Boardroom, the app currently reports `Secure governance launch 
 
 Coverage notices disclose when only some child contracts or events were read. `Unknown` is intentionally different from zero or “not applicable.” Use grant links in this section to open the verified [grant details](grant-details).
 
+Choose `Export evidence` to download the exact project snapshot currently rendered by the app as a versioned JSON file. Big integer values stay lossless strings, and the file carries the chain ID, Boardroom address, read coverage, partial-history warnings, and capture time. The export is a portable record of the app's bounded reads, not an atomic block proof; retry incomplete reads before relying on it for a decision.
+
 ## Recover from a bad project read
 
 - `Some project data could not be read`: choose `Try again` after checking RPC access.

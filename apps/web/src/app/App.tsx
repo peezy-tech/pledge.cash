@@ -4215,6 +4215,7 @@ export function App(): React.JSX.Element {
               />
             ) : (
               <TransparencyPage
+                chainId={appRoute.chainId}
                 dashboard={exactProjectDashboard}
                 error={productBoardroomError}
                 grantHref={(grant) => appRouteHref({ kind: "grant", chainId: appRoute.chainId, grant })}
