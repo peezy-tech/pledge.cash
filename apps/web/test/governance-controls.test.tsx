@@ -8,12 +8,14 @@ import { renderToString } from "react-dom/server";
 import { encodeFunctionData, type Address, type Hex } from "viem";
 import {
   GovernanceLaunchControl,
+  GovernanceProposalComposer,
   GovernanceQueue,
   buildGovernanceExecutionRequest,
   buildGovernanceVetoRequest,
   effectiveGovernanceActionStatus,
   governanceActionView,
   governanceDelayPresets,
+  executorProposalError,
 } from "../src/features/governance";
 import { governanceRefreshDelay } from "../src/lib/governance-refresh";
 
@@ -206,5 +208,30 @@ describe("governance controls", () => {
     expect(html).toContain(executor);
     expect(html).toContain("1 day");
     expect(html).not.toContain("<button");
+  });
+
+  test("prepares a decoded executor-rotation proposal without implying immediate authority", () => {
+    expect(executorProposalError("", executor)).toContain("Enter the proposed executor");
+    expect(executorProposalError(executor, executor)).toContain("other than the current executor");
+    expect(executorProposalError(recipient, executor)).toBeUndefined();
+    const html = renderToString(
+      <GovernanceProposalComposer
+        boardroom={boardroom}
+        capability={{ status: "enabled" }}
+        currentExecutor={executor}
+        governanceDelay={86_400n}
+        gracePeriod={604_800n}
+        now={1_700_000_000n}
+        pendingAction={undefined}
+        queueExecutorChange={async () => undefined}
+        runAction={async (_id, action) => action()}
+      />,
+    );
+    expect(html).toContain("Change who can queue project decisions");
+    expect(html).toContain("Current executor");
+    expect(html).toContain(executor);
+    expect(html).toContain("Queueing does not change authority immediately");
+    expect(html).toContain("Review proposal");
+    expect(html).toContain("disabled");
   });
 });
