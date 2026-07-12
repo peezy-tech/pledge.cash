@@ -28,6 +28,7 @@ import {
 import { AddressLink } from "../src/components/shell";
 import { participationDistributionKey } from "../src/features/participation/types";
 import type { ProductBoardroomCatalogEntry, ProductBoardroomDashboardState } from "../src/lib/product-boardroom";
+import type { SavedProject } from "../src/lib/saved-projects";
 
 const boardroom = "0x1000000000000000000000000000000000000000" as Address;
 const owner = "0x2000000000000000000000000000000000000000" as Address;
@@ -173,6 +174,7 @@ describe("read-first product pages", () => {
     };
     expect(filterProjects([catalogEntry, other], "atlas", "all")).toEqual([catalogEntry]);
     expect(filterProjects([catalogEntry, other], "", "merkle-airdrop")).toEqual([other]);
+    expect(filterProjects([catalogEntry, other], "", "saved", new Set([other.address]))).toEqual([other]);
 
     const html = renderToString(
       <ExplorePage
@@ -232,6 +234,65 @@ describe("read-first product pages", () => {
     expect(exploreSearchState(restored.search)).toEqual({ filter: "amm", query: "Atlas" });
     expect(historyEntries[1]).not.toContain("q=");
     expect(exploreSearchState("?chain=31337&q=Atlas&type=not-a-filter")).toEqual({ filter: "all", query: "Atlas" });
+    expect(exploreSearchState("?chain=31337&type=saved")).toEqual({ filter: "saved", query: "" });
+    expect(exploreSearchHref("/explore", "?chain=31337", { filter: "saved", query: "" }))
+      .toBe("/explore?chain=31337&type=saved");
+  });
+
+  test("renders saved controls and a wallet-independent Portfolio list", () => {
+    const explore = renderToString(
+      <ExplorePage
+        chainId={31337}
+        chainName="Local Anvil"
+        loading={false}
+        projects={[catalogEntry]}
+        savedProjectAddresses={new Set([boardroom])}
+        savedProjectCount={1}
+        onOpenProject={() => undefined}
+        onToggleSaved={() => undefined}
+      />,
+    );
+    expect(explore).toContain('aria-pressed="true"');
+    expect(explore).toContain("Remove Atlas Cooperative from saved projects");
+    expect(explore).toContain(">Saved<");
+
+    const savedProject: SavedProject = {
+      boardroom,
+      chainId: 31337,
+      name: "Atlas Cooperative",
+      savedAt: 123,
+      symbol: "ATLAS",
+    };
+    const portfolio = renderToString(
+      <PortfolioPage
+        loading={false}
+        savedProjectHref={(project) => `/projects/${project.chainId.toString()}/${project.boardroom}/overview`}
+        savedProjects={[savedProject]}
+        tasks={[]}
+      />,
+    );
+    expect(portfolio).toContain("Browser-saved project links");
+    expect(portfolio).toContain('href="/projects/31337/0x1000000000000000000000000000000000000000/overview"');
+    expect(portfolio).toContain("Atlas Cooperative");
+    expect(portfolio).toContain("No wallet connected");
+  });
+
+  test("explains empty saved filters and storage failures truthfully", () => {
+    const emptySaved = renderToString(
+      <ExplorePage
+        chainId={31337}
+        chainName="Local Anvil"
+        loading={false}
+        projects={[]}
+        savedProjectCount={0}
+        savedProjectsWarning="Browser storage is unavailable."
+        onOpenProject={() => undefined}
+      />,
+    );
+
+    expect(emptySaved).toContain("Saved projects could not be restored");
+    expect(emptySaved).toContain("Browser storage is unavailable");
+    expect(emptySaved).toContain("No projects discovered");
   });
 
   test("renders one project workspace with human-readable overview and participation", () => {

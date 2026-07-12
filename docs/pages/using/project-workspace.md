@@ -19,6 +19,10 @@ Open a project from [Explore](explore) to begin.
 
 Use `Refresh` when state may have changed. `Open Studio` provides an operator handoff, but public facts remain separate from controls and an unauthorized wallet sees the section as locked.
 
+Use `Save project` in the project header to keep a chain-and-Boardroom shortcut in this browser. The saved state appears
+on every canonical section for that project and in Portfolio. It is a navigation preference, not an onchain endorsement
+or alert subscription.
+
 ## Participate
 
 `Participate` compares every route discovered for this Boardroom. Available route types are `Fixed-price sale`, `Bonding curve`, `Airdrop`, and `AMM market`.

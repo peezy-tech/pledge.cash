@@ -1,4 +1,4 @@
-import { ArrowRight, RefreshCw, Search } from "lucide-react";
+import { ArrowRight, RefreshCw, Search, Star } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Address } from "@pledge.cash/sdk";
 import { Badge } from "../../components/ui/badge";
@@ -10,7 +10,7 @@ import { formatTokenAmount } from "../../lib/token-amounts";
 import { cn } from "../../lib/utils";
 import { PageHeading, PageNotice, RuledSection, SectionHeading } from "./page-primitives";
 
-export type ExploreFilter = "all" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "amm";
+export type ExploreFilter = "all" | "saved" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "amm";
 export type ExploreSearchState = { filter: ExploreFilter; query: string };
 
 export type ExplorePageProps = {
@@ -25,14 +25,19 @@ export type ExplorePageProps = {
   onLoadMore?: (() => void) | undefined;
   onOpenProject: (project: ProductBoardroomCatalogEntry) => void;
   onRetry?: (() => void) | undefined;
+  onToggleSaved?: ((project: ProductBoardroomCatalogEntry) => void) | undefined;
   projectHref?: ((project: ProductBoardroomCatalogEntry) => string) | undefined;
   projects: readonly ProductBoardroomCatalogEntry[];
+  savedProjectAddresses?: ReadonlySet<string> | undefined;
+  savedProjectCount?: number | undefined;
+  savedProjectsWarning?: string | undefined;
   selectedAddress?: Address | undefined;
   totalProjects?: number | undefined;
 };
 
 const filters: readonly { label: string; value: ExploreFilter }[] = [
   { label: "All", value: "all" },
+  { label: "Saved", value: "saved" },
   { label: "Fixed price", value: "fixed-price-sale" },
   { label: "Curve", value: "migrating-bonding-curve" },
   { label: "Airdrop", value: "merkle-airdrop" },
@@ -52,14 +57,21 @@ export function ExplorePage({
   onLoadMore,
   onOpenProject,
   onRetry,
+  onToggleSaved,
   projectHref,
   projects,
+  savedProjectAddresses = new Set<string>(),
+  savedProjectCount = 0,
+  savedProjectsWarning,
   selectedAddress,
   totalProjects,
 }: ExplorePageProps): React.JSX.Element {
   const [filter, setFilter] = useState<ExploreFilter>(() => initialExploreSearchState().filter);
   const [query, setQuery] = useState(() => initialExploreSearchState().query);
-  const visibleProjects = useMemo(() => filterProjects(projects, query, filter), [filter, projects, query]);
+  const visibleProjects = useMemo(
+    () => filterProjects(projects, query, filter, savedProjectAddresses),
+    [filter, projects, query, savedProjectAddresses],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -108,7 +120,7 @@ export function ExplorePage({
             Chain {chainId} · {directoryCountLabel(projects.length, totalProjects)}
           </p>
         </div>
-        <div aria-label="Participation type" className="mt-4 flex flex-wrap gap-2" role="group">
+        <div aria-label="Project filters" className="mt-4 flex flex-wrap gap-2" role="group">
           {filters.map((item) => (
             <button
               aria-pressed={filter === item.value}
@@ -126,12 +138,19 @@ export function ExplorePage({
             </button>
           ))}
         </div>
+        {savedProjectsWarning ? (
+          <div className="mt-4">
+            <PageNotice title="Saved projects could not be restored" tone="warning">
+              {savedProjectsWarning}
+            </PageNotice>
+          </div>
+        ) : null}
       </RuledSection>
 
       <RuledSection>
         <SectionHeading
           title="Projects"
-          description="Each row is a complete link. Status and amounts are read from the selected network."
+          description="Each project summary links to its canonical workspace. The star saves a browser shortcut; status and amounts still come from the selected network."
         />
         {error ? (
           <div className="mt-4">
@@ -150,19 +169,15 @@ export function ExplorePage({
         ) : visibleProjects.length === 0 ? (
           <div className="mt-5 border-y border-zinc-800 py-8">
             <h3 className="m-0 text-base font-semibold text-zinc-100">
-              {projects.length === 0 ? "No projects discovered" : "No projects match these filters"}
+              {emptyDirectoryTitle(filter, projects.length, savedProjectCount)}
             </h3>
             <p className="m-0 mt-2 max-w-2xl text-sm leading-6 text-zinc-500">
-              {projects.length === 0
-                ? "This network has not returned a Boardroom yet. You can still open Studio to create or inspect one by address."
-                : canLoadMore
-                  ? "No loaded projects match yet. Clear the filters or load more of the directory."
-                  : "Clear the search or choose All to see the full directory."}
+              {emptyDirectoryDescription(filter, projects.length, savedProjectCount, canLoadMore)}
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
-              {projects.length > 0 ? (
+              {projects.length > 0 || filter === "saved" ? (
                 <Button variant="secondary" onClick={() => { setFilter("all"); setQuery(""); }}>
-                  Clear filters
+                  {filter === "saved" ? "Show all projects" : "Clear filters"}
                 </Button>
               ) : emptyAction}
               {canLoadMore && onLoadMore ? (
@@ -180,7 +195,9 @@ export function ExplorePage({
                   active={sameAddress(project.address, selectedAddress)}
                   key={project.address}
                   project={project}
+                  saved={savedProjectAddresses.has(project.address.toLowerCase())}
                   onOpen={() => onOpenProject(project)}
+                  onToggleSaved={onToggleSaved ? () => onToggleSaved(project) : undefined}
                   {...(projectHref ? { href: projectHref(project) } : {})}
                 />
               ))}
@@ -279,12 +296,13 @@ export function filterProjects(
   projects: readonly ProductBoardroomCatalogEntry[],
   query: string,
   filter: ExploreFilter,
+  savedProjectAddresses: ReadonlySet<string> = new Set<string>(),
 ): ProductBoardroomCatalogEntry[] {
   const needle = query.trim().toLowerCase();
   return projects.filter((project) => {
     const matchesQuery = needle.length === 0 || [project.name, project.symbol, project.address, project.path]
       .some((value) => value?.toLowerCase().includes(needle));
-    return matchesQuery && matchesExploreFilter(project, filter);
+    return matchesQuery && matchesExploreFilter(project, filter, savedProjectAddresses);
   });
 }
 
@@ -292,12 +310,16 @@ function ProjectDirectoryRow({
   active,
   href,
   onOpen,
+  onToggleSaved,
   project,
+  saved,
 }: {
   active: boolean;
   href?: string;
   onOpen: () => void;
+  onToggleSaved?: (() => void) | undefined;
   project: ProductBoardroomCatalogEntry;
+  saved: boolean;
 }): React.JSX.Element {
   const content = (
     <>
@@ -307,6 +329,7 @@ function ProjectDirectoryRow({
           <Badge variant={active ? "default" : project.error ? "danger" : "muted"}>
             {active ? "Open" : project.error ? "Read issue" : project.status ?? "Discovered"}
           </Badge>
+          {saved ? <Badge variant="muted">Saved</Badge> : null}
           {project.historyError ? <Badge variant="danger">Partial history</Badge> : null}
         </div>
         <p className="m-0 mt-1 truncate text-xs text-zinc-500">
@@ -320,12 +343,12 @@ function ProjectDirectoryRow({
     </>
   );
   const className = cn(
-    "group grid w-full min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.7fr)_auto] gap-3 border-b border-zinc-800 py-4 text-left transition-colors hover:bg-zinc-900/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-lime-300/70 sm:px-3 lg:grid-cols-[minmax(0,1.5fr)_minmax(110px,0.45fr)_minmax(110px,0.45fr)_minmax(90px,0.35fr)_auto] lg:items-center",
+    "group grid w-full min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.7fr)_auto] gap-3 py-4 pr-14 text-left transition-colors hover:bg-zinc-900/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-lime-300/70 sm:px-3 sm:pr-16 lg:grid-cols-[minmax(0,1.5fr)_minmax(110px,0.45fr)_minmax(110px,0.45fr)_minmax(90px,0.35fr)_auto] lg:items-center",
     active ? "bg-zinc-900/55" : null,
   );
 
   return (
-    <li>
+    <li className="relative border-b border-zinc-800">
       {href ? (
         <a
           className={className}
@@ -341,6 +364,21 @@ function ProjectDirectoryRow({
       ) : (
         <button className={className} type="button" onClick={onOpen}>{content}</button>
       )}
+      {onToggleSaved ? (
+        <button
+          aria-label={saved ? `Remove ${project.name ?? project.symbol ?? "project"} from saved projects` : `Save ${project.name ?? project.symbol ?? "project"}`}
+          aria-pressed={saved}
+          className={cn(
+            "absolute right-1.5 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300/70 sm:right-2.5",
+            saved ? "text-lime-200" : null,
+          )}
+          title={saved ? "Remove from saved projects" : "Save project"}
+          type="button"
+          onClick={onToggleSaved}
+        >
+          <Star className={cn("h-4 w-4", saved ? "fill-current" : null)} />
+        </button>
+      ) : null}
     </li>
   );
 }
@@ -380,10 +418,42 @@ function DirectoryLoading(): React.JSX.Element {
   );
 }
 
-function matchesExploreFilter(project: ProductBoardroomCatalogEntry, filter: ExploreFilter): boolean {
+function matchesExploreFilter(
+  project: ProductBoardroomCatalogEntry,
+  filter: ExploreFilter,
+  savedProjectAddresses: ReadonlySet<string>,
+): boolean {
   if (filter === "all") return true;
+  if (filter === "saved") return savedProjectAddresses.has(project.address.toLowerCase());
   if (filter === "amm") return Boolean(project.pool) || (project.swapCount ?? 0) > 0;
   return project.distributionKind === filter;
+}
+
+function emptyDirectoryTitle(filter: ExploreFilter, loadedProjectCount: number, savedProjectCount: number): string {
+  if (filter === "saved") {
+    return savedProjectCount === 0 ? "No saved projects on this network" : "No saved projects are in the loaded directory";
+  }
+  return loadedProjectCount === 0 ? "No projects discovered" : "No projects match these filters";
+}
+
+function emptyDirectoryDescription(
+  filter: ExploreFilter,
+  loadedProjectCount: number,
+  savedProjectCount: number,
+  canLoadMore: boolean,
+): string {
+  if (filter === "saved") {
+    if (savedProjectCount === 0) return "Save a project from its directory row or project header to keep it available across browser sessions.";
+    return canLoadMore
+      ? "Saved projects can sit outside the loaded directory page. Load more projects or open the saved list in Portfolio."
+      : "The saved identities are still available in Portfolio, but none match the current loaded directory and search.";
+  }
+  if (loadedProjectCount === 0) {
+    return "This network has not returned a Boardroom yet. You can still open Studio to create or inspect one by address.";
+  }
+  return canLoadMore
+    ? "No loaded projects match yet. Clear the filters or load more of the directory."
+    : "Clear the search or choose All to see the full directory.";
 }
 
 function participationLabel(project: ProductBoardroomCatalogEntry): string {
