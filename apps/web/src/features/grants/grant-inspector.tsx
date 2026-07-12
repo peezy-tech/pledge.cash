@@ -28,6 +28,7 @@ type GrantInspectorProps = {
   loadGrant: () => Promise<void>;
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
   settleGrant: () => Promise<void>;
+  settleAvailableGrant: () => Promise<void>;
   withdrawExpired: () => Promise<void>;
 };
 
@@ -61,6 +62,7 @@ export function GrantInspector({
   loadGrant,
   runAction,
   settleGrant,
+  settleAvailableGrant,
   withdrawExpired,
 }: GrantInspectorProps): React.JSX.Element {
   const walletRole = grantWalletRole(account, grantSnapshot, issuerActionsAvailable);
@@ -106,6 +108,29 @@ export function GrantInspector({
         title="Settlement"
         description="Approve payment when the grant is paid, then settle the vested amount into the holder wallet."
       >
+        {grantSnapshot && eligibility.holderActionsAvailable && grantSnapshot.settleable > 0n ? (
+          <div className="grid gap-4 border-t border-zinc-800 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+            <div>
+              <p className="m-0 text-sm font-semibold text-zinc-100">
+                {formatTokenAmount(grantSnapshot.settleable, grantSnapshot.tokenMetadata)} available now
+              </p>
+              <p className="m-0 mt-1 text-xs leading-5 text-zinc-500">
+                {isZeroAddress(grantSnapshot.paymentToken)
+                  ? "This grant is free. The app will settle the full currently vested amount."
+                  : `${formatTokenAmount(grantSnapshot.settlementCost, grantSnapshot.paymentTokenMetadata)} payment required. The app checks live allowance and prepares either the exact approval or settlement.`}
+              </p>
+            </div>
+            <ActionButton
+              actionId="settle-available-grant"
+              pendingAction={pendingAction}
+              title={capabilityReason(actionCapability)}
+              onClick={() => void runAction("settle-available-grant", settleAvailableGrant)}
+            >
+              <Send className="h-4 w-4" />
+              Settle available
+            </ActionButton>
+          </div>
+        ) : null}
         <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2">
           <Field label="Settle amount">
             <Input value={settleAmount} inputMode="decimal" onChange={(event) => setSettleAmount(event.target.value)} />
