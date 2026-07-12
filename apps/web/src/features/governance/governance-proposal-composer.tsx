@@ -1,10 +1,15 @@
 import { buildBoardroomSetExecutorCall, type Address } from "@pledge.cash/sdk";
 import { ArrowRight, Clock3, ShieldCheck } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { getAddress, isAddress } from "viem";
 import { AddressLink, ActionButton } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
 import { Input } from "../../components/ui/input";
+import {
+  TransactionContextGuard,
+  type TransactionActionGuard,
+  type TransactionContextTicket,
+} from "../../lib/transaction-identity";
 import type { Capability } from "../capabilities/project-capabilities";
 import type { GovernanceRunAction } from "./types";
 import { formatGovernanceDuration, formatGovernanceTimestamp, governanceCallView } from "./view-model";
@@ -18,7 +23,7 @@ export type GovernanceProposalComposerProps = {
   governanceDelay: bigint;
   gracePeriod: bigint;
   pendingAction: string | undefined;
-  queueExecutorChange: (executor: Address) => Promise<void>;
+  queueExecutorChange: (executor: Address, actionGuard: TransactionActionGuard) => Promise<void>;
   runAction: GovernanceRunAction;
   now?: bigint | undefined;
 };
@@ -44,7 +49,13 @@ export function GovernanceProposalComposer({
   const actionId = "governance-queue-executor-change";
   const eta = now + governanceDelay;
   const expiresAt = eta + gracePeriod;
-  const disabled = Boolean(error || !view || view.verification !== "verified" || capability.status !== "enabled");
+  const proposalIdentity = executorProposalIdentity({ boardroom, currentExecutor, executorInput });
+  const proposalGuardRef = useRef<TransactionContextGuard | undefined>(undefined);
+  proposalGuardRef.current ??= new TransactionContextGuard(proposalIdentity);
+  const proposalGuard = proposalGuardRef.current;
+  proposalGuard.sync(proposalIdentity);
+  const proposalPending = pendingAction === actionId;
+  const disabled = Boolean(error || !view || view.verification !== "verified" || capability.status !== "enabled" || proposalPending);
 
   return (
     <div className="border-y border-[var(--pc-border)]">
@@ -64,6 +75,7 @@ export function GovernanceProposalComposer({
             New executor
             <Input
               aria-invalid={executorInput.length > 0 && Boolean(error)}
+              disabled={proposalPending}
               placeholder="0x..."
               value={executorInput}
               onChange={(event) => setExecutorInput(event.target.value)}
@@ -108,7 +120,12 @@ export function GovernanceProposalComposer({
           actionId={actionId}
           disabled={disabled}
           pendingAction={pendingAction}
-          onClick={() => executor && void runAction(actionId, async () => await queueExecutorChange(executor))}
+          onClick={() => {
+            if (!executor) return;
+            const ticket = proposalGuard.capture();
+            const actionGuard = executorProposalActionGuard(proposalGuard, ticket);
+            void runAction(actionId, async () => await queueExecutorChange(executor, actionGuard));
+          }}
         >
           {pendingAction === actionId ? "Queueing" : "Review proposal"}
           <ArrowRight className="h-4 w-4" />
@@ -116,6 +133,25 @@ export function GovernanceProposalComposer({
       </div>
     </div>
   );
+}
+
+export function executorProposalIdentity(input: {
+  boardroom: Address;
+  currentExecutor: Address;
+  executorInput: string;
+}): string {
+  return JSON.stringify([
+    input.boardroom.toLowerCase(),
+    input.currentExecutor.toLowerCase(),
+    input.executorInput.trim().toLowerCase(),
+  ]);
+}
+
+export function executorProposalActionGuard(
+  guard: TransactionContextGuard,
+  ticket: TransactionContextTicket,
+): TransactionActionGuard {
+  return { isCurrent: () => guard.isCurrent(ticket) };
 }
 
 export function executorProposalError(value: string, currentExecutor: Address): string | undefined {

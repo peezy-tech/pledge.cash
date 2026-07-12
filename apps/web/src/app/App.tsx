@@ -2119,6 +2119,7 @@ export function App(): React.JSX.Element {
     label: string,
     boardroom: { address: Address; launched: boolean; status: number },
     request: Record<string, unknown>,
+    actionGuard?: TransactionActionGuard,
   ): Promise<"execute" | "queue" | "windDown"> => {
     const calls = boardroomCallsFromExecution(request);
     const plan = planBoardroomCallExecution({
@@ -2128,7 +2129,7 @@ export function App(): React.JSX.Element {
       ...(boardroom.launched && boardroom.status === 0 ? { salt: randomSalt() } : {}),
     });
     const transactionLabel = plan.kind === "queue" ? `Queue ${label.toLowerCase()}` : label;
-    await submitContractTransaction(transactionLabel, plan.transaction);
+    await submitContractTransaction(transactionLabel, plan.transaction, actionGuard);
     if (plan.kind === "queue") {
       pushLog(`${label} is queued. It can execute after the project governance delay.`, "success");
     }
@@ -4151,7 +4152,7 @@ export function App(): React.JSX.Element {
       gracePeriod={exactProjectDashboard.snapshot.governanceConfig.actionGracePeriod}
       pendingAction={pendingAction}
       runAction={runAction}
-      queueExecutorChange={async (executor) => {
+      queueExecutorChange={async (executor, actionGuard) => {
         const route = activeAppRouteRef.current;
         if (route.kind !== "studio-project" || route.section !== "governance"
           || !sameAddress(route.boardroom, exactProjectDashboard.address)) {
@@ -4164,6 +4165,7 @@ export function App(): React.JSX.Element {
             boardroom: exactProjectDashboard.address,
             call: buildBoardroomSetExecutorCall({ boardroom: exactProjectDashboard.address, executor }),
           }),
+          actionGuard,
         );
         if (kind !== "queue") throw new Error("Executor rotation must enter the governance queue after launch.");
       }}

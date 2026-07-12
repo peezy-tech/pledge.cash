@@ -10,8 +10,26 @@ import {
   type SentinelFetch,
 } from "../src/lib/sentinel";
 import { notificationFocusFromLocation } from "../src/app/views/sentinel-settings";
+import { watchGovernanceSubscriptionDraft } from "../src/features/notifications/subscription-settings";
 
 describe("sentinel web client", () => {
+  test("preserves local alert-rule drafts when adding a governance watch", () => {
+    const existing = {
+      address: "0x2000000000000000000000000000000000000000" as const,
+      chainId: 8453,
+    };
+    const suggested = {
+      address: "0x3000000000000000000000000000000000000000" as const,
+      chainId: 31337,
+    };
+
+    expect(watchGovernanceSubscriptionDraft({ boardrooms: [existing], minSeverity: "high" }, suggested)).toEqual({
+      boardrooms: [existing, suggested],
+      minSeverity: "high",
+      mode: "explicit",
+    });
+  });
+
   test("preserves a canonical project watch focus and rejects unsafe return URLs", () => {
     const boardroom = "0x1000000000000000000000000000000000000000";
     expect(notificationFocusFromLocation(`?chain=31337&boardroom=${boardroom}&return=%2Fprojects%2F31337%2F${boardroom}%2Fgovernance`))
