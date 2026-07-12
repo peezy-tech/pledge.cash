@@ -679,6 +679,9 @@ describe("web app shell", () => {
     const observerHtml = renderGrantInspector("0x5000000000000000000000000000000000000000", false);
 
     expect(holderHtml).toContain("Grant holder");
+    expect(holderHtml).toContain("Prepare settlement");
+    expect(holderHtml).toContain("Advanced settlement controls");
+    expect(holderHtml).not.toContain("Settle available");
     expect(holderHtml).not.toContain("Settlement is only available to the current grant holder wallet.");
     expect(holderHtml).not.toContain("Issuer Controls");
     expect(observerHtml).toContain("Observer");
@@ -1031,6 +1034,7 @@ function renderGrantInspector(
       setPaymentApproval={noopSetter}
       setSettleAmount={noopSetter}
       settleAmount="100"
+      settleAvailableGrant={noop}
       settleGrant={noop}
       withdrawExpired={noop}
     />,
