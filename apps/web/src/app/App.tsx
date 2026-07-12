@@ -89,7 +89,11 @@ import {
 } from "../features/capabilities/project-capabilities";
 import type { BoardroomPanelCapabilities } from "../features/boardrooms/boardroom-panel-types";
 import { GovernanceLaunchControl, GovernanceProposalComposer, GovernanceQueue } from "../features/governance";
-import { smartGrantSettlementPlan } from "../features/grants/smart-settlement";
+import {
+  prepareSmartGrantSettlement,
+  submitPreparedGrantSettlement,
+  type GrantSettlementTicket,
+} from "../features/grants/smart-settlement";
 import { createParticipationFlowContent, participationAmmKey, type ParticipationContentKey } from "../features/participation";
 import { AppHeader } from "../features/wallet/app-header";
 import { useActionRunner } from "../hooks/use-action-runner";
@@ -724,6 +728,7 @@ export function App(): React.JSX.Element {
   const [grantRouteFailureKind, setGrantRouteFailureKind] = useState<"invalid" | "transient">();
   const [settleAmount, setSettleAmount] = useState("1");
   const [paymentApproval, setPaymentApproval] = useState("0");
+  const grantSettlementTicketRef = useRef<GrantSettlementTicket | undefined>(undefined);
   const [boardroomForm, setBoardroomForm] = useState<BoardroomForm>(() => ({
     owner: "",
     name: "Pledge Common",
@@ -2572,27 +2577,44 @@ export function App(): React.JSX.Element {
   const settleAvailableGrant = async (): Promise<void> => {
     const account = activeAccount();
     const grant = selectedGrantAddress();
-    const current = await readGrantState(publicClient, grant);
-    if (!sameAddress(current.holder, account)) throw new Error("Only the current grant holder can settle this grant.");
-    if (current.settleable <= 0n) throw new Error("No vested grant tokens are available to settle.");
-    const quote = await readGrantSettlementQuote(publicClient, grant, current.settleable);
-    if (!sameAddress(quote.holder, account)) throw new Error("The grant holder changed while settlement was being prepared.");
-    const plan = smartGrantSettlementPlan(quote);
-    setSettleAmount(formatUnits(quote.amount, quote.state.tokenDecimals));
-    setPaymentApproval(formatUnits(quote.settlementCost, quote.state.paymentTokenDecimals));
-    if (plan.kind === "approve") {
-      await submitContractTransaction(
-        "Approve exact grant payment",
-        buildErc20Approval({ token: quote.state.paymentToken, spender: grant, amount: plan.amount }),
-      );
-      return;
+    const pendingTicket = grantSettlementTicketRef.current;
+    let prepared;
+    try {
+      prepared = await prepareSmartGrantSettlement({
+        chainId: activeNetwork.chainId,
+        grant,
+        holder: account,
+        readCurrentState: () => readGrantState(publicClient, grant),
+        readQuote: (amount) => readGrantSettlementQuote(publicClient, grant, amount),
+        ...(pendingTicket ? { ticket: pendingTicket } : {}),
+      });
+    } catch (error) {
+      if (pendingTicket) grantSettlementTicketRef.current = undefined;
+      throw error;
     }
-    await submitContractTransaction("Settle all available grant tokens", {
-      address: grant,
-      abi: tokenGrantAbi,
-      functionName: "settle",
-      args: [plan.amount],
-    });
+
+    await submitPreparedGrantSettlement(
+      prepared,
+      async ({ plan, quote }) => {
+        if (plan.kind === "approve") {
+          return submitContractTransaction(
+            "Approve exact grant payment",
+            buildErc20Approval({ token: quote.state.paymentToken, spender: grant, amount: plan.amount }),
+          );
+        }
+        return submitContractTransaction("Settle prepared grant tokens", {
+          address: grant,
+          abi: tokenGrantAbi,
+          functionName: "settle",
+          args: [plan.amount],
+        });
+      },
+      ({ plan, quote, ticket }) => {
+        setSettleAmount(formatUnits(ticket.amount, quote.state.tokenDecimals));
+        setPaymentApproval(formatUnits(ticket.settlementCost, quote.state.paymentTokenDecimals));
+        grantSettlementTicketRef.current = plan.kind === "approve" ? ticket : undefined;
+      },
+    );
   };
 
   const readGrantIssuerBoardroomAccess = async (issuer: Address): Promise<GrantIssuerBoardroomAccess | undefined> => {

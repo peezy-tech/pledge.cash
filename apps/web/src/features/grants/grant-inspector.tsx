@@ -116,8 +116,8 @@ export function GrantInspector({
               </p>
               <p className="m-0 mt-1 text-xs leading-5 text-zinc-500">
                 {isZeroAddress(grantSnapshot.paymentToken)
-                  ? "This grant is free. The app will settle the full currently vested amount."
-                  : `${formatTokenAmount(grantSnapshot.settlementCost, grantSnapshot.paymentTokenMetadata)} payment required. The app checks live allowance and prepares either the exact approval or settlement.`}
+                  ? "This grant is free. Review one transaction to settle the currently vested amount."
+                  : `${formatTokenAmount(grantSnapshot.settlementCost, grantSnapshot.paymentTokenMetadata)} payment required. The first transaction may approve that exact cost; the next settles the same prepared amount even if more tokens vest.`}
               </p>
             </div>
             <ActionButton
@@ -127,41 +127,49 @@ export function GrantInspector({
               onClick={() => void runAction("settle-available-grant", settleAvailableGrant)}
             >
               <Send className="h-4 w-4" />
-              Settle available
+              Prepare settlement
             </ActionButton>
           </div>
         ) : null}
-        <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2">
-          <Field label="Settle amount">
-            <Input value={settleAmount} inputMode="decimal" onChange={(event) => setSettleAmount(event.target.value)} />
-          </Field>
-          <Field label="Payment approval">
-            <Input value={paymentApproval} inputMode="decimal" onChange={(event) => setPaymentApproval(event.target.value)} />
-          </Field>
-        </div>
-        <ActionRow>
-          <ActionButton
-            actionId="approve-payment"
-            disabled={!eligibility.paymentApprovalAvailable}
-            pendingAction={pendingAction}
-            title={capabilityReason(actionCapability)}
-            variant="secondary"
-            onClick={() => void runAction("approve-payment", approvePayment)}
-          >
-            <CheckCircle2 className="h-4 w-4" />
-            Approve Payment
-          </ActionButton>
-          <ActionButton
-            actionId="settle-grant"
-            disabled={!eligibility.holderActionsAvailable}
-            pendingAction={pendingAction}
-            title={capabilityReason(actionCapability)}
-            onClick={() => void runAction("settle-grant", settleGrant)}
-          >
-            <Send className="h-4 w-4" />
-            Settle
-          </ActionButton>
-        </ActionRow>
+        <details className="border-t border-zinc-800">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-zinc-300 hover:text-zinc-100">
+            Advanced settlement controls
+          </summary>
+          <p className="m-0 border-t border-zinc-800 px-4 pt-4 text-xs leading-5 text-zinc-500">
+            Enter exact token units only when you need to override the prepared settlement flow.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2">
+            <Field label="Settle amount">
+              <Input value={settleAmount} inputMode="decimal" onChange={(event) => setSettleAmount(event.target.value)} />
+            </Field>
+            <Field label="Payment approval">
+              <Input value={paymentApproval} inputMode="decimal" onChange={(event) => setPaymentApproval(event.target.value)} />
+            </Field>
+          </div>
+          <ActionRow>
+            <ActionButton
+              actionId="approve-payment"
+              disabled={!eligibility.paymentApprovalAvailable}
+              pendingAction={pendingAction}
+              title={capabilityReason(actionCapability)}
+              variant="secondary"
+              onClick={() => void runAction("approve-payment", approvePayment)}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              Approve Payment
+            </ActionButton>
+            <ActionButton
+              actionId="settle-grant"
+              disabled={!eligibility.holderActionsAvailable}
+              pendingAction={pendingAction}
+              title={capabilityReason(actionCapability)}
+              onClick={() => void runAction("settle-grant", settleGrant)}
+            >
+              <Send className="h-4 w-4" />
+              Settle
+            </ActionButton>
+          </ActionRow>
+        </details>
         <CapabilityNotice capability={actionCapability} />
         {eligibility.showSettlementRestriction ? (
           <p className="m-0 border-t border-zinc-800 p-4 text-sm text-zinc-500">
