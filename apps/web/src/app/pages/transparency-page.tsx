@@ -1,8 +1,9 @@
 import type { Address } from "@pledge.cash/sdk";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Download } from "lucide-react";
 import type { ReactNode } from "react";
 import { AddressLink } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
 import {
   formatNativeBalance,
   formatTokenBalance,
@@ -12,6 +13,7 @@ import {
   type ProductTreasuryAsset,
 } from "../../lib/product-boardroom";
 import { formatTokenAmount } from "../../lib/token-amounts";
+import { createProjectEvidenceBundle, downloadProjectEvidenceBundle } from "../../lib/project-evidence";
 import type {
   BoardroomDistributionSnapshot,
   BoardroomGrantSnapshot,
@@ -30,6 +32,7 @@ import {
 
 export type TransparencyPageProps = {
   activityContent?: ReactNode;
+  chainId: number;
   dashboard?: ProductBoardroomDashboardState | undefined;
   error?: string | undefined;
   grantHref?: ((grant: Address) => string) | undefined;
@@ -40,6 +43,7 @@ export type TransparencyPageProps = {
 
 export function TransparencyPage({
   activityContent,
+  chainId,
   dashboard,
   error,
   grantHref,
@@ -74,6 +78,16 @@ export function TransparencyPage({
         <SectionHeading
           title="Treasury and supply"
           description="Balances are held by the Boardroom. Token supply is shown separately from treasury inventory."
+          action={(
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => downloadProjectEvidenceBundle(createProjectEvidenceBundle(dashboard, chainId))}
+            >
+              <Download className="h-4 w-4" />
+              Export evidence
+            </Button>
+          )}
         />
         {error ? <div className="mt-4"><PageNotice title="Some evidence could not be read" tone="danger">{error}</PageNotice></div> : null}
         <KeyValueList
