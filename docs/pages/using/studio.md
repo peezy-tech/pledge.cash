@@ -51,6 +51,8 @@ If the app says `No project AMM pool is available`, create or migrate project li
 
 ## Governance
 
+After launch, the executor can prepare an executor-rotation proposal without pasting calldata. Enter the proposed executor, review the exact decoded `setExecutor(address)` self-call and its earliest execution time, then choose `Review proposal`. The wallet transaction only queues the decision; authority changes after the holder review window and a separate permissionless execution.
+
 Use `Governance` to inspect the decision system, holder protections, and verified queue. Existing launched Boardrooms can expose queue, veto, and execution actions when the wallet and state qualify.
 
 For current pre-launch Boardrooms, the app shows `Secure governance launch is unavailable for this Boardroom version`. The deployed `launch(uint256)` call does not bind the expected executor, so there is no safe in-app launch action. Leave owner governance unchanged; do not bypass the block.

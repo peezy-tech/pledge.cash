@@ -21,6 +21,7 @@ import {
   buildBoardroomOpenRedemptionsTransaction,
   buildBoardroomRedeemTransaction,
   buildBoardroomRegisterRedeemableAssetTransaction,
+  buildBoardroomSetExecutorCall,
   buildBoardroomShareGrantIssuanceBatch,
   buildBoardroomStartWindDownTransaction,
   buildDirectGrantCreationTransaction,
@@ -86,7 +87,7 @@ import {
   type ProjectCapabilityMap,
 } from "../features/capabilities/project-capabilities";
 import type { BoardroomPanelCapabilities } from "../features/boardrooms/boardroom-panel-types";
-import { GovernanceLaunchControl, GovernanceQueue } from "../features/governance";
+import { GovernanceLaunchControl, GovernanceProposalComposer, GovernanceQueue } from "../features/governance";
 import { smartGrantSettlementPlan } from "../features/grants/smart-settlement";
 import { createParticipationFlowContent, participationAmmKey, type ParticipationContentKey } from "../features/participation";
 import { AppHeader } from "../features/wallet/app-header";
@@ -4029,6 +4030,33 @@ export function App(): React.JSX.Element {
       />
     )
   ) : undefined;
+  const governanceProposalComposer = exactProjectDashboard?.snapshot.launched ? (
+    <GovernanceProposalComposer
+      boardroom={exactProjectDashboard.address}
+      capability={projectCapabilities["governance.queue"]}
+      currentExecutor={exactProjectDashboard.snapshot.executor}
+      governanceDelay={exactProjectDashboard.snapshot.governanceDelay}
+      gracePeriod={exactProjectDashboard.snapshot.governanceConfig.actionGracePeriod}
+      pendingAction={pendingAction}
+      runAction={runAction}
+      queueExecutorChange={async (executor) => {
+        const route = activeAppRouteRef.current;
+        if (route.kind !== "studio-project" || route.section !== "governance"
+          || !sameAddress(route.boardroom, exactProjectDashboard.address)) {
+          throw new Error("The selected Studio project changed. Reopen Governance before queueing this proposal.");
+        }
+        const kind = await submitBoardroomExecution(
+          "executor rotation",
+          exactProjectDashboard.snapshot,
+          buildBoardroomExecuteTransaction({
+            boardroom: exactProjectDashboard.address,
+            call: buildBoardroomSetExecutorCall({ boardroom: exactProjectDashboard.address, executor }),
+          }),
+        );
+        if (kind !== "queue") throw new Error("Executor rotation must enter the governance queue after launch.");
+      }}
+    />
+  ) : undefined;
   const governanceLaunchControls = exactProjectDashboard && !exactProjectDashboard.snapshot.launched ? (
     <GovernanceLaunchControl
       boardroom={exactProjectDashboard.address}
@@ -4345,6 +4373,7 @@ export function App(): React.JSX.Element {
             holderPower={verifiedBoardroomHolderPower}
             loading={productBoardroomLoading || productGovernanceLoading}
             primaryAction={retryGovernanceAction}
+            proposalContent={governanceProposalComposer}
             queueContent={governanceQueueControls ?? governanceLaunchControls}
             warning={verifiedProductGovernanceWarning}
           />

@@ -15,6 +15,7 @@ export type GovernancePageProps = {
   holderPower?: BoardroomHolderPower | undefined;
   loading: boolean;
   primaryAction?: ReactNode;
+  proposalContent?: ReactNode;
   queueContent?: ReactNode;
   warning?: string | undefined;
 };
@@ -26,6 +27,7 @@ export function GovernancePage({
   holderPower,
   loading,
   primaryAction,
+  proposalContent,
   queueContent,
   warning,
 }: GovernancePageProps): React.JSX.Element {
@@ -71,6 +73,16 @@ export function GovernancePage({
           ]}
         />
       </RuledSection>
+
+      {proposalContent ? (
+        <RuledSection>
+          <SectionHeading
+            title="Prepare a decision"
+            description="Build a supported governance call, inspect its exact decode, then send it to the holder review queue."
+          />
+          <div className="mt-4">{proposalContent}</div>
+        </RuledSection>
+      ) : null}
 
       <RuledSection>
         <SectionHeading title="Holder protections" description="Thresholds use governance-eligible supply, not the full token supply." />
