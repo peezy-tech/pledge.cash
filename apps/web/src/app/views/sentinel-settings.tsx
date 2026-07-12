@@ -164,7 +164,11 @@ export function notificationFocusFromSearch(search: string): {
 }
 
 function safeReturnHref(value: string | null): string | undefined {
-  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return undefined;
+  if (!value
+    || !value.startsWith("/")
+    || value.startsWith("//")
+    || value.includes("\\")
+    || /[\u0000-\u001f\u007f]/.test(value)) return undefined;
   return value;
 }
 

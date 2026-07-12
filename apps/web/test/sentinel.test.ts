@@ -40,6 +40,10 @@ describe("sentinel web client", () => {
       });
     expect(notificationFocusFromLocation(`?chain=31337&boardroom=${boardroom}&return=%2F%2Fevil.example`))
       .toEqual({ boardroom, chainId: 31337 });
+    for (const control of ["%09", "%0a", "%0d"]) {
+      expect(notificationFocusFromLocation(`?chain=31337&boardroom=${boardroom}&return=%2F${control}%2Fevil.example`))
+        .toEqual({ boardroom, chainId: 31337 });
+    }
   });
   test("reads an optional VITE_SENTINEL_API_URL", () => {
     expect(getSentinelBaseUrl({})).toBeUndefined();
