@@ -37,6 +37,7 @@ const shareToken = "0x3000000000000000000000000000000000000000" as Address;
 const paymentToken = "0x4000000000000000000000000000000000000000" as Address;
 const sale = "0x5000000000000000000000000000000000000000" as Address;
 const grant = "0x6000000000000000000000000000000000000000" as Address;
+const viewer = "0xa000000000000000000000000000000000000000" as Address;
 const zero = "0x0000000000000000000000000000000000000000" as Address;
 
 const catalogEntry: ProductBoardroomCatalogEntry = {
@@ -169,6 +170,7 @@ const walletPosition: ProjectWalletPosition = {
   directBalance: 3_000_000_000_000_000_000n,
   holderPower,
   nextGrant: grant,
+  nextGrantSettleableTokens: 500_000_000_000_000_000n,
   settleableGrantCount: 1,
   settleableProjectTokens: 500_000_000_000_000_000n,
   shareToken,
@@ -176,7 +178,7 @@ const walletPosition: ProjectWalletPosition = {
 
 function overviewActionHref(action: ProjectPositionAction): string {
   return action.kind === "grant"
-    ? `/grants/31337/${action.grant}`
+    ? `/grants/31337/${action.grant}?project=${boardroom}`
     : `/projects/31337/atlas/${action.kind}`;
 }
 
@@ -341,8 +343,23 @@ describe("read-first product pages", () => {
     expect(overview).toContain("Holder governance is live");
     expect(overview).toContain("lifetime activity is reconstructed from their onchain event history");
     expect(overview).toContain("Treasury at a glance");
-    expect(overview).toContain(`href="/grants/31337/${grant}"`);
+    expect(overview).toContain(`href="/grants/31337/${grant}?project=${boardroom}"`);
     expect(overview).not.toContain('href="/projects/31337/atlas/participate"');
+
+    const connectedObserver = renderToString(
+      <ProjectLayout
+        account={viewer}
+        activeSection="overview"
+        chainName="Local Anvil"
+        dashboard={dashboard}
+        loading={false}
+        onNavigateSection={() => undefined}
+      >
+        Project
+      </ProjectLayout>,
+    );
+    expect(connectedObserver).toContain("Wallet connected");
+    expect(connectedObserver).not.toContain("Holder view");
 
     const disconnected = renderToString(
       <ProjectOverviewPage
@@ -354,6 +371,38 @@ describe("read-first product pages", () => {
     );
     expect(disconnected).toContain("Public project state remains available without a wallet");
     expect(disconnected).toContain('href="/projects/31337/atlas/participate"');
+
+    const refreshing = renderToString(
+      <ProjectOverviewPage
+        account={owner}
+        actionHref={overviewActionHref}
+        dashboard={dashboard}
+        loading={false}
+        position={walletPosition}
+        positionLoading
+      />,
+    );
+    expect(refreshing).toContain("Refreshing wallet position");
+    expect(refreshing).toContain("Verifying the latest project-token balance");
+    expect(refreshing).not.toContain("View participation");
+    expect(refreshing).not.toContain("Open transparency");
+
+    const multipleGrants = renderToString(
+      <ProjectOverviewPage
+        account={owner}
+        actionHref={overviewActionHref}
+        dashboard={dashboard}
+        loading={false}
+        position={{
+          ...walletPosition,
+          settleableGrantCount: 2,
+          settleableProjectTokens: 1_200_000_000_000_000_000n,
+        }}
+      />,
+    );
+    expect(multipleGrants).toContain("first of 2 project-token grants");
+    expect(multipleGrants).toContain("0.5 ATLAS can settle from the grant this recommendation opens");
+    expect(multipleGrants).not.toContain("1.2 ATLAS");
 
     const partialHistory = renderToString(
       <ProjectLayout
@@ -659,7 +708,22 @@ describe("read-first product pages", () => {
     );
 
     expect(html).toContain('href="/pledge-cash/portfolio?chain=31337"');
+    expect(html).toContain("Return to Portfolio");
     expect(html).not.toContain(">Portfolio</button>");
+
+    const projectReturn = renderToString(
+      <GrantDetailPage
+        account={undefined}
+        backHref={`/pledge-cash/projects/31337/${boardroom}/overview`}
+        backLabel="Return to Project"
+        grant={grant}
+        onBack={() => undefined}
+      >
+        Grant settlement
+      </GrantDetailPage>,
+    );
+    expect(projectReturn).toContain(`href="/pledge-cash/projects/31337/${boardroom}/overview"`);
+    expect(projectReturn).toContain("Return to Project");
   });
 
   test("renders one honest terminal grant-verification state with transient-only retry", () => {

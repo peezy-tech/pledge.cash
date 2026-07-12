@@ -210,6 +210,7 @@ export function ProjectOverviewPage({
     connected: account !== undefined,
     hasActiveParticipation: hasParticipation,
     launched: snapshot.launched,
+    loading: positionLoading,
     position,
     status: snapshot.status,
   });
@@ -250,7 +251,11 @@ export function ProjectOverviewPage({
               {positionActionDescription(nextAction, account, position, snapshot.shareTokenMetadata)}
             </p>
           </div>
-          <PositionAction action={nextAction} href={actionHref?.(nextAction)} onOpen={onOpenAction} />
+          <PositionAction
+            action={nextAction}
+            href={nextAction.kind === "loading" ? undefined : actionHref?.(nextAction)}
+            onOpen={onOpenAction}
+          />
         </div>
       </RuledSection>
 
@@ -354,7 +359,7 @@ function projectRole(
   if (dashboard.snapshot.grantSummaries.some((grant) => sameAddress(account, grant.state?.holder))) {
     return { label: "Grant holder", tone: "default" };
   }
-  return { label: "Holder view", tone: "muted" };
+  return { label: "Wallet connected", tone: "muted" };
 }
 
 function commitmentSummary(dashboard: ProductBoardroomDashboardState | undefined): {
@@ -436,11 +441,13 @@ function positionFacts(
       detail: "Balance held directly by this wallet on the canonical project token.",
     },
     {
-      label: "Settleable grants",
-      value: value(position?.settleableProjectTokens),
+      label: "Next settleable grant",
+      value: value(position?.nextGrantSettleableTokens),
       detail: position?.settleableGrantCount === undefined
         ? "Unknown until every active project grant is read."
-        : `${position.settleableGrantCount.toString()} project-token grant${position.settleableGrantCount === 1 ? "" : "s"} can settle now. Other grant assets are never added to this amount.`,
+        : position.settleableGrantCount > 1
+          ? `Showing the first of ${position.settleableGrantCount.toString()} project-token grants that can settle now; the recommendation opens this exact grant.`
+          : `${position.settleableGrantCount.toString()} project-token grant${position.settleableGrantCount === 1 ? "" : "s"} can settle now. Other grant assets are never added to this amount.`,
     },
     {
       label: "Governance power",
@@ -470,6 +477,7 @@ function PositionAction({
   href?: string | undefined;
   onOpen?: ((action: ProjectPositionAction) => void) | undefined;
 }): React.JSX.Element | null {
+  if (action.kind === "loading") return null;
   if (!onOpen && !href) return null;
   const label = positionActionButtonLabel(action);
   return href ? (
@@ -493,6 +501,7 @@ function PositionAction({
 }
 
 function positionActionLabel(action: ProjectPositionAction): string {
+  if (action.kind === "loading") return "Refreshing wallet position";
   if (action.kind === "grant") return "Project tokens are available to settle";
   if (action.kind === "governance") return "This wallet has verified holder power";
   if (action.kind === "participate") return "An active participation path is available";
@@ -505,8 +514,11 @@ function positionActionDescription(
   position: ProjectWalletPosition | undefined,
   metadata: ProductBoardroomDashboardState["snapshot"]["shareTokenMetadata"],
 ): string {
+  if (action.kind === "loading") {
+    return "Verifying the latest project-token balance, grant availability, and holder power before recommending a next step.";
+  }
   if (action.kind === "grant") {
-    return `${formatTokenAmount(position?.settleableProjectTokens, metadata)} can settle from this project’s grant. Review its schedule and payment before signing.`;
+    return `${formatTokenAmount(position?.nextGrantSettleableTokens, metadata)} can settle from the grant this recommendation opens. Review its schedule and payment before signing.`;
   }
   if (action.kind === "governance") {
     return "Inspect the verified queue, review thresholds, and the actions this wallet can take before signing anything.";
@@ -520,6 +532,7 @@ function positionActionDescription(
 }
 
 function positionActionButtonLabel(action: ProjectPositionAction): string {
+  if (action.kind === "loading") return "Refreshing";
   if (action.kind === "grant") return "Review grant";
   if (action.kind === "governance") return "Review governance";
   if (action.kind === "participate") return "View participation";
