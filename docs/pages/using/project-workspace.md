@@ -38,6 +38,8 @@ If the page says `No participation route is available`, use `Transparency` to in
 
 Connecting a holder wallet lets the app compare its current and snapshot power. `Some queued decisions were not shown` or `Governance data is incomplete` means retry before concluding the queue is empty.
 
+When Sentinel is configured, `Watch governance` carries the exact chain and Boardroom into Alerts. After wallet sign-in, the project can be added to the explicit watch list in one action, with a return link back to this Governance page. If the current alert mode follows wallet holdings, the handoff clearly warns before switching to the explicit project list.
+
 For a pre-launch Boardroom, the app currently reports `Secure governance launch is unavailable for this Boardroom version`. That is a safety block, not a missing button.
 
 ## Transparency

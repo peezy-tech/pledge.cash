@@ -141,6 +141,21 @@ export function studioRouteHref(
   return appRouteHref({ kind: "studio-project", chainId, boardroom, section }, baseUrl);
 }
 
+export function governanceWatchHref(
+  chainId: number,
+  boardroom: Address,
+  returnHref: string,
+  baseUrl = import.meta.env.BASE_URL || "/",
+): string {
+  const href = appRouteHref({ kind: "alerts" }, baseUrl);
+  const query = new URLSearchParams({
+    boardroom: boardroom.toLowerCase(),
+    chain: chainId.toString(),
+    return: returnHref,
+  });
+  return `${href}?${query.toString()}`;
+}
+
 export function primaryDestination(route: AppRoute): PrimaryDestination | undefined {
   switch (route.kind) {
     case "explore":

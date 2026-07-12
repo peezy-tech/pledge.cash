@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Address } from "@pledge.cash/sdk";
 import {
   appRouteHref,
+  governanceWatchHref,
   primaryDestination,
   projectRouteHref,
   routeFromLocation,
@@ -92,5 +93,15 @@ describe("canonical application routing", () => {
     expect(primaryDestination({ kind: "grant", chainId: 31337, grant: boardroom })).toBe("portfolio");
     expect(primaryDestination({ kind: "studio-project", chainId: 31337, boardroom, section: "setup" })).toBe("studio");
     expect(primaryDestination({ kind: "tools" })).toBeUndefined();
+  });
+
+  test("builds a chain-bound governance watch handoff with a safe return route", () => {
+    const boardroom = "0x1000000000000000000000000000000000000000";
+    const href = governanceWatchHref(31337, boardroom, `/projects/31337/${boardroom}/governance`, "/pledge-cash/");
+    const url = new URL(href, "https://example.test");
+    expect(url.pathname).toBe("/pledge-cash/settings/alerts");
+    expect(url.searchParams.get("chain")).toBe("31337");
+    expect(url.searchParams.get("boardroom")).toBe(boardroom);
+    expect(url.searchParams.get("return")).toBe(`/projects/31337/${boardroom}/governance`);
   });
 });

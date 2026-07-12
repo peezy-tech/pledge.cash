@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { getAddress, isAddress } from "viem";
 import { ActionRow, AddressLink, Facts, Panel } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
-import { Button } from "../../components/ui/button";
+import { Button, ButtonLink } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import type { SentinelClient } from "../../lib/sentinel";
@@ -16,6 +16,8 @@ import { errorMessage } from "./hooks";
 type SubscriptionSettingsProps = {
   client: SentinelClient;
   onChanged: () => Promise<void>;
+  returnHref?: string | undefined;
+  suggestedBoardroom?: BoardroomRef | undefined;
   subscription: SubscriptionDto;
 };
 
@@ -24,6 +26,8 @@ const severities: SeverityDto[] = ["low", "medium", "high"];
 export function SubscriptionSettings({
   client,
   onChanged,
+  returnHref,
+  suggestedBoardroom,
   subscription,
 }: SubscriptionSettingsProps): React.JSX.Element {
   const [mode, setMode] = useState<SubscriptionModeDto>(subscription.mode);
@@ -33,6 +37,9 @@ export function SubscriptionSettings({
   const [draftChainId, setDraftChainId] = useState("");
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
+  const suggestedWatched = Boolean(suggestedBoardroom
+    && subscription.mode === "explicit"
+    && subscription.boardrooms.some((boardroom) => sameBoardroom(boardroom, suggestedBoardroom)));
   const dirty = useMemo(
     () =>
       mode !== subscription.mode
@@ -84,6 +91,27 @@ export function SubscriptionSettings({
     }
   };
 
+  const watchSuggestedBoardroom = async (): Promise<void> => {
+    if (!suggestedBoardroom || suggestedWatched) return;
+    setPending(true);
+    setError(undefined);
+    try {
+      const nextBoardrooms = subscription.boardrooms.some((boardroom) => sameBoardroom(boardroom, suggestedBoardroom))
+        ? subscription.boardrooms
+        : [...subscription.boardrooms, suggestedBoardroom];
+      await client.putSubscription({
+        boardrooms: nextBoardrooms,
+        minSeverity: subscription.minSeverity,
+        mode: "explicit",
+      });
+      await onChanged();
+    } catch (error) {
+      setError(errorMessage(error));
+    } finally {
+      setPending(false);
+    }
+  };
+
   const reset = (): void => {
     setMode(subscription.mode);
     setMinSeverity(subscription.minSeverity);
@@ -102,6 +130,33 @@ export function SubscriptionSettings({
         </Button>
       }
     >
+      {suggestedBoardroom ? (
+        <div className="grid gap-3 border-t border-zinc-800 bg-zinc-900/35 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="m-0 text-sm font-semibold text-zinc-100">
+                {suggestedWatched ? "Watching this project" : "Watch this project"}
+              </p>
+              <Badge variant={suggestedWatched ? "default" : "muted"}>Chain {suggestedBoardroom.chainId.toString()}</Badge>
+            </div>
+            <div className="mt-1 text-xs"><AddressLink address={suggestedBoardroom.address as Address} /></div>
+            {!suggestedWatched && subscription.mode === "holdings" ? (
+              <p className="m-0 mt-2 text-xs leading-5 text-amber-200">
+                Watching switches alert rules from wallet holdings to the explicit project list shown below.
+              </p>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap gap-2 sm:justify-end">
+            {!suggestedWatched ? (
+              <Button disabled={pending} onClick={() => void watchSuggestedBoardroom()}>
+                {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <BellRing className="h-4 w-4" />}
+                Watch governance
+              </Button>
+            ) : null}
+            {returnHref ? <ButtonLink href={returnHref} variant="secondary">Return to project</ButtonLink> : null}
+          </div>
+        </div>
+      ) : null}
       <Facts
         columns="three"
         items={[
@@ -204,6 +259,10 @@ export function SubscriptionSettings({
       </ActionRow>
     </Panel>
   );
+}
+
+function sameBoardroom(first: BoardroomRef, second: BoardroomRef): boolean {
+  return first.chainId === second.chainId && first.address.toLowerCase() === second.address.toLowerCase();
 }
 
 function ModeButton({
