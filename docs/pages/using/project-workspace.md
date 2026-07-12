@@ -25,6 +25,8 @@ Use `Refresh` when state may have changed. `Open Studio` provides an operator ha
 
 Select the exact route before entering an amount. A closed, sold-out, fully claimed, or migrated route stays visible as history but does not expose an actionable workflow. Approval, quote, price protection, deadline, recipient, balance, allowance, and wallet-specific limits appear only where the route needs them.
 
+For airdrops, a project may publish a versioned claim ticket as JSON or through the `claim` URL parameter. `Verify and load` checks the ticket's chain, wallet, airdrop address, claim leaf, proof, and the live onchain Merkle root before filling the claim form. Manual index, amount, proof, and grant-term entry remains available when no ticket was published.
+
 If the page says `No participation route is available`, use `Transparency` to inspect the project; do not send assets directly to an address in an attempt to participate.
 
 ## Governance

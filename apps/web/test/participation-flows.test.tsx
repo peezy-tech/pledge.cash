@@ -152,6 +152,7 @@ const dashboard: ProductBoardroomDashboardState = {
 const publicClient = { readContract: async () => 0n } as unknown as PublicClient;
 const context = {
   account: owner,
+  chainId: 31337,
   dashboard,
   pendingAction: undefined,
   publicClient,
