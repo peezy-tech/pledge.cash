@@ -10,7 +10,10 @@ import {
   type SentinelFetch,
 } from "../src/lib/sentinel";
 import { notificationFocusFromLocation } from "../src/app/views/sentinel-settings";
-import { watchGovernanceSubscriptionDraft } from "../src/features/notifications/subscription-settings";
+import {
+  governanceWatchSuggestionState,
+  watchGovernanceSubscriptionDraft,
+} from "../src/features/notifications/subscription-settings";
 
 describe("sentinel web client", () => {
   test("preserves local alert-rule drafts when adding a governance watch", () => {
@@ -24,6 +27,14 @@ describe("sentinel web client", () => {
     };
 
     expect(watchGovernanceSubscriptionDraft({ boardrooms: [existing], minSeverity: "high" }, suggested)).toEqual({
+      boardrooms: [existing, suggested],
+      minSeverity: "high",
+      mode: "explicit",
+    });
+    const persisted = { boardrooms: [], minSeverity: "medium" as const, mode: "holdings" as const };
+    const pendingDraft = { boardrooms: [existing, suggested], minSeverity: "high" as const, mode: "explicit" as const };
+    expect(governanceWatchSuggestionState(persisted, pendingDraft, suggested)).toBe("pending");
+    expect(watchGovernanceSubscriptionDraft(pendingDraft, suggested)).toEqual({
       boardrooms: [existing, suggested],
       minSeverity: "high",
       mode: "explicit",

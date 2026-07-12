@@ -37,9 +37,13 @@ export function SubscriptionSettings({
   const [draftChainId, setDraftChainId] = useState("");
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
-  const suggestedWatched = Boolean(suggestedBoardroom
-    && mode === "explicit"
-    && boardrooms.some((boardroom) => sameBoardroom(boardroom, suggestedBoardroom)));
+  const suggestedWatchState = suggestedBoardroom
+    ? governanceWatchSuggestionState(
+        subscription,
+        { boardrooms, minSeverity, mode },
+        suggestedBoardroom,
+      )
+    : undefined;
   const dirty = useMemo(
     () =>
       mode !== subscription.mode
@@ -92,7 +96,7 @@ export function SubscriptionSettings({
   };
 
   const watchSuggestedBoardroom = async (): Promise<void> => {
-    if (!suggestedBoardroom || suggestedWatched) return;
+    if (!suggestedBoardroom || suggestedWatchState === "active") return;
     setPending(true);
     setError(undefined);
     try {
@@ -128,22 +132,33 @@ export function SubscriptionSettings({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <p className="m-0 text-sm font-semibold text-zinc-100">
-                {suggestedWatched ? "Watching this project" : "Watch this project"}
+                {suggestedWatchState === "active"
+                  ? "Watching this project"
+                  : suggestedWatchState === "pending"
+                    ? "Governance watch pending save"
+                    : "Watch this project"}
               </p>
-              <Badge variant={suggestedWatched ? "default" : "muted"}>Chain {suggestedBoardroom.chainId.toString()}</Badge>
+              <Badge variant={suggestedWatchState === "active" ? "default" : "muted"}>
+                Chain {suggestedBoardroom.chainId.toString()}
+              </Badge>
             </div>
             <div className="mt-1 text-xs"><AddressLink address={suggestedBoardroom.address as Address} /></div>
-            {!suggestedWatched && mode === "holdings" ? (
+            {suggestedWatchState === "pending" ? (
+              <p className="m-0 mt-2 text-xs leading-5 text-amber-200">
+                This project is only in the unsaved draft. Save the rules or use Watch governance before leaving.
+              </p>
+            ) : null}
+            {suggestedWatchState !== "active" && mode === "holdings" ? (
               <p className="m-0 mt-2 text-xs leading-5 text-amber-200">
                 Watching switches alert rules from wallet holdings to the explicit project list shown below.
               </p>
             ) : null}
           </div>
           <div className="flex flex-wrap gap-2 sm:justify-end">
-            {!suggestedWatched ? (
+            {suggestedWatchState !== "active" ? (
               <Button disabled={pending} onClick={() => void watchSuggestedBoardroom()}>
                 {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <BellRing className="h-4 w-4" />}
-                Watch governance
+                {suggestedWatchState === "pending" ? "Save governance watch" : "Watch governance"}
               </Button>
             ) : null}
             {returnHref ? <ButtonLink href={returnHref} variant="secondary">Return to project</ButtonLink> : null}
@@ -208,41 +223,48 @@ export function SubscriptionSettings({
         {boardrooms.length === 0 ? (
           <li className="bg-zinc-950 p-4 text-sm text-zinc-500">No specific Boardrooms</li>
         ) : (
-          boardrooms.map((boardroom) => (
-            <li
-              className="grid min-w-0 gap-3 bg-zinc-950 p-4 md:grid-cols-[minmax(0,1fr)_minmax(96px,0.2fr)_auto] md:items-center"
-              key={`${boardroom.chainId.toString()}-${boardroom.address}`}
-            >
-              <div className="min-w-0">
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <BellRing className="h-4 w-4 text-zinc-500" />
-                  <AddressLink address={boardroom.address as Address} />
-                  <Badge variant={mode === "explicit" ? "default" : "muted"}>
-                    {mode === "explicit" ? "Active" : "Saved"}
-                  </Badge>
+          boardrooms.map((boardroom) => {
+            const persistedActive = subscription.mode === "explicit"
+              && subscription.boardrooms.some((saved) => sameBoardroom(saved, boardroom));
+            const status = persistedActive
+              ? mode === "explicit" ? "Active" : "Active until save"
+              : mode === "explicit" ? "Pending" : "Saved";
+            return (
+              <li
+                className="grid min-w-0 gap-3 bg-zinc-950 p-4 md:grid-cols-[minmax(0,1fr)_minmax(96px,0.2fr)_auto] md:items-center"
+                key={`${boardroom.chainId.toString()}-${boardroom.address}`}
+              >
+                <div className="min-w-0">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <BellRing className="h-4 w-4 text-zinc-500" />
+                    <AddressLink address={boardroom.address as Address} />
+                    <Badge variant={persistedActive && mode === "explicit" ? "default" : "muted"}>
+                      {status}
+                    </Badge>
+                  </div>
                 </div>
-              </div>
-              <div className="text-sm text-zinc-400">Chain {boardroom.chainId.toString()}</div>
-              <div className="flex md:justify-end">
-                <Button
-                  disabled={pending}
-                  size="sm"
-                  variant="danger"
-                  onClick={() =>
-                    setBoardrooms((current) =>
-                      current.filter(
-                        (item) =>
-                          item.chainId !== boardroom.chainId || item.address.toLowerCase() !== boardroom.address.toLowerCase(),
-                      ),
-                    )
-                  }
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Remove
-                </Button>
-              </div>
-            </li>
-          ))
+                <div className="text-sm text-zinc-400">Chain {boardroom.chainId.toString()}</div>
+                <div className="flex md:justify-end">
+                  <Button
+                    disabled={pending}
+                    size="sm"
+                    variant="danger"
+                    onClick={() =>
+                      setBoardrooms((current) =>
+                        current.filter(
+                          (item) =>
+                            item.chainId !== boardroom.chainId || item.address.toLowerCase() !== boardroom.address.toLowerCase(),
+                        ),
+                      )
+                    }
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Remove
+                  </Button>
+                </div>
+              </li>
+            );
+          })
         )}
       </ol>
       <ActionRow>
@@ -265,6 +287,19 @@ export function watchGovernanceSubscriptionDraft(
     minSeverity: draft.minSeverity,
     mode: "explicit",
   };
+}
+
+export function governanceWatchSuggestionState(
+  subscription: SubscriptionDto,
+  draft: Pick<SubscriptionDto, "boardrooms" | "minSeverity" | "mode">,
+  suggestedBoardroom: BoardroomRef,
+): "active" | "available" | "pending" {
+  const persisted = subscription.mode === "explicit"
+    && subscription.boardrooms.some((boardroom) => sameBoardroom(boardroom, suggestedBoardroom));
+  if (persisted) return "active";
+  const drafted = draft.mode === "explicit"
+    && draft.boardrooms.some((boardroom) => sameBoardroom(boardroom, suggestedBoardroom));
+  return drafted ? "pending" : "available";
 }
 
 function sameBoardroom(first: BoardroomRef, second: BoardroomRef): boolean {
