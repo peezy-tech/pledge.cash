@@ -253,9 +253,11 @@ import type {
 
 import {
   appRouteHref,
+  grantReturnRoute,
   governanceWatchHref,
   initialRoute,
   primaryDestination,
+  projectGrantRoute,
   projectRouteHref,
   routeFromLocation,
   type AppRoute,
@@ -786,6 +788,7 @@ export function App(): React.JSX.Element {
   const [projectPositionErrorKey, setProjectPositionErrorKey] = useState<string>();
   const [projectPositionLoading, setProjectPositionLoading] = useState(false);
   const [projectPositionLoadingKey, setProjectPositionLoadingKey] = useState<string>();
+  const [projectPositionRefreshGeneration, setProjectPositionRefreshGeneration] = useState(0);
   const [boardroomHolderPower, setBoardroomHolderPower] = useState<BoardroomHolderPower>();
   const [boardroomHolderPowerVerifiedKey, setBoardroomHolderPowerVerifiedKey] = useState<string>();
   const [queuedBoardroomActions, setQueuedBoardroomActions] = useState<QueuedBoardroomAction[]>([]);
@@ -1022,6 +1025,7 @@ export function App(): React.JSX.Element {
         chainId: activeNetwork.chainId,
         dashboard: exactProjectDashboard,
         deploymentIdentity: runtimeDeploymentIdentity,
+        refreshGeneration: projectPositionRefreshGeneration,
       })
     : undefined;
   projectPositionReadCoordinatorRef.current.sync(activeProjectPositionKey);
@@ -1442,6 +1446,7 @@ export function App(): React.JSX.Element {
     setProjectPositionErrorKey(undefined);
     setProjectPositionLoading(false);
     setProjectPositionLoadingKey(undefined);
+    setProjectPositionRefreshGeneration(0);
     setBoardroomHolderPower(undefined);
     setBoardroomHolderPowerVerifiedKey(undefined);
     setQueuedBoardroomActions([]);
@@ -1618,6 +1623,11 @@ export function App(): React.JSX.Element {
       if (requestIsCurrent()) setProductCatalogLoadingMore(false);
     }
   }, [activeNetwork.chainId, activeNetwork.name, deployment, isCurrentNetworkRequest, productCatalogLoadingMore, productCatalogNextCursor, productCatalogTotalCount, publicClient, pushLog, runtimeDeploymentIdentity]);
+
+  const refreshProjectOverview = useCallback((boardroom: Address): void => {
+    setProjectPositionRefreshGeneration((generation) => generation + 1);
+    void loadProductBoardroom(boardroom);
+  }, [loadProductBoardroom]);
 
   const loadProductGovernance = useCallback(async (address: Address): Promise<ScopedRefreshLoadResult> => {
     const key = `${activeNetwork.chainId.toString()}:${runtimeDeploymentIdentity ?? "unconfigured"}:${address.toLowerCase()}:${wallet.account?.toLowerCase() ?? "read-only"}`;
@@ -4376,7 +4386,7 @@ export function App(): React.JSX.Element {
                 dashboard={exactProjectDashboard}
                 loading={productBoardroomLoading}
                 onOpenAction={(action) => navigateRoute(projectOverviewActionRoute(action, appRoute.chainId, appRoute.boardroom))}
-                onRefresh={() => void loadProductBoardroom(appRoute.boardroom)}
+                onRefresh={() => refreshProjectOverview(appRoute.boardroom)}
                 position={verifiedProjectPosition}
                 positionError={verifiedProjectPositionError}
                 positionLoading={verifiedProjectPositionLoading}
@@ -4437,20 +4447,24 @@ export function App(): React.JSX.Element {
             })}
           />
         );
-      case "grant":
+      case "grant": {
+        const returnRoute = grantReturnRoute(appRoute);
+        const returnHref = appRouteHref(returnRoute);
+        const returnLabel = returnRoute.kind === "project" ? "Return to Project" : "Return to Portfolio";
         if (grantRouteError) {
           const failureKind = grantRouteFailureKind ?? "transient";
           return (
             <GrantVerificationFailureState
-              backHref={appRouteHref({ kind: "portfolio", chainId: appRoute.chainId })}
+              backHref={returnHref}
               grant={appRoute.grant}
               kind={failureKind}
               message={grantRouteError}
-              onBack={() => navigateRoute({ kind: "portfolio", chainId: appRoute.chainId })}
+              onBack={() => navigateRoute(returnRoute)}
               onRetry={failureKind === "transient" ? () => void loadCanonicalGrantRoute(
                 appRoute.grant,
                 canonicalGrantRouteKey(appRoute.chainId, appRoute.grant, runtimeDeploymentIdentity),
               ) : undefined}
+              returnLabel={returnLabel}
             />
           );
         }
@@ -4460,13 +4474,15 @@ export function App(): React.JSX.Element {
         return (
           <GrantDetailPage
             account={wallet.account}
-            backHref={appRouteHref({ kind: "portfolio", chainId: appRoute.chainId })}
+            backHref={returnHref}
+            backLabel={returnLabel}
             grant={appRoute.grant}
-            onBack={() => navigateRoute({ kind: "portfolio", chainId: appRoute.chainId })}
+            onBack={() => navigateRoute(returnRoute)}
           >
             {grantPanel}
           </GrantDetailPage>
         );
+      }
       case "studio":
       case "studio-project": {
         const selectedDashboard = appRoute.kind === "studio-project" ? exactProjectDashboard : undefined;
@@ -4920,7 +4936,8 @@ function projectOverviewActionRoute(
   chainId: number,
   boardroom: Address,
 ): CanonicalAppRoute {
-  if (action.kind === "grant") return { kind: "grant", chainId, grant: action.grant };
+  if (action.kind === "grant") return projectGrantRoute(chainId, action.grant, boardroom);
+  if (action.kind === "loading") return { kind: "project", chainId, boardroom, section: "overview" };
   return { kind: "project", chainId, boardroom, section: action.kind };
 }
 

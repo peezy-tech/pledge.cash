@@ -11,6 +11,7 @@ import type { ProductBoardroomDashboardState } from "./product-boardroom";
 export type ProjectGrantPosition = {
   error?: string | undefined;
   nextGrant?: Address | undefined;
+  nextGrantSettleableTokens?: bigint | undefined;
   settleableGrantCount?: number | undefined;
   settleableProjectTokens?: bigint | undefined;
 };
@@ -24,6 +25,7 @@ export type ProjectWalletPosition = {
   holderPower?: BoardroomHolderPower | undefined;
   holderPowerError?: string | undefined;
   nextGrant?: Address | undefined;
+  nextGrantSettleableTokens?: bigint | undefined;
   settleableGrantCount?: number | undefined;
   settleableProjectTokens?: bigint | undefined;
   shareToken: Address;
@@ -31,7 +33,7 @@ export type ProjectWalletPosition = {
 
 export type ProjectPositionAction =
   | { kind: "grant"; grant: Address }
-  | { kind: "governance" | "participate" | "transparency" };
+  | { kind: "governance" | "loading" | "participate" | "transparency" };
 
 export type ProjectPositionReadRequest = {
   key: string;
@@ -89,6 +91,7 @@ export async function readProjectWalletPosition(
       ? { grantError: grantPosition.error }
       : {
           nextGrant: grantPosition.nextGrant,
+          nextGrantSettleableTokens: grantPosition.nextGrantSettleableTokens,
           settleableGrantCount: grantPosition.settleableGrantCount,
           settleableProjectTokens: grantPosition.settleableProjectTokens,
         }),
@@ -148,6 +151,7 @@ export function deriveProjectGrantPosition(
 
   return {
     ...(settleableGrants[0] ? { nextGrant: settleableGrants[0].address } : {}),
+    nextGrantSettleableTokens: settleableGrants[0]?.settleable ?? 0n,
     settleableGrantCount: settleableGrants.length,
     settleableProjectTokens: settleable,
   };
@@ -157,13 +161,15 @@ export function projectPositionAction(input: {
   connected: boolean;
   hasActiveParticipation: boolean;
   launched: boolean;
+  loading?: boolean | undefined;
   position?: ProjectWalletPosition | undefined;
   status: number;
 }): ProjectPositionAction {
+  if (input.connected && input.loading) return { kind: "loading" };
   if (
     input.connected
     && input.position?.nextGrant
-    && (input.position.settleableProjectTokens ?? 0n) > 0n
+    && (input.position.nextGrantSettleableTokens ?? 0n) > 0n
   ) {
     return { kind: "grant", grant: input.position.nextGrant };
   }
@@ -186,6 +192,7 @@ export function projectWalletPositionKey(input: {
   chainId: number;
   dashboard: ProductBoardroomDashboardState;
   deploymentIdentity: string;
+  refreshGeneration?: number | undefined;
 }): string {
   return [
     input.chainId.toString(),
@@ -193,6 +200,7 @@ export function projectWalletPositionKey(input: {
     input.dashboard.address.toLowerCase(),
     input.dashboard.snapshot.shareToken.toLowerCase(),
     input.account.toLowerCase(),
+    (input.refreshGeneration ?? 0).toString(),
     projectPositionSourceKey(input.dashboard),
   ].join(":");
 }
@@ -200,7 +208,7 @@ export function projectWalletPositionKey(input: {
 export function projectPositionHasUnknowns(position: ProjectWalletPosition | undefined): boolean {
   return !position
     || position.directBalance === undefined
-    || position.settleableProjectTokens === undefined
+    || position.nextGrantSettleableTokens === undefined
     || position.holderPower === undefined;
 }
 

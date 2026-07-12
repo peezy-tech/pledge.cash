@@ -50,6 +50,7 @@ describe("project wallet position", () => {
 
     expect(position.directBalance).toBe(4n);
     expect(position.settleableProjectTokens).toBe(5n);
+    expect(position.nextGrantSettleableTokens).toBe(5n);
     expect(position.settleableGrantCount).toBe(1);
     expect(position.nextGrant).toBe(projectGrant);
     expect(position.holderPower).toEqual(holderPower);
@@ -106,6 +107,55 @@ describe("project wallet position", () => {
       dashboard: changedGrantState,
       deploymentIdentity: "release-a",
     })).not.toBe(base);
+    expect(projectWalletPositionKey({
+      account,
+      chainId: 31337,
+      dashboard,
+      deploymentIdentity: "release-a",
+      refreshGeneration: 1,
+    })).not.toBe(base);
+  });
+
+  test("a refresh generation reruns unchanged wallet reads and replaces balance 4 with 9", async () => {
+    const dashboard = projectDashboard();
+    const balances = [4n, 9n];
+    const client = fakeClientSequence(balances);
+    const coordinator = new ProjectPositionReadCoordinator();
+    const readAtGeneration = async (refreshGeneration: number) => {
+      const key = projectWalletPositionKey({
+        account,
+        chainId: 31337,
+        dashboard,
+        deploymentIdentity: "release-a",
+        refreshGeneration,
+      });
+      const request = coordinator.begin(key);
+      const position = await readProjectWalletPosition(client, { account, dashboard }, {
+        readHolderPower: async () => holderPower,
+      });
+      expect(coordinator.isCurrent(request)).toBe(true);
+      return position;
+    };
+    const first = await readAtGeneration(0);
+    const refreshed = await readAtGeneration(1);
+
+    expect(first.directBalance).toBe(4n);
+    expect(refreshed.directBalance).toBe(9n);
+    expect(balances).toHaveLength(0);
+  });
+
+  test("keeps the aggregate internal while recommending the exact first settleable grant amount", () => {
+    const dashboard = projectDashboard();
+    const second = dashboard.snapshot.grantSummaries[1]!.state!;
+    second.token = shareToken;
+    second.settleable = 7n;
+
+    expect(deriveProjectGrantPosition(dashboard, account)).toEqual({
+      nextGrant: projectGrant,
+      nextGrantSettleableTokens: 5n,
+      settleableGrantCount: 2,
+      settleableProjectTokens: 12n,
+    });
   });
 
   test("rejects a completed read after its active position identity changes", () => {
@@ -132,6 +182,14 @@ describe("project wallet position", () => {
     const noGrant = { ...position, nextGrant: undefined, settleableProjectTokens: 0n };
     expect(projectPositionAction({ connected: true, hasActiveParticipation: true, launched: true, position: noGrant, status: 0 }))
       .toEqual({ kind: "governance" });
+    expect(projectPositionAction({
+      connected: true,
+      hasActiveParticipation: true,
+      launched: true,
+      loading: true,
+      position,
+      status: 0,
+    })).toEqual({ kind: "loading" });
     expect(projectPositionAction({ connected: false, hasActiveParticipation: true, launched: true, status: 0 }))
       .toEqual({ kind: "participate" });
     expect(projectPositionAction({ connected: false, hasActiveParticipation: true, launched: true, status: 1 }))
@@ -207,6 +265,17 @@ function fakeClient(balance: bigint | Error): PledgeCashBlockReadClient {
     getBlockNumber: async () => 11n,
     readContract: async () => {
       if (balance instanceof Error) throw balance;
+      return balance;
+    },
+  } as PledgeCashBlockReadClient;
+}
+
+function fakeClientSequence(balances: bigint[]): PledgeCashBlockReadClient {
+  return {
+    getBlockNumber: async () => 11n,
+    readContract: async () => {
+      const balance = balances.shift();
+      if (balance === undefined) throw new Error("unexpected extra balance read");
       return balance;
     },
   } as PledgeCashBlockReadClient;

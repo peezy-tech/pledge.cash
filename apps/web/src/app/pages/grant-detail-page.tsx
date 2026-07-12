@@ -8,12 +8,14 @@ import { PageHeading, PageNotice, RuledSection, SectionHeading } from "./page-pr
 export function GrantDetailPage({
   account,
   backHref,
+  backLabel = "Return to Portfolio",
   children,
   grant,
   onBack,
 }: {
   account: Address | undefined;
   backHref: string;
+  backLabel?: string | undefined;
   children: ReactNode;
   grant: Address;
   onBack: () => void;
@@ -32,10 +34,10 @@ export function GrantDetailPage({
             }}
           >
             <ArrowLeft className="h-4 w-4" />
-            Portfolio
+            {backLabel}
           </ButtonLink>
         )}
-        eyebrow="Portfolio / Grant"
+        eyebrow={`${backLabel.replace(/^Return to /, "")} / Grant`}
         title="Review grant settlement"
         description="Confirm the holder, vesting progress, settleable tokens, payment cost, and expiry before asking the wallet to act."
       />
