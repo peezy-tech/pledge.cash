@@ -162,6 +162,23 @@ describe("sentinel web client", () => {
     expect(calls[0]).toBe("https://api.example.test/public/actions?limit=5&minSeverity=high&status=queued&chainId=31337");
   });
 
+  test("reads account-scoped delivery receipts with pagination and cancellation", async () => {
+    const calls: { input: string; init: RequestInit | undefined }[] = [];
+    const fetcher: SentinelFetch = async (input, init) => {
+      calls.push({ input: input.toString(), init });
+      return jsonResponse({ items: [], page: { limit: 10, nextCursor: null } });
+    };
+    const controller = new AbortController();
+    const client = createSentinelClient({ baseUrl: "https://api.example.test", fetcher });
+
+    await client.listNotificationDeliveries({ cursor: "opaque-cursor", limit: 10 }, controller.signal);
+
+    expect(calls[0]?.input).toBe("https://api.example.test/notifications?cursor=opaque-cursor&limit=10");
+    expect(calls[0]?.init?.cache).toBe("no-store");
+    expect(calls[0]?.init?.credentials).toBe("include");
+    expect(calls[0]?.init?.signal).toBe(controller.signal);
+  });
+
   test("surfaces API errors with status", async () => {
     const client = createSentinelClient({
       baseUrl: "https://api.example.test",

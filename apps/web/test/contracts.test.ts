@@ -4,6 +4,7 @@ import {
   PLEDGE_CASH_NETWORKS,
   PUBLIC_RPC_BATCH_SIZE,
   PUBLIC_RPC_RETRY_COUNT,
+  addressUrl,
   createPledgeCashNetworks,
   initialSelectedNetwork,
   networkForChainId,
@@ -72,10 +73,13 @@ describe("web network profiles", () => {
 
   test("can resolve transaction links against the originating chain", () => {
     const hash = "0x00000000000000000000000000000000000000000000000000000000000000aa";
+    const address = "0x1000000000000000000000000000000000000000";
     const hyperEvm = networkForChainId(998);
 
     expect(transactionUrl(hash, hyperEvm.chainId)).toBe(`${hyperEvm.explorerUrl}/tx/${hash}`);
+    expect(addressUrl(address, hyperEvm.chainId)).toBe(`${hyperEvm.explorerUrl}/address/${address}`);
     expect(transactionUrl(hash, LOCAL_ANVIL_CHAIN_ID)).toBeUndefined();
+    expect(addressUrl(address, LOCAL_ANVIL_CHAIN_ID)).toBeUndefined();
     expect(transactionUrl(hash, 999_999)).toBeUndefined();
   });
 

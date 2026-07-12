@@ -6,6 +6,7 @@ import { Button } from "../../components/ui/button";
 import { AlertsIdentity } from "../../features/notifications/alerts-identity";
 import { alertsViewState } from "../../features/notifications/alerts-view-state";
 import { ChannelSettings } from "../../features/notifications/channel-settings";
+import { DeliveryActivity } from "../../features/notifications/delivery-activity";
 import { GovernanceActivity } from "../../features/notifications/governance-activity";
 import { useSentinelSession } from "../../features/notifications/hooks";
 import { SubscriptionSettings } from "../../features/notifications/subscription-settings";
@@ -77,7 +78,7 @@ export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSett
       {focus.boardroom ? (
         <GovernanceActivity
           boardroom={focus.boardroom}
-          chainId={governanceChainId}
+          chainId={focus.chainId ?? governanceChainId}
           highlightActionHash={focus.actionHash}
         />
       ) : null}
@@ -112,6 +113,7 @@ export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSett
             onChanged={session.refresh}
           />
           <ChannelSettings channels={session.me.channels} client={session.client} onChanged={session.refresh} />
+          <DeliveryActivity client={session.client} />
           <SubscriptionSettings
             client={session.client}
             subscription={session.me.subscription}
@@ -123,18 +125,38 @@ export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSett
   );
 }
 
-function notificationFocusFromLocation(): { readonly actionHash?: string; readonly boardroom?: Address } {
+function notificationFocusFromLocation(): {
+  readonly actionHash?: string;
+  readonly boardroom?: Address;
+  readonly chainId?: number;
+} {
   if (typeof window === "undefined") {
     return {};
   }
 
-  const params = new URLSearchParams(window.location.search);
+  return notificationFocusFromSearch(window.location.search);
+}
+
+export function notificationFocusFromSearch(search: string): {
+  readonly actionHash?: string;
+  readonly boardroom?: Address;
+  readonly chainId?: number;
+} {
+  const params = new URLSearchParams(search);
   const boardroom = normalizedHexParam(params.get("boardroom"), 20);
   const actionHash = normalizedHexParam(params.get("action"), 32);
+  const chainId = normalizedChainIdParam(params.get("chain"));
   return {
     ...(actionHash === undefined ? {} : { actionHash }),
-    ...(boardroom === undefined ? {} : { boardroom: boardroom as Address })
+    ...(boardroom === undefined ? {} : { boardroom: boardroom as Address }),
+    ...(chainId === undefined ? {} : { chainId }),
   };
+}
+
+function normalizedChainIdParam(value: string | null): number | undefined {
+  if (value === null || !/^\d+$/.test(value)) return undefined;
+  const chainId = Number(value);
+  return Number.isSafeInteger(chainId) && chainId > 0 ? chainId : undefined;
 }
 
 function normalizedHexParam(value: string | null, bytes: number): string | undefined {

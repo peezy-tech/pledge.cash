@@ -279,9 +279,9 @@ export function TabButton({
   );
 }
 
-export function AddressLink({ address }: { address: Address }): React.JSX.Element {
+export function AddressLink({ address, chainId }: { address: Address; chainId?: number | undefined }): React.JSX.Element {
   const [copied, setCopied] = useState(false);
-  const explorerUrl = addressUrl(address);
+  const explorerUrl = addressUrl(address, chainId);
   const label = shortAddress(address);
   const hasExplorerUrl = explorerUrl !== undefined && explorerUrl.length > 0;
 

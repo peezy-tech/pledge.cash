@@ -114,7 +114,7 @@ function GovernanceActionRow({ action, highlighted }: { action: PublicActionDto;
         <div>ETA {formatSentinelDate(action.eta)}</div>
         <div className="flex min-w-0 flex-wrap items-center gap-2 xl:justify-end">
           <span className="text-zinc-500">Boardroom</span>
-          <AddressLink address={action.boardroom.address as Address} />
+          <AddressLink address={action.boardroom.address as Address} chainId={action.chainId} />
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-2 xl:justify-end">
           <span className="text-zinc-500">Queued</span>

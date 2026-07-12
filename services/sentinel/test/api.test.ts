@@ -10,6 +10,9 @@ import type {
   BoardroomRef,
   ChannelDto,
   HealthResponse,
+  NotificationDeliveriesQuery,
+  NotificationDeliveriesResponse,
+  NotificationDeliveryDto,
   PublicActionDto,
   PublicActionsQuery,
   PublicActionsResponse,
@@ -65,11 +68,15 @@ class StubAuth implements AuthAdapter {
 }
 
 class InMemoryStore implements SentinelApiStore {
+  deliveriesByUser = new Map<string, NotificationDeliveryDto[]>();
   readonly linkCodes = new Map<string, { expiresAt: Date; userId: string }>();
   readonly nonces = new Map<string, WalletNonceRecord>();
   channelsByUser = new Map<string, ChannelDto[]>();
   conflictedWallets = new Set<AddressDto>();
   lastPublicQuery: PublicActionsQuery | undefined;
+  lastNotificationDeliveriesInput:
+    | { readonly query: NotificationDeliveriesQuery; readonly userId: string }
+    | undefined;
   lastLinkedWalletInput:
     | {
         readonly address: AddressDto;
@@ -203,6 +210,15 @@ class InMemoryStore implements SentinelApiStore {
       lagBlocks: "3",
       shareTransfersBlock: "105"
     }));
+  }
+
+  async getNotificationDeliveries(
+    userId: string,
+    query: NotificationDeliveriesQuery
+  ): Promise<NotificationDeliveriesResponse> {
+    this.lastNotificationDeliveriesInput = { query, userId };
+    const items = (this.deliveriesByUser.get(userId) ?? []).slice(0, query.limit);
+    return { items, page: { limit: query.limit, nextCursor: null } };
   }
 
   async getPublicActions(query: PublicActionsQuery): Promise<PublicActionsResponse> {
@@ -468,7 +484,8 @@ describe("Sentinel WP5 API", () => {
     const requests = [
       harness.app.request("/wallets/nonce", { method: "POST" }),
       harness.app.request("/subscriptions"),
-      harness.app.request("/channels")
+      harness.app.request("/channels"),
+      harness.app.request("/notifications")
     ];
 
     for (const response of await Promise.all(requests)) {
@@ -711,6 +728,64 @@ describe("Sentinel WP5 API", () => {
     });
     expect(deleteChannel.status).toBe(200);
     expect(await readJson<{ ok: true }>(deleteChannel)).toEqual({ ok: true });
+  });
+
+  test("returns only the signed-in user's safe paginated delivery receipts", async () => {
+    const cookie = await signedInCookie(harness);
+    const delivery: NotificationDeliveryDto = {
+      action: {
+        actionHash: `0x${"ab".repeat(32)}`,
+        boardroom: BOARDROOM,
+        chainId: 31337,
+        eta: new Date(FIXED_NOW.getTime() + 86_400_000).toISOString(),
+        expiresAt: new Date(FIXED_NOW.getTime() + 8 * 86_400_000).toISOString(),
+        id: ACTION_ID,
+        status: "queued"
+      },
+      attempts: 2,
+      channelType: "telegram",
+      createdAt: FIXED_NOW.toISOString(),
+      event: "queued",
+      id: "00000000-0000-4000-8000-000000000004",
+      nextAttemptAt: new Date(FIXED_NOW.getTime() + 60_000).toISOString(),
+      sentAt: null,
+      severity: "high",
+      status: "failed",
+      summary: "Queued executor rotation.",
+      updatedAt: FIXED_NOW.toISOString()
+    };
+    harness.store.deliveriesByUser.set(USER_ID, [delivery]);
+    harness.store.deliveriesByUser.set("00000000-0000-4000-8000-000000000099", [
+      { ...delivery, id: "00000000-0000-4000-8000-000000000099" }
+    ]);
+
+    const response = await harness.app.request("/notifications?limit=1", {
+      headers: { Cookie: cookie }
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    const body = await readJson<NotificationDeliveriesResponse>(response);
+    expect(body).toEqual({ items: [delivery], page: { limit: 1, nextCursor: null } });
+    expect(harness.store.lastNotificationDeliveriesInput).toEqual({
+      query: { limit: 1 },
+      userId: USER_ID
+    });
+    expect(JSON.stringify(body)).not.toContain("lastError");
+    expect(JSON.stringify(body)).not.toContain("telegramChatId");
+  });
+
+  test("rejects invalid delivery pagination before querying the store", async () => {
+    const cookie = await signedInCookie(harness);
+    const response = await harness.app.request("/notifications?cursor=not-a-cursor", {
+      headers: { Cookie: cookie }
+    });
+
+    expect(response.status).toBe(400);
+    expect(await readJson<{ error: { message: string } }>(response)).toEqual({
+      error: { message: "cursor is invalid" }
+    });
+    expect(harness.store.lastNotificationDeliveriesInput).toBeUndefined();
   });
 
   test("serves cacheable public action feeds and boardroom scoped queries", async () => {

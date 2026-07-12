@@ -101,8 +101,8 @@ export function syncSelectedNetworkSearch(chainId: number): void {
   window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
-export function addressUrl(address: Address): string | undefined {
-  const explorerUrl = selectedNetworkForLinks().explorerUrl;
+export function addressUrl(address: Address, chainId?: number): string | undefined {
+  const explorerUrl = (chainId === undefined ? selectedNetworkForLinks() : supportedNetworkForChainId(chainId))?.explorerUrl;
   if (!explorerUrl) return undefined;
   return `${explorerUrl}/address/${address}`;
 }
