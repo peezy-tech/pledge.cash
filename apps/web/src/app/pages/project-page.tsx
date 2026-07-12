@@ -12,6 +12,12 @@ import {
   type ProductBoardroomCatalogEntry,
   type ProductBoardroomDashboardState,
 } from "../../lib/product-boardroom";
+import {
+  projectPositionAction,
+  projectPositionHasUnknowns,
+  type ProjectPositionAction,
+  type ProjectWalletPosition,
+} from "../../lib/project-position";
 import { formatTokenAmount } from "../../lib/token-amounts";
 import { cn } from "../../lib/utils";
 import { KeyValueList, PageNotice, RuledSection, SectionHeading } from "./page-primitives";
@@ -157,24 +163,28 @@ export function ProjectLayout({
 
 export type ProjectOverviewPageProps = {
   account?: Address | undefined;
+  actionHref?: ((action: ProjectPositionAction) => string) | undefined;
   activity?: ReactNode;
   dashboard?: ProductBoardroomDashboardState | undefined;
   loading: boolean;
-  nextAction?: ReactNode;
-  onOpenParticipation?: (() => void) | undefined;
-  participationHref?: string | undefined;
+  onOpenAction?: ((action: ProjectPositionAction) => void) | undefined;
   onRefresh?: (() => void) | undefined;
+  position?: ProjectWalletPosition | undefined;
+  positionError?: string | undefined;
+  positionLoading?: boolean | undefined;
 };
 
 export function ProjectOverviewPage({
   account,
+  actionHref,
   activity,
   dashboard,
   loading,
-  nextAction,
-  onOpenParticipation,
-  participationHref,
+  onOpenAction,
   onRefresh,
+  position,
+  positionError,
+  positionLoading = false,
 }: ProjectOverviewPageProps): React.JSX.Element {
   const snapshot = dashboard?.snapshot;
   const shareAsset = dashboard?.treasuryAssets.find((asset) => sameAddress(asset.address, snapshot?.shareToken));
@@ -196,12 +206,22 @@ export function ProjectOverviewPage({
     );
   }
 
+  const nextAction = projectPositionAction({
+    connected: account !== undefined,
+    hasActiveParticipation: hasParticipation,
+    launched: snapshot.launched,
+    position,
+    status: snapshot.status,
+  });
+
   return (
     <>
       <RuledSection>
         <SectionHeading
-          title="What needs attention"
-          description="The most useful next step for this wallet and this project."
+          title="Your position"
+          description={account
+            ? "Wallet-specific project tokens, settleable project-token grants, and verified holder power."
+            : "Public project state remains available without a wallet. Connect only to read your position."}
           action={onRefresh ? (
             <Button size="sm" variant="ghost" onClick={onRefresh}>
               <RefreshCw className="h-4 w-4" />
@@ -209,29 +229,28 @@ export function ProjectOverviewPage({
             </Button>
           ) : undefined}
         />
+        {account ? (
+          <>
+            <KeyValueList columns={3} items={positionFacts(position, snapshot, positionLoading)} />
+            {!positionLoading && (positionError || projectPositionHasUnknowns(position)) ? (
+              <p className="m-0 border-t border-zinc-800 py-3 text-xs leading-5 text-amber-200">
+                One or more wallet-specific reads could not be verified. Those values remain Unknown and are not treated as zero.
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <p className="m-0 mt-4 max-w-3xl text-sm leading-6 text-zinc-400">
+            Connect a wallet to read its direct project-token balance, settleable project-token grants, and current plus previous-block governance power.
+          </p>
+        )}
         <div className="mt-4 grid gap-4 border-l-2 border-lime-300 bg-zinc-900/35 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
           <div>
-            <p className="m-0 text-base font-semibold text-zinc-50">{nextActionLabel(account, dashboard, hasParticipation)}</p>
-            <p className="m-0 mt-1 max-w-2xl text-sm leading-6 text-zinc-400">{nextActionDescription(account, dashboard, hasParticipation)}</p>
+            <p className="m-0 text-base font-semibold text-zinc-50">{positionActionLabel(nextAction)}</p>
+            <p className="m-0 mt-1 max-w-2xl text-sm leading-6 text-zinc-400">
+              {positionActionDescription(nextAction, account, position, snapshot.shareTokenMetadata)}
+            </p>
           </div>
-          {nextAction ?? (hasParticipation && onOpenParticipation ? (
-            participationHref ? (
-              <ButtonLink
-                href={participationHref}
-                onClick={(event) => {
-                  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                  event.preventDefault();
-                  onOpenParticipation();
-                }}
-              >
-                View participation
-                <ArrowRight className="h-4 w-4" />
-              </ButtonLink>
-            ) : <Button onClick={onOpenParticipation}>
-                View participation
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-          ) : null)}
+          <PositionAction action={nextAction} href={actionHref?.(nextAction)} onOpen={onOpenAction} />
         </div>
       </RuledSection>
 
@@ -401,24 +420,110 @@ function distributionIsActive(distribution: ProductBoardroomDashboardState["snap
   return false;
 }
 
-function nextActionLabel(account: Address | undefined, dashboard: ProductBoardroomDashboardState, hasOffering: boolean): string {
-  if (!account) return hasOffering ? "Connect a wallet when you are ready to participate" : "Browse the project in read-only mode";
-  if (dashboard.snapshot.grantSummaries.some((grant) => sameAddress(grant.state?.holder, account) && (grant.state?.settleable ?? 0n) > 0n)) {
-    return "A grant can be settled now";
-  }
-  if (hasOffering) return "An active participation path is available";
-  if (sameAddress(account, dashboard.snapshot.owner)) return "Review project operations";
-  return "No wallet action is required";
+function positionFacts(
+  position: ProjectWalletPosition | undefined,
+  snapshot: ProductBoardroomDashboardState["snapshot"],
+  loading: boolean,
+): Array<{ detail?: string | undefined; label: string; value: ReactNode }> {
+  const value = (amount: bigint | undefined): string => loading
+    ? "Loading…"
+    : amount === undefined ? "Unknown" : formatTokenAmount(amount, snapshot.shareTokenMetadata);
+  const power = position?.holderPower;
+  return [
+    {
+      label: "Direct project tokens",
+      value: value(position?.directBalance),
+      detail: "Balance held directly by this wallet on the canonical project token.",
+    },
+    {
+      label: "Settleable grants",
+      value: value(position?.settleableProjectTokens),
+      detail: position?.settleableGrantCount === undefined
+        ? "Unknown until every active project grant is read."
+        : `${position.settleableGrantCount.toString()} project-token grant${position.settleableGrantCount === 1 ? "" : "s"} can settle now. Other grant assets are never added to this amount.`,
+    },
+    {
+      label: "Governance power",
+      value: loading ? "Loading…" : governancePowerLabel(power),
+      detail: power
+        ? `Veto requires ${formatTokenAmount(power.vetoRequired, snapshot.shareTokenMetadata)}; wind-down requires ${formatTokenAmount(power.windDownRequired, snapshot.shareTokenMetadata)} at current and block ${power.snapshotBlock.toString()} balances.`
+        : "Unknown until current and previous-block holder power are both verified.",
+    },
+  ];
 }
 
-function nextActionDescription(account: Address | undefined, dashboard: ProductBoardroomDashboardState, hasOffering: boolean): string {
-  if (!account) return "Everything on this page is public. Connecting only becomes necessary when an action reaches your wallet.";
-  if (dashboard.snapshot.grantSummaries.some((grant) => sameAddress(grant.state?.holder, account) && (grant.state?.settleable ?? 0n) > 0n)) {
-    return "Open Portfolio to review the amount, payment, and wallet confirmation before settling.";
+function governancePowerLabel(power: ProjectWalletPosition["holderPower"]): string {
+  if (!power) return "Unknown";
+  if (power.encumbered) return "Not governance eligible";
+  if (power.canStartWindDown) return "Veto + wind-down eligible";
+  if (power.canVeto) return "Veto eligible";
+  if (power.currentBalance > 0n) return "Holder; below action thresholds";
+  return "No current holder power";
+}
+
+function PositionAction({
+  action,
+  href,
+  onOpen,
+}: {
+  action: ProjectPositionAction;
+  href?: string | undefined;
+  onOpen?: ((action: ProjectPositionAction) => void) | undefined;
+}): React.JSX.Element | null {
+  if (!onOpen && !href) return null;
+  const label = positionActionButtonLabel(action);
+  return href ? (
+    <ButtonLink
+      href={href}
+      onClick={(event) => {
+        if (!onOpen || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        onOpen(action);
+      }}
+    >
+      {label}
+      <ArrowRight className="h-4 w-4" />
+    </ButtonLink>
+  ) : (
+    <Button onClick={() => onOpen?.(action)}>
+      {label}
+      <ArrowRight className="h-4 w-4" />
+    </Button>
+  );
+}
+
+function positionActionLabel(action: ProjectPositionAction): string {
+  if (action.kind === "grant") return "Project tokens are available to settle";
+  if (action.kind === "governance") return "This wallet has verified holder power";
+  if (action.kind === "participate") return "An active participation path is available";
+  return "Continue with the project evidence";
+}
+
+function positionActionDescription(
+  action: ProjectPositionAction,
+  account: Address | undefined,
+  position: ProjectWalletPosition | undefined,
+  metadata: ProductBoardroomDashboardState["snapshot"]["shareTokenMetadata"],
+): string {
+  if (action.kind === "grant") {
+    return `${formatTokenAmount(position?.settleableProjectTokens, metadata)} can settle from this project’s grant. Review its schedule and payment before signing.`;
   }
-  if (hasOffering) return "Compare the available route, quote, and limits before sending anything to your wallet.";
-  if (sameAddress(account, dashboard.snapshot.owner)) return "Studio keeps creation and lifecycle controls separate from this public project view.";
-  return "Return later or inspect the project’s transparency record; there is nothing to sign now.";
+  if (action.kind === "governance") {
+    return "Inspect the verified queue, review thresholds, and the actions this wallet can take before signing anything.";
+  }
+  if (action.kind === "participate") {
+    return account
+      ? "Compare the live route, quote, and limits before sending anything to your wallet."
+      : "Everything on this page is public. Connect only after you have reviewed a live route and its limits.";
+  }
+  return "Review balances, obligations, history coverage, and contract addresses. Unknown values remain distinct from zero.";
+}
+
+function positionActionButtonLabel(action: ProjectPositionAction): string {
+  if (action.kind === "grant") return "Review grant";
+  if (action.kind === "governance") return "Review governance";
+  if (action.kind === "participate") return "View participation";
+  return "Open transparency";
 }
 
 function sameAddress(first: Address | undefined, second: Address | undefined): boolean {

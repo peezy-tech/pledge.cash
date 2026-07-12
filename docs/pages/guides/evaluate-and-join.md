@@ -24,6 +24,8 @@ WalletConnect and Coinbase Wallet QR or mobile handoff are not currently wired. 
 1. [Open Explore](../../explore) and select the intended network.
 2. Search by name only to narrow the list; treat the Boardroom address as the identity.
 3. Open the project and check **Overview** for lifecycle, governance mode, share token, and available participation paths.
+   If a wallet is connected, also verify that **Your position** names the expected direct project-token balance,
+   settleable project-token grants, and holder-power status. Other grant assets are not added to that token amount.
 4. Open **Transparency** and compare the Boardroom, share token, factories, distributions, pools, and treasury assets with the addresses published by the project.
 5. Stop if provenance verification fails, the deployment is pending, or a required value says **Unknown**.
 

@@ -162,6 +162,13 @@ import {
   type ProductBoardroomCatalogEntry,
   type ProductBoardroomDashboardState,
 } from "../lib/product-boardroom";
+import {
+  ProjectPositionReadCoordinator,
+  projectWalletPositionKey,
+  readProjectWalletPosition,
+  type ProjectPositionAction,
+  type ProjectWalletPosition,
+} from "../lib/project-position";
 import { createSentinelClient, getSentinelBaseUrl } from "../lib/sentinel";
 import { governanceRefreshDelay } from "../lib/governance-refresh";
 import {
@@ -615,6 +622,7 @@ export function App(): React.JSX.Element {
   const activeSwapTokenLoadScopeRef = useRef<SwapTokenLoadScope | undefined>(undefined);
   const productCatalogLoadMoreAbortControllerRef = useRef<AbortController | undefined>(undefined);
   const productLoadAbortControllerRef = useRef<AbortController | undefined>(undefined);
+  const projectPositionReadCoordinatorRef = useRef(new ProjectPositionReadCoordinator());
   const productRequestVersionRef = useRef(0);
   const discoveryWriteVersion = useRef(0);
   const grantLoadVersionRef = useRef(0);
@@ -772,6 +780,12 @@ export function App(): React.JSX.Element {
   const [productCatalogTotalCount, setProductCatalogTotalCount] = useState<number>();
   const productCatalogRef = useRef<readonly ProductBoardroomCatalogEntry[]>(productCatalog);
   productCatalogRef.current = productCatalog;
+  const [projectPosition, setProjectPosition] = useState<ProjectWalletPosition>();
+  const [projectPositionVerifiedKey, setProjectPositionVerifiedKey] = useState<string>();
+  const [projectPositionError, setProjectPositionError] = useState<string>();
+  const [projectPositionErrorKey, setProjectPositionErrorKey] = useState<string>();
+  const [projectPositionLoading, setProjectPositionLoading] = useState(false);
+  const [projectPositionLoadingKey, setProjectPositionLoadingKey] = useState<string>();
   const [boardroomHolderPower, setBoardroomHolderPower] = useState<BoardroomHolderPower>();
   const [boardroomHolderPowerVerifiedKey, setBoardroomHolderPowerVerifiedKey] = useState<string>();
   const [queuedBoardroomActions, setQueuedBoardroomActions] = useState<QueuedBoardroomAction[]>([]);
@@ -998,6 +1012,27 @@ export function App(): React.JSX.Element {
     onAccountChanged: clearDirectGrantPrediction,
     pushLog,
   });
+  const activeProjectPositionKey = appRoute.kind === "project"
+    && appRoute.section === "overview"
+    && exactProjectDashboard
+    && wallet.account
+    && runtimeDeploymentIdentity
+    ? projectWalletPositionKey({
+        account: wallet.account,
+        chainId: activeNetwork.chainId,
+        dashboard: exactProjectDashboard,
+        deploymentIdentity: runtimeDeploymentIdentity,
+      })
+    : undefined;
+  projectPositionReadCoordinatorRef.current.sync(activeProjectPositionKey);
+  const verifiedProjectPosition = projectPosition
+    ? verifiedStateForKey(projectPosition, projectPositionVerifiedKey, activeProjectPositionKey)
+    : undefined;
+  const verifiedProjectPositionError = projectPositionErrorKey === activeProjectPositionKey
+    ? projectPositionError
+    : undefined;
+  const verifiedProjectPositionLoading = projectPositionLoadingKey === activeProjectPositionKey
+    && projectPositionLoading;
   activeAccountRef.current = wallet.account;
   activeWalletChainIdRef.current = wallet.chainId;
   if (walletClientRef.current !== walletClient) walletClientGenerationRef.current += 1;
@@ -1401,6 +1436,12 @@ export function App(): React.JSX.Element {
     setProductCatalogLoadingMore(false);
     setProductCatalogNextCursor(undefined);
     setProductCatalogTotalCount(undefined);
+    setProjectPosition(undefined);
+    setProjectPositionVerifiedKey(undefined);
+    setProjectPositionError(undefined);
+    setProjectPositionErrorKey(undefined);
+    setProjectPositionLoading(false);
+    setProjectPositionLoadingKey(undefined);
     setBoardroomHolderPower(undefined);
     setBoardroomHolderPowerVerifiedKey(undefined);
     setQueuedBoardroomActions([]);
@@ -1676,6 +1717,41 @@ export function App(): React.JSX.Element {
       return current && sameAddress(current.address, requestedProductBoardroom) ? current : undefined;
     });
   }, [activeNetwork.chainId, requestedProductBoardroom, runtimeDeploymentIdentity]);
+
+  useEffect(() => {
+    const key = activeProjectPositionKey;
+    const dashboard = exactProjectDashboard;
+    const account = wallet.account;
+    setProjectPosition(undefined);
+    setProjectPositionVerifiedKey(undefined);
+    setProjectPositionError(undefined);
+    setProjectPositionErrorKey(undefined);
+    setProjectPositionLoading(false);
+    setProjectPositionLoadingKey(undefined);
+    if (!key || !dashboard || !account) return;
+
+    const request = projectPositionReadCoordinatorRef.current.begin(key);
+    setProjectPositionLoading(true);
+    setProjectPositionLoadingKey(key);
+    void readProjectWalletPosition(publicClient, { account, dashboard })
+      .then((position) => {
+        if (!projectPositionReadCoordinatorRef.current.isCurrent(request)) return;
+        setProjectPosition(position);
+        setProjectPositionVerifiedKey(key);
+      })
+      .catch((error) => {
+        if (!projectPositionReadCoordinatorRef.current.isCurrent(request)) return;
+        setProjectPositionError(errorMessage(error));
+        setProjectPositionErrorKey(key);
+      })
+      .finally(() => {
+        if (projectPositionReadCoordinatorRef.current.isCurrent(request)) setProjectPositionLoading(false);
+      });
+
+    return () => {
+      projectPositionReadCoordinatorRef.current.invalidate(request);
+    };
+  }, [activeProjectPositionKey, publicClient]);
 
   useEffect(() => {
     if (appRouteChainId(appRoute) !== undefined && appRouteChainId(appRoute) !== activeNetwork.chainId) return;
@@ -4296,11 +4372,14 @@ export function App(): React.JSX.Element {
             {appRoute.section === "overview" ? (
               <ProjectOverviewPage
                 account={wallet.account}
+                actionHref={(action) => appRouteHref(projectOverviewActionRoute(action, appRoute.chainId, appRoute.boardroom))}
                 dashboard={exactProjectDashboard}
                 loading={productBoardroomLoading}
-                onOpenParticipation={() => navigateRoute({ kind: "project", chainId: appRoute.chainId, boardroom: appRoute.boardroom, section: "participate" })}
-                participationHref={projectRouteHref(appRoute.chainId, appRoute.boardroom, "participate")}
+                onOpenAction={(action) => navigateRoute(projectOverviewActionRoute(action, appRoute.chainId, appRoute.boardroom))}
                 onRefresh={() => void loadProductBoardroom(appRoute.boardroom)}
+                position={verifiedProjectPosition}
+                positionError={verifiedProjectPositionError}
+                positionLoading={verifiedProjectPositionLoading}
               />
             ) : appRoute.section === "participate" ? (
               <ParticipatePage
@@ -4834,6 +4913,15 @@ function governanceRouteKey(
     || (route.kind === "studio-project" && (route.section === "governance" || route.section === "close"));
   if (!governanceRoute) return undefined;
   return `${route.chainId.toString()}:${deploymentIdentity ?? "unconfigured"}:${route.boardroom.toLowerCase()}:${account?.toLowerCase() ?? "read-only"}`;
+}
+
+function projectOverviewActionRoute(
+  action: ProjectPositionAction,
+  chainId: number,
+  boardroom: Address,
+): CanonicalAppRoute {
+  if (action.kind === "grant") return { kind: "grant", chainId, grant: action.grant };
+  return { kind: "project", chainId, boardroom, section: action.kind };
 }
 
 function canonicalGrantRouteKey(
