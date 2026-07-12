@@ -6,6 +6,7 @@ import { Button } from "../../components/ui/button";
 import { AlertsIdentity } from "../../features/notifications/alerts-identity";
 import { alertsViewState } from "../../features/notifications/alerts-view-state";
 import { ChannelSettings } from "../../features/notifications/channel-settings";
+import { DeliveryActivity } from "../../features/notifications/delivery-activity";
 import { GovernanceActivity } from "../../features/notifications/governance-activity";
 import { useSentinelSession } from "../../features/notifications/hooks";
 import { SubscriptionSettings } from "../../features/notifications/subscription-settings";
@@ -112,6 +113,7 @@ export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSett
             onChanged={session.refresh}
           />
           <ChannelSettings channels={session.me.channels} client={session.client} onChanged={session.refresh} />
+          <DeliveryActivity client={session.client} />
           <SubscriptionSettings
             client={session.client}
             subscription={session.me.subscription}
@@ -139,11 +141,19 @@ export function notificationFocusFromLocation(search?: string): {
     return {};
   }
 
-  const params = new URLSearchParams(locationSearch);
+  return notificationFocusFromSearch(locationSearch);
+}
+
+export function notificationFocusFromSearch(search: string): {
+  readonly actionHash?: string;
+  readonly boardroom?: Address;
+  readonly chainId?: number;
+  readonly returnHref?: string;
+} {
+  const params = new URLSearchParams(search);
   const boardroom = normalizedHexParam(params.get("boardroom"), 20);
   const actionHash = normalizedHexParam(params.get("action"), 32);
-  const requestedChainId = Number(params.get("chain"));
-  const chainId = Number.isInteger(requestedChainId) && requestedChainId > 0 ? requestedChainId : undefined;
+  const chainId = normalizedChainIdParam(params.get("chain"));
   const returnHref = safeReturnHref(params.get("return"));
   return {
     ...(actionHash === undefined ? {} : { actionHash }),
@@ -156,6 +166,12 @@ export function notificationFocusFromLocation(search?: string): {
 function safeReturnHref(value: string | null): string | undefined {
   if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return undefined;
   return value;
+}
+
+function normalizedChainIdParam(value: string | null): number | undefined {
+  if (value === null || !/^\d+$/.test(value)) return undefined;
+  const chainId = Number(value);
+  return Number.isSafeInteger(chainId) && chainId > 0 ? chainId : undefined;
 }
 
 function normalizedHexParam(value: string | null, bytes: number): string | undefined {

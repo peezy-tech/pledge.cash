@@ -10,6 +10,11 @@ export const UintStringSchema = z.string().regex(/^\d+$/);
 
 export const SeveritySchema = z.enum(["low", "medium", "high"]);
 export const ActionEventSchema = z.enum(["queued", "cancelled", "executed", "invalidated"]);
+export const NotificationEventSchema = z.enum([
+  ...ActionEventSchema.options,
+  "reminder",
+  "policy-admin"
+]);
 export const ActionStatusSchema = z.enum(["queued", "cancelled", "executed", "invalidated", "expired"]);
 export const DecodeStatusSchema = z.enum(["decoded", "undecoded"]);
 export const ChannelTypeSchema = z.enum(["telegram", "twitter"]);
@@ -180,6 +185,42 @@ export const ChannelIdParamsSchema = z.object({
   id: UuidSchema
 });
 
+export const NotificationDeliveriesQuerySchema = z.object({
+  cursor: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20)
+});
+
+export const NotificationDeliveryDtoSchema = z.object({
+  action: z.object({
+    actionHash: HexSchema,
+    boardroom: AddressSchema,
+    chainId: z.number().int().positive(),
+    eta: IsoDateSchema,
+    expiresAt: IsoDateSchema.nullable(),
+    id: UuidSchema,
+    status: ActionEventSchema
+  }),
+  attempts: z.number().int().nonnegative(),
+  channelType: ChannelTypeSchema,
+  createdAt: IsoDateSchema,
+  event: NotificationEventSchema,
+  id: UuidSchema,
+  nextAttemptAt: IsoDateSchema,
+  sentAt: IsoDateSchema.nullable(),
+  severity: SeveritySchema.nullable(),
+  status: NotificationStatusSchema,
+  summary: z.string().min(1).nullable(),
+  updatedAt: IsoDateSchema
+});
+
+export const NotificationDeliveriesResponseSchema = z.object({
+  items: z.array(NotificationDeliveryDtoSchema),
+  page: z.object({
+    limit: z.number().int().min(1).max(50),
+    nextCursor: z.string().min(1).nullable()
+  })
+});
+
 export const ActionCallDtoSchema = z.object({
   callIndex: z.number().int().nonnegative(),
   data: HexSchema,
@@ -270,6 +311,7 @@ export type AddressDto = z.infer<typeof AddressSchema>;
 export type HexDto = z.infer<typeof HexSchema>;
 export type SeverityDto = z.infer<typeof SeveritySchema>;
 export type ActionEventDto = z.infer<typeof ActionEventSchema>;
+export type NotificationEventDto = z.infer<typeof NotificationEventSchema>;
 export type ActionStatusDto = z.infer<typeof ActionStatusSchema>;
 export type DecodeStatusDto = z.infer<typeof DecodeStatusSchema>;
 export type ChannelTypeDto = z.infer<typeof ChannelTypeSchema>;
@@ -304,6 +346,9 @@ export type TelegramLinkCodeResponse = z.infer<typeof TelegramLinkCodeResponseSc
 export type ChannelsResponse = z.infer<typeof ChannelsResponseSchema>;
 export type DeleteChannelResponse = z.infer<typeof DeleteChannelResponseSchema>;
 export type ChannelIdParams = z.infer<typeof ChannelIdParamsSchema>;
+export type NotificationDeliveriesQuery = z.infer<typeof NotificationDeliveriesQuerySchema>;
+export type NotificationDeliveryDto = z.infer<typeof NotificationDeliveryDtoSchema>;
+export type NotificationDeliveriesResponse = z.infer<typeof NotificationDeliveriesResponseSchema>;
 export type ActionCallDto = z.infer<typeof ActionCallDtoSchema>;
 export type RiskFindingDto = z.infer<typeof RiskFindingDtoSchema>;
 export type RiskAssessmentDto = z.infer<typeof RiskAssessmentDtoSchema>;
