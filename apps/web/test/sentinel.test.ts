@@ -9,8 +9,20 @@ import {
   SentinelApiError,
   type SentinelFetch,
 } from "../src/lib/sentinel";
+import { notificationFocusFromLocation } from "../src/app/views/sentinel-settings";
 
 describe("sentinel web client", () => {
+  test("preserves a canonical project watch focus and rejects unsafe return URLs", () => {
+    const boardroom = "0x1000000000000000000000000000000000000000";
+    expect(notificationFocusFromLocation(`?chain=31337&boardroom=${boardroom}&return=%2Fprojects%2F31337%2F${boardroom}%2Fgovernance`))
+      .toEqual({
+        boardroom,
+        chainId: 31337,
+        returnHref: `/projects/31337/${boardroom}/governance`,
+      });
+    expect(notificationFocusFromLocation(`?chain=31337&boardroom=${boardroom}&return=%2F%2Fevil.example`))
+      .toEqual({ boardroom, chainId: 31337 });
+  });
   test("reads an optional VITE_SENTINEL_API_URL", () => {
     expect(getSentinelBaseUrl({})).toBeUndefined();
     expect(getSentinelBaseUrl({ VITE_SENTINEL_API_URL: "" })).toBeUndefined();

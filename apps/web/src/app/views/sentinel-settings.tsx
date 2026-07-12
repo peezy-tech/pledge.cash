@@ -77,7 +77,7 @@ export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSett
       {focus.boardroom ? (
         <GovernanceActivity
           boardroom={focus.boardroom}
-          chainId={governanceChainId}
+          chainId={focus.chainId ?? governanceChainId}
           highlightActionHash={focus.actionHash}
         />
       ) : null}
@@ -115,6 +115,11 @@ export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSett
           <SubscriptionSettings
             client={session.client}
             subscription={session.me.subscription}
+            returnHref={focus.returnHref}
+            suggestedBoardroom={focus.boardroom ? {
+              address: focus.boardroom,
+              chainId: focus.chainId ?? governanceChainId,
+            } : undefined}
             onChanged={session.refresh}
           />
         </div>
@@ -123,18 +128,34 @@ export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSett
   );
 }
 
-function notificationFocusFromLocation(): { readonly actionHash?: string; readonly boardroom?: Address } {
-  if (typeof window === "undefined") {
+export function notificationFocusFromLocation(search?: string): {
+  readonly actionHash?: string;
+  readonly boardroom?: Address;
+  readonly chainId?: number;
+  readonly returnHref?: string;
+} {
+  const locationSearch = search ?? (typeof window === "undefined" ? undefined : window.location.search);
+  if (locationSearch === undefined) {
     return {};
   }
 
-  const params = new URLSearchParams(window.location.search);
+  const params = new URLSearchParams(locationSearch);
   const boardroom = normalizedHexParam(params.get("boardroom"), 20);
   const actionHash = normalizedHexParam(params.get("action"), 32);
+  const requestedChainId = Number(params.get("chain"));
+  const chainId = Number.isInteger(requestedChainId) && requestedChainId > 0 ? requestedChainId : undefined;
+  const returnHref = safeReturnHref(params.get("return"));
   return {
     ...(actionHash === undefined ? {} : { actionHash }),
-    ...(boardroom === undefined ? {} : { boardroom: boardroom as Address })
+    ...(boardroom === undefined ? {} : { boardroom: boardroom as Address }),
+    ...(chainId === undefined ? {} : { chainId }),
+    ...(returnHref === undefined ? {} : { returnHref }),
   };
+}
+
+function safeReturnHref(value: string | null): string | undefined {
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return undefined;
+  return value;
 }
 
 function normalizedHexParam(value: string | null, bytes: number): string | undefined {

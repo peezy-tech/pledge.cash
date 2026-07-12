@@ -244,6 +244,7 @@ import type {
 
 import {
   appRouteHref,
+  governanceWatchHref,
   initialRoute,
   primaryDestination,
   projectRouteHref,
@@ -4076,6 +4077,18 @@ export function App(): React.JSX.Element {
       Retry governance
     </Button>
   ) : undefined;
+  const governanceWatchAction = sentinelBaseUrl && appRoute.kind === "project" && appRoute.section === "governance" ? (
+    <ButtonLink
+      href={governanceWatchHref(
+        appRoute.chainId,
+        appRoute.boardroom,
+        projectRouteHref(appRoute.chainId, appRoute.boardroom, "governance"),
+      )}
+      variant="secondary"
+    >
+      Watch governance
+    </ButtonLink>
+  ) : undefined;
   useEffect(() => {
     if (appRoute.kind !== "project" || appRoute.section !== "participate" || !selectedProjectPool) return;
     const pool = swapTokenList.pools.find((candidate) => sameAddress(candidate.address, selectedProjectPool));
@@ -4268,7 +4281,9 @@ export function App(): React.JSX.Element {
                 error={productGovernanceError}
                 holderPower={verifiedBoardroomHolderPower}
                 loading={productBoardroomLoading || productGovernanceLoading}
-                primaryAction={retryGovernanceAction}
+                primaryAction={retryGovernanceAction || governanceWatchAction ? (
+                  <div className="flex flex-wrap gap-2">{retryGovernanceAction}{governanceWatchAction}</div>
+                ) : undefined}
                 queueContent={governanceQueueControls}
                 warning={verifiedProductGovernanceWarning}
               />
