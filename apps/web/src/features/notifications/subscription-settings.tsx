@@ -38,8 +38,8 @@ export function SubscriptionSettings({
   const [error, setError] = useState<string>();
   const [pending, setPending] = useState(false);
   const suggestedWatched = Boolean(suggestedBoardroom
-    && subscription.mode === "explicit"
-    && subscription.boardrooms.some((boardroom) => sameBoardroom(boardroom, suggestedBoardroom)));
+    && mode === "explicit"
+    && boardrooms.some((boardroom) => sameBoardroom(boardroom, suggestedBoardroom)));
   const dirty = useMemo(
     () =>
       mode !== subscription.mode
@@ -96,14 +96,7 @@ export function SubscriptionSettings({
     setPending(true);
     setError(undefined);
     try {
-      const nextBoardrooms = subscription.boardrooms.some((boardroom) => sameBoardroom(boardroom, suggestedBoardroom))
-        ? subscription.boardrooms
-        : [...subscription.boardrooms, suggestedBoardroom];
-      await client.putSubscription({
-        boardrooms: nextBoardrooms,
-        minSeverity: subscription.minSeverity,
-        mode: "explicit",
-      });
+      await client.putSubscription(watchGovernanceSubscriptionDraft({ boardrooms, minSeverity }, suggestedBoardroom));
       await onChanged();
     } catch (error) {
       setError(errorMessage(error));
@@ -140,7 +133,7 @@ export function SubscriptionSettings({
               <Badge variant={suggestedWatched ? "default" : "muted"}>Chain {suggestedBoardroom.chainId.toString()}</Badge>
             </div>
             <div className="mt-1 text-xs"><AddressLink address={suggestedBoardroom.address as Address} /></div>
-            {!suggestedWatched && subscription.mode === "holdings" ? (
+            {!suggestedWatched && mode === "holdings" ? (
               <p className="m-0 mt-2 text-xs leading-5 text-amber-200">
                 Watching switches alert rules from wallet holdings to the explicit project list shown below.
               </p>
@@ -259,6 +252,19 @@ export function SubscriptionSettings({
       </ActionRow>
     </Panel>
   );
+}
+
+export function watchGovernanceSubscriptionDraft(
+  draft: Pick<SubscriptionDto, "boardrooms" | "minSeverity">,
+  suggestedBoardroom: BoardroomRef,
+): Pick<SubscriptionDto, "boardrooms" | "minSeverity" | "mode"> {
+  return {
+    boardrooms: draft.boardrooms.some((boardroom) => sameBoardroom(boardroom, suggestedBoardroom))
+      ? draft.boardrooms
+      : [...draft.boardrooms, suggestedBoardroom],
+    minSeverity: draft.minSeverity,
+    mode: "explicit",
+  };
 }
 
 function sameBoardroom(first: BoardroomRef, second: BoardroomRef): boolean {
