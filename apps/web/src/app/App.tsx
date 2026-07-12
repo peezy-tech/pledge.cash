@@ -4047,6 +4047,7 @@ export function App(): React.JSX.Element {
   const participationContent = exactProjectDashboard ? {
     ...createParticipationFlowContent({
       account: wallet.account,
+      chainId: activeNetwork.chainId,
       dashboard: exactProjectDashboard,
       pendingAction,
       publicClient,

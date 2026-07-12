@@ -41,6 +41,7 @@ export type SubmitParticipationTransaction = (
 
 export type ParticipationFlowContext = {
   account: Address | undefined;
+  chainId: number;
   dashboard: ProductBoardroomDashboardState;
   pendingAction: string | undefined;
   publicClient: PublicClient;

@@ -2,12 +2,14 @@ import {
   ZERO_ADDRESS,
   buildMerkleAirdropClaimTransaction,
   buildMerkleAirdropGrantClaimTransaction,
+  merkleAirdropAbi,
   readMerkleAirdropClaimState,
   type MerkleAirdropGrantClaimTerms,
   type MerkleAirdropState,
 } from "@pledge.cash/sdk";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getAddress, isAddress } from "viem";
+import { formatUnits, getAddress, isAddress, type Hex } from "viem";
+import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { errorMessage } from "../../lib/forms";
@@ -28,6 +30,11 @@ import {
 import { parseBytes32, parseMerkleProof, parseUnsignedInteger, unixWindowStatus } from "./participation-math";
 import type { ParticipationFlowContext } from "./types";
 import { ParticipationActionGuard, type ParticipationActionTicket } from "./action-integrity";
+import {
+  claimTicketFromSearch,
+  parseAirdropClaimTicket,
+  verifyAirdropClaimTicket,
+} from "./airdrop-claim-ticket";
 
 type MerkleAirdropFlowProps = ParticipationFlowContext & {
   distribution: BoardroomDistributionSnapshot;
@@ -59,6 +66,7 @@ const DEFAULT_GRANT_FORM: GrantClaimForm = {
 
 export function MerkleAirdropFlow({
   account,
+  chainId,
   dashboard,
   distribution,
   pendingAction,
@@ -76,6 +84,9 @@ export function MerkleAirdropFlow({
   const [claimed, setClaimed] = useState<boolean>();
   const [claimReadError, setClaimReadError] = useState<string>();
   const [claimLoading, setClaimLoading] = useState(false);
+  const [claimTicketInput, setClaimTicketInput] = useState(() =>
+    typeof window === "undefined" ? "" : claimTicketFromSearch(window.location.search) ?? "");
+  const [claimTicketStatus, setClaimTicketStatus] = useState<{ error?: string; loaded?: string }>({});
   const requestVersion = useRef(0);
 
   const index = useMemo<ParsedValue<bigint>>(() => {
@@ -121,6 +132,48 @@ export function MerkleAirdropFlow({
     actionGuard.activate();
     return () => actionGuard.deactivate();
   }, [actionGuard]);
+
+  const loadClaimTicket = async (): Promise<void> => {
+    setClaimTicketStatus({});
+    try {
+      if (!account) throw new Error("Connect the allocation wallet before loading its claim ticket.");
+      if (!state || shareMetadata?.decimals === undefined) throw new Error("Airdrop state and token decimals must be available first.");
+      const ticket = parseAirdropClaimTicket(claimTicketInput);
+      if (ticket.chainId !== chainId) throw new Error(`This ticket is for chain ${ticket.chainId.toString()}, not chain ${chainId.toString()}.`);
+      if (ticket.airdrop.toLowerCase() !== state.address.toLowerCase()) throw new Error("This ticket belongs to a different airdrop contract.");
+      if (ticket.account.toLowerCase() !== account.toLowerCase()) throw new Error("This ticket belongs to a different wallet.");
+      const leaf = await publicClient.readContract({
+        address: state.address,
+        abi: merkleAirdropAbi,
+        functionName: ticket.mode === "direct" ? "getDirectClaimLeaf" : "getGrantClaimLeaf",
+        args: ticket.mode === "direct"
+          ? [ticket.index, ticket.account, ticket.amount]
+          : [ticket.index, ticket.account, ticket.amount, ticket.grantTerms!],
+      }) as Hex;
+      if (!verifyAirdropClaimTicket(ticket, leaf, state.merkleRoot)) {
+        throw new Error("This ticket does not verify against the airdrop's onchain Merkle root.");
+      }
+      setMode(ticket.mode);
+      setIndexInput(ticket.index.toString());
+      setAmountInput(formatUnits(ticket.amount, shareMetadata.decimals));
+      setProofInput(JSON.stringify(ticket.proof));
+      if (ticket.grantTerms) {
+        setGrantForm({
+          expiry: ticket.grantTerms.expiry.toString(),
+          paymentToken: ticket.grantTerms.paymentToken,
+          price: ticket.grantTerms.price.toString(),
+          salt: ticket.grantTerms.salt,
+          transferable: ticket.grantTerms.transferable,
+          transferUnlockTime: ticket.grantTerms.transferUnlockTime.toString(),
+          vestingCliff: ticket.grantTerms.vestingCliff.toString(),
+          vestingEnd: ticket.grantTerms.vestingEnd.toString(),
+        });
+      }
+      setClaimTicketStatus({ loaded: "Claim ticket verified against the onchain Merkle root and loaded." });
+    } catch (error) {
+      setClaimTicketStatus({ error: errorMessage(error) });
+    }
+  };
 
   const refreshClaimState = useCallback(async (expected?: {
     airdrop: `0x${string}`;
@@ -223,6 +276,26 @@ export function MerkleAirdropFlow({
         title="Claim an airdrop allocation"
         description="Use the index, amount, proof, and optional grant terms supplied by the project. The app checks whether the index is already claimed before opening your wallet."
       />
+      <div className="mt-5 border-y border-zinc-800 py-4">
+        <p className="m-0 text-sm font-semibold text-zinc-100">Load a claim ticket</p>
+        <p className="m-0 mt-1 text-xs leading-5 text-zinc-500">
+          A project can share one chain-bound ticket instead of four separate claim fields. The app verifies its wallet, airdrop, leaf, proof, and onchain root before loading anything.
+        </p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+          <InlineField label="Claim ticket JSON or link payload">
+            <Input
+              aria-label="Airdrop claim ticket"
+              value={claimTicketInput}
+              onChange={(event) => { setClaimTicketInput(event.target.value); setClaimTicketStatus({}); }}
+            />
+          </InlineField>
+          <Button disabled={!claimTicketInput.trim() || claimLoading} variant="secondary" onClick={() => void loadClaimTicket()}>
+            Verify and load
+          </Button>
+        </div>
+        {claimTicketStatus.error ? <p className="m-0 mt-2 text-xs leading-5 text-red-300" role="alert">{claimTicketStatus.error}</p> : null}
+        {claimTicketStatus.loaded ? <p className="m-0 mt-2 text-xs leading-5 text-lime-200" role="status">{claimTicketStatus.loaded}</p> : null}
+      </div>
       <div aria-label="Airdrop claim type" className="mt-5 inline-flex border-b border-zinc-800" role="group">
         {(["direct", "grant"] as const).map((nextMode) => (
           <button
