@@ -28,6 +28,7 @@ import {
 import { AddressLink } from "../src/components/shell";
 import { participationDistributionKey } from "../src/features/participation/types";
 import type { ProductBoardroomCatalogEntry, ProductBoardroomDashboardState } from "../src/lib/product-boardroom";
+import type { ProjectPositionAction, ProjectWalletPosition } from "../src/lib/project-position";
 
 const boardroom = "0x1000000000000000000000000000000000000000" as Address;
 const owner = "0x2000000000000000000000000000000000000000" as Address;
@@ -161,6 +162,23 @@ const holderPower: BoardroomHolderPower = {
   canStartWindDown: true,
 };
 
+const walletPosition: ProjectWalletPosition = {
+  account: owner,
+  boardroom,
+  directBalance: 3_000_000_000_000_000_000n,
+  holderPower,
+  nextGrant: grant,
+  settleableGrantCount: 1,
+  settleableProjectTokens: 500_000_000_000_000_000n,
+  shareToken,
+};
+
+function overviewActionHref(action: ProjectPositionAction): string {
+  return action.kind === "grant"
+    ? `/grants/31337/${action.grant}`
+    : `/projects/31337/atlas/${action.kind}`;
+}
+
 describe("read-first product pages", () => {
   test("filters Explore projects by participation type and search", () => {
     const other = {
@@ -246,19 +264,35 @@ describe("read-first product pages", () => {
       >
         <ProjectOverviewPage
           account={owner}
+          actionHref={overviewActionHref}
           dashboard={dashboard}
           loading={false}
-          onOpenParticipation={() => undefined}
-          participationHref="/projects/31337/atlas/participate"
+          onOpenAction={() => undefined}
+          position={walletPosition}
         />
       </ProjectLayout>,
     );
     expect(overview).toContain("Atlas Cooperative");
-    expect(overview).toContain("What needs attention");
+    expect(overview).toContain("Your position");
+    expect(overview).toContain("3 ATLAS");
+    expect(overview).toContain("0.5 ATLAS");
+    expect(overview).toContain("Veto + wind-down eligible");
     expect(overview).toContain("Holder governance is live");
     expect(overview).toContain("lifetime activity is reconstructed from their onchain event history");
     expect(overview).toContain("Treasury at a glance");
-    expect(overview).toContain('href="/projects/31337/atlas/participate"');
+    expect(overview).toContain(`href="/grants/31337/${grant}"`);
+    expect(overview).not.toContain('href="/projects/31337/atlas/participate"');
+
+    const disconnected = renderToString(
+      <ProjectOverviewPage
+        actionHref={overviewActionHref}
+        dashboard={dashboard}
+        loading={false}
+        onOpenAction={() => undefined}
+      />,
+    );
+    expect(disconnected).toContain("Public project state remains available without a wallet");
+    expect(disconnected).toContain('href="/projects/31337/atlas/participate"');
 
     const partialHistory = renderToString(
       <ProjectLayout
@@ -359,6 +393,31 @@ describe("read-first product pages", () => {
     expect(participate).not.toContain('role="tablist"');
     expect(participate).not.toContain("Review route");
     expect(participate).toContain("Before anything reaches your wallet");
+  });
+
+  test("renders failed wallet position reads as Unknown without hiding the public overview", () => {
+    const failedPosition: ProjectWalletPosition = {
+      account: owner,
+      boardroom,
+      directBalanceError: "balance unavailable",
+      grantError: "grant coverage incomplete",
+      holderPowerError: "history unavailable",
+      shareToken,
+    };
+    const overview = renderToString(
+      <ProjectOverviewPage
+        account={owner}
+        actionHref={overviewActionHref}
+        dashboard={dashboard}
+        loading={false}
+        position={failedPosition}
+      />,
+    );
+
+    expect(overview.match(/Unknown/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(overview).toContain("not treated as zero");
+    expect(overview).toContain("Project state");
+    expect(overview).toContain("Treasury at a glance");
   });
 
   test("uses semantically honest route controls when multiple participation paths exist", () => {

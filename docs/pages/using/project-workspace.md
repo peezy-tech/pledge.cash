@@ -13,9 +13,20 @@ Open a project from [Explore](explore) to begin.
 
 `Overview` answers “what matters now?”
 
-- `What needs attention` adapts to the connected wallet without hiding public state.
+- `Your position` keeps the public overview readable while adding wallet-specific facts after connection: the direct
+  canonical project-token balance, settleable grants denominated in that same project token, and current plus
+  previous-block governance power.
+- The position read is bound to the selected chain, Boardroom, share token, wallet, and deployment. Changing any of
+  them discards the earlier response instead of carrying it into the new project context.
+- A single next action leads to the most relevant verified destination: a settleable grant, holder governance, an
+  active participation route, or Transparency.
 - `Project state` shows Boardroom, owner, project token, lifecycle, native treasury, token supply, open grants, and participation routes.
 - `Treasury at a glance` lists non-share assets held by the Boardroom.
+
+Grant amounts are added only when they use the canonical project token. A grant in another asset remains a separate
+instrument and is never folded into the project-token amount. If a balance, grant, or previous-block power read fails,
+the position shows `Unknown`; it does not substitute zero. Disconnecting the wallet removes the position read without
+hiding public project state.
 
 Use `Refresh` when state may have changed. `Open Studio` provides an operator handoff, but public facts remain separate from controls and an unauthorized wallet sees the section as locked.
 
