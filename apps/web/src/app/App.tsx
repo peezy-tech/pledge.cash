@@ -71,6 +71,7 @@ import {
   type PledgeCashDeployment,
   type QueuedBoardroomAction,
 } from "@pledge.cash/sdk";
+import { Star } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Hex, PublicClient, WalletClient } from "viem";
 import { TransactionReview } from "../components/transaction-review";
@@ -91,6 +92,7 @@ import { AppHeader } from "../features/wallet/app-header";
 import { useActionRunner } from "../hooks/use-action-runner";
 import { useFactorySnapshot } from "../hooks/use-factory-snapshot";
 import { useRuntimeDeployment } from "../hooks/use-runtime-deployment";
+import { useSavedProjects } from "../hooks/use-saved-projects";
 import { useTransactionReview } from "../hooks/use-transaction-review";
 import { useWagmiWallet } from "../hooks/use-wagmi-wallet";
 import { readBoardroomSnapshot } from "../lib/boardroom-snapshot";
@@ -591,8 +593,17 @@ function discoveryLoadedForWallet(discovery: DiscoverySnapshot, account: Address
 export function App(): React.JSX.Element {
   const { pendingAction, pushLog, runAction: runUnscopedAction } = useActionRunner();
   const { approveReview, cancelReview, requestReview, review } = useTransactionReview();
+  const savedProjects = useSavedProjects();
   const [selectedChainId, setSelectedChainId] = useState(() => initialSelectedNetwork().chainId);
   const activeNetwork = useMemo(() => networkForChainId(selectedChainId), [selectedChainId]);
+  const activeSavedProjects = useMemo(
+    () => savedProjects.projects.filter((project) => project.chainId === activeNetwork.chainId),
+    [activeNetwork.chainId, savedProjects.projects],
+  );
+  const activeSavedProjectAddresses = useMemo(
+    () => new Set(activeSavedProjects.map((project) => project.boardroom.toLowerCase())),
+    [activeSavedProjects],
+  );
   const networkRequestVersion = useRef(0);
   const ammReadCoordinatorRef = useRef(new AmmReadCoordinator());
   const ammTokenLoadAbortControllerRef = useRef<AbortController | undefined>(undefined);
@@ -3649,6 +3660,8 @@ export function App(): React.JSX.Element {
   );
 
   const exactProjectCatalogEntry = exactProjectDashboard?.catalog.find((entry) => sameAddress(entry.address, exactProjectDashboard.address));
+  const exactProjectIsSaved = appRoute.kind === "project"
+    && savedProjects.isSaved(appRoute.chainId, appRoute.boardroom);
   const activeRouteTitle = contextualAppRouteTitle(
     appRoute,
     exactProjectCatalogEntry?.name ?? exactProjectCatalogEntry?.symbol,
@@ -4140,7 +4153,16 @@ export function App(): React.JSX.Element {
             onLoadMore={() => void loadMoreProductBoardrooms()}
             onOpenProject={(project) => navigateRoute({ kind: "project", chainId: activeNetwork.chainId, boardroom: project.address, section: "overview" })}
             onRetry={() => void loadProductBoardroom()}
+            onToggleSaved={(project) => savedProjects.toggle({
+              boardroom: project.address,
+              chainId: activeNetwork.chainId,
+              ...(project.name ? { name: project.name } : {}),
+              ...(project.symbol ? { symbol: project.symbol } : {}),
+            })}
             projectHref={(project) => projectRouteHref(activeNetwork.chainId, project.address)}
+            savedProjectAddresses={activeSavedProjectAddresses}
+            savedProjectCount={activeSavedProjects.length}
+            savedProjectsWarning={savedProjects.warning}
           />
         );
       case "project": {
@@ -4165,8 +4187,23 @@ export function App(): React.JSX.Element {
             dashboard={exactProjectDashboard}
             error={productBoardroomError}
             loading={productBoardroomLoading}
-            mastheadAction={
-              exactProjectDashboard ? (
+            mastheadAction={exactProjectDashboard ? (
+              <>
+                <Button
+                  aria-label={exactProjectIsSaved ? "Remove project from saved projects" : "Save project"}
+                  aria-pressed={exactProjectIsSaved}
+                  title={exactProjectIsSaved ? "Remove from saved projects" : "Save project"}
+                  variant="secondary"
+                  onClick={() => savedProjects.toggle({
+                    boardroom: appRoute.boardroom,
+                    chainId: appRoute.chainId,
+                    ...(exactProjectCatalogEntry?.name ? { name: exactProjectCatalogEntry.name } : {}),
+                    ...(exactProjectCatalogEntry?.symbol ? { symbol: exactProjectCatalogEntry.symbol } : {}),
+                  })}
+                >
+                  <Star className={exactProjectIsSaved ? "h-4 w-4 fill-current text-lime-200" : "h-4 w-4"} />
+                  {exactProjectIsSaved ? "Saved" : "Save project"}
+                </Button>
                 <ButtonLink
                   href={appRouteHref({ kind: "studio-project", chainId: appRoute.chainId, boardroom: appRoute.boardroom, section: "setup" })}
                   variant="secondary"
@@ -4178,8 +4215,8 @@ export function App(): React.JSX.Element {
                 >
                   Open Studio
                 </ButtonLink>
-              ) : undefined
-            }
+              </>
+            ) : undefined}
             onNavigateSection={(section) => navigateRoute({ kind: "project", chainId: appRoute.chainId, boardroom: appRoute.boardroom, section })}
             onRetry={() => void loadProductBoardroom(appRoute.boardroom)}
             sectionHref={(section) => projectRouteHref(appRoute.chainId, appRoute.boardroom, section)}
@@ -4234,7 +4271,16 @@ export function App(): React.JSX.Element {
             error={discovery.errors.length ? discovery.errors.join(" ") : undefined}
             loading={Boolean(discoveryPendingAction)}
             refreshAction={wallet.account ? <Button variant="secondary" onClick={() => void runAction("scan-wallet-access", scanWalletAccess)}>Refresh portfolio</Button> : undefined}
+            savedProjectHref={(project) => projectRouteHref(project.chainId, project.boardroom)}
+            savedProjects={activeSavedProjects}
+            savedProjectsWarning={savedProjects.warning}
             tasks={portfolioTasks}
+            onOpenSavedProject={(project) => navigateRoute({
+              kind: "project",
+              chainId: project.chainId,
+              boardroom: project.boardroom,
+              section: "overview",
+            })}
           />
         );
       case "grant":

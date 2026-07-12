@@ -1,8 +1,10 @@
 import type { Address } from "@pledge.cash/sdk";
-import { AlertTriangle, CheckCircle2, Circle, WalletCards } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, Circle, Star, WalletCards } from "lucide-react";
 import type { ReactNode } from "react";
 import { AddressLink } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
+import { shortAddress } from "../../lib/forms";
+import type { SavedProject } from "../../lib/saved-projects";
 import { PageHeading, PageNotice, RuledSection, SectionHeading } from "./page-primitives";
 
 export type PortfolioTaskStatus = "attention" | "ready" | "informational" | "complete";
@@ -23,6 +25,10 @@ export type PortfolioPageProps = {
   error?: string | undefined;
   loading: boolean;
   refreshAction?: ReactNode;
+  onOpenSavedProject?: ((project: SavedProject) => void) | undefined;
+  savedProjectHref?: ((project: SavedProject) => string) | undefined;
+  savedProjects?: readonly SavedProject[] | undefined;
+  savedProjectsWarning?: string | undefined;
   summaryContent?: ReactNode;
   tasks: readonly PortfolioTask[];
 };
@@ -33,7 +39,11 @@ export function PortfolioPage({
   discoveryContent,
   error,
   loading,
+  onOpenSavedProject,
   refreshAction,
+  savedProjectHref,
+  savedProjects = [],
+  savedProjectsWarning,
   summaryContent,
   tasks,
 }: PortfolioPageProps): React.JSX.Element {
@@ -76,6 +86,37 @@ export function PortfolioPage({
         )}
       </RuledSection>
 
+      <RuledSection>
+        <SectionHeading
+          title="Saved projects"
+          description="Browser-saved project links for this network. Saving does not connect a wallet, subscribe to alerts, or change onchain state."
+        />
+        {savedProjectsWarning ? (
+          <div className="mt-4">
+            <PageNotice title="Saved projects could not be restored" tone="warning">
+              {savedProjectsWarning}
+            </PageNotice>
+          </div>
+        ) : null}
+        {savedProjects.length === 0 ? (
+          <div className="mt-4 border-y border-zinc-800 py-5">
+            <div className="flex items-center gap-2 text-zinc-300"><Star className="h-4 w-4" /><span className="text-sm font-semibold">No saved projects on this network</span></div>
+            <p className="m-0 mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Save a project from Explore or its project header to keep a browser-persistent shortcut here.</p>
+          </div>
+        ) : (
+          <ol className="m-0 mt-4 list-none border-t border-zinc-800 p-0">
+            {savedProjects.map((project) => (
+              <SavedProjectRow
+                href={savedProjectHref?.(project)}
+                key={`${project.chainId.toString()}:${project.boardroom}`}
+                onOpen={onOpenSavedProject ? () => onOpenSavedProject(project) : undefined}
+                project={project}
+              />
+            ))}
+          </ol>
+        )}
+      </RuledSection>
+
       {summaryContent ? (
         <RuledSection>
           <SectionHeading title="Positions summary" description="A compact read of discovered grants, holdings, and project roles." />
@@ -107,6 +148,49 @@ export function PortfolioPage({
         </footer>
       ) : null}
     </div>
+  );
+}
+
+function SavedProjectRow({
+  href,
+  onOpen,
+  project,
+}: {
+  href?: string | undefined;
+  onOpen?: (() => void) | undefined;
+  project: SavedProject;
+}): React.JSX.Element {
+  const content = (
+    <>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-semibold text-zinc-100">{project.name ?? project.symbol ?? "Saved project"}</span>
+        <span className="mt-1 block truncate text-xs text-zinc-500">
+          {project.symbol ? `${project.symbol} · ` : ""}{shortAddress(project.boardroom)}
+        </span>
+      </span>
+      <ArrowRight className="h-4 w-4 shrink-0 text-zinc-600 transition-transform group-hover:translate-x-0.5 group-hover:text-lime-200" />
+    </>
+  );
+  const className = "group flex min-h-16 w-full items-center justify-between gap-4 border-b border-zinc-800 py-3 text-left transition-colors hover:bg-zinc-900/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-lime-300/70 sm:px-3";
+
+  return (
+    <li>
+      {href ? (
+        <a
+          className={className}
+          href={href}
+          onClick={(event) => {
+            if (!onOpen || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            onOpen();
+          }}
+        >
+          {content}
+        </a>
+      ) : (
+        <button className={className} type="button" onClick={onOpen}>{content}</button>
+      )}
+    </li>
   );
 }
 

@@ -5,7 +5,9 @@ description: Discover wallet-specific grants, project roles, and work that needs
 
 # Use Portfolio
 
-`Portfolio` is the wallet-specific workspace. Public project pages remain available without connecting, but Portfolio needs an address to discover that wallet’s open grants and Boardrooms whose creation event recorded that address as owner.
+`Portfolio` combines browser-saved project shortcuts with wallet-specific work. Saved projects remain readable without
+connecting. An address is required only to discover that wallet’s open grants and Boardrooms whose creation event
+recorded that address as owner.
 
 [Open Portfolio](../../portfolio)
 
@@ -18,6 +20,10 @@ description: Discover wallet-specific grants, project roles, and work that needs
 Connecting is used for discovery and authorization. It does not give pledge.cash custody or project authority.
 
 ## What Portfolio shows
+
+`Saved projects` lists shortcuts saved from Explore or a canonical project header on the selected network. These links
+come from browser storage, not wallet discovery, and remain visible while disconnected. Opening one still performs the
+normal canonical project verification and fresh network reads.
 
 `Needs attention` orders tasks by status:
 
@@ -33,6 +39,7 @@ Choose `Refresh portfolio` after a new grant, settlement, or network update. Ref
 - `Portfolio data is incomplete` means some scan or contract read failed. Review `Discovery details`, correct the network or RPC problem, then refresh.
 - `Nothing needs your wallet right now` means the current scan found no open settlement or operator action. It is not a guarantee that no unscanned contract exists.
 - After switching networks, Portfolio intentionally resets to that network’s discovery scope.
+- Saved projects switch to the selected network as well, but do not depend on the connected wallet.
 
 Grant settlement is available only to the current holder wallet. Grant issuer controls normally require the standalone
 issuer or, for an Active Boardroom, its current owner or executor. During Boardroom wind-down, the app also exposes
