@@ -45,6 +45,7 @@ import {
   readBoardroomHolderPower,
   readFixedPriceSaleState,
   readGrantState,
+  readGrantSettlementQuote,
   readLockedLiquidityState,
   readMerkleAirdropState,
   readMigratingBondingCurveState,
@@ -72,7 +73,7 @@ import {
   type QueuedBoardroomAction,
 } from "@pledge.cash/sdk";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Hex, PublicClient, WalletClient } from "viem";
+import { formatUnits, type Hex, type PublicClient, type WalletClient } from "viem";
 import { TransactionReview } from "../components/transaction-review";
 import { ConnectWalletButton } from "../components/simplekit";
 import { Button, ButtonLink } from "../components/ui/button";
@@ -86,6 +87,7 @@ import {
 } from "../features/capabilities/project-capabilities";
 import type { BoardroomPanelCapabilities } from "../features/boardrooms/boardroom-panel-types";
 import { GovernanceLaunchControl, GovernanceQueue } from "../features/governance";
+import { smartGrantSettlementPlan } from "../features/grants/smart-settlement";
 import { createParticipationFlowContent, participationAmmKey, type ParticipationContentKey } from "../features/participation";
 import { AppHeader } from "../features/wallet/app-header";
 import { useActionRunner } from "../hooks/use-action-runner";
@@ -2418,6 +2420,7 @@ export function App(): React.JSX.Element {
       halted: snapshot.halted,
       closed: snapshot.closed,
       settleable: snapshot.settleable,
+      settlementCost: snapshot.settlementCost,
       tokenMetadata,
       paymentTokenMetadata,
     });
@@ -2474,6 +2477,32 @@ export function App(): React.JSX.Element {
       abi: tokenGrantAbi,
       functionName: "settle",
       args: [amount],
+    });
+  };
+
+  const settleAvailableGrant = async (): Promise<void> => {
+    const account = activeAccount();
+    const grant = selectedGrantAddress();
+    const current = await readGrantState(publicClient, grant);
+    if (!sameAddress(current.holder, account)) throw new Error("Only the current grant holder can settle this grant.");
+    if (current.settleable <= 0n) throw new Error("No vested grant tokens are available to settle.");
+    const quote = await readGrantSettlementQuote(publicClient, grant, current.settleable);
+    if (!sameAddress(quote.holder, account)) throw new Error("The grant holder changed while settlement was being prepared.");
+    const plan = smartGrantSettlementPlan(quote);
+    setSettleAmount(formatUnits(quote.amount, quote.state.tokenDecimals));
+    setPaymentApproval(formatUnits(quote.settlementCost, quote.state.paymentTokenDecimals));
+    if (plan.kind === "approve") {
+      await submitContractTransaction(
+        "Approve exact grant payment",
+        buildErc20Approval({ token: quote.state.paymentToken, spender: grant, amount: plan.amount }),
+      );
+      return;
+    }
+    await submitContractTransaction("Settle all available grant tokens", {
+      address: grant,
+      abi: tokenGrantAbi,
+      functionName: "settle",
+      args: [plan.amount],
     });
   };
 
@@ -3833,6 +3862,7 @@ export function App(): React.JSX.Element {
       loadGrant={loadGrant}
       runAction={runAction}
       settleGrant={settleGrant}
+      settleAvailableGrant={settleAvailableGrant}
       withdrawExpired={withdrawExpired}
     />
   );

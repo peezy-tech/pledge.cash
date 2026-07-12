@@ -26,6 +26,8 @@ Connecting is used for discovery and authorization. It does not give pledge.cash
 
 For a grant, choose `Open grant`. For a Boardroom whose creation event recorded the connected wallet as owner, choose `Open Studio`, then verify the live owner before relying on operator controls. Portfolio does not currently reconcile Boardroom ownership transfers: a transferred-away Boardroom can remain listed, and a transferred-in Boardroom can be absent. `Discovery details` shows what was scanned, the network range, and contracts that could not be read.
 
+On Grant Detail, `Settle available` re-reads the full currently vested amount, exact payment cost, holder balance, and allowance. A paid grant prepares an exact payment approval when needed; after that approval confirms, choose `Settle available` again to prepare settlement. Free or already-approved grants proceed directly to settlement. Both stages still use the normal transaction review and receipt flow.
+
 ## Refresh and recovery
 
 Choose `Refresh portfolio` after a new grant, settlement, or network update. Refreshing does not add Boardroom ownership-transfer tracking. Discovery is bounded and deployment-specific; it is not a universal wallet index or complete historical record.
