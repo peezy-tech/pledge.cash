@@ -3,6 +3,7 @@ import type { Address, PledgeCashReadClient } from "@pledge.cash/sdk";
 import {
   distributionCirculatingShares,
   readFactoryBoardroomPage,
+  readProductBoardroomCatalogEntry,
   readProductBoardroomCatalogPage,
   readProductBoardroomDashboard,
   readProductBoardroomHistories,
@@ -302,6 +303,101 @@ describe("product boardroom runtime discovery", () => {
       symbol: "ATLS",
       treasuryCash: 2_100n * cash,
     });
+  });
+
+  test("prefers exact current pool identity when migration history names a different pool", async () => {
+    const boardroom = "0x1100000000000000000000000000000000000000" as Address;
+    const shareToken = "0x2200000000000000000000000000000000000000" as Address;
+    const quoteToken = "0x3300000000000000000000000000000000000000" as Address;
+    const curve = "0x4400000000000000000000000000000000000000" as Address;
+    const pool = "0x5500000000000000000000000000000000000000" as Address;
+    const historicalPool = "0x5600000000000000000000000000000000000000" as Address;
+    const locker = "0x6600000000000000000000000000000000000000" as Address;
+    const client = {
+      async getBlockNumber() { return 100n; },
+      async getLogs(parameters: { address: Address; event?: { name?: string } }) {
+        switch (parameters.event?.name) {
+          case "BoardroomDistributionRecorded":
+            return [{ args: { distribution: curve }, blockNumber: 1n }];
+          case "CurveMigrated":
+            return [{
+              args: {
+                liquidity: 777n,
+                locker,
+                pool: historicalPool,
+                quoteToBoardroom: 888n,
+                quoteToLiquidity: 999n,
+                sharesToLiquidity: 1_111n,
+              },
+              blockNumber: 2n,
+            }];
+          default:
+            return [];
+        }
+      },
+      async readContract(parameters: { address: Address; functionName: string }) {
+        const { address, functionName } = parameters;
+        if (address === boardroom) {
+          if (functionName === "shareToken") return shareToken;
+          if (functionName === "status") return 0;
+          if (functionName === "issuedDistributionCount") return 1n;
+          if (functionName === "issuedDistributionAt") return curve;
+          if (functionName === "lockedLiquidityCount") return 0n;
+        }
+        if (address === curve) {
+          if (functionName === "factory") return "0x7700000000000000000000000000000000000000";
+          if (functionName === "boardroom") return boardroom;
+          if (functionName === "shareToken") return shareToken;
+          if (functionName === "paymentToken") throw new Error("not a fixed-price sale");
+          if (functionName === "lockedLiquidityFactory") return "0x8800000000000000000000000000000000000000";
+          if (functionName === "quoteToken") return quoteToken;
+          if (functionName === "locker") return locker;
+          if (functionName === "pool") return pool;
+          if (functionName === "saleSupply") return 10_000n;
+          if (functionName === "migrationSupply") return 2_000n;
+          if (functionName === "remainingSaleShares") return 0n;
+          if (functionName === "basePrice") return 1_000_000n;
+          if (functionName === "slope") return 0n;
+          if (functionName === "graduationQuoteTarget") return 5_000_000n;
+          if (functionName === "quoteToLpBps") return 8_000;
+          if (functionName === "startTime" || functionName === "endTime") return 0n;
+          if (functionName === "migrationSalt") return `0x${"00".repeat(32)}`;
+          if (functionName === "curveStatus") return 1;
+          if (functionName === "soldShares") return 10_000n;
+          if (functionName === "quoteReserve") return 0n;
+          if (functionName === "graduationLatched") return true;
+          if (functionName === "canMigrate") return false;
+          if (functionName === "isClosed") return true;
+        }
+        if (address === pool) {
+          if (functionName === "token0") return quoteToken;
+          if (functionName === "token1") return shareToken;
+          if (functionName === "getReserves") return [7_000_000n, 11n * 10n ** 18n, 0] as const;
+        }
+        if (functionName === "symbol") return address === shareToken ? "SHARE" : "QUOTE";
+        if (functionName === "decimals") return address === quoteToken ? 6 : 18;
+        if (functionName === "name") return "Current reserve project";
+        if (functionName === "totalSupply") return 1_000_000n * 10n ** 18n;
+        if (functionName === "balanceOf") return 0n;
+        throw new Error(`Unexpected read: ${functionName} on ${address}`);
+      },
+    };
+
+    const entry = await readProductBoardroomCatalogEntry(client as never, boardroom);
+
+    expect(entry).toMatchObject({
+      pool,
+      poolToken0: quoteToken,
+      poolToken1: shareToken,
+      poolReserve0: 7_000_000n,
+      poolReserve1: 11n * 10n ** 18n,
+      quoteToLiquidity: 999n,
+      shareTokenTotalSupply: 1_000_000n * 10n ** 18n,
+    });
+    expect(entry.poolReserve0).not.toBe(entry.quoteToLiquidity);
+    expect(entry.historyError).toContain("Current pool identity takes precedence");
+    expect(entry.historyError).toContain(historicalPool);
+    expect(entry.historyError).toContain(pool);
   });
 
   test("adapts event scans to RPC range limits without dropping history", async () => {

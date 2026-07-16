@@ -1,4 +1,4 @@
-import { ArrowLeft, Loader2, SearchX } from "lucide-react";
+import { ArrowLeft, BellOff, Loader2, SearchX } from "lucide-react";
 import { Button } from "../../components/ui/button";
 
 export function NotFoundPage({
@@ -44,6 +44,52 @@ export function NotFoundPage({
     </div>
   );
 }
+
+export function AlertsUnavailablePage({
+  onReturn,
+  returnHref,
+}: {
+  onReturn?: () => void;
+  returnHref?: string;
+}): React.JSX.Element {
+  const action = returnHref ? (
+    <a
+      className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-800 bg-zinc-900 px-3 text-sm font-semibold text-zinc-100 transition-colors hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300/70"
+      href={returnHref}
+      onClick={(event) => {
+        if (!onReturn || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        onReturn();
+      }}
+    >
+      <ArrowLeft className="h-4 w-4" />
+      Return to Explore
+    </a>
+  ) : (
+    <Button variant="secondary" onClick={onReturn}>
+      <ArrowLeft className="h-4 w-4" />
+      Return to Explore
+    </Button>
+  );
+
+  return (
+    <div className="grid min-h-[58vh] place-items-center py-12">
+      <div className="max-w-xl text-center">
+        <BellOff className="mx-auto h-8 w-8 text-zinc-600" />
+        <p className="m-0 mt-5 text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">Alerts unavailable</p>
+        <h1 className="m-0 mt-2 text-3xl font-semibold tracking-[-0.025em] text-zinc-50">Sentinel is not configured</h1>
+        <p className="m-0 mt-3 text-sm leading-6 text-zinc-400">
+          This pledge.cash deployment does not have the Sentinel alerts service configured. Read-only product use remains available.
+        </p>
+        <p className="m-0 mt-2 text-sm leading-6 text-zinc-500">
+          Social sign-in is only an identity for alert settings; it never acts as an onchain transaction wallet.
+        </p>
+        <div className="mt-6 flex justify-center">{action}</div>
+      </div>
+    </div>
+  );
+}
+
 export function RedirectState({
   destination,
   message = "Opening the canonical workspace…",

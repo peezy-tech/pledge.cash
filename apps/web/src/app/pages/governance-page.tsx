@@ -1,5 +1,5 @@
 import type { BoardroomHolderPower } from "@pledge.cash/sdk";
-import { Clock3, ShieldCheck, Users } from "lucide-react";
+import { ChevronDown, Clock3, ShieldCheck, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { AddressLink } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
@@ -10,6 +10,8 @@ import { boardroomLifecycle } from "./project-page";
 
 export type GovernancePageProps = {
   activityContent?: ReactNode;
+  alertsAction?: ReactNode;
+  alertsUnavailable?: boolean | undefined;
   dashboard?: ProductBoardroomDashboardState | undefined;
   error?: string | undefined;
   holderPower?: BoardroomHolderPower | undefined;
@@ -22,6 +24,8 @@ export type GovernancePageProps = {
 
 export function GovernancePage({
   activityContent,
+  alertsAction,
+  alertsUnavailable = false,
   dashboard,
   error,
   holderPower,
@@ -65,11 +69,24 @@ export function GovernancePage({
           columns={3}
           items={[
             { label: "Current authority", value: mode.authority },
-            { label: "Owner", value: <AddressLink address={snapshot.owner} /> },
-            { label: "Executor", value: snapshot.launched ? <AddressLink address={snapshot.executor} /> : "Not active" },
-            { label: "Governance delay", value: formatDuration(snapshot.governanceDelay) },
-            { label: "Eligible supply", value: formatTokenAmount(snapshot.governanceEligibleSupply, snapshot.shareTokenMetadata) },
-            { label: "Governance epoch", value: snapshot.governanceEpoch.toString() },
+            {
+              label: "Decision path",
+              value: snapshot.launched ? "Executor queues; holders review" : "Owner acts directly",
+              detail: snapshot.launched ? "Anyone may execute a verified action after the delay." : "Launch permanently switches routine changes to delayed governance.",
+            },
+            { label: "Governance delay", value: formatDuration(snapshot.governanceDelay), detail: `Then ${formatDuration(snapshot.governanceConfig.actionGracePeriod)} to execute before expiry.` },
+            { label: "Eligible supply", value: formatTokenAmount(snapshot.governanceEligibleSupply, snapshot.shareTokenMetadata), detail: "Threshold denominator" },
+            {
+              label: "Queue coverage",
+              value: error ? "Unavailable" : warning ? "Partial" : queueContent ? "Attached" : "Not attached",
+              detail: error
+                ? "Do not conclude that the queue is empty."
+                : warning
+                  ? "Some indexed decisions could not be verified."
+                  : queueContent
+                    ? "Decoded queue content is shown below."
+                    : "Current authority is readable, but queue events are absent.",
+            },
           ]}
         />
       </RuledSection>
@@ -136,7 +153,40 @@ export function GovernancePage({
           <SectionHeading title="Decision history" description="Queued, cancelled, vetoed, and executed governance events." />
           <div className="mt-4">{activityContent}</div>
         </RuledSection>
+      ) : alertsUnavailable ? (
+        <RuledSection>
+          <SectionHeading
+            action={alertsAction}
+            title="Governance alerts unavailable"
+            description="Sentinel activity and delivery controls are not attached to this governance view."
+          />
+          <div className="mt-4">
+            <PageNotice title="Alerts do not affect governance authority">
+              Current authority, thresholds, delay, and queue coverage remain readable above. Alert sign-in is an offchain notification identity and never authorizes transactions.
+            </PageNotice>
+          </div>
+        </RuledSection>
       ) : null}
+
+      <RuledSection>
+        <details className="group">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 py-1 text-sm font-semibold text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300/70">
+            Protocol identifiers
+            <ChevronDown className="h-4 w-4 text-zinc-500 transition-transform group-open:rotate-180" />
+          </summary>
+          <p className="m-0 mt-2 max-w-3xl text-sm leading-6 text-zinc-500">
+            Contract addresses support independent verification without crowding the primary authority and timing summary.
+          </p>
+          <KeyValueList
+            columns={3}
+            items={[
+              { label: "Owner", value: <AddressLink address={snapshot.owner} /> },
+              { label: "Executor", value: snapshot.launched ? <AddressLink address={snapshot.executor} /> : "Not active" },
+              { label: "Governance epoch", value: snapshot.governanceEpoch.toString() },
+            ]}
+          />
+        </details>
+      </RuledSection>
     </>
   );
 }

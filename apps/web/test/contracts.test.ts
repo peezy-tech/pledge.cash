@@ -7,6 +7,7 @@ import {
   addressUrl,
   createPledgeCashNetworks,
   initialSelectedNetwork,
+  networkEnvironmentIdentity,
   networkForChainId,
   persistSelectedNetwork,
   transactionUrl,
@@ -25,6 +26,28 @@ describe("web network profiles", () => {
 
   test("keeps HyperEVM, Monad, and local selectable", () => {
     expect(PLEDGE_CASH_NETWORKS.map((network) => network.chainId)).toEqual([998, 10143, 31337]);
+  });
+
+  test("identifies unseeded Local, Testnet, and Custom environments truthfully", () => {
+    const local = networkEnvironmentIdentity(networkForChainId(LOCAL_ANVIL_CHAIN_ID));
+    const localByChainId = networkEnvironmentIdentity({ chainId: LOCAL_ANVIL_CHAIN_ID, key: "custom" });
+    const localByProfileKey = networkEnvironmentIdentity({ chainId: 42_424, key: "local-anvil" });
+    const testnet = networkEnvironmentIdentity(networkForChainId(998));
+    const customNetwork = createPledgeCashNetworks({
+      VITE_PLEDGE_CASH_CHAIN_ID: "424242",
+      VITE_PLEDGE_CASH_CHAIN_NAME: "Partner chain",
+      VITE_PLEDGE_CASH_RPC_URL: "https://rpc.custom.test",
+    }).find((network) => network.chainId === 424242)!;
+    const custom = networkEnvironmentIdentity(customNetwork);
+
+    for (const localIdentity of [local, localByChainId, localByProfileKey]) {
+      expect(localIdentity).toMatchObject({ kind: "local", label: "Local", hasRealValue: false, resettable: true, seeded: false });
+      expect(localIdentity.description).toContain("Local, resettable");
+      expect(localIdentity.description).toContain("no real value");
+      expect(localIdentity.description).not.toMatch(/seeded|fixtures/i);
+    }
+    expect(testnet).toMatchObject({ kind: "testnet", label: "Testnet", hasRealValue: false });
+    expect(custom).toMatchObject({ kind: "custom", label: "Custom", hasRealValue: undefined });
   });
 
   test("keeps JSON-RPC batches within the strictest configured provider limit", () => {

@@ -70,7 +70,7 @@ export function DeliveryActivity({ client }: DeliveryActivityProps): React.JSX.E
       title="Recent deliveries"
       description="Account-scoped receipts for alerts Sentinel prepared for your delivery channels."
       action={
-        <Button disabled={loading || loadingMore} variant="secondary" onClick={() => void load()}>
+        <Button disabled={loading || loadingMore} type="button" variant="secondary" onClick={() => void load()}>
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           Refresh
         </Button>
@@ -78,11 +78,14 @@ export function DeliveryActivity({ client }: DeliveryActivityProps): React.JSX.E
     >
       {error ? (
         <div className="flex flex-col gap-3 border-t border-red-950 bg-red-950/35 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <p aria-live="polite" className="m-0 text-sm text-red-200">{error}</p>
-          <Button size="sm" variant="ghost" onClick={() => void load()}>Retry</Button>
+          <p className="m-0 text-sm text-red-200" role="alert">{error}</p>
+          <Button size="sm" type="button" variant="ghost" onClick={() => void load()}>Retry</Button>
         </div>
       ) : null}
-      <div aria-busy={loading || loadingMore} aria-live="polite">
+      <p aria-live="polite" className="sr-only" role="status">
+        {loading ? "Loading delivery receipts." : loadingMore ? "Loading earlier delivery receipts." : `${deliveries.length.toString()} delivery receipts shown.`}
+      </p>
+      <div aria-busy={loading || loadingMore}>
         {loading && deliveries.length === 0 ? (
           <p className="m-0 border-t border-zinc-800 p-4 text-sm text-zinc-500">Loading delivery receipts</p>
         ) : deliveries.length === 0 ? (
@@ -101,6 +104,7 @@ export function DeliveryActivity({ client }: DeliveryActivityProps): React.JSX.E
           <Button
             disabled={loading || loadingMore}
             size="sm"
+            type="button"
             variant="ghost"
             onClick={() => void load({ append: true, cursor: nextCursor })}
           >

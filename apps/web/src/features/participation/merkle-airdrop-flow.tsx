@@ -7,8 +7,10 @@ import {
   type MerkleAirdropGrantClaimTerms,
   type MerkleAirdropState,
 } from "@pledge.cash/sdk";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { formatUnits, getAddress, isAddress, type Hex } from "viem";
+import { ActionButton } from "../../components/shell";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
@@ -18,9 +20,7 @@ import type { BoardroomDistributionSnapshot } from "../../lib/types";
 import { cn } from "../../lib/utils";
 import {
   AdvancedFields,
-  AmountField,
   ContractFact,
-  FlowActions,
   FlowError,
   FlowHeading,
   InlineField,
@@ -57,6 +57,16 @@ type GrantClaimForm = {
   vestingEnd: string;
 };
 
+export function claimTicketVerificationControlState(
+  rawTicket: string,
+  verificationPending: boolean,
+): { disabled: boolean; pendingLabel: string | undefined } {
+  return {
+    disabled: !rawTicket.trim() || verificationPending,
+    pendingLabel: verificationPending ? "Verifying claim ticket against the onchain Merkle root" : undefined,
+  };
+}
+
 const DEFAULT_GRANT_FORM: GrantClaimForm = {
   expiry: "",
   paymentToken: ZERO_ADDRESS,
@@ -88,6 +98,7 @@ export function MerkleAirdropFlow({
   const [claimed, setClaimed] = useState<boolean>();
   const [claimReadError, setClaimReadError] = useState<string>();
   const [claimLoading, setClaimLoading] = useState(false);
+  const [claimTicketLoading, setClaimTicketLoading] = useState(false);
   const [claimTicketInput, setClaimTicketInput] = useState(() =>
     typeof window === "undefined" ? "" : claimTicketFromSearch(window.location.search) ?? "");
   const [claimTicketStatus, setClaimTicketStatus] = useState<{ error?: string; loaded?: string }>({});
@@ -149,6 +160,7 @@ export function MerkleAirdropFlow({
 
   const invalidateClaimTicket = (): void => {
     claimTicketGuard.invalidate();
+    setClaimTicketLoading(false);
     setClaimTicketStatus({});
   };
 
@@ -157,8 +169,15 @@ export function MerkleAirdropFlow({
     return () => actionGuard.deactivate();
   }, [actionGuard]);
 
+  useEffect(() => {
+    claimTicketGuard.syncSource(claimTicketSourceIdentity);
+    setClaimTicketLoading(false);
+    setClaimTicketStatus({});
+  }, [claimTicketGuard, claimTicketSourceIdentity]);
+
   const loadClaimTicket = async (): Promise<void> => {
     const request = claimTicketGuard.begin();
+    setClaimTicketLoading(true);
     setClaimTicketStatus({});
     try {
       if (!account) throw new Error("Connect the allocation wallet before loading its claim ticket.");
@@ -211,6 +230,8 @@ export function MerkleAirdropFlow({
     } catch (error) {
       if (!claimTicketGuard.isCurrent(request)) return;
       setClaimTicketStatus({ error: errorMessage(error) });
+    } finally {
+      if (claimTicketGuard.isCurrent(request)) setClaimTicketLoading(false);
     }
   };
 
@@ -279,6 +300,10 @@ export function MerkleAirdropFlow({
   });
   const actionId = mode === "direct" ? "Claim airdrop tokens" : "Claim airdrop grant";
   const actionLabel = mode === "direct" ? "Claim project tokens" : "Create vested grant";
+  const claimIndexErrorId = index.error ? "airdrop-claim-index-error" : undefined;
+  const claimAmountErrorId = amount.error ? "airdrop-claim-amount-error" : undefined;
+  const claimProofErrorId = proof.error ? "airdrop-claim-proof-error" : undefined;
+  const claimBlockerId = blocker || claimReadError ? "airdrop-claim-disabled-reason" : undefined;
 
   const submitClaim = async (): Promise<void> => {
     if (!account || index.value === undefined || amount.value === undefined || proof.value === undefined) {
@@ -308,6 +333,12 @@ export function MerkleAirdropFlow({
     if (actionGuard.isCurrent(actionTicket)) await refreshClaimState(claimedAllocation);
   };
 
+  const submitAirdropClaimForm = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    if (blocker || claimReadError || !account) return;
+    void runAction(actionId, submitClaim);
+  };
+
   return (
     <div className="min-w-0">
       <FlowHeading
@@ -315,26 +346,15 @@ export function MerkleAirdropFlow({
         title="Claim an airdrop allocation"
         description="Use the index, amount, proof, and optional grant terms supplied by the project. The app checks whether the index is already claimed before opening your wallet."
       />
-      <div className="mt-5 border-y border-zinc-800 py-4">
-        <p className="m-0 text-sm font-semibold text-zinc-100">Load a claim ticket</p>
-        <p className="m-0 mt-1 text-xs leading-5 text-zinc-500">
-          A project can share one chain-bound ticket instead of four separate claim fields. The app verifies its wallet, airdrop, leaf, proof, and onchain root before loading anything.
-        </p>
-        <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-          <InlineField label="Claim ticket JSON or link payload">
-            <Input
-              aria-label="Airdrop claim ticket"
-              value={claimTicketInput}
-              onChange={(event) => { invalidateClaimTicket(); setClaimTicketInput(event.target.value); }}
-            />
-          </InlineField>
-          <Button disabled={!claimTicketInput.trim() || claimLoading} variant="secondary" onClick={() => void loadClaimTicket()}>
-            Verify and load
-          </Button>
-        </div>
-        {claimTicketStatus.error ? <p className="m-0 mt-2 text-xs leading-5 text-red-300" role="alert">{claimTicketStatus.error}</p> : null}
-        {verifiedClaimTicketLoaded ? <p className="m-0 mt-2 text-xs leading-5 text-lime-200" role="status">{verifiedClaimTicketLoaded}</p> : null}
-      </div>
+      <ClaimTicketLoadForm
+        error={claimTicketStatus.error}
+        loaded={verifiedClaimTicketLoaded}
+        pending={claimTicketLoading}
+        value={claimTicketInput}
+        onChange={(value) => { invalidateClaimTicket(); setClaimTicketInput(value); }}
+        onSubmit={loadClaimTicket}
+      />
+      <form onSubmit={submitAirdropClaimForm}>
       <div aria-label="Airdrop claim type" className="mt-5 inline-flex border-b border-zinc-800" role="group">
         {(["direct", "grant"] as const).map((nextMode) => (
           <button
@@ -355,19 +375,36 @@ export function MerkleAirdropFlow({
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
         <InlineField label="Claim index">
           <Input
+            aria-describedby={claimIndexErrorId}
+            aria-errormessage={claimIndexErrorId}
+            aria-invalid={Boolean(index.error) || undefined}
             aria-label="Airdrop claim index"
+            id="airdrop-claim-index"
             inputMode="numeric"
             placeholder="0"
             value={indexInput}
             onChange={(event) => { invalidateClaimTicket(); setIndexInput(event.target.value); }}
           />
+          {index.error ? <span className="mt-1 block text-xs leading-5 text-red-300" id={claimIndexErrorId} role="alert">{index.error}</span> : null}
         </InlineField>
-        <AmountField
-          label="Allocated project tokens"
-          onChange={(value) => { invalidateClaimTicket(); setAmountInput(value); }}
-          symbol={shareMetadata?.symbol}
-          value={amountInput}
-        />
+        <InlineField label="Allocated project tokens">
+          <div className="relative">
+            <Input
+              aria-describedby={claimAmountErrorId}
+              aria-errormessage={claimAmountErrorId}
+              aria-invalid={Boolean(amount.error) || undefined}
+              aria-label="Allocated project tokens"
+              autoComplete="off"
+              id="airdrop-claim-amount"
+              inputMode="decimal"
+              placeholder="0.00"
+              value={amountInput}
+              onChange={(event) => { invalidateClaimTicket(); setAmountInput(event.target.value); }}
+            />
+            {shareMetadata?.symbol ? <span className="pointer-events-none absolute inset-y-0 right-3 inline-flex items-center text-xs font-semibold text-zinc-500">{shareMetadata.symbol}</span> : null}
+          </div>
+          {amount.error ? <span className="mt-1 block text-xs leading-5 text-red-300" id={claimAmountErrorId} role="alert">{amount.error}</span> : null}
+        </InlineField>
       </div>
 
       <QuoteGrid
@@ -404,16 +441,20 @@ export function MerkleAirdropFlow({
       />
 
       {distribution.error ? <ReadError>{distribution.error}</ReadError> : null}
-      {claimReadError ? <ReadError>{claimReadError}</ReadError> : null}
-      {blocker && !claimReadError ? <FlowError>{blocker}</FlowError> : null}
+      {claimReadError ? <div id={claimBlockerId}><ReadError>{claimReadError}</ReadError></div> : null}
+      {blocker && !claimReadError ? <div id={claimBlockerId}><FlowError>{blocker}</FlowError></div> : null}
 
       <AdvancedFields summary="Proof and claim details">
         <div className="grid gap-4">
           <Label className="text-zinc-400">
             <span>Merkle proof</span>
             <textarea
+              aria-describedby={claimProofErrorId}
+              aria-errormessage={claimProofErrorId}
+              aria-invalid={Boolean(proof.error) || undefined}
               aria-label="Airdrop Merkle proof"
               className="min-h-28 w-full resize-y rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs leading-5 text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-lime-300/70 focus:ring-2 focus:ring-lime-300/10"
+              id="airdrop-claim-proof"
               placeholder={'["0x…", "0x…"] or one proof node per line'}
               value={proofInput}
               onChange={(event) => { invalidateClaimTicket(); setProofInput(event.target.value); }}
@@ -422,6 +463,7 @@ export function MerkleAirdropFlow({
           <p className="m-0 text-xs leading-5 text-zinc-500">
             Proofs are allocation-specific. Paste the exact proof published for this wallet, index, amount, contract, and chain.
           </p>
+          {proof.error ? <p className="m-0 text-xs leading-5 text-red-300" id={claimProofErrorId} role="alert">{proof.error}</p> : null}
           {mode === "grant" ? (
             <GrantClaimFields form={grantForm} onChange={(value) => { invalidateClaimTicket(); setGrantForm(value); }} />
           ) : null}
@@ -432,17 +474,85 @@ export function MerkleAirdropFlow({
         </div>
       </AdvancedFields>
 
-      <FlowActions
-        actionId={actionId}
-        actionLabel={actionLabel}
-        disabled={Boolean(blocker || claimReadError || !account)}
-        onAction={submitClaim}
-        onRefresh={index.value === undefined ? undefined : async () => await refreshClaimState()}
-        pendingAction={pendingAction}
-        refreshLabel="Refresh claim status"
-        runAction={runAction}
-      />
+      <div className="mt-5 flex flex-wrap items-center gap-2">
+        <ActionButton
+          actionId={actionId}
+          aria-describedby={claimBlockerId}
+          disabled={Boolean(blocker || claimReadError || !account)}
+          pendingAction={pendingAction}
+          pendingLabel={mode === "direct" ? "Submitting the exact airdrop token claim" : "Submitting the exact vested-grant claim"}
+          type="submit"
+        >
+          {actionLabel}
+        </ActionButton>
+        {index.value === undefined ? null : (
+          <ActionButton
+            actionId="Refresh claim status"
+            pendingAction={pendingAction}
+            pendingLabel="Refreshing the onchain claim-index status"
+            type="button"
+            variant="secondary"
+            onClick={() => void runAction("Refresh claim status", async () => await refreshClaimState())}
+          >
+            <RefreshCw className="h-4 w-4" />
+            Refresh claim status
+          </ActionButton>
+        )}
+      </div>
+      </form>
     </div>
+  );
+}
+
+export function ClaimTicketLoadForm({
+  error,
+  loaded,
+  onChange,
+  onSubmit,
+  pending,
+  value,
+}: {
+  error?: string | undefined;
+  loaded?: string | undefined;
+  onChange: (value: string) => void;
+  onSubmit: () => Promise<void> | void;
+  pending: boolean;
+  value: string;
+}): React.JSX.Element {
+  const control = claimTicketVerificationControlState(value, pending);
+  const errorId = error ? "airdrop-claim-ticket-error" : undefined;
+  const submit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    if (control.disabled) return;
+    void onSubmit();
+  };
+
+  return (
+    <form className="mt-5 border-y border-zinc-800 py-4" onSubmit={submit}>
+      <p className="m-0 text-sm font-semibold text-zinc-100">Load a claim ticket</p>
+      <p className="m-0 mt-1 text-xs leading-5 text-zinc-500">
+        A project can share one chain-bound ticket instead of four separate claim fields. The app verifies its wallet, airdrop, leaf, proof, and onchain root before loading anything.
+      </p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+        <InlineField label="Claim ticket JSON or link payload">
+          <Input
+            aria-describedby={errorId}
+            aria-errormessage={errorId}
+            aria-invalid={Boolean(error) || undefined}
+            aria-label="Airdrop claim ticket"
+            id="airdrop-claim-ticket"
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+          />
+        </InlineField>
+        <Button aria-busy={pending || undefined} disabled={control.disabled} type="submit" variant="secondary">
+          Verify and load
+        </Button>
+      </div>
+      {control.pendingLabel ? <p aria-live="polite" className="sr-only" role="status">{control.pendingLabel}</p> : null}
+      {error ? <p className="m-0 mt-2 text-xs leading-5 text-red-300" id={errorId} role="alert">{error}</p> : null}
+      {loaded ? <p className="m-0 mt-2 text-xs leading-5 text-lime-200" role="status">{loaded}</p> : null}
+    </form>
   );
 }
 

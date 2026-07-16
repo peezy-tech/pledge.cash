@@ -4,9 +4,9 @@ import type { Address } from "@pledge.cash/sdk";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { ExploreMarketMetrics, ExploreNetworkSummary } from "../../features/market";
 import { shortAddress } from "../../lib/forms";
 import type { ProductBoardroomCatalogEntry } from "../../lib/product-boardroom";
-import { formatTokenAmount } from "../../lib/token-amounts";
 import { cn } from "../../lib/utils";
 import { PageHeading, PageNotice, RuledSection, SectionHeading } from "./page-primitives";
 
@@ -97,9 +97,10 @@ export function ExplorePage({
     <div className="grid gap-0">
       <PageHeading
         eyebrow="Explore"
-        title="Project directory"
-        description={`Boardrooms discovered on ${chainName}. Open any project to inspect its treasury, participation paths, governance, and onchain evidence.`}
+        title="Project directory: markets and live routes"
+        description={`Browse ${chainName} without a wallet. Inspect current participation status, quote-token prices, liquidity, project contracts, treasury evidence, and governance before deciding whether to connect.`}
       />
+      <ExploreNetworkSummary projects={projects} totalProjects={totalProjects} />
 
       <RuledSection>
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
@@ -149,8 +150,8 @@ export function ExplorePage({
 
       <RuledSection>
         <SectionHeading
-          title="Projects"
-          description="Each project summary links to its canonical workspace. The star saves a browser shortcut; status and amounts still come from the selected network."
+          title="Compare projects"
+          description="Rows lead with route liveness and quote-token-denominated market facts. Unknown values show why they are unknown; the star only saves a browser shortcut."
         />
         {error ? (
           <div className="mt-4">
@@ -323,32 +324,36 @@ function ProjectDirectoryRow({
 }): React.JSX.Element {
   const content = (
     <>
-      <div className="col-span-4 min-w-0 lg:col-span-1">
+      <div className="min-w-0 pr-14 sm:pr-12">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="truncate text-base font-semibold text-zinc-50">{project.name ?? project.symbol ?? "Untitled project"}</span>
+          <span className="whitespace-normal [overflow-wrap:anywhere] text-base font-semibold text-[var(--pc-text)]">
+            {project.name ?? project.symbol ?? "Untitled project"}
+          </span>
           <Badge variant={active ? "default" : project.error ? "danger" : "muted"}>
             {active ? "Open" : project.error ? "Read issue" : project.status ?? "Discovered"}
           </Badge>
           {saved ? <Badge variant="muted">Saved</Badge> : null}
           {project.historyError ? <Badge variant="danger">Partial history</Badge> : null}
         </div>
-        <p className="m-0 mt-1 truncate text-xs text-zinc-500">
+        <p className="m-0 mt-1 text-xs leading-5 text-[var(--pc-text-subtle)]">
           {project.symbol ? `${project.symbol} · ` : ""}{shortAddress(project.address)} · {participationLabel(project)}
+          {project.buyerCount === undefined ? "" : ` · Buyers: ${project.buyerCount.toLocaleString()}`}
         </p>
       </div>
-      <DirectoryValue label={allocationMetricLabel(project)} value={formatTokenAmount(project.soldShares, catalogShareMetadata(project))} />
-      <DirectoryValue label="Raised" value={formatTokenAmount(project.cashRaised, catalogCashMetadata(project))} />
-      <DirectoryValue label={participantMetricLabel(project)} value={project.buyerCount === undefined ? "Unknown" : String(project.buyerCount)} />
-      <ArrowRight className="h-4 w-4 shrink-0 text-zinc-600 transition-transform group-hover:translate-x-0.5 group-hover:text-lime-200" />
+      <ExploreMarketMetrics project={project} />
+      <span className="mt-3 flex items-center gap-2 text-xs font-semibold text-[var(--pc-text-muted)]">
+        Open exact project workspace
+        <ArrowRight className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5 group-hover:text-[var(--pc-accent)]" />
+      </span>
     </>
   );
   const className = cn(
-    "group grid w-full min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.7fr)_auto] gap-3 py-4 pr-14 text-left transition-colors hover:bg-zinc-900/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-lime-300/70 sm:px-3 sm:pr-16 lg:grid-cols-[minmax(0,1.5fr)_minmax(110px,0.45fr)_minmax(110px,0.45fr)_minmax(90px,0.35fr)_auto] lg:items-center",
-    active ? "bg-zinc-900/55" : null,
+    "group block w-full min-w-0 space-y-4 py-4 text-left transition-colors hover:bg-[var(--pc-surface-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--pc-accent)] sm:px-3",
+    active ? "bg-[var(--pc-surface-subtle)]" : null,
   );
 
   return (
-    <li className="relative border-b border-zinc-800">
+    <li className="relative border-b border-[var(--pc-border)]" data-mobile-layout="stacked-market-row">
       {href ? (
         <a
           className={className}
@@ -369,8 +374,8 @@ function ProjectDirectoryRow({
           aria-label={saved ? `Remove ${project.name ?? project.symbol ?? "project"} from saved projects` : `Save ${project.name ?? project.symbol ?? "project"}`}
           aria-pressed={saved}
           className={cn(
-            "absolute right-1.5 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300/70 sm:right-2.5",
-            saved ? "text-lime-200" : null,
+            "absolute right-0 top-2 grid h-11 w-11 place-items-center rounded-md text-[var(--pc-text-subtle)] transition-colors hover:bg-[var(--pc-surface-raised)] hover:text-[var(--pc-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--pc-accent)] sm:right-2",
+            saved ? "text-[var(--pc-accent)]" : null,
           )}
           title={saved ? "Remove from saved projects" : "Save project"}
           type="button"
@@ -380,27 +385,6 @@ function ProjectDirectoryRow({
         </button>
       ) : null}
     </li>
-  );
-}
-
-function allocationMetricLabel(project: ProductBoardroomCatalogEntry): string {
-  if (project.distributionKind === "merkle-airdrop") return "Claimed";
-  if (project.distributionKind === "fixed-price-sale" || project.distributionKind === "migrating-bonding-curve") return "Sold";
-  return "Distributed";
-}
-
-function participantMetricLabel(project: ProductBoardroomCatalogEntry): string {
-  if (project.distributionKind === "merkle-airdrop") return "Claimants";
-  if (project.distributionKind === "fixed-price-sale" || project.distributionKind === "migrating-bonding-curve") return "Buyers";
-  return "Participants";
-}
-
-function DirectoryValue({ label, value }: { label: string; value: string }): React.JSX.Element {
-  return (
-    <span className="min-w-0">
-      <span className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-600">{label}</span>
-      <span className="mt-1 block truncate text-sm font-semibold text-zinc-200">{value}</span>
-    </span>
   );
 }
 
@@ -462,24 +446,6 @@ function participationLabel(project: ProductBoardroomCatalogEntry): string {
   if (project.distributionKind === "migrating-bonding-curve") return "Bonding curve";
   if (project.distributionKind === "merkle-airdrop") return "Airdrop";
   return project.path ?? "Boardroom";
-}
-
-function catalogShareMetadata(project: ProductBoardroomCatalogEntry): { address: Address; decimals?: number; symbol?: string } | undefined {
-  if (!project.shareToken) return undefined;
-  return {
-    address: project.shareToken,
-    ...(project.shareTokenDecimals === undefined ? {} : { decimals: project.shareTokenDecimals }),
-    ...(project.symbol === undefined ? {} : { symbol: project.symbol }),
-  };
-}
-
-function catalogCashMetadata(project: ProductBoardroomCatalogEntry): { address: Address; decimals?: number; symbol?: string } | undefined {
-  if (!project.cashToken) return undefined;
-  return {
-    address: project.cashToken,
-    ...(project.cashTokenDecimals === undefined ? {} : { decimals: project.cashTokenDecimals }),
-    ...(project.cashTokenSymbol === undefined ? {} : { symbol: project.cashTokenSymbol }),
-  };
 }
 
 function sameAddress(first: Address, second: Address | undefined): boolean {

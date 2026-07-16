@@ -56,9 +56,12 @@ import {
   StatusBadge,
   TextField,
   windDownBlockers,
+  windDownCoverage,
   type BoardroomFact,
 } from "./boardroom-panel-shared";
 import type { BoardroomPanelProps } from "./boardroom-panel-types";
+
+export const WIND_DOWN_IRREVERSIBLE_WARNING = "Starting wind-down is irreversible. It ends normal project operation and turns the obligations below into the cleanup plan required before redemptions can open.";
 
 export function BoardroomPanel({
   section = "all",
@@ -211,8 +214,10 @@ export function BoardroomPanel({
     <div className="grid gap-4">
       {section === "all" || (section === "setup" && !boardroomSnapshot) ? <Panel
         title="Create Boardroom"
+        description="Define the project identity and owner first. Predict the deterministic address before asking the wallet to deploy it."
         action={
           <Button
+            type="button"
             variant="secondary"
             onClick={() => {
               setBoardroomForm((current) => ({ ...current, salt: randomSalt() }));
@@ -234,10 +239,19 @@ export function BoardroomPanel({
           <Field label="Symbol">
             <Input value={boardroomForm.symbol} onChange={(event) => setBoardroomPredictionField("symbol", event.target.value)} />
           </Field>
-          <Field label="Salt">
-            <Input value={boardroomForm.salt} onChange={(event) => setBoardroomPredictionField("salt", event.target.value)} spellCheck={false} />
-          </Field>
         </div>
+        <details className="border-t border-zinc-800 px-4 py-3">
+          <summary className="cursor-pointer text-sm font-medium text-zinc-300">Advanced deterministic deployment</summary>
+          <div className="mt-3">
+            <Field
+              className="border border-zinc-800 md:border-r"
+              description="The bytes32 salt fixes the predicted Boardroom address. Change it only before prediction or deployment."
+              label="Deployment salt"
+            >
+              <Input value={boardroomForm.salt} onChange={(event) => setBoardroomPredictionField("salt", event.target.value)} spellCheck={false} />
+            </Field>
+          </div>
+        </details>
         <ActionRow>
           <ActionButton
             actionId="predict-boardroom"
@@ -285,7 +299,7 @@ export function BoardroomPanel({
         runAction={runAction}
       /> : null}
 
-      {section === "all" || section === "token" ? <Panel title="Boardroom Shares">
+      {section === "all" || section === "token" ? <Panel title="Boardroom Shares" description="Mint project tokens only while direct owner authority is active. Choose the recipient and review the amount before signing.">
         <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2">
           <Field label="Mint recipient">
             <Input value={boardroomMintTo} onChange={(event) => setBoardroomMintTo(event.target.value)} spellCheck={false} />
@@ -336,6 +350,7 @@ export function BoardroomPanel({
             <Button
               aria-pressed={distributionTool === value}
               key={value}
+              type="button"
               variant={distributionTool === value ? "default" : "secondary"}
               onClick={() => setDistributionTool(value)}
             >
@@ -487,6 +502,7 @@ function BoardroomOverview({
   return (
     <Panel
       title="Boardroom Account"
+      description="Load the canonical Boardroom state before using any operator workflow. Address, owner, token, and lifecycle status come from the contract."
       action={
         <ActionButton actionId="load-boardroom" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("load-boardroom", loadBoardroom)}>
           <RefreshCw className="h-4 w-4" />
@@ -641,10 +657,14 @@ function lockedLiquidityFacts(
   ];
 }
 
-function boardroomWindDownFacts(boardroomSnapshot: BoardroomSnapshot | undefined, blockerCount: number): BoardroomFact[] {
+function boardroomWindDownFacts(
+  boardroomSnapshot: BoardroomSnapshot | undefined,
+  blockerCount: number,
+  coverageComplete: boolean,
+): BoardroomFact[] {
   return [
     { label: "Status", value: <StatusBadge label={boardroomStatusLabel(boardroomSnapshot?.status)} tone={boardroomStatusTone(boardroomSnapshot?.status)} /> },
-    { label: "Open blockers", value: String(blockerCount) },
+    { label: "Open blockers", value: coverageComplete ? String(blockerCount) : `${blockerCount.toString()} loaded + unknown` },
     { label: "Redeemable assets", value: String(boardroomSnapshot?.redeemableAssets.length ?? 0) },
   ];
 }
@@ -679,8 +699,9 @@ function BoardroomGrantPanel({
   return (
     <Panel
       title="Issue Share Grant"
+      description="Set the holder, token amount, vesting schedule, and payment terms. Predict the exact grant address before approving or creating it."
       action={
-        <Button variant="secondary" onClick={() => setBoardroomGrantSalt(randomSalt())}>
+        <Button type="button" variant="secondary" onClick={() => setBoardroomGrantSalt(randomSalt())}>
           <Wand2 className="h-4 w-4" />
           Salt
         </Button>
@@ -695,7 +716,7 @@ function BoardroomGrantPanel({
         <TextField description={timestampPreview(boardroomGrantForm.vestingEnd)} form={boardroomGrantForm} field="vestingEnd" inputMode="numeric" label="Vesting end" setForm={setBoardroomGrantForm} />
         <TextField description={timestampPreview(boardroomGrantForm.expiry)} form={boardroomGrantForm} field="expiry" inputMode="numeric" label="Settlement expiry" setForm={setBoardroomGrantForm} />
         <Field label="Transferable">
-          <label className="flex h-10 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-200">
+          <label className="flex min-h-11 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-200">
             <input
               checked={boardroomGrantForm.transferable}
               className="h-4 w-4 accent-lime-300"
@@ -714,8 +735,20 @@ function BoardroomGrantPanel({
           label="Transfer unlock"
           setForm={setBoardroomGrantForm}
         />
-        <TextField form={boardroomGrantForm} field="salt" label="Salt" setForm={setBoardroomGrantForm} className="md:col-span-2" />
       </div>
+      <details className="border-t border-zinc-800 px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium text-zinc-300">Advanced grant identity</summary>
+        <div className="mt-3">
+          <TextField
+            className="border border-zinc-800 md:border-r"
+            description="This bytes32 salt is part of the deterministic grant address and must match any offchain manifest."
+            form={boardroomGrantForm}
+            field="salt"
+            label="Grant salt"
+            setForm={setBoardroomGrantForm}
+          />
+        </div>
+      </details>
       <ActionRow>
         <ActionButton
           actionId="predict-boardroom-grant"
@@ -815,8 +848,9 @@ function FixedPriceSalePanel({
   return (
     <Panel
       title="Fixed-Price Sale"
+      description="Publish a fixed token price, buyer limit, and claim window. Predict first, then create only after the sale terms read as intended."
       action={
-        <Button variant="secondary" onClick={() => setFixedPriceSaleForm((current) => ({ ...current, salt: randomSalt() }))}>
+        <Button type="button" variant="secondary" onClick={() => setFixedPriceSaleForm((current) => ({ ...current, salt: randomSalt() }))}>
           <Wand2 className="h-4 w-4" />
           Salt
         </Button>
@@ -829,8 +863,13 @@ function FixedPriceSalePanel({
         <TextField form={fixedPriceSaleForm} field="maxPerBuyer" inputMode="decimal" label="Max per buyer" setForm={setFixedPriceSaleForm} />
         <TextField description={timestampPreview(fixedPriceSaleForm.startTime, "Starts immediately")} form={fixedPriceSaleForm} field="startTime" inputMode="numeric" label="Sale starts" setForm={setFixedPriceSaleForm} />
         <TextField description={timestampPreview(fixedPriceSaleForm.endTime, "No scheduled end")} form={fixedPriceSaleForm} field="endTime" inputMode="numeric" label="Sale ends" setForm={setFixedPriceSaleForm} />
-        <TextField form={fixedPriceSaleForm} field="salt" label="Salt" setForm={setFixedPriceSaleForm} className="md:col-span-2" />
       </div>
+      <details className="border-t border-zinc-800 px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium text-zinc-300">Advanced sale identity</summary>
+        <div className="mt-3">
+          <TextField className="border border-zinc-800 md:border-r" description="The bytes32 salt fixes the predicted sale address." form={fixedPriceSaleForm} field="salt" label="Sale salt" setForm={setFixedPriceSaleForm} />
+        </div>
+      </details>
       <ActionRow>
         <ActionButton
           actionId="predict-fixed-sale"
@@ -925,21 +964,27 @@ function MerkleAirdropPanel({
   return (
     <Panel
       title="Merkle Airdrop"
+      description="Fund a published allocation root and claim window. Recipients must use proofs that match this exact contract, chain, wallet, and amount."
       action={
-        <Button variant="secondary" onClick={() => setMerkleAirdropForm((current) => ({ ...current, salt: randomSalt() }))}>
+        <Button type="button" variant="secondary" onClick={() => setMerkleAirdropForm((current) => ({ ...current, salt: randomSalt() }))}>
           <Wand2 className="h-4 w-4" />
           Salt
         </Button>
       }
     >
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2">
-        <TextField form={merkleAirdropForm} field="shareAmount" inputMode="decimal" label="Share amount" setForm={setMerkleAirdropForm} />
-        <TextField form={merkleAirdropForm} field="merkleRoot" label="Merkle root" setForm={setMerkleAirdropForm} />
+        <TextField form={merkleAirdropForm} field="shareAmount" inputMode="decimal" label="Project tokens reserved" setForm={setMerkleAirdropForm} />
         <TextField description={timestampPreview(merkleAirdropForm.startTime, "Claims start immediately")} form={merkleAirdropForm} field="startTime" inputMode="numeric" label="Claims start" setForm={setMerkleAirdropForm} />
         <TextField description={timestampPreview(merkleAirdropForm.endTime, "No scheduled end")} form={merkleAirdropForm} field="endTime" inputMode="numeric" label="Claims end" setForm={setMerkleAirdropForm} />
-        <TextField form={merkleAirdropForm} field="maxGrantClaims" inputMode="numeric" label="Grant claim cap" setForm={setMerkleAirdropForm} />
-        <TextField form={merkleAirdropForm} field="salt" label="Salt" setForm={setMerkleAirdropForm} className="md:col-span-2" />
       </div>
+      <details className="border-t border-zinc-800 px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium text-zinc-300">Advanced allocation protocol fields</summary>
+        <div className="mt-3 grid md:grid-cols-2">
+          <TextField description="The published bytes32 root that binds every wallet, index, amount, proof, and optional grant term." form={merkleAirdropForm} field="merkleRoot" label="Merkle root" setForm={setMerkleAirdropForm} />
+          <TextField description="Maximum number of claims that may create vested grants instead of direct token transfers." form={merkleAirdropForm} field="maxGrantClaims" inputMode="numeric" label="Vested-grant claim cap" setForm={setMerkleAirdropForm} />
+          <TextField className="md:col-span-2" description="The bytes32 salt fixes the predicted airdrop address." form={merkleAirdropForm} field="salt" label="Airdrop salt" setForm={setMerkleAirdropForm} />
+        </div>
+      </details>
       <ActionRow>
         <ActionButton
           actionId="predict-merkle-airdrop"
@@ -1038,8 +1083,10 @@ function MigratingCurvePanel({
   return (
     <Panel
       title="Migrating Bonding Curve"
+      description="Configure token discovery and the later liquidity migration as one lifecycle. Review inventory, pricing, graduation, and migration bounds separately."
       action={
         <Button
+          type="button"
           variant="secondary"
           onClick={() => setMigratingCurveForm((current) => ({ ...current, salt: randomSalt(), migrationSalt: randomSalt() }))}
         >
@@ -1048,7 +1095,9 @@ function MigratingCurvePanel({
         </Button>
       }
     >
-      <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2 xl:grid-cols-3">
+      <details className="border-t border-zinc-800 px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium text-zinc-300">Curve pricing and migration protocol fields</summary>
+        <div className="mt-3 grid grid-cols-1 border border-zinc-800 md:grid-cols-2 xl:grid-cols-3">
         <TextField form={migratingCurveForm} field="quoteToken" label="Quote token" setForm={setMigratingCurveForm} />
         <TextField form={migratingCurveForm} field="saleSupply" inputMode="decimal" label="Sale supply" setForm={setMigratingCurveForm} />
         <TextField form={migratingCurveForm} field="migrationSupply" inputMode="decimal" label="Migration supply" setForm={setMigratingCurveForm} />
@@ -1058,9 +1107,10 @@ function MigratingCurvePanel({
         <TextField form={migratingCurveForm} field="quoteToLpBps" inputMode="numeric" label="Quote to LP bps" setForm={setMigratingCurveForm} />
         <TextField description={timestampPreview(migratingCurveForm.startTime, "Trading starts immediately")} form={migratingCurveForm} field="startTime" inputMode="numeric" label="Trading starts" setForm={setMigratingCurveForm} />
         <TextField description={timestampPreview(migratingCurveForm.endTime, "No scheduled end")} form={migratingCurveForm} field="endTime" inputMode="numeric" label="Trading ends" setForm={setMigratingCurveForm} />
-        <TextField form={migratingCurveForm} field="migrationSalt" label="Migration salt" setForm={setMigratingCurveForm} className="xl:col-span-3" />
-        <TextField form={migratingCurveForm} field="salt" label="Curve salt" setForm={setMigratingCurveForm} className="xl:col-span-3" />
-      </div>
+        <TextField description="Bytes32 identity for the deterministic liquidity migration." form={migratingCurveForm} field="migrationSalt" label="Migration salt" setForm={setMigratingCurveForm} className="xl:col-span-3" />
+        <TextField description="Bytes32 identity for the deterministic curve deployment." form={migratingCurveForm} field="salt" label="Curve salt" setForm={setMigratingCurveForm} className="xl:col-span-3" />
+        </div>
+      </details>
       <ActionRow>
         <ActionButton
           actionId="predict-migrating-curve"
@@ -1102,11 +1152,15 @@ function MigratingCurvePanel({
         columns="three"
         items={curveFacts}
       />
-      <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-3">
-        <TextField form={curveMigrationForm} field="minShareLiquidity" inputMode="decimal" label="Min share liquidity" setForm={setCurveMigrationForm} />
-        <TextField form={curveMigrationForm} field="minQuoteLiquidity" inputMode="decimal" label="Min quote liquidity" setForm={setCurveMigrationForm} />
-        <TextField description={timestampPreview(curveMigrationForm.deadline)} form={curveMigrationForm} field="deadline" inputMode="numeric" label="Migration deadline" setForm={setCurveMigrationForm} />
-      </div>
+      <details className="border-t border-zinc-800 px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium text-zinc-300">Migration execution bounds</summary>
+        <p className="m-0 mt-2 text-xs leading-5 text-zinc-500">These minimum outputs and deadline protect the one-time migration transaction from stale liquidity conditions.</p>
+        <div className="mt-3 grid grid-cols-1 border border-zinc-800 md:grid-cols-3">
+          <TextField form={curveMigrationForm} field="minShareLiquidity" inputMode="decimal" label="Minimum project-token liquidity" setForm={setCurveMigrationForm} />
+          <TextField form={curveMigrationForm} field="minQuoteLiquidity" inputMode="decimal" label="Minimum quote-token liquidity" setForm={setCurveMigrationForm} />
+          <TextField description={timestampPreview(curveMigrationForm.deadline)} form={curveMigrationForm} field="deadline" inputMode="numeric" label="Migration deadline" setForm={setCurveMigrationForm} />
+        </div>
+      </details>
       <ActionRow>
         <ActionButton actionId="migrate-curve" disabled={!capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} onClick={() => void runAction("migrate-curve", migrateCurve)}>
           <ShieldCheck className="h-4 w-4" />
@@ -1166,46 +1220,52 @@ function LockedLiquidityPanel({
   return (
     <Panel
       title="Locked Liquidity"
+      description="Seed a locked AMM position with explicit minimums and a deadline. Fees remain manageable while principal exits only during wind-down."
       action={
-        <Button variant="secondary" onClick={() => setLockedLiquidityForm((current) => ({ ...current, salt: randomSalt() }))}>
+        <Button type="button" variant="secondary" onClick={() => setLockedLiquidityForm((current) => ({ ...current, salt: randomSalt() }))}>
           <Wand2 className="h-4 w-4" />
           Salt
         </Button>
       }
     >
-      <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-3">
         <TextField form={lockedLiquidityForm} field="quoteToken" label="Quote token" setForm={setLockedLiquidityForm} />
-        <TextField form={lockedLiquidityForm} field="shareAmountDesired" inputMode="decimal" label="Share desired" setForm={setLockedLiquidityForm} />
-        <TextField form={lockedLiquidityForm} field="quoteAmountDesired" inputMode="decimal" label="Quote desired" setForm={setLockedLiquidityForm} />
-        <TextField form={lockedLiquidityForm} field="shareAmountMin" inputMode="decimal" label="Share minimum" setForm={setLockedLiquidityForm} />
-        <TextField form={lockedLiquidityForm} field="quoteAmountMin" inputMode="decimal" label="Quote minimum" setForm={setLockedLiquidityForm} />
-        <TextField description={timestampPreview(lockedLiquidityForm.deadline)} form={lockedLiquidityForm} field="deadline" inputMode="numeric" label="Creation deadline" setForm={setLockedLiquidityForm} />
-        <Field label="Share token side">
-          <label className="flex h-10 items-center gap-4 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-200">
-            <span className="flex items-center gap-2">
-              <input
-                checked={lockedLiquidityForm.shareTokenSide === "tokenA"}
-                className="h-4 w-4 accent-lime-300"
-                name="shareTokenSide"
-                type="radio"
-                onChange={() => setFormField("shareTokenSide", "tokenA", setLockedLiquidityForm)}
-              />
-              tokenA
-            </span>
-            <span className="flex items-center gap-2">
-              <input
-                checked={lockedLiquidityForm.shareTokenSide === "tokenB"}
-                className="h-4 w-4 accent-lime-300"
-                name="shareTokenSide"
-                type="radio"
-                onChange={() => setFormField("shareTokenSide", "tokenB", setLockedLiquidityForm)}
-              />
-              tokenB
-            </span>
-          </label>
-        </Field>
-        <TextField form={lockedLiquidityForm} field="salt" label="Salt" setForm={setLockedLiquidityForm} className="xl:col-span-2" />
+        <TextField form={lockedLiquidityForm} field="shareAmountDesired" inputMode="decimal" label="Project tokens to deposit" setForm={setLockedLiquidityForm} />
+        <TextField form={lockedLiquidityForm} field="quoteAmountDesired" inputMode="decimal" label="Quote tokens to deposit" setForm={setLockedLiquidityForm} />
       </div>
+      <details className="border-t border-zinc-800 px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium text-zinc-300">Advanced liquidity bounds and pool ordering</summary>
+        <div className="mt-3 grid grid-cols-1 border border-zinc-800 md:grid-cols-2 xl:grid-cols-3">
+          <TextField form={lockedLiquidityForm} field="shareAmountMin" inputMode="decimal" label="Minimum project tokens" setForm={setLockedLiquidityForm} />
+          <TextField form={lockedLiquidityForm} field="quoteAmountMin" inputMode="decimal" label="Minimum quote tokens" setForm={setLockedLiquidityForm} />
+          <TextField description={timestampPreview(lockedLiquidityForm.deadline)} form={lockedLiquidityForm} field="deadline" inputMode="numeric" label="Creation deadline" setForm={setLockedLiquidityForm} />
+          <Field description="Match the project token to the pool factory’s canonical token ordering." label="Project-token side">
+            <div className="flex min-h-11 items-center gap-4 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-200" role="radiogroup" aria-label="Project-token side">
+              <label className="flex min-h-11 items-center gap-2">
+                <input
+                  checked={lockedLiquidityForm.shareTokenSide === "tokenA"}
+                  className="h-4 w-4 accent-lime-300"
+                  name="shareTokenSide"
+                  type="radio"
+                  onChange={() => setFormField("shareTokenSide", "tokenA", setLockedLiquidityForm)}
+                />
+                tokenA
+              </label>
+              <label className="flex min-h-11 items-center gap-2">
+                <input
+                  checked={lockedLiquidityForm.shareTokenSide === "tokenB"}
+                  className="h-4 w-4 accent-lime-300"
+                  name="shareTokenSide"
+                  type="radio"
+                  onChange={() => setFormField("shareTokenSide", "tokenB", setLockedLiquidityForm)}
+                />
+                tokenB
+              </label>
+            </div>
+          </Field>
+          <TextField description="The bytes32 salt fixes the predicted locker address." form={lockedLiquidityForm} field="salt" label="Locker salt" setForm={setLockedLiquidityForm} className="xl:col-span-2" />
+        </div>
+      </details>
       <ActionRow>
         <ActionButton
           actionId="predict-locked-liquidity"
@@ -1247,11 +1307,15 @@ function LockedLiquidityPanel({
         columns="three"
         items={lockerFacts}
       />
-      <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-3">
-        <TextField form={lockedLiquidityExitForm} field="amountAMin" inputMode="decimal" label="Exit amount A min" setForm={setLockedLiquidityExitForm} />
-        <TextField form={lockedLiquidityExitForm} field="amountBMin" inputMode="decimal" label="Exit amount B min" setForm={setLockedLiquidityExitForm} />
-        <TextField description={timestampPreview(lockedLiquidityExitForm.deadline)} form={lockedLiquidityExitForm} field="deadline" inputMode="numeric" label="Exit deadline" setForm={setLockedLiquidityExitForm} />
-      </div>
+      <details className="border-t border-zinc-800 px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium text-zinc-300">Wind-down exit bounds</summary>
+        <p className="m-0 mt-2 text-xs leading-5 text-zinc-500">Set minimum token outputs and a deadline before removing locked liquidity during wind-down.</p>
+        <div className="mt-3 grid grid-cols-1 border border-zinc-800 md:grid-cols-3">
+          <TextField form={lockedLiquidityExitForm} field="amountAMin" inputMode="decimal" label="Minimum token A" setForm={setLockedLiquidityExitForm} />
+          <TextField form={lockedLiquidityExitForm} field="amountBMin" inputMode="decimal" label="Minimum token B" setForm={setLockedLiquidityExitForm} />
+          <TextField description={timestampPreview(lockedLiquidityExitForm.deadline)} form={lockedLiquidityExitForm} field="deadline" inputMode="numeric" label="Exit deadline" setForm={setLockedLiquidityExitForm} />
+        </div>
+      </details>
       <ActionRow>
         <ActionButton actionId="exit-locked-liquidity" disabled={!capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} variant="danger" onClick={() => void runAction("exit-locked-liquidity", exitLockedLiquidity)}>
           <Flame className="h-4 w-4" />
@@ -1263,7 +1327,7 @@ function LockedLiquidityPanel({
   );
 }
 
-function WindDownPanel({
+export function WindDownPanel({
   boardroomSnapshot,
   claimCapability,
   pendingAction,
@@ -1300,15 +1364,46 @@ function WindDownPanel({
 }): React.JSX.Element {
   const blockers = windDownBlockers(boardroomSnapshot);
   const hasBlockers = blockers.length > 0;
+  const coverage = windDownCoverage(boardroomSnapshot);
   const redeemableAssets = boardroomSnapshot?.redeemableAssets ?? [];
-  const windDownFacts = boardroomWindDownFacts(boardroomSnapshot, blockers.length);
+  const windDownFacts = boardroomWindDownFacts(boardroomSnapshot, blockers.length, coverage.complete);
+  const nextSafeAction = windDownNextSafeAction(boardroomSnapshot, hasBlockers, coverage.complete);
+  const startDisabledReason = capabilityReason(startCapability)
+    ?? (boardroomSnapshot?.status === 0 ? undefined : "Wind-down can start only while the Boardroom is active.");
+  const openDisabledReason = capabilityReason(permissionlessCapability)
+    ?? (!coverage.complete
+      ? "Refresh the Boardroom state and retry until grant, distribution, locked-liquidity, and redeemable-asset coverage is complete."
+      : hasBlockers
+        ? "Resolve every loaded grant, distribution, and liquidity blocker before opening redemptions."
+        : boardroomSnapshot?.status === 1 ? undefined : "Redemptions can open only after wind-down has started.");
 
   return (
-    <Panel title="Wind-Down">
+    <Panel title="Wind-Down" description="Move from active operation to cleanup, then open redemptions only after every tracked obligation is resolved.">
       <Facts
         columns="three"
         items={windDownFacts}
       />
+      <div className="border-t border-zinc-800 p-4">
+        <p className="m-0 text-xs font-semibold uppercase tracking-[0.08em] text-lime-200">Next safe action</p>
+        <p className="m-0 mt-1 text-sm font-semibold text-zinc-100">{nextSafeAction.title}</p>
+        <p className="m-0 mt-1 text-xs leading-5 text-zinc-500">{nextSafeAction.detail}</p>
+      </div>
+      {boardroomSnapshot?.status === 0 ? (
+        <p className="m-0 border-t border-red-400/25 bg-red-400/8 p-4 text-sm leading-6 text-red-100">
+          {WIND_DOWN_IRREVERSIBLE_WARNING}
+        </p>
+      ) : null}
+      {!coverage.complete ? (
+        <div aria-live="polite" className="border-t border-amber-400/25 bg-amber-400/8 p-4 text-sm text-amber-100" role="status">
+          <p className="m-0 font-semibold">Obligation coverage is incomplete.</p>
+          <ul className="m-0 mt-2 grid gap-1 pl-5 text-xs leading-5">
+            {coverage.issues.map((issue) => <li key={issue}>{issue}</li>)}
+          </ul>
+          <p className="m-0 mt-2 text-xs leading-5">
+            Loaded blockers remain actionable, but older obligations may be omitted. Refresh the Boardroom state and retry before opening redemptions.
+          </p>
+        </div>
+      ) : null}
       {hasBlockers ? (
         <ol className="grid gap-px border-t border-zinc-800 bg-zinc-800">
           {blockers.map((blocker) => (
@@ -1321,11 +1416,11 @@ function WindDownPanel({
             </li>
           ))}
         </ol>
-      ) : (
-        <p className="m-0 border-t border-zinc-800 p-4 text-sm text-zinc-500">No loaded blockers.</p>
-      )}
+      ) : coverage.complete ? (
+        <p className="m-0 border-t border-zinc-800 p-4 text-sm text-zinc-500">All tracked obligation reads are complete, and no blockers remain.</p>
+      ) : null}
       <ActionRow>
-        <ActionButton actionId="start-wind-down" disabled={boardroomSnapshot?.status !== 0 || !capabilityEnabled(startCapability)} pendingAction={pendingAction} title={capabilityReason(startCapability)} variant="danger" onClick={() => void runAction("start-wind-down", startWindDown)}>
+        <ActionButton actionId="start-wind-down" aria-describedby={startDisabledReason ? "start-wind-down-disabled-reason" : undefined} disabled={boardroomSnapshot?.status !== 0 || !capabilityEnabled(startCapability)} pendingAction={pendingAction} pendingLabel="Starting the irreversible Boardroom wind-down" title={startDisabledReason} type="button" variant="danger" onClick={() => void runAction("start-wind-down", startWindDown)}>
           <Flame className="h-4 w-4" />
           Start Wind-Down
         </ActionButton>
@@ -1333,11 +1428,13 @@ function WindDownPanel({
           <Flame className="h-4 w-4" />
           Burn Treasury Shares
         </ActionButton>
-        <ActionButton actionId="open-redemptions" disabled={hasBlockers || boardroomSnapshot?.status !== 1 || !capabilityEnabled(permissionlessCapability)} pendingAction={pendingAction} title={capabilityReason(permissionlessCapability)} onClick={() => void runAction("open-redemptions", openRedemptions)}>
+        <ActionButton actionId="open-redemptions" aria-describedby={openDisabledReason ? "open-redemptions-disabled-reason" : undefined} disabled={!coverage.complete || hasBlockers || boardroomSnapshot?.status !== 1 || !capabilityEnabled(permissionlessCapability)} pendingAction={pendingAction} pendingLabel="Opening project-token redemptions" title={openDisabledReason} type="button" onClick={() => void runAction("open-redemptions", openRedemptions)}>
           <ShieldCheck className="h-4 w-4" />
           Open Redemptions
         </ActionButton>
       </ActionRow>
+      {startDisabledReason ? <p className="m-0 border-t border-zinc-800 px-4 py-3 text-sm text-amber-200" id="start-wind-down-disabled-reason">{startDisabledReason}</p> : null}
+      {openDisabledReason ? <p className="m-0 border-t border-zinc-800 px-4 py-3 text-sm text-amber-200" id="open-redemptions-disabled-reason">{openDisabledReason}</p> : null}
       {boardroomSnapshot?.status === 0 && hasBlockers ? (
         <p className="m-0 border-t border-amber-400/25 bg-amber-400/8 p-4 text-sm leading-6 text-amber-100">
           Starting wind-down is allowed now. The obligations above become the permissionless cleanup plan and must be closed before redemptions can open.
@@ -1393,6 +1490,37 @@ function WindDownPanel({
   );
 }
 
+function windDownNextSafeAction(
+  boardroomSnapshot: BoardroomSnapshot | undefined,
+  hasBlockers: boolean,
+  coverageComplete: boolean,
+): { detail: string; title: string } {
+  if (!boardroomSnapshot) return {
+    title: "Load the Boardroom state",
+    detail: "Lifecycle and obligation reads must be current before any wind-down transaction is safe to review.",
+  };
+  if (boardroomSnapshot.status === 0) return {
+    title: "Review the irreversible transition",
+    detail: "Starting wind-down is the next lifecycle action; first confirm that normal project operation should end and that every obligation below has an owner.",
+  };
+  if (boardroomSnapshot.status === 1 && !coverageComplete) return {
+    title: "Refresh incomplete obligation coverage",
+    detail: "Keep resolving every loaded blocker, then refresh until all grant, distribution, locked-liquidity, and redeemable-asset records are covered.",
+  };
+  if (boardroomSnapshot.status === 1 && hasBlockers) return {
+    title: "Clear the remaining obligations",
+    detail: "Close, cancel, migrate, exit, or withdraw each loaded blocker before opening redemptions.",
+  };
+  if (boardroomSnapshot.status === 1) return {
+    title: "Open redemptions",
+    detail: "All tracked obligation reads are complete and no blocker remains. Recheck the asset registry, then open project-token redemption.",
+  };
+  return {
+    title: "Process holder redemptions",
+    detail: "Use minimum outputs for each redemption and retry any independently credited asset without burning the holder’s shares again.",
+  };
+}
+
 function capabilityEnabled(capability: Capability | undefined): boolean {
   return capability === undefined || capability.status === "enabled";
 }
@@ -1409,13 +1537,15 @@ function CapabilityNotice({
   capability: Capability | undefined;
   fallback?: Capability | undefined;
 }): React.JSX.Element | null {
-  const blockedCapability = [capability, fallback].find((candidate) =>
-    candidate && candidate.status !== "enabled" && candidate.status !== "hidden" && candidate.reason
-  );
-  if (!blockedCapability?.reason) return null;
+  const reasons = [...new Set(
+    [capability, fallback]
+      .filter((candidate) => candidate && candidate.status !== "enabled" && candidate.status !== "hidden" && candidate.reason)
+      .map((candidate) => candidate!.reason!),
+  )];
+  if (reasons.length === 0) return null;
   return (
-    <p aria-live="polite" className="m-0 border-t border-zinc-800 px-4 py-3 text-sm text-amber-200">
-      {blockedCapability.reason}
-    </p>
+    <div aria-live="polite" className="m-0 grid gap-1 border-t border-zinc-800 px-4 py-3 text-sm text-amber-200">
+      {reasons.map((reason) => <p className="m-0" key={reason}>{reason}</p>)}
+    </div>
   );
 }

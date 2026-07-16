@@ -95,10 +95,14 @@ import {
   type GrantSettlementTicket,
 } from "../features/grants/smart-settlement";
 import { createParticipationFlowContent, participationAmmKey, type ParticipationContentKey } from "../features/participation";
-import { AppHeader } from "../features/wallet/app-header";
+import { AppHeader, type NetworkDeploymentAvailability } from "../features/wallet/app-header";
 import { useActionRunner } from "../hooks/use-action-runner";
 import { useFactorySnapshot } from "../hooks/use-factory-snapshot";
-import { useRuntimeDeployment } from "../hooks/use-runtime-deployment";
+import {
+  useRuntimeDeploymentAvailability,
+  type RuntimeDeploymentAvailability,
+  type RuntimeDeploymentAvailabilityStatus,
+} from "../hooks/use-runtime-deployment";
 import { useSavedProjects } from "../hooks/use-saved-projects";
 import { useTransactionReview } from "../hooks/use-transaction-review";
 import { useWagmiWallet } from "../hooks/use-wagmi-wallet";
@@ -116,10 +120,13 @@ import {
   PLEDGE_CASH_NETWORKS,
   createPledgeCashPublicClient,
   initialSelectedNetwork,
+  networkEnvironmentIdentity,
   networkForChainId,
   persistSelectedNetwork,
   supportedNetworkForChainId,
   syncSelectedNetworkSearch,
+  type PledgeCashEnvironmentIdentity,
+  type PledgeCashNetwork,
 } from "../lib/contracts";
 import {
   addressMapKey,
@@ -272,7 +279,9 @@ import {
 } from "./routing";
 import { DesktopPrimaryNav, MobilePrimaryNav, StudioSectionNav } from "./product-navigation";
 import { confirmedRouteRefreshPlan } from "./confirmed-route-refresh";
+import { exploreSearchHref, exploreSearchState } from "./pages/explore-page";
 import {
+  AlertsUnavailablePage,
   ExplorePage,
   GovernancePage,
   GrantDetailPage,
@@ -603,8 +612,159 @@ function shouldLoadSwapTokens({
   return true;
 }
 
+export function selectedParticipationPool(
+  route: ParticipationContentKey | undefined,
+  projectPools: readonly Address[],
+): Address | undefined {
+  return participationPoolAddress(route, projectPools);
+}
+
+export function studioProjectLiquidityQuote(
+  quote: LiquidityQuoteState,
+  projectPools: readonly Address[],
+): LiquidityQuoteState {
+  if (quote.error) return quote;
+  try {
+    assertProjectPoolAllowed(quote.pool, projectPools, "This liquidity quote");
+    return quote;
+  } catch (error) {
+    return { ...quote, error: errorMessage(error) };
+  }
+}
+
+export function studioProjectRemoveLiquidityQuote(
+  quote: RemoveLiquidityQuoteState,
+  projectPools: readonly Address[],
+): RemoveLiquidityQuoteState {
+  if (quote.error) return quote;
+  try {
+    assertProjectPoolAllowed(quote.position?.pool, projectPools, "This remove-liquidity quote");
+    return quote;
+  } catch (error) {
+    return { ...quote, error: errorMessage(error) };
+  }
+}
+
+export function projectSwapPoolAddresses(
+  dashboard: ProductBoardroomDashboardState | undefined,
+): Address[] {
+  if (!dashboard) return [];
+  const canonicalPoolKeys = new Set(
+    projectPoolAddresses(dashboard).map((address) => address.toLowerCase()),
+  );
+  const candidates = [
+    ...(dashboard.histories ?? []).map((history) => history.pool),
+    ...dashboard.snapshot.lockedLiquiditySummaries.map((locker) => locker.state?.pool),
+    dashboard.history?.pool,
+    dashboard.catalog.find((entry) => sameAddress(entry.address, dashboard.address))?.pool,
+  ];
+  const seen = new Set<string>();
+  const ordered: Address[] = [];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const key = candidate.toLowerCase();
+    if (!canonicalPoolKeys.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    ordered.push(candidate);
+  }
+  return ordered;
+}
+
 function discoveryLoadedForWallet(discovery: DiscoverySnapshot, account: Address | undefined, chainId: number): boolean {
   return Boolean(discovery.loadedFor && sameAddress(discovery.loadedFor, account) && discovery.chainId === chainId);
+}
+
+function RuntimeDeploymentAvailabilityProbe({
+  network,
+  onAvailability,
+}: {
+  network: PledgeCashNetwork;
+  onAvailability: (chainId: number, status: RuntimeDeploymentAvailabilityStatus) => void;
+}): null {
+  const generatedDeployment = useMemo(() => getPledgeCashDeployment(network.chainId), [network.chainId]);
+  const availability = useRuntimeDeploymentAvailability(network.chainId, generatedDeployment);
+
+  useEffect(() => {
+    onAvailability(network.chainId, availability.status);
+  }, [availability.status, network.chainId, onAvailability]);
+
+  return null;
+}
+
+export function EnvironmentDisclosure({
+  environment,
+}: {
+  environment: PledgeCashEnvironmentIdentity;
+}): React.JSX.Element {
+  return (
+    <div
+      aria-label={`${environment.label} environment disclosure`}
+      className="border-b border-[var(--pc-border)] bg-[var(--pc-surface-subtle)] px-4 py-2 text-center text-xs leading-5 text-[var(--pc-text-muted)] sm:px-6"
+      role="note"
+    >
+      <span className="font-semibold text-[var(--pc-text)]">{environment.label} environment.</span>{" "}
+      {environment.description}
+    </div>
+  );
+}
+
+export function DeploymentUnavailablePage({
+  availability,
+  networkName,
+}: {
+  availability: RuntimeDeploymentAvailability;
+  networkName: string;
+}): React.JSX.Element {
+  const pending = availability.status === "pending";
+  const loading = availability.status === "loading";
+  const title = loading
+    ? "Checking deployment availability"
+    : pending
+      ? "Deployment pending"
+      : availability.status === "missing"
+        ? "Deployment not published"
+        : "Deployment unavailable";
+  const reason = availability.reason
+    ?? (loading
+      ? "The deployment artifact is still being checked."
+      : "No usable deployment artifact is available for this network.");
+
+  return (
+    <div className="grid min-h-[58vh] place-items-center py-12">
+      <div className="max-w-2xl text-center">
+        <p className="m-0 text-xs font-semibold uppercase tracking-[0.12em] text-zinc-600">{networkName}</p>
+        <h1 className="m-0 mt-2 text-3xl font-semibold tracking-[-0.025em] text-zinc-50">{title}</h1>
+        <p className="m-0 mt-3 text-sm leading-6 text-zinc-400">{reason}</p>
+        <p className="m-0 mt-2 text-sm leading-6 text-zinc-500">
+          pledge.cash will not run discovery, contract reads, or wallet actions until this network reports a ready deployment.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export function shouldCanonicalizeAppRoute(route: AppRoute): route is CanonicalAppRoute {
+  return isCanonicalAppRoute(route) && route.kind !== "alerts";
+}
+
+export function canonicalAppLocationHref(
+  route: CanonicalAppRoute,
+  location: Pick<Location, "hash" | "search">,
+): string {
+  const canonicalHref = appRouteHref(route);
+  if (route.kind !== "explore") return canonicalHref;
+
+  const canonicalUrl = new URL(canonicalHref, "https://pledge.cash");
+  return exploreSearchHref(
+    canonicalUrl.pathname,
+    canonicalUrl.search,
+    exploreSearchState(location.search),
+    location.hash,
+  );
+}
+
+export function routeRequiresReadyDeployment(route: AppRoute): boolean {
+  return route.kind !== "alerts" && route.kind !== "not-found";
 }
 
 export function App(): React.JSX.Element {
@@ -685,8 +845,23 @@ export function App(): React.JSX.Element {
   const invalidateConfirmedScopedRouteRef = useRef<(route: AppRoute) => Promise<void>>(async () => undefined);
   const transactionContextGuardRef = useRef(new TransactionContextGuard("initial"));
   const publicClient = useMemo(() => createPledgeCashPublicClient(activeNetwork), [activeNetwork]);
-  const generatedDeployment = getPledgeCashDeployment(activeNetwork.chainId);
-  const deployment = useRuntimeDeployment(activeNetwork.chainId, generatedDeployment);
+  const generatedDeployment = useMemo(() => getPledgeCashDeployment(activeNetwork.chainId), [activeNetwork.chainId]);
+  const runtimeDeploymentAvailability = useRuntimeDeploymentAvailability(activeNetwork.chainId, generatedDeployment);
+  const deployment = runtimeDeploymentAvailability.status === "ready"
+    ? runtimeDeploymentAvailability.deployment
+    : undefined;
+  const environment = networkEnvironmentIdentity(activeNetwork);
+  const [networkDeploymentAvailability, setNetworkDeploymentAvailability] = useState<NetworkDeploymentAvailability>(() =>
+    Object.fromEntries(PLEDGE_CASH_NETWORKS.map((network) => [network.chainId, "loading"])),
+  );
+  const reportNetworkDeploymentAvailability = useCallback((chainId: number, status: RuntimeDeploymentAvailabilityStatus): void => {
+    setNetworkDeploymentAvailability((current) => current[chainId] === status
+      ? current
+      : { ...current, [chainId]: status });
+  }, []);
+  useEffect(() => {
+    reportNetworkDeploymentAvailability(activeNetwork.chainId, runtimeDeploymentAvailability.status);
+  }, [activeNetwork.chainId, reportNetworkDeploymentAvailability, runtimeDeploymentAvailability.status]);
   const discoveryDeploymentIdentity = deploymentDiscoveryIdentity(deployment);
   const runtimeDeploymentIdentity = deploymentRuntimeIdentity(deployment);
   const [appRoute, setAppRoute] = useState<AppRoute>(() => initialRoute());
@@ -886,8 +1061,8 @@ export function App(): React.JSX.Element {
         canonicalStudioBoardroom,
       )
     : lockedLiquiditySnapshot;
-  const exactProjectPools = useMemo(() => projectPoolAddresses(exactProjectDashboard), [exactProjectDashboard]);
-  const selectedProjectPool = participationPoolAddress(selectedParticipationRoute, exactProjectPools) ?? exactProjectPools[0];
+  const exactProjectPools = useMemo(() => projectSwapPoolAddresses(exactProjectDashboard), [exactProjectDashboard]);
+  const selectedProjectPool = selectedParticipationPool(selectedParticipationRoute, exactProjectPools);
   const exactProjectPoolRef = useRef<Address | undefined>(selectedProjectPool);
   const studioProjectPoolsRef = useRef<readonly Address[]>(exactProjectPools);
   exactProjectPoolRef.current = selectedProjectPool;
@@ -978,9 +1153,9 @@ export function App(): React.JSX.Element {
   }, [focusRouteContent]);
 
   useEffect(() => {
-    if (!isCanonicalAppRoute(appRoute) || typeof window === "undefined") return;
-    const canonicalHref = appRouteHref(appRoute);
-    if (`${window.location.pathname}${window.location.search}` !== canonicalHref) {
+    if (!shouldCanonicalizeAppRoute(appRoute) || typeof window === "undefined") return;
+    const canonicalHref = canonicalAppLocationHref(appRoute, window.location);
+    if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== canonicalHref) {
       window.history.replaceState({}, "", canonicalHref);
     }
   }, [appRoute]);
@@ -1015,7 +1190,7 @@ export function App(): React.JSX.Element {
     [appRoute, navigateRoute, pushLog],
   );
 
-  const { activeAccount, switchChain, wallet, walletClient } = useWagmiWallet({
+  const { activeAccount, nativeBalance, switchChain, wallet, walletClient } = useWagmiWallet({
     network: activeNetwork,
     onAccountChanged: clearDirectGrantPrediction,
     pushLog,
@@ -2179,7 +2354,14 @@ export function App(): React.JSX.Element {
     const next = await readSwapQuote(publicClient, deployment, swapForm, wallet.account);
     if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
     const route = activeAppRouteRef.current;
-    const expectedPool = route.kind === "project" && route.section === "participate" ? exactProjectPoolRef.current : undefined;
+    const projectParticipationRoute = route.kind === "project" && route.section === "participate";
+    const expectedPool = projectParticipationRoute ? exactProjectPoolRef.current : undefined;
+    if (projectParticipationRoute && !expectedPool) {
+      const message = "Select a live project AMM route before requesting a swap quote.";
+      setSwapQuote({ ...next, error: message });
+      pushLog(message, "error");
+      return;
+    }
     if (expectedPool && (!next.pool || !sameAddress(next.pool.address, expectedPool))) {
       const message = "This quote does not use the project pool. Refresh the project before swapping.";
       setSwapQuote({ ...next, error: message });
@@ -2202,7 +2384,11 @@ export function App(): React.JSX.Element {
     setSwapQuote(next);
     if (next.error) throw new Error(next.error);
     const route = activeAppRouteRef.current;
-    const expectedPool = route.kind === "project" && route.section === "participate" ? exactProjectPoolRef.current : undefined;
+    const projectParticipationRoute = route.kind === "project" && route.section === "participate";
+    const expectedPool = projectParticipationRoute ? exactProjectPoolRef.current : undefined;
+    if (projectParticipationRoute && !expectedPool) {
+      throw new Error("Select a live project AMM route before submitting a swap.");
+    }
     if (expectedPool && (!next.pool || !sameAddress(next.pool.address, expectedPool))) {
       throw new Error("The current quote does not use this project’s AMM pool.");
     }
@@ -2260,10 +2446,14 @@ export function App(): React.JSX.Element {
     ]);
     if (!ammReadCoordinatorRef.current.isCurrent(quoteRequest)
       || !ammReadCoordinatorRef.current.isCurrent(positionRequest)) return;
-    setLiquidityQuote(next);
-    setAmmPosition(position);
-    if (next.error) {
-      pushLog(next.error, next.error.includes("No AMM pool") ? "info" : "error");
+    const route = activeAppRouteRef.current;
+    const presentedQuote = route.kind === "studio-project" && route.section === "liquidity"
+      ? studioProjectLiquidityQuote(next, studioProjectPoolsRef.current)
+      : next;
+    setLiquidityQuote(presentedQuote);
+    if (presentedQuote === next) setAmmPosition(position);
+    if (presentedQuote.error) {
+      pushLog(presentedQuote.error, presentedQuote.error.includes("No AMM pool") ? "info" : "error");
       return;
     }
     pushLog("Loaded liquidity quote", "success");
@@ -2274,12 +2464,13 @@ export function App(): React.JSX.Element {
     assertCurrentAmmRead(request);
     const next = await readLiquidityQuote(publicClient, deployment, liquidityForm, wallet.account);
     assertCurrentAmmRead(request);
-    setLiquidityQuote(next);
-    if (next.error) throw new Error(next.error);
-    if (activeAppRouteRef.current.kind === "studio-project" && activeAppRouteRef.current.section === "liquidity") {
-      assertProjectPoolAllowed(next.pool, studioProjectPoolsRef.current, "This liquidity quote");
-    }
-    return next;
+    const route = activeAppRouteRef.current;
+    const presentedQuote = route.kind === "studio-project" && route.section === "liquidity"
+      ? studioProjectLiquidityQuote(next, studioProjectPoolsRef.current)
+      : next;
+    setLiquidityQuote(presentedQuote);
+    if (presentedQuote.error) throw new Error(presentedQuote.error);
+    return presentedQuote;
   };
 
   const approveLiquidityTokenA = async (): Promise<void> => {
@@ -2343,10 +2534,14 @@ export function App(): React.JSX.Element {
     if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
     const next = await readRemoveLiquidityQuote(publicClient, deployment, liquidityForm, removeLiquidityForm, wallet.account);
     if (!ammReadCoordinatorRef.current.isCurrent(request)) return;
-    setRemoveLiquidityQuote(next);
-    if (next.position) setAmmPosition(next.position);
-    if (next.error) {
-      pushLog(next.error, next.error.includes("No AMM pool") ? "info" : "error");
+    const route = activeAppRouteRef.current;
+    const presentedQuote = route.kind === "studio-project" && route.section === "liquidity"
+      ? studioProjectRemoveLiquidityQuote(next, studioProjectPoolsRef.current)
+      : next;
+    setRemoveLiquidityQuote(presentedQuote);
+    if (presentedQuote.position && presentedQuote === next) setAmmPosition(presentedQuote.position);
+    if (presentedQuote.error) {
+      pushLog(presentedQuote.error, presentedQuote.error.includes("No AMM pool") ? "info" : "error");
       return;
     }
     pushLog("Loaded remove-liquidity quote", "success");
@@ -2357,13 +2552,14 @@ export function App(): React.JSX.Element {
     assertCurrentAmmRead(request);
     const next = await readRemoveLiquidityQuote(publicClient, deployment, liquidityForm, removeLiquidityForm, wallet.account);
     assertCurrentAmmRead(request);
-    setRemoveLiquidityQuote(next);
-    if (next.position) setAmmPosition(next.position);
-    if (next.error) throw new Error(next.error);
-    if (activeAppRouteRef.current.kind === "studio-project" && activeAppRouteRef.current.section === "liquidity") {
-      assertProjectPoolAllowed(next.position?.pool, studioProjectPoolsRef.current, "This remove-liquidity quote");
-    }
-    return next;
+    const route = activeAppRouteRef.current;
+    const presentedQuote = route.kind === "studio-project" && route.section === "liquidity"
+      ? studioProjectRemoveLiquidityQuote(next, studioProjectPoolsRef.current)
+      : next;
+    setRemoveLiquidityQuote(presentedQuote);
+    if (presentedQuote.position && presentedQuote === next) setAmmPosition(presentedQuote.position);
+    if (presentedQuote.error) throw new Error(presentedQuote.error);
+    return presentedQuote;
   };
 
   const approveLpToken = async (): Promise<void> => {
@@ -3918,10 +4114,12 @@ export function App(): React.JSX.Element {
     <Suspense fallback={<div aria-live="polite" className="border-y border-zinc-800 py-6 text-sm text-zinc-500">Loading market tools…</div>}>
     <SwapPanel
       account={wallet.account}
+      actionCapability={routeWalletCapability}
       deployment={deployment}
       form={swapForm}
       liquidityForm={liquidityForm}
       liquidityQuote={liquidityQuote}
+      nativeBalance={nativeBalance.status === "ready" ? nativeBalance.value : undefined}
       position={ammPosition}
       pendingAction={pendingAction}
       quote={swapQuote}
@@ -3949,6 +4147,7 @@ export function App(): React.JSX.Element {
       refreshTokens={loadSwapTokens}
       removeLiquidity={removeLiquidity}
       runAction={runAction}
+      switchWalletNetwork={switchChain}
     />
     </Suspense>
   );
@@ -4212,6 +4411,11 @@ export function App(): React.JSX.Element {
       Watch governance
     </ButtonLink>
   ) : undefined;
+  const alertsUnavailableAction = !sentinelBaseUrl ? (
+    <ButtonLink href={appRouteHref({ kind: "alerts" })} variant="secondary">
+      View alert status
+    </ButtonLink>
+  ) : undefined;
   useEffect(() => {
     if (appRoute.kind !== "project" || appRoute.section !== "participate" || !selectedProjectPool) return;
     const pool = swapTokenList.pools.find((candidate) => sameAddress(candidate.address, selectedProjectPool));
@@ -4305,6 +4509,17 @@ export function App(): React.JSX.Element {
           onReturn={() => navigateRoute({ kind: "explore", chainId: activeNetwork.chainId })}
         />
       );
+    }
+    if (appRoute.kind === "alerts" && !sentinelBaseUrl) {
+      return (
+        <AlertsUnavailablePage
+          returnHref={appRouteHref({ kind: "explore", chainId: activeNetwork.chainId })}
+          onReturn={() => navigateRoute({ kind: "explore", chainId: activeNetwork.chainId })}
+        />
+      );
+    }
+    if (runtimeDeploymentAvailability.status !== "ready" && routeRequiresReadyDeployment(appRoute)) {
+      return <DeploymentUnavailablePage availability={runtimeDeploymentAvailability} networkName={activeNetwork.name} />;
     }
 
     switch (appRoute.kind) {
@@ -4401,6 +4616,7 @@ export function App(): React.JSX.Element {
             ) : undefined}
             onNavigateSection={(section) => navigateRoute({ kind: "project", chainId: appRoute.chainId, boardroom: appRoute.boardroom, section })}
             onRetry={() => void loadProductBoardroom(appRoute.boardroom)}
+            savedProjectsWarning={savedProjects.warning}
             sectionHref={(section) => projectRouteHref(appRoute.chainId, appRoute.boardroom, section)}
           >
             {appRoute.section === "overview" ? (
@@ -4421,12 +4637,20 @@ export function App(): React.JSX.Element {
                 dashboard={exactProjectDashboard}
                 error={productBoardroomError}
                 loading={productBoardroomLoading}
+                poolMarket={{
+                  error: swapTokenList.error,
+                  loaded: swapTokenList.loaded,
+                  loading: swapTokenListLoading,
+                  pools: swapTokenList.pools,
+                }}
                 onSelectRoute={setSelectedParticipationRoute}
                 selectedRoute={selectedParticipationRoute}
               />
             ) : appRoute.section === "governance" ? (
               <GovernancePage
                 activityContent={sentinelBaseUrl ? <GovernanceActivity boardroom={appRoute.boardroom} chainId={appRoute.chainId} /> : undefined}
+                alertsAction={alertsUnavailableAction}
+                alertsUnavailable={!sentinelBaseUrl}
                 dashboard={exactProjectDashboard}
                 error={productGovernanceError}
                 holderPower={verifiedBoardroomHolderPower}
@@ -4442,9 +4666,9 @@ export function App(): React.JSX.Element {
                 chainId={appRoute.chainId}
                 dashboard={exactProjectDashboard}
                 error={productBoardroomError}
-                grantHref={(grant) => appRouteHref({ kind: "grant", chainId: appRoute.chainId, grant })}
+                grantHref={(grant) => appRouteHref(projectGrantRoute(appRoute.chainId, grant, appRoute.boardroom))}
                 loading={productBoardroomLoading}
-                onOpenGrant={(grant) => navigateRoute({ kind: "grant", chainId: appRoute.chainId, grant })}
+                onOpenGrant={(grant) => navigateRoute(projectGrantRoute(appRoute.chainId, grant, appRoute.boardroom))}
               />
             )}
           </ProjectLayout>
@@ -4548,6 +4772,8 @@ export function App(): React.JSX.Element {
           studioAccessNotice
         ) : appRoute.kind === "studio-project" && appRoute.section === "governance" ? (
           <GovernancePage
+            alertsAction={alertsUnavailableAction}
+            alertsUnavailable={!sentinelBaseUrl}
             dashboard={selectedDashboard}
             error={productGovernanceError}
             holderPower={verifiedBoardroomHolderPower}
@@ -4621,6 +4847,13 @@ export function App(): React.JSX.Element {
 
   return (
     <div className="min-h-svh text-[var(--pc-text)]">
+      {PLEDGE_CASH_NETWORKS.filter((network) => network.chainId !== activeNetwork.chainId).map((network) => (
+        <RuntimeDeploymentAvailabilityProbe
+          key={network.chainId}
+          network={network}
+          onAvailability={reportNetworkDeploymentAvailability}
+        />
+      ))}
       <a
         className="fixed left-3 top-3 z-[100] -translate-y-24 rounded-md border border-[var(--pc-border-strong)] bg-[var(--pc-surface-raised)] px-4 py-2 text-sm font-semibold text-[var(--pc-text)] shadow-lg transition-transform focus:translate-y-0 focus:outline-none focus:ring-2 focus:ring-[var(--pc-accent)]"
         href="#app-main-content"
@@ -4635,12 +4868,15 @@ export function App(): React.JSX.Element {
         wallet={wallet}
         chainId={activeNetwork.chainId}
         chainName={activeNetwork.name}
+        environment={environment}
+        networkAvailability={networkDeploymentAvailability}
         networks={PLEDGE_CASH_NETWORKS}
         onNetworkChange={selectNetwork}
         pendingAction={pendingAction}
         runAction={runAction}
         switchChain={switchChain}
       />
+      <EnvironmentDisclosure environment={environment} />
 
       <div className="sticky top-14 z-20 hidden border-b border-[var(--pc-border)] bg-[color:var(--pc-canvas-translucent)] px-5 py-2 backdrop-blur-xl md:block">
         <div className="mx-auto flex w-full max-w-[1240px] items-center justify-between">

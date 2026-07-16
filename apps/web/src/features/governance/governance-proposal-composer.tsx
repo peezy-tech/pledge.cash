@@ -1,6 +1,6 @@
 import { buildBoardroomSetExecutorCall, type Address } from "@pledge.cash/sdk";
 import { ArrowRight, Clock3, ShieldCheck } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { getAddress, isAddress } from "viem";
 import { AddressLink, ActionButton } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
@@ -40,7 +40,11 @@ export function GovernanceProposalComposer({
   now = BigInt(Math.floor(Date.now() / 1_000)),
 }: GovernanceProposalComposerProps): React.JSX.Element {
   const [executorInput, setExecutorInput] = useState("");
+  const inputId = useId();
+  const descriptionId = `${inputId}-description`;
+  const errorId = `${inputId}-error`;
   const error = executorProposalError(executorInput, currentExecutor);
+  const showError = executorInput.trim().length > 0 && Boolean(error);
   const executor = error ? undefined : getAddress(executorInput);
   const call = useMemo(() => executor
     ? buildBoardroomSetExecutorCall({ boardroom, executor })
@@ -57,8 +61,22 @@ export function GovernanceProposalComposer({
   const proposalPending = pendingAction === actionId;
   const disabled = Boolean(error || !view || view.verification !== "verified" || capability.status !== "enabled" || proposalPending);
 
+  const submitProposal = (): void => {
+    if (!executor || disabled) return;
+    const ticket = proposalGuard.capture();
+    const actionGuard = executorProposalActionGuard(proposalGuard, ticket);
+    void runAction(actionId, async () => await queueExecutorChange(executor, actionGuard));
+  };
+
   return (
-    <div className="border-y border-[var(--pc-border)]">
+    <form
+      aria-label="Executor rotation proposal"
+      className="border-y border-[var(--pc-border)]"
+      onSubmit={(event) => {
+        event.preventDefault();
+        submitProposal();
+      }}
+    >
       <div className="grid gap-5 py-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.7fr)]">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -71,17 +89,25 @@ export function GovernanceProposalComposer({
           <p className="m-0 mt-1 max-w-2xl text-sm leading-6 text-[var(--pc-text-muted)]">
             The current executor queues this self-call. It changes authority only after the holder review window and permissionless execution.
           </p>
-          <label className="mt-4 grid max-w-xl gap-1.5 text-xs font-semibold text-[var(--pc-text-muted)]">
-            New executor
+          <div className="mt-4 grid max-w-xl gap-1.5">
+            <label className="text-xs font-semibold text-[var(--pc-text-muted)]" htmlFor={inputId}>New executor</label>
+            <p className="m-0 text-xs leading-5 text-[var(--pc-text-subtle)]" id={descriptionId}>
+              Enter the address that should queue decisions after this proposal is executed.
+            </p>
             <Input
-              aria-invalid={executorInput.length > 0 && Boolean(error)}
+              aria-describedby={`${descriptionId}${showError ? ` ${errorId}` : ""}`}
+              aria-errormessage={showError ? errorId : undefined}
+              aria-invalid={showError || undefined}
+              autoComplete="off"
               disabled={proposalPending}
+              id={inputId}
+              name="executor"
               placeholder="0x..."
               value={executorInput}
               onChange={(event) => setExecutorInput(event.target.value)}
             />
-          </label>
-          {executorInput && error ? <p className="m-0 mt-2 text-xs text-[var(--pc-danger)]" role="alert">{error}</p> : null}
+          </div>
+          {showError ? <p className="m-0 mt-2 text-xs text-[var(--pc-danger)]" id={errorId} role="alert">{error}</p> : null}
           {capability.status !== "enabled" && capability.status !== "hidden" ? (
             <p className="m-0 mt-2 text-xs leading-5 text-[var(--pc-warning)]">{capability.reason ?? "Only the current executor can queue this proposal."}</p>
           ) : null}
@@ -120,18 +146,14 @@ export function GovernanceProposalComposer({
           actionId={actionId}
           disabled={disabled}
           pendingAction={pendingAction}
-          onClick={() => {
-            if (!executor) return;
-            const ticket = proposalGuard.capture();
-            const actionGuard = executorProposalActionGuard(proposalGuard, ticket);
-            void runAction(actionId, async () => await queueExecutorChange(executor, actionGuard));
-          }}
+          pendingLabel="Queueing executor proposal"
+          type="submit"
         >
-          {pendingAction === actionId ? "Queueing" : "Review proposal"}
+          {proposalPending ? "Queueing proposal" : "Review proposal"}
           <ArrowRight className="h-4 w-4" />
         </ActionButton>
       </div>
-    </div>
+    </form>
   );
 }
 

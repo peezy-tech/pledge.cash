@@ -20,6 +20,7 @@ import {
   type BoardroomCatalogSnapshot,
 } from "./boardroom-snapshot";
 import { errorMessage } from "./forms";
+import { currentUnixTimestamp, deriveExecutableDistributionRoute } from "./market-data";
 import { formatNativeTokenAmount, formatTokenAmount } from "./token-amounts";
 import type {
   BoardroomDistributionSnapshot,
@@ -30,6 +31,7 @@ import type {
 
 export type ProductBoardroomCatalogEntry = {
   address: Address;
+  boardroomStatus?: number | undefined;
   buyerCount?: number | undefined;
   buyCount?: number | undefined;
   cashRaised?: bigint | undefined;
@@ -47,11 +49,27 @@ export type ProductBoardroomCatalogEntry = {
   name?: string | undefined;
   path?: string | undefined;
   pool?: Address | undefined;
+  poolError?: string | undefined;
+  poolReserve0?: bigint | undefined;
+  poolReserve1?: bigint | undefined;
+  poolToken0?: Address | undefined;
+  poolToken1?: Address | undefined;
   quoteToBoardroom?: bigint | undefined;
   quoteToLiquidity?: bigint | undefined;
+  routeBuyInventory?: bigint | undefined;
+  routeClaimInventory?: bigint | undefined;
+  routeClosed?: boolean | undefined;
+  routeEndTime?: bigint | undefined;
+  routeGraduationLatched?: boolean | undefined;
+  routeQuoteReserve?: bigint | undefined;
+  routeSellInventory?: bigint | undefined;
+  routeStartTime?: bigint | undefined;
+  routeStatus?: number | undefined;
   sellCount?: number | undefined;
   shareToken?: Address | undefined;
   shareTokenDecimals?: number | undefined;
+  shareTokenTotalSupply?: bigint | undefined;
+  shareTokenTreasuryBalance?: bigint | undefined;
   sharesToLiquidity?: bigint | undefined;
   soldShares?: bigint | undefined;
   status?: string | undefined;
@@ -220,6 +238,15 @@ type CurveHistoryReadResult = {
   history?: ProductBoardroomCurveHistory | undefined;
 };
 
+type CatalogPoolRead =
+  | {
+      reserve0: bigint;
+      reserve1: bigint;
+      token0: Address;
+      token1: Address;
+    }
+  | { error: string };
+
 const CATALOG_READ_CONCURRENCY = 8;
 const DEFAULT_CATALOG_PAGE_SIZE = 4;
 const MAX_CATALOG_PAGE_SIZE = 16;
@@ -263,6 +290,7 @@ export async function readProductBoardroomDashboard(
     activeCatalogEntry?.name ? Promise.resolve(activeCatalogEntry.name) : readOptionalTokenName(client, snapshot.shareToken),
   ]);
   const history = selectPrimaryHistory(histories, catalogIdentity);
+  const currentPool = await readCatalogPool(client, catalogIdentity.pool ?? history?.pool);
   const historyErrors = uniqueMessages([
     hydration.error,
     ...histories.map((entry) => entry.scanError),
@@ -270,10 +298,14 @@ export async function readProductBoardroomDashboard(
   const catalogTreasuryCash = catalogIdentity.cashToken
     ? treasuryAssets.find((asset) => sameAddress(asset.address, catalogIdentity.cashToken))?.balance
     : undefined;
+  const shareTokenAsset = treasuryAssets.find((asset) => sameAddress(asset.address, snapshot.shareToken));
   const freshCatalogEntry = catalogEntryFromSnapshot(snapshot, {
+    currentPool,
     history,
     historyError: historyErrors.length > 0 ? historyErrors.join(" ") : undefined,
     name: shareName,
+    shareTokenTotalSupply: shareTokenAsset?.totalSupply,
+    shareTokenTreasuryBalance: shareTokenAsset?.balance,
     treasuryCash: catalogTreasuryCash,
   });
   const catalog = activeCatalogEntry
@@ -471,12 +503,17 @@ async function readProductBoardroomCatalogEntryWithContext(
 ): Promise<ProductBoardroomCatalogEntry> {
   try {
     const currentSnapshot = await readBoardroomCatalogSnapshot(client, address);
-    const hydration = await hydrateCatalogHistoricalDistributions(client, currentSnapshot, eventScan);
+    const [hydration, boardroomStatus] = await Promise.all([
+      hydrateCatalogHistoricalDistributions(client, currentSnapshot, eventScan),
+      readCatalogBoardroomStatus(client, address),
+    ]);
     const snapshot = hydration.snapshot;
-    const distribution = findCatalogDistribution(snapshot.distributionSummaries);
-    const distributionState = distribution ? deriveDistributionCatalogFields(distribution, snapshot.shareTokenMetadata?.decimals) : {};
+    const distribution = findCatalogDistribution(snapshot.distributionSummaries, boardroomStatus);
+    const distributionState = distribution
+      ? deriveDistributionCatalogFields(distribution, snapshot.shareTokenMetadata?.decimals, boardroomStatus)
+      : {};
     const locker = findCatalogLocker(snapshot, distributionState.pool);
-    const pool = catalogPoolAddress(distributionState, locker);
+    const pool = catalogPoolAddress(distributionState);
     let history: ProductBoardroomHistory | undefined;
     if (distribution) {
       try {
@@ -487,24 +524,33 @@ async function readProductBoardroomCatalogEntryWithContext(
       }
     }
     const cashToken = distributionState.cashToken;
-    const treasuryCash = await readCatalogTreasuryCash(client, address, cashToken);
-    const shareName = await readOptionalTokenName(client, snapshot.shareToken);
+    const [treasuryCash, shareName, shareTokenTotalSupply, shareTokenTreasuryBalance, currentPool] = await Promise.all([
+      readCatalogTreasuryCash(client, address, cashToken),
+      readOptionalTokenName(client, snapshot.shareToken),
+      readOptionalTokenTotalSupply(client, snapshot.shareToken),
+      readOptionalTokenBalance(client, snapshot.shareToken, address),
+      readCatalogPool(client, pool ?? history?.pool),
+    ]);
     const historyErrors = uniqueMessages([hydration.error, history?.scanError]);
 
     return {
       address,
+      boardroomStatus,
       distributionAddresses: snapshot.distributionSummaries.map((entry) => entry.address),
       distributionCount: snapshot.distributionCount,
       name: shareName,
       shareToken: snapshot.shareToken,
       shareTokenDecimals: snapshot.shareTokenMetadata?.decimals,
+      shareTokenTotalSupply,
+      shareTokenTreasuryBalance,
       symbol: snapshot.shareTokenMetadata?.symbol,
       treasuryCash,
       ...distributionState,
       ...catalogHistoryFields(history),
+      ...catalogPoolFields(currentPool),
       ...(historyErrors.length > 0 ? { historyError: historyErrors.join(" ") } : {}),
       locker: catalogLockerAddress(history, distributionState, locker),
-      pool: history?.pool ?? pool,
+      pool: pool ?? history?.pool,
     };
   } catch (error) {
     eventScan.signal?.throwIfAborted();
@@ -517,33 +563,49 @@ async function readProductBoardroomCatalogEntryWithContext(
 }
 
 function catalogEntryFromSnapshot(
-  snapshot: Pick<BoardroomSnapshot, "address" | "distributionSummaries" | "lockedLiquiditySummaries" | "shareToken" | "shareTokenMetadata">,
+  snapshot: Pick<BoardroomSnapshot, "address" | "distributionSummaries" | "lockedLiquiditySummaries" | "shareToken" | "shareTokenMetadata" | "status">,
   additions: {
+    currentPool?: CatalogPoolRead | undefined;
     history?: ProductBoardroomHistory | undefined;
     historyError?: string | undefined;
     name?: string | undefined;
+    shareTokenTotalSupply?: bigint | undefined;
+    shareTokenTreasuryBalance?: bigint | undefined;
     treasuryCash?: bigint | undefined;
   } = {},
 ): ProductBoardroomCatalogEntry {
-  const distribution = findCatalogDistribution(snapshot.distributionSummaries);
-  const distributionState = distribution ? deriveDistributionCatalogFields(distribution, snapshot.shareTokenMetadata?.decimals) : {};
+  const distribution = findCatalogDistribution(snapshot.distributionSummaries, snapshot.status);
+  const distributionState = distribution
+    ? deriveDistributionCatalogFields(distribution, snapshot.shareTokenMetadata?.decimals, snapshot.status)
+    : {};
   const locker = findCatalogLocker(snapshot, distributionState.pool);
-  const pool = catalogPoolAddress(distributionState, locker);
+  const pool = catalogPoolAddress(distributionState);
   return {
     address: snapshot.address,
+    boardroomStatus: snapshot.status,
     distributionAddresses: snapshot.distributionSummaries.map((entry) => entry.address),
     distributionCount: snapshot.distributionSummaries.length,
     name: additions.name,
     shareToken: snapshot.shareToken,
     shareTokenDecimals: snapshot.shareTokenMetadata?.decimals,
+    shareTokenTotalSupply: additions.shareTokenTotalSupply,
+    shareTokenTreasuryBalance: additions.shareTokenTreasuryBalance,
     symbol: snapshot.shareTokenMetadata?.symbol,
     treasuryCash: additions.treasuryCash,
     ...distributionState,
     ...catalogHistoryFields(additions.history),
+    ...catalogPoolFields(additions.currentPool),
     ...(additions.historyError ? { historyError: additions.historyError } : {}),
     locker: catalogLockerAddress(additions.history, distributionState, locker),
-    pool: additions.history?.pool ?? pool,
+    pool: pool ?? additions.history?.pool,
   };
+}
+
+async function readCatalogBoardroomStatus(
+  client: PledgeCashReadClient,
+  boardroom: Address,
+): Promise<number> {
+  return Number(await client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "status" }));
 }
 
 async function readCatalogTreasuryCash(
@@ -560,11 +622,61 @@ async function readCatalogTreasuryCash(
   }) as bigint;
 }
 
+async function readCatalogPool(
+  client: ProductBoardroomClient,
+  pool: Address | undefined,
+): Promise<CatalogPoolRead | undefined> {
+  if (!pool || isZeroAddress(pool)) return undefined;
+  try {
+    const [token0, token1, reserves] = await Promise.all([
+      client.readContract({ address: pool, abi: ammPoolAbi, functionName: "token0" }) as Promise<Address>,
+      client.readContract({ address: pool, abi: ammPoolAbi, functionName: "token1" }) as Promise<Address>,
+      client.readContract({ address: pool, abi: ammPoolAbi, functionName: "getReserves" }) as Promise<readonly [bigint, bigint, number]>,
+    ]);
+    return { token0, token1, reserve0: reserves[0], reserve1: reserves[1] };
+  } catch (error) {
+    return { error: errorMessage(error) };
+  }
+}
+
+async function readOptionalTokenTotalSupply(
+  client: PledgeCashReadClient,
+  token: Address,
+): Promise<bigint | undefined> {
+  try {
+    return await client.readContract({ address: token, abi: erc20Abi, functionName: "totalSupply" }) as bigint;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readOptionalTokenBalance(
+  client: PledgeCashReadClient,
+  token: Address,
+  account: Address,
+): Promise<bigint | undefined> {
+  try {
+    return await client.readContract({ address: token, abi: erc20Abi, functionName: "balanceOf", args: [account] }) as bigint;
+  } catch {
+    return undefined;
+  }
+}
+
+function catalogPoolFields(pool: CatalogPoolRead | undefined): Partial<ProductBoardroomCatalogEntry> {
+  if (!pool) return {};
+  if ("error" in pool) return { poolError: pool.error };
+  return {
+    poolReserve0: pool.reserve0,
+    poolReserve1: pool.reserve1,
+    poolToken0: pool.token0,
+    poolToken1: pool.token1,
+  };
+}
+
 function catalogPoolAddress(
   distributionState: Partial<ProductBoardroomCatalogEntry>,
-  locker: BoardroomLockedLiquiditySnapshot | undefined,
 ): Address | undefined {
-  return distributionState.pool ?? locker?.state?.pool;
+  return distributionState.pool;
 }
 
 function catalogLockerAddress(
@@ -572,7 +684,7 @@ function catalogLockerAddress(
   distributionState: Partial<ProductBoardroomCatalogEntry>,
   locker: BoardroomLockedLiquiditySnapshot | undefined,
 ): Address | undefined {
-  return history?.curve?.migration?.locker ?? distributionState.locker ?? locker?.address;
+  return distributionState.locker ?? locker?.address ?? history?.curve?.migration?.locker;
 }
 
 function stateDerivedPartialHistory(
@@ -793,6 +905,8 @@ async function hydrateCatalogHistoricalDistributions(
 function deriveDistributionCatalogFields(
   distribution: BoardroomDistributionSnapshot,
   shareTokenDecimals: number | undefined,
+  boardroomStatus: number,
+  now = currentUnixTimestamp(),
 ): Partial<ProductBoardroomCatalogEntry> {
   if (!distribution.state) {
     return {
@@ -806,6 +920,16 @@ function deriveDistributionCatalogFields(
   if ("paymentToken" in distribution.state) {
     const state = distribution.state;
     const soldShares = state.saleSupply - state.remainingShares;
+    const route = deriveExecutableDistributionRoute({
+      boardroomStatus,
+      closed: state.closed,
+      endTime: state.endTime,
+      kind: "fixed-price-sale",
+      now,
+      remainingShares: state.remainingShares,
+      routeStatus: state.saleStatus,
+      startTime: state.startTime,
+    });
     return {
       cashRaised: fixedPriceSaleCashRaised(soldShares, state.price),
       cashToken: state.paymentToken,
@@ -814,19 +938,39 @@ function deriveDistributionCatalogFields(
       distribution: distribution.address,
       distributionKind: "fixed-price-sale",
       path: "Fixed price sale",
+      routeBuyInventory: state.remainingShares,
+      routeClosed: state.closed,
+      routeEndTime: state.endTime,
+      routeStartTime: state.startTime,
+      routeStatus: state.saleStatus,
       soldShares,
-      status: fixedPriceSaleStatusLabel(state.saleStatus),
+      status: catalogRouteStatusLabel(route, fixedPriceSaleStatusLabel(state.saleStatus)),
     };
   }
 
   if ("airdropSupply" in distribution.state) {
     const state = distribution.state;
+    const route = deriveExecutableDistributionRoute({
+      boardroomStatus,
+      closed: state.closed,
+      endTime: state.endTime,
+      kind: "merkle-airdrop",
+      now,
+      remainingShares: state.remainingShares,
+      routeStatus: state.airdropStatus,
+      startTime: state.startTime,
+    });
     return {
       distribution: distribution.address,
       distributionKind: "merkle-airdrop",
       path: "Merkle airdrop",
+      routeClaimInventory: state.remainingShares,
+      routeClosed: state.closed,
+      routeEndTime: state.endTime,
+      routeStartTime: state.startTime,
+      routeStatus: state.airdropStatus,
       soldShares: distributionCirculatingShares(distribution),
-      status: merkleAirdropStatusLabel(state.airdropStatus),
+      status: catalogRouteStatusLabel(route, merkleAirdropStatusLabel(state.airdropStatus)),
       shareTokenDecimals,
     };
   }
@@ -842,6 +986,19 @@ function deriveDistributionCatalogFields(
 
   const state = distribution.state;
   const migrated = state.curveStatus === 1;
+  const route = deriveExecutableDistributionRoute({
+    boardroomStatus,
+    closed: state.closed,
+    endTime: state.endTime,
+    graduationLatched: state.graduationLatched,
+    kind: "migrating-bonding-curve",
+    now,
+    quoteReserve: state.quoteReserve,
+    remainingSaleShares: state.remainingSaleShares,
+    routeStatus: state.curveStatus,
+    soldShares: state.soldShares,
+    startTime: state.startTime,
+  });
   return {
     cashRaised: state.quoteReserve,
     cashToken: state.quoteToken,
@@ -852,8 +1009,16 @@ function deriveDistributionCatalogFields(
     locker: nonZeroAddress(state.locker),
     path: migrated ? "Migrated curve + AMM" : "Bonding curve",
     pool: nonZeroAddress(state.pool),
+    routeBuyInventory: state.remainingSaleShares,
+    routeClosed: state.closed,
+    routeEndTime: state.endTime,
+    routeGraduationLatched: state.graduationLatched,
+    routeQuoteReserve: state.quoteReserve,
+    routeSellInventory: state.soldShares,
+    routeStartTime: state.startTime,
+    routeStatus: state.curveStatus,
     soldShares: state.soldShares,
-    status: migratingCurveStatusLabel(state.curveStatus),
+    status: catalogRouteStatusLabel(route, migratingCurveStatusLabel(state.curveStatus)),
     shareTokenDecimals,
   };
 }
@@ -891,8 +1056,15 @@ async function readDistributionHistory(
 
   const curveResult = await readCurveHistory(client, distribution.address, eventScan);
   const curve = curveResult.history;
-  const historyPool = curve?.migration?.pool ?? pool ?? nonZeroAddress(distribution.state.pool);
-  const errors = [...curveResult.errors];
+  const currentPool = nonZeroAddress(distribution.state.pool) ?? pool;
+  const migrationPool = curve?.migration?.pool;
+  const historyPool = currentPool ?? migrationPool;
+  const errors = uniqueMessages([
+    ...curveResult.errors,
+    currentPool && migrationPool && !sameAddress(currentPool, migrationPool)
+      ? poolHistoryMismatchMessage(distribution.address, currentPool, migrationPool)
+      : undefined,
+  ]);
   let amm: ProductBoardroomAmmHistory | undefined;
   if (historyPool) {
     try {
@@ -1397,20 +1569,78 @@ function catalogHistoryFields(history: ProductBoardroomHistory | undefined): Par
 
 function findCatalogDistribution(
   distributions: readonly BoardroomDistributionSnapshot[],
+  boardroomStatus: number,
+  now = currentUnixTimestamp(),
 ): BoardroomDistributionSnapshot | undefined {
-  return distributions.find(distributionIsActive)
+  return distributions.find((distribution) => distributionIsExecutable(distribution, boardroomStatus, now))
     ?? distributions.find((distribution) => distribution.kind === "migrating-bonding-curve" && Boolean(nonZeroAddress(
       distribution.state && "quoteToken" in distribution.state ? distribution.state.pool : undefined,
     )))
+    ?? distributions.find((distribution) => distributionHasActiveEnum(distribution))
     ?? distributions[0];
 }
 
-function distributionIsActive(distribution: BoardroomDistributionSnapshot): boolean {
+function distributionIsExecutable(
+  distribution: BoardroomDistributionSnapshot,
+  boardroomStatus: number,
+  now: bigint,
+): boolean {
+  const input = executableRouteInput(distribution, boardroomStatus, now);
+  return input ? deriveExecutableDistributionRoute(input).liveness.status === "live" : false;
+}
+
+function distributionHasActiveEnum(distribution: BoardroomDistributionSnapshot): boolean {
   if (!distribution.state || distribution.state.closed) return false;
   if ("saleStatus" in distribution.state) return distribution.state.saleStatus === 0;
   if ("curveStatus" in distribution.state) return distribution.state.curveStatus === 0;
   if ("airdropStatus" in distribution.state) return distribution.state.airdropStatus === 0;
   return false;
+}
+
+function executableRouteInput(
+  distribution: BoardroomDistributionSnapshot,
+  boardroomStatus: number,
+  now: bigint,
+) {
+  if (!distribution.state) return undefined;
+  const state = distribution.state;
+  if ("paymentToken" in state) {
+    return {
+      boardroomStatus,
+      closed: state.closed,
+      endTime: state.endTime,
+      kind: "fixed-price-sale" as const,
+      now,
+      remainingShares: state.remainingShares,
+      routeStatus: state.saleStatus,
+      startTime: state.startTime,
+    };
+  }
+  if ("quoteToken" in state) {
+    return {
+      boardroomStatus,
+      closed: state.closed,
+      endTime: state.endTime,
+      graduationLatched: state.graduationLatched,
+      kind: "migrating-bonding-curve" as const,
+      now,
+      quoteReserve: state.quoteReserve,
+      remainingSaleShares: state.remainingSaleShares,
+      routeStatus: state.curveStatus,
+      soldShares: state.soldShares,
+      startTime: state.startTime,
+    };
+  }
+  return {
+    boardroomStatus,
+    closed: state.closed,
+    endTime: state.endTime,
+    kind: "merkle-airdrop" as const,
+    now,
+    remainingShares: state.remainingShares,
+    routeStatus: state.airdropStatus,
+    startTime: state.startTime,
+  };
 }
 
 function selectPrimaryHistory(
@@ -1421,7 +1651,7 @@ function selectPrimaryHistory(
     const exact = histories.find((history) => sameAddress(history.distribution, catalogEntry.distribution));
     if (exact) return {
       ...exact,
-      pool: exact.pool ?? catalogEntry.pool,
+      pool: catalogEntry.pool ?? exact.pool,
     };
   }
   return histories.find((history) => history.pool || history.curve?.migration)
@@ -1432,13 +1662,10 @@ function findCatalogLocker(
   snapshot: Pick<BoardroomSnapshot, "lockedLiquiditySummaries">,
   pool: Address | undefined,
 ) {
-  if (pool) {
-    const matching = snapshot.lockedLiquiditySummaries.find(
-      (locker) => locker.state?.pool.toLowerCase() === pool.toLowerCase(),
-    );
-    if (matching) return matching;
-  }
-  return snapshot.lockedLiquiditySummaries[0];
+  if (!pool) return undefined;
+  return snapshot.lockedLiquiditySummaries.find(
+    (locker) => locker.state?.pool.toLowerCase() === pool.toLowerCase(),
+  );
 }
 
 function fixedPriceSaleCashRaised(soldShares: bigint, price: bigint): bigint {
@@ -1453,6 +1680,25 @@ export function distributionCirculatingShares(
   if ("airdropSupply" in distribution.state) return distribution.state.claimedShares;
   if ("quoteToken" in distribution.state) return distribution.state.soldShares;
   return undefined;
+}
+
+function catalogRouteStatusLabel(
+  route: ReturnType<typeof deriveExecutableDistributionRoute>,
+  contractStatus: string,
+): string {
+  if (route.mode === "sell-only") return "Sell-only curve";
+  if (route.liveness.status === "live") return contractStatus;
+  if (route.phase === "future") return "Scheduled";
+  if (route.phase === "expired") return "Window ended";
+  if (route.liveness.status === "deployment-pending") return "Migration pending";
+  if (route.phase === "blocked") {
+    const reason = "reason" in route.liveness ? route.liveness.reason : "";
+    if (reason.includes("parent Boardroom")) return "Boardroom inactive";
+    if (!route.buy.available && route.buy.reason.includes("No project-token inventory")) return "Sold out";
+    if (!route.claim.available && route.claim.reason.includes("fully claimed")) return "Fully claimed";
+    return "Unavailable";
+  }
+  return contractStatus;
 }
 
 function fixedPriceSaleStatusLabel(status: number): string {
@@ -1754,6 +2000,14 @@ function logErrorText(error: unknown): string {
 
 function uniqueMessages(messages: readonly (string | undefined)[]): string[] {
   return Array.from(new Set(messages.filter((message): message is string => Boolean(message))));
+}
+
+function poolHistoryMismatchMessage(
+  distribution: Address,
+  currentPool: Address,
+  historicalPool: Address,
+): string {
+  return `Current curve state for ${distribution} names pool ${currentPool}, but migration history names ${historicalPool}. Current pool identity takes precedence; historical AMM coverage is unknown.`;
 }
 
 async function mapInBatches<T, U>(

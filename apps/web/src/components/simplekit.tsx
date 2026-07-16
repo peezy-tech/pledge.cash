@@ -24,7 +24,8 @@ import { cn } from "../lib/utils";
 
 const MODAL_CLOSE_DURATION = 320;
 const PREFERRED_CONNECTOR_ORDER = ["injected", "metaMask", "metaMaskSDK", "safe"];
-const WALLET_CONNECTION_ERROR = "The browser wallet could not complete the request. Retry, or go back and make sure the wallet is installed, unlocked, and allowed on this site.";
+const WALLET_CONNECTION_ERROR = "The injected wallet could not complete the request. Retry, or go back and make sure the wallet is installed, unlocked, and allowed on this site.";
+const NO_PROVIDER_WALLET_GUIDANCE = "Continue read-only, or open pledge.cash inside your wallet app's built-in browser on mobile. On desktop, install or enable an injected wallet, unlock it, then check again.";
 
 type SimpleKitState = {
   pendingConnector: Connector | null;
@@ -70,6 +71,14 @@ type UserBalance = {
   decimals: number;
   symbol?: string | undefined;
 } | undefined;
+
+type WalletBalanceQueryStatus = "pending" | "success" | "error";
+
+export type WalletBalanceDisplayState =
+  | { status: "hidden"; text: undefined }
+  | { status: "loading"; text: "Loading balance…" }
+  | { status: "unavailable"; text: "Balance unavailable" }
+  | { status: "zero" | "value"; text: string };
 
 type Network = ReturnType<typeof networkForChainId> | undefined;
 
@@ -171,15 +180,20 @@ function ConnectWalletButton({ className, compactOnMobile = false, disabled }: C
 }
 
 function Account(): React.JSX.Element {
-  const { address, chainId } = useAccount();
+  const { address, chainId, status: accountStatus } = useAccount();
   const { disconnect } = useDisconnect();
-  const { data: userBalance } = useBalance({ address });
+  const balanceQuery = useBalance({ address });
   const context = React.useContext(SimpleKitContext);
   const network = chainId ? networkForChainId(chainId) : undefined;
   const formattedAddress = address ? shortAddress(address) : "";
-  const formattedBalance = formatWalletBalance(userBalance);
+  const balanceState = walletBalanceDisplayState({
+    accountStatus,
+    address,
+    balanceStatus: balanceQuery.status,
+    network,
+    userBalance: balanceQuery.data,
+  });
   const chainName = network?.name ?? `Chain ${chainId ?? "unknown"}`;
-  const balanceSymbol = walletBalanceSymbol(userBalance, network);
 
   function handleDisconnect(): void {
     context.setOpen(false);
@@ -202,9 +216,9 @@ function Account(): React.JSX.Element {
               <CopyAddressButton />
             </div>
             <p className="m-0 text-sm font-medium text-zinc-500">{chainName}</p>
-            <p className="m-0 text-sm text-zinc-400">
-              {formattedBalance} {balanceSymbol}
-            </p>
+            {balanceState.text ? (
+              <p aria-live="polite" className="m-0 text-sm text-zinc-400">{balanceState.text}</p>
+            ) : null}
           </div>
 
           <Button className="w-full" type="button" onClick={handleDisconnect}>
@@ -301,12 +315,13 @@ function WalletOptions(): React.JSX.Element {
       <div className="flex h-full flex-col items-center justify-center gap-5 text-center">
         <Wallet className="h-8 w-8 text-zinc-500" />
         <div aria-live="polite" className="space-y-2">
-          <h2 className="m-0 text-lg font-semibold text-zinc-100">No browser wallet detected</h2>
-          <p className="m-0 max-w-sm text-sm leading-6 text-zinc-500">
-            pledge.cash currently connects through a browser wallet. Install or enable one, unlock it, then check again.
-          </p>
+          <h2 className="m-0 text-lg font-semibold text-zinc-100">No injected wallet detected</h2>
+          <p className="m-0 max-w-sm text-sm leading-6 text-zinc-500">{NO_PROVIDER_WALLET_GUIDANCE}</p>
         </div>
-        <Button type="button" variant="secondary" onClick={checkAgain}>Check again</Button>
+        <div className="flex flex-wrap justify-center gap-2">
+          <Button type="button" variant="secondary" onClick={checkAgain}>Check again</Button>
+          <Button type="button" variant="ghost" onClick={() => context.setOpen(false)}>Continue read-only</Button>
+        </div>
       </div>
     );
   }
@@ -492,8 +507,34 @@ function connectorRank(connector: Connector): number {
   return preferredIndex === -1 ? PREFERRED_CONNECTOR_ORDER.length : preferredIndex;
 }
 
-function formatWalletBalance(userBalance: UserBalance): string {
-  if (userBalance?.value === undefined) return "0";
+export function walletBalanceDisplayState({
+  accountStatus,
+  address,
+  balanceStatus,
+  network,
+  userBalance,
+}: {
+  accountStatus: string;
+  address: string | undefined;
+  balanceStatus: WalletBalanceQueryStatus;
+  network: Network;
+  userBalance: UserBalance;
+}): WalletBalanceDisplayState {
+  if (accountStatus !== "connected" || !address) return { status: "hidden", text: undefined };
+  if (balanceStatus === "pending") return { status: "loading", text: "Loading balance…" };
+  if (balanceStatus === "error" || !userBalance) return { status: "unavailable", text: "Balance unavailable" };
+
+  const formattedBalance = formatWalletBalance(userBalance);
+  if (formattedBalance === undefined) return { status: "unavailable", text: "Balance unavailable" };
+  const symbol = walletBalanceSymbol(userBalance, network);
+  return {
+    status: userBalance.value === 0n ? "zero" : "value",
+    text: symbol ? `${formattedBalance} ${symbol}` : formattedBalance,
+  };
+}
+
+export function formatWalletBalance(userBalance: UserBalance): string | undefined {
+  if (!userBalance) return undefined;
 
   return Number(formatUnits(userBalance.value, userBalance.decimals)).toLocaleString(undefined, {
     maximumFractionDigits: 4,
@@ -521,6 +562,7 @@ export {
   ConnectWalletButton,
   SimpleKitContext,
   SimpleKitProvider,
+  NO_PROVIDER_WALLET_GUIDANCE,
   WALLET_CONNECTION_ERROR,
   connectorDisplayName,
   connectorProviderAvailable,

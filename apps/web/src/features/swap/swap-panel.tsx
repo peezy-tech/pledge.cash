@@ -1,12 +1,21 @@
 import type { Address, PledgeCashDeployment } from "@pledge.cash/sdk";
-import { ArrowDownUp, Check, ChevronDown, Coins, Droplets, RefreshCw, Search, ShieldCheck, WalletCards, X } from "lucide-react";
+import { ArrowDownUp, Check, ChevronDown, Coins, Droplets, RefreshCw, Search, ShieldCheck, WalletCards } from "lucide-react";
 import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { isAddress } from "viem";
 import { ActionButton, ActionRow, AddressLink, Facts, Field, Panel } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../../components/ui/dialog";
 import { Input } from "../../components/ui/input";
+import type { Capability } from "../capabilities/project-capabilities";
 import { ConnectWalletPrompt } from "../wallet/connect-wallet-prompt";
+import type { ExactRational, MetricState, NormalizedPrice } from "../../lib/market-data";
 import {
   formatPoolShareBps,
   formatSwapAmount,
@@ -16,6 +25,7 @@ import {
   swapNativeMode,
   swapPairLabel,
   swapQuoteReady,
+  swapQuoteRequestIdentity,
   type AmmPositionState,
   type LiquidityForm,
   type LiquidityQuoteState,
@@ -30,10 +40,12 @@ import {
 
 type SwapPanelProps = {
   account: Address | undefined;
+  actionCapability: Capability;
   deployment: PledgeCashDeployment | undefined;
   form: SwapForm;
   liquidityForm: LiquidityForm;
   liquidityQuote: LiquidityQuoteState | undefined;
+  nativeBalance?: bigint | undefined;
   position: AmmPositionState | undefined;
   pendingAction: string | undefined;
   quote: SwapQuoteState | undefined;
@@ -61,6 +73,7 @@ type SwapPanelProps = {
   refreshTokens: () => Promise<void>;
   removeLiquidity: () => Promise<void>;
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
+  switchWalletNetwork: () => Promise<void>;
 };
 
 type TokenSide = "tokenIn" | "tokenOut" | "tokenA" | "tokenB";
@@ -70,11 +83,15 @@ type FactItem = {
   value: ReactNode;
 };
 
+type ActionDecision = {
+  enabled: boolean;
+  reason?: string | undefined;
+};
+
 type SwapActionState = {
+  approve: ActionDecision;
   quoteReady: boolean;
-  needsApproval: boolean;
-  canApproveInput: boolean;
-  canSwap: boolean;
+  swap: ActionDecision;
 };
 
 type LiquidityActionState = {
@@ -83,7 +100,7 @@ type LiquidityActionState = {
   needsTokenBApproval: boolean;
   canApproveTokenA: boolean;
   canApproveTokenB: boolean;
-  canAddLiquidity: boolean;
+  addLiquidity: ActionDecision;
 };
 
 type PositionActionState = {
@@ -96,10 +113,12 @@ type PositionActionState = {
 
 export function SwapPanel({
   account,
+  actionCapability,
   deployment,
   form,
   liquidityForm,
   liquidityQuote,
+  nativeBalance,
   position,
   pendingAction,
   quote,
@@ -127,6 +146,7 @@ export function SwapPanel({
   refreshTokens,
   removeLiquidity,
   runAction,
+  switchWalletNetwork,
 }: SwapPanelProps): React.JSX.Element {
   const [selectorSide, setSelectorSide] = useState<TokenSide>();
   const [tokenSearch, setTokenSearch] = useState("");
@@ -143,9 +163,20 @@ export function SwapPanel({
   const swapWrappedSide = wrappedSwapSide(deployment, form);
   const swapInputIsNative = swapNative === "input";
   const swapDeadlineValid = deadlineIsFuture(form.deadline, currentUnixTime);
-  const swapActions = swapActionState(walletConnected, quote, swapInputIsNative, swapDeadlineValid);
-  const inputToken = selectedTokenOption(form.tokenIn, tokenList.tokens, quote?.tokenIn);
-  const outputToken = selectedTokenOption(form.tokenOut, tokenList.tokens, quote?.tokenOut);
+  const swapDecisionKey = swapDecisionFormKey(form);
+  const swapQuoteCurrent = quote !== undefined && quote.requestIdentity === swapDecisionKey;
+  const currentSwapQuote = swapQuoteCurrent ? quote : undefined;
+  const swapActions = swapActionState(
+    actionCapability,
+    currentSwapQuote,
+    swapInputIsNative,
+    swapDeadlineValid,
+    quote ? (swapQuoteCurrent ? "current" : "stale") : "missing",
+    pendingAction,
+    nativeBalance,
+  );
+  const inputToken = selectedTokenOption(form.tokenIn, tokenList.tokens, currentSwapQuote?.tokenIn);
+  const outputToken = selectedTokenOption(form.tokenOut, tokenList.tokens, currentSwapQuote?.tokenOut);
 
   const tokenA = selectedTokenOption(liquidityForm.tokenA, tokenList.tokens, liquidityQuote?.tokenA ?? position?.tokenA);
   const tokenB = selectedTokenOption(liquidityForm.tokenB, tokenList.tokens, liquidityQuote?.tokenB ?? position?.tokenB);
@@ -154,16 +185,24 @@ export function SwapPanel({
   const tokenBIsNative = liquidityForm.useNative && liquidityNativeAvailable && deployment?.wrappedNative !== undefined && sameAddress(liquidityForm.tokenB, deployment.wrappedNative);
   const liquidityDeadlineValid = deadlineIsFuture(liquidityForm.deadline, currentUnixTime);
   const removeDeadlineValid = deadlineIsFuture(removeLiquidityForm.deadline, currentUnixTime);
-  const liquidityActions = liquidityActionState(walletConnected, liquidityQuote, tokenAIsNative, tokenBIsNative, liquidityDeadlineValid);
-  const positionActions = positionActionState(walletConnected, position, removeLiquidityQuote, removeDeadlineValid);
+  const liquidityActions = liquidityActionState(
+    actionCapability,
+    liquidityQuote,
+    tokenAIsNative,
+    tokenBIsNative,
+    liquidityDeadlineValid,
+    nativeBalance,
+  );
+  const positionActions = positionActionState(actionCapability, position, removeLiquidityQuote, removeDeadlineValid);
 
   const selectorLabel = tokenSelectorLabel(selectorSide);
   const selectorValue = tokenSelectorValue(selectorSide, form, liquidityForm);
   const selectorOtherToken = tokenSelectorOtherValue(selectorSide, form, liquidityForm);
-  const selectorQuoteToken = selectedTokenForSide(selectorSide, quote, liquidityQuote, position);
+  const selectorQuoteToken = selectedTokenForSide(selectorSide, currentSwapQuote, liquidityQuote, position);
   const selectorSelected = selectedTokenOption(selectorValue, tokenList.tokens, selectorQuoteToken);
 
-  const swapFacts = swapTransactionFacts(quote, swapInputIsNative);
+  const swapDecisionFacts = swapTransactionDecisionFacts(currentSwapQuote, form, currentUnixTime);
+  const swapTechnicalFacts = swapTransactionTechnicalFacts(currentSwapQuote, swapInputIsNative, nativeBalance);
   const liquidityFacts = liquidityTransactionFacts(liquidityQuote, tokenAIsNative, tokenBIsNative);
   const positionFacts = lpPositionFacts(position, removeLiquidityQuote);
   const removeLiquidityFacts = removeLiquidityTransactionFacts(removeLiquidityQuote);
@@ -193,105 +232,164 @@ export function SwapPanel({
 
   return (
     <div className="grid gap-4">
+      {actionCapability.status === "switch" ? (
+        <div className="flex flex-col gap-3 rounded-md border border-amber-950 bg-amber-950/30 p-4 text-sm text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+          <p className="m-0">{actionCapability.reason ?? "Switch your wallet to the active app network before submitting a market transaction."}</p>
+          <Button
+            className="shrink-0"
+            disabled={pendingAction !== undefined}
+            type="button"
+            variant="secondary"
+            onClick={() => void runAction("switch-market-chain", switchWalletNetwork)}
+          >
+            Switch wallet network
+          </Button>
+        </div>
+      ) : null}
       {mode !== "liquidity" ? <Panel
         title="Swap"
         action={
-          <ActionButton actionId="quote-swap" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("quote-swap", refreshQuote)}>
+          <ActionButton
+            actionId="quote-swap"
+            pendingAction={pendingAction}
+            pendingLabel="Refreshing swap quote"
+            type="button"
+            variant="secondary"
+            onClick={() => void runAction("quote-swap", refreshQuote)}
+          >
             <RefreshCw className="h-4 w-4" />
-            Quote
+            {pendingAction === "quote-swap" ? "Quoting…" : "Quote"}
           </ActionButton>
         }
       >
-        <div className="border-t border-zinc-800 p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="min-w-0">
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <Badge variant={swapTone(quote, swapDeadlineValid)}>{swapStatus(quote, swapDeadlineValid)}</Badge>
-                <Badge variant="muted">{swapPairLabel(quote, form)}</Badge>
+        <form
+          aria-label="Swap tokens"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (swapActions.swap.enabled) void runAction("execute-swap", executeSwap);
+          }}
+        >
+          <div className="border-t border-zinc-800 p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <Badge variant={swapTone(quote, swapQuoteCurrent, swapDeadlineValid)}>{swapStatus(quote, swapQuoteCurrent, swapDeadlineValid)}</Badge>
+                  <Badge variant="muted">{swapPairLabel(currentSwapQuote, form)}</Badge>
+                </div>
+                <h3 className="m-0 text-2xl font-semibold tracking-normal text-zinc-50 sm:text-3xl">AMM Swap</h3>
               </div>
-              <h3 className="m-0 text-2xl font-semibold tracking-normal text-zinc-50 sm:text-3xl">AMM Swap</h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button aria-label="Flip swap direction" title="Flip swap direction" size="icon" type="button" variant="secondary" onClick={() => flipSwap(setForm)}>
+                  <ArrowDownUp className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button aria-label="Flip swap direction" title="Flip swap direction" size="icon" variant="secondary" onClick={() => flipSwap(setForm)}>
-                <ArrowDownUp className="h-4 w-4" />
-              </Button>
-            </div>
+            {quote && !swapQuoteCurrent ? (
+              <p className="m-0 mt-4 rounded-md border border-amber-950 bg-amber-950/30 p-3 text-sm text-amber-100">
+                Swap inputs or preferences changed. The previous decision metrics are stale and have been cleared; refresh the quote before acting.
+              </p>
+            ) : null}
+            {currentSwapQuote?.error ? <p className="m-0 mt-4 rounded-md border border-amber-950 bg-amber-950/30 p-3 text-sm text-amber-100">{currentSwapQuote.error}</p> : null}
+            {!walletConnected ? (
+              <ConnectWalletPrompt description="Connect the wallet that will fund the swap to load its balance, allowance, and account-specific quote." />
+            ) : null}
           </div>
-          {quote?.error ? <p className="m-0 mt-4 rounded-md border border-amber-950 bg-amber-950/30 p-3 text-sm text-amber-100">{quote.error}</p> : null}
-          {!walletConnected ? (
-            <ConnectWalletPrompt description="Connect the wallet that will fund the swap to load its balance, allowance, and account-specific quote." />
-          ) : null}
-        </div>
 
-        <div className="grid gap-px border-t border-zinc-800 bg-zinc-800 md:grid-cols-2">
-          <TokenSelectField
-            disabled={lockSwapPair}
-            label="From token"
-            loading={tokenListLoading}
-            option={inputToken}
-            otherToken={form.tokenOut}
-            tokenCount={tokenList.tokens.length}
-            value={form.tokenIn}
-            wrappedNativeSymbol={wrappedNativeSymbol}
-            onOpen={() => openSelector("tokenIn")}
-          />
-          <TokenSelectField
-            disabled={lockSwapPair}
-            label="To token"
-            loading={tokenListLoading}
-            option={outputToken}
-            otherToken={form.tokenIn}
-            tokenCount={tokenList.tokens.length}
-            value={form.tokenOut}
-            wrappedNativeSymbol={wrappedNativeSymbol}
-            onOpen={() => openSelector("tokenOut")}
-          />
-          <TextField form={form} field="amountIn" inputMode="decimal" label="Amount in" setForm={setForm} />
-          <TextField form={form} field="recipient" label="Receive tokens at" placeholder={account ?? "Connected wallet"} setForm={setForm} />
-          <ExecutionPreferences currentUnixTime={currentUnixTime} form={form} setForm={setForm} />
-        </div>
-
-        <TransactionTechnicalDetails
-          deadline={form.deadline}
-          router={deployment?.ammRouter}
-          nativeControl={swapNativeAvailable ? (
-            <NativeModeField
-              checked={form.useNative}
-              disabled={false}
-              label="Native asset handling"
-              text={nativeSwapText(true, swapNative ?? swapWrappedSide)}
-              onChange={(checked) => setForm((current) => ({ ...current, useNative: checked }))}
+          <div className="grid gap-px border-t border-zinc-800 bg-zinc-800 md:grid-cols-2">
+            <TokenSelectField
+              disabled={lockSwapPair}
+              label="From token"
+              loading={tokenListLoading}
+              option={inputToken}
+              otherToken={form.tokenOut}
+              tokenCount={tokenList.tokens.length}
+              value={form.tokenIn}
+              wrappedNativeSymbol={wrappedNativeSymbol}
+              onOpen={() => openSelector("tokenIn")}
             />
-          ) : undefined}
-        />
+            <TokenSelectField
+              disabled={lockSwapPair}
+              label="To token"
+              loading={tokenListLoading}
+              option={outputToken}
+              otherToken={form.tokenIn}
+              tokenCount={tokenList.tokens.length}
+              value={form.tokenOut}
+              wrappedNativeSymbol={wrappedNativeSymbol}
+              onOpen={() => openSelector("tokenOut")}
+            />
+            <TextField form={form} field="amountIn" inputMode="decimal" label="Amount in" setForm={setForm} />
+            <TextField form={form} field="recipient" label="Receive tokens at" placeholder={account ?? "Connected wallet"} setForm={setForm} />
+            <ExecutionPreferences currentUnixTime={currentUnixTime} form={form} setForm={setForm} />
+          </div>
 
-        <ActionRow>
-          <ActionButton actionId="approve-swap-input" disabled={!swapActions.canApproveInput} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("approve-swap-input", approveInput)}>
-            <ShieldCheck className="h-4 w-4" />
-            Approve
-          </ActionButton>
-          <ActionButton actionId="execute-swap" disabled={!swapActions.canSwap} pendingAction={pendingAction} onClick={() => void runAction("execute-swap", executeSwap)}>
-            <ArrowDownUp className="h-4 w-4" />
-            Swap
-          </ActionButton>
-        </ActionRow>
+          <Facts columns="three" items={swapDecisionFacts} />
 
-        <Facts
-          columns="three"
-          items={swapFacts}
-        />
+          <TransactionTechnicalDetails
+            deadline={form.deadline}
+            items={swapTechnicalFacts}
+            router={deployment?.ammRouter}
+            nativeControl={swapNativeAvailable ? (
+              <NativeModeField
+                checked={form.useNative}
+                disabled={false}
+                label="Native asset handling"
+                text={nativeSwapText(true, swapNative ?? swapWrappedSide)}
+                onChange={(checked) => setForm((current) => ({ ...current, useNative: checked }))}
+              />
+            ) : undefined}
+          />
+
+          <ActionRow>
+            <ActionControl reason={swapActions.approve.reason} reasonId="approve-swap-input-reason">
+              <ActionButton
+                actionId="approve-swap-input"
+                aria-describedby={swapActions.approve.reason ? "approve-swap-input-reason" : undefined}
+                disabled={!swapActions.approve.enabled}
+                pendingAction={pendingAction}
+                pendingLabel="Approving swap input"
+                type="button"
+                variant="secondary"
+                onClick={() => void runAction("approve-swap-input", approveInput)}
+              >
+                <ShieldCheck className="h-4 w-4" />
+                {pendingAction === "approve-swap-input" ? "Approving…" : "Approve"}
+              </ActionButton>
+            </ActionControl>
+            <ActionControl reason={swapActions.swap.reason} reasonId="execute-swap-reason">
+              <ActionButton
+                actionId="execute-swap"
+                aria-describedby={swapActions.swap.reason ? "execute-swap-reason" : undefined}
+                disabled={!swapActions.swap.enabled}
+                pendingAction={pendingAction}
+                pendingLabel="Submitting swap"
+                type="submit"
+              >
+                <ArrowDownUp className="h-4 w-4" />
+                {pendingAction === "execute-swap" ? "Swapping…" : "Swap"}
+              </ActionButton>
+            </ActionControl>
+          </ActionRow>
+        </form>
       </Panel> : null}
 
       {mode !== "swap" ? <>
       <Panel
         title="Liquidity"
         action={
-          <ActionButton actionId="quote-liquidity" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("quote-liquidity", refreshLiquidityQuote)}>
+          <ActionButton actionId="quote-liquidity" pendingAction={pendingAction} type="button" variant="secondary" onClick={() => void runAction("quote-liquidity", refreshLiquidityQuote)}>
             <RefreshCw className="h-4 w-4" />
             Quote
           </ActionButton>
         }
       >
+        <form
+          aria-label="Add liquidity"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (liquidityActions.addLiquidity.enabled) void runAction("add-liquidity", addLiquidity);
+          }}
+        >
         <div className="border-t border-zinc-800 p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
@@ -302,7 +400,7 @@ export function SwapPanel({
               <h2 className="m-0 text-xl font-semibold tracking-normal text-zinc-50 sm:text-2xl">Add Liquidity</h2>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Button aria-label="Flip liquidity pair" title="Flip liquidity pair" size="icon" variant="secondary" onClick={() => flipLiquidityPair(setLiquidityForm)}>
+              <Button aria-label="Flip liquidity pair" title="Flip liquidity pair" size="icon" type="button" variant="secondary" onClick={() => flipLiquidityPair(setLiquidityForm)}>
                 <ArrowDownUp className="h-4 w-4" />
               </Button>
             </div>
@@ -352,35 +450,51 @@ export function SwapPanel({
         />
 
         <ActionRow>
-          <ActionButton actionId="approve-liquidity-token-a" disabled={!liquidityActions.canApproveTokenA} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("approve-liquidity-token-a", approveLiquidityTokenA)}>
+          <ActionButton actionId="approve-liquidity-token-a" disabled={!liquidityActions.canApproveTokenA} pendingAction={pendingAction} type="button" variant="secondary" onClick={() => void runAction("approve-liquidity-token-a", approveLiquidityTokenA)}>
             <ShieldCheck className="h-4 w-4" />
             Approve A
           </ActionButton>
-          <ActionButton actionId="approve-liquidity-token-b" disabled={!liquidityActions.canApproveTokenB} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("approve-liquidity-token-b", approveLiquidityTokenB)}>
+          <ActionButton actionId="approve-liquidity-token-b" disabled={!liquidityActions.canApproveTokenB} pendingAction={pendingAction} type="button" variant="secondary" onClick={() => void runAction("approve-liquidity-token-b", approveLiquidityTokenB)}>
             <ShieldCheck className="h-4 w-4" />
             Approve B
           </ActionButton>
-          <ActionButton actionId="add-liquidity" disabled={!liquidityActions.canAddLiquidity} pendingAction={pendingAction} onClick={() => void runAction("add-liquidity", addLiquidity)}>
-            <Droplets className="h-4 w-4" />
-            Add Liquidity
-          </ActionButton>
+          <ActionControl reason={liquidityActions.addLiquidity.reason} reasonId="add-liquidity-reason">
+            <ActionButton
+              actionId="add-liquidity"
+              aria-describedby={liquidityActions.addLiquidity.reason ? "add-liquidity-reason" : undefined}
+              disabled={!liquidityActions.addLiquidity.enabled}
+              pendingAction={pendingAction}
+              type="submit"
+            >
+              <Droplets className="h-4 w-4" />
+              Add Liquidity
+            </ActionButton>
+          </ActionControl>
         </ActionRow>
 
         <Facts
           columns="three"
           items={liquidityFacts}
         />
+        </form>
       </Panel>
 
       <Panel
         title="LP Position"
         action={
-          <ActionButton actionId="refresh-amm-position" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("refresh-amm-position", refreshPosition)}>
+          <ActionButton actionId="refresh-amm-position" pendingAction={pendingAction} type="button" variant="secondary" onClick={() => void runAction("refresh-amm-position", refreshPosition)}>
             <RefreshCw className="h-4 w-4" />
             Refresh
           </ActionButton>
         }
       >
+        <form
+          aria-label="Remove liquidity"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (positionActions.canRemoveLiquidity) void runAction("remove-liquidity", removeLiquidity);
+          }}
+        >
         <div className="border-t border-zinc-800 p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
@@ -390,7 +504,7 @@ export function SwapPanel({
               </div>
               <h2 className="m-0 text-xl font-semibold tracking-normal text-zinc-50 sm:text-2xl">Manage LP</h2>
             </div>
-            <ActionButton actionId="claim-amm-fees" disabled={!positionActions.canClaimFees} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("claim-amm-fees", claimAmmFees)}>
+            <ActionButton actionId="claim-amm-fees" disabled={!positionActions.canClaimFees} pendingAction={pendingAction} type="button" variant="secondary" onClick={() => void runAction("claim-amm-fees", claimAmmFees)}>
               <Coins className="h-4 w-4" />
               Claim Fees
             </ActionButton>
@@ -425,15 +539,15 @@ export function SwapPanel({
         />
 
         <ActionRow>
-          <ActionButton actionId="quote-remove-liquidity" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("quote-remove-liquidity", refreshRemoveLiquidityQuote)}>
+          <ActionButton actionId="quote-remove-liquidity" pendingAction={pendingAction} type="button" variant="secondary" onClick={() => void runAction("quote-remove-liquidity", refreshRemoveLiquidityQuote)}>
             <RefreshCw className="h-4 w-4" />
             Quote Remove
           </ActionButton>
-          <ActionButton actionId="approve-lp-token" disabled={!positionActions.canApproveLp} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("approve-lp-token", approveLpToken)}>
+          <ActionButton actionId="approve-lp-token" disabled={!positionActions.canApproveLp} pendingAction={pendingAction} type="button" variant="secondary" onClick={() => void runAction("approve-lp-token", approveLpToken)}>
             <ShieldCheck className="h-4 w-4" />
             Approve LP
           </ActionButton>
-          <ActionButton actionId="remove-liquidity" disabled={!positionActions.canRemoveLiquidity} pendingAction={pendingAction} variant="danger" onClick={() => void runAction("remove-liquidity", removeLiquidity)}>
+          <ActionButton actionId="remove-liquidity" disabled={!positionActions.canRemoveLiquidity} pendingAction={pendingAction} type="submit" variant="danger">
             <WalletCards className="h-4 w-4" />
             Remove Liquidity
           </ActionButton>
@@ -443,6 +557,7 @@ export function SwapPanel({
           columns="two"
           items={removeLiquidityFacts}
         />
+        </form>
       </Panel>
       </> : null}
 
@@ -464,6 +579,23 @@ export function SwapPanel({
           onSelect={selectToken}
         />
       ) : null}
+    </div>
+  );
+}
+
+function ActionControl({
+  children,
+  reason,
+  reasonId,
+}: {
+  children: ReactNode;
+  reason?: string | undefined;
+  reasonId: string;
+}): React.JSX.Element {
+  return (
+    <div className="min-w-[12rem] flex-1 sm:flex-initial">
+      <div className="[&>*]:w-full">{children}</div>
+      {reason ? <p className="m-0 mt-2 max-w-sm text-xs leading-5 text-zinc-400" id={reasonId}>{reason}</p> : null}
     </div>
   );
 }
@@ -514,7 +646,7 @@ function TokenSelectField({
   );
 }
 
-function TokenSelectorDialog({
+export function TokenSelectorDialog({
   error,
   label,
   loading,
@@ -552,43 +684,40 @@ function TokenSelectorDialog({
   );
   const customAddress = isAddress(normalizedQuery) && !tokens.some((token) => sameAddress(token.address, normalizedQuery)) ? normalizedQuery : undefined;
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/80 p-4 backdrop-blur-sm" role="presentation" onMouseDown={onClose}>
-      <div
-        aria-label={label}
-        aria-modal="true"
-        className="max-h-[min(760px,calc(100vh-2rem))] w-full max-w-lg overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 shadow-2xl"
-        role="dialog"
-        onMouseDown={(event) => event.stopPropagation()}
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent
+        className="flex max-h-[min(760px,calc(100svh-2rem))] max-w-lg flex-col gap-0 overflow-hidden p-0"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          document.getElementById("swap-token-search")?.focus();
+        }}
       >
-        <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
-          <div className="min-w-0">
-            <h2 className="m-0 text-base font-semibold tracking-normal text-zinc-50">{label}</h2>
-            <p className="m-0 mt-0.5 text-xs text-zinc-500">{tokens.length.toString()} listed tokens</p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <ActionButton actionId="refresh-swap-tokens" pendingAction={pendingAction} size="icon" title="Refresh token list" variant="secondary" onClick={() => void runAction("refresh-swap-tokens", refreshTokens)}>
-              <RefreshCw className="h-4 w-4" />
-            </ActionButton>
-            <Button aria-label="Close token selector" size="icon" title="Close token selector" variant="secondary" onClick={onClose}>
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
+        <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3 pr-14">
+          <DialogHeader className="min-w-0 text-left">
+            <DialogTitle className="text-base">{label}</DialogTitle>
+            <DialogDescription>{tokens.length.toString()} listed tokens. Search by symbol or paste a token address.</DialogDescription>
+          </DialogHeader>
+          <ActionButton
+            actionId="refresh-swap-tokens"
+            pendingAction={pendingAction}
+            pendingLabel="Refreshing token list"
+            size="icon"
+            title="Refresh token list"
+            type="button"
+            variant="secondary"
+            onClick={() => void runAction("refresh-swap-tokens", refreshTokens)}
+          >
+            <RefreshCw className="h-4 w-4" />
+          </ActionButton>
         </div>
 
         <div className="border-b border-zinc-800 p-4">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-600" />
             <Input
-              autoFocus
+              aria-label="Search tokens"
+              id="swap-token-search"
               className="pl-9"
               placeholder="Search symbol or paste token address"
               spellCheck={false}
@@ -599,7 +728,7 @@ function TokenSelectorDialog({
           {error ? <p className="m-0 mt-3 rounded-md border border-amber-950 bg-amber-950/30 p-3 text-sm text-amber-100">{error}</p> : null}
         </div>
 
-        <div className="max-h-[420px] overflow-y-auto">
+        <div aria-label="Available tokens" className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {customAddress ? (
             <TokenRow
               actionLabel="Custom"
@@ -631,8 +760,8 @@ function TokenSelectorDialog({
           ) : null}
           {loading && visibleTokens.length === 0 ? <div className="p-6 text-center text-sm text-zinc-500">Loading tokens</div> : null}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -657,7 +786,7 @@ function TokenRow({
 }): React.JSX.Element {
   return (
     <button
-      className="flex w-full items-center justify-between gap-3 border-b border-zinc-900 px-4 py-3 text-left transition-colors hover:bg-zinc-900/80 focus:bg-zinc-900 focus:outline-none"
+      className="flex min-h-11 w-full items-center justify-between gap-3 border-b border-zinc-900 px-4 py-3 text-left transition-colors hover:bg-zinc-900/80 focus:bg-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-lime-300/70"
       type="button"
       onClick={() => onSelect(address)}
     >
@@ -747,10 +876,12 @@ function ExecutionPreferences<TForm extends ExecutionPreferenceForm>({
 
 function TransactionTechnicalDetails({
   deadline,
+  items = [],
   nativeControl,
   router,
 }: {
   deadline: string;
+  items?: FactItem[] | undefined;
   nativeControl?: ReactNode | undefined;
   router?: Address | undefined;
 }): React.JSX.Element {
@@ -768,6 +899,12 @@ function TransactionTechnicalDetails({
           <span className="block text-xs font-semibold uppercase tracking-[0.1em] text-zinc-600">Raw Unix deadline</span>
           <code className="mt-1 block [overflow-wrap:anywhere]">{deadline}</code>
         </div>
+        {items.map((item) => (
+          <div className="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 p-3" key={item.label}>
+            <span className="block text-xs font-semibold uppercase tracking-[0.1em] text-zinc-600">{item.label}</span>
+            <span className="mt-1 block [overflow-wrap:anywhere] text-zinc-300">{item.value}</span>
+          </div>
+        ))}
         {nativeControl ? <div className="min-w-0 md:col-span-2">{nativeControl}</div> : null}
       </div>
     </details>
@@ -857,86 +994,289 @@ export function deadlineIsFuture(deadline: string, currentUnixTime: number): boo
   return Number.isSafeInteger(timestamp) && timestamp > currentUnixTime;
 }
 
-function swapActionState(
-  walletConnected: boolean,
+export function swapActionState(
+  actionCapability: Capability,
   quote: SwapQuoteState | undefined,
   inputIsNative: boolean,
   deadlineValid: boolean,
+  quoteState: "current" | "missing" | "stale" = quote ? "current" : "missing",
+  pendingAction?: string | undefined,
+  nativeBalance?: bigint | undefined,
 ): SwapActionState {
   const quoteReady = swapQuoteReady(quote);
-  let needsApproval = false;
+  const commonReason = swapQuoteBlockingReason(actionCapability, quote, quoteReady, quoteState);
+  let approve: ActionDecision;
+  let swap: ActionDecision;
 
-  if (quoteReady && !inputIsNative) {
-    needsApproval = (quote.tokenIn.allowance ?? 0n) < quote.amountIn;
+  if (commonReason) {
+    approve = { enabled: false, reason: commonReason };
+    swap = { enabled: false, reason: commonReason };
+  } else if (!quoteReady) {
+    const reason = "Quote details are incomplete. Refresh the quote before acting.";
+    approve = { enabled: false, reason };
+    swap = { enabled: false, reason };
+  } else {
+    const balance = inputIsNative ? nativeBalance : quote.tokenIn.balance;
+    const allowance = quote.tokenIn.allowance;
+
+    if (inputIsNative) {
+      approve = { enabled: false, reason: "Native input does not require ERC-20 approval." };
+    } else if (allowance === undefined) {
+      approve = { enabled: false, reason: "Input-token allowance is unknown. Refresh the quote; unknown allowance is not treated as zero." };
+    } else if (allowance >= quote.amountIn) {
+      approve = { enabled: false, reason: "The current allowance already covers this swap." };
+    } else {
+      approve = { enabled: true };
+    }
+
+    if (!deadlineValid) {
+      swap = { enabled: false, reason: "The quote expiry is invalid or has passed. Choose a fresh expiry window." };
+    } else if (balance === undefined) {
+      swap = {
+        enabled: false,
+        reason: inputIsNative
+          ? "Native wallet balance is unknown. Load it before swapping; unknown balance is not treated as zero."
+          : "Input-token balance is unknown. Refresh the quote; unknown balance is not treated as zero.",
+      };
+    } else if (balance < quote.amountIn) {
+      swap = {
+        enabled: false,
+        reason: inputIsNative
+          ? "Insufficient native wallet balance for the quoted input amount."
+          : `Insufficient input-token balance. The swap needs ${formatSwapAmount(quote.amountIn, quote.tokenIn)}, but the verified balance is ${formatSwapAmount(balance, quote.tokenIn)}.`,
+      };
+    } else if (!inputIsNative && allowance === undefined) {
+      swap = { enabled: false, reason: "Input-token allowance is unknown. Refresh the quote before swapping." };
+    } else if (!inputIsNative && allowance !== undefined && allowance < quote.amountIn) {
+      swap = { enabled: false, reason: "Approval needed: the verified allowance does not cover the quoted input amount." };
+    } else {
+      swap = { enabled: true };
+    }
   }
 
-  return {
-    quoteReady,
-    needsApproval,
-    canApproveInput: walletConnected && quoteReady && !inputIsNative,
-    canSwap: walletConnected && quoteReady && !needsApproval && deadlineValid,
-  };
+  if (pendingAction) {
+    approve = { enabled: false, reason: pendingAction === "approve-swap-input" ? "Approval is pending in the wallet or onchain." : "Another wallet action is in progress." };
+    swap = { enabled: false, reason: pendingAction === "execute-swap" ? "Swap submission is pending in the wallet or onchain." : "Another wallet action is in progress." };
+  }
+
+  return { approve, quoteReady, swap };
 }
 
-function liquidityActionState(
-  walletConnected: boolean,
+function swapQuoteBlockingReason(
+  actionCapability: Capability,
+  quote: SwapQuoteState | undefined,
+  quoteReady: boolean,
+  quoteState: "current" | "missing" | "stale",
+): string | undefined {
+  const capabilityReason = marketWalletBlockingReason(
+    actionCapability,
+    "Connect a wallet to load account balance and allowance before approving or swapping.",
+  );
+  if (capabilityReason) return capabilityReason;
+  if (quoteState === "stale") return "The quote is stale because the pair, amount, or execution preferences changed. Refresh it before acting.";
+  if (quoteState === "missing" || !quote) return "No current quote is loaded. Review the inputs, then refresh the quote.";
+  if (quote.error) return quoteErrorReason(quote.error);
+  if (!quoteReady) return "Quote details are incomplete. Refresh the quote before acting.";
+  return undefined;
+}
+
+function quoteErrorReason(error: string): string {
+  if (/no two-sided liquidity|no amm pool|output would be zero/i.test(error)) return `No liquidity: ${error}`;
+  if (/could not|failed|read|rpc|revert/i.test(error)) return `Read failure: ${error}`;
+  return `Quote error: ${error}`;
+}
+
+export function liquidityActionState(
+  actionCapability: Capability,
   quote: LiquidityQuoteState | undefined,
   tokenAIsNative: boolean,
   tokenBIsNative: boolean,
   deadlineValid: boolean,
+  nativeBalance?: bigint | undefined,
 ): LiquidityActionState {
   const quoteReady = liquidityQuoteReady(quote);
-  let needsTokenAApproval = false;
-  let needsTokenBApproval = false;
+  const tokenAAllowance = quoteReady && !tokenAIsNative ? quote.tokenA.allowance : undefined;
+  const tokenBAllowance = quoteReady && !tokenBIsNative ? quote.tokenB.allowance : undefined;
+  const needsTokenAApproval = quoteReady && tokenAAllowance !== undefined && tokenAAllowance < quote.amountA;
+  const needsTokenBApproval = quoteReady && tokenBAllowance !== undefined && tokenBAllowance < quote.amountB;
+  const blockingReasons: string[] = [];
+  const walletReady = actionCapability.status === "enabled";
+  const capabilityReason = marketWalletBlockingReason(
+    actionCapability,
+    "Connect a wallet to load balances and allowances before adding liquidity.",
+  );
 
-  if (quoteReady) {
-    needsTokenAApproval = !tokenAIsNative && (quote.tokenA.allowance ?? 0n) < quote.amountA;
-    needsTokenBApproval = !tokenBIsNative && (quote.tokenB.allowance ?? 0n) < quote.amountB;
+  if (capabilityReason) {
+    blockingReasons.push(capabilityReason);
+  } else if (!quote) {
+    blockingReasons.push("No current liquidity quote is loaded. Review the inputs, then refresh the quote.");
+  } else if (quote.error) {
+    blockingReasons.push(quoteErrorReason(quote.error));
+  } else if (!quoteReady) {
+    blockingReasons.push("Liquidity quote details are incomplete. Refresh the quote before adding liquidity.");
+  } else {
+    const tokenABalanceReason = liquidityBalanceBlockingReason("A", quote.tokenA, quote.amountA, tokenAIsNative, nativeBalance);
+    const tokenBBalanceReason = liquidityBalanceBlockingReason("B", quote.tokenB, quote.amountB, tokenBIsNative, nativeBalance);
+    if (tokenABalanceReason) blockingReasons.push(tokenABalanceReason);
+    if (tokenBBalanceReason) blockingReasons.push(tokenBBalanceReason);
+    if (!tokenAIsNative && tokenAAllowance === undefined) {
+      blockingReasons.push("Token A allowance is unknown. Refresh the liquidity quote before adding liquidity.");
+    } else if (needsTokenAApproval) {
+      blockingReasons.push("Approval needed for token A before adding liquidity.");
+    }
+    if (!tokenBIsNative && tokenBAllowance === undefined) {
+      blockingReasons.push("Token B allowance is unknown. Refresh the liquidity quote before adding liquidity.");
+    } else if (needsTokenBApproval) {
+      blockingReasons.push("Approval needed for token B before adding liquidity.");
+    }
+    if (!deadlineValid) {
+      blockingReasons.push("The quote expiry is invalid or has passed. Choose a fresh expiry window.");
+    }
   }
 
   return {
     quoteReady,
     needsTokenAApproval,
     needsTokenBApproval,
-    canApproveTokenA: walletConnected && quoteReady && !tokenAIsNative,
-    canApproveTokenB: walletConnected && quoteReady && !tokenBIsNative,
-    canAddLiquidity: walletConnected && quoteReady && !needsTokenAApproval && !needsTokenBApproval && deadlineValid,
+    canApproveTokenA: walletReady && quoteReady && !tokenAIsNative && needsTokenAApproval,
+    canApproveTokenB: walletReady && quoteReady && !tokenBIsNative && needsTokenBApproval,
+    addLiquidity: {
+      enabled: blockingReasons.length === 0,
+      reason: blockingReasons.length > 0 ? blockingReasons.join(" ") : undefined,
+    },
   };
 }
 
-function positionActionState(
-  walletConnected: boolean,
+function liquidityBalanceBlockingReason(
+  side: "A" | "B",
+  token: SwapTokenMetadata,
+  amount: bigint,
+  native: boolean,
+  nativeBalance: bigint | undefined,
+): string | undefined {
+  const balance = native ? nativeBalance : token.balance;
+  if (balance === undefined) {
+    return native
+      ? `Native wallet balance for token ${side} is unknown. Load it before adding liquidity; unknown balance is not treated as zero.`
+      : `Token ${side} balance is unknown. Refresh the liquidity quote; unknown balance is not treated as zero.`;
+  }
+  if (balance >= amount) return undefined;
+
+  const balanceToken = native ? { ...token, symbol: "Native" } : token;
+  return native
+    ? `Insufficient native wallet balance for token ${side}. Add liquidity needs ${formatSwapAmount(amount, balanceToken)}, but the verified native balance is ${formatSwapAmount(balance, balanceToken)}.`
+    : `Insufficient token ${side} balance. Add liquidity needs ${formatSwapAmount(amount, token)}, but the verified balance is ${formatSwapAmount(balance, token)}.`;
+}
+
+export function positionActionState(
+  actionCapability: Capability,
   position: AmmPositionState | undefined,
   quote: RemoveLiquidityQuoteState | undefined,
   deadlineValid: boolean,
 ): PositionActionState {
   const removeReady = removeLiquidityQuoteReady(quote);
-  let needsLpApproval = false;
-
-  if (removeReady) {
-    needsLpApproval = (quote.position.lpAllowance ?? 0n) < quote.liquidity;
-  }
+  const lpAllowance = removeReady && quote
+    ? quote.position.lpAllowance ?? quote.position.lpToken.allowance
+    : undefined;
+  const needsLpApproval = removeReady && quote !== undefined && lpAllowance !== undefined && lpAllowance < quote.liquidity;
+  const walletReady = actionCapability.status === "enabled";
 
   return {
     removeReady,
     needsLpApproval,
-    canApproveLp: walletConnected && removeReady,
-    canRemoveLiquidity: walletConnected && removeReady && !needsLpApproval && deadlineValid,
-    canClaimFees: walletConnected && Boolean(position?.pool?.exists),
+    canApproveLp: walletReady && removeReady && needsLpApproval,
+    canRemoveLiquidity: walletReady && removeReady && lpAllowance !== undefined && !needsLpApproval && deadlineValid,
+    canClaimFees: walletReady && Boolean(position?.pool?.exists),
   };
 }
 
-function swapTransactionFacts(quote: SwapQuoteState | undefined, inputIsNative: boolean): FactItem[] {
+function marketWalletBlockingReason(
+  actionCapability: Capability,
+  connectReason: string,
+): string | undefined {
+  if (actionCapability.status === "enabled") return undefined;
+  if (actionCapability.reason) return actionCapability.reason;
+  if (actionCapability.status === "connect") return connectReason;
+  if (actionCapability.status === "switch") return "Switch your wallet to the active app network before submitting a market transaction.";
+  return "Wallet actions are not available right now.";
+}
+
+function swapTransactionDecisionFacts(
+  quote: SwapQuoteState | undefined,
+  form: SwapForm,
+  currentUnixTime: number,
+): FactItem[] {
   return [
-    { label: "Pool", value: quote?.pool ? <AddressLink address={quote.pool.address} /> : "None" },
-    { label: "Fee", value: quote?.feeBps !== undefined ? formatSlippagePercent(quote.feeBps.toString()) : "Unknown" },
     { label: "Expected output", value: formatSwapAmount(quote?.amountOut, quote?.tokenOut) },
+    { label: "Effective execution price", value: formatExecutionPrice(quote?.effectiveExecutionPrice, quote?.tokenIn, quote?.tokenOut) },
+    { label: "Price impact (including fee)", value: formatMetricPercent(quote?.feeInclusivePriceImpact) },
     { label: "Minimum received", value: formatSwapAmount(quote?.amountOutMin, quote?.tokenOut) },
-    { label: "Approval", value: inputIsNative ? "Native value" : approvalLabel(quote?.tokenIn, quote?.amountIn) },
-    { label: "From balance", value: formatSwapAmount(quote?.tokenIn?.balance, quote?.tokenIn) },
-    { label: "Reserve in", value: formatSwapAmount(quote?.pool?.reserveIn, quote?.tokenIn) },
-    { label: "Reserve out", value: formatSwapAmount(quote?.pool?.reserveOut, quote?.tokenOut) },
+    { label: "AMM fee", value: formatFeePercent(quote?.feeBps, quote?.feeDenominator) },
+    { label: "Quote expiry", value: quote ? quoteExpiryLabel(form.deadline, currentUnixTime) : "Not quoted" },
   ];
+}
+
+function swapTransactionTechnicalFacts(
+  quote: SwapQuoteState | undefined,
+  inputIsNative: boolean,
+  nativeBalance: bigint | undefined,
+): FactItem[] {
+  const displayedBalance = inputIsNative && quote?.tokenIn
+    ? formatSwapAmount(nativeBalance, { ...quote.tokenIn, symbol: "Native" })
+    : formatSwapAmount(quote?.tokenIn?.balance, quote?.tokenIn);
+  return [
+    { label: "Pool contract", value: quote?.pool ? <AddressLink address={quote.pool.address} /> : "Unknown" },
+    { label: "Input approval", value: inputIsNative ? "Native value" : approvalLabel(quote?.tokenIn, quote?.amountIn) },
+    { label: inputIsNative ? "Native input balance" : "Input balance", value: displayedBalance },
+    { label: "Input reserve", value: formatSwapAmount(quote?.pool?.reserveIn, quote?.tokenIn) },
+    { label: "Output reserve", value: formatSwapAmount(quote?.pool?.reserveOut, quote?.tokenOut) },
+  ];
+}
+
+function formatExecutionPrice(
+  metric: MetricState<NormalizedPrice> | undefined,
+  inputToken: SwapTokenMetadata | undefined,
+  outputToken: SwapTokenMetadata | undefined,
+): string {
+  if (!metric) return "Unknown — refresh the quote";
+  if (metric.status !== "known") return `Unknown — ${metric.reason}`;
+  const input = inputToken?.symbol ?? shortTokenAddress(metric.value.baseToken);
+  const output = outputToken?.symbol ?? shortTokenAddress(metric.value.quoteToken);
+  return `1 ${input} = ${formatExactRational(metric.value.quotePerBase)} ${output}`;
+}
+
+function formatMetricPercent(metric: MetricState<ExactRational> | undefined): string {
+  if (!metric) return "Unknown — refresh the quote";
+  if (metric.status !== "known") return `Unknown — ${metric.reason}`;
+  return formatExactRational({ numerator: metric.value.numerator * 100n, denominator: metric.value.denominator }, 4, "%");
+}
+
+function formatFeePercent(fee: bigint | undefined, denominator: bigint | undefined): string {
+  if (fee === undefined || denominator === undefined || denominator <= 0n) return "Unknown";
+  return formatExactRational({ numerator: fee * 100n, denominator }, 4, "%");
+}
+
+function quoteExpiryLabel(deadline: string, currentUnixTime: number): string {
+  const minutes = remainingDeadlineMinutes(deadline, currentUnixTime);
+  return minutes === undefined ? "Invalid or expired" : `${minutes.toString()} min`;
+}
+
+function formatExactRational(value: ExactRational, maximumFractionDigits = 6, suffix = ""): string {
+  if (value.denominator === 0n) return "Unknown";
+  const negative = (value.numerator < 0n) !== (value.denominator < 0n);
+  const numerator = value.numerator < 0n ? -value.numerator : value.numerator;
+  const denominator = value.denominator < 0n ? -value.denominator : value.denominator;
+  const whole = numerator / denominator;
+  let remainder = numerator % denominator;
+  let fraction = "";
+  for (let index = 0; index < maximumFractionDigits && remainder !== 0n; index += 1) {
+    remainder *= 10n;
+    fraction += (remainder / denominator).toString();
+    remainder %= denominator;
+  }
+  fraction = fraction.replace(/0+$/, "");
+  const approximate = remainder !== 0n ? "≈" : "";
+  return `${approximate}${negative ? "-" : ""}${whole.toString()}${fraction ? `.${fraction}` : ""}${suffix}`;
 }
 
 function liquidityTransactionFacts(
@@ -998,6 +1338,10 @@ function selectedTokenForSide(
   return undefined;
 }
 
+export function swapDecisionFormKey(form: SwapForm): string {
+  return swapQuoteRequestIdentity(form);
+}
+
 function flipSwap(setForm: Dispatch<SetStateAction<SwapForm>>): void {
   setForm((current) => ({
     ...current,
@@ -1032,9 +1376,8 @@ function flipLiquidityPair(setForm: Dispatch<SetStateAction<LiquidityForm>>): vo
 }
 
 function approvalLabel(token: SwapTokenMetadata | undefined, amountIn: bigint | undefined): string {
-  if (!token || amountIn === undefined) return "Unknown";
-  const allowance = token.allowance ?? 0n;
-  return allowance >= amountIn ? "Approved" : `${formatSwapAmount(allowance, token)} approved`;
+  if (!token || amountIn === undefined || token.allowance === undefined) return "Unknown — allowance not verified";
+  return token.allowance >= amountIn ? "Approved" : `${formatSwapAmount(token.allowance, token)} approved`;
 }
 
 function lpApprovalLabel(position: AmmPositionState | undefined, liquidity: bigint | undefined): string {
@@ -1043,19 +1386,25 @@ function lpApprovalLabel(position: AmmPositionState | undefined, liquidity: bigi
   return allowance >= liquidity ? "Approved" : `${formatSwapAmount(allowance, position.lpToken)} approved`;
 }
 
-function swapStatus(quote: SwapQuoteState | undefined, deadlineValid: boolean): string {
+function swapStatus(quote: SwapQuoteState | undefined, quoteCurrent: boolean, deadlineValid: boolean): string {
+  if (quote && !quoteCurrent) return "Quote stale";
   if (!deadlineValid) return "New expiry needed";
   if (!quote) return "Not quoted";
   if (swapQuoteReady(quote)) return "Ready";
-  if (quote.error?.startsWith("No AMM pool")) return "No pool";
+  if (/no two-sided liquidity|no amm pool/i.test(quote.error ?? "")) return "No liquidity";
   return "Blocked";
 }
 
-function swapTone(quote: SwapQuoteState | undefined, deadlineValid: boolean): "default" | "muted" | "warning" | "danger" {
+function swapTone(
+  quote: SwapQuoteState | undefined,
+  quoteCurrent: boolean,
+  deadlineValid: boolean,
+): "default" | "muted" | "warning" | "danger" {
+  if (quote && !quoteCurrent) return "warning";
   if (!deadlineValid) return "warning";
   if (!quote) return "muted";
   if (swapQuoteReady(quote)) return "default";
-  if (quote.error?.startsWith("No AMM pool")) return "warning";
+  if (/no two-sided liquidity|no amm pool/i.test(quote.error ?? "")) return "warning";
   return "danger";
 }
 

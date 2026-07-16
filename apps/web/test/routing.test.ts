@@ -64,9 +64,12 @@ describe("canonical application routing", () => {
     expect(routeFromPath("/advanced")).toEqual({ kind: "tools" });
   });
 
-  test("keeps hosted alerts optional", () => {
-    expect(routeFromPath("/notifications", {})).toEqual({ kind: "explore" });
+  test("always classifies alert aliases independently of Sentinel configuration", () => {
+    expect(routeFromPath("/settings/alerts", {})).toEqual({ kind: "alerts" });
+    expect(routeFromPath("/notifications", {})).toEqual({ kind: "alerts" });
+    expect(routeFromPath("/sentinel", {})).toEqual({ kind: "alerts" });
     expect(routeFromPath("/settings/alerts", { VITE_SENTINEL_API_URL: "https://alerts.example.test" })).toEqual({ kind: "alerts" });
+    expect(routeFromPath("/notifications/history", {})).toEqual({ kind: "not-found" });
   });
 
   test("builds stable canonical hrefs and preserves compatibility views", () => {

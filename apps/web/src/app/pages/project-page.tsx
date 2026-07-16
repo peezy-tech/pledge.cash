@@ -1,10 +1,10 @@
 import type { Address } from "@pledge.cash/sdk";
-import { ArrowRight, RefreshCw } from "lucide-react";
+import { ArrowRight, Loader2, RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
 import { AddressLink } from "../../components/shell";
+import { ProjectMarketOverview } from "../../features/market";
 import { Badge } from "../../components/ui/badge";
 import { Button, ButtonLink } from "../../components/ui/button";
-import { shortAddress } from "../../lib/forms";
 import {
   formatNativeBalance,
   formatTokenBalance,
@@ -36,14 +36,15 @@ export type ProjectLayoutProps = {
   onNavigateSection: (section: ProjectSection) => void;
   onRetry?: (() => void) | undefined;
   projectName?: string | undefined;
+  savedProjectsWarning?: string | undefined;
   sectionHref?: ((section: ProjectSection) => string) | undefined;
 };
 
-const projectSections: readonly { label: string; mobileLabel: string; value: ProjectSection }[] = [
-  { label: "Overview", mobileLabel: "Overview", value: "overview" },
-  { label: "Participate", mobileLabel: "Join", value: "participate" },
-  { label: "Governance", mobileLabel: "Govern", value: "governance" },
-  { label: "Transparency", mobileLabel: "Details", value: "transparency" },
+const projectSections: readonly { label: string; value: ProjectSection }[] = [
+  { label: "Overview", value: "overview" },
+  { label: "Participate", value: "participate" },
+  { label: "Governance", value: "governance" },
+  { label: "Transparency", value: "transparency" },
 ];
 
 export function ProjectLayout({
@@ -58,6 +59,7 @@ export function ProjectLayout({
   onNavigateSection,
   onRetry,
   projectName,
+  savedProjectsWarning,
   sectionHref,
 }: ProjectLayoutProps): React.JSX.Element {
   const snapshot = dashboard?.snapshot;
@@ -70,38 +72,55 @@ export function ProjectLayout({
 
   return (
     <div>
-      <header className="border-b border-zinc-800 pb-5">
+      <header className="border-b border-[var(--pc-border)] pb-5">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <Badge variant={lifecycle.tone}>{lifecycle.label}</Badge>
               <Badge variant={role.tone}>{role.label}</Badge>
-              <span className="text-xs text-zinc-600">{chainName}</span>
+              <span className="text-xs text-[var(--pc-text-subtle)]">{chainName}</span>
             </div>
-            <h1 className="m-0 whitespace-normal [overflow-wrap:anywhere] text-3xl font-semibold tracking-[-0.03em] text-zinc-50 sm:text-5xl">{name}</h1>
-            <p className="m-0 mt-3 max-w-3xl text-sm leading-6 text-zinc-400">
+            <h1 className="m-0 whitespace-normal [overflow-wrap:anywhere] text-3xl font-semibold tracking-[-0.03em] text-[var(--pc-text)] sm:text-5xl">{name}</h1>
+            <p className="m-0 mt-3 max-w-3xl text-sm leading-6 text-[var(--pc-text-muted)]">
               {snapshot
-                ? `${snapshot.launched ? "Holder governance is live." : "Holder governance has not launched; the owner still manages project changes directly."} Participation can be live independently. Current state is read from the Boardroom and the contracts it coordinates; lifetime activity is reconstructed from their onchain event history.`
-                : "Read a project’s state, participation paths, governance, and treasury evidence in one place."}
+                ? `${snapshot.launched ? "Holder governance is live." : "Holder governance has not launched; the owner still manages project changes directly."} See whether participation is open, what the current route costs in its quote token, how deep the market is, and what holders can do.`
+                : "See whether participation is open, what the route costs, how project funds are held, and what holders can do."}
             </p>
-            {dashboard ? <p className="m-0 mt-2 font-mono text-xs text-zinc-600">{shortAddress(dashboard.address)}</p> : null}
+            {dashboard ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--pc-text-subtle)]">
+                <span>Canonical project contract</span>
+                <AddressLink address={dashboard.address} />
+              </div>
+            ) : null}
           </div>
-          {mastheadAction ? <div className="flex shrink-0 flex-wrap gap-2">{mastheadAction}</div> : null}
+          {mastheadAction || savedProjectsWarning ? (
+            <div className="max-w-md shrink-0">
+              {mastheadAction ? <div className="flex flex-wrap gap-2">{mastheadAction}</div> : null}
+              {savedProjectsWarning ? (
+                <p className="m-0 mt-2 text-xs leading-5 text-[var(--pc-warning)]" role="status">
+                  Saved-project storage warning: {savedProjectsWarning}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </header>
 
-      <nav aria-label="Project" className="grid grid-cols-4 border-b border-zinc-800 md:flex md:gap-1">
+      <ProjectMarketOverview dashboard={dashboard} loading={loading} />
+
+      <nav aria-label="Project" className="grid grid-cols-2 border-b border-[var(--pc-border)] sm:grid-cols-4 md:flex md:gap-1" data-mobile-layout="two-column-project-navigation">
         {projectSections.map((section) => {
           const className = cn(
-            "relative min-h-12 min-w-0 px-1 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-lime-300/70 md:shrink-0 md:px-3 md:text-sm",
+            "relative flex min-h-12 min-w-0 items-center justify-center px-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--pc-accent)] md:shrink-0 md:px-3 md:text-sm",
             activeSection === section.value
-              ? "text-zinc-50 after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:bg-lime-300"
-              : "text-zinc-500 hover:text-zinc-200",
+              ? "text-[var(--pc-text)] after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:bg-[var(--pc-accent)]"
+              : "text-[var(--pc-text-muted)] hover:text-[var(--pc-text)]",
           );
           const href = sectionHref?.(section.value);
           return href ? (
             <a
               aria-current={activeSection === section.value ? "page" : undefined}
+              aria-label={section.label}
               className={className}
               href={href}
               key={section.value}
@@ -111,17 +130,18 @@ export function ProjectLayout({
                 onNavigateSection(section.value);
               }}
             >
-              <span className="md:hidden">{section.mobileLabel}</span><span className="hidden md:inline">{section.label}</span>
+              {section.label}
             </a>
           ) : (
             <button
               aria-current={activeSection === section.value ? "page" : undefined}
+              aria-label={section.label}
               className={className}
               key={section.value}
               type="button"
               onClick={() => onNavigateSection(section.value)}
             >
-              <span className="md:hidden">{section.mobileLabel}</span><span className="hidden md:inline">{section.label}</span>
+              {section.label}
             </button>
           );
         })}
@@ -172,6 +192,8 @@ export type ProjectOverviewPageProps = {
   position?: ProjectWalletPosition | undefined;
   positionError?: string | undefined;
   positionLoading?: boolean | undefined;
+  refreshing?: boolean | undefined;
+  refreshPendingLabel?: string | undefined;
 };
 
 export function ProjectOverviewPage({
@@ -185,12 +207,15 @@ export function ProjectOverviewPage({
   position,
   positionError,
   positionLoading = false,
+  refreshing,
+  refreshPendingLabel = "Refreshing project position",
 }: ProjectOverviewPageProps): React.JSX.Element {
   const snapshot = dashboard?.snapshot;
   const shareAsset = dashboard?.treasuryAssets.find((asset) => sameAddress(asset.address, snapshot?.shareToken));
   const cashAssets = dashboard?.treasuryAssets.filter((asset) => !sameAddress(asset.address, snapshot?.shareToken)) ?? [];
   const commitments = commitmentSummary(dashboard);
   const hasParticipation = (commitments.openDistributions ?? 0) > 0;
+  const refreshPending = refreshing ?? positionLoading;
 
   if (loading && !dashboard) {
     return <OverviewLoading />;
@@ -210,7 +235,7 @@ export function ProjectOverviewPage({
     connected: account !== undefined,
     hasActiveParticipation: hasParticipation,
     launched: snapshot.launched,
-    loading: positionLoading,
+    loading: refreshPending,
     position,
     status: snapshot.status,
   });
@@ -218,53 +243,11 @@ export function ProjectOverviewPage({
   return (
     <>
       <RuledSection>
-        <SectionHeading
-          title="Your position"
-          description={account
-            ? "Wallet-specific project tokens, settleable project-token grants, and verified holder power."
-            : "Public project state remains available without a wallet. Connect only to read your position."}
-          action={onRefresh ? (
-            <Button size="sm" variant="ghost" onClick={onRefresh}>
-              <RefreshCw className="h-4 w-4" />
-              Refresh
-            </Button>
-          ) : undefined}
-        />
-        {account ? (
-          <>
-            <KeyValueList columns={3} items={positionFacts(position, snapshot, positionLoading)} />
-            {!positionLoading && (positionError || projectPositionHasUnknowns(position)) ? (
-              <p className="m-0 border-t border-zinc-800 py-3 text-xs leading-5 text-amber-200">
-                One or more wallet-specific reads could not be verified. Those values remain Unknown and are not treated as zero.
-              </p>
-            ) : null}
-          </>
-        ) : (
-          <p className="m-0 mt-4 max-w-3xl text-sm leading-6 text-zinc-400">
-            Connect a wallet to read its direct project-token balance, settleable project-token grants, and current plus previous-block governance power.
-          </p>
-        )}
-        <div className="mt-4 grid gap-4 border-l-2 border-lime-300 bg-zinc-900/35 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-          <div>
-            <p className="m-0 text-base font-semibold text-zinc-50">{positionActionLabel(nextAction)}</p>
-            <p className="m-0 mt-1 max-w-2xl text-sm leading-6 text-zinc-400">
-              {positionActionDescription(nextAction, account, position, snapshot.shareTokenMetadata)}
-            </p>
-          </div>
-          <PositionAction
-            action={nextAction}
-            href={nextAction.kind === "loading" ? undefined : actionHref?.(nextAction)}
-            onOpen={onOpenAction}
-          />
-        </div>
-      </RuledSection>
-
-      <RuledSection>
-        <SectionHeading title="Project state" description="A compact read of authority, supply, treasury, and open obligations." />
+        <SectionHeading title="Project state" description="Authority, token supply, treasury, and open obligations before any wallet-specific position." />
         <KeyValueList
           columns={4}
           items={[
-            { label: "Boardroom", value: <AddressLink address={dashboard.address} /> },
+            { label: "Project contract", value: <AddressLink address={dashboard.address} /> },
             { label: "Owner", value: <AddressLink address={snapshot.owner} /> },
             { label: "Project token", value: <AddressLink address={snapshot.shareToken} /> },
             { label: "Lifecycle", value: boardroomLifecycle(snapshot.status).label },
@@ -291,6 +274,54 @@ export function ProjectOverviewPage({
             },
           ]}
         />
+      </RuledSection>
+
+      <RuledSection>
+        <SectionHeading
+          title="Your position"
+          description={account
+            ? "Wallet-specific project tokens, settleable project-token grants, and verified holder power."
+            : "Public project state remains available without a wallet, including the market truth above. Connect only to read a wallet-specific position."}
+          action={onRefresh ? (
+            <Button
+              aria-busy={refreshPending || undefined}
+              disabled={refreshPending}
+              size="sm"
+              variant="ghost"
+              onClick={onRefresh}
+            >
+              {refreshPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              {refreshPending ? refreshPendingLabel : "Refresh position"}
+            </Button>
+          ) : undefined}
+        />
+        {account ? (
+          <>
+            <KeyValueList columns={3} items={positionFacts(position, snapshot, positionLoading)} />
+            {!positionLoading && (positionError || projectPositionHasUnknowns(position)) ? (
+              <p className="m-0 border-t border-[var(--pc-border)] py-3 text-xs leading-5 text-[var(--pc-warning)]">
+                One or more wallet-specific reads could not be verified. Those values remain Unknown and are not treated as zero.
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <p className="m-0 mt-4 max-w-3xl text-sm leading-6 text-[var(--pc-text-muted)]">
+            Connect a wallet to read its direct project-token balance, settleable project-token grants, and current plus previous-block governance power.
+          </p>
+        )}
+        <div className="mt-4 grid gap-4 border-l-2 border-[var(--pc-accent)] bg-[var(--pc-surface-subtle)] px-4 py-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <div>
+            <p className="m-0 text-base font-semibold text-[var(--pc-text)]">{positionActionLabel(nextAction)}</p>
+            <p className="m-0 mt-1 max-w-2xl text-sm leading-6 text-[var(--pc-text-muted)]">
+              {positionActionDescription(nextAction, account, position, snapshot.shareTokenMetadata)}
+            </p>
+          </div>
+          <PositionAction
+            action={nextAction}
+            href={nextAction.kind === "loading" ? undefined : actionHref?.(nextAction)}
+            onOpen={onOpenAction}
+          />
+        </div>
       </RuledSection>
 
       <RuledSection>

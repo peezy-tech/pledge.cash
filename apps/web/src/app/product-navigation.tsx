@@ -37,11 +37,11 @@ const PRIMARY_NAVIGATION_ITEMS: PrimaryNavigationItem[] = [
   { destination: "studio", icon: <Landmark className="h-4 w-4" />, label: "Studio" },
 ];
 
-const PROJECT_SECTIONS: { section: ProjectSection; desktopLabel: string; mobileLabel: string }[] = [
-  { section: "overview", desktopLabel: "Overview", mobileLabel: "Overview" },
-  { section: "participate", desktopLabel: "Participate", mobileLabel: "Join" },
-  { section: "governance", desktopLabel: "Governance", mobileLabel: "Govern" },
-  { section: "transparency", desktopLabel: "Transparency", mobileLabel: "Details" },
+const PROJECT_SECTIONS: { section: ProjectSection; label: string }[] = [
+  { section: "overview", label: "Overview" },
+  { section: "participate", label: "Participate" },
+  { section: "governance", label: "Governance" },
+  { section: "transparency", label: "Transparency" },
 ];
 
 const STUDIO_SECTIONS: { section: StudioSection; label: string }[] = [
@@ -126,7 +126,7 @@ export function ProjectSectionNav({
     <nav
       aria-label="Project sections"
       className={cn(
-        "grid grid-cols-4 border-b border-[var(--pc-border)] md:flex md:gap-6",
+        "grid grid-cols-2 border-b border-[var(--pc-border)] sm:grid-cols-4 md:flex md:gap-6",
         className,
       )}
     >
@@ -135,9 +135,9 @@ export function ProjectSectionNav({
         return (
           <a
             aria-current={selected ? "page" : undefined}
-            aria-label={item.desktopLabel}
+            aria-label={item.label}
             className={cn(
-              "relative flex min-h-11 items-center justify-center px-1 text-[11px] font-semibold transition-colors md:justify-start md:px-0 md:text-sm",
+              "relative flex min-h-12 items-center justify-center px-2 text-xs font-semibold transition-colors md:justify-start md:px-0 md:text-sm",
               selected
                 ? "text-[var(--pc-text)] after:absolute after:inset-x-1 after:bottom-0 after:h-0.5 after:bg-[var(--pc-accent)] md:after:inset-x-0"
                 : "text-[var(--pc-text-muted)] hover:text-[var(--pc-text)]",
@@ -145,8 +145,7 @@ export function ProjectSectionNav({
             href={projectRouteHref(chainId, boardroom, item.section)}
             key={item.section}
           >
-            <span className="md:hidden">{item.mobileLabel}</span>
-            <span className="hidden md:inline">{item.desktopLabel}</span>
+            {item.label}
           </a>
         );
       })}

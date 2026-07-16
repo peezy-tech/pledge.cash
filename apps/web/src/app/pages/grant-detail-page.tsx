@@ -105,16 +105,44 @@ export function GrantVerificationFailureState({
   );
 }
 
-export function GrantVerificationLoadingState({ grant }: { grant: Address }): React.JSX.Element {
+export function GrantVerificationLoadingState({
+  backHref,
+  grant,
+  onBack,
+  returnLabel = "Return to Portfolio",
+}: {
+  backHref?: string | undefined;
+  grant: Address;
+  onBack?: (() => void) | undefined;
+  returnLabel?: string | undefined;
+}): React.JSX.Element {
   return (
-    <div aria-live="polite" className="grid min-h-[58vh] place-items-center py-12">
+    <div className="grid min-h-[58vh] place-items-center py-12">
       <div className="max-w-xl text-center">
-        <p className="m-0 text-xs font-semibold uppercase tracking-[0.12em] text-lime-200/80">Grant verification</p>
-        <h1 className="m-0 mt-2 text-3xl font-semibold tracking-[-0.025em] text-zinc-50 sm:text-4xl">Verifying grant</h1>
-        <p className="m-0 mt-3 text-sm leading-6 text-zinc-400">
-          Checking contract code, factory provenance, and current grant terms before showing any settlement guidance.
-        </p>
+        <div aria-busy="true" aria-live="polite" role="status">
+          <p className="m-0 text-xs font-semibold uppercase tracking-[0.12em] text-lime-200/80">Grant verification</p>
+          <h1 className="m-0 mt-2 text-3xl font-semibold tracking-[-0.025em] text-zinc-50 sm:text-4xl">Verifying grant</h1>
+          <p className="m-0 mt-3 text-sm leading-6 text-zinc-400">
+            Checking contract code, factory provenance, and current grant terms before showing any settlement guidance.
+          </p>
+        </div>
         <p className="m-0 mt-3 text-xs text-zinc-500">Requested grant <AddressLink address={grant} /></p>
+        {backHref && onBack ? (
+          <div className="mt-6 flex justify-center">
+            <ButtonLink
+              href={backHref}
+              variant="secondary"
+              onClick={(event) => {
+                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+                onBack();
+              }}
+            >
+              <ArrowLeft className="h-4 w-4" />
+              {returnLabel}
+            </ButtonLink>
+          </div>
+        ) : null}
       </div>
     </div>
   );

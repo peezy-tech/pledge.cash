@@ -513,6 +513,7 @@ describe("participation flow composition", () => {
       <Web3Provider>
         <SwapPanel
           account={undefined}
+          actionCapability={{ status: "connect" }}
           deployment={undefined}
           form={defaultSwapForm()}
           liquidityForm={defaultLiquidityForm()}
@@ -543,6 +544,7 @@ describe("participation flow composition", () => {
           refreshTokens={noop}
           removeLiquidity={noop}
           runAction={async (_label, action) => action()}
+          switchWalletNetwork={noop}
         />
       </Web3Provider>,
     );

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Address, BoardroomHolderPower } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
 import {
+  AlertsUnavailablePage,
   ExplorePage,
   GrantDetailPage,
   GrantVerificationFailureState,
@@ -685,13 +686,19 @@ describe("read-first product pages", () => {
     expect(studio).toContain("Operator tools");
   });
 
-  test("renders explicit not-found and redirect states", () => {
+  test("renders explicit not-found, alerts-unavailable, and redirect states", () => {
     const notFound = renderToString(<NotFoundPage />);
+    const alertsUnavailable = renderToString(<AlertsUnavailablePage returnHref="/explore" />);
     const redirect = renderToString(<RedirectState destination="/explore" />);
 
     expect(notFound).toContain("This page does not exist");
+    expect(alertsUnavailable).toContain("Sentinel is not configured");
+    expect(alertsUnavailable).toContain("Read-only product use remains available");
+    expect(alertsUnavailable).toContain("never acts as an onchain transaction wallet");
+    expect(alertsUnavailable).toContain('href="/explore"');
     expect(redirect).toContain("Opening the canonical workspace");
     expect(notFound).not.toContain("<main");
+    expect(alertsUnavailable).not.toContain("<main");
     expect(redirect).not.toContain("<main");
   });
 
@@ -802,7 +809,7 @@ describe("read-first product pages", () => {
     const html = renderToString(<AddressLink address={boardroom} />);
 
     expect(html).toContain(`aria-label="Copy address ${boardroom}"`);
-    expect(html).toContain("h-10 w-10");
-    expect(html).toContain("sm:h-8 sm:w-8");
+    expect(html).toContain("h-11 w-11");
+    expect(html).toContain("sm:h-9 sm:w-9");
   });
 });

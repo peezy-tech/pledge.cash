@@ -1,6 +1,6 @@
 import type { Address } from "@pledge.cash/sdk";
 import { isAddress } from "viem";
-import { getSentinelBaseUrl, type SentinelEnv } from "../lib/sentinel";
+import type { SentinelEnv } from "../lib/sentinel";
 
 export type AppView = "project" | "market" | "wallet" | "grants" | "manage" | "activity" | "notifications" | "advanced";
 
@@ -106,12 +106,8 @@ export function routeFromPath(pathname: string, env: RouteEnvironment = import.m
   if (first === "portfolio" && rest.length === 0) return { kind: "portfolio" };
   if (first === "studio") return studioRoute(rest);
   if (first === "projects") return projectRoute(rest);
-  if (first === "settings" && rest.length === 1 && rest[0] === "alerts") {
-    return getSentinelBaseUrl(env) ? { kind: "alerts" } : { kind: "explore" };
-  }
-  if (first === "notifications" || first === "sentinel") {
-    return rest.length === 0 && getSentinelBaseUrl(env) ? { kind: "alerts" } : { kind: "explore" };
-  }
+  if (first === "settings" && rest.length === 1 && rest[0] === "alerts") return { kind: "alerts" };
+  if ((first === "notifications" || first === "sentinel") && rest.length === 0) return { kind: "alerts" };
   if (first === "grants" && rest.length === 2) return grantRoute(rest);
   if (rest.length > 0) return { kind: "not-found" };
 

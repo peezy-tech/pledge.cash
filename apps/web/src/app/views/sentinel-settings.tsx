@@ -59,15 +59,15 @@ export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSett
       <WorkspaceHeader
         eyebrow="Notifications"
         title="Governance alerts"
-        description="Get notified when queued governance actions affect wallets you control."
+        description="Get notified when queued governance actions affect wallets you control. Social sign-in establishes an alert identity only; it is not a transaction wallet and cannot authorize onchain actions."
         action={
           session.authenticated ? (
             <div className="flex flex-wrap gap-2">
-              <Button disabled={session.loading} variant="ghost" onClick={() => void session.refresh()}>
+              <Button disabled={session.loading} type="button" variant="ghost" onClick={() => void session.refresh()}>
                 <RefreshCw className="h-4 w-4" />
                 Refresh
               </Button>
-              <Button disabled={logoutPending} variant="secondary" onClick={() => void logout()}>
+              <Button disabled={logoutPending} type="button" variant="secondary" onClick={() => void logout()}>
                 {logoutPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
                 Sign out
               </Button>
@@ -85,9 +85,9 @@ export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSett
       {session.loading && !session.me ? <LoadingPanel /> : null}
       {session.error ? (
         <Panel title="Alert service">
-          <p className="m-0 border-t border-red-950 bg-red-950/35 p-4 text-sm text-red-200">{session.error}</p>
+          <p className="m-0 border-t border-red-950 bg-red-950/35 p-4 text-sm text-red-200" role="alert">{session.error}</p>
           <div className="border-t border-zinc-800 p-4">
-            <Button variant="secondary" onClick={() => void session.refresh()}>
+            <Button type="button" variant="secondary" onClick={() => void session.refresh()}>
               <RefreshCw className="h-4 w-4" />
               Retry
             </Button>

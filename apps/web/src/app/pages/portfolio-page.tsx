@@ -48,17 +48,19 @@ export function PortfolioPage({
   tasks,
 }: PortfolioPageProps): React.JSX.Element {
   const orderedTasks = orderPortfolioTasks(tasks);
-  const attentionCount = tasks.filter((task) => task.status === "attention").length;
+  const attentionTasks = orderedTasks.filter((task) => task.status === "attention");
+  const readyTasks = orderedTasks.filter((task) => task.status === "ready");
+  const recordTasks = orderedTasks.filter((task) => task.status === "informational" || task.status === "complete");
 
   return (
     <div>
       <PageHeading
         actions={account ? refreshAction : connectAction}
         eyebrow="Portfolio"
-        title={account ? "Your onchain work" : "Wallet portfolio"}
+        title={account ? "Decisions, ready actions, and records" : "Portfolio and saved projects"}
         description={account
-          ? "Grants, project roles, and liquidity actions ordered by what needs attention first."
-          : "Connect a wallet to find grants and project responsibilities. Public project pages remain available without connecting."}
+          ? "Wallet-specific work stays ordered by urgency: decisions first, then actions ready to take, then completed or reference records."
+          : "Saved projects remain available as read-only browser shortcuts. Connect only to discover wallet-specific grants, roles, and actions."}
       />
 
       {error ? <div className="pt-5"><PageNotice title="Portfolio data is incomplete" tone="danger">{error}</PageNotice></div> : null}
@@ -66,25 +68,53 @@ export function PortfolioPage({
       <RuledSection>
         <SectionHeading
           title="Needs attention"
-          description={account ? `${attentionCount} ${attentionCount === 1 ? "item" : "items"} require a decision or transaction.` : "Wallet-specific actions appear here after connection."}
+          description={account
+            ? `${attentionTasks.length.toLocaleString()} ${attentionTasks.length === 1 ? "item needs" : "items need"} a decision, expiring response, or corrective transaction.`
+            : "Wallet-specific decisions appear here after connection."}
         />
         {!account ? (
-          <div className="mt-5 border-l-2 border-zinc-700 px-4 py-2">
-            <div className="flex items-center gap-2 text-zinc-300"><WalletCards className="h-4 w-4" /><span className="text-sm font-semibold">No wallet connected</span></div>
-            <p className="m-0 mt-2 max-w-2xl text-sm leading-6 text-zinc-500">Connecting is used to discover positions and authorize actions; it does not grant pledge.cash custody or project authority.</p>
+          <div className="mt-5 border-l-2 border-[var(--pc-border-strong)] px-4 py-2">
+            <div className="flex items-center gap-2 text-[var(--pc-text-muted)]"><WalletCards className="h-4 w-4" /><span className="text-sm font-semibold">No wallet connected</span></div>
+            <p className="m-0 mt-2 max-w-2xl text-sm leading-6 text-[var(--pc-text-subtle)]">Connecting discovers positions and authorizes actions; it does not grant pledge.cash custody or project authority. Saved projects below remain readable.</p>
           </div>
         ) : loading && orderedTasks.length === 0 ? (
           <PortfolioLoading />
-        ) : orderedTasks.length === 0 ? (
-          <PageNotice title="Nothing needs your wallet right now">
-            No open grant settlement, owner operation, governance threshold, or liquidity action was discovered.
-          </PageNotice>
         ) : (
-          <ol className="m-0 mt-4 list-none border-t border-zinc-800 p-0">
-            {orderedTasks.map((task) => <PortfolioTaskRow key={task.id} task={task} />)}
-          </ol>
+          <PortfolioTaskList
+            emptyDescription="No expiring grant, owner decision, governance threshold, or liquidity correction currently needs this wallet."
+            emptyTitle="Nothing needs attention"
+            tasks={attentionTasks}
+          />
         )}
       </RuledSection>
+
+      {account ? (
+        <RuledSection>
+          <SectionHeading
+            title="Ready"
+            description={`${readyTasks.length.toLocaleString()} ${readyTasks.length === 1 ? "action is" : "actions are"} verified and ready to review without displacing more urgent work.`}
+          />
+          <PortfolioTaskList
+            emptyDescription="No verified grant settlement, participation step, governance action, or owner operation is ready right now."
+            emptyTitle="No actions are ready"
+            tasks={readyTasks}
+          />
+        </RuledSection>
+      ) : null}
+
+      {account ? (
+        <RuledSection>
+          <SectionHeading
+            title="Records and completed"
+            description="Reference-only discoveries and completed work stay available here without competing with actionable tasks."
+          />
+          <PortfolioTaskList
+            emptyDescription="Completed and reference-only wallet records will appear after discovery finds them."
+            emptyTitle="No records discovered"
+            tasks={recordTasks}
+          />
+        </RuledSection>
+      ) : null}
 
       <RuledSection>
         <SectionHeading
@@ -206,6 +236,29 @@ export function orderPortfolioTasks(tasks: readonly PortfolioTask[]): PortfolioT
     .map(({ task }) => task);
 }
 
+function PortfolioTaskList({
+  emptyDescription,
+  emptyTitle,
+  tasks,
+}: {
+  emptyDescription: string;
+  emptyTitle: string;
+  tasks: readonly PortfolioTask[];
+}): React.JSX.Element {
+  if (tasks.length === 0) {
+    return (
+      <div className="mt-4">
+        <PageNotice title={emptyTitle}>{emptyDescription}</PageNotice>
+      </div>
+    );
+  }
+  return (
+    <ol className="m-0 mt-4 list-none border-t border-[var(--pc-border)] p-0">
+      {tasks.map((task) => <PortfolioTaskRow key={task.id} task={task} />)}
+    </ol>
+  );
+}
+
 function PortfolioTaskRow({ task }: { task: PortfolioTask }): React.JSX.Element {
   const presentation = taskPresentation(task.status);
   return (
@@ -232,8 +285,8 @@ function taskPresentation(status: PortfolioTaskStatus): {
 } {
   if (status === "attention") return { icon: <AlertTriangle className="h-4 w-4" />, iconClass: "text-amber-300", label: "Needs attention", tone: "warning" };
   if (status === "ready") return { icon: <Circle className="h-4 w-4" />, iconClass: "text-lime-300", label: "Ready", tone: "default" };
-  if (status === "complete") return { icon: <CheckCircle2 className="h-4 w-4" />, iconClass: "text-zinc-600", label: "Complete", tone: "muted" };
-  return { icon: <Circle className="h-4 w-4" />, iconClass: "text-zinc-600", label: "For reference", tone: "muted" };
+  if (status === "complete") return { icon: <CheckCircle2 className="h-4 w-4" />, iconClass: "text-zinc-600", label: "Completed", tone: "muted" };
+  return { icon: <Circle className="h-4 w-4" />, iconClass: "text-zinc-600", label: "Record", tone: "muted" };
 }
 
 function PortfolioLoading(): React.JSX.Element {

@@ -17,6 +17,17 @@ export type PledgeCashNetwork = {
   chain: Chain;
 };
 
+export type PledgeCashEnvironmentKind = "local" | "testnet" | "custom";
+
+export type PledgeCashEnvironmentIdentity = {
+  kind: PledgeCashEnvironmentKind;
+  label: "Local" | "Testnet" | "Custom";
+  description: string;
+  hasRealValue: boolean | undefined;
+  resettable: boolean;
+  seeded: boolean;
+};
+
 export type PledgeCashNetworkEnv = Partial<
   Record<
     | "BASE_URL"
@@ -69,6 +80,39 @@ export function networkForChainId(chainId: number): PledgeCashNetwork {
 
 export function supportedNetworkForChainId(chainId: number): PledgeCashNetwork | undefined {
   return PLEDGE_CASH_NETWORKS.find((network) => network.chainId === chainId);
+}
+
+export function networkEnvironmentIdentity(network: Pick<PledgeCashNetwork, "chainId" | "key">): PledgeCashEnvironmentIdentity {
+  if (network.chainId === LOCAL_ANVIL_CHAIN_ID || network.key === "local-anvil") {
+    return {
+      kind: "local",
+      label: "Local",
+      description: "Local, resettable environment with no real value. State depends on the current local chain.",
+      hasRealValue: false,
+      resettable: true,
+      seeded: false,
+    };
+  }
+
+  if (network.key === "hyperevm-testnet" || network.key === "monad-testnet") {
+    return {
+      kind: "testnet",
+      label: "Testnet",
+      description: "Public test network using test assets with no real value.",
+      hasRealValue: false,
+      resettable: false,
+      seeded: false,
+    };
+  }
+
+  return {
+    kind: "custom",
+    label: "Custom",
+    description: "Custom network configuration. Verify the chain and asset value before signing.",
+    hasRealValue: undefined,
+    resettable: false,
+    seeded: false,
+  };
 }
 
 export function createPledgeCashPublicClient(network: PledgeCashNetwork): PublicClient {

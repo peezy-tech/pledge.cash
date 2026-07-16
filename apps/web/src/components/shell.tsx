@@ -1,6 +1,13 @@
 import type { Address } from "@pledge.cash/sdk";
-import { CheckCircle2, Copy, ExternalLink, Loader2 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { AlertCircle, CheckCircle2, Copy, ExternalLink, Loader2 } from "lucide-react";
+import {
+  cloneElement,
+  isValidElement,
+  useId,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import type { Hex } from "viem";
 import { addressUrl, transactionUrl } from "../lib/contracts";
 import { shortAddress } from "../lib/forms";
@@ -48,10 +55,32 @@ type StatusNoticeProps = {
   className?: string | undefined;
 };
 
-type FieldProps = {
+export type FieldControlProps = {
+  id: string;
+  "aria-describedby"?: string;
+  "aria-errormessage"?: string;
+  "aria-invalid"?: true;
+  "aria-required"?: true;
+};
+
+type FieldControlElementProps = {
+  id?: string;
+  "aria-label"?: string;
+  "aria-labelledby"?: string;
+  "aria-describedby"?: string;
+  "aria-errormessage"?: string;
+  "aria-invalid"?: boolean | "false" | "grammar" | "spelling" | "true";
+  "aria-required"?: boolean | "false" | "true";
+};
+
+export type FieldProps = {
   label: string;
-  children: ReactNode;
+  children: ReactNode | ((controlProps: FieldControlProps) => ReactNode);
   className?: string;
+  controlId?: string;
+  description?: ReactNode;
+  error?: ReactNode;
+  required?: boolean;
 };
 
 type FactsColumnCount = "one" | "two" | "three";
@@ -66,9 +95,10 @@ type FactsProps = {
   columns?: FactsColumnCount;
 };
 
-type ActionButtonProps = React.ComponentProps<typeof Button> & {
+export type ActionButtonProps = React.ComponentProps<typeof Button> & {
   actionId: string;
   pendingAction: string | undefined;
+  pendingLabel?: string;
 };
 
 type TabButtonProps = {
@@ -207,13 +237,77 @@ export function Field({
   label,
   children,
   className,
+  controlId,
+  description,
+  error,
+  required = false,
 }: FieldProps): React.JSX.Element {
+  const generatedId = `field-${useId().replaceAll(":", "")}`;
+  const directControl = isDirectFieldControl(children);
+  const resolvedControlId = controlId ?? directControl?.props.id ?? generatedId;
+  const descriptionId = description ? `${resolvedControlId}-description` : undefined;
+  const errorId = error ? `${resolvedControlId}-error` : undefined;
+  const describedBy = [descriptionId, errorId].filter(Boolean).join(" ") || undefined;
+  const controlProps: FieldControlProps = {
+    id: resolvedControlId,
+    ...(describedBy ? { "aria-describedby": describedBy } : {}),
+    ...(errorId ? { "aria-errormessage": errorId, "aria-invalid": true } : {}),
+    ...(required ? { "aria-required": true } : {}),
+  };
+  const canAssociateLabel = typeof children === "function" || controlId !== undefined || directControl !== undefined;
+  const control = typeof children === "function"
+    ? children(controlProps)
+    : directControl
+      ? cloneElement(directControl, mergeFieldControlProps(directControl.props, controlProps))
+      : children;
+
   return (
-    <Label className={cn("min-w-0 border-b border-[var(--pc-border)] p-4 text-[var(--pc-text-muted)] md:border-r [&:nth-child(2n)]:md:border-r-0", className)}>
-      <span>{label}</span>
-      {children}
-    </Label>
+    <div className={cn("grid min-w-0 gap-2 border-b border-[var(--pc-border)] p-4 md:border-r [&:nth-child(2n)]:md:border-r-0", className)}>
+      <Label htmlFor={canAssociateLabel ? resolvedControlId : undefined}>
+        <span>
+          {label}
+          {required ? <span aria-hidden="true" className="ml-1 text-[var(--pc-danger)]">*</span> : null}
+        </span>
+      </Label>
+      {control}
+      {description ? <p className="m-0 text-xs leading-5 text-[var(--pc-text-subtle)]" id={descriptionId}>{description}</p> : null}
+      {error ? (
+        <p className="m-0 flex items-start gap-1.5 text-xs leading-5 text-[var(--pc-danger)]" id={errorId} role="alert">
+          <AlertCircle aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>{error}</span>
+        </p>
+      ) : null}
+    </div>
   );
+}
+
+function isDirectFieldControl(children: FieldProps["children"]): ReactElement<FieldControlElementProps> | undefined {
+  if (!isValidElement<FieldControlElementProps>(children)) return undefined;
+  if (typeof children.type === "string") {
+    return ["button", "input", "select", "textarea"].includes(children.type) ? children : undefined;
+  }
+  return typeof children.type === "function" || typeof children.type === "object" ? children : undefined;
+}
+
+function mergeFieldControlProps(
+  existing: FieldControlElementProps,
+  field: FieldControlProps,
+): FieldControlElementProps {
+  const describedBy = [existing["aria-describedby"], field["aria-describedby"]].filter(Boolean).join(" ") || undefined;
+
+  return {
+    ...field,
+    ...(describedBy ? { "aria-describedby": describedBy } : {}),
+    ...(field["aria-invalid"] === undefined && existing["aria-invalid"] !== undefined
+      ? { "aria-invalid": existing["aria-invalid"] }
+      : {}),
+    ...(field["aria-errormessage"] === undefined && existing["aria-errormessage"]
+      ? { "aria-errormessage": existing["aria-errormessage"] }
+      : {}),
+    ...(field["aria-required"] === undefined && existing["aria-required"] !== undefined
+      ? { "aria-required": existing["aria-required"] }
+      : {}),
+  };
 }
 
 export function Facts({
@@ -243,6 +337,7 @@ export function ActionRow({ children }: { children: ReactNode }): React.JSX.Elem
 export function ActionButton({
   actionId,
   pendingAction,
+  pendingLabel,
   children,
   disabled,
   ...props
@@ -251,9 +346,17 @@ export function ActionButton({
   const hasPendingAction = pendingAction !== undefined;
 
   return (
-    <Button disabled={disabled || hasPendingAction} {...props}>
-      {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : children}
-    </Button>
+    <>
+      <Button {...props} aria-busy={isPending || undefined} disabled={disabled || hasPendingAction}>
+        <span aria-hidden="true" className="grid h-4 w-4 shrink-0 place-items-center">
+          {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+        </span>
+        <span className="inline-flex min-w-0 items-center gap-2">{children}</span>
+      </Button>
+      {isPending && pendingLabel ? (
+        <span aria-live="polite" className="sr-only" role="status">{pendingLabel}</span>
+      ) : null}
+    </>
   );
 }
 
@@ -266,7 +369,7 @@ export function TabButton({
     <button
       aria-current={active ? "page" : undefined}
       className={cn(
-        "h-10 shrink-0 border-b-2 px-3 text-sm font-semibold transition-colors",
+        "min-h-11 shrink-0 border-b-2 px-3 text-sm font-semibold transition-colors",
         active
           ? "border-[var(--pc-accent)] text-[var(--pc-text)]"
           : "border-transparent text-[var(--pc-text-muted)] hover:border-[var(--pc-border-strong)] hover:text-[var(--pc-text)]",
@@ -298,7 +401,7 @@ export function AddressLink({ address, chainId }: { address: Address; chainId?: 
       </span>
       <button
         aria-label={`Copy address ${address}`}
-        className="grid h-10 w-10 shrink-0 place-items-center rounded border border-zinc-800 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 sm:h-8 sm:w-8"
+        className="grid h-11 w-11 shrink-0 place-items-center rounded border border-[var(--pc-control-border)] text-[var(--pc-text-muted)] hover:bg-[var(--pc-surface-raised)] hover:text-[var(--pc-text)] sm:h-9 sm:w-9"
         type="button"
         onClick={() => void copyAddress()}
       >
@@ -307,7 +410,7 @@ export function AddressLink({ address, chainId }: { address: Address; chainId?: 
       {hasExplorerUrl ? (
         <a
           aria-label={`Open address ${address} in explorer`}
-          className="grid h-10 w-10 shrink-0 place-items-center rounded border border-zinc-800 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 sm:h-8 sm:w-8"
+          className="grid h-11 w-11 shrink-0 place-items-center rounded border border-[var(--pc-control-border)] text-[var(--pc-text-muted)] hover:bg-[var(--pc-surface-raised)] hover:text-[var(--pc-text)] sm:h-9 sm:w-9"
           href={explorerUrl}
           rel="noreferrer"
           target="_blank"
