@@ -272,17 +272,75 @@ describe("workflow form semantics", () => {
     expect(html).toContain("wallet, index, amount, contract, and chain");
   });
 
-  test("keeps Open Redemptions disabled when bounded obligation coverage is incomplete", () => {
+  test("allows Open Redemptions when bounded coverage is incomplete and loaded obligations are closed", () => {
     const issuedGrants = Array.from({ length: 65 }, (_, index) =>
       `0x${(8_000 + index).toString(16).padStart(40, "0")}` as Address);
-    const redeemableAssets = Array.from({ length: 65 }, (_, index) =>
+    const snapshot: BoardroomSnapshot = {
+      ...dashboard.snapshot,
+      status: 1,
+      issuedGrants,
+      issuedDistributions: [],
+      grantSummaries: issuedGrants.slice(1).map((address) => ({
+        address,
+        state: {
+          ...grantSnapshot,
+          address,
+          closed: true,
+        } as never,
+      })),
+      distributionSummaries: [],
+    };
+    const html = renderToString(
+      <WindDownPanel
+        boardroomSnapshot={snapshot}
+        claimCapability={{ status: "enabled" }}
+        pendingAction={undefined}
+        permissionlessCapability={{ status: "enabled" }}
+        redeemCapability={{ status: "enabled" }}
+        registerCapability={{ status: "enabled" }}
+        setWindDownForm={noopSetter}
+        startCapability={{ status: "enabled" }}
+        windDownForm={{
+          redeemableAsset: "",
+          redeemShares: "",
+          redeemRecipient: "",
+          minAmountsOut: "",
+          claimAsset: "",
+          claimRecipient: "",
+          claimMinAmount: "",
+        }}
+        burnTreasuryShares={noop}
+        claimRedemptionAsset={noop}
+        openRedemptions={noop}
+        redeemBoardroomShares={noop}
+        registerRedeemableAsset={noop}
+        runAction={async (_label, action) => action()}
+        startWindDown={noop}
+      />,
+    );
+    const openButton = (html.match(/<button[^>]*>[\s\S]*?<\/button>/g) ?? [])
+      .find((button) => button.includes("Open Redemptions"));
+
+    expect(openButton).not.toContain('disabled=""');
+    expect(html).toContain("Obligation coverage is incomplete.");
+    expect(html).toContain("Grant coverage is incomplete: 64 of 65 records were loaded.");
+    expect(html).toContain("older obligations may be omitted");
+    expect(html).toContain("transaction simulation checks the complete onchain obligation set");
+    expect(html).toContain("Review and simulate opening redemptions");
+    expect(html).toContain("0 loaded + unknown");
+    expect(html).not.toContain("No loaded blockers.");
+    expect(html).not.toContain("All tracked obligation reads are complete, and no blockers remain.");
+  });
+
+  test("keeps Open Redemptions disabled when incomplete coverage includes a loaded blocker", () => {
+    const issuedGrants = Array.from({ length: 65 }, (_, index) =>
       `0x${(9_000 + index).toString(16).padStart(40, "0")}` as Address);
     const loadedOpenGrant = issuedGrants.at(-1)!;
     const snapshot: BoardroomSnapshot = {
       ...dashboard.snapshot,
       status: 1,
       issuedGrants,
-      redeemableAssets,
+      issuedDistributions: [],
       grantSummaries: issuedGrants.slice(1).map((address) => ({
         address,
         state: {
@@ -291,6 +349,7 @@ describe("workflow form semantics", () => {
           closed: address !== loadedOpenGrant,
         } as never,
       })),
+      distributionSummaries: [],
     };
     const html = renderToString(
       <WindDownPanel
@@ -324,15 +383,10 @@ describe("workflow form semantics", () => {
       .find((button) => button.includes("Open Redemptions"));
 
     expect(openButton).toContain('disabled=""');
-    expect(html).toContain("Obligation coverage is incomplete.");
-    expect(html).toContain("Grant coverage is incomplete: 64 of 65 records were loaded.");
-    expect(html).toContain("Redeemable-asset coverage is incomplete: 64 of 65 records were loaded.");
-    expect(html).toContain("older obligations may be omitted");
-    expect(html).toContain("Refresh the Boardroom state and retry");
+    expect(html).toContain("Resolve every loaded grant, distribution, and liquidity blocker before opening redemptions.");
     expect(html).toContain(`Copy address ${loadedOpenGrant}`);
-    expect(html).toContain("2 loaded + unknown");
-    expect(html).not.toContain("No loaded blockers.");
-    expect(html).not.toContain("All tracked obligation reads are complete, and no blockers remain.");
+    expect(html).toContain("1 loaded + unknown");
+    expect(html).toContain("Clear the remaining obligations");
   });
 
   test("treats every bounded wind-down child collection as unknown when coverage is incomplete", () => {

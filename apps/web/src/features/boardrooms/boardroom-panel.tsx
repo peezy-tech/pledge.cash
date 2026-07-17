@@ -1371,11 +1371,9 @@ export function WindDownPanel({
   const startDisabledReason = capabilityReason(startCapability)
     ?? (boardroomSnapshot?.status === 0 ? undefined : "Wind-down can start only while the Boardroom is active.");
   const openDisabledReason = capabilityReason(permissionlessCapability)
-    ?? (!coverage.complete
-      ? "Refresh the Boardroom state and retry until grant, distribution, locked-liquidity, and redeemable-asset coverage is complete."
-      : hasBlockers
-        ? "Resolve every loaded grant, distribution, and liquidity blocker before opening redemptions."
-        : boardroomSnapshot?.status === 1 ? undefined : "Redemptions can open only after wind-down has started.");
+    ?? (hasBlockers
+      ? "Resolve every loaded grant, distribution, and liquidity blocker before opening redemptions."
+      : boardroomSnapshot?.status === 1 ? undefined : "Redemptions can open only after wind-down has started.");
 
   return (
     <Panel title="Wind-Down" description="Move from active operation to cleanup, then open redemptions only after every tracked obligation is resolved.">
@@ -1400,7 +1398,7 @@ export function WindDownPanel({
             {coverage.issues.map((issue) => <li key={issue}>{issue}</li>)}
           </ul>
           <p className="m-0 mt-2 text-xs leading-5">
-            Loaded blockers remain actionable, but older obligations may be omitted. Refresh the Boardroom state and retry before opening redemptions.
+            Loaded blockers remain actionable, but older obligations may be omitted. The transaction simulation checks the complete onchain obligation set and rejects opening redemptions while any obligation remains open.
           </p>
         </div>
       ) : null}
@@ -1428,7 +1426,7 @@ export function WindDownPanel({
           <Flame className="h-4 w-4" />
           Burn Treasury Shares
         </ActionButton>
-        <ActionButton actionId="open-redemptions" aria-describedby={openDisabledReason ? "open-redemptions-disabled-reason" : undefined} disabled={!coverage.complete || hasBlockers || boardroomSnapshot?.status !== 1 || !capabilityEnabled(permissionlessCapability)} pendingAction={pendingAction} pendingLabel="Opening project-token redemptions" title={openDisabledReason} type="button" onClick={() => void runAction("open-redemptions", openRedemptions)}>
+        <ActionButton actionId="open-redemptions" aria-describedby={openDisabledReason ? "open-redemptions-disabled-reason" : undefined} disabled={hasBlockers || boardroomSnapshot?.status !== 1 || !capabilityEnabled(permissionlessCapability)} pendingAction={pendingAction} pendingLabel="Opening project-token redemptions" title={openDisabledReason} type="button" onClick={() => void runAction("open-redemptions", openRedemptions)}>
           <ShieldCheck className="h-4 w-4" />
           Open Redemptions
         </ActionButton>
@@ -1503,13 +1501,13 @@ function windDownNextSafeAction(
     title: "Review the irreversible transition",
     detail: "Starting wind-down is the next lifecycle action; first confirm that normal project operation should end and that every obligation below has an owner.",
   };
-  if (boardroomSnapshot.status === 1 && !coverageComplete) return {
-    title: "Refresh incomplete obligation coverage",
-    detail: "Keep resolving every loaded blocker, then refresh until all grant, distribution, locked-liquidity, and redeemable-asset records are covered.",
-  };
   if (boardroomSnapshot.status === 1 && hasBlockers) return {
     title: "Clear the remaining obligations",
     detail: "Close, cancel, migrate, exit, or withdraw each loaded blocker before opening redemptions.",
+  };
+  if (boardroomSnapshot.status === 1 && !coverageComplete) return {
+    title: "Review and simulate opening redemptions",
+    detail: "Some older obligations are omitted from this browser view. Review the warning, then let the transaction simulation verify the complete onchain obligation set.",
   };
   if (boardroomSnapshot.status === 1) return {
     title: "Open redemptions",
