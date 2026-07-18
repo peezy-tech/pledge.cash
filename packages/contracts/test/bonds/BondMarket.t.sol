@@ -205,6 +205,22 @@ contract BondMarketTest is Test {
         assertEq(market.marketPrice(), MINIMUM_PRICE);
     }
 
+    function testPurchaseAfterFullDebtDecayReanchorsNewDemandAtCurrentTime() public {
+        BondMarket market = _createReserveMarket(address(quoteToken), keccak256("reanchor-market"));
+        vm.warp(block.timestamp + 6 days);
+        assertEq(market.currentDebt(), 0);
+        assertEq(market.marketPrice(), MINIMUM_PRICE);
+
+        vm.startPrank(buyer);
+        quoteToken.approve(address(market), 20_000000);
+        market.purchase(20_000000, 0, block.timestamp);
+        vm.stopPrank();
+
+        assertGt(market.currentDebt(), 0, "fresh demand must not inherit a fully decayed timestamp");
+        (, uint48 lastDecay,,,,,,,) = market.metadata();
+        assertGt(lastDecay, block.timestamp, "new demand must advance decay from the purchase time");
+    }
+
     function testSdaReferenceVectorUsesFiveDepositIntervalsForDebtDecay() public {
         BondMarket market = _createReserveMarket(address(quoteToken), keccak256("reference-market"));
         assertApproxEqAbs(market.marketPrice(), INITIAL_PRICE, 1);

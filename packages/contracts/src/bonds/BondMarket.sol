@@ -356,14 +356,15 @@ contract BondMarket is Initializable, ReentrancyGuard {
 
         Metadata memory meta = metadata;
         uint256 lastDecayIncrement = FixedPointMathLib.fullMulDivUp(meta.debtDecayInterval, payout, meta.lastTuneDebt);
-        metadata.lastDecay = _toUint48(uint256(meta.lastDecay) + lastDecayIncrement);
+        uint256 decayAnchor = decayedDebt == 0 ? timestamp : meta.lastDecay;
+        metadata.lastDecay = _toUint48(decayAnchor + lastDecayIncrement);
 
         uint256 decayOffset;
-        if (timestamp > meta.lastDecay) {
-            uint256 elapsed = uint256(timestamp) - meta.lastDecay;
+        if (timestamp > decayAnchor) {
+            uint256 elapsed = uint256(timestamp) - decayAnchor;
             decayOffset = meta.debtDecayInterval > elapsed ? meta.debtDecayInterval - elapsed : 0;
         } else {
-            decayOffset = uint256(meta.debtDecayInterval) + (uint256(meta.lastDecay) - timestamp);
+            decayOffset = uint256(meta.debtDecayInterval) + (decayAnchor - timestamp);
         }
 
         totalDebt = FixedPointMathLib.fullMulDiv(decayedDebt, meta.debtDecayInterval, decayOffset + lastDecayIncrement)

@@ -103,7 +103,7 @@ export function defaultBondMarketForm(): BondMarketForm {
     minimumPrice: "1",
     debtBuffer: "10000",
     vesting: String(7 * SECONDS_PER_DAY),
-    start: String(currentUnixSeconds()),
+    start: "0",
     duration: String(30 * SECONDS_PER_DAY),
     depositInterval: String(SECONDS_PER_DAY),
     salt: randomSalt(),
