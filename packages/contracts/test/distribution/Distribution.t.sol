@@ -22,6 +22,8 @@ import {MerkleAirdrop} from "../../src/distribution/MerkleAirdrop.sol";
 import {MigratingBondingCurve} from "../../src/distribution/MigratingBondingCurve.sol";
 import {TokenGrant} from "../../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
+import {BoardroomRewards} from "../../src/rewards/BoardroomRewards.sol";
+import {BoardroomRewardsFactory} from "../../src/rewards/BoardroomRewardsFactory.sol";
 
 contract DistributionCurrency {
     string public name;
@@ -237,6 +239,7 @@ contract DistributionTest is Test {
     LockedLiquidityFactory internal lockedLiquidityFactory;
     TokenGrantFactory internal tokenGrantFactory;
     DistributionFactory internal distributionFactory;
+    BoardroomRewardsFactory internal rewardsFactory;
     DistributionCurrency internal paymentToken;
 
     address internal owner = address(0xA11CE);
@@ -274,14 +277,17 @@ contract DistributionTest is Test {
         ammFactory.setReservationManager(address(lockedLiquidityFactory));
         tokenGrantFactory = new TokenGrantFactory(address(this), address(boardroomFactory));
         distributionFactory = new DistributionFactory(address(lockedLiquidityFactory), address(tokenGrantFactory));
+        rewardsFactory = new BoardroomRewardsFactory(address(boardroomFactory));
         paymentToken = new DistributionCurrency("USD Coin", "USDC", 6);
 
         assetPolicy.setApprovalSpenderAllowed(address(distributionFactory), true);
         assetPolicy.setApprovalSpenderAllowed(address(tokenGrantFactory), true);
+        assetPolicy.setApprovalSpenderAllowed(address(rewardsFactory), true);
         policyRegistry.setPolicyAllowed(address(assetPolicy), true);
         policyRegistry.registerModulePolicy(address(tokenGrantFactory));
         policyRegistry.registerModulePolicy(address(distributionFactory));
         policyRegistry.registerModulePolicy(address(lockedLiquidityFactory));
+        policyRegistry.registerModulePolicy(address(rewardsFactory));
         paymentToken.mint(buyer, 10_000_000000);
     }
 
@@ -328,6 +334,11 @@ contract DistributionTest is Test {
 
         vm.startPrank(owner);
         boardroom.mint(recipient, 10 ether);
+        BoardroomRewards rewards = _createRewardPool(boardroom);
+        vm.stopPrank();
+        vm.prank(recipient);
+        rewards.stake(10 ether);
+        vm.startPrank(owner);
         boardroom.setExecutor(lostExecutor);
         boardroom.launch(1 days);
         vm.stopPrank();
@@ -1714,6 +1725,18 @@ contract DistributionTest is Test {
         boardroom = Boardroom(payable(boardroomAddress));
         shareToken = BoardroomToken(boardroom.shareToken());
         assetPolicy.setAssetAllowed(address(shareToken), true);
+    }
+
+    function _createRewardPool(Boardroom boardroom) internal returns (BoardroomRewards rewards) {
+        bytes memory result = boardroom.execute(
+            Boardroom.Call({
+                policy: address(rewardsFactory),
+                target: address(rewardsFactory),
+                value: 0,
+                data: abi.encodeCall(rewardsFactory.createRewards, (uint64(1 days), keccak256("test-rewards")))
+            })
+        );
+        rewards = BoardroomRewards(abi.decode(result, (address)));
     }
 
     function _createFixedPriceSale(

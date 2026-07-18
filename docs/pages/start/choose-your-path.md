@@ -31,11 +31,11 @@ Connect the operator wallet and open `Studio`. Choose an existing Boardroom or s
 
 [Learn how Studio works](../using/studio) · [Open Studio](../../studio)
 
-## I hold governance power
+## I stake for governance power
 
-Open the project’s `Governance` section to inspect current authority, review delay, veto threshold, wind-down threshold, and queued decisions. Connect only when you need the app to compare your holder power or authorize an available action.
+Open the project’s `Governance` section to inspect current authority, review delay, veto threshold, wind-down threshold, and queued decisions. Connect only when you need the app to compare your current and previous-block active stake or authorize an available action.
 
-Creating a new secure governance launch is currently unavailable for the deployed Boardroom version. Existing launched Boardrooms can still expose their verified queue and holder actions when supported by their state.
+Creating a new secure governance launch is currently unavailable for the deployed Boardroom version. Existing launched Boardrooms can still expose their verified queue and staker actions when supported by their state.
 
 ## I need raw diagnostics or alerts
 

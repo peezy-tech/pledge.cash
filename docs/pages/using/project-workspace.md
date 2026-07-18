@@ -32,11 +32,11 @@ If the page says `No participation route is available`, use `Transparency` to in
 `Governance` shows:
 
 - `Decision system`: current authority, owner, executor, delay, eligible supply, and epoch.
-- `Holder protections`: review window, veto threshold, and wind-down threshold.
+- `Staker protections`: review window, veto threshold, and wind-down threshold.
 - `Queued decisions`: decoded targets, values, intent, and current status.
 - `Decision history` when the optional governance activity service is available.
 
-Connecting a holder wallet lets the app compare its current and snapshot power. `Some queued decisions were not shown` or `Governance data is incomplete` means retry before concluding the queue is empty.
+Connecting a staker wallet lets the app compare its current and snapshot active stake. `Some queued decisions were not shown` or `Governance data is incomplete` means retry before concluding the queue is empty.
 
 For a pre-launch Boardroom, the app currently reports `Secure governance launch is unavailable for this Boardroom version`. That is a safety block, not a missing button.
 

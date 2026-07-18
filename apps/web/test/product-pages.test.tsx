@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Address, BoardroomHolderPower } from "@pledge.cash/sdk";
+import type { Address, BoardroomStakerPower } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
 import {
   ExplorePage,
@@ -65,6 +65,7 @@ const dashboard: ProductBoardroomDashboardState = {
     policyRegistry: "0x7000000000000000000000000000000000000000" as Address,
     wrappedNative: "0x8000000000000000000000000000000000000000" as Address,
     shareToken,
+    rewardPool: "0x0000000000000000000000000000000000000fed" as Address,
     status: 0,
     launched: true,
     executor: "0x9000000000000000000000000000000000000000" as Address,
@@ -144,15 +145,19 @@ const dashboard: ProductBoardroomDashboardState = {
   ],
 };
 
-const holderPower: BoardroomHolderPower = {
+const stakerPower: BoardroomStakerPower = {
   boardroom,
   shareToken,
+  rewardPool: "0x0000000000000000000000000000000000000fed" as Address,
   account: owner,
   blockNumber: 100n,
   snapshotBlock: 99n,
   encumbered: false,
+  currentTokenBalance: 4_000_000_000_000_000_000n,
   currentBalance: 3_000_000_000_000_000_000n,
   pastBalance: 3_000_000_000_000_000_000n,
+  currentActiveStake: 3_000_000_000_000_000_000n,
+  pastActiveStake: 3_000_000_000_000_000_000n,
   currentEligibleSupply: 8_000_000_000_000_000_000n,
   pastEligibleSupply: 8_000_000_000_000_000_000n,
   vetoRequired: 1_600_000_000_000_000_000n,
@@ -255,7 +260,7 @@ describe("read-first product pages", () => {
     );
     expect(overview).toContain("Atlas Cooperative");
     expect(overview).toContain("What needs attention");
-    expect(overview).toContain("Holder governance is live");
+    expect(overview).toContain("Staker governance is live");
     expect(overview).toContain("lifetime activity is reconstructed from their onchain event history");
     expect(overview).toContain("Treasury at a glance");
     expect(overview).toContain('href="/projects/31337/atlas/participate"');
@@ -400,9 +405,9 @@ describe("read-first product pages", () => {
   });
 
   test("explains governance thresholds and exposes transparency tables", () => {
-    const governance = renderToString(<GovernancePage dashboard={dashboard} holderPower={holderPower} loading={false} />);
+    const governance = renderToString(<GovernancePage dashboard={dashboard} stakerPower={stakerPower} loading={false} />);
     expect(governance).toContain("Decision system");
-    expect(governance).toContain("Holder protections");
+    expect(governance).toContain("Staker protections");
     expect(governance).toContain("20%");
     expect(governance).toContain("This wallet can veto");
 

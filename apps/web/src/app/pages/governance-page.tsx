@@ -1,4 +1,4 @@
-import type { BoardroomHolderPower } from "@pledge.cash/sdk";
+import type { BoardroomStakerPower } from "@pledge.cash/sdk";
 import { Clock3, ShieldCheck, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { AddressLink } from "../../components/shell";
@@ -12,10 +12,11 @@ export type GovernancePageProps = {
   activityContent?: ReactNode;
   dashboard?: ProductBoardroomDashboardState | undefined;
   error?: string | undefined;
-  holderPower?: BoardroomHolderPower | undefined;
+  stakerPower?: BoardroomStakerPower | undefined;
   loading: boolean;
   primaryAction?: ReactNode;
   queueContent?: ReactNode;
+  stakingContent?: ReactNode;
   warning?: string | undefined;
 };
 
@@ -23,10 +24,11 @@ export function GovernancePage({
   activityContent,
   dashboard,
   error,
-  holderPower,
+  stakerPower,
   loading,
   primaryAction,
   queueContent,
+  stakingContent,
   warning,
 }: GovernancePageProps): React.JSX.Element {
   if (loading && !dashboard) return <GovernanceLoading />;
@@ -34,7 +36,7 @@ export function GovernancePage({
     return (
       <RuledSection>
         <PageNotice title="Governance is not loaded">
-          Open a project before reading its launch state, authority, delay, and holder thresholds.
+          Open a project before reading its launch state, authority, delay, and active-staker thresholds.
         </PageNotice>
       </RuledSection>
     );
@@ -49,13 +51,13 @@ export function GovernancePage({
       <RuledSection>
         <SectionHeading
           title="Decision system"
-          description="Who can act, how long changes wait, and which holder protections are available right now."
+          description="Who can act, how long changes wait, and which active-staker protections are available right now."
           action={primaryAction}
         />
         {error ? <div className="mt-4"><PageNotice title="Governance data is incomplete" tone="danger">{error}</PageNotice></div> : null}
         {warning ? <div className="mt-4"><PageNotice title="Some queued decisions were not shown" tone="warning">{warning}</PageNotice></div> : null}
         <div className="mt-5 flex flex-wrap items-center gap-2">
-          <Badge variant={snapshot.launched ? "default" : "warning"}>{snapshot.launched ? "Holder governance live" : "Pre-launch authority"}</Badge>
+          <Badge variant={snapshot.launched ? "default" : "warning"}>{snapshot.launched ? "Staker governance live" : "Pre-launch authority"}</Badge>
           <Badge variant={lifecycle.tone}>{lifecycle.label}</Badge>
         </div>
         <p className="m-0 mt-3 max-w-3xl text-sm leading-6 text-zinc-400">{mode.description}</p>
@@ -72,8 +74,10 @@ export function GovernancePage({
         />
       </RuledSection>
 
+      {stakingContent ? <RuledSection>{stakingContent}</RuledSection> : null}
+
       <RuledSection>
-        <SectionHeading title="Holder protections" description="Thresholds use governance-eligible supply, not the full token supply." />
+        <SectionHeading title="Staker protections" description="Only active stake counts in the numerator; thresholds still use all governance-eligible circulating supply." />
         <div className="mt-4 grid border-y border-zinc-800 lg:grid-cols-3">
           <GovernanceRule
             icon={<Clock3 className="h-4 w-4" />}
@@ -85,23 +89,23 @@ export function GovernancePage({
             icon={<ShieldCheck className="h-4 w-4" />}
             title="Veto threshold"
             value={formatBasisPoints(snapshot.governanceConfig.vetoBps)}
-            detail={holderPower ? holderThresholdDetail(holderPower.vetoRequired, snapshot.shareTokenMetadata, holderPower.canVeto, "veto") : "Connect a holder wallet to compare its voting power."}
+            detail={stakerPower ? stakerThresholdDetail(stakerPower.vetoRequired, snapshot.shareTokenMetadata, stakerPower.canVeto, "veto") : "Connect a staker wallet to compare its governance power."}
           />
           <GovernanceRule
             icon={<Users className="h-4 w-4" />}
             title="Wind-down threshold"
             value={formatBasisPoints(snapshot.governanceConfig.windDownBps)}
-            detail={holderPower ? holderThresholdDetail(holderPower.windDownRequired, snapshot.shareTokenMetadata, holderPower.canStartWindDown, "start wind-down") : "Connect a holder wallet to compare its voting power."}
+            detail={stakerPower ? stakerThresholdDetail(stakerPower.windDownRequired, snapshot.shareTokenMetadata, stakerPower.canStartWindDown, "start wind-down") : "Connect a staker wallet to compare its governance power."}
           />
         </div>
-        {holderPower ? <HolderPowerSummary holderPower={holderPower} dashboard={dashboard} /> : null}
+        {stakerPower ? <StakerPowerSummary stakerPower={stakerPower} dashboard={dashboard} /> : null}
       </RuledSection>
 
       <RuledSection>
         <SectionHeading
           title="Queued decisions"
           description={snapshot.launched
-            ? "Pending actions are decoded before execution so holders can inspect their target, value, and intent."
+            ? "Pending actions are decoded before execution so active stakers can inspect their target, value, and intent."
             : "Direct owner actions apply before launch; the queue becomes the primary decision path after launch."}
         />
         <div className="mt-4">
@@ -149,27 +153,27 @@ function GovernanceRule({
   );
 }
 
-function HolderPowerSummary({
+function StakerPowerSummary({
   dashboard,
-  holderPower,
+  stakerPower,
 }: {
   dashboard: ProductBoardroomDashboardState;
-  holderPower: BoardroomHolderPower;
+  stakerPower: BoardroomStakerPower;
 }): React.JSX.Element {
   const metadata = dashboard.snapshot.shareTokenMetadata;
   return (
     <div className="mt-5 border-l-2 border-zinc-700 px-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="m-0 text-sm font-semibold text-zinc-100">Connected holder power</h3>
-        {holderPower.encumbered ? <Badge variant="warning">Encumbered</Badge> : null}
+        <h3 className="m-0 text-sm font-semibold text-zinc-100">Connected staker power</h3>
+        {stakerPower.encumbered ? <Badge variant="warning">Encumbered</Badge> : null}
       </div>
       <KeyValueList
         columns={4}
         items={[
-          { label: "Holder", value: <AddressLink address={holderPower.account} /> },
-          { label: "Current balance", value: formatTokenAmount(holderPower.currentBalance, metadata) },
-          { label: "Snapshot balance", value: formatTokenAmount(holderPower.pastBalance, metadata) },
-          { label: "Snapshot block", value: holderPower.snapshotBlock.toString() },
+          { label: "Staker", value: <AddressLink address={stakerPower.account} /> },
+          { label: "Current active stake", value: formatTokenAmount(stakerPower.currentActiveStake, metadata) },
+          { label: "Snapshot active stake", value: formatTokenAmount(stakerPower.pastActiveStake, metadata) },
+          { label: "Snapshot block", value: stakerPower.snapshotBlock.toString() },
         ]}
       />
     </div>
@@ -188,8 +192,8 @@ function GovernanceLoading(): React.JSX.Element {
 function governanceMode(launched: boolean, status: number): { authority: string; description: string } {
   if (status === 1) return { authority: launched ? "Governance wind-down" : "Wind-down operators", description: "The project is unwinding obligations. Only lifecycle-safe cleanup actions should proceed." };
   if (status === 2) return { authority: "Token holders", description: "Redemptions are open. Holders can exchange project tokens for their share of redeemable assets." };
-  if (launched) return { authority: "Executor + holders", description: "The executor queues actions. The delay gives holders time to inspect or veto them before anyone executes a ready action." };
-  return { authority: "Owner", description: "The owner can act directly before launch. Launching permanently switches routine project changes to delayed holder governance." };
+  if (launched) return { authority: "Executor + active stakers", description: "The executor queues actions. The delay gives active stakers time to inspect or veto them before anyone executes a ready action." };
+  return { authority: "Owner", description: "The owner can act directly before launch. Launching permanently switches routine project changes to delayed staker governance." };
 }
 
 function formatDuration(seconds: bigint): string {
@@ -206,7 +210,7 @@ function formatBasisPoints(value: bigint): string {
   return fraction === 0n ? `${whole}%` : `${whole}.${fraction.toString().padStart(2, "0").replace(/0+$/, "")}%`;
 }
 
-function holderThresholdDetail(
+function stakerThresholdDetail(
   required: bigint,
   metadata: ProductBoardroomDashboardState["snapshot"]["shareTokenMetadata"],
   canAct: boolean,

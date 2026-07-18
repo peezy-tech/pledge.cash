@@ -10,7 +10,7 @@ Use the [Boardroom protocol specification](https://github.com/peezy-tech/pledge.
 ## Read before enabling actions
 
 - verify `BoardroomFactory.isBoardroom(address)` on the selected deployment;
-- read owner, policy registry, wrapped native, share token, lifecycle status, launch state, executor, delay, epoch, and eligible supply;
+- read owner, policy registry, wrapped native, share token, canonical reward pool, lifecycle status, launch state, executor, delay, epoch, and eligible supply;
 - verify the share token's Boardroom authority;
 - read current obligation arrays and surface partial failures individually;
 - scan creation and governance events when lifetime history is required.
@@ -29,7 +29,9 @@ Do not expose governance launch for the legacy `launch(uint256)` interface. It d
 
 ## Wind-down and redemption
 
-Treat `Active -> WindingDown -> RedemptionsOpen` as monotonic. New obligations stop in wind-down. Redemptions open only after bounded active grants, distributions, and lockers close and prune.
+Treat `Active -> WindingDown -> RedemptionsOpen` as monotonic. New obligations stop in wind-down. Redemptions open only after bounded active grants, distributions, and lockers close and prune and the canonical reward pool is terminalized.
+
+Never use share-token `balanceOf` as governance power. Use current and previous-block active stake from the canonical reward pool against the stricter current/prior governance-eligible supply threshold. See [Staking and rewards integration](staking-and-rewards).
 
 `redeem` can pay only a subset of snapshot assets. Persist and render per-asset credits; use `claimRedemptionAsset` for retries. Never infer completion from burned share balance alone.
 

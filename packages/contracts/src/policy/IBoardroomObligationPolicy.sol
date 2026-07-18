@@ -9,11 +9,12 @@ interface IBoardroomObligationPolicy is IBoardroomCallPolicy {
         None,
         Grant,
         Distribution,
-        LockedLiquidity
+        LockedLiquidity,
+        Reward
     }
 
     /// @param kind Record category; `None` means the call creates no boardroom-tracked obligation.
-    /// @param account Issued grant, distribution, or locked-liquidity contract address.
+    /// @param account Issued grant, distribution, locked-liquidity, or reward contract address.
     /// @param aux Additional issued object address, currently the AMM pool for locked liquidity.
     /// @param grantSlotReservations Future grant slots reserved by a distribution that can issue grants.
     struct Obligation {

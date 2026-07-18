@@ -136,13 +136,13 @@ Project-level completion also requires all snapshot entitlements to be paid or f
 
 ## Recovery
 
-- **Cannot start:** an unlaunched Boardroom requires its owner; after launch, verify the 10% current-and-previous-block
-  holder threshold.
+- **Cannot start:** an unlaunched Boardroom requires its owner; after launch, verify active stake meets the 10%
+  current-and-previous-block eligible-supply threshold.
 - **Cannot open:** check the wind-down delay, remaining grant/distribution/locker obligations, admitted-asset reads, and any
   reported failure in the automatic native wrapping or treasury-share burn. A plain native balance or treasury-held
   share balance is not itself a blocker: `openRedemptions()` wraps and burns those before the snapshot.
 - **Asset read fails during wind-down:** before launch, only the owner can admit a positive-balance final asset; after
-  launch, the caller must meet the 10% current-and-previous-block holder threshold. Unreadable admitted assets have a
+  launch, the caller's active stake must meet the 10% current-and-previous-block eligible-supply threshold. Unreadable admitted assets have a
   bounded quarantine escape hatch, but the current Studio has no control for it; an advanced integration must call the
   verified Boardroom's `quarantineRedeemableAsset(asset)` directly.
 - **Redemption only partly paid:** retry each unpaid asset from the credit-owner wallet; do not request a second full redemption for the same burned shares.

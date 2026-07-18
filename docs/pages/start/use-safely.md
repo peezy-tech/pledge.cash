@@ -31,7 +31,7 @@ For an `Irreversible lifecycle change`, the app requires the acknowledgement “
 - Quotes and limits can change between reading, simulation, and mining.
 - A grant can require payment; verify `Payment token`, `Price`, `Settleable now`, and `Expiry`.
 - An airdrop proof and grant terms come from the project. The app verifies the submitted values against the contract, but it does not author the allocation.
-- A project token creates only the rights encoded by its contracts. It does not automatically create equity, dividends, employment, corporate governance, or another offchain right. After governance launch, governance-eligible holders can have limited onchain veto or wind-down power when the contract thresholds are met.
+- A project token creates only the rights encoded by its contracts. It does not automatically create equity, dividends, employment, corporate governance, or another offchain right. After governance launch, active stakers can have limited onchain veto or wind-down power when the contract thresholds are met; a liquid balance alone has none.
 
 ## After submission
 

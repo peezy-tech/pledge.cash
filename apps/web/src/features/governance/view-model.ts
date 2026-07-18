@@ -114,7 +114,7 @@ export function governanceStatusView(
     case "invalidated":
       return { description: "A governance epoch change superseded this action.", label: "Superseded", tone: "muted" };
     case "cancelled":
-      return { description: "An eligible holder vetoed this action.", label: "Vetoed", tone: "danger" };
+      return { description: "An eligible active staker vetoed this action.", label: "Vetoed", tone: "danger" };
     case "executed":
       return { description: "The decoded calls were executed onchain.", label: "Executed", tone: "muted" };
     case "unknown":

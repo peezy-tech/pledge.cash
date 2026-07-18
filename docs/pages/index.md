@@ -27,7 +27,7 @@ Every canonical project workspace uses the same sequence:
 
 1. **Overview** — identify the Boardroom, project token, lifecycle, and available actions.
 2. **Participate** — compare the exact sale, curve, airdrop, or AMM routes discovered for that project.
-3. **Governance** — see who can act, what is queued, and when holders can intervene.
+3. **Governance** — see who can act, what is queued, and when active stakers can intervene.
 4. **Transparency** — inspect treasury assets, supply, obligations, distributions, liquidity, and provenance.
 
 See [Project workspace](using/project-workspace) for what each section proves—and what it does not.
@@ -52,7 +52,7 @@ Read [Networks and current limitations](start/networks-and-limitations) before i
 
 ## Understand The Boundary
 
-Project tokens are ERC-20 protocol assets. Depending on Boardroom lifecycle, eligible holders can have limited onchain veto and wind-down powers. Tokens do not automatically create equity, debt, dividends, employment, legal membership, or offchain governance rights.
+Project tokens are ERC-20 protocol assets. Depending on Boardroom lifecycle, active stakers can have limited onchain veto and wind-down powers. Liquid token ownership alone carries no governance power. Tokens do not automatically create equity, debt, dividends, employment, legal membership, or offchain governance rights.
 
 Hosted services such as Sentinel can index public governance actions and deliver configured alerts. They are optional context, not settlement authority. Contract state remains the source of truth for protocol actions.
 

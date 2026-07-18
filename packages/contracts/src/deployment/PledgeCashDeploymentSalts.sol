@@ -12,6 +12,7 @@ import {DistributionFactory} from "../distribution/DistributionFactory.sol";
 import {ProtocolFeeRouter} from "../fees/ProtocolFeeRouter.sol";
 import {TokenGrantFactory} from "../grants/TokenGrantFactory.sol";
 import {LockedLiquidityFactory} from "../liquidity/LockedLiquidityFactory.sol";
+import {BoardroomRewardsFactory} from "../rewards/BoardroomRewardsFactory.sol";
 
 library PledgeCashDeploymentSalts {
     string internal constant VERSION = "pledge.cash.deterministic.v4";
@@ -67,6 +68,10 @@ library PledgeCashDeploymentSalts {
         return _releaseSalt("DistributionFactory", keccak256(type(DistributionFactory).creationCode));
     }
 
+    function boardroomRewardsFactory() internal pure returns (bytes32) {
+        return _releaseSalt("BoardroomRewardsFactory", keccak256(type(BoardroomRewardsFactory).creationCode));
+    }
+
     function boardroomFactory() internal pure returns (bytes32) {
         return _releaseSalt("BoardroomFactory", keccak256(type(BoardroomFactory).creationCode));
     }
@@ -84,6 +89,7 @@ library PledgeCashDeploymentSalts {
                 keccak256(type(AmmRouter).creationCode),
                 keccak256(type(LockedLiquidityFactory).creationCode),
                 keccak256(type(DistributionFactory).creationCode),
+                keccak256(type(BoardroomRewardsFactory).creationCode),
                 keccak256(type(BoardroomFactory).creationCode)
             )
         );

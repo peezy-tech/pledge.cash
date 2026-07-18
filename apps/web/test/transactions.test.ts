@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   boardroomAbi,
+  buildBoardroomRewardFundingCalls,
   buildBoardroomExecuteTransaction,
+  buildBoardroomRewardsCreationCall,
   buildBoardroomQueueActionTransaction,
   buildBoardroomSelfCall,
   buildBoardroomShareGrantIssuanceBatch,
@@ -137,6 +139,30 @@ describe("transaction review", () => {
     });
     expect(review.risk).toBe("irreversible");
     expect(transactionReviewCanContinue(review, false)).toBe(false);
+  });
+
+  test("verifies nested reward-pool creation and funding calls", () => {
+    const rewardPool = "0x7000000000000000000000000000000000000000" as Address;
+    const rewardAsset = "0x8000000000000000000000000000000000000000" as Address;
+    const calls = [
+      buildBoardroomRewardsCreationCall({ factory, cooldown: 604_800n, salt }),
+      ...buildBoardroomRewardFundingCalls({
+        factory,
+        assetPolicy,
+        rewards: rewardPool,
+        asset: rewardAsset,
+        amount: 1_000n,
+        duration: 2_592_000n,
+      }),
+    ];
+
+    const reviews = calls.map((call) => contractCallReview(
+      "Review reward call",
+      buildBoardroomExecuteTransaction({ boardroom: target, call }),
+    ).boardroomCalls?.[0]);
+
+    expect(reviews.map((review) => review?.functionName)).toEqual(["createRewards", "approve", "fundReward"]);
+    expect(reviews.every((review) => review?.verification === "verified")).toBe(true);
   });
 
   test.each([

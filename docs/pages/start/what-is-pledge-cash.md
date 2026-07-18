@@ -23,7 +23,7 @@ It cannot prove that a project is trustworthy, economically sound, or legally co
 
 ## What a token does not mean
 
-Holding a project token does **not**, by itself, create equity, debt, dividends, employment, corporate voting rights, legal membership, or any other offchain entitlement. A grant, sale, airdrop, or AMM transaction creates only the rights encoded by the deployed contracts and any separate agreement you have independently verified. After governance launch, governance-eligible holders can have limited onchain veto or wind-down power when the contract thresholds are met.
+Holding a project token does **not**, by itself, create equity, debt, dividends, employment, corporate voting rights, legal membership, or any other offchain entitlement. A grant, sale, airdrop, or AMM transaction creates only the rights encoded by the deployed contracts and any separate agreement you have independently verified. After governance launch, active stakers can have limited onchain veto or wind-down power when the contract thresholds are met; liquid holders retain economic and redemption rights but no governance power.
 
 Words such as “owner,” “holder,” “buyer,” “advisor,” and “contractor” describe how a wallet interacts with the protocol. They are not legal classifications.
 

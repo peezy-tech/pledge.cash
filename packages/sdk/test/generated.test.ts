@@ -7,6 +7,8 @@ import {
   boardroomAbi,
   boardroomGovernanceLogicAbi,
   boardroomRedemptionPayoutAbi,
+  boardroomRewardsAbi,
+  boardroomRewardsFactoryAbi,
   boardroomTokenAbi,
   distributionFactoryAbi,
   fixedPriceSaleAbi,
@@ -30,6 +32,8 @@ describe("generated SDK exports", () => {
     expect(pledgeCashAbis.AmmRouter).toBe(ammRouterAbi);
     expect(pledgeCashAbis.BoardroomGovernanceLogic).toBe(boardroomGovernanceLogicAbi);
     expect(pledgeCashAbis.BoardroomRedemptionPayout).toBe(boardroomRedemptionPayoutAbi);
+    expect(pledgeCashAbis.BoardroomRewards).toBe(boardroomRewardsAbi);
+    expect(pledgeCashAbis.BoardroomRewardsFactory).toBe(boardroomRewardsFactoryAbi);
     expect(pledgeCashAbis.FixedPriceSale).toBe(fixedPriceSaleAbi);
     expect(pledgeCashAbis.LockedLiquidity).toBe(lockedLiquidityAbi);
     expect(pledgeCashAbis.LockedLiquidityFactory).toBe(lockedLiquidityFactoryAbi);
@@ -65,6 +69,14 @@ describe("generated SDK exports", () => {
       "governanceEligibleSupply",
       "isEncumberedAccount",
     ]));
+    expect(functionNames(boardroomRewardsAbi)).toEqual(expect.arrayContaining([
+      "claim",
+      "completeUnstake",
+      "earned",
+      "requestUnstake",
+      "stake",
+    ]));
+    expect(functionNames(boardroomRewardsFactoryAbi)).toEqual(expect.arrayContaining(["createRewards", "fundReward"]));
     expect(functionNames(tokenGrantAbi)).toEqual(expect.arrayContaining([
       "getSettlementCost",
       "getSettleableAmount",

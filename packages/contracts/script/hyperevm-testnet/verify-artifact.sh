@@ -135,7 +135,7 @@ for required in \
   tokenGrantFactory factoryOwner tokenGrantFeeRecipient tokenGrantLogic creationFee \
   ammFactory ammFactoryOwner ammFeeManager ammProtocolFeeRecipient ammLiquidityRouter \
   ammReservationManager ammRouter wrappedNative \
-  lockedLiquidityFactory distributionFactory deploymentTimestamp; do
+  lockedLiquidityFactory distributionFactory boardroomRewardsFactory deploymentTimestamp; do
   require_field "$required"
 done
 
@@ -234,17 +234,23 @@ if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactor
   require_field distributionFactory
   require_field distributionPolicyAllowed
   require_field distributionModulePolicy
+  require_field boardroomRewardsFactory
+  require_field boardroomRewardsPolicyAllowed
+  require_field boardroomRewardsModulePolicy
   require_field assetWrappedNativeAllowed
   require_field assetTokenGrantSpenderAllowed
   require_field assetDistributionSpenderAllowed
+  require_field assetBoardroomRewardsSpenderAllowed
 
   expect_equal "TokenGrantFactory module artifact" "true" "$(field tokenGrantModulePolicy)"
   expect_equal "DistributionFactory module artifact" "true" "$(field distributionModulePolicy)"
+  expect_equal "BoardroomRewardsFactory module artifact" "true" "$(field boardroomRewardsModulePolicy)"
 
   policy_registry="$(field boardroomPolicyRegistry)"
   asset_policy="$(field assetPolicy)"
   wrapped_native="$(field wrappedNative)"
   distribution_factory="$(field distributionFactory)"
+  boardroom_rewards_factory="$(field boardroomRewardsFactory)"
   boardroom_governance_logic="$(field boardroomGovernanceLogic)"
   boardroom_redemption_payout="$(field boardroomRedemptionPayout)"
   boardroom_logic="$(field boardroomLogic)"
@@ -255,6 +261,7 @@ if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactor
   require_code "BoardroomPolicyRegistry" "$policy_registry"
   require_code "AssetPolicy" "$asset_policy"
   require_code "DistributionFactory" "$distribution_factory"
+  require_code "BoardroomRewardsFactory" "$boardroom_rewards_factory"
 
   actual_boardroom_factory_registry="$(call_address "$boardroom_factory" "policyRegistry()(address)")"
   expect_address_equal "BoardroomFactory policyRegistry" "$policy_registry" "$actual_boardroom_factory_registry"
@@ -312,6 +319,18 @@ if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactor
   actual_distribution_module_policy="$(call_bool "$policy_registry" "isModulePolicy(address)(bool)" "$distribution_factory")"
   expect_equal "DistributionFactory permanent module identity" "$(field distributionModulePolicy)" "$actual_distribution_module_policy"
 
+  actual_boardroom_rewards_boardroom_factory="$(call_address "$boardroom_rewards_factory" "boardroomFactory()(address)")"
+  expect_address_equal \
+    "BoardroomRewardsFactory BoardroomFactory wiring" \
+    "$boardroom_factory" \
+    "$actual_boardroom_rewards_boardroom_factory"
+
+  actual_boardroom_rewards_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$boardroom_rewards_factory")"
+  expect_equal "BoardroomRewards policy allowance" "$(field boardroomRewardsPolicyAllowed)" "$actual_boardroom_rewards_policy_allowed"
+
+  actual_boardroom_rewards_module_policy="$(call_bool "$policy_registry" "isModulePolicy(address)(bool)" "$boardroom_rewards_factory")"
+  expect_equal "BoardroomRewardsFactory permanent module identity" "$(field boardroomRewardsModulePolicy)" "$actual_boardroom_rewards_module_policy"
+
   actual_asset_wrapped_native_allowed="$(call_bool "$asset_policy" "isAssetAllowed(address)(bool)" "$wrapped_native")"
   expect_equal "AssetPolicy wrapped native allowance" "$(field assetWrappedNativeAllowed)" "$actual_asset_wrapped_native_allowed"
 
@@ -320,6 +339,9 @@ if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactor
 
   actual_asset_distribution_spender_allowed="$(call_bool "$asset_policy" "isApprovalSpenderAllowed(address)(bool)" "$distribution_factory")"
   expect_equal "AssetPolicy DistributionFactory spender allowance" "$(field assetDistributionSpenderAllowed)" "$actual_asset_distribution_spender_allowed"
+
+  actual_asset_boardroom_rewards_spender_allowed="$(call_bool "$asset_policy" "isApprovalSpenderAllowed(address)(bool)" "$boardroom_rewards_factory")"
+  expect_equal "AssetPolicy BoardroomRewardsFactory spender allowance" "$(field assetBoardroomRewardsSpenderAllowed)" "$actual_asset_boardroom_rewards_spender_allowed"
 elif [[ "$REQUIRE_BOARDROOM_DEPLOYMENT" == "1" ]]; then
   fail "Boardroom deployment fields are required but missing"
 else
@@ -416,4 +438,5 @@ require_code_hash "AmmFactory" "$(field ammFactory)" ammFactoryCodeHash
 require_code_hash "AmmRouter" "$(field ammRouter)" ammRouterCodeHash
 require_code_hash "LockedLiquidityFactory" "$(field lockedLiquidityFactory)" lockedLiquidityFactoryCodeHash
 require_code_hash "DistributionFactory" "$(field distributionFactory)" distributionFactoryCodeHash
+require_code_hash "BoardroomRewardsFactory" "$(field boardroomRewardsFactory)" boardroomRewardsFactoryCodeHash
 require_code_hash "Wrapped native" "$(field wrappedNative)" wrappedNativeCodeHash

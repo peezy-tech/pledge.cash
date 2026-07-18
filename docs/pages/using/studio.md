@@ -11,7 +11,7 @@ description: Use the seven Studio sections across project setup, operation, gove
 
 ## How Studio unlocks controls
 
-Studio verifies the canonical Boardroom and current lifecycle before exposing writes. Before governance launch, the recorded owner manages available sections. After launch, the executor manages operator sections while holder-specific actions follow their own thresholds. A connected wallet on the wrong chain gets `Switch wallet network`; an unauthorized wallet gets `Open public project` instead of controls.
+Studio verifies the canonical Boardroom and current lifecycle before exposing writes. Before governance launch, the recorded owner manages available sections. After launch, the executor manages operator sections while active-staker actions follow their own thresholds. A connected wallet on the wrong chain gets `Switch wallet network`; an unauthorized wallet gets `Open public project` instead of controls.
 
 The lifecycle shown under `Current stage` moves through `Define`, `Configure`, `Govern`, `Wind down`, and `Redeem`. Actions disappear or become blocked when the lifecycle makes them unsafe.
 
@@ -51,7 +51,7 @@ If the app says `No project AMM pool is available`, create or migrate project li
 
 ## Governance
 
-Use `Governance` to inspect the decision system, holder protections, and verified queue. Existing launched Boardrooms can expose queue, veto, and execution actions when the wallet and state qualify.
+Use `Governance` to inspect the decision system, staker protections, reward pool, and verified queue. Existing launched Boardrooms can expose queue, veto, and execution actions when the wallet and state qualify.
 
 For current pre-launch Boardrooms, the app shows `Secure governance launch is unavailable for this Boardroom version`. The deployed `launch(uint256)` call does not bind the expected executor, so there is no safe in-app launch action. Leave owner governance unchanged; do not bypass the block.
 
@@ -59,8 +59,8 @@ For current pre-launch Boardrooms, the app shows `Secure governance launch is un
 
 Use `Close` for `Wind-Down` and redemptions. The safe sequence is:
 
-1. `Start Wind-Down` as the owner before launch or after launch when the wallet meets the 10% current-and-previous-block
-   holder threshold.
+1. `Start Wind-Down` as the owner before launch or after launch when active stake meets the 10%
+   current-and-previous-block eligible-supply threshold.
 2. Resolve grants, distributions, and locked-liquidity blockers.
 3. `Burn Treasury Shares` where applicable.
 4. Verify the full admitted redemption basket. Wrapped native is admitted at initialization, and canonical module

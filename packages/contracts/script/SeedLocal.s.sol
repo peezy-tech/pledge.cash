@@ -16,6 +16,8 @@ import {LockedLiquidity} from "../src/liquidity/LockedLiquidity.sol";
 import {MigratingBondingCurve} from "../src/distribution/MigratingBondingCurve.sol";
 import {TokenGrant} from "../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../src/grants/TokenGrantFactory.sol";
+import {BoardroomRewards} from "../src/rewards/BoardroomRewards.sol";
+import {BoardroomRewardsFactory} from "../src/rewards/BoardroomRewardsFactory.sol";
 
 contract SeedToken {
     string public name;
@@ -107,12 +109,17 @@ contract SeedLocal is Script {
     uint256 internal constant FIXED_CLOSED_BUY_ONE = 600 * PLEDGE;
     uint256 internal constant FIXED_CLOSED_BUY_TWO = 300 * PLEDGE;
     uint256 internal constant FIXED_CLOSED_PRICE = 4 * CASH;
+    uint64 internal constant REWARD_COOLDOWN = 7 days;
+    uint256 internal constant REWARD_AMOUNT = 3_000 * CASH;
+    uint256 internal constant REWARD_DURATION = 30 days;
+    uint256 internal constant REWARD_STAKE = 1_000 * PLEDGE;
 
     struct Deployment {
         BoardroomFactory boardroomFactory;
         AssetPolicy assetPolicy;
         TokenGrantFactory tokenGrantFactory;
         DistributionFactory distributionFactory;
+        BoardroomRewardsFactory boardroomRewardsFactory;
         AmmFactory ammFactory;
         AmmRouter ammRouter;
         address protocolFeeRouter;
@@ -197,6 +204,7 @@ contract SeedLocal is Script {
     FixedPriceSale internal activeFixedSale;
     MigratingBondingCurve internal activeCurve;
     FixedPriceSale internal closedFixedSale;
+    BoardroomRewards internal boardroomRewards;
     SeededBoardroom[] internal seededBoardrooms;
     uint256 internal seedNonce;
     uint256 internal deployerKey;
@@ -238,6 +246,8 @@ contract SeedLocal is Script {
         AssetPolicy assetPolicy = AssetPolicy(json.readAddress(".assetPolicy"));
         TokenGrantFactory tokenGrantFactory = TokenGrantFactory(json.readAddress(".tokenGrantFactory"));
         DistributionFactory distributionFactory = DistributionFactory(json.readAddress(".distributionFactory"));
+        BoardroomRewardsFactory boardroomRewardsFactory =
+            BoardroomRewardsFactory(json.readAddress(".boardroomRewardsFactory"));
         AmmFactory ammFactory = AmmFactory(json.readAddress(".ammFactory"));
         AmmRouter ammRouter = AmmRouter(payable(json.readAddress(".ammRouter")));
         address protocolFeeRouter = json.readAddress(".protocolFeeRouter");
@@ -246,6 +256,7 @@ contract SeedLocal is Script {
             assetPolicy: assetPolicy,
             tokenGrantFactory: tokenGrantFactory,
             distributionFactory: distributionFactory,
+            boardroomRewardsFactory: boardroomRewardsFactory,
             ammFactory: ammFactory,
             ammRouter: ammRouter,
             protocolFeeRouter: protocolFeeRouter
@@ -354,6 +365,7 @@ contract SeedLocal is Script {
 
         _seedBoardroomLaunch();
         _seedBoardroomEmployeeOptions();
+        _seedBoardroomRewards();
         _recordSeededBoardroom(
             boardroom,
             "Seed Labs",
@@ -369,6 +381,49 @@ contract SeedLocal is Script {
             cash.balanceOf(address(boardroom)),
             5
         );
+    }
+
+    function _seedBoardroomRewards() internal {
+        Boardroom.Call memory createCall = Boardroom.Call({
+            policy: address(deployment.boardroomRewardsFactory),
+            target: address(deployment.boardroomRewardsFactory),
+            value: 0,
+            data: abi.encodeCall(BoardroomRewardsFactory.createRewards, (REWARD_COOLDOWN, _salt("seed-rewards")))
+        });
+
+        vm.startBroadcast(BOARDROOM_OWNER_KEY);
+        bytes memory createResult = boardroom.execute(createCall);
+        vm.stopBroadcast();
+        boardroomRewards = BoardroomRewards(abi.decode(createResult, (address)));
+
+        vm.startBroadcast(deployerKey);
+        cash.mint(address(boardroom), REWARD_AMOUNT);
+        vm.stopBroadcast();
+
+        Boardroom.Call[] memory fundingCalls = new Boardroom.Call[](2);
+        fundingCalls[0] = Boardroom.Call({
+            policy: address(deployment.assetPolicy),
+            target: address(cash),
+            value: 0,
+            data: abi.encodeCall(SeedToken.approve, (address(deployment.boardroomRewardsFactory), REWARD_AMOUNT))
+        });
+        fundingCalls[1] = Boardroom.Call({
+            policy: address(deployment.boardroomRewardsFactory),
+            target: address(deployment.boardroomRewardsFactory),
+            value: 0,
+            data: abi.encodeCall(
+                BoardroomRewardsFactory.fundReward,
+                (address(boardroomRewards), address(cash), REWARD_AMOUNT, REWARD_DURATION)
+            )
+        });
+
+        vm.startBroadcast(BOARDROOM_OWNER_KEY);
+        boardroom.executeBatch(fundingCalls);
+        vm.stopBroadcast();
+
+        vm.startBroadcast(INVESTOR_KEY);
+        boardroomRewards.stake(REWARD_STAKE);
+        vm.stopBroadcast();
     }
 
     function _seedAdditionalBoardrooms() internal {
@@ -905,7 +960,22 @@ contract SeedLocal is Script {
         _assertDirectGrantMatrix();
         _assertLaunchScenario();
         _assertEmployeeOptions();
+        _assertBoardroomRewards();
         _assertSeededBoardrooms();
+    }
+
+    function _assertBoardroomRewards() internal view {
+        BoardroomToken shares = BoardroomToken(boardroom.shareToken());
+        _check(boardroom.rewardPool() == address(boardroomRewards), "boardroom-reward-pool");
+        _check(
+            deployment.boardroomRewardsFactory.rewardsForBoardroom(address(boardroom)) == address(boardroomRewards),
+            "factory-boardroom-rewards"
+        );
+        _check(boardroomRewards.rewardAssetCount() == 1, "boardroom-reward-asset-count");
+        _check(boardroomRewards.rewardAssetAt(0) == address(cash), "boardroom-reward-asset");
+        _check(boardroomRewards.totalActiveStake() == REWARD_STAKE, "boardroom-reward-total-stake");
+        _check(boardroomRewards.activeStakeOf(actors.investor) == REWARD_STAKE, "boardroom-reward-investor-stake");
+        _check(shares.lockedStakeBalance(actors.investor) == REWARD_STAKE, "boardroom-share-locked-stake");
     }
 
     function _assertDirectGrantMatrix() internal view {
@@ -1080,6 +1150,13 @@ contract SeedLocal is Script {
         json.serialize("cashToken", address(cash));
         json.serialize("boardroom", address(boardroom));
         json.serialize("boardroomShareToken", boardroom.shareToken());
+        json.serialize("boardroomRewards", address(boardroomRewards));
+        json.serialize("boardroomRewardAsset", address(cash));
+        json.serialize("boardroomRewardStaker", actors.investor);
+        json.serialize("boardroomRewardAmount", vm.toString(REWARD_AMOUNT));
+        json.serialize("boardroomRewardDuration", REWARD_DURATION);
+        json.serialize("boardroomRewardCooldown", REWARD_COOLDOWN);
+        json.serialize("boardroomRewardStake", vm.toString(REWARD_STAKE));
         json.serialize("migratingCurve", address(launch.curve));
         json.serialize("curvePool", launch.pool);
         json.serialize("curveLocker", launch.locker);
@@ -1206,6 +1283,9 @@ contract SeedLocal is Script {
         console2.log("Cash token", address(cash));
         console2.log("Boardroom", address(boardroom));
         console2.log("Boardroom share token", boardroom.shareToken());
+        console2.log("Boardroom rewards", address(boardroomRewards));
+        console2.log("Boardroom reward amount", REWARD_AMOUNT);
+        console2.log("Boardroom reward stake", REWARD_STAKE);
         console2.log("Migrating curve", address(launch.curve));
         console2.log("Curve pool", launch.pool);
         console2.log("Curve locker", launch.locker);

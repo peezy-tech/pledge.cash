@@ -3,6 +3,7 @@ import {
   ammFactoryAbi,
   boardroomAbi,
   boardroomFactoryAbi,
+  boardroomRewardsAbi,
   boardroomTokenAbi,
   distributionFactoryAbi,
   erc20Abi,
@@ -16,7 +17,9 @@ import {
 } from "../generated";
 import type {
   BoardroomGovernanceConfig,
-  BoardroomHolderPower,
+  BoardroomStakerPower,
+  BoardroomRewardsAccountState,
+  BoardroomRewardsState,
   BoardroomState,
   FactoryState,
   FixedPriceSaleParticipationQuote,
@@ -197,6 +200,7 @@ export async function readBoardroomState(client: PledgeCashReadClient, boardroom
     policyRegistry,
     wrappedNative,
     shareToken,
+    rewardPool,
     status,
     launched,
     executor,
@@ -213,6 +217,7 @@ export async function readBoardroomState(client: PledgeCashReadClient, boardroom
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "policyRegistry" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "wrappedNative" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "shareToken" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "rewardPool" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "status" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "launched" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "executor" }),
@@ -238,6 +243,7 @@ export async function readBoardroomState(client: PledgeCashReadClient, boardroom
     policyRegistry: policyRegistry as Address,
     wrappedNative: wrappedNative as Address,
     shareToken: shareToken as Address,
+    rewardPool: rewardPool as Address,
     status: Number(status),
     launched: launched as boolean,
     executor: executor as Address,
@@ -252,7 +258,7 @@ export async function readBoardroomState(client: PledgeCashReadClient, boardroom
   };
 }
 
-export function governanceHolderPowerThreshold(
+export function governanceStakerPowerThreshold(
   currentEligibleSupply: bigint,
   pastEligibleSupply: bigint,
   thresholdBps: bigint,
@@ -262,21 +268,23 @@ export function governanceHolderPowerThreshold(
   return currentRequired > pastRequired ? currentRequired : pastRequired;
 }
 
-export async function readBoardroomHolderPower(
+export async function readBoardroomStakerPower(
   client: PledgeCashBlockReadClient,
   input: { boardroom: Address; account: Address },
-): Promise<BoardroomHolderPower> {
-  const [blockNumber, shareToken, governanceConfigResult] = await Promise.all([
+): Promise<BoardroomStakerPower> {
+  const [blockNumber, shareToken, rewardPool, governanceConfigResult] = await Promise.all([
     client.getBlockNumber(),
     client.readContract({ address: input.boardroom, abi: boardroomAbi, functionName: "shareToken" }),
+    client.readContract({ address: input.boardroom, abi: boardroomAbi, functionName: "rewardPool" }),
     client.readContract({ address: input.boardroom, abi: boardroomAbi, functionName: "governanceConfig" }),
   ]);
-  if (blockNumber === 0n) throw new Error("Holder power requires at least one mined block.");
+  if (blockNumber === 0n) throw new Error("Staker power requires at least one mined block.");
 
   const snapshotBlock = blockNumber - 1n;
   const token = shareToken as Address;
+  const rewards = rewardPool as Address;
   const config = boardroomGovernanceConfig(governanceConfigResult);
-  const [encumbered, currentBalance, pastBalance, currentEligibleSupply, pastEligibleSupply] = await Promise.all([
+  const [encumbered, currentTokenBalance, currentActiveStake, pastActiveStake, currentEligibleSupply, pastEligibleSupply] = await Promise.all([
     client.readContract({
       address: token,
       abi: boardroomTokenAbi,
@@ -291,13 +299,24 @@ export async function readBoardroomHolderPower(
       args: [input.account],
       blockNumber,
     }),
-    client.readContract({
-      address: token,
-      abi: boardroomTokenAbi,
-      functionName: "getPastBalance",
-      args: [input.account, snapshotBlock],
-      blockNumber,
-    }),
+    rewards === ZERO_ADDRESS
+      ? Promise.resolve(0n)
+      : client.readContract({
+          address: rewards,
+          abi: boardroomRewardsAbi,
+          functionName: "activeStakeOf",
+          args: [input.account],
+          blockNumber,
+        }),
+    rewards === ZERO_ADDRESS
+      ? Promise.resolve(0n)
+      : client.readContract({
+          address: rewards,
+          abi: boardroomRewardsAbi,
+          functionName: "getPastActiveStake",
+          args: [input.account, snapshotBlock],
+          blockNumber,
+        }),
     client.readContract({
       address: token,
       abi: boardroomTokenAbi,
@@ -314,29 +333,143 @@ export async function readBoardroomHolderPower(
   ]);
   const currentSupply = currentEligibleSupply as bigint;
   const pastSupply = pastEligibleSupply as bigint;
-  const balance = currentBalance as bigint;
-  const priorBalance = pastBalance as bigint;
+  const balance = currentActiveStake as bigint;
+  const priorBalance = pastActiveStake as bigint;
   const isEncumbered = encumbered as boolean;
-  const vetoRequired = governanceHolderPowerThreshold(currentSupply, pastSupply, config.vetoBps);
-  const windDownRequired = governanceHolderPowerThreshold(currentSupply, pastSupply, config.windDownBps);
+  const vetoRequired = governanceStakerPowerThreshold(currentSupply, pastSupply, config.vetoBps);
+  const windDownRequired = governanceStakerPowerThreshold(currentSupply, pastSupply, config.windDownBps);
   const hasPower = (required: bigint): boolean =>
     !isEncumbered && currentSupply !== 0n && pastSupply !== 0n && balance >= required && priorBalance >= required;
 
   return {
     boardroom: input.boardroom,
     shareToken: token,
+    rewardPool: rewards,
     account: input.account,
     blockNumber,
     snapshotBlock,
     encumbered: isEncumbered,
+    currentTokenBalance: currentTokenBalance as bigint,
     currentBalance: balance,
     pastBalance: priorBalance,
+    currentActiveStake: balance,
+    pastActiveStake: priorBalance,
     currentEligibleSupply: currentSupply,
     pastEligibleSupply: pastSupply,
     vetoRequired,
     windDownRequired,
     canVeto: hasPower(vetoRequired),
     canStartWindDown: hasPower(windDownRequired),
+  };
+}
+
+/** @deprecated Use governanceStakerPowerThreshold. */
+export const governanceHolderPowerThreshold = governanceStakerPowerThreshold;
+
+/** @deprecated Use readBoardroomStakerPower. */
+export const readBoardroomHolderPower = readBoardroomStakerPower;
+
+export async function readBoardroomRewardsState(
+  client: PledgeCashReadClient,
+  rewards: Address,
+): Promise<BoardroomRewardsState> {
+  const [factory, boardroom, shareToken, cooldown, terminalized, totalActiveStake, rewardAssets] = await Promise.all([
+    client.readContract({ address: rewards, abi: boardroomRewardsAbi, functionName: "factory" }),
+    client.readContract({ address: rewards, abi: boardroomRewardsAbi, functionName: "boardroom" }),
+    client.readContract({ address: rewards, abi: boardroomRewardsAbi, functionName: "shareToken" }),
+    client.readContract({ address: rewards, abi: boardroomRewardsAbi, functionName: "cooldown" }),
+    client.readContract({ address: rewards, abi: boardroomRewardsAbi, functionName: "terminalized" }),
+    client.readContract({ address: rewards, abi: boardroomRewardsAbi, functionName: "totalActiveStake" }),
+    client.readContract({ address: rewards, abi: boardroomRewardsAbi, functionName: "getRewardAssets" }),
+  ]);
+  const assets = rewardAssets as Address[];
+  const rewardStates = await Promise.all(
+    assets.map(async (asset) => {
+      const [periodFinish, lastUpdateTime, rewardRate, rewardPerTokenStored, unallocated] = (await client.readContract({
+        address: rewards,
+        abi: boardroomRewardsAbi,
+        functionName: "rewardState",
+        args: [asset],
+      })) as readonly [bigint, bigint, bigint, bigint, bigint];
+      return { asset, periodFinish, lastUpdateTime, rewardRate, rewardPerTokenStored, unallocated };
+    }),
+  );
+
+  return {
+    address: rewards,
+    factory: factory as Address,
+    boardroom: boardroom as Address,
+    shareToken: shareToken as Address,
+    cooldown: cooldown as bigint,
+    terminalized: terminalized as boolean,
+    totalActiveStake: totalActiveStake as bigint,
+    rewardAssets: rewardStates,
+  };
+}
+
+export async function readBoardroomRewardsAccountState(
+  client: PledgeCashReadClient,
+  input: { rewards: Address; account: Address },
+): Promise<BoardroomRewardsAccountState> {
+  const [shareToken, rewardAssets, activeStake, lockedStake, pendingSlots] = await Promise.all([
+    client.readContract({ address: input.rewards, abi: boardroomRewardsAbi, functionName: "shareToken" }),
+    client.readContract({ address: input.rewards, abi: boardroomRewardsAbi, functionName: "getRewardAssets" }),
+    client.readContract({
+      address: input.rewards,
+      abi: boardroomRewardsAbi,
+      functionName: "activeStakeOf",
+      args: [input.account],
+    }),
+    client.readContract({
+      address: input.rewards,
+      abi: boardroomRewardsAbi,
+      functionName: "lockedStakeOf",
+      args: [input.account],
+    }),
+    client.readContract({ address: input.rewards, abi: boardroomRewardsAbi, functionName: "MAX_PENDING_UNSTAKES" }),
+  ]);
+  const token = shareToken as Address;
+  const assets = rewardAssets as Address[];
+  const slotCount = Number(pendingSlots as bigint);
+  const [transferableBalance, requests, earned] = await Promise.all([
+    client.readContract({
+      address: token,
+      abi: boardroomTokenAbi,
+      functionName: "transferableBalanceOf",
+      args: [input.account],
+    }),
+    Promise.all(
+      Array.from({ length: slotCount }, async (_, slot) => {
+        const [amount, unlockAt] = (await client.readContract({
+          address: input.rewards,
+          abi: boardroomRewardsAbi,
+          functionName: "unstakeRequest",
+          args: [input.account, BigInt(slot)],
+        })) as readonly [bigint, bigint];
+        return { slot, amount, unlockAt };
+      }),
+    ),
+    Promise.all(
+      assets.map(async (asset) => ({
+        asset,
+        amount: (await client.readContract({
+          address: input.rewards,
+          abi: boardroomRewardsAbi,
+          functionName: "earned",
+          args: [input.account, asset],
+        })) as bigint,
+      })),
+    ),
+  ]);
+
+  return {
+    rewards: input.rewards,
+    account: input.account,
+    activeStake: activeStake as bigint,
+    lockedStake: lockedStake as bigint,
+    transferableBalance: transferableBalance as bigint,
+    pendingUnstakes: requests.filter((request) => request.amount !== 0n),
+    earned,
   };
 }
 

@@ -20,6 +20,9 @@ contract BoardroomToken is ERC20 {
     /// @notice Sum of all share balances held by registered non-voting custodians.
     uint256 public encumberedSupply;
     Checkpoint[] internal encumberedSupplyCheckpoints;
+    address public rewardLocker;
+    bool public rewardLocksDisabled;
+    mapping(address => uint256) public lockedStakeBalance;
 
     error InvalidAddress();
     error InvalidAmount();
@@ -28,8 +31,18 @@ contract BoardroomToken is ERC20 {
     error CheckpointValueOverflow(uint256 value);
     error InvalidEncumberedAccount(address account);
     error EncumberedAccountAlreadyRegistered(address account);
+    error InvalidRewardLocker(address locker);
+    error RewardLockerAlreadyRegistered(address locker);
+    error OnlyRewardLocker();
+    error RewardLocksAreDisabled();
+    error InsufficientUnlockedBalance(address account, uint256 requested, uint256 available);
+    error InsufficientLockedStake(address account, uint256 requested, uint256 available);
 
     event EncumberedAccountRegistered(address indexed account, uint256 balance);
+    event RewardLockerRegistered(address indexed locker);
+    event StakeBalanceLocked(address indexed account, uint256 amount, uint256 lockedBalance);
+    event StakeBalanceUnlocked(address indexed account, uint256 amount, uint256 lockedBalance);
+    event RewardLocksDisabled();
 
     constructor(address boardroom_, string memory name_, string memory symbol_) {
         if (boardroom_ == address(0)) revert InvalidAddress();
@@ -78,7 +91,58 @@ contract BoardroomToken is ERC20 {
         emit EncumberedAccountRegistered(account, balance);
     }
 
-    /// @notice Current supply eligible for shareholder governance thresholds.
+    function registerRewardLocker(address locker) external {
+        _requireBoardroomCaller();
+        if (locker == address(0) || locker.code.length == 0 || locker == boardroom) {
+            revert InvalidRewardLocker(locker);
+        }
+        if (rewardLocker != address(0)) revert RewardLockerAlreadyRegistered(rewardLocker);
+        rewardLocker = locker;
+        emit RewardLockerRegistered(locker);
+    }
+
+    function lockStake(address account, uint256 amount) external {
+        _requireRewardLockerCaller();
+        if (rewardLocksDisabled) revert RewardLocksAreDisabled();
+        _requireTokenAccount(account);
+        _requireTokenAmount(amount);
+
+        uint256 balance = balanceOf(account);
+        uint256 locked = lockedStakeBalance[account];
+        uint256 available = balance > locked ? balance - locked : 0;
+        if (amount > available) revert InsufficientUnlockedBalance(account, amount, available);
+        uint256 nextLocked = locked + amount;
+        lockedStakeBalance[account] = nextLocked;
+        emit StakeBalanceLocked(account, amount, nextLocked);
+    }
+
+    function unlockStake(address account, uint256 amount) external {
+        _requireRewardLockerCaller();
+        _requireTokenAccount(account);
+        _requireTokenAmount(amount);
+
+        uint256 locked = lockedStakeBalance[account];
+        if (amount > locked) revert InsufficientLockedStake(account, amount, locked);
+        uint256 nextLocked = locked - amount;
+        lockedStakeBalance[account] = nextLocked;
+        emit StakeBalanceUnlocked(account, amount, nextLocked);
+    }
+
+    function disableRewardLocks() external {
+        _requireBoardroomCaller();
+        if (rewardLocksDisabled) return;
+        rewardLocksDisabled = true;
+        emit RewardLocksDisabled();
+    }
+
+    function transferableBalanceOf(address account) external view returns (uint256) {
+        uint256 balance = balanceOf(account);
+        if (rewardLocksDisabled) return balance;
+        uint256 locked = lockedStakeBalance[account];
+        return balance > locked ? balance - locked : 0;
+    }
+
+    /// @notice Current circulating supply used as the denominator for active-staker governance thresholds.
     /// @dev Redemption accounting intentionally continues to use total supply after treasury burning.
     function governanceEligibleSupply() public view returns (uint256) {
         return totalSupply() - balanceOf(boardroom) - encumberedSupply;
@@ -128,6 +192,15 @@ contract BoardroomToken is ERC20 {
         else _setEncumberedSupply(encumberedSupply + amount);
     }
 
+    function _beforeTokenTransfer(address from, address, uint256 amount) internal view override {
+        if (from == address(0) || rewardLocksDisabled) return;
+        uint256 locked = lockedStakeBalance[from];
+        if (locked == 0) return;
+        uint256 balance = balanceOf(from);
+        uint256 available = balance > locked ? balance - locked : 0;
+        if (amount > available) revert InsufficientUnlockedBalance(from, amount, available);
+    }
+
     function _setEncumberedSupply(uint256 value) internal {
         encumberedSupply = value;
         _writeCheckpoint(encumberedSupplyCheckpoints, value);
@@ -161,6 +234,10 @@ contract BoardroomToken is ERC20 {
 
     function _requireBoardroomCaller() internal view {
         if (msg.sender != boardroom) revert OnlyBoardroom();
+    }
+
+    function _requireRewardLockerCaller() internal view {
+        if (msg.sender != rewardLocker) revert OnlyRewardLocker();
     }
 
     function _requireTokenAccount(address account) internal pure {

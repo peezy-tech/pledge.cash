@@ -296,6 +296,7 @@ export type BoardroomState = {
   policyRegistry: Address;
   wrappedNative: Address;
   shareToken: Address;
+  rewardPool: Address;
   status: number;
   launched: boolean;
   executor: Address;
@@ -309,21 +310,66 @@ export type BoardroomState = {
   lockedLiquidityPositions: Address[];
 };
 
-export type BoardroomHolderPower = {
+export type BoardroomStakerPower = {
   boardroom: Address;
   shareToken: Address;
+  rewardPool: Address;
   account: Address;
   blockNumber: bigint;
   snapshotBlock: bigint;
   encumbered: boolean;
+  currentTokenBalance: bigint;
+  /** @deprecated Active stake, retained for compatibility. */
   currentBalance: bigint;
+  /** @deprecated Prior-block active stake, retained for compatibility. */
   pastBalance: bigint;
+  currentActiveStake: bigint;
+  pastActiveStake: bigint;
   currentEligibleSupply: bigint;
   pastEligibleSupply: bigint;
   vetoRequired: bigint;
   windDownRequired: bigint;
   canVeto: boolean;
   canStartWindDown: boolean;
+};
+
+/** @deprecated Use BoardroomStakerPower. */
+export type BoardroomHolderPower = BoardroomStakerPower;
+
+export type BoardroomRewardAssetState = {
+  asset: Address;
+  periodFinish: bigint;
+  lastUpdateTime: bigint;
+  rewardRate: bigint;
+  rewardPerTokenStored: bigint;
+  unallocated: bigint;
+};
+
+export type BoardroomRewardsState = {
+  address: Address;
+  factory: Address;
+  boardroom: Address;
+  shareToken: Address;
+  cooldown: bigint;
+  terminalized: boolean;
+  totalActiveStake: bigint;
+  rewardAssets: BoardroomRewardAssetState[];
+};
+
+export type BoardroomUnstakeRequest = {
+  slot: number;
+  amount: bigint;
+  unlockAt: bigint;
+};
+
+export type BoardroomRewardsAccountState = {
+  rewards: Address;
+  account: Address;
+  activeStake: bigint;
+  lockedStake: bigint;
+  transferableBalance: bigint;
+  pendingUnstakes: BoardroomUnstakeRequest[];
+  earned: ReadonlyArray<{ asset: Address; amount: bigint }>;
 };
 
 export type GrantDiscoveryRange = DiscoveryRange & {

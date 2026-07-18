@@ -42,7 +42,7 @@ import {
   predictMigratingBondingCurveAddress as sdkPredictMigratingBondingCurveAddress,
   planBoardroomCallExecution,
   readBoardroomState,
-  readBoardroomHolderPower,
+  readBoardroomStakerPower,
   readFixedPriceSaleState,
   readGrantState,
   readLockedLiquidityState,
@@ -52,7 +52,7 @@ import {
   type Address,
   type BoardroomFixedPriceSaleTerms,
   type BoardroomCall,
-  type BoardroomHolderPower,
+  type BoardroomStakerPower,
   type BoardroomLockedLiquidityTerms,
   type BoardroomMerkleAirdropTerms,
   type BoardroomMigratingBondingCurveTerms,
@@ -86,6 +86,7 @@ import {
 } from "../features/capabilities/project-capabilities";
 import type { BoardroomPanelCapabilities } from "../features/boardrooms/boardroom-panel-types";
 import { GovernanceLaunchControl, GovernanceQueue } from "../features/governance";
+import { BoardroomRewardsPanel } from "../features/rewards";
 import { createParticipationFlowContent, participationAmmKey, type ParticipationContentKey } from "../features/participation";
 import { AppHeader } from "../features/wallet/app-header";
 import { useActionRunner } from "../hooks/use-action-runner";
@@ -757,8 +758,8 @@ export function App(): React.JSX.Element {
   const [productCatalogTotalCount, setProductCatalogTotalCount] = useState<number>();
   const productCatalogRef = useRef<readonly ProductBoardroomCatalogEntry[]>(productCatalog);
   productCatalogRef.current = productCatalog;
-  const [boardroomHolderPower, setBoardroomHolderPower] = useState<BoardroomHolderPower>();
-  const [boardroomHolderPowerVerifiedKey, setBoardroomHolderPowerVerifiedKey] = useState<string>();
+  const [boardroomStakerPower, setBoardroomStakerPower] = useState<BoardroomStakerPower>();
+  const [boardroomStakerPowerVerifiedKey, setBoardroomStakerPowerVerifiedKey] = useState<string>();
   const [queuedBoardroomActions, setQueuedBoardroomActions] = useState<QueuedBoardroomAction[]>([]);
   const [productGovernanceQueueVerifiedKey, setProductGovernanceQueueVerifiedKey] = useState<string>();
   const [productGovernanceQueueComplete, setProductGovernanceQueueComplete] = useState(false);
@@ -1056,8 +1057,8 @@ export function App(): React.JSX.Element {
   }, [transactionWatcherIdentity]);
   const activeGovernanceKey = governanceRouteKey(appRoute, wallet.account, runtimeDeploymentIdentity);
   activeGovernanceKeyRef.current = activeGovernanceKey;
-  const verifiedBoardroomHolderPower = boardroomHolderPower
-    ? verifiedStateForKey(boardroomHolderPower, boardroomHolderPowerVerifiedKey, activeGovernanceKey)
+  const verifiedBoardroomStakerPower = boardroomStakerPower
+    ? verifiedStateForKey(boardroomStakerPower, boardroomStakerPowerVerifiedKey, activeGovernanceKey)
     : undefined;
   const verifiedQueuedBoardroomActions = verifiedStateForKey(
     queuedBoardroomActions,
@@ -1386,8 +1387,8 @@ export function App(): React.JSX.Element {
     setProductCatalogLoadingMore(false);
     setProductCatalogNextCursor(undefined);
     setProductCatalogTotalCount(undefined);
-    setBoardroomHolderPower(undefined);
-    setBoardroomHolderPowerVerifiedKey(undefined);
+    setBoardroomStakerPower(undefined);
+    setBoardroomStakerPowerVerifiedKey(undefined);
     setQueuedBoardroomActions([]);
     setProductGovernanceQueueVerifiedKey(undefined);
     setProductGovernanceQueueComplete(false);
@@ -1583,14 +1584,14 @@ export function App(): React.JSX.Element {
       setProductGovernanceQueueVerifiedKey(undefined);
       setProductGovernanceQueueComplete(false);
       setProductGovernanceQueueLoaded(false);
-      setBoardroomHolderPower(undefined);
-      setBoardroomHolderPowerVerifiedKey(undefined);
+      setBoardroomStakerPower(undefined);
+      setBoardroomStakerPowerVerifiedKey(undefined);
       setProductGovernanceWarning(undefined);
     }
     setProductGovernanceLoading(true);
     setProductGovernanceError(undefined);
     try {
-      const [queuedResult, holderResult] = await Promise.allSettled([
+      const [queuedResult, stakerResult] = await Promise.allSettled([
         raceWithGovernanceAbort(
           import("../lib/governance-actions").then(({ loadQueuedGovernanceActions }) =>
             loadQueuedGovernanceActions(publicClient, {
@@ -1603,7 +1604,7 @@ export function App(): React.JSX.Element {
         ),
         wallet.account
           ? raceWithGovernanceAbort(
-              readBoardroomHolderPower(publicClient, { boardroom: address, account: wallet.account }),
+              readBoardroomStakerPower(publicClient, { boardroom: address, account: wallet.account }),
               abortController.signal,
             )
           : Promise.resolve(undefined),
@@ -1617,11 +1618,11 @@ export function App(): React.JSX.Element {
         setProductGovernanceQueueVerifiedKey(key);
         productGovernanceSnapshotKeyRef.current = key;
       }
-      if (holderResult.status === "fulfilled" && holderResult.value?.boardroom && sameAddress(holderResult.value.boardroom, address)) {
-        setBoardroomHolderPower(holderResult.value);
-        setBoardroomHolderPowerVerifiedKey(key);
+      if (stakerResult.status === "fulfilled" && stakerResult.value?.boardroom && sameAddress(stakerResult.value.boardroom, address)) {
+        setBoardroomStakerPower(stakerResult.value);
+        setBoardroomStakerPowerVerifiedKey(key);
       }
-      const errors = [...new Set([queuedResult, holderResult]
+      const errors = [...new Set([queuedResult, stakerResult]
         .filter((result): result is PromiseRejectedResult => result.status === "rejected")
         .map((result) => errorMessage(result.reason)))];
       if (errors.length > 0) {
@@ -1693,8 +1694,8 @@ export function App(): React.JSX.Element {
     setProductGovernanceQueueVerifiedKey(undefined);
     setProductGovernanceQueueComplete(false);
     setProductGovernanceQueueLoaded(false);
-    setBoardroomHolderPower(undefined);
-    setBoardroomHolderPowerVerifiedKey(undefined);
+    setBoardroomStakerPower(undefined);
+    setBoardroomStakerPowerVerifiedKey(undefined);
     setProductGovernanceError(undefined);
     setProductGovernanceWarning(undefined);
     setProductGovernanceLoading(false);
@@ -2598,7 +2599,7 @@ export function App(): React.JSX.Element {
     productGovernanceLoadedKeyRef.current = undefined;
     productGovernanceSnapshotKeyRef.current = undefined;
     setProductGovernanceQueueVerifiedKey(undefined);
-    setBoardroomHolderPowerVerifiedKey(undefined);
+    setBoardroomStakerPowerVerifiedKey(undefined);
     setProductGovernanceLoading(false);
     const invalidateCurrentProjectChild = (current: string | undefined): string | undefined =>
       current === activeProjectKey ? undefined : current;
@@ -3675,9 +3676,9 @@ export function App(): React.JSX.Element {
       windDownBlockers: windDownBlockers(exactProjectDashboard.snapshot).length,
     } : undefined,
     wallet: {
-      shareBalance: verifiedBoardroomHolderPower?.currentBalance,
-      vetoEligible: verifiedBoardroomHolderPower?.canVeto,
-      windDownEligible: verifiedBoardroomHolderPower?.canStartWindDown,
+      shareBalance: verifiedBoardroomStakerPower?.currentTokenBalance,
+      vetoEligible: verifiedBoardroomStakerPower?.canVeto,
+      windDownEligible: verifiedBoardroomStakerPower?.canStartWindDown,
     },
     governance: {
       queuedActionCount: verifiedQueuedBoardroomActions.filter((action) => action.status === "waiting" || action.status === "ready").length,
@@ -4006,6 +4007,29 @@ export function App(): React.JSX.Element {
       minimumDelay={exactProjectDashboard.snapshot.governanceConfig.minimumDelay}
     />
   ) : undefined;
+  const publicRewardsPanel = exactProjectDashboard ? (
+    <BoardroomRewardsPanel
+      account={wallet.account}
+      dashboard={exactProjectDashboard}
+      deployment={deployment}
+      pendingAction={pendingAction}
+      publicClient={publicClient}
+      runAction={runAction}
+      submitTransaction={submitContractTransaction}
+    />
+  ) : undefined;
+  const operatorRewardsPanel = exactProjectDashboard ? (
+    <BoardroomRewardsPanel
+      account={wallet.account}
+      dashboard={exactProjectDashboard}
+      deployment={deployment}
+      operatorMode
+      pendingAction={pendingAction}
+      publicClient={publicClient}
+      runAction={runAction}
+      submitTransaction={submitContractTransaction}
+    />
+  ) : undefined;
   const retryGovernanceAction = productGovernanceError && exactProjectDashboard ? (
     <Button
       size="sm"
@@ -4207,10 +4231,11 @@ export function App(): React.JSX.Element {
                 activityContent={sentinelBaseUrl ? <GovernanceActivity boardroom={appRoute.boardroom} chainId={appRoute.chainId} /> : undefined}
                 dashboard={exactProjectDashboard}
                 error={productGovernanceError}
-                holderPower={verifiedBoardroomHolderPower}
+                stakerPower={verifiedBoardroomStakerPower}
                 loading={productBoardroomLoading || productGovernanceLoading}
                 primaryAction={retryGovernanceAction}
                 queueContent={governanceQueueControls}
+                stakingContent={publicRewardsPanel}
                 warning={verifiedProductGovernanceWarning}
               />
             ) : (
@@ -4310,10 +4335,11 @@ export function App(): React.JSX.Element {
           <GovernancePage
             dashboard={selectedDashboard}
             error={productGovernanceError}
-            holderPower={verifiedBoardroomHolderPower}
+            stakerPower={verifiedBoardroomStakerPower}
             loading={productBoardroomLoading || productGovernanceLoading}
             primaryAction={retryGovernanceAction}
             queueContent={governanceQueueControls ?? governanceLaunchControls}
+            stakingContent={operatorRewardsPanel}
             warning={verifiedProductGovernanceWarning}
           />
         ) : appRoute.kind === "studio-project" && appRoute.section === "liquidity" ? (
