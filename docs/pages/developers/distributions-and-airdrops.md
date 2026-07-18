@@ -1,11 +1,11 @@
 ---
 title: Distribution and airdrop integration
-description: Developer bridge for fixed-price sales, migrating curves, Merkle leaf construction, manifests, proofs, and lifecycle cleanup.
+description: Developer bridge for bond markets, fixed-price sales, migrating curves, Merkle leaves, proofs, and lifecycle cleanup.
 ---
 
 # Distribution and airdrop integration
 
-Use the [Distribution protocol specification](https://github.com/peezy-tech/pledge.cash/blob/main/docs/distribution-protocol.md) and `packages/contracts/src/distribution/` for exact formulas and invariants.
+Use the [Distribution protocol specification](https://github.com/peezy-tech/pledge.cash/blob/main/docs/distribution-protocol.md), [Bond market protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/bond-market-protocol.md), and their contract directories for exact formulas and invariants.
 
 ## Canonical discovery
 
@@ -14,6 +14,21 @@ and the distribution's reciprocal factory, Boardroom, and share-token fields. Wh
 require the Boardroom's live obligation record; after close and prune that record is intentionally cleared and is not a
 terminal provenance failure. Preserve a distinct identity per distribution address; one project can have several of the
 same type.
+
+Bond markets use a distinct `BondMarketFactory`. Verify `isBondMarket`, reciprocal factory and Boardroom fields, and the
+verified project share token. A liquidity bond's quote token must also be a funded pool from the configured AmmFactory
+that contains that share token.
+
+## Bond quotes and positions
+
+`readBondPurchaseQuote` returns live auction state, payout, wallet balance, and allowance. Refresh it immediately before
+submission, then bind `minimumPayout` and `deadline` through `buildBondPurchaseTransaction`. Approval targets the market,
+not the factory. Prices are quote-token smallest units per one whole 18-decimal project token.
+
+Use `readBondPositionsForOwner` for the bounded owner ledger and `buildBondRedeemTransaction` for matured positions.
+There is no transfer or approval flow: the owner recorded by the market is immutable, and permissionless redemption
+always pays that owner. `buildBondFinalizeTransaction` is permissionless after conclusion; Boardroom-authorized early
+close uses `buildBoardroomBondMarketCloseAction`.
 
 ## Fixed-price and curve quotes
 

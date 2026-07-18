@@ -1,5 +1,6 @@
 import type {
   Address,
+  BondMarketState,
   FixedPriceSaleState,
   LockedLiquidityState,
   MerkleAirdropState,
@@ -31,6 +32,7 @@ import { formatTokenAmount } from "../../lib/token-amounts";
 import type { Capability } from "../capabilities/project-capabilities";
 import type {
   BoardroomForm,
+  BondMarketForm,
   BoardroomDistributionSnapshot,
   BoardroomGrantForm,
   BoardroomLockedLiquiditySnapshot,
@@ -65,6 +67,7 @@ export function BoardroomPanel({
   boardroomIdentityLocked = false,
   capabilities,
   boardroom,
+  bondMarket,
   fixedPriceSale,
   grant,
   lockedLiquidity,
@@ -73,7 +76,7 @@ export function BoardroomPanel({
   windDown,
   workflow,
 }: BoardroomPanelProps): React.JSX.Element {
-  const [distributionTool, setDistributionTool] = useState<"airdrop" | "curve" | "fixed-price">("fixed-price");
+  const [distributionTool, setDistributionTool] = useState<"airdrop" | "bond" | "curve" | "fixed-price">("fixed-price");
   const { deployment, pendingAction, runAction } = workflow;
   const {
     address: boardroomAddress,
@@ -92,6 +95,18 @@ export function BoardroomPanel({
     setBoardroomMintTo,
     setPredictedBoardroom,
   } = boardroom;
+  const {
+    address: bondMarketAddress,
+    form: bondMarketForm,
+    predicted: predictedBondMarket,
+    snapshot: bondMarketSnapshot,
+    close: closeBondMarket,
+    create: createBondMarket,
+    load: loadBondMarket,
+    predict: predictBondMarket,
+    setAddress: setBondMarketAddress,
+    setForm: setBondMarketForm,
+  } = bondMarket;
   const {
     form: boardroomGrantForm,
     predicted: predictedBoardroomGrant,
@@ -198,6 +213,7 @@ export function BoardroomPanel({
         <ObligationLists
           boardroomSnapshot={boardroomSnapshot}
           scope={scope}
+          setBondMarketAddress={setBondMarketAddress}
           setFixedPriceSaleAddress={setFixedPriceSaleAddress}
           setMerkleAirdropAddress={setMerkleAirdropAddress}
           setLockedLiquidityAddress={setLockedLiquidityAddress}
@@ -276,6 +292,7 @@ export function BoardroomPanel({
         boardroomSnapshot={boardroomSnapshot}
         pendingAction={pendingAction}
         setBoardroomAddress={setBoardroomAddress}
+        setBondMarketAddress={setBondMarketAddress}
         setFixedPriceSaleAddress={setFixedPriceSaleAddress}
         setMerkleAirdropAddress={setMerkleAirdropAddress}
         setLockedLiquidityAddress={setLockedLiquidityAddress}
@@ -327,9 +344,10 @@ export function BoardroomPanel({
 
       {section === "all" || section === "distributions" ? <>
       {section === "distributions" ? (
-        <div aria-label="Distribution type" className="grid grid-cols-1 gap-2 border-y border-zinc-800 py-3 sm:grid-cols-3" role="group">
+        <div aria-label="Distribution type" className="grid grid-cols-2 gap-2 border-y border-zinc-800 py-3 lg:grid-cols-4" role="group">
           {([
             ["fixed-price", "Fixed price"],
+            ["bond", "Bond market"],
             ["airdrop", "Airdrop"],
             ["curve", "Bonding curve"],
           ] as const).map(([value, label]) => (
@@ -361,6 +379,25 @@ export function BoardroomPanel({
         createFixedPriceSale={createFixedPriceSale}
         loadFixedPriceSale={loadFixedPriceSale}
         predictFixedPriceSale={predictFixedPriceSale}
+        runAction={runAction}
+      /> : null}
+
+      {section === "all" || distributionTool === "bond" ? <BondMarketPanel
+        boardroomSnapshot={boardroomSnapshot}
+        bondMarketAddress={bondMarketAddress}
+        bondMarketForm={bondMarketForm}
+        bondMarketSnapshot={bondMarketSnapshot}
+        createCapability={capabilities?.createDistribution}
+        deployment={deployment}
+        manageCapability={capabilities?.manageDistribution}
+        pendingAction={pendingAction}
+        predictedBondMarket={predictedBondMarket}
+        setBondMarketAddress={setBondMarketAddress}
+        setBondMarketForm={setBondMarketForm}
+        closeBondMarket={closeBondMarket}
+        createBondMarket={createBondMarket}
+        loadBondMarket={loadBondMarket}
+        predictBondMarket={predictBondMarket}
         runAction={runAction}
       /> : null}
 
@@ -461,6 +498,7 @@ function BoardroomOverview({
   boardroomSnapshot,
   pendingAction,
   setBoardroomAddress,
+  setBondMarketAddress,
   setFixedPriceSaleAddress,
   setMerkleAirdropAddress,
   setLockedLiquidityAddress,
@@ -474,6 +512,7 @@ function BoardroomOverview({
   boardroomSnapshot: BoardroomSnapshot | undefined;
   pendingAction: string | undefined;
   setBoardroomAddress: (address: string) => void;
+  setBondMarketAddress: (address: string) => void;
   setFixedPriceSaleAddress: (address: string) => void;
   setMerkleAirdropAddress: (address: string) => void;
   setLockedLiquidityAddress: (address: string) => void;
@@ -514,6 +553,7 @@ function BoardroomOverview({
       {obligationScope ? <ObligationLists
         boardroomSnapshot={boardroomSnapshot}
         scope={obligationScope}
+        setBondMarketAddress={setBondMarketAddress}
         setFixedPriceSaleAddress={setFixedPriceSaleAddress}
         setMerkleAirdropAddress={setMerkleAirdropAddress}
         setLockedLiquidityAddress={setLockedLiquidityAddress}
@@ -767,6 +807,127 @@ function BoardroomGrantPanel({
           { label: "Share token", value: boardroomSnapshot?.shareToken ? <AddressLink address={boardroomSnapshot.shareToken} /> : "Load Boardroom" },
         ]}
       />
+    </Panel>
+  );
+}
+
+function BondMarketPanel({
+  boardroomSnapshot,
+  bondMarketAddress,
+  bondMarketForm,
+  bondMarketSnapshot,
+  createCapability,
+  deployment,
+  manageCapability,
+  pendingAction,
+  predictedBondMarket,
+  setBondMarketAddress,
+  setBondMarketForm,
+  closeBondMarket,
+  createBondMarket,
+  loadBondMarket,
+  predictBondMarket,
+  runAction,
+}: {
+  boardroomSnapshot: BoardroomSnapshot | undefined;
+  bondMarketAddress: string;
+  bondMarketForm: BondMarketForm;
+  bondMarketSnapshot: BondMarketState | undefined;
+  createCapability: Capability | undefined;
+  deployment: PledgeCashDeployment | undefined;
+  manageCapability: Capability | undefined;
+  pendingAction: string | undefined;
+  predictedBondMarket: Address | undefined;
+  setBondMarketAddress: (address: string) => void;
+  setBondMarketForm: Dispatch<SetStateAction<BondMarketForm>>;
+  closeBondMarket: () => Promise<void>;
+  createBondMarket: () => Promise<void>;
+  loadBondMarket: () => Promise<void>;
+  predictBondMarket: () => Promise<void>;
+  runAction: (label: string, action: () => Promise<void>) => Promise<void>;
+}): React.JSX.Element {
+  const distributionSummary = distributionSummaryFor(boardroomSnapshot, bondMarketSnapshot?.address ?? bondMarketAddress);
+  const canUseBondFactory = Boolean(deployment?.bondMarketFactory);
+  const quoteMetadata = distributionSummary?.quoteTokenMetadata;
+  const shareMetadata = distributionSummary?.shareTokenMetadata ?? boardroomSnapshot?.shareTokenMetadata;
+
+  return (
+    <Panel
+      title="Sequential Dutch Auction Bond"
+      action={
+        <Button variant="secondary" onClick={() => setBondMarketForm((current) => ({ ...current, salt: randomSalt() }))}>
+          <Wand2 className="h-4 w-4" />
+          Salt
+        </Button>
+      }
+    >
+      <div className="border-t border-zinc-800 p-4">
+        <p className="m-0 text-sm leading-6 text-zinc-400">
+          Prefund a declining-price auction with project tokens. Buyers commit a reserve asset or a canonical first-party LP token and receive immutable, non-transferable positions.
+        </p>
+        <div className="mt-3 flex gap-2" role="group" aria-label="Bond quote asset type">
+          {(["reserve", "liquidity"] as const).map((kind) => (
+            <Button
+              aria-pressed={bondMarketForm.kind === kind}
+              key={kind}
+              size="sm"
+              variant={bondMarketForm.kind === kind ? "default" : "secondary"}
+              onClick={() => setBondMarketForm((current) => ({ ...current, kind }))}
+            >
+              {kind === "reserve" ? "Reserve asset" : "First-party LP token"}
+            </Button>
+          ))}
+        </div>
+      </div>
+      <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2">
+        <TextField form={bondMarketForm} field="quoteToken" label={bondMarketForm.kind === "reserve" ? "Reserve quote token" : "AMM LP token"} setForm={setBondMarketForm} />
+        <TextField form={bondMarketForm} field="capacity" inputMode="decimal" label="Project-token capacity" setForm={setBondMarketForm} />
+        <TextField form={bondMarketForm} field="initialPrice" inputMode="decimal" label="Initial price per project token" setForm={setBondMarketForm} />
+        <TextField form={bondMarketForm} field="minimumPrice" inputMode="decimal" label="Minimum price" setForm={setBondMarketForm} />
+        <TextField description="100,000 = 100%; minimum 10,000." form={bondMarketForm} field="debtBuffer" inputMode="numeric" label="Debt circuit-breaker buffer" setForm={setBondMarketForm} />
+        <TextField description="Seconds from purchase until claim." form={bondMarketForm} field="vesting" inputMode="numeric" label="Vesting term" setForm={setBondMarketForm} />
+        <TextField description={timestampPreview(bondMarketForm.start, "Starts immediately")} form={bondMarketForm} field="start" inputMode="numeric" label="Auction starts" setForm={setBondMarketForm} />
+        <TextField description="Minimum 86,400 seconds." form={bondMarketForm} field="duration" inputMode="numeric" label="Auction duration" setForm={setBondMarketForm} />
+        <TextField description="Target cadence for maximum position size; minimum 3,600 seconds." form={bondMarketForm} field="depositInterval" inputMode="numeric" label="Deposit interval" setForm={setBondMarketForm} />
+        <TextField form={bondMarketForm} field="salt" label="Salt" setForm={setBondMarketForm} />
+      </div>
+      <ActionRow>
+        <ActionButton actionId="predict-bond-market" disabled={!canUseBondFactory} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("predict-bond-market", predictBondMarket)}>
+          <Search className="h-4 w-4" />
+          Predict
+        </ActionButton>
+        <ActionButton actionId="create-bond-market" disabled={!canUseBondFactory || !capabilityEnabled(createCapability)} pendingAction={pendingAction} title={capabilityReason(createCapability)} onClick={() => void runAction("create-bond-market", createBondMarket)}>
+          <Coins className="h-4 w-4" />
+          Create Bond Market
+        </ActionButton>
+      </ActionRow>
+      <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-[minmax(0,1fr)_auto]">
+        <Field label="Bond market address">
+          <Input value={bondMarketAddress} onChange={(event) => setBondMarketAddress(event.target.value)} spellCheck={false} />
+        </Field>
+        <div className="flex items-end gap-2 border-b border-zinc-800 p-4">
+          <ActionButton actionId="load-bond-market" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("load-bond-market", loadBondMarket)}>
+            <RefreshCw className="h-4 w-4" />
+            Load
+          </ActionButton>
+          <ActionButton actionId="close-bond-market" disabled={!capabilityEnabled(manageCapability) || bondMarketSnapshot?.status !== 0} pendingAction={pendingAction} title={capabilityReason(manageCapability)} variant="danger" onClick={() => void runAction("close-bond-market", closeBondMarket)}>
+            <XCircle className="h-4 w-4" />
+            Close Market
+          </ActionButton>
+        </div>
+      </div>
+      <CapabilityNotice capability={createCapability} fallback={manageCapability} />
+      <Facts columns="three" items={[
+        { label: "Status", value: bondMarketSnapshot ? (bondMarketSnapshot.closed ? "Settled" : bondMarketSnapshot.live ? "Live" : bondMarketSnapshot.status === 0 ? "Scheduled / concluded" : "Claims pending") : "Not loaded" },
+        { label: "Predicted market", value: predictedBondMarket ? <AddressLink address={predictedBondMarket} /> : "None" },
+        { label: "Quote asset", value: bondMarketSnapshot ? <AddressLink address={bondMarketSnapshot.quoteToken} /> : "Unknown" },
+        { label: "Remaining capacity", value: formatTokenAmount(bondMarketSnapshot?.capacity, shareMetadata) },
+        { label: "Current price", value: formatTokenAmount(bondMarketSnapshot?.currentPrice, quoteMetadata) },
+        { label: "Outstanding positions", value: formatTokenAmount(bondMarketSnapshot?.outstandingPayout, shareMetadata) },
+        { label: "Vesting", value: bondMarketSnapshot ? `${bondMarketSnapshot.vestingTerm.toLocaleString()} seconds` : "Unknown" },
+        { label: "Window", value: bondMarketSnapshot ? `${dateString(BigInt(bondMarketSnapshot.startTime))} -> ${dateString(BigInt(bondMarketSnapshot.conclusion))}` : "Unknown" },
+        { label: "Receipt", value: "Internal and non-transferable" },
+      ]} />
     </Panel>
   );
 }

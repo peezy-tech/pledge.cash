@@ -5,6 +5,13 @@ import {
   ammRouterAbi,
   boardroomAbi,
   boardroomTokenAbi,
+  bondMarketAbi,
+  bondMarketFactoryAbi,
+  buildBoardroomBondMarketBatch,
+  buildBoardroomBondMarketCloseAction,
+  buildBondFinalizeTransaction,
+  buildBondPurchaseTransaction,
+  buildBondRedeemTransaction,
   buildBoardroomFixedPriceSaleCancelAction,
   buildBoardroomFixedPriceSaleCloseAction,
   buildBoardroomFixedPriceSaleBatch,
@@ -44,6 +51,7 @@ import {
   merkleAirdropAbi,
   migratingBondingCurveAbi,
   poolFeesAbi,
+  predictBondMarketAddress,
   predictAmmPoolAddress,
   predictLockedLiquidityAddress,
   predictMerkleAirdropAddress,
@@ -51,6 +59,7 @@ import {
   queryGrantsHeldByAddress,
   queryGrantsIssuedByAddress,
   readBoardroomState,
+  readBondMarketState,
   readFactoryState,
   readFixedPriceSaleState,
   readGrantState,
@@ -59,6 +68,7 @@ import {
   readMigratingBondingCurveState,
   tokenGrantFactoryAbi,
   type BoardroomLockedLiquidityTerms,
+  type BondMarketTerms,
   type BoardroomFixedPriceSaleTerms,
   type BoardroomMerkleAirdropTerms,
   type BoardroomMigratingBondingCurveTerms,
@@ -77,6 +87,8 @@ const other = "0x000000000000000000000000000000000000cafe" as Address;
 const grantToken = "0x0000000000000000000000000000000000000123" as Address;
 const paymentToken = "0x0000000000000000000000000000000000000456" as Address;
 const distributionFactory = "0x0000000000000000000000000000000000000d15" as Address;
+const bondMarketFactory = "0x0000000000000000000000000000000000000b0d" as Address;
+const bondMarket = "0x000000000000000000000000000000000000b0a1" as Address;
 const assetPolicy = "0x0000000000000000000000000000000000000a55" as Address;
 const sale = "0x0000000000000000000000000000000000000a1e" as Address;
 const airdrop = "0x0000000000000000000000000000000000000a1d" as Address;
@@ -171,7 +183,58 @@ const lockedLiquidityTerms = {
   salt,
 } satisfies BoardroomLockedLiquidityTerms;
 
+const bondTerms = {
+  quoteToken: paymentToken,
+  kind: 0,
+  capacity: 1000n,
+  initialPrice: 25n,
+  minimumPrice: 10n,
+  debtBuffer: 25_000,
+  vesting: 604_800,
+  start: 100,
+  duration: 2_592_000,
+  depositInterval: 86_400,
+  salt,
+} satisfies BondMarketTerms;
+
 describe("SDK action and query helpers", () => {
+  test("reads and predicts bond markets", async () => {
+    const client = mockReadClient({
+      factory: bondMarketFactory,
+      boardroom,
+      shareToken,
+      quoteToken: paymentToken,
+      marketKind: 0,
+      marketStatus: 0,
+      initialCapacity: 1000n,
+      capacity: 900n,
+      minimumPrice: 10n,
+      marketPrice: 25n,
+      maxPayout: 100n,
+      purchased: 250n,
+      sold: 100n,
+      outstandingPayout: 100n,
+      returnedPayout: 0n,
+      startTime: 100,
+      conclusion: 1000,
+      vestingTerm: 604_800,
+      nextPositionId: 1n,
+      isLive: true,
+      isClosed: false,
+      predictBondMarketAddress: bondMarket,
+    });
+
+    await expect(readBondMarketState(client, bondMarket)).resolves.toMatchObject({
+      address: bondMarket,
+      factory: bondMarketFactory,
+      boardroom,
+      capacity: 900n,
+      currentPrice: 25n,
+      live: true,
+    });
+    await expect(predictBondMarketAddress(client, { factory: bondMarketFactory, boardroom, salt })).resolves.toBe(bondMarket);
+  });
+
   test("reads factory, grant, and Boardroom state through standard viem calls", async () => {
     const client = mockReadClient({
       owner: issuer,
@@ -503,6 +566,52 @@ describe("SDK action and query helpers", () => {
     expect(cancel.args[0].data).toBe(encodeFunctionData({ abi: fixedPriceSaleAbi, functionName: "cancel" }));
   });
 
+  test("builds non-transferable bond market transactions", () => {
+    const batch = buildBoardroomBondMarketBatch({
+      boardroom,
+      factory: bondMarketFactory,
+      shareToken,
+      terms: bondTerms,
+      policy: bondMarketFactory,
+      assetPolicy,
+    });
+
+    expect(batch.address).toBe(boardroom);
+    expect(batch.functionName).toBe("executeBatch");
+    expect(batch.args[0][0]?.data).toBe(encodeFunctionData({
+      abi: boardroomTokenAbi,
+      functionName: "approve",
+      args: [bondMarketFactory, bondTerms.capacity],
+    }));
+    expect(batch.args[0][1]?.data).toBe(encodeFunctionData({
+      abi: bondMarketFactoryAbi,
+      functionName: "createBondMarket",
+      args: [{
+        quoteToken: bondTerms.quoteToken,
+        kind: bondTerms.kind,
+        capacity: bondTerms.capacity,
+        initialPrice: bondTerms.initialPrice,
+        minimumPrice: bondTerms.minimumPrice,
+        debtBuffer: bondTerms.debtBuffer,
+        vesting: bondTerms.vesting,
+        start: bondTerms.start,
+        duration: bondTerms.duration,
+        depositInterval: bondTerms.depositInterval,
+        salt: bondTerms.salt,
+      }],
+    }));
+
+    const close = buildBoardroomBondMarketCloseAction({ boardroom, policy: bondMarketFactory, market: bondMarket });
+    expect(close.args[0]).toMatchObject({ policy: bondMarketFactory, target: bondMarket, value: 0n });
+    expect(close.args[0].data).toBe(encodeFunctionData({ abi: bondMarketAbi, functionName: "close" }));
+    expect(buildBondPurchaseTransaction({ market: bondMarket, quoteAmount: 25n, minimumPayout: 9n, deadline: 999n }))
+      .toMatchObject({ address: bondMarket, functionName: "purchase", args: [25n, 9n, 999n] });
+    expect(buildBondRedeemTransaction({ market: bondMarket, positionId: 7n }))
+      .toMatchObject({ address: bondMarket, functionName: "redeem", args: [7n] });
+    expect(buildBondFinalizeTransaction({ market: bondMarket }))
+      .toMatchObject({ address: bondMarket, functionName: "finalize" });
+  });
+
   test("builds Boardroom migrating bonding curve transaction inputs", () => {
     const batch = buildBoardroomMigratingCurveBatch({
       boardroom,
@@ -757,6 +866,16 @@ describe("SDK action and query helpers", () => {
         shareToken,
         terms: saleTerms,
         policy: distributionFactory,
+      }),
+    ).toThrow(error);
+
+    expect(() =>
+      buildBoardroomBondMarketBatch({
+        boardroom,
+        factory: bondMarketFactory,
+        shareToken,
+        terms: bondTerms,
+        policy: bondMarketFactory,
       }),
     ).toThrow(error);
 

@@ -21,7 +21,7 @@ Use `Refresh` when state may have changed. `Open Studio` provides an operator ha
 
 ## Participate
 
-`Participate` compares every route discovered for this Boardroom. Available route types are `Fixed-price sale`, `Bonding curve`, `Airdrop`, and `AMM market`.
+`Participate` compares every route discovered for this Boardroom. Available route types are `Reserve bond`, `Liquidity bond`, `Fixed-price sale`, `Bonding curve`, `Airdrop`, and `AMM market`.
 
 Select the exact route before entering an amount. A closed, sold-out, fully claimed, or migrated route stays visible as history but does not expose an actionable workflow. Approval, quote, price protection, deadline, recipient, balance, allowance, and wallet-specific limits appear only where the route needs them.
 

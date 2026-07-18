@@ -48,6 +48,7 @@ import { PLEDGE_CASH_NETWORKS } from "../src/lib/contracts";
 import { deploymentDiscoveryIdentity, discoveryStorageKey, resumeWalletAccessRange, walletAccessDiscoveryRange } from "../src/lib/discovery";
 import {
   defaultBoardroomGrantForm,
+  defaultBondMarketForm,
   defaultCurveMigrationForm,
   defaultFixedPriceSaleForm,
   defaultLockedLiquidityExitForm,
@@ -842,6 +843,18 @@ describe("web app shell", () => {
           setBoardroomMintTo: noopSetter,
           setPredictedBoardroom: noopSetter,
         }}
+        bondMarket={{
+          address: "",
+          form: defaultBondMarketForm(),
+          predicted: undefined,
+          snapshot: undefined,
+          close: noop,
+          create: noop,
+          load: noop,
+          predict: noop,
+          setAddress: noopSetter,
+          setForm: noopSetter,
+        }}
         fixedPriceSale={{
           address: sale,
           form: defaultFixedPriceSaleForm(),
@@ -923,6 +936,7 @@ describe("web app shell", () => {
             chainId: 31337,
             boardroomFactory: "0x7900000000000000000000000000000000000000",
             distributionFactory: "0x7600000000000000000000000000000000000000",
+            bondMarketFactory: "0x7500000000000000000000000000000000000000",
             lockedLiquidityFactory: "0x7700000000000000000000000000000000000000",
           },
           pendingAction: undefined,
@@ -932,6 +946,7 @@ describe("web app shell", () => {
     );
 
     expect(html).toContain("Fixed-Price Sale");
+    expect(html).toContain("Sequential Dutch Auction Bond");
     expect(html).toContain("Merkle Airdrop");
     expect(html).toContain("Migrating Bonding Curve");
     expect(html).toContain("Locked Liquidity");

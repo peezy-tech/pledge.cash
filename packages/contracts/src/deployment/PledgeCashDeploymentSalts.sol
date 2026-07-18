@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import {AmmFactory} from "../amm/AmmFactory.sol";
 import {AmmRouter} from "../amm/AmmRouter.sol";
+import {BondMarketFactory} from "../bonds/BondMarketFactory.sol";
 import {AssetPolicy} from "../policy/AssetPolicy.sol";
 import {BoardroomFactory} from "../boardroom/BoardroomFactory.sol";
 import {BoardroomGovernanceLogic} from "../boardroom/BoardroomGovernanceLogic.sol";
@@ -67,6 +68,10 @@ library PledgeCashDeploymentSalts {
         return _releaseSalt("DistributionFactory", keccak256(type(DistributionFactory).creationCode));
     }
 
+    function bondMarketFactory() internal pure returns (bytes32) {
+        return _releaseSalt("BondMarketFactory", keccak256(type(BondMarketFactory).creationCode));
+    }
+
     function boardroomFactory() internal pure returns (bytes32) {
         return _releaseSalt("BoardroomFactory", keccak256(type(BoardroomFactory).creationCode));
     }
@@ -84,6 +89,7 @@ library PledgeCashDeploymentSalts {
                 keccak256(type(AmmRouter).creationCode),
                 keccak256(type(LockedLiquidityFactory).creationCode),
                 keccak256(type(DistributionFactory).creationCode),
+                keccak256(type(BondMarketFactory).creationCode),
                 keccak256(type(BoardroomFactory).creationCode)
             )
         );

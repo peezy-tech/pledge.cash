@@ -91,7 +91,7 @@ export function ParticipatePage({
         {options.length === 0 ? (
           <div className="mt-5">
             <PageNotice title="No participation route is available">
-              This project has no readable sale, curve, airdrop, or AMM market. Its transparency record remains available.
+              This project has no readable bond, sale, curve, airdrop, or AMM market. Its transparency record remains available.
             </PageNotice>
           </div>
         ) : options.length === 1 && activeOption ? (
@@ -187,6 +187,9 @@ function unavailableRouteGuidance(
   if (option.path === "fixed-price-sale") {
     return "This sale is closed or sold out. Its historical terms and contract remain visible in the route details.";
   }
+  if (option.path === "bond-market") {
+    return "This bond market is scheduled, closed, or out of capacity. Existing positions remain claimable from its contract when they mature.";
+  }
   if (option.path === "merkle-airdrop") {
     return "This claim route is closed or fully claimed. Its allocation contract remains visible in the route details.";
   }
@@ -201,7 +204,25 @@ export function participationOptions(
   const options: ParticipationOption[] = [];
 
   for (const distribution of dashboard.snapshot.distributionSummaries) {
-    if (distribution.kind === "fixed-price-sale" && distribution.state && "saleStatus" in distribution.state) {
+    if (distribution.kind === "bond-market" && distribution.state && "live" in distribution.state) {
+      options.push({
+        address: distribution.address,
+        available: !distribution.state.closed && (
+          distribution.state.live
+          || distribution.state.outstandingPayout > 0n
+          || distribution.state.status === 0
+        ),
+        description: distribution.state.kind === 1
+          ? "Commit first-party LP tokens now for non-transferable vested project tokens."
+          : "Commit a reserve asset now for non-transferable vested project tokens.",
+        id: participationDistributionKey("bond-market", distribution.address),
+        label: distribution.state.kind === 1 ? "Liquidity bond" : "Reserve bond",
+        path: "bond-market",
+        remaining: distribution.state.capacity,
+        status: distribution.state.closed ? "Settled" : distribution.state.live ? "Live" : distribution.state.status === 0 ? "Scheduled" : "Claims pending",
+        ...(distribution.shareTokenMetadata?.symbol ? { tokenSymbol: distribution.shareTokenMetadata.symbol } : {}),
+      });
+    } else if (distribution.kind === "fixed-price-sale" && distribution.state && "saleStatus" in distribution.state) {
       options.push({
         address: distribution.address,
         available: distribution.state.saleStatus === 0 && !distribution.state.closed && distribution.state.remainingShares > 0n,
@@ -368,6 +389,7 @@ function distributionStatus(status: number, closedLabel: string): string {
 function fallbackOption(id: ParticipationContentKey): ParticipationOption {
   const path = participationPathFromContentKey(id);
   const address = distributionAddressFromContentKey(id);
+  if (path === "bond-market") return { ...(address ? { address } : {}), available: false, description: "Commit reserve or LP assets for a vested project-token position.", id, label: "Bond market", path, status: "Not loaded" };
   if (path === "fixed-price-sale") return { ...(address ? { address } : {}), available: false, description: "Buy at a published unit price.", id, label: "Fixed-price sale", path, status: "Not loaded" };
   if (path === "migrating-bonding-curve") return { ...(address ? { address } : {}), available: false, description: "Buy or sell against a price curve.", id, label: "Bonding curve", path, status: "Not loaded" };
   if (path === "merkle-airdrop") return { ...(address ? { address } : {}), available: false, description: "Claim a published allocation.", id, label: "Airdrop", path, status: "Not loaded" };

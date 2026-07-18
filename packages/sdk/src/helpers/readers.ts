@@ -4,6 +4,8 @@ import {
   boardroomAbi,
   boardroomFactoryAbi,
   boardroomTokenAbi,
+  bondMarketAbi,
+  bondMarketFactoryAbi,
   distributionFactoryAbi,
   erc20Abi,
   fixedPriceSaleAbi,
@@ -18,6 +20,9 @@ import type {
   BoardroomGovernanceConfig,
   BoardroomHolderPower,
   BoardroomState,
+  BondMarketState,
+  BondPositionState,
+  BondPurchaseQuote,
   FactoryState,
   FixedPriceSaleParticipationQuote,
   FixedPriceSaleState,
@@ -388,6 +393,183 @@ export async function predictFixedPriceSaleAddress(
     functionName: "predictFixedPriceSaleAddress",
     args: [input.boardroom, input.salt],
   })) as Address;
+}
+
+export async function predictBondMarketAddress(
+  client: PledgeCashReadClient,
+  input: { factory: Address; boardroom: Address; salt: Hex },
+): Promise<Address> {
+  return (await client.readContract({
+    address: input.factory,
+    abi: bondMarketFactoryAbi,
+    functionName: "predictBondMarketAddress",
+    args: [input.boardroom, input.salt],
+  })) as Address;
+}
+
+export async function readBondMarketsForBoardroom(
+  client: PledgeCashReadClient,
+  input: { factory: Address; boardroom: Address },
+): Promise<Address[]> {
+  return (await client.readContract({
+    address: input.factory,
+    abi: bondMarketFactoryAbi,
+    functionName: "getBondMarketsForBoardroom",
+    args: [input.boardroom],
+  })) as Address[];
+}
+
+export async function readBondMarketState(
+  client: PledgeCashReadClient,
+  market: Address,
+): Promise<BondMarketState> {
+  const [
+    factory,
+    boardroom,
+    shareToken,
+    quoteToken,
+    kind,
+    status,
+    initialCapacity,
+    capacity,
+    minimumPrice,
+    currentPrice,
+    maximumPayout,
+    purchased,
+    sold,
+    outstandingPayout,
+    returnedPayout,
+    startTime,
+    conclusion,
+    vestingTerm,
+    nextPositionId,
+    live,
+    closed,
+  ] = await Promise.all([
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "factory" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "boardroom" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "shareToken" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "quoteToken" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "marketKind" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "marketStatus" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "initialCapacity" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "capacity" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "minimumPrice" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "marketPrice" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "maxPayout" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "purchased" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "sold" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "outstandingPayout" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "returnedPayout" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "startTime" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "conclusion" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "vestingTerm" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "nextPositionId" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "isLive" }),
+    client.readContract({ address: market, abi: bondMarketAbi, functionName: "isClosed" }),
+  ]);
+
+  return {
+    address: market,
+    factory: factory as Address,
+    boardroom: boardroom as Address,
+    shareToken: shareToken as Address,
+    quoteToken: quoteToken as Address,
+    kind: Number(kind),
+    status: Number(status),
+    initialCapacity: initialCapacity as bigint,
+    capacity: capacity as bigint,
+    minimumPrice: minimumPrice as bigint,
+    currentPrice: currentPrice as bigint,
+    maximumPayout: maximumPayout as bigint,
+    purchased: purchased as bigint,
+    sold: sold as bigint,
+    outstandingPayout: outstandingPayout as bigint,
+    returnedPayout: returnedPayout as bigint,
+    startTime: Number(startTime),
+    conclusion: Number(conclusion),
+    vestingTerm: Number(vestingTerm),
+    nextPositionId: nextPositionId as bigint,
+    live: live as boolean,
+    closed: closed as boolean,
+  };
+}
+
+export async function readBondPosition(
+  client: PledgeCashReadClient,
+  input: { market: Address; positionId: bigint },
+): Promise<BondPositionState> {
+  const [owner, payout, maturity, redeemed] = (await client.readContract({
+    address: input.market,
+    abi: bondMarketAbi,
+    functionName: "positions",
+    args: [input.positionId],
+  })) as readonly [Address, bigint, number, boolean];
+  return { market: input.market, positionId: input.positionId, owner, payout, maturity, redeemed };
+}
+
+export async function readBondPositionsForOwner(
+  client: PledgeCashReadClient,
+  input: { market: Address; owner: Address; limit?: number },
+): Promise<BondPositionState[]> {
+  const rawCount = await client.readContract({
+    address: input.market,
+    abi: bondMarketAbi,
+    functionName: "positionCountFor",
+    args: [input.owner],
+  });
+  const count = Number(rawCount);
+  if (!Number.isSafeInteger(count) || count < 0) throw new Error("Bond position count is invalid.");
+  const limit = Math.max(0, Math.min(input.limit ?? 64, 64));
+  const start = Math.max(0, count - limit);
+  const positionIds = await Promise.all(
+    Array.from({ length: count - start }, (_, offset) => start + offset).map(async (index) =>
+      await client.readContract({
+        address: input.market,
+        abi: bondMarketAbi,
+        functionName: "positionForOwnerAt",
+        args: [input.owner, BigInt(index)],
+      }) as bigint
+    ),
+  );
+  return await Promise.all(positionIds.map(async (positionId) =>
+    await readBondPosition(client, { market: input.market, positionId })
+  ));
+}
+
+export async function readBondPurchaseQuote(
+  client: PledgeCashReadClient,
+  input: { market: Address; buyer: Address; quoteAmount: bigint },
+): Promise<BondPurchaseQuote> {
+  const state = await readBondMarketState(client, input.market);
+  const [payout, quoteBalance, quoteAllowance] = await Promise.all([
+    client.readContract({
+      address: input.market,
+      abi: bondMarketAbi,
+      functionName: "payoutFor",
+      args: [input.quoteAmount],
+    }),
+    client.readContract({
+      address: state.quoteToken,
+      abi: erc20Abi,
+      functionName: "balanceOf",
+      args: [input.buyer],
+    }),
+    client.readContract({
+      address: state.quoteToken,
+      abi: erc20Abi,
+      functionName: "allowance",
+      args: [input.buyer, input.market],
+    }),
+  ]);
+  return {
+    state,
+    buyer: input.buyer,
+    quoteAmount: input.quoteAmount,
+    payout: payout as bigint,
+    quoteBalance: quoteBalance as bigint,
+    quoteAllowance: quoteAllowance as bigint,
+  };
 }
 
 export async function predictMigratingBondingCurveAddress(

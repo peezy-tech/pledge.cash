@@ -1,4 +1,4 @@
-import type { FixedPriceSaleState, MerkleAirdropState, MigratingBondingCurveState } from "@pledge.cash/sdk";
+import type { BondMarketState, FixedPriceSaleState, MerkleAirdropState, MigratingBondingCurveState } from "@pledge.cash/sdk";
 import { Children } from "react";
 import type React from "react";
 import { AddressLink, Facts } from "../../components/shell";
@@ -26,6 +26,7 @@ export function ObligationLists({
   boardroomSnapshot,
   scope = "all",
   setFixedPriceSaleAddress,
+  setBondMarketAddress,
   setMerkleAirdropAddress,
   setLockedLiquidityAddress,
   setMigratingCurveAddress,
@@ -33,6 +34,7 @@ export function ObligationLists({
   boardroomSnapshot: BoardroomSnapshot | undefined;
   scope?: "all" | "distributions" | "grants" | "liquidity";
   setFixedPriceSaleAddress: (address: string) => void;
+  setBondMarketAddress: (address: string) => void;
   setMerkleAirdropAddress: (address: string) => void;
   setLockedLiquidityAddress: (address: string) => void;
   setMigratingCurveAddress: (address: string) => void;
@@ -53,6 +55,7 @@ export function ObligationLists({
           <DistributionRow
             distribution={distribution}
             key={distribution.address}
+            setBondMarketAddress={setBondMarketAddress}
             setFixedPriceSaleAddress={setFixedPriceSaleAddress}
             setMerkleAirdropAddress={setMerkleAirdropAddress}
             setMigratingCurveAddress={setMigratingCurveAddress}
@@ -116,16 +119,19 @@ function GrantRow({ grant }: { grant: BoardroomGrantSnapshot }): React.JSX.Eleme
 
 function DistributionRow({
   distribution,
+  setBondMarketAddress,
   setFixedPriceSaleAddress,
   setMerkleAirdropAddress,
   setMigratingCurveAddress,
 }: {
   distribution: BoardroomDistributionSnapshot;
+  setBondMarketAddress: (address: string) => void;
   setFixedPriceSaleAddress: (address: string) => void;
   setMerkleAirdropAddress: (address: string) => void;
   setMigratingCurveAddress: (address: string) => void;
 }): React.JSX.Element {
   const addressAction = distributionAddressAction(distribution.kind, {
+    setBondMarketAddress,
     setFixedPriceSaleAddress,
     setMerkleAirdropAddress,
     setMigratingCurveAddress,
@@ -156,11 +162,13 @@ function DistributionRow({
 function distributionAddressAction(
   kind: BoardroomDistributionSnapshot["kind"],
   setters: {
+    setBondMarketAddress: (address: string) => void;
     setFixedPriceSaleAddress: (address: string) => void;
     setMerkleAirdropAddress: (address: string) => void;
     setMigratingCurveAddress: (address: string) => void;
   },
 ): { label: string; setAddress: (address: string) => void } | undefined {
+  if (kind === "bond-market") return { label: "Use Bond", setAddress: setters.setBondMarketAddress };
   if (kind === "fixed-price-sale") return { label: "Use Sale", setAddress: setters.setFixedPriceSaleAddress };
   if (kind === "migrating-bonding-curve") return { label: "Use Curve", setAddress: setters.setMigratingCurveAddress };
   if (kind === "merkle-airdrop") return { label: "Use Airdrop", setAddress: setters.setMerkleAirdropAddress };
@@ -217,6 +225,15 @@ function distributionFacts(distribution: BoardroomDistributionSnapshot): { label
       { label: "Remaining shares", value: formatTokenAmount(remainingDistributionShares(distribution), distribution.shareTokenMetadata) },
       { label: "Grant factory", value: state ? <AddressLink address={state.tokenGrantFactory} /> : "Unknown" },
       { label: "Merkle root", value: state?.merkleRoot ?? "Unknown" },
+    ];
+  }
+  if (distribution.kind === "bond-market") {
+    const state = distribution.state as BondMarketState | undefined;
+    return [
+      { label: "Remaining capacity", value: formatTokenAmount(state?.capacity, distribution.shareTokenMetadata) },
+      { label: "Current price", value: formatTokenAmount(state?.currentPrice, distribution.quoteTokenMetadata) },
+      { label: "Outstanding", value: formatTokenAmount(state?.outstandingPayout, distribution.shareTokenMetadata) },
+      { label: "Receipt", value: "Non-transferable" },
     ];
   }
   return [];

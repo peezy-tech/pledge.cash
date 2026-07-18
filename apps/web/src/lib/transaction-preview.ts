@@ -1,6 +1,8 @@
 import {
   boardroomAbi,
   boardroomTokenAbi,
+  bondMarketAbi,
+  bondMarketFactoryAbi,
   distributionFactoryAbi,
   erc20Abi,
   fixedPriceSaleAbi,
@@ -84,6 +86,7 @@ const BOARDROOM_BATCH_CALL_FUNCTIONS = new Set([
 
 const ASSET_AND_OBLIGATION_ABIS = [
   boardroomTokenAbi,
+  bondMarketAbi,
   erc20Abi,
   fixedPriceSaleAbi,
   lockedLiquidityAbi,
@@ -93,6 +96,7 @@ const ASSET_AND_OBLIGATION_ABIS = [
 ] as const;
 
 const MODULE_FACTORY_ABIS = [
+  bondMarketFactoryAbi,
   distributionFactoryAbi,
   lockedLiquidityFactoryAbi,
   tokenGrantFactoryAbi,
@@ -104,11 +108,14 @@ const FUNCTION_LABELS: Record<string, string> = {
   cancel: "Cancel a participation contract",
   claimFees: "Claim liquidity fees",
   close: "Close a participation contract",
+  createBondMarket: "Create a non-transferable bond market",
   createFixedPriceSale: "Create a fixed-price sale",
   createGrant: "Create a token grant",
   createLockedLiquidity: "Create a locked liquidity position",
   createMerkleAirdrop: "Create an airdrop",
   createMigratingBondingCurve: "Create a bonding curve",
+  finalize: "Finalize a concluded bond market",
+  purchase: "Create a non-transferable bond position",
   executeWindDownCall: "Run a wind-down operation",
   exit: "Exit a liquidity position",
   launch: "Launch holder governance",
@@ -408,6 +415,7 @@ const IRREVERSIBLE_FUNCTIONS = new Set([
   "exit",
   "exitLockedLiquidity",
   "exitToBoardroom",
+  "finalize",
   "finalizeWindDown",
   "launch",
   "migrate",
@@ -431,6 +439,7 @@ const IMPORTANT_FUNCTIONS = new Set([
   "claimGrant",
   "claimRedemptionAsset",
   "createBoardroom",
+  "createBondMarket",
   "createFixedPriceSale",
   "createGrant",
   "createLockedLiquidity",
@@ -442,6 +451,7 @@ const IMPORTANT_FUNCTIONS = new Set([
   "executeQueuedBatch",
   "executeWindDownCall",
   "mint",
+  "purchase",
   "queueAction",
   "queueBatch",
   "redeem",

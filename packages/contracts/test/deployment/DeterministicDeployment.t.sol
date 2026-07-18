@@ -7,6 +7,7 @@ import {WETH} from "solady/tokens/WETH.sol";
 import {CREATE3} from "solady/utils/CREATE3.sol";
 import {AmmFactory} from "../../src/amm/AmmFactory.sol";
 import {AmmRouter} from "../../src/amm/AmmRouter.sol";
+import {BondMarketFactory} from "../../src/bonds/BondMarketFactory.sol";
 import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
 import {Boardroom} from "../../src/boardroom/Boardroom.sol";
 import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
@@ -157,6 +158,10 @@ contract DeterministicDeploymentTest is Test {
             _releaseSalt("DistributionFactory", keccak256(type(DistributionFactory).creationCode))
         );
         assertEq(
+            PledgeCashDeploymentSalts.bondMarketFactory(),
+            _releaseSalt("BondMarketFactory", keccak256(type(BondMarketFactory).creationCode))
+        );
+        assertEq(
             PledgeCashDeploymentSalts.boardroomFactory(),
             _releaseSalt("BoardroomFactory", keccak256(type(BoardroomFactory).creationCode))
         );
@@ -174,6 +179,7 @@ contract DeterministicDeploymentTest is Test {
                     keccak256(type(AmmRouter).creationCode),
                     keccak256(type(LockedLiquidityFactory).creationCode),
                     keccak256(type(DistributionFactory).creationCode),
+                    keccak256(type(BondMarketFactory).creationCode),
                     keccak256(type(BoardroomFactory).creationCode)
                 )
             )

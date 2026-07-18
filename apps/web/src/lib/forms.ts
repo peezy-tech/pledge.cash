@@ -1,6 +1,7 @@
 import { pledgeCashErrorMessage, ZERO_ADDRESS, type Address } from "@pledge.cash/sdk";
 import { getAddress, isAddress, type Hex } from "viem";
 import type {
+  BondMarketForm,
   CurveMigrationForm,
   FixedPriceSaleForm,
   GrantForm,
@@ -89,6 +90,22 @@ export function defaultFixedPriceSaleForm(): FixedPriceSaleForm {
     price: "1",
     maxPerBuyer: "0",
     ...defaultWorkflowWindow(),
+    salt: randomSalt(),
+  };
+}
+
+export function defaultBondMarketForm(): BondMarketForm {
+  return {
+    quoteToken: "",
+    kind: "reserve",
+    capacity: "1000",
+    initialPrice: "1",
+    minimumPrice: "1",
+    debtBuffer: "10000",
+    vesting: String(7 * SECONDS_PER_DAY),
+    start: String(currentUnixSeconds()),
+    duration: String(30 * SECONDS_PER_DAY),
+    depositInterval: String(SECONDS_PER_DAY),
     salt: randomSalt(),
   };
 }

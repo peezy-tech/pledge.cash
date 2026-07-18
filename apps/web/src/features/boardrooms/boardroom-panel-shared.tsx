@@ -102,6 +102,7 @@ export function distributionKindLabel(kind: BoardroomDistributionSnapshot["kind"
   if (kind === "fixed-price-sale") return "Sale";
   if (kind === "migrating-bonding-curve") return "Curve";
   if (kind === "merkle-airdrop") return "Airdrop";
+  if (kind === "bond-market") return "Bond market";
   return "Distribution";
 }
 
@@ -115,6 +116,11 @@ export function distributionStatusLabel(distribution: BoardroomDistributionSnaps
   }
   if (distribution.kind === "merkle-airdrop" && distribution.state && "airdropStatus" in distribution.state) {
     return airdropStatusLabel(distribution.state.airdropStatus);
+  }
+  if (distribution.kind === "bond-market" && distribution.state && "status" in distribution.state) {
+    if (distribution.state.closed) return "Settled";
+    if (distribution.state.status === 1) return "Awaiting claims";
+    return distribution.state.live ? "Live" : "Scheduled";
   }
   return "Unknown";
 }
@@ -153,6 +159,7 @@ export function remainingDistributionShares(distribution: BoardroomDistributionS
   if (!distribution.state) return undefined;
   if ("remainingShares" in distribution.state) return distribution.state.remainingShares;
   if ("remainingSaleShares" in distribution.state) return distribution.state.remainingSaleShares;
+  if ("capacity" in distribution.state) return distribution.state.capacity;
   return undefined;
 }
 

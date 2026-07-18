@@ -1,5 +1,7 @@
 import {
   boardroomFactoryAbi,
+  buildBoardroomBondMarketBatch,
+  buildBoardroomBondMarketCloseAction,
   buildBoardroomBurnTreasurySharesTransaction,
   buildBoardroomClaimRedemptionAssetTransaction,
   buildBoardroomExecuteTransaction,
@@ -34,6 +36,7 @@ import {
   getPledgeCashDeployment,
   isZeroAddress,
   predictBoardroomAddress as sdkPredictBoardroomAddress,
+  predictBondMarketAddress as sdkPredictBondMarketAddress,
   predictBoardroomGrantAddress as sdkPredictBoardroomGrantAddress,
   predictDirectGrantAddress as sdkPredictDirectGrantAddress,
   predictFixedPriceSaleAddress as sdkPredictFixedPriceSaleAddress,
@@ -42,6 +45,7 @@ import {
   predictMigratingBondingCurveAddress as sdkPredictMigratingBondingCurveAddress,
   planBoardroomCallExecution,
   readBoardroomState,
+  readBondMarketState,
   readBoardroomHolderPower,
   readFixedPriceSaleState,
   readGrantState,
@@ -50,6 +54,8 @@ import {
   readMigratingBondingCurveState,
   tokenGrantAbi,
   type Address,
+  type BondMarketState,
+  type BondMarketTerms,
   type BoardroomFixedPriceSaleTerms,
   type BoardroomCall,
   type BoardroomHolderPower,
@@ -96,6 +102,7 @@ import { useWagmiWallet } from "../hooks/use-wagmi-wallet";
 import { readBoardroomSnapshot } from "../lib/boardroom-snapshot";
 import {
   assertCanonicalFixedPriceSale,
+  assertCanonicalBondMarket,
   assertCanonicalBoardroom,
   assertCanonicalGrant,
   assertCanonicalLockedLiquidity,
@@ -132,6 +139,7 @@ import {
 } from "../lib/discovery";
 import {
   defaultBoardroomGrantForm,
+  defaultBondMarketForm,
   defaultCurveMigrationForm,
   defaultFixedPriceSaleForm,
   defaultGrantForm,
@@ -224,6 +232,7 @@ import {
 } from "../features/transactions/transaction-center";
 import type {
   BoardroomForm,
+  BondMarketForm,
   BoardroomGrantForm,
   BoardroomSnapshot,
   CurveMigrationForm,
@@ -604,6 +613,7 @@ export function App(): React.JSX.Element {
   const discoveryWriteVersion = useRef(0);
   const grantLoadVersionRef = useRef(0);
   const boardroomLoadVersionRef = useRef(0);
+  const bondMarketLoadVersionRef = useRef(0);
   const fixedPriceSaleLoadVersionRef = useRef(0);
   const merkleAirdropLoadVersionRef = useRef(0);
   const migratingCurveLoadVersionRef = useRef(0);
@@ -715,6 +725,11 @@ export function App(): React.JSX.Element {
   const [boardroomMintTo, setBoardroomMintTo] = useState("");
   const [boardroomGrantForm, setBoardroomGrantForm] = useState<BoardroomGrantForm>(() => defaultBoardroomGrantForm());
   const [predictedBoardroomGrant, setPredictedBoardroomGrant] = useState<Address>();
+  const [bondMarketForm, setBondMarketForm] = useState<BondMarketForm>(() => defaultBondMarketForm());
+  const [bondMarketAddress, setBondMarketAddress] = useState("");
+  const [bondMarketSnapshot, setBondMarketSnapshot] = useState<BondMarketState>();
+  const [bondMarketSnapshotVerifiedKey, setBondMarketSnapshotVerifiedKey] = useState<string>();
+  const [predictedBondMarket, setPredictedBondMarket] = useState<Address>();
   const [fixedPriceSaleForm, setFixedPriceSaleForm] = useState<FixedPriceSaleForm>(() => defaultFixedPriceSaleForm());
   const [fixedPriceSaleAddress, setFixedPriceSaleAddress] = useState("");
   const [fixedPriceSaleSnapshot, setFixedPriceSaleSnapshot] = useState<FixedPriceSaleState>();
@@ -786,6 +801,8 @@ export function App(): React.JSX.Element {
     boardroomMintAmount,
     boardroomMintTo,
     boardroomGrantForm,
+    bondMarketForm,
+    bondMarketAddress,
     fixedPriceSaleForm,
     fixedPriceSaleAddress,
     merkleAirdropForm,
@@ -825,6 +842,14 @@ export function App(): React.JSX.Element {
         canonicalStudioBoardroom,
       )
     : fixedPriceSaleSnapshot;
+  const displayedBondMarketSnapshot = canonicalStudioBoardroom
+    ? verifiedStudioChildState(
+        bondMarketSnapshot,
+        bondMarketSnapshotVerifiedKey,
+        exactProjectVerifiedKey,
+        canonicalStudioBoardroom,
+      )
+    : bondMarketSnapshot;
   const displayedMerkleAirdropSnapshot = canonicalStudioBoardroom
     ? verifiedStudioChildState(
         merkleAirdropSnapshot,
@@ -1358,6 +1383,10 @@ export function App(): React.JSX.Element {
     setBoardroomSnapshotVerifiedKey(undefined);
     setBoardroomMintTo("");
     setPredictedBoardroomGrant(undefined);
+    setBondMarketAddress("");
+    setBondMarketSnapshot(undefined);
+    setBondMarketSnapshotVerifiedKey(undefined);
+    setPredictedBondMarket(undefined);
     setFixedPriceSaleAddress("");
     setFixedPriceSaleSnapshot(undefined);
     setFixedPriceSaleSnapshotVerifiedKey(undefined);
@@ -1813,6 +1842,7 @@ export function App(): React.JSX.Element {
 
   const updateBoardroomAddress = useCallback((address: string): void => {
     boardroomLoadVersionRef.current += 1;
+    bondMarketLoadVersionRef.current += 1;
     fixedPriceSaleLoadVersionRef.current += 1;
     merkleAirdropLoadVersionRef.current += 1;
     migratingCurveLoadVersionRef.current += 1;
@@ -1823,6 +1853,10 @@ export function App(): React.JSX.Element {
     setBoardroomMintAmount("1");
     setBoardroomMintTo("");
     setBoardroomGrantForm(defaultBoardroomGrantForm());
+    setBondMarketAddress("");
+    setBondMarketForm(defaultBondMarketForm());
+    setBondMarketSnapshot(undefined);
+    setBondMarketSnapshotVerifiedKey(undefined);
     setFixedPriceSaleAddress("");
     setFixedPriceSaleForm(defaultFixedPriceSaleForm());
     setFixedPriceSaleSnapshot(undefined);
@@ -1843,6 +1877,7 @@ export function App(): React.JSX.Element {
     setLockedLiquiditySnapshotVerifiedKey(undefined);
     setWindDownForm(defaultWindDownForm());
     setPredictedBoardroomGrant(undefined);
+    setPredictedBondMarket(undefined);
     setPredictedFixedPriceSale(undefined);
     setPredictedMerkleAirdrop(undefined);
     setPredictedMigratingCurve(undefined);
@@ -1862,6 +1897,13 @@ export function App(): React.JSX.Element {
     setFixedPriceSaleAddress(address);
     setFixedPriceSaleSnapshot(undefined);
     setFixedPriceSaleSnapshotVerifiedKey(undefined);
+  }, []);
+
+  const updateBondMarketAddress = useCallback((address: string): void => {
+    bondMarketLoadVersionRef.current += 1;
+    setBondMarketAddress(address);
+    setBondMarketSnapshot(undefined);
+    setBondMarketSnapshotVerifiedKey(undefined);
   }, []);
 
   const updateMerkleAirdropAddress = useCallback((address: string): void => {
@@ -2855,9 +2897,123 @@ export function App(): React.JSX.Element {
     return displayedBoardroomSnapshot;
   };
 
+  const requireLoadedBondMarket = (): BondMarketState => {
+    const address = requireAddress(bondMarketAddress, "Bond market address");
+    return requireVerifiedChildState(displayedBondMarketSnapshot, address, "bond market");
+  };
+
   const requireLoadedFixedPriceSale = (): FixedPriceSaleState => {
     const address = requireAddress(fixedPriceSaleAddress, "Fixed-price sale address");
     return requireVerifiedChildState(displayedFixedPriceSaleSnapshot, address, "fixed-price sale");
+  };
+
+  const bondMarketTerms = async (boardroom: BoardroomSnapshot): Promise<BondMarketTerms> => {
+    const quoteToken = requireAddress(bondMarketForm.quoteToken, "Bond quote token");
+    const [capacity, initialPrice, minimumPrice] = await Promise.all([
+      parseErc20Amount(publicClient, bondMarketForm.capacity, boardroom.shareToken, "Bond capacity"),
+      parseErc20Amount(publicClient, bondMarketForm.initialPrice, quoteToken, "Bond initial price"),
+      parseErc20Amount(publicClient, bondMarketForm.minimumPrice, quoteToken, "Bond minimum price"),
+    ]);
+    if (capacity === 0n) throw new Error("Bond capacity must be greater than zero.");
+    if (initialPrice === 0n || minimumPrice === 0n || initialPrice < minimumPrice) {
+      throw new Error("Bond prices must be positive and the initial price must be at least the minimum price.");
+    }
+    return {
+      quoteToken,
+      kind: bondMarketForm.kind === "liquidity" ? 1 : 0,
+      capacity,
+      initialPrice,
+      minimumPrice,
+      debtBuffer: uintNumberInput(bondMarketForm.debtBuffer, "Debt buffer", 32),
+      vesting: uintNumberInput(bondMarketForm.vesting, "Vesting term", 48),
+      start: uintNumberInput(bondMarketForm.start, "Market start", 48),
+      duration: uintNumberInput(bondMarketForm.duration, "Market duration", 32),
+      depositInterval: uintNumberInput(bondMarketForm.depositInterval, "Deposit interval", 32),
+      salt: requireBytes32(bondMarketForm.salt, "Bond market salt"),
+    };
+  };
+
+  const predictBondMarket = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.bondMarketFactory, "BondMarketFactory");
+    const salt = requireBytes32(bondMarketForm.salt, "Bond market salt");
+    const predicted = await sdkPredictBondMarketAddress(publicClient, { factory, boardroom: boardroom.address, salt });
+    setPredictedBondMarket(predicted);
+    updateBondMarketAddress(predicted);
+    pushLog(`Predicted bond market ${predicted}`, "success");
+  };
+
+  const loadBondMarketAddress = async (address?: Address): Promise<BondMarketState> => {
+    const market = address ?? requireAddress(bondMarketAddress, "Bond market address");
+    const requestVersion = ++bondMarketLoadVersionRef.current;
+    const requestScope = activeStudioReadScopeKeyRef.current;
+    const requestChainId = activeNetwork.chainId;
+    const requestDeploymentIdentity = runtimeDeploymentIdentity;
+    const routeAtRequest = activeAppRouteRef.current;
+    const requestIsCurrent = (): boolean =>
+      activeStudioReadScopeKeyRef.current === requestScope
+      && bondMarketLoadVersionRef.current === requestVersion;
+    setBondMarketSnapshotVerifiedKey(undefined);
+    const [snapshot, canonicalBoardroom] = await Promise.all([
+      readBondMarketState(publicClient, market),
+      routeAtRequest.kind === "studio-project" ? readBoardroomState(publicClient, routeAtRequest.boardroom) : undefined,
+    ]);
+    if (!requestIsCurrent()) return snapshot;
+    if (routeAtRequest.kind === "studio-project" && canonicalBoardroom) {
+      await assertCanonicalBondMarket(publicClient, deployment, canonicalBoardroom, snapshot);
+      if (!requestIsCurrent()) return snapshot;
+    }
+    setBondMarketSnapshot(snapshot);
+    setBondMarketSnapshotVerifiedKey(canonicalProjectStateKey(
+      requestChainId,
+      snapshot.boardroom,
+      requestDeploymentIdentity,
+    ));
+    setBondMarketAddress(market);
+    return snapshot;
+  };
+
+  const loadBondMarket = async (): Promise<void> => {
+    const market = requireAddress(bondMarketAddress, "Bond market address");
+    await loadBondMarketAddress(market);
+    pushLog(`Loaded bond market ${market}`, "success");
+  };
+
+  const createBondMarket = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.bondMarketFactory, "BondMarketFactory");
+    const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
+    const terms = await bondMarketTerms(boardroom);
+    const predicted = await sdkPredictBondMarketAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
+    const executionKind = await submitBoardroomExecution(
+      "Bond market creation",
+      boardroom,
+      buildBoardroomBondMarketBatch({
+        boardroom: boardroom.address,
+        factory,
+        shareToken: boardroom.shareToken,
+        terms,
+        policy: factory,
+        assetPolicy,
+      }),
+    );
+    if (!activeActionOriginIsCurrent()) return;
+    setPredictedBondMarket(predicted);
+    updateBondMarketAddress(predicted);
+    if (executionKind !== "queue") await loadBondMarketAddress(predicted);
+  };
+
+  const closeBondMarket = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.bondMarketFactory, "BondMarketFactory");
+    const market = requireLoadedBondMarket().address;
+    await submitBoardroomExecution(
+      "Bond market close",
+      boardroom,
+      buildBoardroomBondMarketCloseAction({ boardroom: boardroom.address, policy: factory, market }),
+    );
+    if (!activeActionOriginIsCurrent()) return;
+    await loadBondMarketAddress(market);
   };
 
   const requireLoadedMerkleAirdrop = (): MerkleAirdropState => {
@@ -3859,6 +4015,18 @@ export function App(): React.JSX.Element {
         setBoardroomMintTo,
         setPredictedBoardroom,
       }}
+      bondMarket={{
+        address: bondMarketAddress,
+        form: bondMarketForm,
+        predicted: predictedBondMarket,
+        snapshot: displayedBondMarketSnapshot,
+        close: closeBondMarket,
+        create: createBondMarket,
+        load: loadBondMarket,
+        predict: predictBondMarket,
+        setAddress: updateBondMarketAddress,
+        setForm: setBondMarketForm,
+      }}
       fixedPriceSale={{
         address: fixedPriceSaleAddress,
         form: fixedPriceSaleForm,
@@ -4606,6 +4774,13 @@ function participationCapabilityOpportunities(
   const opportunities: NonNullable<ProjectCapabilityContext["opportunities"]> = {};
   for (const distribution of dashboard?.snapshot.distributionSummaries ?? []) {
     if (!distribution.state) continue;
+    if (distribution.kind === "bond-market" && "live" in distribution.state) {
+      const available = distribution.state.live && distribution.state.capacity > 0n;
+      opportunities["participate.bond.purchase"] = mergeCapabilityOpportunity(
+        opportunities["participate.bond.purchase"],
+        { available, ...(!available ? { reason: "The bond market is not accepting purchases." } : {}) },
+      );
+    }
     if (distribution.kind === "fixed-price-sale" && "saleStatus" in distribution.state) {
       const available = distribution.state.saleStatus === 0 && !distribution.state.closed && distribution.state.remainingShares > 0n;
       opportunities["participate.fixedSale.buy"] = mergeCapabilityOpportunity(
@@ -4720,6 +4895,13 @@ function canonicalGrantRouteKey(
   deploymentIdentity: string | undefined,
 ): string {
   return `${chainId.toString()}:${deploymentIdentity ?? "unconfigured"}:${grant.toLowerCase()}`;
+}
+
+function uintNumberInput(value: string, label: string, bits: 32 | 48): number {
+  const parsed = uintInput(value, label);
+  const maximum = (1n << BigInt(bits)) - 1n;
+  if (parsed > maximum) throw new Error(`${label} must fit uint${bits.toString()}.`);
+  return Number(parsed);
 }
 
 export function canonicalProjectStateKey(

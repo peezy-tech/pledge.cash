@@ -25,7 +25,7 @@ Each row links to the exact chain-and-Boardroom workspace. Its lifecycle and par
 From the project, use:
 
 - `Overview` for authority, supply, treasury, obligations, and the next useful action.
-- `Participate` for live sale, curve, airdrop, or AMM routes.
+- `Participate` for live bond, sale, curve, airdrop, or AMM routes.
 - `Governance` for authority, delay, thresholds, and queued decisions.
 - `Transparency` for detailed balances, commitments, history, and addresses.
 

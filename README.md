@@ -15,6 +15,7 @@ pledge.cash is a permissionless protocol and product workspace for token-backed 
 - [Token Grant Protocol](docs/token-grant-protocol.md): escrow-backed free-claim and paid-settlement token grants.
 - [Boardroom Protocol](docs/boardroom-protocol.md): owned issuer accounts with native share tokens.
 - [Distribution Protocol](docs/distribution-protocol.md): fixed-price sales, Merkle airdrops, and migrating bonding curves for Boardroom shares.
+- [Bond Market Protocol](docs/bond-market-protocol.md): oracleless reserve and first-party LP auctions with non-transferable vested positions.
 - [AMM Protocol](docs/amm-protocol.md): Boardroom-owned liquidity, trading, and fee accounting.
 - [Project Token Launch](docs/project-token-launch.md): local dogfood scenario for a Boardroom-backed project token.
 - [Deployment](docs/deployment.md): deterministic full-stack deployment, simulation, verification, and HyperEVM/Monad testnet operator flows.

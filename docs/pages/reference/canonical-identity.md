@@ -16,6 +16,7 @@ Canonical identity is a relationship, not a logo or address-shaped string. It al
 | Grant | The selected TokenGrantFactory maps its token id to the grant and the grant reports that factory |
 | Boardroom-issued grant | The grant has the factory proof above and reports the verified Boardroom as issuer; the Boardroom's obligation record is an additional live-state check only while the grant remains active |
 | Distribution | The selected DistributionFactory permanently records the address, Boardroom, and kind, while the distribution reports that factory, Boardroom, and verified project share token |
+| Bond market | The selected BondMarketFactory reports the market, while the market reports that factory, the verified Boardroom, and its project share token; liquidity bonds additionally accept only a funded pool from the configured AmmFactory that contains that share token |
 | Merkle airdrop | The distribution proof above and the configured TokenGrantFactory agree |
 | Migrating curve | The distribution proof above holds and the curve reports the configured LockedLiquidityFactory; a migration reservation exists only before it is consumed or released |
 | Locked liquidity | The LockerFactory's permanent locker and Boardroom mappings agree with the locker-reported factory and Boardroom, its router is the configured AMM router, and its token pair contains the verified project share token |

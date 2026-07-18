@@ -10,7 +10,7 @@ import { formatTokenAmount } from "../../lib/token-amounts";
 import { cn } from "../../lib/utils";
 import { PageHeading, PageNotice, RuledSection, SectionHeading } from "./page-primitives";
 
-export type ExploreFilter = "all" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "amm";
+export type ExploreFilter = "all" | "bond-market" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "amm";
 export type ExploreSearchState = { filter: ExploreFilter; query: string };
 
 export type ExplorePageProps = {
@@ -34,6 +34,7 @@ export type ExplorePageProps = {
 const filters: readonly { label: string; value: ExploreFilter }[] = [
   { label: "All", value: "all" },
   { label: "Fixed price", value: "fixed-price-sale" },
+  { label: "Bonds", value: "bond-market" },
   { label: "Curve", value: "migrating-bonding-curve" },
   { label: "Airdrop", value: "merkle-airdrop" },
   { label: "AMM", value: "amm" },
@@ -347,13 +348,13 @@ function ProjectDirectoryRow({
 
 function allocationMetricLabel(project: ProductBoardroomCatalogEntry): string {
   if (project.distributionKind === "merkle-airdrop") return "Claimed";
-  if (project.distributionKind === "fixed-price-sale" || project.distributionKind === "migrating-bonding-curve") return "Sold";
+  if (project.distributionKind === "bond-market" || project.distributionKind === "fixed-price-sale" || project.distributionKind === "migrating-bonding-curve") return "Sold";
   return "Distributed";
 }
 
 function participantMetricLabel(project: ProductBoardroomCatalogEntry): string {
   if (project.distributionKind === "merkle-airdrop") return "Claimants";
-  if (project.distributionKind === "fixed-price-sale" || project.distributionKind === "migrating-bonding-curve") return "Buyers";
+  if (project.distributionKind === "bond-market" || project.distributionKind === "fixed-price-sale" || project.distributionKind === "migrating-bonding-curve") return "Buyers";
   return "Participants";
 }
 
@@ -388,6 +389,7 @@ function matchesExploreFilter(project: ProductBoardroomCatalogEntry, filter: Exp
 
 function participationLabel(project: ProductBoardroomCatalogEntry): string {
   if (project.pool) return "AMM market";
+  if (project.distributionKind === "bond-market") return "Bond market";
   if (project.distributionKind === "fixed-price-sale") return "Fixed-price sale";
   if (project.distributionKind === "migrating-bonding-curve") return "Bonding curve";
   if (project.distributionKind === "merkle-airdrop") return "Airdrop";
