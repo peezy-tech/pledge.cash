@@ -305,6 +305,65 @@ describe("product boardroom runtime discovery", () => {
     });
   });
 
+  test("derives catalog AMM metrics from direct locked liquidity without a distribution", async () => {
+    const boardroom = "0x1200000000000000000000000000000000000000" as Address;
+    const shareToken = "0x2200000000000000000000000000000000000000" as Address;
+    const quoteToken = "0x3200000000000000000000000000000000000000" as Address;
+    const locker = "0x4200000000000000000000000000000000000000" as Address;
+    const pool = "0x5200000000000000000000000000000000000000" as Address;
+    const factory = "0x6200000000000000000000000000000000000000" as Address;
+    const router = "0x7200000000000000000000000000000000000000" as Address;
+    const client = {
+      async getBlockNumber() { return 100n; },
+      async getLogs() { return []; },
+      async readContract(parameters: { address: Address; functionName: string }) {
+        const { address, functionName } = parameters;
+        if (address === boardroom) {
+          if (functionName === "shareToken") return shareToken;
+          if (functionName === "status") return 0;
+          if (functionName === "issuedDistributionCount") return 0n;
+          if (functionName === "lockedLiquidityCount") return 1n;
+          if (functionName === "lockedLiquidityAt") return locker;
+        }
+        if (address === locker) {
+          if (functionName === "factory") return factory;
+          if (functionName === "boardroom") return boardroom;
+          if (functionName === "router") return router;
+          if (functionName === "tokenA") return shareToken;
+          if (functionName === "tokenB") return quoteToken;
+          if (functionName === "pool") return pool;
+          if (functionName === "seeded") return true;
+          if (functionName === "lockedLiquidity") return 1n;
+        }
+        if (address === pool) {
+          if (functionName === "token0") return shareToken;
+          if (functionName === "token1") return quoteToken;
+          if (functionName === "getReserves") return [11n * 10n ** 18n, 7_000_000n, 0] as const;
+          if (functionName === "balanceOf") return 1n;
+          if (["claimable0", "claimable1", "index0", "index1", "supplyIndex0", "supplyIndex1"].includes(functionName)) return 0n;
+        }
+        if (functionName === "name") return "Direct liquidity project";
+        if (functionName === "symbol") return address === shareToken ? "SHARE" : address === quoteToken ? "QUOTE" : "LP";
+        if (functionName === "decimals") return address === quoteToken ? 6 : 18;
+        if (functionName === "totalSupply") return 1_000_000n * 10n ** 18n;
+        if (functionName === "balanceOf") return 0n;
+        throw new Error(`Unexpected read: ${functionName} on ${address}`);
+      },
+    };
+
+    const entry = await readProductBoardroomCatalogEntry(client as never, boardroom);
+
+    expect(entry).toMatchObject({
+      address: boardroom,
+      locker,
+      pool,
+      poolToken0: shareToken,
+      poolToken1: quoteToken,
+      poolReserve0: 11n * 10n ** 18n,
+      poolReserve1: 7_000_000n,
+    });
+  });
+
   test("prefers exact current pool identity when migration history names a different pool", async () => {
     const boardroom = "0x1100000000000000000000000000000000000000" as Address;
     const shareToken = "0x2200000000000000000000000000000000000000" as Address;

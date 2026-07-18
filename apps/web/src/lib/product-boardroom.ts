@@ -513,7 +513,7 @@ async function readProductBoardroomCatalogEntryWithContext(
       ? deriveDistributionCatalogFields(distribution, snapshot.shareTokenMetadata?.decimals, boardroomStatus)
       : {};
     const locker = findCatalogLocker(snapshot, distributionState.pool);
-    const pool = catalogPoolAddress(distributionState);
+    const pool = catalogPoolAddress(distributionState, locker);
     let history: ProductBoardroomHistory | undefined;
     if (distribution) {
       try {
@@ -579,7 +579,7 @@ function catalogEntryFromSnapshot(
     ? deriveDistributionCatalogFields(distribution, snapshot.shareTokenMetadata?.decimals, snapshot.status)
     : {};
   const locker = findCatalogLocker(snapshot, distributionState.pool);
-  const pool = catalogPoolAddress(distributionState);
+  const pool = catalogPoolAddress(distributionState, locker);
   return {
     address: snapshot.address,
     boardroomStatus: snapshot.status,
@@ -675,8 +675,9 @@ function catalogPoolFields(pool: CatalogPoolRead | undefined): Partial<ProductBo
 
 function catalogPoolAddress(
   distributionState: Partial<ProductBoardroomCatalogEntry>,
+  locker: BoardroomLockedLiquiditySnapshot | undefined,
 ): Address | undefined {
-  return distributionState.pool;
+  return distributionState.pool ?? locker?.state?.pool;
 }
 
 function catalogLockerAddress(
@@ -1662,10 +1663,13 @@ function findCatalogLocker(
   snapshot: Pick<BoardroomSnapshot, "lockedLiquiditySummaries">,
   pool: Address | undefined,
 ) {
-  if (!pool) return undefined;
-  return snapshot.lockedLiquiditySummaries.find(
-    (locker) => locker.state?.pool.toLowerCase() === pool.toLowerCase(),
-  );
+  if (pool) {
+    const matching = snapshot.lockedLiquiditySummaries.find(
+      (locker) => locker.state?.pool.toLowerCase() === pool.toLowerCase(),
+    );
+    if (matching) return matching;
+  }
+  return snapshot.lockedLiquiditySummaries[0];
 }
 
 function fixedPriceSaleCashRaised(soldShares: bigint, price: bigint): bigint {
