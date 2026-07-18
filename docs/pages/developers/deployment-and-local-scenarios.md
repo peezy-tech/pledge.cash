@@ -28,7 +28,9 @@ Use the exact commands in the engineering deployment note; network gas behavior 
 
 Local Anvil uses chain id `31337`, normally on port `8547`. Deploy the full stack with a local wrapped-native contract, write the ignored local artifact, then run the maintained seed scenario.
 
-The seed covers standalone grant variants and Boardroom project flows. Its addresses belong only to that Anvil state. Resetting Anvil invalidates the artifact, seed manifest, browser cache, and prior receipt-refresh context together.
+The seed covers standalone grant variants plus eight Boardroom projects: migrated AMM, active fixed price, active curve, closed sale, live Merkle airdrop, launched governance with a queued action, winding down with an open distribution blocker, and redemptions open with a CASH snapshot. The seed manifest carries deterministic actor identities, airdrop allocations and proofs, queued-action hash/salt/calldata, blocker identity, and redemption balances for browser automation. Read queued-action ETA and expiry from `governanceState`; Forge simulation timestamps are deliberately excluded from the fixture.
+
+Its addresses belong only to that Anvil state. Resetting Anvil invalidates the deployment artifact, seed manifest, browser cache, and prior receipt-refresh context together. Reuse a fixed `LOCAL_SEED_NONCE` only with a reset state; use a new nonce to append another deterministic batch.
 
 For a subpath browser deployment, use the repository's `build:local` or `dev:local` flow so app base path and RPC proxy agree.
 

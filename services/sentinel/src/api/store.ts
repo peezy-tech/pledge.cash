@@ -23,6 +23,9 @@ import {
   type BoardroomRef,
   type ChannelDto,
   type HealthResponse,
+  type NotificationDeliveriesQuery,
+  type NotificationDeliveriesResponse,
+  type NotificationDeliveryDto,
   type PublicActionDto,
   type PublicActionsQuery,
   type PublicActionsResponse,
@@ -79,6 +82,27 @@ type PublicActionCallRow = {
   readonly selector: string;
   readonly target: string;
   readonly value: string;
+};
+
+type NotificationDeliveryRow = {
+  readonly actionHash: string;
+  readonly actionId: string;
+  readonly actionStatus: "queued" | "cancelled" | "executed" | "invalidated";
+  readonly attempts: number;
+  readonly boardroom: string;
+  readonly chainId: number;
+  readonly channelType: "telegram" | "twitter";
+  readonly createdAt: Date | string;
+  readonly eta: Date | string;
+  readonly event: "queued" | "cancelled" | "executed" | "invalidated" | "reminder" | "policy-admin";
+  readonly expiresAt: Date | string | null;
+  readonly id: string;
+  readonly nextAttemptAt: Date | string;
+  readonly sentAt: Date | string | null;
+  readonly severity: "low" | "medium" | "high" | null;
+  readonly status: "pending" | "sent" | "failed" | "dead";
+  readonly summary: string | null;
+  readonly updatedAt: Date | string;
 };
 
 const severityRank = {
@@ -139,6 +163,9 @@ export function createDrizzleApiStore(db: SentinelDb): SentinelApiStore {
     },
     async getCursorLags(chainIds) {
       return getCursorLags(db, chainIds);
+    },
+    async getNotificationDeliveries(userId, query) {
+      return getNotificationDeliveries(db, userId, query);
     },
     async getPublicActions(query) {
       return getPublicActions(db, query);
@@ -288,6 +315,68 @@ export function createDrizzleApiStore(db: SentinelDb): SentinelApiStore {
 
         return toWalletDto(wallet);
       });
+    }
+  };
+}
+
+export async function getNotificationDeliveries(
+  db: SentinelDb,
+  userId: string,
+  query: NotificationDeliveriesQuery
+): Promise<NotificationDeliveriesResponse> {
+  const limit = query.limit;
+  const cursor = decodeNotificationDeliveriesCursor(query.cursor);
+  if (query.cursor !== undefined && cursor === undefined) {
+    throw new Error("Invalid notification deliveries cursor");
+  }
+  const cursorFilter = cursor === undefined
+    ? sql``
+    : sql`
+        AND (
+          n.created_at < ${cursor.createdAt}::timestamptz
+          OR (n.created_at = ${cursor.createdAt}::timestamptz AND n.id < ${cursor.id}::uuid)
+        )
+      `;
+  const rows = rowsFromResult(
+    await db.execute<NotificationDeliveryRow>(
+      sql`
+        SELECT
+          n.id,
+          n.channel_type AS "channelType",
+          n.event,
+          n.status,
+          n.attempts,
+          n.created_at AS "createdAt",
+          n.updated_at AS "updatedAt",
+          n.next_attempt_at AS "nextAttemptAt",
+          n.sent_at AS "sentAt",
+          n.payload->'action'->>'id' AS "actionId",
+          n.payload->'action'->>'actionHash' AS "actionHash",
+          n.payload->'action'->>'boardroom' AS boardroom,
+          (n.payload->'action'->>'chainId')::integer AS "chainId",
+          n.payload->'action'->>'eta' AS eta,
+          NULLIF(n.payload->'action'->>'expiresAt', '') AS "expiresAt",
+          n.payload->'action'->>'status' AS "actionStatus",
+          NULLIF(n.payload->'risk'->>'severity', '') AS severity,
+          NULLIF(n.payload->'analysis'->>'summary', '') AS summary
+        FROM notifications n
+        WHERE n.user_id = ${userId}::uuid
+        ${cursorFilter}
+        ORDER BY n.created_at DESC, n.id DESC
+        LIMIT ${limit + 1}
+      `
+    )
+  );
+  const pageRows = rows.slice(0, limit);
+
+  return {
+    items: pageRows.map(toNotificationDeliveryDto),
+    page: {
+      limit,
+      nextCursor:
+        rows.length > limit && pageRows.length > 0
+          ? encodeNotificationDeliveriesCursor(pageRows[pageRows.length - 1]!)
+          : null
     }
   };
 }
@@ -616,6 +705,31 @@ function toPublicActionDto(
   };
 }
 
+function toNotificationDeliveryDto(row: NotificationDeliveryRow): NotificationDeliveryDto {
+  return {
+    action: {
+      actionHash: row.actionHash as NotificationDeliveryDto["action"]["actionHash"],
+      boardroom: row.boardroom as AddressDto,
+      chainId: row.chainId,
+      eta: toIso(row.eta),
+      expiresAt: row.expiresAt === null ? null : toIso(row.expiresAt),
+      id: row.actionId,
+      status: row.actionStatus
+    },
+    attempts: row.attempts,
+    channelType: row.channelType,
+    createdAt: toIso(row.createdAt),
+    event: row.event,
+    id: row.id,
+    nextAttemptAt: toIso(row.nextAttemptAt),
+    sentAt: row.sentAt === null ? null : toIso(row.sentAt),
+    severity: row.severity,
+    status: row.status,
+    summary: row.summary,
+    updatedAt: toIso(row.updatedAt)
+  };
+}
+
 function toRiskDto(row: PublicActionRow): RiskAssessmentDto | null {
   if (
     row.riskRulesetVersion === null ||
@@ -710,6 +824,53 @@ export function decodePublicActionsCursor(
 
 export function isPublicActionsCursor(cursor: string): boolean {
   return decodePublicActionsCursor(cursor) !== undefined;
+}
+
+type NotificationDeliveriesCursor = {
+  readonly createdAt: string;
+  readonly id: string;
+};
+
+export function encodeNotificationDeliveriesCursor(input: {
+  readonly createdAt: Date | string;
+  readonly id: string;
+}): string {
+  return Buffer.from(
+    JSON.stringify({ createdAt: toIso(input.createdAt), id: input.id }),
+    "utf8"
+  ).toString("base64url");
+}
+
+export function decodeNotificationDeliveriesCursor(
+  cursor: string | undefined
+): NotificationDeliveriesCursor | undefined {
+  if (cursor === undefined) return undefined;
+
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
+      createdAt?: unknown;
+      id?: unknown;
+    };
+    const createdAt = typeof parsed.createdAt === "string" ? new Date(parsed.createdAt) : undefined;
+    if (
+      typeof parsed.id !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        parsed.id
+      ) ||
+      createdAt === undefined ||
+      Number.isNaN(createdAt.getTime()) ||
+      createdAt.toISOString() !== parsed.createdAt
+    ) {
+      return undefined;
+    }
+    return { createdAt: createdAt.toISOString(), id: parsed.id };
+  } catch {
+    return undefined;
+  }
+}
+
+export function isNotificationDeliveriesCursor(cursor: string): boolean {
+  return decodeNotificationDeliveriesCursor(cursor) !== undefined;
 }
 
 function stringArray(value: unknown): string[] {

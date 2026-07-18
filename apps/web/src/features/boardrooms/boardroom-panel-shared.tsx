@@ -4,6 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { Field } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
 import { Input } from "../../components/ui/input";
+import { PRODUCT_DETAIL_CHILD_READ_LIMIT } from "../../lib/boardroom-snapshot";
 import type {
   BoardroomDistributionSnapshot,
   BoardroomGrantSnapshot,
@@ -38,7 +39,7 @@ export function TextField<T extends object, K extends keyof T & string>({
   setForm: Dispatch<SetStateAction<T>>;
 }): React.JSX.Element {
   return (
-    <Field label={label} {...(className ? { className } : {})}>
+    <Field description={description} label={label} {...(className ? { className } : {})}>
       <Input
         disabled={disabled}
         inputMode={inputMode}
@@ -46,7 +47,6 @@ export function TextField<T extends object, K extends keyof T & string>({
         spellCheck={false}
         onChange={(event) => setFormField(field, event.target.value as T[K], setForm)}
       />
-      {description ? <span className="mt-1 block text-xs leading-5 text-zinc-500">{description}</span> : null}
     </Field>
   );
 }
@@ -177,6 +177,41 @@ export function lockerSummaryFor(
 ): BoardroomLockedLiquiditySnapshot | undefined {
   if (!boardroomSnapshot || !address) return undefined;
   return boardroomSnapshot.lockedLiquiditySummaries.find((locker) => sameAddress(locker.address, address));
+}
+
+export type WindDownCoverage = {
+  complete: boolean;
+  issues: string[];
+};
+
+export function windDownCoverage(boardroomSnapshot: BoardroomSnapshot | undefined): WindDownCoverage {
+  if (!boardroomSnapshot) {
+    return {
+      complete: false,
+      issues: ["Boardroom state has not been loaded."],
+    };
+  }
+
+  const issues = [
+    coverageIssue("Grant", boardroomSnapshot.issuedGrants.length, boardroomSnapshot.grantSummaries.length),
+    coverageIssue("Distribution", boardroomSnapshot.issuedDistributions.length, boardroomSnapshot.distributionSummaries.length),
+    coverageIssue("Locked-liquidity", boardroomSnapshot.lockedLiquidityPositions.length, boardroomSnapshot.lockedLiquiditySummaries.length),
+    coverageIssue(
+      "Redeemable-asset",
+      boardroomSnapshot.redeemableAssets.length,
+      Math.min(boardroomSnapshot.redeemableAssets.length, PRODUCT_DETAIL_CHILD_READ_LIMIT),
+    ),
+  ].filter((issue): issue is string => issue !== undefined);
+
+  return {
+    complete: issues.length === 0,
+    issues,
+  };
+}
+
+function coverageIssue(label: string, total: number, loaded: number): string | undefined {
+  if (loaded >= total) return undefined;
+  return `${label} coverage is incomplete: ${loaded.toString()} of ${total.toString()} records were loaded.`;
 }
 
 export function windDownBlockers(boardroomSnapshot: BoardroomSnapshot | undefined): { kind: string; address: Address; action: string }[] {

@@ -28,6 +28,8 @@ The selected network and deployment artifact are part of every answer. The same 
 
 Sentinel data can be stale, unavailable, incomplete, disputed, or wrong. It cannot mint shares, transfer treasury assets, settle grants, execute governance, mark a Merkle index claimed, or change a receipt.
 
+Sentinel delivery receipts are account-scoped operational records. `Delivered` means a configured channel provider accepted the send; it does not prove that a person received, read, approved, vetoed, or executed the referenced action.
+
 ## Sentinel's boundary
 
 Sentinel is an optional service for indexing public actions, linking wallets to notification preferences, and delivering alerts. It is **not settlement authority**. A Sentinel alert is a prompt to inspect canonical state; it is not proof that an action exists, is safe, succeeded, or still needs attention.

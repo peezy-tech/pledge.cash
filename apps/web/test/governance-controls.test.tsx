@@ -8,14 +8,19 @@ import { renderToString } from "react-dom/server";
 import { encodeFunctionData, type Address, type Hex } from "viem";
 import {
   GovernanceLaunchControl,
+  GovernanceProposalComposer,
   GovernanceQueue,
   buildGovernanceExecutionRequest,
   buildGovernanceVetoRequest,
   effectiveGovernanceActionStatus,
   governanceActionView,
   governanceDelayPresets,
+  executorProposalActionGuard,
+  executorProposalError,
+  executorProposalIdentity,
 } from "../src/features/governance";
 import { governanceRefreshDelay } from "../src/lib/governance-refresh";
+import { assertTransactionActionCurrent, TransactionContextGuard } from "../src/lib/transaction-identity";
 
 const boardroom = "0x1000000000000000000000000000000000000000" as Address;
 const owner = "0x2000000000000000000000000000000000000000" as Address;
@@ -207,4 +212,55 @@ describe("governance controls", () => {
     expect(html).toContain("1 day");
     expect(html).not.toContain("<button");
   });
+
+  test("prepares a decoded executor-rotation proposal without implying immediate authority", () => {
+    expect(executorProposalError("", executor)).toContain("Enter the proposed executor");
+    expect(executorProposalError(executor, executor)).toContain("other than the current executor");
+    expect(executorProposalError(recipient, executor)).toBeUndefined();
+    const html = renderToString(
+      <GovernanceProposalComposer
+        boardroom={boardroom}
+        capability={{ status: "enabled" }}
+        currentExecutor={executor}
+        governanceDelay={86_400n}
+        gracePeriod={604_800n}
+        now={1_700_000_000n}
+        pendingAction={undefined}
+        queueExecutorChange={async () => undefined}
+        runAction={async (_id, action) => action()}
+      />,
+    );
+    expect(html).toContain("Change who can queue project decisions");
+    expect(html).toContain("Current executor");
+    expect(html).toContain(executor);
+    expect(html).toContain("Queueing does not change authority immediately");
+    expect(html).toContain("Review proposal");
+    expect(html).toContain("disabled");
+  });
+
+  test("blocks a stale executor proposal after the input changes during deferred simulation", async () => {
+    const initialIdentity = executorProposalIdentity({ boardroom, currentExecutor: executor, executorInput: recipient });
+    const proposalGuard = new TransactionContextGuard(initialIdentity);
+    const actionGuard = executorProposalActionGuard(proposalGuard, proposalGuard.capture());
+    const simulation = deferred<void>();
+    let walletSubmissions = 0;
+    const submission = (async () => {
+      assertTransactionActionCurrent(actionGuard, "simulation");
+      await simulation.promise;
+      assertTransactionActionCurrent(actionGuard, "submission");
+      walletSubmissions += 1;
+    })();
+
+    proposalGuard.sync(executorProposalIdentity({ boardroom, currentExecutor: executor, executorInput: policy }));
+    simulation.resolve();
+
+    await expect(submission).rejects.toThrow("action details changed");
+    expect(walletSubmissions).toBe(0);
+  });
 });
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
+}

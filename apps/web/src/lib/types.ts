@@ -56,6 +56,7 @@ export type GrantSnapshot = {
   expiry: bigint;
   settledAmount: bigint;
   settleable: bigint;
+  settlementCost: bigint;
   halted: boolean;
   closed: boolean;
   tokenMetadata?: TokenMetadata | undefined;

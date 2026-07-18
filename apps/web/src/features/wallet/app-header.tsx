@@ -4,8 +4,15 @@ import { ConnectWalletButton } from "../../components/simplekit";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { appRouteHref } from "../../app/routing";
-import type { PledgeCashNetwork } from "../../lib/contracts";
+import type { RuntimeDeploymentAvailabilityStatus } from "../../hooks/use-runtime-deployment";
+import {
+  networkEnvironmentIdentity,
+  type PledgeCashEnvironmentIdentity,
+  type PledgeCashNetwork,
+} from "../../lib/contracts";
 import type { WalletState } from "../../lib/types";
+
+export type NetworkDeploymentAvailability = Readonly<Partial<Record<number, RuntimeDeploymentAvailabilityStatus>>>;
 
 type AppHeaderProps = {
   wallet: WalletState;
@@ -16,6 +23,8 @@ type AppHeaderProps = {
   pendingAction: string | undefined;
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
   switchChain: () => Promise<void>;
+  environment?: PledgeCashEnvironmentIdentity | undefined;
+  networkAvailability?: NetworkDeploymentAvailability | undefined;
 };
 
 const NETWORK_PENDING_TITLE = "Network changes are disabled while an action is running";
@@ -30,6 +39,8 @@ export function AppHeader({
   pendingAction,
   runAction,
   switchChain,
+  environment,
+  networkAvailability,
 }: AppHeaderProps): React.JSX.Element {
   const actionPending = pendingAction !== undefined;
   const walletConnected = wallet.account !== undefined;
@@ -38,6 +49,8 @@ export function AppHeader({
   const baseHref = import.meta.env.BASE_URL || "/";
   const homeHref = appRouteHref({ kind: "explore" }, baseHref);
   const docsHref = `${baseHref}docs/`;
+  const activeNetwork = networks.find((network) => network.chainId === chainId);
+  const activeEnvironment = environment ?? (activeNetwork ? networkEnvironmentIdentity(activeNetwork) : undefined);
 
   return (
     <header className="sticky top-0 z-30 border-b border-[var(--pc-border)] bg-[color:var(--pc-canvas-translucent)] backdrop-blur-xl">
@@ -48,6 +61,8 @@ export function AppHeader({
           chainId={chainId}
           chainName={chainName}
           docsHref={docsHref}
+          environment={activeEnvironment}
+          networkAvailability={networkAvailability}
           networks={networks}
           onNetworkChange={onNetworkChange}
           runAction={runAction}
@@ -73,7 +88,7 @@ function HeaderHomeLink({ href }: { href: string }): React.JSX.Element {
 
 type HeaderActionsProps = Pick<
   AppHeaderProps,
-  "chainId" | "chainName" | "networks" | "onNetworkChange" | "runAction" | "switchChain"
+  "chainId" | "chainName" | "environment" | "networkAvailability" | "networks" | "onNetworkChange" | "runAction" | "switchChain"
 > & {
   actionPending: boolean;
   docsHref: string;
@@ -86,6 +101,8 @@ function HeaderActions({
   chainId,
   chainName,
   docsHref,
+  environment,
+  networkAvailability,
   networks,
   onNetworkChange,
   runAction,
@@ -98,10 +115,12 @@ function HeaderActions({
       <NetworkSelect
         actionPending={actionPending}
         chainId={chainId}
+        networkAvailability={networkAvailability}
         networks={networks}
         onNetworkChange={onNetworkChange}
       />
       <DocsLink href={docsHref} />
+      {environment ? <EnvironmentBadge environment={environment} /> : null}
       <Badge className="hidden xl:inline-flex" variant={walletReady ? "default" : "warning"}>{chainName}</Badge>
       {walletConnected && !walletReady ? <SwitchChainButton actionPending={actionPending} runAction={runAction} switchChain={switchChain} /> : null}
       <ConnectWalletButton
@@ -116,36 +135,97 @@ function HeaderActions({
 function NetworkSelect({
   actionPending,
   chainId,
+  networkAvailability,
   networks,
   onNetworkChange,
-}: Pick<AppHeaderProps, "chainId" | "networks" | "onNetworkChange"> & {
+}: Pick<AppHeaderProps, "chainId" | "networkAvailability" | "networks" | "onNetworkChange"> & {
   actionPending: boolean;
 }): React.JSX.Element {
   const handleNetworkChange = (event: React.ChangeEvent<HTMLSelectElement>): void => {
     onNetworkChange(Number(event.target.value));
   };
+  const activeNetwork = networks.find((network) => network.chainId === chainId);
+  const activeStatus = networkAvailability?.[chainId];
 
   return (
     <select
       aria-label="Network"
       className="block h-9 max-w-24 rounded-md border border-[var(--pc-border)] bg-[var(--pc-surface)] px-2 text-xs font-medium text-[var(--pc-text)] outline-none transition-colors hover:border-[var(--pc-border-strong)] focus:border-[var(--pc-focus)] disabled:cursor-not-allowed disabled:opacity-60 min-[360px]:max-w-32 sm:max-w-36 md:max-w-44 md:px-3 md:text-sm"
       disabled={actionPending}
-      title={actionPending ? NETWORK_PENDING_TITLE : networks.find((network) => network.chainId === chainId)?.name}
+      title={actionPending ? NETWORK_PENDING_TITLE : activeNetwork ? networkOptionLabel(activeNetwork, activeStatus) : undefined}
       value={chainId}
       onChange={handleNetworkChange}
     >
-      {networks.map((network) => (
-        <option key={network.chainId} value={network.chainId}>
-          {networkOptionLabel(network)}
-        </option>
-      ))}
+      {networks.map((network) => {
+        const availability = networkAvailability?.[network.chainId];
+        return (
+          <option
+            disabled={networkOptionDisabled(availability)}
+            key={network.chainId}
+            value={network.chainId}
+          >
+            {networkOptionLabel(network, availability)}
+          </option>
+        );
+      })}
     </select>
   );
 }
 
-function networkOptionLabel(network: PledgeCashNetwork): string {
-  if (network.chainId === 31337) return "Local";
-  return network.name.replace(/\s+Testnet$/i, "");
+export function EnvironmentBadge({
+  environment,
+}: {
+  environment: PledgeCashEnvironmentIdentity;
+}): React.JSX.Element {
+  return (
+    <Badge
+      aria-label={`${environment.label} environment: ${environment.description}`}
+      className="hidden sm:inline-flex"
+      title={environment.description}
+      variant={environment.kind === "custom" ? "warning" : environment.kind === "local" ? "muted" : "default"}
+    >
+      {environment.label}
+    </Badge>
+  );
+}
+
+export function networkOptionDisabled(
+  availability: RuntimeDeploymentAvailabilityStatus | undefined,
+): boolean {
+  return availability !== undefined && availability !== "ready";
+}
+
+export function networkOptionLabel(
+  network: PledgeCashNetwork,
+  availability: RuntimeDeploymentAvailabilityStatus | undefined = "ready",
+): string {
+  const environment = networkEnvironmentIdentity(network);
+  const environmentLabel = environment.kind === "local"
+    ? "Local (resettable, no real value)"
+    : environment.label;
+  const baseLabel = environment.kind === "testnet" && /\btestnet\b/i.test(network.name)
+    ? network.name
+    : `${network.name} — ${environmentLabel}`;
+  const availabilityLabel = networkAvailabilityLabel(availability);
+  return availabilityLabel ? `${baseLabel} — ${availabilityLabel}` : baseLabel;
+}
+
+export function networkAvailabilityLabel(
+  availability: RuntimeDeploymentAvailabilityStatus | undefined,
+): string | undefined {
+  switch (availability) {
+    case "loading":
+      return "checking deployment";
+    case "pending":
+      return "deployment pending";
+    case "missing":
+      return "not deployed";
+    case "error":
+      return "deployment unavailable";
+    case "ready":
+    case undefined:
+      return undefined;
+  }
 }
 
 function DocsLink({ href }: { href: string }): React.JSX.Element {

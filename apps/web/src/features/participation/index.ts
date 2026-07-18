@@ -1,5 +1,6 @@
 export * from "./action-integrity";
 export * from "./bonding-curve-flow";
+export * from "./claim-ticket-integrity";
 export * from "./fixed-price-sale-flow";
 export * from "./merkle-airdrop-flow";
 export * from "./participation-flows";

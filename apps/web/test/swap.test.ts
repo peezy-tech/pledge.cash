@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Address, PledgeCashDeployment, PledgeCashReadClient } from "@pledge.cash/sdk";
+import { exactRational } from "../src/lib/market-data";
 import {
   buildAddLiquidityTransaction,
   buildRemoveLiquidityTransaction,
@@ -150,6 +151,36 @@ describe("swap token discovery", () => {
     expect(state.tokens.find((token) => token.address === share)?.pools).toEqual([pinnedPool]);
   });
 
+  test("retains the newest 64 pinned pools in deterministic append order", async () => {
+    const discoveryOrder = Array.from(
+      { length: 66 },
+      (_, index) => indexedPoolAddress(BigInt((index * 17) % 66)),
+    );
+    const firstPool = discoveryOrder[0]!;
+    const duplicateWithDifferentCase = `0x${firstPool.slice(2).toUpperCase()}` as Address;
+    const requestedPools = [...discoveryOrder, duplicateWithDifferentCase];
+    const expectedPools = discoveryOrder.slice(-64);
+    const client = {
+      async readContract(rawRequest: unknown): Promise<unknown> {
+        const request = rawRequest as { address: Address; functionName: string };
+        if (request.functionName === "token0") return usdc;
+        if (request.functionName === "token1") return share;
+        if (request.functionName === "getReserves") return [1_000_000n, 2_000_000_000_000_000_000n, 0] as const;
+        if (request.functionName === "symbol") return request.address === usdc ? "USDC" : request.address === share ? "PLDG" : "WHYPE";
+        if (request.functionName === "decimals") return request.address === usdc ? 6 : 18;
+        throw new Error(`Unexpected read ${request.functionName} on ${request.address}`);
+      },
+    } as PledgeCashReadClient;
+
+    const state = await readSwapTokenList(client, deployment, undefined, {
+      discoveryMode: "pinned-only",
+      pinnedPools: requestedPools,
+    });
+
+    expect(state.pools.map((candidate) => candidate.address)).toEqual(expectedPools);
+    expect(state.error).toBe("Only the newest 64 project pools can be pinned at once.");
+  });
+
   test("cancels pinned discovery before issuing RPC reads", async () => {
     const controller = new AbortController();
     controller.abort(new DOMException("Project changed.", "AbortError"));
@@ -226,6 +257,15 @@ describe("AMM liquidity helpers", () => {
 
     expect(nativeInputQuote.error).toBeUndefined();
     expect(nativeInputQuote.amountOut).toBe(2_000_000_000_000_000_000n);
+    expect(nativeInputQuote.slippageBps).toBe(50);
+    expect(nativeInputQuote.effectiveExecutionPrice).toMatchObject({
+      status: "known",
+      value: { quotePerBase: exactRational(2n) },
+    });
+    expect(nativeInputQuote.feeInclusivePriceImpact).toEqual({
+      status: "known",
+      value: exactRational(0n),
+    });
     const nativeInputTransaction = buildSwapTransaction({
       deployment,
       form: { tokenIn: whype, tokenOut: share, amountIn: "1", slippageBps: "50", recipient: "", deadline: "1700000000", useNative: true },
@@ -251,6 +291,15 @@ describe("AMM liquidity helpers", () => {
 
     expect(nativeOutputQuote.error).toBeUndefined();
     expect(nativeOutputQuote.amountOut).toBe(1_000_000_000_000_000_000n);
+    expect(nativeOutputQuote.slippageBps).toBe(50);
+    expect(nativeOutputQuote.effectiveExecutionPrice).toMatchObject({
+      status: "known",
+      value: { quotePerBase: exactRational(1n, 2n) },
+    });
+    expect(nativeOutputQuote.feeInclusivePriceImpact).toEqual({
+      status: "known",
+      value: exactRational(0n),
+    });
     const nativeOutputTransaction = buildSwapTransaction({
       deployment,
       form: { tokenIn: share, tokenOut: whype, amountIn: "2", slippageBps: "50", recipient: "", deadline: "1700000000", useNative: true },
@@ -263,6 +312,38 @@ describe("AMM liquidity helpers", () => {
     expect(nativeOutputTransaction.args[1]).toBe(995_000_000_000_000_000n);
     expect(nativeOutputTransaction.args[2]).toEqual([share, whype]);
     expect(nativeOutputTransaction.args[3]).toBe(account);
+  });
+
+  test("starts the independent router quote while pool state is loading", async () => {
+    const base = fakeReadClient();
+    let routerQuoteStarted = false;
+    let poolReadObservedRouterQuote = false;
+    const concurrentClient = {
+      ...base,
+      async readContract(rawRequest: unknown): Promise<unknown> {
+        const request = rawRequest as { address: Address; functionName: string };
+        if (request.address === router && request.functionName === "getAmountsOut") {
+          routerQuoteStarted = true;
+        }
+        if (request.address === nativePool && request.functionName === "token0") {
+          poolReadObservedRouterQuote = routerQuoteStarted;
+        }
+        return await base.readContract(rawRequest);
+      },
+    } as PledgeCashReadClient;
+
+    const quote = await readSwapQuote(concurrentClient, deployment, {
+      tokenIn: whype,
+      tokenOut: share,
+      amountIn: "1",
+      slippageBps: "50",
+      recipient: "",
+      deadline: "1700000000",
+      useNative: true,
+    }, account);
+
+    expect(quote.error).toBeUndefined();
+    expect(poolReadObservedRouterQuote).toBe(true);
   });
 
   test("rejects swap quotes that round down to zero output", async () => {
@@ -279,6 +360,60 @@ describe("AMM liquidity helpers", () => {
     expect(quote.amountIn).toBe(1n);
     expect(quote.amountOut).toBe(0n);
     expect(quote.error).toBe("Swap output would be zero.");
+  });
+
+  test("fails closed on zero-reserve and mismatched pool routes", async () => {
+    const base = fakeReadClient();
+    let routerQuoteReads = 0;
+    const zeroReserveClient = {
+      ...base,
+      async readContract(rawRequest: unknown): Promise<unknown> {
+        const request = rawRequest as { address: Address; functionName: string };
+        if (request.address === nativePool && request.functionName === "getReserves") {
+          return [0n, 20_000_000_000_000_000_000n, 0] as const;
+        }
+        if (request.address === router && request.functionName === "getAmountsOut") {
+          routerQuoteReads += 1;
+          throw new Error("Router quote should not override pool validation.");
+        }
+        return await base.readContract(rawRequest);
+      },
+    } as PledgeCashReadClient;
+    const zeroReserveQuote = await readSwapQuote(zeroReserveClient, deployment, {
+      tokenIn: whype,
+      tokenOut: share,
+      amountIn: "1",
+      slippageBps: "50",
+      recipient: "",
+      deadline: "1700000000",
+      useNative: true,
+    }, account);
+
+    expect(zeroReserveQuote.error).toContain("no two-sided liquidity");
+    expect(zeroReserveQuote.effectiveExecutionPrice?.status).toBe("unavailable");
+    expect(zeroReserveQuote.feeInclusivePriceImpact?.status).toBe("unavailable");
+    expect(routerQuoteReads).toBe(1);
+
+    const mismatchClient = {
+      ...base,
+      async readContract(rawRequest: unknown): Promise<unknown> {
+        const request = rawRequest as { address: Address; functionName: string };
+        if (request.address === nativePool && request.functionName === "token1") return usdc;
+        return await base.readContract(rawRequest);
+      },
+    } as PledgeCashReadClient;
+    const mismatchQuote = await readSwapQuote(mismatchClient, deployment, {
+      tokenIn: whype,
+      tokenOut: share,
+      amountIn: "1",
+      slippageBps: "50",
+      recipient: "",
+      deadline: "1700000000",
+      useNative: true,
+    }, account);
+
+    expect(mismatchQuote.error).toContain("does not match the requested swap route");
+    expect(mismatchQuote.amountOut).toBeUndefined();
   });
 
   test("quotes balanced add liquidity amounts and builds add transaction", async () => {

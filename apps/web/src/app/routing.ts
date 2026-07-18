@@ -1,6 +1,6 @@
 import type { Address } from "@pledge.cash/sdk";
 import { isAddress } from "viem";
-import { getSentinelBaseUrl, type SentinelEnv } from "../lib/sentinel";
+import type { SentinelEnv } from "../lib/sentinel";
 
 export type AppView = "project" | "market" | "wallet" | "grants" | "manage" | "activity" | "notifications" | "advanced";
 
@@ -15,7 +15,7 @@ export type CanonicalAppRoute =
   | { kind: "studio"; chainId?: number | undefined }
   | { kind: "project"; chainId: number; boardroom: Address; section: ProjectSection }
   | { kind: "studio-project"; chainId: number; boardroom: Address; section: StudioSection }
-  | { kind: "grant"; chainId: number; grant: Address }
+  | { kind: "grant"; chainId: number; grant: Address; returnBoardroom?: Address | undefined }
   | { kind: "alerts" }
   | { kind: "tools" };
 
@@ -85,6 +85,10 @@ export function routeFromLocation(
   env: RouteEnvironment = import.meta.env,
 ): AppRoute {
   const route = routeFromPath(pathname, env);
+  if (route.kind === "grant") {
+    const returnBoardroom = routeGrantReturnBoardroom(search);
+    return returnBoardroom ? { ...route, returnBoardroom } : route;
+  }
   if (!isPrimaryRoute(route)) return route;
   const chainId = routeChainFromSearch(search);
   return chainId === undefined ? route : { ...route, chainId };
@@ -102,12 +106,8 @@ export function routeFromPath(pathname: string, env: RouteEnvironment = import.m
   if (first === "portfolio" && rest.length === 0) return { kind: "portfolio" };
   if (first === "studio") return studioRoute(rest);
   if (first === "projects") return projectRoute(rest);
-  if (first === "settings" && rest.length === 1 && rest[0] === "alerts") {
-    return getSentinelBaseUrl(env) ? { kind: "alerts" } : { kind: "explore" };
-  }
-  if (first === "notifications" || first === "sentinel") {
-    return rest.length === 0 && getSentinelBaseUrl(env) ? { kind: "alerts" } : { kind: "explore" };
-  }
+  if (first === "settings" && rest.length === 1 && rest[0] === "alerts") return { kind: "alerts" };
+  if ((first === "notifications" || first === "sentinel") && rest.length === 0) return { kind: "alerts" };
   if (first === "grants" && rest.length === 2) return grantRoute(rest);
   if (rest.length > 0) return { kind: "not-found" };
 
@@ -117,10 +117,28 @@ export function routeFromPath(pathname: string, env: RouteEnvironment = import.m
 export function appRouteHref(route: CanonicalAppRoute, baseUrl = import.meta.env.BASE_URL || "/"): string {
   const base = normalizeBaseUrl(baseUrl);
   const path = routePath(route);
-  const search = "chainId" in route && route.chainId !== undefined && isPrimaryRoute(route)
-    ? `?chain=${route.chainId.toString()}`
-    : "";
+  const search = route.kind === "grant" && route.returnBoardroom
+    ? `?project=${route.returnBoardroom.toLowerCase()}`
+    : "chainId" in route && route.chainId !== undefined && isPrimaryRoute(route)
+      ? `?chain=${route.chainId.toString()}`
+      : "";
   return `${base}${path}${search}`;
+}
+
+export function projectGrantRoute(
+  chainId: number,
+  grant: Address,
+  returnBoardroom: Address,
+): Extract<CanonicalAppRoute, { kind: "grant" }> {
+  return { kind: "grant", chainId, grant, returnBoardroom };
+}
+
+export function grantReturnRoute(
+  route: Extract<AppRoute, { kind: "grant" }>,
+): Extract<CanonicalAppRoute, { kind: "portfolio" | "project" }> {
+  return route.returnBoardroom
+    ? { kind: "project", chainId: route.chainId, boardroom: route.returnBoardroom, section: "overview" }
+    : { kind: "portfolio", chainId: route.chainId };
 }
 
 export function projectRouteHref(
@@ -139,6 +157,21 @@ export function studioRouteHref(
   baseUrl = import.meta.env.BASE_URL || "/",
 ): string {
   return appRouteHref({ kind: "studio-project", chainId, boardroom, section }, baseUrl);
+}
+
+export function governanceWatchHref(
+  chainId: number,
+  boardroom: Address,
+  returnHref: string,
+  baseUrl = import.meta.env.BASE_URL || "/",
+): string {
+  const href = appRouteHref({ kind: "alerts" }, baseUrl);
+  const query = new URLSearchParams({
+    boardroom: boardroom.toLowerCase(),
+    chain: chainId.toString(),
+    return: returnHref,
+  });
+  return `${href}?${query.toString()}`;
 }
 
 export function primaryDestination(route: AppRoute): PrimaryDestination | undefined {
@@ -244,6 +277,14 @@ function routeChainId(value: string | undefined): number | undefined {
 function routeChainFromSearch(search: string): number | undefined {
   try {
     return routeChainId(new URLSearchParams(search).get("chain") ?? undefined);
+  } catch {
+    return undefined;
+  }
+}
+
+function routeGrantReturnBoardroom(search: string): Address | undefined {
+  try {
+    return routeAddress(new URLSearchParams(search).get("project") ?? undefined);
   } catch {
     return undefined;
   }

@@ -37,6 +37,17 @@ import {
   verifiedStudioChildState,
   viewFromPath,
 } from "../src/App";
+import {
+  canonicalAppLocationHref,
+  DeploymentUnavailablePage,
+  EnvironmentDisclosure,
+  projectSwapPoolAddresses,
+  routeRequiresReadyDeployment,
+  selectedParticipationPool,
+  shouldCanonicalizeAppRoute,
+  studioProjectLiquidityQuote,
+  studioProjectRemoveLiquidityQuote,
+} from "../src/app/App";
 import { Web3Provider } from "../src/components/web3-provider";
 import type { BoardroomPanelCapabilities } from "../src/features/boardrooms/boardroom-panel-types";
 import type { ProjectCapabilityMap } from "../src/features/capabilities/project-capabilities";
@@ -44,8 +55,12 @@ import { BoardroomPanel } from "../src/features/boardrooms/boardroom-panel";
 import { DiscoveryPanel, WalletAccessPanel } from "../src/features/discovery/discovery-panel";
 import { GrantInspector } from "../src/features/grants/grant-inspector";
 import { AppHeader } from "../src/features/wallet/app-header";
-import { PLEDGE_CASH_NETWORKS } from "../src/lib/contracts";
+import { resolveNativeBalanceState } from "../src/hooks/use-wagmi-wallet";
+import { AlertsUnavailablePage, NotFoundPage, participationOptions, ProjectLayout } from "../src/app/pages";
+import { networkEnvironmentIdentity, networkForChainId, PLEDGE_CASH_NETWORKS } from "../src/lib/contracts";
+import type { ProductBoardroomDashboardState } from "../src/lib/product-boardroom";
 import { deploymentDiscoveryIdentity, discoveryStorageKey, resumeWalletAccessRange, walletAccessDiscoveryRange } from "../src/lib/discovery";
+import { liquidityQuoteReady, removeLiquidityQuoteReady } from "../src/lib/swap";
 import {
   defaultBoardroomGrantForm,
   defaultCurveMigrationForm,
@@ -363,20 +378,26 @@ describe("web app shell", () => {
 
     expect(html).toContain("pledge.cash");
     expect(html).toContain("Project directory");
-    expect(html).toContain("Search projects");
     expect(html).toContain("Explore");
     expect(html).toContain("Portfolio");
     expect(html).toContain("Studio");
     expect(html).toContain('href="#app-main-content"');
     expect(html).toContain("Skip to main content");
-    expect(html).toContain("No projects discovered");
+    expect(html).toContain("Checking deployment availability");
+    expect(html).toContain("HyperEVM Testnet — checking deployment");
+    expect(html).toContain("Monad Testnet — checking deployment");
+    expect(html).toContain("pledge.cash will not run discovery, contract reads, or wallet actions");
+    expect(html).toContain('aria-label="Testnet environment: Public test network using test assets with no real value."');
+    expect(html).toContain('aria-label="Testnet environment disclosure"');
+    expect(html).toContain("Public test network using test assets with no real value.");
+    expect(html).not.toContain("Search projects");
+    expect(html).not.toContain("No projects discovered");
     expect(html).not.toContain("Project workspace");
     expect(html).not.toContain("Market");
     expect(html).not.toContain("Manage");
     expect(html).not.toContain("Activity");
     expect(html).not.toContain("Sentinel");
     expect(html).not.toContain("Alerts");
-    expect(html).not.toContain("Deployment");
     expect(html).not.toContain("Artifact");
     expect(html).not.toContain("TokenGrantFactory");
     expect(html).not.toContain("Positions");
@@ -384,12 +405,229 @@ describe("web app shell", () => {
     expect(html).not.toContain("Project Overview");
   });
 
+  test("renders a nondismissible truthful local disclosure", () => {
+    const html = renderToString(
+      <EnvironmentDisclosure environment={networkEnvironmentIdentity(networkForChainId(31337))} />,
+    );
+
+    expect(html).toContain('role="note"');
+    expect(html).toContain("Local environment");
+    expect(html).toContain("Local, resettable environment with no real value.");
+    expect(html).not.toMatch(/seeded|fixtures/i);
+    expect(html).not.toContain("Dismiss");
+  });
+
+  test("renders pending deployment reasons without exposing Studio or write actions", () => {
+    const pending = renderToString(
+      <DeploymentUnavailablePage
+        availability={{
+          chainId: 998,
+          deployment: undefined,
+          reason: "Awaiting the public broadcast artifact.",
+          source: undefined,
+          status: "pending",
+        }}
+        networkName="HyperEVM Testnet"
+      />,
+    );
+    const unsupported = renderToString(
+      <NotFoundPage title="Unsupported network" description="pledge.cash is not configured for chain 999999 in this build." />,
+    );
+
+    expect(pending).toContain("Deployment pending");
+    expect(pending).toContain("Awaiting the public broadcast artifact.");
+    expect(pending).toContain("will not run discovery, contract reads, or wallet actions");
+    expect(pending).not.toContain("Open Studio");
+    expect(pending).not.toContain("Start project setup");
+    expect(unsupported).toContain("Unsupported network");
+    expect(unsupported).not.toContain("Deployment pending");
+  });
+
+  test("keeps configured Alerts and local not-found routes outside the pending deployment gate", () => {
+    const pending = "pending" as const;
+    const isDeploymentBlocked = (route: Parameters<typeof routeRequiresReadyDeployment>[0]): boolean =>
+      pending !== ("ready" as string) && routeRequiresReadyDeployment(route);
+
+    expect(isDeploymentBlocked({ kind: "alerts" })).toBe(false);
+    expect(isDeploymentBlocked({ kind: "not-found" })).toBe(false);
+    expect(isDeploymentBlocked({ kind: "explore", chainId: 998 })).toBe(true);
+  });
+
+  test("preserves project pool discovery order before the newest-64 bound", () => {
+    const discoveryOrder = Array.from({ length: 66 }, (_, index) =>
+      `0x${BigInt((index * 17) % 66 + 1_000).toString(16).padStart(40, "0")}` as Address);
+    const duplicate = discoveryOrder[0]!;
+    const dashboard = {
+      address: boardroom,
+      catalog: [],
+      histories: discoveryOrder.map((candidate) => ({ pool: candidate })),
+      snapshot: {
+        ...boardroomSnapshot,
+        lockedLiquiditySummaries: [{ address: locker, state: { pool: `0x${duplicate.slice(2).toUpperCase()}` } }],
+      },
+    } as unknown as ProductBoardroomDashboardState;
+
+    expect(projectSwapPoolAddresses(dashboard)).toEqual(discoveryOrder);
+    expect(projectSwapPoolAddresses(dashboard).slice(-64)).toEqual(discoveryOrder.slice(-64));
+  });
+
+  test("derives the executable project pool only from the synchronized participation route", () => {
+    const secondPool = "0x7600000000000000000000000000000000000000" as Address;
+
+    expect(selectedParticipationPool(undefined, [pool, secondPool])).toBeUndefined();
+    expect(selectedParticipationPool(`amm:${secondPool}`, [pool, secondPool])).toBe(secondPool);
+    expect(selectedParticipationPool(`amm:${oldGrant.grantAddress}`, [pool, secondPool])).toBeUndefined();
+    expect(selectedParticipationPool("amm", [pool, secondPool])).toBeUndefined();
+  });
+
+  test("rejects Studio new and unrecorded pool quotes before they become actionable", () => {
+    const unrecordedPool = "0x7600000000000000000000000000000000000000" as Address;
+    const quote = {
+      tokenA: { address: shareToken, decimals: 18 },
+      tokenB: { address: policyRegistry, decimals: 6 },
+      amountA: 1n,
+      amountB: 1n,
+      amountAMin: 1n,
+      amountBMin: 1n,
+      liquidityOut: 1n,
+      slippageBps: 50,
+      pool: {
+        address: unrecordedPool,
+        exists: false,
+        token0: shareToken,
+        token1: policyRegistry,
+        reserve0: 0n,
+        reserve1: 0n,
+        reserveA: 0n,
+        reserveB: 0n,
+        totalSupply: 0n,
+      },
+    };
+
+    const newPool = studioProjectLiquidityQuote(quote, [pool]);
+    expect(newPool.error).toBe("This liquidity quote requires an existing project AMM pool.");
+    expect(liquidityQuoteReady(newPool)).toBe(false);
+
+    const existingUnrecorded = studioProjectLiquidityQuote({
+      ...quote,
+      pool: { ...quote.pool, exists: true },
+    }, [pool]);
+    expect(existingUnrecorded.error).toBe("This liquidity quote is not scoped to an AMM pool owned by this project.");
+    expect(liquidityQuoteReady(existingUnrecorded)).toBe(false);
+
+    const removeQuote = studioProjectRemoveLiquidityQuote({
+      position: {
+        tokenA: quote.tokenA,
+        tokenB: quote.tokenB,
+        pool: { ...quote.pool, exists: true },
+        lpToken: { address: unrecordedPool, decimals: 18 },
+      },
+      liquidity: 1n,
+      amountA: 1n,
+      amountB: 1n,
+      amountAMin: 1n,
+      amountBMin: 1n,
+      slippageBps: 50,
+    }, [pool]);
+    expect(removeQuote.error).toBe("This remove-liquidity quote is not scoped to an AMM pool owned by this project.");
+    expect(removeLiquidityQuoteReady(removeQuote)).toBe(false);
+
+    const recorded = studioProjectLiquidityQuote({
+      ...quote,
+      pool: { ...quote.pool, address: pool, exists: true },
+    }, [pool]);
+    expect(recorded.error).toBeUndefined();
+    expect(liquidityQuoteReady(recorded)).toBe(true);
+  });
+
+  test("preserves disconnected, loading, error, and known-zero native balance states", async () => {
+    const readError = new Error("RPC unavailable");
+
+    expect(resolveNativeBalanceState(undefined, "pending", undefined, null)).toEqual({ status: "disconnected" });
+    expect(resolveNativeBalanceState(oldGrant.currentHolder, "pending", undefined, null)).toEqual({ status: "loading" });
+    expect(resolveNativeBalanceState(oldGrant.currentHolder, "error", undefined, readError)).toEqual({ status: "error", error: readError });
+    expect(resolveNativeBalanceState(oldGrant.currentHolder, "success", 0n, null)).toEqual({ status: "ready", value: 0n });
+
+    const source = await Bun.file(new URL("../src/app/App.tsx", import.meta.url)).text();
+    expect(source).toContain('nativeBalance={nativeBalance.status === "ready" ? nativeBalance.value : undefined}');
+    expect(source).not.toContain("nativeBalance={undefined}");
+  });
+
+  test("keeps Alerts aliases unavailable without Sentinel and preserves configured deep-link queries", () => {
+    const html = renderToString(<AlertsUnavailablePage returnHref="/explore?chain=31337" />);
+
+    expect(html).toContain("Sentinel is not configured");
+    expect(html).toContain("Read-only product use remains available");
+    expect(viewFromPath("/notifications")).toBe("notifications");
+    expect(viewFromPath("/sentinel")).toBe("notifications");
+    expect(viewFromPath("/settings/alerts")).toBe("notifications");
+    expect(shouldCanonicalizeAppRoute({ kind: "alerts" })).toBe(false);
+    expect(shouldCanonicalizeAppRoute({ kind: "explore", chainId: 31337 })).toBe(true);
+  });
+
+  test("preserves Explore-owned query state and hash while canonicalizing a fresh deep link", () => {
+    expect(canonicalAppLocationHref(
+      { kind: "explore", chainId: 31337 },
+      { search: "?chain=31337&q=Atlas&type=amm", hash: "#directory" },
+    )).toBe("/explore?chain=31337&q=Atlas&type=amm#directory");
+    expect(canonicalAppLocationHref(
+      { kind: "explore", chainId: 31337 },
+      { search: "?chain=31337&q=Atlas&type=invalid", hash: "#directory" },
+    )).toBe("/explore?chain=31337&q=Atlas#directory");
+    expect(canonicalAppLocationHref(
+      { kind: "portfolio", chainId: 31337 },
+      { search: "?chain=998&q=Atlas&type=amm", hash: "#directory" },
+    )).toBe("/portfolio?chain=31337");
+  });
+
+  test("surfaces saved-project storage warnings inside the project layout", () => {
+    const html = renderToString(
+      <ProjectLayout
+        activeSection="overview"
+        chainName="Local Anvil"
+        loading={false}
+        onNavigateSection={() => undefined}
+        savedProjectsWarning="Browser storage is unavailable."
+      >
+        <div>Project content</div>
+      </ProjectLayout>,
+    );
+
+    expect(html).toContain("Saved-project storage warning:");
+    expect(html).toContain("Browser storage is unavailable.");
+    expect(html).toContain("Project content");
+  });
+
+  test("classifies a recorded address-only AMM pool after its market read completes", () => {
+    const dashboard = {
+      address: boardroom,
+      catalog: [],
+      histories: [],
+      snapshot: {
+        distributionSummaries: [],
+        lockedLiquiditySummaries: [{ address: locker, state: { pool } }],
+        shareToken,
+      },
+    } as unknown as ProductBoardroomDashboardState;
+
+    const option = participationOptions(dashboard, {}, {
+      loaded: true,
+      loading: false,
+      pools: [],
+    }).find((candidate) => candidate.path === "amm");
+
+    expect(option?.status).toBe("Unavailable");
+    expect(option?.group).toBe("unavailable");
+    expect(option?.reason).toContain("No current reserve snapshot was returned");
+  });
+
   test("keeps legacy workspace routes while using product labels", () => {
     expect(viewFromPath("/wallet")).toBe("wallet");
     expect(viewFromPath("/positions")).toBe("wallet");
     expect(viewFromPath("/portfolio")).toBe("wallet");
-    expect(viewFromPath("/notifications")).toBe("project");
-    expect(viewFromPath("/sentinel")).toBe("project");
+    expect(viewFromPath("/notifications")).toBe("notifications");
+    expect(viewFromPath("/sentinel")).toBe("notifications");
+    expect(viewFromPath("/settings/alerts")).toBe("notifications");
     expect(viewFromPath("/notifications", { VITE_SENTINEL_API_URL: "https://api.example.test" })).toBe("notifications");
     expect(viewFromPath("/tools")).toBe("advanced");
     expect(viewFromPath("/advanced")).toBe("advanced");
@@ -679,6 +917,9 @@ describe("web app shell", () => {
     const observerHtml = renderGrantInspector("0x5000000000000000000000000000000000000000", false);
 
     expect(holderHtml).toContain("Grant holder");
+    expect(holderHtml).toContain("Prepare settlement");
+    expect(holderHtml).toContain("Advanced settlement controls");
+    expect(holderHtml).not.toContain("Settle available");
     expect(holderHtml).not.toContain("Settlement is only available to the current grant holder wallet.");
     expect(holderHtml).not.toContain("Issuer Controls");
     expect(observerHtml).toContain("Observer");
@@ -1031,6 +1272,7 @@ function renderGrantInspector(
       setPaymentApproval={noopSetter}
       setSettleAmount={noopSetter}
       settleAmount="100"
+      settleAvailableGrant={noop}
       settleGrant={noop}
       withdrawExpired={noop}
     />,

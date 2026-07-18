@@ -9,8 +9,53 @@ import {
   SentinelApiError,
   type SentinelFetch,
 } from "../src/lib/sentinel";
+import { notificationFocusFromLocation } from "../src/app/views/sentinel-settings";
+import {
+  governanceWatchSuggestionState,
+  watchGovernanceSubscriptionDraft,
+} from "../src/features/notifications/subscription-settings";
 
 describe("sentinel web client", () => {
+  test("preserves local alert-rule drafts when adding a governance watch", () => {
+    const existing = {
+      address: "0x2000000000000000000000000000000000000000" as const,
+      chainId: 8453,
+    };
+    const suggested = {
+      address: "0x3000000000000000000000000000000000000000" as const,
+      chainId: 31337,
+    };
+
+    expect(watchGovernanceSubscriptionDraft({ boardrooms: [existing], minSeverity: "high" }, suggested)).toEqual({
+      boardrooms: [existing, suggested],
+      minSeverity: "high",
+      mode: "explicit",
+    });
+    const persisted = { boardrooms: [], minSeverity: "medium" as const, mode: "holdings" as const };
+    const pendingDraft = { boardrooms: [existing, suggested], minSeverity: "high" as const, mode: "explicit" as const };
+    expect(governanceWatchSuggestionState(persisted, pendingDraft, suggested)).toBe("pending");
+    expect(watchGovernanceSubscriptionDraft(pendingDraft, suggested)).toEqual({
+      boardrooms: [existing, suggested],
+      minSeverity: "high",
+      mode: "explicit",
+    });
+  });
+
+  test("preserves a canonical project watch focus and rejects unsafe return URLs", () => {
+    const boardroom = "0x1000000000000000000000000000000000000000";
+    expect(notificationFocusFromLocation(`?chain=31337&boardroom=${boardroom}&return=%2Fprojects%2F31337%2F${boardroom}%2Fgovernance`))
+      .toEqual({
+        boardroom,
+        chainId: 31337,
+        returnHref: `/projects/31337/${boardroom}/governance`,
+      });
+    expect(notificationFocusFromLocation(`?chain=31337&boardroom=${boardroom}&return=%2F%2Fevil.example`))
+      .toEqual({ boardroom, chainId: 31337 });
+    for (const control of ["%09", "%0a", "%0d"]) {
+      expect(notificationFocusFromLocation(`?chain=31337&boardroom=${boardroom}&return=%2F${control}%2Fevil.example`))
+        .toEqual({ boardroom, chainId: 31337 });
+    }
+  });
   test("reads an optional VITE_SENTINEL_API_URL", () => {
     expect(getSentinelBaseUrl({})).toBeUndefined();
     expect(getSentinelBaseUrl({ VITE_SENTINEL_API_URL: "" })).toBeUndefined();
@@ -160,6 +205,23 @@ describe("sentinel web client", () => {
     await client.listPublicActions({ chainId: 31337, limit: 5, minSeverity: "high", status: "queued" });
 
     expect(calls[0]).toBe("https://api.example.test/public/actions?limit=5&minSeverity=high&status=queued&chainId=31337");
+  });
+
+  test("reads account-scoped delivery receipts with pagination and cancellation", async () => {
+    const calls: { input: string; init: RequestInit | undefined }[] = [];
+    const fetcher: SentinelFetch = async (input, init) => {
+      calls.push({ input: input.toString(), init });
+      return jsonResponse({ items: [], page: { limit: 10, nextCursor: null } });
+    };
+    const controller = new AbortController();
+    const client = createSentinelClient({ baseUrl: "https://api.example.test", fetcher });
+
+    await client.listNotificationDeliveries({ cursor: "opaque-cursor", limit: 10 }, controller.signal);
+
+    expect(calls[0]?.input).toBe("https://api.example.test/notifications?cursor=opaque-cursor&limit=10");
+    expect(calls[0]?.init?.cache).toBe("no-store");
+    expect(calls[0]?.init?.credentials).toBe("include");
+    expect(calls[0]?.init?.signal).toBe(controller.signal);
   });
 
   test("surfaces API errors with status", async () => {

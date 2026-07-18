@@ -13,6 +13,8 @@ import {
   createParticipationFlowContent,
   findParticipationDistribution,
   maximumWithSlippage,
+  ClaimTicketVerificationGuard,
+  claimTicketVerificationSourceIdentity,
   merkleAirdropActionIdentity,
   minimumWithSlippage,
   parseMerkleProof,
@@ -152,6 +154,7 @@ const dashboard: ProductBoardroomDashboardState = {
 const publicClient = { readContract: async () => 0n } as unknown as PublicClient;
 const context = {
   account: owner,
+  chainId: 31337,
   dashboard,
   pendingAction: undefined,
   publicClient,
@@ -353,6 +356,62 @@ describe("participation bounds and proof parsing", () => {
     })).not.toBe(grantIdentity);
   });
 
+  test("accepts the newest claim-ticket verification first and rejects the older late result", async () => {
+    const oldestSource = claimTicketVerificationSourceIdentity({
+      account: owner,
+      airdrop,
+      chainId: 31337,
+      merkleRoot: zeroHash,
+      rawTicket: "ticket-oldest",
+    });
+    const newestSource = claimTicketVerificationSourceIdentity({
+      account: owner,
+      airdrop,
+      chainId: 31337,
+      merkleRoot: zeroHash,
+      rawTicket: "ticket-newest",
+    });
+    const guard = new ClaimTicketVerificationGuard(oldestSource);
+    const oldest = guard.bind(guard.begin(), "allocation-oldest");
+    if (!oldest) throw new Error("Expected the oldest request to bind.");
+    const oldestRead = deferred<void>();
+    const oldestCompletion = oldestRead.promise.then(() => guard.complete(oldest));
+
+    guard.syncSource(newestSource);
+    const newest = guard.bind(guard.begin(), "allocation-newest");
+    if (!newest) throw new Error("Expected the newest request to bind.");
+    const newestRead = deferred<void>();
+    const newestCompletion = newestRead.promise.then(() => guard.complete(newest));
+
+    newestRead.resolve();
+    await expect(newestCompletion).resolves.toBe(true);
+    expect(guard.isVerified(newestSource, "allocation-newest")).toBe(true);
+
+    oldestRead.resolve();
+    await expect(oldestCompletion).resolves.toBe(false);
+    expect(guard.isVerified(newestSource, "allocation-newest")).toBe(true);
+  });
+
+  test("clears claim-ticket verification when loaded allocation fields are edited", () => {
+    const source = claimTicketVerificationSourceIdentity({
+      account: owner,
+      airdrop,
+      chainId: 31337,
+      merkleRoot: zeroHash,
+      rawTicket: "ticket",
+    });
+    const guard = new ClaimTicketVerificationGuard(source);
+    const request = guard.bind(guard.begin(), "allocation:1:10:proof-a");
+    if (!request) throw new Error("Expected the request to bind.");
+
+    expect(guard.complete(request)).toBe(true);
+    expect(guard.isVerified(source, "allocation:1:10:proof-a")).toBe(true);
+
+    guard.invalidate();
+    expect(guard.isVerified(source, "allocation:1:10:proof-a")).toBe(false);
+    expect(guard.isVerified(source, "allocation:2:10:proof-a")).toBe(false);
+  });
+
   test("uses one fresh curve quote for both action selection and transaction bounds", async () => {
     const state = curveDistribution.state as MigratingBondingCurveState;
     const intent = bondingCurveIntent(state);
@@ -454,6 +513,7 @@ describe("participation flow composition", () => {
       <Web3Provider>
         <SwapPanel
           account={undefined}
+          actionCapability={{ status: "connect" }}
           deployment={undefined}
           form={defaultSwapForm()}
           liquidityForm={defaultLiquidityForm()}
@@ -484,6 +544,7 @@ describe("participation flow composition", () => {
           refreshTokens={noop}
           removeLiquidity={noop}
           runAction={async (_label, action) => action()}
+          switchWalletNetwork={noop}
         />
       </Web3Provider>,
     );

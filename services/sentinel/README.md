@@ -50,6 +50,8 @@ Harness credentials such as API keys or CLI logins belong to the host environmen
 
 Authentication is wallet-first: the first SIWE signature creates a pseudonymous local account with no profile form, password, or deliverable email address. Every wallet linked with a fresh SIWE signature becomes an equal sign-in credential for that account; alert coverage is a separate per-wallet setting. This release accepts EOA signatures only; ERC-1271 smart-account authentication needs a chain-scoped identity model and is rejected rather than merging the same contract address across chains. Configured social providers can be linked explicitly and can then sign back into that same account; they cannot create walletless accounts. Better Auth organization tables are present as a dormant foundation for future group accounts, but organization creation and UI are disabled until group ownership semantics are defined.
 
+Signed-in accounts can read their own keyset-paginated delivery receipts from `GET /notifications`. The response exposes safe operational state and action context, but never returns raw provider errors, chat identifiers, credentials, or another account's rows. A `sent` receipt means the provider accepted the send; it does not prove that a person read it.
+
 Built-in OAuth provider callbacks use `${BETTER_AUTH_URL}/auth/callback/<provider>`, for example `http://localhost:8787/auth/callback/discord` in local development. Telegram uses Better Auth's Generic OAuth callback at `${BETTER_AUTH_URL}/auth/oauth2/callback/telegram`; keep the BotFather Web Login signing algorithm at its `RS256` default. Telegram authentication does not grant alert-delivery access, which remains an explicit bot-linking step.
 
 ## Local Commands

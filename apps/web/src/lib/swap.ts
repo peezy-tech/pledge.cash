@@ -10,6 +10,14 @@ import {
 } from "@pledge.cash/sdk";
 import { isAddress } from "viem";
 import { errorMessage } from "./forms";
+import {
+  swapExecutionMetrics as calculateSwapExecutionMetrics,
+  unavailableMetric,
+  type ExactRational,
+  type MetricState,
+  type NormalizedPrice,
+  type SwapExecutionMetrics,
+} from "./market-data";
 import { formatTokenAmount, parseTokenAmountInput } from "./token-amounts";
 
 export type SwapForm = {
@@ -97,6 +105,7 @@ export type LiquidityPoolState = {
 };
 
 export type SwapQuoteState = {
+  requestIdentity: string;
   tokenIn?: SwapTokenMetadata;
   tokenOut?: SwapTokenMetadata;
   pool?: SwapPoolState;
@@ -107,6 +116,8 @@ export type SwapQuoteState = {
   feeBps?: bigint;
   feeDenominator?: bigint;
   protocolFeeShareBps?: bigint;
+  effectiveExecutionPrice?: MetricState<NormalizedPrice>;
+  feeInclusivePriceImpact?: MetricState<ExactRational>;
   error?: string;
 };
 
@@ -203,6 +214,17 @@ const FULL_BPS_BIGINT = 10_000n;
 const MAX_DISCOVERED_POOLS = 500;
 const MAX_PINNED_POOLS = 64;
 const SWAP_DISCOVERY_CONCURRENCY = 8;
+
+export function swapQuoteRequestIdentity(form: SwapForm): string {
+  return [
+    form.tokenIn.trim().toLowerCase(),
+    form.tokenOut.trim().toLowerCase(),
+    form.amountIn.trim(),
+    form.slippageBps.trim(),
+    form.deadline.trim(),
+    form.useNative ? "native" : "wrapped",
+  ].join("|");
+}
 
 export function defaultSwapForm(): SwapForm {
   return {
@@ -374,6 +396,7 @@ export async function readSwapQuote(
   form: SwapForm,
   account?: Address | undefined,
 ): Promise<SwapQuoteState> {
+  const requestIdentity = swapQuoteRequestIdentity(form);
   let slippageBps = DEFAULT_SLIPPAGE_BPS;
 
   try {
@@ -394,19 +417,20 @@ export async function readSwapQuote(
     ]);
 
     if (inputToken.decimals === undefined) {
-      return baseQuote({ inputToken, outputToken, slippageBps, ...fees, error: "From token decimals could not be read." });
+      return baseQuote({ requestIdentity, inputToken, outputToken, slippageBps, ...fees, error: "From token decimals could not be read." });
     }
     if (outputToken.decimals === undefined) {
-      return baseQuote({ inputToken, outputToken, slippageBps, ...fees, error: "To token decimals could not be read." });
+      return baseQuote({ requestIdentity, inputToken, outputToken, slippageBps, ...fees, error: "To token decimals could not be read." });
     }
 
     const amountIn = parseTokenAmountInput(form.amountIn, inputToken, "Input amount");
     if (amountIn === 0n) {
-      return baseQuote({ inputToken, outputToken, amountIn, slippageBps, ...fees, error: "Enter a positive input amount." });
+      return baseQuote({ requestIdentity, inputToken, outputToken, amountIn, slippageBps, ...fees, error: "Enter a positive input amount." });
     }
 
     if (isZeroAddress(poolAddress)) {
       return baseQuote({
+        requestIdentity,
         inputToken,
         outputToken,
         amountIn,
@@ -417,15 +441,47 @@ export async function readSwapQuote(
     }
 
     const path = [tokenIn, tokenOut] as const;
-    const [pool, amounts] = await Promise.all([
-      readSwapPoolState(client, poolAddress, tokenIn),
-      client.readContract({ address: router, abi: ammRouterAbi, functionName: "getAmountsOut", args: [amountIn, path] }) as Promise<readonly bigint[]>,
-    ]);
+    const amountsRead = (client.readContract({
+      address: router,
+      abi: ammRouterAbi,
+      functionName: "getAmountsOut",
+      args: [amountIn, path],
+    }) as Promise<readonly bigint[]>).then(
+      (amounts) => ({ status: "fulfilled" as const, amounts }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+    const pool = await readSwapPoolState(client, poolAddress, tokenIn, tokenOut);
+    if (pool.reserveIn === 0n || pool.reserveOut === 0n) {
+      const executionMetrics = unavailableSwapExecutionMetrics("The AMM pool has no two-sided liquidity.");
+      return {
+        requestIdentity,
+        tokenIn: inputToken,
+        tokenOut: outputToken,
+        pool,
+        amountIn,
+        slippageBps,
+        ...fees,
+        ...executionMetrics,
+        error: "The AMM pool has no two-sided liquidity.",
+      };
+    }
+
+    const amountsResult = await amountsRead;
+    if (amountsResult.status === "rejected") throw amountsResult.error;
+    const amounts = amountsResult.amounts;
     const amountOut = amounts[1] ?? 0n;
     const amountOutMin = applySlippage(amountOut, slippageBps);
+    const executionMetrics = swapQuoteExecutionMetrics({
+      tokenIn: inputToken,
+      tokenOut: outputToken,
+      pool,
+      amountIn,
+      amountOut,
+    });
 
     if (amountOut === 0n) {
       return {
+        requestIdentity,
         tokenIn: inputToken,
         tokenOut: outputToken,
         pool,
@@ -434,11 +490,13 @@ export async function readSwapQuote(
         amountOutMin,
         slippageBps,
         ...fees,
+        ...executionMetrics,
         error: "Swap output would be zero.",
       };
     }
 
     return {
+      requestIdentity,
       tokenIn: inputToken,
       tokenOut: outputToken,
       pool,
@@ -447,10 +505,34 @@ export async function readSwapQuote(
       amountOutMin,
       slippageBps,
       ...fees,
+      ...executionMetrics,
     };
   } catch (error) {
-    return { slippageBps, error: errorMessage(error) };
+    return { requestIdentity, slippageBps, error: errorMessage(error) };
   }
+}
+
+export function swapQuoteExecutionMetrics(input: {
+  tokenIn: SwapTokenMetadata;
+  tokenOut: SwapTokenMetadata;
+  pool: SwapPoolState;
+  amountIn: bigint;
+  amountOut: bigint;
+}): Pick<SwapQuoteState, "effectiveExecutionPrice" | "feeInclusivePriceImpact"> {
+  if (input.tokenIn.decimals === undefined || input.tokenOut.decimals === undefined) {
+    return unavailableSwapExecutionMetrics("Execution metrics require verified token decimals.");
+  }
+  const metrics = calculateSwapExecutionMetrics({
+    tokenIn: input.tokenIn.address,
+    tokenInDecimals: input.tokenIn.decimals,
+    tokenOut: input.tokenOut.address,
+    tokenOutDecimals: input.tokenOut.decimals,
+    amountIn: input.amountIn,
+    amountOut: input.amountOut,
+    reserveIn: input.pool.reserveIn,
+    reserveOut: input.pool.reserveOut,
+  });
+  return executionMetricFields(metrics);
 }
 
 export async function readLiquidityQuote(
@@ -883,7 +965,26 @@ function removeLiquidityAmountsReady(quote: RemoveLiquidityQuoteState): boolean 
   );
 }
 
+function executionMetricFields(
+  metrics: SwapExecutionMetrics,
+): Pick<SwapQuoteState, "effectiveExecutionPrice" | "feeInclusivePriceImpact"> {
+  return {
+    effectiveExecutionPrice: metrics.effectiveExecutionPrice,
+    feeInclusivePriceImpact: metrics.feeInclusivePriceImpact,
+  };
+}
+
+function unavailableSwapExecutionMetrics(
+  reason: string,
+): Pick<SwapQuoteState, "effectiveExecutionPrice" | "feeInclusivePriceImpact"> {
+  return {
+    effectiveExecutionPrice: unavailableMetric(reason),
+    feeInclusivePriceImpact: unavailableMetric(reason),
+  };
+}
+
 function baseQuote(input: {
+  requestIdentity: string;
   inputToken: SwapTokenMetadata;
   outputToken: SwapTokenMetadata;
   slippageBps: number;
@@ -894,6 +995,7 @@ function baseQuote(input: {
   error: string;
 }): SwapQuoteState {
   const quote: SwapQuoteState = {
+    requestIdentity: input.requestIdentity,
     tokenIn: input.inputToken,
     tokenOut: input.outputToken,
     slippageBps: input.slippageBps,
@@ -984,6 +1086,7 @@ async function readSwapPoolState(
   client: PledgeCashReadClient,
   poolAddress: Address,
   tokenIn: Address,
+  tokenOut: Address,
 ): Promise<SwapPoolState> {
   const [token0, token1, reserves] = await Promise.all([
     client.readContract({ address: poolAddress, abi: ammPoolAbi, functionName: "token0" }) as Promise<Address>,
@@ -992,6 +1095,12 @@ async function readSwapPoolState(
   ]);
   const [reserve0, reserve1] = reserves;
   const tokenInIsToken0 = sameAddress(token0, tokenIn);
+  const tokenInIsToken1 = sameAddress(token1, tokenIn);
+  const tokenOutIsToken0 = sameAddress(token0, tokenOut);
+  const tokenOutIsToken1 = sameAddress(token1, tokenOut);
+  if (!(tokenInIsToken0 && tokenOutIsToken1) && !(tokenInIsToken1 && tokenOutIsToken0)) {
+    throw new Error("The AMM pool token pair does not match the requested swap route.");
+  }
 
   return {
     address: poolAddress,
