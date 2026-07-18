@@ -12,6 +12,8 @@ import type {
   HealthResponse,
   LinkWalletRequest,
   LinkWalletResponse,
+  NotificationDeliveriesQuery,
+  NotificationDeliveriesResponse,
   PublicActionsQuery,
   PublicActionsResponse,
   PutSubscriptionRequest,
@@ -46,6 +48,7 @@ export type SocialAuthRequest = AuthRedirectRequest & {
 
 export type SentinelPublicActionsQuery = Partial<PublicActionsQuery>;
 export type SentinelBoardroomActionsQuery = Partial<BoardroomActionsQuery>;
+export type SentinelNotificationDeliveriesQuery = Partial<NotificationDeliveriesQuery>;
 
 export type SentinelClient = ReturnType<typeof createSentinelClient>;
 
@@ -132,6 +135,15 @@ export function createSentinelClient(options: SentinelClientOptions = {}) {
         { cache: "no-store", query: queryParams(query), signal },
       ),
     listChannels: () => sentinelJson<ChannelsResponse>(baseUrl, fetcher, "/channels"),
+    listNotificationDeliveries: (
+      query?: SentinelNotificationDeliveriesQuery | undefined,
+      signal?: AbortSignal | undefined,
+    ) =>
+      sentinelJson<NotificationDeliveriesResponse>(baseUrl, fetcher, "/notifications", {
+        cache: "no-store",
+        query: notificationDeliveryQueryParams(query),
+        signal,
+      }),
     listPublicActions: (query?: SentinelPublicActionsQuery | undefined, signal?: AbortSignal | undefined) =>
       sentinelJson<PublicActionsResponse>(baseUrl, fetcher, "/public/actions", { query: queryParams(query), signal }),
     linkSocial: (body: SocialAuthRequest) =>
@@ -227,6 +239,15 @@ function queryParams(query: SentinelPublicActionsQuery | SentinelBoardroomAction
     status: query.status,
     ...("boardroom" in query ? { boardroom: query.boardroom } : {}),
     ...("chainId" in query ? { chainId: query.chainId } : {}),
+  };
+}
+
+function notificationDeliveryQueryParams(
+  query: SentinelNotificationDeliveriesQuery | undefined,
+): Record<string, QueryValue> {
+  return {
+    cursor: query?.cursor,
+    limit: query?.limit,
   };
 }
 

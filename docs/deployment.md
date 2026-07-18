@@ -330,16 +330,26 @@ scenario matrix implemented by `SeedLocal.s.sol`:
 
 - direct grant variations: free partially settled, paid transferred and settled,
   and halted before cliff;
-- Seed Labs: Boardroom-issued migrating curve, two curve buyers, migration into locked AMM liquidity, three
+- Seed Labs: prelaunch Boardroom-issued migrating curve, two curve buyers, migration into locked AMM liquidity, three
   post-migration AMM buys, claimable locked-liquidity fees, active reserve and LP bond markets with purchases, and
   three employee option variants (partially settled active, unvested future-cliff, and vested partially settled);
-- Atlas Payroll: active fixed-price sale with two buyers;
-- Northstar Robotics: active bonding curve with three buys and one sell;
-- Harbor Analytics: closed fixed-price sale with two historical buyers and treasury cash already raised.
+- Atlas Payroll: prelaunch active fixed-price sale with two buyers;
+- Northstar Robotics: prelaunch active bonding curve with three buys and one sell;
+- Harbor Analytics: prelaunch closed fixed-price sale with two historical buyers and treasury cash already raised;
+- Beacon Contributors: live two-leaf Merkle airdrop with index `0` already claimed, index `1` still claimable, and both
+  leaves and sibling proofs written to the seed manifest;
+- Civic Compute: launched holder governance with a one-day delay and a queued `setExecutor` action still waiting;
+- Tidelock Storage: winding down while an active fixed-price distribution remains recorded as the explicit blocker to
+  opening redemptions;
+- Final Harbor: redemptions open with CASH registered and snapshotted as a redeemable asset while the seeded holder
+  retains the full circulating share balance.
 
-All four seeded Boardrooms remain prelaunch: `SeedLocal` does not call `Boardroom.launch()`. Its setup transactions use
-direct owner execution, and it does not seed a Merkle airdrop. This distinction matters when using the local data to test
-the launched executor/timelock UI or airdrop claim flows.
+The first four project Boardrooms remain prelaunch. The lifecycle Boardrooms are intentionally independent so airdrop,
+governance, wind-down, and redemption browser checks cannot invalidate one another. The ignored
+`deployments/31337.seed.json` manifest includes the actor identities, Merkle root/leaves/proofs, queued-action hash,
+salt, and calldata, wind-down blocker identity, and redemption asset/snapshot values needed by browser automation.
+Queued-action ETA and expiry must be read from `governanceState(actionHash)`: broadcast block timestamps intentionally are
+not copied from Forge's pre-broadcast simulation into the fixture.
 
 ```sh
 cd packages/contracts

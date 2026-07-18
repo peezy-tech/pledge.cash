@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import type { Address } from "@pledge.cash/sdk";
 import {
   appRouteHref,
+  grantReturnRoute,
+  governanceWatchHref,
   primaryDestination,
+  projectGrantRoute,
   projectRouteHref,
   routeFromLocation,
   routeFromPath,
@@ -61,9 +64,12 @@ describe("canonical application routing", () => {
     expect(routeFromPath("/advanced")).toEqual({ kind: "tools" });
   });
 
-  test("keeps hosted alerts optional", () => {
-    expect(routeFromPath("/notifications", {})).toEqual({ kind: "explore" });
+  test("always classifies alert aliases independently of Sentinel configuration", () => {
+    expect(routeFromPath("/settings/alerts", {})).toEqual({ kind: "alerts" });
+    expect(routeFromPath("/notifications", {})).toEqual({ kind: "alerts" });
+    expect(routeFromPath("/sentinel", {})).toEqual({ kind: "alerts" });
     expect(routeFromPath("/settings/alerts", { VITE_SENTINEL_API_URL: "https://alerts.example.test" })).toEqual({ kind: "alerts" });
+    expect(routeFromPath("/notifications/history", {})).toEqual({ kind: "not-found" });
   });
 
   test("builds stable canonical hrefs and preserves compatibility views", () => {
@@ -87,10 +93,49 @@ describe("canonical application routing", () => {
     });
   });
 
+  test("round-trips only a valid project return context on grant routes", () => {
+    const grant = "0x6000000000000000000000000000000000000000" as Address;
+    const route = projectGrantRoute(31337, grant, boardroom);
+    const href = appRouteHref(route, "/pledge-cash/");
+    expect(href).toBe(`/pledge-cash/grants/31337/${grant}?project=${normalizedBoardroom}`);
+    expect(routeFromLocation(
+      `/pledge-cash/grants/31337/${grant}`,
+      `?project=${boardroom}`,
+      { BASE_URL: "/pledge-cash/" },
+    )).toEqual({ ...route, returnBoardroom: normalizedBoardroom });
+    expect(grantReturnRoute(route)).toEqual({
+      kind: "project",
+      chainId: 31337,
+      boardroom,
+      section: "overview",
+    });
+
+    const withoutContext = routeFromLocation(
+      `/pledge-cash/grants/31337/${grant}`,
+      "?project=//evil.example/path",
+      { BASE_URL: "/pledge-cash/" },
+    );
+    expect(withoutContext).toEqual({ kind: "grant", chainId: 31337, grant });
+    expect(grantReturnRoute(withoutContext as Extract<typeof withoutContext, { kind: "grant" }>)).toEqual({
+      kind: "portfolio",
+      chainId: 31337,
+    });
+  });
+
   test("derives the three-destination product navigation state", () => {
     expect(primaryDestination({ kind: "project", chainId: 31337, boardroom, section: "overview" })).toBe("explore");
     expect(primaryDestination({ kind: "grant", chainId: 31337, grant: boardroom })).toBe("portfolio");
     expect(primaryDestination({ kind: "studio-project", chainId: 31337, boardroom, section: "setup" })).toBe("studio");
     expect(primaryDestination({ kind: "tools" })).toBeUndefined();
+  });
+
+  test("builds a chain-bound governance watch handoff with a safe return route", () => {
+    const boardroom = "0x1000000000000000000000000000000000000000";
+    const href = governanceWatchHref(31337, boardroom, `/projects/31337/${boardroom}/governance`, "/pledge-cash/");
+    const url = new URL(href, "https://example.test");
+    expect(url.pathname).toBe("/pledge-cash/settings/alerts");
+    expect(url.searchParams.get("chain")).toBe("31337");
+    expect(url.searchParams.get("boardroom")).toBe(boardroom);
+    expect(url.searchParams.get("return")).toBe(`/projects/31337/${boardroom}/governance`);
   });
 });

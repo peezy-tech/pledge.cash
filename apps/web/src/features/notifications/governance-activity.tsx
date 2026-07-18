@@ -52,14 +52,17 @@ export function GovernanceActivity({ boardroom, chainId, highlightActionHash }: 
       title="Governance Activity"
       description="Queued, cancelled, and executed Boardroom actions from the public Sentinel feed."
       action={
-        <Button disabled={loading} variant="secondary" onClick={() => void load()}>
+        <Button disabled={loading} type="button" variant="secondary" onClick={() => void load()}>
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           Refresh
         </Button>
       }
     >
-      {error ? <p className="m-0 border-t border-red-950 bg-red-950/35 p-4 text-sm text-red-200">{error}</p> : null}
-      <ol className="m-0 grid list-none gap-px border-t border-zinc-800 bg-zinc-800 p-0">
+      <p aria-live="polite" className="sr-only" role="status">
+        {loading ? "Loading governance activity." : `${actions.length.toString()} governance actions shown.`}
+      </p>
+      {error ? <p className="m-0 border-t border-red-950 bg-red-950/35 p-4 text-sm text-red-200" role="alert">{error}</p> : null}
+      <ol aria-busy={loading} className="m-0 grid list-none gap-px border-t border-zinc-800 bg-zinc-800 p-0">
         {actions.length === 0 ? (
           <li className="bg-zinc-950 p-4 text-sm text-zinc-500">
             {loading ? "Loading governance activity" : "No governance activity"}
@@ -114,7 +117,7 @@ function GovernanceActionRow({ action, highlighted }: { action: PublicActionDto;
         <div>ETA {formatSentinelDate(action.eta)}</div>
         <div className="flex min-w-0 flex-wrap items-center gap-2 xl:justify-end">
           <span className="text-zinc-500">Boardroom</span>
-          <AddressLink address={action.boardroom.address as Address} />
+          <AddressLink address={action.boardroom.address as Address} chainId={action.chainId} />
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-2 xl:justify-end">
           <span className="text-zinc-500">Queued</span>

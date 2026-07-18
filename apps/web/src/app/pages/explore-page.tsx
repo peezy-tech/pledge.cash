@@ -1,16 +1,16 @@
-import { ArrowRight, RefreshCw, Search } from "lucide-react";
+import { ArrowRight, RefreshCw, Search, Star } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Address } from "@pledge.cash/sdk";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { ExploreMarketMetrics, ExploreNetworkSummary } from "../../features/market";
 import { shortAddress } from "../../lib/forms";
 import type { ProductBoardroomCatalogEntry } from "../../lib/product-boardroom";
-import { formatTokenAmount } from "../../lib/token-amounts";
 import { cn } from "../../lib/utils";
 import { PageHeading, PageNotice, RuledSection, SectionHeading } from "./page-primitives";
 
-export type ExploreFilter = "all" | "bond-market" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "amm";
+export type ExploreFilter = "all" | "saved" | "bond-market" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "amm";
 export type ExploreSearchState = { filter: ExploreFilter; query: string };
 
 export type ExplorePageProps = {
@@ -25,14 +25,19 @@ export type ExplorePageProps = {
   onLoadMore?: (() => void) | undefined;
   onOpenProject: (project: ProductBoardroomCatalogEntry) => void;
   onRetry?: (() => void) | undefined;
+  onToggleSaved?: ((project: ProductBoardroomCatalogEntry) => void) | undefined;
   projectHref?: ((project: ProductBoardroomCatalogEntry) => string) | undefined;
   projects: readonly ProductBoardroomCatalogEntry[];
+  savedProjectAddresses?: ReadonlySet<string> | undefined;
+  savedProjectCount?: number | undefined;
+  savedProjectsWarning?: string | undefined;
   selectedAddress?: Address | undefined;
   totalProjects?: number | undefined;
 };
 
 const filters: readonly { label: string; value: ExploreFilter }[] = [
   { label: "All", value: "all" },
+  { label: "Saved", value: "saved" },
   { label: "Fixed price", value: "fixed-price-sale" },
   { label: "Bonds", value: "bond-market" },
   { label: "Curve", value: "migrating-bonding-curve" },
@@ -53,14 +58,21 @@ export function ExplorePage({
   onLoadMore,
   onOpenProject,
   onRetry,
+  onToggleSaved,
   projectHref,
   projects,
+  savedProjectAddresses = new Set<string>(),
+  savedProjectCount = 0,
+  savedProjectsWarning,
   selectedAddress,
   totalProjects,
 }: ExplorePageProps): React.JSX.Element {
   const [filter, setFilter] = useState<ExploreFilter>(() => initialExploreSearchState().filter);
   const [query, setQuery] = useState(() => initialExploreSearchState().query);
-  const visibleProjects = useMemo(() => filterProjects(projects, query, filter), [filter, projects, query]);
+  const visibleProjects = useMemo(
+    () => filterProjects(projects, query, filter, savedProjectAddresses),
+    [filter, projects, query, savedProjectAddresses],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -86,9 +98,10 @@ export function ExplorePage({
     <div className="grid gap-0">
       <PageHeading
         eyebrow="Explore"
-        title="Project directory"
-        description={`Boardrooms discovered on ${chainName}. Open any project to inspect its treasury, participation paths, governance, and onchain evidence.`}
+        title="Project directory: markets and live routes"
+        description={`Browse ${chainName} without a wallet. Inspect current participation status, quote-token prices, liquidity, project contracts, treasury evidence, and governance before deciding whether to connect.`}
       />
+      <ExploreNetworkSummary projects={projects} totalProjects={totalProjects} />
 
       <RuledSection>
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
@@ -109,7 +122,7 @@ export function ExplorePage({
             Chain {chainId} · {directoryCountLabel(projects.length, totalProjects)}
           </p>
         </div>
-        <div aria-label="Participation type" className="mt-4 flex flex-wrap gap-2" role="group">
+        <div aria-label="Project filters" className="mt-4 flex flex-wrap gap-2" role="group">
           {filters.map((item) => (
             <button
               aria-pressed={filter === item.value}
@@ -127,12 +140,19 @@ export function ExplorePage({
             </button>
           ))}
         </div>
+        {savedProjectsWarning ? (
+          <div className="mt-4">
+            <PageNotice title="Saved projects could not be restored" tone="warning">
+              {savedProjectsWarning}
+            </PageNotice>
+          </div>
+        ) : null}
       </RuledSection>
 
       <RuledSection>
         <SectionHeading
-          title="Projects"
-          description="Each row is a complete link. Status and amounts are read from the selected network."
+          title="Compare projects"
+          description="Rows lead with route liveness and quote-token-denominated market facts. Unknown values show why they are unknown; the star only saves a browser shortcut."
         />
         {error ? (
           <div className="mt-4">
@@ -151,19 +171,15 @@ export function ExplorePage({
         ) : visibleProjects.length === 0 ? (
           <div className="mt-5 border-y border-zinc-800 py-8">
             <h3 className="m-0 text-base font-semibold text-zinc-100">
-              {projects.length === 0 ? "No projects discovered" : "No projects match these filters"}
+              {emptyDirectoryTitle(filter, projects.length, savedProjectCount)}
             </h3>
             <p className="m-0 mt-2 max-w-2xl text-sm leading-6 text-zinc-500">
-              {projects.length === 0
-                ? "This network has not returned a Boardroom yet. You can still open Studio to create or inspect one by address."
-                : canLoadMore
-                  ? "No loaded projects match yet. Clear the filters or load more of the directory."
-                  : "Clear the search or choose All to see the full directory."}
+              {emptyDirectoryDescription(filter, projects.length, savedProjectCount, canLoadMore)}
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
-              {projects.length > 0 ? (
+              {projects.length > 0 || filter === "saved" ? (
                 <Button variant="secondary" onClick={() => { setFilter("all"); setQuery(""); }}>
-                  Clear filters
+                  {filter === "saved" ? "Show all projects" : "Clear filters"}
                 </Button>
               ) : emptyAction}
               {canLoadMore && onLoadMore ? (
@@ -181,7 +197,9 @@ export function ExplorePage({
                   active={sameAddress(project.address, selectedAddress)}
                   key={project.address}
                   project={project}
+                  saved={savedProjectAddresses.has(project.address.toLowerCase())}
                   onOpen={() => onOpenProject(project)}
+                  onToggleSaved={onToggleSaved ? () => onToggleSaved(project) : undefined}
                   {...(projectHref ? { href: projectHref(project) } : {})}
                 />
               ))}
@@ -280,12 +298,13 @@ export function filterProjects(
   projects: readonly ProductBoardroomCatalogEntry[],
   query: string,
   filter: ExploreFilter,
+  savedProjectAddresses: ReadonlySet<string> = new Set<string>(),
 ): ProductBoardroomCatalogEntry[] {
   const needle = query.trim().toLowerCase();
   return projects.filter((project) => {
     const matchesQuery = needle.length === 0 || [project.name, project.symbol, project.address, project.path]
       .some((value) => value?.toLowerCase().includes(needle));
-    return matchesQuery && matchesExploreFilter(project, filter);
+    return matchesQuery && matchesExploreFilter(project, filter, savedProjectAddresses);
   });
 }
 
@@ -293,40 +312,49 @@ function ProjectDirectoryRow({
   active,
   href,
   onOpen,
+  onToggleSaved,
   project,
+  saved,
 }: {
   active: boolean;
   href?: string;
   onOpen: () => void;
+  onToggleSaved?: (() => void) | undefined;
   project: ProductBoardroomCatalogEntry;
+  saved: boolean;
 }): React.JSX.Element {
   const content = (
     <>
-      <div className="col-span-4 min-w-0 lg:col-span-1">
+      <div className="min-w-0 pr-14 sm:pr-12">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="truncate text-base font-semibold text-zinc-50">{project.name ?? project.symbol ?? "Untitled project"}</span>
+          <span className="whitespace-normal [overflow-wrap:anywhere] text-base font-semibold text-[var(--pc-text)]">
+            {project.name ?? project.symbol ?? "Untitled project"}
+          </span>
           <Badge variant={active ? "default" : project.error ? "danger" : "muted"}>
             {active ? "Open" : project.error ? "Read issue" : project.status ?? "Discovered"}
           </Badge>
+          {saved ? <Badge variant="muted">Saved</Badge> : null}
           {project.historyError ? <Badge variant="danger">Partial history</Badge> : null}
         </div>
-        <p className="m-0 mt-1 truncate text-xs text-zinc-500">
+        <p className="m-0 mt-1 text-xs leading-5 text-[var(--pc-text-subtle)]">
           {project.symbol ? `${project.symbol} · ` : ""}{shortAddress(project.address)} · {participationLabel(project)}
+          {project.buyerCount === undefined ? "" : ` · Buyers: ${project.buyerCount.toLocaleString()}`}
         </p>
       </div>
-      <DirectoryValue label={allocationMetricLabel(project)} value={formatTokenAmount(project.soldShares, catalogShareMetadata(project))} />
-      <DirectoryValue label="Raised" value={formatTokenAmount(project.cashRaised, catalogCashMetadata(project))} />
-      <DirectoryValue label={participantMetricLabel(project)} value={project.buyerCount === undefined ? "Unknown" : String(project.buyerCount)} />
-      <ArrowRight className="h-4 w-4 shrink-0 text-zinc-600 transition-transform group-hover:translate-x-0.5 group-hover:text-lime-200" />
+      <ExploreMarketMetrics project={project} />
+      <span className="mt-3 flex items-center gap-2 text-xs font-semibold text-[var(--pc-text-muted)]">
+        Open exact project workspace
+        <ArrowRight className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5 group-hover:text-[var(--pc-accent)]" />
+      </span>
     </>
   );
   const className = cn(
-    "group grid w-full min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.7fr)_auto] gap-3 border-b border-zinc-800 py-4 text-left transition-colors hover:bg-zinc-900/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-lime-300/70 sm:px-3 lg:grid-cols-[minmax(0,1.5fr)_minmax(110px,0.45fr)_minmax(110px,0.45fr)_minmax(90px,0.35fr)_auto] lg:items-center",
-    active ? "bg-zinc-900/55" : null,
+    "group block w-full min-w-0 space-y-4 py-4 text-left transition-colors hover:bg-[var(--pc-surface-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--pc-accent)] sm:px-3",
+    active ? "bg-[var(--pc-surface-subtle)]" : null,
   );
 
   return (
-    <li>
+    <li className="relative border-b border-[var(--pc-border)]" data-mobile-layout="stacked-market-row">
       {href ? (
         <a
           className={className}
@@ -342,28 +370,22 @@ function ProjectDirectoryRow({
       ) : (
         <button className={className} type="button" onClick={onOpen}>{content}</button>
       )}
+      {onToggleSaved ? (
+        <button
+          aria-label={saved ? `Remove ${project.name ?? project.symbol ?? "project"} from saved projects` : `Save ${project.name ?? project.symbol ?? "project"}`}
+          aria-pressed={saved}
+          className={cn(
+            "absolute right-0 top-2 grid h-11 w-11 place-items-center rounded-md text-[var(--pc-text-subtle)] transition-colors hover:bg-[var(--pc-surface-raised)] hover:text-[var(--pc-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--pc-accent)] sm:right-2",
+            saved ? "text-[var(--pc-accent)]" : null,
+          )}
+          title={saved ? "Remove from saved projects" : "Save project"}
+          type="button"
+          onClick={onToggleSaved}
+        >
+          <Star className={cn("h-4 w-4", saved ? "fill-current" : null)} />
+        </button>
+      ) : null}
     </li>
-  );
-}
-
-function allocationMetricLabel(project: ProductBoardroomCatalogEntry): string {
-  if (project.distributionKind === "merkle-airdrop") return "Claimed";
-  if (project.distributionKind === "bond-market" || project.distributionKind === "fixed-price-sale" || project.distributionKind === "migrating-bonding-curve") return "Sold";
-  return "Distributed";
-}
-
-function participantMetricLabel(project: ProductBoardroomCatalogEntry): string {
-  if (project.distributionKind === "merkle-airdrop") return "Claimants";
-  if (project.distributionKind === "bond-market" || project.distributionKind === "fixed-price-sale" || project.distributionKind === "migrating-bonding-curve") return "Buyers";
-  return "Participants";
-}
-
-function DirectoryValue({ label, value }: { label: string; value: string }): React.JSX.Element {
-  return (
-    <span className="min-w-0">
-      <span className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-600">{label}</span>
-      <span className="mt-1 block truncate text-sm font-semibold text-zinc-200">{value}</span>
-    </span>
   );
 }
 
@@ -381,10 +403,42 @@ function DirectoryLoading(): React.JSX.Element {
   );
 }
 
-function matchesExploreFilter(project: ProductBoardroomCatalogEntry, filter: ExploreFilter): boolean {
+function matchesExploreFilter(
+  project: ProductBoardroomCatalogEntry,
+  filter: ExploreFilter,
+  savedProjectAddresses: ReadonlySet<string>,
+): boolean {
   if (filter === "all") return true;
+  if (filter === "saved") return savedProjectAddresses.has(project.address.toLowerCase());
   if (filter === "amm") return Boolean(project.pool) || (project.swapCount ?? 0) > 0;
   return project.distributionKind === filter;
+}
+
+function emptyDirectoryTitle(filter: ExploreFilter, loadedProjectCount: number, savedProjectCount: number): string {
+  if (filter === "saved") {
+    return savedProjectCount === 0 ? "No saved projects on this network" : "No saved projects are in the loaded directory";
+  }
+  return loadedProjectCount === 0 ? "No projects discovered" : "No projects match these filters";
+}
+
+function emptyDirectoryDescription(
+  filter: ExploreFilter,
+  loadedProjectCount: number,
+  savedProjectCount: number,
+  canLoadMore: boolean,
+): string {
+  if (filter === "saved") {
+    if (savedProjectCount === 0) return "Save a project from its directory row or project header to keep it available across browser sessions.";
+    return canLoadMore
+      ? "Saved projects can sit outside the loaded directory page. Load more projects or open the saved list in Portfolio."
+      : "The saved identities are still available in Portfolio, but none match the current loaded directory and search.";
+  }
+  if (loadedProjectCount === 0) {
+    return "This network has not returned a Boardroom yet. You can still open Studio to create or inspect one by address.";
+  }
+  return canLoadMore
+    ? "No loaded projects match yet. Clear the filters or load more of the directory."
+    : "Clear the search or choose All to see the full directory.";
 }
 
 function participationLabel(project: ProductBoardroomCatalogEntry): string {
@@ -394,24 +448,6 @@ function participationLabel(project: ProductBoardroomCatalogEntry): string {
   if (project.distributionKind === "migrating-bonding-curve") return "Bonding curve";
   if (project.distributionKind === "merkle-airdrop") return "Airdrop";
   return project.path ?? "Boardroom";
-}
-
-function catalogShareMetadata(project: ProductBoardroomCatalogEntry): { address: Address; decimals?: number; symbol?: string } | undefined {
-  if (!project.shareToken) return undefined;
-  return {
-    address: project.shareToken,
-    ...(project.shareTokenDecimals === undefined ? {} : { decimals: project.shareTokenDecimals }),
-    ...(project.symbol === undefined ? {} : { symbol: project.symbol }),
-  };
-}
-
-function catalogCashMetadata(project: ProductBoardroomCatalogEntry): { address: Address; decimals?: number; symbol?: string } | undefined {
-  if (!project.cashToken) return undefined;
-  return {
-    address: project.cashToken,
-    ...(project.cashTokenDecimals === undefined ? {} : { decimals: project.cashTokenDecimals }),
-    ...(project.cashTokenSymbol === undefined ? {} : { symbol: project.cashTokenSymbol }),
-  };
 }
 
 function sameAddress(first: Address, second: Address | undefined): boolean {

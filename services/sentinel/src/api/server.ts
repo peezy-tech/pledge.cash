@@ -7,6 +7,7 @@ import { verifyMessage, type Address, type Hex } from "viem";
 import { createAuthRoutes, jsonError, type ApiEnv, type SentinelApiDeps } from "./auth";
 import { HealthResponseSchema } from "./dto";
 import { createChannelRoutes } from "./routes/channels";
+import { createNotificationRoutes } from "./routes/notifications";
 import { createPublicRoutes } from "./routes/public";
 import { createSubscriptionRoutes } from "./routes/subscriptions";
 import { createWalletRoutes } from "./routes/wallets";
@@ -60,6 +61,7 @@ export function createApp(inputDeps: SentinelApiDeps): Hono<ApiEnv> {
   app.route("/wallets", createWalletRoutes(deps));
   app.route("/subscriptions", createSubscriptionRoutes(deps));
   app.route("/channels", createChannelRoutes(deps));
+  app.route("/notifications", createNotificationRoutes(deps));
   app.route("/public", createPublicRoutes(deps));
 
   app.notFound((c) => jsonError(c, 404, "Not found"));
