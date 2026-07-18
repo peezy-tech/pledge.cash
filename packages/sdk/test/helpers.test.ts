@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { encodeErrorResult, encodeFunctionData, type Address, type Hex } from "viem";
+import { decodeFunctionData, encodeErrorResult, encodeFunctionData, type Address, type Hex } from "viem";
 import {
   ammPoolAbi,
   ammRouterAbi,
   boardroomAbi,
   boardroomTokenAbi,
+  boardroomRewardsAbi,
+  boardroomRewardsFactoryAbi,
   bondMarketAbi,
   bondMarketFactoryAbi,
   buildBoardroomBondMarketBatch,
@@ -30,6 +32,13 @@ import {
   buildBoardroomOpenRedemptionsTransaction,
   buildBoardroomRedeemTransaction,
   buildBoardroomRegisterRedeemableAssetTransaction,
+  buildBoardroomRewardFundingBatch,
+  buildBoardroomRewardsClaimTransaction,
+  buildBoardroomRewardsCompleteUnstakeTransaction,
+  buildBoardroomRewardsCreationTransaction,
+  buildBoardroomRewardsStakeTransaction,
+  buildBoardroomRewardsTerminalizeTransaction,
+  buildBoardroomRewardsUnstakeRequestTransaction,
   buildBoardroomShareGrantIssuanceBatch,
   buildBoardroomStartWindDownTransaction,
   buildBoardroomWrapNativeBalanceTransaction,
@@ -59,6 +68,8 @@ import {
   queryGrantsHeldByAddress,
   queryGrantsIssuedByAddress,
   readBoardroomState,
+  readBoardroomRewardsAccountState,
+  readBoardroomRewardsState,
   readBondMarketState,
   readFactoryState,
   readFixedPriceSaleState,
@@ -81,6 +92,7 @@ import {
 const factory = "0x0000000000000000000000000000000000000fac" as Address;
 const boardroom = "0x0000000000000000000000000000000000000b0a" as Address;
 const shareToken = "0x0000000000000000000000000000000000000aaa" as Address;
+const rewardPool = "0x0000000000000000000000000000000000000fed" as Address;
 const holder = "0x0000000000000000000000000000000000000b0b" as Address;
 const issuer = "0x00000000000000000000000000000000000a11ce" as Address;
 const other = "0x000000000000000000000000000000000000cafe" as Address;
@@ -268,6 +280,7 @@ describe("SDK action and query helpers", () => {
       policyRegistry: "0x0000000000000000000000000000000000000777",
       wrappedNative,
       shareToken,
+      rewardPool,
       status: 1,
       launched: true,
       executor: issuer,
@@ -341,6 +354,7 @@ describe("SDK action and query helpers", () => {
       owner: issuer,
       wrappedNative,
       shareToken,
+      rewardPool,
       status: 1,
       launched: true,
       executor: issuer,
@@ -449,6 +463,104 @@ describe("SDK action and query helpers", () => {
         args: [holder, shareToken, paymentToken, 1000n, 25n, 3000n, 1000n, 2000n, true, 1200n, salt],
       }),
     );
+  });
+
+  test("reads Boardroom reward pool and account staking state", async () => {
+    const client = {
+      async readContract(parameters: { functionName: string; args?: readonly unknown[] }) {
+        switch (parameters.functionName) {
+          case "factory": return factory;
+          case "boardroom": return boardroom;
+          case "shareToken": return shareToken;
+          case "cooldown": return 86_400n;
+          case "terminalized": return false;
+          case "totalActiveStake": return 1_000n;
+          case "getRewardAssets": return [paymentToken];
+          case "rewardState": return [1_000n, 100n, 2n, 3n, 4n];
+          case "activeStakeOf": return 100n;
+          case "lockedStakeOf": return 120n;
+          case "MAX_PENDING_UNSTAKES": return 2n;
+          case "transferableBalanceOf": return 880n;
+          case "unstakeRequest": return parameters.args?.[1] === 0n ? [20n, 500n] : [0n, 0n];
+          case "earned": return 7n;
+          default: throw new Error(`Unexpected read: ${parameters.functionName}`);
+        }
+      },
+    } as unknown as PledgeCashReadClient;
+
+    await expect(readBoardroomRewardsState(client, rewardPool)).resolves.toMatchObject({
+      address: rewardPool,
+      factory,
+      boardroom,
+      shareToken,
+      cooldown: 86_400n,
+      totalActiveStake: 1_000n,
+      rewardAssets: [{ asset: paymentToken, rewardRate: 2n, unallocated: 4n }],
+    });
+    await expect(readBoardroomRewardsAccountState(client, { rewards: rewardPool, account: holder })).resolves.toMatchObject({
+      rewards: rewardPool,
+      account: holder,
+      activeStake: 100n,
+      lockedStake: 120n,
+      transferableBalance: 880n,
+      pendingUnstakes: [{ slot: 0, amount: 20n, unlockAt: 500n }],
+      earned: [{ asset: paymentToken, amount: 7n }],
+    });
+  });
+
+  test("builds reward pool creation, funding, staking, cooldown, and claim inputs", () => {
+    const creation = buildBoardroomRewardsCreationTransaction({
+      boardroom,
+      factory,
+      cooldown: 86_400n,
+      salt,
+    });
+    expect(creation).toMatchObject({ address: boardroom, functionName: "execute" });
+    const creationCall = creation.args[0];
+    expect(creationCall).toMatchObject({ policy: factory, target: factory, value: 0n });
+    expect(decodeFunctionData({ abi: boardroomRewardsFactoryAbi, data: creationCall.data })).toMatchObject({
+      functionName: "createRewards",
+      args: [86_400n, salt],
+    });
+
+    const funding = buildBoardroomRewardFundingBatch({
+      boardroom,
+      factory,
+      assetPolicy,
+      rewards: rewardPool,
+      asset: paymentToken,
+      amount: 1_000n,
+      duration: 604_800n,
+    });
+    expect(funding).toMatchObject({ address: boardroom, functionName: "executeBatch" });
+    const fundingCalls = funding.args[0];
+    expect(fundingCalls).toHaveLength(2);
+    const decodedFunding = decodeFunctionData({ abi: boardroomRewardsFactoryAbi, data: fundingCalls[1]!.data });
+    expect(decodedFunding.functionName).toBe("fundReward");
+    expect(String(decodedFunding.args?.[0]).toLowerCase()).toBe(rewardPool.toLowerCase());
+    expect(String(decodedFunding.args?.[1]).toLowerCase()).toBe(paymentToken.toLowerCase());
+    expect(decodedFunding.args?.slice(2)).toEqual([1_000n, 604_800n]);
+
+    expect(buildBoardroomRewardsStakeTransaction({ rewards: rewardPool, amount: 100n })).toMatchObject({
+      abi: boardroomRewardsAbi,
+      functionName: "stake",
+      args: [100n],
+    });
+    expect(buildBoardroomRewardsUnstakeRequestTransaction({ rewards: rewardPool, amount: 20n })).toMatchObject({
+      functionName: "requestUnstake",
+      args: [20n],
+    });
+    expect(buildBoardroomRewardsCompleteUnstakeTransaction({ rewards: rewardPool, account: holder, slot: 0n })).toMatchObject({
+      functionName: "completeUnstake",
+      args: [holder, 0n],
+    });
+    expect(buildBoardroomRewardsClaimTransaction({ rewards: rewardPool, asset: paymentToken, recipient: holder })).toMatchObject({
+      functionName: "claim",
+      args: [paymentToken, holder],
+    });
+    expect(buildBoardroomRewardsTerminalizeTransaction({ rewards: rewardPool })).toMatchObject({
+      functionName: "terminalize",
+    });
   });
 
   test("builds Boardroom direct transaction inputs", () => {

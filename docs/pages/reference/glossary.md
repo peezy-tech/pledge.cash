@@ -22,7 +22,7 @@ description: Plain-language definitions for pledge.cash contracts, roles, lifecy
 | Executor | Address allowed to queue delayed Boardroom actions after governance launch. It is not the only address allowed to execute a ready action. |
 | Grant | Contract that escrows existing tokens and releases vested amounts under fixed terms. |
 | Grant-right NFT | ERC721 whose current owner is synchronized as the grant holder while the grant remains live. |
-| Governance-eligible supply | Current or checkpointed shares outside the Boardroom treasury and authenticated protocol custody, used for holder thresholds. |
+| Governance-eligible supply | Current or checkpointed circulating shares outside the Boardroom treasury and authenticated protocol custody, used as the denominator for active-staker thresholds. |
 | Governance epoch | Version that invalidates older queued actions when executor or lifecycle context changes. |
 | Holder | Current grant-right owner for a grant, or a project-share owner in governance/redemption context. Read the surrounding context. |
 | Issuer | Account or Boardroom that escrows tokens into a grant and receives paid-settlement proceeds. |

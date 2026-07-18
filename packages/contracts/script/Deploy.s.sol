@@ -18,6 +18,7 @@ import {LockedLiquidityFactory} from "../src/liquidity/LockedLiquidityFactory.so
 import {PledgeCashDeploymentSalts} from "../src/deployment/PledgeCashDeploymentSalts.sol";
 import {PledgeCashDeterministicDeployer} from "../src/deployment/PledgeCashDeterministicDeployer.sol";
 import {TokenGrantFactory} from "../src/grants/TokenGrantFactory.sol";
+import {BoardroomRewardsFactory} from "../src/rewards/BoardroomRewardsFactory.sol";
 
 interface IOwnableDeploymentRoot {
     function owner() external view returns (address);
@@ -60,6 +61,7 @@ contract Deploy is Script {
         AmmRouter ammRouter;
         LockedLiquidityFactory lockedLiquidityFactory;
         DistributionFactory distributionFactory;
+        BoardroomRewardsFactory boardroomRewardsFactory;
         BondMarketFactory bondMarketFactory;
         BoardroomFactory boardroomFactory;
         BoardroomGovernanceLogic boardroomGovernanceLogic;
@@ -212,6 +214,15 @@ contract Deploy is Script {
                 )
             )
         );
+        state.boardroomRewardsFactory = BoardroomRewardsFactory(
+            _deployDeterministic(
+                state,
+                PledgeCashDeploymentSalts.boardroomRewardsFactory(),
+                abi.encodePacked(
+                    type(BoardroomRewardsFactory).creationCode, abi.encode(address(state.boardroomFactory))
+                )
+            )
+        );
         state.bondMarketFactory = BondMarketFactory(
             _deployDeterministic(
                 state,
@@ -275,6 +286,7 @@ contract Deploy is Script {
         _configureApprovalSpender(state, address(state.distributionFactory));
         _configureApprovalSpender(state, address(state.bondMarketFactory));
         _configureApprovalSpender(state, address(state.lockedLiquidityFactory));
+        _configureApprovalSpender(state, address(state.boardroomRewardsFactory));
         if (!state.boardroomPolicyRegistry.isPolicyAllowed(address(state.assetPolicy))) {
             _requireBootstrapOwner(address(state.boardroomPolicyRegistry), state);
             state.boardroomPolicyRegistry.setPolicyAllowed(address(state.assetPolicy), true);
@@ -283,6 +295,7 @@ contract Deploy is Script {
         _configureModulePolicy(state, address(state.distributionFactory));
         _configureModulePolicy(state, address(state.bondMarketFactory));
         _configureModulePolicy(state, address(state.lockedLiquidityFactory));
+        _configureModulePolicy(state, address(state.boardroomRewardsFactory));
     }
 
     function _configureApprovalSpender(DeployState memory state, address spender) internal {
@@ -412,6 +425,11 @@ contract Deploy is Script {
         _attestAddress(
             "grantFactory.boardroom", address(state.boardroomFactory), state.tokenGrantFactory.boardroomFactory()
         );
+        _attestAddress(
+            "rewardsFactory.boardroom",
+            address(state.boardroomFactory),
+            state.boardroomRewardsFactory.boardroomFactory()
+        );
         _attestAddress("locker.ammRouter", address(state.ammRouter), state.lockedLiquidityFactory.ammRouter());
         _attestAddress("bondFactory.ammFactory", address(state.ammFactory), state.bondMarketFactory.ammFactory());
         _attestAddress(
@@ -450,6 +468,7 @@ contract Deploy is Script {
         json.serialize("boardroomRedemptionPayout", address(state.boardroomRedemptionPayout));
         json.serialize("boardroomLogic", address(state.boardroomLogic));
         json.serialize("distributionFactory", address(state.distributionFactory));
+        json.serialize("boardroomRewardsFactory", address(state.boardroomRewardsFactory));
         json.serialize("bondMarketFactory", address(state.bondMarketFactory));
         json.serialize("bondMarketLogic", state.bondMarketFactory.bondMarketLogic());
         json.serialize("ammFactory", address(state.ammFactory));
@@ -481,6 +500,10 @@ contract Deploy is Script {
             state.assetPolicy.isApprovalSpenderAllowed(address(state.lockedLiquidityFactory))
         );
         json.serialize(
+            "assetBoardroomRewardsSpenderAllowed",
+            state.assetPolicy.isApprovalSpenderAllowed(address(state.boardroomRewardsFactory))
+        );
+        json.serialize(
             "lockedLiquidityPolicyAllowed",
             state.boardroomPolicyRegistry.isPolicyAllowed(address(state.lockedLiquidityFactory))
         );
@@ -506,6 +529,14 @@ contract Deploy is Script {
         json.serialize(
             "lockedLiquidityModulePolicy",
             state.boardroomPolicyRegistry.isModulePolicy(address(state.lockedLiquidityFactory))
+        );
+        json.serialize(
+            "boardroomRewardsPolicyAllowed",
+            state.boardroomPolicyRegistry.isPolicyAllowed(address(state.boardroomRewardsFactory))
+        );
+        json.serialize(
+            "boardroomRewardsModulePolicy",
+            state.boardroomPolicyRegistry.isModulePolicy(address(state.boardroomRewardsFactory))
         );
     }
 
@@ -539,6 +570,7 @@ contract Deploy is Script {
         json.serialize("ammRouterCodeHash", address(state.ammRouter).codehash);
         json.serialize("lockedLiquidityFactoryCodeHash", address(state.lockedLiquidityFactory).codehash);
         json.serialize("distributionFactoryCodeHash", address(state.distributionFactory).codehash);
+        json.serialize("boardroomRewardsFactoryCodeHash", address(state.boardroomRewardsFactory).codehash);
         json.serialize("bondMarketFactoryCodeHash", address(state.bondMarketFactory).codehash);
         json.serialize("bondMarketLogicCodeHash", state.bondMarketFactory.bondMarketLogic().codehash);
         json.serialize("wrappedNativeCodeHash", state.wrappedNative.codehash);
@@ -560,6 +592,7 @@ contract Deploy is Script {
         console2.log("BoardroomRedemptionPayout", address(state.boardroomRedemptionPayout));
         console2.log("BoardroomLogic", address(state.boardroomLogic));
         console2.log("DistributionFactory", address(state.distributionFactory));
+        console2.log("BoardroomRewardsFactory", address(state.boardroomRewardsFactory));
         console2.log("BondMarketFactory", address(state.bondMarketFactory));
         console2.log("BondMarketLogic", state.bondMarketFactory.bondMarketLogic());
         console2.log("AmmFactory", address(state.ammFactory));
@@ -612,6 +645,14 @@ contract Deploy is Script {
         console2.log(
             "AssetLockedLiquiditySpenderAllowed",
             state.assetPolicy.isApprovalSpenderAllowed(address(state.lockedLiquidityFactory))
+        );
+        console2.log(
+            "AssetBoardroomRewardsSpenderAllowed",
+            state.assetPolicy.isApprovalSpenderAllowed(address(state.boardroomRewardsFactory))
+        );
+        console2.log(
+            "BoardroomRewardsPolicyAllowed",
+            state.boardroomPolicyRegistry.isPolicyAllowed(address(state.boardroomRewardsFactory))
         );
         console2.log(
             "LockedLiquidityPolicyAllowed",

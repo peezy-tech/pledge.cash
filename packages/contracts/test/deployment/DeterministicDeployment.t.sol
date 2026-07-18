@@ -15,6 +15,7 @@ import {BoardroomGovernanceLogic} from "../../src/boardroom/BoardroomGovernanceL
 import {BoardroomPolicyRegistry} from "../../src/boardroom/BoardroomPolicyRegistry.sol";
 import {BoardroomRedemptionPayout} from "../../src/boardroom/BoardroomRedemptionPayout.sol";
 import {DistributionFactory} from "../../src/distribution/DistributionFactory.sol";
+import {BoardroomRewardsFactory} from "../../src/rewards/BoardroomRewardsFactory.sol";
 import {ProtocolFeeRouter} from "../../src/fees/ProtocolFeeRouter.sol";
 import {LockedLiquidityFactory} from "../../src/liquidity/LockedLiquidityFactory.sol";
 import {PledgeCashDeploymentSalts} from "../../src/deployment/PledgeCashDeploymentSalts.sol";
@@ -158,6 +159,10 @@ contract DeterministicDeploymentTest is Test {
             _releaseSalt("DistributionFactory", keccak256(type(DistributionFactory).creationCode))
         );
         assertEq(
+            PledgeCashDeploymentSalts.boardroomRewardsFactory(),
+            _releaseSalt("BoardroomRewardsFactory", keccak256(type(BoardroomRewardsFactory).creationCode))
+        );
+        assertEq(
             PledgeCashDeploymentSalts.bondMarketFactory(),
             _releaseSalt("BondMarketFactory", keccak256(type(BondMarketFactory).creationCode))
         );
@@ -179,6 +184,7 @@ contract DeterministicDeploymentTest is Test {
                     keccak256(type(AmmRouter).creationCode),
                     keccak256(type(LockedLiquidityFactory).creationCode),
                     keccak256(type(DistributionFactory).creationCode),
+                    keccak256(type(BoardroomRewardsFactory).creationCode),
                     keccak256(type(BondMarketFactory).creationCode),
                     keccak256(type(BoardroomFactory).creationCode)
                 )
@@ -266,6 +272,12 @@ contract DeterministicDeploymentTest is Test {
                 )
             )
         );
+        BoardroomRewardsFactory rewardsFactory = BoardroomRewardsFactory(
+            _deploy(
+                PledgeCashDeploymentSalts.boardroomRewardsFactory(),
+                abi.encodePacked(type(BoardroomRewardsFactory).creationCode, abi.encode(address(boardroomFactory)))
+            )
+        );
         assertEq(policyRegistry.owner(), owner);
         assertEq(assetPolicy.owner(), owner);
         assertEq(tokenGrantFactory.owner(), owner);
@@ -281,6 +293,8 @@ contract DeterministicDeploymentTest is Test {
         assertEq(lockedLiquidityFactory.ammRouter(), address(ammRouter));
         assertEq(lockedLiquidityFactory.boardroomFactory(), address(boardroomFactory));
         assertEq(distributionFactory.lockedLiquidityFactory(), address(lockedLiquidityFactory));
+        assertEq(rewardsFactory.boardroomFactory(), address(boardroomFactory));
+        assertGt(rewardsFactory.rewardsLogic().code.length, 0);
         assertEq(boardroomFactory.policyRegistry(), address(policyRegistry));
         assertEq(boardroomFactory.wrappedNative(), address(wrappedNative));
         assertEq(boardroomFactory.redemptionPayoutLogic(), address(deployedRedemptionPayout));
@@ -294,12 +308,17 @@ contract DeterministicDeploymentTest is Test {
         tokenGrantFactory.setFeeRecipient(address(protocolFeeRouter));
         ammFactory.setProtocolFeeRecipient(address(protocolFeeRouter));
         assetPolicy.setApprovalSpenderAllowed(address(tokenGrantFactory), true);
+        assetPolicy.setApprovalSpenderAllowed(address(rewardsFactory), true);
         policyRegistry.registerModulePolicy(address(tokenGrantFactory));
+        policyRegistry.registerModulePolicy(address(rewardsFactory));
         vm.stopPrank();
 
         assertTrue(assetPolicy.isApprovalSpenderAllowed(address(tokenGrantFactory)));
+        assertTrue(assetPolicy.isApprovalSpenderAllowed(address(rewardsFactory)));
         assertTrue(policyRegistry.isPolicyAllowed(address(tokenGrantFactory)));
         assertTrue(policyRegistry.isModulePolicy(address(tokenGrantFactory)));
+        assertTrue(policyRegistry.isPolicyAllowed(address(rewardsFactory)));
+        assertTrue(policyRegistry.isModulePolicy(address(rewardsFactory)));
         assertEq(tokenGrantFactory.feeRecipient(), address(protocolFeeRouter));
         assertEq(ammFactory.protocolFeeRecipient(), address(protocolFeeRouter));
     }

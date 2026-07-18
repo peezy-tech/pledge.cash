@@ -83,7 +83,7 @@ export function ProjectLayout({
             <h1 className="m-0 whitespace-normal [overflow-wrap:anywhere] text-3xl font-semibold tracking-[-0.03em] text-[var(--pc-text)] sm:text-5xl">{name}</h1>
             <p className="m-0 mt-3 max-w-3xl text-sm leading-6 text-[var(--pc-text-muted)]">
               {snapshot
-                ? `${snapshot.launched ? "Holder governance is live." : "Holder governance has not launched; the owner still manages project changes directly."} See whether participation is open, what the current route costs in its quote token, how deep the market is, and what holders can do.`
+                ? `${snapshot.launched ? "Staker governance is live." : "Staker governance has not launched; the owner still manages project changes directly."} See whether participation is open, what the current route costs in its quote token, how deep the market is, and what active stakers can do.`
                 : "See whether participation is open, what the route costs, how project funds are held, and what holders can do."}
             </p>
             {dashboard ? (

@@ -16,7 +16,7 @@ Studio is the operator workspace. A Boardroom is the project account, share-toke
 - A durable owner address and an intended governance executor address.
 - A project token name and symbol, deterministic salt, and supply plan.
 - For grants, sales, curves, airdrops, or liquidity: supported ERC20 addresses, quantities, schedules, pricing, and risk limits.
-- A plan for treasury assets, holder protections, wind-down, and recovery before taking funds.
+- A plan for treasury assets, staker protections, wind-down, and recovery before taking funds.
 
 Contract calls are public and irreversible once confirmed. The project-token name and symbol do not override the Boardroom address.
 

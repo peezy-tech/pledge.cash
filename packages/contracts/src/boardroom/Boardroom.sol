@@ -10,6 +10,7 @@ import {BoardroomGovernanceStorage} from "./BoardroomGovernanceStorage.sol";
 import {IBoardroomPolicyRegistry} from "./IBoardroomPolicyRegistry.sol";
 import {BoardroomRedemptionPayout} from "./BoardroomRedemptionPayout.sol";
 import {BoardroomRedemptionStorage} from "./BoardroomRedemptionStorage.sol";
+import {BoardroomRewards} from "../rewards/BoardroomRewards.sol";
 
 contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     uint256 public constant MAX_BATCH_CALLS = 16;
@@ -61,6 +62,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     mapping(address => bool) public isLockedLiquidity;
     mapping(address => uint256) public issuedGrantReservationsForDistribution;
     mapping(address => address) public obligationPolicyOf;
+    address public rewardPool;
 
     error InvalidAddress();
     error InvalidAmount();
@@ -81,6 +83,9 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     error IssuedGrantStillOpen(address grant);
     error IssuedDistributionStillOpen(address distribution);
     error LockedLiquidityStillOpen(address locker);
+    error RewardPoolStillOpen(address rewards);
+    error InvalidRewardPool(address rewards);
+    error RewardPoolAlreadyRegistered(address rewards);
     error InsufficientRedemptionAmount(address asset, uint256 amountOut, uint256 minAmountOut);
     error UnexpectedRedeemableAssetBalanceChange(address asset, uint256 expected, uint256 actual);
     error EmptyBatch();
@@ -101,10 +106,8 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     error ActionContextMismatch(bytes32 actionHash);
     error ModulePolicyRequired(address target);
     error ObligationPolicyMismatch(address target, address expectedPolicy, address actualPolicy);
-    error NotShareholder(address account);
-    error InsufficientHolderPower(
-        address account, uint256 currentBalance, uint256 pastBalance, uint256 requiredBalance
-    );
+    error NotActiveStaker(address account);
+    error InsufficientStakerPower(address account, uint256 currentStake, uint256 pastStake, uint256 requiredStake);
     error NoCirculatingShares();
     error WindDownFinalizationNotReady(uint256 readyAt, uint256 currentTime);
     error RedeemableAssetStillValid(address asset);
@@ -132,6 +135,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     event BoardroomGrantSlotsReleased(address indexed distribution, uint256 count);
     event BoardroomDistributionRecorded(address indexed distribution);
     event BoardroomLockedLiquidityRecorded(address indexed locker);
+    event BoardroomRewardPoolRecorded(address indexed rewards);
     event BoardroomLockedLiquidityExited(
         address indexed locker, address indexed pool, uint256 liquidity, uint256 amountA, uint256 amountB
     );
@@ -329,7 +333,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     function cancelAction(bytes32 actionHash) external {
         _requireBoardroomLaunched();
         _requireStatus(BoardroomStatus.Active);
-        _requireHolderPower(msg.sender, VETO_BPS);
+        _requireStakerPower(msg.sender, VETO_BPS);
         _delegateGovernance(abi.encodeCall(BoardroomGovernanceLogic.cancelAction, (actionHash)));
         emit BoardroomActionCancelled(actionHash, msg.sender);
     }
@@ -385,6 +389,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         _requireStatus(BoardroomStatus.Active);
 
         _wrapNativeBalanceForWindDown();
+        BoardroomToken(shareToken).disableRewardLocks();
         status = BoardroomStatus.WindingDown;
         uint256 epoch =
             abi.decode(_delegateGovernance(abi.encodeCall(BoardroomGovernanceLogic.startWindDown, ())), (uint256));
@@ -544,6 +549,10 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
     function redemptionCredits(address holder) external view returns (uint256) {
         return BoardroomRedemptionStorage.layout().credits[holder];
+    }
+
+    function windDownStartedAt() external view returns (uint256) {
+        return BoardroomGovernanceStorage.layout().windDownStartedAt;
     }
 
     function allocatedRedemptionShares(address holder, address asset) external view returns (uint256) {
@@ -784,6 +793,9 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         if (issuedGrants.length != 0) revert IssuedGrantStillOpen(issuedGrants[0]);
         if (issuedDistributions.length != 0) revert IssuedDistributionStillOpen(issuedDistributions[0]);
         if (lockedLiquidityPositions.length != 0) revert LockedLiquidityStillOpen(lockedLiquidityPositions[0]);
+        if (rewardPool != address(0) && !BoardroomRewards(rewardPool).isTerminalized()) {
+            revert RewardPoolStillOpen(rewardPool);
+        }
     }
 
     function _obligationSlots() internal pure returns (BoardroomRedemptionPayout.ObligationSlots memory slots) {
@@ -888,7 +900,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
 
     function _requireWindDownStarter() internal view {
         if (launched) {
-            _requireHolderPower(msg.sender, WIND_DOWN_BPS);
+            _requireStakerPower(msg.sender, WIND_DOWN_BPS);
             return;
         }
 
@@ -913,9 +925,9 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
         if (msg.sender != owner()) revert Unauthorized();
     }
 
-    function _requireHolderPower(address account, uint256 thresholdBps) internal view {
+    function _requireStakerPower(address account, uint256 thresholdBps) internal view {
         BoardroomGovernanceLogic(governanceLogic)
-            .requireHolderPower(shareToken, account, thresholdBps, GOVERNANCE_BPS_DENOMINATOR);
+            .requireStakerPower(shareToken, rewardPool, account, thresholdBps, GOVERNANCE_BPS_DENOMINATOR);
     }
 
     function _requireAssetManager() internal view {
@@ -925,7 +937,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
             return;
         }
         if (currentStatus == BoardroomStatus.WindingDown && launched) {
-            _requireHolderPower(msg.sender, WIND_DOWN_BPS);
+            _requireStakerPower(msg.sender, WIND_DOWN_BPS);
             return;
         }
         if (currentStatus == BoardroomStatus.WindingDown) {

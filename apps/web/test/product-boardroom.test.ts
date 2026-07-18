@@ -162,6 +162,7 @@ describe("product boardroom runtime discovery", () => {
         if (address === boardroom) {
           if (["owner", "policyRegistry", "wrappedNative", "executor"].includes(functionName)) return boardroom;
           if (functionName === "shareToken") return shareToken;
+          if (functionName === "rewardPool") return "0x0000000000000000000000000000000000000000";
           if (functionName === "status") return 0;
           if (functionName === "launched") return false;
           if (functionName === "governanceDelay") return 0n;
@@ -1412,6 +1413,7 @@ function fakeProductBoardroomClient(
         if (functionName === "policyRegistry") return "0x9000000000000000000000000000000000000000";
         if (functionName === "wrappedNative") return context.wrappedNative;
         if (functionName === "shareToken") return context.shareToken;
+        if (functionName === "rewardPool") return "0x0000000000000000000000000000000000000000";
         if (functionName === "status") return 0;
         if (functionName === "launched") return false;
         if (functionName === "executor") return "0x8000000000000000000000000000000000000000";

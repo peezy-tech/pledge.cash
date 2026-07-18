@@ -10,6 +10,7 @@ import { and, eq } from "drizzle-orm";
 import {
   assetPolicyAbi,
   boardroomAbi,
+  boardroomRewardsAbi,
   erc20Abi,
   hashAction,
   type BoardroomCall,
@@ -67,6 +68,7 @@ const zeroAddress = "0x0000000000000000000000000000000000000000" as const;
 type SeedArtifact = {
   readonly boardroom: Address;
   readonly boardroomOwner: Address;
+  readonly boardroomRewards: Address;
   readonly boardroomShareToken: Address;
   readonly cashToken: Address;
   readonly holder: Address;
@@ -113,6 +115,7 @@ try {
   assertAddress(deployment.boardroomFactory, "deployment.boardroomFactory");
   assertAddress(deployment.assetPolicy, "deployment.assetPolicy");
   assertAddress(seed.boardroom, "seed.boardroom");
+  assertAddress(seed.boardroomRewards, "seed.boardroomRewards");
   assertAddress(seed.boardroomShareToken, "seed.boardroomShareToken");
   assertAddress(seed.cashToken, "seed.cashToken");
 
@@ -441,22 +444,46 @@ async function launchBoardroom(seed: SeedArtifact): Promise<void> {
     functionName: "launched"
   });
 
-  if (launched) {
+  if (!launched) {
+    await submit(ownerClient.writeContract({
+      address: seed.boardroom,
+      abi: boardroomAbi,
+      functionName: "mint",
+      args: [seed.holder, 1n]
+    }), "mint shareholder share");
+    await submit(ownerClient.writeContract({
+      address: seed.boardroom,
+      abi: boardroomAbi,
+      functionName: "launch",
+      args: [governanceDelay]
+    }), "launch boardroom");
+  }
+
+  const activeStake = await publicClient.readContract({
+    address: seed.boardroomRewards,
+    abi: boardroomRewardsAbi,
+    functionName: "activeStakeOf",
+    args: [seed.holder]
+  });
+  if (activeStake !== 0n) {
     return;
   }
 
-  await submit(ownerClient.writeContract({
-    address: seed.boardroom,
-    abi: boardroomAbi,
-    functionName: "mint",
-    args: [seed.holder, 1n]
-  }), "mint shareholder share");
-  await submit(ownerClient.writeContract({
-    address: seed.boardroom,
-    abi: boardroomAbi,
-    functionName: "launch",
-    args: [governanceDelay]
-  }), "launch boardroom");
+  const shareBalance = await publicClient.readContract({
+    address: seed.boardroomShareToken,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: [seed.holder]
+  });
+  if (shareBalance === 0n) {
+    throw new Error("Sentinel integration holder has no Boardroom shares to stake");
+  }
+  await submit(holderClient.writeContract({
+    address: seed.boardroomRewards,
+    abi: boardroomRewardsAbi,
+    functionName: "stake",
+    args: [shareBalance]
+  }), "activate shareholder stake");
 }
 
 async function requireAction(

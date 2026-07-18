@@ -1,6 +1,8 @@
 import { encodeFunctionData, type Address, type Hex } from "viem";
 import {
   boardroomAbi,
+  boardroomRewardsAbi,
+  boardroomRewardsFactoryAbi,
   boardroomTokenAbi,
   bondMarketAbi,
   bondMarketFactoryAbi,
@@ -198,6 +200,58 @@ export function buildBoardroomClaimRedemptionAssetTransaction(input: {
   };
 }
 
+export function buildBoardroomRewardsStakeTransaction(input: { rewards: Address; amount: bigint }) {
+  return {
+    address: input.rewards,
+    abi: boardroomRewardsAbi,
+    functionName: "stake",
+    args: [input.amount] as const,
+  };
+}
+
+export function buildBoardroomRewardsUnstakeRequestTransaction(input: { rewards: Address; amount: bigint }) {
+  return {
+    address: input.rewards,
+    abi: boardroomRewardsAbi,
+    functionName: "requestUnstake",
+    args: [input.amount] as const,
+  };
+}
+
+export function buildBoardroomRewardsCompleteUnstakeTransaction(input: {
+  rewards: Address;
+  account: Address;
+  slot: bigint;
+}) {
+  return {
+    address: input.rewards,
+    abi: boardroomRewardsAbi,
+    functionName: "completeUnstake",
+    args: [input.account, input.slot] as const,
+  };
+}
+
+export function buildBoardroomRewardsClaimTransaction(input: {
+  rewards: Address;
+  asset: Address;
+  recipient: Address;
+}) {
+  return {
+    address: input.rewards,
+    abi: boardroomRewardsAbi,
+    functionName: "claim",
+    args: [input.asset, input.recipient] as const,
+  };
+}
+
+export function buildBoardroomRewardsTerminalizeTransaction(input: { rewards: Address }) {
+  return {
+    address: input.rewards,
+    abi: boardroomRewardsAbi,
+    functionName: "terminalize",
+  };
+}
+
 export function buildBoardroomCall(input: {
   policy: Address;
   target: Address;
@@ -210,6 +264,87 @@ export function buildBoardroomCall(input: {
     value: input.value ?? 0n,
     data: input.data,
   };
+}
+
+export function buildBoardroomRewardsCreationCall(input: {
+  factory: Address;
+  cooldown: bigint;
+  salt: Hex;
+}): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.factory,
+    target: input.factory,
+    data: encodeFunctionData({
+      abi: boardroomRewardsFactoryAbi,
+      functionName: "createRewards",
+      args: [input.cooldown, input.salt],
+    }),
+  });
+}
+
+export function buildBoardroomRewardsCreationTransaction(input: {
+  boardroom: Address;
+  factory: Address;
+  cooldown: bigint;
+  salt: Hex;
+}) {
+  return buildBoardroomExecuteTransaction({
+    boardroom: input.boardroom,
+    call: buildBoardroomRewardsCreationCall(input),
+  });
+}
+
+export function buildBoardroomRewardFundingCall(input: {
+  factory: Address;
+  rewards: Address;
+  asset: Address;
+  amount: bigint;
+  duration: bigint;
+}): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.factory,
+    target: input.factory,
+    data: encodeFunctionData({
+      abi: boardroomRewardsFactoryAbi,
+      functionName: "fundReward",
+      args: [input.rewards, input.asset, input.amount, input.duration],
+    }),
+  });
+}
+
+export function buildBoardroomRewardFundingBatch(input: {
+  boardroom: Address;
+  factory: Address;
+  assetPolicy: Address;
+  rewards: Address;
+  asset: Address;
+  amount: bigint;
+  duration: bigint;
+}) {
+  return buildBoardroomExecuteBatchTransaction({
+    boardroom: input.boardroom,
+    calls: buildBoardroomRewardFundingCalls(input),
+  });
+}
+
+export function buildBoardroomRewardFundingCalls(input: {
+  factory: Address;
+  assetPolicy: Address;
+  rewards: Address;
+  asset: Address;
+  amount: bigint;
+  duration: bigint;
+}): readonly [BoardroomCall, BoardroomCall] {
+  const approvalCall = buildBoardroomCall({
+    policy: requireAssetPolicy(input.assetPolicy),
+    target: input.asset,
+    data: encodeFunctionData({
+      abi: erc20Abi,
+      functionName: "approve",
+      args: [input.factory, input.amount],
+    }),
+  });
+  return [approvalCall, buildBoardroomRewardFundingCall(input)] as const;
 }
 
 export function buildBoardroomSelfCall(input: { boardroom: Address; data: Hex; value?: bigint }): BoardroomCall {

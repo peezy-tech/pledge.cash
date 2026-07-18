@@ -14,9 +14,9 @@ import {
   buildGrantSettlementTransaction,
   buildMigratingBondingCurveBuyTransaction,
   buildMigratingBondingCurveSellTransaction,
-  governanceHolderPowerThreshold,
+  governanceStakerPowerThreshold,
   planBoardroomCallExecution,
-  readBoardroomHolderPower,
+  readBoardroomStakerPower,
   readFixedPriceSaleParticipationQuote,
   readGrantSettlementQuote,
   readMerkleAirdropClaimState,
@@ -29,6 +29,7 @@ import {
 
 const boardroom = "0x0000000000000000000000000000000000000b0a" as Address;
 const shareToken = "0x0000000000000000000000000000000000000aaa" as Address;
+const rewardPool = "0x0000000000000000000000000000000000000fed" as Address;
 const paymentToken = "0x0000000000000000000000000000000000000456" as Address;
 const account = "0x0000000000000000000000000000000000000b0b" as Address;
 const recipient = "0x000000000000000000000000000000000000cafe" as Address;
@@ -117,9 +118,9 @@ describe("governance transaction planning", () => {
   });
 });
 
-describe("holder power", () => {
+describe("staker power", () => {
   test("uses the larger rounded-up current and prior-block threshold", async () => {
-    expect(governanceHolderPowerThreshold(10_001n, 10_000n, 100n)).toBe(101n);
+    expect(governanceStakerPowerThreshold(10_001n, 10_000n, 100n)).toBe(101n);
 
     const requests: { functionName: string; args?: readonly unknown[]; blockNumber?: bigint }[] = [];
     const client = {
@@ -130,10 +131,12 @@ describe("holder power", () => {
         requests.push(parameters);
         switch (parameters.functionName) {
           case "shareToken": return shareToken;
+          case "rewardPool": return rewardPool;
           case "governanceConfig": return [86_400n, 604_800n, 100n, 1_000n];
           case "isEncumberedAccount": return false;
-          case "balanceOf": return 1_001n;
-          case "getPastBalance": return 1_001n;
+          case "balanceOf": return 1_500n;
+          case "activeStakeOf": return 1_001n;
+          case "getPastActiveStake": return 1_001n;
           case "governanceEligibleSupply": return 10_001n;
           case "getPastGovernanceEligibleSupply": return 10_000n;
           default: throw new Error(`Unexpected read: ${parameters.functionName}`);
@@ -141,9 +144,13 @@ describe("holder power", () => {
       },
     } as unknown as PledgeCashBlockReadClient;
 
-    await expect(readBoardroomHolderPower(client, { boardroom, account })).resolves.toMatchObject({
+    await expect(readBoardroomStakerPower(client, { boardroom, account })).resolves.toMatchObject({
       blockNumber: 100n,
       snapshotBlock: 99n,
+      rewardPool,
+      currentTokenBalance: 1_500n,
+      currentActiveStake: 1_001n,
+      pastActiveStake: 1_001n,
       currentEligibleSupply: 10_001n,
       pastEligibleSupply: 10_000n,
       vetoRequired: 101n,
@@ -152,7 +159,7 @@ describe("holder power", () => {
       canStartWindDown: true,
     });
     expect(requests.filter((request) => request.blockNumber !== undefined).every((request) => request.blockNumber === 100n)).toBe(true);
-    expect(requests.find((request) => request.functionName === "getPastBalance")?.args).toEqual([account, 99n]);
+    expect(requests.find((request) => request.functionName === "getPastActiveStake")?.args).toEqual([account, 99n]);
   });
 });
 

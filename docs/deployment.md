@@ -18,7 +18,7 @@ deployments, until a wrapper has promoted a fully verified candidate artifact.
 The deploy script creates or reuses one `PledgeCashDeterministicDeployer`, then creates one
 `BoardroomPolicyRegistry`, one `AssetPolicy`, one `BoardroomGovernanceLogic`, one `BoardroomRedemptionPayout`, one
 `ProtocolFeeRouter`, one `BoardroomFactory`, one `TokenGrantFactory`, one `AmmFactory`, one `AmmRouter`, one
-`LockedLiquidityFactory`, one `DistributionFactory`, and one `BondMarketFactory`. The two Boardroom helpers are deterministic roots deployed
+`LockedLiquidityFactory`, one `DistributionFactory`, one `BoardroomRewardsFactory`, and one `BondMarketFactory`. The two Boardroom helpers are deterministic roots deployed
 before the factory and injected into its internally created `boardroomLogic` implementation. The Boardroom factory is
 deployed before the token-grant and locked-liquidity factories because its address is an immutable provenance
 constructor argument for both. A wrapped-native address is required because every Boardroom stores the canonical
@@ -58,14 +58,14 @@ revenue is not coupled to a wind-downable project Boardroom or to factory owners
 owned by `PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER`; the current script requires that role to match the broadcaster so it
 can deploy or reuse roots safely.
 
-The registry allows `AssetPolicy` for external asset operations and permanently registers the token grant,
-distribution, bond-market, and locked-liquidity factories as module policies. Registration starts each module in `Active` status.
+The registry allows `AssetPolicy` for external asset operations and permanently registers the token-grant,
+distribution, Boardroom-reward, bond-market, and locked-liquidity factories as module policies. Registration starts each module in `Active` status.
 Protocol governance may later set a policy to `LifecycleOnly` or `Disabled`; either status blocks new active calls, but
 permanent module identity and each obligation's canonical-policy binding preserve its approved cleanup calls. A disabled
 module therefore cannot become an untracked raw-call target. Each factory authorizes its own calls and reports any
 created Boardroom obligation for redemption accounting. `AmmRouter` is deployed for user and protocol flows but is not
-a deployment-default Boardroom policy. The deploy script also registers the token grant, distribution, bond-market,
-and locked-liquidity factories as allowed approval spenders in `AssetPolicy`. Boardroom-created share tokens and other
+a deployment-default Boardroom policy. The deploy script also registers the token-grant, distribution, Boardroom-reward,
+bond-market, and locked-liquidity factories as allowed approval spenders in `AssetPolicy`. Boardroom-created share tokens and other
 project-specific assets still need protocol-governance registration in `AssetPolicy` before a Boardroom can approve them
 through that policy.
 
@@ -203,6 +203,7 @@ After a broadcast, verify each chain artifact contains:
 - `boardroomRedemptionPayout`
 - `boardroomLogic`
 - `distributionFactory`
+- `boardroomRewardsFactory`
 - `bondMarketFactory`
 - `bondMarketLogic`
 - `ammFactory`
@@ -225,6 +226,8 @@ After a broadcast, verify each chain artifact contains:
 - `tokenGrantModulePolicy`
 - `distributionPolicyAllowed`
 - `distributionModulePolicy`
+- `boardroomRewardsPolicyAllowed`
+- `boardroomRewardsModulePolicy`
 - `bondMarketPolicyAllowed`
 - `bondMarketModulePolicy`
 - `lockedLiquidityPolicyAllowed`
@@ -232,6 +235,7 @@ After a broadcast, verify each chain artifact contains:
 - `assetWrappedNativeAllowed`
 - `assetTokenGrantSpenderAllowed`
 - `assetDistributionSpenderAllowed`
+- `assetBoardroomRewardsSpenderAllowed`
 - `assetBondMarketSpenderAllowed`
 - `assetLockedLiquiditySpenderAllowed`
 - `factoryOwner`
@@ -253,11 +257,12 @@ After a broadcast, verify each chain artifact contains:
 - `ammRouterCodeHash`
 - `lockedLiquidityFactoryCodeHash`
 - `distributionFactoryCodeHash`
+- `boardroomRewardsFactoryCodeHash`
 - `bondMarketFactoryCodeHash`
 - `bondMarketLogicCodeHash`
 - `wrappedNativeCodeHash`
 
-The four `*ModulePolicy` identity fields must be `true`. Unlike the corresponding mutable `*PolicyAllowed` status,
+The five `*ModulePolicy` identity fields must be `true`. Unlike the corresponding mutable `*PolicyAllowed` status,
 module identity is permanent and remains true if an operator later disables new calls to that module.
 
 `TokenGrantFactory.boardroomFactory()` is an immutable provenance link and must equal the artifact's `boardroomFactory`.
@@ -332,7 +337,8 @@ scenario matrix implemented by `SeedLocal.s.sol`:
   and halted before cliff;
 - Seed Labs: prelaunch Boardroom-issued migrating curve, two curve buyers, migration into locked AMM liquidity, three
   post-migration AMM buys, claimable locked-liquidity fees, active reserve and LP bond markets with purchases, and
-  three employee option variants (partially settled active, unvested future-cliff, and vested partially settled);
+  three employee option variants (partially settled active, unvested future-cliff, and vested partially settled), plus
+  a 30-day prefunded CASH reward stream with an investor actively staking 1,000 SEED shares behind a seven-day cooldown;
 - Atlas Payroll: prelaunch active fixed-price sale with two buyers;
 - Northstar Robotics: prelaunch active bonding curve with three buys and one sell;
 - Harbor Analytics: prelaunch closed fixed-price sale with two historical buyers and treasury cash already raised;

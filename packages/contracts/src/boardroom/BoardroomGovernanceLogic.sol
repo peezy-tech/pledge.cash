@@ -18,6 +18,15 @@ interface IBoardroomGovernanceDistribution {
     function shareToken() external view returns (address);
 }
 
+interface IBoardroomGovernanceRewards {
+    function factory() external view returns (address);
+    function boardroom() external view returns (address);
+    function shareToken() external view returns (address);
+    function activeStakeOf(address account) external view returns (uint256);
+    function getPastActiveStake(address account, uint256 blockNumber) external view returns (uint256);
+    function isTerminalized() external view returns (bool);
+}
+
 contract BoardroomGovernanceLogic {
     uint256 internal constant ASSET_PROBE_GAS = 30_000;
     uint256 internal constant TERMINAL_LIQUIDITY_EXIT_GAS = 1_500_000;
@@ -27,11 +36,8 @@ contract BoardroomGovernanceLogic {
     error ActionNotReady(bytes32 actionHash, uint256 eta, uint256 currentTime);
     error ActionExpired(bytes32 actionHash, uint256 expiresAt, uint256 currentTime);
     error ActionContextMismatch(bytes32 actionHash);
-    error InsufficientHolderPower(
-        address account, uint256 currentBalance, uint256 pastBalance, uint256 requiredBalance
-    );
+    error InsufficientStakerPower(address account, uint256 currentStake, uint256 pastStake, uint256 requiredStake);
     error NoCirculatingShares();
-    error NotShareholder(address account);
     error InvalidRedeemableAsset(address asset);
     error EmptyRedeemableAsset(address asset);
     error RedeemableAssetAlreadyRegistered(address asset);
@@ -48,9 +54,13 @@ contract BoardroomGovernanceLogic {
     error InvalidIssuedGrant(address grant);
     error InvalidIssuedDistribution(address distribution);
     error InvalidLockedLiquidity(address locker);
+    error InvalidRewardPool(address rewards);
+    error RewardPoolAlreadyRegistered(address rewards);
     error IssuedGrantStillOpen(address grant);
     error IssuedDistributionStillOpen(address distribution);
     error LockedLiquidityStillOpen(address locker);
+    error RewardPoolStillOpen(address rewards);
+    error NotActiveStaker(address account);
     error WindDownFinalizationNotReady(uint256 readyAt, uint256 currentTime);
     error CallFailed(address target);
 
@@ -66,6 +76,7 @@ contract BoardroomGovernanceLogic {
         address indexed locker, address indexed pool, uint256 liquidity, uint256 amountA, uint256 amountB
     );
     event BoardroomLockedLiquidityReturnedAsLp(address indexed locker, address indexed pool, uint256 liquidity);
+    event BoardroomRewardPoolRecorded(address indexed rewards);
 
     struct LifecycleSlots {
         uint256 redeemableAssets;
@@ -79,6 +90,7 @@ contract BoardroomGovernanceLogic {
         uint256 isLockedLiquidity;
         uint256 issuedGrantReservationsForDistribution;
         uint256 obligationPolicyOf;
+        uint256 rewardPool;
     }
 
     struct LifecycleConfig {
@@ -164,14 +176,19 @@ contract BoardroomGovernanceLogic {
         governance.epoch = epoch;
     }
 
-    function requireHolderPower(address shareToken, address account, uint256 thresholdBps, uint256 bpsDenominator)
-        external
-        view
-    {
+    function requireStakerPower(
+        address shareToken,
+        address rewardPool,
+        address account,
+        uint256 thresholdBps,
+        uint256 bpsDenominator
+    ) external view {
         if (block.number == 0) revert NoCirculatingShares();
+        if (rewardPool == address(0)) revert NotActiveStaker(account);
 
         BoardroomToken shares = BoardroomToken(shareToken);
-        if (shares.isEncumberedAccount(account)) revert NotShareholder(account);
+        if (shares.isEncumberedAccount(account)) revert NotActiveStaker(account);
+        IBoardroomGovernanceRewards rewards = IBoardroomGovernanceRewards(rewardPool);
         uint256 snapshotBlock = block.number - 1;
         uint256 currentEligible = shares.governanceEligibleSupply();
         uint256 pastEligible = shares.getPastGovernanceEligibleSupply(snapshotBlock);
@@ -181,10 +198,10 @@ contract BoardroomGovernanceLogic {
         uint256 pastRequired = (pastEligible * thresholdBps + bpsDenominator - 1) / bpsDenominator;
         // A custody transition cannot lower the denominator for either side of the prior-block power check.
         uint256 required = currentRequired > pastRequired ? currentRequired : pastRequired;
-        uint256 currentBalance = shares.balanceOf(account);
-        uint256 pastBalance = shares.getPastBalance(account, snapshotBlock);
-        if (currentBalance < required || pastBalance < required) {
-            revert InsufficientHolderPower(account, currentBalance, pastBalance, required);
+        uint256 currentStake = rewards.activeStakeOf(account);
+        uint256 pastStake = rewards.getPastActiveStake(account, snapshotBlock);
+        if (currentStake < required || pastStake < required) {
+            revert InsufficientStakerPower(account, currentStake, pastStake, required);
         }
     }
 
@@ -291,7 +308,11 @@ contract BoardroomGovernanceLogic {
             _reserveIssuedGrantSlots(obligation.account, obligation.grantSlotReservations, config.maxGrants);
             return;
         }
-        _recordLockedLiquidityPosition(config, obligation.account, obligation.aux, policy);
+        if (obligation.kind == IBoardroomObligationPolicy.ObligationKind.LockedLiquidity) {
+            _recordLockedLiquidityPosition(config, obligation.account, obligation.aux, policy);
+            return;
+        }
+        _recordRewardPool(config.policyRegistry, config.shareToken, policy, obligation.account);
     }
 
     function recordGrantFromDistribution(
@@ -415,6 +436,10 @@ contract BoardroomGovernanceLogic {
         if (_arrayLength(lifecycleSlots.lockedLiquidityPositions) != 0) {
             revert LockedLiquidityStillOpen(_arrayAt(lifecycleSlots.lockedLiquidityPositions, 0));
         }
+        address rewards = address(uint160(_slotValue(lifecycleSlots.rewardPool)));
+        if (rewards != address(0) && !IBoardroomGovernanceRewards(rewards).isTerminalized()) {
+            revert RewardPoolStillOpen(rewards);
+        }
         _delegate(redemptionPayout, abi.encodeCall(BoardroomRedemptionPayout.burnTreasuryShares, (shareToken, false)));
         BoardroomRedemptionStorage.layout().supply = BoardroomToken(shareToken).totalSupply();
         _delegate(redemptionPayout, abi.encodeCall(BoardroomRedemptionPayout.snapshotAssets, (redeemableAssets)));
@@ -514,6 +539,27 @@ contract BoardroomGovernanceLogic {
         emit BoardroomLockedLiquidityRecorded(locker);
     }
 
+    function _recordRewardPool(address policyRegistry, address shareToken, address factory, address rewards) private {
+        LifecycleSlots memory slots = _lifecycleSlots();
+        address existing = address(uint160(_slotValue(slots.rewardPool)));
+        if (existing != address(0)) revert RewardPoolAlreadyRegistered(existing);
+        if (
+            rewards == address(0) || _mappingAddress(slots.obligationPolicyOf, rewards) != address(0)
+                || !IBoardroomPolicyRegistry(policyRegistry).isModulePolicy(factory)
+        ) revert InvalidRewardPool(rewards);
+
+        IBoardroomGovernanceRewards rewardPool_ = IBoardroomGovernanceRewards(rewards);
+        if (
+            rewardPool_.factory() != factory || rewardPool_.boardroom() != address(this)
+                || rewardPool_.shareToken() != shareToken
+        ) revert InvalidRewardPool(rewards);
+
+        BoardroomToken(shareToken).registerRewardLocker(rewards);
+        _setMappingAddress(slots.obligationPolicyOf, rewards, factory);
+        _setSlot(slots.rewardPool, uint256(uint160(rewards)));
+        emit BoardroomRewardPoolRecorded(rewards);
+    }
+
     function _registerAssetIfNeeded(LifecycleSlots memory slots, address asset, address shareToken, uint256 maximum)
         private
     {
@@ -578,7 +624,8 @@ contract BoardroomGovernanceLogic {
             isIssuedDistribution: 13,
             isLockedLiquidity: 14,
             issuedGrantReservationsForDistribution: 15,
-            obligationPolicyOf: 16
+            obligationPolicyOf: 16,
+            rewardPool: 17
         });
     }
 

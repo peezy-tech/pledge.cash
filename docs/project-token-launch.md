@@ -39,7 +39,7 @@ native contract before entering `WindingDown`.
 
 The script does not call `Boardroom.launch()`: “launch” here means the project-token market launch. Boardroom governance
 remains in its prelaunch owner-execution phase until the owner starts wind-down, so this scenario does not exercise the
-executor queue, timelock, holder veto, or permissionless ready-action execution.
+executor queue, timelock, active-staker veto, or permissionless ready-action execution.
 
 ## Assets And Authorities
 

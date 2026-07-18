@@ -72,14 +72,31 @@ describe("runtime deployment artifacts", () => {
       "chainId": 998,
       "tokenGrantModulePolicy": true,
       "distributionModulePolicy": false,
+      "boardroomRewardsModulePolicy": true,
       "bondMarketModulePolicy": true,
       "lockedLiquidityModulePolicy": true
     }`);
 
     expect(deployment.tokenGrantModulePolicy).toBe(true);
     expect(deployment.distributionModulePolicy).toBe(false);
+    expect(deployment.boardroomRewardsModulePolicy).toBe(true);
     expect(deployment.bondMarketModulePolicy).toBe(true);
     expect(deployment.lockedLiquidityModulePolicy).toBe(true);
+  });
+
+  test("preserves Boardroom reward deployment roots and attestations", () => {
+    const deployment = parseDeployment(`{
+      "chainId": 998,
+      "boardroomRewardsFactory": "0x1000000000000000000000000000000000000004",
+      "boardroomRewardsPolicyAllowed": true,
+      "assetBoardroomRewardsSpenderAllowed": true,
+      "boardroomRewardsFactoryCodeHash": "0xabc456"
+    }`);
+
+    expect(deployment.boardroomRewardsFactory).toBe("0x1000000000000000000000000000000000000004");
+    expect(deployment.boardroomRewardsPolicyAllowed).toBe(true);
+    expect(deployment.assetBoardroomRewardsSpenderAllowed).toBe(true);
+    expect(deployment.boardroomRewardsFactoryCodeHash).toBe("0xabc456");
   });
 
   test("preserves bond-market deployment provenance", () => {

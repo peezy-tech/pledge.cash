@@ -108,7 +108,7 @@ describe("project capability resolver", () => {
     expect(executorCapabilities["governance.launch"].status).toBe("hidden");
   });
 
-  test("separates holder veto authority from permissionless ready execution", () => {
+  test("separates staker veto authority from permissionless ready execution", () => {
     const project = { owner, executor, launched: true, status: "active" as const };
     const eligible = resolveProjectCapabilities(context({
       account: holder,

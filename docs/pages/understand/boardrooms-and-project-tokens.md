@@ -13,7 +13,7 @@ The Boardroom alone can mint or burn its share token. Before governance launch, 
 
 The token has two different accounting roles:
 
-- **Governance:** eligible current and previous-block balances can veto delayed actions or start wind-down. Treasury shares and shares in authenticated protocol custody are excluded.
+- **Governance:** active stake at the current and previous block can veto delayed actions or start wind-down. The threshold denominator is governance-eligible circulating supply; liquid balances and cooling stake have no power.
 - **Redemption:** economic share ownership participates in the final asset snapshot. Governance custody exclusions do not reduce redemption supply.
 
 A token balance therefore does not automatically mean that balance has immediate governance power, and governance-eligible supply is not the same as total supply.
@@ -34,13 +34,13 @@ Module factories record obligations so the Boardroom cannot open redemptions whi
 ## Lifecycle
 
 1. **Active, pre-launch:** the owner mints and executes policy-checked calls directly.
-2. **Active, launched:** the executor queues delayed actions; holders gain veto and wind-down protections.
+2. **Active, launched:** the executor queues delayed actions; active stakers gain veto and wind-down protections.
 3. **Winding down:** new issuance, fixed-price buys, airdrop claims, curve buys/sells, and curve migration stop while
    obligations close and assets are prepared. An already-created public AMM pool is independent of Boardroom lifecycle;
    its permissionless swaps and liquidity actions can continue.
 4. **Redemptions open:** shares burn for fixed snapshot entitlements. Owner execution is closed.
 
-These transitions are one-way. See [Governance and holder protections](governance-and-holder-protections) and [Treasury obligations and redemptions](treasury-obligations-and-redemptions).
+These transitions are one-way. See [Governance and staker protections](governance-and-holder-protections) and [Treasury obligations and redemptions](treasury-obligations-and-redemptions).
 
 ## Canonical identity
 

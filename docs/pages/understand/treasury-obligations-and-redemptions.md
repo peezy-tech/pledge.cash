@@ -12,8 +12,8 @@ A Boardroom cannot snapshot only the tokens visible in its wallet today. Grants,
 Canonical wrapped native is admitted when a Boardroom initializes. Module creation admits assets that can later reach the treasury, such as grant tokens, payment tokens, distribution quote tokens, and liquidity sides. Governance can admit additional supported ERC20s within a bounded list.
 
 An arbitrary transfer to the Boardroom does not automatically prove the asset belongs in the redemption basket. During
-wind-down, the prelaunch owner can admit a positive-balance final asset; after governance launch, the caller must meet
-the 10% current-and-previous-block holder threshold. An unreadable admitted asset has a quarantine escape hatch.
+wind-down, the prelaunch owner can admit a positive-balance final asset; after governance launch, the caller's active
+stake must meet the 10% current-and-previous-block eligible-supply threshold. An unreadable admitted asset has a quarantine escape hatch.
 
 ## Why obligations must close
 

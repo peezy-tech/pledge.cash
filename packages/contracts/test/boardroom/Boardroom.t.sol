@@ -18,6 +18,8 @@ import {IBoardroomCallPolicy} from "../../src/policy/IBoardroomCallPolicy.sol";
 import {IBoardroomObligationPolicy} from "../../src/policy/IBoardroomObligationPolicy.sol";
 import {TokenGrant} from "../../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
+import {BoardroomRewards} from "../../src/rewards/BoardroomRewards.sol";
+import {BoardroomRewardsFactory} from "../../src/rewards/BoardroomRewardsFactory.sol";
 
 contract BoardroomCurrency {
     string public name;
@@ -252,6 +254,7 @@ contract BoardroomTest is Test {
     BoardroomPolicyRegistry internal policyRegistry;
     AssetPolicy internal assetPolicy;
     TokenGrantFactory internal tokenGrantFactory;
+    BoardroomRewardsFactory internal rewardsFactory;
     BoardroomFactory internal boardroomFactory;
     BoardroomGovernanceLogic internal governanceLogic;
     BoardroomRedemptionPayout internal redemptionPayoutLogic;
@@ -281,13 +284,16 @@ contract BoardroomTest is Test {
             address(policyRegistry), address(wrappedNative), address(redemptionPayoutLogic), address(governanceLogic)
         );
         tokenGrantFactory = new TokenGrantFactory(address(this), address(boardroomFactory));
+        rewardsFactory = new BoardroomRewardsFactory(address(boardroomFactory));
         paymentToken = new BoardroomCurrency("Payment", "PAY", 6);
 
         assetPolicy.setAssetAllowed(address(paymentToken), true);
         assetPolicy.setApprovalSpenderAllowed(address(tokenGrantFactory), true);
+        assetPolicy.setApprovalSpenderAllowed(address(rewardsFactory), true);
 
         policyRegistry.setPolicyAllowed(address(assetPolicy), true);
         policyRegistry.registerModulePolicy(address(tokenGrantFactory));
+        policyRegistry.registerModulePolicy(address(rewardsFactory));
 
         paymentToken.mint(holder, 1_000_000000);
     }
@@ -653,12 +659,16 @@ contract BoardroomTest is Test {
         assertEq(shares.balanceOf(stranger), 2 ether);
     }
 
-    function testLaunchedShareholderCanCancelQueuedActionAndStartWindDown() public {
-        (Boardroom boardroom,) = _createBoardroom("launched-shareholder-veto");
+    function testLaunchedActiveStakerCanCancelQueuedActionAndStartWindDown() public {
+        (Boardroom boardroom,) = _createBoardroom("launched-staker-veto");
         BoardroomToken shareToken = BoardroomToken(boardroom.shareToken());
 
         vm.startPrank(owner);
         boardroom.mint(holder, 1 ether);
+        _createRewardPool(boardroom);
+        vm.stopPrank();
+        _stake(boardroom, holder, 1 ether);
+        vm.startPrank(owner);
         boardroom.launch(1 days);
         vm.stopPrank();
         vm.roll(block.number + 1);
@@ -671,7 +681,7 @@ contract BoardroomTest is Test {
         boardroom.queueAction(call_, salt);
 
         vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSelector(Boardroom.InsufficientHolderPower.selector, stranger, 0, 0, 0.01 ether));
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.InsufficientStakerPower.selector, stranger, 0, 0, 0.01 ether));
         boardroom.cancelAction(actionHash);
 
         vm.prank(holder);
@@ -697,12 +707,17 @@ contract BoardroomTest is Test {
 
         vm.startPrank(owner);
         boardroom.mint(holder, 1 ether);
+        _createRewardPool(boardroom);
+        vm.stopPrank();
+        _stake(boardroom, holder, 1 ether);
+        vm.startPrank(owner);
         boardroom.launch(1 days);
         vm.stopPrank();
         vm.roll(block.number + 1);
 
         vm.prank(holder);
         boardroom.startWindDown();
+        BoardroomRewards(boardroom.rewardPool()).terminalize();
 
         vm.warp(block.timestamp + 1 days);
         vm.prank(stranger);
@@ -716,6 +731,10 @@ contract BoardroomTest is Test {
 
         vm.startPrank(owner);
         boardroom.mint(holder, 1 ether);
+        _createRewardPool(boardroom);
+        vm.stopPrank();
+        _stake(boardroom, holder, 1 ether);
+        vm.startPrank(owner);
         boardroom.launch(1 days);
         vm.stopPrank();
         vm.roll(block.number + 1);
@@ -769,14 +788,13 @@ contract BoardroomTest is Test {
 
         vm.startPrank(owner);
         boardroom.mint(address(lender), 100 ether);
+        _createRewardPool(boardroom);
         boardroom.launch(1 days);
         vm.stopPrank();
         vm.roll(block.number + 1);
 
         vm.expectRevert(
-            abi.encodeWithSelector(
-                Boardroom.InsufficientHolderPower.selector, address(attacker), 100 ether, 0, 10 ether
-            )
+            abi.encodeWithSelector(Boardroom.InsufficientStakerPower.selector, address(attacker), 0, 0, 10 ether)
         );
         attacker.attack(100 ether);
 
@@ -798,6 +816,7 @@ contract BoardroomTest is Test {
 
         vm.startPrank(owner);
         boardroom.mint(owner, 100 ether);
+        _createRewardPool(boardroom);
         quote.mint(owner, 100 ether);
         shares.approve(address(ammRouter), 100 ether);
         quote.approve(address(ammRouter), 100 ether);
@@ -810,7 +829,7 @@ contract BoardroomTest is Test {
 
         AmmFlashGovernanceAttacker attacker = new AmmFlashGovernanceAttacker(boardroom, pool);
         vm.expectRevert(
-            abi.encodeWithSelector(Boardroom.InsufficientHolderPower.selector, address(attacker), 20 ether, 0, 10 ether)
+            abi.encodeWithSelector(Boardroom.InsufficientStakerPower.selector, address(attacker), 0, 0, 10 ether)
         );
         attacker.attack(20 ether);
 
@@ -818,28 +837,40 @@ contract BoardroomTest is Test {
         assertEq(shares.balanceOf(address(attacker)), 0);
     }
 
-    function testStaleAndNewlyReceivedBalancesCannotStartWindDown() public {
+    function testStaleAndNewlyActivatedStakeCannotStartWindDown() public {
         (Boardroom boardroom,) = _createBoardroom("stale-holder-threshold");
         BoardroomToken shares = BoardroomToken(boardroom.shareToken());
 
         vm.startPrank(owner);
         boardroom.mint(holder, 100 ether);
+        _createRewardPool(boardroom);
+        vm.stopPrank();
+        BoardroomRewards rewards = BoardroomRewards(boardroom.rewardPool());
+        vm.prank(holder);
+        rewards.stake(100 ether);
+        vm.startPrank(owner);
         boardroom.launch(1 days);
         vm.stopPrank();
         vm.roll(block.number + 1);
 
         vm.prank(holder);
+        uint256 slot = rewards.requestUnstake(100 ether);
+        vm.warp(block.timestamp + 1 days);
+        rewards.completeUnstake(holder, slot);
+        vm.prank(holder);
         shares.transfer(stranger, 100 ether);
+        vm.prank(stranger);
+        rewards.stake(100 ether);
 
         vm.prank(holder);
         vm.expectRevert(
-            abi.encodeWithSelector(Boardroom.InsufficientHolderPower.selector, holder, 0, 100 ether, 10 ether)
+            abi.encodeWithSelector(Boardroom.InsufficientStakerPower.selector, holder, 0, 100 ether, 10 ether)
         );
         boardroom.startWindDown();
 
         vm.prank(stranger);
         vm.expectRevert(
-            abi.encodeWithSelector(Boardroom.InsufficientHolderPower.selector, stranger, 100 ether, 0, 10 ether)
+            abi.encodeWithSelector(Boardroom.InsufficientStakerPower.selector, stranger, 100 ether, 0, 10 ether)
         );
         boardroom.startWindDown();
 
@@ -896,6 +927,10 @@ contract BoardroomTest is Test {
         (Boardroom boardroom,) = _createBoardroom("wind-down-epoch-invalidation");
         vm.startPrank(owner);
         boardroom.mint(holder, 1 ether);
+        _createRewardPool(boardroom);
+        vm.stopPrank();
+        _stake(boardroom, holder, 1 ether);
+        vm.startPrank(owner);
         boardroom.launch(1 days);
         Boardroom.Call memory call_ =
             _rawCall(address(boardroom), 0, abi.encodeCall(Boardroom.mint, (stranger, 1 ether)));
@@ -917,6 +952,10 @@ contract BoardroomTest is Test {
 
         vm.startPrank(owner);
         boardroom.mint(holder, 1 ether);
+        _createRewardPool(boardroom);
+        vm.stopPrank();
+        _stake(boardroom, holder, 1 ether);
+        vm.startPrank(owner);
         boardroom.setExecutor(lostExecutor);
         boardroom.launch(1 days);
         vm.stopPrank();
@@ -924,6 +963,7 @@ contract BoardroomTest is Test {
 
         vm.prank(holder);
         boardroom.startWindDown();
+        BoardroomRewards(boardroom.rewardPool()).terminalize();
         vm.warp(block.timestamp + 1 days);
 
         vm.prank(stranger);
@@ -985,6 +1025,12 @@ contract BoardroomTest is Test {
         );
 
         vm.startPrank(owner);
+        _createRewardPool(boardroom);
+        vm.stopPrank();
+        BoardroomRewards rewards = BoardroomRewards(boardroom.rewardPool());
+        vm.prank(holder);
+        rewards.stake(1 ether);
+        vm.startPrank(owner);
         boardroom.setExecutor(lostExecutor);
         boardroom.launch(1 days);
         vm.stopPrank();
@@ -998,13 +1044,15 @@ contract BoardroomTest is Test {
         vm.warp(VESTING_END);
         vm.prank(holder);
         grant.settle(90 ether);
+        vm.prank(holder);
+        rewards.stake(90 ether);
 
         assertEq(shares.encumberedSupply(), 9 ether);
         assertEq(shares.governanceEligibleSupply(), 91 ether);
 
         vm.prank(holder);
         vm.expectRevert(
-            abi.encodeWithSelector(Boardroom.InsufficientHolderPower.selector, holder, 91 ether, 1 ether, 9.1 ether)
+            abi.encodeWithSelector(Boardroom.InsufficientStakerPower.selector, holder, 91 ether, 1 ether, 9.1 ether)
         );
         boardroom.startWindDown();
 
@@ -1032,6 +1080,10 @@ contract BoardroomTest is Test {
         );
 
         vm.startPrank(owner);
+        _createRewardPool(boardroom);
+        vm.stopPrank();
+        _stake(boardroom, holder, 1 ether);
+        vm.startPrank(owner);
         boardroom.setExecutor(address(0xDEAD));
         boardroom.launch(1 days);
         vm.stopPrank();
@@ -1042,7 +1094,7 @@ contract BoardroomTest is Test {
         assertEq(shares.governanceEligibleSupply(), 1 ether);
 
         vm.prank(address(grant));
-        vm.expectRevert(abi.encodeWithSelector(Boardroom.NotShareholder.selector, address(grant)));
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.NotActiveStaker.selector, address(grant)));
         boardroom.startWindDown();
 
         vm.prank(holder);
@@ -1065,6 +1117,10 @@ contract BoardroomTest is Test {
             _boardroomGrantCreate(address(shares), holder, address(0), 1 ether, 0, keccak256("custody-ratio-grant"), 0)
         );
 
+        vm.startPrank(owner);
+        _createRewardPool(boardroom);
+        vm.stopPrank();
+        _stake(boardroom, holder, 5 ether);
         vm.prank(owner);
         boardroom.launch(1 days);
         vm.roll(block.number + 1);
@@ -1076,7 +1132,7 @@ contract BoardroomTest is Test {
 
         vm.prank(holder);
         vm.expectRevert(
-            abi.encodeWithSelector(Boardroom.InsufficientHolderPower.selector, holder, 5 ether, 5 ether, 9.9 ether)
+            abi.encodeWithSelector(Boardroom.InsufficientStakerPower.selector, holder, 5 ether, 5 ether, 9.9 ether)
         );
         boardroom.startWindDown();
 
@@ -2095,8 +2151,11 @@ contract BoardroomTest is Test {
         BoardroomCurrency funded = new BoardroomCurrency("Funded", "FUNDED", 18);
         funded.mint(address(boardroom), 1 ether);
 
-        vm.prank(owner);
+        vm.startPrank(owner);
         boardroom.mint(holder, 10 ether);
+        _createRewardPool(boardroom);
+        vm.stopPrank();
+        _stake(boardroom, holder, 10 ether);
         vm.roll(block.number + 1);
         vm.prank(owner);
         boardroom.launch(1 days);
@@ -2192,6 +2251,24 @@ contract BoardroomTest is Test {
         assertEq(created, boardroomAddress);
         boardroom = Boardroom(payable(boardroomAddress));
         assetPolicy.setAssetAllowed(boardroom.shareToken(), true);
+    }
+
+    function _createRewardPool(Boardroom boardroom) internal returns (BoardroomRewards rewards) {
+        bytes memory result = boardroom.execute(
+            Boardroom.Call({
+                policy: address(rewardsFactory),
+                target: address(rewardsFactory),
+                value: 0,
+                data: abi.encodeCall(rewardsFactory.createRewards, (uint64(1 days), keccak256("test-rewards")))
+            })
+        );
+        rewards = BoardroomRewards(abi.decode(result, (address)));
+    }
+
+    function _stake(Boardroom boardroom, address account, uint256 amount) internal {
+        BoardroomRewards rewards = BoardroomRewards(boardroom.rewardPool());
+        vm.prank(account);
+        rewards.stake(amount);
     }
 
     function _sendNative(address to, uint256 amount) internal {

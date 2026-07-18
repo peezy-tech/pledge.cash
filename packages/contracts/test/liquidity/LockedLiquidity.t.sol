@@ -17,6 +17,8 @@ import {BoardroomToken} from "../../src/boardroom/BoardroomToken.sol";
 import {IBoardroomCallPolicy} from "../../src/policy/IBoardroomCallPolicy.sol";
 import {LockedLiquidity} from "../../src/liquidity/LockedLiquidity.sol";
 import {LockedLiquidityFactory} from "../../src/liquidity/LockedLiquidityFactory.sol";
+import {BoardroomRewards} from "../../src/rewards/BoardroomRewards.sol";
+import {BoardroomRewardsFactory} from "../../src/rewards/BoardroomRewardsFactory.sol";
 
 contract LockedLiquidityTestERC20 is ERC20 {
     string internal tokenName;
@@ -302,6 +304,7 @@ contract LockedLiquidityTest is Test {
     WETH internal wrappedNative;
     AmmRouter internal router;
     LockedLiquidityFactory internal lockedLiquidityFactory;
+    BoardroomRewardsFactory internal rewardsFactory;
     LockedLiquidityTestERC20 internal quoteToken;
 
     address internal owner = address(0xA11CE);
@@ -326,14 +329,17 @@ contract LockedLiquidityTest is Test {
         ammFactory = new AmmFactory(address(this), address(boardroomFactory));
         router = new AmmRouter(address(ammFactory), address(wrappedNative));
         lockedLiquidityFactory = new LockedLiquidityFactory(address(router), address(boardroomFactory));
+        rewardsFactory = new BoardroomRewardsFactory(address(boardroomFactory));
         ammFactory.setLiquidityRouter(address(router));
         ammFactory.setReservationManager(address(lockedLiquidityFactory));
         quoteToken = new LockedLiquidityTestERC20("Quote", "QUOTE", 18);
 
         assetPolicy.setAssetAllowed(address(quoteToken), true);
         assetPolicy.setApprovalSpenderAllowed(address(lockedLiquidityFactory), true);
+        assetPolicy.setApprovalSpenderAllowed(address(rewardsFactory), true);
         policyRegistry.setPolicyAllowed(address(assetPolicy), true);
         policyRegistry.registerModulePolicy(address(lockedLiquidityFactory));
+        policyRegistry.registerModulePolicy(address(rewardsFactory));
     }
 
     function testBoardroomCreatesAndRecordsLockedLiquidity() public {
@@ -386,6 +392,11 @@ contract LockedLiquidityTest is Test {
             boardroom, shareToken, address(quoteToken), address(lockedLiquidityFactory), "locked-executor-loss-create"
         );
 
+        vm.startPrank(owner);
+        BoardroomRewards rewards = _createRewardPool(boardroom);
+        vm.stopPrank();
+        vm.prank(holder);
+        rewards.stake(HOLDER_SHARES);
         vm.startPrank(owner);
         boardroom.setExecutor(address(0xDEAD));
         boardroom.launch(1 days);
@@ -753,6 +764,11 @@ contract LockedLiquidityTest is Test {
 
         vm.startPrank(owner);
         boardroom.mint(holder, 2 * HOLDER_SHARES);
+        BoardroomRewards rewards = _createRewardPool(boardroom);
+        vm.stopPrank();
+        vm.prank(holder);
+        rewards.stake(2 * HOLDER_SHARES);
+        vm.startPrank(owner);
         boardroom.launch(1 days);
         vm.stopPrank();
         vm.roll(block.number + 1);
@@ -774,6 +790,11 @@ contract LockedLiquidityTest is Test {
 
         vm.startPrank(owner);
         boardroom.mint(holder, 2 * HOLDER_SHARES);
+        BoardroomRewards rewards = _createRewardPool(boardroom);
+        vm.stopPrank();
+        vm.prank(holder);
+        rewards.stake(2 * HOLDER_SHARES);
+        vm.startPrank(owner);
         boardroom.launch(1 days);
         vm.stopPrank();
         vm.roll(block.number + 1);
@@ -805,11 +826,17 @@ contract LockedLiquidityTest is Test {
 
         vm.startPrank(owner);
         boardroom.mint(holder, 2 * HOLDER_SHARES);
+        BoardroomRewards rewards = _createRewardPool(boardroom);
+        vm.stopPrank();
+        vm.prank(holder);
+        rewards.stake(2 * HOLDER_SHARES);
+        vm.startPrank(owner);
         boardroom.launch(1 days);
         vm.stopPrank();
         vm.roll(block.number + 1);
         vm.prank(holder);
         boardroom.startWindDown();
+        rewards.terminalize();
         hostileQuote.setBlockedSender(created.pool);
 
         vm.prank(trader);
@@ -1304,6 +1331,18 @@ contract LockedLiquidityTest is Test {
         boardroom = Boardroom(payable(boardroomAddress));
         shareToken = BoardroomToken(boardroom.shareToken());
         assetPolicy.setAssetAllowed(address(shareToken), true);
+    }
+
+    function _createRewardPool(Boardroom boardroom) internal returns (BoardroomRewards rewards) {
+        bytes memory result = boardroom.execute(
+            Boardroom.Call({
+                policy: address(rewardsFactory),
+                target: address(rewardsFactory),
+                value: 0,
+                data: abi.encodeCall(rewardsFactory.createRewards, (uint64(1 days), keccak256("test-rewards")))
+            })
+        );
+        rewards = BoardroomRewards(abi.decode(result, (address)));
     }
 
     function _createLockedLiquidity(

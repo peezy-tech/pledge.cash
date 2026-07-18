@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Address, BoardroomHolderPower } from "@pledge.cash/sdk";
+import type { Address, BoardroomHolderPower, BoardroomStakerPower } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
 import {
   AlertsUnavailablePage,
@@ -69,6 +69,7 @@ const dashboard: ProductBoardroomDashboardState = {
     policyRegistry: "0x7000000000000000000000000000000000000000" as Address,
     wrappedNative: "0x8000000000000000000000000000000000000000" as Address,
     shareToken,
+    rewardPool: "0x0000000000000000000000000000000000000fed" as Address,
     status: 0,
     launched: true,
     executor: "0x9000000000000000000000000000000000000000" as Address,
@@ -148,15 +149,19 @@ const dashboard: ProductBoardroomDashboardState = {
   ],
 };
 
-const holderPower: BoardroomHolderPower = {
+const stakerPower: BoardroomStakerPower = {
   boardroom,
   shareToken,
+  rewardPool: "0x0000000000000000000000000000000000000fed" as Address,
   account: owner,
   blockNumber: 100n,
   snapshotBlock: 99n,
   encumbered: false,
+  currentTokenBalance: 4_000_000_000_000_000_000n,
   currentBalance: 3_000_000_000_000_000_000n,
   pastBalance: 3_000_000_000_000_000_000n,
+  currentActiveStake: 3_000_000_000_000_000_000n,
+  pastActiveStake: 3_000_000_000_000_000_000n,
   currentEligibleSupply: 8_000_000_000_000_000_000n,
   pastEligibleSupply: 8_000_000_000_000_000_000n,
   vetoRequired: 1_600_000_000_000_000_000n,
@@ -164,6 +169,8 @@ const holderPower: BoardroomHolderPower = {
   canVeto: true,
   canStartWindDown: true,
 };
+
+const holderPower: BoardroomHolderPower = stakerPower;
 
 const walletPosition: ProjectWalletPosition = {
   account: owner,
@@ -337,11 +344,11 @@ describe("read-first product pages", () => {
       </ProjectLayout>,
     );
     expect(overview).toContain("Atlas Cooperative");
+    expect(overview).toContain("Staker governance is live");
     expect(overview).toContain("Your position");
     expect(overview).toContain("3 ATLAS");
     expect(overview).toContain("0.5 ATLAS");
     expect(overview).toContain("Veto + wind-down eligible");
-    expect(overview).toContain("Holder governance is live");
     expect(overview).toContain("lifetime activity is reconstructed from their onchain event history");
     expect(overview).toContain("Treasury at a glance");
     expect(overview).toContain(`href="/grants/31337/${grant}?project=${boardroom}"`);
@@ -570,9 +577,9 @@ describe("read-first product pages", () => {
   });
 
   test("explains governance thresholds and exposes transparency tables", () => {
-    const governance = renderToString(<GovernancePage dashboard={dashboard} holderPower={holderPower} loading={false} />);
+    const governance = renderToString(<GovernancePage dashboard={dashboard} stakerPower={stakerPower} loading={false} />);
     expect(governance).toContain("Decision system");
-    expect(governance).toContain("Holder protections");
+    expect(governance).toContain("Staker protections");
     expect(governance).toContain("20%");
     expect(governance).toContain("This wallet can veto");
 

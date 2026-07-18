@@ -181,12 +181,12 @@ export function studioGuidance(
     description: "The Boardroom is active under direct owner authority. Configure grants, distributions, and liquidity before handing routine decisions to governance.",
     label: "Pre-launch",
     nextStep: dashboard?.snapshot.issuedDistributions.length ? "Review before launching governance" : "Choose a distribution path",
-    nextStepDetail: "Launch is a one-way authority transition. Confirm the executor, delay, and holder thresholds first.",
+    nextStepDetail: "Launch is a one-way authority transition. Confirm the executor, delay, and staker thresholds first.",
     title: "Build the project’s operating system",
     tone: "warning",
   };
   if (lifecycle === "launched") return {
-    description: "Holder governance is live. Project changes should be prepared as decoded queued actions, then reviewed during the configured delay.",
+    description: "Staker governance is live. Project changes should be prepared as decoded queued actions, then reviewed during the configured delay.",
     label: "Launched",
     nextStep: "Prepare or review a queued action",
     nextStepDetail: "State the intent, target, value, and calldata before asking the executor to queue it.",

@@ -1,5 +1,7 @@
 import {
   boardroomAbi,
+  boardroomRewardsAbi,
+  boardroomRewardsFactoryAbi,
   boardroomTokenAbi,
   bondMarketAbi,
   bondMarketFactoryAbi,
@@ -85,6 +87,7 @@ const BOARDROOM_BATCH_CALL_FUNCTIONS = new Set([
 ]);
 
 const ASSET_AND_OBLIGATION_ABIS = [
+  boardroomRewardsAbi,
   boardroomTokenAbi,
   bondMarketAbi,
   erc20Abi,
@@ -96,6 +99,7 @@ const ASSET_AND_OBLIGATION_ABIS = [
 ] as const;
 
 const MODULE_FACTORY_ABIS = [
+  boardroomRewardsFactoryAbi,
   bondMarketFactoryAbi,
   distributionFactoryAbi,
   lockedLiquidityFactoryAbi,
@@ -114,16 +118,22 @@ const FUNCTION_LABELS: Record<string, string> = {
   createLockedLiquidity: "Create a locked liquidity position",
   createMerkleAirdrop: "Create an airdrop",
   createMigratingBondingCurve: "Create a bonding curve",
+  createRewards: "Create a staking and rewards pool",
   finalize: "Finalize a concluded bond market",
   purchase: "Create a non-transferable bond position",
   executeWindDownCall: "Run a wind-down operation",
   exit: "Exit a liquidity position",
-  launch: "Launch holder governance",
+  fundReward: "Fund a reward period",
+  launch: "Launch staker governance",
   mint: "Mint project shares",
   openRedemptions: "Open holder redemptions",
   registerRedeemableAsset: "Register a redemption asset",
   setExecutor: "Change the governance executor",
   startWindDown: "Start project wind-down",
+  stake: "Activate project-token stake",
+  requestUnstake: "Start unstake cooldown",
+  completeUnstake: "Complete unstake cooldown",
+  terminalize: "Terminalize project rewards",
   transfer: "Transfer tokens",
   transferFrom: "Transfer tokens",
   wrapNativeBalance: "Wrap treasury native balance",
@@ -425,6 +435,7 @@ const IRREVERSIBLE_FUNCTIONS = new Set([
   "returnLpToBoardroom",
   "startWindDown",
   "stopVestingAndWithdrawUnvested",
+  "terminalize",
   "withdrawExpiredTokens",
 ]);
 
@@ -445,12 +456,17 @@ const IMPORTANT_FUNCTIONS = new Set([
   "createLockedLiquidity",
   "createMerkleAirdrop",
   "createMigratingBondingCurve",
+  "createRewards",
+  "fundReward",
   "execute",
   "executeBatch",
   "executeQueuedAction",
   "executeQueuedBatch",
   "executeWindDownCall",
   "mint",
+  "stake",
+  "requestUnstake",
+  "completeUnstake",
   "purchase",
   "queueAction",
   "queueBatch",

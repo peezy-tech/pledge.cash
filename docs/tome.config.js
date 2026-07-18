@@ -65,6 +65,7 @@ export default {
         "understand/grants-and-vesting",
         "understand/distributions-and-liquidity",
         "understand/governance-and-holder-protections",
+        "understand/staking-and-rewards",
         "understand/treasury-obligations-and-redemptions",
         "understand/provenance-and-hosted-context",
       ],
@@ -83,6 +84,7 @@ export default {
       pages: [
         "developers/index",
         "developers/boardroom",
+        "developers/staking-and-rewards",
         "developers/grants",
         "developers/distributions-and-airdrops",
         "developers/amm-and-liquidity",
