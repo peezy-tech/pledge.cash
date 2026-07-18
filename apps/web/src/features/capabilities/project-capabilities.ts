@@ -3,6 +3,7 @@ import type { Address } from "@pledge.cash/sdk";
 export type CapabilityStatus = "enabled" | "connect" | "switch" | "blocked" | "hidden";
 
 export type ProjectCapability =
+  | "participate.bond.purchase"
   | "participate.fixedSale.buy"
   | "participate.curve.buy"
   | "participate.curve.sell"
@@ -69,6 +70,7 @@ export type OpportunityCapability = Extract<
 >;
 
 const PROJECT_CAPABILITIES: ProjectCapability[] = [
+  "participate.bond.purchase",
   "participate.fixedSale.buy",
   "participate.curve.buy",
   "participate.curve.sell",
@@ -92,6 +94,7 @@ const PROJECT_CAPABILITIES: ProjectCapability[] = [
 ];
 
 const OPPORTUNITY_CAPABILITIES: OpportunityCapability[] = [
+  "participate.bond.purchase",
   "participate.fixedSale.buy",
   "participate.curve.buy",
   "participate.curve.sell",

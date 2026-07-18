@@ -200,6 +200,14 @@ function marketBoundaries(input: MarketBoundaryClockInput): bigint[] {
     for (const distribution of input.dashboard.snapshot.distributionSummaries) {
       const state = distribution.state;
       if (!state || state.closed) continue;
+      if (distribution.kind === "bond-market" && "live" in state) {
+        if (state.status === 0) {
+          boundaries.push(BigInt(state.startTime) * 1_000n);
+          boundaries.push(BigInt(state.conclusion) * 1_000n);
+        }
+        continue;
+      }
+      if (!("endTime" in state)) continue;
       const routeStatus = "saleStatus" in state
         ? state.saleStatus
         : "curveStatus" in state
@@ -240,6 +248,18 @@ function marketTimingIdentity(input: MarketBoundaryClockInput): string {
         ...input.dashboard.snapshot.distributionSummaries.map((distribution) => {
           const state = distribution.state;
           if (!state) return `${distribution.address.toLowerCase()}:unread`;
+          if (distribution.kind === "bond-market" && "live" in state) {
+            return [
+              distribution.address.toLowerCase(),
+              state.status,
+              state.closed ? 1 : 0,
+              state.startTime,
+              state.conclusion,
+              state.capacity,
+              state.live ? 1 : 0,
+            ].join(":");
+          }
+          if (!("endTime" in state)) return `${distribution.address.toLowerCase()}:unread`;
           const routeStatus = "saleStatus" in state
             ? state.saleStatus
             : "curveStatus" in state

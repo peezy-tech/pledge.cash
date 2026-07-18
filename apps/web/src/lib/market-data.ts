@@ -41,6 +41,11 @@ export type FixedSaleRoutePrice = NormalizedPrice & {
   sale: Address;
 };
 
+export type BondMarketRoutePrice = NormalizedPrice & {
+  source: "bond-market";
+  market: Address;
+};
+
 export type CurveQuoteRoutePrice = NormalizedPrice & {
   source: "curve-quote";
   curve: Address;
@@ -49,7 +54,7 @@ export type CurveQuoteRoutePrice = NormalizedPrice & {
   quoteAmount: ExactTokenAmount;
 };
 
-export type RoutePrice = VerifiedAmmSpotPrice | FixedSaleRoutePrice | CurveQuoteRoutePrice;
+export type RoutePrice = VerifiedAmmSpotPrice | FixedSaleRoutePrice | BondMarketRoutePrice | CurveQuoteRoutePrice;
 export type RoutePriceState = MetricState<RoutePrice>;
 
 export type RouteLiveness =
@@ -288,6 +293,31 @@ export function fixedSaleUnitPrice(input: {
   return knownMetric({
     source: "fixed-sale",
     sale: input.sale,
+    baseToken: input.projectToken,
+    baseDecimals: projectDecimals,
+    quoteToken: input.quoteToken,
+    quoteDecimals,
+    quotePerBase: exactRational(
+      input.priceWad * powerOfTen(projectDecimals),
+      WAD * powerOfTen(quoteDecimals),
+    ),
+  });
+}
+
+export function bondMarketUnitPrice(input: {
+  market: Address;
+  projectToken: Address;
+  projectDecimals: number;
+  quoteToken: Address;
+  quoteDecimals: number;
+  priceWad: bigint;
+}): MetricState<BondMarketRoutePrice> {
+  if (input.priceWad <= 0n) return unavailableMetric("The bond market does not expose a positive current price.");
+  const projectDecimals = checkedDecimals(input.projectDecimals);
+  const quoteDecimals = checkedDecimals(input.quoteDecimals);
+  return knownMetric({
+    source: "bond-market",
+    market: input.market,
     baseToken: input.projectToken,
     baseDecimals: projectDecimals,
     quoteToken: input.quoteToken,

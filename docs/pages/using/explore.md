@@ -33,7 +33,7 @@ connect a wallet, subscribe to governance alerts, or prove that the project's cu
 From the project, use:
 
 - `Overview` for authority, supply, treasury, obligations, and the next useful action.
-- `Participate` for live sale, curve, airdrop, or AMM routes.
+- `Participate` for live bond, sale, curve, airdrop, or AMM routes.
 - `Governance` for authority, delay, thresholds, and queued decisions.
 - `Transparency` for detailed balances, commitments, history, and addresses.
 

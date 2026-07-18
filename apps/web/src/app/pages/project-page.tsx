@@ -453,6 +453,7 @@ function distributionIsActive(distribution: ProductBoardroomDashboardState["snap
   if ("saleStatus" in distribution.state) return distribution.state.saleStatus === 0 && distribution.state.remainingShares > 0n;
   if ("curveStatus" in distribution.state) return distribution.state.curveStatus === 0 && distribution.state.remainingSaleShares > 0n;
   if ("airdropStatus" in distribution.state) return distribution.state.airdropStatus === 0 && distribution.state.remainingShares > 0n;
+  if ("currentPrice" in distribution.state) return distribution.state.live && distribution.state.capacity > 0n;
   return false;
 }
 

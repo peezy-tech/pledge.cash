@@ -35,13 +35,14 @@ An issued grant is a contract commitment. Confirm funding, payment terms, and da
 
 ## Distributions
 
-Use `Distributions` to choose `Fixed price`, `Airdrop`, or `Bonding curve`.
+Use `Distributions` to choose `Fixed price`, `Bond market`, `Airdrop`, or `Bonding curve`.
 
 - A fixed-price sale sets inventory, payment token, unit price, buyer cap, and schedule.
+- a bond market sets reserve or first-party LP quote asset, pre-funded capacity, auction prices, debt buffer, vesting, cadence, and schedule. Bond positions are non-transferable.
 - a Merkle airdrop sets inventory, root, claim schedule, optional grant-claim cap, and salt.
 - a migrating bonding curve sets sale and migration inventory, quote token, curve terms, graduation target, liquidity share, schedule, and salts.
 
-Existing routes remain listed. Available lifecycle actions include close, cancel, or curve migration when the contract state and authority allow them.
+Existing routes remain listed. Available lifecycle actions include closing a bond market, closing or cancelling other distributions, and curve migration when the contract state and authority allow them.
 
 ## Liquidity
 

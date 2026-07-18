@@ -976,6 +976,22 @@ function deriveDistributionCatalogFields(
     };
   }
 
+  if ("currentPrice" in distribution.state) {
+    const state = distribution.state;
+    return {
+      cashRaised: state.purchased,
+      cashToken: state.quoteToken,
+      cashTokenDecimals: distribution.quoteTokenMetadata?.decimals,
+      cashTokenSymbol: distribution.quoteTokenMetadata?.symbol,
+      distribution: distribution.address,
+      distributionKind: "bond-market",
+      path: state.kind === 1 ? "Liquidity bond" : "Reserve bond",
+      soldShares: state.sold,
+      status: bondMarketStatusLabel(state),
+      shareTokenDecimals,
+    };
+  }
+
   if (!("quoteToken" in distribution.state)) {
     return {
       distribution: distribution.address,
@@ -1050,6 +1066,16 @@ async function readDistributionHistory(
       completeness: "state-derived",
       distribution: distribution.address,
       soldShares: distributionCirculatingShares(distribution),
+    };
+  }
+
+
+  if ("currentPrice" in distribution.state) {
+    return {
+      cashRaised: distribution.state.purchased,
+      completeness: "state-derived",
+      distribution: distribution.address,
+      soldShares: distribution.state.sold,
     };
   }
 
@@ -1575,7 +1601,7 @@ function findCatalogDistribution(
 ): BoardroomDistributionSnapshot | undefined {
   return distributions.find((distribution) => distributionIsExecutable(distribution, boardroomStatus, now))
     ?? distributions.find((distribution) => distribution.kind === "migrating-bonding-curve" && Boolean(nonZeroAddress(
-      distribution.state && "quoteToken" in distribution.state ? distribution.state.pool : undefined,
+      distribution.state && "pool" in distribution.state ? distribution.state.pool : undefined,
     )))
     ?? distributions.find((distribution) => distributionHasActiveEnum(distribution))
     ?? distributions[0];
@@ -1595,6 +1621,7 @@ function distributionHasActiveEnum(distribution: BoardroomDistributionSnapshot):
   if ("saleStatus" in distribution.state) return distribution.state.saleStatus === 0;
   if ("curveStatus" in distribution.state) return distribution.state.curveStatus === 0;
   if ("airdropStatus" in distribution.state) return distribution.state.airdropStatus === 0;
+  if ("currentPrice" in distribution.state) return distribution.state.live && distribution.state.capacity > 0n;
   return false;
 }
 
@@ -1605,6 +1632,7 @@ function executableRouteInput(
 ) {
   if (!distribution.state) return undefined;
   const state = distribution.state;
+  if (distribution.kind === "bond-market") return undefined;
   if ("paymentToken" in state) {
     return {
       boardroomStatus,
@@ -1617,7 +1645,7 @@ function executableRouteInput(
       startTime: state.startTime,
     };
   }
-  if ("quoteToken" in state) {
+  if ("curveStatus" in state) {
     return {
       boardroomStatus,
       closed: state.closed,
@@ -1632,6 +1660,7 @@ function executableRouteInput(
       startTime: state.startTime,
     };
   }
+  if (!("airdropStatus" in state)) return undefined;
   return {
     boardroomStatus,
     closed: state.closed,
@@ -1682,6 +1711,7 @@ export function distributionCirculatingShares(
   if (!distribution.state) return undefined;
   if ("paymentToken" in distribution.state) return distribution.state.saleSupply - distribution.state.remainingShares;
   if ("airdropSupply" in distribution.state) return distribution.state.claimedShares;
+  if ("currentPrice" in distribution.state) return distribution.state.sold;
   if ("quoteToken" in distribution.state) return distribution.state.soldShares;
   return undefined;
 }
@@ -1742,6 +1772,13 @@ function merkleAirdropStatusLabel(status: number): string {
     default:
       return "Unknown airdrop";
   }
+}
+
+function bondMarketStatusLabel(state: { closed: boolean; live: boolean; status: number }): string {
+  if (state.closed) return "Settled bond market";
+  if (state.live) return "Open bond market";
+  if (state.status === 0) return "Scheduled or concluded bond market";
+  return "Bond claims pending";
 }
 
 async function readOptionalTokenName(client: PledgeCashReadClient, address: Address): Promise<string | undefined> {

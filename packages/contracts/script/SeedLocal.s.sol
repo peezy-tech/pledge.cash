@@ -6,6 +6,8 @@ import {stdJson} from "forge-std/StdJson.sol";
 import {AmmFactory} from "../src/amm/AmmFactory.sol";
 import {AmmPool} from "../src/amm/AmmPool.sol";
 import {AmmRouter} from "../src/amm/AmmRouter.sol";
+import {BondMarket} from "../src/bonds/BondMarket.sol";
+import {BondMarketFactory} from "../src/bonds/BondMarketFactory.sol";
 import {AssetPolicy} from "../src/policy/AssetPolicy.sol";
 import {Boardroom} from "../src/boardroom/Boardroom.sol";
 import {BoardroomFactory} from "../src/boardroom/BoardroomFactory.sol";
@@ -108,6 +110,8 @@ contract SeedLocal is Script {
     uint256 internal constant FIXED_CLOSED_BUY_ONE = 600 * PLEDGE;
     uint256 internal constant FIXED_CLOSED_BUY_TWO = 300 * PLEDGE;
     uint256 internal constant FIXED_CLOSED_PRICE = 4 * CASH;
+    uint256 internal constant BOND_CAPACITY = 500 * PLEDGE;
+    uint256 internal constant RESERVE_BOND_BUY = 30 * CASH;
     uint256 internal constant AIRDROP_CLAIMED_SHARES = 240 * PLEDGE;
     uint256 internal constant AIRDROP_UNCLAIMED_SHARES = 360 * PLEDGE;
     uint256 internal constant GOVERNANCE_HOLDER_SHARES = 1_000 * PLEDGE;
@@ -126,6 +130,7 @@ contract SeedLocal is Script {
         AssetPolicy assetPolicy;
         TokenGrantFactory tokenGrantFactory;
         DistributionFactory distributionFactory;
+        BondMarketFactory bondMarketFactory;
         AmmFactory ammFactory;
         AmmRouter ammRouter;
         address protocolFeeRouter;
@@ -228,6 +233,8 @@ contract SeedLocal is Script {
     SeededGrants internal grants;
     LaunchScenario internal launch;
     FixedPriceSale internal activeFixedSale;
+    BondMarket internal reserveBond;
+    BondMarket internal liquidityBond;
     MigratingBondingCurve internal activeCurve;
     FixedPriceSale internal closedFixedSale;
     LifecycleScenarios internal lifecycle;
@@ -274,6 +281,7 @@ contract SeedLocal is Script {
         AssetPolicy assetPolicy = AssetPolicy(json.readAddress(".assetPolicy"));
         TokenGrantFactory tokenGrantFactory = TokenGrantFactory(json.readAddress(".tokenGrantFactory"));
         DistributionFactory distributionFactory = DistributionFactory(json.readAddress(".distributionFactory"));
+        BondMarketFactory bondMarketFactory = BondMarketFactory(json.readAddress(".bondMarketFactory"));
         AmmFactory ammFactory = AmmFactory(json.readAddress(".ammFactory"));
         AmmRouter ammRouter = AmmRouter(payable(json.readAddress(".ammRouter")));
         address protocolFeeRouter = json.readAddress(".protocolFeeRouter");
@@ -282,6 +290,7 @@ contract SeedLocal is Script {
             assetPolicy: assetPolicy,
             tokenGrantFactory: tokenGrantFactory,
             distributionFactory: distributionFactory,
+            bondMarketFactory: bondMarketFactory,
             ammFactory: ammFactory,
             ammRouter: ammRouter,
             protocolFeeRouter: protocolFeeRouter
@@ -390,18 +399,20 @@ contract SeedLocal is Script {
 
         _seedBoardroomLaunch();
         _seedBoardroomEmployeeOptions();
+        _seedBoardroomBonds();
         _recordSeededBoardroom(
             boardroom,
             "Seed Labs",
             "SEED",
-            "Migrated curve + AMM",
-            "Live AMM",
-            "migrating-bonding-curve",
-            address(launch.curve),
+            "Reserve bonds + AMM",
+            "Live bond market",
+            "bond-market",
+            address(reserveBond),
             launch.pool,
             launch.locker,
-            CURVE_BUYER_ONE_SHARES + CURVE_BUYER_TWO_SHARES + launch.postMigrationBuyOutput,
-            launch.quoteReserveAtMigration + launch.postMigrationBuyInput,
+            CURVE_BUYER_ONE_SHARES + CURVE_BUYER_TWO_SHARES + launch.postMigrationBuyOutput + reserveBond.sold()
+                + liquidityBond.sold(),
+            launch.quoteReserveAtMigration + launch.postMigrationBuyInput + reserveBond.purchased(),
             cash.balanceOf(address(boardroom)),
             5
         );
@@ -981,6 +992,101 @@ contract SeedLocal is Script {
         (launch.claimableLockerFee0, launch.claimableLockerFee1) = _pendingPoolFees(launch.pool, launch.locker);
     }
 
+    function _seedBoardroomBonds() internal {
+        reserveBond = _createBondMarket(
+            boardroom, address(cash), BondMarket.MarketKind.Reserve, 3 * CASH, 2 * CASH, "seed-reserve-bond"
+        );
+
+        vm.startBroadcast(HOLDER_KEY);
+        cash.approve(address(reserveBond), RESERVE_BOND_BUY);
+        reserveBond.purchase(RESERVE_BOND_BUY, 1, block.timestamp + 1 hours);
+        vm.stopBroadcast();
+
+        uint256 investorLiquidity = _addInvestorLiquidity();
+        uint256 lpQuoteAmount = investorLiquidity / 2;
+        uint256 lpInitialPrice = investorLiquidity / 10;
+        liquidityBond = _createBondMarket(
+            boardroom,
+            launch.pool,
+            BondMarket.MarketKind.Liquidity,
+            lpInitialPrice,
+            lpInitialPrice / 2,
+            "seed-liquidity-bond"
+        );
+
+        vm.startBroadcast(INVESTOR_KEY);
+        AmmPool(launch.pool).approve(address(liquidityBond), lpQuoteAmount);
+        liquidityBond.purchase(lpQuoteAmount, 1, block.timestamp + 1 hours);
+        vm.stopBroadcast();
+    }
+
+    function _addInvestorLiquidity() internal returns (uint256 liquidity) {
+        vm.startBroadcast(INVESTOR_KEY);
+        cash.approve(address(deployment.ammRouter), 100 * CASH);
+        BoardroomToken(boardroom.shareToken()).approve(address(deployment.ammRouter), 50 * PLEDGE);
+        (,, liquidity) = deployment.ammRouter
+            .addLiquidity(
+                address(cash),
+                boardroom.shareToken(),
+                100 * CASH,
+                50 * PLEDGE,
+                1,
+                1,
+                actors.investor,
+                block.timestamp + 1 hours
+            );
+        vm.stopBroadcast();
+        if (liquidity < 20) revert ScenarioInvariantFailed("investor-liquidity-too-small");
+    }
+
+    function _createBondMarket(
+        Boardroom target,
+        address quoteToken,
+        BondMarket.MarketKind kind,
+        uint256 initialPrice,
+        uint256 minimumPrice,
+        string memory saltLabel
+    ) internal returns (BondMarket market) {
+        bytes32 marketSalt = _salt(saltLabel);
+        BondMarket.CreateParams memory params = BondMarket.CreateParams({
+            quoteToken: quoteToken,
+            kind: kind,
+            capacity: BOND_CAPACITY,
+            initialPrice: initialPrice,
+            minimumPrice: minimumPrice,
+            debtBuffer: 25_000,
+            vesting: 7 days,
+            start: 0,
+            duration: 30 days,
+            depositInterval: 1 days,
+            salt: marketSalt
+        });
+        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        calls[0] = Boardroom.Call({
+            policy: address(deployment.assetPolicy),
+            target: target.shareToken(),
+            value: 0,
+            data: abi.encodeWithSignature(
+                "approve(address,uint256)", address(deployment.bondMarketFactory), BOND_CAPACITY
+            )
+        });
+        calls[1] = Boardroom.Call({
+            policy: address(deployment.bondMarketFactory),
+            target: address(deployment.bondMarketFactory),
+            value: 0,
+            data: abi.encodeCall(BondMarketFactory.createBondMarket, (params))
+        });
+
+        vm.startBroadcast(BOARDROOM_OWNER_KEY);
+        bytes[] memory results = target.executeBatch(calls);
+        vm.stopBroadcast();
+
+        market = BondMarket(abi.decode(results[1], (address)));
+        if (address(market) != deployment.bondMarketFactory.predictBondMarketAddress(address(target), marketSalt)) {
+            revert ScenarioInvariantFailed("bond-market-prediction");
+        }
+    }
+
     function _swapCashForShares(uint256 buyerKey, address buyer, address[] memory path, uint256 amountIn) internal {
         vm.startBroadcast(buyerKey);
         cash.approve(address(deployment.ammRouter), amountIn);
@@ -1177,8 +1283,14 @@ contract SeedLocal is Script {
         );
         _check(launch.lockedLiquidity > 0, "curve-locked-liquidity");
         _check(locker.lockedLiquidity() == launch.lockedLiquidity, "locker-liquidity");
-        _check(boardroom.issuedDistributionCount() == 0, "boardroom-distribution-count");
+        _check(boardroom.issuedDistributionCount() == 2, "boardroom-distribution-count");
         _check(!boardroom.isIssuedDistribution(address(launch.curve)), "boardroom-distribution-pruned");
+        _check(boardroom.isIssuedDistribution(address(reserveBond)), "boardroom-reserve-bond");
+        _check(boardroom.isIssuedDistribution(address(liquidityBond)), "boardroom-liquidity-bond");
+        _check(reserveBond.nextPositionId() == 1, "reserve-bond-position");
+        _check(liquidityBond.nextPositionId() == 1, "liquidity-bond-position");
+        _check(reserveBond.outstandingPayout() > 0, "reserve-bond-outstanding");
+        _check(liquidityBond.outstandingPayout() > 0, "liquidity-bond-outstanding");
         _check(boardroom.lockedLiquidityCount() == 1, "boardroom-locker-count");
         _check(boardroom.lockedLiquidityAt(0) == launch.locker, "boardroom-locker");
         _check(launch.optionStrikePrice == launch.quoteToLiquidity * PLEDGE / launch.sharesToLiquidity, "option-strike");
@@ -1283,7 +1395,7 @@ contract SeedLocal is Script {
         _check(seededBoardrooms.length == 8, "seeded-boardroom-count");
 
         _check(seededBoardrooms[0].boardroom == boardroom, "seeded-primary-boardroom");
-        _check(seededBoardrooms[0].distribution == address(launch.curve), "seeded-primary-distribution");
+        _check(seededBoardrooms[0].distribution == address(reserveBond), "seeded-primary-distribution");
         _check(seededBoardrooms[0].pool == launch.pool, "seeded-primary-pool");
         _check(seededBoardrooms[0].locker == launch.locker, "seeded-primary-locker");
 
@@ -1381,6 +1493,8 @@ contract SeedLocal is Script {
         json.serialize("migratingCurve", address(launch.curve));
         json.serialize("curvePool", launch.pool);
         json.serialize("curveLocker", launch.locker);
+        json.serialize("reserveBondMarket", address(reserveBond));
+        json.serialize("liquidityBondMarket", address(liquidityBond));
         json.serialize("curveBuyerOne", actors.investor);
         json.serialize("curveBuyerTwo", actors.newHolder);
         json.serialize("curveSaleSupply", vm.toString(CURVE_SALE_SUPPLY));
@@ -1558,6 +1672,8 @@ contract SeedLocal is Script {
         console2.log("Migrating curve", address(launch.curve));
         console2.log("Curve pool", launch.pool);
         console2.log("Curve locker", launch.locker);
+        console2.log("Reserve bond market", address(reserveBond));
+        console2.log("Liquidity bond market", address(liquidityBond));
         console2.log("Curve buyer one quote paid", launch.buyerOneQuotePaid);
         console2.log("Curve buyer two quote paid", launch.buyerTwoQuotePaid);
         console2.log("Curve quote reserve at migration", launch.quoteReserveAtMigration);

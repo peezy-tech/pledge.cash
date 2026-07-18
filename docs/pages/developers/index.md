@@ -14,6 +14,7 @@ These pages bridge the product documentation to the repository's authoritative e
 | Boardroom, governance, wind-down, redemption | [Boardroom integration](developers/boardroom) | [Boardroom protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/boardroom-protocol.md) |
 | Direct and Boardroom-issued grants | [Grant integration](developers/grants) | [Token grant protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/token-grant-protocol.md) |
 | Fixed sales, curves, and Merkle airdrops | [Distribution and airdrop integration](developers/distributions-and-airdrops) | [Distribution protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/distribution-protocol.md) |
+| Reserve and liquidity bond auctions | [Distribution and airdrop integration](developers/distributions-and-airdrops) | [Bond market protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/bond-market-protocol.md) |
 | Pools, router, fees, and locked liquidity | [AMM and liquidity integration](developers/amm-and-liquidity) | [AMM and locked liquidity protocol](https://github.com/peezy-tech/pledge.cash/blob/main/docs/amm-protocol.md) |
 | Broadcasts, artifacts, and local seeding | [Deployment and local scenarios](developers/deployment-and-local-scenarios) | [Deployment](https://github.com/peezy-tech/pledge.cash/blob/main/docs/deployment.md) |
 

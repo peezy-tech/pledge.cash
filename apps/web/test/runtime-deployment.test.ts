@@ -72,12 +72,29 @@ describe("runtime deployment artifacts", () => {
       "chainId": 998,
       "tokenGrantModulePolicy": true,
       "distributionModulePolicy": false,
+      "bondMarketModulePolicy": true,
       "lockedLiquidityModulePolicy": true
     }`);
 
     expect(deployment.tokenGrantModulePolicy).toBe(true);
     expect(deployment.distributionModulePolicy).toBe(false);
+    expect(deployment.bondMarketModulePolicy).toBe(true);
     expect(deployment.lockedLiquidityModulePolicy).toBe(true);
+  });
+
+  test("preserves bond-market deployment provenance", () => {
+    const deployment = parseDeployment(`{
+      "chainId": 998,
+      "bondMarketFactory": "0x1000000000000000000000000000000000000001",
+      "bondMarketLogic": "0x1000000000000000000000000000000000000002",
+      "assetBondMarketSpenderAllowed": true,
+      "bondMarketFactoryCodeHash": "0xabc123"
+    }`);
+
+    expect(deployment.bondMarketFactory).toBe("0x1000000000000000000000000000000000000001");
+    expect(deployment.bondMarketLogic).toBe("0x1000000000000000000000000000000000000002");
+    expect(deployment.assetBondMarketSpenderAllowed).toBe(true);
+    expect(deployment.bondMarketFactoryCodeHash).toBe("0xabc123");
   });
 
   test("preserves Boardroom implementation and helper roots", () => {

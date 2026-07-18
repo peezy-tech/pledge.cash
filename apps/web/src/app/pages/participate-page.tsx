@@ -135,7 +135,14 @@ export function participationRefreshDelayMs(
   const boundaries: bigint[] = [];
   for (const distribution of dashboard.snapshot.distributionSummaries) {
     const state = distribution.state;
-    if (!state || !("startTime" in state) || !("endTime" in state) || state.closed) continue;
+    if (!state || state.closed) continue;
+    if (distribution.kind === "bond-market" && "live" in state) {
+      if (state.status !== 0) continue;
+      boundaries.push(BigInt(state.startTime) * 1_000n);
+      boundaries.push(BigInt(state.conclusion) * 1_000n);
+      continue;
+    }
+    if (!("startTime" in state) || !("endTime" in state)) continue;
     const routeStatus = "saleStatus" in state
       ? state.saleStatus
       : "curveStatus" in state
@@ -193,7 +200,19 @@ function participationTimingIdentity(dashboard: ProductBoardroomDashboardState |
     dashboard.snapshot.status.toString(),
     ...dashboard.snapshot.distributionSummaries.map((distribution) => {
       const state = distribution.state;
-      if (!state || !("startTime" in state) || !("endTime" in state)) return `${distribution.address.toLowerCase()}:unread`;
+      if (!state) return `${distribution.address.toLowerCase()}:unread`;
+      if (distribution.kind === "bond-market" && "live" in state) {
+        return [
+          distribution.address.toLowerCase(),
+          state.status,
+          state.closed ? 1 : 0,
+          state.startTime,
+          state.conclusion,
+          state.capacity,
+          state.live ? 1 : 0,
+        ].join(":");
+      }
+      if (!("startTime" in state) || !("endTime" in state)) return `${distribution.address.toLowerCase()}:unread`;
       const routeStatus = "saleStatus" in state
         ? state.saleStatus
         : "curveStatus" in state
@@ -277,7 +296,7 @@ export function ParticipatePage({
         {options.length === 0 ? (
           <div className="mt-5">
             <PageNotice title="No participation route is available">
-              This project has no readable sale, curve, airdrop, or AMM market. Its transparency record remains available.
+              This project has no readable bond, sale, curve, airdrop, or AMM market. Its transparency record remains available.
             </PageNotice>
           </div>
         ) : options.length === 1 && activeOption ? (
@@ -387,6 +406,9 @@ function unavailableRouteGuidance(
   if (option.path === "fixed-price-sale") {
     return "This sale is closed or sold out. Its historical terms and contract remain visible in the route details.";
   }
+  if (option.path === "bond-market") {
+    return "This bond market is scheduled, closed, or out of capacity. Existing positions remain claimable from its contract when they mature.";
+  }
   if (option.path === "merkle-airdrop") {
     return "This claim route is closed or fully claimed. Its allocation contract remains visible in the route details.";
   }
@@ -461,6 +483,62 @@ function distributionOption(
   boardroomStatus: number,
   now: bigint,
 ): ParticipationOption | undefined {
+  if (distribution.kind === "bond-market") {
+    const base = distributionBase(
+      distribution,
+      "bond-market",
+      "Bond market",
+      "Commit reserve or first-party LP assets for non-transferable vested project tokens.",
+    );
+    if (!distribution.state || !("live" in distribution.state)) return unreadDistribution(base, distribution, "bond-market");
+    const state = distribution.state;
+    const available = state.live && state.capacity > 0n;
+    const startTime = BigInt(state.startTime);
+    const conclusion = BigInt(state.conclusion);
+    const group: ParticipationRouteGroup = available
+      ? "live"
+      : state.status !== 0 || state.capacity === 0n || now >= conclusion
+        ? "closed"
+        : "unavailable";
+    const status = available
+      ? "Live"
+      : state.status !== 0
+        ? state.outstandingPayout > 0n ? "Claims pending" : "Settled"
+        : state.capacity === 0n
+          ? "Sold out"
+          : now < startTime
+            ? "Scheduled"
+            : now >= conclusion
+              ? "Window ended"
+              : "Unavailable";
+    const reason = available
+      ? undefined
+      : state.status !== 0
+        ? state.outstandingPayout > 0n
+          ? "Purchases are closed while funded positions remain claimable at maturity."
+          : "This bond market has settled."
+        : state.capacity === 0n
+          ? "The bond market has no remaining project-token capacity."
+          : now < startTime
+            ? `Purchases open at Unix time ${state.startTime}.`
+            : now >= conclusion
+              ? "The bond purchase window has ended."
+              : boardroomStatus !== 0
+                ? "The project lifecycle does not currently permit bond purchases."
+                : "The bond market is not currently accepting purchases.";
+    return {
+      ...base,
+      available,
+      group,
+      label: state.kind === 1 ? "Liquidity bond" : "Reserve bond",
+      liveness: available ? routeLiveness("live") : routeLiveness("unavailable", reason ?? "Bond purchases are unavailable."),
+      ...(reason ? { reason } : {}),
+      remaining: state.capacity,
+      status,
+      ...(distribution.shareTokenMetadata?.symbol ? { tokenSymbol: distribution.shareTokenMetadata.symbol } : {}),
+    };
+  }
+
   if (distribution.kind === "fixed-price-sale") {
     const base = distributionBase(distribution, "fixed-price-sale", "Fixed-price sale", "Buy a known number of project tokens at a fixed unit price.");
     if (!distribution.state || !("saleStatus" in distribution.state)) return unreadDistribution(base, distribution, "sale");
@@ -539,7 +617,7 @@ function distributionBase(
   return {
     address: distribution.address,
     description,
-    id: participationDistributionKey(path as "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop", distribution.address),
+    id: participationDistributionKey(path as "bond-market" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop", distribution.address),
     label,
     path,
   };
@@ -745,6 +823,7 @@ function fallbackOption(id: ParticipationContentKey): ParticipationOption {
     reason,
     status: "Unknown",
   };
+  if (path === "bond-market") return { ...common, description: "Commit reserve or LP assets for a vested project-token position.", label: "Bond market" };
   if (path === "fixed-price-sale") return { ...common, description: "Buy at a published unit price.", label: "Fixed-price sale" };
   if (path === "migrating-bonding-curve") return { ...common, description: "Buy or sell against a price curve.", label: "Bonding curve" };
   if (path === "merkle-airdrop") return { ...common, description: "Claim a published allocation.", label: "Airdrop" };

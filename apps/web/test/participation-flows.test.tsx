@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type {
   Address,
+  BondMarketState,
+  BondPurchaseQuote,
   FixedPriceSaleParticipationQuote,
   FixedPriceSaleState,
   MigratingBondingCurveBuyQuote,
@@ -21,6 +23,7 @@ import {
   parseSlippageBps,
   ParticipationActionGuard,
   participationDistributionKey,
+  prepareBondMarketAction,
   prepareBondingCurveAction,
   prepareFixedPriceSaleAction,
   transactionDeadline,
@@ -41,6 +44,7 @@ const sale = "0x5000000000000000000000000000000000000000" as Address;
 const oldSale = "0x5100000000000000000000000000000000000000" as Address;
 const curve = "0x6000000000000000000000000000000000000000" as Address;
 const airdrop = "0x7000000000000000000000000000000000000000" as Address;
+const bond = "0x7100000000000000000000000000000000000000" as Address;
 const zeroAddress = "0x0000000000000000000000000000000000000000" as Address;
 const zeroHash = `0x${"00".repeat(32)}` as const;
 
@@ -122,6 +126,37 @@ const airdropDistribution: BoardroomDistributionSnapshot = {
   shareTokenMetadata: { address: shareToken, decimals: 18, symbol: "ATLAS" },
 };
 
+const bondDistribution: BoardroomDistributionSnapshot = {
+  address: bond,
+  kind: "bond-market",
+  state: {
+    address: bond,
+    factory: owner,
+    boardroom,
+    shareToken,
+    quoteToken: paymentToken,
+    kind: 0,
+    status: 0,
+    initialCapacity: 10_000_000_000_000_000_000n,
+    capacity: 8_000_000_000_000_000_000n,
+    minimumPrice: 2_000_000n,
+    currentPrice: 3_000_000n,
+    maximumPayout: 1_000_000_000_000_000_000n,
+    purchased: 6_000_000n,
+    sold: 2_000_000_000_000_000_000n,
+    outstandingPayout: 2_000_000_000_000_000_000n,
+    returnedPayout: 0n,
+    startTime: 1,
+    conclusion: 4_102_444_800,
+    vestingTerm: 604_800,
+    nextPositionId: 2n,
+    live: true,
+    closed: false,
+  },
+  shareTokenMetadata: { address: shareToken, decimals: 18, symbol: "ATLAS" },
+  quoteTokenMetadata: { address: paymentToken, decimals: 6, symbol: "USDC" },
+};
+
 const dashboard: ProductBoardroomDashboardState = {
   address: boardroom,
   catalog: [],
@@ -141,11 +176,11 @@ const dashboard: ProductBoardroomDashboardState = {
     governanceConfig: { minimumDelay: 86_400n, actionGracePeriod: 604_800n, vetoBps: 2_000n, windDownBps: 3_000n },
     redeemableAssets: [],
     issuedGrants: [],
-    issuedDistributions: [sale, curve, airdrop],
+    issuedDistributions: [sale, curve, airdrop, bond],
     lockedLiquidityPositions: [],
     shareTokenMetadata: { address: shareToken, decimals: 18, symbol: "ATLAS" },
     grantSummaries: [],
-    distributionSummaries: [fixedSaleDistribution, curveDistribution, airdropDistribution],
+    distributionSummaries: [fixedSaleDistribution, curveDistribution, airdropDistribution, bondDistribution],
     lockedLiquiditySummaries: [],
   },
   treasuryAssets: [],
@@ -270,6 +305,68 @@ describe("participation bounds and proof parsing", () => {
       intent: fixedPriceIntent(state),
       async readQuote() { return fixedPriceQuote(state, { paymentAllowance: 1_000n }); },
     })).rejects.toThrow("Approval is now sufficient");
+  });
+
+  test("uses one fresh bond quote for action selection and minimum-payout protection", async () => {
+    const state = bondDistribution.state as BondMarketState;
+    const result = await prepareBondMarketAction(publicClient, {
+      clock: () => 1_000,
+      expectedAction: "trade",
+      intent: bondMarketIntent(state),
+      async readQuote(_client, input) {
+        expect(input).toEqual({ market: bond, buyer: owner, quoteAmount: 100n });
+        return bondPurchaseQuote(state, { payout: 101n, quoteAllowance: 1_000n });
+      },
+    });
+
+    expect(result.minimumPayout).toBe(100n);
+    expect(result.request).toMatchObject({ address: bond, functionName: "purchase" });
+    expect(result.request.args).toEqual([100n, 100n, 2_200n]);
+  });
+
+  test("rejects a deferred bond action after an A-to-B-to-A identity change", async () => {
+    const state = bondDistribution.state as BondMarketState;
+    const pending = deferred<BondPurchaseQuote>();
+    const guard = new ParticipationActionGuard("bond:A");
+    const ticket = guard.capture();
+    const prepared = prepareBondMarketAction(publicClient, {
+      expectedAction: "trade",
+      intent: bondMarketIntent(state),
+      isCurrent: () => guard.isCurrent(ticket),
+      async readQuote() { return await pending.promise; },
+    });
+
+    guard.sync("bond:B");
+    guard.sync("bond:A");
+    pending.resolve(bondPurchaseQuote(state));
+
+    await expect(prepared).rejects.toThrow("Bond details changed");
+  });
+
+  test("requires a new review when a refreshed bond quote changes the approval action", async () => {
+    const state = bondDistribution.state as BondMarketState;
+    await expect(prepareBondMarketAction(publicClient, {
+      expectedAction: "trade",
+      intent: bondMarketIntent(state),
+      async readQuote() { return bondPurchaseQuote(state, { quoteAllowance: 0n }); },
+    })).rejects.toThrow("now requires approval");
+
+    await expect(prepareBondMarketAction(publicClient, {
+      expectedAction: "approve",
+      intent: bondMarketIntent(state),
+      async readQuote() { return bondPurchaseQuote(state, { quoteAllowance: 1_000n }); },
+    })).rejects.toThrow("Approval is now sufficient");
+  });
+
+  test("rejects a bond quote for a different immutable market identity", async () => {
+    const state = bondDistribution.state as BondMarketState;
+    await expect(prepareBondMarketAction(publicClient, {
+      expectedAction: "trade",
+      intent: bondMarketIntent(state),
+      async readQuote() {
+        return bondPurchaseQuote({ ...state, factory: sale });
+      },
+    })).rejects.toThrow("does not match this wallet, market, or exact commitment amount");
   });
 
   test("fails a deferred curve action when the connected account changes mid-quote", async () => {
@@ -473,7 +570,8 @@ describe("participation flow composition", () => {
     const fixedKey = participationDistributionKey("fixed-price-sale", sale);
     const curveKey = participationDistributionKey("migrating-bonding-curve", curve);
     const airdropKey = participationDistributionKey("merkle-airdrop", airdrop);
-    expect(Object.keys(content)).toEqual([fixedKey, curveKey, airdropKey]);
+    const bondKey = participationDistributionKey("bond-market", bond);
+    expect(Object.keys(content)).toEqual([fixedKey, curveKey, airdropKey, bondKey]);
 
     const fixedHtml = renderToString(content[fixedKey]);
     expect(fixedHtml).toContain("Buy from the fixed-price sale");
@@ -490,6 +588,11 @@ describe("participation flow composition", () => {
     expect(airdropHtml).toContain("Claim an airdrop allocation");
     expect(airdropHtml).toContain("Proof and claim details");
     expect(airdropHtml).toContain("Grant claim slots");
+
+    const bondHtml = renderToString(<ParticipationFlows {...context} path="bond-market" />);
+    expect(bondHtml).toContain("Commit now, claim vested project tokens later");
+    expect(bondHtml).toContain("Non-transferable");
+    expect(bondHtml).toContain("Your non-transferable positions");
   });
 
   test("puts a contextual wallet connection action inside disconnected sale and curve flows", () => {
@@ -638,6 +741,36 @@ function fixedPriceQuote(
     remainingBuyerCapacity: state.remainingShares,
     paymentBalance: 1_000n,
     paymentAllowance: 1_000n,
+    ...overrides,
+  };
+}
+
+function bondMarketIntent(state: BondMarketState) {
+  return {
+    account: owner,
+    boardroom,
+    boardroomStatus: 0,
+    deadlineMinutes: "20",
+    factory: state.factory,
+    market: state.address,
+    quoteAmount: 100n,
+    quoteToken: state.quoteToken,
+    shareToken: state.shareToken,
+    slippageBps: 100n,
+  } as const;
+}
+
+function bondPurchaseQuote(
+  state: BondMarketState,
+  overrides: Partial<BondPurchaseQuote> = {},
+): BondPurchaseQuote {
+  return {
+    state,
+    buyer: owner,
+    quoteAmount: 100n,
+    payout: 100n,
+    quoteBalance: 1_000n,
+    quoteAllowance: 1_000n,
     ...overrides,
   };
 }

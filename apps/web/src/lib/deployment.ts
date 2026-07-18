@@ -20,6 +20,8 @@ const STRING_DEPLOYMENT_FIELDS = [
   "ammRouterCodeHash",
   "lockedLiquidityFactoryCodeHash",
   "distributionFactoryCodeHash",
+  "bondMarketFactoryCodeHash",
+  "bondMarketLogicCodeHash",
   "wrappedNativeCodeHash",
 ] as const;
 const ADDRESS_DEPLOYMENT_FIELDS = [
@@ -34,6 +36,8 @@ const ADDRESS_DEPLOYMENT_FIELDS = [
   "assetPolicy",
   "protocolFeeRouter",
   "distributionFactory",
+  "bondMarketFactory",
+  "bondMarketLogic",
   "ammFactory",
   "ammProtocolFeeRecipient",
   "ammRouter",
@@ -61,12 +65,15 @@ const BOOLEAN_DEPLOYMENT_FIELDS = [
   "tokenGrantModulePolicy",
   "distributionPolicyAllowed",
   "distributionModulePolicy",
+  "bondMarketPolicyAllowed",
+  "bondMarketModulePolicy",
   "lockedLiquidityPolicyAllowed",
   "lockedLiquidityModulePolicy",
   "assetPolicyAllowed",
   "assetWrappedNativeAllowed",
   "assetTokenGrantSpenderAllowed",
   "assetDistributionSpenderAllowed",
+  "assetBondMarketSpenderAllowed",
   "assetLockedLiquiditySpenderAllowed",
 ] as const;
 const BIGINT_DEPLOYMENT_FIELDS = ["creationFee", "deploymentTimestamp"] as const;

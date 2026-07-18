@@ -196,7 +196,7 @@ export function TransparencyPage({
 
       {histories.length > 0 || catalogEntry?.distribution ? (
         <RuledSection>
-          <SectionHeading title="Lifetime participation history" description="Cumulative onchain activity is separate from the current-state snapshot. Each sale, curve, airdrop, and migrated market stays separate so incompatible payment tokens are never added together." />
+          <SectionHeading title="Lifetime participation history" description="Cumulative onchain activity is separate from the current-state snapshot. Each bond, sale, curve, airdrop, and migrated market stays separate so incompatible quote and payment tokens are never added together." />
           <div className="mt-4 divide-y divide-zinc-800 border-y border-zinc-800">
             {(histories.length > 0 ? histories : [{
               buyerCount: catalogEntry?.buyerCount,
@@ -548,6 +548,11 @@ function GrantStatus({ grant }: { grant: BoardroomGrantSnapshot }): React.JSX.El
 
 function DistributionStatus({ distribution }: { distribution: BoardroomDistributionSnapshot }): React.JSX.Element {
   if (distribution.error || !distribution.state) return <Badge variant="danger">Read issue</Badge>;
+  if ("currentPrice" in distribution.state) {
+    if (distribution.state.closed) return <Badge variant="muted">Settled</Badge>;
+    if (distribution.state.live) return <Badge variant="default">Live</Badge>;
+    return <Badge variant={distribution.state.status === 0 ? "warning" : "muted"}>{distribution.state.status === 0 ? "Scheduled / concluded" : "Claims pending"}</Badge>;
+  }
   const status = "saleStatus" in distribution.state
     ? distribution.state.saleStatus
     : "curveStatus" in distribution.state
@@ -603,6 +608,7 @@ function distributionIsOpen(distribution: BoardroomDistributionSnapshot): boolea
   if (!distribution.state || distribution.state.closed) return false;
   if ("saleStatus" in distribution.state) return distribution.state.saleStatus === 0;
   if ("curveStatus" in distribution.state) return distribution.state.curveStatus === 0;
+  if ("currentPrice" in distribution.state) return distribution.state.live;
   return distribution.state.airdropStatus === 0;
 }
 
@@ -610,6 +616,7 @@ function distributionAllocated(distribution: BoardroomDistributionSnapshot): big
   if (!distribution.state) return undefined;
   if ("saleSupply" in distribution.state) return distribution.state.saleSupply;
   if ("airdropSupply" in distribution.state) return distribution.state.airdropSupply;
+  if ("currentPrice" in distribution.state) return distribution.state.initialCapacity;
   return undefined;
 }
 
@@ -617,10 +624,12 @@ function distributionRemaining(distribution: BoardroomDistributionSnapshot): big
   if (!distribution.state) return undefined;
   if ("remainingSaleShares" in distribution.state) return distribution.state.remainingSaleShares;
   if ("remainingShares" in distribution.state) return distribution.state.remainingShares;
+  if ("currentPrice" in distribution.state) return distribution.state.capacity;
   return undefined;
 }
 
 function distributionKindLabel(kind: BoardroomDistributionSnapshot["kind"]): string {
+  if (kind === "bond-market") return "Bond market";
   if (kind === "fixed-price-sale") return "Fixed-price sale";
   if (kind === "migrating-bonding-curve") return "Bonding curve";
   if (kind === "merkle-airdrop") return "Airdrop";

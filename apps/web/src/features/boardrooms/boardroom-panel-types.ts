@@ -1,5 +1,6 @@
 import type {
   Address,
+  BondMarketState,
   FixedPriceSaleState,
   LockedLiquidityState,
   MerkleAirdropState,
@@ -10,6 +11,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { Capability } from "../capabilities/project-capabilities";
 import type {
   BoardroomForm,
+  BondMarketForm,
   BoardroomGrantForm,
   BoardroomSnapshot,
   CurveMigrationForm,
@@ -26,6 +28,7 @@ export type BoardroomPanelProps = {
   boardroomIdentityLocked?: boolean | undefined;
   capabilities?: BoardroomPanelCapabilities | undefined;
   boardroom: BoardroomPanelState;
+  bondMarket: BondMarketPanelState;
   fixedPriceSale: FixedPriceSalePanelState;
   grant: BoardroomGrantPanelState;
   lockedLiquidity: LockedLiquidityPanelState;
@@ -33,6 +36,19 @@ export type BoardroomPanelProps = {
   migratingCurve: MigratingCurvePanelState;
   windDown: WindDownPanelState;
   workflow: BoardroomWorkflow;
+};
+
+export type BondMarketPanelState = {
+  address: string;
+  form: BondMarketForm;
+  predicted: Address | undefined;
+  snapshot: BondMarketState | undefined;
+  close: () => Promise<void>;
+  create: () => Promise<void>;
+  load: () => Promise<void>;
+  predict: () => Promise<void>;
+  setAddress: (address: string) => void;
+  setForm: Dispatch<SetStateAction<BondMarketForm>>;
 };
 
 export type BoardroomPanelCapabilities = {

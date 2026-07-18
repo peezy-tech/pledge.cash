@@ -1,6 +1,7 @@
 import { isZeroAddress, type Address } from "@pledge.cash/sdk";
 import {
   currentUnixTimestamp,
+  bondMarketUnitPrice,
   curveBuyQuoteAmountRaw,
   curveBuyQuoteRaw,
   curveQuoteUnitPrice,
@@ -295,6 +296,9 @@ function catalogRoutePrice(project: ProductBoardroomCatalogEntry): RoutePriceSta
   if (project.distributionKind === "fixed-price-sale") {
     return unknownMetric("The directory does not expose the current fixed-sale unit price. Open the project for exact sale terms.");
   }
+  if (project.distributionKind === "bond-market") {
+    return unknownMetric("The directory does not expose the bond market's current sequential-auction price. Open the project for exact terms.");
+  }
   if (project.distributionKind === "migrating-bonding-curve") {
     return unknownMetric("A curve price requires an exact project-token amount and current curve quote. Open the project to quote it.");
   }
@@ -341,6 +345,42 @@ function dashboardRoute(
     };
   }
 
+  if (distribution.kind === "bond-market" && "currentPrice" in distribution.state) {
+    const metadata = distribution.shareTokenMetadata ?? dashboard.snapshot.shareTokenMetadata;
+    const quote = distribution.quoteTokenMetadata;
+    const price = metadata?.decimals === undefined || quote?.decimals === undefined
+      ? unknownMetric<never>("Token decimals are required to normalize the bond market's current price.")
+      : bondMarketUnitPrice({
+          market: distribution.address,
+          projectToken: distribution.state.shareToken,
+          projectDecimals: metadata.decimals,
+          quoteToken: distribution.state.quoteToken,
+          quoteDecimals: quote.decimals,
+          priceWad: distribution.state.currentPrice,
+        });
+    const live = distribution.state.live && distribution.state.capacity > 0n;
+    const reason = distribution.state.status !== 0
+      ? distribution.state.outstandingPayout > 0n
+        ? "Bond purchases are closed while funded positions remain claimable at maturity."
+        : "This bond market has settled."
+      : distribution.state.capacity === 0n
+        ? "The bond market has no remaining project-token capacity."
+        : now < BigInt(distribution.state.startTime)
+          ? `Bond purchases open at Unix time ${distribution.state.startTime}.`
+          : now >= BigInt(distribution.state.conclusion)
+            ? "The bond purchase window has ended."
+            : dashboard.snapshot.status !== 0
+              ? "The project lifecycle does not currently permit bond purchases."
+              : "The bond market is not currently accepting purchases.";
+    return {
+      liveness: live ? routeLiveness("live") : routeLiveness("unavailable", reason),
+      price,
+      routeLabel: distribution.state.kind === 1 ? "Liquidity bond" : "Reserve bond",
+      routeSource: routePriceSource(price, "Bond market state"),
+      tradeable: true,
+    };
+  }
+
   if ("paymentToken" in distribution.state) {
     const metadata = distribution.shareTokenMetadata ?? dashboard.snapshot.shareTokenMetadata;
     const quote = distribution.paymentTokenMetadata;
@@ -373,7 +413,7 @@ function dashboardRoute(
     };
   }
 
-  if ("quoteToken" in distribution.state) {
+  if (distribution.kind === "migrating-bonding-curve" && "curveStatus" in distribution.state) {
     const projectDecimals = distribution.shareTokenMetadata?.decimals ?? dashboard.snapshot.shareTokenMetadata?.decimals;
     const quoteDecimals = distribution.quoteTokenMetadata?.decimals;
     const executable = deriveExecutableDistributionRoute({
@@ -422,6 +462,16 @@ function dashboardRoute(
     };
   }
 
+  if (distribution.kind !== "merkle-airdrop" || !("airdropStatus" in distribution.state)) {
+    const reason = "The selected participation route does not expose a supported current-state market view.";
+    return {
+      liveness: routeLiveness("unknown", reason),
+      price: unknownMetric(reason),
+      routeLabel: distributionKindLabel(distribution.kind),
+      routeSource: distributionKindLabel(distribution.kind),
+      tradeable: isTradeRoute(distribution.kind),
+    };
+  }
   const executable = deriveExecutableDistributionRoute({
     boardroomStatus: dashboard.snapshot.status,
     closed: distribution.state.closed,
@@ -596,6 +646,7 @@ function dashboardPoolBelongsToSelectedRoute(
   if (
     distribution?.state
     && "quoteToken" in distribution.state
+    && "pool" in distribution.state
     && !isZeroAddress(distribution.state.pool)
   ) return sameAddress(distribution.state.pool, catalog.pool);
   return Boolean((dashboard.histories ?? []).some((history) =>
@@ -612,7 +663,7 @@ function dashboardHasPoolHistoryMismatch(
   if (!catalog?.distribution) return false;
   const distribution = dashboard.snapshot.distributionSummaries.find((candidate) =>
     sameAddress(candidate.address, catalog.distribution));
-  if (!distribution?.state || !("quoteToken" in distribution.state) || isZeroAddress(distribution.state.pool)) {
+  if (!distribution?.state || !("quoteToken" in distribution.state) || !("pool" in distribution.state) || isZeroAddress(distribution.state.pool)) {
     return false;
   }
   const history = (dashboard.histories ?? []).find((candidate) =>
@@ -633,14 +684,18 @@ function selectedDistribution(
     preferredDistribution
     && (
       dashboardExecutableRoute(dashboard, preferredDistribution, now)?.liveness.status === "live"
-      || Boolean(preferredDistribution.state && "quoteToken" in preferredDistribution.state && preferredDistribution.state.pool)
+      || Boolean(preferredDistribution.state && "quoteToken" in preferredDistribution.state && "pool" in preferredDistribution.state && preferredDistribution.state.pool)
+      || Boolean(preferredDistribution.kind === "bond-market" && preferredDistribution.state && "live" in preferredDistribution.state && preferredDistribution.state.live)
     )
   ) return preferredDistribution;
   return dashboard.snapshot.distributionSummaries.find((distribution) => {
+    if (distribution.kind === "bond-market" && distribution.state && "live" in distribution.state) {
+      return distribution.state.live && distribution.state.capacity > 0n;
+    }
     const executable = dashboardExecutableRoute(dashboard, distribution, now);
     return executable?.liveness.status === "live";
   })
-    ?? dashboard.snapshot.distributionSummaries.find((distribution) => Boolean(distribution.state && "quoteToken" in distribution.state && distribution.state.pool))
+    ?? dashboard.snapshot.distributionSummaries.find((distribution) => Boolean(distribution.state && "quoteToken" in distribution.state && "pool" in distribution.state && distribution.state.pool))
     ?? preferredDistribution
     ?? dashboard.snapshot.distributionSummaries[0];
 }
@@ -652,37 +707,44 @@ function dashboardExecutableRoute(
 ): ExecutableDistributionRoute | undefined {
   const state = distribution.state;
   if (!state) return undefined;
-  const common = {
-    boardroomStatus: dashboard.snapshot.status,
-    closed: state.closed,
-    endTime: state.endTime,
-    now,
-    startTime: state.startTime,
-  };
-  if ("paymentToken" in state) {
+  if (distribution.kind === "bond-market") return undefined;
+  if (distribution.kind === "fixed-price-sale" && "paymentToken" in state) {
     return deriveExecutableDistributionRoute({
-      ...common,
+      boardroomStatus: dashboard.snapshot.status,
+      closed: state.closed,
+      endTime: state.endTime,
       kind: "fixed-price-sale",
+      now,
       remainingShares: state.remainingShares,
       routeStatus: state.saleStatus,
+      startTime: state.startTime,
     });
   }
-  if ("quoteToken" in state) {
+  if (distribution.kind === "migrating-bonding-curve" && "curveStatus" in state) {
     return deriveExecutableDistributionRoute({
-      ...common,
+      boardroomStatus: dashboard.snapshot.status,
+      closed: state.closed,
+      endTime: state.endTime,
       graduationLatched: state.graduationLatched,
       kind: "migrating-bonding-curve",
+      now,
       quoteReserve: state.quoteReserve,
       remainingSaleShares: state.remainingSaleShares,
       routeStatus: state.curveStatus,
       soldShares: state.soldShares,
+      startTime: state.startTime,
     });
   }
+  if (distribution.kind !== "merkle-airdrop" || !("airdropStatus" in state)) return undefined;
   return deriveExecutableDistributionRoute({
-    ...common,
+    boardroomStatus: dashboard.snapshot.status,
+    closed: state.closed,
+    endTime: state.endTime,
     kind: "merkle-airdrop",
+    now,
     remainingShares: state.remainingShares,
     routeStatus: state.airdropStatus,
+    startTime: state.startTime,
   });
 }
 
@@ -713,6 +775,7 @@ function priceDetail(price: RoutePriceState): string | undefined {
     return `Current reserve ratio from pool ${shortAddress(price.value.pool)}; not a 24-hour average or external price feed.`;
   }
   if (price.value.source === "fixed-sale") return "Current contract sale price, denominated in the route quote token.";
+  if (price.value.source === "bond-market") return `Current sequential-auction bond price from market ${shortAddress(price.value.market)}.`;
   const quotedAmount = formatTokenAmount(price.value.projectAmount.raw, {
     address: price.value.projectAmount.token,
     decimals: price.value.projectAmount.decimals,
@@ -739,6 +802,7 @@ function routePriceSource(price: RoutePriceState, fallback: string): string {
   if (price.status !== "known") return fallback;
   if (price.value.source === "amm-spot") return `AMM spot · ${shortAddress(price.value.pool)}`;
   if (price.value.source === "fixed-sale") return "Fixed sale";
+  if (price.value.source === "bond-market") return `Bond market · ${shortAddress(price.value.market)}`;
   return `Curve buy quote · ${formatTokenAmount(price.value.projectAmount.raw, {
     address: price.value.projectAmount.token,
     decimals: price.value.projectAmount.decimals,
@@ -752,6 +816,7 @@ function catalogRouteLabel(project: ProductBoardroomCatalogEntry, now: bigint): 
 }
 
 function distributionKindLabel(kind: string | undefined): string {
+  if (kind === "bond-market") return "Bond market";
   if (kind === "fixed-price-sale") return "Fixed-price sale";
   if (kind === "migrating-bonding-curve") return "Bonding curve";
   if (kind === "merkle-airdrop") return "Airdrop claim";
@@ -759,7 +824,7 @@ function distributionKindLabel(kind: string | undefined): string {
 }
 
 function isTradeRoute(kind: string | undefined): boolean {
-  return kind === "fixed-price-sale" || kind === "migrating-bonding-curve";
+  return kind === "bond-market" || kind === "fixed-price-sale" || kind === "migrating-bonding-curve";
 }
 
 function pairMatches(project: Address, quote: Address, token0: Address, token1: Address): boolean {

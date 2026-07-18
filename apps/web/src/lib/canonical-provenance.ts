@@ -1,10 +1,12 @@
 import {
   boardroomFactoryAbi,
+  bondMarketFactoryAbi,
   distributionFactoryAbi,
   lockedLiquidityFactoryAbi,
   tokenGrantFactoryAbi,
   type Address,
   type BoardroomState,
+  type BondMarketState,
   type FixedPriceSaleState,
   type GrantState,
   type LockedLiquidityState,
@@ -86,6 +88,37 @@ export async function assertCanonicalFixedPriceSale(
   sale: FixedPriceSaleState,
 ): Promise<void> {
   await assertCanonicalDistributionBase(client, deployment, boardroom, sale, 0);
+}
+
+export async function assertCanonicalBondMarket(
+  client: PledgeCashReadClient,
+  deployment: PledgeCashDeployment | undefined,
+  boardroom: BoardroomState,
+  market: BondMarketState,
+): Promise<void> {
+  const factory = requireConfiguredAddress(
+    deployment?.bondMarketFactory,
+    "BondMarketFactory",
+    "this bond market",
+  );
+  if (!sameAddress(market.factory, factory)) {
+    throw new CanonicalProvenanceError("distribution", "This bond market was not created by the configured BondMarketFactory.");
+  }
+  if (!sameAddress(market.boardroom, boardroom.address)) {
+    throw new CanonicalProvenanceError("distribution", "This bond market does not belong to the verified Boardroom.");
+  }
+  if (!sameAddress(market.shareToken, boardroom.shareToken)) {
+    throw new CanonicalProvenanceError("distribution", "This bond market does not use the verified Boardroom share token.");
+  }
+  const registered = await client.readContract({
+    address: factory,
+    abi: bondMarketFactoryAbi,
+    functionName: "isBondMarket",
+    args: [market.address],
+  });
+  if (!registered) {
+    throw new CanonicalProvenanceError("distribution", "This bond market is not registered by the configured BondMarketFactory.");
+  }
 }
 
 export async function assertCanonicalMerkleAirdrop(
