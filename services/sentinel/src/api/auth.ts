@@ -11,6 +11,8 @@ import {
   type BoardroomRef,
   type ChannelDto,
   type HealthResponse,
+  type NotificationDeliveriesQuery,
+  type NotificationDeliveriesResponse,
   type PublicActionsQuery,
   type PublicActionsResponse,
   type SocialProviderDto,
@@ -82,6 +84,10 @@ export type SentinelApiStore = {
   getAuthSnapshot(userId: string): Promise<AuthSnapshot>;
   getChannels(userId: string): Promise<ChannelDto[]>;
   getCursorLags(chainIds: readonly number[]): Promise<HealthResponse["chains"]>;
+  getNotificationDeliveries(
+    userId: string,
+    query: NotificationDeliveriesQuery
+  ): Promise<NotificationDeliveriesResponse>;
   getPublicActions(query: PublicActionsQuery): Promise<PublicActionsResponse>;
   getSubscription(userId: string): Promise<SubscriptionDto>;
   getWalletNonce(nonce: string): Promise<WalletNonceRecord | null>;

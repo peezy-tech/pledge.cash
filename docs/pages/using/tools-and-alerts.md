@@ -42,6 +42,17 @@ To configure alerts:
 
 Every linked EOA wallet can sign in, but only wallets marked `Watching alerts` contribute wallet-based coverage. `Specific Boardrooms` accepts an explicit chain ID and Boardroom address.
 
+## Recent deliveries
+
+After signing in, `Recent deliveries` shows account-scoped receipts for alerts Sentinel prepared for your enabled channels. The list does not expose provider credentials or raw provider errors.
+
+- `Queued` means the alert is waiting for a delivery attempt.
+- `Delivered` means the channel provider accepted the send. It does not prove that a person read or acted on it.
+- `Retry scheduled` means a delivery attempt failed and Sentinel plans another bounded attempt.
+- `Delivery stopped` means automatic retries are exhausted. Review or replace the affected delivery channel.
+
+Choose `Review action` to reopen the exact chain, Boardroom, and action context. Recheck current contract state before acting: a delivery receipt records Sentinel processing, not the action's current onchain status.
+
 ## Public governance activity
 
 When Sentinel is configured, a project’s `Governance` section can show observed `Decision history` without giving the viewer transaction authority. Treat an alert as a prompt to inspect the canonical project, decoded action, and current onchain status—not as proof that an action remains pending or safe.
@@ -49,6 +60,7 @@ When Sentinel is configured, a project’s `Governance` section can show observe
 ## Recovery and privacy
 
 - `Alert service` with `Retry` means the Sentinel request failed; onchain project pages remain usable.
+- A failed or stopped delivery affects only that offchain channel. It does not change the underlying governance action or any wallet authority.
 - Use `Refresh`, `Refresh wallets`, or `Refresh channels` after completing an external sign-in or Telegram flow.
 - A linked wallet and notification destination are offchain account data. `Stop watching` disables that wallet's alert coverage, removing a delivery channel stops delivery there, and `Sign out` ends only the current browser session. The current product does not expose wallet-credential unlinking or account deletion; none of those three controls removes the Sentinel account or its sign-in credential.
 - Never sign a message whose domain, URI, wallet, chain ID, or purpose does not match the pledge.cash alert flow shown in the browser.

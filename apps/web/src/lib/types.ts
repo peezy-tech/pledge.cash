@@ -1,6 +1,7 @@
 import type {
   Address,
   BoardroomState,
+  BondMarketState,
   DiscoveredBoardroom,
   DiscoveredDistribution,
   DiscoveredGrant,
@@ -56,6 +57,7 @@ export type GrantSnapshot = {
   expiry: bigint;
   settledAmount: bigint;
   settleable: bigint;
+  settlementCost: bigint;
   halted: boolean;
   closed: boolean;
   tokenMetadata?: TokenMetadata | undefined;
@@ -79,8 +81,8 @@ export type BoardroomGrantSnapshot = {
 
 export type BoardroomDistributionSnapshot = {
   address: Address;
-  kind: "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "unknown";
-  state?: FixedPriceSaleState | MigratingBondingCurveState | MerkleAirdropState;
+  kind: "bond-market" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "unknown";
+  state?: BondMarketState | FixedPriceSaleState | MigratingBondingCurveState | MerkleAirdropState;
   error?: string;
   shareTokenMetadata?: TokenMetadata | undefined;
   paymentTokenMetadata?: TokenMetadata | undefined;
@@ -135,6 +137,20 @@ export type MerkleAirdropForm = {
   startTime: string;
   endTime: string;
   maxGrantClaims: string;
+  salt: string;
+};
+
+export type BondMarketForm = {
+  quoteToken: string;
+  kind: "reserve" | "liquidity";
+  capacity: string;
+  initialPrice: string;
+  minimumPrice: string;
+  debtBuffer: string;
+  vesting: string;
+  start: string;
+  duration: string;
+  depositInterval: string;
   salt: string;
 };
 

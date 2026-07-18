@@ -4,6 +4,7 @@ import { ReadError } from "./flow-primitives";
 import { FixedPriceSaleFlow } from "./fixed-price-sale-flow";
 import { BondingCurveFlow } from "./bonding-curve-flow";
 import { MerkleAirdropFlow } from "./merkle-airdrop-flow";
+import { BondMarketFlow } from "./bond-market-flow";
 import {
   participationDistributionKey,
   type ParticipationContentKey,
@@ -22,6 +23,7 @@ export function ParticipationFlows({
     return <ReadError>No {participationPathLabel(path)} contract was discovered for this project.</ReadError>;
   }
 
+  if (path === "bond-market") return <BondMarketFlow {...context} distribution={selected} />;
   if (path === "fixed-price-sale") return <FixedPriceSaleFlow {...context} distribution={selected} />;
   if (path === "migrating-bonding-curve") return <BondingCurveFlow {...context} distribution={selected} />;
   return <MerkleAirdropFlow {...context} distribution={selected} />;
@@ -56,6 +58,7 @@ export function findParticipationDistribution(
 function isActiveDistribution(distribution: BoardroomDistributionSnapshot): boolean {
   const state = distribution.state;
   if (!state || state.closed) return false;
+  if (distribution.kind === "bond-market" && "live" in state) return state.live && state.capacity > 0n;
   if (distribution.kind === "fixed-price-sale" && "saleStatus" in state) return state.saleStatus === 0;
   if (distribution.kind === "migrating-bonding-curve" && "curveStatus" in state) return state.curveStatus === 0;
   if (distribution.kind === "merkle-airdrop" && "airdropStatus" in state) return state.airdropStatus === 0;
@@ -63,10 +66,11 @@ function isActiveDistribution(distribution: BoardroomDistributionSnapshot): bool
 }
 
 function isParticipationPath(kind: BoardroomDistributionSnapshot["kind"]): kind is ParticipationPath {
-  return kind === "fixed-price-sale" || kind === "migrating-bonding-curve" || kind === "merkle-airdrop";
+  return kind === "bond-market" || kind === "fixed-price-sale" || kind === "migrating-bonding-curve" || kind === "merkle-airdrop";
 }
 
 function participationPathLabel(path: ParticipationPath): string {
+  if (path === "bond-market") return "bond market";
   if (path === "fixed-price-sale") return "fixed-price sale";
   if (path === "migrating-bonding-curve") return "bonding curve";
   return "airdrop";

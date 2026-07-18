@@ -37,6 +37,8 @@ const contracts = [
     "packages/contracts/out/BoardroomRewardsFactory.sol/BoardroomRewardsFactory.json",
     "boardroomRewardsFactoryAbi",
   ],
+  ["BondMarket", "packages/contracts/out/BondMarket.sol/BondMarket.json", "bondMarketAbi"],
+  ["BondMarketFactory", "packages/contracts/out/BondMarketFactory.sol/BondMarketFactory.json", "bondMarketFactoryAbi"],
   [
     "BoardroomRedemptionPayout",
     "packages/contracts/out/BoardroomRedemptionPayout.sol/BoardroomRedemptionPayout.json",
@@ -90,6 +92,8 @@ const deploymentFields = [
   ["protocolFeeRouter", "address"],
   ["distributionFactory", "address"],
   ["boardroomRewardsFactory", "address"],
+  ["bondMarketFactory", "address"],
+  ["bondMarketLogic", "address"],
   ["ammFactory", "address"],
   ["ammProtocolFeeRecipient", "address"],
   ["ammRouter", "address"],
@@ -115,6 +119,8 @@ const deploymentFields = [
   ["distributionModulePolicy", "boolean"],
   ["boardroomRewardsPolicyAllowed", "boolean"],
   ["boardroomRewardsModulePolicy", "boolean"],
+  ["bondMarketPolicyAllowed", "boolean"],
+  ["bondMarketModulePolicy", "boolean"],
   ["lockedLiquidityPolicyAllowed", "boolean"],
   ["lockedLiquidityModulePolicy", "boolean"],
   ["tokenGrantPolicyAllowed", "boolean"],
@@ -123,6 +129,7 @@ const deploymentFields = [
   ["assetTokenGrantSpenderAllowed", "boolean"],
   ["assetDistributionSpenderAllowed", "boolean"],
   ["assetBoardroomRewardsSpenderAllowed", "boolean"],
+  ["assetBondMarketSpenderAllowed", "boolean"],
   ["assetLockedLiquiditySpenderAllowed", "boolean"],
   ["creationFee", "bigint"],
   ["deploymentTimestamp", "bigint"],
@@ -140,6 +147,8 @@ const deploymentFields = [
   ["lockedLiquidityFactoryCodeHash", "string"],
   ["distributionFactoryCodeHash", "string"],
   ["boardroomRewardsFactoryCodeHash", "string"],
+  ["bondMarketFactoryCodeHash", "string"],
+  ["bondMarketLogicCodeHash", "string"],
   ["wrappedNativeCodeHash", "string"],
 ] as const satisfies readonly (readonly [string, DeploymentFieldKind])[];
 

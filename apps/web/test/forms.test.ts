@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   dateString,
+  defaultBondMarketForm,
   defaultCurveMigrationForm,
   defaultGrantForm,
   defaultLockedLiquidityForm,
@@ -23,6 +24,10 @@ describe("form presentation helpers", () => {
       quoteAmountMin: "0.95",
     });
     expect(defaultCurveMigrationForm()).toMatchObject({ minShareLiquidity: "", minQuoteLiquidity: "" });
+  });
+
+  test("uses the contract's immediate-start sentinel for new bond markets", () => {
+    expect(defaultBondMarketForm().start).toBe("0");
   });
 
   test("defaults grants to at least one day of post-vesting settlement time", () => {

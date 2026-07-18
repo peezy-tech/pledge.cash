@@ -1,6 +1,6 @@
 ---
 title: Distributions and liquidity
-description: Compare fixed-price sales, Merkle airdrops, migrating curves, AMM pools, and Boardroom-owned locked liquidity.
+description: Compare bond markets, fixed-price sales, Merkle airdrops, migrating curves, AMM pools, and Boardroom-owned locked liquidity.
 ---
 
 # Distributions and liquidity
@@ -12,6 +12,17 @@ Distribution contracts put project shares into a defined participation path. AMM
 A sale escrows a fixed share inventory. Buyers pay the configured ERC20 directly to the Boardroom and receive shares from escrow. Payment rounds up to the payment token's smallest unit. Limits include the sale window, remaining inventory, buyer cap, user maximum, and deadline.
 
 Close or cancellation returns unsold shares to the Boardroom. Buying also stops automatically when Boardroom wind-down begins.
+
+## Bond market
+
+A reserve or liquidity bond is a pre-funded Sequential Dutch Auction. Buyers commit a reserve token or a canonical
+pledge.cash LP token now and receive a project-token position that matures after a fixed delay. Demand raises marginal
+price; inactivity decays it toward a configured floor. The auction is self-priced and does not use the AMM TWAP as an
+oracle.
+
+The position is an internal contract record, not an NFT. It cannot be transferred or approved. Anyone may execute a
+mature claim, but the project tokens always go to the wallet recorded at purchase. Closing returns only unsold capacity;
+already funded positions remain claimable and keep wind-down blocked until settled.
 
 ## Merkle airdrop
 
@@ -49,4 +60,4 @@ If hostile underlying-token behavior blocks terminal exact exit, the protocol ca
 
 ## One project, several prices
 
-The fixed sale price, curve quote, and AMM spot price can differ. None is guaranteed to equal treasury value or final redemption value. Compare contract address, inventory, reserves, fees, sell rights, slippage, deadlines, lifecycle status, and exit route before participating.
+The bond auction price, fixed sale price, curve quote, and AMM spot price can differ. None is guaranteed to equal treasury value or final redemption value. Compare contract address, inventory, reserves, fees, position rights, slippage, deadlines, lifecycle status, and exit route before participating.

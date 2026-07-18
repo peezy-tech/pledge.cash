@@ -229,7 +229,6 @@ contract BoardroomRewards is Initializable, ReentrancyGuard {
         if (terminalized) return;
 
         uint256 stopTime = IBoardroomRewardsBoardroom(boardroom).windDownStartedAt();
-        terminalized = true;
         uint256 length = rewardAssets.length;
         for (uint256 i; i < length; ++i) {
             address asset = rewardAssets[i];
@@ -246,6 +245,7 @@ contract BoardroomRewards is Initializable, ReentrancyGuard {
             if (refund != 0) _refundBestEffort(asset, refund);
         }
 
+        terminalized = true;
         emit RewardsTerminalized(stopTime);
     }
 

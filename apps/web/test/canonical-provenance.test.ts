@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type {
   Address,
+  BondMarketState,
   BoardroomState,
   FixedPriceSaleState,
   GrantState,
@@ -11,6 +12,7 @@ import type {
   PledgeCashReadClient,
 } from "@pledge.cash/sdk";
 import {
+  assertCanonicalBondMarket,
   assertCanonicalBoardroom,
   assertCanonicalFixedPriceSale,
   assertCanonicalGrant,
@@ -27,6 +29,7 @@ const grant = "0x4000000000000000000000000000000000000000" as Address;
 const spoof = "0x5000000000000000000000000000000000000000" as Address;
 const distributionFactory = "0x6000000000000000000000000000000000000000" as Address;
 const lockedLiquidityFactory = "0x7000000000000000000000000000000000000000" as Address;
+const bondMarketFactory = "0x7100000000000000000000000000000000000000" as Address;
 const ammRouter = "0x8000000000000000000000000000000000000000" as Address;
 const shareToken = "0x9000000000000000000000000000000000000000" as Address;
 const paymentToken = "0xa000000000000000000000000000000000000000" as Address;
@@ -34,9 +37,11 @@ const sale = "0xb000000000000000000000000000000000000000" as Address;
 const airdrop = "0xc000000000000000000000000000000000000000" as Address;
 const curve = "0xd000000000000000000000000000000000000000" as Address;
 const locker = "0xe000000000000000000000000000000000000000" as Address;
+const bondMarket = "0xf000000000000000000000000000000000000000" as Address;
 const deployment = {
   ammRouter,
   boardroomFactory,
+  bondMarketFactory,
   chainId: 31337,
   distributionFactory,
   lockedLiquidityFactory,
@@ -76,6 +81,12 @@ const lockerState = {
   tokenA: shareToken,
   tokenB: paymentToken,
 } as LockedLiquidityState;
+const bondMarketState = {
+  address: bondMarket,
+  boardroom,
+  factory: bondMarketFactory,
+  shareToken,
+} as BondMarketState;
 
 describe("canonical product provenance", () => {
   test("rejects a spoof Boardroom that is absent from the configured factory", async () => {
@@ -183,6 +194,23 @@ describe("canonical product provenance", () => {
       boardroomState,
       { ...curveState, shareToken: spoof },
     )).rejects.toThrow("Boardroom share token");
+  });
+
+  test("accepts only factory-registered bond markets with canonical wiring", async () => {
+    const client = readClient(async (functionName) => functionName === "isBondMarket" ? true : undefined);
+    await expect(assertCanonicalBondMarket(client, deployment, boardroomState, bondMarketState)).resolves.toBeUndefined();
+    await expect(assertCanonicalBondMarket(client, deployment, boardroomState, { ...bondMarketState, factory: spoof }))
+      .rejects.toThrow("configured BondMarketFactory");
+    await expect(assertCanonicalBondMarket(
+      readClient(async (functionName) => functionName === "isBondMarket" ? false : undefined),
+      deployment,
+      boardroomState,
+      bondMarketState,
+    )).rejects.toThrow("not registered");
+    await expect(assertCanonicalBondMarket(client, deployment, boardroomState, { ...bondMarketState, boardroom: spoof }))
+      .rejects.toThrow("verified Boardroom");
+    await expect(assertCanonicalBondMarket(client, deployment, boardroomState, { ...bondMarketState, shareToken: spoof }))
+      .rejects.toThrow("Boardroom share token");
   });
 
   test("accepts only factory-registered liquidity positions with canonical wiring", async () => {

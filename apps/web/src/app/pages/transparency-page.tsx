@@ -1,8 +1,9 @@
 import type { Address } from "@pledge.cash/sdk";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Download } from "lucide-react";
 import type { ReactNode } from "react";
 import { AddressLink } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
 import {
   formatNativeBalance,
   formatTokenBalance,
@@ -12,6 +13,7 @@ import {
   type ProductTreasuryAsset,
 } from "../../lib/product-boardroom";
 import { formatTokenAmount } from "../../lib/token-amounts";
+import { createProjectEvidenceBundle, downloadProjectEvidenceBundle } from "../../lib/project-evidence";
 import type {
   BoardroomDistributionSnapshot,
   BoardroomGrantSnapshot,
@@ -30,6 +32,7 @@ import {
 
 export type TransparencyPageProps = {
   activityContent?: ReactNode;
+  chainId: number;
   dashboard?: ProductBoardroomDashboardState | undefined;
   error?: string | undefined;
   grantHref?: ((grant: Address) => string) | undefined;
@@ -40,6 +43,7 @@ export type TransparencyPageProps = {
 
 export function TransparencyPage({
   activityContent,
+  chainId,
   dashboard,
   error,
   grantHref,
@@ -67,15 +71,64 @@ export function TransparencyPage({
   const totals = transparencyTotals(dashboard);
   const treasuryAssetTypesKnown = dashboard.currentStateCoverage?.redeemableAssets.complete !== false
     && dashboard.treasuryAssets.every((asset) => !asset.error);
+  const coverage = currentStateCoverageSummary(dashboard);
 
   return (
     <>
       <RuledSection>
         <SectionHeading
-          title="Treasury and supply"
-          description="Balances are held by the Boardroom. Token supply is shown separately from treasury inventory."
+          title="Current state"
+          description="A concise snapshot of treasury, supply, open commitments, liquidity, and evidence coverage. Lifetime activity is reported separately below."
+          action={(
+            <Button
+              size="sm"
+              type="button"
+              variant="secondary"
+              onClick={() => downloadProjectEvidenceBundle(createProjectEvidenceBundle(dashboard, chainId))}
+            >
+              <Download className="h-4 w-4" />
+              Export evidence
+            </Button>
+          )}
         />
         {error ? <div className="mt-4"><PageNotice title="Some evidence could not be read" tone="danger">{error}</PageNotice></div> : null}
+        <CurrentStateSummary
+          items={[
+            {
+              label: "Treasury",
+              value: formatNativeBalance(dashboard.nativeBalance),
+              detail: treasuryAssetTypesKnown
+                ? `${dashboard.treasuryAssets.length.toString()} ERC-20 asset ${dashboard.treasuryAssets.length === 1 ? "type" : "types"}`
+                : "ERC-20 asset coverage is incomplete",
+            },
+            {
+              label: "Project token supply",
+              value: shareAsset?.totalSupply === undefined
+                ? "Unknown"
+                : formatTokenAmount(shareAsset.totalSupply, shareAsset),
+            },
+            {
+              label: "Open commitments",
+              value: formatTokenAmount(totals.unsettledShareGrantShares, snapshot.shareTokenMetadata),
+              detail: totals.openGrantCount === undefined
+                ? "Grant coverage is incomplete"
+                : `${totals.openGrantCount.toString()} open ${totals.openGrantCount === 1 ? "grant" : "grants"}; ${formatTokenAmount(totals.distributionShares, snapshot.shareTokenMetadata)} in distribution reserves`,
+            },
+            {
+              label: "Locked liquidity",
+              value: coverageValue(dashboard.currentStateCoverage?.lockedLiquidity, snapshot.lockedLiquiditySummaries.length),
+              detail: "Current Boardroom positions",
+            },
+            { label: "Evidence coverage", value: coverage.value, detail: coverage.detail },
+          ]}
+        />
+      </RuledSection>
+
+      <RuledSection>
+        <SectionHeading
+          title="Treasury and supply evidence"
+          description="Current balances held by the Boardroom. Token supply is shown separately from treasury inventory."
+        />
         <KeyValueList
           columns={4}
           items={[
@@ -143,7 +196,7 @@ export function TransparencyPage({
 
       {histories.length > 0 || catalogEntry?.distribution ? (
         <RuledSection>
-          <SectionHeading title="Participation history" description="Each sale, curve, airdrop, and migrated market stays separate so incompatible payment tokens are never added together." />
+          <SectionHeading title="Lifetime participation history" description="Cumulative onchain activity is separate from the current-state snapshot. Each bond, sale, curve, airdrop, and migrated market stays separate so incompatible quote and payment tokens are never added together." />
           <div className="mt-4 divide-y divide-zinc-800 border-y border-zinc-800">
             {(histories.length > 0 ? histories : [{
               buyerCount: catalogEntry?.buyerCount,
@@ -162,7 +215,7 @@ export function TransparencyPage({
       ) : null}
 
       <RuledSection>
-        <SectionHeading title="Liquidity" description="Positions the Boardroom has locked for project market liquidity." />
+        <SectionHeading title="Current liquidity positions" description="Positions the Boardroom currently has locked for project market liquidity." />
         <CoverageStatement coverage={dashboard.currentStateCoverage?.lockedLiquidity} label="locked-liquidity position" />
         <LiquidityTable lockers={snapshot.lockedLiquiditySummaries} />
       </RuledSection>
@@ -205,6 +258,55 @@ export function TransparencyPage({
   );
 }
 
+function CurrentStateSummary({
+  items,
+}: {
+  items: readonly { detail?: ReactNode; label: string; value: ReactNode }[];
+}): React.JSX.Element {
+  return (
+    <dl
+      aria-label="Current treasury, supply, commitments, liquidity, and coverage summary"
+      className="mt-5 grid border-y border-zinc-800 sm:grid-cols-2 xl:grid-cols-5"
+    >
+      {items.map((item) => (
+        <div className="min-w-0 border-b border-zinc-800 py-4 sm:px-4 xl:border-b-0 xl:border-r xl:last:border-r-0" key={item.label}>
+          <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-500">{item.label}</dt>
+          <dd className="m-0 mt-1 break-words text-base font-semibold text-zinc-100">{item.value}</dd>
+          {item.detail ? <dd className="m-0 mt-1 text-xs leading-5 text-zinc-500">{item.detail}</dd> : null}
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function currentStateCoverageSummary(dashboard: ProductBoardroomDashboardState): { detail: string; value: string } {
+  const coverage = dashboard.currentStateCoverage;
+  const failedAssetReads = dashboard.treasuryAssets.filter((asset) => Boolean(asset.error)).length;
+  if (!coverage) {
+    return {
+      detail: failedAssetReads > 0
+        ? `${failedAssetReads.toString()} treasury asset ${failedAssetReads === 1 ? "read is" : "reads are"} unknown.`
+        : "Coverage bounds were not attached; evidence tables remain available below.",
+      value: failedAssetReads > 0 ? "Partial" : "Not reported",
+    };
+  }
+
+  const coverageEntries: readonly [string, ProductBoardroomChildCoverage][] = [
+    ["redeemable assets", coverage.redeemableAssets],
+    ["grants", coverage.grants],
+    ["distributions", coverage.distributions],
+    ["liquidity", coverage.lockedLiquidity],
+  ];
+  const incomplete = coverageEntries.filter(([, item]) => !item.complete);
+  if (incomplete.length === 0 && failedAssetReads === 0) {
+    return { detail: "All bounded current-state records were read.", value: "Complete" };
+  }
+
+  const missingLabels = incomplete.map(([label, item]) => `${label} ${item.shown.toString()} of ${item.total.toString()}`);
+  if (failedAssetReads > 0) missingLabels.push(`${failedAssetReads.toString()} treasury ${failedAssetReads === 1 ? "read" : "reads"} failed`);
+  return { detail: `${missingLabels.join("; ")}. Missing records remain unknown.`, value: "Partial" };
+}
+
 function ParticipationHistoryRow({
   dashboard,
   history,
@@ -233,6 +335,11 @@ function ParticipationHistoryRow({
               ? <Badge variant="muted">Complete event history</Badge>
               : <Badge variant="warning">Completeness unknown</Badge>}
       </div>
+      {history.amm || history.pool || history.curve?.migration ? (
+        <p className="m-0 mt-3 border-l-2 border-zinc-700 pl-3 text-xs leading-5 text-zinc-400">
+          Lifetime AMM activity is event-derived. 24h market data is not indexed, so 24h volume and price change are not shown.
+        </p>
+      ) : null}
       <KeyValueList
         columns={4}
         items={[
@@ -295,12 +402,12 @@ function TreasuryTable({ assets }: { assets: readonly ProductTreasuryAsset[] }):
     <TableFrame label="Treasury assets">
       <table className={tableClassName}>
         <thead className={tableHeadClassName}>
-          <tr><th className={tableCellClassName}>Asset</th><th className={tableCellClassName}>Contract</th><th className={tableCellClassName}>Treasury balance</th><th className={tableCellClassName}>Total supply</th></tr>
+          <tr><th className={tableCellClassName} scope="col">Asset</th><th className={tableCellClassName} scope="col">Contract</th><th className={tableCellClassName} scope="col">Treasury balance</th><th className={tableCellClassName} scope="col">Total supply</th></tr>
         </thead>
         <tbody>
           {assets.map((asset) => (
             <tr key={asset.address}>
-              <td className={tableCellClassName}><span className="font-semibold text-zinc-100">{asset.symbol ?? asset.label}</span><span className="mt-1 block text-xs text-zinc-500">{asset.label}</span></td>
+              <th className={tableCellClassName} scope="row"><span className="font-semibold text-zinc-100">{asset.symbol ?? asset.label}</span><span className="mt-1 block text-xs font-normal text-zinc-500">{asset.label}</span></th>
               <td className={tableCellClassName}><AddressLink address={asset.address} /></td>
               <td className={tableCellClassName}>{asset.error ? <span className="text-red-200">Read failed</span> : formatTokenBalance(asset)}</td>
               <td className={tableCellClassName}>{asset.totalSupply === undefined ? "Unknown" : formatTokenAmount(asset.totalSupply, asset)}</td>
@@ -326,12 +433,12 @@ function GrantTable({
     <TableFrame label="Issued grants">
       <table className={tableClassName}>
         <thead className={tableHeadClassName}>
-          <tr><th className={tableCellClassName}>Grant</th><th className={tableCellClassName}>Holder</th><th className={tableCellClassName}>Committed</th><th className={tableCellClassName}>Settled</th><th className={tableCellClassName}>Status</th></tr>
+          <tr><th className={tableCellClassName} scope="col">Grant</th><th className={tableCellClassName} scope="col">Holder</th><th className={tableCellClassName} scope="col">Committed</th><th className={tableCellClassName} scope="col">Settled</th><th className={tableCellClassName} scope="col">Status</th></tr>
         </thead>
         <tbody>
           {grants.map((grant) => (
             <tr key={grant.address}>
-              <td className={tableCellClassName}>
+              <th className={tableCellClassName} scope="row">
                 <div className="flex flex-wrap items-center gap-2">
                   <AddressLink address={grant.address} />
                   {grantHref ? (
@@ -348,8 +455,8 @@ function GrantTable({
                     </a>
                   ) : null}
                 </div>
-                {grant.error ? <span className="mt-1 block text-xs text-red-200">Read failed</span> : null}
-              </td>
+                {grant.error ? <span className="mt-1 block text-xs font-normal text-red-200">Read failed</span> : null}
+              </th>
               <td className={tableCellClassName}>{grant.state ? <AddressLink address={grant.state.holder} /> : "Unknown"}</td>
               <td className={tableCellClassName}>{formatTokenAmount(grant.state?.grantSize, grant.tokenMetadata)}</td>
               <td className={tableCellClassName}>{formatTokenAmount(grant.state?.settledAmount, grant.tokenMetadata)}</td>
@@ -368,12 +475,12 @@ function DistributionTable({ distributions }: { distributions: readonly Boardroo
     <TableFrame label="Token distributions">
       <table className={tableClassName}>
         <thead className={tableHeadClassName}>
-          <tr><th className={tableCellClassName}>Type</th><th className={tableCellClassName}>Contract</th><th className={tableCellClassName}>Originally allocated</th><th className={tableCellClassName}>Remaining</th><th className={tableCellClassName}>Status</th></tr>
+          <tr><th className={tableCellClassName} scope="col">Type</th><th className={tableCellClassName} scope="col">Contract</th><th className={tableCellClassName} scope="col">Originally allocated</th><th className={tableCellClassName} scope="col">Remaining</th><th className={tableCellClassName} scope="col">Status</th></tr>
         </thead>
         <tbody>
           {distributions.map((distribution) => (
             <tr key={distribution.address}>
-              <td className={tableCellClassName}><span className="font-semibold text-zinc-100">{distributionKindLabel(distribution.kind)}</span></td>
+              <th className={tableCellClassName} scope="row"><span className="font-semibold text-zinc-100">{distributionKindLabel(distribution.kind)}</span></th>
               <td className={tableCellClassName}><AddressLink address={distribution.address} />{distribution.error ? <span className="mt-1 block text-xs text-red-200">Read failed</span> : null}</td>
               <td className={tableCellClassName}>{formatTokenAmount(distributionAllocated(distribution), distribution.shareTokenMetadata)}</td>
               <td className={tableCellClassName}>{formatTokenAmount(distributionRemaining(distribution), distribution.shareTokenMetadata)}</td>
@@ -392,12 +499,12 @@ function LiquidityTable({ lockers }: { lockers: readonly BoardroomLockedLiquidit
     <TableFrame label="Locked liquidity positions">
       <table className={tableClassName}>
         <thead className={tableHeadClassName}>
-          <tr><th className={tableCellClassName}>Locker</th><th className={tableCellClassName}>Pool</th><th className={tableCellClassName}>Locked LP</th><th className={tableCellClassName}>Claimable token A</th><th className={tableCellClassName}>Claimable token B</th></tr>
+          <tr><th className={tableCellClassName} scope="col">Locker</th><th className={tableCellClassName} scope="col">Pool</th><th className={tableCellClassName} scope="col">Locked LP</th><th className={tableCellClassName} scope="col">Claimable token A</th><th className={tableCellClassName} scope="col">Claimable token B</th></tr>
         </thead>
         <tbody>
           {lockers.map((locker) => (
             <tr key={locker.address}>
-              <td className={tableCellClassName}><AddressLink address={locker.address} />{locker.error ? <span className="mt-1 block text-xs text-red-200">Read failed</span> : null}</td>
+              <th className={tableCellClassName} scope="row"><AddressLink address={locker.address} />{locker.error ? <span className="mt-1 block text-xs font-normal text-red-200">Read failed</span> : null}</th>
               <td className={tableCellClassName}>{locker.state?.pool ? <AddressLink address={locker.state.pool} /> : "Unknown"}</td>
               <td className={tableCellClassName}>{formatTokenAmount(locker.state?.lockedLiquidity, locker.liquidityMetadata)}</td>
               <td className={tableCellClassName}>{formatTokenAmount(locker.claimableA, locker.tokenAMetadata)}</td>
@@ -441,6 +548,11 @@ function GrantStatus({ grant }: { grant: BoardroomGrantSnapshot }): React.JSX.El
 
 function DistributionStatus({ distribution }: { distribution: BoardroomDistributionSnapshot }): React.JSX.Element {
   if (distribution.error || !distribution.state) return <Badge variant="danger">Read issue</Badge>;
+  if ("currentPrice" in distribution.state) {
+    if (distribution.state.closed) return <Badge variant="muted">Settled</Badge>;
+    if (distribution.state.live) return <Badge variant="default">Live</Badge>;
+    return <Badge variant={distribution.state.status === 0 ? "warning" : "muted"}>{distribution.state.status === 0 ? "Scheduled / concluded" : "Claims pending"}</Badge>;
+  }
   const status = "saleStatus" in distribution.state
     ? distribution.state.saleStatus
     : "curveStatus" in distribution.state
@@ -496,6 +608,7 @@ function distributionIsOpen(distribution: BoardroomDistributionSnapshot): boolea
   if (!distribution.state || distribution.state.closed) return false;
   if ("saleStatus" in distribution.state) return distribution.state.saleStatus === 0;
   if ("curveStatus" in distribution.state) return distribution.state.curveStatus === 0;
+  if ("currentPrice" in distribution.state) return distribution.state.live;
   return distribution.state.airdropStatus === 0;
 }
 
@@ -503,6 +616,7 @@ function distributionAllocated(distribution: BoardroomDistributionSnapshot): big
   if (!distribution.state) return undefined;
   if ("saleSupply" in distribution.state) return distribution.state.saleSupply;
   if ("airdropSupply" in distribution.state) return distribution.state.airdropSupply;
+  if ("currentPrice" in distribution.state) return distribution.state.initialCapacity;
   return undefined;
 }
 
@@ -510,10 +624,12 @@ function distributionRemaining(distribution: BoardroomDistributionSnapshot): big
   if (!distribution.state) return undefined;
   if ("remainingSaleShares" in distribution.state) return distribution.state.remainingSaleShares;
   if ("remainingShares" in distribution.state) return distribution.state.remainingShares;
+  if ("currentPrice" in distribution.state) return distribution.state.capacity;
   return undefined;
 }
 
 function distributionKindLabel(kind: BoardroomDistributionSnapshot["kind"]): string {
+  if (kind === "bond-market") return "Bond market";
   if (kind === "fixed-price-sale") return "Fixed-price sale";
   if (kind === "migrating-bonding-curve") return "Bonding curve";
   if (kind === "merkle-airdrop") return "Airdrop";

@@ -53,7 +53,7 @@ export function StudioPage({
         title={loadingSelectedProject
           ? "Loading selected project"
           : dashboard ? project?.name ?? project?.symbol ?? "Project workspace" : "Create and operate projects"}
-        description="A guided workspace for project setup and lifecycle changes. Public project pages stay separate from operator controls."
+        description="See the project’s current stage, take the next safe operator action, and keep raw protocol controls separate from the public project record."
       />
 
       {sectionNavigation ? <div className="border-b border-zinc-800 py-3">{sectionNavigation}</div> : null}
@@ -69,7 +69,7 @@ export function StudioPage({
 
       {showLifecycleOverview ? <>
       <RuledSection>
-        <SectionHeading title="Current stage" description="The lifecycle determines which actions are safe and who can authorize them." />
+        <SectionHeading title="Current stage" description="Start here. The onchain lifecycle determines what can happen next and which wallet may authorize it." />
         <div className="mt-5 grid gap-5 border-y border-zinc-800 py-5 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.45fr)] lg:items-start">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -123,7 +123,7 @@ export function StudioPage({
       <RuledSection>
         <SectionHeading
           title="Operator tools"
-          description="Creation, issuance, liquidity, and wind-down controls appear here only when the lifecycle and connected wallet allow them."
+          description="Then act here. Creation, issuance, liquidity, and wind-down controls appear only when the verified lifecycle and connected wallet allow them."
         />
         <div className="mt-4" id="studio-operator-tools">
           {operatorTools ?? (

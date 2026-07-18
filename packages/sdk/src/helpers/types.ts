@@ -74,6 +74,63 @@ export type MerkleAirdropTerms = {
 
 export type BoardroomMerkleAirdropTerms = Omit<MerkleAirdropTerms, "shareToken">;
 
+export type BondMarketTerms = {
+  quoteToken: Address;
+  kind: 0 | 1;
+  capacity: bigint;
+  initialPrice: bigint;
+  minimumPrice: bigint;
+  debtBuffer: number;
+  vesting: number;
+  start: number;
+  duration: number;
+  depositInterval: number;
+  salt: Hex;
+};
+
+export type BondPositionState = {
+  market: Address;
+  positionId: bigint;
+  owner: Address;
+  payout: bigint;
+  maturity: number;
+  redeemed: boolean;
+};
+
+export type BondMarketState = {
+  address: Address;
+  factory: Address;
+  boardroom: Address;
+  shareToken: Address;
+  quoteToken: Address;
+  kind: number;
+  status: number;
+  initialCapacity: bigint;
+  capacity: bigint;
+  minimumPrice: bigint;
+  currentPrice: bigint;
+  maximumPayout: bigint;
+  purchased: bigint;
+  sold: bigint;
+  outstandingPayout: bigint;
+  returnedPayout: bigint;
+  startTime: number;
+  conclusion: number;
+  vestingTerm: number;
+  nextPositionId: bigint;
+  live: boolean;
+  closed: boolean;
+};
+
+export type BondPurchaseQuote = {
+  state: BondMarketState;
+  buyer: Address;
+  quoteAmount: bigint;
+  payout: bigint;
+  quoteBalance: bigint;
+  quoteAllowance: bigint;
+};
+
 export type MerkleAirdropGrantClaimTerms = {
   paymentToken: Address;
   price: bigint;

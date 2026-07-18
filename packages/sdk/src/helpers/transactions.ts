@@ -4,6 +4,8 @@ import {
   boardroomRewardsAbi,
   boardroomRewardsFactoryAbi,
   boardroomTokenAbi,
+  bondMarketAbi,
+  bondMarketFactoryAbi,
   distributionFactoryAbi,
   erc20Abi,
   fixedPriceSaleAbi,
@@ -21,6 +23,7 @@ import type {
   BoardroomMerkleAirdropTerms,
   BoardroomMigratingBondingCurveTerms,
   BoardroomShareGrantTerms,
+  BondMarketTerms,
   FixedPriceSaleTerms,
   GrantCreationArgs,
   GrantCreationTerms,
@@ -566,6 +569,103 @@ export function fixedPriceSaleArgs(terms: FixedPriceSaleTerms) {
       salt: terms.salt,
     },
   ] as const;
+}
+
+export function bondMarketArgs(terms: BondMarketTerms) {
+  return [
+    {
+      quoteToken: terms.quoteToken,
+      kind: terms.kind,
+      capacity: terms.capacity,
+      initialPrice: terms.initialPrice,
+      minimumPrice: terms.minimumPrice,
+      debtBuffer: terms.debtBuffer,
+      vesting: terms.vesting,
+      start: terms.start,
+      duration: terms.duration,
+      depositInterval: terms.depositInterval,
+      salt: terms.salt,
+    },
+  ] as const;
+}
+
+export function buildBondPurchaseTransaction(input: {
+  market: Address;
+  quoteAmount: bigint;
+  minimumPayout: bigint;
+  deadline: bigint;
+}) {
+  return {
+    address: input.market,
+    abi: bondMarketAbi,
+    functionName: "purchase",
+    args: [input.quoteAmount, input.minimumPayout, input.deadline] as const,
+  };
+}
+
+export function buildBondRedeemTransaction(input: { market: Address; positionId: bigint }) {
+  return {
+    address: input.market,
+    abi: bondMarketAbi,
+    functionName: "redeem",
+    args: [input.positionId] as const,
+  };
+}
+
+export function buildBondFinalizeTransaction(input: { market: Address }) {
+  return { address: input.market, abi: bondMarketAbi, functionName: "finalize" };
+}
+
+export function buildBoardroomBondMarketBatch(input: {
+  boardroom: Address;
+  factory: Address;
+  shareToken: Address;
+  terms: BondMarketTerms;
+  assetPolicy?: Address;
+  policy?: Address;
+}) {
+  const assetPolicy = requireAssetPolicy(input.assetPolicy);
+  const calls = [
+    buildBoardroomCall({
+      policy: assetPolicy,
+      target: input.shareToken,
+      data: encodeFunctionData({
+        abi: boardroomTokenAbi,
+        functionName: "approve",
+        args: [input.factory, input.terms.capacity],
+      }),
+    }),
+    buildBoardroomCall({
+      policy: input.policy ?? input.factory,
+      target: input.factory,
+      data: encodeFunctionData({
+        abi: bondMarketFactoryAbi,
+        functionName: "createBondMarket",
+        args: bondMarketArgs(input.terms),
+      }),
+    }),
+  ] as const;
+
+  return buildBoardroomExecuteBatchTransaction({ boardroom: input.boardroom, calls });
+}
+
+export function buildBoardroomBondMarketCloseCall(input: { policy: Address; market: Address }): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.market,
+    data: encodeFunctionData({ abi: bondMarketAbi, functionName: "close" }),
+  });
+}
+
+export function buildBoardroomBondMarketCloseAction(input: {
+  boardroom: Address;
+  policy: Address;
+  market: Address;
+}) {
+  return buildBoardroomExecuteTransaction({
+    boardroom: input.boardroom,
+    call: buildBoardroomBondMarketCloseCall(input),
+  });
 }
 
 export function buildFixedPriceSaleBuyTransaction(input: {

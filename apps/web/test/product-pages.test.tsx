@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import type { Address, BoardroomStakerPower } from "@pledge.cash/sdk";
+import type { Address, BoardroomHolderPower, BoardroomStakerPower } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
 import {
+  AlertsUnavailablePage,
   ExplorePage,
   GrantDetailPage,
   GrantVerificationFailureState,
@@ -28,6 +29,8 @@ import {
 import { AddressLink } from "../src/components/shell";
 import { participationDistributionKey } from "../src/features/participation/types";
 import type { ProductBoardroomCatalogEntry, ProductBoardroomDashboardState } from "../src/lib/product-boardroom";
+import type { SavedProject } from "../src/lib/saved-projects";
+import type { ProjectPositionAction, ProjectWalletPosition } from "../src/lib/project-position";
 
 const boardroom = "0x1000000000000000000000000000000000000000" as Address;
 const owner = "0x2000000000000000000000000000000000000000" as Address;
@@ -35,6 +38,7 @@ const shareToken = "0x3000000000000000000000000000000000000000" as Address;
 const paymentToken = "0x4000000000000000000000000000000000000000" as Address;
 const sale = "0x5000000000000000000000000000000000000000" as Address;
 const grant = "0x6000000000000000000000000000000000000000" as Address;
+const viewer = "0xa000000000000000000000000000000000000000" as Address;
 const zero = "0x0000000000000000000000000000000000000000" as Address;
 
 const catalogEntry: ProductBoardroomCatalogEntry = {
@@ -166,6 +170,26 @@ const stakerPower: BoardroomStakerPower = {
   canStartWindDown: true,
 };
 
+const holderPower: BoardroomHolderPower = stakerPower;
+
+const walletPosition: ProjectWalletPosition = {
+  account: owner,
+  boardroom,
+  directBalance: 3_000_000_000_000_000_000n,
+  holderPower,
+  nextGrant: grant,
+  nextGrantSettleableTokens: 500_000_000_000_000_000n,
+  settleableGrantCount: 1,
+  settleableProjectTokens: 500_000_000_000_000_000n,
+  shareToken,
+};
+
+function overviewActionHref(action: ProjectPositionAction): string {
+  return action.kind === "grant"
+    ? `/grants/31337/${action.grant}?project=${boardroom}`
+    : `/projects/31337/atlas/${action.kind}`;
+}
+
 describe("read-first product pages", () => {
   test("filters Explore projects by participation type and search", () => {
     const other = {
@@ -178,6 +202,7 @@ describe("read-first product pages", () => {
     };
     expect(filterProjects([catalogEntry, other], "atlas", "all")).toEqual([catalogEntry]);
     expect(filterProjects([catalogEntry, other], "", "merkle-airdrop")).toEqual([other]);
+    expect(filterProjects([catalogEntry, other], "", "saved", new Set([other.address]))).toEqual([other]);
 
     const html = renderToString(
       <ExplorePage
@@ -237,6 +262,65 @@ describe("read-first product pages", () => {
     expect(exploreSearchState(restored.search)).toEqual({ filter: "amm", query: "Atlas" });
     expect(historyEntries[1]).not.toContain("q=");
     expect(exploreSearchState("?chain=31337&q=Atlas&type=not-a-filter")).toEqual({ filter: "all", query: "Atlas" });
+    expect(exploreSearchState("?chain=31337&type=saved")).toEqual({ filter: "saved", query: "" });
+    expect(exploreSearchHref("/explore", "?chain=31337", { filter: "saved", query: "" }))
+      .toBe("/explore?chain=31337&type=saved");
+  });
+
+  test("renders saved controls and a wallet-independent Portfolio list", () => {
+    const explore = renderToString(
+      <ExplorePage
+        chainId={31337}
+        chainName="Local Anvil"
+        loading={false}
+        projects={[catalogEntry]}
+        savedProjectAddresses={new Set([boardroom])}
+        savedProjectCount={1}
+        onOpenProject={() => undefined}
+        onToggleSaved={() => undefined}
+      />,
+    );
+    expect(explore).toContain('aria-pressed="true"');
+    expect(explore).toContain("Remove Atlas Cooperative from saved projects");
+    expect(explore).toContain(">Saved<");
+
+    const savedProject: SavedProject = {
+      boardroom,
+      chainId: 31337,
+      name: "Atlas Cooperative",
+      savedAt: 123,
+      symbol: "ATLAS",
+    };
+    const portfolio = renderToString(
+      <PortfolioPage
+        loading={false}
+        savedProjectHref={(project) => `/projects/${project.chainId.toString()}/${project.boardroom}/overview`}
+        savedProjects={[savedProject]}
+        tasks={[]}
+      />,
+    );
+    expect(portfolio).toContain("Browser-saved project links");
+    expect(portfolio).toContain('href="/projects/31337/0x1000000000000000000000000000000000000000/overview"');
+    expect(portfolio).toContain("Atlas Cooperative");
+    expect(portfolio).toContain("No wallet connected");
+  });
+
+  test("explains empty saved filters and storage failures truthfully", () => {
+    const emptySaved = renderToString(
+      <ExplorePage
+        chainId={31337}
+        chainName="Local Anvil"
+        loading={false}
+        projects={[]}
+        savedProjectCount={0}
+        savedProjectsWarning="Browser storage is unavailable."
+        onOpenProject={() => undefined}
+      />,
+    );
+
+    expect(emptySaved).toContain("Saved projects could not be restored");
+    expect(emptySaved).toContain("Browser storage is unavailable");
+    expect(emptySaved).toContain("No projects discovered");
   });
 
   test("renders one project workspace with human-readable overview and participation", () => {
@@ -251,19 +335,82 @@ describe("read-first product pages", () => {
       >
         <ProjectOverviewPage
           account={owner}
+          actionHref={overviewActionHref}
           dashboard={dashboard}
           loading={false}
-          onOpenParticipation={() => undefined}
-          participationHref="/projects/31337/atlas/participate"
+          onOpenAction={() => undefined}
+          position={walletPosition}
         />
       </ProjectLayout>,
     );
     expect(overview).toContain("Atlas Cooperative");
-    expect(overview).toContain("What needs attention");
     expect(overview).toContain("Staker governance is live");
+    expect(overview).toContain("Your position");
+    expect(overview).toContain("3 ATLAS");
+    expect(overview).toContain("0.5 ATLAS");
+    expect(overview).toContain("Veto + wind-down eligible");
     expect(overview).toContain("lifetime activity is reconstructed from their onchain event history");
     expect(overview).toContain("Treasury at a glance");
-    expect(overview).toContain('href="/projects/31337/atlas/participate"');
+    expect(overview).toContain(`href="/grants/31337/${grant}?project=${boardroom}"`);
+    expect(overview).not.toContain('href="/projects/31337/atlas/participate"');
+
+    const connectedObserver = renderToString(
+      <ProjectLayout
+        account={viewer}
+        activeSection="overview"
+        chainName="Local Anvil"
+        dashboard={dashboard}
+        loading={false}
+        onNavigateSection={() => undefined}
+      >
+        Project
+      </ProjectLayout>,
+    );
+    expect(connectedObserver).toContain("Wallet connected");
+    expect(connectedObserver).not.toContain("Holder view");
+
+    const disconnected = renderToString(
+      <ProjectOverviewPage
+        actionHref={overviewActionHref}
+        dashboard={dashboard}
+        loading={false}
+        onOpenAction={() => undefined}
+      />,
+    );
+    expect(disconnected).toContain("Public project state remains available without a wallet");
+    expect(disconnected).toContain('href="/projects/31337/atlas/participate"');
+
+    const refreshing = renderToString(
+      <ProjectOverviewPage
+        account={owner}
+        actionHref={overviewActionHref}
+        dashboard={dashboard}
+        loading={false}
+        position={walletPosition}
+        positionLoading
+      />,
+    );
+    expect(refreshing).toContain("Refreshing wallet position");
+    expect(refreshing).toContain("Verifying the latest project-token balance");
+    expect(refreshing).not.toContain("View participation");
+    expect(refreshing).not.toContain("Open transparency");
+
+    const multipleGrants = renderToString(
+      <ProjectOverviewPage
+        account={owner}
+        actionHref={overviewActionHref}
+        dashboard={dashboard}
+        loading={false}
+        position={{
+          ...walletPosition,
+          settleableGrantCount: 2,
+          settleableProjectTokens: 1_200_000_000_000_000_000n,
+        }}
+      />,
+    );
+    expect(multipleGrants).toContain("first of 2 project-token grants");
+    expect(multipleGrants).toContain("0.5 ATLAS can settle from the grant this recommendation opens");
+    expect(multipleGrants).not.toContain("1.2 ATLAS");
 
     const partialHistory = renderToString(
       <ProjectLayout
@@ -364,6 +511,31 @@ describe("read-first product pages", () => {
     expect(participate).not.toContain('role="tablist"');
     expect(participate).not.toContain("Review route");
     expect(participate).toContain("Before anything reaches your wallet");
+  });
+
+  test("renders failed wallet position reads as Unknown without hiding the public overview", () => {
+    const failedPosition: ProjectWalletPosition = {
+      account: owner,
+      boardroom,
+      directBalanceError: "balance unavailable",
+      grantError: "grant coverage incomplete",
+      holderPowerError: "history unavailable",
+      shareToken,
+    };
+    const overview = renderToString(
+      <ProjectOverviewPage
+        account={owner}
+        actionHref={overviewActionHref}
+        dashboard={dashboard}
+        loading={false}
+        position={failedPosition}
+      />,
+    );
+
+    expect(overview.match(/Unknown/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(overview).toContain("not treated as zero");
+    expect(overview).toContain("Project state");
+    expect(overview).toContain("Treasury at a glance");
   });
 
   test("uses semantically honest route controls when multiple participation paths exist", () => {
@@ -521,13 +693,19 @@ describe("read-first product pages", () => {
     expect(studio).toContain("Operator tools");
   });
 
-  test("renders explicit not-found and redirect states", () => {
+  test("renders explicit not-found, alerts-unavailable, and redirect states", () => {
     const notFound = renderToString(<NotFoundPage />);
+    const alertsUnavailable = renderToString(<AlertsUnavailablePage returnHref="/explore" />);
     const redirect = renderToString(<RedirectState destination="/explore" />);
 
     expect(notFound).toContain("This page does not exist");
+    expect(alertsUnavailable).toContain("Sentinel is not configured");
+    expect(alertsUnavailable).toContain("Read-only product use remains available");
+    expect(alertsUnavailable).toContain("never acts as an onchain transaction wallet");
+    expect(alertsUnavailable).toContain('href="/explore"');
     expect(redirect).toContain("Opening the canonical workspace");
     expect(notFound).not.toContain("<main");
+    expect(alertsUnavailable).not.toContain("<main");
     expect(redirect).not.toContain("<main");
   });
 
@@ -544,7 +722,22 @@ describe("read-first product pages", () => {
     );
 
     expect(html).toContain('href="/pledge-cash/portfolio?chain=31337"');
+    expect(html).toContain("Return to Portfolio");
     expect(html).not.toContain(">Portfolio</button>");
+
+    const projectReturn = renderToString(
+      <GrantDetailPage
+        account={undefined}
+        backHref={`/pledge-cash/projects/31337/${boardroom}/overview`}
+        backLabel="Return to Project"
+        grant={grant}
+        onBack={() => undefined}
+      >
+        Grant settlement
+      </GrantDetailPage>,
+    );
+    expect(projectReturn).toContain(`href="/pledge-cash/projects/31337/${boardroom}/overview"`);
+    expect(projectReturn).toContain("Return to Project");
   });
 
   test("renders one honest terminal grant-verification state with transient-only retry", () => {
@@ -623,7 +816,7 @@ describe("read-first product pages", () => {
     const html = renderToString(<AddressLink address={boardroom} />);
 
     expect(html).toContain(`aria-label="Copy address ${boardroom}"`);
-    expect(html).toContain("h-10 w-10");
-    expect(html).toContain("sm:h-8 sm:w-8");
+    expect(html).toContain("h-11 w-11");
+    expect(html).toContain("sm:h-9 sm:w-9");
   });
 });

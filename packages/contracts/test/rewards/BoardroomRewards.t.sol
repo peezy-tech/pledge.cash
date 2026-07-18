@@ -36,6 +36,33 @@ contract RewardCurrency is ERC20 {
     }
 }
 
+contract ReentrantRewardCurrency is RewardCurrency {
+    address public target;
+    bytes public payload;
+    bool public reenter;
+    bool public reentered;
+    bool public reenteredOk;
+
+    constructor() RewardCurrency("Reentrant Reward", "RRWD") {}
+
+    function setReentry(address target_, bytes calldata payload_) external {
+        target = target_;
+        payload = payload_;
+        reenter = true;
+        reentered = false;
+        reenteredOk = false;
+    }
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        if (reenter) {
+            reenter = false;
+            reentered = true;
+            (reenteredOk,) = target.call(payload);
+        }
+        return super.transfer(to, amount);
+    }
+}
+
 contract BoardroomRewardsTest is Test {
     BoardroomPolicyRegistry internal registry;
     AssetPolicy internal assetPolicy;
@@ -249,6 +276,42 @@ contract BoardroomRewardsTest is Test {
 
         vm.prank(staker);
         assertEq(rewards.claim(address(rewardToken), staker), 100 ether);
+
+        boardroom.openRedemptions();
+        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
+    }
+
+    function testTerminalizationIsNotObservableDuringRewardRefund() public {
+        (Boardroom boardroom,) = _createBoardroom("terminalize-reentry");
+        BoardroomRewards rewards = _createRewards(boardroom, 7 days, keccak256("terminalize-reentry-rewards"));
+        ReentrantRewardCurrency reentrantReward = new ReentrantRewardCurrency();
+        assetPolicy.setAssetAllowed(address(reentrantReward), true);
+
+        uint256 funded = 86_400 ether;
+        reentrantReward.mint(address(boardroom), funded);
+        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        calls[0] = Boardroom.Call({
+            policy: address(assetPolicy),
+            target: address(reentrantReward),
+            value: 0,
+            data: abi.encodeWithSignature("approve(address,uint256)", address(rewardsFactory), funded)
+        });
+        calls[1] = _rewardsFactoryCall(
+            abi.encodeCall(rewardsFactory.fundReward, (address(rewards), address(reentrantReward), funded, 1 days))
+        );
+        vm.prank(owner);
+        boardroom.executeBatch(calls);
+
+        vm.prank(owner);
+        boardroom.startWindDown();
+        reentrantReward.setReentry(address(boardroom), abi.encodeCall(Boardroom.openRedemptions, ()));
+
+        rewards.terminalize();
+
+        assertTrue(reentrantReward.reentered());
+        assertFalse(reentrantReward.reenteredOk());
+        assertTrue(rewards.terminalized());
+        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.WindingDown));
 
         boardroom.openRedemptions();
         assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));

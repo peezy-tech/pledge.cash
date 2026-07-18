@@ -6,6 +6,7 @@ import { Button } from "../../components/ui/button";
 import { AlertsIdentity } from "../../features/notifications/alerts-identity";
 import { alertsViewState } from "../../features/notifications/alerts-view-state";
 import { ChannelSettings } from "../../features/notifications/channel-settings";
+import { DeliveryActivity } from "../../features/notifications/delivery-activity";
 import { GovernanceActivity } from "../../features/notifications/governance-activity";
 import { useSentinelSession } from "../../features/notifications/hooks";
 import { SubscriptionSettings } from "../../features/notifications/subscription-settings";
@@ -58,15 +59,15 @@ export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSett
       <WorkspaceHeader
         eyebrow="Notifications"
         title="Governance alerts"
-        description="Get notified when queued governance actions affect wallets you control."
+        description="Get notified when queued governance actions affect wallets you control. Social sign-in establishes an alert identity only; it is not a transaction wallet and cannot authorize onchain actions."
         action={
           session.authenticated ? (
             <div className="flex flex-wrap gap-2">
-              <Button disabled={session.loading} variant="ghost" onClick={() => void session.refresh()}>
+              <Button disabled={session.loading} type="button" variant="ghost" onClick={() => void session.refresh()}>
                 <RefreshCw className="h-4 w-4" />
                 Refresh
               </Button>
-              <Button disabled={logoutPending} variant="secondary" onClick={() => void logout()}>
+              <Button disabled={logoutPending} type="button" variant="secondary" onClick={() => void logout()}>
                 {logoutPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
                 Sign out
               </Button>
@@ -77,16 +78,16 @@ export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSett
       {focus.boardroom ? (
         <GovernanceActivity
           boardroom={focus.boardroom}
-          chainId={governanceChainId}
+          chainId={focus.chainId ?? governanceChainId}
           highlightActionHash={focus.actionHash}
         />
       ) : null}
       {session.loading && !session.me ? <LoadingPanel /> : null}
       {session.error ? (
         <Panel title="Alert service">
-          <p className="m-0 border-t border-red-950 bg-red-950/35 p-4 text-sm text-red-200">{session.error}</p>
+          <p className="m-0 border-t border-red-950 bg-red-950/35 p-4 text-sm text-red-200" role="alert">{session.error}</p>
           <div className="border-t border-zinc-800 p-4">
-            <Button variant="secondary" onClick={() => void session.refresh()}>
+            <Button type="button" variant="secondary" onClick={() => void session.refresh()}>
               <RefreshCw className="h-4 w-4" />
               Retry
             </Button>
@@ -112,9 +113,15 @@ export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSett
             onChanged={session.refresh}
           />
           <ChannelSettings channels={session.me.channels} client={session.client} onChanged={session.refresh} />
+          <DeliveryActivity client={session.client} />
           <SubscriptionSettings
             client={session.client}
             subscription={session.me.subscription}
+            returnHref={focus.returnHref}
+            suggestedBoardroom={focus.boardroom ? {
+              address: focus.boardroom,
+              chainId: focus.chainId ?? governanceChainId,
+            } : undefined}
             onChanged={session.refresh}
           />
         </div>
@@ -123,18 +130,52 @@ export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSett
   );
 }
 
-function notificationFocusFromLocation(): { readonly actionHash?: string; readonly boardroom?: Address } {
-  if (typeof window === "undefined") {
+export function notificationFocusFromLocation(search?: string): {
+  readonly actionHash?: string;
+  readonly boardroom?: Address;
+  readonly chainId?: number;
+  readonly returnHref?: string;
+} {
+  const locationSearch = search ?? (typeof window === "undefined" ? undefined : window.location.search);
+  if (locationSearch === undefined) {
     return {};
   }
 
-  const params = new URLSearchParams(window.location.search);
+  return notificationFocusFromSearch(locationSearch);
+}
+
+export function notificationFocusFromSearch(search: string): {
+  readonly actionHash?: string;
+  readonly boardroom?: Address;
+  readonly chainId?: number;
+  readonly returnHref?: string;
+} {
+  const params = new URLSearchParams(search);
   const boardroom = normalizedHexParam(params.get("boardroom"), 20);
   const actionHash = normalizedHexParam(params.get("action"), 32);
+  const chainId = normalizedChainIdParam(params.get("chain"));
+  const returnHref = safeReturnHref(params.get("return"));
   return {
     ...(actionHash === undefined ? {} : { actionHash }),
-    ...(boardroom === undefined ? {} : { boardroom: boardroom as Address })
+    ...(boardroom === undefined ? {} : { boardroom: boardroom as Address }),
+    ...(chainId === undefined ? {} : { chainId }),
+    ...(returnHref === undefined ? {} : { returnHref }),
   };
+}
+
+function safeReturnHref(value: string | null): string | undefined {
+  if (!value
+    || !value.startsWith("/")
+    || value.startsWith("//")
+    || value.includes("\\")
+    || /[\u0000-\u001f\u007f]/.test(value)) return undefined;
+  return value;
+}
+
+function normalizedChainIdParam(value: string | null): number | undefined {
+  if (value === null || !/^\d+$/.test(value)) return undefined;
+  const chainId = Number(value);
+  return Number.isSafeInteger(chainId) && chainId > 0 ? chainId : undefined;
 }
 
 function normalizedHexParam(value: string | null, bytes: number): string | undefined {

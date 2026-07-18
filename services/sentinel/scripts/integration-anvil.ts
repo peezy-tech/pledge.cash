@@ -136,7 +136,7 @@ try {
   dbClient = createDbClient(config);
   await dbClient.migrate();
 
-  await linkShareholder(dbClient, seed.holder.toLowerCase() as Address);
+  const subscriberUserId = await linkShareholder(dbClient, seed.holder.toLowerCase() as Address);
   await launchBoardroom(seed);
 
   const pipeline = createActionPipeline({ config, db: dbClient.db });
@@ -193,6 +193,13 @@ try {
   });
   await requireAction(dbClient, setExecutorHash, "cancelled");
   await requireNotification(dbClient, setExecutorAction.id, "cancelled");
+  await requireNotificationDeliveryFeed(
+    config,
+    dbClient,
+    subscriberUserId,
+    setExecutorAction.id,
+    ["queued", "cancelled"]
+  );
 
   const approveSpender = "0x000000000000000000000000000000000000dEaD" as Address;
   const approveCall: BoardroomCall = {
@@ -398,7 +405,7 @@ async function dropTempDatabase(temp: TempDatabase): Promise<void> {
   }
 }
 
-async function linkShareholder(dbClient_: SentinelDbClient, holderAddress: Address): Promise<void> {
+async function linkShareholder(dbClient_: SentinelDbClient, holderAddress: Address): Promise<string> {
   const [user] = await dbClient_.db
     .insert(users)
     .values({
@@ -427,6 +434,7 @@ async function linkShareholder(dbClient_: SentinelDbClient, holderAddress: Addre
     type: "telegram",
     userId: user.id
   });
+  return user.id;
 }
 
 async function launchBoardroom(seed: SeedArtifact): Promise<void> {
@@ -536,6 +544,68 @@ async function requireNotification(
     .limit(1);
   if (row === undefined) {
     throw new Error(`Missing ${event} notification for ${actionId}`);
+  }
+}
+
+async function requireNotificationDeliveryFeed(
+  config: ReturnType<typeof loadConfig>,
+  dbClient_: SentinelDbClient,
+  userId: string,
+  actionId: string,
+  events: readonly string[]
+): Promise<void> {
+  const app = createApp({
+    auth: {
+      socialProviders: [],
+      async getSession() {
+        return { user: { id: userId } };
+      },
+      async handler() {
+        return new Response(null, { status: 404 });
+      }
+    },
+    config,
+    store: createDrizzleApiStore(dbClient_.db)
+  });
+  const observed: Array<{
+    readonly action?: { readonly id?: string };
+    readonly event?: string;
+  }> = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < 10; page += 1) {
+    const query = new URLSearchParams({ limit: "10" });
+    if (cursor !== null) query.set("cursor", cursor);
+    const response = await app.request(`/notifications?${query.toString()}`);
+    if (response.status !== 200) {
+      throw new Error(`GET /notifications returned ${response.status}`);
+    }
+
+    const body = (await response.json()) as {
+      readonly items?: readonly {
+        readonly action?: { readonly id?: string };
+        readonly event?: string;
+      }[];
+      readonly page?: { readonly nextCursor?: string | null };
+    };
+    if (JSON.stringify(body).includes("lastError")) {
+      throw new Error("GET /notifications exposed raw delivery errors");
+    }
+    observed.push(...(body.items ?? []));
+    cursor = body.page?.nextCursor ?? null;
+    if (cursor === null) break;
+  }
+
+  const actionEvents = new Set(
+    observed
+      .filter((item) => item.action?.id === actionId)
+      .map((item) => item.event)
+  );
+  for (const event of events) {
+    if (!actionEvents.has(event)) {
+      throw new Error(
+        `GET /notifications did not include ${event} for ${actionId}; observed ${JSON.stringify(observed)}`
+      );
+    }
   }
 }
 

@@ -35,13 +35,14 @@ An issued grant is a contract commitment. Confirm funding, payment terms, and da
 
 ## Distributions
 
-Use `Distributions` to choose `Fixed price`, `Airdrop`, or `Bonding curve`.
+Use `Distributions` to choose `Fixed price`, `Bond market`, `Airdrop`, or `Bonding curve`.
 
 - A fixed-price sale sets inventory, payment token, unit price, buyer cap, and schedule.
+- a bond market sets reserve or first-party LP quote asset, pre-funded capacity, auction prices, debt buffer, vesting, cadence, and schedule. Bond positions are non-transferable.
 - a Merkle airdrop sets inventory, root, claim schedule, optional grant-claim cap, and salt.
 - a migrating bonding curve sets sale and migration inventory, quote token, curve terms, graduation target, liquidity share, schedule, and salts.
 
-Existing routes remain listed. Available lifecycle actions include close, cancel, or curve migration when the contract state and authority allow them.
+Existing routes remain listed. Available lifecycle actions include closing a bond market, closing or cancelling other distributions, and curve migration when the contract state and authority allow them.
 
 ## Liquidity
 
@@ -51,7 +52,7 @@ If the app says `No project AMM pool is available`, create or migrate project li
 
 ## Governance
 
-Use `Governance` to inspect the decision system, staker protections, reward pool, and verified queue. Existing launched Boardrooms can expose queue, veto, and execution actions when the wallet and state qualify.
+Use `Governance` to inspect the decision system, active-staker protections, reward pool, and verified queue. Existing launched Boardrooms can expose queue, veto, and execution actions when the wallet and state qualify. After launch, the executor can prepare an executor-rotation proposal without pasting calldata. Enter the proposed executor, review the exact decoded `setExecutor(address)` self-call and its earliest execution time, then choose `Review proposal`. The wallet transaction only queues the decision; authority changes after the active-staker review window and a separate permissionless execution.
 
 For current pre-launch Boardrooms, the app shows `Secure governance launch is unavailable for this Boardroom version`. The deployed `launch(uint256)` call does not bind the expected executor, so there is no safe in-app launch action. Leave owner governance unchanged; do not bypass the block.
 

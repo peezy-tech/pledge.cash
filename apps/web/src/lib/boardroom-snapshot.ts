@@ -5,6 +5,7 @@ import {
   type Address,
   type LockedLiquidityState,
   readBoardroomState,
+  readBondMarketState,
   readFixedPriceSaleState,
   readGrantState,
   readLockedLiquidityState,
@@ -240,10 +241,30 @@ async function readMerkleAirdropDistributionSummary(
       state: await readMerkleAirdropState(client, distribution),
     };
   } catch (airdropError) {
+    return await readBondMarketDistributionSummary(
+      client, distribution, fixedPriceError, curveError, airdropError,
+    );
+  }
+}
+
+async function readBondMarketDistributionSummary(
+  client: PledgeCashReadClient,
+  distribution: Address,
+  fixedPriceError: unknown,
+  curveError: unknown,
+  airdropError: unknown,
+): Promise<BoardroomDistributionSnapshot> {
+  try {
+    return {
+      address: distribution,
+      kind: "bond-market",
+      state: await readBondMarketState(client, distribution),
+    };
+  } catch (bondError) {
     return {
       address: distribution,
       kind: "unknown",
-      error: `${errorMessage(fixedPriceError)}; ${errorMessage(curveError)}; ${errorMessage(airdropError)}`,
+      error: `${errorMessage(fixedPriceError)}; ${errorMessage(curveError)}; ${errorMessage(airdropError)}; ${errorMessage(bondError)}`,
     };
   }
 }
