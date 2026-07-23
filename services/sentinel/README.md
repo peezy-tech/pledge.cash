@@ -1,6 +1,6 @@
 # pledge.cash Sentinel
 
-Sentinel is a self-hosted off-chain monitor for pledge.cash Boardroom governance. It watches configured chains, stores queued actions in Postgres, classifies risk, writes deterministic or harness-assisted analysis, exposes a Hono HTTP API, and sends notifications through configured channels.
+Sentinel is a self-hosted off-chain monitor for pledge.cash Boardroom governance. It discovers each canonical external controller, stores scheduled Boardroom and controller-self operations in Postgres with generation and epoch context, classifies risk, writes deterministic or harness-assisted analysis, exposes a Hono HTTP API, and sends notifications through configured channels.
 
 ## Prerequisites
 
@@ -48,7 +48,9 @@ Copy `.env.example` and set values for your environment.
 
 Harness credentials such as API keys or CLI logins belong to the host environment. Sentinel passes only the configured command/model/workdir settings.
 
-Authentication is wallet-first: the first SIWE signature creates a pseudonymous local account with no profile form, password, or deliverable email address. Every wallet linked with a fresh SIWE signature becomes an equal sign-in credential for that account; alert coverage is a separate per-wallet setting. This release accepts EOA signatures only; ERC-1271 smart-account authentication needs a chain-scoped identity model and is rejected rather than merging the same contract address across chains. Configured social providers can be linked explicitly and can then sign back into that same account; they cannot create walletless accounts. Better Auth organization tables are present as a dormant foundation for future group accounts, but organization creation and UI are disabled until group ownership semantics are defined.
+Authentication is wallet-first: the first SIWE signature creates a pseudonymous local account with no profile form, password, or deliverable email address. Every wallet linked with a fresh SIWE signature becomes an equal sign-in credential for that account; alert coverage is a separate per-wallet setting. Ordinary sign-in and wallet linking remain EOA-only. ERC-1271 Boardroom control uses the separate chain-scoped flow below and never creates a wallet credential. Configured social providers can be linked explicitly and can then sign back into that same account; they cannot create walletless accounts. Better Auth organization creation and UI remain disabled; an existing organization membership can be named as the destination of a Boardroom-control proof.
+
+`POST /boardroom-control/challenges` creates an exactly serialized, five-minute SIWE challenge for one scope and one user or organization destination. `POST /boardroom-control/claims` accepts only the server nonce and controller signature. Sentinel re-resolves the v5 canonical Boardroom/controller topology and calls controller ERC-1271 at one pinned finalized block, rechecks the block hash, and atomically consumes the nonce with claim creation. Claims are audit receipts, not reusable authorization: every privileged Boardroom write must repeat the fresh challenge and proof flow. Unknown chains, legacy or incomplete release identities, changed controller generations or configuration epochs, malformed RPC results, and finality uncertainty fail closed.
 
 Signed-in accounts can read their own keyset-paginated delivery receipts from `GET /notifications`. The response exposes safe operational state and action context, but never returns raw provider errors, chat identifiers, credentials, or another account's rows. A `sent` receipt means the provider accepted the send; it does not prove that a person read it.
 
@@ -70,6 +72,10 @@ For local Anvil verification with a disposable Postgres database:
 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres \
 bun --cwd services/sentinel integration:anvil
 ```
+
+The harness deploys and seeds v5 locally, advances Anvil finality, proves a real EOA-proposer controller signature
+through the challenge/claim API, rejects nonce replay, and then exercises scheduled, vetoed, and policy-admin watcher
+flows against the same temporary database.
 
 ## Docker
 

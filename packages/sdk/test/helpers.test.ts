@@ -18,8 +18,11 @@ import {
   buildBoardroomFixedPriceSaleCloseAction,
   buildBoardroomFixedPriceSaleBatch,
   buildBoardroomLockedLiquidityBatch,
+  buildBoardroomLockedLiquidityAddBatch,
+  buildBoardroomLockedLiquidityCloseAction,
   buildBoardroomLockedLiquidityExitTransaction,
   buildBoardroomLockedLiquidityFeeClaimAction,
+  buildBoardroomLockedLiquidityRemoveAction,
   buildBoardroomMerkleAirdropBatch,
   buildBoardroomMerkleAirdropCancelAction,
   buildBoardroomMerkleAirdropCloseAction,
@@ -28,8 +31,12 @@ import {
   buildBoardroomMintTransaction,
   buildBoardroomMigratingCurveBatch,
   buildBoardroomMigratingCurveCancelAction,
-  buildBoardroomMigratingCurveMigrationAction,
+  buildMigratingBondingCurveExpireTransaction,
+  buildMigratingBondingCurveFinalizeUnwindTransaction,
+  buildMigratingBondingCurveMigrationTransaction,
   buildBoardroomOpenRedemptionsTransaction,
+  buildBoardroomPruneObligationTransaction,
+  buildBoardroomPruneObligationsTransaction,
   buildBoardroomRedeemTransaction,
   buildBoardroomRegisterRedeemableAssetTransaction,
   buildBoardroomRewardFundingBatch,
@@ -108,6 +115,7 @@ const curve = "0x0000000000000000000000000000000000000c0e" as Address;
 const ammFactory = "0x0000000000000000000000000000000000000aee" as Address;
 const lockedLiquidityFactory = "0x00000000000000000000000000000000000010cc" as Address;
 const locker = "0x00000000000000000000000000000000000010cd" as Address;
+const boardroomController = "0x000000000000000000000000000000000000c011" as Address;
 const pool = "0x0000000000000000000000000000000000000a00" as Address;
 const wrappedNative = "0x00000000000000000000000000000000000000ee" as Address;
 const salt = "0x1111111111111111111111111111111111111111111111111111111111111111" as Hex;
@@ -281,17 +289,34 @@ describe("SDK action and query helpers", () => {
       wrappedNative,
       shareToken,
       rewardPool,
+      redemptionExcessRecipient: issuer,
       status: 1,
       launched: true,
-      executor: issuer,
-      governanceDelay: 86_400n,
-      governanceConfig: [86_400n, 604_800n, 100n, 1_000n],
-      governanceState: [3n, 0n, 0n, 0n, 0],
+      controller: boardroomController,
+      controllerGeneration: 1n,
+      governanceEpoch: 3n,
+      windDownDelay: 172_800n,
+      windDownStartedAt: 100n,
+      protectionStaker: holder,
+      redeemableAssetCount: 2n,
+      assetSnapshotProgress: [2n, 1n, true],
+      redemptionSupplyState: [700n, true],
+      activeObligationCount: 4n,
+      activeObligationCountByKind: 1n,
+      primaryMarketMode: 2,
+      bondingCurve: curve,
+      primaryMarketQuoteAsset: paymentToken,
+      liquidityStatus: 1,
+      liquidityLocker: locker,
+      liquidityPool: pool,
+      liquidityQuoteAsset: paymentToken,
+      proposer: issuer,
+      delay: 86_400n,
+      gracePeriod: 604_800n,
+      generation: 1n,
+      configurationEpoch: 2n,
+      configurationHash: salt,
       governanceEligibleSupply: 750n,
-      getRedeemableAssets: [paymentToken],
-      getIssuedGrants: [boardroom],
-      getIssuedDistributions: [sale],
-      getLockedLiquidityPositions: [locker],
       factory,
       boardroom,
       tokenGrantFactory: factory,
@@ -305,6 +330,10 @@ describe("SDK action and query helpers", () => {
       maxPerBuyer: 500n,
       startTime: 100n,
       endTime: 1000n,
+      phaseEndsAt: 0n,
+      quarantineStartedAt: 0n,
+      forfeitureEligibleAt: 0n,
+      forfeitureWindowEndsAt: 0n,
       saleStatus: 0,
       airdropStatus: 0,
       lockedLiquidityFactory,
@@ -313,20 +342,30 @@ describe("SDK action and query helpers", () => {
       pool: "0x0000000000000000000000000000000000000a00",
       migrationSupply: 500n,
       remainingSaleShares: 800n,
+      outstandingCurveShareLiability: 200n,
       basePrice: 25n,
       slope: 2n,
       graduationQuoteTarget: 10_000n,
       quoteToLpBps: 5_000,
       migrationSalt: curveTerms.migrationSalt,
       curveStatus: 0,
+      settlementReason: 0,
+      postQuarantinePhase: 0,
       soldShares: 200n,
       quoteReserve: 5_000n,
+      migrationAmounts: [100n, 2_500n],
+      terminalCurvePrice: 25n,
       graduationLatched: false,
+      migrationReservationHeld: true,
+      quoteQuarantined: false,
+      forfeitureFinalized: false,
+      unrecoveredQuote: 0n,
+      forfeitedQuote: 0n,
       canMigrate: false,
       router: "0x0000000000000000000000000000000000000a0a",
       tokenA: shareToken,
       tokenB: paymentToken,
-      seeded: true,
+      liquidityState: 1,
       lockedLiquidity: 777n,
     });
 
@@ -357,14 +396,27 @@ describe("SDK action and query helpers", () => {
       rewardPool,
       status: 1,
       launched: true,
-      executor: issuer,
-      governanceDelay: 86_400n,
+      controller: boardroomController,
+      proposer: issuer,
+      controllerDelay: 86_400n,
+      controllerGracePeriod: 604_800n,
+      controllerGeneration: 1n,
+      controllerConfigurationEpoch: 2n,
       governanceEpoch: 3n,
+      windDownDelay: 172_800n,
+      windDownStartedAt: 100n,
+      protectionStaker: holder,
       governanceEligibleSupply: 750n,
-      governanceConfig: { minimumDelay: 86_400n, actionGracePeriod: 604_800n, vetoBps: 100n, windDownBps: 1_000n },
-      redeemableAssets: [paymentToken],
-      issuedDistributions: [sale],
-      lockedLiquidityPositions: [locker],
+      redeemableAssetCount: 2n,
+      snapshotAssetCount: 2n,
+      snapshotCursor: 1n,
+      snapshotFrozen: true,
+      redemptionSupply: 700n,
+      redemptionSupplyFrozen: true,
+      activeObligationCount: 4n,
+      primaryMarketMode: 2,
+      liquidityStatus: 1,
+      liquidityLocker: locker,
     });
     await expect(readFixedPriceSaleState(client, sale)).resolves.toMatchObject({
       address: sale,
@@ -393,6 +445,7 @@ describe("SDK action and query helpers", () => {
       shareToken,
       quoteToken: paymentToken,
       remainingSaleShares: 800n,
+      outstandingCurveShareLiability: 200n,
       quoteToLpBps: 5000,
       graduationLatched: false,
       canMigrate: false,
@@ -404,7 +457,7 @@ describe("SDK action and query helpers", () => {
       tokenA: shareToken,
       tokenB: paymentToken,
       pool: "0x0000000000000000000000000000000000000a00",
-      seeded: true,
+      liquidityState: 1,
       lockedLiquidity: 777n,
     });
   });
@@ -586,15 +639,26 @@ describe("SDK action and query helpers", () => {
       address: boardroom,
       functionName: "openRedemptions",
     });
+    expect(buildBoardroomPruneObligationTransaction({ boardroom, obligation: holder })).toMatchObject({
+      address: boardroom,
+      functionName: "pruneObligation",
+      args: [holder],
+    });
+    expect(buildBoardroomPruneObligationsTransaction({ boardroom, obligations: [holder, paymentToken] })).toMatchObject({
+      address: boardroom,
+      functionName: "pruneObligations",
+      args: [[holder, paymentToken]],
+    });
+    expect(() => buildBoardroomPruneObligationsTransaction({ boardroom, obligations: [] })).toThrow();
     expect(buildBoardroomRegisterRedeemableAssetTransaction({ boardroom, asset: paymentToken })).toMatchObject({
       address: boardroom,
       functionName: "registerRedeemableAsset",
       args: [paymentToken],
     });
-    expect(buildBoardroomRedeemTransaction({ boardroom, shares: 10n, recipient: holder, minAmountsOut: [1n, 2n] })).toMatchObject({
+    expect(buildBoardroomRedeemTransaction({ boardroom, shares: 10n })).toMatchObject({
       address: boardroom,
       functionName: "redeem",
-      args: [10n, holder, [1n, 2n]],
+      args: [10n],
     });
     expect(
       buildBoardroomClaimRedemptionAssetTransaction({
@@ -784,25 +848,18 @@ describe("SDK action and query helpers", () => {
     expect(cancel.args[0]).toMatchObject({ policy: distributionFactory, target: curve, value: 0n });
     expect(cancel.args[0].data).toBe(encodeFunctionData({ abi: migratingBondingCurveAbi, functionName: "cancel" }));
 
-    const migrate = buildBoardroomMigratingCurveMigrationAction({
-      boardroom,
-      policy: distributionFactory,
+    const migrate = buildMigratingBondingCurveMigrationTransaction({
       curve,
       minShareLiquidity: 1n,
       minQuoteLiquidity: 2n,
       deadline: 12345n,
     });
-    expect(migrate.address).toBe(boardroom);
-    expect(migrate.abi).toBe(boardroomAbi);
-    expect(migrate.functionName).toBe("execute");
-    expect(migrate.args[0]).toMatchObject({ policy: distributionFactory, target: curve, value: 0n });
-    expect(migrate.args[0].data).toBe(
-      encodeFunctionData({
-        abi: migratingBondingCurveAbi,
-        functionName: "migrate",
-        args: [1n, 2n, 12345n],
-      }),
-    );
+    expect(migrate.address).toBe(curve);
+    expect(migrate.abi).toBe(migratingBondingCurveAbi);
+    expect(migrate.functionName).toBe("migrate");
+    expect(migrate.args).toEqual([1n, 2n, 12345n]);
+    expect(buildMigratingBondingCurveExpireTransaction(curve).functionName).toBe("expire");
+    expect(buildMigratingBondingCurveFinalizeUnwindTransaction(curve).functionName).toBe("finalizeUnwind");
   });
 
   test("builds Boardroom Merkle airdrop and claim transaction inputs", () => {
@@ -934,17 +991,69 @@ describe("SDK action and query helpers", () => {
       }),
     );
 
+    const add = buildBoardroomLockedLiquidityAddBatch({
+      boardroom,
+      factory: lockedLiquidityFactory,
+      shareToken,
+      terms: {
+        ...lockedLiquidityTerms,
+        shareTokenSide: "tokenA",
+      },
+      policy: lockedLiquidityFactory,
+      assetPolicy,
+    });
+    expect(add.args[0]).toHaveLength(3);
+    expect(add.args[0][2]).toMatchObject({ policy: lockedLiquidityFactory, target: lockedLiquidityFactory });
+    expect(add.args[0][2]?.data).toBe(encodeFunctionData({
+      abi: lockedLiquidityFactoryAbi,
+      functionName: "addLockedLiquidity",
+      args: [{
+        tokenA: shareToken,
+        tokenB: paymentToken,
+        amountADesired: 1000n,
+        amountBDesired: 2000n,
+        amountAMin: 900n,
+        amountBMin: 1900n,
+        deadline: 12345n,
+      }],
+    }));
+
+    const remove = buildBoardroomLockedLiquidityRemoveAction({
+      boardroom,
+      policy: lockedLiquidityFactory,
+      factory: lockedLiquidityFactory,
+      liquidity: 5n,
+      amountAMin: 1n,
+      amountBMin: 2n,
+      deadline: 12345n,
+    });
+    expect(remove.args[0]).toMatchObject({ policy: lockedLiquidityFactory, target: lockedLiquidityFactory });
+    expect(remove.args[0].data).toBe(encodeFunctionData({
+      abi: lockedLiquidityFactoryAbi,
+      functionName: "removeLockedLiquidity",
+      args: [{ liquidity: 5n, amountAMin: 1n, amountBMin: 2n, deadline: 12345n }],
+    }));
+
+    const close = buildBoardroomLockedLiquidityCloseAction({
+      boardroom,
+      policy: lockedLiquidityFactory,
+      factory: lockedLiquidityFactory,
+    });
+    expect(close.args[0]).toMatchObject({ policy: lockedLiquidityFactory, target: lockedLiquidityFactory });
+    expect(close.args[0].data).toBe(
+      encodeFunctionData({ abi: lockedLiquidityFactoryAbi, functionName: "closeLockedLiquidity" }),
+    );
+
     const exit = buildBoardroomLockedLiquidityExitTransaction({
       boardroom,
-      locker,
       amountAMin: 1n,
       amountBMin: 2n,
       deadline: 12345n,
     });
     expect(exit.address).toBe(boardroom);
     expect(exit.abi).toBe(boardroomAbi);
-    expect(exit.functionName).toBe("exitLockedLiquidity");
-    expect(exit.args).toEqual([locker, 1n, 2n, 12345n]);
+    expect(exit.functionName).toBe("exitProtocolLiquidity");
+    expect(exit.args).toEqual([1n, 2n, 12345n]);
 
     const claim = buildBoardroomLockedLiquidityFeeClaimAction({
       boardroom,
@@ -1069,7 +1178,7 @@ describe("SDK action and query helpers", () => {
         distributionCreatedLog(24n, 0, airdrop, boardroom, 2n),
         distributionCreatedLog(24n, 0, other, holder, 1n),
       ],
-      LockedLiquidityCreated: [
+      ProtocolLiquidityCreated: [
         lockedLiquidityCreatedLog(25n, 0, locker, boardroom),
         lockedLiquidityCreatedLog(26n, 0, other, holder),
       ],

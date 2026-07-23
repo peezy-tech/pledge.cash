@@ -97,7 +97,8 @@ the treasury.
 `close` stops purchases and returns only unsold capacity. `finalize` does the same permissionlessly after conclusion.
 Neither action impairs existing positions. A market reports closed to the Boardroom only when purchases have stopped
 and `outstandingPayout == 0`; therefore wind-down cannot snapshot redemptions while a funded bond claim remains.
-Settled markets can be pruned from the factory's bounded active index without erasing canonical identity.
+Settled markets remain in the factory's append-only discovery history. Their Boardroom obligation membership can be
+pruned permissionlessly without erasing canonical identity.
 
 ## Invariants and bounds
 
@@ -107,7 +108,8 @@ Settled markets can be pruned from the factory's bounded active index without er
 - Returned capacity cannot be promised to a position.
 - A position is redeemed at most once and only to its immutable owner.
 - Purchases require an active Boardroom and an open market window.
-- Market indexes are capped at 128 active entries per Boardroom and owner-position reads are SDK-bounded to 64.
+- Market discovery has no concurrent-capacity ceiling and is exposed through bounded pages of at most 100 entries;
+  owner-position reads remain client-bounded.
 - Market duration is at least one day, deposit interval at least one hour, vesting between one day and 50 years, and
   the deposit interval is bounded so its five-interval debt-decay calculation cannot overflow.
 

@@ -14,10 +14,10 @@ import { errorMessage, formatSentinelDate } from "./hooks";
 type GovernanceActivityProps = {
   boardroom: Address | undefined;
   chainId: number;
-  highlightActionHash?: string | undefined;
+  highlightOperationId?: string | undefined;
 };
 
-export function GovernanceActivity({ boardroom, chainId, highlightActionHash }: GovernanceActivityProps): React.JSX.Element | null {
+export function GovernanceActivity({ boardroom, chainId, highlightOperationId }: GovernanceActivityProps): React.JSX.Element | null {
   const baseUrl = getSentinelBaseUrl();
   const client = useMemo(() => (baseUrl ? createSentinelClient({ baseUrl }) : undefined), [baseUrl]);
   const [actions, setActions] = useState<PublicActionDto[]>([]);
@@ -50,7 +50,7 @@ export function GovernanceActivity({ boardroom, chainId, highlightActionHash }: 
   return (
     <Panel
       title="Governance Activity"
-      description="Queued, cancelled, and executed Boardroom actions from the public Sentinel feed."
+      description="Scheduled, vetoed, invalidated, and executed controller operations from the public Sentinel feed."
       action={
         <Button disabled={loading} type="button" variant="secondary" onClick={() => void load()}>
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
@@ -71,7 +71,7 @@ export function GovernanceActivity({ boardroom, chainId, highlightActionHash }: 
           actions.map((action) => (
             <GovernanceActionRow
               action={action}
-              highlighted={sameActionHash(action.actionHash, highlightActionHash)}
+              highlighted={sameOperationId(action.operationId, highlightOperationId)}
               key={action.id}
             />
           ))
@@ -90,7 +90,7 @@ function GovernanceActionRow({ action, highlighted }: { action: PublicActionDto;
     ?? "No analysis is available yet.";
   const event = action.event ?? action.status;
   const callLabel = action.calls.length === 0
-    ? "No decoded calls"
+    ? action.operationKind === "controller" ? "Controller configuration" : "No decoded calls"
     : action.calls.map((call) => call.decodedFunction ?? call.selector).join(", ");
 
   const itemClassName = [
@@ -120,8 +120,8 @@ function GovernanceActionRow({ action, highlighted }: { action: PublicActionDto;
           <AddressLink address={action.boardroom.address as Address} chainId={action.chainId} />
         </div>
         <div className="flex min-w-0 flex-wrap items-center gap-2 xl:justify-end">
-          <span className="text-zinc-500">Queued</span>
-          <TransactionLink chainId={action.chainId} hash={action.queueTxHash as Hex} />
+          <span className="text-zinc-500">Scheduled</span>
+          <TransactionLink chainId={action.chainId} hash={action.scheduleTxHash as Hex} />
         </div>
       </div>
     </li>
@@ -129,13 +129,13 @@ function GovernanceActionRow({ action, highlighted }: { action: PublicActionDto;
 }
 
 function statusIcon(status: ActionStatusDto): React.ReactNode {
-  if (status === "queued") return <Clock3 className="h-3.5 w-3.5" />;
+  if (status === "scheduled") return <Clock3 className="h-3.5 w-3.5" />;
   if (status === "executed") return <CheckCircle2 className="h-3.5 w-3.5" />;
   return <XCircle className="h-3.5 w-3.5" />;
 }
 
 function statusTone(status: ActionStatusDto): "default" | "muted" | "warning" | "danger" {
-  if (status === "queued") return "warning";
+  if (status === "scheduled") return "warning";
   if (status === "executed") return "default";
   return "muted";
 }
@@ -147,6 +147,6 @@ function severityTone(severity: SeverityDto | undefined): "default" | "muted" | 
   return "muted";
 }
 
-function sameActionHash(left: string | undefined, right: string | undefined): boolean {
+function sameOperationId(left: string | undefined, right: string | undefined): boolean {
   return Boolean(left && right && left.toLowerCase() === right.toLowerCase());
 }

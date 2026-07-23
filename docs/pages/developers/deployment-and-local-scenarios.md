@@ -9,7 +9,8 @@ Use the [deployment specification](https://github.com/peezy-tech/pledge.cash/blo
 
 ## Public testnet status
 
-Artifacts for HyperEVM testnet `998` and Monad testnet `10143` are pending because the authority-hardened deterministic v4 stack has not been broadcast. Clients must withhold stale root addresses while pending.
+Artifacts for HyperEVM testnet `998` and Monad testnet `10143` are pending because the deterministic v5 candidate has
+not been broadcast or verified. Clients must withhold stale root addresses while pending.
 
 Do not develop against guessed legacy addresses. A candidate artifact becomes publishable only after live code, ownership, policy, helper, factory, router, fee, and immutable-wiring verification succeeds.
 
@@ -28,7 +29,13 @@ Use the exact commands in the engineering deployment note; network gas behavior 
 
 Local Anvil uses chain id `31337`, normally on port `8547`. Deploy the full stack with a local wrapped-native contract, write the ignored local artifact, then run the maintained seed scenario.
 
-The seed covers standalone grant variants plus eight Boardroom projects: migrated AMM, active fixed price, active curve, closed sale, live Merkle airdrop, launched governance with a queued action, winding down with an open distribution blocker, and redemptions open with a CASH snapshot. The seed manifest carries deterministic actor identities, airdrop allocations and proofs, queued-action hash/salt/calldata, blocker identity, and redemption balances for browser automation. Read queued-action ETA and expiry from `governanceState`; Forge simulation timestamps are deliberately excluded from the fixture.
+The seed covers standalone grant variants plus eight Boardroom projects: direct canonical AMM, active fixed price, active curve,
+closed sale, live Merkle airdrop, launched generation-1 controller governance with a scheduled operation, winding down
+with an open distribution blocker, and winding down with CASH registered while the snapshot delay remains pending. The
+fixture does not skip the required Snapshotting phase. The seed manifest carries deterministic
+actors, controller/proposer identity, operation hash/salt/calldata/Boardroom epoch, airdrop proofs, blocker identity,
+and snapshot-pending balances. Read ETA and expiry from the controller's `operationState`; Forge simulation timestamps are
+deliberately excluded from the fixture.
 
 Its addresses belong only to that Anvil state. Resetting Anvil invalidates the deployment artifact, seed manifest, browser cache, and prior receipt-refresh context together. Reuse a fixed `LOCAL_SEED_NONCE` only with a reset state; use a new nonce to append another deterministic batch.
 

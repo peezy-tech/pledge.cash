@@ -156,7 +156,7 @@ function DeliveryReceiptRow({ delivery }: { delivery: NotificationDeliveryDto })
           </div>
         ) : null}
         <ButtonLink href={notificationDeliveryHref(delivery)} size="sm" variant="ghost">
-          Review action
+          Review operation
           <ArrowRight className="h-3.5 w-3.5" />
         </ButtonLink>
       </div>
@@ -169,7 +169,7 @@ export function notificationDeliveryHref(
   baseUrl = import.meta.env.BASE_URL || "/",
 ): string {
   const query = new URLSearchParams({
-    action: delivery.action.actionHash,
+    operation: delivery.action.operationId,
     boardroom: delivery.action.boardroom,
     chain: delivery.action.chainId.toString(),
   });

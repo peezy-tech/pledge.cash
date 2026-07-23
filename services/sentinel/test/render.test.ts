@@ -11,15 +11,15 @@ describe("notification rendering", () => {
       webOrigin: "https://sentinel.example"
     });
 
-    expect(rendered.html).toContain("HIGH Queued governance action");
+    expect(rendered.html).toContain("HIGH Scheduled governance operation");
     expect(rendered.html).toContain("execution opens in 12h");
     expect(rendered.html).toContain("Execution deadline");
-    expect(rendered.html).toContain("at least 1% of prior-block circulating shares held both now and in the prior block");
-    expect(rendered.html).toContain("cancelAction(0x0000000000000000000000000000000000000000000000000000000000000abc)");
+    expect(rendered.html).toContain("required 1% current and prior-block active-stake power");
+    expect(rendered.html).toContain("veto(0x0000000000000000000000000000000000000000000000000000000000000abc)");
     expect(rendered.html).toContain("https://explorer.example/tx/0x0000000000000000000000000000000000000000000000000000000000000def");
-    expect(rendered.text).toContain("setExecutor");
+    expect(rendered.text).toContain("updateConfiguration");
     expect(rendered.url).toBe(
-      "https://sentinel.example/notifications?chain=998&boardroom=0x0000000000000000000000000000000000000b0a&action=0x0000000000000000000000000000000000000000000000000000000000000abc"
+      "https://sentinel.example/notifications?chain=998&boardroom=0x0000000000000000000000000000000000000b0a&operation=0x0000000000000000000000000000000000000000000000000000000000000abc"
     );
   });
 
@@ -31,7 +31,7 @@ describe("notification rendering", () => {
     });
 
     expect(rendered.text.length).toBeLessThanOrEqual(280);
-    expect(rendered.text).toContain("HIGH-RISK action queued");
+    expect(rendered.text).toContain("HIGH-RISK operation scheduled");
     expect(rendered.text).toContain("Eligible 1% holders may cancel");
     expect(rendered.text).toContain("https://sentinel.example/notifications?chain=998");
     expect(rendered.html).toBeUndefined();
@@ -44,8 +44,8 @@ describe("notification rendering", () => {
       webOrigin: "https://sentinel.example"
     });
 
-    expect(rendered.html).toContain("Policy Admin Updated governance action");
-    expect(rendered.subject).toContain("Policy Admin Updated action");
+    expect(rendered.html).toContain("Policy Admin Updated governance operation");
+    expect(rendered.subject).toContain("Policy Admin Updated operation");
   });
 
   test("renders reminders as execution-opening prompts with exact cancellation eligibility", () => {
@@ -55,8 +55,8 @@ describe("notification rendering", () => {
 
     expect(rendered.subject).toContain("Reminder");
     expect(rendered.text).toContain("execution opens in 12h");
-    expect(rendered.text).toContain("at least 1% of prior-block circulating shares");
-    expect(rendered.text).toContain("cancelAction");
+    expect(rendered.text).toContain("required 1% current and prior-block active-stake power");
+    expect(rendered.text).toContain("veto");
   });
 
   test("renders epoch invalidation as terminal without cancellation instructions", () => {
@@ -66,10 +66,10 @@ describe("notification rendering", () => {
 
     expect(rendered.subject).toContain("Invalidated");
     expect(rendered.text).toContain("no longer executable");
-    expect(rendered.text).not.toContain("call cancelAction");
+    expect(rendered.text).not.toContain("call veto");
   });
 
-  test("renders a delayed queued notification as expired instead of actionable", () => {
+  test("renders a delayed scheduled notification as expired instead of actionable", () => {
     const row = makeRow("telegram");
     const rendered = renderNotification(
       {
@@ -83,11 +83,11 @@ describe("notification rendering", () => {
     );
 
     expect(rendered.text).toContain("execution window has expired");
-    expect(rendered.text).toContain("This action is expired and is no longer executable");
-    expect(rendered.text).not.toContain("call cancelAction");
+    expect(rendered.text).toContain("This operation is expired and is no longer executable");
+    expect(rendered.text).not.toContain("call veto");
   });
 
-  test("renders a delayed queued Twitter notification as expired instead of actionable", () => {
+  test("renders a delayed scheduled Twitter notification as expired instead of actionable", () => {
     const row = makeRow("twitter");
     const rendered = renderNotification(
       {
@@ -114,23 +114,22 @@ describe("notification rendering", () => {
       explorerTx:
         "https://explorer.example/tx/0x0000000000000000000000000000000000000000000000000000000000000def",
       webAction:
-        "https://sentinel.example/notifications?chain=998&boardroom=0x0000000000000000000000000000000000000b0a&action=0x0000000000000000000000000000000000000000000000000000000000000abc"
+        "https://sentinel.example/notifications?chain=998&boardroom=0x0000000000000000000000000000000000000b0a&operation=0x0000000000000000000000000000000000000000000000000000000000000abc"
     });
   });
 });
 
 function makeRow(
   channelType: "telegram" | "twitter",
-  event: RenderableOutboxRow["event"] = "queued"
+  event: RenderableOutboxRow["event"] = "scheduled"
 ): RenderableOutboxRow {
   const now = new Date("2026-07-09T00:00:00.000Z");
   return {
     actionId: "00000000-0000-4000-8000-000000000001",
     attempts: 0,
-    channelId: channelType === "telegram" ? "00000000-0000-4000-8000-000000000002" : null,
     channelType,
     createdAt: now,
-    dedupeKey: `998:0xabc:queued:${channelType}:public`,
+    dedupeKey: `998:0xabc:scheduled:${channelType}:public`,
     event,
     externalId: null,
     id: "00000000-0000-4000-8000-000000000003",
@@ -138,23 +137,28 @@ function makeRow(
     nextAttemptAt: now,
     payload: {
       action: {
-        actionHash: "0x0000000000000000000000000000000000000000000000000000000000000abc",
+        operationId: "0x0000000000000000000000000000000000000000000000000000000000000abc",
         boardroom: "0x0000000000000000000000000000000000000b0a",
         chainId: 998,
-        epoch: "2",
+        boardroomEpoch: "2",
+        configurationEpoch: "1",
+        controller: "0x000000000000000000000000000000000000c011",
+        controllerGeneration: "1",
         eta: "2026-07-10T00:00:00.000Z",
         expiresAt: "2026-07-17T00:00:00.000Z",
         id: "00000000-0000-4000-8000-000000000001",
-        queueTxHash: "0x0000000000000000000000000000000000000000000000000000000000000def",
-        status: "queued"
+        operationKind: "controller",
+        proposer: "0x0000000000000000000000000000000000000a11",
+        scheduleTxHash: "0x0000000000000000000000000000000000000000000000000000000000000def",
+        status: "scheduled"
       },
       analysis: {
         affectedParties: ["shareholders"],
-        effects: ["Changes the boardroom executor"],
-        severityRationale: "Executor changes can redirect governance execution.",
+        effects: ["Changes the boardroom controller"],
+        severityRationale: "controller changes can redirect governance execution.",
         source: "template",
         summary:
-          "setExecutor changes queue authority for the Boardroom; ready execution remains permissionless. This long summary intentionally exercises the public post truncation path while keeping the important veto link available."
+          "updateConfiguration changes controller configuration for the Boardroom; ready execution remains permissionless. This long summary intentionally exercises the public post truncation path while keeping the important veto link available."
       },
       boardroom: {
         address: "0x0000000000000000000000000000000000000b0a",
@@ -166,8 +170,8 @@ function makeRow(
           actionId: "00000000-0000-4000-8000-000000000001",
           callIndex: 0,
           data: "0x12345678",
-          decodedArgs: { executor: "0x0000000000000000000000000000000000000e0e" },
-          decodedFunction: "setExecutor",
+          decodedArgs: { controller: "0x0000000000000000000000000000000000000e0e" },
+          decodedFunction: "updateConfiguration",
           policy: "0x0000000000000000000000000000000000000f00",
           selector: "0x12345678",
           target: "0x0000000000000000000000000000000000000b0a",
@@ -178,8 +182,8 @@ function makeRow(
         findings: [
           {
             callIndex: 0,
-            detail: "Executor update",
-            ruleId: "boardroom.executor-change",
+            detail: "controller update",
+            ruleId: "boardroom.controller-change",
             severity: "high"
           }
         ],

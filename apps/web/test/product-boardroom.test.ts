@@ -99,30 +99,26 @@ describe("product boardroom runtime discovery", () => {
     expect(readCount).toBe(5);
   });
 
-  test("bounds and batches per-project child reads for catalog summaries", async () => {
+  test("bounds per-project catalog reads with canonical factory pagination", async () => {
     const boardroom = "0x1000000000000000000000000000000000000000" as Address;
     const shareToken = "0x2000000000000000000000000000000000000000" as Address;
     const paymentToken = "0x3000000000000000000000000000000000000000" as Address;
+    const distributionFactory = "0x4000000000000000000000000000000000000000" as Address;
     const distributionCount = 50;
-    const requestedIndexes: number[] = [];
-    let activeIndexReads = 0;
-    let maxActiveIndexReads = 0;
+    const pageRequests: Array<{ cursor: bigint; size: bigint }> = [];
     const client = {
-      async readContract(parameters: { address: Address; functionName: string; args?: readonly [bigint] }) {
+      async readContract(parameters: { address: Address; functionName: string; args?: readonly bigint[] }) {
         const { functionName } = parameters;
         if (parameters.address === boardroom && functionName === "shareToken") return shareToken;
-        if (parameters.address === boardroom && functionName === "issuedDistributionCount") return BigInt(distributionCount);
-        if (parameters.address === boardroom && functionName === "lockedLiquidityCount") return 0n;
-        if (parameters.address === boardroom && functionName === "issuedDistributionAt") {
-          const index = Number(parameters.args?.[0] ?? 0n);
-          requestedIndexes.push(index);
-          activeIndexReads += 1;
-          maxActiveIndexReads = Math.max(maxActiveIndexReads, activeIndexReads);
-          await Promise.resolve();
-          activeIndexReads -= 1;
-          return `0x${(index + 1).toString(16).padStart(40, "0")}` as Address;
+        if (parameters.address === distributionFactory && functionName === "distributionCountForBoardroom") return BigInt(distributionCount);
+        if (parameters.address === distributionFactory && functionName === "distributionPageForBoardroom") {
+          const cursor = parameters.args?.[1] ?? 0n;
+          const size = parameters.args?.[2] ?? 0n;
+          pageRequests.push({ cursor, size });
+          return [Array.from({ length: Number(size) }, (_, index) =>
+            `0x${(Number(cursor) + index + 1).toString(16).padStart(40, "0")}` as Address), cursor + size] as const;
         }
-        if (functionName === "factory") return "0x4000000000000000000000000000000000000000";
+        if (functionName === "factory") return distributionFactory;
         if (functionName === "boardroom") return boardroom;
         if (functionName === "shareToken") return shareToken;
         if (functionName === "paymentToken") return paymentToken;
@@ -135,66 +131,34 @@ describe("product boardroom runtime discovery", () => {
       },
     };
 
-    const snapshot = await readBoardroomCatalogSnapshot(client as never, boardroom);
+    const snapshot = await readBoardroomCatalogSnapshot(client as never, boardroom, {
+      chainId: 31337,
+      distributionFactory,
+    });
 
     expect(snapshot.distributionCount).toBe(distributionCount);
     expect(snapshot.distributionSummaries).toHaveLength(PRODUCT_CATALOG_CHILD_READ_LIMIT);
-    expect(requestedIndexes).toEqual(Array.from(
-      { length: PRODUCT_CATALOG_CHILD_READ_LIMIT },
-      (_, offset) => distributionCount - offset - 1,
-    ));
-    expect(maxActiveIndexReads).toBeLessThanOrEqual(4);
+    expect(pageRequests).toEqual([{ cursor: 38n, size: BigInt(PRODUCT_CATALOG_CHILD_READ_LIMIT) }]);
   });
 
-  test("bounds full project child hydration and reports omitted records", async () => {
-    const boardroom = "0x1000000000000000000000000000000000000000" as Address;
-    const shareToken = "0x2000000000000000000000000000000000000000" as Address;
-    const children = (offset: number): Address[] => Array.from({ length: 100 }, (_, index) =>
-      `0x${(offset + index).toString(16).padStart(40, "0")}` as Address);
-    const grants = children(1_000);
-    const distributions = children(2_000);
-    const lockers = children(3_000);
-    let activeChildReads = 0;
-    let maxActiveChildReads = 0;
-    const client = {
-      async readContract(parameters: { address: Address; functionName: string }) {
-        const { address, functionName } = parameters;
-        if (address === boardroom) {
-          if (["owner", "policyRegistry", "wrappedNative", "executor"].includes(functionName)) return boardroom;
-          if (functionName === "shareToken") return shareToken;
-          if (functionName === "rewardPool") return "0x0000000000000000000000000000000000000000";
-          if (functionName === "status") return 0;
-          if (functionName === "launched") return false;
-          if (functionName === "governanceDelay") return 0n;
-          if (functionName === "governanceConfig") return [86_400n, 604_800n, 100n, 1_000n] as const;
-          if (functionName === "governanceState") return [0n, 0n, 0n, 0n, 0] as const;
-          if (functionName === "getRedeemableAssets") return [];
-          if (functionName === "getIssuedGrants") return grants;
-          if (functionName === "getIssuedDistributions") return distributions;
-          if (functionName === "getLockedLiquidityPositions") return lockers;
-        }
-        if (address === shareToken) {
-          if (functionName === "governanceEligibleSupply") return 0n;
-          if (functionName === "symbol") return "SHARE";
-          if (functionName === "decimals") return 18;
-        }
-        activeChildReads += 1;
-        maxActiveChildReads = Math.max(maxActiveChildReads, activeChildReads);
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        activeChildReads -= 1;
-        throw new Error("child read unavailable");
-      },
-    };
+  test("bounds full project factory hydration and reports omitted provenance records", async () => {
+    const context = productBoardroomFixture();
+    const recordedDistributions = Array.from({ length: 100 }, (_, index) =>
+      `0x${(2_000 + index).toString(16).padStart(40, "0")}` as Address);
+    const distributionFactoryReads: Address[] = [];
+    const client = fakeProductBoardroomClient({
+      ...context,
+      distributionFactoryReads,
+      recordedDistributions,
+      tokenReads: new Set<string>(),
+    });
+    const snapshot = await readBoardroomSnapshot(client, context.boardroom, fixtureDeployment(context));
 
-    const snapshot = await readBoardroomSnapshot(client as never, boardroom);
-
-    expect(snapshot.grantSummaries).toHaveLength(PRODUCT_DETAIL_CHILD_READ_LIMIT);
+    expect(snapshot.grantSummaries).toHaveLength(0);
     expect(snapshot.distributionSummaries).toHaveLength(PRODUCT_DETAIL_CHILD_READ_LIMIT);
-    expect(snapshot.lockedLiquiditySummaries).toHaveLength(PRODUCT_DETAIL_CHILD_READ_LIMIT);
-    expect(snapshot.summaryWarnings?.join(" ")).toContain("newest 64 of 100 grants");
-    expect(snapshot.summaryWarnings?.join(" ")).toContain("newest 64 of 100 distributions");
-    expect(snapshot.summaryWarnings?.join(" ")).toContain("newest 64 of 100 locked-liquidity positions");
-    expect(maxActiveChildReads).toBeLessThanOrEqual(256);
+    expect(snapshot.lockedLiquiditySummaries).toHaveLength(0);
+    expect(snapshot.summaryWarnings?.join(" ")).toContain("newest 64 of 100 distribution records");
+    expect(new Set(distributionFactoryReads.map((address) => address.toLowerCase())).size).toBe(64);
   });
 
   test("loads dashboard treasury assets from Boardroom state without seed artifacts", async () => {
@@ -203,7 +167,7 @@ describe("product boardroom runtime discovery", () => {
     const client = fakeProductBoardroomClient({ ...context, tokenReads });
     const seedOnlyEquity = "0x6000000000000000000000000000000000000000" as Address;
 
-    const dashboard = await readProductBoardroomDashboard(client, { address: context.boardroom });
+    const dashboard = await readProductBoardroomDashboard(client, { address: context.boardroom, deployment: fixtureDeployment(context) });
 
     expect(dashboard.catalog).toHaveLength(1);
     expect(dashboard.catalog[0]).toMatchObject({
@@ -238,11 +202,11 @@ describe("product boardroom runtime discovery", () => {
       },
     };
 
-    const dashboard = await readProductBoardroomDashboard(client, { address: context.boardroom });
+    const dashboard = await readProductBoardroomDashboard(client, { address: context.boardroom, deployment: fixtureDeployment(context) });
 
     expect(dashboard.snapshot.distributionSummaries[0]?.error).toContain("distribution child unavailable");
     expect(dashboard.currentStateCoverage.distributions).toEqual({ complete: false, shown: 0, total: 1 });
-    expect(dashboard.currentStateCoverage.grants).toEqual({ complete: true, shown: 0, total: 0 });
+    expect(dashboard.currentStateCoverage.grants).toEqual({ complete: false, shown: 0, total: 1 });
   });
 
   test("synthesizes exact catalog identity for a deep-linked project outside the newest page", async () => {
@@ -257,6 +221,7 @@ describe("product boardroom runtime discovery", () => {
     const dashboard = await readProductBoardroomDashboard(client, {
       address: context.boardroom,
       catalog: [newest],
+      deployment: fixtureDeployment(context),
     });
     const exactEntry = dashboard.catalog.find((entry) => entry.address === context.boardroom);
 
@@ -276,10 +241,7 @@ describe("product boardroom runtime discovery", () => {
     const cash = 10n ** 6n;
     const client = fakeProductBoardroomClient({ ...context, tokenReads: new Set<string>() });
 
-    const page = await readProductBoardroomCatalogPage(client, {
-      chainId: 31337,
-      boardroomFactory: context.boardroomFactory,
-    });
+    const page = await readProductBoardroomCatalogPage(client, fixtureDeployment(context));
     const catalog = page.entries;
 
     expect(page).toMatchObject({ totalCount: 1 });
@@ -319,12 +281,12 @@ describe("product boardroom runtime discovery", () => {
       async getLogs() { return []; },
       async readContract(parameters: { address: Address; functionName: string }) {
         const { address, functionName } = parameters;
+        if (address === factory && functionName === "positionOfBoardroom") {
+          return [locker, pool, quoteToken, 1] as const;
+        }
         if (address === boardroom) {
           if (functionName === "shareToken") return shareToken;
           if (functionName === "status") return 0;
-          if (functionName === "issuedDistributionCount") return 0n;
-          if (functionName === "lockedLiquidityCount") return 1n;
-          if (functionName === "lockedLiquidityAt") return locker;
         }
         if (address === locker) {
           if (functionName === "factory") return factory;
@@ -333,7 +295,7 @@ describe("product boardroom runtime discovery", () => {
           if (functionName === "tokenA") return shareToken;
           if (functionName === "tokenB") return quoteToken;
           if (functionName === "pool") return pool;
-          if (functionName === "seeded") return true;
+          if (functionName === "liquidityState") return 1;
           if (functionName === "lockedLiquidity") return 1n;
         }
         if (address === pool) {
@@ -352,7 +314,10 @@ describe("product boardroom runtime discovery", () => {
       },
     };
 
-    const entry = await readProductBoardroomCatalogEntry(client as never, boardroom);
+    const entry = await readProductBoardroomCatalogEntry(client as never, boardroom, {}, {
+      chainId: 31337,
+      lockedLiquidityFactory: factory,
+    });
 
     expect(entry).toMatchObject({
       address: boardroom,
@@ -373,6 +338,7 @@ describe("product boardroom runtime discovery", () => {
     const pool = "0x5500000000000000000000000000000000000000" as Address;
     const historicalPool = "0x5600000000000000000000000000000000000000" as Address;
     const locker = "0x6600000000000000000000000000000000000000" as Address;
+    const distributionFactory = "0x7700000000000000000000000000000000000000" as Address;
     const client = {
       async getBlockNumber() { return 100n; },
       async getLogs(parameters: { address: Address; event?: { name?: string } }) {
@@ -395,17 +361,18 @@ describe("product boardroom runtime discovery", () => {
             return [];
         }
       },
-      async readContract(parameters: { address: Address; functionName: string }) {
+      async readContract(parameters: { address: Address; functionName: string; args?: readonly unknown[] }) {
         const { address, functionName } = parameters;
+        if (address === distributionFactory) {
+          if (functionName === "distributionCountForBoardroom") return 1n;
+          if (functionName === "distributionPageForBoardroom") return [[curve], 1n] as const;
+        }
         if (address === boardroom) {
           if (functionName === "shareToken") return shareToken;
           if (functionName === "status") return 0;
-          if (functionName === "issuedDistributionCount") return 1n;
-          if (functionName === "issuedDistributionAt") return curve;
-          if (functionName === "lockedLiquidityCount") return 0n;
         }
         if (address === curve) {
-          if (functionName === "factory") return "0x7700000000000000000000000000000000000000";
+          if (functionName === "factory") return distributionFactory;
           if (functionName === "boardroom") return boardroom;
           if (functionName === "shareToken") return shareToken;
           if (functionName === "paymentToken") throw new Error("not a fixed-price sale");
@@ -416,16 +383,27 @@ describe("product boardroom runtime discovery", () => {
           if (functionName === "saleSupply") return 10_000n;
           if (functionName === "migrationSupply") return 2_000n;
           if (functionName === "remainingSaleShares") return 0n;
+          if (functionName === "outstandingCurveShareLiability") return 0n;
           if (functionName === "basePrice") return 1_000_000n;
           if (functionName === "slope") return 0n;
           if (functionName === "graduationQuoteTarget") return 5_000_000n;
           if (functionName === "quoteToLpBps") return 8_000;
           if (functionName === "startTime" || functionName === "endTime") return 0n;
+          if (
+            functionName === "phaseEndsAt" || functionName === "quarantineStartedAt"
+              || functionName === "forfeitureEligibleAt" || functionName === "forfeitureWindowEndsAt"
+          ) return 0n;
           if (functionName === "migrationSalt") return `0x${"00".repeat(32)}`;
-          if (functionName === "curveStatus") return 1;
+          if (functionName === "curveStatus") return 3;
+          if (functionName === "settlementReason" || functionName === "postQuarantinePhase") return 0;
           if (functionName === "soldShares") return 10_000n;
           if (functionName === "quoteReserve") return 0n;
+          if (functionName === "migrationAmounts") return [1_111n, 999n] as const;
+          if (functionName === "terminalCurvePrice") return 1_000_000n;
           if (functionName === "graduationLatched") return true;
+          if (functionName === "migrationReservationHeld" || functionName === "quoteQuarantined"
+            || functionName === "forfeitureFinalized") return false;
+          if (functionName === "unrecoveredQuote" || functionName === "forfeitedQuote") return 0n;
           if (functionName === "canMigrate") return false;
           if (functionName === "isClosed") return true;
         }
@@ -443,7 +421,10 @@ describe("product boardroom runtime discovery", () => {
       },
     };
 
-    const entry = await readProductBoardroomCatalogEntry(client as never, boardroom);
+    const entry = await readProductBoardroomCatalogEntry(client as never, boardroom, {}, {
+      chainId: 31337,
+      distributionFactory,
+    });
 
     expect(entry).toMatchObject({
       pool,
@@ -471,10 +452,7 @@ describe("product boardroom runtime discovery", () => {
       tokenReads: new Set<string>(),
     });
 
-    const catalog = await readFirstCatalogPageEntries(client, {
-      chainId: 31337,
-      boardroomFactory: context.boardroomFactory,
-    });
+    const catalog = await readFirstCatalogPageEntries(client, fixtureDeployment(context));
 
     expect(catalog[0]?.buyerCount).toBe(2);
     expect(successfulRanges.length).toBeGreaterThan(2);
@@ -492,10 +470,7 @@ describe("product boardroom runtime discovery", () => {
       tokenReads: new Set<string>(),
     });
 
-    const catalog = await readFirstCatalogPageEntries(client, {
-      chainId: 31337,
-      boardroomFactory: context.boardroomFactory,
-    });
+    const catalog = await readFirstCatalogPageEntries(client, fixtureDeployment(context));
 
     expect(catalog[0]?.buyerCount).toBe(2);
     expect(successfulRanges.length).toBeGreaterThan(2);
@@ -574,7 +549,7 @@ describe("product boardroom runtime discovery", () => {
       tokenReads: new Set<string>(),
     };
     const client = fakeProductBoardroomClient(runtime);
-    const deployment = { chainId: 31337, boardroomFactory: runtime.boardroomFactory };
+    const deployment = fixtureDeployment(runtime);
 
     await readFirstCatalogPageEntries(client, deployment);
     attemptedRanges.length = 0;
@@ -763,22 +738,22 @@ describe("product boardroom runtime discovery", () => {
     expect(partialAmm[0]?.scanError).toContain("Swap history failed");
   });
 
-  test("preserves current snapshots when historical distribution discovery fails", async () => {
+  test("uses canonical factory provenance without querying removed Boardroom history events", async () => {
     const context = productBoardroomFixture();
+    const attemptedRanges: Array<{ event: string | undefined; fromBlock: bigint; toBlock: bigint }> = [];
     const client = fakeProductBoardroomClient({
       ...context,
-      failEvents: new Set(["BoardroomDistributionRecorded"]),
+      attemptedRanges,
       tokenReads: new Set<string>(),
     });
-    const deployment = { chainId: 31337, boardroomFactory: context.boardroomFactory };
+    const deployment = fixtureDeployment(context);
 
     const catalog = await readFirstCatalogPageEntries(client, deployment);
-    const dashboard = await readProductBoardroomDashboard(client, { address: context.boardroom, catalog });
+    const dashboard = await readProductBoardroomDashboard(client, { address: context.boardroom, catalog, deployment: fixtureDeployment(context) });
 
     expect(catalog[0]?.distribution).toBe(context.sale);
-    expect(catalog[0]?.historyError).toContain("Historical distribution scan failed");
     expect(dashboard.snapshot.distributionSummaries.map((entry) => entry.address)).toContain(context.sale);
-    expect(dashboard.historyErrors?.join(" ")).toContain("Historical distribution scan failed");
+    expect(attemptedRanges.some((range) => range.event === "BoardroomDistributionRecorded")).toBe(false);
   });
 
   test("rebuilds exact project identity instead of trusting a stale catalog row", async () => {
@@ -793,6 +768,7 @@ describe("product boardroom runtime discovery", () => {
         distribution: staleDistribution,
         name: "Cached project name",
       }],
+      deployment: fixtureDeployment(context),
     });
 
     expect(dashboard.history?.distribution).toBe(context.sale);
@@ -813,14 +789,12 @@ describe("product boardroom runtime discovery", () => {
       recordedDistribution,
       tokenReads: new Set<string>(),
     });
-    const deployment = { chainId: 31337, boardroomFactory: context.boardroomFactory };
+    const deployment = fixtureDeployment(context);
 
     const catalog = await readFirstCatalogPageEntries(client, deployment);
-    const dashboard = await readProductBoardroomDashboard(client, { address: context.boardroom, catalog });
+    const dashboard = await readProductBoardroomDashboard(client, { address: context.boardroom, catalog, deployment: fixtureDeployment(context) });
 
-    expect(catalog[0]?.historyError).toContain("Historical distribution reconstruction failed");
-    expect(catalog[0]?.historyError).toContain(recordedDistribution);
-    expect(dashboard.historyErrors?.join(" ")).toContain("Historical distribution reconstruction failed");
+    expect(catalog[0]?.distribution).toBe(recordedDistribution);
     expect(dashboard.snapshot.distributionSummaries.find((entry) => entry.address === recordedDistribution)?.error).toBeTruthy();
   });
 
@@ -837,12 +811,12 @@ describe("product boardroom runtime discovery", () => {
       tokenReads: new Set<string>(),
     });
 
-    const dashboard = await readProductBoardroomDashboard(client, { address: context.boardroom });
+    const dashboard = await readProductBoardroomDashboard(client, { address: context.boardroom, deployment: fixtureDeployment(context) });
     const reconstructed = new Set(distributionFactoryReads.map((address) => address.toLowerCase()));
 
     expect(dashboard.snapshot.distributionSummaries).toHaveLength(PRODUCT_DETAIL_CHILD_READ_LIMIT);
     expect(reconstructed.size).toBe(PRODUCT_DETAIL_CHILD_READ_LIMIT);
-    expect(dashboard.historyErrors?.join(" ")).toContain("36 older historical records are omitted");
+    expect(dashboard.historyErrors?.join(" ")).toContain("newest 64 of 100 distribution records");
   });
 
   test("marks the bounded Explore lifetime summary as partial with an exact count", async () => {
@@ -858,14 +832,11 @@ describe("product boardroom runtime discovery", () => {
       tokenReads: new Set<string>(),
     });
 
-    const entries = await readFirstCatalogPageEntries(client, {
-      chainId: 31337,
-      boardroomFactory: context.boardroomFactory,
-    });
+    const entries = await readFirstCatalogPageEntries(client, fixtureDeployment(context));
 
     expect(entries[0]?.distributionAddresses).toHaveLength(PRODUCT_CATALOG_CHILD_READ_LIMIT);
     expect(entries[0]?.distributionCount).toBe(100);
-    expect(entries[0]?.historyError).toContain("newest 12 of 100 lifetime distributions");
+    expect(entries[0]?.historyError).toContain("newest 12 of 100 canonical factory distribution records");
     expect(new Set(distributionFactoryReads.map((address) => address.toLowerCase())).size)
       .toBe(PRODUCT_CATALOG_CHILD_READ_LIMIT);
   });
@@ -1117,10 +1088,7 @@ describe("product boardroom runtime discovery", () => {
       tokenReads: new Set<string>(),
     });
 
-    const catalog = await readFirstCatalogPageEntries(client, {
-      chainId: 31337,
-      boardroomFactory: context.boardroomFactory,
-    });
+    const catalog = await readFirstCatalogPageEntries(client, fixtureDeployment(context));
 
     expect(catalog[0]).toMatchObject({
       cashRaised: 2_100n * 10n ** 6n,
@@ -1187,13 +1155,11 @@ describe("product boardroom runtime discovery", () => {
     const context = productBoardroomFixture();
     const client = fakeProductBoardroomClient({ ...context, pruned: true, tokenReads: new Set<string>() });
 
-    const catalog = await readFirstCatalogPageEntries(client, {
-      chainId: 31337,
-      boardroomFactory: context.boardroomFactory,
-    });
+    const catalog = await readFirstCatalogPageEntries(client, fixtureDeployment(context));
     const dashboard = await readProductBoardroomDashboard(client, {
       address: context.boardroom,
       catalog,
+      deployment: fixtureDeployment(context),
     });
 
     expect(catalog[0]).toMatchObject({
@@ -1313,6 +1279,10 @@ function curveHistoryClient(pool: Address, failEvents: Set<string>, hangEvents =
 function productBoardroomFixture() {
   return {
     boardroomFactory: "0x0100000000000000000000000000000000000000" as Address,
+    distributionFactory: "0xc000000000000000000000000000000000000000" as Address,
+    bondMarketFactory: "0xd000000000000000000000000000000000000000" as Address,
+    lockedLiquidityFactory: "0xe000000000000000000000000000000000000000" as Address,
+    tokenGrantFactory: "0xf000000000000000000000000000000000000000" as Address,
     boardroom: "0x1000000000000000000000000000000000000000" as Address,
     shareToken: "0x2000000000000000000000000000000000000000" as Address,
     wrappedNative: "0x3000000000000000000000000000000000000000" as Address,
@@ -1408,29 +1378,53 @@ function fakeProductBoardroomClient(
         if (functionName === "allBoardrooms") return context.boardroom;
       }
 
+      if (address.toLowerCase() === context.distributionFactory.toLowerCase()) {
+        const distributions = context.recordedDistributions ?? [context.recordedDistribution ?? context.sale];
+        if (functionName === "distributionCountForBoardroom") return BigInt(distributions.length);
+        if (functionName === "distributionPageForBoardroom") {
+          const cursor = Number(parameters.args?.[1] ?? 0n);
+          const size = Number(parameters.args?.[2] ?? 0n);
+          const page = distributions.slice(cursor, cursor + size);
+          return [page, BigInt(cursor + page.length)] as const;
+        }
+      }
+      if (address.toLowerCase() === context.bondMarketFactory.toLowerCase()) {
+        if (functionName === "bondMarketCountForBoardroom") return 0n;
+        if (functionName === "bondMarketPageForBoardroom") return [[], 0n] as const;
+      }
+      if (address.toLowerCase() === context.lockedLiquidityFactory.toLowerCase() && functionName === "positionOfBoardroom") {
+        return ["0x0000000000000000000000000000000000000000", "0x0000000000000000000000000000000000000000", "0x0000000000000000000000000000000000000000", 0] as const;
+      }
+
       if (address.toLowerCase() === context.boardroom.toLowerCase()) {
         if (functionName === "owner") return "0x8000000000000000000000000000000000000000";
         if (functionName === "policyRegistry") return "0x9000000000000000000000000000000000000000";
         if (functionName === "wrappedNative") return context.wrappedNative;
         if (functionName === "shareToken") return context.shareToken;
         if (functionName === "rewardPool") return "0x0000000000000000000000000000000000000000";
+        if (functionName === "redemptionExcessRecipient") return "0x8000000000000000000000000000000000000000";
         if (functionName === "status") return 0;
         if (functionName === "launched") return false;
-        if (functionName === "executor") return "0x8000000000000000000000000000000000000000";
-        if (functionName === "governanceDelay") return 0n;
-        if (functionName === "governanceConfig") return [86_400n, 604_800n, 100n, 1_000n] as const;
-        if (functionName === "governanceState") return [0n, 0n, 0n, 0n, 0] as const;
-        if (functionName === "getRedeemableAssets") return [context.redeemableAsset];
-        if (functionName === "getIssuedGrants") return [];
-        if (functionName === "getIssuedDistributions") return context.pruned ? [] : [context.sale];
-        if (functionName === "getLockedLiquidityPositions") return [];
-        if (functionName === "issuedDistributionCount") return context.pruned ? 0n : 1n;
-        if (functionName === "issuedDistributionAt") return context.sale;
-        if (functionName === "lockedLiquidityCount") return 0n;
+        if (functionName === "controller") return "0x0000000000000000000000000000000000000000";
+        if (functionName === "controllerGeneration" || functionName === "governanceEpoch") return 0n;
+        if (functionName === "windDownDelay") return 86_400n;
+        if (functionName === "windDownStartedAt") return 0n;
+        if (functionName === "protectionStaker") return "0x0000000000000000000000000000000000000000";
+        if (functionName === "redeemableAssetCount") return 1n;
+        if (functionName === "assetSnapshotProgress") return [0n, 0n, false] as const;
+        if (functionName === "redemptionSupplyState") return [0n, false] as const;
+        if (functionName === "activeObligationCount" || functionName === "activeObligationCountByKind") return 1n;
+        if (functionName === "primaryMarketMode") return 2;
+        if (functionName === "bondingCurve") return "0x0000000000000000000000000000000000000000";
+        if (functionName === "primaryMarketQuoteAsset") return context.cashToken;
+        if (functionName === "liquidityStatus") return 0;
+        if (functionName === "liquidityLocker" || functionName === "liquidityPool") return "0x0000000000000000000000000000000000000000";
+        if (functionName === "liquidityQuoteAsset") return context.cashToken;
+        if (functionName === "redeemableAssetPage") return [[context.redeemableAsset], 1n] as const;
       }
 
       if (address.toLowerCase() === context.sale.toLowerCase()) {
-        if (functionName === "factory") return "0xc000000000000000000000000000000000000000";
+        if (functionName === "factory") return context.distributionFactory;
         if (functionName === "boardroom") return context.boardroom;
         if (functionName === "shareToken") return context.shareToken;
         if (functionName === "paymentToken") return context.cashToken;
@@ -1455,5 +1449,16 @@ function fakeProductBoardroomClient(
       if (functionName === "totalSupply") return address.toLowerCase() === context.shareToken.toLowerCase() ? 1_000_000n * share : 1_000_000n * cash;
       throw new Error(`Unexpected read: ${functionName}`);
     },
+  };
+}
+
+function fixtureDeployment(context: ProductBoardroomFixture) {
+  return {
+    chainId: 31337,
+    boardroomFactory: context.boardroomFactory,
+    distributionFactory: context.distributionFactory,
+    bondMarketFactory: context.bondMarketFactory,
+    lockedLiquidityFactory: context.lockedLiquidityFactory,
+    tokenGrantFactory: context.tokenGrantFactory,
   };
 }

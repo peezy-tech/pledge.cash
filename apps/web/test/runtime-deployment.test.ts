@@ -7,9 +7,78 @@ import {
   startRuntimeDeploymentRecovery,
   type RuntimeDeploymentResult,
 } from "../src/hooks/use-runtime-deployment";
-import { deploymentRuntimeIdentity, parseDeployment } from "../src/lib/deployment";
+import {
+  boardroomControlReleaseSupport,
+  deploymentRuntimeIdentity,
+  parseDeployment,
+  SECURE_BOARDROOM_RELEASE_VERSION,
+} from "../src/lib/deployment";
 
 describe("runtime deployment artifacts", () => {
+  test("fails closed for legacy and unknown Boardroom controller releases", () => {
+    const legacy = boardroomControlReleaseSupport({
+      chainId: 31_337,
+      deterministicDeploymentVersion: "pledge.cash.deterministic.v4",
+      boardroomFactory: "0x1000000000000000000000000000000000000001",
+      boardroomControllerFactory: "0x1000000000000000000000000000000000000002",
+      boardroomControllerLogic: "0x1000000000000000000000000000000000000003",
+      boardroomMarketLogic: "0x1000000000000000000000000000000000000004",
+    });
+    const unknown = boardroomControlReleaseSupport({ chainId: 31_337 });
+
+    expect(legacy.supported).toBe(false);
+    expect(legacy.reason).toContain("remain read-only");
+    expect(unknown.supported).toBe(false);
+  });
+
+  test("supports controller writes only for a complete accepted release identity", () => {
+    const codeHash = `0x${"11".repeat(32)}` as const;
+    const complete = {
+      chainId: 31_337,
+      deterministicDeployment: true,
+      deterministicDeploymentVersion: SECURE_BOARDROOM_RELEASE_VERSION,
+      deterministicReleaseCodeHash: codeHash,
+      boardroomFactory: "0x1000000000000000000000000000000000000001" as const,
+      boardroomControllerFactory: "0x1000000000000000000000000000000000000002" as const,
+      boardroomControllerLogic: "0x1000000000000000000000000000000000000003" as const,
+      boardroomGovernanceLogic: "0x1000000000000000000000000000000000000004" as const,
+      boardroomMarketLogic: "0x1000000000000000000000000000000000000005" as const,
+      boardroomRedemptionPayout: "0x1000000000000000000000000000000000000006" as const,
+      boardroomLogic: "0x1000000000000000000000000000000000000007" as const,
+      boardroomFactoryCodeHash: codeHash,
+      boardroomControllerFactoryCodeHash: codeHash,
+      boardroomControllerCodeHash: codeHash,
+      boardroomGovernanceLogicCodeHash: codeHash,
+      boardroomMarketLogicCodeHash: codeHash,
+      boardroomRedemptionPayoutCodeHash: codeHash,
+      boardroomLogicCodeHash: codeHash,
+    };
+
+    expect(boardroomControlReleaseSupport(complete)).toEqual({ supported: true });
+    expect(boardroomControlReleaseSupport({ ...complete, boardroomControllerLogic: undefined }).supported).toBe(false);
+    expect(boardroomControlReleaseSupport({ ...complete, deterministicDeployment: false }).supported).toBe(false);
+    expect(boardroomControlReleaseSupport({ ...complete, boardroomControllerCodeHash: undefined }).supported).toBe(false);
+  });
+
+  test("preserves external controller release addresses and code hashes", () => {
+    const deployment = parseDeployment(`{
+      "chainId": 31337,
+      "boardroomControllerFactory": "0x1000000000000000000000000000000000000002",
+      "boardroomControllerLogic": "0x1000000000000000000000000000000000000003",
+      "boardroomMarketLogic": "0x1000000000000000000000000000000000000004",
+      "boardroomControllerFactoryCodeHash": "0xcontrollerfactory",
+      "boardroomControllerCodeHash": "0xcontroller",
+      "boardroomMarketLogicCodeHash": "0xmarket"
+    }`);
+
+    expect(deployment.boardroomControllerFactory).toBe("0x1000000000000000000000000000000000000002");
+    expect(deployment.boardroomControllerLogic).toBe("0x1000000000000000000000000000000000000003");
+    expect(deployment.boardroomMarketLogic).toBe("0x1000000000000000000000000000000000000004");
+    expect(deployment.boardroomControllerFactoryCodeHash).toBe("0xcontrollerfactory");
+    expect(deployment.boardroomControllerCodeHash).toBe("0xcontroller");
+    expect(deployment.boardroomMarketLogicCodeHash).toBe("0xmarket");
+  });
+
   test("accepts status-only placeholders for the requested deployment path", () => {
     const deployment = parseDeployment('{"status":"pending","reason":"Broadcast artifact not published yet"}');
 

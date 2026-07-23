@@ -94,16 +94,17 @@ class InMemoryStore implements SentinelApiStore {
 
   actions: PublicActionDto[] = [
     {
-      actionHash: `0x${"ab".repeat(32)}`,
+      operationId: `0x${"ab".repeat(32)}`,
       analysis: {
         affectedParties: ["shareholders"],
-        effects: ["executor changes"],
+        effects: ["controller configuration changes"],
         harness: "template",
         model: null,
         severityRationale: "Executor authority changes are high impact.",
         source: "template",
-        summary: "Queued executor rotation."
+        summary: "Scheduled controller configuration."
       },
+      boardroomEpoch: "1",
       boardroom: {
         address: BOARDROOM,
         name: "Sentinel Test Boardroom",
@@ -115,7 +116,7 @@ class InMemoryStore implements SentinelApiStore {
           callIndex: 0,
           data: "0x12345678",
           decodedArgs: null,
-          decodedFunction: "setExecutor",
+          decodedFunction: "updateConfiguration",
           policy: POLICY,
           selector: "0x12345678",
           target: TARGET,
@@ -123,29 +124,33 @@ class InMemoryStore implements SentinelApiStore {
         }
       ],
       chainId: 31337,
+      configurationEpoch: "1",
+      controller: TARGET,
+      controllerGeneration: "1",
       decodeStatus: "decoded",
-      epoch: "1",
       eta: new Date(FIXED_NOW.getTime() + 86_400_000).toISOString(),
-      event: "queued",
+      event: "scheduled",
       expiresAt: new Date(FIXED_NOW.getTime() + 8 * 86_400_000).toISOString(),
       id: ACTION_ID,
       invalidatedByEpoch: null,
-      queueBlock: "123",
-      queueTxHash: `0x${"cd".repeat(32)}`,
+      operationKind: "controller",
+      proposer: POLICY,
+      scheduleBlock: "123",
+      scheduleTxHash: `0x${"cd".repeat(32)}`,
       risk: {
         evaluatedAt: FIXED_NOW.toISOString(),
         findings: [
           {
             callIndex: 0,
             detail: "Executor update can redirect queue authority; ready execution remains permissionless.",
-            ruleId: "executor-change",
+            ruleId: "controller-configuration",
             severity: "high"
           }
         ],
         rulesetVersion: 1,
         severity: "high"
       },
-      status: "queued"
+      status: "scheduled"
     }
   ];
 
@@ -734,24 +739,24 @@ describe("Sentinel WP5 API", () => {
     const cookie = await signedInCookie(harness);
     const delivery: NotificationDeliveryDto = {
       action: {
-        actionHash: `0x${"ab".repeat(32)}`,
+        operationId: `0x${"ab".repeat(32)}`,
         boardroom: BOARDROOM,
         chainId: 31337,
         eta: new Date(FIXED_NOW.getTime() + 86_400_000).toISOString(),
         expiresAt: new Date(FIXED_NOW.getTime() + 8 * 86_400_000).toISOString(),
         id: ACTION_ID,
-        status: "queued"
+        status: "scheduled"
       },
       attempts: 2,
       channelType: "telegram",
       createdAt: FIXED_NOW.toISOString(),
-      event: "queued",
+      event: "scheduled",
       id: "00000000-0000-4000-8000-000000000004",
       nextAttemptAt: new Date(FIXED_NOW.getTime() + 60_000).toISOString(),
       sentAt: null,
       severity: "high",
       status: "failed",
-      summary: "Queued executor rotation.",
+      summary: "Scheduled controller configuration.",
       updatedAt: FIXED_NOW.toISOString()
     };
     harness.store.deliveriesByUser.set(USER_ID, [delivery]);
@@ -806,7 +811,7 @@ describe("Sentinel WP5 API", () => {
     });
 
     const scoped = await harness.app.request(
-      "/public/chains/31337/boardrooms/0x1111111111111111111111111111111111111111/actions?status=queued"
+      "/public/chains/31337/boardrooms/0x1111111111111111111111111111111111111111/actions?status=scheduled"
     );
 
     expect(scoped.status).toBe(200);
@@ -819,7 +824,7 @@ describe("Sentinel WP5 API", () => {
       boardroom: BOARDROOM,
       chainId: 31337,
       limit: 25,
-      status: "queued"
+      status: "scheduled"
     });
   });
 });

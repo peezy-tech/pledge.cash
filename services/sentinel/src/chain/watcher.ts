@@ -4,10 +4,12 @@ import { and, asc, desc, eq, gt, isNull, lt, lte, or, sql } from "drizzle-orm";
 import {
   createPublicClient,
   decodeFunctionData,
+  encodeAbiParameters,
   encodeFunctionData,
   getAbiItem,
   http,
   isHex,
+  keccak256,
   type Abi,
   type Address,
   type Hex,
@@ -16,19 +18,14 @@ import {
 
 import {
   assetPolicyAbi,
-  boardroomAbi,
+  boardroomControlReleaseSupport,
+  boardroomControllerAbi,
   boardroomPolicyRegistryAbi,
-  decodeQueueCalldata,
   discoverBoardrooms,
   getPledgeCashDeployment,
-  hashAction,
-  hashBatch,
   pledgeCashAbis,
-  queryGovernanceEvents,
   type BoardroomCall,
-  type DecodedQueueInput,
   type DiscoveredBoardroom,
-  type GovernanceEvent,
   type PledgeCashDeployment,
   type PledgeCashLogClient
 } from "@pledge.cash/sdk";
@@ -39,12 +36,13 @@ import {
   actionCalls,
   boardrooms,
   cursors,
+  marketLifecycleEvents,
   policyAdminEvents,
-  queuedActions,
+  scheduledOperations,
   shareBalances,
   type JsonValue
 } from "../db/schema";
-import type { ActionPipelineEvent, QueuedActionRow, StoredCall } from "../types";
+import type { ActionPipelineEvent, ScheduledOperationRow, StoredCall } from "../types";
 import { advanceCursor, loadCursorWindow, type CursorWindow, type WatcherCursorScope } from "./cursor";
 import {
   aggregateShareBalanceDeltas,
@@ -52,6 +50,16 @@ import {
   queryShareTransfers,
   type ShareBalanceDeltaInput
 } from "./holders";
+import {
+  queryExternalGovernanceEvents,
+  type GovernanceEvent
+} from "./governance-events";
+import {
+  marketStateUpdateForEvent,
+  queryMarketLifecycleEvents,
+  type BoardroomMarketStateUpdate,
+  type MarketLifecycleEvent
+} from "./market-events";
 
 export type PolicyAdminPipelineEvent = Omit<ActionPipelineEvent, "event"> & {
   readonly event: "policy-admin";
@@ -70,27 +78,52 @@ export type WatcherBoardroom = {
   readonly address: Lowercase<Address>;
   readonly chainId: number;
   readonly createdBlock: bigint;
-  readonly executor: Lowercase<Address>;
-  readonly governanceDelay: bigint;
+  readonly controller: Lowercase<Address>;
+  readonly proposer: Lowercase<Address>;
+  readonly controllerGeneration: bigint;
+  readonly configurationEpoch: bigint;
+  readonly controllerDelay: bigint;
+  readonly gracePeriod: bigint;
+  readonly windDownDelay: bigint;
   readonly launched: boolean;
   readonly name: string | null;
   readonly owner: Lowercase<Address>;
   readonly shareToken: Lowercase<Address>;
-  readonly status: "prelaunch" | "active" | "winddown";
+  readonly status: "prelaunch" | "active" | "winddown" | "snapshotting" | "redemptions-open";
+  readonly primaryMarketMode: number;
+  readonly bondingCurve: Lowercase<Address> | null;
+  readonly primaryMarketQuoteAsset: Lowercase<Address> | null;
+  readonly bondingCurvePhase: number | null;
+  readonly bondingCurveSettlementReason: number | null;
+  readonly bondingCurvePhaseEndsAt: bigint;
+  readonly liquidityStatus: number;
+  readonly liquidityLocker: Lowercase<Address> | null;
+  readonly liquidityPool: Lowercase<Address> | null;
+  readonly liquidityQuoteAsset: Lowercase<Address> | null;
+  readonly liquidityReservationCurve: Lowercase<Address> | null;
+  readonly liquidityReservationExpectedLocker: Lowercase<Address> | null;
+  readonly liquidityReservationExpectedPool: Lowercase<Address> | null;
+  readonly liquidityReservationPairKey: Lowercase<Hex> | null;
+  readonly liquidityReservationSalt: Lowercase<Hex> | null;
+  readonly liquidityReservationExpiresAt: bigint;
 };
 
-export type InsertQueuedActionInput = {
-  readonly actionHash: Lowercase<Hex>;
+export type InsertScheduledOperationInput = {
+  readonly operationId: Lowercase<Hex>;
   readonly boardroom: Lowercase<Address>;
   readonly chainId: number;
+  readonly configurationEpoch: bigint;
+  readonly controller: Lowercase<Address>;
+  readonly controllerGeneration: bigint;
   readonly decodeStatus: "decoded" | "undecoded";
-  readonly epoch: bigint;
+  readonly boardroomEpoch: bigint;
   readonly eta: Date;
   readonly expiresAt: Date;
-  readonly executor: Lowercase<Address>;
-  readonly queueBlock: bigint;
-  readonly queueLogIndex: number;
-  readonly queueTxHash: Lowercase<Hex>;
+  readonly operationKind: "boardroom" | "controller";
+  readonly proposer: Lowercase<Address>;
+  readonly scheduleBlock: bigint;
+  readonly scheduleLogIndex: number;
+  readonly scheduleTxHash: Lowercase<Hex>;
   readonly rawCalldata: Hex;
   readonly salt: Lowercase<Hex>;
 };
@@ -120,40 +153,58 @@ export type InsertPolicyAdminEventInput = {
 export type WatcherStoreTx = {
   applyShareBalanceDeltas(inputs: readonly ShareBalanceDeltaInput[]): Promise<void>;
   getCursor(chainId: number, scope: WatcherCursorScope): Promise<bigint | undefined>;
-  invalidateQueuedActionsBeforeEpoch(input: {
+  invalidateScheduledOperationsBeforeEpoch(input: {
     readonly boardroom: Lowercase<Address>;
     readonly chainId: number;
     readonly epoch: bigint;
     readonly terminalBlock: bigint;
     readonly terminalLogIndex: number;
     readonly txHash: Lowercase<Hex>;
-  }): Promise<Array<{ action: QueuedActionRow; calls: StoredCall[] }>>;
+  }): Promise<Array<{ action: ScheduledOperationRow; calls: StoredCall[] }>>;
+  invalidateScheduledOperationsBeforeConfigurationEpoch(input: {
+    readonly boardroom: Lowercase<Address>;
+    readonly chainId: number;
+    readonly configurationEpoch: bigint;
+    readonly controller: Lowercase<Address>;
+    readonly terminalBlock: bigint;
+    readonly terminalLogIndex: number;
+    readonly txHash: Lowercase<Hex>;
+  }): Promise<Array<{ action: ScheduledOperationRow; calls: StoredCall[] }>>;
   insertActionCalls(actionId: string, calls: readonly InsertActionCallInput[]): Promise<StoredCall[]>;
+  insertMarketLifecycleEvent(input: MarketLifecycleEvent & { readonly chainId: number }): Promise<boolean>;
   insertPolicyAdminEvent(input: InsertPolicyAdminEventInput): Promise<boolean>;
-  insertQueuedAction(input: InsertQueuedActionInput): Promise<QueuedActionRow | undefined>;
+  insertScheduledOperation(input: InsertScheduledOperationInput): Promise<ScheduledOperationRow | undefined>;
   listActionCalls(actionId: string): Promise<StoredCall[]>;
   listBoardrooms(chainId: number): Promise<WatcherBoardroom[]>;
-  listQueuedActions(chainId: number): Promise<Array<{ action: QueuedActionRow; calls: StoredCall[] }>>;
+  listScheduledOperations(chainId: number): Promise<Array<{ action: ScheduledOperationRow; calls: StoredCall[] }>>;
   setCursor(chainId: number, scope: WatcherCursorScope, blockNumber: bigint): Promise<void>;
-  transitionLatestQueuedAction(input: {
-    readonly actionHash: Lowercase<Hex>;
+  transitionLatestScheduledOperation(input: {
+    readonly operationId: Lowercase<Hex>;
     readonly boardroom: Lowercase<Address>;
+    readonly controller: Lowercase<Address>;
     readonly caller: Lowercase<Address>;
     readonly chainId: number;
     readonly status: "cancelled" | "executed";
     readonly terminalBlock: bigint;
     readonly terminalLogIndex: number;
     readonly txHash: Lowercase<Hex>;
-  }): Promise<{ action: QueuedActionRow; calls: StoredCall[] } | undefined>;
+  }): Promise<{ action: ScheduledOperationRow; calls: StoredCall[] } | undefined>;
   upsertBoardrooms(chainId: number, discovered: readonly DiscoveredBoardroom[]): Promise<void>;
   updateBoardroomLifecycle(input: {
     readonly boardroom: Lowercase<Address>;
     readonly chainId: number;
-    readonly executor?: Lowercase<Address>;
-    readonly governanceDelay?: bigint;
+    readonly configurationEpoch?: bigint;
+    readonly controller?: Lowercase<Address>;
+    readonly controllerGeneration?: bigint;
+    readonly controllerDelay?: bigint;
+    readonly gracePeriod?: bigint;
     readonly launched?: boolean;
-    readonly status?: "prelaunch" | "active" | "winddown";
+    readonly owner?: Lowercase<Address>;
+    readonly proposer?: Lowercase<Address>;
+    readonly status?: "prelaunch" | "active" | "winddown" | "snapshotting" | "redemptions-open";
+    readonly windDownDelay?: bigint;
   }): Promise<void>;
+  updateBoardroomMarketState(input: BoardroomMarketStateUpdate & { readonly chainId: number }): Promise<void>;
 };
 
 export type WatcherStore = {
@@ -184,6 +235,7 @@ export type WatcherRunResult = {
   readonly fromSafeHead: bigint;
   readonly governanceEvents: number;
   readonly latestBlock: bigint;
+  readonly marketLifecycleEvents: number;
   readonly policyAdminEvents: number;
   readonly scannedWindows: number;
   readonly shareTransfers: number;
@@ -197,7 +249,7 @@ type WatcherPassPlan = {
 };
 
 type PolicyAdminEvent = InsertPolicyAdminEventInput & {
-  readonly affectedQueuedActions: boolean;
+  readonly affectedScheduledOperations: boolean;
 };
 
 type PositionedPipelineEvent = {
@@ -206,11 +258,11 @@ type PositionedPipelineEvent = {
   readonly logIndex: number;
 };
 
-type QueuedDecodeResult =
+type ScheduledDecodeResult =
   | {
       readonly calls: BoardroomCall[];
       readonly decodeStatus: "decoded";
-      readonly input: DecodedQueueInput;
+      readonly input: DecodedScheduleInput;
     }
   | {
       readonly calls: [];
@@ -218,23 +270,29 @@ type QueuedDecodeResult =
       readonly input?: undefined;
     };
 
+type DecodedScheduleInput =
+  | { readonly kind: "boardroom"; readonly calls: BoardroomCall[] }
+  | { readonly kind: "controller"; readonly data: Hex };
+
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const satisfies Address;
 const DEFAULT_MAX_ITERATIONS = 1_000;
 const BOARDROOM_QUERY_CHUNK_SIZE = 500;
 
-const queueActionSelector = encodeFunctionData({
-  abi: boardroomAbi,
-  functionName: "queueAction",
+const scheduleBoardroomOperationSelector = encodeFunctionData({
+  abi: boardroomControllerAbi,
+  functionName: "scheduleBoardroomOperation",
   args: [
-    { policy: ZERO_ADDRESS, target: ZERO_ADDRESS, value: 0n, data: "0x" },
-    "0x0000000000000000000000000000000000000000000000000000000000000000"
+    [],
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    0n,
+    0n
   ]
 }).slice(0, 10) as Hex;
 
-const queueBatchSelector = encodeFunctionData({
-  abi: boardroomAbi,
-  functionName: "queueBatch",
-  args: [[], "0x0000000000000000000000000000000000000000000000000000000000000000"]
+const scheduleControllerOperationSelector = encodeFunctionData({
+  abi: boardroomControllerAbi,
+  functionName: "scheduleControllerOperation",
+  args: ["0x", "0x0000000000000000000000000000000000000000000000000000000000000000", 0n, 0n]
 }).slice(0, 10) as Hex;
 
 const safeExecTransactionAbi = [
@@ -376,8 +434,12 @@ export async function runWatcherOnce(
   }
 
   const deployment = options.deployment ?? getPledgeCashDeployment(chainId);
-  if (!deployment?.boardroomFactory) {
-    return skippedResult(chainId, `No boardroomFactory deployment is available for chain ${chainId}`);
+  const releaseSupport = boardroomControlReleaseSupport(deployment);
+  if (!releaseSupport.supported || !deployment?.boardroomFactory) {
+    return skippedResult(
+      chainId,
+      releaseSupport.reason ?? `No supported boardroomFactory deployment is available for chain ${chainId}`
+    );
   }
 
   const ownedDbClient = options.store || options.db ? undefined : createDbClient(config.databaseUrl);
@@ -394,6 +456,7 @@ export async function runWatcherOnce(
     cursorAdvances: 0,
     discoveredBoardrooms: 0,
     governanceEvents: 0,
+    marketLifecycleEvents: 0,
     policyAdminEvents: 0,
     scannedWindows: 0,
     shareTransfers: 0
@@ -417,6 +480,7 @@ export async function runWatcherOnce(
       totals.cursorAdvances += pass.cursorAdvances;
       totals.discoveredBoardrooms += pass.discoveredBoardrooms;
       totals.governanceEvents += pass.governanceEvents;
+      totals.marketLifecycleEvents += pass.marketLifecycleEvents;
       totals.policyAdminEvents += pass.policyAdminEvents;
       totals.scannedWindows += pass.scannedWindows;
       totals.shareTransfers += pass.shareTransfers;
@@ -456,35 +520,100 @@ export function createDrizzleWatcherStore(db: SentinelDb): WatcherStore {
   };
 }
 
-export function decodeQueuedActionCalldata(input: {
-  readonly actionHash: Hex;
+export function decodeScheduledOperationCalldata(input: {
+  readonly controller: Address;
+  readonly expectedBoardroomEpoch: bigint;
+  readonly expectedConfigurationEpoch: bigint;
+  readonly expectedPayloadHash: Hex;
   readonly expectedSalt: Hex;
+  readonly operationKind: "boardroom" | "controller";
   readonly txInput: Hex;
-}): QueuedDecodeResult {
+}): ScheduledDecodeResult {
   const seen = new Set<string>();
-  const candidates = queueCalldataCandidates(input.txInput, seen, 0);
+  const candidates = scheduleCalldataCandidates(input.txInput, seen, 0);
 
   for (const candidate of candidates) {
-    const decoded = decodeQueueCalldata(candidate);
+    const decoded = decodeScheduleCalldata(candidate);
     if (!decoded) continue;
+    if (decoded.input.kind !== input.operationKind) continue;
     if (lowerHex(decoded.salt) !== lowerHex(input.expectedSalt)) continue;
-
-    const calls = decoded.kind === "queueAction" ? [decoded.call] : decoded.calls;
-    const computed =
-      decoded.kind === "queueAction"
-        ? hashAction(decoded.call, input.expectedSalt)
-        : hashBatch(decoded.calls, input.expectedSalt);
-
-    if (lowerHex(computed) !== lowerHex(input.actionHash)) continue;
+    if (decoded.boardroomEpoch !== input.expectedBoardroomEpoch) continue;
+    if (decoded.configurationEpoch !== input.expectedConfigurationEpoch) continue;
+    if (lowerHex(decoded.payloadHash) !== lowerHex(input.expectedPayloadHash)) continue;
 
     return {
-      calls,
+      calls:
+        decoded.input.kind === "boardroom"
+          ? decoded.input.calls
+          : [{ policy: ZERO_ADDRESS, target: input.controller, value: 0n, data: decoded.input.data }],
       decodeStatus: "decoded",
-      input: decoded
+      input: decoded.input
     };
   }
 
   return { calls: [], decodeStatus: "undecoded" };
+}
+
+function decodeScheduleCalldata(data: Hex):
+  | {
+      readonly boardroomEpoch: bigint;
+      readonly configurationEpoch: bigint;
+      readonly input: DecodedScheduleInput;
+      readonly payloadHash: Hex;
+      readonly salt: Hex;
+    }
+  | undefined {
+  try {
+    const decoded = decodeFunctionData({ abi: boardroomControllerAbi, data });
+    const args = decoded.args as readonly unknown[] | undefined;
+    if (decoded.functionName === "scheduleBoardroomOperation") {
+      const calls = normalizeBoardroomCalls(args?.[0]);
+      const salt = hexValue(args?.[1]);
+      const boardroomEpoch = bigintValue(args?.[2]);
+      const configurationEpoch = bigintValue(args?.[3]);
+      if (!calls || !salt || boardroomEpoch === undefined || configurationEpoch === undefined) return undefined;
+      return {
+        boardroomEpoch,
+        configurationEpoch,
+        input: { kind: "boardroom", calls },
+        payloadHash: keccak256(
+          encodeAbiParameters(
+            [
+              {
+                name: "calls",
+                type: "tuple[]",
+                components: [
+                  { name: "policy", type: "address" },
+                  { name: "target", type: "address" },
+                  { name: "value", type: "uint256" },
+                  { name: "data", type: "bytes" }
+                ]
+              }
+            ],
+            [calls]
+          )
+        ),
+        salt
+      };
+    }
+    if (decoded.functionName === "scheduleControllerOperation") {
+      const selfData = hexValue(args?.[0]);
+      const salt = hexValue(args?.[1]);
+      const boardroomEpoch = bigintValue(args?.[2]);
+      const configurationEpoch = bigintValue(args?.[3]);
+      if (!selfData || !salt || boardroomEpoch === undefined || configurationEpoch === undefined) return undefined;
+      return {
+        boardroomEpoch,
+        configurationEpoch,
+        input: { kind: "controller", data: selfData },
+        payloadHash: keccak256(selfData),
+        salt
+      };
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 async function runWatcherPass(input: {
@@ -514,7 +643,13 @@ async function runWatcherPass(input: {
   const boardroomsForGovernance = mergeBoardrooms(plan.boardrooms, discovery.items);
   const governanceEvents = await fetchGovernanceEvents(
     input.client,
-    boardroomsForGovernance.map((boardroom) => boardroom.address),
+    boardroomsForGovernance,
+    plan.windows.governance
+  );
+  const marketEvents = await fetchMarketEvents(
+    input.client,
+    input.deployment,
+    boardroomsForGovernance,
     plan.windows.governance
   );
   const policyAdminEvents = await fetchPolicyAdminEvents(
@@ -533,16 +668,44 @@ async function runWatcherPass(input: {
     const pendingEvents: WatcherPipelineEvent[] = [];
     const governancePipelineEvents: PositionedPipelineEvent[] = [];
     const epochEvents: Extract<GovernanceEvent, { kind: "governanceEpochAdvanced" }>[] = [];
+    const configurationEvents: Extract<GovernanceEvent, { kind: "configurationUpdated" }>[] = [];
+    const vetoStakers = new Map<string, Lowercase<Address>>();
     const notifiedPolicyChanges = new Set<string>();
 
     await tx.upsertBoardrooms(input.chainId, discovery.items);
+
+    for (const event of marketEvents) {
+      if (!(await tx.insertMarketLifecycleEvent({ ...event, chainId: input.chainId }))) continue;
+      const update = marketStateUpdateForEvent(event);
+      if (update) await tx.updateBoardroomMarketState({ ...update, chainId: input.chainId });
+    }
+
+    for (const event of governanceEvents) {
+      if (event.kind === "operationVetoed") {
+        vetoStakers.set(
+          vetoKey(event.transactionHash, event.operationId),
+          lowerAddress(event.staker)
+        );
+      }
+    }
 
     for (const event of governanceEvents) {
       if (event.kind === "governanceEpochAdvanced") {
         epochEvents.push(event);
         continue;
       }
-      const emitted = await processGovernanceEvent(tx, input.client, input.chainId, event);
+      if (event.kind === "configurationUpdated") {
+        configurationEvents.push(event);
+        continue;
+      }
+      if (event.kind === "operationVetoed") continue;
+      const emitted = await processGovernanceEvent(
+        tx,
+        input.client,
+        input.chainId,
+        event,
+        vetoStakers
+      );
       governancePipelineEvents.push(
         ...emitted.map((pipelineEvent) => ({
           blockNumber: event.blockNumber,
@@ -552,12 +715,38 @@ async function runWatcherPass(input: {
       );
     }
 
-    // Epoch advancement can be emitted from inside the action currently being executed.
-    // Apply terminal events first so that action is recorded as executed, then invalidate
-    // only older actions that remain queued. The queue-position bound protects actions
-    // created later in the same block, while the epoch bound protects new-epoch queues.
+    // Epoch changes are emitted from inside the operation currently being executed.
+    // Apply terminal events first, then invalidate only older operations that remain scheduled.
+    for (const event of configurationEvents) {
+      await tx.updateBoardroomLifecycle({
+        boardroom: lowerAddress(event.boardroom),
+        chainId: input.chainId,
+        configurationEpoch: event.configurationEpoch,
+        controller: lowerAddress(event.controller),
+        controllerDelay: event.controllerDelay,
+        gracePeriod: event.gracePeriod,
+        proposer: lowerAddress(event.proposer)
+      });
+      const invalidated = await tx.invalidateScheduledOperationsBeforeConfigurationEpoch({
+        boardroom: lowerAddress(event.boardroom),
+        chainId: input.chainId,
+        configurationEpoch: event.configurationEpoch,
+        controller: lowerAddress(event.controller),
+        terminalBlock: event.blockNumber,
+        terminalLogIndex: event.logIndex,
+        txHash: lowerHex(event.transactionHash)
+      });
+      governancePipelineEvents.push(
+        ...invalidated.map((item) => ({
+          blockNumber: event.blockNumber,
+          event: { ...item, event: "invalidated" as const },
+          logIndex: event.logIndex
+        }))
+      );
+    }
+
     for (const event of epochEvents) {
-      const invalidated = await tx.invalidateQueuedActionsBeforeEpoch({
+      const invalidated = await tx.invalidateScheduledOperationsBeforeEpoch({
         boardroom: lowerAddress(event.boardroom),
         chainId: input.chainId,
         epoch: event.epoch,
@@ -579,14 +768,14 @@ async function runWatcherPass(input: {
 
     for (const event of policyAdminEvents) {
       const inserted = await tx.insertPolicyAdminEvent(event);
-      if (inserted && event.enabled && event.affectedQueuedActions) {
+      if (inserted && event.enabled && event.affectedScheduledOperations) {
         const notificationKey = policyAdminNotificationKey(event);
         if (notifiedPolicyChanges.has(notificationKey)) continue;
         notifiedPolicyChanges.add(notificationKey);
-        const queued = await tx.listQueuedActions(input.chainId);
+        const scheduled = await tx.listScheduledOperations(input.chainId);
         const eventId = policyAdminEventId(event);
         pendingEvents.push(
-          ...queued.map((item) => ({ ...item, event: "policy-admin" as const, eventId }))
+          ...scheduled.map((item) => ({ ...item, event: "policy-admin" as const, eventId }))
         );
       }
     }
@@ -609,6 +798,7 @@ async function runWatcherPass(input: {
     cursorAdvances: windows.length,
     discoveredBoardrooms: discovery.items.length,
     governanceEvents: governanceEvents.length,
+    marketLifecycleEvents: marketEvents.length,
     policyAdminEvents: policyAdminEvents.length,
     scannedWindows: windows.length,
     shareTransfers: shareTransfers.length
@@ -663,16 +853,19 @@ async function fetchDiscovery(
 
 async function fetchGovernanceEvents(
   client: WatcherClient,
-  boardroomAddresses: readonly Address[],
+  boardrooms_: readonly WatcherBoardroom[],
   window: CursorWindow | undefined
 ): Promise<GovernanceEvent[]> {
-  if (!window || boardroomAddresses.length === 0) return [];
+  if (!window || boardrooms_.length === 0) return [];
 
   const events: GovernanceEvent[] = [];
-  for (const addresses of chunks(uniqueAddresses(boardroomAddresses), BOARDROOM_QUERY_CHUNK_SIZE)) {
+  for (const boardroomChunk of chunks(boardrooms_, BOARDROOM_QUERY_CHUNK_SIZE)) {
     events.push(
-      ...(await queryGovernanceEvents(client, {
-        boardrooms: addresses,
+      ...(await queryExternalGovernanceEvents(client, {
+        boardrooms: boardroomChunk.map((item) => item.address),
+        controllers: boardroomChunk
+          .filter((item) => item.controller !== ZERO_ADDRESS)
+          .map((item) => ({ boardroom: item.address, controller: item.controller })),
         fromBlock: window.fromBlock,
         toBlock: window.toBlock
       }))
@@ -680,6 +873,46 @@ async function fetchGovernanceEvents(
   }
 
   return events.sort(compareGovernanceEvents);
+}
+
+async function fetchMarketEvents(
+  client: WatcherClient,
+  deployment: PledgeCashDeployment,
+  boardrooms_: readonly WatcherBoardroom[],
+  window: CursorWindow | undefined
+): Promise<MarketLifecycleEvent[]> {
+  if (!window || boardrooms_.length === 0) return [];
+
+  const events: MarketLifecycleEvent[] = [];
+  for (const boardroomChunk of chunks(boardrooms_, BOARDROOM_QUERY_CHUNK_SIZE)) {
+    events.push(
+      ...(await queryMarketLifecycleEvents(client, {
+        boardrooms: boardroomChunk.map((item) => ({
+          boardroom: item.address,
+          bondingCurve: item.bondingCurve,
+          liquidityLocker: item.liquidityLocker,
+          liquidityReservationExpectedLocker: item.liquidityReservationExpectedLocker
+        })),
+        fromBlock: window.fromBlock,
+        ...(deployment.lockedLiquidityFactory === undefined
+          ? {}
+          : { lockedLiquidityFactory: deployment.lockedLiquidityFactory }),
+        toBlock: window.toBlock
+      }))
+    );
+  }
+
+  const actors = new Map<string, Lowercase<Address> | undefined>();
+  for (const event of events) {
+    const txHash = event.transactionHash;
+    if (!actors.has(txHash)) actors.set(txHash, await transactionActor(client, txHash));
+  }
+  return events
+    .map((event) => {
+      const actor = actors.get(event.transactionHash);
+      return actor === undefined ? event : { ...event, actor };
+    })
+    .sort(compareMarketLifecycleEvents);
 }
 
 async function fetchPolicyAdminEvents(
@@ -779,7 +1012,8 @@ async function processGovernanceEvent(
   tx: WatcherStoreTx,
   client: WatcherClient,
   chainId: number,
-  event: GovernanceEvent
+  event: GovernanceEvent,
+  vetoStakers: ReadonlyMap<string, Lowercase<Address>>
 ): Promise<WatcherPipelineEvent[]> {
   const boardroom = lowerAddress(event.boardroom);
 
@@ -787,19 +1021,31 @@ async function processGovernanceEvent(
     await tx.updateBoardroomLifecycle({
       boardroom,
       chainId,
-      executor: lowerAddress(event.executor),
-      governanceDelay: event.governanceDelay,
+      configurationEpoch: event.configurationEpoch,
+      controller: lowerAddress(event.controller),
+      controllerGeneration: event.controllerGeneration,
+      controllerDelay: event.controllerDelay,
+      gracePeriod: event.gracePeriod,
       launched: true,
+      owner: lowerAddress(event.controller),
+      proposer: lowerAddress(event.proposer),
+      windDownDelay: event.windDownDelay,
       status: "active"
     });
     return [];
   }
 
-  if (event.kind === "executorSet") {
+  if (event.kind === "controllerReplaced") {
     await tx.updateBoardroomLifecycle({
       boardroom,
       chainId,
-      executor: lowerAddress(event.executor)
+      configurationEpoch: event.configurationEpoch,
+      controller: lowerAddress(event.controller),
+      controllerGeneration: event.controllerGeneration,
+      controllerDelay: event.controllerDelay,
+      gracePeriod: event.gracePeriod,
+      owner: lowerAddress(event.controller),
+      proposer: lowerAddress(event.proposer)
     });
     return [];
   }
@@ -813,25 +1059,43 @@ async function processGovernanceEvent(
     return [];
   }
 
-  if (event.kind === "actionQueued") {
+  if (event.kind === "snapshottingStarted") {
+    await tx.updateBoardroomLifecycle({ boardroom, chainId, status: "snapshotting" });
+    return [];
+  }
+
+  if (event.kind === "redemptionsOpened") {
+    await tx.updateBoardroomLifecycle({ boardroom, chainId, status: "redemptions-open" });
+    return [];
+  }
+
+  if (event.kind === "operationScheduled") {
     const txInput = await transactionInput(client, event.transactionHash);
-    const decoded = decodeQueuedActionCalldata({
-      actionHash: event.actionHash,
+    const decoded = decodeScheduledOperationCalldata({
+      controller: event.controller,
+      expectedBoardroomEpoch: event.boardroomEpoch,
+      expectedConfigurationEpoch: event.configurationEpoch,
+      expectedPayloadHash: event.payloadHash,
       expectedSalt: event.salt,
+      operationKind: event.operationKind,
       txInput
     });
-    const action = await tx.insertQueuedAction({
-      actionHash: lowerHex(event.actionHash),
+    const action = await tx.insertScheduledOperation({
+      operationId: lowerHex(event.operationId),
       boardroom,
       chainId,
+      configurationEpoch: event.configurationEpoch,
+      controller: lowerAddress(event.controller),
+      controllerGeneration: event.controllerGeneration,
       decodeStatus: decoded.decodeStatus,
-      epoch: event.epoch,
+      boardroomEpoch: event.boardroomEpoch,
       eta: new Date(Number(event.eta) * 1000),
       expiresAt: new Date(Number(event.expiresAt) * 1000),
-      executor: lowerAddress(event.executor),
-      queueBlock: event.blockNumber,
-      queueLogIndex: event.logIndex,
-      queueTxHash: lowerHex(event.transactionHash),
+      operationKind: event.operationKind,
+      proposer: lowerAddress(event.proposer),
+      scheduleBlock: event.blockNumber,
+      scheduleLogIndex: event.logIndex,
+      scheduleTxHash: lowerHex(event.transactionHash),
       rawCalldata: txInput,
       salt: lowerHex(event.salt)
     });
@@ -842,16 +1106,26 @@ async function processGovernanceEvent(
       action.id,
       decoded.calls.map((call, callIndex) => storedCallInput(call, callIndex))
     );
-    return [{ action, calls, event: "queued" }];
+    return [{ action, calls, event: "scheduled" }];
   }
 
-  if (event.kind === "actionCancelled" || event.kind === "actionExecuted") {
-    const transitioned = await tx.transitionLatestQueuedAction({
-      actionHash: lowerHex(event.actionHash),
+  if (event.kind === "operationCancelled" || event.kind === "operationExecuted") {
+    const caller =
+      event.kind === "operationExecuted"
+        ? lowerAddress(event.executor)
+        : vetoStakers.get(vetoKey(event.transactionHash, event.operationId));
+    if (caller === undefined) {
+      throw new Error(
+        `Controller cancellation ${event.operationId} is missing its canonical Boardroom veto event`
+      );
+    }
+    const transitioned = await tx.transitionLatestScheduledOperation({
+      operationId: lowerHex(event.operationId),
       boardroom,
-      caller: lowerAddress(event.caller),
+      caller,
       chainId,
-      status: event.kind === "actionCancelled" ? "cancelled" : "executed",
+      controller: lowerAddress(event.controller),
+      status: event.kind === "operationCancelled" ? "cancelled" : "executed",
       terminalBlock: event.blockNumber,
       terminalLogIndex: event.logIndex,
       txHash: lowerHex(event.transactionHash)
@@ -895,16 +1169,16 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
         .limit(1);
       return row?.blockNumber;
     },
-    async invalidateQueuedActionsBeforeEpoch(input: {
+    async invalidateScheduledOperationsBeforeEpoch(input: {
       readonly boardroom: Lowercase<Address>;
       readonly chainId: number;
       readonly epoch: bigint;
       readonly terminalBlock: bigint;
       readonly terminalLogIndex: number;
       readonly txHash: Lowercase<Hex>;
-    }): Promise<Array<{ action: QueuedActionRow; calls: StoredCall[] }>> {
+    }): Promise<Array<{ action: ScheduledOperationRow; calls: StoredCall[] }>> {
       const invalidated = await db
-        .update(queuedActions)
+        .update(scheduledOperations)
         .set({
           invalidatedByEpoch: input.epoch,
           resolvedTxHash: input.txHash,
@@ -913,15 +1187,15 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
         })
         .where(
           and(
-            eq(queuedActions.chainId, input.chainId),
-            eq(queuedActions.boardroom, input.boardroom),
-            eq(queuedActions.status, "queued"),
-            lt(queuedActions.epoch, input.epoch),
+            eq(scheduledOperations.chainId, input.chainId),
+            eq(scheduledOperations.boardroom, input.boardroom),
+            eq(scheduledOperations.status, "scheduled"),
+            lt(scheduledOperations.boardroomEpoch, input.epoch),
             or(
-              lt(queuedActions.queueBlock, input.terminalBlock),
+              lt(scheduledOperations.scheduleBlock, input.terminalBlock),
               and(
-                eq(queuedActions.queueBlock, input.terminalBlock),
-                lt(queuedActions.queueLogIndex, input.terminalLogIndex)
+                eq(scheduledOperations.scheduleBlock, input.terminalBlock),
+                lt(scheduledOperations.scheduleLogIndex, input.terminalLogIndex)
               )
             )
           )
@@ -930,8 +1204,54 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
 
       invalidated.sort(
         (left, right) =>
-          Number(left.queueBlock - right.queueBlock)
-          || left.queueLogIndex - right.queueLogIndex
+          Number(left.scheduleBlock - right.scheduleBlock)
+          || left.scheduleLogIndex - right.scheduleLogIndex
+          || left.createdAt.getTime() - right.createdAt.getTime()
+      );
+      return Promise.all(
+        invalidated.map(async (action) => ({
+          action,
+          calls: await this.listActionCalls(action.id)
+        }))
+      );
+    },
+    async invalidateScheduledOperationsBeforeConfigurationEpoch(input: {
+      readonly boardroom: Lowercase<Address>;
+      readonly chainId: number;
+      readonly configurationEpoch: bigint;
+      readonly controller: Lowercase<Address>;
+      readonly terminalBlock: bigint;
+      readonly terminalLogIndex: number;
+      readonly txHash: Lowercase<Hex>;
+    }): Promise<Array<{ action: ScheduledOperationRow; calls: StoredCall[] }>> {
+      const invalidated = await db
+        .update(scheduledOperations)
+        .set({
+          resolvedTxHash: input.txHash,
+          status: "invalidated",
+          updatedAt: new Date()
+        })
+        .where(
+          and(
+            eq(scheduledOperations.chainId, input.chainId),
+            eq(scheduledOperations.boardroom, input.boardroom),
+            eq(scheduledOperations.controller, input.controller),
+            eq(scheduledOperations.status, "scheduled"),
+            lt(scheduledOperations.configurationEpoch, input.configurationEpoch),
+            or(
+              lt(scheduledOperations.scheduleBlock, input.terminalBlock),
+              and(
+                eq(scheduledOperations.scheduleBlock, input.terminalBlock),
+                lt(scheduledOperations.scheduleLogIndex, input.terminalLogIndex)
+              )
+            )
+          )
+        )
+        .returning();
+      invalidated.sort(
+        (left, right) =>
+          Number(left.scheduleBlock - right.scheduleBlock)
+          || left.scheduleLogIndex - right.scheduleLogIndex
           || left.createdAt.getTime() - right.createdAt.getTime()
       );
       return Promise.all(
@@ -951,6 +1271,25 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
 
       return this.listActionCalls(actionId);
     },
+    async insertMarketLifecycleEvent(input: MarketLifecycleEvent & { readonly chainId: number }): Promise<boolean> {
+      const inserted = await db
+        .insert(marketLifecycleEvents)
+        .values({
+          actor: input.actor ?? null,
+          blockNumber: input.blockNumber,
+          boardroom: input.boardroom,
+          chainId: input.chainId,
+          contractAddress: input.contractAddress,
+          kind: input.kind,
+          logIndex: input.logIndex,
+          metadata: input.data,
+          source: input.source,
+          txHash: input.transactionHash
+        })
+        .onConflictDoNothing()
+        .returning({ id: marketLifecycleEvents.id });
+      return inserted.length > 0;
+    },
     async insertPolicyAdminEvent(input: InsertPolicyAdminEventInput): Promise<boolean> {
       const inserted = await db
         .insert(policyAdminEvents)
@@ -969,21 +1308,25 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
 
       return inserted.length > 0;
     },
-    async insertQueuedAction(input: InsertQueuedActionInput): Promise<QueuedActionRow | undefined> {
+    async insertScheduledOperation(input: InsertScheduledOperationInput): Promise<ScheduledOperationRow | undefined> {
       const inserted = await db
-        .insert(queuedActions)
+        .insert(scheduledOperations)
         .values({
-          actionHash: input.actionHash,
+          operationId: input.operationId,
           boardroom: input.boardroom,
           chainId: input.chainId,
+          configurationEpoch: input.configurationEpoch,
+          controller: input.controller,
+          controllerGeneration: input.controllerGeneration,
           decodeStatus: input.decodeStatus,
-          epoch: input.epoch,
+          boardroomEpoch: input.boardroomEpoch,
           eta: input.eta,
           expiresAt: input.expiresAt,
-          executor: input.executor,
-          queueBlock: input.queueBlock,
-          queueLogIndex: input.queueLogIndex,
-          queueTxHash: input.queueTxHash,
+          operationKind: input.operationKind,
+          proposer: input.proposer,
+          scheduleBlock: input.scheduleBlock,
+          scheduleLogIndex: input.scheduleLogIndex,
+          scheduleTxHash: input.scheduleTxHash,
           rawCalldata: input.rawCalldata,
           salt: input.salt
         })
@@ -995,13 +1338,13 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
 
       const [existing] = await db
         .select()
-        .from(queuedActions)
+        .from(scheduledOperations)
         .where(
           and(
-            eq(queuedActions.chainId, input.chainId),
-            eq(queuedActions.boardroom, input.boardroom),
-            eq(queuedActions.actionHash, input.actionHash),
-            eq(queuedActions.queueTxHash, input.queueTxHash)
+            eq(scheduledOperations.chainId, input.chainId),
+            eq(scheduledOperations.boardroom, input.boardroom),
+            eq(scheduledOperations.operationId, input.operationId),
+            eq(scheduledOperations.scheduleTxHash, input.scheduleTxHash)
           )
         )
         .limit(1);
@@ -1020,28 +1363,49 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
       return rows.map((row) => ({
         address: row.address as Lowercase<Address>,
         chainId: row.chainId,
+        configurationEpoch: row.configurationEpoch,
+        controller: row.controller as Lowercase<Address>,
+        controllerGeneration: row.controllerGeneration,
         createdBlock: row.createdBlock,
-        executor: row.executor as Lowercase<Address>,
-        governanceDelay: row.governanceDelay,
+        controllerDelay: row.controllerDelay,
+        gracePeriod: row.gracePeriod,
         launched: row.launched,
         name: row.name,
         owner: row.owner as Lowercase<Address>,
+        proposer: row.proposer as Lowercase<Address>,
         shareToken: row.shareToken as Lowercase<Address>,
-        status: row.status
+        status: row.status,
+        windDownDelay: row.windDownDelay,
+        primaryMarketMode: row.primaryMarketMode,
+        bondingCurve: row.bondingCurve as Lowercase<Address> | null,
+        primaryMarketQuoteAsset: row.primaryMarketQuoteAsset as Lowercase<Address> | null,
+        bondingCurvePhase: row.bondingCurvePhase,
+        bondingCurveSettlementReason: row.bondingCurveSettlementReason,
+        bondingCurvePhaseEndsAt: row.bondingCurvePhaseEndsAt,
+        liquidityStatus: row.liquidityStatus,
+        liquidityLocker: row.liquidityLocker as Lowercase<Address> | null,
+        liquidityPool: row.liquidityPool as Lowercase<Address> | null,
+        liquidityQuoteAsset: row.liquidityQuoteAsset as Lowercase<Address> | null,
+        liquidityReservationCurve: row.liquidityReservationCurve as Lowercase<Address> | null,
+        liquidityReservationExpectedLocker: row.liquidityReservationExpectedLocker as Lowercase<Address> | null,
+        liquidityReservationExpectedPool: row.liquidityReservationExpectedPool as Lowercase<Address> | null,
+        liquidityReservationPairKey: row.liquidityReservationPairKey as Lowercase<Hex> | null,
+        liquidityReservationSalt: row.liquidityReservationSalt as Lowercase<Hex> | null,
+        liquidityReservationExpiresAt: row.liquidityReservationExpiresAt
       }));
     },
-    async listQueuedActions(chainId: number): Promise<Array<{ action: QueuedActionRow; calls: StoredCall[] }>> {
+    async listScheduledOperations(chainId: number): Promise<Array<{ action: ScheduledOperationRow; calls: StoredCall[] }>> {
       const rows = await db
         .select()
-        .from(queuedActions)
+        .from(scheduledOperations)
         .where(
           and(
-            eq(queuedActions.chainId, chainId),
-            eq(queuedActions.status, "queued"),
-            or(isNull(queuedActions.expiresAt), gt(queuedActions.expiresAt, new Date()))
+            eq(scheduledOperations.chainId, chainId),
+            eq(scheduledOperations.status, "scheduled"),
+            or(isNull(scheduledOperations.expiresAt), gt(scheduledOperations.expiresAt, new Date()))
           )
         )
-        .orderBy(desc(queuedActions.queueBlock), desc(queuedActions.queueLogIndex), desc(queuedActions.createdAt));
+        .orderBy(desc(scheduledOperations.scheduleBlock), desc(scheduledOperations.scheduleLogIndex), desc(scheduledOperations.createdAt));
       return Promise.all(
         rows.map(async (action) => ({
           action,
@@ -1058,50 +1422,53 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
           set: { blockNumber, updatedAt: new Date() }
         });
     },
-    async transitionLatestQueuedAction(input: {
-      readonly actionHash: Lowercase<Hex>;
+    async transitionLatestScheduledOperation(input: {
+      readonly operationId: Lowercase<Hex>;
       readonly boardroom: Lowercase<Address>;
       readonly caller: Lowercase<Address>;
       readonly chainId: number;
+      readonly controller: Lowercase<Address>;
       readonly status: "cancelled" | "executed";
       readonly terminalBlock: bigint;
       readonly terminalLogIndex: number;
       readonly txHash: Lowercase<Hex>;
-    }): Promise<{ action: QueuedActionRow; calls: StoredCall[] } | undefined> {
+    }): Promise<{ action: ScheduledOperationRow; calls: StoredCall[] } | undefined> {
       const [pending] = await db
-        .select({ id: queuedActions.id })
-        .from(queuedActions)
+        .select({ id: scheduledOperations.id })
+        .from(scheduledOperations)
         .where(
           and(
-            eq(queuedActions.chainId, input.chainId),
-            eq(queuedActions.boardroom, input.boardroom),
-            eq(queuedActions.actionHash, input.actionHash),
+            eq(scheduledOperations.chainId, input.chainId),
+            eq(scheduledOperations.boardroom, input.boardroom),
+            eq(scheduledOperations.controller, input.controller),
+            eq(scheduledOperations.operationId, input.operationId),
             or(
-              lt(queuedActions.queueBlock, input.terminalBlock),
+              lt(scheduledOperations.scheduleBlock, input.terminalBlock),
               and(
-                eq(queuedActions.queueBlock, input.terminalBlock),
-                lte(queuedActions.queueLogIndex, input.terminalLogIndex)
+                eq(scheduledOperations.scheduleBlock, input.terminalBlock),
+                lte(scheduledOperations.scheduleLogIndex, input.terminalLogIndex)
               )
             ),
-            eq(queuedActions.status, "queued")
+            eq(scheduledOperations.status, "scheduled")
           )
         )
-        .orderBy(desc(queuedActions.queueBlock), desc(queuedActions.queueLogIndex), desc(queuedActions.createdAt))
+        .orderBy(desc(scheduledOperations.scheduleBlock), desc(scheduledOperations.scheduleLogIndex), desc(scheduledOperations.createdAt))
         .limit(1);
       if (!pending) {
         const [existing] = await db
           .select()
-          .from(queuedActions)
+          .from(scheduledOperations)
           .where(
             and(
-              eq(queuedActions.chainId, input.chainId),
-              eq(queuedActions.boardroom, input.boardroom),
-              eq(queuedActions.actionHash, input.actionHash),
-              eq(queuedActions.status, input.status),
-              eq(queuedActions.resolvedTxHash, input.txHash)
+              eq(scheduledOperations.chainId, input.chainId),
+              eq(scheduledOperations.boardroom, input.boardroom),
+              eq(scheduledOperations.controller, input.controller),
+              eq(scheduledOperations.operationId, input.operationId),
+              eq(scheduledOperations.status, input.status),
+              eq(scheduledOperations.resolvedTxHash, input.txHash)
             )
           )
-          .orderBy(desc(queuedActions.queueBlock), desc(queuedActions.queueLogIndex), desc(queuedActions.createdAt))
+          .orderBy(desc(scheduledOperations.scheduleBlock), desc(scheduledOperations.scheduleLogIndex), desc(scheduledOperations.createdAt))
           .limit(1);
         return existing === undefined
           ? undefined
@@ -1114,9 +1481,9 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
           : { executedBy: input.caller, resolvedTxHash: input.txHash, status: input.status, updatedAt: new Date() };
 
       const [action] = await db
-        .update(queuedActions)
+        .update(scheduledOperations)
         .set(updates)
-        .where(eq(queuedActions.id, pending.id))
+        .where(eq(scheduledOperations.id, pending.id))
         .returning();
       if (!action) return undefined;
 
@@ -1132,14 +1499,19 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
           .values({
             address: lowerAddress(item.boardroom),
             chainId,
+            configurationEpoch: 0n,
+            controller: ZERO_ADDRESS,
+            controllerGeneration: 0n,
             createdBlock: item.createdAtBlock,
-            executor: lowerAddress(item.owner),
-            governanceDelay: 0n,
+            controllerDelay: 0n,
+            gracePeriod: 0n,
             launched: false,
             name: item.name,
             owner: lowerAddress(item.owner),
+            proposer: ZERO_ADDRESS,
             shareToken: lowerAddress(item.shareToken),
-            status: "prelaunch"
+            status: "prelaunch",
+            windDownDelay: 0n
           })
           .onConflictDoUpdate({
             target: [boardrooms.chainId, boardrooms.address],
@@ -1156,20 +1528,115 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
     async updateBoardroomLifecycle(input: {
       readonly boardroom: Lowercase<Address>;
       readonly chainId: number;
-      readonly executor?: Lowercase<Address>;
-      readonly governanceDelay?: bigint;
+      readonly configurationEpoch?: bigint;
+      readonly controller?: Lowercase<Address>;
+      readonly controllerGeneration?: bigint;
+      readonly controllerDelay?: bigint;
+      readonly gracePeriod?: bigint;
       readonly launched?: boolean;
-      readonly status?: "prelaunch" | "active" | "winddown";
+      readonly owner?: Lowercase<Address>;
+      readonly proposer?: Lowercase<Address>;
+      readonly status?: "prelaunch" | "active" | "winddown" | "snapshotting" | "redemptions-open";
+      readonly windDownDelay?: bigint;
     }): Promise<void> {
       const set = withoutUndefined({
-        executor: input.executor,
-        governanceDelay: input.governanceDelay,
+        configurationEpoch: input.configurationEpoch,
+        controller: input.controller,
+        controllerGeneration: input.controllerGeneration,
+        controllerDelay: input.controllerDelay,
+        gracePeriod: input.gracePeriod,
         launched: input.launched,
+        owner: input.owner,
+        proposer: input.proposer,
         status: input.status,
-        updatedAt: new Date()
+        updatedAt: new Date(),
+        windDownDelay: input.windDownDelay
       });
       if (Object.keys(set).length === 1) return;
 
+      await db
+        .update(boardrooms)
+        .set(set)
+        .where(and(eq(boardrooms.chainId, input.chainId), eq(boardrooms.address, input.boardroom)));
+    },
+    async updateBoardroomMarketState(
+      input: BoardroomMarketStateUpdate & { readonly chainId: number }
+    ): Promise<void> {
+      const [current] = await db
+        .select()
+        .from(boardrooms)
+        .where(and(eq(boardrooms.chainId, input.chainId), eq(boardrooms.address, input.boardroom)))
+        .limit(1);
+      if (!current) throw new Error(`Unknown Boardroom market topology ${input.boardroom}`);
+
+      assertTopologyAddress(current.bondingCurve, input.bondingCurve, "bonding curve");
+      assertTopologyAddress(current.liquidityLocker, input.liquidityLocker, "liquidity locker");
+      assertTopologyAddress(current.liquidityPool, input.liquidityPool, "liquidity pool");
+      assertTopologyAddress(current.primaryMarketQuoteAsset, input.primaryMarketQuoteAsset, "primary-market quote asset");
+      assertTopologyAddress(current.liquidityQuoteAsset, input.liquidityQuoteAsset, "liquidity quote asset");
+      const nextQuote = input.primaryMarketQuoteAsset ?? input.liquidityQuoteAsset;
+      if (nextQuote) {
+        assertTopologyAddress(current.primaryMarketQuoteAsset, nextQuote, "permanent quote asset");
+        assertTopologyAddress(current.liquidityQuoteAsset, nextQuote, "permanent quote asset");
+      }
+
+      if (!input.clearLiquidityReservation) {
+        assertTopologyAddress(
+          current.liquidityReservationCurve,
+          input.liquidityReservationCurve,
+          "liquidity reservation curve"
+        );
+        assertTopologyAddress(
+          current.liquidityReservationExpectedLocker,
+          input.liquidityReservationExpectedLocker,
+          "liquidity reservation locker"
+        );
+        assertTopologyAddress(
+          current.liquidityReservationExpectedPool,
+          input.liquidityReservationExpectedPool,
+          "liquidity reservation pool"
+        );
+        assertTopologyHex(
+          current.liquidityReservationPairKey,
+          input.liquidityReservationPairKey,
+          "liquidity reservation pair key"
+        );
+        assertTopologyHex(
+          current.liquidityReservationSalt,
+          input.liquidityReservationSalt,
+          "liquidity reservation salt"
+        );
+      }
+
+      const set: Record<string, unknown> = withoutUndefined({
+        bondingCurve: input.bondingCurve,
+        bondingCurvePhase: input.bondingCurvePhase,
+        bondingCurvePhaseEndsAt: input.bondingCurvePhaseEndsAt,
+        bondingCurveSettlementReason: input.bondingCurveSettlementReason,
+        liquidityLocker: input.liquidityLocker,
+        liquidityPool: input.liquidityPool,
+        liquidityQuoteAsset: input.liquidityQuoteAsset,
+        liquidityReservationCurve: input.liquidityReservationCurve,
+        liquidityReservationExpectedLocker: input.liquidityReservationExpectedLocker,
+        liquidityReservationExpectedPool: input.liquidityReservationExpectedPool,
+        liquidityReservationExpiresAt: input.liquidityReservationExpiresAt,
+        liquidityReservationPairKey: input.liquidityReservationPairKey,
+        liquidityReservationSalt: input.liquidityReservationSalt,
+        liquidityStatus: input.liquidityStatus,
+        primaryMarketMode: input.primaryMarketMode,
+        primaryMarketQuoteAsset: input.primaryMarketQuoteAsset,
+        updatedAt: new Date()
+      });
+      if (input.clearLiquidityReservation) {
+        Object.assign(set, {
+          liquidityReservationCurve: null,
+          liquidityReservationExpectedLocker: null,
+          liquidityReservationExpectedPool: null,
+          liquidityReservationExpiresAt: 0n,
+          liquidityReservationPairKey: null,
+          liquidityReservationSalt: null
+        });
+      }
       await db
         .update(boardrooms)
         .set(set)
@@ -1180,6 +1647,10 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
 
 function policyAdminEventId(event: InsertPolicyAdminEventInput): string {
   return `${event.chainId}:${event.txHash.toLowerCase()}:${event.logIndex}`;
+}
+
+function vetoKey(transactionHash: Hex, operationId: Hex): string {
+  return `${transactionHash.toLowerCase()}:${operationId.toLowerCase()}`;
 }
 
 function policyAdminNotificationKey(event: InsertPolicyAdminEventInput): string {
@@ -1200,33 +1671,39 @@ function storedCallInput(call: BoardroomCall, callIndex: number): InsertActionCa
   };
 }
 
-function decodeKnownCall(data: Hex): { decodedArgs: JsonValue | null; decodedFunction: string | null } {
+export function decodeKnownCall(data: Hex): { decodedArgs: JsonValue | null; decodedFunction: string | null } {
   if (data.length < 10) return { decodedArgs: null, decodedFunction: null };
 
+  const matches: Array<{ decodedArgs: JsonValue; decodedFunction: string }> = [];
   for (const [contractName, abi] of Object.entries(pledgeCashAbis)) {
     try {
       const decoded = decodeFunctionData({ abi: abi as Abi, data });
-      return {
+      matches.push({
         decodedArgs: toJson(decoded.args ?? []) as JsonValue,
         decodedFunction: `${contractName}.${decoded.functionName}`
-      };
+      });
     } catch {
       // Try the next known ABI.
     }
   }
 
-  return { decodedArgs: null, decodedFunction: null };
+  if (matches.length === 0) return { decodedArgs: null, decodedFunction: null };
+  if (matches.length === 1) return matches[0]!;
+  return {
+    decodedArgs: matches[0]!.decodedArgs,
+    decodedFunction: `ambiguous:${matches.map((match) => match.decodedFunction).join("|")}`
+  };
 }
 
-function queueCalldataCandidates(input: Hex, seen: Set<string>, depth: number): Hex[] {
+function scheduleCalldataCandidates(input: Hex, seen: Set<string>, depth: number): Hex[] {
   if (seen.has(input) || depth > 4) return [];
   seen.add(input);
 
   const candidates: Hex[] = [input];
   for (const unwrapped of unwrapCalldata(input)) {
-    candidates.push(...queueCalldataCandidates(unwrapped, seen, depth + 1));
+    candidates.push(...scheduleCalldataCandidates(unwrapped, seen, depth + 1));
   }
-  candidates.push(...scanForQueueSelectors(input));
+  candidates.push(...scanForScheduleSelectors(input));
 
   return candidates;
 }
@@ -1263,9 +1740,10 @@ function unwrapCalldata(data: Hex): Hex[] {
   return unwrapped;
 }
 
-function scanForQueueSelectors(data: Hex): Hex[] {
+function scanForScheduleSelectors(data: Hex): Hex[] {
   const body = data.slice(2).toLowerCase();
-  const selectors = [queueActionSelector, queueBatchSelector].map((selector) => selector.slice(2).toLowerCase());
+  const selectors = [scheduleBoardroomOperationSelector, scheduleControllerOperationSelector]
+    .map((selector) => selector.slice(2).toLowerCase());
   const candidates: Hex[] = [];
 
   for (const selector of selectors) {
@@ -1281,10 +1759,32 @@ function scanForQueueSelectors(data: Hex): Hex[] {
   return candidates;
 }
 
+function normalizeBoardroomCalls(value: unknown): BoardroomCall[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const calls: BoardroomCall[] = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) return undefined;
+    const record = item as Record<string, unknown>;
+    const policy = addressValue(record.policy ?? record["0"]);
+    const target = addressValue(record.target ?? record["1"]);
+    const callValue = bigintValue(record.value ?? record["2"]);
+    const data = hexValue(record.data ?? record["3"]);
+    if (!policy || !target || callValue === undefined || !data) return undefined;
+    calls.push({ policy, target, value: callValue, data });
+  }
+  return calls;
+}
+
 async function transactionInput(client: WatcherClient, hash: Hex): Promise<Hex> {
   const tx = (await client.getTransaction({ hash } as never)) as { input?: unknown; data?: unknown };
   const input = tx.input ?? tx.data;
   return typeof input === "string" && isHex(input) ? input : "0x";
+}
+
+async function transactionActor(client: WatcherClient, hash: Hex): Promise<Lowercase<Address> | undefined> {
+  const tx = (await client.getTransaction({ hash } as never)) as { from?: unknown };
+  const actor = addressValue(tx.from);
+  return actor === undefined ? undefined : lowerAddress(actor);
 }
 
 async function getPolicyAdminLogs(
@@ -1345,7 +1845,7 @@ function toPolicyAdminEvent(
       : bigintValue(args[input.statusKey]) !== 0n);
 
   return {
-    affectedQueuedActions: true,
+    affectedScheduledOperations: true,
     blockNumber: log.blockNumber,
     chainId: input.chainId,
     contract: input.contract,
@@ -1364,17 +1864,40 @@ function mergeBoardrooms(
   const byAddress = new Map<string, WatcherBoardroom>();
   for (const boardroom of existing) byAddress.set(boardroom.address, boardroom);
   for (const item of discovered) {
-    byAddress.set(lowerAddress(item.boardroom), {
-      address: lowerAddress(item.boardroom),
+    const address = lowerAddress(item.boardroom);
+    if (byAddress.has(address)) continue;
+    byAddress.set(address, {
+      address,
       chainId: 0,
+      configurationEpoch: 0n,
+      controller: ZERO_ADDRESS,
+      controllerGeneration: 0n,
       createdBlock: item.createdAtBlock,
-      executor: lowerAddress(item.owner),
-      governanceDelay: 0n,
+      controllerDelay: 0n,
+      gracePeriod: 0n,
       launched: false,
       name: item.name,
       owner: lowerAddress(item.owner),
+      proposer: ZERO_ADDRESS,
       shareToken: lowerAddress(item.shareToken),
-      status: "prelaunch"
+      status: "prelaunch",
+      windDownDelay: 0n,
+      primaryMarketMode: 0,
+      bondingCurve: null,
+      primaryMarketQuoteAsset: null,
+      bondingCurvePhase: null,
+      bondingCurveSettlementReason: null,
+      bondingCurvePhaseEndsAt: 0n,
+      liquidityStatus: 0,
+      liquidityLocker: null,
+      liquidityPool: null,
+      liquidityQuoteAsset: null,
+      liquidityReservationCurve: null,
+      liquidityReservationExpectedLocker: null,
+      liquidityReservationExpectedPool: null,
+      liquidityReservationPairKey: null,
+      liquidityReservationSalt: null,
+      liquidityReservationExpiresAt: 0n
     });
   }
   return [...byAddress.values()];
@@ -1421,6 +1944,7 @@ function skippedResult(chainId: number, skipReason: string): WatcherRunResult {
     discoveredBoardrooms: 0,
     fromSafeHead: 0n,
     governanceEvents: 0,
+    marketLifecycleEvents: 0,
     latestBlock: 0n,
     policyAdminEvents: 0,
     scannedWindows: 0,
@@ -1439,14 +1963,11 @@ function emptyPassResult(): Omit<
     cursorAdvances: 0,
     discoveredBoardrooms: 0,
     governanceEvents: 0,
+    marketLifecycleEvents: 0,
     policyAdminEvents: 0,
     scannedWindows: 0,
     shareTransfers: 0
   };
-}
-
-function uniqueAddresses(addresses: readonly Address[]): Address[] {
-  return [...new Map(addresses.map((address) => [address.toLowerCase(), address])).values()];
 }
 
 function chunks<T>(items: readonly T[], size: number): T[][] {
@@ -1461,6 +1982,12 @@ function compareGovernanceEvents(left: GovernanceEvent, right: GovernanceEvent):
   if (left.blockNumber < right.blockNumber) return -1;
   if (left.blockNumber > right.blockNumber) return 1;
   return left.logIndex - right.logIndex;
+}
+
+function compareMarketLifecycleEvents(left: MarketLifecycleEvent, right: MarketLifecycleEvent): number {
+  if (left.blockNumber < right.blockNumber) return -1;
+  if (left.blockNumber > right.blockNumber) return 1;
+  return left.logIndex - right.logIndex || left.contractAddress.localeCompare(right.contractAddress);
 }
 
 function comparePositionedPipelineEvents(left: PositionedPipelineEvent, right: PositionedPipelineEvent): number {
@@ -1538,4 +2065,16 @@ function toJson(value: unknown): JsonValue {
 
 function withoutUndefined<T extends Record<string, unknown>>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as Partial<T>;
+}
+
+function assertTopologyAddress(current: string | null, next: string | undefined, label: string): void {
+  if (current && next && current.toLowerCase() !== next.toLowerCase()) {
+    throw new Error(`Conflicting canonical ${label}: ${current} != ${next}`);
+  }
+}
+
+function assertTopologyHex(current: string | null, next: string | undefined, label: string): void {
+  if (current && next && current.toLowerCase() !== next.toLowerCase()) {
+    throw new Error(`Conflicting canonical ${label}: ${current} != ${next}`);
+  }
 }

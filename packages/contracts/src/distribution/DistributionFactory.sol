@@ -12,12 +12,13 @@ import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 import {IBoardroomObligationPolicy} from "../policy/IBoardroomObligationPolicy.sol";
 
 interface IDistributionBoardroom {
+    function launched() external view returns (bool);
+
+    function primaryMarketMode() external view returns (uint8);
+
     function shareToken() external view returns (address);
     function reserveRedeemableAsset(address asset) external;
-}
-
-interface IDistributionLifecycle {
-    function isClosed() external view returns (bool);
+    function precommitBondingCurve(address curve, address quoteAsset, uint256 fundingAmount) external;
 }
 
 contract DistributionFactory is IBoardroomObligationPolicy {
@@ -28,8 +29,9 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     uint256 internal constant WAD = 1e18;
     uint256 internal constant MINIMUM_MIGRATION_FILL_BPS = 9_500;
     uint256 internal constant AMM_MINIMUM_LIQUIDITY = 1_000;
+    uint256 internal constant MAX_CURVE_LIFETIME = 90 days;
     uint256 internal constant MAX_CURVE_SUPPLY = type(uint112).max;
-    uint256 public constant MAX_DISTRIBUTIONS_PER_BOARDROOM = 128;
+    uint256 public constant MAX_DISCOVERY_PAGE = 100;
 
     enum DistributionKind {
         FixedPriceSale,
@@ -46,12 +48,15 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     mapping(address => bool) public isDistribution;
     mapping(address => address) public distributionBoardroom;
     mapping(address => DistributionKind) public distributionKind;
+    mapping(address => address) public bondingCurveOfBoardroom;
     mapping(address => address[]) internal distributionsForBoardroom;
 
     error InvalidAddress();
+    error BondingCurveAlreadyConfigured(address boardroom, address curve);
     error InvalidBoardroom(address boardroom);
     error InvalidShareToken(address expected, address actual);
-    error TooManyBoardroomDistributions(address boardroom);
+    error InvalidPrimaryMarketState(address boardroom);
+    error InvalidDiscoveryPage(uint256 requested, uint256 maximum);
     error UnexpectedTokenBalanceChange(address token, uint256 expected, uint256 actual);
     error InvalidAsset(address asset);
 
@@ -64,7 +69,6 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         uint256 shareAmount,
         bytes32 salt
     );
-    event ClosedDistributionsPruned(address indexed boardroom, uint256 count);
 
     constructor(address lockedLiquidityFactory_, address tokenGrantFactory_) {
         if (tokenGrantFactory_ == address(0)) revert InvalidAddress();
@@ -99,11 +103,25 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         returns (address curve)
     {
         if (lockedLiquidityFactory == address(0)) revert InvalidAddress();
+        if (
+            IDistributionBoardroom(msg.sender).launched() || IDistributionBoardroom(msg.sender).primaryMarketMode() != 0
+        ) {
+            revert InvalidPrimaryMarketState(msg.sender);
+        }
+        address existingCurve = bondingCurveOfBoardroom[msg.sender];
+        if (existingCurve != address(0)) revert BondingCurveAlreadyConfigured(msg.sender, existingCurve);
         _requireBoardroomShareToken(msg.sender, params.shareToken);
         _requireAsset(params.quoteToken);
         IDistributionBoardroom(msg.sender).reserveRedeemableAsset(params.quoteToken);
 
         uint256 shareAmount = params.saleSupply + params.migrationSupply;
+        address predictedCurve = LibClone.predictDeterministicAddress(
+            migratingBondingCurveLogic,
+            _cloneSalt(msg.sender, DistributionKind.MigratingBondingCurve, params.salt),
+            address(this)
+        );
+        bondingCurveOfBoardroom[msg.sender] = predictedCurve;
+        IDistributionBoardroom(msg.sender).precommitBondingCurve(predictedCurve, params.quoteToken, shareAmount);
         curve = _createDistribution(
             migratingBondingCurveLogic,
             msg.sender,
@@ -113,6 +131,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
             params.salt,
             DistributionKind.MigratingBondingCurve
         );
+        if (curve != predictedCurve) revert InvalidAddress();
 
         MigratingBondingCurve(curve).initialize(msg.sender, lockedLiquidityFactory, params);
         LockedLiquidityFactory(lockedLiquidityFactory)
@@ -165,24 +184,10 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         address distribution = abi.decode(result, (address));
         obligation.kind = ObligationKind.Distribution;
         obligation.account = distribution;
-        if (selector == DistributionFactory.createMerkleAirdrop.selector) {
-            obligation.grantSlotReservations = MerkleAirdrop(distribution).maxGrantClaims();
-        }
     }
 
     function isLifecycleCallAllowed(address boardroom, address target, bytes4 selector) external view returns (bool) {
         return _canCallDistributionLifecycle(boardroom, target, selector);
-    }
-
-    function grantSlotReleaseForLifecycleCall(address boardroom, address target, bytes4 selector)
-        external
-        view
-        returns (address distribution)
-    {
-        if (distributionBoardroom[target] != boardroom) return address(0);
-        if (distributionKind[target] != DistributionKind.MerkleAirdrop) return address(0);
-        if (!_isMerkleAirdropLifecycleSelector(selector)) return address(0);
-        return target;
     }
 
     function distributionCountForBoardroom(address boardroom) external view returns (uint256) {
@@ -193,32 +198,22 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         return distributionsForBoardroom[boardroom][index];
     }
 
-    function getDistributionsForBoardroom(address boardroom) external view returns (address[] memory) {
-        return distributionsForBoardroom[boardroom];
-    }
-
-    /// @notice Removes closed entries from the Boardroom's bounded active-distribution index.
-    /// @dev Distribution identity mappings remain permanent so historical addresses stay attributable.
-    function pruneClosedDistributions(address boardroom) public returns (uint256 pruned) {
+    function distributionPageForBoardroom(address boardroom, uint256 cursor, uint256 size)
+        external
+        view
+        returns (address[] memory page, uint256 nextCursor)
+    {
+        if (size == 0 || size > MAX_DISCOVERY_PAGE) revert InvalidDiscoveryPage(size, MAX_DISCOVERY_PAGE);
         address[] storage distributions = distributionsForBoardroom[boardroom];
-        uint256 index;
-
-        while (index < distributions.length) {
-            if (!_isClosedDistribution(distributions[index])) {
-                unchecked {
-                    ++index;
-                }
-                continue;
-            }
-
-            distributions[index] = distributions[distributions.length - 1];
-            distributions.pop();
-            unchecked {
-                ++pruned;
-            }
+        uint256 length = distributions.length;
+        if (cursor >= length) return (new address[](0), length);
+        uint256 end = cursor + size;
+        if (end > length) end = length;
+        page = new address[](end - cursor);
+        for (uint256 i; i < page.length; ++i) {
+            page[i] = distributions[cursor + i];
         }
-
-        if (pruned != 0) emit ClosedDistributionsPruned(boardroom, pruned);
+        nextCursor = end;
     }
 
     function predictFixedPriceSaleAddress(address boardroom, bytes32 salt) external view returns (address) {
@@ -293,7 +288,18 @@ contract DistributionFactory is IBoardroomObligationPolicy {
 
     function _canCreateMigratingBondingCurve(address boardroom, bytes calldata data) internal view returns (bool) {
         if (lockedLiquidityFactory == address(0)) return false;
+        if (bondingCurveOfBoardroom[boardroom] != address(0)) return false;
         if (data.length != MIGRATING_CURVE_CREATE_DATA_LENGTH) return false;
+        try IDistributionBoardroom(boardroom).launched() returns (bool isLaunched) {
+            if (isLaunched) return false;
+        } catch {
+            return false;
+        }
+        try IDistributionBoardroom(boardroom).primaryMarketMode() returns (uint8 mode) {
+            if (mode != 0) return false;
+        } catch {
+            return false;
+        }
 
         MigratingBondingCurve.CreateParams memory params = abi.decode(data[4:], (MigratingBondingCurve.CreateParams));
         if (params.shareToken != IDistributionBoardroom(boardroom).shareToken()) return false;
@@ -307,7 +313,9 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         if (params.basePrice == 0 || params.graduationQuoteTarget == 0) return false;
         if (params.quoteToLpBps == 0 || params.quoteToLpBps > BPS) return false;
         if (!_hasFeasibleCurveMigration(params)) return false;
-        return _hasValidTimeWindow(params.startTime, params.endTime);
+        if (params.endTime == 0 || !_hasValidTimeWindow(params.startTime, params.endTime)) return false;
+        return uint256(params.endTime) - uint256(params.startTime) <= MAX_CURVE_LIFETIME
+            && uint256(params.endTime) <= block.timestamp + MAX_CURVE_LIFETIME;
     }
 
     function _canCreateMerkleAirdrop(address boardroom, bytes calldata data) internal view returns (bool) {
@@ -331,13 +339,6 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         if (boardroom == address(0) || shareToken == address(0)) {
             revert InvalidAddress();
         }
-        if (distributionsForBoardroom[boardroom].length >= MAX_DISTRIBUTIONS_PER_BOARDROOM) {
-            pruneClosedDistributions(boardroom);
-        }
-        if (distributionsForBoardroom[boardroom].length >= MAX_DISTRIBUTIONS_PER_BOARDROOM) {
-            revert TooManyBoardroomDistributions(boardroom);
-        }
-
         distribution = LibClone.cloneDeterministic(implementation, _cloneSalt(boardroom, kind, salt));
         isDistribution[distribution] = true;
         distributionBoardroom[distribution] = boardroom;
@@ -373,9 +374,12 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         uint256 slopeQuote = FixedPointMathLib.fullMulDivUp(params.slope, slopeNumerator, 2 * WAD * WAD);
         uint256 fullSaleQuote = linearQuote + slopeQuote;
         uint256 quoteToLiquidity = FixedPointMathLib.fullMulDiv(fullSaleQuote, params.quoteToLpBps, BPS);
-        uint256 minimumShares = FixedPointMathLib.fullMulDivUp(params.migrationSupply, MINIMUM_MIGRATION_FILL_BPS, BPS);
+        uint256 terminalPrice = params.basePrice + FixedPointMathLib.fullMulDiv(params.slope, params.saleSupply, WAD);
+        uint256 sharesToLiquidity = FixedPointMathLib.fullMulDiv(quoteToLiquidity, WAD, terminalPrice);
+        uint256 minimumShares = FixedPointMathLib.fullMulDivUp(sharesToLiquidity, MINIMUM_MIGRATION_FILL_BPS, BPS);
         uint256 minimumQuote = FixedPointMathLib.fullMulDivUp(quoteToLiquidity, MINIMUM_MIGRATION_FILL_BPS, BPS);
-        return quoteToLiquidity != 0 && quoteToLiquidity <= type(uint112).max
+        return sharesToLiquidity != 0 && sharesToLiquidity <= params.migrationSupply
+            && sharesToLiquidity <= type(uint112).max && quoteToLiquidity != 0 && quoteToLiquidity <= type(uint112).max
             && FixedPointMathLib.sqrt(minimumShares * minimumQuote) > AMM_MINIMUM_LIQUIDITY;
     }
 
@@ -386,14 +390,6 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     function _isAsset(address asset) internal view returns (bool) {
         (bool readable,) = BestEffortTokenLib.tryBalanceOf(asset, address(this));
         return readable;
-    }
-
-    function _isClosedDistribution(address distribution) internal view returns (bool) {
-        try IDistributionLifecycle(distribution).isClosed() returns (bool closed) {
-            return closed;
-        } catch {
-            return false;
-        }
     }
 
     function _isCreateDistributionSelector(bytes4 selector) internal pure returns (bool) {
@@ -407,7 +403,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     }
 
     function _isMigratingBondingCurveLifecycleSelector(bytes4 selector) internal pure returns (bool) {
-        return selector == MigratingBondingCurve.cancel.selector || selector == MigratingBondingCurve.migrate.selector;
+        return selector == MigratingBondingCurve.cancel.selector;
     }
 
     function _isMerkleAirdropLifecycleSelector(bytes4 selector) internal pure returns (bool) {

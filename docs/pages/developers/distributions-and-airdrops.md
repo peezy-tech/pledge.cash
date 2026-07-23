@@ -34,9 +34,10 @@ close uses `buildBoardroomBondMarketCloseAction`.
 
 Fixed-price buys round payment up. Curve buys round cost up and sells round refund down. Use contract or SDK quote helpers immediately before submission and bind maximum/minimum plus deadline onchain.
 
-Persist curve sell rights by recipient account; do not derive them from current ERC20 balance. Once graduation latches,
-disable buy and sell. Migration is active-Boardroom only. Migration and cancellation return remaining canonical shares
-exactly, while either terminal path can leave explicitly quarantined quote for retry only to the Boardroom.
+Read the global `outstandingCurveShareLiability` and derive a holder's current sellable amount as the lesser of that
+liability and its transferable share balance. Do not persist recipient-specific rights. Once graduation latches, disable
+buy and sell. The final permissionless migration, unwind, and quarantine paths remain decision-gated; quarantined
+recovery currently fails closed.
 
 ## Merkle manifests
 
@@ -54,9 +55,7 @@ Manifest requirements:
   factory enforces those conditions at claim execution;
 - exact free/paid pairing: zero price with zero payment token, or positive price with a nonzero payment token different
   from the share token and readable `decimals() <= 77`;
-- supported bounded-read ERC-20 payment tokens, with every distinct nonzero token pre-admitted or budgeted inside the
-  Boardroom's 32-asset redemption basket for the full claim period; airdrop grant-slot reservation does not reserve
-  redeemable-asset capacity;
+- supported bounded-read ERC-20 payment tokens; each becomes a canonical dependency in the unbounded asset registry;
 - sorted-pair Merkle tree compatible with Solady `MerkleProofLib`;
 - aggregate intended amount no greater than escrow;
 - grant leaves no greater than `maxGrantClaims`;
@@ -73,4 +72,6 @@ bun --cwd packages/sdk test
 bun --cwd apps/web test
 ```
 
-Test direct and grant claims, duplicate indices, wrong chain/address, malformed proof, inventory overflow, cap exhaustion, close/cancel, curve cancellation recovery, and wind-down gating.
+Test direct and grant claims, duplicate indices, wrong chain/address, malformed proof, inventory overflow,
+distribution-specific grant-claim cap exhaustion, atomic parent-to-child accounting, curve migration/unwind/quarantine
+transitions, and wind-down gating.

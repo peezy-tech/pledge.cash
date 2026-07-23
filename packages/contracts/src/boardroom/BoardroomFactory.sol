@@ -3,6 +3,8 @@ pragma solidity ^0.8.30;
 
 import {LibClone} from "solady/utils/LibClone.sol";
 import {Boardroom} from "./Boardroom.sol";
+import {BoardroomControllerFactory} from "./BoardroomControllerFactory.sol";
+import {BoardroomMarketLogic} from "./BoardroomMarketLogic.sol";
 
 contract BoardroomFactory {
     address public immutable policyRegistry;
@@ -10,6 +12,8 @@ contract BoardroomFactory {
     address public immutable boardroomLogic;
     address public immutable redemptionPayoutLogic;
     address public immutable governanceLogic;
+    address public immutable controllerFactory;
+    address public immutable marketLogic;
 
     address[] public allBoardrooms;
     mapping(address => bool) public isBoardroom;
@@ -43,7 +47,9 @@ contract BoardroomFactory {
         wrappedNative = wrappedNative_;
         redemptionPayoutLogic = redemptionPayoutLogic_;
         governanceLogic = governanceLogic_;
-        boardroomLogic = address(new Boardroom(redemptionPayoutLogic, governanceLogic));
+        controllerFactory = address(new BoardroomControllerFactory(address(this)));
+        marketLogic = address(new BoardroomMarketLogic());
+        boardroomLogic = address(new Boardroom(redemptionPayoutLogic, governanceLogic, controllerFactory, marketLogic));
     }
 
     function createBoardroom(address owner, string calldata name, string calldata symbol, bytes32 salt)

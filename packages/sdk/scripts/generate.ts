@@ -19,12 +19,23 @@ const contracts = [
   ["AmmRouter", "packages/contracts/out/AmmRouter.sol/AmmRouter.json", "ammRouterAbi"],
   ["AssetPolicy", "packages/contracts/out/AssetPolicy.sol/AssetPolicy.json", "assetPolicyAbi"],
   ["Boardroom", "packages/contracts/out/Boardroom.sol/Boardroom.json", "boardroomAbi"],
+  [
+    "BoardroomController",
+    "packages/contracts/out/BoardroomController.sol/BoardroomController.json",
+    "boardroomControllerAbi",
+  ],
+  [
+    "BoardroomControllerFactory",
+    "packages/contracts/out/BoardroomControllerFactory.sol/BoardroomControllerFactory.json",
+    "boardroomControllerFactoryAbi",
+  ],
   ["BoardroomFactory", "packages/contracts/out/BoardroomFactory.sol/BoardroomFactory.json", "boardroomFactoryAbi"],
   [
     "BoardroomGovernanceLogic",
     "packages/contracts/out/BoardroomGovernanceLogic.sol/BoardroomGovernanceLogic.json",
     "boardroomGovernanceLogicAbi",
   ],
+  ["BoardroomMarketLogic", "packages/contracts/out/BoardroomMarketLogic.sol/BoardroomMarketLogic.json", "boardroomMarketLogicAbi"],
   [
     "BoardroomPolicyRegistry",
     "packages/contracts/out/BoardroomPolicyRegistry.sol/BoardroomPolicyRegistry.json",
@@ -84,7 +95,10 @@ const deploymentFields = [
   ["boardroomStatus", "string"],
   ["boardroomReason", "string"],
   ["boardroomFactory", "address"],
+  ["boardroomControllerFactory", "address"],
+  ["boardroomControllerLogic", "address"],
   ["boardroomGovernanceLogic", "address"],
+  ["boardroomMarketLogic", "address"],
   ["boardroomRedemptionPayout", "address"],
   ["boardroomLogic", "address"],
   ["boardroomPolicyRegistry", "address"],
@@ -138,7 +152,10 @@ const deploymentFields = [
   ["assetPolicyCodeHash", "string"],
   ["protocolFeeRouterCodeHash", "string"],
   ["boardroomFactoryCodeHash", "string"],
+  ["boardroomControllerFactoryCodeHash", "string"],
+  ["boardroomControllerCodeHash", "string"],
   ["boardroomGovernanceLogicCodeHash", "string"],
+  ["boardroomMarketLogicCodeHash", "string"],
   ["boardroomRedemptionPayoutCodeHash", "string"],
   ["boardroomLogicCodeHash", "string"],
   ["tokenGrantFactoryCodeHash", "string"],
@@ -168,7 +185,10 @@ const requiredTokenGrantDeploymentFields = [
 
 const requiredBoardroomDeploymentFields = [
   "boardroomFactory",
+  "boardroomControllerFactory",
+  "boardroomControllerLogic",
   "boardroomGovernanceLogic",
+  "boardroomMarketLogic",
   "boardroomRedemptionPayout",
   "boardroomLogic",
   "boardroomPolicyRegistry",
@@ -235,6 +255,16 @@ const requiredV4DeploymentFields = [
   "boardroomLogic",
 ] as const;
 
+const requiredV5DeploymentFields = [
+  ...requiredV4DeploymentFields,
+  "boardroomControllerFactory",
+  "boardroomControllerLogic",
+  "boardroomMarketLogic",
+  "boardroomControllerFactoryCodeHash",
+  "boardroomControllerCodeHash",
+  "boardroomMarketLogicCodeHash",
+] as const;
+
 function literal(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
@@ -282,6 +312,13 @@ function serializeDeployment(raw: string): string | undefined {
     const missingV4Fields = requiredV4DeploymentFields.filter((field) => propertyToken(raw, field) === undefined);
     if (missingV4Fields.length > 0) {
       throw new Error(`Deployment ${chainId} is deterministic v4 but is missing attestations (${missingV4Fields.join(", ")}).`);
+    }
+  }
+
+  if (parsed.deterministicDeploymentVersion === "pledge.cash.deterministic.v5" && parsed.status !== "pending") {
+    const missingV5Fields = requiredV5DeploymentFields.filter((field) => propertyToken(raw, field) === undefined);
+    if (missingV5Fields.length > 0) {
+      throw new Error(`Deployment ${chainId} is deterministic v5 but is missing attestations (${missingV5Fields.join(", ")}).`);
     }
   }
 

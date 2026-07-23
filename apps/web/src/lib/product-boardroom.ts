@@ -12,10 +12,8 @@ import {
 } from "@pledge.cash/sdk";
 import { getAbiItem, isAddress, type AbiEvent, type Hex, type PublicClient } from "viem";
 import {
-  PRODUCT_CATALOG_CHILD_READ_LIMIT,
   PRODUCT_DETAIL_CHILD_READ_LIMIT,
   readBoardroomCatalogSnapshot,
-  readBoardroomDistributionSnapshot,
   readBoardroomSnapshot,
   type BoardroomCatalogSnapshot,
 } from "./boardroom-snapshot";
@@ -200,7 +198,7 @@ type ProductBoardroomEventLog = {
   blockNumber?: bigint | null | undefined;
 };
 type ProductBoardroomEventAbi = typeof ammPoolAbi | typeof boardroomAbi | typeof fixedPriceSaleAbi | typeof migratingBondingCurveAbi;
-type ProductBoardroomEventName = "BoardroomDistributionRecorded" | "CurveBuy" | "CurveMigrated" | "CurveSell" | "FixedPricePurchase" | "Swap";
+type ProductBoardroomEventName = "CurveBuy" | "CurveMigrated" | "CurveSell" | "FixedPricePurchase" | "Swap";
 
 type HistoricalDistributionHydration = {
   error?: string | undefined;
@@ -270,10 +268,11 @@ export async function readProductBoardroomDashboard(
   input: {
     address: Address;
     catalog?: ProductBoardroomCatalogEntry[] | undefined;
+    deployment?: PledgeCashDeployment | undefined;
   } & ProductBoardroomHistoryReadOptions,
 ): Promise<ProductBoardroomDashboardState> {
   const [currentSnapshot, nativeBalance] = await Promise.all([
-    readBoardroomSnapshot(client, input.address),
+    readBoardroomSnapshot(client, input.address, input.deployment),
     client.getBalance({ address: input.address }),
   ]);
   const eventScan = createEventScanContext(input);
@@ -293,6 +292,7 @@ export async function readProductBoardroomDashboard(
   const currentPool = await readCatalogPool(client, catalogIdentity.pool ?? history?.pool);
   const historyErrors = uniqueMessages([
     hydration.error,
+    ...(snapshot.summaryWarnings ?? []),
     ...histories.map((entry) => entry.scanError),
   ]);
   const catalogTreasuryCash = catalogIdentity.cashToken
@@ -331,7 +331,11 @@ export async function readProductBoardroomCatalogPage(
   input: ProductBoardroomCatalogPageInput = {},
 ): Promise<ProductBoardroomCatalogPage> {
   if (!deployment?.boardroomFactory) return { entries: [], snapshotCount: 0, totalCount: 0 };
-  return await discoverProductBoardroomCatalogPage(client, deployment.boardroomFactory, input);
+  return await discoverProductBoardroomCatalogPage(
+    client,
+    { ...deployment, boardroomFactory: deployment.boardroomFactory },
+    input,
+  );
 }
 
 export function resolveProductBoardroomAddress(catalog: ProductBoardroomCatalogEntry[] = []): Address | undefined {
@@ -435,15 +439,15 @@ function addGrantAssets(labels: Map<Address, string>, grant: BoardroomGrantSnaps
 
 async function discoverProductBoardroomCatalogPage(
   client: ProductBoardroomClient,
-  factory: Address,
+  deployment: PledgeCashDeployment & { boardroomFactory: Address },
   input: ProductBoardroomCatalogPageInput,
 ): Promise<ProductBoardroomCatalogPage> {
-  const factoryPage = await readFactoryBoardroomPage(client, factory, input);
+  const factoryPage = await readFactoryBoardroomPage(client, deployment.boardroomFactory, input);
   const eventScan = createEventScanContext(input);
   const entries = await mapInBatches(
     uniqueAddresses(factoryPage.addresses),
     CATALOG_READ_CONCURRENCY,
-    async (address) => await readProductBoardroomCatalogEntryWithContext(client, address, eventScan),
+    async (address) => await readProductBoardroomCatalogEntryWithContext(client, address, eventScan, deployment),
   );
   return {
     entries,
@@ -492,17 +496,19 @@ export async function readProductBoardroomCatalogEntry(
   client: ProductBoardroomClient,
   address: Address,
   options: ProductBoardroomHistoryReadOptions = {},
+  deployment?: PledgeCashDeployment,
 ): Promise<ProductBoardroomCatalogEntry> {
-  return await readProductBoardroomCatalogEntryWithContext(client, address, createEventScanContext(options));
+  return await readProductBoardroomCatalogEntryWithContext(client, address, createEventScanContext(options), deployment);
 }
 
 async function readProductBoardroomCatalogEntryWithContext(
   client: ProductBoardroomClient,
   address: Address,
   eventScan: EventScanContext,
+  deployment?: PledgeCashDeployment,
 ): Promise<ProductBoardroomCatalogEntry> {
   try {
-    const currentSnapshot = await readBoardroomCatalogSnapshot(client, address);
+    const currentSnapshot = await readBoardroomCatalogSnapshot(client, address, deployment);
     const [hydration, boardroomStatus] = await Promise.all([
       hydrateCatalogHistoricalDistributions(client, currentSnapshot, eventScan),
       readCatalogBoardroomStatus(client, address),
@@ -718,37 +724,28 @@ function stateDerivedPartialHistory(
 }
 
 function currentStateCoverage(snapshot: BoardroomSnapshot): ProductBoardroomCurrentStateCoverage {
+  const activeGrantCount = safeCount(snapshot.activeGrantCount, "Active grant count");
+  const redeemableAssetCount = safeCount(snapshot.redeemableAssetCount, "Redeemable asset count");
   return {
-    distributions: childCoverage(
-      snapshot.issuedDistributions,
-      snapshot.distributionSummaries
-        .filter((distribution) => Boolean(distribution.state) && !distribution.error)
-        .map((distribution) => distribution.address),
+    distributions: countCoverage(
+      snapshot.distributionRecordCount,
+      snapshot.distributionSummaries.filter((distribution) => Boolean(distribution.state) && !distribution.error).length,
     ),
-    grants: childCoverage(
-      snapshot.issuedGrants,
-      snapshot.grantSummaries
-        .filter((grant) => Boolean(grant.state) && !grant.error)
-        .map((grant) => grant.address),
+    grants: countCoverage(
+      Math.max(snapshot.grantRecordCount ?? activeGrantCount, activeGrantCount),
+      snapshot.grantSummaries.filter((grant) => Boolean(grant.state) && !grant.error).length,
     ),
-    lockedLiquidity: childCoverage(
-      snapshot.lockedLiquidityPositions,
-      snapshot.lockedLiquiditySummaries
-        .filter((locker) => Boolean(locker.state) && !locker.error)
-        .map((locker) => locker.address),
+    lockedLiquidity: countCoverage(
+      snapshot.lockedLiquidityRecordCount,
+      snapshot.lockedLiquiditySummaries.filter((locker) => Boolean(locker.state) && !locker.error).length,
     ),
-    redeemableAssets: childCoverage(
-      snapshot.redeemableAssets,
-      snapshot.redeemableAssets.slice(-PRODUCT_DETAIL_CHILD_READ_LIMIT),
-    ),
+    redeemableAssets: countCoverage(redeemableAssetCount, snapshot.redeemableAssets.length),
   };
 }
 
-function childCoverage(expected: readonly Address[], shown: readonly Address[]): ProductBoardroomChildCoverage {
-  const shownKeys = new Set(shown.map((address) => address.toLowerCase()));
-  const shownCount = uniqueAddresses(expected).filter((address) => shownKeys.has(address.toLowerCase())).length;
-  const total = uniqueAddresses(expected).length;
-  return { complete: shownCount === total, shown: shownCount, total };
+function countCoverage(total: number, shown: number): ProductBoardroomChildCoverage {
+  const boundedShown = Math.min(total, shown);
+  return { complete: boundedShown === total, shown: boundedShown, total };
 }
 
 export async function readProductBoardroomHistory(
@@ -789,117 +786,26 @@ async function readProductBoardroomHistoriesWithContext(
 }
 
 async function hydrateHistoricalDistributions(
-  client: ProductBoardroomClient,
+  _client: ProductBoardroomClient,
   snapshot: BoardroomSnapshot,
   eventScan: EventScanContext,
 ): Promise<HistoricalDistributionHydration> {
-  let logs: ProductBoardroomEventLog[] | undefined;
-  try {
-    logs = await readEventLogs(client, snapshot.address, boardroomAbi, "BoardroomDistributionRecorded", eventScan);
-  } catch (error) {
-    eventScan.signal?.throwIfAborted();
-    return {
-      error: `Historical distribution scan failed: ${errorMessage(error)}`,
-      snapshot,
-    };
-  }
-  if (!logs) return { snapshot };
-  const recorded = uniqueAddresses(logs
-    .map((log) => addressArg(log.args, "distribution"))
-    .filter((address): address is Address => address !== undefined));
-  const allMissing = recorded.filter((address) =>
-    !snapshot.distributionSummaries.some((distribution) => sameAddress(distribution.address, address)));
-  if (allMissing.length === 0) return { snapshot };
-  const remainingCapacity = Math.max(0, PRODUCT_DETAIL_CHILD_READ_LIMIT - snapshot.distributionSummaries.length);
-  const missing = allMissing.slice(Math.max(0, allMissing.length - remainingCapacity));
-  const omittedCount = allMissing.length - missing.length;
-  const historical = await mapInBatches(
-    missing,
-    CATALOG_READ_CONCURRENCY,
-    async (distribution) => await readBoardroomDistributionSnapshot(client, distribution),
-  );
-  const reconstructionErrors = historical
-    .filter((distribution) => Boolean(distribution.error))
-    .map((distribution) => `${distribution.address}: ${distribution.error ?? "Unknown read failure"}`);
-  const errors = uniqueMessages([
-    omittedCount > 0
-      ? `Showing the newest ${PRODUCT_DETAIL_CHILD_READ_LIMIT.toString()} distributions; ${omittedCount.toString()} older historical ${omittedCount === 1 ? "record is" : "records are"} omitted from this browser view.`
-      : undefined,
-    reconstructionErrors.length > 0
-      ? `Historical distribution reconstruction failed: ${reconstructionErrors.join("; ")}`
-      : undefined,
-  ]);
-  return {
-    ...(errors.length > 0 ? { error: errors.join(" ") } : {}),
-    snapshot: {
-      ...snapshot,
-      distributionSummaries: [...snapshot.distributionSummaries, ...historical],
-    },
-  };
+  eventScan.signal?.throwIfAborted();
+  return { snapshot };
 }
 
 async function hydrateCatalogHistoricalDistributions(
-  client: ProductBoardroomClient,
+  _client: ProductBoardroomClient,
   snapshot: BoardroomCatalogSnapshot,
   eventScan: EventScanContext,
 ): Promise<{ error?: string | undefined; snapshot: BoardroomCatalogSnapshot }> {
-  let logs: ProductBoardroomEventLog[] | undefined;
-  try {
-    logs = await readEventLogs(client, snapshot.address, boardroomAbi, "BoardroomDistributionRecorded", eventScan);
-  } catch (error) {
-    eventScan.signal?.throwIfAborted();
-    return {
-      error: `Historical distribution scan failed: ${errorMessage(error)}`,
-      snapshot,
-    };
-  }
-  if (!logs) return { snapshot };
-
-  const recorded = uniqueAddresses(logs
-    .map((log) => addressArg(log.args, "distribution"))
-    .filter((address): address is Address => address !== undefined));
-  const known = new Set(snapshot.distributionSummaries.map((distribution) => distribution.address.toLowerCase()));
-  const missing: Address[] = [];
-  for (
-    let index = recorded.length - 1;
-    index >= 0 && snapshot.distributionSummaries.length + missing.length < PRODUCT_CATALOG_CHILD_READ_LIMIT;
-    index -= 1
-  ) {
-    const address = recorded[index];
-    if (!address || known.has(address.toLowerCase())) continue;
-    known.add(address.toLowerCase());
-    missing.push(address);
-  }
-
-  const historical = await mapInBatches(
-    missing,
-    CATALOG_READ_CONCURRENCY,
-    async (distribution) => await readBoardroomDistributionSnapshot(client, distribution),
-  );
-  const reconstructionErrors = historical
-    .filter((distribution) => Boolean(distribution.error))
-    .map((distribution) => `${distribution.address}: ${distribution.error ?? "Unknown read failure"}`);
-  const summaries = [...snapshot.distributionSummaries, ...historical];
-  const lifetimeCount = uniqueAddresses([
-    ...recorded,
-    ...summaries.map((distribution) => distribution.address),
-  ]).length;
-  const omittedCount = Math.max(0, lifetimeCount - summaries.length);
-  const errors = uniqueMessages([
-    omittedCount > 0
-      ? `Showing the newest ${summaries.length.toString()} of ${lifetimeCount.toString()} lifetime distributions; ${omittedCount.toString()} older ${omittedCount === 1 ? "record is" : "records are"} omitted from this Explore summary.`
-      : undefined,
-    reconstructionErrors.length > 0
-      ? `Historical distribution reconstruction failed: ${reconstructionErrors.join("; ")}`
-      : undefined,
-  ]);
+  eventScan.signal?.throwIfAborted();
+  const omitted = Math.max(0, snapshot.distributionCount - snapshot.distributionSummaries.length);
   return {
-    ...(errors.length > 0 ? { error: errors.join(" ") } : {}),
-    snapshot: {
-      ...snapshot,
-      distributionCount: Math.max(snapshot.distributionCount, lifetimeCount),
-      distributionSummaries: summaries,
-    },
+    ...(omitted > 0
+      ? { error: `Showing the newest ${snapshot.distributionSummaries.length.toString()} of ${snapshot.distributionCount.toString()} canonical factory distribution records; ${omitted.toString()} older records are omitted from this Explore summary.` }
+      : {}),
+    snapshot,
   };
 }
 

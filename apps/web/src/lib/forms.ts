@@ -158,6 +158,7 @@ export function defaultCurveMigrationForm(): CurveMigrationForm {
 
 export function defaultLockedLiquidityExitForm(): LockedLiquidityExitForm {
   return {
+    liquidity: "0",
     amountAMin: "0",
     amountBMin: "0",
     deadline: defaultDeadline(),
@@ -168,8 +169,6 @@ export function defaultWindDownForm(): WindDownForm {
   return {
     redeemableAsset: "",
     redeemShares: "0",
-    redeemRecipient: "",
-    minAmountsOut: "",
     claimAsset: "",
     claimRecipient: "",
     claimMinAmount: "0",

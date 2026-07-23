@@ -11,8 +11,8 @@ Network support is not the same as a live protocol deployment. The app can offer
 
 | Network | Chain id | Current artifact | What users should do |
 | --- | ---: | --- | --- |
-| HyperEVM testnet | `998` | **Pending** — authority-hardened deterministic v4 has not been broadcast | Do not submit pledge.cash protocol transactions |
-| Monad testnet | `10143` | **Pending** — authority-hardened deterministic v4 has not been broadcast | Do not submit pledge.cash protocol transactions |
+| HyperEVM testnet | `998` | **Pending** — Boardroom-controller deterministic v5 has not been broadcast | Do not submit pledge.cash protocol transactions |
+| Monad testnet | `10143` | **Pending** — Boardroom-controller deterministic v5 has not been broadcast | Do not submit pledge.cash protocol transactions |
 | Local Anvil | `31337` | Generated locally and ignored by Git | Use only for the local scenario that produced it |
 | Mainnet | — | No supported deployment | Treat any claimed mainnet address as unsupported |
 
@@ -44,7 +44,8 @@ A usable deployment artifact binds:
 - root factory, policy, helper, router, and fee addresses;
 - wrapped-native address;
 - ownership, governance, treasury, and fee-manager roles;
-- immutable wiring between Boardroom, grant, distribution, AMM, and liquidity factories;
+- immutable reciprocal wiring between BoardroomFactory, Boardroom, ControllerFactory, controller implementation,
+  governance, market, and payout helpers, plus grant, distribution, AMM, and liquidity factories;
 - runtime code hashes and live post-broadcast verification.
 
 A subsystem marked pending is unavailable. The app should fail closed instead of reusing stale addresses.

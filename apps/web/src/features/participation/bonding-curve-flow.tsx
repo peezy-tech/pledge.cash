@@ -272,7 +272,7 @@ export function BondingCurveFlow({
       <FlowHeading
         eyebrow="Live onchain price"
         title="Trade on the bonding curve"
-        description="The quote changes with curve inventory. Buy before migration, or sell only the tokens this wallet acquired from this curve."
+        description="The quote changes with curve inventory. Sell rights follow transferable shares and are bounded by the curve’s one global outstanding-share liability."
       />
       <div aria-label="Bonding curve direction" className="mt-5 inline-flex border-b border-zinc-800" role="group">
         {(["buy", "sell"] as const).map((nextMode) => (
@@ -331,6 +331,11 @@ export function BondingCurveFlow({
             value: mode === "buy"
               ? formatTokenAmount(state.remainingSaleShares, shareMetadata)
               : sellQuote ? formatTokenAmount(sellQuote.sellableShares, shareMetadata) : "Not loaded",
+          },
+          {
+            label: "Outstanding curve liability",
+            value: formatTokenAmount(state.outstandingCurveShareLiability, shareMetadata),
+            detail: "Global transferable shares that remain sellable against this curve",
           },
         ]}
       />
@@ -494,7 +499,7 @@ function prepareBondingCurveSellAction(
   intent: BondingCurveActionIntent,
   nowSeconds: number,
 ): Pick<PreparedBondingCurveAction, "kind" | "request"> {
-  if (intent.shareAmount > quote.sellableShares) throw new Error("This wallet no longer has enough curve-acquired tokens to sell.");
+  if (intent.shareAmount > quote.sellableShares) throw new Error("This wallet no longer has enough currently sellable project tokens.");
   if (intent.shareAmount > quote.shareBalance) throw new Error("The wallet project-token balance is now too low for this trade.");
   const minQuoteOut = minimumWithSlippage(quote.quoteOut, intent.slippageBps);
   const kind: BondingCurveActionKind = quote.shareAllowance < intent.shareAmount ? "approve" : "trade";
@@ -608,7 +613,7 @@ function curveBlocker(input: {
     if (input.buyQuote.quoteBalance < input.maximumQuoteIn) return "The wallet’s quote-token balance does not cover the maximum payment.";
   } else {
     if (!input.sellQuote || input.minimumQuoteOut === undefined) return "A current sell quote is required.";
-    if (input.amount > input.sellQuote.sellableShares) return "This wallet did not acquire enough sellable tokens from this curve.";
+    if (input.amount > input.sellQuote.sellableShares) return "This wallet has fewer currently sellable project tokens than requested.";
     if (input.amount > input.sellQuote.shareBalance) return "The wallet’s project-token balance is too low for this sale.";
   }
   return undefined;

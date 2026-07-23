@@ -153,7 +153,12 @@ function projectContextRole(
 } {
   if (!account) return { roleLabel: "Read-only visitor", roleTone: "muted" };
   if (!dashboard?.snapshot) return { roleLabel: "Wallet connected", roleTone: "muted" };
-  if (sameAddress(account, dashboard.snapshot.owner)) return { roleLabel: "Owner wallet", roleTone: "default" };
+  if (dashboard.snapshot.launched && sameAddress(account, dashboard.snapshot.proposer)) {
+    return { roleLabel: "Controller proposer", roleTone: "default" };
+  }
+  if (!dashboard.snapshot.launched && sameAddress(account, dashboard.snapshot.owner)) {
+    return { roleLabel: "Owner wallet", roleTone: "default" };
+  }
   if (dashboard.snapshot.grantSummaries.some((grant) => sameAddress(grant.state?.holder, account))) {
     return { roleLabel: "Grant holder", roleTone: "default" };
   }

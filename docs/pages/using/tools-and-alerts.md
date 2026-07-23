@@ -27,7 +27,9 @@ If an artifact says `pending`, missing contract addresses are intentional. Do no
 
 [Open Governance alerts](../../settings/alerts)
 
-Alerts are available only when the app build has the optional Sentinel API configured. Without it, alert URLs return to `Explore`. Sentinel is an offchain notification service; it does not queue, veto, execute, or change onchain authority.
+Alerts are available only when the app build has the optional Sentinel API configured. Without it, alert URLs return
+to `Explore`. Sentinel is an offchain notification service; it does not schedule, veto, execute, or change onchain
+authority.
 
 Sentinel currently verifies EOA wallet signatures only. ERC-1271 smart-account signatures are not supported for SIWE
 sign-in or wallet linking. That limitation applies to Sentinel identity—not to ordinary read-only use of project pages.

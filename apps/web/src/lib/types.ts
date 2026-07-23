@@ -101,6 +101,14 @@ export type BoardroomLockedLiquiditySnapshot = {
 };
 
 export type BoardroomSnapshot = BoardroomState & {
+  /** Bounded canonical provenance records for display only; lifecycle safety uses the scalar active counts. */
+  issuedGrants: Address[];
+  issuedDistributions: Address[];
+  lockedLiquidityPositions: Address[];
+  redeemableAssets: Address[];
+  grantRecordCount?: number | undefined;
+  distributionRecordCount: number;
+  lockedLiquidityRecordCount: number;
   shareTokenMetadata?: TokenMetadata | undefined;
   summaryWarnings?: string[] | undefined;
   grantSummaries: BoardroomGrantSnapshot[];
@@ -186,6 +194,7 @@ export type CurveMigrationForm = {
 };
 
 export type LockedLiquidityExitForm = {
+  liquidity: string;
   amountAMin: string;
   amountBMin: string;
   deadline: string;
@@ -194,8 +203,6 @@ export type LockedLiquidityExitForm = {
 export type WindDownForm = {
   redeemableAsset: string;
   redeemShares: string;
-  redeemRecipient: string;
-  minAmountsOut: string;
   claimAsset: string;
   claimRecipient: string;
   claimMinAmount: string;

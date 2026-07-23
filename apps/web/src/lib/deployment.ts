@@ -1,4 +1,13 @@
-import type { Address, PledgeCashDeployment } from "@pledge.cash/sdk";
+import {
+  boardroomControlReleaseSupport,
+  SECURE_BOARDROOM_RELEASE_VERSION,
+  type Address,
+  type BoardroomControlReleaseSupport,
+  type PledgeCashDeployment,
+} from "@pledge.cash/sdk";
+
+export { boardroomControlReleaseSupport, SECURE_BOARDROOM_RELEASE_VERSION };
+export type { BoardroomControlReleaseSupport };
 
 const STRING_DEPLOYMENT_FIELDS = [
   "status",
@@ -12,7 +21,10 @@ const STRING_DEPLOYMENT_FIELDS = [
   "assetPolicyCodeHash",
   "protocolFeeRouterCodeHash",
   "boardroomFactoryCodeHash",
+  "boardroomControllerFactoryCodeHash",
+  "boardroomControllerCodeHash",
   "boardroomGovernanceLogicCodeHash",
+  "boardroomMarketLogicCodeHash",
   "boardroomRedemptionPayoutCodeHash",
   "boardroomLogicCodeHash",
   "tokenGrantFactoryCodeHash",
@@ -30,7 +42,10 @@ const ADDRESS_DEPLOYMENT_FIELDS = [
   "deterministicDeployerOwner",
   "create2Factory",
   "boardroomFactory",
+  "boardroomControllerFactory",
+  "boardroomControllerLogic",
   "boardroomGovernanceLogic",
+  "boardroomMarketLogic",
   "boardroomRedemptionPayout",
   "boardroomLogic",
   "boardroomPolicyRegistry",
@@ -83,7 +98,6 @@ const BOOLEAN_DEPLOYMENT_FIELDS = [
 ] as const;
 const BIGINT_DEPLOYMENT_FIELDS = ["creationFee", "deploymentTimestamp"] as const;
 const JSON_PRIMITIVE_TOKEN_PATTERN = '"([^"\\\\]|\\\\.)*"|-?\\d+|true|false|null';
-
 export function deploymentText(deployment: PledgeCashDeployment | undefined): string {
   if (!deployment) return "{}";
   return JSON.stringify(deployment, (_, value: unknown) => (typeof value === "bigint" ? value.toString() : value), 2);

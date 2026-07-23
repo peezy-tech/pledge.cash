@@ -132,6 +132,7 @@ for required in \
   protocolGovernance protocolTreasury protocolFeeRouter protocolFeeRouterOwner protocolFeeRouterRecipient \
   boardroomPolicyRegistry policyRegistryOwner assetPolicy assetPolicyOwner boardroomFactory \
   boardroomGovernanceLogic boardroomRedemptionPayout boardroomLogic \
+  boardroomControllerFactory boardroomControllerLogic boardroomMarketLogic \
   tokenGrantFactory factoryOwner tokenGrantFeeRecipient tokenGrantLogic creationFee \
   ammFactory ammFactoryOwner ammFeeManager ammProtocolFeeRecipient ammLiquidityRouter \
   ammReservationManager ammRouter wrappedNative \
@@ -192,7 +193,7 @@ fi
 if field_exists deterministicDeployment; then
   expect_equal "deterministic deployment flag" "true" "$(field deterministicDeployment)"
   require_field deterministicDeploymentVersion
-  expect_equal "deterministic deployment version" "pledge.cash.deterministic.v4" "$(field deterministicDeploymentVersion)"
+  expect_equal "deterministic deployment version" "pledge.cash.deterministic.v5" "$(field deterministicDeploymentVersion)"
   require_field deterministicDeployer
   require_field create2Factory
 
@@ -223,6 +224,9 @@ if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactor
   require_field boardroomGovernanceLogic
   require_field boardroomRedemptionPayout
   require_field boardroomLogic
+  require_field boardroomControllerFactory
+  require_field boardroomControllerLogic
+  require_field boardroomMarketLogic
   require_field boardroomPolicyRegistry
   require_field assetPolicy
   require_field wrappedNative
@@ -254,10 +258,16 @@ if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactor
   boardroom_governance_logic="$(field boardroomGovernanceLogic)"
   boardroom_redemption_payout="$(field boardroomRedemptionPayout)"
   boardroom_logic="$(field boardroomLogic)"
+  boardroom_controller_factory="$(field boardroomControllerFactory)"
+  boardroom_controller_logic="$(field boardroomControllerLogic)"
+  boardroom_market_logic="$(field boardroomMarketLogic)"
   require_code "BoardroomFactory" "$boardroom_factory"
   require_code "BoardroomGovernanceLogic" "$boardroom_governance_logic"
   require_code "BoardroomRedemptionPayout" "$boardroom_redemption_payout"
   require_code "Boardroom implementation" "$boardroom_logic"
+  require_code "BoardroomControllerFactory" "$boardroom_controller_factory"
+  require_code "BoardroomController implementation" "$boardroom_controller_logic"
+  require_code "BoardroomMarketLogic" "$boardroom_market_logic"
   require_code "BoardroomPolicyRegistry" "$policy_registry"
   require_code "AssetPolicy" "$asset_policy"
   require_code "DistributionFactory" "$distribution_factory"
@@ -284,6 +294,30 @@ if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactor
   actual_boardroom_factory_logic="$(call_address "$boardroom_factory" "boardroomLogic()(address)")"
   expect_address_equal "BoardroomFactory boardroomLogic" "$boardroom_logic" "$actual_boardroom_factory_logic"
 
+  actual_boardroom_factory_controller_factory="$(call_address "$boardroom_factory" "controllerFactory()(address)")"
+  expect_address_equal \
+    "BoardroomFactory controllerFactory" \
+    "$boardroom_controller_factory" \
+    "$actual_boardroom_factory_controller_factory"
+
+  actual_boardroom_factory_market_logic="$(call_address "$boardroom_factory" "marketLogic()(address)")"
+  expect_address_equal \
+    "BoardroomFactory marketLogic" \
+    "$boardroom_market_logic" \
+    "$actual_boardroom_factory_market_logic"
+
+  actual_controller_factory_boardroom_factory="$(call_address "$boardroom_controller_factory" "boardroomFactory()(address)")"
+  expect_address_equal \
+    "BoardroomControllerFactory BoardroomFactory" \
+    "$boardroom_factory" \
+    "$actual_controller_factory_boardroom_factory"
+
+  actual_controller_implementation="$(call_address "$boardroom_controller_factory" "controllerImplementation()(address)")"
+  expect_address_equal \
+    "BoardroomControllerFactory controllerImplementation" \
+    "$boardroom_controller_logic" \
+    "$actual_controller_implementation"
+
   actual_boardroom_governance_logic="$(call_address "$boardroom_logic" "governanceLogic()(address)")"
   expect_address_equal \
     "Boardroom implementation governanceLogic" \
@@ -295,6 +329,18 @@ if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactor
     "Boardroom implementation redemptionPayoutLogic" \
     "$boardroom_redemption_payout" \
     "$actual_boardroom_redemption_payout"
+
+  actual_boardroom_controller_factory="$(call_address "$boardroom_logic" "controllerFactory()(address)")"
+  expect_address_equal \
+    "Boardroom implementation controllerFactory" \
+    "$boardroom_controller_factory" \
+    "$actual_boardroom_controller_factory"
+
+  actual_boardroom_market_logic="$(call_address "$boardroom_logic" "marketLogic()(address)")"
+  expect_address_equal \
+    "Boardroom implementation marketLogic" \
+    "$boardroom_market_logic" \
+    "$actual_boardroom_market_logic"
 
   actual_registry_owner="$(call_address "$policy_registry" "owner()(address)")"
   expect_address_equal "BoardroomPolicyRegistry owner" "$(field policyRegistryOwner)" "$actual_registry_owner"
@@ -433,6 +479,9 @@ require_code_hash "BoardroomFactory" "$(field boardroomFactory)" boardroomFactor
 require_code_hash "BoardroomGovernanceLogic" "$(field boardroomGovernanceLogic)" boardroomGovernanceLogicCodeHash
 require_code_hash "BoardroomRedemptionPayout" "$(field boardroomRedemptionPayout)" boardroomRedemptionPayoutCodeHash
 require_code_hash "Boardroom implementation" "$(field boardroomLogic)" boardroomLogicCodeHash
+require_code_hash "BoardroomControllerFactory" "$(field boardroomControllerFactory)" boardroomControllerFactoryCodeHash
+require_code_hash "BoardroomController implementation" "$(field boardroomControllerLogic)" boardroomControllerCodeHash
+require_code_hash "BoardroomMarketLogic" "$(field boardroomMarketLogic)" boardroomMarketLogicCodeHash
 require_code_hash "TokenGrantFactory" "$(field tokenGrantFactory)" tokenGrantFactoryCodeHash
 require_code_hash "AmmFactory" "$(field ammFactory)" ammFactoryCodeHash
 require_code_hash "AmmRouter" "$(field ammRouter)" ammRouterCodeHash

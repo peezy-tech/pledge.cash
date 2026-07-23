@@ -20,6 +20,8 @@ interface ITokenGrantBoardroomFactory {
 }
 
 interface ITokenGrantBoardroomAssetRegistry {
+    function shareToken() external view returns (address);
+
     function reserveRedeemableAsset(address asset) external;
 }
 
@@ -239,8 +241,6 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
         return _isAuthorizedLifecycleCall(boardroom, target, selector);
     }
 
-    function grantSlotReleaseForLifecycleCall(address, address, bytes4) external pure returns (address distribution) {}
-
     function isCanonicalBoardroom(address account) public view returns (bool) {
         return ITokenGrantBoardroomFactory(boardroomFactory).isBoardroom(account);
     }
@@ -340,8 +340,14 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
             revert InvalidCreationFeePayment(fee, msg.value);
         }
         _requireBoardroomGrantExpiry(input.issuer, input.expiry);
-        if (isCanonicalBoardroom(input.issuer) && input.paymentToken != address(0)) {
-            ITokenGrantBoardroomAssetRegistry(input.issuer).reserveRedeemableAsset(input.paymentToken);
+        // Distribution children are registered atomically by their canonical parent callback.
+        if (input.funder == input.issuer && isCanonicalBoardroom(input.issuer)) {
+            ITokenGrantBoardroomAssetRegistry registry = ITokenGrantBoardroomAssetRegistry(input.issuer);
+            address shares = registry.shareToken();
+            if (input.token != shares) registry.reserveRedeemableAsset(input.token);
+            if (input.paymentToken != address(0) && input.paymentToken != input.token) {
+                registry.reserveRedeemableAsset(input.paymentToken);
+            }
         }
 
         grant = LibClone.cloneDeterministic(tokenGrantLogic, _deploymentSalt(input.issuer, input.salt));

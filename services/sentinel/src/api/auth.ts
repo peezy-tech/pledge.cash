@@ -1,6 +1,9 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 
+import type { BoardroomControlChainReader } from "../chain/boardroom-control";
+import type { BoardroomControlStore } from "./boardroom-control-store";
+
 import {
   AuthCapabilitiesResponseSchema,
   AuthMeResponseSchema,
@@ -126,6 +129,10 @@ export type RateLimitConfig = {
 
 export type SentinelApiDeps = {
   readonly auth: AuthAdapter;
+  readonly boardroomControl?: {
+    readonly chain: BoardroomControlChainReader;
+    readonly store: BoardroomControlStore;
+  };
   readonly config: ApiConfig;
   readonly generateLinkCode?: () => string;
   readonly generateNonce?: () => string;

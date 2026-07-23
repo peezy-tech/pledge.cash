@@ -953,7 +953,7 @@ describe("web app shell", () => {
 
     expect(canRunGrantIssuerActions(oldGrant.issuer, grant, {
       boardroom,
-      executor: oldGrant.issuer,
+      proposer: oldGrant.issuer,
       launched: false,
       owner: oldGrant.issuer,
       status: 0,
@@ -961,7 +961,7 @@ describe("web app shell", () => {
     expect(
       canRunGrantIssuerActions("0x5000000000000000000000000000000000000000", grant, {
         boardroom,
-        executor: oldGrant.issuer,
+        proposer: oldGrant.issuer,
         launched: false,
         owner: oldGrant.issuer,
         status: 0,
@@ -969,12 +969,12 @@ describe("web app shell", () => {
     ).toBe(false);
   });
 
-  test("moves Boardroom grant issuer controls to the launched executor", () => {
+  test("moves Boardroom grant issuer controls to the launched controller proposer", () => {
     const grant = boardroomSnapshot.grantSummaries[0].state;
-    const executor = "0x6000000000000000000000000000000000000000";
-    const access = { boardroom, executor, launched: true, owner: oldGrant.issuer, status: 0 };
+    const proposer = "0x6000000000000000000000000000000000000000";
+    const access = { boardroom, proposer, launched: true, owner: oldGrant.issuer, status: 0 };
 
-    expect(canRunGrantIssuerActions(executor, grant, access)).toBe(true);
+    expect(canRunGrantIssuerActions(proposer, grant, access)).toBe(true);
     expect(canRunGrantIssuerActions(oldGrant.issuer, grant, access)).toBe(false);
   });
 
@@ -1019,7 +1019,7 @@ describe("web app shell", () => {
   test("allows permissionless Boardroom grant cleanup during wind-down", () => {
     const grant = boardroomSnapshot.grantSummaries[0].state;
     const observer = "0x5000000000000000000000000000000000000000";
-    const access = { boardroom, executor: oldGrant.issuer, launched: true, owner: oldGrant.issuer, status: 1 };
+    const access = { boardroom, proposer: oldGrant.issuer, launched: true, owner: oldGrant.issuer, status: 1 };
 
     expect(canRunGrantIssuerActions(observer, grant, access)).toBe(true);
   });
@@ -1193,7 +1193,7 @@ describe("web app shell", () => {
     expect(html).toContain("Locked Liquidity");
     expect(html).toContain("Wind-Down");
     expect(html).toContain("Winding down");
-    expect(html).toContain("Open blockers");
+    expect(html).toContain("Loaded blocker details");
     expect(html).toContain("Vesting schedule");
     expect(html).toContain("Settleable now");
     expect(html).toContain("Use Sale");

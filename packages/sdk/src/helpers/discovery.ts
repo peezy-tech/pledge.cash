@@ -50,7 +50,7 @@ const grantClosedEvent = getAbiItem({ abi: tokenGrantFactoryAbi, name: "GrantClo
 const transferEvent = getAbiItem({ abi: tokenGrantFactoryAbi, name: "Transfer" });
 const boardroomCreatedEvent = getAbiItem({ abi: boardroomFactoryAbi, name: "BoardroomCreated" });
 const distributionCreatedEvent = getAbiItem({ abi: distributionFactoryAbi, name: "DistributionCreated" });
-const lockedLiquidityCreatedEvent = getAbiItem({ abi: lockedLiquidityFactoryAbi, name: "LockedLiquidityCreated" });
+const lockedLiquidityCreatedEvent = getAbiItem({ abi: lockedLiquidityFactoryAbi, name: "ProtocolLiquidityCreated" });
 const poolCreatedEvent = getAbiItem({ abi: ammFactoryAbi, name: "PoolCreated" });
 
 export async function queryGrantHistory(

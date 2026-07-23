@@ -13,7 +13,7 @@ Studio is the operator workspace. A Boardroom is the project account, share-toke
 
 - A supported network with a current BoardroomFactory deployment.
 - An installed, unlocked browser-injected wallet with native gas token.
-- A durable owner address and an intended governance executor address.
+- A durable prelaunch owner, intended controller proposer, and named protection staker.
 - A project token name and symbol, deterministic salt, and supply plan.
 - For grants, sales, curves, airdrops, or liquidity: supported ERC20 addresses, quantities, schedules, pricing, and risk limits.
 - A plan for treasury assets, staker protections, wind-down, and recovery before taking funds.
@@ -41,7 +41,7 @@ Before governance launch, the owner can mint project shares and execute policy-c
 4. Transfer treasury assets to the Boardroom through deliberate, traceable transactions.
 5. Verify **Transparency** after every change. Token total supply and Boardroom-held inventory are different values.
 
-Do not send arbitrary assets to the Boardroom and assume they will become redeemable. The redemption basket is explicitly admitted and bounded.
+Do not send arbitrary assets to the Boardroom and assume they will become redeemable. The redemption basket is explicitly admitted and later processed in bounded pages; the append-only registry itself is not a protocol capacity ceiling.
 
 ## 3. Create obligations
 
@@ -49,9 +49,11 @@ Studio can coordinate these canonical modules while the Boardroom is active:
 
 - **Grant:** approve grant-token escrow, then create an escrow-backed schedule. Paid grants also admit their payment token as a potential treasury asset.
 - **Fixed-price sale:** approve project-share inventory, then create a sale whose buyer payments go directly to the Boardroom.
-- **Merkle airdrop:** approve project-share inventory, publish a root and claim window, and reserve a bounded number of grant-claim slots.
+- **Merkle airdrop:** approve project-share inventory and publish a root, claim window, and distribution-specific maximum grant-claim count. There is no global Boardroom grant-slot capacity.
 - **Migrating curve:** approve sale plus migration inventory, configure quote economics, and reserve the future locker and AMM initialization path.
-- **Locked liquidity:** approve both assets and create a Boardroom-owned LP position whose principal cannot exit before wind-down.
+- **Locked liquidity:** approve both assets and create the one permanent Boardroom pool/locker pair. Liquidity may be
+  added repeatedly; after launch Active removals require delayed controller governance and always return assets to the
+  Boardroom, while WindingDown permits a permissionless full exit.
 
 Most creation paths are batches. Every approval, target, policy, amount, salt, time, and slippage bound must match the intended module. Record predicted child addresses before submitting.
 
@@ -59,22 +61,27 @@ See [Distributions and liquidity](../understand/distributions-and-liquidity), [G
 
 ## 4. Operate the active project
 
-- Monitor open inventory, claim windows, curve reserves, sell rights, grant expiries, LP fees, and bounded obligation slots.
+- Monitor open inventory, claim windows, curve reserves, global curve liability, grant expiries, LP fees, scalar
+  obligation counts, and bounded discovery pages.
 - Close or cancel obsolete sales and airdrops so unused inventory returns to the Boardroom.
-- Migrate a ready curve only while the Boardroom remains active and with protected two-sided liquidity minima.
+- Do not use curve terminal paths until the approved lifetime, migration-price, unwind, and quarantine policies are
+  implemented and verified.
 - Claim locked-liquidity fees to the Boardroom where appropriate.
-- Prune closed obligations so they stop consuming bounded active capacity.
+- Prune closed obligations to decrement active counts while preserving permanent provenance.
 - Keep Sentinel wallet coverage, Boardroom subscriptions, severity thresholds, and delivery channels current, but never treat an alert as onchain authority.
 
-For a migrating curve, graduation latches and freezes trading. Migration and cancellation both return remaining
-canonical shares exactly. Each terminal path returns quote remainder through a bounded best-effort path; a hostile quote
-token can leave a shortfall tracked in the closed curve for retry only to the Boardroom.
+For the singleton curve, sell rights follow transferable shares through one global liability. Graduation currently
+freezes trading, but cancellation/expiry unwind, permissionless migration, and quarantined-quote disposition are still
+decision-gated. A stranded-quote curve remains open and recovery fails closed.
 
 ## 5. Governance launch boundary
 
-**Secure governance launch is currently unavailable for legacy Boardrooms in the app.** Their permanent `launch(uint256)` call does not bind the expected executor in calldata. A pending owner transaction could change the executor before launch mines, so pledge.cash refuses to submit or certify that transition.
+Launch is available only for a verified v5 Boardroom. Review the proposer, predicted generation-1 controller, named
+protection staker, reward pool, redemption-excess recipient, delays, grace period, and generation in calldata. The first
+controller is deployed only inside launch and every mismatch reverts atomically.
 
-Do not bypass this warning merely to complete a checklist. Leave the Boardroom in pre-launch owner governance until a contract version makes expected executor mismatch revert. Existing Boardrooms that are already launched can still expose their delayed governance state and actions.
+Legacy and unknown versions remain readable but fail closed for launch, controller writes, and Boardroom-control
+claims. No public v5 artifact is currently broadcast.
 
 Read [Govern a project](govern-a-project) for the launched state machine.
 

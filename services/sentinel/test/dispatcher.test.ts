@@ -119,20 +119,26 @@ function makeOutboxRow(input: Partial<OutboxRow> = {}): OutboxRow {
     channelId: "00000000-0000-4000-8000-000000000002",
     channelType: "telegram",
     createdAt: now,
-    dedupeKey: "998:0xabc:queued:telegram:00000000-0000-4000-8000-000000000002",
-    event: "queued",
+    dedupeKey: "998:0xabc:scheduled:telegram:00000000-0000-4000-8000-000000000002",
+    event: "scheduled",
     externalId: null,
     id: "00000000-0000-4000-8000-000000000003",
     lastError: null,
     nextAttemptAt: now,
     payload: {
       action: {
-        actionHash: "0x0000000000000000000000000000000000000000000000000000000000000abc",
+        operationId: "0x0000000000000000000000000000000000000000000000000000000000000abc",
         boardroom: "0x0000000000000000000000000000000000000b0a",
+        boardroomEpoch: "1",
         chainId: 998,
+        configurationEpoch: "1",
+        controller: "0x000000000000000000000000000000000000c011",
+        controllerGeneration: "1",
         eta: "2026-07-10T00:00:00.000Z",
         id: "00000000-0000-4000-8000-000000000001",
-        status: "queued"
+        operationKind: "boardroom",
+        proposer: "0x0000000000000000000000000000000000000a11",
+        status: "scheduled"
       }
     },
     sentAt: null,

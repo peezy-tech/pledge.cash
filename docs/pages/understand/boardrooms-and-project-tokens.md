@@ -1,60 +1,57 @@
 ---
 title: Boardrooms and project tokens
-description: Understand how a Boardroom combines a project treasury, share-token issuer, policy account, and lifecycle coordinator.
+description: Understand how a Boardroom combines a project treasury, share-token issuer, policy gateway, obligations, singleton markets, and redemptions.
 ---
 
 # Boardrooms and project tokens
 
-A Boardroom is a project-owned onchain account created by the canonical BoardroomFactory. It creates one ERC20 share token and coordinates treasury execution, grants, distributions, locked liquidity, governance, wind-down, and redemptions.
+A Boardroom is a canonical project account created by `BoardroomFactory`. It creates one ERC20 share token and
+coordinates treasury execution, obligations, singleton primary-market and liquidity state, governance, wind-down,
+snapshotting, and redemptions.
 
-## What the project token represents
+## Token accounting
 
-The Boardroom alone can mint or burn its share token. Before governance launch, only the owner can cause minting. Minting stops permanently when wind-down begins.
+The Boardroom alone can authorize minting or burning its share token. Before launch, the owner can cause minting through
+the policy gateway. Minting stops when wind-down begins.
 
-The token has two different accounting roles:
+- Governance uses current and previous-block active stake divided by governance-eligible circulating supply.
+- Redemption uses the frozen economic share supply and asset balances.
 
-- **Governance:** active stake at the current and previous block can veto delayed actions or start wind-down. The threshold denominator is governance-eligible circulating supply; liquid balances and cooling stake have no power.
-- **Redemption:** economic share ownership participates in the final asset snapshot. Governance custody exclusions do not reduce redemption supply.
-
-A token balance therefore does not automatically mean that balance has immediate governance power, and governance-eligible supply is not the same as total supply.
+A liquid token balance therefore does not imply immediate governance power.
 
 ## What the Boardroom controls
 
-- its project-share supply;
-- admitted treasury assets;
-- policy-checked external calls;
-- project-issued grants;
-- fixed sales, airdrops, and migrating curves;
-- Boardroom-owned locked liquidity;
-- delayed governance after launch;
-- wind-down cleanup and the redemption snapshot.
+- share supply and Boardroom-originated primary releases;
+- admitted treasury assets and dependency counts;
+- policy-checked calls;
+- canonical grants, distributions, and one reward pool;
+- one lifetime bonding curve and permanent quote identity;
+- at most one canonical liquidity locker and pool;
+- external delayed governance after launch;
+- bounded wind-down cleanup, asset snapshotting, and redemptions.
 
-Module factories record obligations so the Boardroom cannot open redemptions while a live commitment may still return assets or require payment.
+Obligations use canonical mappings, scalar counts, permanent provenance, and permissionless bounded pruning. Factory
+discovery is append-only and paginated; it does not cap concurrent protocol commitments.
 
 ## Lifecycle
 
-1. **Active, pre-launch:** the owner mints and executes policy-checked calls directly.
-2. **Active, launched:** the executor queues delayed actions; active stakers gain veto and wind-down protections.
-3. **Winding down:** new issuance, fixed-price buys, airdrop claims, curve buys/sells, and curve migration stop while
-   obligations close and assets are prepared. An already-created public AMM pool is independent of Boardroom lifecycle;
-   its permissionless swaps and liquidity actions can continue.
-4. **Redemptions open:** shares burn for fixed snapshot entitlements. Owner execution is closed.
+1. **Active, pre-launch:** owner executes policy-checked calls; no controller exists.
+2. **Active, launched:** the external controller proposer schedules delayed operations; anyone executes ready operations.
+3. **Winding down:** new commitments and liquidity mutation stop; obligations and singleton liquidity close.
+4. **Snapshotting:** asset registry length, balances, and redemption supply are frozen and processed in bounded pages.
+5. **Redemptions open:** holders burn shares for frozen per-asset entitlements; ordinary governance is closed.
 
-These transitions are one-way. See [Governance and staker protections](governance-and-holder-protections) and [Treasury obligations and redemptions](treasury-obligations-and-redemptions).
+Transitions are one-way. Starting wind-down invalidates earlier controller operations in constant time.
 
 ## Canonical identity
 
-An ERC20 that calls itself a project token is not enough. The current app verifies the Boardroom through the selected
-deployment's BoardroomFactory and uses the share-token address reported by that verified Boardroom. It does not yet make
-a separate reverse `BoardroomToken.boardroom()` read in the project-route check; verify that reciprocal authority
-directly when independent token provenance matters. Child grants, distributions, and lockers have their own links.
+Verify the selected deployment version and code hashes, `BoardroomFactory.isBoardroom`, the Boardroom-reported share
+token, and the token's reciprocal Boardroom reference. Verify child factory relationships separately. An ERC20 name,
+symbol, copied address, or Sentinel record is not canonical identity.
 
-Read [Canonical identity](../reference/canonical-identity) before relying on a copied contract address.
+## Release boundary
 
-## Important limits
-
-- Boardroom arrays and batches are bounded.
-- Supported assets must satisfy the protocol's read and exact-transfer assumptions.
-- Raw native value is normalized to the canonical wrapped-native token for wind-down.
-- A token name, symbol, or Sentinel alert cannot change ownership, supply, policy, or lifecycle state.
-- Current legacy Boardrooms cannot be launched safely through the app; see [Govern a project](../guides/govern-a-project).
+The v5 candidate is not deployed on mainnet. Its approved curve policy uses a 90-day maximum lifetime, seven-day
+migration grace, 30-day sell-only unwind, 50-basis-point migration-price tolerance, and delayed holder-vetoable
+wind-down forfeiture for unrecoverable quote. Unsupported versions and incomplete relationships must fail closed.
+Release-candidate proof, production authority ceremony, and independent security assurance remain required.

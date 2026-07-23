@@ -1,6 +1,7 @@
 import { encodeFunctionData, type Address, type Hex } from "viem";
 import {
   boardroomAbi,
+  boardroomControllerAbi,
   boardroomRewardsAbi,
   boardroomRewardsFactoryAbi,
   boardroomTokenAbi,
@@ -18,8 +19,10 @@ import {
 } from "../generated";
 import type {
   BoardroomCall,
+  BoardroomLaunchConfig,
   BoardroomFixedPriceSaleTerms,
   BoardroomLockedLiquidityTerms,
+  BoardroomLockedLiquidityAddTerms,
   BoardroomMerkleAirdropTerms,
   BoardroomMigratingBondingCurveTerms,
   BoardroomShareGrantTerms,
@@ -28,6 +31,7 @@ import type {
   GrantCreationArgs,
   GrantCreationTerms,
   LockedLiquidityTerms,
+  LockedLiquidityAddTerms,
   MerkleAirdropGrantClaimTerms,
   MerkleAirdropTerms,
   MigratingBondingCurveTerms,
@@ -113,21 +117,29 @@ export function buildBoardroomMintTransaction(input: { boardroom: Address; to: A
   };
 }
 
-export function buildBoardroomLaunchTransaction(input: { boardroom: Address; governanceDelay: bigint }) {
+export function buildBoardroomLaunchTransaction(input: { boardroom: Address; config: BoardroomLaunchConfig }) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "launch",
-    args: [input.governanceDelay] as const,
+    args: [input.config] as const,
   };
 }
 
-export function buildBoardroomSetExecutorTransaction(input: { boardroom: Address; executor: Address }) {
+export function buildBoardroomBeginSnapshotTransaction(input: { boardroom: Address }) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
-    functionName: "setExecutor",
-    args: [input.executor] as const,
+    functionName: "beginSnapshot",
+  };
+}
+
+export function buildBoardroomSnapshotAssetsTransaction(input: { boardroom: Address; maximum: bigint }) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "snapshotAssets",
+    args: [input.maximum] as const,
   };
 }
 
@@ -136,6 +148,27 @@ export function buildBoardroomStartWindDownTransaction(input: { boardroom: Addre
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "startWindDown",
+  };
+}
+
+export function buildBoardroomPruneObligationTransaction(input: { boardroom: Address; obligation: Address }) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "pruneObligation",
+    args: [input.obligation] as const,
+  };
+}
+
+export function buildBoardroomPruneObligationsTransaction(input: { boardroom: Address; obligations: readonly Address[] }) {
+  if (input.obligations.length === 0 || input.obligations.length > 32) {
+    throw new Error("Obligation prune batches must contain between 1 and 32 addresses.");
+  }
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "pruneObligations",
+    args: [input.obligations] as const,
   };
 }
 
@@ -175,14 +208,12 @@ export function buildBoardroomRegisterRedeemableAssetTransaction(input: { boardr
 export function buildBoardroomRedeemTransaction(input: {
   boardroom: Address;
   shares: bigint;
-  recipient: Address;
-  minAmountsOut: readonly bigint[];
 }) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "redeem",
-    args: [input.shares, input.recipient, input.minAmountsOut] as const,
+    args: [input.shares] as const,
   };
 }
 
@@ -380,68 +411,86 @@ export function buildBoardroomExecuteBatchTransaction(input: {
   };
 }
 
-export function buildBoardroomQueueActionTransaction(input: {
-  boardroom: Address;
-  call: BoardroomCall;
-  salt: Hex;
-}) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "queueAction",
-    args: [input.call, input.salt] as const,
-  };
-}
-
-export function buildBoardroomQueueBatchTransaction(input: {
-  boardroom: Address;
+export function buildControllerScheduleBoardroomOperationTransaction(input: {
+  controller: Address;
   calls: readonly BoardroomCall[];
   salt: Hex;
+  expectedBoardroomEpoch: bigint;
+  expectedConfigurationEpoch: bigint;
 }) {
   return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "queueBatch",
-    args: [input.calls, input.salt] as const,
+    address: input.controller,
+    abi: boardroomControllerAbi,
+    functionName: "scheduleBoardroomOperation",
+    args: [input.calls, input.salt, input.expectedBoardroomEpoch, input.expectedConfigurationEpoch] as const,
   };
 }
 
-export function buildBoardroomCancelActionTransaction(input: { boardroom: Address; actionHash: Hex }) {
-  return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "cancelAction",
-    args: [input.actionHash] as const,
-  };
-}
-
-export function buildBoardroomExecuteQueuedActionTransaction(input: {
-  boardroom: Address;
-  call: BoardroomCall;
+export function buildControllerScheduleConfigurationOperationTransaction(input: {
+  controller: Address;
+  data: Hex;
   salt: Hex;
-  value?: bigint;
+  expectedBoardroomEpoch: bigint;
+  expectedConfigurationEpoch: bigint;
 }) {
   return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "executeQueuedAction",
-    args: [input.call, input.salt] as const,
-    value: input.value ?? input.call.value,
+    address: input.controller,
+    abi: boardroomControllerAbi,
+    functionName: "scheduleControllerOperation",
+    args: [input.data, input.salt, input.expectedBoardroomEpoch, input.expectedConfigurationEpoch] as const,
   };
 }
 
-export function buildBoardroomExecuteQueuedBatchTransaction(input: {
-  boardroom: Address;
+export function buildBoardroomVetoOperationTransaction(input: { boardroom: Address; operationId: Hex }) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "veto",
+    args: [input.operationId] as const,
+  };
+}
+
+export function buildControllerExecuteBoardroomOperationTransaction(input: {
+  controller: Address;
   calls: readonly BoardroomCall[];
   salt: Hex;
-  value?: bigint;
+  expectedBoardroomEpoch: bigint;
+  expectedConfigurationEpoch: bigint;
+  authority: Address;
 }) {
   return {
-    address: input.boardroom,
-    abi: boardroomAbi,
-    functionName: "executeQueuedBatch",
-    args: [input.calls, input.salt] as const,
-    value: input.value ?? totalCallValue(input.calls),
+    address: input.controller,
+    abi: boardroomControllerAbi,
+    functionName: "executeBoardroomOperation",
+    args: [
+      input.calls,
+      input.salt,
+      input.expectedBoardroomEpoch,
+      input.expectedConfigurationEpoch,
+      input.authority,
+    ] as const,
+  };
+}
+
+export function buildControllerExecuteConfigurationOperationTransaction(input: {
+  controller: Address;
+  data: Hex;
+  salt: Hex;
+  expectedBoardroomEpoch: bigint;
+  expectedConfigurationEpoch: bigint;
+  authority: Address;
+}) {
+  return {
+    address: input.controller,
+    abi: boardroomControllerAbi,
+    functionName: "executeControllerOperation",
+    args: [
+      input.data,
+      input.salt,
+      input.expectedBoardroomEpoch,
+      input.expectedConfigurationEpoch,
+      input.authority,
+    ] as const,
   };
 }
 
@@ -460,13 +509,20 @@ export function buildBoardroomExecuteWindDownCallTransaction(input: {
 
 export type BoardroomCallExecutionPlan =
   | { kind: "execute"; transaction: ReturnType<typeof buildBoardroomExecuteTransaction> | ReturnType<typeof buildBoardroomExecuteBatchTransaction> }
-  | { kind: "queue"; transaction: ReturnType<typeof buildBoardroomQueueActionTransaction> | ReturnType<typeof buildBoardroomQueueBatchTransaction> }
+  | { kind: "schedule"; transaction: ReturnType<typeof buildControllerScheduleBoardroomOperationTransaction> }
   | { kind: "windDown"; transaction: ReturnType<typeof buildBoardroomExecuteWindDownCallTransaction> };
 
 export function planBoardroomCallExecution(input: {
   boardroom: Address;
   calls: readonly BoardroomCall[];
-  lifecycle: { launched: boolean; status: number };
+  lifecycle: {
+    launched: boolean;
+    status: number;
+    controller?: Address;
+    governanceEpoch?: bigint;
+    controllerConfigurationEpoch?: bigint;
+    proposer?: Address;
+  };
   salt?: Hex;
 }): BoardroomCallExecutionPlan {
   if (input.calls.length === 0) throw new Error("At least one Boardroom call is required.");
@@ -474,23 +530,20 @@ export function planBoardroomCallExecution(input: {
   if (input.lifecycle.status === 0) {
     if (input.lifecycle.launched) {
       if (!input.salt) throw new Error("A governance salt is required after launch.");
-      return input.calls.length === 1
-        ? {
-            kind: "queue",
-            transaction: buildBoardroomQueueActionTransaction({
-              boardroom: input.boardroom,
-              call: input.calls[0]!,
-              salt: input.salt,
-            }),
-          }
-        : {
-            kind: "queue",
-            transaction: buildBoardroomQueueBatchTransaction({
-              boardroom: input.boardroom,
-              calls: input.calls,
-              salt: input.salt,
-            }),
-          };
+      const { controller, governanceEpoch, controllerConfigurationEpoch } = input.lifecycle;
+      if (!controller || governanceEpoch === undefined || controllerConfigurationEpoch === undefined) {
+        throw new Error("Current controller and governance epochs are required after launch.");
+      }
+      return {
+        kind: "schedule",
+        transaction: buildControllerScheduleBoardroomOperationTransaction({
+          controller,
+          calls: input.calls,
+          salt: input.salt,
+          expectedBoardroomEpoch: governanceEpoch,
+          expectedConfigurationEpoch: controllerConfigurationEpoch,
+        }),
+      };
     }
 
     return input.calls.length === 1
@@ -512,13 +565,44 @@ export function planBoardroomCallExecution(input: {
     };
   }
 
-  throw new Error("Boardroom calls are unavailable after redemptions open.");
+  throw new Error("Boardroom calls are unavailable during snapshotting or after redemptions open.");
 }
 
-export function buildBoardroomSetExecutorCall(input: { boardroom: Address; executor: Address }): BoardroomCall {
+export function buildControllerUpdateConfigurationData(input: {
+  proposer: Address;
+  delay: bigint;
+  gracePeriod: bigint;
+}): Hex {
+  return encodeFunctionData({
+    abi: boardroomControllerAbi,
+    functionName: "updateConfiguration",
+    args: [input.proposer, input.delay, input.gracePeriod],
+  });
+}
+
+export function buildBoardroomReplaceControllerCall(input: {
+  boardroom: Address;
+  expectedCurrentController: Address;
+  expectedNextController: Address;
+  nextProposer: Address;
+  nextDelay: bigint;
+  nextGracePeriod: bigint;
+  nextGeneration: bigint;
+}): BoardroomCall {
   return buildBoardroomSelfCall({
     boardroom: input.boardroom,
-    data: encodeFunctionData({ abi: boardroomAbi, functionName: "setExecutor", args: [input.executor] }),
+    data: encodeFunctionData({
+      abi: boardroomAbi,
+      functionName: "replaceController",
+      args: [
+        input.expectedCurrentController,
+        input.expectedNextController,
+        input.nextProposer,
+        input.nextDelay,
+        input.nextGracePeriod,
+        input.nextGeneration,
+      ],
+    }),
   });
 }
 
@@ -774,6 +858,20 @@ export function lockedLiquidityArgs(terms: LockedLiquidityTerms) {
   ] as const;
 }
 
+export function lockedLiquidityAddArgs(terms: LockedLiquidityAddTerms) {
+  return [
+    {
+      tokenA: terms.tokenA,
+      tokenB: terms.tokenB,
+      amountADesired: terms.amountADesired,
+      amountBDesired: terms.amountBDesired,
+      amountAMin: terms.amountAMin,
+      amountBMin: terms.amountBMin,
+      deadline: terms.deadline,
+    },
+  ] as const;
+}
+
 export function buildBoardroomFixedPriceSaleApprovalCall(input: {
   policy: Address;
   shareToken: Address;
@@ -961,36 +1059,50 @@ export function buildBoardroomMigratingCurveCancelCall(input: { policy: Address;
   });
 }
 
-export function buildBoardroomMigratingCurveMigrationAction(input: {
-  boardroom: Address;
-  policy: Address;
+export function buildMigratingBondingCurveMigrationTransaction(input: {
   curve: Address;
   minShareLiquidity: bigint;
   minQuoteLiquidity: bigint;
   deadline: bigint;
 }) {
-  return buildBoardroomExecuteTransaction({
-    boardroom: input.boardroom,
-    call: buildBoardroomMigratingCurveMigrationCall(input),
-  });
+  return {
+    address: input.curve,
+    abi: migratingBondingCurveAbi,
+    functionName: "migrate",
+    args: [input.minShareLiquidity, input.minQuoteLiquidity, input.deadline] as const,
+  };
 }
 
-export function buildBoardroomMigratingCurveMigrationCall(input: {
-  policy: Address;
-  curve: Address;
-  minShareLiquidity: bigint;
-  minQuoteLiquidity: bigint;
-  deadline: bigint;
-}): BoardroomCall {
-  return buildBoardroomCall({
-    policy: input.policy,
-    target: input.curve,
-    data: encodeFunctionData({
-      abi: migratingBondingCurveAbi,
-      functionName: "migrate",
-      args: [input.minShareLiquidity, input.minQuoteLiquidity, input.deadline],
-    }),
-  });
+export function buildMigratingBondingCurveExpireTransaction(curve: Address) {
+  return { address: curve, abi: migratingBondingCurveAbi, functionName: "expire" } as const;
+}
+
+export function buildMigratingBondingCurveFallbackTransaction(curve: Address) {
+  return { address: curve, abi: migratingBondingCurveAbi, functionName: "fallbackToUnwind" } as const;
+}
+
+export function buildMigratingBondingCurveFinalizeUnwindTransaction(curve: Address) {
+  return { address: curve, abi: migratingBondingCurveAbi, functionName: "finalizeUnwind" } as const;
+}
+
+export function buildMigratingBondingCurveRecoverQuoteTransaction(curve: Address) {
+  return { address: curve, abi: migratingBondingCurveAbi, functionName: "recoverQuarantinedQuote" } as const;
+}
+
+export function buildMigratingBondingCurveOpenForfeitureTransaction(curve: Address) {
+  return { address: curve, abi: migratingBondingCurveAbi, functionName: "openQuoteForfeiture" } as const;
+}
+
+export function buildMigratingBondingCurveVetoForfeitureTransaction(curve: Address) {
+  return { address: curve, abi: migratingBondingCurveAbi, functionName: "vetoQuoteForfeiture" } as const;
+}
+
+export function buildMigratingBondingCurveFinalizeForfeitureTransaction(curve: Address) {
+  return { address: curve, abi: migratingBondingCurveAbi, functionName: "finalizeQuoteForfeiture" } as const;
+}
+
+export function buildMigratingBondingCurveRecoverForfeitedQuoteTransaction(curve: Address) {
+  return { address: curve, abi: migratingBondingCurveAbi, functionName: "recoverForfeitedQuote" } as const;
 }
 
 export function buildBoardroomMerkleAirdropApprovalCall(input: {
@@ -1218,9 +1330,135 @@ export function buildBoardroomLockedLiquidityBatch(input: {
   });
 }
 
+export function buildBoardroomLockedLiquidityAddCall(input: {
+  policy: Address;
+  factory: Address;
+  terms: LockedLiquidityAddTerms;
+}): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.factory,
+    data: encodeFunctionData({
+      abi: lockedLiquidityFactoryAbi,
+      functionName: "addLockedLiquidity",
+      args: lockedLiquidityAddArgs(input.terms),
+    }),
+  });
+}
+
+export function buildBoardroomLockedLiquidityAddBatch(input: {
+  boardroom: Address;
+  factory: Address;
+  shareToken: Address;
+  terms: BoardroomLockedLiquidityAddTerms;
+  policy?: Address;
+  assetPolicy?: Address;
+}) {
+  const policy = input.policy ?? input.factory;
+  const assetPolicy = requireAssetPolicy(input.assetPolicy);
+  const shareTokenSide = input.terms.shareTokenSide ?? "tokenA";
+  const terms = shareTokenSide === "tokenA"
+    ? ({
+        tokenA: input.shareToken,
+        tokenB: input.terms.quoteToken,
+        amountADesired: input.terms.shareAmountDesired,
+        amountBDesired: input.terms.quoteAmountDesired,
+        amountAMin: input.terms.shareAmountMin,
+        amountBMin: input.terms.quoteAmountMin,
+        deadline: input.terms.deadline,
+      } satisfies LockedLiquidityAddTerms)
+    : ({
+        tokenA: input.terms.quoteToken,
+        tokenB: input.shareToken,
+        amountADesired: input.terms.quoteAmountDesired,
+        amountBDesired: input.terms.shareAmountDesired,
+        amountAMin: input.terms.quoteAmountMin,
+        amountBMin: input.terms.shareAmountMin,
+        deadline: input.terms.deadline,
+      } satisfies LockedLiquidityAddTerms);
+  return buildBoardroomExecuteBatchTransaction({
+    boardroom: input.boardroom,
+    calls: [
+      buildBoardroomLockedLiquidityApprovalCall({
+        policy: assetPolicy,
+        token: input.shareToken,
+        factory: input.factory,
+        amount: input.terms.shareAmountDesired,
+      }),
+      buildBoardroomLockedLiquidityApprovalCall({
+        policy: assetPolicy,
+        token: input.terms.quoteToken,
+        factory: input.factory,
+        amount: input.terms.quoteAmountDesired,
+      }),
+      buildBoardroomLockedLiquidityAddCall({ policy, factory: input.factory, terms }),
+    ],
+  });
+}
+
+export function buildBoardroomLockedLiquidityRemoveCall(input: {
+  policy: Address;
+  factory: Address;
+  liquidity: bigint;
+  amountAMin: bigint;
+  amountBMin: bigint;
+  deadline: bigint;
+}): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.factory,
+    data: encodeFunctionData({
+      abi: lockedLiquidityFactoryAbi,
+      functionName: "removeLockedLiquidity",
+      args: [{
+        liquidity: input.liquidity,
+        amountAMin: input.amountAMin,
+        amountBMin: input.amountBMin,
+        deadline: input.deadline,
+      }],
+    }),
+  });
+}
+
+export function buildBoardroomLockedLiquidityRemoveAction(input: {
+  boardroom: Address;
+  policy: Address;
+  factory: Address;
+  liquidity: bigint;
+  amountAMin: bigint;
+  amountBMin: bigint;
+  deadline: bigint;
+}) {
+  return buildBoardroomExecuteTransaction({
+    boardroom: input.boardroom,
+    call: buildBoardroomLockedLiquidityRemoveCall(input),
+  });
+}
+
+export function buildBoardroomLockedLiquidityCloseCall(input: {
+  policy: Address;
+  factory: Address;
+}): BoardroomCall {
+  return buildBoardroomCall({
+    policy: input.policy,
+    target: input.factory,
+    data: encodeFunctionData({ abi: lockedLiquidityFactoryAbi, functionName: "closeLockedLiquidity" }),
+  });
+}
+
+export function buildBoardroomLockedLiquidityCloseAction(input: {
+  boardroom: Address;
+  policy: Address;
+  factory: Address;
+}) {
+  return buildBoardroomExecuteTransaction({
+    boardroom: input.boardroom,
+    call: buildBoardroomLockedLiquidityCloseCall(input),
+  });
+}
+
 export function buildBoardroomLockedLiquidityExitTransaction(input: {
   boardroom: Address;
-  locker: Address;
   amountAMin: bigint;
   amountBMin: bigint;
   deadline: bigint;
@@ -1228,9 +1466,17 @@ export function buildBoardroomLockedLiquidityExitTransaction(input: {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
-    functionName: "exitLockedLiquidity",
-    args: [input.locker, input.amountAMin, input.amountBMin, input.deadline] as const,
+    functionName: "exitProtocolLiquidity",
+    args: [input.amountAMin, input.amountBMin, input.deadline] as const,
   };
+}
+
+export function buildBoardroomReturnProtocolLiquidityAsLpTransaction(input: { boardroom: Address }) {
+  return { address: input.boardroom, abi: boardroomAbi, functionName: "returnProtocolLiquidityAsLp" };
+}
+
+export function buildBoardroomCloseProtocolLiquidityTransaction(input: { boardroom: Address }) {
+  return { address: input.boardroom, abi: boardroomAbi, functionName: "closeProtocolLiquidityAfterWindDown" };
 }
 
 export function buildBoardroomLockedLiquidityFeeClaimAction(input: {
@@ -1326,8 +1572,4 @@ export function buildGrantIssuerBoardroomCall(input: {
     target: input.grant,
     data: encodeFunctionData({ abi: tokenGrantAbi, functionName: input.functionName }),
   });
-}
-
-function totalCallValue(calls: readonly BoardroomCall[]): bigint {
-  return calls.reduce((total, call) => total + call.value, 0n);
 }

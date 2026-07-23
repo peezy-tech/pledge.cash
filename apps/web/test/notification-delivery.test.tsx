@@ -8,7 +8,7 @@ import {
 } from "../src/features/notifications/delivery-activity";
 
 const boardroom = "0x1111111111111111111111111111111111111111" as const;
-const actionHash = `0x${"ab".repeat(32)}` as const;
+const operationId = `0x${"ab".repeat(32)}` as const;
 
 describe("recent alert deliveries", () => {
   test("renders clear operational states without exposing provider errors", () => {
@@ -39,10 +39,10 @@ describe("recent alert deliveries", () => {
       "/pledge-cash/",
     );
     expect(href).toBe(
-      `/pledge-cash/settings/alerts?action=${actionHash}&boardroom=${boardroom}&chain=31337`,
+      `/pledge-cash/settings/alerts?operation=${operationId}&boardroom=${boardroom}&chain=31337`,
     );
     expect(notificationFocusFromSearch(new URL(href, "https://pledge.cash").search)).toEqual({
-      actionHash,
+      operationId,
       boardroom,
       chainId: 31337,
     });
@@ -52,18 +52,18 @@ describe("recent alert deliveries", () => {
 function delivery(id: string, status: NotificationDeliveryDto["status"]): NotificationDeliveryDto {
   return {
     action: {
-      actionHash,
+      operationId,
       boardroom,
       chainId: 31337,
       eta: "2026-07-13T12:00:00.000Z",
       expiresAt: "2026-07-20T12:00:00.000Z",
       id: "00000000-0000-4000-8000-000000000010",
-      status: "queued",
+      status: "scheduled",
     },
     attempts: status === "pending" ? 0 : 2,
     channelType: "telegram",
     createdAt: "2026-07-12T12:00:00.000Z",
-    event: "queued",
+    event: "scheduled",
     id,
     nextAttemptAt: "2026-07-12T12:05:00.000Z",
     sentAt: status === "sent" ? "2026-07-12T12:01:00.000Z" : null,

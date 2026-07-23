@@ -77,17 +77,46 @@ const dashboard = {
     policyRegistry: issuer,
     wrappedNative: issuer,
     shareToken: token,
+    rewardPool: issuer,
+    redemptionExcessRecipient: issuer,
     status: 0,
     launched: true,
-    executor: issuer,
-    governanceDelay: 86_400n,
+    controller: issuer,
+    proposer: issuer,
+    controllerDelay: 86_400n,
+    controllerGracePeriod: 604_800n,
+    controllerGeneration: 1n,
+    controllerConfigurationEpoch: 1n,
     governanceEpoch: 1n,
+    windDownDelay: 86_400n,
+    windDownStartedAt: 0n,
+    protectionStaker: holder,
     governanceEligibleSupply: 100n,
-    governanceConfig: { minimumDelay: 86_400n, actionGracePeriod: 604_800n, vetoBps: 2_000n, windDownBps: 3_000n },
+    redeemableAssetCount: 0n,
+    snapshotAssetCount: 0n,
+    snapshotCursor: 0n,
+    snapshotFrozen: false,
+    redemptionSupply: 0n,
+    redemptionSupplyFrozen: false,
+    activeObligationCount: 1n,
+    activeGrantCount: 0n,
+    activeDistributionCount: 1n,
+    activeLiquidityCount: 0n,
+    activeRewardCount: 0n,
+    primaryMarketMode: 2,
+    bondingCurve: issuer,
+    primaryMarketQuoteAsset: paymentToken,
+    liquidityStatus: 0,
+    liquidityLocker: issuer,
+    liquidityPool: issuer,
+    liquidityQuoteAsset: paymentToken,
     redeemableAssets: [],
     issuedGrants: [],
     issuedDistributions: [airdrop],
     lockedLiquidityPositions: [],
+    grantRecordCount: 0,
+    distributionRecordCount: 1,
+    lockedLiquidityRecordCount: 0,
     grantSummaries: [],
     distributionSummaries: [airdropDistribution],
     lockedLiquiditySummaries: [],
@@ -272,12 +301,15 @@ describe("workflow form semantics", () => {
     expect(html).toContain("wallet, index, amount, contract, and chain");
   });
 
-  test("allows Open Redemptions when bounded coverage is incomplete and loaded obligations are closed", () => {
+  test("allows beginning Snapshotting when canonical active obligations are zero despite bounded display coverage", () => {
     const issuedGrants = Array.from({ length: 65 }, (_, index) =>
       `0x${(8_000 + index).toString(16).padStart(40, "0")}` as Address);
     const snapshot: BoardroomSnapshot = {
       ...dashboard.snapshot,
       status: 1,
+      activeObligationCount: 0n,
+      activeGrantCount: 0n,
+      grantRecordCount: 65,
       issuedGrants,
       issuedDistributions: [],
       grantSummaries: issuedGrants.slice(1).map((address) => ({
@@ -293,9 +325,12 @@ describe("workflow form semantics", () => {
     const html = renderToString(
       <WindDownPanel
         boardroomSnapshot={snapshot}
+        beginSnapshotCapability={{ status: "enabled" }}
         claimCapability={{ status: "enabled" }}
         pendingAction={undefined}
         permissionlessCapability={{ status: "enabled" }}
+        processSnapshotCapability={{ status: "hidden" }}
+        openRedemptionsCapability={{ status: "hidden" }}
         redeemCapability={{ status: "enabled" }}
         registerCapability={{ status: "enabled" }}
         setWindDownForm={noopSetter}
@@ -303,42 +338,44 @@ describe("workflow form semantics", () => {
         windDownForm={{
           redeemableAsset: "",
           redeemShares: "",
-          redeemRecipient: "",
-          minAmountsOut: "",
           claimAsset: "",
           claimRecipient: "",
           claimMinAmount: "",
         }}
+        beginSnapshot={noop}
         burnTreasuryShares={noop}
         claimRedemptionAsset={noop}
         openRedemptions={noop}
+        processSnapshot={noop}
         redeemBoardroomShares={noop}
         registerRedeemableAsset={noop}
         runAction={async (_label, action) => action()}
         startWindDown={noop}
       />,
     );
-    const openButton = (html.match(/<button[^>]*>[\s\S]*?<\/button>/g) ?? [])
-      .find((button) => button.includes("Open Redemptions"));
+    const beginButton = (html.match(/<button[^>]*>[\s\S]*?<\/button>/g) ?? [])
+      .find((button) => button.includes("Begin Snapshot"));
 
-    expect(openButton).not.toContain('disabled=""');
+    expect(beginButton).not.toContain('disabled=""');
     expect(html).toContain("Obligation coverage is incomplete.");
     expect(html).toContain("Grant coverage is incomplete: 64 of 65 records were loaded.");
-    expect(html).toContain("older obligations may be omitted");
-    expect(html).toContain("transaction simulation checks the complete onchain obligation set");
-    expect(html).toContain("Review and simulate opening redemptions");
-    expect(html).toContain("0 loaded + unknown");
-    expect(html).not.toContain("No loaded blockers.");
+    expect(html).toContain("older records may be omitted");
+    expect(html).toContain("canonical active-obligation count");
+    expect(html).toContain("Review and simulate snapshotting");
+    expect(html).toContain("0 loaded + omitted history");
     expect(html).not.toContain("All tracked obligation reads are complete, and no blockers remain.");
   });
 
-  test("keeps Open Redemptions disabled when incomplete coverage includes a loaded blocker", () => {
+  test("keeps Snapshotting disabled while the canonical active count reports a blocker", () => {
     const issuedGrants = Array.from({ length: 65 }, (_, index) =>
       `0x${(9_000 + index).toString(16).padStart(40, "0")}` as Address);
     const loadedOpenGrant = issuedGrants.at(-1)!;
     const snapshot: BoardroomSnapshot = {
       ...dashboard.snapshot,
       status: 1,
+      activeObligationCount: 1n,
+      activeGrantCount: 1n,
+      grantRecordCount: 65,
       issuedGrants,
       issuedDistributions: [],
       grantSummaries: issuedGrants.slice(1).map((address) => ({
@@ -354,9 +391,12 @@ describe("workflow form semantics", () => {
     const html = renderToString(
       <WindDownPanel
         boardroomSnapshot={snapshot}
+        beginSnapshotCapability={{ status: "blocked", reason: "Every active obligation must close before snapshotting." }}
         claimCapability={{ status: "enabled" }}
         pendingAction={undefined}
         permissionlessCapability={{ status: "enabled" }}
+        processSnapshotCapability={{ status: "hidden" }}
+        openRedemptionsCapability={{ status: "hidden" }}
         redeemCapability={{ status: "enabled" }}
         registerCapability={{ status: "enabled" }}
         setWindDownForm={noopSetter}
@@ -364,28 +404,28 @@ describe("workflow form semantics", () => {
         windDownForm={{
           redeemableAsset: "",
           redeemShares: "",
-          redeemRecipient: "",
-          minAmountsOut: "",
           claimAsset: "",
           claimRecipient: "",
           claimMinAmount: "",
         }}
+        beginSnapshot={noop}
         burnTreasuryShares={noop}
         claimRedemptionAsset={noop}
         openRedemptions={noop}
+        processSnapshot={noop}
         redeemBoardroomShares={noop}
         registerRedeemableAsset={noop}
         runAction={async (_label, action) => action()}
         startWindDown={noop}
       />,
     );
-    const openButton = (html.match(/<button[^>]*>[\s\S]*?<\/button>/g) ?? [])
-      .find((button) => button.includes("Open Redemptions"));
+    const beginButton = (html.match(/<button[^>]*>[\s\S]*?<\/button>/g) ?? [])
+      .find((button) => button.includes("Begin Snapshot"));
 
-    expect(openButton).toContain('disabled=""');
-    expect(html).toContain("Resolve every loaded grant, distribution, and liquidity blocker before opening redemptions.");
+    expect(beginButton).toContain('disabled=""');
+    expect(html).toContain("Every active obligation must close before snapshotting.");
     expect(html).toContain(`Copy address ${loadedOpenGrant}`);
-    expect(html).toContain("1 loaded + unknown");
+    expect(html).toContain("1 loaded + omitted history");
     expect(html).toContain("Clear the remaining obligations");
   });
 
@@ -397,7 +437,11 @@ describe("workflow form semantics", () => {
       issuedGrants: [grant],
       issuedDistributions: [airdrop],
       lockedLiquidityPositions: [token],
-      redeemableAssets,
+      redeemableAssets: redeemableAssets.slice(1),
+      redeemableAssetCount: 65n,
+      grantRecordCount: 1,
+      distributionRecordCount: 1,
+      lockedLiquidityRecordCount: 1,
       grantSummaries: [],
       distributionSummaries: [],
       lockedLiquiditySummaries: [],

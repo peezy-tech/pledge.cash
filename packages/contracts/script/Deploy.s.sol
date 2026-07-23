@@ -8,8 +8,11 @@ import {AmmRouter} from "../src/amm/AmmRouter.sol";
 import {AssetPolicy} from "../src/policy/AssetPolicy.sol";
 import {BondMarketFactory} from "../src/bonds/BondMarketFactory.sol";
 import {Boardroom} from "../src/boardroom/Boardroom.sol";
+import {BoardroomController} from "../src/boardroom/BoardroomController.sol";
+import {BoardroomControllerFactory} from "../src/boardroom/BoardroomControllerFactory.sol";
 import {BoardroomFactory} from "../src/boardroom/BoardroomFactory.sol";
 import {BoardroomGovernanceLogic} from "../src/boardroom/BoardroomGovernanceLogic.sol";
+import {BoardroomMarketLogic} from "../src/boardroom/BoardroomMarketLogic.sol";
 import {BoardroomPolicyRegistry} from "../src/boardroom/BoardroomPolicyRegistry.sol";
 import {BoardroomRedemptionPayout} from "../src/boardroom/BoardroomRedemptionPayout.sol";
 import {DistributionFactory} from "../src/distribution/DistributionFactory.sol";
@@ -67,6 +70,9 @@ contract Deploy is Script {
         BoardroomGovernanceLogic boardroomGovernanceLogic;
         BoardroomRedemptionPayout boardroomRedemptionPayout;
         Boardroom boardroomLogic;
+        BoardroomControllerFactory boardroomControllerFactory;
+        BoardroomController boardroomControllerLogic;
+        BoardroomMarketLogic boardroomMarketLogic;
     }
 
     function run() external {
@@ -158,6 +164,10 @@ contract Deploy is Script {
             )
         );
         state.boardroomLogic = Boardroom(payable(state.boardroomFactory.boardroomLogic()));
+        state.boardroomControllerFactory = BoardroomControllerFactory(state.boardroomFactory.controllerFactory());
+        state.boardroomControllerLogic =
+            BoardroomController(state.boardroomControllerFactory.controllerImplementation());
+        state.boardroomMarketLogic = BoardroomMarketLogic(state.boardroomFactory.marketLogic());
         state.protocolFeeRouter = ProtocolFeeRouter(
             payable(_deployDeterministic(
                     state,
@@ -412,6 +422,22 @@ contract Deploy is Script {
         );
         _attestAddress("factory.boardroomLogic", address(state.boardroomLogic), state.boardroomFactory.boardroomLogic());
         _attestAddress(
+            "factory.controllerFactory",
+            address(state.boardroomControllerFactory),
+            state.boardroomFactory.controllerFactory()
+        );
+        _attestAddress("factory.marketLogic", address(state.boardroomMarketLogic), state.boardroomFactory.marketLogic());
+        _attestAddress(
+            "ctrlFactory.boardroomFactory",
+            address(state.boardroomFactory),
+            state.boardroomControllerFactory.boardroomFactory()
+        );
+        _attestAddress(
+            "ctrlFactory.controllerLogic",
+            address(state.boardroomControllerLogic),
+            state.boardroomControllerFactory.controllerImplementation()
+        );
+        _attestAddress(
             "boardroom.payoutLogic",
             address(state.boardroomRedemptionPayout),
             state.boardroomLogic.redemptionPayoutLogic()
@@ -419,6 +445,12 @@ contract Deploy is Script {
         _attestAddress(
             "boardroom.governanceLogic", address(state.boardroomGovernanceLogic), state.boardroomLogic.governanceLogic()
         );
+        _attestAddress(
+            "boardroom.controllerFactory",
+            address(state.boardroomControllerFactory),
+            state.boardroomLogic.controllerFactory()
+        );
+        _attestAddress("boardroom.marketLogic", address(state.boardroomMarketLogic), state.boardroomLogic.marketLogic());
         _attestAddress(
             "locker.boardroomFactory", address(state.boardroomFactory), state.lockedLiquidityFactory.boardroomFactory()
         );
@@ -467,6 +499,9 @@ contract Deploy is Script {
         json.serialize("boardroomGovernanceLogic", address(state.boardroomGovernanceLogic));
         json.serialize("boardroomRedemptionPayout", address(state.boardroomRedemptionPayout));
         json.serialize("boardroomLogic", address(state.boardroomLogic));
+        json.serialize("boardroomControllerFactory", address(state.boardroomControllerFactory));
+        json.serialize("boardroomControllerLogic", address(state.boardroomControllerLogic));
+        json.serialize("boardroomMarketLogic", address(state.boardroomMarketLogic));
         json.serialize("distributionFactory", address(state.distributionFactory));
         json.serialize("boardroomRewardsFactory", address(state.boardroomRewardsFactory));
         json.serialize("bondMarketFactory", address(state.bondMarketFactory));
@@ -565,6 +600,9 @@ contract Deploy is Script {
         json.serialize("boardroomGovernanceLogicCodeHash", address(state.boardroomGovernanceLogic).codehash);
         json.serialize("boardroomRedemptionPayoutCodeHash", address(state.boardroomRedemptionPayout).codehash);
         json.serialize("boardroomLogicCodeHash", address(state.boardroomLogic).codehash);
+        json.serialize("boardroomControllerFactoryCodeHash", address(state.boardroomControllerFactory).codehash);
+        json.serialize("boardroomControllerCodeHash", address(state.boardroomControllerLogic).codehash);
+        json.serialize("boardroomMarketLogicCodeHash", address(state.boardroomMarketLogic).codehash);
         json.serialize("tokenGrantFactoryCodeHash", address(state.tokenGrantFactory).codehash);
         json.serialize("ammFactoryCodeHash", address(state.ammFactory).codehash);
         json.serialize("ammRouterCodeHash", address(state.ammRouter).codehash);
@@ -591,6 +629,9 @@ contract Deploy is Script {
         console2.log("BoardroomGovernanceLogic", address(state.boardroomGovernanceLogic));
         console2.log("BoardroomRedemptionPayout", address(state.boardroomRedemptionPayout));
         console2.log("BoardroomLogic", address(state.boardroomLogic));
+        console2.log("BoardroomControllerFactory", address(state.boardroomControllerFactory));
+        console2.log("BoardroomControllerLogic", address(state.boardroomControllerLogic));
+        console2.log("BoardroomMarketLogic", address(state.boardroomMarketLogic));
         console2.log("DistributionFactory", address(state.distributionFactory));
         console2.log("BoardroomRewardsFactory", address(state.boardroomRewardsFactory));
         console2.log("BondMarketFactory", address(state.bondMarketFactory));

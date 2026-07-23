@@ -7,7 +7,7 @@ import type {
   boardrooms,
   channels,
   notifications,
-  queuedActions,
+  scheduledOperations,
   riskAssessments,
   users
 } from "./db/schema";
@@ -19,18 +19,18 @@ export type HexString = Hex;
 export type Uint256String = `${bigint}`;
 
 export type Severity = "low" | "medium" | "high";
-export type ActionEvent = "queued" | "cancelled" | "executed" | "invalidated";
+export type ActionEvent = "scheduled" | "cancelled" | "executed" | "invalidated";
 export type NotificationEvent = ActionEvent | "policy-admin" | "reminder";
-export type ActionStatus = "queued" | "cancelled" | "executed" | "invalidated";
+export type ActionStatus = "scheduled" | "cancelled" | "executed" | "invalidated";
 export type DecodeStatus = "decoded" | "undecoded";
-export type BoardroomStatus = "prelaunch" | "active" | "winddown";
+export type BoardroomStatus = "prelaunch" | "active" | "winddown" | "snapshotting" | "redemptions-open";
 export type AnalysisSource = "harness" | "template";
 export type ChannelType = "telegram" | "twitter";
 export type SubscriptionMode = "holdings" | "explicit";
 
 export type UserRow = InferSelectModel<typeof users>;
 export type BoardroomRow = InferSelectModel<typeof boardrooms>;
-export type QueuedActionRow = InferSelectModel<typeof queuedActions>;
+export type ScheduledOperationRow = InferSelectModel<typeof scheduledOperations>;
 export type ChannelRow = InferSelectModel<typeof channels>;
 
 export type StoredCall = Omit<InferSelectModel<typeof actionCalls>, "decodedArgs" | "value"> & {
@@ -61,14 +61,19 @@ export type AnalysisResult = Omit<
 
 export type NotificationPayload = {
   readonly action: {
-    readonly actionHash: HexString;
+    readonly operationId: HexString;
     readonly boardroom: AddressString;
     readonly chainId: ChainId;
-    readonly epoch?: string | null;
+    readonly boardroomEpoch?: string | null;
+    readonly configurationEpoch: string;
+    readonly controller: AddressString;
+    readonly controllerGeneration: string;
     readonly eta: string;
     readonly expiresAt?: string | null;
     readonly id: string;
     readonly invalidatedByEpoch?: string | null;
+    readonly operationKind: "boardroom" | "controller";
+    readonly proposer: AddressString;
     readonly status: ActionStatus;
   };
   readonly analysis?: {
@@ -96,7 +101,7 @@ export type RenderedMessage = {
 };
 
 export type ActionPipelineEvent = {
-  readonly action: QueuedActionRow;
+  readonly action: ScheduledOperationRow;
   readonly calls: StoredCall[];
   readonly event: ActionEvent;
 };

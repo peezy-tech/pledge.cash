@@ -36,7 +36,7 @@ A free grant shows `Payment token` as `None` and `Price` as `Free`; no payment a
 
 The app makes `Issuer Controls` visible from the connected account and issuer path. For a standalone grant, that account
 is the issuer. For a Boardroom-issued grant while the Boardroom is Active, it is the prelaunch owner or launched
-executor. While the Boardroom is Winding down, canonical obligation cleanup is permissionless, so the section can appear
+controller proposer. While the Boardroom is Winding down, canonical obligation cleanup is permissionless, so the section can appear
 for any connected account. Visibility is not proof that a particular action will succeed. Account/network capability
 gates the buttons, but the current UI does not fully pre-disable them for grant state or expiry—for example, an early
 `Withdraw Expired` or a repeated halt is rejected during simulation or by the contract. A permitted wind-down action uses

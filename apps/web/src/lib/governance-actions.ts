@@ -1,11 +1,11 @@
 import {
-  hydrateQueuedBoardroomActionCandidates,
-  queryQueuedBoardroomActions,
+  hydrateScheduledBoardroomOperationCandidates,
+  queryScheduledBoardroomOperations,
   type Address,
-  type HydratedQueuedBoardroomActions,
+  type HydratedScheduledBoardroomOperations,
   type PledgeCashGovernanceClient,
-  type QueuedBoardroomAction,
-  type QueuedBoardroomActionCandidate,
+  type ScheduledBoardroomOperation,
+  type ScheduledBoardroomOperationCandidate,
 } from "@pledge.cash/sdk";
 import { HealthResponseSchema, PublicActionsResponseSchema } from "@pledge.cash/sentinel/dto";
 import type { Hex } from "viem";
@@ -18,12 +18,12 @@ export const SENTINEL_GOVERNANCE_MAX_CANDIDATES =
 
 type GovernanceSentinelClient = Pick<SentinelClient, "health" | "listBoardroomActions">;
 
-type GovernanceActionLoaderDependencies = {
-  hydrateCandidates?: typeof hydrateQueuedBoardroomActionCandidates;
-  queryChain?: typeof queryQueuedBoardroomActions;
+type GovernanceOperationLoaderDependencies = {
+  hydrateCandidates?: typeof hydrateScheduledBoardroomOperationCandidates;
+  queryChain?: typeof queryScheduledBoardroomOperations;
 };
 
-export type GovernanceActionLoadInput = {
+export type GovernanceOperationLoadInput = {
   boardroom: Address;
   chainId: number;
   currentTime?: bigint | undefined;
@@ -32,33 +32,33 @@ export type GovernanceActionLoadInput = {
   sentinelClient?: GovernanceSentinelClient | undefined;
 };
 
-export type GovernanceActionLoadResult = {
-  actions: QueuedBoardroomAction[];
+export type GovernanceOperationLoadResult = {
+  operations: ScheduledBoardroomOperation[];
   complete: boolean;
   source: "chain" | "sentinel";
   warning?: string | undefined;
 };
 
 type SentinelCandidates = {
-  candidates: QueuedBoardroomActionCandidate[];
+  candidates: ScheduledBoardroomOperationCandidate[];
   invalidCount: number;
   truncated: boolean;
 };
 
 /**
- * Uses Sentinel only as a bounded candidate index. Every indexed candidate is
- * independently reconstructed and checked against current onchain state by the
- * SDK before it reaches the governance controls.
+ * Sentinel is a bounded candidate index only. The SDK reconstructs each
+ * controller event, transaction payload, operation hash, and current epoch
+ * from chain data before an operation reaches execution controls.
  */
-export async function loadQueuedGovernanceActions(
+export async function loadScheduledGovernanceOperations(
   client: PledgeCashGovernanceClient,
-  input: GovernanceActionLoadInput,
-  dependencies: GovernanceActionLoaderDependencies = {},
-): Promise<GovernanceActionLoadResult> {
+  input: GovernanceOperationLoadInput,
+  dependencies: GovernanceOperationLoaderDependencies = {},
+): Promise<GovernanceOperationLoadResult> {
   const loadSignal = linkedGovernanceLoadSignal(input.signal, input.deadlineMs);
   try {
     return await raceWithAbortSignal(
-      loadQueuedGovernanceActionsWithSignal(client, input, dependencies, loadSignal.signal),
+      loadScheduledGovernanceOperationsWithSignal(client, input, dependencies, loadSignal.signal),
       loadSignal.signal,
     );
   } finally {
@@ -66,20 +66,20 @@ export async function loadQueuedGovernanceActions(
   }
 }
 
-async function loadQueuedGovernanceActionsWithSignal(
+async function loadScheduledGovernanceOperationsWithSignal(
   client: PledgeCashGovernanceClient,
-  input: GovernanceActionLoadInput,
-  dependencies: GovernanceActionLoaderDependencies,
+  input: GovernanceOperationLoadInput,
+  dependencies: GovernanceOperationLoaderDependencies,
   signal: AbortSignal,
-): Promise<GovernanceActionLoadResult> {
-  const queryChain = dependencies.queryChain ?? queryQueuedBoardroomActions;
-  const hydrateCandidates = dependencies.hydrateCandidates ?? hydrateQueuedBoardroomActionCandidates;
+): Promise<GovernanceOperationLoadResult> {
+  const queryChain = dependencies.queryChain ?? queryScheduledBoardroomOperations;
+  const hydrateCandidates = dependencies.hydrateCandidates ?? hydrateScheduledBoardroomOperationCandidates;
   const currentTime = input.currentTime ?? BigInt(Math.floor(Date.now() / 1_000));
   throwIfGovernanceLoadAborted(signal);
 
   if (!input.sentinelClient) {
     return {
-      actions: await queryChain(client, {
+      operations: await queryChain(client, {
         boardrooms: [input.boardroom],
         currentTime,
         signal,
@@ -127,7 +127,7 @@ async function loadQueuedGovernanceActionsWithSignal(
   );
 
   return {
-    actions: mergeVerifiedGovernanceActions(hydrated.actions, tail.actions),
+    operations: mergeVerifiedGovernanceOperations(hydrated.operations, tail.operations),
     complete,
     source: "sentinel",
     ...(warning ? { warning } : {}),
@@ -147,7 +147,7 @@ async function readSentinelGovernanceHighWater(
     const matching = parsed.data.chains.filter((entry) => entry.chainId === chainId);
     if (matching.length !== 1) return undefined;
     return unsignedBigInt(matching[0]?.governanceBlock);
-  } catch (error) {
+  } catch {
     if (signal.aborted) throw governanceAbortReason(signal);
     return undefined;
   }
@@ -159,20 +159,20 @@ async function readUncoveredGovernanceTail(
     boardroom: Address;
     currentTime: bigint;
     governanceHighWater: bigint | undefined;
-    queryChain: typeof queryQueuedBoardroomActions;
+    queryChain: typeof queryScheduledBoardroomOperations;
     signal: AbortSignal;
   },
-): Promise<{ actions: QueuedBoardroomAction[]; complete: boolean }> {
+): Promise<{ operations: ScheduledBoardroomOperation[]; complete: boolean }> {
   if (input.governanceHighWater === undefined || !client.getBlockNumber) {
-    return { actions: [], complete: false };
+    return { operations: [], complete: false };
   }
 
   try {
     const head = await client.getBlockNumber();
     throwIfGovernanceLoadAborted(input.signal);
-    if (head < input.governanceHighWater) return { actions: [], complete: false };
-    if (head === input.governanceHighWater) return { actions: [], complete: true };
-    const actions = await input.queryChain(client, {
+    if (head < input.governanceHighWater) return { operations: [], complete: false };
+    if (head === input.governanceHighWater) return { operations: [], complete: true };
+    const operations = await input.queryChain(client, {
       boardrooms: [input.boardroom],
       currentTime: input.currentTime,
       fromBlock: input.governanceHighWater + 1n,
@@ -180,10 +180,10 @@ async function readUncoveredGovernanceTail(
       toBlock: head,
     });
     throwIfGovernanceLoadAborted(input.signal);
-    return { actions, complete: true };
-  } catch (error) {
+    return { operations, complete: true };
+  } catch {
     if (input.signal.aborted) throw governanceAbortReason(input.signal);
-    return { actions: [], complete: false };
+    return { operations: [], complete: false };
   }
 }
 
@@ -193,7 +193,7 @@ async function readSentinelGovernanceCandidates(
   boardroom: Address,
   signal: AbortSignal,
 ): Promise<SentinelCandidates> {
-  const candidates: QueuedBoardroomActionCandidate[] = [];
+  const candidates: ScheduledBoardroomOperationCandidate[] = [];
   const seenCursors = new Set<string>();
   let cursor: string | undefined;
   let invalidCount = 0;
@@ -207,33 +207,30 @@ async function readSentinelGovernanceCandidates(
       query: {
         ...(cursor ? { cursor } : {}),
         limit: SENTINEL_GOVERNANCE_PAGE_LIMIT,
-        status: "queued",
+        status: "scheduled",
       },
       signal,
     });
     throwIfGovernanceLoadAborted(signal);
     const parsed = PublicActionsResponseSchema.safeParse(response);
-    if (!parsed.success) {
-      throw new Error("The governance index returned an invalid response.");
-    }
-
+    if (!parsed.success) throw new Error("The governance index returned an invalid response.");
     if (parsed.data.items.length > SENTINEL_GOVERNANCE_PAGE_LIMIT) {
       throw new Error("The governance index exceeded its page-size safety limit.");
     }
 
     for (const item of parsed.data.items) {
-      if (unsignedBigInt(item.queueBlock) === undefined) {
-        throw new Error("The governance index returned an invalid queue block.");
+      const raw = item as unknown;
+      if (!isRecord(raw) || unsignedBigInt(raw.scheduleBlock) === undefined) {
+        throw new Error("The governance index returned an invalid schedule block.");
       }
-      if (item.status !== "queued") {
-        throw new Error("The governance index returned a non-queued decision for a queued-only request.");
+      if (raw.status !== "scheduled") {
+        throw new Error("The governance index returned a non-scheduled operation for a scheduled-only request.");
       }
-      const candidate = sentinelActionCandidate(item, chainId, boardroom);
+      const candidate = sentinelOperationCandidate(raw, chainId, boardroom);
       if (!candidate) {
         invalidCount += 1;
         continue;
       }
-
       candidates.push(candidate);
     }
 
@@ -242,10 +239,7 @@ async function readSentinelGovernanceCandidates(
       cursor = undefined;
       break;
     }
-    if (seenCursors.has(nextCursor)) {
-      throw new Error("The governance index returned a repeated cursor.");
-    }
-
+    if (seenCursors.has(nextCursor)) throw new Error("The governance index returned a repeated cursor.");
     seenCursors.add(nextCursor);
     cursor = nextCursor;
     if (pageIndex === SENTINEL_GOVERNANCE_MAX_PAGES - 1) truncated = true;
@@ -258,85 +252,90 @@ async function readSentinelGovernanceCandidates(
   };
 }
 
-function sentinelActionCandidate(
-  value: unknown,
+function sentinelOperationCandidate(
+  value: Record<string, unknown>,
   expectedChainId: number,
   expectedBoardroom: Address,
-): QueuedBoardroomActionCandidate | undefined {
-  if (!isRecord(value) || !isRecord(value.boardroom)) return undefined;
+): ScheduledBoardroomOperationCandidate | undefined {
   if (value.chainId !== expectedChainId) return undefined;
-  if (typeof value.boardroom.address !== "string"
-    || value.boardroom.address.toLowerCase() !== expectedBoardroom.toLowerCase()) return undefined;
-  if (!isHash(value.actionHash) || !isHash(value.queueTxHash)) return undefined;
-
-  const queueBlockNumber = unsignedBigInt(value.queueBlock);
-  if (queueBlockNumber === undefined) return undefined;
+  const boardroom = nestedAddress(value.boardroom);
+  if (!boardroom || boardroom.toLowerCase() !== expectedBoardroom.toLowerCase()) return undefined;
+  const controller = addressField(value.controller);
+  if (!controller || !isHash(value.operationId) || !isHash(value.scheduleTxHash)) return undefined;
+  const scheduleBlockNumber = unsignedBigInt(value.scheduleBlock);
+  if (scheduleBlockNumber === undefined) return undefined;
   return {
     boardroom: expectedBoardroom,
-    actionHash: value.actionHash,
-    queueTransactionHash: value.queueTxHash,
-    queueBlockNumber,
+    controller,
+    operationId: value.operationId,
+    scheduleTransactionHash: value.scheduleTxHash,
+    scheduleBlockNumber,
   };
 }
 
 function governanceCandidateWarning(invalidCount: number, truncated: boolean, complete: boolean): string | undefined {
   const parts: string[] = [];
   if (invalidCount > 0) {
-    parts.push(`${invalidCount.toLocaleString()} indexed ${invalidCount === 1 ? "decision could" : "decisions could"} not be verified and ${invalidCount === 1 ? "was" : "were"} ignored.`);
+    parts.push(`${invalidCount.toLocaleString()} indexed ${invalidCount === 1 ? "operation could" : "operations could"} not be verified and ${invalidCount === 1 ? "was" : "were"} ignored.`);
   }
   if (truncated) {
-    parts.push(`Only the newest ${SENTINEL_GOVERNANCE_MAX_CANDIDATES.toLocaleString()} queued decisions were checked.`);
+    parts.push(`Only the newest ${SENTINEL_GOVERNANCE_MAX_CANDIDATES.toLocaleString()} scheduled operations were checked.`);
   }
   if (!complete) {
-    parts.push("Queue coverage could not be confirmed. Displayed decisions are verified onchain, but additional decisions may be missing.");
+    parts.push("Operation coverage could not be confirmed. Displayed operations are verified onchain, but additional operations may be missing.");
   }
   return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
-function mergeVerifiedGovernanceActions(
-  indexed: readonly QueuedBoardroomAction[],
-  tail: readonly QueuedBoardroomAction[],
-): QueuedBoardroomAction[] {
-  const actions = new Map<string, QueuedBoardroomAction>();
-  for (const action of [...indexed, ...tail]) {
-    const key = `${action.boardroom.toLowerCase()}:${action.actionHash.toLowerCase()}`;
-    const existing = actions.get(key);
+function mergeVerifiedGovernanceOperations(
+  indexed: readonly ScheduledBoardroomOperation[],
+  tail: readonly ScheduledBoardroomOperation[],
+): ScheduledBoardroomOperation[] {
+  const operations = new Map<string, ScheduledBoardroomOperation>();
+  for (const operation of [...indexed, ...tail]) {
+    const key = `${operation.controller.toLowerCase()}:${operation.operationId.toLowerCase()}`;
+    const existing = operations.get(key);
     if (!existing) {
-      actions.set(key, action);
+      operations.set(key, operation);
       continue;
     }
-    if (verifiedGovernanceActionFingerprint(existing) !== verifiedGovernanceActionFingerprint(action)) {
-      throw new Error("Conflicting verified governance actions were returned for the same decision.");
+    if (verifiedGovernanceOperationFingerprint(existing) !== verifiedGovernanceOperationFingerprint(operation)) {
+      throw new Error("Conflicting verified governance operations were returned for the same operation ID.");
     }
   }
-  return [...actions.values()].sort((left, right) =>
-    left.queueBlockNumber === right.queueBlockNumber
+  return [...operations.values()].sort((left, right) =>
+    left.scheduleBlockNumber === right.scheduleBlockNumber
       ? 0
-      : left.queueBlockNumber > right.queueBlockNumber ? -1 : 1);
+      : left.scheduleBlockNumber > right.scheduleBlockNumber ? -1 : 1);
 }
 
-function verifiedGovernanceActionFingerprint(action: QueuedBoardroomAction): string {
+function verifiedGovernanceOperationFingerprint(operation: ScheduledBoardroomOperation): string {
   return JSON.stringify({
-    actionHash: action.actionHash.toLowerCase(),
-    actionStatus: action.actionStatus,
-    boardroom: action.boardroom.toLowerCase(),
-    calls: action.calls?.map((call) => ({
+    boardroom: operation.boardroom.toLowerCase(),
+    boardroomEpoch: operation.boardroomEpoch.toString(),
+    calls: operation.calls?.map((call) => ({
       data: call.data.toLowerCase(),
       policy: call.policy.toLowerCase(),
       target: call.target.toLowerCase(),
       value: call.value.toString(),
     })),
-    currentEpoch: action.currentEpoch.toString(),
-    epoch: action.epoch.toString(),
-    eta: action.eta.toString(),
-    executor: action.executor.toLowerCase(),
-    expiresAt: action.expiresAt.toString(),
-    kind: action.kind,
-    payloadError: action.payloadError,
-    queueBlockNumber: action.queueBlockNumber.toString(),
-    queueTransactionHash: action.queueTransactionHash.toLowerCase(),
-    salt: action.salt.toLowerCase(),
-    status: action.status,
+    configurationEpoch: operation.configurationEpoch.toString(),
+    controller: operation.controller.toLowerCase(),
+    controllerData: operation.controllerData?.toLowerCase(),
+    controllerGeneration: operation.controllerGeneration.toString(),
+    currentBoardroomEpoch: operation.currentBoardroomEpoch.toString(),
+    currentConfigurationEpoch: operation.currentConfigurationEpoch.toString(),
+    eta: operation.eta.toString(),
+    expiresAt: operation.expiresAt.toString(),
+    kind: operation.kind,
+    operationId: operation.operationId.toLowerCase(),
+    operationStatus: operation.operationStatus,
+    payloadError: operation.payloadError,
+    proposer: operation.proposer.toLowerCase(),
+    salt: operation.salt.toLowerCase(),
+    scheduleBlockNumber: operation.scheduleBlockNumber.toString(),
+    scheduleTransactionHash: operation.scheduleTransactionHash.toLowerCase(),
+    status: operation.status,
   });
 }
 
@@ -408,6 +407,15 @@ function unsignedBigInt(value: unknown): bigint | undefined {
   }
 }
 
+function addressField(value: unknown): Address | undefined {
+  return typeof value === "string" && /^0x[\da-fA-F]{40}$/.test(value) ? value as Address : undefined;
+}
+
+function nestedAddress(value: unknown): Address | undefined {
+  if (typeof value === "string") return addressField(value);
+  return isRecord(value) ? addressField(value.address) : undefined;
+}
+
 function isHash(value: unknown): value is Hex {
   return typeof value === "string" && /^0x[\da-fA-F]{64}$/.test(value);
 }
@@ -416,4 +424,4 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-export type { GovernanceActionLoaderDependencies, HydratedQueuedBoardroomActions };
+export type { GovernanceOperationLoaderDependencies, HydratedScheduledBoardroomOperations };

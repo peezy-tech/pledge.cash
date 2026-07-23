@@ -3,13 +3,13 @@ import { describe, expect, test } from "bun:test";
 import {
   buildNotificationDedupeKey,
   fanout,
-  runQueuedRefanoutSweep,
+  runScheduledRefanoutSweep,
   runReminderSweep,
   shouldNotifySeverity,
   type FanoutDb,
   type NotificationPipelineEvent
 } from "../src/notify/fanout";
-import type { QueuedActionRow } from "../src/types";
+import type { ScheduledOperationRow } from "../src/types";
 
 type QueryResult<T> = readonly T[] | { readonly rows: readonly T[] };
 
@@ -32,27 +32,27 @@ describe("notification fanout", () => {
     expect(
       buildNotificationDedupeKey({
         actionId: "00000000-0000-4000-8000-000000000001",
-        actionHash: "0xABCDEF",
+        operationId: "0xABCDEF",
         chainId: 998,
         channelId: "channel-1",
         channelType: "telegram",
-        event: "queued"
+        event: "scheduled"
       })
-    ).toBe("998:00000000-0000-4000-8000-000000000001:0xabcdef:queued:telegram:channel-1");
+    ).toBe("998:00000000-0000-4000-8000-000000000001:0xabcdef:scheduled:telegram:channel-1");
     expect(
       buildNotificationDedupeKey({
-        actionHash: "0xABCDEF",
+        operationId: "0xABCDEF",
         chainId: 998,
         channelType: "twitter",
-        event: "queued"
+        event: "scheduled"
       })
-    ).toBe("998:0xabcdef:queued:twitter:public");
+    ).toBe("998:0xabcdef:scheduled:twitter:public");
     expect(shouldNotifySeverity("medium", "high")).toBe(true);
     expect(shouldNotifySeverity("high", "medium")).toBe(false);
 
     const firstAdminKey = buildNotificationDedupeKey({
       actionId: "00000000-0000-4000-8000-000000000001",
-      actionHash: "0xABCDEF",
+      operationId: "0xABCDEF",
       chainId: 998,
       channelId: "channel-1",
       channelType: "telegram",
@@ -61,7 +61,7 @@ describe("notification fanout", () => {
     });
     const secondAdminKey = buildNotificationDedupeKey({
       actionId: "00000000-0000-4000-8000-000000000001",
-      actionHash: "0xABCDEF",
+      operationId: "0xABCDEF",
       chainId: 998,
       channelId: "channel-1",
       channelType: "telegram",
@@ -78,7 +78,7 @@ describe("notification fanout", () => {
       [{ id: "twitter-row", channelType: "twitter" }]
     ]);
 
-    const result = await fanout(makeEvent("queued"), db, { twitterEnabled: true });
+    const result = await fanout(makeEvent("scheduled"), db, { twitterEnabled: true });
 
     expect(result).toEqual({ telegram: 1, total: 2, twitter: 1 });
     expect(db.queries).toHaveLength(2);
@@ -103,7 +103,7 @@ describe("notification fanout", () => {
   });
 
   test.each(["cancelled", "executed", "invalidated", "policy-admin"] as const)(
-    "preserves Twitter %s follow-ups when the original queued tweet is unsent",
+    "preserves Twitter %s follow-ups when the original scheduled tweet is unsent",
     async (event) => {
       const db = new FakeDb([[], [{ id: `twitter-${event}`, channelType: "twitter" }]]);
 
@@ -121,7 +121,7 @@ describe("notification fanout", () => {
   test("re-fanout does not pre-load action calls that fanout ignores", async () => {
     const db = new FakeDb([[makeAction()], [{ id: "telegram-row", channelType: "telegram" }]]);
 
-    const result = await runQueuedRefanoutSweep(db);
+    const result = await runScheduledRefanoutSweep(db);
 
     expect(result).toEqual({ telegram: 1, total: 1, twitter: 0 });
     expect(db.queries).toHaveLength(2);
@@ -130,7 +130,7 @@ describe("notification fanout", () => {
     expect(sqlText(db.queries[1])).toContain("WITH action_context");
   });
 
-  test("selects queued actions inside the reminder window and emits reminder rows", async () => {
+  test("selects scheduled actions inside the reminder window and emits reminder rows", async () => {
     const db = new FakeDb([[makeAction()], [{ id: "reminder-row", channelType: "telegram" }]]);
 
     const result = await runReminderSweep(db, {
@@ -164,27 +164,32 @@ function makeEvent(event: NotificationPipelineEvent["event"]): NotificationPipel
   };
 }
 
-function makeAction(): QueuedActionRow {
+function makeAction(): ScheduledOperationRow {
   return {
-    actionHash: "0x0000000000000000000000000000000000000000000000000000000000000abc",
+    operationId: "0x0000000000000000000000000000000000000000000000000000000000000abc",
     boardroom: "0x0000000000000000000000000000000000000b0a",
     cancelledBy: null,
     chainId: 998,
+    configurationEpoch: 1n,
+    controller: "0x0000000000000000000000000000000000000e0e",
+    controllerGeneration: 1n,
     createdAt: new Date("2026-07-09T00:00:00.000Z"),
     decodeStatus: "decoded",
-    epoch: 2n,
+    boardroomEpoch: 2n,
     eta: new Date("2026-07-10T00:00:00.000Z"),
     expiresAt: new Date("2026-07-17T00:00:00.000Z"),
     executedBy: null,
-    executor: "0x0000000000000000000000000000000000000e0e",
     id: "00000000-0000-4000-8000-000000000001",
     invalidatedByEpoch: null,
-    queueBlock: 123n,
-    queueTxHash: "0x0000000000000000000000000000000000000000000000000000000000000def",
+    operationKind: "boardroom",
+    proposer: "0x0000000000000000000000000000000000000a11",
+    scheduleBlock: 123n,
+    scheduleLogIndex: 0,
+    scheduleTxHash: "0x0000000000000000000000000000000000000000000000000000000000000def",
     rawCalldata: "0x",
     resolvedTxHash: null,
     salt: "0x00",
-    status: "queued",
+    status: "scheduled",
     updatedAt: new Date("2026-07-09T00:00:00.000Z")
   };
 }

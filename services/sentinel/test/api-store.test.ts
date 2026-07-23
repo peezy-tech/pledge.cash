@@ -13,17 +13,17 @@ import {
 } from "../src/api/store";
 
 describe("public action keyset pagination", () => {
-  test("round-trips an opaque queue-block/id cursor", () => {
+  test("round-trips an opaque schedule-block/id cursor", () => {
     const cursor = encodePublicActionsCursor({
       id: "00000000-0000-4000-8000-000000000001",
-      queueBlock: 123n
+      scheduleBlock: 123n
     });
 
     expect(cursor).not.toBe("123");
     expect(isPublicActionsCursor(cursor)).toBe(true);
     expect(decodePublicActionsCursor(cursor)).toEqual({
       id: "00000000-0000-4000-8000-000000000001",
-      queueBlock: 123n
+      scheduleBlock: 123n
     });
     expect(isPublicActionsCursor("25")).toBe(false);
   });
@@ -32,7 +32,7 @@ describe("public action keyset pagination", () => {
     const db = new QueryCaptureDb();
     const cursor = encodePublicActionsCursor({
       id: "00000000-0000-4000-8000-000000000001",
-      queueBlock: 123n
+      scheduleBlock: 123n
     });
 
     await getPublicActions(db as unknown as SentinelDb, { cursor, limit: 25 });
@@ -50,12 +50,12 @@ describe("public action keyset pagination", () => {
     const expiredQuery = sqlText(expiredDb.queries[0]);
 
     expect(expiredQuery).toContain("THEN 'expired'");
-    expect(expiredQuery).toContain("qa.status = 'queued' AND qa.expires_at IS NOT NULL");
+    expect(expiredQuery).toContain("qa.status = 'scheduled' AND qa.expires_at IS NOT NULL");
     expect(expiredQuery).not.toContain("'expired'::sentinel_queued_action_status");
 
-    const queuedDb = new QueryCaptureDb();
-    await getPublicActions(queuedDb as unknown as SentinelDb, { limit: 25, status: "queued" });
-    expect(sqlText(queuedDb.queries[0])).toContain("qa.expires_at IS NULL OR qa.expires_at > NOW()");
+    const scheduledDb = new QueryCaptureDb();
+    await getPublicActions(scheduledDb as unknown as SentinelDb, { limit: 25, status: "scheduled" });
+    expect(sqlText(scheduledDb.queries[0])).toContain("qa.expires_at IS NULL OR qa.expires_at > NOW()");
   });
 });
 
@@ -126,18 +126,18 @@ describe("notification delivery keyset pagination", () => {
     expect(response.items).toEqual([
       {
         action: {
-          actionHash: `0x${"ab".repeat(32)}`,
+          operationId: `0x${"ab".repeat(32)}`,
           boardroom: "0x1111111111111111111111111111111111111111",
           chainId: 31337,
           eta: "2026-07-13T12:00:00.000Z",
           expiresAt: "2026-07-20T12:00:00.000Z",
           id: "00000000-0000-4000-8000-000000000010",
-          status: "queued"
+          status: "scheduled"
         },
         attempts: 1,
         channelType: "telegram",
         createdAt: "2026-07-12T12:03:00.000Z",
-        event: "queued",
+        event: "scheduled",
         id: "00000000-0000-4000-8000-000000000003",
         nextAttemptAt: "2026-07-12T12:04:00.000Z",
         sentAt: null,
@@ -170,16 +170,16 @@ class QueryCaptureDb {
 
 function notificationRow(id: string, createdAt: string) {
   return {
-    actionHash: `0x${"ab".repeat(32)}`,
+    operationId: `0x${"ab".repeat(32)}`,
     actionId: "00000000-0000-4000-8000-000000000010",
-    actionStatus: "queued" as const,
+    actionStatus: "scheduled" as const,
     attempts: 1,
     boardroom: "0x1111111111111111111111111111111111111111",
     chainId: 31337,
     channelType: "telegram" as const,
     createdAt,
     eta: "2026-07-13T12:00:00.000Z",
-    event: "queued" as const,
+    event: "scheduled" as const,
     expiresAt: "2026-07-20T12:00:00.000Z",
     id,
     nextAttemptAt: "2026-07-12T12:04:00.000Z",

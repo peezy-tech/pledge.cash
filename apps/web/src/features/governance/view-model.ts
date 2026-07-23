@@ -1,12 +1,12 @@
 import {
-  buildBoardroomCancelActionTransaction,
-  buildBoardroomExecuteQueuedActionTransaction,
-  buildBoardroomExecuteQueuedBatchTransaction,
+  boardroomControllerAbi,
+  buildBoardroomVetoOperationTransaction,
+  buildControllerExecuteBoardroomOperationTransaction,
   type BoardroomCall,
-  type QueuedBoardroomAction,
-  type QueuedBoardroomActionStatus,
+  type ScheduledBoardroomOperation,
+  type ScheduledBoardroomOperationStatus,
 } from "@pledge.cash/sdk";
-import { formatEther, isAddress, type Address, type Hex } from "viem";
+import { decodeFunctionData, formatEther, isAddress, type Address, type Hex } from "viem";
 import { boardroomCallReview, type ContractParameterReview } from "../../lib/transaction-preview";
 import type { GovernanceTransactionRequest } from "./types";
 
@@ -29,10 +29,10 @@ export type GovernanceCallView = {
   verificationReason?: string | undefined;
 };
 
-export type GovernanceActionView = {
-  actionHash: Hex;
+export type GovernanceOperationView = {
   calls: GovernanceCallView[];
   expiryLabel: string;
+  operationId: Hex;
   payloadError?: string | undefined;
   statusDescription: string;
   statusLabel: string;
@@ -40,28 +40,35 @@ export type GovernanceActionView = {
   title: string;
 };
 
-export type GovernanceDelayPreset = {
+export type ControllerDelayPreset = {
   label: string;
   seconds: bigint;
 };
 
-export function governanceActionView(
-  action: QueuedBoardroomAction,
+export function governanceOperationView(
+  operation: ScheduledBoardroomOperation,
   now = BigInt(Math.floor(Date.now() / 1_000)),
-): GovernanceActionView {
-  const calls = (action.calls ?? []).map((call) => governanceCallView(call, action.boardroom));
-  const status = governanceStatusView(effectiveGovernanceActionStatus(action, now), action.eta, action.expiresAt, now);
-  const title = calls.length === 0
-    ? "Undecoded governance action"
-    : calls.length === 1
-      ? calls[0]!.label
-      : `${calls.length.toString()}-call governance batch`;
+): GovernanceOperationView {
+  const calls = (operation.calls ?? []).map((call) => governanceCallView(call, operation.boardroom));
+  const status = governanceStatusView(
+    effectiveGovernanceOperationStatus(operation, now),
+    operation.eta,
+    operation.expiresAt,
+    now,
+  );
+  const title = operation.kind === "controllerOperation"
+    ? controllerOperationTitle(operation.controllerData)
+    : calls.length === 0
+      ? "Undecoded Boardroom operation"
+      : calls.length === 1
+        ? calls[0]!.label
+        : `${calls.length.toString()}-call Boardroom operation`;
 
   return {
-    actionHash: action.actionHash,
     calls,
-    expiryLabel: action.expiresAt > 0n ? formatGovernanceTimestamp(action.expiresAt) : "Not available",
-    ...(action.payloadError ? { payloadError: action.payloadError } : {}),
+    expiryLabel: operation.expiresAt > 0n ? formatGovernanceTimestamp(operation.expiresAt) : "Not available",
+    operationId: operation.operationId,
+    ...(operation.payloadError ? { payloadError: operation.payloadError } : {}),
     statusDescription: status.description,
     statusLabel: status.label,
     statusTone: status.tone,
@@ -91,11 +98,11 @@ export function governanceCallView(call: BoardroomCall, boardroom?: Address): Go
 }
 
 export function governanceStatusView(
-  status: QueuedBoardroomActionStatus,
+  status: ScheduledBoardroomOperationStatus,
   eta: bigint,
   expiresAt: bigint,
   now: bigint,
-): { description: string; label: string; tone: GovernanceActionView["statusTone"] } {
+): { description: string; label: string; tone: GovernanceOperationView["statusTone"] } {
   switch (status) {
     case "waiting":
       return {
@@ -105,94 +112,108 @@ export function governanceStatusView(
       };
     case "ready":
       return {
-        description: expiresAt > now ? `Execution window closes ${formatRelativeTime(expiresAt, now)}.` : "The action is ready to execute.",
+        description: expiresAt > now ? `Execution window closes ${formatRelativeTime(expiresAt, now)}.` : "The operation is ready to execute.",
         label: "Ready to execute",
         tone: "default",
       };
     case "expired":
       return { description: "The execution window closed without execution.", label: "Expired", tone: "muted" };
     case "invalidated":
-      return { description: "A governance epoch change superseded this action.", label: "Superseded", tone: "muted" };
+      return { description: "A governance or controller configuration epoch superseded this operation.", label: "Superseded", tone: "muted" };
     case "cancelled":
-      return { description: "An eligible active staker vetoed this action.", label: "Vetoed", tone: "danger" };
+      return { description: "An eligible active staker vetoed this operation.", label: "Vetoed", tone: "danger" };
     case "executed":
-      return { description: "The decoded calls were executed onchain.", label: "Executed", tone: "muted" };
+      return { description: "The verified operation was executed onchain.", label: "Executed", tone: "muted" };
     case "unknown":
       return { description: "The current onchain state could not be classified.", label: "Unknown", tone: "muted" };
   }
 }
 
-export function effectiveGovernanceActionStatus(
-  action: QueuedBoardroomAction,
+export function effectiveGovernanceOperationStatus(
+  operation: ScheduledBoardroomOperation,
   now = BigInt(Math.floor(Date.now() / 1_000)),
-): QueuedBoardroomActionStatus {
+): ScheduledBoardroomOperationStatus {
   if (
-    action.status === "cancelled"
-    || action.status === "executed"
-    || action.status === "expired"
-    || action.status === "invalidated"
-    || action.status === "unknown"
+    operation.status === "cancelled"
+    || operation.status === "executed"
+    || operation.status === "expired"
+    || operation.status === "invalidated"
+    || operation.status === "unknown"
   ) {
-    return action.status;
+    return operation.status;
   }
-  if (action.eta === 0n || action.expiresAt === 0n) return "unknown";
-  if (now > action.expiresAt) return "expired";
-  if (now >= action.eta) return "ready";
+  if (operation.eta === 0n || operation.expiresAt === 0n) return "unknown";
+  if (now > operation.expiresAt) return "expired";
+  if (now >= operation.eta) return "ready";
   return "waiting";
 }
 
-export function canVetoQueuedAction(action: QueuedBoardroomAction, now?: bigint): boolean {
-  const status = effectiveGovernanceActionStatus(action, now);
+export function canVetoScheduledOperation(operation: ScheduledBoardroomOperation, now?: bigint): boolean {
+  const status = effectiveGovernanceOperationStatus(operation, now);
   return status === "waiting" || status === "ready";
 }
 
-export function canExecuteQueuedAction(action: QueuedBoardroomAction, now?: bigint): boolean {
-  return effectiveGovernanceActionStatus(action, now) === "ready"
-    && action.calls !== undefined
-    && action.calls.length > 0
-    && action.kind !== undefined;
+export function canExecuteScheduledOperation(operation: ScheduledBoardroomOperation, now?: bigint): boolean {
+  if (effectiveGovernanceOperationStatus(operation, now) !== "ready" || !operation.kind) return false;
+  if (operation.kind === "boardroomOperation") return Boolean(operation.calls?.length);
+  return isVerifiedControllerConfiguration(operation.controllerData);
 }
 
 export function buildGovernanceVetoRequest(
-  action: QueuedBoardroomAction,
+  operation: ScheduledBoardroomOperation,
   now = BigInt(Math.floor(Date.now() / 1_000)),
 ): GovernanceTransactionRequest {
-  if (!canVetoQueuedAction(action, now)) {
-    throw new Error("This governance action is no longer available for veto.");
+  if (!canVetoScheduledOperation(operation, now)) {
+    throw new Error("This governance operation is no longer available for veto.");
   }
-  return buildBoardroomCancelActionTransaction({ boardroom: action.boardroom, actionHash: action.actionHash });
-}
-
-export function buildGovernanceExecutionRequest(
-  action: QueuedBoardroomAction,
-  now = BigInt(Math.floor(Date.now() / 1_000)),
-): GovernanceTransactionRequest {
-  if (effectiveGovernanceActionStatus(action, now) === "expired") {
-    throw new Error("This governance action has expired and cannot be executed.");
-  }
-  if (!canExecuteQueuedAction(action, now) || !action.calls || !action.kind) {
-    throw new Error("Verified queued calldata is required before execution.");
-  }
-
-  if (action.kind === "queueAction") {
-    const call = action.calls[0];
-    if (!call) throw new Error("The queued action does not contain a call.");
-    return buildBoardroomExecuteQueuedActionTransaction({
-      boardroom: action.boardroom,
-      call,
-      salt: action.salt,
-    });
-  }
-
-  return buildBoardroomExecuteQueuedBatchTransaction({
-    boardroom: action.boardroom,
-    calls: action.calls,
-    salt: action.salt,
+  return buildBoardroomVetoOperationTransaction({
+    boardroom: operation.boardroom,
+    operationId: operation.operationId,
   });
 }
 
-export function governanceDelayPresets(minimumDelay: bigint): GovernanceDelayPreset[] {
-  const safeMinimum = minimumDelay > 0n ? minimumDelay : HOUR;
+export function buildGovernanceExecutionRequest(
+  operation: ScheduledBoardroomOperation,
+  now = BigInt(Math.floor(Date.now() / 1_000)),
+): GovernanceTransactionRequest {
+  if (effectiveGovernanceOperationStatus(operation, now) === "expired") {
+    throw new Error("This governance operation has expired and cannot be executed.");
+  }
+  if (!canExecuteScheduledOperation(operation, now) || !operation.kind) {
+    throw new Error("Verified scheduled calldata is required before execution.");
+  }
+
+  if (operation.kind === "boardroomOperation") {
+    if (!operation.calls?.length) throw new Error("The scheduled operation does not contain Boardroom calls.");
+    return buildControllerExecuteBoardroomOperationTransaction({
+      controller: operation.controller,
+      calls: operation.calls,
+      salt: operation.salt,
+      expectedBoardroomEpoch: operation.boardroomEpoch,
+      expectedConfigurationEpoch: operation.configurationEpoch,
+      authority: operation.proposer,
+    });
+  }
+
+  if (!operation.controllerData || operation.controllerData === "0x") {
+    throw new Error("The scheduled controller operation is missing its calldata.");
+  }
+  return {
+    address: operation.controller,
+    abi: boardroomControllerAbi,
+    functionName: "executeControllerOperation",
+    args: [
+      operation.controllerData,
+      operation.salt,
+      operation.boardroomEpoch,
+      operation.configurationEpoch,
+      operation.proposer,
+    ] as const,
+  };
+}
+
+export function controllerDelayPresets(minimumDelay: bigint): ControllerDelayPreset[] {
+  const safeMinimum = minimumDelay > 0n ? minimumDelay : DAY;
   const values = [safeMinimum, 2n * DAY, 3n * DAY, 7n * DAY, 14n * DAY, safeMinimum * 2n]
     .filter((seconds) => seconds >= safeMinimum);
   const unique = [...new Set(values.map((seconds) => seconds.toString()))]
@@ -206,16 +227,19 @@ export function governanceDelayPresets(minimumDelay: bigint): GovernanceDelayPre
   }));
 }
 
-export function customGovernanceDelay(amount: string, unit: "days" | "hours"): bigint | undefined {
+export function customControllerDelay(amount: string, unit: "days" | "hours"): bigint | undefined {
   if (!/^\d+$/.test(amount.trim())) return undefined;
   const value = BigInt(amount.trim());
   if (value === 0n) return undefined;
   return value * (unit === "days" ? DAY : HOUR);
 }
 
-export function governanceExecutorError(value: string): string | undefined {
-  if (!isAddress(value, { strict: false })) return "Enter a valid executor address.";
-  if (value.toLowerCase() === ZERO_ADDRESS) return "The executor cannot be the zero address.";
+export function governanceProposerError(value: string, currentProposer?: Address): string | undefined {
+  if (!isAddress(value, { strict: false })) return "Enter a valid proposer address.";
+  if (value.toLowerCase() === ZERO_ADDRESS) return "The proposer cannot be the zero address.";
+  if (currentProposer && value.toLowerCase() === currentProposer.toLowerCase()) {
+    return "Choose an address other than the current proposer.";
+  }
   return undefined;
 }
 
@@ -242,6 +266,26 @@ export function formatGovernanceTimestamp(seconds: bigint): string {
     timeStyle: "short",
     timeZone: "UTC",
   }).format(date) + " UTC";
+}
+
+function controllerOperationTitle(data: Hex | undefined): string {
+  if (!data || data === "0x") return "Undecoded controller operation";
+  try {
+    const decoded = decodeFunctionData({ abi: boardroomControllerAbi, data });
+    if (decoded.functionName === "updateConfiguration") return "Update controller security configuration";
+  } catch {
+    return "Undecoded controller operation";
+  }
+  return "Controller operation";
+}
+
+function isVerifiedControllerConfiguration(data: Hex | undefined): boolean {
+  if (!data || data === "0x") return false;
+  try {
+    return decodeFunctionData({ abi: boardroomControllerAbi, data }).functionName === "updateConfiguration";
+  } catch {
+    return false;
+  }
 }
 
 function formatRelativeTime(target: bigint, now: bigint): string {

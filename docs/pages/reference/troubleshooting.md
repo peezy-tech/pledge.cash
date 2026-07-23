@@ -9,7 +9,8 @@ Start with chain, deployment, address, wallet, and receipt. Most dangerous recov
 
 ## The app says the deployment is pending
 
-Both HyperEVM testnet `998` and Monad testnet `10143` deployments are pending until authority-hardened v4 is broadcast and verified. Do not paste legacy addresses or override the warning. Use a maintained local scenario for development.
+Both HyperEVM testnet `998` and Monad testnet `10143` v5 candidate deployments are pending. Nothing has been
+broadcast or certified. Do not paste legacy addresses or override the warning; use a maintained local scenario.
 
 ## No browser wallet is detected
 
@@ -84,13 +85,18 @@ See [Receive and settle a grant](../guides/receive-and-settle-grant).
 
 ## Airdrop claim fails
 
-Compare chain id, airdrop address, Boardroom, share token, index, raw amount, account, proof ordering, and claim mode. For a grant claim, compare every grant term. Check claim window, Boardroom Active status, remaining shares, used index, and grant-slot cap.
+Compare chain id, airdrop address, Boardroom, share token, index, raw amount, account, proof ordering, and claim mode. For
+a grant claim, compare every term. Check claim window, Boardroom Active status, remaining shares, used index, and the
+airdrop's distribution-specific `maxGrantClaims` count.
 
 See [Claim an airdrop](../guides/claim-airdrop).
 
 ## Curve sell fails
 
-The selling wallet needs both enough project shares and its own account-bound sell right. Sell rights do not follow token transfers. Trading also freezes after graduation latches or Boardroom wind-down starts.
+The selling wallet needs enough transferable project shares and the curve must have enough global outstanding-share
+liability. Rights follow transferred shares, but aggregate sells cannot exceed that liability. Graduation freezes buys
+and sells for the seven-day migration window; expiry, cancellation, or failed migration then enables a bounded 30-day
+sell-only unwind. Snapshotting closes the sell boundary.
 
 ## Redemptions opened, but one asset did not pay
 

@@ -63,7 +63,7 @@ plus this pending state:
 ```json
 {
   "status": "pending",
-  "reason": "Authority-hardened deterministic v4 deployment has not been broadcast yet"
+  "reason": "Boardroom-controller deterministic v5 deployment has not been broadcast yet"
 }
 ```
 

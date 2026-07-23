@@ -12,7 +12,7 @@ A project can register one Boardroom reward pool. The pool does not mint emissio
 Active stake has two powers:
 
 - it earns the ERC20 rewards that the project has already funded; and
-- it is the only token balance that can veto queued actions or start wind-down.
+- it is the only token balance that can veto pending controller operations or start wind-down.
 
 The threshold denominator still includes all governance-eligible circulating project tokens. Holding liquid tokens therefore preserves economic ownership and redemption rights, but it does not grant governance power. Unstaked supply still dilutes active stakers.
 

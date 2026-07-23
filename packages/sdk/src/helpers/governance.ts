@@ -8,7 +8,7 @@ import {
   type Address,
   type Hex,
 } from "viem";
-import { boardroomAbi } from "../generated";
+import { boardroomAbi, boardroomControllerAbi } from "../generated";
 import type { BoardroomCall, PledgeCashGovernanceClient, PledgeCashLogClient } from "./types";
 
 export type { BoardroomCall } from "./types";
@@ -21,36 +21,103 @@ export type GovernanceLogMeta = {
 };
 
 export type GovernanceEvent =
-  | (GovernanceLogMeta & { kind: "launched"; executor: Address; governanceDelay: bigint })
-  | (GovernanceLogMeta & { kind: "executorSet"; executor: Address })
   | (GovernanceLogMeta & {
-      kind: "actionQueued";
-      actionHash: Hex;
-      executor: Address;
+      kind: "launched";
+      controller: Address;
+      proposer: Address;
+      protectionStaker: Address;
+      controllerGeneration: bigint;
+      controllerDelay: bigint;
+      windDownDelay: bigint;
+      gracePeriod: bigint;
+    })
+  | (GovernanceLogMeta & {
+      kind: "controllerReplaced";
+      oldController: Address;
+      controller: Address;
+      controllerGeneration: bigint;
+      proposer: Address;
+      controllerDelay: bigint;
+      gracePeriod: bigint;
+    })
+  | (GovernanceLogMeta & {
+      kind: "boardroomOperationScheduled";
+      controller: Address;
+      operationId: Hex;
+      proposer: Address;
       eta: bigint;
       expiresAt: bigint;
-      epoch: bigint;
+      boardroomEpoch: bigint;
+      controllerGeneration: bigint;
+      configurationEpoch: bigint;
       salt: Hex;
+      callsHash: Hex;
     })
-  | (GovernanceLogMeta & { kind: "actionCancelled"; actionHash: Hex; caller: Address })
-  | (GovernanceLogMeta & { kind: "actionExecuted"; actionHash: Hex; caller: Address })
-  | (GovernanceLogMeta & { kind: "callExecuted"; policy: Address; target: Address; selector: Hex; value: bigint; dataHash: Hex })
+  | (GovernanceLogMeta & {
+      kind: "controllerOperationScheduled";
+      controller: Address;
+      operationId: Hex;
+      proposer: Address;
+      eta: bigint;
+      expiresAt: bigint;
+      boardroomEpoch: bigint;
+      controllerGeneration: bigint;
+      configurationEpoch: bigint;
+      salt: Hex;
+      dataHash: Hex;
+    })
+  | (GovernanceLogMeta & { kind: "operationCancelled"; controller: Address; operationId: Hex })
+  | (GovernanceLogMeta & { kind: "operationExecuted"; controller: Address; operationId: Hex; executor: Address })
+  | (GovernanceLogMeta & {
+      kind: "configurationUpdated";
+      controller: Address;
+      oldProposer: Address;
+      proposer: Address;
+      oldDelay: bigint;
+      delay: bigint;
+      oldGracePeriod: bigint;
+      gracePeriod: bigint;
+      configurationEpoch: bigint;
+    })
+  | (GovernanceLogMeta & { kind: "operationVetoed"; operationId: Hex; staker: Address })
+  | (GovernanceLogMeta & {
+      kind: "callExecuted";
+      policy: Address;
+      target: Address;
+      selector: Hex;
+      authority: Address;
+      value: bigint;
+      dataHash: Hex;
+    })
   | (GovernanceLogMeta & { kind: "governanceEpochAdvanced"; epoch: bigint })
-  | (GovernanceLogMeta & { kind: "windDownStarted"; caller: Address });
+  | (GovernanceLogMeta & { kind: "windDownStarted"; caller: Address; epoch: bigint; windDownDelay: bigint });
 
 export type GovernanceEventsQuery = {
   boardrooms: readonly Address[];
+  controllers?: readonly { boardroom: Address; controller: Address }[];
   fromBlock?: bigint;
   toBlock?: bigint | "latest";
   chunkSize?: bigint;
   signal?: AbortSignal;
 };
 
-export type DecodedQueueInput =
-  | { kind: "queueAction"; call: BoardroomCall; salt: Hex }
-  | { kind: "queueBatch"; calls: BoardroomCall[]; salt: Hex };
+export type DecodedControllerScheduleInput =
+  | {
+      kind: "boardroomOperation";
+      calls: BoardroomCall[];
+      salt: Hex;
+      expectedBoardroomEpoch: bigint;
+      expectedConfigurationEpoch: bigint;
+    }
+  | {
+      kind: "controllerOperation";
+      data: Hex;
+      salt: Hex;
+      expectedBoardroomEpoch: bigint;
+      expectedConfigurationEpoch: bigint;
+    };
 
-export type QueuedBoardroomActionStatus =
+export type ScheduledBoardroomOperationStatus =
   | "waiting"
   | "ready"
   | "expired"
@@ -59,44 +126,51 @@ export type QueuedBoardroomActionStatus =
   | "executed"
   | "unknown";
 
-export type QueuedBoardroomAction = {
+export type ScheduledBoardroomOperation = {
   boardroom: Address;
-  actionHash: Hex;
-  executor: Address;
+  controller: Address;
+  operationId: Hex;
+  proposer: Address;
   eta: bigint;
   expiresAt: bigint;
-  epoch: bigint;
-  currentEpoch: bigint;
-  actionStatus: number;
+  boardroomEpoch: bigint;
+  controllerGeneration: bigint;
+  configurationEpoch: bigint;
+  currentBoardroomEpoch: bigint;
+  currentConfigurationEpoch: bigint;
+  operationStatus: number;
   salt: Hex;
-  queueBlockNumber: bigint;
-  queueTransactionHash: Hex;
-  status: QueuedBoardroomActionStatus;
-  kind?: DecodedQueueInput["kind"];
+  scheduleBlockNumber: bigint;
+  scheduleTransactionHash: Hex;
+  status: ScheduledBoardroomOperationStatus;
+  kind?: DecodedControllerScheduleInput["kind"];
   calls?: BoardroomCall[];
+  controllerData?: Hex;
   payloadError?: string;
 };
 
-export type QueuedBoardroomActionsQuery = GovernanceEventsQuery & {
+export type ScheduledBoardroomOperationsQuery = Omit<GovernanceEventsQuery, "controllers"> & {
   currentTime?: bigint;
 };
 
-export type QueuedBoardroomActionCandidate = {
+export type ScheduledBoardroomOperationCandidate = {
   boardroom: Address;
-  actionHash: Hex;
-  queueTransactionHash: Hex;
-  queueBlockNumber?: bigint;
+  controller: Address;
+  operationId: Hex;
+  scheduleTransactionHash: Hex;
+  scheduleBlockNumber?: bigint;
 };
 
-export type QueuedBoardroomActionCandidateError = {
+export type ScheduledBoardroomOperationCandidateError = {
   boardroom: Address;
-  actionHash: Hex;
+  controller: Address;
+  operationId: Hex;
   message: string;
 };
 
-export type HydratedQueuedBoardroomActions = {
-  actions: QueuedBoardroomAction[];
-  errors: QueuedBoardroomActionCandidateError[];
+export type HydratedScheduledBoardroomOperations = {
+  operations: ScheduledBoardroomOperation[];
+  errors: ScheduledBoardroomOperationCandidateError[];
 };
 
 type RawEventLog = {
@@ -108,973 +182,740 @@ type RawEventLog = {
   transactionHash?: Hex;
 };
 
-const launchedEvent = getAbiItem({ abi: boardroomAbi, name: "BoardroomLaunched" });
-const executorSetEvent = getAbiItem({ abi: boardroomAbi, name: "ExecutorSet" });
-const actionQueuedEvent = getAbiItem({ abi: boardroomAbi, name: "BoardroomActionQueued" });
-const actionCancelledEvent = getAbiItem({ abi: boardroomAbi, name: "BoardroomActionCancelled" });
-const actionExecutedEvent = getAbiItem({ abi: boardroomAbi, name: "BoardroomActionExecuted" });
-const callExecutedEvent = getAbiItem({ abi: boardroomAbi, name: "BoardroomCallExecuted" });
-const governanceEpochAdvancedEvent = getAbiItem({ abi: boardroomAbi, name: "GovernanceEpochAdvanced" });
-const windDownStartedEvent = getAbiItem({ abi: boardroomAbi, name: "BoardroomWindDownStarted" });
-const governanceEventAbis = [
-  launchedEvent,
-  executorSetEvent,
-  actionQueuedEvent,
-  actionCancelledEvent,
-  actionExecutedEvent,
-  callExecutedEvent,
-  governanceEpochAdvancedEvent,
-  windDownStartedEvent,
+type ScheduleEvent = Extract<
+  GovernanceEvent,
+  { kind: "boardroomOperationScheduled" | "controllerOperationScheduled" }
+>;
+
+type ScheduleTransaction = {
+  blockNumber?: bigint | null;
+  from: Address;
+  hash: Hex;
+  input: Hex;
+  to?: Address | null;
+};
+
+type ScheduleReceipt = {
+  blockNumber: bigint;
+  logs: readonly { address: Address; data: Hex; topics: readonly Hex[] }[];
+  status: "success" | "reverted";
+  transactionHash: Hex;
+};
+
+const boardroomEvents = [
+  getAbiItem({ abi: boardroomAbi, name: "BoardroomLaunched" }),
+  getAbiItem({ abi: boardroomAbi, name: "BoardroomControllerReplaced" }),
+  getAbiItem({ abi: boardroomAbi, name: "BoardroomOperationVetoed" }),
+  getAbiItem({ abi: boardroomAbi, name: "BoardroomCallExecuted" }),
+  getAbiItem({ abi: boardroomAbi, name: "GovernanceEpochAdvanced" }),
+  getAbiItem({ abi: boardroomAbi, name: "BoardroomWindDownStarted" }),
 ] as const;
 
-const DEFAULT_GOVERNANCE_LOG_CHUNK_SIZE = 100_000n;
-const MIN_GOVERNANCE_LOG_CHUNK_SIZE = 1n;
-const MAX_GOVERNANCE_LOG_REQUESTS = 128;
-const MAX_GOVERNANCE_LOGS = 25_000;
-const MAX_GOVERNANCE_BOARDROOMS = 64;
-const MAX_QUEUED_ACTIONS = 500;
-const QUEUED_ACTION_READ_CONCURRENCY = 8;
-const CONTRACT_START_READ_CONCURRENCY = 4;
-const MAX_CONTRACT_START_CACHE_ENTRIES = 512;
-const MAX_CONTRACT_START_SEARCH_STEPS = 64;
-const contractStartBlockCache = new WeakMap<object, Map<string, Promise<bigint>>>();
+const controllerEvents = [
+  getAbiItem({ abi: boardroomControllerAbi, name: "BoardroomOperationScheduled" }),
+  getAbiItem({ abi: boardroomControllerAbi, name: "ControllerOperationScheduled" }),
+  getAbiItem({ abi: boardroomControllerAbi, name: "OperationCancelled" }),
+  getAbiItem({ abi: boardroomControllerAbi, name: "OperationExecuted" }),
+  getAbiItem({ abi: boardroomControllerAbi, name: "ConfigurationUpdated" }),
+] as const;
+
+const DEFAULT_CHUNK_SIZE = 100_000n;
+const MAX_LOG_REQUESTS = 256;
+const MAX_LOGS = 25_000;
+const MAX_BOARDROOMS = 64;
+const MAX_OPERATIONS = 500;
+const MAX_START_SEARCH_STEPS = 64;
 
 export async function queryGovernanceEvents(
   client: PledgeCashLogClient,
   input: GovernanceEventsQuery,
 ): Promise<GovernanceEvent[]> {
   throwIfAborted(input.signal);
-  if (input.boardrooms.length === 0) return [];
-  assertGovernanceBoardroomBound(input.boardrooms);
+  const boardrooms = uniqueAddresses(input.boardrooms);
+  if (boardrooms.length === 0) return [];
+  if (boardrooms.length > MAX_BOARDROOMS) {
+    throw new Error(`Governance discovery supports at most ${MAX_BOARDROOMS} Boardrooms per query.`);
+  }
 
-  const logs = await getGovernanceLogs(client, input);
-  return logs.flatMap((log) => maybeArray(toGovernanceEvent(log))).sort(compareGovernanceEvents);
-}
-
-export async function queryQueuedBoardroomActions(
-  client: PledgeCashGovernanceClient,
-  input: QueuedBoardroomActionsQuery,
-): Promise<QueuedBoardroomAction[]> {
-  throwIfAborted(input.signal);
-  assertGovernanceBoardroomBound(input.boardrooms);
-  const boardrooms = uniqueBoardroomAddresses(input.boardrooms);
-  const launched = await mapInBatches(
+  const range = await resolveRange(client, boardrooms, input);
+  if (range.fromBlock > range.toBlock) return [];
+  const budget = { requests: 0, logs: 0 };
+  const rawBoardroomLogs = await readLogsInChunks(
+    client,
     boardrooms,
-    QUEUED_ACTION_READ_CONCURRENCY,
-    async (boardroom) => {
-      throwIfAborted(input.signal);
-      const launched = await client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "launched" }) as boolean;
-      throwIfAborted(input.signal);
-      return { boardroom, launched };
-    },
+    boardroomEvents,
+    range.fromBlock,
+    range.toBlock,
+    input.chunkSize ?? DEFAULT_CHUNK_SIZE,
+    budget,
     input.signal,
   );
-  const launchedBoardrooms = launched.filter((entry) => entry.launched).map((entry) => entry.boardroom);
-  if (launchedBoardrooms.length === 0) return [];
 
-  const events = await queryGovernanceEvents(client, { ...input, boardrooms: launchedBoardrooms });
-  const latestQueues = latestQueueEvents(events);
-  const resolutionIndex = governanceResolutionIndex(events);
-  const currentTime = input.currentTime ?? BigInt(Math.floor(Date.now() / 1000));
-  const unresolvedQueues = latestQueues.filter((queued) =>
-    latestTerminalEvent(resolutionIndex, queued) === undefined
-      && currentTime <= queued.expiresAt
-      && !queueEpochWasInvalidated(resolutionIndex, queued)
-  );
-  if (unresolvedQueues.length > MAX_QUEUED_ACTIONS) {
-    throw new Error(`Governance queue exceeds its ${MAX_QUEUED_ACTIONS.toLocaleString()}-action hydration safety bound.`);
+  const controllerMap = new Map<string, Address>();
+  for (const pair of input.controllers ?? []) {
+    if (!boardrooms.some((boardroom) => sameAddress(boardroom, pair.boardroom))) continue;
+    controllerMap.set(pair.controller.toLowerCase(), pair.boardroom);
+  }
+  for (const log of rawBoardroomLogs) {
+    const boardroom = log.address;
+    const args = log.args;
+    if (!boardroom || !args) continue;
+    if (log.eventName === "BoardroomLaunched") {
+      const controller = addressArg(args, "controller");
+      if (controller) controllerMap.set(controller.toLowerCase(), boardroom);
+    } else if (log.eventName === "BoardroomControllerReplaced") {
+      const oldController = addressArg(args, "oldController");
+      const newController = addressArg(args, "newController");
+      if (oldController) controllerMap.set(oldController.toLowerCase(), boardroom);
+      if (newController) controllerMap.set(newController.toLowerCase(), boardroom);
+    }
   }
 
-  const actions = await mapInBatches(
-    unresolvedQueues,
-    QUEUED_ACTION_READ_CONCURRENCY,
-    async (queued) => {
-      throwIfAborted(input.signal);
-      const [governanceStateResult, payload] = await Promise.all([
-        client.readContract({
-          address: queued.boardroom,
-          abi: boardroomAbi,
-          functionName: "governanceState",
-          args: [queued.actionHash],
-        }),
-        readQueuedPayload(client, queued, input.signal),
-      ]);
-      throwIfAborted(input.signal);
-      const [currentEpoch, eta, expiresAt, actionEpoch, actionStatus] = governanceStateResult as readonly [
-        bigint,
-        bigint,
-        bigint,
-        bigint,
-        number,
-      ];
-      const terminal = latestTerminalEvent(resolutionIndex, queued);
-      const status = queuedActionStatus({
-        terminal,
-        currentTime,
-        currentEpoch,
-        eta,
-        expiresAt,
-        actionEpoch,
-      });
+  const controllers = [...controllerMap.keys()] as Address[];
+  const rawControllerLogs = controllers.length === 0
+    ? []
+    : await readLogsInChunks(
+        client,
+        controllers,
+        controllerEvents,
+        range.fromBlock,
+        range.toBlock,
+        input.chunkSize ?? DEFAULT_CHUNK_SIZE,
+        budget,
+        input.signal,
+      );
 
-      return {
-        boardroom: queued.boardroom,
-        actionHash: queued.actionHash,
-        executor: queued.executor,
-        eta: queued.eta,
-        expiresAt: queued.expiresAt,
-        epoch: queued.epoch,
-        currentEpoch,
-        actionStatus: Number(actionStatus),
-        salt: queued.salt,
-        queueBlockNumber: queued.blockNumber,
-        queueTransactionHash: queued.transactionHash,
-        status,
-        ...payload,
-      } satisfies QueuedBoardroomAction;
-    },
-    input.signal,
-  );
-
-  return actions.sort((left, right) => compareBigIntDesc(left.queueBlockNumber, right.queueBlockNumber));
+  const events = [
+    ...rawBoardroomLogs.flatMap((log) => maybeEvent(toBoardroomEvent(log))),
+    ...rawControllerLogs.flatMap((log) => {
+      const controller = log.address;
+      const boardroom = controller ? controllerMap.get(controller.toLowerCase()) : undefined;
+      return boardroom && controller ? maybeEvent(toControllerEvent(log, boardroom, controller)) : [];
+    }),
+  ];
+  return events.sort(compareGovernanceEvents);
 }
 
-export async function hydrateQueuedBoardroomActionCandidates(
+export async function queryScheduledBoardroomOperations(
   client: PledgeCashGovernanceClient,
-  input: { candidates: readonly QueuedBoardroomActionCandidate[]; currentTime?: bigint; signal?: AbortSignal },
-): Promise<HydratedQueuedBoardroomActions> {
+  input: ScheduledBoardroomOperationsQuery,
+): Promise<ScheduledBoardroomOperation[]> {
   throwIfAborted(input.signal);
-  const deduplicated = deduplicateQueuedActionCandidates(input.candidates);
-  if (deduplicated.candidates.length > MAX_QUEUED_ACTIONS) {
-    throw new Error(`Governance candidate hydration exceeds its ${MAX_QUEUED_ACTIONS.toLocaleString()}-action safety bound.`);
+  const boardrooms = uniqueAddresses(input.boardrooms);
+  const controllerPairs = (await Promise.all(boardrooms.map(async (boardroom) => {
+    const [launched, controller] = await Promise.all([
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "launched" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "controller" }),
+    ]);
+    return launched && !isZeroAddress(controller as Address)
+      ? { boardroom, controller: controller as Address }
+      : undefined;
+  }))).flatMap((pair) => pair ? [pair] : []);
+  if (controllerPairs.length === 0) return [];
+
+  const events = await queryGovernanceEvents(client, { ...input, controllers: controllerPairs });
+  const currentControllers = new Set(controllerPairs.map((pair) => pair.controller.toLowerCase()));
+  const schedules = latestScheduleEvents(events).filter((event) => currentControllers.has(event.controller.toLowerCase()));
+  if (schedules.length > MAX_OPERATIONS) {
+    throw new Error(`Governance operation hydration exceeds its ${MAX_OPERATIONS}-operation safety bound.`);
   }
-  const currentTime = input.currentTime ?? BigInt(Math.floor(Date.now() / 1000));
-  const results = await mapInBatches(
-    deduplicated.candidates,
-    QUEUED_ACTION_READ_CONCURRENCY,
-    async (candidate): Promise<{
-      action?: QueuedBoardroomAction | undefined;
-      error?: QueuedBoardroomActionCandidateError | undefined;
-    }> => {
-      try {
-        throwIfAborted(input.signal);
-        if (!client.getTransactionReceipt) throw new Error("Queue transaction receipt verification is unavailable.");
-        const [transaction, receipt] = await Promise.all([
-          client.getTransaction({ hash: candidate.queueTransactionHash }),
-          client.getTransactionReceipt({ hash: candidate.queueTransactionHash }),
-        ]);
-        throwIfAborted(input.signal);
-        if (!sameHex(transaction.hash, candidate.queueTransactionHash)) {
-          throw new Error("RPC returned a different queue transaction hash.");
-        }
-        if (transaction.blockNumber === null || transaction.blockNumber === undefined) {
-          throw new Error("Queue transaction is not confirmed in a block.");
-        }
-        if (candidate.queueBlockNumber !== undefined && candidate.queueBlockNumber !== transaction.blockNumber) {
-          throw new Error("Candidate queue block does not match the mined transaction.");
-        }
-        const payload = verifiedQueuedPayload(transaction, candidate.boardroom, candidate.actionHash);
-        const queuedEvent = verifiedQueuedReceipt({
-          actionHash: candidate.actionHash,
+
+  const currentTime = input.currentTime ?? BigInt(Math.floor(Date.now() / 1_000));
+  const operations = await Promise.all(schedules.map(async (event) => {
+    try {
+      return await hydrateScheduleEvent(client, event, currentTime, input.signal);
+    } catch (error) {
+      return scheduleFromEvent(event, {
+        currentTime,
+        currentBoardroomEpoch: 0n,
+        currentConfigurationEpoch: 0n,
+        operationStatus: 0,
+        status: "unknown",
+        payloadError: conciseError(error),
+      });
+    }
+  }));
+  return operations.sort((left, right) => compareBigIntDesc(left.scheduleBlockNumber, right.scheduleBlockNumber));
+}
+
+export async function hydrateScheduledBoardroomOperationCandidates(
+  client: PledgeCashGovernanceClient,
+  input: {
+    candidates: readonly ScheduledBoardroomOperationCandidate[];
+    currentTime?: bigint;
+    signal?: AbortSignal;
+  },
+): Promise<HydratedScheduledBoardroomOperations> {
+  throwIfAborted(input.signal);
+  const { candidates, errors } = deduplicateCandidates(input.candidates);
+  if (candidates.length > MAX_OPERATIONS) {
+    throw new Error(`Governance candidate hydration exceeds its ${MAX_OPERATIONS}-operation safety bound.`);
+  }
+  const currentTime = input.currentTime ?? BigInt(Math.floor(Date.now() / 1_000));
+  const results = await Promise.all(candidates.map(async (candidate) => {
+    try {
+      if (!client.getTransactionReceipt) throw new Error("Schedule receipt verification is unavailable.");
+      const [transaction, receipt] = await Promise.all([
+        client.getTransaction({ hash: candidate.scheduleTransactionHash }),
+        client.getTransactionReceipt({ hash: candidate.scheduleTransactionHash }),
+      ]);
+      const tx = transaction as unknown as ScheduleTransaction;
+      const minedReceipt = receipt as unknown as ScheduleReceipt;
+      verifyTransactionProvenance(candidate, tx, minedReceipt);
+      const decoded = verifiedSchedulePayload(tx, candidate.controller);
+      const event = scheduleEventFromReceipt(candidate, decoded, minedReceipt);
+      const operation = await hydrateScheduleEvent(client, event, currentTime, input.signal, decoded);
+      return { operation };
+    } catch (error) {
+      return {
+        error: {
           boardroom: candidate.boardroom,
-          executor: transaction.from,
-          payload,
-          receipt,
-          transactionBlock: transaction.blockNumber,
-          transactionHash: candidate.queueTransactionHash,
-        });
-        const governanceStateResult = await client.readContract({
-          address: candidate.boardroom,
-          abi: boardroomAbi,
-          functionName: "governanceState",
-          args: [candidate.actionHash],
-        });
-        throwIfAborted(input.signal);
-        const [currentEpoch, eta, expiresAt, actionEpoch, actionStatus] = governanceStateResult as readonly [
-          bigint,
-          bigint,
-          bigint,
-          bigint,
-          number,
-        ];
-        if (eta === 0n) return {};
-        if (eta !== queuedEvent.eta || expiresAt !== queuedEvent.expiresAt || actionEpoch !== queuedEvent.epoch) {
-          throw new Error("Queue event does not match the current action context.");
-        }
-
-        return {
-          action: {
-            boardroom: candidate.boardroom,
-            actionHash: candidate.actionHash,
-            executor: transaction.from,
-            eta,
-            expiresAt,
-            epoch: actionEpoch,
-            currentEpoch,
-            actionStatus: Number(actionStatus),
-            salt: payload.salt,
-            queueBlockNumber: transaction.blockNumber,
-            queueTransactionHash: candidate.queueTransactionHash,
-            status: queuedActionStatus({
-              terminal: undefined,
-              currentTime,
-              currentEpoch,
-              eta,
-              expiresAt,
-              actionEpoch,
-            }),
-            kind: payload.kind,
-            calls: payload.calls,
-          },
-        };
-      } catch (error) {
-        throwIfAborted(input.signal);
-        return {
-          error: {
-            boardroom: candidate.boardroom,
-            actionHash: candidate.actionHash,
-            message: conciseErrorMessage(error),
-          },
-        };
-      }
-    },
-    input.signal,
-  );
-
+          controller: candidate.controller,
+          operationId: candidate.operationId,
+          message: conciseError(error),
+        } satisfies ScheduledBoardroomOperationCandidateError,
+      };
+    }
+  }));
   return {
-    actions: results.flatMap((result) => result.action ? [result.action] : [])
-      .sort((left, right) => compareBigIntDesc(left.queueBlockNumber, right.queueBlockNumber)),
-    errors: [
-      ...deduplicated.errors,
-      ...results.flatMap((result) => result.error ? [result.error] : []),
-    ],
+    operations: results.flatMap((result) => result.operation ? [result.operation] : [])
+      .sort((left, right) => compareBigIntDesc(left.scheduleBlockNumber, right.scheduleBlockNumber)),
+    errors: [...errors, ...results.flatMap((result) => result.error ? [result.error] : [])],
   };
 }
 
-export function decodeQueueCalldata(data: Hex): DecodedQueueInput | undefined {
+export function decodeControllerScheduleCalldata(data: Hex): DecodedControllerScheduleInput | undefined {
   try {
-    const decoded = decodeFunctionData({ abi: boardroomAbi, data });
+    const decoded = decodeFunctionData({ abi: boardroomControllerAbi, data });
     const args = decoded.args as readonly unknown[] | undefined;
-
-    if (decoded.functionName === "queueAction") {
-      const call = normalizeBoardroomCall(args?.[0]);
-      const salt = hexValue(args?.[1]);
-      if (!call || !salt) return undefined;
-      return { kind: "queueAction", call, salt };
-    }
-
-    if (decoded.functionName === "queueBatch") {
+    if (decoded.functionName === "scheduleBoardroomOperation") {
       const calls = normalizeBoardroomCalls(args?.[0]);
       const salt = hexValue(args?.[1]);
-      if (!calls || !salt) return undefined;
-      return { kind: "queueBatch", calls, salt };
+      const expectedBoardroomEpoch = bigintValue(args?.[2]);
+      const expectedConfigurationEpoch = bigintValue(args?.[3]);
+      if (!calls || !salt || expectedBoardroomEpoch === undefined || expectedConfigurationEpoch === undefined) {
+        return undefined;
+      }
+      return { kind: "boardroomOperation", calls, salt, expectedBoardroomEpoch, expectedConfigurationEpoch };
     }
-
+    if (decoded.functionName === "scheduleControllerOperation") {
+      const controllerData = hexValue(args?.[0]);
+      const salt = hexValue(args?.[1]);
+      const expectedBoardroomEpoch = bigintValue(args?.[2]);
+      const expectedConfigurationEpoch = bigintValue(args?.[3]);
+      if (!controllerData || !salt || expectedBoardroomEpoch === undefined || expectedConfigurationEpoch === undefined) {
+        return undefined;
+      }
+      return {
+        kind: "controllerOperation",
+        data: controllerData,
+        salt,
+        expectedBoardroomEpoch,
+        expectedConfigurationEpoch,
+      };
+    }
     return undefined;
   } catch {
     return undefined;
   }
 }
 
-export function hashCall(call: BoardroomCall): Hex {
-  return keccak256(
-    encodeAbiParameters(
-      [{ type: "address" }, { type: "address" }, { type: "uint256" }, { type: "bytes32" }],
-      [call.policy, call.target, call.value, keccak256(call.data)],
-    ),
-  );
+export function hashBoardroomCalls(calls: readonly BoardroomCall[]): Hex {
+  return keccak256(encodeAbiParameters([
+    {
+      type: "tuple[]",
+      components: [
+        { name: "policy", type: "address" },
+        { name: "target", type: "address" },
+        { name: "value", type: "uint256" },
+        { name: "data", type: "bytes" },
+      ],
+    },
+  ], [calls]));
 }
 
-export function hashAction(call: BoardroomCall, salt: Hex): Hex {
-  return keccak256(encodeAbiParameters([{ type: "bytes32" }, { type: "bytes32" }], [hashCall(call), salt]));
+async function hydrateScheduleEvent(
+  client: PledgeCashGovernanceClient,
+  event: ScheduleEvent,
+  currentTime: bigint,
+  signal?: AbortSignal,
+  knownPayload?: DecodedControllerScheduleInput,
+): Promise<ScheduledBoardroomOperation> {
+  throwIfAborted(signal);
+  const transaction = knownPayload
+    ? undefined
+    : await client.getTransaction({ hash: event.transactionHash }) as unknown as ScheduleTransaction;
+  const payload = knownPayload ?? verifiedSchedulePayload(transaction!, event.controller);
+  verifyPayloadAgainstEvent(payload, event);
+
+  const operationHash = await client.readContract({
+    address: event.controller,
+    abi: boardroomControllerAbi,
+    functionName: payload.kind === "boardroomOperation" ? "hashBoardroomOperation" : "hashControllerOperation",
+    args: payload.kind === "boardroomOperation"
+      ? [payload.calls, payload.salt, payload.expectedBoardroomEpoch, payload.expectedConfigurationEpoch, event.proposer]
+      : [payload.data, payload.salt, payload.expectedBoardroomEpoch, payload.expectedConfigurationEpoch, event.proposer],
+  });
+  if (!sameHex(operationHash as Hex, event.operationId)) {
+    throw new Error("Schedule calldata does not match the controller operation hash.");
+  }
+
+  const [operationState, boardroomEpoch, currentController, currentGeneration, boardroomStatus, configurationEpoch, proposer] =
+    await Promise.all([
+      client.readContract({
+        address: event.controller,
+        abi: boardroomControllerAbi,
+        functionName: "operationState",
+        args: [event.operationId],
+      }),
+      client.readContract({ address: event.boardroom, abi: boardroomAbi, functionName: "governanceEpoch" }),
+      client.readContract({ address: event.boardroom, abi: boardroomAbi, functionName: "controller" }),
+      client.readContract({ address: event.boardroom, abi: boardroomAbi, functionName: "controllerGeneration" }),
+      client.readContract({ address: event.boardroom, abi: boardroomAbi, functionName: "status" }),
+      client.readContract({ address: event.controller, abi: boardroomControllerAbi, functionName: "configurationEpoch" }),
+      client.readContract({ address: event.controller, abi: boardroomControllerAbi, functionName: "proposer" }),
+    ]);
+  const [eta, expiresAt, rawStatus] = operationState as readonly [bigint, bigint, number];
+  if (eta !== event.eta || expiresAt !== event.expiresAt) {
+    throw new Error("Scheduled event does not match controller operation timing.");
+  }
+  const operationStatus = Number(rawStatus);
+  const currentBoardroomEpoch = boardroomEpoch as bigint;
+  const currentConfigurationEpoch = configurationEpoch as bigint;
+  const activeContext = Number(boardroomStatus) === 0
+    && sameAddress(currentController as Address, event.controller)
+    && (currentGeneration as bigint) === event.controllerGeneration
+    && currentBoardroomEpoch === event.boardroomEpoch
+    && currentConfigurationEpoch === event.configurationEpoch
+    && sameAddress(proposer as Address, event.proposer);
+  const status = deriveStatus(operationStatus, activeContext, eta, expiresAt, currentTime);
+  return scheduleFromEvent(event, {
+    currentTime,
+    currentBoardroomEpoch,
+    currentConfigurationEpoch,
+    operationStatus,
+    status,
+    ...(payload.kind === "boardroomOperation"
+      ? { kind: payload.kind, calls: payload.calls }
+      : { kind: payload.kind, controllerData: payload.data }),
+  });
 }
 
-export function hashBatch(calls: readonly BoardroomCall[], salt: Hex): Hex {
-  return keccak256(
-    encodeAbiParameters([{ type: "bytes32[]" }, { type: "bytes32" }], [calls.map((call) => hashCall(call)), salt]),
-  );
+function scheduleFromEvent(
+  event: ScheduleEvent,
+  state: {
+    currentTime: bigint;
+    currentBoardroomEpoch: bigint;
+    currentConfigurationEpoch: bigint;
+    operationStatus: number;
+    status: ScheduledBoardroomOperationStatus;
+    kind?: DecodedControllerScheduleInput["kind"];
+    calls?: BoardroomCall[];
+    controllerData?: Hex;
+    payloadError?: string;
+  },
+): ScheduledBoardroomOperation {
+  return {
+    boardroom: event.boardroom,
+    controller: event.controller,
+    operationId: event.operationId,
+    proposer: event.proposer,
+    eta: event.eta,
+    expiresAt: event.expiresAt,
+    boardroomEpoch: event.boardroomEpoch,
+    controllerGeneration: event.controllerGeneration,
+    configurationEpoch: event.configurationEpoch,
+    currentBoardroomEpoch: state.currentBoardroomEpoch,
+    currentConfigurationEpoch: state.currentConfigurationEpoch,
+    operationStatus: state.operationStatus,
+    salt: event.salt,
+    scheduleBlockNumber: event.blockNumber,
+    scheduleTransactionHash: event.transactionHash,
+    status: state.status,
+    ...(state.kind ? { kind: state.kind } : {}),
+    ...(state.calls ? { calls: state.calls } : {}),
+    ...(state.controllerData ? { controllerData: state.controllerData } : {}),
+    ...(state.payloadError ? { payloadError: state.payloadError } : {}),
+  };
 }
 
-type ActionQueuedEvent = Extract<GovernanceEvent, { kind: "actionQueued" }>;
-type ActionTerminalEvent = Extract<GovernanceEvent, { kind: "actionCancelled" | "actionExecuted" }>;
-type GovernanceResolutionIndex = {
-  currentEpochs: Map<string, bigint>;
-  terminalEvents: Map<string, ActionTerminalEvent>;
-};
-type QueueTransaction = {
-  blockNumber?: bigint | null | undefined;
-  from: Address;
-  hash: Hex;
-  input: Hex;
-  to?: Address | null | undefined;
-};
-type QueueReceipt = {
-  blockNumber: bigint;
-  logs: readonly {
-    address: Address;
-    data: Hex;
-    topics: readonly Hex[];
-  }[];
-  status: "success" | "reverted";
-  transactionHash: Hex;
-};
-type VerifiedQueuedPayload = {
-  calls: BoardroomCall[];
-  kind: DecodedQueueInput["kind"];
-  salt: Hex;
-};
-type VerifiedQueuedReceipt = {
-  epoch: bigint;
-  eta: bigint;
-  expiresAt: bigint;
-};
+function deriveStatus(
+  operationStatus: number,
+  activeContext: boolean,
+  eta: bigint,
+  expiresAt: bigint,
+  currentTime: bigint,
+): ScheduledBoardroomOperationStatus {
+  if (operationStatus === 2) return "executed";
+  if (operationStatus === 3) return "cancelled";
+  if (operationStatus !== 1) return "unknown";
+  if (!activeContext) return "invalidated";
+  if (currentTime > expiresAt) return "expired";
+  return currentTime < eta ? "waiting" : "ready";
+}
 
-function latestQueueEvents(events: readonly GovernanceEvent[]): ActionQueuedEvent[] {
-  const latest = new Map<string, ActionQueuedEvent>();
+function verifiedSchedulePayload(
+  transaction: ScheduleTransaction,
+  controller: Address,
+): DecodedControllerScheduleInput {
+  if (!transaction.to || !sameAddress(transaction.to, controller)) {
+    throw new Error("Schedule transaction does not directly target the controller.");
+  }
+  const decoded = decodeControllerScheduleCalldata(transaction.input);
+  if (!decoded) throw new Error("Controller schedule calldata could not be decoded.");
+  return decoded;
+}
+
+function verifyPayloadAgainstEvent(payload: DecodedControllerScheduleInput, event: ScheduleEvent): void {
+  if (!sameHex(payload.salt, event.salt)
+    || payload.expectedBoardroomEpoch !== event.boardroomEpoch
+    || payload.expectedConfigurationEpoch !== event.configurationEpoch) {
+    throw new Error("Schedule calldata context does not match the emitted operation.");
+  }
+  if (payload.kind === "boardroomOperation" && event.kind === "boardroomOperationScheduled") {
+    if (!sameHex(hashBoardroomCalls(payload.calls), event.callsHash)) {
+      throw new Error("Scheduled calls do not match the emitted calls hash.");
+    }
+    return;
+  }
+  if (payload.kind === "controllerOperation" && event.kind === "controllerOperationScheduled") {
+    if (!sameHex(keccak256(payload.data), event.dataHash)) {
+      throw new Error("Scheduled controller data does not match the emitted data hash.");
+    }
+    return;
+  }
+  throw new Error("Schedule calldata kind does not match the emitted operation kind.");
+}
+
+function verifyTransactionProvenance(
+  candidate: ScheduledBoardroomOperationCandidate,
+  transaction: ScheduleTransaction,
+  receipt: ScheduleReceipt,
+): void {
+  if (!sameHex(transaction.hash, candidate.scheduleTransactionHash)) {
+    throw new Error("RPC returned a different schedule transaction hash.");
+  }
+  if (transaction.blockNumber === null || transaction.blockNumber === undefined) {
+    throw new Error("Schedule transaction is not confirmed in a block.");
+  }
+  if (candidate.scheduleBlockNumber !== undefined && candidate.scheduleBlockNumber !== transaction.blockNumber) {
+    throw new Error("Candidate schedule block does not match the mined transaction.");
+  }
+  if (receipt.status !== "success") throw new Error("Schedule transaction reverted.");
+  if (!sameHex(receipt.transactionHash, candidate.scheduleTransactionHash)) {
+    throw new Error("Receipt does not match the schedule transaction hash.");
+  }
+  if (receipt.blockNumber !== transaction.blockNumber) {
+    throw new Error("Receipt block does not match the schedule transaction block.");
+  }
+}
+
+function scheduleEventFromReceipt(
+  candidate: ScheduledBoardroomOperationCandidate,
+  payload: DecodedControllerScheduleInput,
+  receipt: ScheduleReceipt,
+): ScheduleEvent {
+  for (const log of receipt.logs) {
+    if (!sameAddress(log.address, candidate.controller)) continue;
+    try {
+      const decoded = decodeEventLog({
+        abi: boardroomControllerAbi,
+        data: log.data,
+        topics: log.topics as [Hex, ...Hex[]],
+      });
+      const expectedName = payload.kind === "boardroomOperation"
+        ? "BoardroomOperationScheduled"
+        : "ControllerOperationScheduled";
+      if (decoded.eventName !== expectedName) continue;
+      const args = decoded.args as Record<string, unknown>;
+      const operationId = requireHexArg(args, "operationId");
+      if (!sameHex(operationId, candidate.operationId)) continue;
+      const common = {
+        boardroom: candidate.boardroom,
+        controller: candidate.controller,
+        operationId,
+        proposer: requireAddressArg(args, "proposer"),
+        eta: requireBigintArg(args, "eta"),
+        expiresAt: requireBigintArg(args, "expiresAt"),
+        boardroomEpoch: requireBigintArg(args, "boardroomEpoch"),
+        controllerGeneration: requireBigintArg(args, "controllerGeneration"),
+        configurationEpoch: requireBigintArg(args, "configurationEpoch"),
+        salt: requireHexArg(args, "salt"),
+        blockNumber: receipt.blockNumber,
+        logIndex: 0,
+        transactionHash: receipt.transactionHash,
+      };
+      return payload.kind === "boardroomOperation"
+        ? { ...common, kind: "boardroomOperationScheduled", callsHash: requireHexArg(args, "callsHash") }
+        : { ...common, kind: "controllerOperationScheduled", dataHash: requireHexArg(args, "dataHash") };
+    } catch {
+      continue;
+    }
+  }
+  throw new Error("Schedule receipt does not contain the matching controller event.");
+}
+
+function latestScheduleEvents(events: readonly GovernanceEvent[]): ScheduleEvent[] {
+  const latest = new Map<string, ScheduleEvent>();
   for (const event of events) {
-    if (event.kind !== "actionQueued") continue;
-    latest.set(actionKey(event.boardroom, event.actionHash), event);
+    if (event.kind !== "boardroomOperationScheduled" && event.kind !== "controllerOperationScheduled") continue;
+    latest.set(`${event.controller.toLowerCase()}:${event.operationId.toLowerCase()}`, event);
   }
   return [...latest.values()];
 }
 
-function governanceResolutionIndex(events: readonly GovernanceEvent[]): GovernanceResolutionIndex {
-  const currentEpochs = new Map<string, bigint>();
-  const terminalEvents = new Map<string, ActionTerminalEvent>();
-  for (const event of events) {
-    if (event.kind === "governanceEpochAdvanced") {
-      currentEpochs.set(event.boardroom.toLowerCase(), event.epoch);
-    } else if (event.kind === "actionCancelled" || event.kind === "actionExecuted") {
-      terminalEvents.set(actionKey(event.boardroom, event.actionHash), event);
-    }
+function toBoardroomEvent(log: RawEventLog): GovernanceEvent | undefined {
+  const meta = logMeta(log);
+  if (!meta || !log.args) return undefined;
+  const args = log.args;
+  switch (log.eventName) {
+    case "BoardroomLaunched":
+      return {
+        ...meta,
+        kind: "launched",
+        controller: requireAddressArg(args, "controller"),
+        proposer: requireAddressArg(args, "proposer"),
+        protectionStaker: requireAddressArg(args, "protectionStaker"),
+        controllerGeneration: requireBigintArg(args, "controllerGeneration"),
+        controllerDelay: requireBigintArg(args, "controllerDelay"),
+        windDownDelay: requireBigintArg(args, "windDownDelay"),
+        gracePeriod: requireBigintArg(args, "gracePeriod"),
+      };
+    case "BoardroomControllerReplaced":
+      return {
+        ...meta,
+        kind: "controllerReplaced",
+        oldController: requireAddressArg(args, "oldController"),
+        controller: requireAddressArg(args, "newController"),
+        controllerGeneration: requireBigintArg(args, "generation"),
+        proposer: requireAddressArg(args, "proposer"),
+        controllerDelay: requireBigintArg(args, "controllerDelay"),
+        gracePeriod: requireBigintArg(args, "gracePeriod"),
+      };
+    case "BoardroomOperationVetoed":
+      return {
+        ...meta,
+        kind: "operationVetoed",
+        operationId: requireHexArg(args, "operationId"),
+        staker: requireAddressArg(args, "staker"),
+      };
+    case "BoardroomCallExecuted":
+      return {
+        ...meta,
+        kind: "callExecuted",
+        policy: requireAddressArg(args, "policy"),
+        target: requireAddressArg(args, "target"),
+        selector: requireHexArg(args, "selector"),
+        authority: requireAddressArg(args, "authority"),
+        value: requireBigintArg(args, "value"),
+        dataHash: requireHexArg(args, "dataHash"),
+      };
+    case "GovernanceEpochAdvanced":
+      return { ...meta, kind: "governanceEpochAdvanced", epoch: requireBigintArg(args, "epoch") };
+    case "BoardroomWindDownStarted":
+      return {
+        ...meta,
+        kind: "windDownStarted",
+        caller: requireAddressArg(args, "caller"),
+        epoch: requireBigintArg(args, "epoch"),
+        windDownDelay: requireBigintArg(args, "windDownDelay"),
+      };
+    default:
+      return undefined;
   }
-  return { currentEpochs, terminalEvents };
 }
 
-function latestTerminalEvent(
-  index: GovernanceResolutionIndex,
-  queued: ActionQueuedEvent,
-): ActionTerminalEvent | undefined {
-  const terminal = index.terminalEvents.get(actionKey(queued.boardroom, queued.actionHash));
-  return terminal && compareEventPosition(terminal, queued) > 0 ? terminal : undefined;
-}
-
-function queueEpochWasInvalidated(index: GovernanceResolutionIndex, queued: ActionQueuedEvent): boolean {
-  const currentEpoch = index.currentEpochs.get(queued.boardroom.toLowerCase());
-  return currentEpoch !== undefined && currentEpoch !== queued.epoch;
-}
-
-async function readQueuedPayload(
-  client: PledgeCashGovernanceClient,
-  queued: ActionQueuedEvent,
-  signal?: AbortSignal,
-): Promise<Pick<QueuedBoardroomAction, "kind" | "calls"> | Pick<QueuedBoardroomAction, "payloadError">> {
-  try {
-    throwIfAborted(signal);
-    const transaction = await client.getTransaction({ hash: queued.transactionHash });
-    throwIfAborted(signal);
-    const payload = verifiedQueuedPayload(transaction, queued.boardroom, queued.actionHash);
-    if (payload.salt.toLowerCase() !== queued.salt.toLowerCase()) {
-      return { payloadError: "Queue calldata does not match the emitted salt." };
-    }
-
-    return { kind: payload.kind, calls: payload.calls };
-  } catch (error) {
-    throwIfAborted(signal);
-    return { payloadError: error instanceof Error ? error.message : String(error) };
+function toControllerEvent(log: RawEventLog, boardroom: Address, controller: Address): GovernanceEvent | undefined {
+  const meta = logMeta({ ...log, address: boardroom });
+  if (!meta || !log.args) return undefined;
+  const args = log.args;
+  switch (log.eventName) {
+    case "BoardroomOperationScheduled":
+      return {
+        ...meta,
+        kind: "boardroomOperationScheduled",
+        controller,
+        operationId: requireHexArg(args, "operationId"),
+        proposer: requireAddressArg(args, "proposer"),
+        eta: requireBigintArg(args, "eta"),
+        expiresAt: requireBigintArg(args, "expiresAt"),
+        boardroomEpoch: requireBigintArg(args, "boardroomEpoch"),
+        controllerGeneration: requireBigintArg(args, "controllerGeneration"),
+        configurationEpoch: requireBigintArg(args, "configurationEpoch"),
+        salt: requireHexArg(args, "salt"),
+        callsHash: requireHexArg(args, "callsHash"),
+      };
+    case "ControllerOperationScheduled":
+      return {
+        ...meta,
+        kind: "controllerOperationScheduled",
+        controller,
+        operationId: requireHexArg(args, "operationId"),
+        proposer: requireAddressArg(args, "proposer"),
+        eta: requireBigintArg(args, "eta"),
+        expiresAt: requireBigintArg(args, "expiresAt"),
+        boardroomEpoch: requireBigintArg(args, "boardroomEpoch"),
+        controllerGeneration: requireBigintArg(args, "controllerGeneration"),
+        configurationEpoch: requireBigintArg(args, "configurationEpoch"),
+        salt: requireHexArg(args, "salt"),
+        dataHash: requireHexArg(args, "dataHash"),
+      };
+    case "OperationCancelled":
+      return { ...meta, kind: "operationCancelled", controller, operationId: requireHexArg(args, "operationId") };
+    case "OperationExecuted":
+      return {
+        ...meta,
+        kind: "operationExecuted",
+        controller,
+        operationId: requireHexArg(args, "operationId"),
+        executor: requireAddressArg(args, "executor"),
+      };
+    case "ConfigurationUpdated":
+      return {
+        ...meta,
+        kind: "configurationUpdated",
+        controller,
+        oldProposer: requireAddressArg(args, "oldProposer"),
+        proposer: requireAddressArg(args, "newProposer"),
+        oldDelay: requireBigintArg(args, "oldDelay"),
+        delay: requireBigintArg(args, "newDelay"),
+        oldGracePeriod: requireBigintArg(args, "oldGracePeriod"),
+        gracePeriod: requireBigintArg(args, "newGracePeriod"),
+        configurationEpoch: requireBigintArg(args, "configurationEpoch"),
+      };
+    default:
+      return undefined;
   }
 }
 
-function verifiedQueuedPayload(
-  transaction: QueueTransaction,
-  boardroom: Address,
-  actionHash: Hex,
-): VerifiedQueuedPayload {
-  if (!transaction.to || !sameAddress(transaction.to, boardroom)) {
-    throw new Error("Queue transaction does not directly target the Boardroom.");
-  }
-  const decoded = decodeQueueCalldata(transaction.input);
-  if (!decoded) throw new Error("Queue calldata could not be decoded.");
-  const calls = decoded.kind === "queueAction" ? [decoded.call] : decoded.calls;
-  const computedHash = decoded.kind === "queueAction"
-    ? hashAction(decoded.call, decoded.salt)
-    : hashBatch(decoded.calls, decoded.salt);
-  if (computedHash.toLowerCase() !== actionHash.toLowerCase()) {
-    throw new Error("Queue calldata does not match the action hash.");
-  }
-  return { kind: decoded.kind, calls, salt: decoded.salt };
-}
-
-function verifiedQueuedReceipt(input: {
-  actionHash: Hex;
-  boardroom: Address;
-  executor: Address;
-  payload: VerifiedQueuedPayload;
-  receipt: QueueReceipt;
-  transactionBlock: bigint;
-  transactionHash: Hex;
-}): VerifiedQueuedReceipt {
-  if (input.receipt.status !== "success") throw new Error("Queue transaction reverted.");
-  if (!sameHex(input.receipt.transactionHash, input.transactionHash)) {
-    throw new Error("Receipt does not match the queue transaction hash.");
-  }
-  if (input.receipt.blockNumber !== input.transactionBlock) {
-    throw new Error("Receipt block does not match the queue transaction block.");
-  }
-
-  for (const log of input.receipt.logs) {
-    if (!sameAddress(log.address, input.boardroom)) continue;
-    try {
-      const decoded = decodeEventLog({
-        abi: boardroomAbi,
-        data: log.data,
-        topics: log.topics as [Hex, ...Hex[]],
-      });
-      if (decoded.eventName !== "BoardroomActionQueued") continue;
-      const args = decoded.args as Record<string, unknown>;
-      const actionHash = hexArg(args, "actionHash");
-      if (!actionHash || !sameHex(actionHash, input.actionHash)) continue;
-      const executor = addressArg(args, "executor");
-      const eta = bigintArg(args, "eta");
-      const expiresAt = bigintArg(args, "expiresAt");
-      const epoch = bigintArg(args, "epoch");
-      const salt = hexArg(args, "salt");
-      if (!executor || !sameAddress(executor, input.executor)) {
-        throw new Error("Queue event executor does not match the transaction sender.");
-      }
-      if (!salt || !sameHex(salt, input.payload.salt)) {
-        throw new Error("Queue event salt does not match the verified calldata.");
-      }
-      if (eta === undefined || expiresAt === undefined || epoch === undefined) {
-        throw new Error("Queue event is missing governance timing fields.");
-      }
-      return { epoch, eta, expiresAt };
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith("Queue event")) throw error;
-    }
-  }
-  throw new Error("Queue receipt does not contain the matching Boardroom event.");
-}
-
-function deduplicateQueuedActionCandidates(candidates: readonly QueuedBoardroomActionCandidate[]): {
-  candidates: QueuedBoardroomActionCandidate[];
-  errors: QueuedBoardroomActionCandidateError[];
-} {
-  const deduplicated = new Map<string, QueuedBoardroomActionCandidate>();
-  const conflicts = new Set<string>();
-  const errors: QueuedBoardroomActionCandidateError[] = [];
-  for (const candidate of candidates) {
-    const key = actionKey(candidate.boardroom, candidate.actionHash);
-    if (conflicts.has(key)) continue;
-    const existing = deduplicated.get(key);
-    if (!existing) {
-      deduplicated.set(key, candidate);
-      continue;
-    }
-    const sameTransaction = sameHex(existing.queueTransactionHash, candidate.queueTransactionHash);
-    const compatibleBlock = existing.queueBlockNumber === undefined
-      || candidate.queueBlockNumber === undefined
-      || existing.queueBlockNumber === candidate.queueBlockNumber;
-    if (sameTransaction && compatibleBlock) {
-      if (existing.queueBlockNumber === undefined && candidate.queueBlockNumber !== undefined) {
-        deduplicated.set(key, candidate);
-      }
-      continue;
-    }
-    deduplicated.delete(key);
-    conflicts.add(key);
-    errors.push({
-      boardroom: candidate.boardroom,
-      actionHash: candidate.actionHash,
-      message: "Conflicting queue candidates were returned for this action.",
-    });
-  }
-  return { candidates: [...deduplicated.values()], errors };
-}
-
-function conciseErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  const firstLine = message.split("\n", 1)[0]?.trim();
-  return (firstLine || "Candidate could not be verified.").slice(0, 240);
-}
-
-function queuedActionStatus(input: {
-  terminal: ActionTerminalEvent | undefined;
-  currentTime: bigint;
-  currentEpoch: bigint;
-  eta: bigint;
-  expiresAt: bigint;
-  actionEpoch: bigint;
-}): QueuedBoardroomActionStatus {
-  if (input.terminal?.kind === "actionExecuted") return "executed";
-  if (input.terminal?.kind === "actionCancelled") return "cancelled";
-  if (input.eta === 0n) return "unknown";
-  if (input.currentEpoch !== input.actionEpoch) return "invalidated";
-  if (input.currentTime > input.expiresAt) return "expired";
-  if (input.currentTime >= input.eta) return "ready";
-  return "waiting";
-}
-
-function actionKey(boardroom: Address, actionHash: Hex): string {
-  return `${boardroom.toLowerCase()}:${actionHash.toLowerCase()}`;
-}
-
-function sameHex(left: Hex, right: Hex): boolean {
-  return left.toLowerCase() === right.toLowerCase();
-}
-
-function sameAddress(left: Address, right: Address): boolean {
-  return left.toLowerCase() === right.toLowerCase();
-}
-
-function compareEventPosition(left: GovernanceLogMeta, right: GovernanceLogMeta): number {
-  if (left.blockNumber < right.blockNumber) return -1;
-  if (left.blockNumber > right.blockNumber) return 1;
-  return left.logIndex - right.logIndex;
-}
-
-function compareBigIntDesc(left: bigint, right: bigint): number {
-  if (left > right) return -1;
-  if (left < right) return 1;
-  return 0;
-}
-
-async function getGovernanceLogs(
+async function resolveRange(
   client: PledgeCashLogClient,
+  boardrooms: readonly Address[],
   input: GovernanceEventsQuery,
-): Promise<RawEventLog[]> {
-  throwIfAborted(input.signal);
-  const address = input.boardrooms.length === 1 ? input.boardrooms[0]! : [...input.boardrooms];
-  const chunkSize = input.chunkSize ?? DEFAULT_GOVERNANCE_LOG_CHUNK_SIZE;
-  if (chunkSize <= 0n) throw new Error("Governance event chunk size must be greater than zero.");
-
+): Promise<{ fromBlock: bigint; toBlock: bigint }> {
   let toBlock = input.toBlock;
   if (toBlock === undefined || toBlock === "latest") {
     if (!client.getBlockNumber) {
-      throw new Error("Governance event discovery requires an explicit ending block or a client that can read the latest block number.");
+      throw new Error("Governance discovery requires an ending block or a client that can read the latest block.");
     }
-    throwIfAborted(input.signal);
     toBlock = await client.getBlockNumber();
-    throwIfAborted(input.signal);
   }
-  const budget: GovernanceLogBudget = { logsUsed: 0, requestsUsed: 0 };
-  const detectedStart = await governanceStartBlock(client, input.boardrooms, input.fromBlock, toBlock, input.signal);
-  const fromBlock = detectedStart ?? await governanceLaunchStartBlock(
-    client,
-    address,
-    input.boardrooms,
-    toBlock,
-    chunkSize,
-    budget,
-    input.signal,
-  );
-  throwIfAborted(input.signal);
-  if (fromBlock > toBlock) return [];
+  if (input.fromBlock !== undefined) return { fromBlock: input.fromBlock, toBlock };
+  if (!client.getCode) return { fromBlock: 0n, toBlock };
+  const starts = await Promise.all(boardrooms.map(async (boardroom) => findContractStart(client, boardroom, toBlock)));
+  return { fromBlock: starts.reduce((minimum, start) => start < minimum ? start : minimum, toBlock + 1n), toBlock };
+}
 
+async function findContractStart(client: PledgeCashLogClient, address: Address, toBlock: bigint): Promise<bigint> {
+  if (!client.getCode) return 0n;
+  const headCode = await client.getCode({ address, blockNumber: toBlock });
+  if (!headCode || headCode === "0x") return toBlock + 1n;
+  let low = 0n;
+  let high = toBlock;
+  let steps = 0;
+  while (low < high) {
+    if (++steps > MAX_START_SEARCH_STEPS) throw new Error("Governance contract start search exceeded its bound.");
+    const middle = (low + high) / 2n;
+    const code = await client.getCode({ address, blockNumber: middle });
+    if (code && code !== "0x") high = middle;
+    else low = middle + 1n;
+  }
+  return low;
+}
+
+async function readLogsInChunks(
+  client: PledgeCashLogClient,
+  addresses: readonly Address[],
+  events: readonly unknown[],
+  fromBlock: bigint,
+  toBlock: bigint,
+  chunkSize: bigint,
+  budget: { requests: number; logs: number },
+  signal?: AbortSignal,
+): Promise<RawEventLog[]> {
+  if (chunkSize <= 0n) throw new Error("Governance event chunk size must be greater than zero.");
   const logs: RawEventLog[] = [];
-  let start = fromBlock;
-  while (start <= toBlock) {
-    throwIfAborted(input.signal);
+  for (let start = fromBlock; start <= toBlock;) {
+    throwIfAborted(signal);
     const end = minBigInt(start + chunkSize - 1n, toBlock);
-    logs.push(...await readGovernanceLogRangeAdaptive(client, address, start, end, budget, input.signal));
-    throwIfAborted(input.signal);
+    logs.push(...await readLogRangeAdaptive(client, addresses, events, start, end, budget, signal));
     start = end + 1n;
   }
   return logs;
 }
 
-async function governanceStartBlock(
+async function readLogRangeAdaptive(
   client: PledgeCashLogClient,
-  boardrooms: readonly Address[],
-  requestedFromBlock: bigint | undefined,
-  toBlock: bigint,
-  signal?: AbortSignal,
-): Promise<bigint | undefined> {
-  throwIfAborted(signal);
-  if (requestedFromBlock !== undefined) return requestedFromBlock;
-  if (!client.getCode) return undefined;
-  const uniqueBoardrooms = uniqueBoardroomAddresses(boardrooms);
-  const starts = await mapInBatches(
-    uniqueBoardrooms,
-    CONTRACT_START_READ_CONCURRENCY,
-    async (address) => await governanceContractStartBlock(client, address, toBlock, signal),
-    signal,
-  );
-  if (starts.some((start) => start === undefined)) return undefined;
-  return (starts as bigint[]).reduce((earliest, start) => minBigInt(earliest, start), toBlock + 1n);
-}
-
-async function governanceContractStartBlock(
-  client: PledgeCashLogClient,
-  address: Address,
-  toBlock: bigint,
-  signal?: AbortSignal,
-): Promise<bigint | undefined> {
-  throwIfAborted(signal);
-  if (!client.getCode) return undefined;
-  let clientCache = contractStartBlockCache.get(client);
-  if (!clientCache) {
-    clientCache = new Map();
-    contractStartBlockCache.set(client, clientCache);
-  }
-  const key = address.toLowerCase();
-  const cached = clientCache.get(key);
-  if (cached) {
-    clientCache.delete(key);
-    clientCache.set(key, cached);
-    try {
-      const start = await waitForGovernanceStartBlock(cached, signal);
-      return start;
-    } catch {
-      throwIfAborted(signal);
-      if (clientCache.get(key) === cached) clientCache.delete(key);
-      return undefined;
-    }
-  }
-
-  // The cached lookup is deliberately independent from any one caller's
-  // cancellation signal. Each caller races its own wait against its signal,
-  // so an abandoned route cannot poison a concurrent or later lookup.
-  const request = findGovernanceContractStartBlock(client, address, toBlock);
-  while (clientCache.size >= MAX_CONTRACT_START_CACHE_ENTRIES) {
-    const oldest = clientCache.keys().next().value as string | undefined;
-    if (oldest === undefined) break;
-    clientCache.delete(oldest);
-  }
-  clientCache.set(key, request);
-  try {
-    const start = await waitForGovernanceStartBlock(request, signal);
-    if (start > toBlock && clientCache.get(key) === request) clientCache.delete(key);
-    return start;
-  } catch {
-    throwIfAborted(signal);
-    if (clientCache.get(key) === request) clientCache.delete(key);
-    return undefined;
-  }
-}
-
-async function findGovernanceContractStartBlock(
-  client: PledgeCashLogClient,
-  address: Address,
-  toBlock: bigint,
-): Promise<bigint> {
-  if (!client.getCode) return 0n;
-  const latestCode = await client.getCode({ address, blockNumber: toBlock });
-  if (!latestCode || latestCode === "0x") return toBlock + 1n;
-
-  let low = 0n;
-  let high = toBlock;
-  let steps = 0;
-  while (low < high && steps < MAX_CONTRACT_START_SEARCH_STEPS) {
-    const middle = (low + high) / 2n;
-    const code = await client.getCode({ address, blockNumber: middle });
-    if (code && code !== "0x") high = middle;
-    else low = middle + 1n;
-    steps += 1;
-  }
-  if (low < high) {
-    throw new Error(`Governance contract start-block search exceeded ${MAX_CONTRACT_START_SEARCH_STEPS.toString()} steps.`);
-  }
-  return low;
-}
-
-async function waitForGovernanceStartBlock(request: Promise<bigint>, signal?: AbortSignal): Promise<bigint> {
-  throwIfAborted(signal);
-  if (!signal) return await request;
-
-  return await new Promise<bigint>((resolve, reject) => {
-    const onAbort = (): void => reject(signal.reason ?? new DOMException("The operation was aborted.", "AbortError"));
-    signal.addEventListener("abort", onAbort, { once: true });
-    request.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
-  });
-}
-
-async function governanceLaunchStartBlock(
-  client: PledgeCashLogClient,
-  address: Address | Address[],
-  boardrooms: readonly Address[],
-  toBlock: bigint,
-  chunkSize: bigint,
-  budget: GovernanceLogBudget,
-  signal?: AbortSignal,
-): Promise<bigint> {
-  throwIfAborted(signal);
-  const remaining = new Set(uniqueBoardroomAddresses(boardrooms).map((boardroom) => boardroom.toLowerCase()));
-  const launchBlocks: bigint[] = [];
-  let end = toBlock;
-  while (true) {
-    throwIfAborted(signal);
-    const start = end >= chunkSize - 1n ? end - chunkSize + 1n : 0n;
-    const logs = await readGovernanceLaunchRangeAdaptive(client, address, start, end, budget, signal);
-    throwIfAborted(signal);
-    for (const log of logs) {
-      if (!log.address || log.blockNumber === undefined || !remaining.delete(log.address.toLowerCase())) continue;
-      launchBlocks.push(log.blockNumber);
-    }
-    if (remaining.size === 0) {
-      return launchBlocks.reduce((earliest, block) => minBigInt(earliest, block), toBlock);
-    }
-    if (start === 0n) return 0n;
-    end = start - 1n;
-  }
-}
-
-async function readGovernanceLaunchRangeAdaptive(
-  client: PledgeCashLogClient,
-  address: Address | Address[],
+  addresses: readonly Address[],
+  events: readonly unknown[],
   fromBlock: bigint,
   toBlock: bigint,
-  budget: GovernanceLogBudget,
+  budget: { requests: number; logs: number },
   signal?: AbortSignal,
 ): Promise<RawEventLog[]> {
   throwIfAborted(signal);
-  reserveGovernanceLogRequest(budget);
+  if (++budget.requests > MAX_LOG_REQUESTS) throw new Error("Governance log request budget exceeded.");
   try {
-    throwIfAborted(signal);
-    const logs = (await client.getLogs({
-      address,
-      event: launchedEvent,
-      fromBlock,
-      toBlock,
-    } as never)) as RawEventLog[];
-    throwIfAborted(signal);
-    reserveGovernanceLogResults(budget, logs.length);
+    const address = addresses.length === 1 ? addresses[0]! : [...addresses];
+    const logs = await client.getLogs({ address, events, fromBlock, toBlock } as never) as unknown as RawEventLog[];
+    budget.logs += logs.length;
+    if (budget.logs > MAX_LOGS) throw new Error("Governance log result exceeds its safety bound.");
     return logs;
   } catch (error) {
     throwIfAborted(signal);
-    const size = toBlock - fromBlock + 1n;
-    if (!isGovernanceLogRangeLimitError(error) || size <= MIN_GOVERNANCE_LOG_CHUNK_SIZE) throw error;
-    const middle = fromBlock + (toBlock - fromBlock) / 2n;
-    const first = await readGovernanceLaunchRangeAdaptive(client, address, fromBlock, middle, budget, signal);
-    const second = await readGovernanceLaunchRangeAdaptive(client, address, middle + 1n, toBlock, budget, signal);
-    return [...first, ...second];
+    if (fromBlock === toBlock || conciseError(error).includes("safety bound")) throw error;
+    const middle = (fromBlock + toBlock) / 2n;
+    const [left, right] = await Promise.all([
+      readLogRangeAdaptive(client, addresses, events, fromBlock, middle, budget, signal),
+      readLogRangeAdaptive(client, addresses, events, middle + 1n, toBlock, budget, signal),
+    ]);
+    return [...left, ...right];
   }
 }
 
-type GovernanceLogBudget = {
-  logsUsed: number;
-  requestsUsed: number;
-};
-
-async function readGovernanceLogRangeAdaptive(
-  client: PledgeCashLogClient,
-  address: Address | Address[],
-  fromBlock: bigint,
-  toBlock: bigint,
-  budget: GovernanceLogBudget,
-  signal?: AbortSignal,
-): Promise<RawEventLog[]> {
-  throwIfAborted(signal);
-  reserveGovernanceLogRequest(budget);
-  try {
-    throwIfAborted(signal);
-    const logs = (await client.getLogs({
-      address,
-      events: governanceEventAbis,
-      fromBlock,
-      toBlock,
-    } as never)) as RawEventLog[];
-    throwIfAborted(signal);
-    reserveGovernanceLogResults(budget, logs.length);
-    return logs;
-  } catch (error) {
-    throwIfAborted(signal);
-    const size = toBlock - fromBlock + 1n;
-    if (!isGovernanceLogRangeLimitError(error) || size <= MIN_GOVERNANCE_LOG_CHUNK_SIZE) throw error;
-    const middle = fromBlock + (toBlock - fromBlock) / 2n;
-    const first = await readGovernanceLogRangeAdaptive(client, address, fromBlock, middle, budget, signal);
-    const second = await readGovernanceLogRangeAdaptive(client, address, middle + 1n, toBlock, budget, signal);
-    return [...first, ...second];
-  }
-}
-
-function reserveGovernanceLogRequest(budget: GovernanceLogBudget): void {
-  if (budget.requestsUsed >= MAX_GOVERNANCE_LOG_REQUESTS) {
-    throw new Error(`Governance event scan exceeded its ${MAX_GOVERNANCE_LOG_REQUESTS.toString()}-request safety bound.`);
-  }
-  budget.requestsUsed += 1;
-}
-
-function reserveGovernanceLogResults(budget: GovernanceLogBudget, count: number): void {
-  if (count > MAX_GOVERNANCE_LOGS - budget.logsUsed) {
-    throw new Error(`Governance event scan exceeds its ${MAX_GOVERNANCE_LOGS.toLocaleString()}-event safety bound.`);
-  }
-  budget.logsUsed += count;
-}
-
-function isGovernanceLogRangeLimitError(error: unknown): boolean {
-  const message = governanceLogErrorText(error).toLowerCase();
-  if (/(?:rate[ -]?limit|too many requests|\b429\b|quota|throttl)/.test(message)) return false;
-  return [
-    /(?:exceed|maximum|max|limit|limited)[^.\n]*block range/,
-    /(?:limit|limited)[^.\n]*\brange\b/,
-    /block range[^.\n]*(?:exceed|maximum|max|limit|too (?:large|wide))/,
-    /range[^.\n]*(?:too (?:large|wide)|exceed|limit)/,
-    /query returned more than/,
-    /too many (?:logs|results)/,
-    /response size[^.\n]*(?:exceed|limit|too large)/,
-    /please (?:reduce|limit)[^.\n]*(?:block|range)/,
-    /eth_getlogs[^.\n]*(?:exceed|limit|too (?:large|wide))/,
-  ].some((pattern) => pattern.test(message));
-}
-
-function governanceLogErrorText(error: unknown): string {
-  const parts: string[] = [];
-  const seen = new Set<unknown>();
-  let current: unknown = error;
-  for (let depth = 0; depth < 5 && current !== undefined && current !== null && !seen.has(current); depth += 1) {
-    seen.add(current);
-    if (typeof current === "string") {
-      parts.push(current);
-      break;
-    }
-    if (current instanceof Error) {
-      parts.push(current.message);
-      current = current.cause;
+function deduplicateCandidates(candidates: readonly ScheduledBoardroomOperationCandidate[]): {
+  candidates: ScheduledBoardroomOperationCandidate[];
+  errors: ScheduledBoardroomOperationCandidateError[];
+} {
+  const unique = new Map<string, ScheduledBoardroomOperationCandidate>();
+  const errors: ScheduledBoardroomOperationCandidateError[] = [];
+  for (const candidate of candidates) {
+    const key = `${candidate.controller.toLowerCase()}:${candidate.operationId.toLowerCase()}`;
+    const existing = unique.get(key);
+    if (!existing) {
+      unique.set(key, candidate);
       continue;
     }
-    if (typeof current === "object") {
-      const record = current as Record<string, unknown>;
-      for (const field of ["shortMessage", "details", "message"] as const) {
-        if (typeof record[field] === "string") parts.push(record[field]);
-      }
-      current = record.cause;
-      continue;
+    if (!sameHex(existing.scheduleTransactionHash, candidate.scheduleTransactionHash)
+      || !sameAddress(existing.boardroom, candidate.boardroom)) {
+      errors.push({
+        boardroom: candidate.boardroom,
+        controller: candidate.controller,
+        operationId: candidate.operationId,
+        message: "Conflicting provenance was provided for the same controller operation.",
+      });
     }
-    parts.push(String(current));
-    break;
   }
-  return parts.join(" ");
+  return { candidates: [...unique.values()], errors };
 }
 
-function toGovernanceEvent(log: RawEventLog): GovernanceEvent | undefined {
-  switch (log.eventName) {
-    case "BoardroomLaunched": return toLaunchedEvent(log);
-    case "ExecutorSet": return toExecutorSetEvent(log);
-    case "BoardroomActionQueued": return toActionQueuedEvent(log);
-    case "BoardroomActionCancelled": return toActionCancelledEvent(log);
-    case "BoardroomActionExecuted": return toActionExecutedEvent(log);
-    case "BoardroomCallExecuted": return toCallExecutedEvent(log);
-    case "GovernanceEpochAdvanced": return toGovernanceEpochAdvancedEvent(log);
-    case "BoardroomWindDownStarted": return toWindDownStartedEvent(log);
-    default: return undefined;
-  }
+function normalizeBoardroomCalls(value: unknown): BoardroomCall[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const calls = value.map(normalizeBoardroomCall);
+  return calls.every((call): call is BoardroomCall => call !== undefined) ? calls : undefined;
 }
 
-function minBigInt(left: bigint, right: bigint): bigint {
-  return left < right ? left : right;
+function normalizeBoardroomCall(value: unknown): BoardroomCall | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Record<string, unknown> & { 0?: unknown; 1?: unknown; 2?: unknown; 3?: unknown };
+  const policy = addressValue(item.policy ?? item[0]);
+  const target = addressValue(item.target ?? item[1]);
+  const amount = bigintValue(item.value ?? item[2]);
+  const data = hexValue(item.data ?? item[3]);
+  return policy && target && amount !== undefined && data ? { policy, target, value: amount, data } : undefined;
 }
 
-function uniqueBoardroomAddresses(boardrooms: readonly Address[]): Address[] {
-  return Array.from(new Map(boardrooms.map((address) => [address.toLowerCase(), address])).values());
-}
-
-function assertGovernanceBoardroomBound(boardrooms: readonly Address[]): void {
-  if (uniqueBoardroomAddresses(boardrooms).length > MAX_GOVERNANCE_BOARDROOMS) {
-    throw new Error(`Governance event scan exceeds its ${MAX_GOVERNANCE_BOARDROOMS.toString()}-Boardroom safety bound.`);
-  }
-}
-
-async function mapInBatches<T, U>(
-  values: readonly T[],
-  concurrency: number,
-  mapper: (value: T) => Promise<U>,
-  signal?: AbortSignal,
-): Promise<U[]> {
-  throwIfAborted(signal);
-  const results: U[] = [];
-  for (let start = 0; start < values.length; start += concurrency) {
-    throwIfAborted(signal);
-    const batch = values.slice(start, start + concurrency);
-    results.push(...await Promise.all(batch.map(mapper)));
-    throwIfAborted(signal);
-  }
-  return results;
-}
-
-function throwIfAborted(signal?: AbortSignal): void {
-  signal?.throwIfAborted();
-}
-
-function toLaunchedEvent(log: RawEventLog): GovernanceEvent | undefined {
-  const meta = governanceMeta(log);
-  const executor = addressArg(log.args, "executor");
-  const governanceDelay = bigintArg(log.args, "governanceDelay");
-  if (!meta || !executor || governanceDelay === undefined) return undefined;
-  return { kind: "launched", executor, governanceDelay, ...meta };
-}
-
-function toExecutorSetEvent(log: RawEventLog): GovernanceEvent | undefined {
-  const meta = governanceMeta(log);
-  const executor = addressArg(log.args, "executor");
-  if (!meta || !executor) return undefined;
-  return { kind: "executorSet", executor, ...meta };
-}
-
-function toActionQueuedEvent(log: RawEventLog): GovernanceEvent | undefined {
-  const meta = governanceMeta(log);
-  const actionHash = hexArg(log.args, "actionHash");
-  const executor = addressArg(log.args, "executor");
-  const eta = bigintArg(log.args, "eta");
-  const expiresAt = bigintArg(log.args, "expiresAt");
-  const epoch = bigintArg(log.args, "epoch");
-  const salt = hexArg(log.args, "salt");
-  if (
-    !meta
-    || !actionHash
-    || !executor
-    || eta === undefined
-    || expiresAt === undefined
-    || epoch === undefined
-    || !salt
-  ) {
-    return undefined;
-  }
-  return { kind: "actionQueued", actionHash, executor, eta, expiresAt, epoch, salt, ...meta };
-}
-
-function toActionCancelledEvent(log: RawEventLog): GovernanceEvent | undefined {
-  const meta = governanceMeta(log);
-  const actionHash = hexArg(log.args, "actionHash");
-  const caller = addressArg(log.args, "caller");
-  if (!meta || !actionHash || !caller) return undefined;
-  return { kind: "actionCancelled", actionHash, caller, ...meta };
-}
-
-function toActionExecutedEvent(log: RawEventLog): GovernanceEvent | undefined {
-  const meta = governanceMeta(log);
-  const actionHash = hexArg(log.args, "actionHash");
-  const caller = addressArg(log.args, "caller");
-  if (!meta || !actionHash || !caller) return undefined;
-  return { kind: "actionExecuted", actionHash, caller, ...meta };
-}
-
-function toCallExecutedEvent(log: RawEventLog): GovernanceEvent | undefined {
-  const meta = governanceMeta(log);
-  const policy = addressArg(log.args, "policy");
-  const target = addressArg(log.args, "target");
-  const selector = hexArg(log.args, "selector");
-  const value = bigintArg(log.args, "value");
-  const dataHash = hexArg(log.args, "dataHash");
-  if (!meta || !policy || !target || !selector || value === undefined || !dataHash) return undefined;
-  return { kind: "callExecuted", policy, target, selector, value, dataHash, ...meta };
-}
-
-function toGovernanceEpochAdvancedEvent(log: RawEventLog): GovernanceEvent | undefined {
-  const meta = governanceMeta(log);
-  const epoch = bigintArg(log.args, "epoch");
-  if (!meta || epoch === undefined) return undefined;
-  return { kind: "governanceEpochAdvanced", epoch, ...meta };
-}
-
-function toWindDownStartedEvent(log: RawEventLog): GovernanceEvent | undefined {
-  const meta = governanceMeta(log);
-  const caller = addressArg(log.args, "caller");
-  if (!meta || !caller) return undefined;
-  return { kind: "windDownStarted", caller, ...meta };
-}
-
-function governanceMeta(log: RawEventLog): GovernanceLogMeta | undefined {
+function logMeta(log: RawEventLog): GovernanceLogMeta | undefined {
   if (!log.address || log.blockNumber === undefined || log.logIndex === undefined || !log.transactionHash) {
     return undefined;
   }
@@ -1086,64 +927,90 @@ function governanceMeta(log: RawEventLog): GovernanceLogMeta | undefined {
   };
 }
 
-function normalizeBoardroomCalls(value: unknown): BoardroomCall[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-
-  const calls: BoardroomCall[] = [];
-  for (const item of value) {
-    const call = normalizeBoardroomCall(item);
-    if (!call) return undefined;
-    calls.push(call);
-  }
-  return calls;
+function requireAddressArg(args: Record<string, unknown>, key: string): Address {
+  const value = addressArg(args, key);
+  if (!value) throw new Error(`Governance event is missing ${key}.`);
+  return value;
 }
 
-function normalizeBoardroomCall(value: unknown): BoardroomCall | undefined {
-  if (!value || typeof value !== "object") return undefined;
-
-  const fields = value as Record<string, unknown>;
-  const tuple = Array.isArray(value) ? value : undefined;
-  const policy = addressValue(fields.policy ?? tuple?.[0]);
-  const target = addressValue(fields.target ?? tuple?.[1]);
-  const amount = bigintValue(fields.value ?? tuple?.[2]);
-  const data = hexValue(fields.data ?? tuple?.[3]);
-  if (!policy || !target || amount === undefined || !data) return undefined;
-
-  return { policy, target, value: amount, data };
+function requireBigintArg(args: Record<string, unknown>, key: string): bigint {
+  const value = bigintArg(args, key);
+  if (value === undefined) throw new Error(`Governance event is missing ${key}.`);
+  return value;
 }
 
-function maybeArray<T>(value: T | undefined): T[] {
-  return value === undefined ? [] : [value];
+function requireHexArg(args: Record<string, unknown>, key: string): Hex {
+  const value = hexArg(args, key);
+  if (!value) throw new Error(`Governance event is missing ${key}.`);
+  return value;
 }
 
-function addressArg(args: Record<string, unknown> | undefined, name: string): Address | undefined {
-  return addressValue(args?.[name]);
+function addressArg(args: Record<string, unknown>, key: string): Address | undefined {
+  return addressValue(args[key]);
 }
 
-function hexArg(args: Record<string, unknown> | undefined, name: string): Hex | undefined {
-  return hexValue(args?.[name]);
+function bigintArg(args: Record<string, unknown>, key: string): bigint | undefined {
+  return bigintValue(args[key]);
+}
+
+function hexArg(args: Record<string, unknown>, key: string): Hex | undefined {
+  return hexValue(args[key]);
 }
 
 function addressValue(value: unknown): Address | undefined {
-  return typeof value === "string" ? (value as Address) : undefined;
-}
-
-function hexValue(value: unknown): Hex | undefined {
-  return typeof value === "string" && isHex(value) ? value : undefined;
-}
-
-function bigintArg(args: Record<string, unknown> | undefined, name: string): bigint | undefined {
-  return bigintValue(args?.[name]);
+  return typeof value === "string" && /^0x[0-9a-fA-F]{40}$/.test(value) ? value as Address : undefined;
 }
 
 function bigintValue(value: unknown): bigint | undefined {
-  if (typeof value === "bigint") return value;
-  if (typeof value === "number" && Number.isSafeInteger(value)) return BigInt(value);
-  return undefined;
+  return typeof value === "bigint" ? value : undefined;
 }
 
-function compareGovernanceEvents(left: GovernanceEvent, right: GovernanceEvent): number {
+function hexValue(value: unknown): Hex | undefined {
+  return typeof value === "string" && isHex(value) ? value as Hex : undefined;
+}
+
+function uniqueAddresses(addresses: readonly Address[]): Address[] {
+  const unique = new Map<string, Address>();
+  for (const address of addresses) unique.set(address.toLowerCase(), address);
+  return [...unique.values()];
+}
+
+function maybeEvent(event: GovernanceEvent | undefined): GovernanceEvent[] {
+  return event ? [event] : [];
+}
+
+function isZeroAddress(address: Address): boolean {
+  return /^0x0{40}$/i.test(address);
+}
+
+function sameAddress(left: Address, right: Address): boolean {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
+function sameHex(left: Hex, right: Hex): boolean {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
+function compareGovernanceEvents(left: GovernanceLogMeta, right: GovernanceLogMeta): number {
   if (left.blockNumber < right.blockNumber) return -1;
   if (left.blockNumber > right.blockNumber) return 1;
   return left.logIndex - right.logIndex;
+}
+
+function compareBigIntDesc(left: bigint, right: bigint): number {
+  if (left > right) return -1;
+  if (left < right) return 1;
+  return 0;
+}
+
+function minBigInt(left: bigint, right: bigint): bigint {
+  return left < right ? left : right;
+}
+
+function conciseError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
 }

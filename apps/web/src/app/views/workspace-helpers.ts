@@ -35,7 +35,8 @@ export function manageWorkspaceSummary(
 export function boardroomStatusText(status: number): string {
   if (status === 0) return "Active";
   if (status === 1) return "Winding down";
-  if (status === 2) return "Redemptions open";
+  if (status === 2) return "Snapshotting";
+  if (status === 3) return "Redemptions open";
   return "Unknown status";
 }
 

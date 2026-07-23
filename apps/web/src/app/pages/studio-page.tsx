@@ -8,7 +8,7 @@ import type { ProductBoardroomDashboardState } from "../../lib/product-boardroom
 import { PageHeading, PageNotice, RuledSection, SectionHeading } from "./page-primitives";
 import { selectedCatalogEntry } from "./project-page";
 
-export type StudioLifecycle = "empty" | "draft" | "pre-launch" | "launched" | "winding-down" | "redemptions-open";
+export type StudioLifecycle = "empty" | "draft" | "pre-launch" | "launched" | "winding-down" | "snapshotting" | "redemptions-open";
 
 export type StudioPageProps = {
   account?: Address | undefined;
@@ -43,7 +43,11 @@ export function StudioPage({
   const loadingSelectedProject = loading && !dashboard && Boolean(sectionNavigation);
   const guidance = loadingSelectedProject ? selectedProjectLoadingGuidance() : studioGuidance(resolvedLifecycle, dashboard);
   const project = selectedCatalogEntry(dashboard);
-  const isOwner = Boolean(account && dashboard && sameAddress(account, dashboard.snapshot.owner));
+  const isOperator = Boolean(account && dashboard && sameAddress(
+    account,
+    dashboard.snapshot.launched ? dashboard.snapshot.proposer : dashboard.snapshot.owner,
+  ));
+  const operatorLabel = dashboard?.snapshot.launched ? "Controller proposer" : "Owner wallet";
 
   return (
     <div>
@@ -74,14 +78,14 @@ export function StudioPage({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={guidance.tone}>{guidance.label}</Badge>
-              {dashboard ? <Badge variant={isOwner ? "default" : "muted"}>{isOwner ? "Owner wallet" : account ? "Read-only operator view" : "Wallet not connected"}</Badge> : null}
+              {dashboard ? <Badge variant={isOperator ? "default" : "muted"}>{isOperator ? operatorLabel : account ? "Read-only operator view" : "Wallet not connected"}</Badge> : null}
             </div>
             <h2 className="m-0 mt-4 text-2xl font-semibold tracking-[-0.02em] text-zinc-50">{guidance.title}</h2>
             <p className="m-0 mt-2 max-w-3xl text-sm leading-6 text-zinc-400">{guidance.description}</p>
             {dashboard ? (
               <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-zinc-500">
                 <span>Boardroom <AddressLink address={dashboard.address} /></span>
-                <span>Owner <AddressLink address={dashboard.snapshot.owner} /></span>
+                <span>{dashboard.snapshot.launched ? "Proposer" : "Owner"} <AddressLink address={dashboard.snapshot.launched ? dashboard.snapshot.proposer : dashboard.snapshot.owner} /></span>
               </div>
             ) : null}
           </div>
@@ -146,7 +150,8 @@ export function StudioPage({
 export function studioLifecycle(dashboard: ProductBoardroomDashboardState | undefined): StudioLifecycle {
   if (!dashboard) return "empty";
   if (dashboard.snapshot.status === 1) return "winding-down";
-  if (dashboard.snapshot.status === 2) return "redemptions-open";
+  if (dashboard.snapshot.status === 2) return "snapshotting";
+  if (dashboard.snapshot.status === 3) return "redemptions-open";
   return dashboard.snapshot.launched ? "launched" : "pre-launch";
 }
 
@@ -180,16 +185,16 @@ export function studioGuidance(
   if (lifecycle === "pre-launch") return {
     description: "The Boardroom is active under direct owner authority. Configure grants, distributions, and liquidity before handing routine decisions to governance.",
     label: "Pre-launch",
-    nextStep: dashboard?.snapshot.issuedDistributions.length ? "Review before launching governance" : "Choose a distribution path",
-    nextStepDetail: "Launch is a one-way authority transition. Confirm the executor, delay, and staker thresholds first.",
+    nextStep: (dashboard?.snapshot.distributionRecordCount ?? 0) > 0 ? "Review before launching governance" : "Choose a distribution path",
+    nextStepDetail: "Launch is a one-way authority transition. Confirm the predicted controller, proposer, protection staker, and delays first.",
     title: "Build the project’s operating system",
     tone: "warning",
   };
   if (lifecycle === "launched") return {
-    description: "Staker governance is live. Project changes should be prepared as decoded queued actions, then reviewed during the configured delay.",
+    description: "External controller governance is live. The proposer schedules decoded operations, then active stakers review them during the configured delay.",
     label: "Launched",
-    nextStep: "Prepare or review a queued action",
-    nextStepDetail: "State the intent, target, value, and calldata before asking the executor to queue it.",
+    nextStep: "Prepare or review a scheduled operation",
+    nextStepDetail: "State the intent, target, value, calldata, and epoch bindings before asking the proposer to schedule it.",
     title: "Operate through governance",
     tone: "default",
   };
@@ -197,8 +202,16 @@ export function studioGuidance(
     description: "The Boardroom is unwinding grants, distributions, and liquidity. Creation actions are no longer the priority.",
     label: "Winding down",
     nextStep: "Clear remaining obligations",
-    nextStepDetail: "Use only lifecycle-safe cleanup actions, then verify every tracked obligation before opening redemptions.",
+    nextStepDetail: "Use only lifecycle-safe cleanup actions, then begin the immutable redemption snapshot after the delay.",
     title: "Prepare assets for redemption",
+    tone: "warning",
+  };
+  if (lifecycle === "snapshotting") return {
+    description: "Asset registration, liquidity mutation, redemption supply, and treasury-share treatment are frozen while the registry is processed in bounded pages.",
+    label: "Snapshotting",
+    nextStep: "Process the next asset page",
+    nextStepDetail: "Anyone may make progress. Redemptions open only after every frozen registry entry is classified.",
+    title: "Freeze and classify redemption assets",
     tone: "warning",
   };
   return {
@@ -223,13 +236,14 @@ function selectedProjectLoadingGuidance(): ReturnType<typeof studioGuidance> {
 }
 
 function studioSteps(lifecycle: StudioLifecycle): { complete: boolean; current: boolean; detail: string; title: string }[] {
-  const order: StudioLifecycle[] = ["draft", "pre-launch", "launched", "winding-down", "redemptions-open"];
+  const order: StudioLifecycle[] = ["draft", "pre-launch", "launched", "winding-down", "snapshotting", "redemptions-open"];
   const index = lifecycle === "empty" ? -1 : order.indexOf(lifecycle);
   return [
     { title: "Define", detail: "Name the project, choose the owner, and create the Boardroom.", current: lifecycle === "empty" || lifecycle === "draft", complete: index > 0 },
     { title: "Configure", detail: "Issue grants and choose distribution and liquidity paths.", current: lifecycle === "pre-launch", complete: index > 1 },
-    { title: "Govern", detail: "Queue delayed, inspectable actions after launch.", current: lifecycle === "launched", complete: index > 2 },
+    { title: "Govern", detail: "Schedule delayed, controller-bound operations after launch.", current: lifecycle === "launched", complete: index > 2 },
     { title: "Wind down", detail: "Resolve obligations and declare redeemable assets.", current: lifecycle === "winding-down", complete: index > 3 },
+    { title: "Snapshot", detail: "Freeze and process the bounded asset registry.", current: lifecycle === "snapshotting", complete: index > 4 },
     { title: "Redeem", detail: "Let holders redeem against final project assets.", current: lifecycle === "redemptions-open", complete: false },
   ];
 }

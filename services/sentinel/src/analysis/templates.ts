@@ -10,7 +10,7 @@ export function renderTemplateAnalysis(input: AnalyzeActionInput): AnalysisConte
     affectedParties: affectedParties(input),
     effects: effects(input),
     severityRationale: severityRationale(input),
-    summary: `${severity} severity governance action queued for ${boardroomLabel} on chain ${input.action.chainId}. The action contains ${callCount} ${callWord}; ruleset ${input.risk.rulesetVersion} determines the severity, and this analysis is a deterministic fallback for presentation only.`
+    summary: `${severity} severity governance operation scheduled for ${boardroomLabel} on chain ${input.action.chainId}. The operation contains ${callCount} ${callWord}; ruleset ${input.risk.rulesetVersion} determines the severity, and this analysis is a deterministic fallback for presentation only.`
   };
 }
 
@@ -37,7 +37,8 @@ function affectedParties(input: AnalyzeActionInput): string[] {
     "Boardroom share holders",
     `Boardroom ${input.action.boardroom}`,
     input.boardroom === undefined ? undefined : `Share token ${input.boardroom.shareToken}`,
-    `Executor ${input.action.executor}`,
+    `Controller ${input.action.controller}`,
+    `Proposer ${input.action.proposer}`,
     ...input.calls.flatMap((call) => [`Policy ${call.policy}`, `Target ${call.target}`])
   ]);
 }

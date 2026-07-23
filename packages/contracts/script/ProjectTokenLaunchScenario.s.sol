@@ -165,7 +165,7 @@ contract ProjectTokenLaunchScenario is Script {
         _check(liquidity > 0, "project-liquidity");
         _check(LockedLiquidity(state.locker).lockedLiquidity() == liquidity, "project-lp-locked");
         _check(AmmPool(state.pool).balanceOf(state.locker) == liquidity, "locker-holds-lp");
-        _check(state.boardroom.lockedLiquidityAt(0) == state.locker, "boardroom-recorded-locker");
+        _check(state.boardroom.liquidityLocker() == state.locker, "boardroom-recorded-locker");
     }
 
     function _swapIntoProjectToken(ScenarioState memory state, uint256 traderKey, address trader) internal {

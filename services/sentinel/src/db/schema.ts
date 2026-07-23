@@ -29,14 +29,22 @@ export type RiskFindingJson = {
 export const boardroomStatusEnum = pgEnum("sentinel_boardroom_status", [
   "prelaunch",
   "active",
-  "winddown"
+  "winddown",
+  "snapshotting",
+  "redemptions-open"
 ]);
 
-export const queuedActionStatusEnum = pgEnum("sentinel_queued_action_status", [
-  "queued",
+// Physical enum/table names remain for an in-place migration; runtime semantics are external controller operations.
+export const scheduledOperationStatusEnum = pgEnum("sentinel_queued_action_status", [
+  "scheduled",
   "cancelled",
   "executed",
   "invalidated"
+]);
+
+export const governanceOperationKindEnum = pgEnum("sentinel_governance_operation_kind", [
+  "boardroom",
+  "controller"
 ]);
 
 export const decodeStatusEnum = pgEnum("sentinel_decode_status", ["decoded", "undecoded"]);
@@ -44,9 +52,13 @@ export const severityEnum = pgEnum("sentinel_severity", ["low", "medium", "high"
 export const analysisSourceEnum = pgEnum("sentinel_analysis_source", ["harness", "template"]);
 export const channelTypeEnum = pgEnum("sentinel_channel_type", ["telegram", "twitter"]);
 export const subscriptionModeEnum = pgEnum("sentinel_subscription_mode", ["holdings", "explicit"]);
+export const boardroomControlDestinationEnum = pgEnum("boardroom_control_destination", [
+  "user",
+  "organization"
+]);
 
 export const notificationEventEnum = pgEnum("sentinel_notification_event", [
-  "queued",
+  "scheduled",
   "cancelled",
   "executed",
   "invalidated",
@@ -64,6 +76,13 @@ export const notificationStatusEnum = pgEnum("sentinel_notification_status", [
 export const policyAdminContractEnum = pgEnum("sentinel_policy_admin_contract", [
   "registry",
   "asset-policy"
+]);
+
+export const marketLifecycleSourceEnum = pgEnum("sentinel_market_lifecycle_source", [
+  "boardroom",
+  "bonding-curve",
+  "liquidity-factory",
+  "liquidity-locker"
 ]);
 
 export const cursors = pgTable(
@@ -87,38 +106,67 @@ export const boardrooms = pgTable(
     shareToken: text("share_token").notNull(),
     name: text("name"),
     owner: text("owner").notNull(),
-    executor: text("executor").notNull(),
-    governanceDelay: bigint("governance_delay", { mode: "bigint" }).notNull(),
+    controller: text("executor").notNull(),
+    proposer: text("proposer").notNull().default("0x0000000000000000000000000000000000000000"),
+    controllerGeneration: bigint("controller_generation", { mode: "bigint" }).notNull().default(sql`0`),
+    configurationEpoch: bigint("configuration_epoch", { mode: "bigint" }).notNull().default(sql`0`),
+    controllerDelay: bigint("governance_delay", { mode: "bigint" }).notNull(),
+    gracePeriod: bigint("grace_period", { mode: "bigint" }).notNull().default(sql`0`),
+    windDownDelay: bigint("wind_down_delay", { mode: "bigint" }).notNull().default(sql`0`),
     launched: boolean("launched").notNull().default(false),
     status: boardroomStatusEnum("status").notNull().default("prelaunch"),
+    primaryMarketMode: integer("primary_market_mode").notNull().default(0),
+    bondingCurve: text("bonding_curve"),
+    primaryMarketQuoteAsset: text("primary_market_quote_asset"),
+    bondingCurvePhase: integer("bonding_curve_phase"),
+    bondingCurveSettlementReason: integer("bonding_curve_settlement_reason"),
+    bondingCurvePhaseEndsAt: bigint("bonding_curve_phase_ends_at", { mode: "bigint" }).notNull().default(sql`0`),
+    liquidityStatus: integer("liquidity_status").notNull().default(0),
+    liquidityLocker: text("liquidity_locker"),
+    liquidityPool: text("liquidity_pool"),
+    liquidityQuoteAsset: text("liquidity_quote_asset"),
+    liquidityReservationCurve: text("liquidity_reservation_curve"),
+    liquidityReservationExpectedLocker: text("liquidity_reservation_expected_locker"),
+    liquidityReservationExpectedPool: text("liquidity_reservation_expected_pool"),
+    liquidityReservationPairKey: text("liquidity_reservation_pair_key"),
+    liquidityReservationSalt: text("liquidity_reservation_salt"),
+    liquidityReservationExpiresAt: bigint("liquidity_reservation_expires_at", { mode: "bigint" })
+      .notNull()
+      .default(sql`0`),
     createdBlock: bigint("created_block", { mode: "bigint" }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => ({
     pk: primaryKey({ columns: [table.chainId, table.address] }),
+    bondingCurveIdx: index("boardrooms_bonding_curve_idx").on(table.chainId, table.bondingCurve),
+    liquidityLockerIdx: index("boardrooms_liquidity_locker_idx").on(table.chainId, table.liquidityLocker),
     shareTokenIdx: index("boardrooms_share_token_idx").on(table.chainId, table.shareToken),
     statusIdx: index("boardrooms_status_idx").on(table.chainId, table.status)
   })
 );
 
-export const queuedActions = pgTable(
+export const scheduledOperations = pgTable(
   "queued_actions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     chainId: integer("chain_id").notNull(),
     boardroom: text("boardroom").notNull(),
-    actionHash: text("action_hash").notNull(),
-    queueTxHash: text("queue_tx_hash").notNull(),
+    operationId: text("action_hash").notNull(),
+    scheduleTxHash: text("queue_tx_hash").notNull(),
     salt: text("salt").notNull(),
-    executor: text("executor").notNull(),
+    controller: text("executor").notNull(),
+    proposer: text("proposer").notNull().default("0x0000000000000000000000000000000000000000"),
+    operationKind: governanceOperationKindEnum("operation_kind").notNull().default("boardroom"),
+    controllerGeneration: bigint("controller_generation", { mode: "bigint" }).notNull().default(sql`0`),
+    configurationEpoch: bigint("configuration_epoch", { mode: "bigint" }).notNull().default(sql`0`),
     eta: timestamp("eta", { withTimezone: true }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
-    epoch: bigint("epoch", { mode: "bigint" }),
+    boardroomEpoch: bigint("epoch", { mode: "bigint" }),
     invalidatedByEpoch: bigint("invalidated_by_epoch", { mode: "bigint" }),
-    queueBlock: bigint("queue_block", { mode: "bigint" }).notNull(),
-    queueLogIndex: integer("queue_log_index").notNull().default(0),
-    status: queuedActionStatusEnum("status").notNull().default("queued"),
+    scheduleBlock: bigint("queue_block", { mode: "bigint" }).notNull(),
+    scheduleLogIndex: integer("queue_log_index").notNull().default(0),
+    status: scheduledOperationStatusEnum("status").notNull().default("scheduled"),
     cancelledBy: text("cancelled_by"),
     executedBy: text("executed_by"),
     resolvedTxHash: text("resolved_tx_hash"),
@@ -128,16 +176,16 @@ export const queuedActions = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => ({
-    uniqueQueuedAction: unique("queued_actions_chain_boardroom_hash_tx_unique").on(
+    uniqueScheduledOperation: unique("queued_actions_chain_boardroom_hash_tx_unique").on(
       table.chainId,
       table.boardroom,
-      table.actionHash,
-      table.queueTxHash
+      table.operationId,
+      table.scheduleTxHash
     ),
     boardroomIdx: index("queued_actions_boardroom_idx").on(table.chainId, table.boardroom),
     etaIdx: index("queued_actions_eta_idx").on(table.status, table.eta),
-    hashIdx: index("queued_actions_hash_idx").on(table.chainId, table.actionHash),
-    publicFeedIdx: index("queued_actions_public_feed_idx").on(table.queueBlock, table.id)
+    hashIdx: index("queued_actions_hash_idx").on(table.chainId, table.operationId),
+    publicFeedIdx: index("queued_actions_public_feed_idx").on(table.scheduleBlock, table.id)
   })
 );
 
@@ -146,7 +194,7 @@ export const actionCalls = pgTable(
   {
     actionId: uuid("action_id")
       .notNull()
-      .references(() => queuedActions.id, { onDelete: "cascade" }),
+      .references(() => scheduledOperations.id, { onDelete: "cascade" }),
     callIndex: integer("call_index").notNull(),
     policy: text("policy").notNull(),
     target: text("target").notNull(),
@@ -183,7 +231,7 @@ export const shareBalances = pgTable(
 export const riskAssessments = pgTable("risk_assessments", {
   actionId: uuid("action_id")
     .primaryKey()
-    .references(() => queuedActions.id, { onDelete: "cascade" }),
+    .references(() => scheduledOperations.id, { onDelete: "cascade" }),
   rulesetVersion: integer("ruleset_version").notNull(),
   severity: severityEnum("severity").notNull(),
   findings: jsonb("findings").$type<RiskFindingJson[]>().notNull(),
@@ -195,7 +243,7 @@ export const analyses = pgTable(
   {
     actionId: uuid("action_id")
       .primaryKey()
-      .references(() => queuedActions.id, { onDelete: "cascade" }),
+      .references(() => scheduledOperations.id, { onDelete: "cascade" }),
     harness: text("harness").notNull(),
     model: text("model"),
     summary: text("summary").notNull(),
@@ -215,7 +263,7 @@ export const harnessRuns = pgTable(
     actionId: uuid("action_id")
       .notNull()
       .unique()
-      .references(() => queuedActions.id, { onDelete: "cascade" }),
+      .references(() => scheduledOperations.id, { onDelete: "cascade" }),
     harness: text("harness").notNull(),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow()
   },
@@ -245,6 +293,41 @@ export const policyAdminEvents = pgTable(
       table.logIndex
     ),
     subjectIdx: index("policy_admin_events_subject_idx").on(table.chainId, table.subject)
+  })
+);
+
+export const marketLifecycleEvents = pgTable(
+  "market_lifecycle_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    chainId: integer("chain_id").notNull(),
+    boardroom: text("boardroom").notNull(),
+    source: marketLifecycleSourceEnum("source").notNull(),
+    kind: text("kind").notNull(),
+    contractAddress: text("contract_address").notNull(),
+    actor: text("actor"),
+    metadata: jsonb("metadata").$type<Record<string, JsonPrimitive>>().notNull(),
+    blockNumber: bigint("block_number", { mode: "bigint" }).notNull(),
+    txHash: text("tx_hash").notNull(),
+    logIndex: integer("log_index").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    uniqueLog: unique("market_lifecycle_events_chain_tx_log_unique").on(
+      table.chainId,
+      table.txHash,
+      table.logIndex
+    ),
+    boardroomIdx: index("market_lifecycle_events_boardroom_idx").on(
+      table.chainId,
+      table.boardroom,
+      table.blockNumber
+    ),
+    contractIdx: index("market_lifecycle_events_contract_idx").on(
+      table.chainId,
+      table.contractAddress,
+      table.blockNumber
+    )
   })
 );
 
@@ -447,6 +530,94 @@ export const walletLinkNonces = pgTable("wallet_link_nonces", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 });
 
+export const boardroomControlChallenges = pgTable(
+  "boardroom_control_challenges",
+  {
+    nonce: text("nonce").primaryKey(),
+    requestedByUserId: uuid("requested_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    destinationType: boardroomControlDestinationEnum("destination_type").notNull(),
+    destinationId: uuid("destination_id").notNull(),
+    scope: text("scope").notNull(),
+    chainId: integer("chain_id").notNull(),
+    boardroom: text("boardroom").notNull(),
+    controller: text("controller").notNull(),
+    controllerGeneration: bigint("controller_generation", { mode: "bigint" }).notNull(),
+    configurationEpoch: bigint("configuration_epoch", { mode: "bigint" }).notNull(),
+    issuedBlock: bigint("issued_block", { mode: "bigint" }).notNull(),
+    issuedBlockHash: text("issued_block_hash").notNull(),
+    audience: text("audience").notNull(),
+    domain: text("domain").notNull(),
+    message: text("message").notNull(),
+    messageHash: text("message_hash").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    destinationIdx: index("boardroom_control_challenges_destination_idx").on(
+      table.destinationType,
+      table.destinationId,
+      table.createdAt
+    ),
+    identityIdx: index("boardroom_control_challenges_identity_idx").on(
+      table.chainId,
+      table.boardroom,
+      table.controller,
+      table.controllerGeneration,
+      table.configurationEpoch
+    ),
+    requesterIdx: index("boardroom_control_challenges_requester_idx").on(
+      table.requestedByUserId,
+      table.createdAt
+    )
+  })
+);
+
+export const boardroomControlClaims = pgTable(
+  "boardroom_control_claims",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    challengeNonce: text("challenge_nonce")
+      .notNull()
+      .unique()
+      .references(() => boardroomControlChallenges.nonce, { onDelete: "restrict" }),
+    createdByUserId: uuid("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    destinationType: boardroomControlDestinationEnum("destination_type").notNull(),
+    destinationId: uuid("destination_id").notNull(),
+    scope: text("scope").notNull(),
+    chainId: integer("chain_id").notNull(),
+    boardroom: text("boardroom").notNull(),
+    controller: text("controller").notNull(),
+    controllerGeneration: bigint("controller_generation", { mode: "bigint" }).notNull(),
+    configurationEpoch: bigint("configuration_epoch", { mode: "bigint" }).notNull(),
+    verifiedBlock: bigint("verified_block", { mode: "bigint" }).notNull(),
+    verifiedBlockHash: text("verified_block_hash").notNull(),
+    messageHash: text("message_hash").notNull(),
+    signatureHash: text("signature_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    destinationIdx: index("boardroom_control_claims_destination_idx").on(
+      table.destinationType,
+      table.destinationId,
+      table.createdAt
+    ),
+    identityIdx: index("boardroom_control_claims_identity_idx").on(
+      table.chainId,
+      table.boardroom,
+      table.controller,
+      table.controllerGeneration,
+      table.configurationEpoch,
+      table.createdAt
+    )
+  })
+);
+
 export const channels = pgTable(
   "channels",
   {
@@ -510,7 +681,7 @@ export const notifications = pgTable(
     userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
     actionId: uuid("action_id")
       .notNull()
-      .references(() => queuedActions.id, { onDelete: "cascade" }),
+      .references(() => scheduledOperations.id, { onDelete: "cascade" }),
     event: notificationEventEnum("event").notNull(),
     payload: jsonb("payload").$type<JsonValue>().notNull(),
     status: notificationStatusEnum("status").notNull().default("pending"),

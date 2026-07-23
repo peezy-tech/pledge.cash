@@ -129,11 +129,8 @@ export function deriveProjectGrantPosition(
     return { error: "Grant coverage is incomplete for this project." };
   }
 
-  const summaries = new Map(
-    dashboard.snapshot.grantSummaries.map((summary) => [summary.address.toLowerCase(), summary] as const),
-  );
-  const activeGrants = dashboard.snapshot.issuedGrants.map((address) => summaries.get(address.toLowerCase()));
-  if (activeGrants.some((summary) => !summary?.state || summary.error)) {
+  const activeGrants = dashboard.snapshot.grantSummaries;
+  if (activeGrants.some((summary) => !summary.state || summary.error)) {
     return { error: "At least one active project grant could not be read." };
   }
 
@@ -176,7 +173,7 @@ export function projectPositionAction(input: {
   if (
     input.connected
     && input.launched
-    && input.status !== 2
+    && input.status === 0
     && input.position?.holderPower
     && !input.position.holderPower.encumbered
     && input.position.holderPower.currentBalance > 0n
@@ -218,7 +215,6 @@ function projectPositionSourceKey(dashboard: ProductBoardroomDashboardState): st
     grantCoverage?.complete ?? "unreported",
     grantCoverage?.shown ?? "unreported",
     grantCoverage?.total ?? "unreported",
-    dashboard.snapshot.issuedGrants.map((address) => address.toLowerCase()),
     dashboard.snapshot.grantSummaries.map((summary) => [
       summary.address.toLowerCase(),
       summary.error ?? "",

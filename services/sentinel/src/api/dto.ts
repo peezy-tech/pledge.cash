@@ -9,13 +9,13 @@ export const IntegerStringSchema = z.string().regex(/^-?\d+$/);
 export const UintStringSchema = z.string().regex(/^\d+$/);
 
 export const SeveritySchema = z.enum(["low", "medium", "high"]);
-export const ActionEventSchema = z.enum(["queued", "cancelled", "executed", "invalidated"]);
+export const ActionEventSchema = z.enum(["scheduled", "cancelled", "executed", "invalidated"]);
 export const NotificationEventSchema = z.enum([
   ...ActionEventSchema.options,
   "reminder",
   "policy-admin"
 ]);
-export const ActionStatusSchema = z.enum(["queued", "cancelled", "executed", "invalidated", "expired"]);
+export const ActionStatusSchema = z.enum(["scheduled", "cancelled", "executed", "invalidated", "expired"]);
 export const DecodeStatusSchema = z.enum(["decoded", "undecoded"]);
 export const ChannelTypeSchema = z.enum(["telegram", "twitter"]);
 export const SubscriptionModeSchema = z.enum(["holdings", "explicit"]);
@@ -155,6 +155,65 @@ export const UpdateWalletAlertsResponseSchema = z.object({
   wallet: WalletDtoSchema
 });
 
+export const BoardroomControlDestinationSchema = z.object({
+  id: UuidSchema,
+  type: z.enum(["user", "organization"])
+});
+
+export const BoardroomControlScopeSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[a-z][a-z0-9:._-]*$/);
+
+export const BoardroomControlChallengeRequestSchema = z.object({
+  boardroom: AddressSchema,
+  chainId: z.number().int().positive(),
+  destination: BoardroomControlDestinationSchema,
+  scope: BoardroomControlScopeSchema
+});
+
+export const BoardroomControlIdentitySchema = z.object({
+  boardroom: AddressSchema,
+  chainId: z.number().int().positive(),
+  configurationEpoch: UintStringSchema,
+  controller: AddressSchema,
+  controllerGeneration: UintStringSchema
+});
+
+export const BoardroomControlChallengeResponseSchema = z.object({
+  audience: z.string().url(),
+  destination: BoardroomControlDestinationSchema,
+  domain: z.string().min(1),
+  expirationTime: IsoDateSchema,
+  identity: BoardroomControlIdentitySchema,
+  issuedAt: IsoDateSchema,
+  message: z.string().min(1),
+  messageHash: HexSchema,
+  nonce: z.string().min(16).max(64).regex(/^[a-zA-Z0-9]+$/),
+  scope: BoardroomControlScopeSchema
+});
+
+export const BoardroomControlClaimRequestSchema = z.object({
+  nonce: z.string().min(16).max(64).regex(/^[a-zA-Z0-9]+$/),
+  signature: HexSchema.max(2 + 2 * 65_536).refine(
+    (value) => /^0x(?:[a-fA-F0-9]{2})+$/.test(value),
+    { message: "Signature must contain whole bytes" }
+  )
+});
+
+export const BoardroomControlClaimResponseSchema = z.object({
+  claim: z.object({
+    destination: BoardroomControlDestinationSchema,
+    id: UuidSchema,
+    identity: BoardroomControlIdentitySchema,
+    scope: BoardroomControlScopeSchema,
+    verifiedAt: IsoDateSchema,
+    verifiedBlock: UintStringSchema,
+    verifiedBlockHash: HexSchema
+  })
+});
+
 export const WalletAddressParamsSchema = z.object({
   address: AddressSchema
 });
@@ -192,7 +251,7 @@ export const NotificationDeliveriesQuerySchema = z.object({
 
 export const NotificationDeliveryDtoSchema = z.object({
   action: z.object({
-    actionHash: HexSchema,
+    operationId: HexSchema,
     boardroom: AddressSchema,
     chainId: z.number().int().positive(),
     eta: IsoDateSchema,
@@ -257,26 +316,31 @@ export const AnalysisDtoSchema = z.object({
 });
 
 export const PublicActionDtoSchema = z.object({
-  actionHash: HexSchema,
   analysis: AnalysisDtoSchema.nullable(),
+  boardroomEpoch: IntegerStringSchema.nullable(),
   boardroom: z.object({
     address: AddressSchema,
     name: z.string().nullable(),
     shareToken: AddressSchema,
-    status: z.enum(["prelaunch", "active", "winddown"])
+    status: z.enum(["prelaunch", "active", "winddown", "snapshotting", "redemptions-open"])
   }),
   calls: z.array(ActionCallDtoSchema),
   chainId: z.number().int().positive(),
+  configurationEpoch: IntegerStringSchema,
+  controller: AddressSchema,
+  controllerGeneration: IntegerStringSchema,
   decodeStatus: DecodeStatusSchema,
-  epoch: IntegerStringSchema.nullable(),
   eta: IsoDateSchema,
   event: ActionEventSchema.optional(),
   expiresAt: IsoDateSchema.nullable(),
   id: UuidSchema,
   invalidatedByEpoch: IntegerStringSchema.nullable(),
-  queueBlock: IntegerStringSchema,
-  queueTxHash: HexSchema,
+  operationId: HexSchema,
+  operationKind: z.enum(["boardroom", "controller"]),
+  proposer: AddressSchema,
   risk: RiskAssessmentDtoSchema.nullable(),
+  scheduleBlock: IntegerStringSchema,
+  scheduleTxHash: HexSchema,
   status: ActionStatusSchema
 });
 
@@ -339,6 +403,17 @@ export type LinkWalletResponse = z.infer<typeof LinkWalletResponseSchema>;
 export type DeleteWalletResponse = z.infer<typeof DeleteWalletResponseSchema>;
 export type UpdateWalletAlertsRequest = z.infer<typeof UpdateWalletAlertsRequestSchema>;
 export type UpdateWalletAlertsResponse = z.infer<typeof UpdateWalletAlertsResponseSchema>;
+export type BoardroomControlDestination = z.infer<typeof BoardroomControlDestinationSchema>;
+export type BoardroomControlScope = z.infer<typeof BoardroomControlScopeSchema>;
+export type BoardroomControlChallengeRequest = z.infer<
+  typeof BoardroomControlChallengeRequestSchema
+>;
+export type BoardroomControlIdentity = z.infer<typeof BoardroomControlIdentitySchema>;
+export type BoardroomControlChallengeResponse = z.infer<
+  typeof BoardroomControlChallengeResponseSchema
+>;
+export type BoardroomControlClaimRequest = z.infer<typeof BoardroomControlClaimRequestSchema>;
+export type BoardroomControlClaimResponse = z.infer<typeof BoardroomControlClaimResponseSchema>;
 export type WalletAddressParams = z.infer<typeof WalletAddressParamsSchema>;
 export type PutSubscriptionRequest = z.infer<typeof PutSubscriptionRequestSchema>;
 export type SubscriptionResponse = z.infer<typeof SubscriptionResponseSchema>;
