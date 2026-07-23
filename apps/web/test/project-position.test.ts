@@ -234,9 +234,13 @@ function projectDashboard(): ProductBoardroomDashboardState {
     snapshot: {
       address: boardroom,
       distributionSummaries: [],
-      executor: account,
-      governanceConfig: { actionGracePeriod: 1n, minimumDelay: 1n, vetoBps: 100n, windDownBps: 1_000n },
-      governanceDelay: 1n,
+      controller: account,
+      proposer: account,
+      controllerDelay: 1n,
+      controllerGracePeriod: 1n,
+      controllerGeneration: 1n,
+      controllerConfigurationEpoch: 1n,
+      windDownDelay: 1n,
       governanceEligibleSupply: 20n,
       governanceEpoch: 1n,
       grantSummaries: [

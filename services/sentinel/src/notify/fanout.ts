@@ -5,7 +5,7 @@ import type {
   ActionPipelineEvent,
   ChannelType,
   NotificationEvent,
-  QueuedActionRow,
+  ScheduledOperationRow,
   Severity
 } from "../types";
 
@@ -74,7 +74,7 @@ export function shouldNotifySeverity(minSeverity: Severity, severity: Severity):
 
 export function buildNotificationDedupeKey(args: {
   readonly actionId?: string;
-  readonly actionHash: string;
+  readonly operationId: string;
   readonly chainId: number;
   readonly channelId?: string | null;
   readonly channelType: ChannelType;
@@ -84,8 +84,8 @@ export function buildNotificationDedupeKey(args: {
   const channelId = args.channelId ?? "public";
   const actionScope =
     args.actionId === undefined
-      ? args.actionHash.toLowerCase()
-      : `${args.actionId}:${args.actionHash.toLowerCase()}`;
+      ? args.operationId.toLowerCase()
+      : `${args.actionId}:${args.operationId.toLowerCase()}`;
   const eventScope =
     args.event === "policy-admin"
       ? `policy-admin:${requiredPolicyAdminEventId(args.eventId)}`
@@ -104,28 +104,32 @@ export async function fanout(
   return countInsertedRows([...subscriberRows, ...twitterRows]);
 }
 
-export async function runQueuedRefanoutSweep(
+export async function runScheduledRefanoutSweep(
   db: FanoutDb,
   options: FanoutOptions = {}
 ): Promise<FanoutResult> {
   const nowIso = (options.now ?? new Date()).toISOString();
   const actions = rowsFromResult(
-    await db.execute<QueuedActionRow>(
+    await db.execute<ScheduledOperationRow>(
       sql`
         SELECT
           id,
           chain_id AS "chainId",
           boardroom,
-          action_hash AS "actionHash",
-          queue_tx_hash AS "queueTxHash",
+          action_hash AS "operationId",
+          queue_tx_hash AS "scheduleTxHash",
           salt,
-          executor,
+          executor AS controller,
+          proposer,
+          operation_kind AS "operationKind",
+          controller_generation AS "controllerGeneration",
+          configuration_epoch AS "configurationEpoch",
           eta,
           expires_at AS "expiresAt",
-          epoch,
+          epoch AS "boardroomEpoch",
           invalidated_by_epoch AS "invalidatedByEpoch",
-          queue_block AS "queueBlock",
-          queue_log_index AS "queueLogIndex",
+          queue_block AS "scheduleBlock",
+          queue_log_index AS "scheduleLogIndex",
           status,
           cancelled_by AS "cancelledBy",
           executed_by AS "executedBy",
@@ -135,7 +139,7 @@ export async function runQueuedRefanoutSweep(
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM queued_actions
-        WHERE status = 'queued'
+        WHERE status = 'scheduled'
           AND (expires_at IS NULL OR expires_at > ${nowIso}::timestamptz)
         ORDER BY eta ASC
         ${sweepLimitSql(options.refanoutLimit)}
@@ -143,7 +147,7 @@ export async function runQueuedRefanoutSweep(
     )
   );
 
-  return fanoutActions(actions, "queued", db, options);
+  return fanoutActions(actions, "scheduled", db, options);
 }
 
 export async function runReminderSweep(
@@ -157,22 +161,26 @@ export async function runReminderSweep(
   const nowIso = now.toISOString();
   const reminderDeadlineIso = reminderDeadline.toISOString();
   const actions = rowsFromResult(
-    await db.execute<QueuedActionRow>(
+    await db.execute<ScheduledOperationRow>(
       sql`
         SELECT
           id,
           chain_id AS "chainId",
           boardroom,
-          action_hash AS "actionHash",
-          queue_tx_hash AS "queueTxHash",
+          action_hash AS "operationId",
+          queue_tx_hash AS "scheduleTxHash",
           salt,
-          executor,
+          executor AS controller,
+          proposer,
+          operation_kind AS "operationKind",
+          controller_generation AS "controllerGeneration",
+          configuration_epoch AS "configurationEpoch",
           eta,
           expires_at AS "expiresAt",
-          epoch,
+          epoch AS "boardroomEpoch",
           invalidated_by_epoch AS "invalidatedByEpoch",
-          queue_block AS "queueBlock",
-          queue_log_index AS "queueLogIndex",
+          queue_block AS "scheduleBlock",
+          queue_log_index AS "scheduleLogIndex",
           status,
           cancelled_by AS "cancelledBy",
           executed_by AS "executedBy",
@@ -182,7 +190,7 @@ export async function runReminderSweep(
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM queued_actions
-        WHERE status = 'queued'
+        WHERE status = 'scheduled'
           AND (expires_at IS NULL OR expires_at > ${nowIso}::timestamptz)
           AND eta > ${nowIso}::timestamptz
           AND eta <= ${reminderDeadlineIso}::timestamptz
@@ -205,7 +213,7 @@ export function startFanoutSweeps(options: StartFanoutSweepsOptions): FanoutSwee
     if (stopped || refanoutRunning) return;
     refanoutRunning = true;
     try {
-      await runQueuedRefanoutSweep(options.db, options);
+      await runScheduledRefanoutSweep(options.db, options);
     } catch (error) {
       logger.error(error);
     } finally {
@@ -245,7 +253,7 @@ export function startFanoutSweeps(options: StartFanoutSweepsOptions): FanoutSwee
 }
 
 async function fanoutActions(
-  actions: readonly QueuedActionRow[],
+  actions: readonly ScheduledOperationRow[],
   event: ActionEvent | "reminder",
   db: FanoutDb,
   options: FanoutOptions
@@ -367,8 +375,8 @@ async function insertTwitterNotification(
     return [];
   }
 
-  if (event.event === "queued") {
-    return insertQueuedTweet(event, db);
+  if (event.event === "scheduled") {
+    return insertScheduledTweet(event, db);
   }
 
   if (
@@ -383,7 +391,7 @@ async function insertTwitterNotification(
   return [];
 }
 
-async function insertQueuedTweet(
+async function insertScheduledTweet(
   event: NotificationPipelineEvent,
   db: FanoutDb
 ): Promise<readonly InsertedNotificationRow[]> {
@@ -405,12 +413,12 @@ async function insertQueuedTweet(
           next_attempt_at
         )
         SELECT
-          concat(ctx.chain_id::text, ':', ctx.action_id::text, ':', lower(ctx.action_hash), ':queued:twitter:public'),
+          concat(ctx.chain_id::text, ':', ctx.action_id::text, ':', lower(ctx.action_hash), ':scheduled:twitter:public'),
           'twitter',
           NULL,
           NULL,
           ctx.action_id,
-          'queued'::sentinel_notification_event,
+          'scheduled'::sentinel_notification_event,
           ${payloadSql(null)},
           'pending',
           NOW()
@@ -439,7 +447,7 @@ async function insertTwitterFollowUp(
           FROM notifications
           WHERE action_id = ${event.action.id}
             AND channel_type = 'twitter'
-            AND event = 'queued'
+            AND event = 'scheduled'
             AND status IN ('pending', 'failed', 'sent')
           ORDER BY created_at ASC, id ASC
           LIMIT 1
@@ -482,6 +490,11 @@ function actionContextSql(actionId: string): SQL {
       qa.boardroom,
       qa.action_hash,
       qa.queue_tx_hash,
+      qa.executor AS controller,
+      qa.proposer,
+      qa.operation_kind,
+      qa.controller_generation,
+      qa.configuration_epoch,
       qa.resolved_tx_hash,
       qa.eta,
       qa.expires_at,
@@ -544,13 +557,18 @@ function payloadSql(replyToExternalIdSql: string | null): SQL {
             'id', ctx.action_id,
             'chainId', ctx.chain_id,
             'boardroom', ctx.boardroom,
-            'actionHash', ctx.action_hash,
-            'epoch', ctx.epoch::text,
+            'operationId', ctx.action_hash,
+            'boardroomEpoch', ctx.epoch::text,
+            'configurationEpoch', ctx.configuration_epoch::text,
+            'controller', ctx.controller,
+            'controllerGeneration', ctx.controller_generation::text,
             'eta', ctx.eta,
             'expiresAt', ctx.expires_at,
             'invalidatedByEpoch', ctx.invalidated_by_epoch::text,
+            'operationKind', ctx.operation_kind,
+            'proposer', ctx.proposer,
             'status', ctx.status,
-            'queueTxHash', ctx.queue_tx_hash,
+            'scheduleTxHash', ctx.queue_tx_hash,
             'resolvedTxHash', ctx.resolved_tx_hash
           )
         ),

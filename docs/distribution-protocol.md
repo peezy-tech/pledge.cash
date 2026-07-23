@@ -1,360 +1,191 @@
 # Distribution Protocol
 
-This document describes the Boardroom distribution primitives in `packages/contracts/src/distribution/DistributionFactory.sol`,
-`FixedPriceSale.sol`, `MerkleAirdrop.sol`, and `MigratingBondingCurve.sol`.
+This document describes the candidate distribution contracts in `packages/contracts/src/distribution/`. The candidate is
+a mainnet NO-GO. Fixed-price and Merkle paths use the accepted unbounded obligation model. The bonding-curve terminal
+paths implement the product decisions approved for this candidate, but still require release-candidate and independent
+security proof before deployment.
 
-## Actors
+## Governance envelope
 
-- Boardroom governance: mints treasury-held Boardroom shares, approves the distribution factory, and creates
-  distributions. Before launch the owner may call `Boardroom.executeBatch` directly; after launch the executor must
-  queue the same Boardroom calls and anyone may execute the ready action.
-- Boardroom: owns sale inventory before creation and receives buyer payments directly into its treasury.
-- Distribution factory: deploys deterministic distribution clones, records which Boardroom created each one, and acts as the Boardroom call policy for distribution actions.
-- Buyer: purchases Boardroom shares from a fixed-price sale or migrating bonding curve.
-- Seller: sells curve-issued shares back to an active migrating bonding curve.
-- Boardroom governance as migrator: asks a ready curve to migrate reserves into Boardroom-owned locked AMM liquidity,
-  using direct owner execution only before launch or a queued action after launch.
-- Distribution recipient: receives purchased Boardroom shares.
-- Airdrop claimant: proves inclusion in a Merkle root and receives Boardroom shares directly or through a Boardroom-issued grant.
+Before launch, the Boardroom owner submits policy-checked calls through `Boardroom.execute` or
+`Boardroom.executeBatch`. After launch, the current controller proposer schedules the exact call batch and anyone may
+execute it after the delay. The Boardroom gateway preserves the proposer as policy authority.
 
-## Assets
+`DistributionFactory` is both deployment factory and obligation policy. It accepts only a canonical Boardroom whose
+share token matches the requested distribution. Creation is atomic: deterministic clone deployment, initialization,
+Boardroom obligation registration, dependency accounting, and exact inventory funding either all succeed or all revert.
 
-- Boardroom share token: ERC20 minted by the Boardroom and sold through distributions.
-- Payment or quote token: ERC20 paid by buyers. Fixed-price sale payments go directly to the Boardroom treasury; curve quote reserves stay in the curve until sold back, migrated, or cancelled.
-- Distribution escrow: Boardroom shares held by a fixed-price sale or migrating curve until bought, closed, cancelled, or migrated.
-- Airdrop escrow: Boardroom shares held by a Merkle airdrop until claimed directly, escrowed into claim-created grants,
-  closed, or cancelled.
-- Locked liquidity: AMM LP tokens held by `LockedLiquidity` after a curve migrates.
+## Discovery and provenance
 
-Native value is not used by these distribution flows. In particular, a Merkle grant claim is fee-exempt even when the
-shared `TokenGrantFactory` charges a native fee for direct grants. A mutable factory fee therefore cannot invalidate a
-committed airdrop entitlement.
+The factory permanently records:
 
-## State Machines
+- `isDistribution(distribution)`;
+- `distributionBoardroom(distribution)`;
+- `distributionKind(distribution)`;
+- the canonical `DistributionCreated` event.
 
-### DistributionFactory
+Per-Boardroom discovery is append-only and exposed through `distributionCountForBoardroom`,
+`distributionForBoardroomAt`, and bounded `distributionPageForBoardroom` pages. Closed distributions are not removed
+from discovery. Boardroom active membership is separate: permissionless pruning decrements scalar active counts without
+erasing provenance.
 
-The factory deploys deterministic distribution clones and records ownership by Boardroom.
+There is no concurrent-distribution capacity ceiling.
 
-State:
+## Fixed-price sale
 
-- `lockedLiquidityFactory`: factory used by migrating curves to create Boardroom-owned locked AMM liquidity.
-- `fixedPriceSaleLogic`: immutable implementation cloned for each fixed-price sale.
-- `merkleAirdropLogic`: immutable implementation cloned for each Merkle airdrop.
-- `migratingBondingCurveLogic`: immutable implementation cloned for each migrating curve.
-- `isDistribution`: whether an address is a factory-created distribution.
-- `distributionBoardroom`: Boardroom that created a distribution.
-- `distributionKind`: distribution type.
-- `distributionsForBoardroom`: bounded, prunable distribution index for each Boardroom. Closed entries may remain until
-  anyone explicitly prunes them or the factory needs capacity for another creation; permanent `isDistribution`,
-  Boardroom, and kind mappings preserve historical identity after pruning. The index uses swap-and-pop removal, so
-  callers must not treat its ordering as historical.
+A fixed-price sale escrows a fixed share inventory. Creation requires:
 
-As a Boardroom policy, the factory allows:
+- the Boardroom's canonical share token;
+- a readable non-share payment asset;
+- nonzero inventory and price;
+- a valid start/end window;
+- exact Boardroom-to-sale funding.
 
-- Boardroom share-token approvals where spender is the distribution factory.
-- `DistributionFactory.createFixedPriceSale(...)` calls where `params.shareToken` equals the calling Boardroom's share token.
-- `DistributionFactory.createMigratingBondingCurve(...)` calls where `params.shareToken` equals the calling Boardroom's share token and locked-liquidity support is configured.
-- `DistributionFactory.createMerkleAirdrop(...)` calls where `params.shareToken` equals the calling Boardroom's share
-  token and the Merkle root, inventory, and time window are valid.
-- `FixedPriceSale.close()` or `FixedPriceSale.cancel()` calls for fixed-price sales owned by the calling Boardroom.
-- `MerkleAirdrop.close()` or `MerkleAirdrop.cancel()` calls for airdrops owned by the calling Boardroom.
-- `MigratingBondingCurve.cancel()` or `MigratingBondingCurve.migrate(...)` calls for curves owned by the calling Boardroom.
+The payment asset becomes a canonical redeemable-asset dependency. Buys require an active Boardroom, open sale window,
+nonzero recipient and amount, remaining inventory, buyer-cap compliance, deadline, and buyer maximum. Quote rounds up.
+Payment moves directly to the Boardroom and shares move to the recipient with exact sender and recipient balance-delta
+checks.
 
-### FixedPriceSale
+Only a policy-checked Boardroom call closes or cancels the sale. Unsold inventory returns exactly to the Boardroom.
+Starting wind-down stops new buys. A closed sale remains permanent factory history and can be pruned from active
+Boardroom membership.
 
-Each sale is initialized once and starts active.
+## Merkle airdrop
 
-State:
+An airdrop escrows shares behind one Merkle root. A leaf binds chain, predicted airdrop, Boardroom, share token, index,
+account, amount, and claim mode. Grant leaves also bind the canonical grant factory and every grant term.
 
-- `boardroom`: Boardroom that created the sale and receives payment.
-- `shareToken`: Boardroom share token being sold.
-- `paymentToken`: ERC20 paid by buyers.
-- `saleSupply`: initial share inventory.
-- `remainingShares`: unsold inventory.
-- `price`: payment-token units per one 18-decimal share.
-- `maxPerBuyer`: optional buyer cap.
-- `startTime` and `endTime`: optional sale window.
-- `saleStatus`: `Active`, `Closed`, or `Cancelled`.
-- `purchasedBy`: per-buyer purchased share total for the buyer cap.
+Direct claims deliver shares to the committed account. Grant claims perform an atomic parent-to-child transition:
 
-### MigratingBondingCurve
+1. validate proof, inventory, schedule, and payment-token rules;
+2. deploy and fund the child grant;
+3. record the child obligation and its asset dependencies;
+4. mark the leaf consumed and update parent accounting.
 
-Each curve is initialized once and starts active. It prices buys and sells with a linear integral:
+The parent cannot become terminal while it can still create an uncounted child. There is no Boardroom grant-slot
+reservation or grant-capacity ceiling. `maxGrantClaims` remains a distribution-specific commitment to the published
+root, not a global protocol-capacity limit.
 
-```solidity
-price(sold) = basePrice + slope * sold / 1e18;
+Paid grant claims may add a payment-asset dependency. Asset membership is unbounded; dependency counts prevent removal
+while an open parent or child still relies on the asset. Closing or cancelling returns unclaimed shares and stops future
+claims.
+
+## Singleton bonding curve
+
+Each Boardroom can create at most one canonical curve in its lifetime. Creation is allowed only:
+
+- before launch;
+- while primary-market mode is `Unset`;
+- before any other canonical release of transferable shares;
+- with a finite nonzero end time;
+- with the Boardroom's canonical share token and a readable quote token;
+- while singleton protocol liquidity is still unconfigured.
+
+The factory predicts the curve and calls `Boardroom.precommitBondingCurve` before transferring inventory. The Boardroom
+permanently records the curve and quote-asset identities, switches primary-market mode to `BondingCurve`, and
+authorizes exactly the committed funding amount. Curve deployment, initialization, liquidity reservation, and funding
+are atomic.
+
+While `BondingCurve` is active, `BoardroomToken` enforces the primary-market restriction at its transfer boundary.
+Boardroom-originated mints, transfers, and `transferFrom` calls may fund only the exact curve or explicitly authorized
+atomic migration custody. Earlier allowances do not bypass the rule. Burns that could desynchronize curve liability are
+rejected.
+
+Holder-to-holder transfers remain possible. Third-party markets are outside Boardroom-authorized exclusivity.
+
+## Curve pricing and sell liability
+
+The current curve prices buys and sells using the integral of:
+
+```text
+price(sold) = basePrice + slope * sold / 1e18
 ```
 
-State:
+Buy quotes round up; sell quotes round down. Exact token balance deltas reject fee-on-transfer and sender-surcharge
+behavior.
 
-- `boardroom`: Boardroom that created the curve.
-- `lockedLiquidityFactory`: factory used during migration.
-- `shareToken`: Boardroom share token being sold.
-- `quoteToken`: ERC20 paid into and refunded from the curve reserve.
-- `saleSupply`: sellable shares available for curve buys.
-- `migrationSupply`: reserved shares added to AMM liquidity on migration.
-- `remainingSaleShares`: sellable inventory not currently held by buyers.
-- `basePrice` and `slope`: quote-token pricing parameters.
-- `graduationQuoteTarget`: quote reserve threshold that allows migration.
-- `quoteToLpBps`: portion of quote reserve sent into AMM liquidity.
-- `locker` and `pool`: created after migration.
-- `curveStatus`: `Active`, `Migrated`, or `Cancelled`.
-- `accountedQuoteReserve`: quote received from curve buys minus quote returned by sells. Donations and rebases do not
-  silently change migration economics.
-- `graduationLatched`: permanent readiness flag set once the quote target is reached or inventory sells out and the
-  resulting seed is AMM-feasible.
-- `quoteQuarantined` and `unrecoveredQuote`: explicit accounting for quote that could not be inspected or returned while
-  closing a curve.
+Sell rights are fungible, not purchase-recipient records. A buy increases one
+`outstandingCurveShareLiability`. Any current holder may sell up to the lesser of its transferable share balance and
+that global liability. A sale decreases the global liability. Transfers therefore carry economic sell rights with the
+shares, while the global cap prevents more shares being sold back than the curve issued.
 
-## Fixed-Price Create
+Prices are denominated in quote-token base units per one whole 18-decimal Boardroom share. Graduation readiness latches
+when the quote target is reached or the sale inventory is exhausted, and then freezes trading.
 
-Preconditions:
+## Curve terminal lifecycle
 
-- Boardroom governance has minted share inventory to the Boardroom.
-- The Boardroom executes a policy-approved batch, directly by its owner before launch or as a queued action after
-  launch:
-  - approve the distribution factory for the share inventory,
-  - call `createFixedPriceSale`.
-- share token is the Boardroom's own share token.
-- payment token is a deployed contract whose `balanceOf(address)` returns exactly one word under a bounded probe.
-- share amount and price are nonzero.
-- end time is zero for an open-ended sale, or is strictly after start time and in the future at creation.
+The explicit phases are `Selling`, `Graduated`, `Unwinding`, `Migrated`, `Settled`, and `Quarantined`.
 
-Effects:
+- Every curve has a finite end no more than 90 days after creation. A future start cannot extend that absolute bound.
+- Cancellation before graduation or permissionless expiry begins a 30-day sell-only unwind. Any current holder may sell
+  transferable shares against the global liability. After the deadline anyone finalizes; residual quote and unused
+  inventory return to the Boardroom, remaining holders retain their shares, and the primary market becomes
+  `GeneralAvailability` without automatic liquidity.
+- Graduation opens a seven-day permissionless migration window. If migration does not complete, anyone may enter the
+  same 30-day sell-only unwind.
+- Settlement and migration release the active curve obligation atomically. Permanent curve and quote tombstones remain.
 
-- factory deploys a sale clone at a deterministic address,
-- factory records the sale under the Boardroom,
-- sale initializes immutable lifecycle parameters,
-- the payment token is registered immediately as a Boardroom redeemable asset, reserving bounded wind-down capacity,
-- factory transfers the full share inventory from the Boardroom into sale escrow.
+## Singleton liquidity reservation
 
-If initialization or escrow transfer fails, the transaction reverts atomically.
+Curve creation reserves the Boardroom's one predicted locker and canonical pool initialization. The reservation binds
+Boardroom, curve, share token, permanent quote asset, pair key, and salt. An attacker-preseeded pool is rejected both at
+reservation and immediately before initial funding by checking AMM reserves and raw token balances.
 
-## Fixed-Price Buy
+A successful migration must consume that exact reservation and activate the first and only canonical locker/pool.
+Reservation release never clears the Boardroom's quote identity.
 
-Preconditions:
+## Migration price continuity
 
-- sale is active,
-- creating Boardroom is still active,
-- current time is inside the sale window,
-- deadline has not passed,
-- recipient is nonzero,
-- requested share amount is nonzero and not above remaining inventory,
-- payment, rounded up to the payment token's smallest unit, is not above the buyer-provided maximum,
-- buyer cap is not exceeded.
+The terminal marginal price is:
 
-Effects:
+```text
+terminalPrice = basePrice + floor(slope * soldShares / 1e18)
+```
 
-- `remainingShares` decreases,
-- buyer purchased total increases,
-- payment token transfers from buyer directly to Boardroom,
-- share token transfers from sale escrow to recipient.
+Migration selects quote first from the recorded reserve according to `quoteToLpBps`, then derives share inventory as
+`floor(quoteToLiquidity * 1e18 / terminalPrice)`. Unused reserved shares and quote return to the Boardroom. Actual AMM
+funding must satisfy caller minimums of at least 95% of the protocol-derived amounts, and the realized reserve price may
+deviate from the terminal price by at most 50 basis points. These conventions are simulated across edge and fuzzed
+parameter grids in `BondingCurveEconomicSimulation.t.sol`.
 
-Both token transfers verify the exact sender decrease and recipient increase. Fee-on-transfer and sender-surcharge
-behavior therefore revert the complete purchase instead of overcharging a buyer or under-delivering inventory.
+## Quarantined quote
 
-## Close Or Cancel
+A failed best-effort quote return enters `Quarantined`; it is not a closed obligation and retains the singleton
+liquidity reservation. Anyone may retry recovery. Before snapshotting, recovered value goes to the Boardroom. After the
+redemption snapshot boundary, it goes to the immutable redemption-excess recipient.
 
-Only the creating Boardroom contract can close or cancel a sale. Before launch its owner can request this through
-`Boardroom.execute`; after launch the executor queues the policy-checked action and any caller may execute it once ready.
-`DistributionFactory` remains the required policy in either phase.
+Forfeiture is impossible before wind-down. After 30 days in quarantine, anyone may open a seven-day forfeiture window.
+A staker with at least 1% power against both current and previous-block eligible supply may veto, restarting the 30-day
+delay. If no veto occurs, anyone may finalize forfeiture. Only then does the curve become terminal and release its
+reservation. Quote that later becomes recoverable follows the same Boardroom-before-snapshot and excess-recipient-after-
+snapshot rule.
 
-Effects:
+## Safety invariants
 
-- sale status becomes closed or cancelled,
-- remaining share inventory is returned to the Boardroom,
-- future buys fail.
+- A Boardroom has at most one permanent curve, quote asset, locker, and pool.
+- A curve cannot be created after launch or after any other canonical transferable-share release.
+- Curve funding cannot be redirected or repeated.
+- Old allowances cannot bypass the token-level primary-market guard.
+- Global curve liability equals the maximum aggregate shares the curve remains obligated to repurchase.
+- A transferee can exercise the same fungible sell right as an original buyer without exceeding global liability.
+- A bounded unwind may discharge the global repurchase liability only after every holder had the full 30-day sell window;
+  remaining holders keep their shares.
+- No stranded quote path may mark the curve closed before recovery or the delayed, vetoable wind-down forfeiture.
+- Factory discovery is append-only and bounded by page size, not lifetime count.
+- Parent-to-child creation is atomic and reentrancy-safe.
+- No lifecycle transition performs work proportional to unbounded history.
 
-Future buys also fail as soon as the creating Boardroom starts wind-down, even before the Boardroom closes or cancels the
-sale.
+## Deterministic proof
 
-## Merkle Airdrop Create And Claim
-
-Preconditions:
-
-- Boardroom governance has minted share inventory to the Boardroom.
-- The Boardroom executes a policy-approved batch, directly by its owner before launch or as a queued action after
-  launch:
-  - approve the distribution factory for the airdrop inventory,
-  - call `createMerkleAirdrop`.
-- share token is the Boardroom's own share token.
-- share amount and Merkle root are nonzero.
-- end time is zero for an open-ended claim period, or is strictly after start time and in the future at creation.
-- `maxGrantClaims` is the maximum number of grant-claim leaves the airdrop can honor.
-
-Effects:
-
-- factory deploys an airdrop clone at a deterministic address,
-- factory records the airdrop under the Boardroom,
-- Boardroom reserves `maxGrantClaims` issued-grant slots for the airdrop,
-- airdrop initializes lifecycle and Merkle parameters,
-- factory transfers the full share inventory from the Boardroom into airdrop escrow.
-
-Anyone may submit a valid direct or grant proof; the leaf-bound `account`, not `msg.sender`, receives the shares or grant
-right. Direct claims transfer proven share amounts from airdrop escrow to that account. Grant claims create a
-Boardroom-issued `TokenGrant` funded by the airdrop escrow, consume one reserved Boardroom grant slot, and record that
-grant so redemptions cannot open while it remains live. Grant-claim leaves are capped by `maxGrantClaims`; once the cap
-is reached, otherwise valid grant proofs revert instead of overflowing the Boardroom's bounded issued-grant list.
-Distribution-created grants always use the factory's explicit zero-fee path; `claimGrant` is nonpayable.
-At claim execution, `TokenGrantFactory` still validates the committed Boardroom grant schedule: cliff cannot be after
-vesting end, expiry must be in the future and at least one day after vesting ends, and expiry can be no more than
-`5 * 365 days` after the claim block. Merkle validity does not bypass those factory checks; as time advances, the
-five-year upper bound becomes easier while the future-expiry requirement eventually closes the claimable schedule.
-For a paid claim, the factory also calls the issuing Boardroom's `reserveRedeemableAsset(paymentToken)` before grant
-creation. Free terms require zero price and zero payment token; paid terms require positive price, a nonzero payment
-token different from the share token, and readable `decimals() <= 77`. The token must also pass bounded ERC-20 reads even
-if already admitted, and a newly admitted payment token needs a free slot in the 32-asset redemption basket. Airdrop
-creation reserves issued-grant capacity but does not reserve these asset slots, so an otherwise valid Merkle leaf can
-still revert on grant terms, token support, or basket capacity at claim time.
-The token-grant factory grants that exemption only when its immutable canonical `BoardroomFactory` recognizes the issuer
-and the issuer currently recognizes the calling airdrop in its recorded issued-distribution set. That Boardroom
-membership is removed when the closed distribution obligation is pruned, so it is not permanent; the distribution
-factory's identity mapping remains permanent for historical attribution. The airdrop itself still requires both its own
-status and the Boardroom status to be active for any claim.
-
-Both direct-claim and grant-claim leaves commit to `block.chainid`, the predicted airdrop address, Boardroom, share token,
-claim index, claimant, and amount. Grant leaves additionally commit to the token-grant factory and a hash of every grant
-term. The deployed grant salt is further derived from the airdrop address, claim index, account, and leaf-bound salt.
-Claims track `claimedShares`, and the contract rejects any claim that would take aggregate claimed inventory above the
-originally escrowed `airdropSupply`.
-
-The Merkle root is an opaque commitment, so several properties remain an offchain root-construction responsibility and
-cannot be proven during `createMerkleAirdrop`: use unique indices, encode the exact onchain type hashes and chain id, use
-sorted-pair hashing compatible with Solady `MerkleProofLib`, ensure the sum of intended claim amounts does not exceed
-`shareAmount`, keep the number of grant leaves at or below `maxGrantClaims`, and design each grant expiry to remain no
-more than `5 * 365 days` after its intended claim time. Root construction must also budget every paid-grant payment token
-inside the Boardroom's bounded redemption basket for the entire claim period. The token-grant factory enforces the expiry,
-token-read, and asset-capacity conditions relative to the actual claim block. Onchain claim accounting and the bitmap
-still enforce the inventory cap and one successful claim per index if a malformed root is published.
-
-Closing or cancelling an airdrop returns unclaimed share inventory to the Boardroom and releases any unused reserved
-grant slots. Starting Boardroom wind-down stops claims immediately even if the airdrop has not yet been explicitly
-closed or cancelled.
-
-## Curve Create
-
-Preconditions:
-
-- Boardroom governance has minted `saleSupply + migrationSupply` shares to the Boardroom.
-- The Boardroom executes a policy-approved batch, directly by its owner before launch or as a queued action after
-  launch:
-  - approve the distribution factory for the total share inventory,
-  - call `createMigratingBondingCurve`.
-- share token is the Boardroom's own share token.
-- quote token is a deployed contract whose `balanceOf(address)` returns exactly one word under a bounded probe, is not
-  the share token, and is not another canonical Boardroom share token.
-- sale supply, migration supply, base price, graduation target, and LP quote basis points are nonzero.
-- total curve supply is at most the AMM `uint112` reserve limit.
-- a full sale must allocate nonzero quote no greater than the AMM reserve limit and produce an initial LP amount above
-  the AMM's `MINIMUM_LIQUIDITY` safety floor after applying the mandatory 95% migration minima.
-- end time is zero for an open-ended sale, or is strictly after start time and in the future at creation.
-- the distribution factory has a nonzero locked-liquidity factory.
-
-Effects:
-
-- factory deploys a curve clone at a deterministic address,
-- the quote token is registered immediately as a Boardroom redeemable asset,
-- the locked-liquidity factory reserves the Boardroom's migration salt, share/quote pair, locker slot, predicted locker,
-  and AMM initializer before accepting the curve,
-- factory records the curve under the Boardroom,
-- curve initializes lifecycle and pricing parameters,
-- factory transfers the full share inventory from the Boardroom into curve escrow.
-
-## Curve Buy And Sell
-
-Buys require the curve and creating Boardroom to be active, the buy window to be open, and the quoted payment to be at or
-below the buyer's maximum. Buy quotes round up to avoid zero-cost dust purchases.
-
-Sells require the curve and creating Boardroom to be active, the seller's amount to be no more than that account's
-remaining curve sell right and no more than currently sold shares, and the quote refund to be at or above the seller's
-minimum. Sell quotes round down so refunds never exceed the curve integral.
-
-Effects:
-
-- buys decrease `remainingSaleShares`, increase quote reserve, credit an account-bound sell right to the share recipient,
-  and transfer shares to the recipient,
-- sells decrease the seller's account-bound sell right, increase `remainingSaleShares`, decrease quote reserve, and
-  refund quote tokens to the recipient.
-
-All curve token transfers require exact sender and recipient balance deltas, rejecting fee-on-transfer and sender-taxed
-tokens. Curve sell rights do not follow ERC20 transfers; a recipient that transfers away curve-bought shares keeps the
-sell right but still needs enough shares to sell.
-
-Once graduation readiness is feasible it latches permanently. Further buys and sells revert, freezing the reserve,
-inventory, and migration amounts until the Boardroom migrates or cancels.
-
-## Curve Migration Or Cancellation
-
-Migration is allowed through the issuing Boardroom only while that Boardroom is active and after graduation has
-latched. Once wind-down begins the only terminal path is cancellation, so a cleanup caller cannot burn redemption value
-into a fresh AMM position. The share and quote allocations must fit the AMM's `uint112` reserves and produce more than
-the AMM's `MINIMUM_LIQUIDITY` initial-supply safety floor. Reserved Boardroom initialization mints that full initial
-supply to the authenticated locker rather than permanently burning a slice. Caller minima for both assets must be at
-least 95% of the desired seed amounts; weaker slippage bounds revert before any external call.
-
-Effects:
-
-- curve status becomes `Migrated`,
-- reserved migration shares plus unsold sale shares are paired with `quoteToLpBps` of quote reserve,
-- `LockedLiquidityFactory.createLockedLiquidityForBoardroom` creates a Boardroom-owned locker,
-- the curve asks the issuing Boardroom to record the locker,
-- the share remainder returns exactly to the Boardroom treasury, while the quote remainder uses bounded best-effort
-  return and can be quarantined if the quote token becomes hostile.
-
-Only the reserved curve can consume its predicted locked-liquidity and AMM initializer reservation. This prevents
-untrusted contracts from filling another Boardroom's locker slots, pre-seeding the pair, or consuming a reserved salt.
-The locked-liquidity factory accepts migration reservations only for Boardrooms recognized by its immutable canonical
-`BoardroomFactory`, and permanently used locker salts are rejected before a curve is accepted. The reservation is
-consumed atomically by migration.
-
-Cancellation is Boardroom-only and releases the unused migration reservation. Canonical Boardroom shares are returned
-first with exact transfer checks. Both migration and cancellation return quote remainder best-effort: bounded-gas
-balance and transfer calls cannot block either terminal transition if the quote token later reverts, burns gas, or
-returns malformed data. Any shortfall is quarantined explicitly in `unrecoveredQuote`; anyone can retry
-`recoverQuarantinedQuote` after the curve is `Migrated` or `Cancelled`, but recovery can only pay the issuing Boardroom.
-Since the quote asset was registered at creation, recovery before `openRedemptions` joins holder entitlements only if
-that asset remains admitted or is re-admitted after recovery and before the snapshot. A closed curve can be pruned and
-its empty, unpinned quote asset removed first. Recovery after opening is a late Boardroom deposit: it does not increase
-holder entitlements and is sweepable as excess to the current `redemptionExcessRecipient`.
-
-## Invariants
-
-- Sale escrow inventory plus sold shares equals original sale supply.
-- Fixed-price buyer payments go to the Boardroom, not the factory or sale.
-- Curve buyer quote payments stay in the curve reserve until sale, migration, or cancellation.
-- Curve migration economics use accounted quote, not unsolicited token balance changes.
-- Graduation is monotonic and freezes buys and sells once latched.
-- Only the creating Boardroom can close or cancel its sale.
-- Fixed-price sales cannot keep selling shares after the creating Boardroom starts wind-down.
-- Migrating curves cannot buy, sell, or migrate after the creating Boardroom starts wind-down.
-- Curve sell refunds are limited by account-bound sell rights credited by curve buys.
-- A Boardroom policy call cannot create a sale for another share token.
-- A Boardroom policy call cannot create a curve for another share token.
-- A Boardroom policy call cannot create an airdrop for another share token.
-- Grant-claim airdrops reserve Boardroom issued-grant capacity before claims can create grants.
-- Grant-claim proofs do not bypass the token-grant factory's claim-time expiry and settlement-grace bounds.
-- Paid grant claims do not bypass payment-token validation or the Boardroom's bounded redeemable-asset capacity.
-- Curve migration creates a locker owned by the originating Boardroom, not by the curve.
-- Active curve migration salts, token pairs, locker slots, and initial AMM liquidity are reserved before share escrow.
-- Curve cancellation cannot be blocked by a subsequently hostile quote token; unrecovered quote remains explicitly
-  quarantined and canonical share recovery remains exact.
-- The Boardroom records migrated locked liquidity before redemptions can open.
-- Fee-on-transfer and sender-surcharge share or payment tokens fail safely through exact two-sided balance-delta checks.
-- Aggregate Merkle claims never exceed the airdrop inventory committed at creation.
-- Merkle claims require both the airdrop and its creating Boardroom to remain active.
-- Distribution indexes are bounded by `MAX_DISTRIBUTIONS_PER_BOARDROOM`, and closed entries can be pruned without
-  erasing their permanent factory identity.
-
-## Deterministic Proof
+Use Foundry v1.7.1 and run:
 
 ```sh
 bun --cwd packages/contracts build
 bun --cwd packages/contracts test
-cd packages/contracts && forge fmt --check
+forge test --match-path test/distribution/Distribution.t.sol -vv
+forge test --match-path test/boardroom/BoardroomWindDownInvariant.t.sol -vv
+bun run format:check
 ```
 
-The current distribution-specific suite does not yet exercise Merkle-valid grant claims rejected by the five-year
-claim-time maximum, ordinary expiry or settlement-grace validation, unsupported payment tokens, or a full redemption
-basket. Those end-to-end cases remain an explicit coverage gap; add them before changing grant-claim or asset-reservation
-behavior rather than inferring them from direct TokenGrantFactory tests alone.
+Also run SDK, web, Sentinel, docs, contract-size, and maximum-gas checks. These checks do not remove the explicit
+mainnet blockers.

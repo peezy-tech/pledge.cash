@@ -11,7 +11,8 @@ The mechanism has no protocol emissions. A project deliberately pre-funds an ERC
 - Only active stake supplies the numerator for veto and wind-down governance checks.
 - The governance denominator remains all current and previous-block governance-eligible circulating supply. Unstaked holders therefore dilute voting power even though they cannot exercise it themselves.
 - Starting an unstake removes active stake, reward accrual, and governance power immediately. The tokens remain transfer-locked until the configured cooldown ends.
-- Staking and claiming are direct holder actions. Creating or funding the canonical pool is a Boardroom policy action: direct owner execution before launch and delayed executor-queued execution after launch.
+- Staking and claiming are direct holder actions. Creating or funding the canonical pool is a Boardroom policy action:
+  direct owner execution before launch, or a proposer-scheduled external-controller operation after launch.
 
 ## Canonical topology
 

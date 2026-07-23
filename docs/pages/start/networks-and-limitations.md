@@ -11,8 +11,8 @@ The app’s `Network` selector can show HyperEVM Testnet, Monad Testnet, and `Lo
 
 | Network | Chain ID | Current status |
 | --- | ---: | --- |
-| HyperEVM Testnet | `998` | The checked-in authority-hardened deterministic v4 artifact is `pending`; it has not been broadcast. Contract-dependent app workflows are therefore unavailable. |
-| Monad Testnet | `10143` | The checked-in authority-hardened deterministic v4 artifact is `pending`; it has not been broadcast. Contract-dependent app workflows are therefore unavailable. |
+| HyperEVM Testnet | `998` | The checked-in deterministic v5 candidate artifact is `pending`; it has not been broadcast. Contract-dependent app workflows are unavailable. |
+| Monad Testnet | `10143` | The checked-in deterministic v5 candidate artifact is `pending`; it has not been broadcast. Contract-dependent app workflows are unavailable. |
 | Local Anvil | `31337` | Intended for a host or developer environment that provides the matching RPC and local deployment artifact. Local addresses and state are not durable public deployments. |
 
 No mainnet deployment is supported by these docs. A network appearing in the selector is not proof that a current pledge.cash contract stack exists there.
@@ -25,9 +25,12 @@ If connection fails, unlock or enable the browser wallet for the site and choose
 
 ## Governance limitation
 
-The current deployed Boardroom version signs `launch(uint256)` without binding the expected executor. Because a pending owner transaction could change the executor before launch is mined, the app shows `Secure governance launch is unavailable for this Boardroom version` and provides no launch transaction.
+The candidate v5 release has the external-controller launch flow, but no public artifact has been broadcast or
+independently assured. Legacy Boardrooms remain readable and fail closed for v5 launch, controller operations, and
+Boardroom-control claims. The app must not translate an old internal queue into the new interface.
 
-This limitation concerns creating the permanent authority transition. It does not hide readable governance state on existing Boardrooms.
+Four bonding-curve terminal-policy decisions also remain unresolved, so even a successful local v5 build is not a
+mainnet-readiness claim.
 
 ## Read and service limitations
 

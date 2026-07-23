@@ -22,7 +22,7 @@ export type NotificationRenderEvent = OutboxRow["event"];
 
 export type RenderPayload = NotificationPayload & {
   readonly action: NotificationPayload["action"] & {
-    readonly queueTxHash?: string;
+    readonly scheduleTxHash?: string;
     readonly resolvedTxHash?: string | null;
   };
   readonly analysis?: NotificationPayload["analysis"] & {
@@ -74,7 +74,7 @@ export function buildLinks(
     renderPayload.links?.webAction ??
     buildWebActionLink(payload, options.webOrigin ?? defaultWebOrigin);
   const explorerBase = options.explorerUrls?.[payload.action.chainId];
-  const txHash = renderPayload.action.resolvedTxHash ?? renderPayload.action.queueTxHash;
+  const txHash = renderPayload.action.resolvedTxHash ?? renderPayload.action.scheduleTxHash;
   const explorerTx =
     renderPayload.links?.explorerTx ??
     (explorerBase !== undefined && txHash !== undefined
@@ -88,7 +88,7 @@ function buildWebActionLink(payload: NotificationPayload, webOrigin: string): st
   const url = new URL("notifications", `${trimTrailingSlash(webOrigin)}/`);
   url.searchParams.set("chain", payload.action.chainId.toString());
   url.searchParams.set("boardroom", payload.action.boardroom);
-  url.searchParams.set("action", payload.action.actionHash);
+  url.searchParams.set("operation", payload.action.operationId);
   return url.toString();
 }
 
@@ -106,34 +106,34 @@ function renderTelegram(
   const eta = new Date(payload.action.eta);
   const utcEta = formatUtc(eta);
   const expiresAt = payload.action.expiresAt ? new Date(payload.action.expiresAt) : undefined;
-  const activeNotification = row.event === "queued" || row.event === "reminder" || row.event === "policy-admin";
+  const activeNotification = row.event === "scheduled" || row.event === "reminder" || row.event === "policy-admin";
   const actionExpired = activeNotification
     && expiresAt !== undefined
     && Number.isFinite(expiresAt.getTime())
     && expiresAt.getTime() <= now.getTime();
   const executionOpening = actionExpired ? "execution window has expired" : executionOpeningText(eta, now);
   const executionDeadline = expiresAt ? formatUtc(expiresAt) : "Unavailable";
-  const summary = payload.analysis?.summary ?? "Sentinel detected a governance action.";
+  const summary = payload.analysis?.summary ?? "Sentinel detected a governance operation.";
   const source = payload.analysis?.source ?? "template";
   const callLines = summarizeCalls(payload.calls ?? []);
   const explorerLine =
     links.explorerTx === undefined
       ? ""
-      : `\n<a href="${escapeHtml(links.explorerTx)}">Queue transaction</a>`;
-  const actionStillQueued = activeNotification && !actionExpired;
+      : `\n<a href="${escapeHtml(links.explorerTx)}">Schedule transaction</a>`;
+  const operationStillScheduled = activeNotification && !actionExpired;
   const terminalDescription = actionExpired ? "expired" : event.toLowerCase();
-  const cancellationHtml = actionStillQueued
-    ? `<b>Cancellation:</b> While queued, cancellation requires at least 1% of prior-block circulating shares held both now and in the prior block. Open ${linkHtml(
+  const cancellationHtml = operationStillScheduled
+    ? `<b>Veto:</b> While scheduled, a holder with the required 1% current and prior-block active-stake power may veto. Open ${linkHtml(
         links.webAction,
         "the boardroom"
-      )} or call <code>cancelAction(${escapeHtml(payload.action.actionHash)})</code>.${explorerLine}`
-    : `<b>Status:</b> This action is ${escapeHtml(terminalDescription)} and is no longer executable.${explorerLine}`;
-  const cancellationText = actionStillQueued
-    ? `Cancellation: While queued, cancellation requires at least 1% of prior-block circulating shares held both now and in the prior block. ${links.webAction} or call cancelAction(${payload.action.actionHash})`
-    : `Status: This action is ${terminalDescription} and is no longer executable.`;
+      )} or call <code>veto(${escapeHtml(payload.action.operationId)})</code> on the Boardroom.${explorerLine}`
+    : `<b>Status:</b> This operation is ${escapeHtml(terminalDescription)} and is no longer executable.${explorerLine}`;
+  const cancellationText = operationStillScheduled
+    ? `Veto: While scheduled, a holder with the required 1% current and prior-block active-stake power may call Boardroom.veto(${payload.action.operationId}). ${links.webAction}`
+    : `Status: This operation is ${terminalDescription} and is no longer executable.`;
 
   const html = [
-    `<b>${escapeHtml(severityBadge(severity))} ${escapeHtml(event)} governance action</b>`,
+    `<b>${escapeHtml(severityBadge(severity))} ${escapeHtml(event)} governance operation</b>`,
     `<b>Boardroom:</b> ${escapeHtml(boardroom)} on ${escapeHtml(chain)}`,
     `<b>Address:</b> <code>${escapeHtml(payload.action.boardroom)}</code>`,
     `<b>Executable from:</b> ${escapeHtml(utcEta)} (${escapeHtml(executionOpening)})`,
@@ -148,9 +148,9 @@ function renderTelegram(
 
   return {
     html,
-    subject: `${severityBadge(severity)} ${event} action in ${boardroom}`,
+    subject: `${severityBadge(severity)} ${event} operation in ${boardroom}`,
     text: [
-      `${severityBadge(severity)} ${event} governance action`,
+      `${severityBadge(severity)} ${event} governance operation`,
       `Boardroom: ${boardroom} on ${chain}`,
       `Address: ${payload.action.boardroom}`,
       `Executable from: ${utcEta} (${executionOpening})`,
@@ -161,7 +161,7 @@ function renderTelegram(
         payload.analysis?.severityRationale ?? "Severity comes from deterministic Sentinel rules."
       }`,
       cancellationText,
-      links.explorerTx === undefined ? "" : `Queue transaction: ${links.explorerTx}`
+      links.explorerTx === undefined ? "" : `Schedule transaction: ${links.explorerTx}`
     ]
       .filter((line) => line.length > 0)
       .join("\n\n"),
@@ -177,27 +177,27 @@ function renderTwitter(
   const payload = row.payload as RenderPayload;
   const boardroom = boardroomName(payload);
   const chain = chainName(payload.action.chainId, options);
-  const summary = oneLine(payload.analysis?.summary ?? "governance action pending");
+  const summary = oneLine(payload.analysis?.summary ?? "governance operation pending");
   const eta = formatUtc(new Date(payload.action.eta));
   const event = row.event as NotificationRenderEvent;
   const expiresAt = payload.action.expiresAt ? new Date(payload.action.expiresAt) : undefined;
   const now = options.now ?? new Date();
-  const queuedActionExpired = event === "queued"
+  const scheduledOperationExpired = event === "scheduled"
     && expiresAt !== undefined
     && Number.isFinite(expiresAt.getTime())
     && expiresAt.getTime() <= now.getTime();
   const text =
-    event === "queued" && !queuedActionExpired
+    event === "scheduled" && !scheduledOperationExpired
       ? fitTweetParts(
-          `${warningSign} HIGH-RISK action queued: `,
+          `${warningSign} HIGH-RISK operation scheduled: `,
           summary,
           `. Opens ${eta}. Eligible 1% holders may cancel.`,
           links.webAction
         )
       : fitTweet(
-          queuedActionExpired
-            ? `UPDATE: ${boardroom} action on ${chain} expired and is no longer executable.`
-            : `UPDATE: ${boardroom} action on ${chain} was ${eventLabel(
+          scheduledOperationExpired
+            ? `UPDATE: ${boardroom} operation on ${chain} expired and is no longer executable.`
+            : `UPDATE: ${boardroom} operation on ${chain} was ${eventLabel(
                 event
               ).toLowerCase()}. Shareholders can review details.`,
           links.webAction
@@ -219,8 +219,8 @@ function severityBadge(severity: Severity): string {
 
 function eventLabel(event: NotificationRenderEvent): string {
   switch (event) {
-    case "queued":
-      return "Queued";
+    case "scheduled":
+      return "Scheduled";
     case "cancelled":
       return "Cancelled";
     case "executed":
@@ -244,7 +244,7 @@ function chainName(chainId: number, options: RenderOptions): string {
 
 function summarizeCalls(calls: readonly StoredCall[]): string[] {
   if (calls.length === 0) {
-    return ["- No decoded calls were stored for this action."];
+    return ["- No decoded calls were stored for this operation."];
   }
 
   return calls.map((call) => {

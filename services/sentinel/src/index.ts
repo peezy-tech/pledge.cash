@@ -6,8 +6,10 @@ import {
   createPledgeCashSiweVerifier,
   WALLET_LINK_SIWE_STATEMENT
 } from "./api/better-auth";
+import { createDrizzleBoardroomControlStore } from "./api/boardroom-control-store";
 import { createApp } from "./api/server";
 import { createDrizzleApiStore } from "./api/store";
+import { createConfiguredBoardroomControlChainReader } from "./chain/boardroom-control";
 import { runWatcherOnce, type WatcherActionEventHandler } from "./chain/watcher";
 import { loadConfig, type Config, type SentinelChainConfig } from "./config";
 import { createDbClient, type SentinelDbClient } from "./db/client";
@@ -32,7 +34,7 @@ export type {
   DecodeStatus,
   NotificationEvent,
   OutboxRow,
-  QueuedActionRow,
+  ScheduledOperationRow,
   RenderedMessage,
   RiskAssessment,
   RiskFinding,
@@ -115,6 +117,10 @@ export async function startSentinel(options: StartSentinelOptions = {}): Promise
   });
   const app = createApp({
     auth: createBetterAuthAdapter(config, dbClient.db),
+    boardroomControl: {
+      chain: createConfiguredBoardroomControlChainReader(config),
+      store: createDrizzleBoardroomControlStore(dbClient.db)
+    },
     config,
     store: createDrizzleApiStore(dbClient.db),
     verifySiweSignature: createPledgeCashSiweVerifier(config, [WALLET_LINK_SIWE_STATEMENT])

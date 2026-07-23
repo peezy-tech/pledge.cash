@@ -9,11 +9,12 @@ A Boardroom cannot snapshot only the tokens visible in its wallet today. Grants,
 
 ## Redeemable assets
 
-Canonical wrapped native is admitted when a Boardroom initializes. Module creation admits assets that can later reach the treasury, such as grant tokens, payment tokens, distribution quote tokens, and liquidity sides. Governance can admit additional supported ERC20s within a bounded list.
+Canonical wrapped native is admitted when a Boardroom initializes. Module creation admits assets that can later reach the treasury, such as grant tokens, payment tokens, distribution quote tokens, and liquidity sides. Governance can append additional supported ERC20s to the permanent registry; bounded pagination, rather than a protocol-wide asset capacity, keeps processing finite per transaction.
 
 An arbitrary transfer to the Boardroom does not automatically prove the asset belongs in the redemption basket. During
-wind-down, the prelaunch owner can admit a positive-balance final asset; after governance launch, the caller's active
-stake must meet the 10% current-and-previous-block eligible-supply threshold. An unreadable admitted asset has a quarantine escape hatch.
+wind-down, a holder with the required 10% current-and-previous-block eligible stake can admit a positive-balance final
+asset. Snapshotting freezes registration and liquidity/supply treatment. An unreadable admitted asset is classified
+explicitly during a bounded snapshot page instead of silently skipped or allowed to create an unbounded loop.
 
 ## Why obligations must close
 
@@ -22,13 +23,15 @@ stake must meet the 10% current-and-previous-block eligible-supply threshold. An
 - a curve may return shares and quote reserve or create locked liquidity;
 - a locker may return underlying assets or, in a hostile-token fallback, the LP token itself.
 
-Redemptions open only after these active obligations report closed and are pruned.
+Redemptions open only after active obligation counts reach zero and every frozen asset-registry entry has been processed.
+Permissionless pruning removes terminal members from active accounting while permanent provenance tombstones remain.
 
 ## The opening snapshot
 
-Opening redemptions burns treasury shares, fixes economic share supply, and snapshots every admitted asset balance. Late
-deposits do not change entitlement. They are excess payable to the recipient recorded when the excess is swept. Opening
-does not snapshot that recipient; on an unlaunched Boardroom, an owner-following recipient can still move with ownership.
+Beginning Snapshotting burns treasury shares, fixes economic share supply and treasury-share treatment, and freezes the
+asset registry and liquidity mutation. Permissionless calls then process at most 32 frozen registry entries at a time.
+Only a completely processed registry may enter RedemptionsOpen. Late deposits do not change entitlement; excess goes to
+the explicit redemption-excess recipient whose semantics survive launch and controller replacement.
 
 Holder payout uses remaining snapshot balance and remaining entitlement shares, preserving the final indivisible remainder for the final claimant.
 

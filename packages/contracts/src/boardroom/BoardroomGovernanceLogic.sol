@@ -2,178 +2,100 @@
 pragma solidity ^0.8.30;
 
 import {BoardroomToken} from "./BoardroomToken.sol";
-import {BoardroomGovernanceStorage} from "./BoardroomGovernanceStorage.sol";
 import {IBoardroomPolicyRegistry} from "./IBoardroomPolicyRegistry.sol";
-import {BoardroomRedemptionPayout} from "./BoardroomRedemptionPayout.sol";
-import {BoardroomRedemptionStorage} from "./BoardroomRedemptionStorage.sol";
-import {AmmPool} from "../amm/AmmPool.sol";
-import {TokenGrant} from "../grants/TokenGrant.sol";
-import {LockedLiquidity} from "../liquidity/LockedLiquidity.sol";
-import {LockedLiquidityFactory} from "../liquidity/LockedLiquidityFactory.sol";
+import {BoardroomAssetStorage} from "./storage/BoardroomAssetStorage.sol";
+import {BoardroomCoreStorage} from "./storage/BoardroomCoreStorage.sol";
+import {BoardroomObligationStorage} from "./storage/BoardroomObligationStorage.sol";
+import {BestEffortTokenLib} from "../lib/BestEffortTokenLib.sol";
 import {IBoardroomObligationPolicy} from "../policy/IBoardroomObligationPolicy.sol";
 
-interface IBoardroomGovernanceDistribution {
+interface IBoardroomGovernanceRewards {
+    function activeStakeOf(address account) external view returns (uint256);
+
+    function getPastActiveStake(address account, uint256 blockNumber) external view returns (uint256);
+}
+
+interface IBoardroomCanonicalObligation {
     function factory() external view returns (address);
+
     function boardroom() external view returns (address);
+
     function shareToken() external view returns (address);
 }
 
-interface IBoardroomGovernanceRewards {
+interface IBoardroomCanonicalGrant {
     function factory() external view returns (address);
+
+    function issuer() external view returns (address);
+
+    function token() external view returns (address);
+}
+
+interface IBoardroomCanonicalLiquidity {
+    function factory() external view returns (address);
+
     function boardroom() external view returns (address);
-    function shareToken() external view returns (address);
-    function activeStakeOf(address account) external view returns (uint256);
-    function getPastActiveStake(address account, uint256 blockNumber) external view returns (uint256);
+
+    function tokenA() external view returns (address);
+
+    function tokenB() external view returns (address);
+
+    function pool() external view returns (address);
+
+    function isClosed() external view returns (bool);
+}
+
+interface IBoardroomClosableObligation {
+    function isClosed() external view returns (bool);
+}
+
+interface IBoardroomTerminalRewards {
     function isTerminalized() external view returns (bool);
 }
 
+/// @notice EIP-170 helper logic shared by Boardroom clones.
+/// @dev Governance scheduling deliberately does not live here. It is owned by each external controller.
 contract BoardroomGovernanceLogic {
     uint256 internal constant ASSET_PROBE_GAS = 30_000;
-    uint256 internal constant TERMINAL_LIQUIDITY_EXIT_GAS = 1_500_000;
-    uint256 internal constant MIN_TERMINAL_LIQUIDITY_DELAY = 1 days;
-    error ActionAlreadyQueued(bytes32 actionHash);
-    error ActionNotQueued(bytes32 actionHash);
-    error ActionNotReady(bytes32 actionHash, uint256 eta, uint256 currentTime);
-    error ActionExpired(bytes32 actionHash, uint256 expiresAt, uint256 currentTime);
-    error ActionContextMismatch(bytes32 actionHash);
+    uint256 internal constant MAX_OBLIGATION_DEPENDENCIES = 12;
+    uint256 internal constant MAX_PRUNE_BATCH = 32;
+
     error InsufficientStakerPower(address account, uint256 currentStake, uint256 pastStake, uint256 requiredStake);
     error NoCirculatingShares();
-    error InvalidRedeemableAsset(address asset);
-    error EmptyRedeemableAsset(address asset);
-    error RedeemableAssetAlreadyRegistered(address asset);
-    error RedeemableAssetStillValid(address asset);
-    error RedeemableAssetHasBalance(address asset, uint256 balance);
-    error RedeemableAssetReserved(address asset);
-    error TooManyRedeemableAssets();
-    error PolicyNotAllowed(address policy);
-    error TooManyIssuedGrants();
-    error TooManyIssuedGrantReservations(uint256 requested, uint256 available);
-    error TooManyIssuedDistributions();
-    error TooManyLockedLiquidityPositions();
-    error NoReservedIssuedGrantSlots(address distribution);
-    error InvalidIssuedGrant(address grant);
-    error InvalidIssuedDistribution(address distribution);
-    error InvalidLockedLiquidity(address locker);
-    error InvalidRewardPool(address rewards);
-    error RewardPoolAlreadyRegistered(address rewards);
-    error IssuedGrantStillOpen(address grant);
-    error IssuedDistributionStillOpen(address distribution);
-    error LockedLiquidityStillOpen(address locker);
-    error RewardPoolStillOpen(address rewards);
     error NotActiveStaker(address account);
-    error WindDownFinalizationNotReady(uint256 readyAt, uint256 currentTime);
+    error InvalidAddress();
+    error InvalidExecutionStatus(uint8 status);
+    error CallNotAllowed(address policy, address target, bytes4 selector);
     error CallFailed(address target);
+    error InvalidObligation(address obligation);
+    error ObligationAlreadyRegistered(address obligation);
+    error ObligationNotActive(address obligation);
+    error InvalidRedeemableAsset(address asset);
+    error SnapshotAlreadyFrozen();
+    error TooManyObligationDependencies(uint256 requested, uint256 maximum);
+    error TooManyCalls(uint256 requested, uint256 maximum);
+    error InvalidParentTransition(address parent);
+    error InvalidExecutionContext();
 
-    event RedeemableAssetRegistered(address indexed asset);
-    event RedeemableAssetRemoved(address indexed asset);
-    event RedeemableAssetQuarantined(address indexed asset);
-    event BoardroomGrantRecorded(address indexed grant);
-    event BoardroomGrantSlotsReserved(address indexed distribution, uint256 count);
-    event BoardroomGrantSlotsReleased(address indexed distribution, uint256 count);
-    event BoardroomDistributionRecorded(address indexed distribution);
-    event BoardroomLockedLiquidityRecorded(address indexed locker);
-    event BoardroomLockedLiquidityExited(
-        address indexed locker, address indexed pool, uint256 liquidity, uint256 amountA, uint256 amountB
+    event BoardroomCallExecuted(
+        address indexed policy,
+        address indexed target,
+        bytes4 indexed selector,
+        address authority,
+        uint256 value,
+        bytes32 dataHash
     );
-    event BoardroomLockedLiquidityReturnedAsLp(address indexed locker, address indexed pool, uint256 liquidity);
-    event BoardroomRewardPoolRecorded(address indexed rewards);
-
-    struct LifecycleSlots {
-        uint256 redeemableAssets;
-        uint256 issuedGrants;
-        uint256 issuedDistributions;
-        uint256 lockedLiquidityPositions;
-        uint256 issuedGrantSlotReservations;
-        uint256 isRedeemableAsset;
-        uint256 isIssuedGrant;
-        uint256 isIssuedDistribution;
-        uint256 isLockedLiquidity;
-        uint256 issuedGrantReservationsForDistribution;
-        uint256 obligationPolicyOf;
-        uint256 rewardPool;
-    }
-
-    struct LifecycleConfig {
-        address policyRegistry;
-        address shareToken;
-        uint256 maxAssets;
-        uint256 maxGrants;
-        uint256 maxDistributions;
-        uint256 maxLockers;
-    }
-
-    struct ExitParams {
-        address redemptionPayout;
-        address locker;
-        uint256 amountAMin;
-        uint256 amountBMin;
-        uint256 deadline;
-        uint256 governanceDelay;
-    }
-
-    struct ExitResult {
-        address pool;
-        address tokenA;
-        address tokenB;
-        uint256 amountA;
-        uint256 amountB;
-        uint256 liquidity;
-        bool returnedAsLp;
-    }
+    event BoardroomObligationRecorded(
+        address indexed obligation, address indexed policy, BoardroomObligationStorage.Kind indexed kind
+    );
+    event BoardroomObligationPruned(
+        address indexed obligation, address indexed policy, BoardroomObligationStorage.Kind indexed kind
+    );
+    event BoardroomObligationDependency(address indexed obligation, address indexed asset);
+    event RedeemableAssetRegistered(address indexed asset);
 
     function deployShareToken(string calldata name, string calldata symbol) external returns (address token) {
         token = address(new BoardroomToken(address(this), name, symbol));
-    }
-
-    function queueAction(bytes32 actionHash, uint8 status, uint256 delay, uint256 gracePeriod)
-        external
-        returns (uint256 eta)
-    {
-        BoardroomGovernanceStorage.Layout storage governance = BoardroomGovernanceStorage.layout();
-        BoardroomGovernanceStorage.ActionContext storage existing = governance.actions[actionHash];
-        if (existing.eta != 0 && existing.epoch == governance.epoch && block.timestamp <= existing.expiresAt) {
-            revert ActionAlreadyQueued(actionHash);
-        }
-
-        eta = block.timestamp + delay;
-        governance.actions[actionHash] = BoardroomGovernanceStorage.ActionContext({
-            eta: uint64(eta), expiresAt: uint64(eta + gracePeriod), epoch: governance.epoch, status: status
-        });
-    }
-
-    function consumeReadyAction(bytes32 actionHash, uint8 status) external {
-        BoardroomGovernanceStorage.Layout storage governance = BoardroomGovernanceStorage.layout();
-        BoardroomGovernanceStorage.ActionContext memory context = governance.actions[actionHash];
-        if (context.eta == 0) revert ActionNotQueued(actionHash);
-        if (context.epoch != governance.epoch || context.status != status) revert ActionContextMismatch(actionHash);
-        if (block.timestamp < context.eta) {
-            revert ActionNotReady(actionHash, context.eta, block.timestamp);
-        }
-        if (block.timestamp > context.expiresAt) {
-            revert ActionExpired(actionHash, context.expiresAt, block.timestamp);
-        }
-        delete governance.actions[actionHash];
-    }
-
-    function cancelAction(bytes32 actionHash) external {
-        BoardroomGovernanceStorage.Layout storage governance = BoardroomGovernanceStorage.layout();
-        BoardroomGovernanceStorage.ActionContext memory context = governance.actions[actionHash];
-        if (context.eta == 0) revert ActionNotQueued(actionHash);
-        if (context.epoch != governance.epoch) revert ActionContextMismatch(actionHash);
-        delete governance.actions[actionHash];
-    }
-
-    function advanceEpoch() external returns (uint64 epoch) {
-        BoardroomGovernanceStorage.Layout storage governance = BoardroomGovernanceStorage.layout();
-        epoch = governance.epoch + 1;
-        governance.epoch = epoch;
-    }
-
-    function startWindDown() external returns (uint64 epoch) {
-        BoardroomGovernanceStorage.Layout storage governance = BoardroomGovernanceStorage.layout();
-        governance.windDownStartedAt = uint64(block.timestamp);
-        epoch = governance.epoch + 1;
-        governance.epoch = epoch;
     }
 
     function requireStakerPower(
@@ -196,7 +118,6 @@ contract BoardroomGovernanceLogic {
 
         uint256 currentRequired = (currentEligible * thresholdBps + bpsDenominator - 1) / bpsDenominator;
         uint256 pastRequired = (pastEligible * thresholdBps + bpsDenominator - 1) / bpsDenominator;
-        // A custody transition cannot lower the denominator for either side of the prior-block power check.
         uint256 required = currentRequired > pastRequired ? currentRequired : pastRequired;
         uint256 currentStake = rewards.activeStakeOf(account);
         uint256 pastStake = rewards.getPastActiveStake(account, snapshotBlock);
@@ -205,539 +126,329 @@ contract BoardroomGovernanceLogic {
         }
     }
 
-    function validateRedeemableAsset(address asset, address shareToken, address boardroom)
-        public
-        view
-        returns (uint256 balance)
-    {
-        if (asset == address(0) || asset == shareToken || asset == boardroom || asset.code.length == 0) {
-            revert InvalidRedeemableAsset(asset);
-        }
-        bool success;
-        (success, balance) = _tryBalanceOf(asset, boardroom);
-        if (!success) revert InvalidRedeemableAsset(asset);
-    }
-
-    function reserveRedeemableAsset(address policyRegistry, address asset, address shareToken, uint256 maximum)
-        external
-        payable
-    {
-        LifecycleSlots memory slots = _lifecycleSlots();
-        address policy = msg.sender;
-        if (!IBoardroomPolicyRegistry(policyRegistry).isModulePolicy(policy)) revert PolicyNotAllowed(policy);
-        validateRedeemableAsset(asset, shareToken, address(this));
-        _registerAssetIfNeeded(slots, asset, shareToken, maximum);
-    }
-
-    function registerRedeemableAsset(
-        address asset,
+    function executeCall(
+        address policyRegistry,
         address shareToken,
-        uint256 maximum,
-        bool allowExisting,
-        bool requirePositiveBalance
-    ) external returns (bool registered) {
-        LifecycleSlots memory slots = _lifecycleSlots();
-        uint256 balance = validateRedeemableAsset(asset, shareToken, address(this));
-        if (requirePositiveBalance && balance == 0) revert EmptyRedeemableAsset(asset);
-        if (_mappingBool(slots.isRedeemableAsset, asset)) {
-            if (allowExisting) return false;
-            revert RedeemableAssetAlreadyRegistered(asset);
+        uint8 currentStatus,
+        address authority,
+        address policy,
+        address target,
+        uint256 value,
+        bytes calldata data
+    ) external payable returns (bytes memory result) {
+        if (target == address(0)) revert InvalidAddress();
+        if (currentStatus > uint8(BoardroomCoreStorage.Status.WindingDown)) {
+            revert InvalidExecutionStatus(currentStatus);
         }
 
-        if (_arrayLength(slots.redeemableAssets) >= maximum) revert TooManyRedeemableAssets();
-
-        _setMappingBool(slots.isRedeemableAsset, asset, true);
-        _push(slots.redeemableAssets, asset);
-        emit RedeemableAssetRegistered(asset);
-        return true;
-    }
-
-    function removeEmptyRedeemableAsset(address asset, address shareToken, address wrappedNative) external {
-        LifecycleSlots memory slots = _lifecycleSlots();
-        if (asset == wrappedNative) revert InvalidRedeemableAsset(asset);
-        uint256 balance = validateRedeemableAsset(asset, shareToken, address(this));
-        if (balance != 0) revert RedeemableAssetHasBalance(asset, balance);
-        _removeRedeemableAsset(slots, asset, false);
-    }
-
-    function quarantineRedeemableAsset(address asset, address shareToken, address wrappedNative) external {
-        LifecycleSlots memory slots = _lifecycleSlots();
-        if (asset == wrappedNative || !_mappingBool(slots.isRedeemableAsset, asset)) {
-            revert InvalidRedeemableAsset(asset);
+        BoardroomObligationStorage.Record storage record = BoardroomObligationStorage.layout().obligationOf[target];
+        address canonicalPolicy = record.active ? record.policy : address(0);
+        if (currentStatus == uint8(BoardroomCoreStorage.Status.WindingDown) && canonicalPolicy == address(0)) {
+            revert CallNotAllowed(policy, target, _selector(data));
         }
-        (bool readable,) = _tryBalanceOf(asset, address(this));
-        if (asset.code.length != 0 && asset != shareToken && readable) revert RedeemableAssetStillValid(asset);
-        _removeRedeemableAsset(slots, asset, true);
-    }
+        IBoardroomPolicyRegistry(policyRegistry)
+            .authorizeCall(address(this), authority, policy, target, value, data, canonicalPolicy);
 
-    function _removeRedeemableAsset(LifecycleSlots memory slots, address asset, bool quarantined) private {
-        if (!_mappingBool(slots.isRedeemableAsset, asset)) revert InvalidRedeemableAsset(asset);
-        if (BoardroomGovernanceStorage.layout().redeemableAssetPins[asset] != 0) {
-            revert RedeemableAssetReserved(asset);
+        BoardroomCoreStorage.Layout storage core = BoardroomCoreStorage.layout();
+        core.executionActive = true;
+        core.executionAuthority = authority;
+        core.executionPolicy = policy;
+        core.executionTarget = target;
+        (bool success, bytes memory output) = target.call{value: value}(data);
+        core.executionActive = false;
+        core.executionAuthority = address(0);
+        core.executionPolicy = address(0);
+        core.executionTarget = address(0);
+        if (!success) _revertCall(target, output);
+        result = output;
+
+        if (canonicalPolicy != address(0)) {
+            _pruneObligation(shareToken, target);
+        } else if (currentStatus == uint8(BoardroomCoreStorage.Status.Active) && policy != address(0)) {
+            _recordPostCallObligation(policyRegistry, shareToken, policy, target, value, data, result);
         }
-        (bool found, uint256 index) = _find(slots.redeemableAssets, asset);
-        if (!found) revert InvalidRedeemableAsset(asset);
-
-        _removeAt(slots.redeemableAssets, index);
-        _setMappingBool(slots.isRedeemableAsset, asset, false);
-        if (quarantined) emit RedeemableAssetQuarantined(asset);
-        else emit RedeemableAssetRemoved(asset);
+        emit BoardroomCallExecuted(policy, target, _selector(data), authority, value, keccak256(data));
     }
 
-    function recordIssuedObligation(
-        LifecycleConfig calldata config,
+    function pruneObligation(address shareToken, address obligation) external returns (bool pruned) {
+        pruned = _pruneObligation(shareToken, obligation);
+    }
+
+    function pruneObligations(address shareToken, address[] calldata obligations) external returns (uint256 pruned) {
+        uint256 length = obligations.length;
+        if (length == 0 || length > MAX_PRUNE_BATCH) revert TooManyCalls(length, MAX_PRUNE_BATCH);
+        for (uint256 i; i < length; ++i) {
+            if (_pruneObligation(shareToken, obligations[i])) ++pruned;
+        }
+    }
+
+    function addObligationDependency(address shareToken, address obligation, address asset) external {
+        BoardroomObligationStorage.Record storage record = BoardroomObligationStorage.layout().obligationOf[obligation];
+        if (!record.active) revert ObligationNotActive(obligation);
+        _addDependency(shareToken, obligation, asset);
+    }
+
+    function recordGrantFromDistribution(address policyRegistry, address shareToken, address grant) external {
+        address parent = msg.sender;
+        _beginParentTransition(parent);
+        address policy = IBoardroomCanonicalGrant(grant).factory();
+        _registerObligation(
+            policyRegistry, shareToken, policy, grant, BoardroomObligationStorage.Kind.Grant, address(0)
+        );
+        _pruneObligation(shareToken, parent);
+        BoardroomObligationStorage.layout().parentTransitionActive = false;
+    }
+
+    function recordLockedLiquidityFromDistribution(
+        address policyRegistry,
+        address shareToken,
+        address locker,
+        address pool
+    ) external {
+        address parent = msg.sender;
+        _beginParentTransition(parent);
+        address policy = IBoardroomCanonicalLiquidity(locker).factory();
+        _registerObligation(policyRegistry, shareToken, policy, locker, BoardroomObligationStorage.Kind.Liquidity, pool);
+        _pruneObligation(shareToken, parent);
+        BoardroomObligationStorage.layout().parentTransitionActive = false;
+    }
+
+    function _recordPostCallObligation(
+        address policyRegistry,
+        address shareToken,
         address policy,
         address target,
         uint256 value,
         bytes calldata data,
-        bytes calldata result
-    ) external payable {
-        IBoardroomObligationPolicy.Obligation memory obligation = IBoardroomObligationPolicy(policy)
-            .obligationForCall(address(this), target, value, data, result);
-        if (obligation.kind == IBoardroomObligationPolicy.ObligationKind.None) return;
-        if (obligation.kind == IBoardroomObligationPolicy.ObligationKind.Grant) {
-            _recordIssuedGrant(
-                config.policyRegistry, config.shareToken, policy, obligation.account, config.maxAssets, config.maxGrants
-            );
-            return;
-        }
-        if (obligation.kind == IBoardroomObligationPolicy.ObligationKind.Distribution) {
-            _recordIssuedDistribution(
-                config.policyRegistry, config.shareToken, policy, obligation.account, config.maxDistributions
-            );
-            _reserveIssuedGrantSlots(obligation.account, obligation.grantSlotReservations, config.maxGrants);
-            return;
-        }
-        if (obligation.kind == IBoardroomObligationPolicy.ObligationKind.LockedLiquidity) {
-            _recordLockedLiquidityPosition(config, obligation.account, obligation.aux, policy);
-            return;
-        }
-        _recordRewardPool(config.policyRegistry, config.shareToken, policy, obligation.account);
+        bytes memory result
+    ) internal {
+        if (!IBoardroomPolicyRegistry(policyRegistry).isModulePolicy(policy)) return;
+        IBoardroomObligationPolicy.Obligation memory obligation =
+            IBoardroomObligationPolicy(policy).obligationForCall(address(this), target, value, data, result);
+        BoardroomObligationStorage.Kind kind = _obligationKind(obligation.kind);
+        if (kind == BoardroomObligationStorage.Kind.None) return;
+        _registerObligation(policyRegistry, shareToken, policy, obligation.account, kind, obligation.aux);
     }
 
-    function recordGrantFromDistribution(
+    function _registerObligation(
         address policyRegistry,
         address shareToken,
-        address grant,
-        uint256 maxAssets,
-        uint256 maxGrants
-    ) external {
-        LifecycleSlots memory slots = _lifecycleSlots();
-        if (!_mappingBool(slots.isIssuedDistribution, msg.sender)) {
-            revert InvalidIssuedDistribution(msg.sender);
-        }
-        _consumeIssuedGrantReservation(slots, msg.sender);
-        _recordIssuedGrant(policyRegistry, shareToken, TokenGrant(grant).factory(), grant, maxAssets, maxGrants);
-    }
+        address policy,
+        address obligation,
+        BoardroomObligationStorage.Kind kind,
+        address auxiliary
+    ) internal {
+        if (
+            policy == address(0) || obligation == address(0) || obligation.code.length == 0
+                || kind == BoardroomObligationStorage.Kind.None
+                || !IBoardroomPolicyRegistry(policyRegistry).isModulePolicy(policy)
+        ) revert InvalidObligation(obligation);
 
-    function recordLockedLiquidityFromDistribution(LifecycleConfig calldata config, address locker, address pool)
-        external
-    {
-        LifecycleSlots memory slots = _lifecycleSlots();
-        if (!_mappingBool(slots.isIssuedDistribution, msg.sender)) {
-            revert InvalidIssuedDistribution(msg.sender);
-        }
-        _recordLockedLiquidityPosition(config, locker, pool, address(0));
-    }
-
-    function releaseGrantSlotsForLifecycleCall(address policy, address target, bytes4 selector) external payable {
-        address distribution =
-            IBoardroomObligationPolicy(policy).grantSlotReleaseForLifecycleCall(address(this), target, selector);
-        if (distribution != address(0)) _releaseIssuedGrantSlots(distribution);
-    }
-
-    function exitLockedLiquidity(
-        LifecycleConfig calldata config,
-        BoardroomRedemptionPayout.ObligationSlots calldata obligationSlots,
-        ExitParams calldata params
-    ) external returns (uint256 amountA, uint256 amountB, uint256 liquidity) {
-        LifecycleSlots memory lifecycleSlots = _lifecycleSlots();
-        address locker = params.locker;
-        if (!_mappingBool(lifecycleSlots.isLockedLiquidity, locker)) {
-            revert InvalidLockedLiquidity(locker);
-        }
-        ExitResult memory exited = _exitPosition(LockedLiquidity(locker), params);
-        amountA = exited.amountA;
-        amountB = exited.amountB;
-        liquidity = exited.liquidity;
-
-        BoardroomGovernanceStorage.Layout storage governance = BoardroomGovernanceStorage.layout();
-        governance.redeemableAssetPins[exited.pool] -= 1;
-        if (exited.returnedAsLp) {
-            _quarantineUnreadableAssetIfNeeded(lifecycleSlots, exited.tokenA, config.shareToken);
-            _quarantineUnreadableAssetIfNeeded(lifecycleSlots, exited.tokenB, config.shareToken);
-        } else {
-            _registerAssetIfNeeded(lifecycleSlots, exited.tokenA, config.shareToken, config.maxAssets);
-            _registerAssetIfNeeded(lifecycleSlots, exited.tokenB, config.shareToken, config.maxAssets);
-            if (governance.redeemableAssetPins[exited.pool] == 0) {
-                (bool readable, uint256 balance) = _tryBalanceOf(exited.pool, address(this));
-                if (readable && balance == 0) _removeRedeemableAsset(lifecycleSlots, exited.pool, false);
-            }
-        }
-        _delegate(
-            params.redemptionPayout,
-            abi.encodeCall(BoardroomRedemptionPayout.burnTreasuryShares, (config.shareToken, false))
-        );
-        _delegate(
-            params.redemptionPayout,
-            abi.encodeCall(BoardroomRedemptionPayout.pruneClosedObligation, (obligationSlots, locker))
-        );
-        if (exited.returnedAsLp) emit BoardroomLockedLiquidityReturnedAsLp(locker, exited.pool, liquidity);
-        else emit BoardroomLockedLiquidityExited(locker, exited.pool, liquidity, amountA, amountB);
-    }
-
-    function _exitPosition(LockedLiquidity position, ExitParams calldata params)
-        private
-        returns (ExitResult memory exited)
-    {
-        exited.pool = position.pool();
-        exited.tokenA = position.tokenA();
-        exited.tokenB = position.tokenB();
-        uint256 fallbackDelay = params.governanceDelay == 0 ? MIN_TERMINAL_LIQUIDITY_DELAY : params.governanceDelay;
-        uint256 terminalAt = uint256(BoardroomGovernanceStorage.layout().windDownStartedAt) + fallbackDelay;
-        if (block.timestamp < terminalAt) {
-            (exited.amountA, exited.amountB, exited.liquidity) =
-                position.exitToBoardroom(params.amountAMin, params.amountBMin, params.deadline);
-            return exited;
+        BoardroomObligationStorage.Layout storage obligations = BoardroomObligationStorage.layout();
+        BoardroomObligationStorage.Record storage record = obligations.obligationOf[obligation];
+        if (record.everRegistered) revert ObligationAlreadyRegistered(obligation);
+        _requireCanonicalObligation(policy, shareToken, obligation, kind, auxiliary);
+        if (kind == BoardroomObligationStorage.Kind.Reward && obligations.rewardPool != address(0)) {
+            revert ObligationAlreadyRegistered(obligations.rewardPool);
         }
 
-        try position.exitToBoardroom{gas: TERMINAL_LIQUIDITY_EXIT_GAS}(0, 0, block.timestamp) returns (
-            uint256 amountA, uint256 amountB, uint256 liquidity
+        record.policy = policy;
+        record.kind = kind;
+        record.active = true;
+        record.everRegistered = true;
+        ++obligations.activeCount;
+        ++obligations.activeByKind[kind];
+        BoardroomToken shares = BoardroomToken(shareToken);
+        if (kind == BoardroomObligationStorage.Kind.Reward) {
+            obligations.rewardPool = obligation;
+            shares.registerRewardLocker(obligation);
+        } else if (
+            (kind != BoardroomObligationStorage.Kind.Grant
+                    || IBoardroomCanonicalGrant(obligation).token() == shareToken)
+                && !shares.isEncumberedAccount(obligation)
         ) {
-            exited.amountA = amountA;
-            exited.amountB = amountB;
-            exited.liquidity = liquidity;
-        } catch {
-            exited.liquidity = position.returnLpToBoardroom();
-            exited.returnedAsLp = true;
+            shares.registerEncumberedAccount(obligation);
         }
+        if (auxiliary != address(0)) {
+            if (!shares.isEncumberedAccount(auxiliary)) shares.registerEncumberedAccount(auxiliary);
+            _addDependency(shareToken, obligation, auxiliary);
+        }
+        _discoverDependencies(shareToken, obligation, kind);
+        emit BoardroomObligationRecorded(obligation, policy, kind);
     }
 
-    function finalizeWindDown(
-        BoardroomRedemptionPayout.ObligationSlots calldata obligationSlots,
-        address redemptionPayout,
-        address wrappedNative,
+    function _requireCanonicalObligation(
+        address policy,
         address shareToken,
-        address[] calldata redeemableAssets,
-        uint256 governanceDelay
-    ) external {
-        LifecycleSlots memory lifecycleSlots = _lifecycleSlots();
-        uint256 readyAt = uint256(BoardroomGovernanceStorage.layout().windDownStartedAt) + governanceDelay;
-        if (block.timestamp < readyAt) revert WindDownFinalizationNotReady(readyAt, block.timestamp);
-
-        _delegate(redemptionPayout, abi.encodeCall(BoardroomRedemptionPayout.wrapNative, (wrappedNative)));
-        _delegate(redemptionPayout, abi.encodeCall(BoardroomRedemptionPayout.pruneClosedObligations, (obligationSlots)));
-        if (_arrayLength(lifecycleSlots.issuedGrants) != 0) {
-            revert IssuedGrantStillOpen(_arrayAt(lifecycleSlots.issuedGrants, 0));
-        }
-        if (_arrayLength(lifecycleSlots.issuedDistributions) != 0) {
-            revert IssuedDistributionStillOpen(_arrayAt(lifecycleSlots.issuedDistributions, 0));
-        }
-        if (_arrayLength(lifecycleSlots.lockedLiquidityPositions) != 0) {
-            revert LockedLiquidityStillOpen(_arrayAt(lifecycleSlots.lockedLiquidityPositions, 0));
-        }
-        address rewards = address(uint160(_slotValue(lifecycleSlots.rewardPool)));
-        if (rewards != address(0) && !IBoardroomGovernanceRewards(rewards).isTerminalized()) {
-            revert RewardPoolStillOpen(rewards);
-        }
-        _delegate(redemptionPayout, abi.encodeCall(BoardroomRedemptionPayout.burnTreasuryShares, (shareToken, false)));
-        BoardroomRedemptionStorage.layout().supply = BoardroomToken(shareToken).totalSupply();
-        _delegate(redemptionPayout, abi.encodeCall(BoardroomRedemptionPayout.snapshotAssets, (redeemableAssets)));
-    }
-
-    function _recordIssuedGrant(
-        address policyRegistry,
-        address shareToken,
-        address factory,
-        address grant,
-        uint256 maxAssets,
-        uint256 maxGrants
-    ) private {
-        LifecycleSlots memory slots = _lifecycleSlots();
-        if (_remainingIssuedGrantSlots(slots, maxGrants) == 0) revert TooManyIssuedGrants();
-        if (
-            grant == address(0) || _mappingAddress(slots.obligationPolicyOf, grant) != address(0)
-                || !IBoardroomPolicyRegistry(policyRegistry).isModulePolicy(factory)
-        ) revert InvalidIssuedGrant(grant);
-
-        TokenGrant tokenGrant = TokenGrant(grant);
-        if (tokenGrant.issuer() != address(this) || tokenGrant.factory() != factory) revert InvalidIssuedGrant(grant);
-
-        address grantToken = tokenGrant.token();
-        if (grantToken == shareToken) BoardroomToken(shareToken).registerEncumberedAccount(grant);
-        else _registerAssetIfNeeded(slots, grantToken, shareToken, maxAssets);
-        address paymentToken = tokenGrant.paymentToken();
-        if (paymentToken != address(0)) _registerAssetIfNeeded(slots, paymentToken, shareToken, maxAssets);
-        _setMappingBool(slots.isIssuedGrant, grant, true);
-        _setMappingAddress(slots.obligationPolicyOf, grant, factory);
-        _push(slots.issuedGrants, grant);
-        emit BoardroomGrantRecorded(grant);
-    }
-
-    function _recordIssuedDistribution(
-        address policyRegistry,
-        address shareToken,
-        address factory,
-        address distribution,
-        uint256 maximum
-    ) private {
-        LifecycleSlots memory slots = _lifecycleSlots();
-        if (_arrayLength(slots.issuedDistributions) >= maximum) revert TooManyIssuedDistributions();
-        if (
-            distribution == address(0) || _mappingAddress(slots.obligationPolicyOf, distribution) != address(0)
-                || !IBoardroomPolicyRegistry(policyRegistry).isModulePolicy(factory)
-        ) revert InvalidIssuedDistribution(distribution);
-
-        IBoardroomGovernanceDistribution issued = IBoardroomGovernanceDistribution(distribution);
-        if (issued.boardroom() != address(this) || issued.factory() != factory || issued.shareToken() != shareToken) {
-            revert InvalidIssuedDistribution(distribution);
-        }
-        BoardroomToken(shareToken).registerEncumberedAccount(distribution);
-        _setMappingBool(slots.isIssuedDistribution, distribution, true);
-        _setMappingAddress(slots.obligationPolicyOf, distribution, factory);
-        _push(slots.issuedDistributions, distribution);
-        emit BoardroomDistributionRecorded(distribution);
-    }
-
-    function _recordLockedLiquidityPosition(
-        LifecycleConfig calldata config,
-        address locker,
-        address pool,
-        address expectedFactory
-    ) private {
-        LifecycleSlots memory slots = _lifecycleSlots();
-        if (_arrayLength(slots.lockedLiquidityPositions) >= config.maxLockers) {
-            revert TooManyLockedLiquidityPositions();
-        }
-        if (locker == address(0) || _mappingAddress(slots.obligationPolicyOf, locker) != address(0)) {
-            revert InvalidLockedLiquidity(locker);
-        }
-
-        LockedLiquidity position = LockedLiquidity(locker);
-        address factory = position.factory();
-        if (expectedFactory != address(0) && factory != expectedFactory) revert InvalidLockedLiquidity(locker);
-        if (!IBoardroomPolicyRegistry(config.policyRegistry).isModulePolicy(factory)) {
-            revert InvalidLockedLiquidity(locker);
-        }
-        if (
-            position.boardroom() != address(this) || position.pool() != pool
-                || !LockedLiquidityFactory(factory).isLocker(locker)
-        ) revert InvalidLockedLiquidity(locker);
-        if (position.tokenA() != config.shareToken && position.tokenB() != config.shareToken) {
-            revert InvalidLockedLiquidity(locker);
-        }
-
-        _registerAssetIfNeeded(slots, position.tokenA(), config.shareToken, config.maxAssets);
-        _registerAssetIfNeeded(slots, position.tokenB(), config.shareToken, config.maxAssets);
-        _registerAssetIfNeeded(slots, pool, config.shareToken, config.maxAssets);
-        BoardroomGovernanceStorage.layout().redeemableAssetPins[pool] += 1;
-        BoardroomToken(config.shareToken).registerEncumberedAccount(pool);
-        BoardroomToken(config.shareToken).registerEncumberedAccount(AmmPool(pool).poolFees());
-        _setMappingBool(slots.isLockedLiquidity, locker, true);
-        _setMappingAddress(slots.obligationPolicyOf, locker, factory);
-        _push(slots.lockedLiquidityPositions, locker);
-        emit BoardroomLockedLiquidityRecorded(locker);
-    }
-
-    function _recordRewardPool(address policyRegistry, address shareToken, address factory, address rewards) private {
-        LifecycleSlots memory slots = _lifecycleSlots();
-        address existing = address(uint160(_slotValue(slots.rewardPool)));
-        if (existing != address(0)) revert RewardPoolAlreadyRegistered(existing);
-        if (
-            rewards == address(0) || _mappingAddress(slots.obligationPolicyOf, rewards) != address(0)
-                || !IBoardroomPolicyRegistry(policyRegistry).isModulePolicy(factory)
-        ) revert InvalidRewardPool(rewards);
-
-        IBoardroomGovernanceRewards rewardPool_ = IBoardroomGovernanceRewards(rewards);
-        if (
-            rewardPool_.factory() != factory || rewardPool_.boardroom() != address(this)
-                || rewardPool_.shareToken() != shareToken
-        ) revert InvalidRewardPool(rewards);
-
-        BoardroomToken(shareToken).registerRewardLocker(rewards);
-        _setMappingAddress(slots.obligationPolicyOf, rewards, factory);
-        _setSlot(slots.rewardPool, uint256(uint160(rewards)));
-        emit BoardroomRewardPoolRecorded(rewards);
-    }
-
-    function _registerAssetIfNeeded(LifecycleSlots memory slots, address asset, address shareToken, uint256 maximum)
-        private
-    {
-        if (asset == address(0) || asset == shareToken || asset == address(this)) return;
-        if (_mappingBool(slots.isRedeemableAsset, asset)) return;
-        validateRedeemableAsset(asset, shareToken, address(this));
-        if (_arrayLength(slots.redeemableAssets) >= maximum) revert TooManyRedeemableAssets();
-        _setMappingBool(slots.isRedeemableAsset, asset, true);
-        _push(slots.redeemableAssets, asset);
-        emit RedeemableAssetRegistered(asset);
-    }
-
-    function _quarantineUnreadableAssetIfNeeded(LifecycleSlots memory slots, address asset, address shareToken)
-        private
-    {
-        if (asset == shareToken || !_mappingBool(slots.isRedeemableAsset, asset)) return;
-        (bool readable,) = _tryBalanceOf(asset, address(this));
-        if (asset.code.length == 0 || !readable) _removeRedeemableAsset(slots, asset, true);
-    }
-
-    function _reserveIssuedGrantSlots(address distribution, uint256 count, uint256 maximum) private {
-        LifecycleSlots memory slots = _lifecycleSlots();
-        if (count == 0) return;
-        uint256 available = _remainingIssuedGrantSlots(slots, maximum);
-        if (count > available) revert TooManyIssuedGrantReservations(count, available);
-        _setMappingUint(slots.issuedGrantReservationsForDistribution, distribution, count);
-        _setSlot(slots.issuedGrantSlotReservations, _slotValue(slots.issuedGrantSlotReservations) + count);
-        emit BoardroomGrantSlotsReserved(distribution, count);
-    }
-
-    function _consumeIssuedGrantReservation(LifecycleSlots memory slots, address distribution) private {
-        uint256 reserved = _mappingUint(slots.issuedGrantReservationsForDistribution, distribution);
-        if (reserved == 0) revert NoReservedIssuedGrantSlots(distribution);
-        _setMappingUint(slots.issuedGrantReservationsForDistribution, distribution, reserved - 1);
-        _setSlot(slots.issuedGrantSlotReservations, _slotValue(slots.issuedGrantSlotReservations) - 1);
-    }
-
-    function _releaseIssuedGrantSlots(address distribution) private {
-        LifecycleSlots memory slots = _lifecycleSlots();
-        uint256 reserved = _mappingUint(slots.issuedGrantReservationsForDistribution, distribution);
-        if (reserved == 0) return;
-        _setMappingUint(slots.issuedGrantReservationsForDistribution, distribution, 0);
-        _setSlot(slots.issuedGrantSlotReservations, _slotValue(slots.issuedGrantSlotReservations) - reserved);
-        emit BoardroomGrantSlotsReleased(distribution, reserved);
-    }
-
-    function _remainingIssuedGrantSlots(LifecycleSlots memory slots, uint256 maximum) private view returns (uint256) {
-        uint256 usedAndReserved = _arrayLength(slots.issuedGrants) + _slotValue(slots.issuedGrantSlotReservations);
-        return usedAndReserved >= maximum ? 0 : maximum - usedAndReserved;
-    }
-
-    /// @dev Boardroom's legacy storage layout is fixed for its immutable clone implementation.
-    function _lifecycleSlots() private pure returns (LifecycleSlots memory slots) {
-        slots = LifecycleSlots({
-            redeemableAssets: 6,
-            issuedGrants: 7,
-            issuedDistributions: 8,
-            lockedLiquidityPositions: 9,
-            issuedGrantSlotReservations: 10,
-            isRedeemableAsset: 11,
-            isIssuedGrant: 12,
-            isIssuedDistribution: 13,
-            isLockedLiquidity: 14,
-            issuedGrantReservationsForDistribution: 15,
-            obligationPolicyOf: 16,
-            rewardPool: 17
-        });
-    }
-
-    function _find(uint256 arraySlot, address account) private view returns (bool found, uint256 index) {
-        uint256 length = _arrayLength(arraySlot);
-        for (; index < length; ++index) {
-            if (_arrayAt(arraySlot, index) == account) return (true, index);
-        }
-    }
-
-    function _arrayLength(uint256 arraySlot) private view returns (uint256 length) {
-        assembly ("memory-safe") {
-            length := sload(arraySlot)
-        }
-    }
-
-    function _arrayAt(uint256 arraySlot, uint256 index) private view returns (address account) {
-        assembly ("memory-safe") {
-            mstore(0, arraySlot)
-            account := sload(add(keccak256(0, 0x20), index))
-        }
-    }
-
-    function _push(uint256 arraySlot, address account) private {
-        assembly ("memory-safe") {
-            let length := sload(arraySlot)
-            mstore(0, arraySlot)
-            sstore(add(keccak256(0, 0x20), length), account)
-            sstore(arraySlot, add(length, 1))
-        }
-    }
-
-    function _removeAt(uint256 arraySlot, uint256 index) private returns (address account) {
-        assembly ("memory-safe") {
-            let length := sload(arraySlot)
-            mstore(0, arraySlot)
-            let dataSlot := keccak256(0, 0x20)
-            let lastIndex := sub(length, 1)
-            account := sload(add(dataSlot, index))
-            sstore(add(dataSlot, index), sload(add(dataSlot, lastIndex)))
-            sstore(add(dataSlot, lastIndex), 0)
-            sstore(arraySlot, lastIndex)
-        }
-    }
-
-    function _mappingBool(uint256 mappingSlot, address account) private view returns (bool value) {
-        uint256 position = _mappingPosition(mappingSlot, account);
-        assembly ("memory-safe") {
-            value := sload(position)
-        }
-    }
-
-    function _setMappingBool(uint256 mappingSlot, address account, bool value) private {
-        _setSlot(_mappingPosition(mappingSlot, account), value ? 1 : 0);
-    }
-
-    function _mappingAddress(uint256 mappingSlot, address account) private view returns (address value) {
-        uint256 raw = _slotValue(_mappingPosition(mappingSlot, account));
-        value = address(uint160(raw));
-    }
-
-    function _setMappingAddress(uint256 mappingSlot, address account, address value) private {
-        _setSlot(_mappingPosition(mappingSlot, account), uint256(uint160(value)));
-    }
-
-    function _mappingUint(uint256 mappingSlot, address account) private view returns (uint256) {
-        return _slotValue(_mappingPosition(mappingSlot, account));
-    }
-
-    function _setMappingUint(uint256 mappingSlot, address account, uint256 value) private {
-        _setSlot(_mappingPosition(mappingSlot, account), value);
-    }
-
-    function _mappingPosition(uint256 mappingSlot, address account) private pure returns (uint256 position) {
-        assembly ("memory-safe") {
-            mstore(0, account)
-            mstore(0x20, mappingSlot)
-            position := keccak256(0, 0x40)
-        }
-    }
-
-    function _slotValue(uint256 slot) private view returns (uint256 value) {
-        assembly ("memory-safe") {
-            value := sload(slot)
-        }
-    }
-
-    function _setSlot(uint256 slot, uint256 value) private {
-        assembly ("memory-safe") {
-            sstore(slot, value)
-        }
-    }
-
-    function _tryBalanceOf(address asset, address account) private view returns (bool success, uint256 amount) {
-        assembly ("memory-safe") {
-            let pointer := mload(0x40)
-            mstore(pointer, shl(224, 0x70a08231))
-            mstore(add(pointer, 4), account)
-            success := staticcall(ASSET_PROBE_GAS, asset, pointer, 36, pointer, 32)
-            success := and(success, eq(returndatasize(), 32))
-            amount := mload(pointer)
-        }
-    }
-
-    function _delegate(address target, bytes memory input) private returns (bytes memory result) {
-        (bool success, bytes memory output) = target.delegatecall(input);
-        if (!success) {
-            if (output.length == 0) revert CallFailed(target);
-            assembly ("memory-safe") {
-                revert(add(output, 0x20), mload(output))
+        address obligation,
+        BoardroomObligationStorage.Kind kind,
+        address auxiliary
+    ) internal view {
+        if (kind == BoardroomObligationStorage.Kind.Grant) {
+            IBoardroomCanonicalGrant grant = IBoardroomCanonicalGrant(obligation);
+            address token = grant.token();
+            if (
+                grant.factory() != policy || grant.issuer() != address(this) || token == address(0)
+                    || token.code.length == 0
+            ) {
+                revert InvalidObligation(obligation);
             }
+            return;
         }
-        return output;
+        if (kind == BoardroomObligationStorage.Kind.Liquidity) {
+            IBoardroomCanonicalLiquidity liquidity = IBoardroomCanonicalLiquidity(obligation);
+            address tokenA = liquidity.tokenA();
+            address tokenB = liquidity.tokenB();
+            if (
+                liquidity.factory() != policy || liquidity.boardroom() != address(this)
+                    || (tokenA != shareToken && tokenB != shareToken) || liquidity.pool() != auxiliary
+            ) revert InvalidObligation(obligation);
+            return;
+        }
+        IBoardroomCanonicalObligation canonical = IBoardroomCanonicalObligation(obligation);
+        if (
+            canonical.factory() != policy || canonical.boardroom() != address(this)
+                || canonical.shareToken() != shareToken
+        ) revert InvalidObligation(obligation);
+    }
+
+    function _beginParentTransition(address parent) internal {
+        BoardroomObligationStorage.Layout storage obligations = BoardroomObligationStorage.layout();
+        BoardroomObligationStorage.Record storage record = obligations.obligationOf[parent];
+        if (
+            obligations.parentTransitionActive || !record.active
+                || record.kind != BoardroomObligationStorage.Kind.Distribution
+        ) revert InvalidParentTransition(parent);
+        obligations.parentTransitionActive = true;
+    }
+
+    function _discoverDependencies(address shareToken, address obligation, BoardroomObligationStorage.Kind kind)
+        internal
+    {
+        if (kind == BoardroomObligationStorage.Kind.Grant) {
+            _addDependencyIfAsset(shareToken, obligation, _readAddress(obligation, bytes4(keccak256("token()"))));
+            _addDependencyIfAsset(shareToken, obligation, _readAddress(obligation, bytes4(keccak256("paymentToken()"))));
+            return;
+        }
+        if (kind == BoardroomObligationStorage.Kind.Distribution) {
+            _addDependencyIfAsset(shareToken, obligation, _readAddress(obligation, bytes4(keccak256("paymentToken()"))));
+            _addDependencyIfAsset(shareToken, obligation, _readAddress(obligation, bytes4(keccak256("quoteToken()"))));
+            return;
+        }
+        if (kind == BoardroomObligationStorage.Kind.Liquidity) {
+            _addDependencyIfAsset(shareToken, obligation, _readAddress(obligation, bytes4(keccak256("tokenA()"))));
+            _addDependencyIfAsset(shareToken, obligation, _readAddress(obligation, bytes4(keccak256("tokenB()"))));
+            _addDependencyIfAsset(shareToken, obligation, _readAddress(obligation, bytes4(keccak256("pool()"))));
+        }
+    }
+
+    function _addDependencyIfAsset(address shareToken, address obligation, address asset) internal {
+        if (asset == address(0) || asset == shareToken || asset == address(this)) return;
+        _addDependency(shareToken, obligation, asset);
+    }
+
+    function _addDependency(address shareToken, address obligation, address asset) internal {
+        _validateAsset(shareToken, asset);
+        BoardroomObligationStorage.Layout storage obligations = BoardroomObligationStorage.layout();
+        address[] storage dependencies = obligations.dependenciesOf[obligation];
+        uint256 length = dependencies.length;
+        for (uint256 i; i < length; ++i) {
+            if (dependencies[i] == asset) return;
+        }
+        if (length >= MAX_OBLIGATION_DEPENDENCIES) {
+            revert TooManyObligationDependencies(length + 1, MAX_OBLIGATION_DEPENDENCIES);
+        }
+        dependencies.push(asset);
+        ++obligations.assetDependencyCount[asset];
+        _registerAsset(shareToken, asset);
+        emit BoardroomObligationDependency(obligation, asset);
+    }
+
+    function _pruneObligation(address, address obligation) internal returns (bool pruned) {
+        BoardroomObligationStorage.Record storage record = BoardroomObligationStorage.layout().obligationOf[obligation];
+        if (!record.active) return false;
+        bool terminal;
+        if (record.kind == BoardroomObligationStorage.Kind.Reward) {
+            try IBoardroomTerminalRewards(obligation).isTerminalized() returns (bool closed) {
+                terminal = closed;
+            } catch {}
+        } else {
+            try IBoardroomClosableObligation(obligation).isClosed() returns (bool closed) {
+                terminal = closed;
+            } catch {}
+        }
+        if (!terminal) return false;
+        _deactivateObligation(obligation);
+        return true;
+    }
+
+    function _deactivateObligation(address obligation) internal {
+        BoardroomObligationStorage.Layout storage obligations = BoardroomObligationStorage.layout();
+        BoardroomObligationStorage.Record storage record = obligations.obligationOf[obligation];
+        if (!record.active) revert ObligationNotActive(obligation);
+        record.active = false;
+        --obligations.activeCount;
+        --obligations.activeByKind[record.kind];
+        address[] storage dependencies = obligations.dependenciesOf[obligation];
+        uint256 length = dependencies.length;
+        for (uint256 i; i < length; ++i) {
+            --obligations.assetDependencyCount[dependencies[i]];
+        }
+        emit BoardroomObligationPruned(obligation, record.policy, record.kind);
+    }
+
+    function _registerAsset(address shareToken, address asset) internal {
+        _validateAsset(shareToken, asset);
+        BoardroomAssetStorage.Layout storage assets = BoardroomAssetStorage.layout();
+        if (assets.frozen) revert SnapshotAlreadyFrozen();
+        if (!assets.everRegistered[asset]) {
+            assets.everRegistered[asset] = true;
+            assets.registry.push(asset);
+        }
+        if (!assets.isRegistered[asset]) {
+            assets.isRegistered[asset] = true;
+            emit RedeemableAssetRegistered(asset);
+        }
+    }
+
+    function _validateAsset(address shareToken, address asset) internal view {
+        if (asset == address(0) || asset == shareToken || asset == address(this) || asset.code.length == 0) {
+            revert InvalidRedeemableAsset(asset);
+        }
+        (bool readable,) = BestEffortTokenLib.tryBalanceOf(asset, address(this));
+        if (!readable) revert InvalidRedeemableAsset(asset);
+    }
+
+    function _obligationKind(IBoardroomObligationPolicy.ObligationKind kind)
+        internal
+        pure
+        returns (BoardroomObligationStorage.Kind)
+    {
+        if (kind == IBoardroomObligationPolicy.ObligationKind.Grant) return BoardroomObligationStorage.Kind.Grant;
+        if (kind == IBoardroomObligationPolicy.ObligationKind.Distribution) {
+            return BoardroomObligationStorage.Kind.Distribution;
+        }
+        if (kind == IBoardroomObligationPolicy.ObligationKind.LockedLiquidity) {
+            return BoardroomObligationStorage.Kind.Liquidity;
+        }
+        if (kind == IBoardroomObligationPolicy.ObligationKind.Reward) return BoardroomObligationStorage.Kind.Reward;
+        return BoardroomObligationStorage.Kind.None;
+    }
+
+    function _readAddress(address target, bytes4 selector) internal view returns (address value) {
+        (bool success, bytes memory result) = target.staticcall{gas: ASSET_PROBE_GAS}(abi.encodeWithSelector(selector));
+        if (success && result.length == 32) value = abi.decode(result, (address));
+    }
+
+    function _selector(bytes calldata data) internal pure returns (bytes4 selector) {
+        if (data.length < 4) return bytes4(0);
+        return bytes4(data[:4]);
+    }
+
+    function _revertCall(address target, bytes memory returnData) internal pure {
+        if (returnData.length == 0) revert CallFailed(target);
+        assembly ("memory-safe") {
+            revert(add(returnData, 0x20), mload(returnData))
+        }
     }
 }

@@ -18,7 +18,7 @@ export type GovernancePageProps = {
   loading: boolean;
   primaryAction?: ReactNode;
   proposalContent?: ReactNode;
-  queueContent?: ReactNode;
+  operationsContent?: ReactNode;
   stakingContent?: ReactNode;
   warning?: string | undefined;
 };
@@ -33,7 +33,7 @@ export function GovernancePage({
   loading,
   primaryAction,
   proposalContent,
-  queueContent,
+  operationsContent,
   stakingContent,
   warning,
 }: GovernancePageProps): React.JSX.Element {
@@ -61,9 +61,9 @@ export function GovernancePage({
           action={primaryAction}
         />
         {error ? <div className="mt-4"><PageNotice title="Governance data is incomplete" tone="danger">{error}</PageNotice></div> : null}
-        {warning ? <div className="mt-4"><PageNotice title="Some queued decisions were not shown" tone="warning">{warning}</PageNotice></div> : null}
+        {warning ? <div className="mt-4"><PageNotice title="Some scheduled operations were not shown" tone="warning">{warning}</PageNotice></div> : null}
         <div className="mt-5 flex flex-wrap items-center gap-2">
-          <Badge variant={snapshot.launched ? "default" : "warning"}>{snapshot.launched ? "Staker governance live" : "Pre-launch authority"}</Badge>
+          <Badge variant={snapshot.launched ? "default" : "warning"}>{snapshot.launched ? "Controller governance live" : "Pre-launch authority"}</Badge>
           <Badge variant={lifecycle.tone}>{lifecycle.label}</Badge>
         </div>
         <p className="m-0 mt-3 max-w-3xl text-sm leading-6 text-zinc-400">{mode.description}</p>
@@ -73,21 +73,21 @@ export function GovernancePage({
             { label: "Current authority", value: mode.authority },
             {
               label: "Decision path",
-              value: snapshot.launched ? "Executor queues; holders review" : "Owner acts directly",
+              value: snapshot.launched ? "Proposer schedules; holders review" : "Owner acts directly",
               detail: snapshot.launched ? "Anyone may execute a verified action after the delay." : "Launch permanently switches routine changes to delayed governance.",
             },
-            { label: "Governance delay", value: formatDuration(snapshot.governanceDelay), detail: `Then ${formatDuration(snapshot.governanceConfig.actionGracePeriod)} to execute before expiry.` },
+            { label: "Controller delay", value: formatDuration(snapshot.controllerDelay), detail: `Then ${formatDuration(snapshot.controllerGracePeriod)} to execute before expiry.` },
             { label: "Eligible supply", value: formatTokenAmount(snapshot.governanceEligibleSupply, snapshot.shareTokenMetadata), detail: "Threshold denominator" },
             {
-              label: "Queue coverage",
-              value: error ? "Unavailable" : warning ? "Partial" : queueContent ? "Attached" : "Not attached",
+              label: "Operation coverage",
+              value: error ? "Unavailable" : warning ? "Partial" : operationsContent ? "Attached" : "Not attached",
               detail: error
-                ? "Do not conclude that the queue is empty."
+                ? "Do not conclude that no operation is pending."
                 : warning
                   ? "Some indexed decisions could not be verified."
-                  : queueContent
-                    ? "Decoded queue content is shown below."
-                    : "Current authority is readable, but queue events are absent.",
+                  : operationsContent
+                    ? "Decoded controller operations are shown below."
+                    : "Current authority is readable, but controller events are absent.",
             },
           ]}
         />
@@ -98,7 +98,7 @@ export function GovernancePage({
         <RuledSection>
           <SectionHeading
             title="Prepare a decision"
-            description="Build a supported governance call, inspect its exact decode, then send it to the holder review queue."
+            description="Build a supported controller operation, inspect its exact calldata, then schedule it for holder review."
           />
           <div className="mt-4">{proposalContent}</div>
         </RuledSection>
@@ -110,19 +110,19 @@ export function GovernancePage({
           <GovernanceRule
             icon={<Clock3 className="h-4 w-4" />}
             title="Review window"
-            value={formatDuration(snapshot.governanceConfig.minimumDelay)}
-            detail={`Queued actions remain executable for ${formatDuration(snapshot.governanceConfig.actionGracePeriod)} after the delay.`}
+            value={formatDuration(snapshot.controllerDelay)}
+            detail={`Scheduled operations remain executable for ${formatDuration(snapshot.controllerGracePeriod)} after the delay.`}
           />
           <GovernanceRule
             icon={<ShieldCheck className="h-4 w-4" />}
             title="Veto threshold"
-            value={formatBasisPoints(snapshot.governanceConfig.vetoBps)}
+            value={formatBasisPoints(100n)}
             detail={stakerPower ? stakerThresholdDetail(stakerPower.vetoRequired, snapshot.shareTokenMetadata, stakerPower.canVeto, "veto") : "Connect a staker wallet to compare its governance power."}
           />
           <GovernanceRule
             icon={<Users className="h-4 w-4" />}
             title="Wind-down threshold"
-            value={formatBasisPoints(snapshot.governanceConfig.windDownBps)}
+            value={formatBasisPoints(1_000n)}
             detail={stakerPower ? stakerThresholdDetail(stakerPower.windDownRequired, snapshot.shareTokenMetadata, stakerPower.canStartWindDown, "start wind-down") : "Connect a staker wallet to compare its governance power."}
           />
         </div>
@@ -131,21 +131,21 @@ export function GovernancePage({
 
       <RuledSection>
         <SectionHeading
-          title="Queued decisions"
+          title="Scheduled operations"
           description={snapshot.launched
-            ? "Pending actions are decoded before execution so active stakers can inspect their target, value, and intent."
-            : "Direct owner actions apply before launch; the queue becomes the primary decision path after launch."}
+            ? "Controller operations are reconstructed before execution so active stakers can inspect their target, value, epochs, and authority."
+            : "Direct owner actions apply before launch; the external controller becomes the decision path after launch."}
         />
         <div className="mt-4">
-          {queueContent ?? (
-            <PageNotice title={snapshot.launched ? (error ? "Queued decisions are unavailable" : warning ? "No verified queued decisions" : "No queue data attached") : "Queue starts after launch"}>
+          {operationsContent ?? (
+            <PageNotice title={snapshot.launched ? (error ? "Scheduled operations are unavailable" : warning ? "No verified scheduled operations" : "No operation data attached") : "Controller starts at launch"}>
               {snapshot.launched
                 ? error
-                  ? "The current queue could not be checked. Retry before concluding that no decisions are pending."
+                  ? "Current controller operations could not be checked. Retry before concluding that no decision is pending."
                   : warning
-                    ? "Queue coverage is incomplete. Retry before assuming no decisions are pending."
-                    : "The governance state is readable, but decoded queue events have not been attached to this view."
-                : "Launching is a one-way authority transition. Review the executor and governance settings before continuing."}
+                    ? "Operation coverage is incomplete. Retry before assuming no decisions are pending."
+                    : "The governance state is readable, but decoded controller events have not been attached to this view."
+                : "Launching is a one-way authority transition. Review the proposer, predicted controller, protection staker, and timing before continuing."}
             </PageNotice>
           )}
         </div>
@@ -153,7 +153,7 @@ export function GovernancePage({
 
       {activityContent ? (
         <RuledSection>
-          <SectionHeading title="Decision history" description="Queued, cancelled, vetoed, and executed governance events." />
+          <SectionHeading title="Decision history" description="Scheduled, vetoed, invalidated, and executed controller events." />
           <div className="mt-4">{activityContent}</div>
         </RuledSection>
       ) : alertsUnavailable ? (
@@ -165,7 +165,7 @@ export function GovernancePage({
           />
           <div className="mt-4">
             <PageNotice title="Alerts do not affect governance authority">
-              Current authority, thresholds, delay, and queue coverage remain readable above. Alert sign-in is an offchain notification identity and never authorizes transactions.
+              Current authority, thresholds, delay, and operation coverage remain readable above. Alert sign-in is an offchain notification identity and never authorizes transactions.
             </PageNotice>
           </div>
         </RuledSection>
@@ -184,8 +184,11 @@ export function GovernancePage({
             columns={3}
             items={[
               { label: "Owner", value: <AddressLink address={snapshot.owner} /> },
-              { label: "Executor", value: snapshot.launched ? <AddressLink address={snapshot.executor} /> : "Not active" },
+              { label: "Controller", value: snapshot.launched ? <AddressLink address={snapshot.controller} /> : "Not deployed" },
+              { label: "Proposer", value: snapshot.launched ? <AddressLink address={snapshot.proposer} /> : "Not active" },
               { label: "Governance epoch", value: snapshot.governanceEpoch.toString() },
+              { label: "Controller generation", value: snapshot.controllerGeneration.toString() },
+              { label: "Configuration epoch", value: snapshot.controllerConfigurationEpoch.toString() },
             ]}
           />
         </details>
@@ -252,9 +255,10 @@ function GovernanceLoading(): React.JSX.Element {
 
 function governanceMode(launched: boolean, status: number): { authority: string; description: string } {
   if (status === 1) return { authority: launched ? "Governance wind-down" : "Wind-down operators", description: "The project is unwinding obligations. Only lifecycle-safe cleanup actions should proceed." };
-  if (status === 2) return { authority: "Token holders", description: "Redemptions are open. Holders can exchange project tokens for their share of redeemable assets." };
-  if (launched) return { authority: "Executor + active stakers", description: "The executor queues actions. The delay gives active stakers time to inspect or veto them before anyone executes a ready action." };
-  return { authority: "Owner", description: "The owner can act directly before launch. Launching permanently switches routine project changes to delayed staker governance." };
+  if (status === 2) return { authority: "Permissionless snapshot processors", description: "Redemption inputs are frozen. Anyone can process the bounded asset pages; redemptions open only after the registry is complete." };
+  if (status === 3) return { authority: "Token holders", description: "Redemptions are open. Holders burn project tokens for immutable redemption credits, then claim each snapshotted asset." };
+  if (launched) return { authority: "Proposer + active stakers", description: "The proposer schedules controller-bound operations. The delay gives active stakers time to inspect or veto them before anyone executes a ready operation." };
+  return { authority: "Owner", description: "The owner can act directly before launch. Launching atomically deploys generation 1 and permanently transfers ownership to the external controller." };
 }
 
 function formatDuration(seconds: bigint): string {

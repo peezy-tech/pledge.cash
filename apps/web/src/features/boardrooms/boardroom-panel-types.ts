@@ -60,6 +60,9 @@ export type BoardroomPanelCapabilities = {
   manageDistribution: Capability;
   manageLiquidity: Capability;
   mint: Capability;
+  beginSnapshot: Capability;
+  openRedemptions: Capability;
+  processSnapshot: Capability;
   permissionlessWindDown: Capability;
   redeem: Capability;
   registerRedeemableAsset: Capability;
@@ -137,16 +140,26 @@ export type MigratingCurvePanelState = {
   snapshot: MigratingBondingCurveState | undefined;
   cancel: () => Promise<void>;
   create: () => Promise<void>;
+  expire: () => Promise<void>;
+  fallbackToUnwind: () => Promise<void>;
+  finalizeForfeiture: () => Promise<void>;
+  finalizeUnwind: () => Promise<void>;
   load: () => Promise<void>;
   migrate: () => Promise<void>;
+  openForfeiture: () => Promise<void>;
   predict: () => Promise<void>;
+  recoverForfeitedQuote: () => Promise<void>;
+  recoverQuote: () => Promise<void>;
   setCurveMigrationForm: Dispatch<SetStateAction<CurveMigrationForm>>;
   setMigratingCurveAddress: (address: string) => void;
   setMigratingCurveForm: Dispatch<SetStateAction<MigratingCurveForm>>;
+  vetoForfeiture: () => Promise<void>;
 };
 
 export type LockedLiquidityPanelState = {
+  add: () => Promise<void>;
   address: string;
+  close: () => Promise<void>;
   exitForm: LockedLiquidityExitForm;
   form: LockedLiquidityForm;
   predicted: Address | undefined;
@@ -156,6 +169,7 @@ export type LockedLiquidityPanelState = {
   exit: () => Promise<void>;
   load: () => Promise<void>;
   predict: () => Promise<void>;
+  remove: () => Promise<void>;
   setLockedLiquidityAddress: (address: string) => void;
   setLockedLiquidityExitForm: Dispatch<SetStateAction<LockedLiquidityExitForm>>;
   setLockedLiquidityForm: Dispatch<SetStateAction<LockedLiquidityForm>>;
@@ -164,8 +178,12 @@ export type LockedLiquidityPanelState = {
 export type WindDownPanelState = {
   form: WindDownForm;
   burnTreasuryShares: () => Promise<void>;
+  beginSnapshot: () => Promise<void>;
   claimRedemptionAsset: () => Promise<void>;
   openRedemptions: () => Promise<void>;
+  processSnapshot: () => Promise<void>;
+  pruneObligation: (obligation: string) => Promise<void>;
+  pruneObligations: (obligations: string) => Promise<void>;
   redeemShares: () => Promise<void>;
   registerRedeemableAsset: () => Promise<void>;
   setForm: Dispatch<SetStateAction<WindDownForm>>;

@@ -25,13 +25,9 @@ interface IBondMarketFactoryPool {
     function totalSupply() external view returns (uint256);
 }
 
-interface IBondMarketLifecycle {
-    function isClosed() external view returns (bool);
-}
-
 contract BondMarketFactory is IBoardroomObligationPolicy {
     uint256 internal constant CREATE_DATA_LENGTH = 4 + 32 * 11;
-    uint256 public constant MAX_BOND_MARKETS_PER_BOARDROOM = 128;
+    uint256 public constant MAX_DISCOVERY_PAGE = 100;
 
     address public immutable ammFactory;
     address public immutable boardroomFactory;
@@ -46,7 +42,7 @@ contract BondMarketFactory is IBoardroomObligationPolicy {
     error InvalidBoardroom(address boardroom);
     error InvalidQuoteToken(address quoteToken);
     error InvalidLiquidityPool(address pool);
-    error TooManyBoardroomMarkets(address boardroom);
+    error InvalidDiscoveryPage(uint256 requested, uint256 maximum);
     error UnexpectedTokenBalanceChange(address token, uint256 expected, uint256 actual);
 
     event BondMarketCreated(
@@ -58,7 +54,6 @@ contract BondMarketFactory is IBoardroomObligationPolicy {
         uint256 capacity,
         bytes32 salt
     );
-    event ClosedBondMarketsPruned(address indexed boardroom, uint256 count);
 
     constructor(address ammFactory_, address boardroomFactory_) {
         if (
@@ -80,13 +75,6 @@ contract BondMarketFactory is IBoardroomObligationPolicy {
         address shareToken = IBondMarketFactoryBoardroom(boardroom).shareToken();
         _validateQuoteToken(params.quoteToken, shareToken, params.kind);
         IBondMarketFactoryBoardroom(boardroom).reserveRedeemableAsset(params.quoteToken);
-
-        if (marketsForBoardroom[boardroom].length >= MAX_BOND_MARKETS_PER_BOARDROOM) {
-            pruneClosedBondMarkets(boardroom);
-        }
-        if (marketsForBoardroom[boardroom].length >= MAX_BOND_MARKETS_PER_BOARDROOM) {
-            revert TooManyBoardroomMarkets(boardroom);
-        }
 
         market = LibClone.cloneDeterministic(bondMarketLogic, _cloneSalt(boardroom, params.salt));
         isBondMarket[market] = true;
@@ -143,10 +131,6 @@ contract BondMarketFactory is IBoardroomObligationPolicy {
             && (selector == BondMarket.close.selector || selector == BondMarket.finalize.selector);
     }
 
-    function grantSlotReleaseForLifecycleCall(address, address, bytes4) external pure returns (address) {
-        return address(0);
-    }
-
     function bondMarketCountForBoardroom(address boardroom) external view returns (uint256) {
         return marketsForBoardroom[boardroom].length;
     }
@@ -155,33 +139,26 @@ contract BondMarketFactory is IBoardroomObligationPolicy {
         return marketsForBoardroom[boardroom][index];
     }
 
-    function getBondMarketsForBoardroom(address boardroom) external view returns (address[] memory) {
-        return marketsForBoardroom[boardroom];
+    function bondMarketPageForBoardroom(address boardroom, uint256 cursor, uint256 size)
+        external
+        view
+        returns (address[] memory page, uint256 nextCursor)
+    {
+        if (size == 0 || size > MAX_DISCOVERY_PAGE) revert InvalidDiscoveryPage(size, MAX_DISCOVERY_PAGE);
+        address[] storage markets = marketsForBoardroom[boardroom];
+        uint256 length = markets.length;
+        if (cursor >= length) return (new address[](0), length);
+        uint256 end = cursor + size;
+        if (end > length) end = length;
+        page = new address[](end - cursor);
+        for (uint256 i; i < page.length; ++i) {
+            page[i] = markets[cursor + i];
+        }
+        nextCursor = end;
     }
 
     function predictBondMarketAddress(address boardroom, bytes32 salt) external view returns (address) {
         return LibClone.predictDeterministicAddress(bondMarketLogic, _cloneSalt(boardroom, salt), address(this));
-    }
-
-    function pruneClosedBondMarkets(address boardroom) public returns (uint256 pruned) {
-        address[] storage markets = marketsForBoardroom[boardroom];
-        uint256 index;
-        while (index < markets.length) {
-            if (!_isClosed(markets[index])) {
-                unchecked {
-                    ++index;
-                }
-                continue;
-            }
-
-            markets[index] = markets[markets.length - 1];
-            markets.pop();
-            unchecked {
-                ++pruned;
-            }
-        }
-
-        if (pruned != 0) emit ClosedBondMarketsPruned(boardroom, pruned);
     }
 
     function _canCreate(address boardroom, BondMarket.CreateParams memory params) internal view returns (bool) {
@@ -249,14 +226,6 @@ contract BondMarketFactory is IBoardroomObligationPolicy {
         }
         if (delta.recipientReceived != expectedAmount) {
             revert UnexpectedTokenBalanceChange(token, expectedAmount, delta.recipientReceived);
-        }
-    }
-
-    function _isClosed(address market) internal view returns (bool) {
-        try IBondMarketLifecycle(market).isClosed() returns (bool closed) {
-            return closed;
-        } catch {
-            return false;
         }
     }
 

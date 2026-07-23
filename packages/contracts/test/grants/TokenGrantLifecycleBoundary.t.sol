@@ -6,12 +6,22 @@ import {TokenGrant} from "../../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
 import {GrantERC20, MutableFailureGrantERC20, TokenGrantTestBoardroomFactory} from "./TokenGrant.t.sol";
 
+contract TokenGrantLifecycleBoardroom {
+    address public immutable shareToken;
+
+    constructor(address shareToken_) {
+        shareToken = shareToken_;
+    }
+
+    function reserveRedeemableAsset(address) external {}
+}
+
 contract TokenGrantLifecycleBoundaryTest is Test {
     TokenGrantFactory internal factory;
     TokenGrantTestBoardroomFactory internal boardroomFactory;
     GrantERC20 internal token;
 
-    address internal issuer = address(0xA11CE);
+    address internal issuer;
     address internal holder = address(0xB0B);
 
     uint256 internal constant GRANT_SIZE = 100 ether;
@@ -25,6 +35,7 @@ contract TokenGrantLifecycleBoundaryTest is Test {
         boardroomFactory = new TokenGrantTestBoardroomFactory();
         factory = new TokenGrantFactory(address(this), address(boardroomFactory));
         token = new GrantERC20("Grant Token", "GRANT", 18);
+        issuer = address(new TokenGrantLifecycleBoardroom(address(token)));
         token.mint(issuer, GRANT_SIZE);
     }
 

@@ -4,7 +4,6 @@ import type { Dispatch, SetStateAction } from "react";
 import { Field } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
 import { Input } from "../../components/ui/input";
-import { PRODUCT_DETAIL_CHILD_READ_LIMIT } from "../../lib/boardroom-snapshot";
 import type {
   BoardroomDistributionSnapshot,
   BoardroomGrantSnapshot,
@@ -62,14 +61,16 @@ export function StatusBadge({ label, tone }: { label: string; tone: StatusTone }
 export function boardroomStatusLabel(status: number | undefined): string {
   if (status === 0) return "Active";
   if (status === 1) return "Winding down";
-  if (status === 2) return "Redemptions open";
+  if (status === 2) return "Snapshotting";
+  if (status === 3) return "Redemptions open";
   return "Unknown";
 }
 
 export function boardroomStatusTone(status: number | undefined): "default" | "muted" | "warning" | "danger" {
   if (status === 0) return "default";
   if (status === 1) return "warning";
-  if (status === 2) return "muted";
+  if (status === 2) return "warning";
+  if (status === 3) return "muted";
   return "muted";
 }
 
@@ -81,9 +82,12 @@ export function saleStatusLabel(status: number | undefined): string {
 }
 
 export function curveStatusLabel(status: number | undefined): string {
-  if (status === 0) return "Active";
-  if (status === 1) return "Migrated";
-  if (status === 2) return "Cancelled";
+  if (status === 0) return "Selling";
+  if (status === 1) return "Graduated";
+  if (status === 2) return "Unwinding";
+  if (status === 3) return "Migrated";
+  if (status === 4) return "Settled";
+  if (status === 5) return "Quarantined";
   return "Unknown";
 }
 
@@ -200,13 +204,13 @@ export function windDownCoverage(boardroomSnapshot: BoardroomSnapshot | undefine
   }
 
   const issues = [
-    coverageIssue("Grant", boardroomSnapshot.issuedGrants.length, boardroomSnapshot.grantSummaries.length),
-    coverageIssue("Distribution", boardroomSnapshot.issuedDistributions.length, boardroomSnapshot.distributionSummaries.length),
-    coverageIssue("Locked-liquidity", boardroomSnapshot.lockedLiquidityPositions.length, boardroomSnapshot.lockedLiquiditySummaries.length),
+    coverageIssue("Grant", boardroomSnapshot.grantRecordCount ?? boardroomSnapshot.activeGrantCount, boardroomSnapshot.grantSummaries.length),
+    coverageIssue("Distribution", boardroomSnapshot.distributionRecordCount, boardroomSnapshot.distributionSummaries.length),
+    coverageIssue("Locked-liquidity", boardroomSnapshot.lockedLiquidityRecordCount, boardroomSnapshot.lockedLiquiditySummaries.length),
     coverageIssue(
       "Redeemable-asset",
+      boardroomSnapshot.redeemableAssetCount,
       boardroomSnapshot.redeemableAssets.length,
-      Math.min(boardroomSnapshot.redeemableAssets.length, PRODUCT_DETAIL_CHILD_READ_LIMIT),
     ),
   ].filter((issue): issue is string => issue !== undefined);
 
@@ -216,8 +220,9 @@ export function windDownCoverage(boardroomSnapshot: BoardroomSnapshot | undefine
   };
 }
 
-function coverageIssue(label: string, total: number, loaded: number): string | undefined {
-  if (loaded >= total) return undefined;
+function coverageIssue(label: string, total: number | bigint | undefined, loaded: number): string | undefined {
+  if (total === undefined) return `${label} canonical record count is unavailable.`;
+  if (BigInt(loaded) >= BigInt(total)) return undefined;
   return `${label} coverage is incomplete: ${loaded.toString()} of ${total.toString()} records were loaded.`;
 }
 

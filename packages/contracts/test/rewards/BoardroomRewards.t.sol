@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
 import {WETH} from "solady/tokens/WETH.sol";
 import {Boardroom} from "../../src/boardroom/Boardroom.sol";
+import {BoardroomControllerFactory} from "../../src/boardroom/BoardroomControllerFactory.sol";
 import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
 import {BoardroomGovernanceLogic} from "../../src/boardroom/BoardroomGovernanceLogic.sol";
 import {BoardroomPolicyRegistry} from "../../src/boardroom/BoardroomPolicyRegistry.sol";
@@ -161,13 +162,14 @@ contract BoardroomRewardsTest is Test {
 
         vm.prank(staker);
         rewards.stake(100 ether);
-        vm.prank(owner);
-        boardroom.launch(1 days);
+        _launch(boardroom, staker);
         vm.roll(block.number + 1);
 
         vm.prank(liquidHolder);
         vm.expectRevert(
-            abi.encodeWithSelector(Boardroom.InsufficientStakerPower.selector, liquidHolder, 0, 0, 100 ether)
+            abi.encodeWithSelector(
+                BoardroomGovernanceLogic.InsufficientStakerPower.selector, liquidHolder, 0, 0, 100 ether
+            )
         );
         boardroom.startWindDown();
 
@@ -184,8 +186,7 @@ contract BoardroomRewardsTest is Test {
 
         vm.prank(staker);
         rewards.stake(100 ether);
-        vm.prank(owner);
-        boardroom.launch(1 days);
+        _launch(boardroom, staker);
         vm.roll(block.number + 1);
 
         vm.prank(staker);
@@ -194,7 +195,9 @@ contract BoardroomRewardsTest is Test {
 
         vm.prank(staker);
         vm.expectRevert(
-            abi.encodeWithSelector(Boardroom.InsufficientStakerPower.selector, staker, 99 ether, 99 ether, 100 ether)
+            abi.encodeWithSelector(
+                BoardroomGovernanceLogic.InsufficientStakerPower.selector, staker, 99 ether, 99 ether, 100 ether
+            )
         );
         boardroom.startWindDown();
     }
@@ -266,8 +269,8 @@ contract BoardroomRewardsTest is Test {
         assertEq(shares.transferableBalanceOf(staker), 100 ether);
 
         vm.warp(block.timestamp + 1 days);
-        vm.expectRevert(abi.encodeWithSelector(Boardroom.RewardPoolStillOpen.selector, address(rewards)));
-        boardroom.openRedemptions();
+        vm.expectRevert(BoardroomRedemptionPayout.SnapshotNotReady.selector);
+        boardroom.beginSnapshot();
 
         rewards.terminalize();
         assertTrue(rewards.terminalized());
@@ -277,7 +280,8 @@ contract BoardroomRewardsTest is Test {
         vm.prank(staker);
         assertEq(rewards.claim(address(rewardToken), staker), 100 ether);
 
-        boardroom.openRedemptions();
+        boardroom.pruneObligation(address(rewards));
+        _openRedemptions(boardroom);
         assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
     }
 
@@ -313,7 +317,8 @@ contract BoardroomRewardsTest is Test {
         assertTrue(rewards.terminalized());
         assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.WindingDown));
 
-        boardroom.openRedemptions();
+        boardroom.pruneObligation(address(rewards));
+        _openRedemptions(boardroom);
         assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
     }
 
@@ -352,6 +357,39 @@ contract BoardroomRewardsTest is Test {
     function _mint(Boardroom boardroom, address to, uint256 amount) internal {
         vm.prank(owner);
         boardroom.mint(to, amount);
+    }
+
+    function _launch(Boardroom boardroom, address protection) internal {
+        vm.roll(block.number + 1);
+        BoardroomControllerFactory controllerFactory = BoardroomControllerFactory(boardroomFactory.controllerFactory());
+        address predicted = controllerFactory.predictControllerAddress(address(boardroom), 1);
+        Boardroom.LaunchConfig memory config = Boardroom.LaunchConfig({
+            proposer: owner,
+            predictedController: predicted,
+            protectionStaker: protection,
+            expectedRewardPool: boardroom.rewardPool(),
+            expectedRedemptionExcessRecipient: owner,
+            controllerDelay: 1 days,
+            windDownDelay: 1 days,
+            gracePeriod: 1 days,
+            generation: 1
+        });
+        vm.prank(owner);
+        boardroom.launch(config);
+    }
+
+    function _openRedemptions(Boardroom boardroom) internal {
+        uint256 readyAt = boardroom.windDownStartedAt() + boardroom.windDownDelay();
+        if (block.timestamp < readyAt) vm.warp(readyAt);
+        boardroom.beginSnapshot();
+        uint256 count = boardroom.redeemableAssetCount();
+        for (uint256 cursor; cursor < count; cursor += boardroom.MAX_SNAPSHOT_PAGE()) {
+            uint256 remaining = count - cursor;
+            boardroom.snapshotAssets(
+                remaining > boardroom.MAX_SNAPSHOT_PAGE() ? boardroom.MAX_SNAPSHOT_PAGE() : remaining
+            );
+        }
+        boardroom.openRedemptions();
     }
 
     function _fundReward(Boardroom boardroom, BoardroomRewards rewards, uint256 amount, uint256 duration) internal {

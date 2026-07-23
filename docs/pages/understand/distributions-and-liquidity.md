@@ -26,7 +26,10 @@ already funded positions remain claimable and keep wind-down blocked until settl
 
 ## Merkle airdrop
 
-An airdrop escrows shares behind one Merkle root. A leaf can transfer shares immediately or create an exact vesting grant. The root commits to chain, contract, Boardroom, share token, index, account, amount, claim mode, and—where applicable—every grant term.
+An airdrop escrows shares behind one Merkle root. A leaf can transfer shares immediately or create an exact vesting
+grant. The root commits to chain, contract, Boardroom, share token, index, account, amount, claim mode, and—where
+applicable—every grant term. Grant creation records the child obligation and its asset dependencies atomically; there is
+no global grant-slot capacity.
 
 The manifest and proof are offchain publication responsibilities. Onchain checks enforce the root, one claim per index, aggregate inventory, and a bounded number of grant claims. See [Claim an airdrop](../guides/claim-airdrop).
 
@@ -34,15 +37,14 @@ The manifest and proof are offchain publication responsibilities. Onchain checks
 
 A curve prices buys and sells from an integral over sold supply:
 
-- buys add quote reserve and create account-bound sell rights for the recipient;
-- sells consume that account's sell right and return quote tokens;
-- sell rights do not follow ERC20 transfers;
+- buys add quote reserve and increase one global outstanding-share liability;
+- any current holder may sell up to its transferable balance and the remaining global liability;
+- sell rights therefore follow ERC20 transfers without exceeding the aggregate curve obligation;
 - buy quotes round up and sell refunds round down.
 
-When graduation becomes feasible, it latches and freezes trading. The active Boardroom can migrate reserved shares and
-quote into Boardroom-owned locked liquidity. Migration and cancellation both return remaining canonical shares exactly;
-quote remainder return is bounded and best-effort, and any hostile-token shortfall remains recorded in the closed curve
-and retryable only to the Boardroom.
+When graduation becomes feasible, it latches and freezes trading. The final deterministic permissionless migration,
+bounded unwind, price-continuity, and quarantine semantics are not yet approved. Cancellation with purchaser liability
+and quarantined recovery fail closed; a stranded curve remains an active Boardroom dependency.
 
 ## AMM pool
 
@@ -54,9 +56,13 @@ User protections are exact input, minimum output, route, and deadline. Supported
 
 ## Locked liquidity
 
-A Boardroom-owned locker holds LP principal while the project is active. Fees can return to the Boardroom, but principal exits only during wind-down. The initial mint is reserved to the authenticated locker so a third party cannot capture the canonical first liquidity position.
+A Boardroom has one permanent quote identity and at most one canonical locker and pool. The locker holds LP principal
+while active, accepts repeated additions to that same pool, and returns removed assets only to the Boardroom. Initial
+mint is reserved to the predicted locker and an attacker-preseeded pool is rejected.
 
-If hostile underlying-token behavior blocks terminal exact exit, the protocol can eventually preserve the LP token itself as a redeemable asset. That keeps a claim on pool reserves without blocking unrelated redemptions.
+Zero LP does not close the position. Closure is explicit, empty-only, reservation-free, and irreversible. During
+wind-down, if hostile underlying-token behavior blocks exact exit, the protocol can preserve the LP token itself as a
+redeemable asset before closing. Snapshotting and RedemptionsOpen forbid liquidity mutation.
 
 ## One project, several prices
 

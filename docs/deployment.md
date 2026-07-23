@@ -11,15 +11,17 @@ Merkle airdrop, migrating bonding curve, AMM, and locked-liquidity primitives.
 | Monad Testnet | `10143` | `https://testnet-rpc.monad.xyz` | `0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541` | `packages/contracts/script/monad-testnet/deploy.sh` | `10143.json`: `pending` |
 
 Target support is not deployment evidence. Both checked-in artifacts currently say
-`Authority-hardened deterministic v4 deployment has not been broadcast yet`; each contains a chain id, `status`, and
+`Boardroom-controller deterministic v5 deployment has not been broadcast yet`; each contains a chain id, `status`, and
 `reason`, but no protocol addresses. Treat HyperEVM and Monad as supported broadcast targets, not live pledge.cash
 deployments, until a wrapper has promoted a fully verified candidate artifact.
 
 The deploy script creates or reuses one `PledgeCashDeterministicDeployer`, then creates one
 `BoardroomPolicyRegistry`, one `AssetPolicy`, one `BoardroomGovernanceLogic`, one `BoardroomRedemptionPayout`, one
 `ProtocolFeeRouter`, one `BoardroomFactory`, one `TokenGrantFactory`, one `AmmFactory`, one `AmmRouter`, one
-`LockedLiquidityFactory`, one `DistributionFactory`, one `BoardroomRewardsFactory`, and one `BondMarketFactory`. The two Boardroom helpers are deterministic roots deployed
-before the factory and injected into its internally created `boardroomLogic` implementation. The Boardroom factory is
+`LockedLiquidityFactory`, one `DistributionFactory`, one `BoardroomRewardsFactory`, and one `BondMarketFactory`. The
+Boardroom governance and redemption helpers are deterministic roots deployed before the factory. The Boardroom factory
+then constructs exactly one bound `BoardroomControllerFactory`, controller implementation, market helper, and Boardroom
+implementation, and injects their immutable reciprocal references. The Boardroom factory is
 deployed before the token-grant and locked-liquidity factories because its address is an immutable provenance
 constructor argument for both. A wrapped-native address is required because every Boardroom stores the canonical
 wrapped native token and wraps raw native funds before wind-down redemptions.
@@ -32,14 +34,15 @@ existing deployer from `PLEDGE_CASH_DETERMINISTIC_DEPLOYER`. The deterministic d
 arguments, so it cannot be captured by the first account to deploy the public salt. Use the same
 `PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER` on every chain that should share deterministic root addresses.
 
-The security-remediated root stack uses the `pledge.cash.deterministic.v4` namespace. The deterministic deployer itself
-keeps its original v1 salt because its bytecode and cross-chain address are unchanged. Each v4 root salt includes the
+The Boardroom-controller root stack uses the `pledge.cash.deterministic.v5` namespace. The deterministic deployer itself
+keeps its original v1 salt because its bytecode and cross-chain address are unchanged. Each v5 root salt includes the
 hash of that root's creation bytecode, including any embedded implementation bytecode. A bytecode change therefore
 changes the salt mechanically rather than depending on an operator to remember a manual version bump. The artifact also
 records one aggregate `deterministicReleaseCodeHash` and each deployed runtime code hash. Constructor arguments remain
 outside the release salt and continue to affect the CREATE3 initialization transaction rather than the root address.
 The factory-created Boardroom implementation is not a separate CREATE3 root, but its address and runtime code hash are
-serialized and verified together with both helper roots and their immutable wiring.
+serialized and verified together with the controller factory, controller implementation, market helper, helper roots,
+and immutable reciprocal wiring.
 
 ## Authority And Revenue Roles
 
@@ -73,7 +76,7 @@ The checked-in testnet artifacts may model subsystems independently while deploy
 existing artifact predates a current subsystem, mark that subsystem pending instead of keeping stale partial fields. A
 current TokenGrant deployment is no longer independent of Boardroom provenance: every artifact containing
 `tokenGrantFactory` must also contain the canonical `boardroomFactory` embedded in that factory. Other missing Boardroom
-or distribution fields may remain pending until a full stack broadcast replaces the artifact. A v4 artifact is current
+or distribution fields may remain pending until a full stack broadcast replaces the artifact. A v5 artifact is current
 only when it includes the authority, wiring, release-hash, and per-contract runtime-codehash attestations described
 below.
 
@@ -335,8 +338,8 @@ scenario matrix implemented by `SeedLocal.s.sol`:
 
 - direct grant variations: free partially settled, paid transferred and settled,
   and halted before cliff;
-- Seed Labs: prelaunch Boardroom-issued migrating curve, two curve buyers, migration into locked AMM liquidity, three
-  post-migration AMM buys, claimable locked-liquidity fees, active reserve and LP bond markets with purchases, and
+- Seed Labs: prelaunch direct creation of its canonical singleton AMM position, two initial holder allocations, three
+  post-liquidity AMM buys, claimable locked-liquidity fees, active reserve and LP bond markets with purchases, and
   three employee option variants (partially settled active, unvested future-cliff, and vested partially settled), plus
   a 30-day prefunded CASH reward stream with an investor actively staking 1,000 SEED shares behind a seven-day cooldown;
 - Atlas Payroll: prelaunch active fixed-price sale with two buyers;
@@ -344,18 +347,19 @@ scenario matrix implemented by `SeedLocal.s.sol`:
 - Harbor Analytics: prelaunch closed fixed-price sale with two historical buyers and treasury cash already raised;
 - Beacon Contributors: live two-leaf Merkle airdrop with index `0` already claimed, index `1` still claimable, and both
   leaves and sibling proofs written to the seed manifest;
-- Civic Compute: launched holder governance with a one-day delay and a queued `setExecutor` action still waiting;
+- Civic Compute: launched generation-1 external-controller governance with a one-day delay and a scheduled
+  `setRedemptionExcessRecipient` Boardroom operation still waiting;
 - Tidelock Storage: winding down while an active fixed-price distribution remains recorded as the explicit blocker to
   opening redemptions;
-- Final Harbor: redemptions open with CASH registered and snapshotted as a redeemable asset while the seeded holder
-  retains the full circulating share balance.
+- Final Harbor: winding down with CASH registered and the snapshot delay still pending while the seeded holder retains
+  the full circulating share balance. It does not skip the required Snapshotting phase.
 
 The first four project Boardrooms remain prelaunch. The lifecycle Boardrooms are intentionally independent so airdrop,
-governance, wind-down, and redemption browser checks cannot invalidate one another. The ignored
-`deployments/31337.seed.json` manifest includes the actor identities, Merkle root/leaves/proofs, queued-action hash,
-salt, and calldata, wind-down blocker identity, and redemption asset/snapshot values needed by browser automation.
-Queued-action ETA and expiry must be read from `governanceState(actionHash)`: broadcast block timestamps intentionally are
-not copied from Forge's pre-broadcast simulation into the fixture.
+governance and wind-down browser checks cannot invalidate one another. The ignored
+`deployments/31337.seed.json` manifest includes the actor identities, Merkle root/leaves/proofs, scheduled-operation
+hash, salt, calldata, Boardroom epoch, wind-down blocker identity, and snapshot-pending asset values needed by
+browser automation. Operation ETA and expiry must be read from the controller's `operationState(operationId)`;
+broadcast block timestamps intentionally are not copied from Forge's pre-broadcast simulation into the fixture.
 
 ```sh
 cd packages/contracts

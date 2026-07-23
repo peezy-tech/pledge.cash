@@ -141,8 +141,7 @@ contract BondMarketTest is Test {
         assertEq(shareToken.balanceOf(address(market)), CAPACITY);
         assertEq(market.capacity(), CAPACITY);
         assertEq(bondMarketFactory.bondMarketCountForBoardroom(address(boardroom)), 1);
-        assertEq(boardroom.issuedDistributionCount(), 1);
-        assertEq(boardroom.issuedDistributionAt(0), address(market));
+        assertTrue(boardroom.isIssuedDistribution(address(market)));
         assertEq(boardroom.obligationPolicyOf(address(market)), address(bondMarketFactory));
         assertTrue(boardroom.isRedeemableAsset(address(quoteToken)));
         assertTrue(shareToken.isEncumberedAccount(address(market)));
@@ -265,16 +264,16 @@ contract BondMarketTest is Test {
         assertEq(market.returnedPayout(), CAPACITY - payout);
         assertEq(shareToken.balanceOf(address(market)), payout);
         assertFalse(market.isClosed());
-        assertEq(boardroom.issuedDistributionCount(), 1);
+        assertTrue(boardroom.isIssuedDistribution(address(market)));
 
         (,, uint48 maturity,) = market.positions(positionId);
         vm.warp(maturity);
         market.redeem(positionId);
         assertTrue(market.isClosed());
 
-        boardroom.pruneClosedObligations();
-        assertEq(boardroom.issuedDistributionCount(), 0);
-        assertEq(bondMarketFactory.pruneClosedBondMarkets(address(boardroom)), 1);
+        boardroom.pruneObligation(address(market));
+        assertFalse(boardroom.isIssuedDistribution(address(market)));
+        assertEq(bondMarketFactory.bondMarketCountForBoardroom(address(boardroom)), 1);
     }
 
     function testAnyoneCanFinalizeElapsedMarket() public {

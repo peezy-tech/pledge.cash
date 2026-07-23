@@ -10,9 +10,10 @@ import { and, eq } from "drizzle-orm";
 import {
   assetPolicyAbi,
   boardroomAbi,
+  boardroomControllerAbi,
+  boardroomControllerFactoryAbi,
   boardroomRewardsAbi,
   erc20Abi,
-  hashAction,
   type BoardroomCall,
   type PledgeCashDeployment
 } from "@pledge.cash/sdk";
@@ -30,8 +31,10 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 
 import { createBetterAuthAdapter } from "../src/api/better-auth";
+import { createDrizzleBoardroomControlStore } from "../src/api/boardroom-control-store";
 import { createApp } from "../src/api/server";
 import { createDrizzleApiStore } from "../src/api/store";
+import { createBoardroomControlChainReader } from "../src/chain/boardroom-control";
 import { runWatcherOnce } from "../src/chain/watcher";
 import { loadConfig } from "../src/config";
 import { createDbClient, type SentinelDbClient } from "../src/db/client";
@@ -40,7 +43,7 @@ import {
   channels,
   notifications,
   policyAdminEvents,
-  queuedActions,
+  scheduledOperations,
   riskAssessments,
   subscriptions,
   users,
@@ -55,7 +58,8 @@ const deploymentPath = join(contractsDir, "deployments/31337.json");
 const seedPath = join(contractsDir, "deployments/31337.seed.json");
 
 const chainId = 31337;
-const governanceDelay = 86_400n;
+const controllerDelay = 86_400n;
+const governanceGracePeriod = 7n * 86_400n;
 const defaultPort = Number.parseInt(process.env.SENTINEL_ANVIL_PORT ?? "8547", 10);
 const rpcUrl = process.env.SENTINEL_ANVIL_RPC_URL ?? `http://127.0.0.1:${defaultPort}`;
 const deployerKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as Hex;
@@ -63,7 +67,6 @@ const boardroomOwnerKey = "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639
 const holderKey = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a" as Hex;
 const contractorKey = "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba" as Hex;
 const create2Factory = "0x4e59b44847b379578588920cA78FbF26c0B4956C" as const;
-const zeroAddress = "0x0000000000000000000000000000000000000000" as const;
 
 type SeedArtifact = {
   readonly boardroom: Address;
@@ -137,35 +140,52 @@ try {
   await dbClient.migrate();
 
   const subscriberUserId = await linkShareholder(dbClient, seed.holder.toLowerCase() as Address);
-  await launchBoardroom(seed);
+  const controller = await launchBoardroom(seed);
+  await mineFinalizedProofBlocks();
+  const controlClaim = await requireBoardroomControlProof(
+    config,
+    dbClient,
+    deployment,
+    subscriberUserId,
+    seed.boardroom
+  );
 
   const pipeline = createActionPipeline({ config, db: dbClient.db });
-  const setExecutorCall: BoardroomCall = {
-    data: encodeFunctionData({
-      abi: boardroomAbi,
-      functionName: "setExecutor",
-      args: [contractor.address]
-    }),
-    policy: zeroAddress,
-    target: seed.boardroom,
-    value: 0n
-  };
-  const setExecutorSalt = salt("sentinel-set-executor");
-  const setExecutorHash = hashAction(setExecutorCall, setExecutorSalt);
-  const onChainHash = await publicClient.readContract({
+  const boardroomEpoch = await publicClient.readContract({
     address: seed.boardroom,
     abi: boardroomAbi,
-    functionName: "hashAction",
-    args: [setExecutorCall, setExecutorSalt]
+    functionName: "governanceEpoch"
   });
-  assertEqual(onChainHash.toLowerCase(), setExecutorHash.toLowerCase(), "hash parity for setExecutor");
+  const configurationEpoch = await publicClient.readContract({
+    address: controller,
+    abi: boardroomControllerAbi,
+    functionName: "configurationEpoch"
+  });
+  const updateConfigurationData = encodeFunctionData({
+    abi: boardroomControllerAbi,
+    functionName: "updateConfiguration",
+    args: [contractor.address, controllerDelay, governanceGracePeriod]
+  });
+  const updateConfigurationSalt = salt("sentinel-controller-configuration");
+  const updateConfigurationOperationId = await publicClient.readContract({
+    address: controller,
+    abi: boardroomControllerAbi,
+    functionName: "hashControllerOperation",
+    args: [
+      updateConfigurationData,
+      updateConfigurationSalt,
+      boardroomEpoch,
+      configurationEpoch,
+      owner.address
+    ]
+  });
 
   await submit(ownerClient.writeContract({
-    address: seed.boardroom,
-    abi: boardroomAbi,
-    functionName: "queueAction",
-    args: [setExecutorCall, setExecutorSalt]
-  }), "queue setExecutor action");
+    address: controller,
+    abi: boardroomControllerAbi,
+    functionName: "scheduleControllerOperation",
+    args: [updateConfigurationData, updateConfigurationSalt, boardroomEpoch, configurationEpoch]
+  }), "schedule controller configuration operation");
   await runWatcherOnce(chainId, {
     config,
     deployment,
@@ -173,32 +193,36 @@ try {
     db: dbClient.db
   });
 
-  const setExecutorAction = await requireAction(dbClient, setExecutorHash, "queued");
-  await requireRisk(dbClient, setExecutorAction.id, "high");
-  await requireAnalysis(dbClient, setExecutorAction.id, "template");
-  await requireNotification(dbClient, setExecutorAction.id, "queued");
-  await requirePublicFeed(config, dbClient, setExecutorAction.id);
+  const configurationOperation = await requireOperation(
+    dbClient,
+    updateConfigurationOperationId,
+    "scheduled"
+  );
+  await requireRisk(dbClient, configurationOperation.id, "high");
+  await requireAnalysis(dbClient, configurationOperation.id, "template");
+  await requireNotification(dbClient, configurationOperation.id, "scheduled");
+  await requirePublicFeed(config, dbClient, configurationOperation.id);
 
   await submit(holderClient.writeContract({
     address: seed.boardroom,
     abi: boardroomAbi,
-    functionName: "cancelAction",
-    args: [setExecutorHash]
-  }), "cancel setExecutor action");
+    functionName: "veto",
+    args: [updateConfigurationOperationId]
+  }), "veto controller configuration operation");
   await runWatcherOnce(chainId, {
     config,
     deployment,
     onActionEvent: pipeline.handle,
     db: dbClient.db
   });
-  await requireAction(dbClient, setExecutorHash, "cancelled");
-  await requireNotification(dbClient, setExecutorAction.id, "cancelled");
+  await requireOperation(dbClient, updateConfigurationOperationId, "cancelled");
+  await requireNotification(dbClient, configurationOperation.id, "cancelled");
   await requireNotificationDeliveryFeed(
     config,
     dbClient,
     subscriberUserId,
-    setExecutorAction.id,
-    ["queued", "cancelled"]
+    configurationOperation.id,
+    ["scheduled", "cancelled"]
   );
 
   const approveSpender = "0x000000000000000000000000000000000000dEaD" as Address;
@@ -213,7 +237,12 @@ try {
     value: 0n
   };
   const approveSalt = salt("sentinel-policy-admin-approve");
-  const approveHash = hashAction(approveCall, approveSalt);
+  const approveOperationId = await publicClient.readContract({
+    address: controller,
+    abi: boardroomControllerAbi,
+    functionName: "hashBoardroomOperation",
+    args: [[approveCall], approveSalt, boardroomEpoch, configurationEpoch, owner.address]
+  });
   await submit(deployerClient.writeContract({
     address: deployment.assetPolicy as Address,
     abi: assetPolicyAbi,
@@ -227,18 +256,18 @@ try {
     db: dbClient.db
   });
   await submit(ownerClient.writeContract({
-    address: seed.boardroom,
-    abi: boardroomAbi,
-    functionName: "queueAction",
-    args: [approveCall, approveSalt]
-  }), "queue approve action");
+    address: controller,
+    abi: boardroomControllerAbi,
+    functionName: "scheduleBoardroomOperation",
+    args: [[approveCall], approveSalt, boardroomEpoch, configurationEpoch]
+  }), "schedule approve operation");
   await runWatcherOnce(chainId, {
     config,
     deployment,
     onActionEvent: pipeline.handle,
     db: dbClient.db
   });
-  const approveAction = await requireAction(dbClient, approveHash, "queued");
+  const approveAction = await requireOperation(dbClient, approveOperationId, "scheduled");
   await requireRisk(dbClient, approveAction.id, "high");
 
   await submit(deployerClient.writeContract({
@@ -268,8 +297,9 @@ try {
         ok: true,
         approveAction: approveAction.id,
         boardroom: seed.boardroom,
-        cancelledAction: setExecutorAction.id,
+        cancelledOperation: configurationOperation.id,
         chainId,
+        controlClaim,
         rpcUrl
       },
       null,
@@ -437,27 +467,102 @@ async function linkShareholder(dbClient_: SentinelDbClient, holderAddress: Addre
   return user.id;
 }
 
-async function launchBoardroom(seed: SeedArtifact): Promise<void> {
+async function requireBoardroomControlProof(
+  config: ReturnType<typeof loadConfig>,
+  dbClient_: SentinelDbClient,
+  deployment: PledgeCashDeployment,
+  userId: string,
+  boardroom: Address
+): Promise<string> {
+  const app = createApp({
+    auth: {
+      socialProviders: [],
+      async getSession() {
+        return { user: { id: userId } };
+      },
+      async handler() {
+        return new Response(null, { status: 404 });
+      }
+    },
+    boardroomControl: {
+      chain: createBoardroomControlChainReader({
+        chains: config.chains,
+        getDeployment: (requestedChainId) => requestedChainId === chainId ? deployment : undefined
+      }),
+      store: createDrizzleBoardroomControlStore(dbClient_.db)
+    },
+    config,
+    generateNonce: () => "sentinellivecontrolnonce00000001",
+    store: createDrizzleApiStore(dbClient_.db)
+  });
+  const headers = { "content-type": "application/json" };
+  const challengeResponse = await app.request("/boardroom-control/challenges", {
+    body: JSON.stringify({
+      boardroom,
+      chainId,
+      destination: { id: userId, type: "user" },
+      scope: "governance:write"
+    }),
+    headers,
+    method: "POST"
+  });
+  if (challengeResponse.status !== 200) {
+    throw new Error(
+      `POST /boardroom-control/challenges returned ${challengeResponse.status}: ${await challengeResponse.text()}`
+    );
+  }
+  const challenge = (await challengeResponse.json()) as {
+    readonly message: string;
+    readonly nonce: string;
+  };
+  const signature = await owner.signMessage({ message: challenge.message });
+  const claimRequest = {
+    body: JSON.stringify({ nonce: challenge.nonce, signature }),
+    headers,
+    method: "POST" as const
+  };
+  const claimResponse = await app.request("/boardroom-control/claims", claimRequest);
+  if (claimResponse.status !== 200) {
+    throw new Error(`POST /boardroom-control/claims returned ${claimResponse.status}: ${await claimResponse.text()}`);
+  }
+  const claimBody = (await claimResponse.json()) as {
+    readonly claim?: {
+      readonly id?: string;
+      readonly identity?: { readonly boardroom?: Address };
+      readonly scope?: string;
+    };
+  };
+  if (
+    claimBody.claim?.id === undefined ||
+    claimBody.claim.identity?.boardroom?.toLowerCase() !== boardroom.toLowerCase() ||
+    claimBody.claim.scope !== "governance:write"
+  ) {
+    throw new Error(`Boardroom-control claim response was malformed: ${JSON.stringify(claimBody)}`);
+  }
+
+  const replayResponse = await app.request("/boardroom-control/claims", claimRequest);
+  if (replayResponse.status !== 409) {
+    throw new Error(`Boardroom-control nonce replay returned ${replayResponse.status}`);
+  }
+  return claimBody.claim.id;
+}
+
+async function mineFinalizedProofBlocks(): Promise<void> {
+  await runCommand("advance local finalized block", "cast", [
+    "rpc",
+    "anvil_mine",
+    "0x40",
+    "--rpc-url",
+    rpcUrl
+  ], { cwd: contractsDir });
+}
+
+async function launchBoardroom(seed: SeedArtifact): Promise<Address> {
   const launched = await publicClient.readContract({
     address: seed.boardroom,
     abi: boardroomAbi,
     functionName: "launched"
   });
-
-  if (!launched) {
-    await submit(ownerClient.writeContract({
-      address: seed.boardroom,
-      abi: boardroomAbi,
-      functionName: "mint",
-      args: [seed.holder, 1n]
-    }), "mint shareholder share");
-    await submit(ownerClient.writeContract({
-      address: seed.boardroom,
-      abi: boardroomAbi,
-      functionName: "launch",
-      args: [governanceDelay]
-    }), "launch boardroom");
-  }
 
   const activeStake = await publicClient.readContract({
     address: seed.boardroomRewards,
@@ -465,42 +570,98 @@ async function launchBoardroom(seed: SeedArtifact): Promise<void> {
     functionName: "activeStakeOf",
     args: [seed.holder]
   });
-  if (activeStake !== 0n) {
-    return;
+  if (activeStake === 0n) {
+    let shareBalance = await publicClient.readContract({
+      address: seed.boardroomShareToken,
+      abi: erc20Abi,
+      functionName: "balanceOf",
+      args: [seed.holder]
+    });
+    if (shareBalance === 0n) {
+      if (launched) throw new Error("Launched integration Boardroom has no protection-staker shares");
+      await submit(ownerClient.writeContract({
+        address: seed.boardroom,
+        abi: boardroomAbi,
+        functionName: "mint",
+        args: [seed.holder, 100n * 10n ** 18n]
+      }), "mint protection-staker shares");
+      shareBalance = 100n * 10n ** 18n;
+    }
+    await submit(holderClient.writeContract({
+      address: seed.boardroomRewards,
+      abi: boardroomRewardsAbi,
+      functionName: "stake",
+      args: [shareBalance]
+    }), "activate protection-staker stake");
   }
 
-  const shareBalance = await publicClient.readContract({
-    address: seed.boardroomShareToken,
-    abi: erc20Abi,
-    functionName: "balanceOf",
-    args: [seed.holder]
-  });
-  if (shareBalance === 0n) {
-    throw new Error("Sentinel integration holder has no Boardroom shares to stake");
+  if (!launched) {
+    const controllerFactory = await publicClient.readContract({
+      address: seed.boardroom,
+      abi: boardroomAbi,
+      functionName: "controllerFactory"
+    });
+    const predictedController = await publicClient.readContract({
+      address: controllerFactory,
+      abi: boardroomControllerFactoryAbi,
+      functionName: "predictControllerAddress",
+      args: [seed.boardroom, 1n]
+    });
+    const expectedRewardPool = await publicClient.readContract({
+      address: seed.boardroom,
+      abi: boardroomAbi,
+      functionName: "rewardPool"
+    });
+    const expectedRedemptionExcessRecipient = await publicClient.readContract({
+      address: seed.boardroom,
+      abi: boardroomAbi,
+      functionName: "redemptionExcessRecipient"
+    });
+    await submit(ownerClient.writeContract({
+      address: seed.boardroom,
+      abi: boardroomAbi,
+      functionName: "launch",
+      args: [{
+        proposer: owner.address,
+        predictedController,
+        protectionStaker: seed.holder,
+        expectedRewardPool,
+        expectedRedemptionExcessRecipient,
+        controllerDelay: controllerDelay,
+        windDownDelay: controllerDelay,
+        gracePeriod: governanceGracePeriod,
+        generation: 1n
+      }]
+    }), "launch Boardroom with generation-1 controller");
   }
-  await submit(holderClient.writeContract({
-    address: seed.boardroomRewards,
-    abi: boardroomRewardsAbi,
-    functionName: "stake",
-    args: [shareBalance]
-  }), "activate shareholder stake");
+
+  return publicClient.readContract({
+    address: seed.boardroom,
+    abi: boardroomAbi,
+    functionName: "controller"
+  });
 }
 
-async function requireAction(
+async function requireOperation(
   dbClient_: SentinelDbClient,
-  actionHash: Hex,
-  status: "queued" | "cancelled" | "executed"
+  operationId: Hex,
+  status: "scheduled" | "cancelled" | "executed"
 ) {
   const [row] = await dbClient_.db
     .select()
-    .from(queuedActions)
-    .where(and(eq(queuedActions.chainId, chainId), eq(queuedActions.actionHash, actionHash.toLowerCase())))
+    .from(scheduledOperations)
+    .where(
+      and(
+        eq(scheduledOperations.chainId, chainId),
+        eq(scheduledOperations.operationId, operationId.toLowerCase())
+      )
+    )
     .limit(1);
   if (row === undefined) {
-    throw new Error(`Missing queued_actions row for ${actionHash}`);
+    throw new Error(`Missing scheduled operation row for ${operationId}`);
   }
-  assertEqual(row.status, status, `queued action ${actionHash} status`);
-  assertEqual(row.decodeStatus, "decoded", `queued action ${actionHash} decode status`);
+  assertEqual(row.status, status, `scheduled operation ${operationId} status`);
+  assertEqual(row.decodeStatus, "decoded", `scheduled operation ${operationId} decode status`);
   return row;
 }
 
@@ -535,7 +696,7 @@ async function requireAnalysis(
 async function requireNotification(
   dbClient_: SentinelDbClient,
   actionId: string,
-  event: "queued" | "cancelled" | "executed" | "policy-admin"
+  event: "scheduled" | "cancelled" | "executed" | "policy-admin"
 ): Promise<void> {
   const [row] = await dbClient_.db
     .select()

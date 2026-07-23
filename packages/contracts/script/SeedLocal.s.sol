@@ -10,12 +10,16 @@ import {BondMarket} from "../src/bonds/BondMarket.sol";
 import {BondMarketFactory} from "../src/bonds/BondMarketFactory.sol";
 import {AssetPolicy} from "../src/policy/AssetPolicy.sol";
 import {Boardroom} from "../src/boardroom/Boardroom.sol";
+import {BoardroomController} from "../src/boardroom/BoardroomController.sol";
+import {BoardroomControllerFactory} from "../src/boardroom/BoardroomControllerFactory.sol";
 import {BoardroomFactory} from "../src/boardroom/BoardroomFactory.sol";
+import {BoardroomCall} from "../src/boardroom/IBoardroomGovernance.sol";
 import {BoardroomToken} from "../src/boardroom/BoardroomToken.sol";
 import {DistributionFactory} from "../src/distribution/DistributionFactory.sol";
 import {FixedPriceSale} from "../src/distribution/FixedPriceSale.sol";
 import {MerkleAirdrop} from "../src/distribution/MerkleAirdrop.sol";
 import {LockedLiquidity} from "../src/liquidity/LockedLiquidity.sol";
+import {LockedLiquidityFactory} from "../src/liquidity/LockedLiquidityFactory.sol";
 import {MigratingBondingCurve} from "../src/distribution/MigratingBondingCurve.sol";
 import {TokenGrant} from "../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../src/grants/TokenGrantFactory.sol";
@@ -80,20 +84,15 @@ contract SeedLocal is Script {
     uint256 internal constant DAY = 1 days;
     uint256 internal constant PLEDGE = 1 ether;
     uint256 internal constant CASH = 1e6;
-    uint256 internal constant BPS = 10_000;
     uint256 internal constant FEE_INDEX_SCALE = 1e18;
     uint256 internal constant BOARDROOM_TREASURY_SHARES = 12_000 * PLEDGE;
-    uint256 internal constant CURVE_SALE_SUPPLY = 4_000 * PLEDGE;
-    uint256 internal constant CURVE_MIGRATION_SUPPLY = 2_000 * PLEDGE;
-    uint256 internal constant CURVE_BUYER_ONE_SHARES = 1_250 * PLEDGE;
-    uint256 internal constant CURVE_BUYER_TWO_SHARES = 1_750 * PLEDGE;
-    uint256 internal constant CURVE_BASE_PRICE = 2 * CASH;
-    uint256 internal constant CURVE_SLOPE = 1;
-    uint256 internal constant CURVE_GRADUATION_TARGET = 6_000 * CASH;
-    uint16 internal constant CURVE_QUOTE_TO_LP_BPS = 10_000;
-    uint256 internal constant POST_MIGRATION_BUY_ONE = 250 * CASH;
-    uint256 internal constant POST_MIGRATION_BUY_TWO = 375 * CASH;
-    uint256 internal constant POST_MIGRATION_BUY_THREE = 125 * CASH;
+    uint256 internal constant PRIMARY_LIQUIDITY_SHARES = 2_000 * PLEDGE;
+    uint256 internal constant PRIMARY_LIQUIDITY_QUOTE = 6_000 * CASH;
+    uint256 internal constant PRIMARY_ALLOCATION_ONE = 1_250 * PLEDGE;
+    uint256 internal constant PRIMARY_ALLOCATION_TWO = 1_750 * PLEDGE;
+    uint256 internal constant POST_LIQUIDITY_BUY_ONE = 250 * CASH;
+    uint256 internal constant POST_LIQUIDITY_BUY_TWO = 375 * CASH;
+    uint256 internal constant POST_LIQUIDITY_BUY_THREE = 125 * CASH;
     uint256 internal constant FIXED_ACTIVE_SALE_SUPPLY = 2_400 * PLEDGE;
     uint256 internal constant FIXED_ACTIVE_BUY_ONE = 700 * PLEDGE;
     uint256 internal constant FIXED_ACTIVE_BUY_TWO = 450 * PLEDGE;
@@ -107,7 +106,8 @@ contract SeedLocal is Script {
     uint256 internal constant ACTIVE_CURVE_BASE_PRICE = 15 * CASH / 10;
     uint256 internal constant ACTIVE_CURVE_SLOPE = 1;
     uint256 internal constant ACTIVE_CURVE_GRADUATION_TARGET = 12_000 * CASH;
-    uint16 internal constant ACTIVE_CURVE_QUOTE_TO_LP_BPS = 7_500;
+    uint16 internal constant ACTIVE_CURVE_QUOTE_TO_LP_BPS = 3_500;
+    uint64 internal constant LOCAL_CURVE_END_DELAY = 30 days;
     uint256 internal constant FIXED_CLOSED_SALE_SUPPLY = 1_800 * PLEDGE;
     uint256 internal constant FIXED_CLOSED_BUY_ONE = 600 * PLEDGE;
     uint256 internal constant FIXED_CLOSED_BUY_TWO = 300 * PLEDGE;
@@ -138,6 +138,7 @@ contract SeedLocal is Script {
         DistributionFactory distributionFactory;
         BoardroomRewardsFactory boardroomRewardsFactory;
         BondMarketFactory bondMarketFactory;
+        LockedLiquidityFactory lockedLiquidityFactory;
         AmmFactory ammFactory;
         AmmRouter ammRouter;
         address protocolFeeRouter;
@@ -178,19 +179,15 @@ contract SeedLocal is Script {
     }
 
     struct LaunchScenario {
-        MigratingBondingCurve curve;
         address pool;
         address locker;
-        uint256 buyerOneQuotePaid;
-        uint256 buyerTwoQuotePaid;
-        uint256 quoteReserveAtMigration;
         uint256 sharesToLiquidity;
         uint256 quoteToLiquidity;
         uint256 lockedLiquidity;
         uint256 optionStrikePrice;
-        uint256 postMigrationBuyCount;
-        uint256 postMigrationBuyInput;
-        uint256 postMigrationBuyOutput;
+        uint256 postLiquidityBuyCount;
+        uint256 postLiquidityBuyInput;
+        uint256 postLiquidityBuyOutput;
         uint256 claimableLockerFee0;
         uint256 claimableLockerFee1;
     }
@@ -202,17 +199,15 @@ contract SeedLocal is Script {
         bytes32 airdropClaimedLeaf;
         bytes32 airdropUnclaimedLeaf;
         Boardroom governanceBoardroom;
-        bytes32 queuedActionHash;
-        bytes32 queuedActionSalt;
-        uint256 queuedActionEta;
-        uint256 queuedActionExpiresAt;
-        uint256 queuedActionEpoch;
-        uint8 queuedActionStatus;
+        bytes32 scheduledOperationHash;
+        bytes32 scheduledOperationSalt;
+        uint256 scheduledOperationEta;
+        uint256 scheduledOperationExpiresAt;
+        uint256 scheduledOperationBoardroomEpoch;
+        uint8 scheduledOperationStatus;
         Boardroom windDownBoardroom;
         FixedPriceSale windDownBlocker;
-        Boardroom redemptionBoardroom;
-        uint256 redemptionAssetSnapshot;
-        uint256 redemptionSupplySnapshot;
+        Boardroom snapshotPendingBoardroom;
     }
 
     struct SeededBoardroom {
@@ -246,7 +241,7 @@ contract SeedLocal is Script {
     FixedPriceSale internal closedFixedSale;
     BoardroomRewards internal boardroomRewards;
     LifecycleScenarios internal lifecycle;
-    bytes internal queuedGovernanceCallData;
+    bytes internal scheduledOperationCallData;
     SeededBoardroom[] internal seededBoardrooms;
     uint256 internal seedNonce;
     uint256 internal deployerKey;
@@ -292,6 +287,8 @@ contract SeedLocal is Script {
         BoardroomRewardsFactory boardroomRewardsFactory =
             BoardroomRewardsFactory(json.readAddress(".boardroomRewardsFactory"));
         BondMarketFactory bondMarketFactory = BondMarketFactory(json.readAddress(".bondMarketFactory"));
+        LockedLiquidityFactory lockedLiquidityFactory =
+            LockedLiquidityFactory(json.readAddress(".lockedLiquidityFactory"));
         AmmFactory ammFactory = AmmFactory(json.readAddress(".ammFactory"));
         AmmRouter ammRouter = AmmRouter(payable(json.readAddress(".ammRouter")));
         address protocolFeeRouter = json.readAddress(".protocolFeeRouter");
@@ -302,6 +299,7 @@ contract SeedLocal is Script {
             distributionFactory: distributionFactory,
             boardroomRewardsFactory: boardroomRewardsFactory,
             bondMarketFactory: bondMarketFactory,
+            lockedLiquidityFactory: lockedLiquidityFactory,
             ammFactory: ammFactory,
             ammRouter: ammRouter,
             protocolFeeRouter: protocolFeeRouter
@@ -422,9 +420,9 @@ contract SeedLocal is Script {
             address(reserveBond),
             launch.pool,
             launch.locker,
-            CURVE_BUYER_ONE_SHARES + CURVE_BUYER_TWO_SHARES + launch.postMigrationBuyOutput + reserveBond.sold()
+            PRIMARY_ALLOCATION_ONE + PRIMARY_ALLOCATION_TWO + launch.postLiquidityBuyOutput + reserveBond.sold()
                 + liquidityBond.sold(),
-            launch.quoteReserveAtMigration + launch.postMigrationBuyInput + reserveBond.purchased(),
+            launch.postLiquidityBuyInput + reserveBond.purchased(),
             cash.balanceOf(address(boardroom)),
             5
         );
@@ -483,7 +481,7 @@ contract SeedLocal is Script {
         _seedLiveMerkleAirdropBoardroom();
         _seedLaunchedGovernanceBoardroom();
         _seedWindingDownBoardroom();
-        _seedRedemptionsOpenBoardroom();
+        _seedSnapshotPendingBoardroom();
     }
 
     function _seedLiveMerkleAirdropBoardroom() internal {
@@ -562,33 +560,14 @@ contract SeedLocal is Script {
 
     function _seedLaunchedGovernanceBoardroom() internal {
         Boardroom target = _createBoardroom("Civic Compute Common", "CIVC", "civic-boardroom", 0);
-        Boardroom.Call memory queuedCall = Boardroom.Call({
-            policy: address(0),
-            target: address(target),
-            value: 0,
-            data: abi.encodeCall(Boardroom.setExecutor, (actors.contractor))
-        });
-        lifecycle.queuedActionSalt = _salt("civic-set-executor");
-        queuedGovernanceCallData = queuedCall.data;
-
-        vm.startBroadcast(BOARDROOM_OWNER_KEY);
-        target.mint(actors.holder, GOVERNANCE_HOLDER_SHARES);
-        target.mint(actors.newHolder, GOVERNANCE_SECONDARY_SHARES);
-        target.launch(GOVERNANCE_DELAY);
-        (lifecycle.queuedActionHash, lifecycle.queuedActionEta) =
-            target.queueAction(queuedCall, lifecycle.queuedActionSalt);
-        vm.stopBroadcast();
-
-        lifecycle.governanceBoardroom = target;
-        (,, lifecycle.queuedActionExpiresAt, lifecycle.queuedActionEpoch, lifecycle.queuedActionStatus) =
-            target.governanceState(lifecycle.queuedActionHash);
+        _launchAndScheduleGovernanceScenario(target);
 
         _recordSeededBoardroom(
             target,
             "Civic Compute",
             "CIVC",
             "Holder governance",
-            "Queued governance",
+            "Scheduled governance",
             "none",
             address(0),
             address(0),
@@ -598,6 +577,65 @@ contract SeedLocal is Script {
             cash.balanceOf(address(target)),
             0
         );
+    }
+
+    function _launchAndScheduleGovernanceScenario(Boardroom target) internal {
+        Boardroom.Call memory createRewardsCall = Boardroom.Call({
+            policy: address(deployment.boardroomRewardsFactory),
+            target: address(deployment.boardroomRewardsFactory),
+            value: 0,
+            data: abi.encodeCall(
+                BoardroomRewardsFactory.createRewards, (REWARD_COOLDOWN, _salt("civic-protection-rewards"))
+            )
+        });
+        BoardroomCall[] memory scheduledCalls = new BoardroomCall[](1);
+        scheduledCalls[0] = BoardroomCall({
+            policy: address(0),
+            target: address(target),
+            value: 0,
+            data: abi.encodeCall(Boardroom.setRedemptionExcessRecipient, (actors.contractor))
+        });
+        lifecycle.scheduledOperationSalt = _salt("civic-set-redemption-excess-recipient");
+        scheduledOperationCallData = scheduledCalls[0].data;
+
+        vm.startBroadcast(BOARDROOM_OWNER_KEY);
+        target.mint(actors.holder, GOVERNANCE_HOLDER_SHARES);
+        target.mint(actors.newHolder, GOVERNANCE_SECONDARY_SHARES);
+        BoardroomRewards protectionRewards = BoardroomRewards(abi.decode(target.execute(createRewardsCall), (address)));
+        vm.stopBroadcast();
+
+        vm.startBroadcast(HOLDER_KEY);
+        protectionRewards.stake(GOVERNANCE_HOLDER_SHARES);
+        vm.stopBroadcast();
+
+        vm.roll(block.number + 1);
+        BoardroomControllerFactory controllerFactory =
+            BoardroomControllerFactory(deployment.boardroomFactory.controllerFactory());
+        address predictedController = controllerFactory.predictControllerAddress(address(target), 1);
+        Boardroom.LaunchConfig memory launchConfig = Boardroom.LaunchConfig({
+            proposer: actors.boardroomOwner,
+            predictedController: predictedController,
+            protectionStaker: actors.holder,
+            expectedRewardPool: address(protectionRewards),
+            expectedRedemptionExcessRecipient: actors.boardroomOwner,
+            controllerDelay: uint64(GOVERNANCE_DELAY),
+            windDownDelay: uint64(GOVERNANCE_DELAY),
+            gracePeriod: uint64(GOVERNANCE_DELAY),
+            generation: 1
+        });
+
+        vm.startBroadcast(BOARDROOM_OWNER_KEY);
+        target.launch(launchConfig);
+        (lifecycle.scheduledOperationHash, lifecycle.scheduledOperationEta) = BoardroomController(predictedController)
+            .scheduleBoardroomOperation(scheduledCalls, lifecycle.scheduledOperationSalt, target.governanceEpoch(), 1);
+        vm.stopBroadcast();
+
+        lifecycle.governanceBoardroom = target;
+        BoardroomController.OperationStatus operationStatus;
+        (, lifecycle.scheduledOperationExpiresAt, operationStatus) =
+            BoardroomController(predictedController).operationState(lifecycle.scheduledOperationHash);
+        lifecycle.scheduledOperationBoardroomEpoch = target.governanceEpoch();
+        lifecycle.scheduledOperationStatus = uint8(operationStatus);
     }
 
     function _seedWindingDownBoardroom() internal {
@@ -628,7 +666,7 @@ contract SeedLocal is Script {
         );
     }
 
-    function _seedRedemptionsOpenBoardroom() internal {
+    function _seedSnapshotPendingBoardroom() internal {
         Boardroom target = _createBoardroom("Final Harbor Common", "FINAL", "final-harbor-boardroom", 0);
 
         vm.startBroadcast(deployerKey);
@@ -639,19 +677,16 @@ contract SeedLocal is Script {
         target.mint(actors.holder, REDEMPTION_HOLDER_SHARES);
         target.registerRedeemableAsset(address(cash));
         target.startWindDown();
-        target.openRedemptions();
         vm.stopBroadcast();
 
-        lifecycle.redemptionBoardroom = target;
-        (lifecycle.redemptionAssetSnapshot,) = target.redemptionAssetState(address(cash));
-        lifecycle.redemptionSupplySnapshot = BoardroomToken(target.shareToken()).totalSupply();
+        lifecycle.snapshotPendingBoardroom = target;
 
         _recordSeededBoardroom(
             target,
             "Final Harbor",
             "FINAL",
-            "Cash redemption",
-            "Redemptions open",
+            "Snapshot delay",
+            "Winding down",
             "none",
             address(0),
             address(0),
@@ -866,7 +901,7 @@ contract SeedLocal is Script {
             graduationQuoteTarget: graduationQuoteTarget,
             quoteToLpBps: quoteToLpBps,
             startTime: uint64(block.timestamp),
-            endTime: 0,
+            endTime: uint64(block.timestamp) + LOCAL_CURVE_END_DELAY,
             migrationSalt: _salt(string.concat(saltLabel, "-migration")),
             salt: curveSalt
         });
@@ -934,56 +969,54 @@ contract SeedLocal is Script {
     }
 
     function _seedBoardroomLaunch() internal {
-        _createMigratingCurve();
-        launch.buyerOneQuotePaid = _buyCurve(launch.curve, INVESTOR_KEY, actors.investor, CURVE_BUYER_ONE_SHARES);
-        launch.buyerTwoQuotePaid = _buyCurve(launch.curve, NEW_HOLDER_KEY, actors.newHolder, CURVE_BUYER_TWO_SHARES);
-        _migrateCurve();
-        _seedPostMigrationSwap();
-    }
+        vm.startBroadcast(deployerKey);
+        cash.mint(address(boardroom), PRIMARY_LIQUIDITY_QUOTE);
+        vm.stopBroadcast();
 
-    function _createMigratingCurve() internal {
-        uint256 totalCurveShares = CURVE_SALE_SUPPLY + CURVE_MIGRATION_SUPPLY;
-        bytes32 curveSalt = _salt("seed-curve");
-        address predictedCurve =
-            deployment.distributionFactory.predictMigratingBondingCurveAddress(address(boardroom), curveSalt);
-        MigratingBondingCurve.CreateParams memory params = MigratingBondingCurve.CreateParams({
-            shareToken: boardroom.shareToken(),
-            quoteToken: address(cash),
-            saleSupply: CURVE_SALE_SUPPLY,
-            migrationSupply: CURVE_MIGRATION_SUPPLY,
-            basePrice: CURVE_BASE_PRICE,
-            slope: CURVE_SLOPE,
-            graduationQuoteTarget: CURVE_GRADUATION_TARGET,
-            quoteToLpBps: CURVE_QUOTE_TO_LP_BPS,
-            startTime: uint64(block.timestamp),
-            endTime: 0,
-            migrationSalt: _salt("seed-curve-migration"),
-            salt: curveSalt
+        LockedLiquidityFactory.CreateParams memory params = LockedLiquidityFactory.CreateParams({
+            tokenA: boardroom.shareToken(),
+            tokenB: address(cash),
+            amountADesired: PRIMARY_LIQUIDITY_SHARES,
+            amountBDesired: PRIMARY_LIQUIDITY_QUOTE,
+            amountAMin: PRIMARY_LIQUIDITY_SHARES * 95 / 100,
+            amountBMin: PRIMARY_LIQUIDITY_QUOTE * 95 / 100,
+            deadline: block.timestamp + 1 hours,
+            salt: _salt("seed-primary-liquidity")
         });
-
-        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        Boardroom.Call[] memory calls = new Boardroom.Call[](3);
         calls[0] = Boardroom.Call({
             policy: address(deployment.assetPolicy),
             target: boardroom.shareToken(),
             value: 0,
             data: abi.encodeWithSignature(
-                "approve(address,uint256)", address(deployment.distributionFactory), totalCurveShares
+                "approve(address,uint256)", address(deployment.lockedLiquidityFactory), PRIMARY_LIQUIDITY_SHARES
             )
         });
         calls[1] = Boardroom.Call({
-            policy: address(deployment.distributionFactory),
-            target: address(deployment.distributionFactory),
+            policy: address(deployment.assetPolicy),
+            target: address(cash),
             value: 0,
-            data: abi.encodeCall(DistributionFactory.createMigratingBondingCurve, (params))
+            data: abi.encodeWithSignature(
+                "approve(address,uint256)", address(deployment.lockedLiquidityFactory), PRIMARY_LIQUIDITY_QUOTE
+            )
+        });
+        calls[2] = Boardroom.Call({
+            policy: address(deployment.lockedLiquidityFactory),
+            target: address(deployment.lockedLiquidityFactory),
+            value: 0,
+            data: abi.encodeCall(LockedLiquidityFactory.createLockedLiquidity, (params))
         });
 
         vm.startBroadcast(BOARDROOM_OWNER_KEY);
         bytes[] memory results = boardroom.executeBatch(calls);
+        boardroom.mint(actors.investor, PRIMARY_ALLOCATION_ONE);
+        boardroom.mint(actors.holder, PRIMARY_ALLOCATION_TWO);
         vm.stopBroadcast();
 
-        address createdCurve = abi.decode(results[1], (address));
-        if (createdCurve != predictedCurve) revert("curve prediction mismatch");
-        launch.curve = MigratingBondingCurve(createdCurve);
+        (launch.locker, launch.pool, launch.sharesToLiquidity, launch.quoteToLiquidity, launch.lockedLiquidity) =
+            abi.decode(results[2], (address, address, uint256, uint256, uint256));
+        launch.optionStrikePrice = launch.quoteToLiquidity * PLEDGE / launch.sharesToLiquidity;
+        _seedPostLiquiditySwap();
     }
 
     function _buyCurve(MigratingBondingCurve curve, uint256 buyerKey, address buyer, uint256 shareAmount)
@@ -1010,39 +1043,14 @@ contract SeedLocal is Script {
         vm.stopBroadcast();
     }
 
-    function _migrateCurve() internal {
-        launch.quoteReserveAtMigration = launch.curve.quoteReserve();
-        launch.sharesToLiquidity = launch.curve.migrationSupply() + launch.curve.remainingSaleShares();
-        uint256 quoteToLiquidity = launch.quoteReserveAtMigration * CURVE_QUOTE_TO_LP_BPS / BPS;
-
-        Boardroom.Call memory call = Boardroom.Call({
-            policy: address(deployment.distributionFactory),
-            target: address(launch.curve),
-            value: 0,
-            data: abi.encodeCall(
-                MigratingBondingCurve.migrate, (launch.sharesToLiquidity, quoteToLiquidity, block.timestamp + 1 hours)
-            )
-        });
-
-        vm.startBroadcast(BOARDROOM_OWNER_KEY);
-        bytes memory result = boardroom.execute(call);
-        vm.stopBroadcast();
-
-        uint256 amountShares;
-        (launch.locker, launch.pool, amountShares, launch.quoteToLiquidity, launch.lockedLiquidity) =
-            abi.decode(result, (address, address, uint256, uint256, uint256));
-        if (amountShares != launch.sharesToLiquidity) revert("curve share liquidity mismatch");
-        launch.optionStrikePrice = launch.quoteToLiquidity * PLEDGE / launch.sharesToLiquidity;
-    }
-
-    function _seedPostMigrationSwap() internal {
+    function _seedPostLiquiditySwap() internal {
         address[] memory path = new address[](2);
         path[0] = address(cash);
         path[1] = boardroom.shareToken();
 
-        _swapCashForShares(INVESTOR_KEY, actors.investor, path, POST_MIGRATION_BUY_ONE);
-        _swapCashForShares(CONTRACTOR_KEY, actors.contractor, path, POST_MIGRATION_BUY_TWO);
-        _swapCashForShares(NEW_HOLDER_KEY, actors.newHolder, path, POST_MIGRATION_BUY_THREE);
+        _swapCashForShares(INVESTOR_KEY, actors.investor, path, POST_LIQUIDITY_BUY_ONE);
+        _swapCashForShares(CONTRACTOR_KEY, actors.contractor, path, POST_LIQUIDITY_BUY_TWO);
+        _swapCashForShares(NEW_HOLDER_KEY, actors.newHolder, path, POST_LIQUIDITY_BUY_THREE);
 
         (launch.claimableLockerFee0, launch.claimableLockerFee1) = _pendingPoolFees(launch.pool, launch.locker);
     }
@@ -1149,9 +1157,9 @@ contract SeedLocal is Script {
             deployment.ammRouter.swapExactTokensForTokens(amountIn, 1, path, buyer, block.timestamp + 1 hours);
         vm.stopBroadcast();
 
-        launch.postMigrationBuyCount += 1;
-        launch.postMigrationBuyInput += amounts[0];
-        launch.postMigrationBuyOutput += amounts[1];
+        launch.postLiquidityBuyCount += 1;
+        launch.postLiquidityBuyInput += amounts[0];
+        launch.postLiquidityBuyOutput += amounts[1];
     }
 
     function _pendingPoolFees(address pool, address account)
@@ -1331,56 +1339,40 @@ contract SeedLocal is Script {
         LockedLiquidity locker = LockedLiquidity(launch.locker);
 
         _check(deployment.ammFactory.protocolFeeRecipient() == deployment.protocolFeeRouter, "amm-protocol-fee-router");
-        _check(address(launch.curve) != address(0), "curve-created");
-        _check(launch.curve.curveStatus() == MigratingBondingCurve.CurveStatus.Migrated, "curve-migrated");
-        _check(launch.curve.pool() == launch.pool, "curve-pool");
-        _check(launch.curve.locker() == launch.locker, "curve-locker");
-        _check(launch.buyerOneQuotePaid > 0, "curve-buyer-one-paid");
-        _check(launch.buyerTwoQuotePaid > 0, "curve-buyer-two-paid");
-        _check(
-            launch.quoteReserveAtMigration >= CURVE_GRADUATION_TARGET
-                || CURVE_BUYER_ONE_SHARES + CURVE_BUYER_TWO_SHARES == CURVE_SALE_SUPPLY,
-            "curve-graduated"
-        );
-        _check(
-            launch.sharesToLiquidity
-                == CURVE_MIGRATION_SUPPLY + CURVE_SALE_SUPPLY - CURVE_BUYER_ONE_SHARES - CURVE_BUYER_TWO_SHARES,
-            "curve-liquidity-shares"
-        );
-        _check(
-            launch.quoteToLiquidity == launch.quoteReserveAtMigration * CURVE_QUOTE_TO_LP_BPS / BPS,
-            "curve-liquidity-quote"
-        );
-        _check(launch.lockedLiquidity > 0, "curve-locked-liquidity");
+        _check(boardroom.bondingCurve() == address(0), "primary-no-curve");
+        _check(uint8(boardroom.primaryMarketMode()) == 2, "primary-general-availability");
+        _check(launch.sharesToLiquidity == PRIMARY_LIQUIDITY_SHARES, "primary-liquidity-shares");
+        _check(launch.quoteToLiquidity == PRIMARY_LIQUIDITY_QUOTE, "primary-liquidity-quote");
+        _check(launch.lockedLiquidity > 0, "primary-locked-liquidity");
         _check(locker.lockedLiquidity() == launch.lockedLiquidity, "locker-liquidity");
-        _check(boardroom.issuedDistributionCount() == 2, "boardroom-distribution-count");
-        _check(!boardroom.isIssuedDistribution(address(launch.curve)), "boardroom-distribution-pruned");
         _check(boardroom.isIssuedDistribution(address(reserveBond)), "boardroom-reserve-bond");
         _check(boardroom.isIssuedDistribution(address(liquidityBond)), "boardroom-liquidity-bond");
         _check(reserveBond.nextPositionId() == 1, "reserve-bond-position");
         _check(liquidityBond.nextPositionId() == 1, "liquidity-bond-position");
         _check(reserveBond.outstandingPayout() > 0, "reserve-bond-outstanding");
         _check(liquidityBond.outstandingPayout() > 0, "liquidity-bond-outstanding");
-        _check(boardroom.lockedLiquidityCount() == 1, "boardroom-locker-count");
-        _check(boardroom.lockedLiquidityAt(0) == launch.locker, "boardroom-locker");
+        _check(boardroom.isLockedLiquidity(launch.locker), "boardroom-locker-active");
+        _check(boardroom.liquidityLocker() == launch.locker, "boardroom-locker");
+        _check(boardroom.liquidityPool() == launch.pool, "boardroom-pool");
+        _check(boardroom.liquidityQuoteAsset() == address(cash), "boardroom-liquidity-quote");
         _check(launch.optionStrikePrice == launch.quoteToLiquidity * PLEDGE / launch.sharesToLiquidity, "option-strike");
-        _check(launch.postMigrationBuyCount == 3, "post-migration-buy-count");
+        _check(launch.postLiquidityBuyCount == 3, "post-liquidity-buy-count");
         _check(
-            launch.postMigrationBuyInput == POST_MIGRATION_BUY_ONE + POST_MIGRATION_BUY_TWO + POST_MIGRATION_BUY_THREE,
-            "post-migration-buy-input"
+            launch.postLiquidityBuyInput == POST_LIQUIDITY_BUY_ONE + POST_LIQUIDITY_BUY_TWO + POST_LIQUIDITY_BUY_THREE,
+            "post-liquidity-buy-input"
         );
-        _check(launch.postMigrationBuyOutput > 0, "post-migration-buy-output");
+        _check(launch.postLiquidityBuyOutput > 0, "post-liquidity-buy-output");
         _check(launch.claimableLockerFee0 + launch.claimableLockerFee1 > 0, "claimable-locker-fees");
-        _check(shares.balanceOf(actors.investor) > CURVE_BUYER_ONE_SHARES, "investor-share-balance");
+        _check(shares.balanceOf(actors.investor) > PRIMARY_ALLOCATION_ONE, "investor-share-balance");
+        _check(shares.balanceOf(actors.holder) >= PRIMARY_ALLOCATION_TWO, "holder-share-balance");
     }
 
     function _assertEmployeeOptions() internal view {
         uint256 now_ = block.timestamp;
 
-        _check(boardroom.issuedGrantCount() == 3, "boardroom-grant-count");
-        _check(boardroom.issuedGrantAt(0) == address(grants.employeeLeadOption), "boardroom-lead-option");
-        _check(boardroom.issuedGrantAt(1) == address(grants.employeeEngineerOption), "boardroom-engineer-option");
-        _check(boardroom.issuedGrantAt(2) == address(grants.employeeAdvisorOption), "boardroom-advisor-option");
+        _check(boardroom.isIssuedGrant(address(grants.employeeLeadOption)), "boardroom-lead-option");
+        _check(boardroom.isIssuedGrant(address(grants.employeeEngineerOption)), "boardroom-engineer-option");
+        _check(boardroom.isIssuedGrant(address(grants.employeeAdvisorOption)), "boardroom-advisor-option");
 
         _assertBoardroomOption(grants.employeeLeadOption, actors.holder, 500 * PLEDGE, 40 * PLEDGE, "lead-option");
         _check(grants.employeeLeadOption.vestingCliff() < now_, "lead-option-started");
@@ -1432,17 +1424,22 @@ contract SeedLocal is Script {
         BoardroomToken governanceShares = BoardroomToken(lifecycle.governanceBoardroom.shareToken());
         _check(lifecycle.governanceBoardroom.launched(), "governance-launched");
         _check(lifecycle.governanceBoardroom.status() == Boardroom.BoardroomStatus.Active, "governance-active");
-        _check(lifecycle.governanceBoardroom.executor() == actors.boardroomOwner, "governance-executor");
+        _check(
+            BoardroomController(lifecycle.governanceBoardroom.controller()).proposer() == actors.boardroomOwner,
+            "governance-proposer"
+        );
         _check(governanceShares.balanceOf(actors.holder) == GOVERNANCE_HOLDER_SHARES, "governance-holder-balance");
-        _check(lifecycle.queuedActionEta > block.timestamp, "governance-action-waiting");
-        _check(lifecycle.queuedActionExpiresAt > lifecycle.queuedActionEta, "governance-action-expiry");
-        _check(lifecycle.queuedActionEpoch == 1, "governance-action-epoch");
-        _check(lifecycle.queuedActionStatus == uint8(Boardroom.BoardroomStatus.Active), "governance-action-status");
+        _check(lifecycle.scheduledOperationEta > block.timestamp, "governance-operation-waiting");
+        _check(lifecycle.scheduledOperationExpiresAt > lifecycle.scheduledOperationEta, "governance-operation-expiry");
+        _check(lifecycle.scheduledOperationBoardroomEpoch == 1, "governance-operation-epoch");
+        _check(
+            lifecycle.scheduledOperationStatus == uint8(BoardroomController.OperationStatus.Pending),
+            "governance-operation-status"
+        );
 
         _check(lifecycle.windDownBoardroom.status() == Boardroom.BoardroomStatus.WindingDown, "wind-down-status");
-        _check(lifecycle.windDownBoardroom.issuedDistributionCount() == 1, "wind-down-blocker-count");
         _check(
-            lifecycle.windDownBoardroom.issuedDistributionAt(0) == address(lifecycle.windDownBlocker),
+            lifecycle.windDownBoardroom.isIssuedDistribution(address(lifecycle.windDownBlocker)),
             "wind-down-blocker-address"
         );
         _check(lifecycle.windDownBlocker.saleStatus() == FixedPriceSale.SaleStatus.Active, "wind-down-blocker-open");
@@ -1452,13 +1449,20 @@ contract SeedLocal is Script {
             "wind-down-blocker-policy"
         );
 
-        BoardroomToken redemptionShares = BoardroomToken(lifecycle.redemptionBoardroom.shareToken());
-        _check(lifecycle.redemptionBoardroom.status() == Boardroom.BoardroomStatus.RedemptionsOpen, "redemption-status");
-        _check(lifecycle.redemptionBoardroom.isRedeemableAsset(address(cash)), "redemption-asset-registered");
-        _check(lifecycle.redemptionAssetSnapshot == REDEMPTION_CASH_BALANCE, "redemption-asset-snapshot");
-        _check(lifecycle.redemptionSupplySnapshot == REDEMPTION_HOLDER_SHARES, "redemption-supply-snapshot");
-        _check(redemptionShares.balanceOf(actors.holder) == REDEMPTION_HOLDER_SHARES, "redemption-holder-balance");
-        _check(cash.balanceOf(address(lifecycle.redemptionBoardroom)) == REDEMPTION_CASH_BALANCE, "redemption-cash");
+        BoardroomToken snapshotPendingShares = BoardroomToken(lifecycle.snapshotPendingBoardroom.shareToken());
+        _check(
+            lifecycle.snapshotPendingBoardroom.status() == Boardroom.BoardroomStatus.WindingDown,
+            "snapshot-pending-status"
+        );
+        _check(lifecycle.snapshotPendingBoardroom.isRedeemableAsset(address(cash)), "snapshot-pending-asset-registered");
+        _check(
+            snapshotPendingShares.balanceOf(actors.holder) == REDEMPTION_HOLDER_SHARES,
+            "snapshot-pending-holder-balance"
+        );
+        _check(
+            cash.balanceOf(address(lifecycle.snapshotPendingBoardroom)) == REDEMPTION_CASH_BALANCE,
+            "snapshot-pending-cash"
+        );
     }
 
     function _assertSeededBoardrooms() internal view {
@@ -1476,7 +1480,7 @@ contract SeedLocal is Script {
         );
         _check(cash.balanceOf(activeFixedSale.boardroom()) == seededBoardrooms[1].cashRaised, "active-fixed-sale-cash");
 
-        _check(activeCurve.curveStatus() == MigratingBondingCurve.CurveStatus.Active, "active-curve-status");
+        _check(activeCurve.curveStatus() == MigratingBondingCurve.CurvePhase.Selling, "active-curve-status");
         _check(
             activeCurve.soldShares()
                 == ACTIVE_CURVE_BUY_ONE + ACTIVE_CURVE_BUY_TWO + ACTIVE_CURVE_BUY_THREE - ACTIVE_CURVE_SELL,
@@ -1495,8 +1499,8 @@ contract SeedLocal is Script {
         _check(seededBoardrooms[5].distribution == address(0), "seeded-governance-no-route");
         _check(seededBoardrooms[6].boardroom == lifecycle.windDownBoardroom, "seeded-wind-down-boardroom");
         _check(seededBoardrooms[6].distribution == address(lifecycle.windDownBlocker), "seeded-wind-down-distribution");
-        _check(seededBoardrooms[7].boardroom == lifecycle.redemptionBoardroom, "seeded-redemption-boardroom");
-        _check(seededBoardrooms[7].distribution == address(0), "seeded-redemption-no-route");
+        _check(seededBoardrooms[7].boardroom == lifecycle.snapshotPendingBoardroom, "seeded-snapshot-boardroom");
+        _check(seededBoardrooms[7].distribution == address(0), "seeded-snapshot-no-route");
     }
 
     function _directClaimLeaf(
@@ -1567,31 +1571,17 @@ contract SeedLocal is Script {
         json.serialize("boardroomRewardDuration", REWARD_DURATION);
         json.serialize("boardroomRewardCooldown", REWARD_COOLDOWN);
         json.serialize("boardroomRewardStake", vm.toString(REWARD_STAKE));
-        json.serialize("migratingCurve", address(launch.curve));
-        json.serialize("curvePool", launch.pool);
-        json.serialize("curveLocker", launch.locker);
+        json.serialize("primaryLiquidityPool", launch.pool);
+        json.serialize("primaryLiquidityLocker", launch.locker);
         json.serialize("reserveBondMarket", address(reserveBond));
         json.serialize("liquidityBondMarket", address(liquidityBond));
-        json.serialize("curveBuyerOne", actors.investor);
-        json.serialize("curveBuyerTwo", actors.newHolder);
-        json.serialize("curveSaleSupply", vm.toString(CURVE_SALE_SUPPLY));
-        json.serialize("curveMigrationSupply", vm.toString(CURVE_MIGRATION_SUPPLY));
-        json.serialize("curveBuyerOneShares", vm.toString(CURVE_BUYER_ONE_SHARES));
-        json.serialize("curveBuyerTwoShares", vm.toString(CURVE_BUYER_TWO_SHARES));
-        json.serialize("curveBuyerOneQuotePaid", vm.toString(launch.buyerOneQuotePaid));
-        json.serialize("curveBuyerTwoQuotePaid", vm.toString(launch.buyerTwoQuotePaid));
-        json.serialize("curveBasePrice", vm.toString(CURVE_BASE_PRICE));
-        json.serialize("curveSlope", vm.toString(CURVE_SLOPE));
-        json.serialize("curveGraduationQuoteTarget", vm.toString(CURVE_GRADUATION_TARGET));
-        json.serialize("curveQuoteToLpBps", CURVE_QUOTE_TO_LP_BPS);
-        json.serialize("curveQuoteReserveAtMigration", vm.toString(launch.quoteReserveAtMigration));
-        json.serialize("curveSharesToLiquidity", vm.toString(launch.sharesToLiquidity));
-        json.serialize("curveQuoteToLiquidity", vm.toString(launch.quoteToLiquidity));
-        json.serialize("curveLockedLiquidity", vm.toString(launch.lockedLiquidity));
+        json.serialize("primaryLiquidityShares", vm.toString(launch.sharesToLiquidity));
+        json.serialize("primaryLiquidityQuote", vm.toString(launch.quoteToLiquidity));
+        json.serialize("primaryLockedLiquidity", vm.toString(launch.lockedLiquidity));
         json.serialize("employeeOptionStrikePrice", vm.toString(launch.optionStrikePrice));
-        json.serialize("postMigrationBuyCount", launch.postMigrationBuyCount);
-        json.serialize("postMigrationBuyInput", vm.toString(launch.postMigrationBuyInput));
-        json.serialize("postMigrationBuyOutput", vm.toString(launch.postMigrationBuyOutput));
+        json.serialize("postLiquidityBuyCount", launch.postLiquidityBuyCount);
+        json.serialize("postLiquidityBuyInput", vm.toString(launch.postLiquidityBuyInput));
+        json.serialize("postLiquidityBuyOutput", vm.toString(launch.postLiquidityBuyOutput));
         json.serialize("claimableLockerFee0", vm.toString(launch.claimableLockerFee0));
         json.serialize("claimableLockerFee1", vm.toString(launch.claimableLockerFee1));
         json.serialize("directPartiallySettledGrant", address(grants.directPartiallySettled));
@@ -1629,31 +1619,34 @@ contract SeedLocal is Script {
         json.serialize("governanceShareToken", lifecycle.governanceBoardroom.shareToken());
         json.serialize("governanceHolder", actors.holder);
         json.serialize("governanceHolderBalance", vm.toString(GOVERNANCE_HOLDER_SHARES));
-        json.serialize("governanceExecutor", actors.boardroomOwner);
-        json.serialize("governanceDelay", vm.toString(GOVERNANCE_DELAY));
-        json.serialize("queuedActionHash", lifecycle.queuedActionHash);
-        json.serialize("queuedActionSalt", lifecycle.queuedActionSalt);
-        json.serialize("queuedActionPolicy", address(0));
-        json.serialize("queuedActionTarget", address(lifecycle.governanceBoardroom));
-        json.serialize("queuedActionValue", vm.toString(uint256(0)));
-        json.serialize("queuedActionCallData", queuedGovernanceCallData);
-        json.serialize("queuedActionEpoch", lifecycle.queuedActionEpoch);
-        json.serialize("queuedActionStatus", uint256(lifecycle.queuedActionStatus));
+        json.serialize("governanceController", lifecycle.governanceBoardroom.controller());
+        json.serialize("governanceProposer", actors.boardroomOwner);
+        json.serialize("controllerDelay", vm.toString(GOVERNANCE_DELAY));
+        json.serialize("scheduledOperationHash", lifecycle.scheduledOperationHash);
+        json.serialize("scheduledOperationSalt", lifecycle.scheduledOperationSalt);
+        json.serialize("scheduledOperationPolicy", address(0));
+        json.serialize("scheduledOperationTarget", address(lifecycle.governanceBoardroom));
+        json.serialize("scheduledOperationValue", vm.toString(uint256(0)));
+        json.serialize("scheduledOperationCallData", scheduledOperationCallData);
+        json.serialize("scheduledOperationBoardroomEpoch", lifecycle.scheduledOperationBoardroomEpoch);
+        json.serialize("scheduledOperationStatus", uint256(lifecycle.scheduledOperationStatus));
 
         json.serialize("windDownBoardroom", address(lifecycle.windDownBoardroom));
         json.serialize("windDownShareToken", lifecycle.windDownBoardroom.shareToken());
         json.serialize("windDownBlocker", address(lifecycle.windDownBlocker));
         json.serialize("windDownBlockerKind", string("fixed-price-sale"));
         json.serialize("windDownBlockerOpen", true);
-        json.serialize("windDownIssuedDistributionCount", lifecycle.windDownBoardroom.issuedDistributionCount());
+        json.serialize(
+            "windDownActiveDistributionCount",
+            lifecycle.windDownBoardroom.isIssuedDistribution(address(lifecycle.windDownBlocker)) ? 1 : 0
+        );
 
-        json.serialize("redemptionBoardroom", address(lifecycle.redemptionBoardroom));
-        json.serialize("redemptionShareToken", lifecycle.redemptionBoardroom.shareToken());
-        json.serialize("redemptionHolder", actors.holder);
-        json.serialize("redemptionHolderBalance", vm.toString(REDEMPTION_HOLDER_SHARES));
-        json.serialize("redemptionAsset", address(cash));
-        json.serialize("redemptionAssetSnapshot", vm.toString(lifecycle.redemptionAssetSnapshot));
-        json.serialize("redemptionSupplySnapshot", vm.toString(lifecycle.redemptionSupplySnapshot));
+        json.serialize("snapshotPendingBoardroom", address(lifecycle.snapshotPendingBoardroom));
+        json.serialize("snapshotPendingShareToken", lifecycle.snapshotPendingBoardroom.shareToken());
+        json.serialize("snapshotPendingHolder", actors.holder);
+        json.serialize("snapshotPendingHolderBalance", vm.toString(REDEMPTION_HOLDER_SHARES));
+        json.serialize("snapshotPendingAsset", address(cash));
+        json.serialize("snapshotPendingAssetBalance", vm.toString(REDEMPTION_CASH_BALANCE));
         string memory output = _serializeSeededBoardrooms(json);
 
         vm.writeJson(output, string.concat("deployments/", vm.toString(block.chainid), ".seed.json"));
@@ -1749,20 +1742,17 @@ contract SeedLocal is Script {
         console2.log("Boardroom rewards", address(boardroomRewards));
         console2.log("Boardroom reward amount", REWARD_AMOUNT);
         console2.log("Boardroom reward stake", REWARD_STAKE);
-        console2.log("Migrating curve", address(launch.curve));
-        console2.log("Curve pool", launch.pool);
-        console2.log("Curve locker", launch.locker);
+        console2.log("Primary liquidity pool", launch.pool);
+        console2.log("Primary liquidity locker", launch.locker);
         console2.log("Reserve bond market", address(reserveBond));
         console2.log("Liquidity bond market", address(liquidityBond));
-        console2.log("Curve buyer one quote paid", launch.buyerOneQuotePaid);
-        console2.log("Curve buyer two quote paid", launch.buyerTwoQuotePaid);
-        console2.log("Curve quote reserve at migration", launch.quoteReserveAtMigration);
-        console2.log("Curve quote to liquidity", launch.quoteToLiquidity);
-        console2.log("Curve locked LP", launch.lockedLiquidity);
+        console2.log("Primary liquidity shares", launch.sharesToLiquidity);
+        console2.log("Primary liquidity quote", launch.quoteToLiquidity);
+        console2.log("Primary locked LP", launch.lockedLiquidity);
         console2.log("Employee option strike price", launch.optionStrikePrice);
-        console2.log("Post migration buy count", launch.postMigrationBuyCount);
-        console2.log("Post migration buy input", launch.postMigrationBuyInput);
-        console2.log("Post migration buy output", launch.postMigrationBuyOutput);
+        console2.log("Post liquidity buy count", launch.postLiquidityBuyCount);
+        console2.log("Post liquidity buy input", launch.postLiquidityBuyInput);
+        console2.log("Post liquidity buy output", launch.postLiquidityBuyOutput);
         console2.log("Claimable locker fee 0", launch.claimableLockerFee0);
         console2.log("Claimable locker fee 1", launch.claimableLockerFee1);
         console2.log("Direct partially settled grant", address(grants.directPartiallySettled));
@@ -1775,12 +1765,12 @@ contract SeedLocal is Script {
         console2.log("Airdrop claimed account", actors.holder);
         console2.log("Airdrop unclaimed account", actors.newHolder);
         console2.log("Launched governance boardroom", address(lifecycle.governanceBoardroom));
-        console2.log("Queued governance action");
-        console2.logBytes32(lifecycle.queuedActionHash);
+        console2.log("Scheduled controller operation");
+        console2.logBytes32(lifecycle.scheduledOperationHash);
         console2.log("Winding-down boardroom", address(lifecycle.windDownBoardroom));
         console2.log("Wind-down blocker", address(lifecycle.windDownBlocker));
-        console2.log("Redemptions-open boardroom", address(lifecycle.redemptionBoardroom));
-        console2.log("Redemption asset snapshot", lifecycle.redemptionAssetSnapshot);
+        console2.log("Snapshot-pending boardroom", address(lifecycle.snapshotPendingBoardroom));
+        console2.log("Snapshot-pending asset balance", REDEMPTION_CASH_BALANCE);
         console2.log("Seeded boardrooms", seededBoardrooms.length);
         for (uint256 i = 0; i < seededBoardrooms.length; i++) {
             console2.log("Seeded boardroom index", i);

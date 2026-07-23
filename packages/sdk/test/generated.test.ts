@@ -5,7 +5,10 @@ import {
   ammPoolAbi,
   ammRouterAbi,
   boardroomAbi,
+  boardroomControllerAbi,
+  boardroomControllerFactoryAbi,
   boardroomGovernanceLogicAbi,
+  boardroomMarketLogicAbi,
   boardroomRedemptionPayoutAbi,
   boardroomRewardsAbi,
   boardroomRewardsFactoryAbi,
@@ -31,6 +34,9 @@ describe("generated SDK exports", () => {
     expect(pledgeCashAbis.AmmPool).toBe(ammPoolAbi);
     expect(pledgeCashAbis.AmmRouter).toBe(ammRouterAbi);
     expect(pledgeCashAbis.BoardroomGovernanceLogic).toBe(boardroomGovernanceLogicAbi);
+    expect(pledgeCashAbis.BoardroomController).toBe(boardroomControllerAbi);
+    expect(pledgeCashAbis.BoardroomControllerFactory).toBe(boardroomControllerFactoryAbi);
+    expect(pledgeCashAbis.BoardroomMarketLogic).toBe(boardroomMarketLogicAbi);
     expect(pledgeCashAbis.BoardroomRedemptionPayout).toBe(boardroomRedemptionPayoutAbi);
     expect(pledgeCashAbis.BoardroomRewards).toBe(boardroomRewardsAbi);
     expect(pledgeCashAbis.BoardroomRewardsFactory).toBe(boardroomRewardsFactoryAbi);
@@ -54,14 +60,24 @@ describe("generated SDK exports", () => {
 
   test("includes governance and participation functions consumed by helpers", () => {
     expect(functionNames(boardroomAbi)).toEqual(expect.arrayContaining([
-      "cancelAction",
-      "executeQueuedAction",
-      "executeQueuedBatch",
-      "governanceConfig",
-      "governanceState",
+      "assetSnapshotProgress",
+      "beginSnapshot",
+      "executeGovernance",
+      "governanceEpoch",
       "launch",
-      "queueAction",
-      "queueBatch",
+      "openRedemptions",
+      "replaceController",
+      "snapshotAssets",
+      "veto",
+    ]));
+    expect(functionNames(boardroomControllerAbi)).toEqual(expect.arrayContaining([
+      "executeBoardroomOperation",
+      "executeControllerOperation",
+      "hashBoardroomOperation",
+      "isValidSignature",
+      "scheduleBoardroomOperation",
+      "scheduleControllerOperation",
+      "updateConfiguration",
     ]));
     expect(functionNames(boardroomTokenAbi)).toEqual(expect.arrayContaining([
       "getPastBalance",
@@ -88,7 +104,8 @@ describe("generated SDK exports", () => {
       "getBuyQuote",
       "getSellQuote",
       "graduationLatched",
-      "sellableSharesBy",
+      "outstandingCurveShareLiability",
+      "sellableShares",
     ]));
     expect(functionNames(merkleAirdropAbi)).toEqual(expect.arrayContaining(["claimedShares", "isClaimed"]));
   });
@@ -96,7 +113,7 @@ describe("generated SDK exports", () => {
   test("includes checked-in deployment metadata", () => {
     expect(pledgeCashDeployments[998]?.chainId).toBe(998);
     expect(pledgeCashDeployments[998]?.status).toBe("pending");
-    expect(pledgeCashDeployments[998]?.reason).toContain("deterministic v4 deployment");
+    expect(pledgeCashDeployments[998]?.reason).toContain("deterministic v5 deployment");
     expect(pledgeCashDeployments[998]?.tokenGrantFactory).toBeUndefined();
     expect(pledgeCashDeployments[998]?.boardroomFactory).toBeUndefined();
     expect(pledgeCashDeployments[998]?.distributionFactory).toBeUndefined();

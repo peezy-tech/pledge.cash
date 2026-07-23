@@ -2,6 +2,8 @@ import type { Address, Hex } from "viem";
 import {
   ammFactoryAbi,
   boardroomAbi,
+  boardroomControllerAbi,
+  boardroomControllerFactoryAbi,
   boardroomFactoryAbi,
   boardroomRewardsAbi,
   boardroomTokenAbi,
@@ -18,7 +20,7 @@ import {
   tokenGrantFactoryAbi,
 } from "../generated";
 import type {
-  BoardroomGovernanceConfig,
+  BoardroomControllerState,
   BoardroomStakerPower,
   BoardroomRewardsAccountState,
   BoardroomRewardsState,
@@ -42,8 +44,9 @@ import type {
 } from "./types";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const satisfies Address;
-const ZERO_HASH = "0x0000000000000000000000000000000000000000000000000000000000000000" as const satisfies Hex;
 const BPS_DENOMINATOR = 10_000n;
+const VETO_BPS = 100n;
+const WIND_DOWN_BPS = 1_000n;
 
 export async function readFactoryState(client: PledgeCashReadClient, factory: Address): Promise<FactoryState> {
   const [owner, tokenGrantLogic, creationFee] = await Promise.all([
@@ -206,16 +209,30 @@ export async function readBoardroomState(client: PledgeCashReadClient, boardroom
     wrappedNative,
     shareToken,
     rewardPool,
+    redemptionExcessRecipient,
     status,
     launched,
-    executor,
-    governanceDelay,
-    governanceConfigResult,
-    governanceStateResult,
-    redeemableAssets,
-    issuedGrants,
-    issuedDistributions,
-    lockedLiquidityPositions,
+    controller,
+    controllerGeneration,
+    governanceEpoch,
+    windDownDelay,
+    windDownStartedAt,
+    protectionStaker,
+    redeemableAssetCount,
+    snapshotProgress,
+    redemptionSupplyState,
+    activeObligationCount,
+    activeGrantCount,
+    activeDistributionCount,
+    activeLiquidityCount,
+    activeRewardCount,
+    primaryMarketMode,
+    bondingCurve,
+    primaryMarketQuoteAsset,
+    liquidityStatus,
+    liquidityLocker,
+    liquidityPool,
+    liquidityQuoteAsset,
   ] =
     await Promise.all([
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "owner" }),
@@ -223,24 +240,41 @@ export async function readBoardroomState(client: PledgeCashReadClient, boardroom
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "wrappedNative" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "shareToken" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "rewardPool" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "redemptionExcessRecipient" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "status" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "launched" }),
-      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "executor" }),
-      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "governanceDelay" }),
-      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "governanceConfig" }),
-      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "governanceState", args: [ZERO_HASH] }),
-      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "getRedeemableAssets" }),
-      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "getIssuedGrants" }),
-      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "getIssuedDistributions" }),
-      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "getLockedLiquidityPositions" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "controller" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "controllerGeneration" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "governanceEpoch" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "windDownDelay" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "windDownStartedAt" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "protectionStaker" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "redeemableAssetCount" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "assetSnapshotProgress" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "redemptionSupplyState" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "activeObligationCount" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "activeObligationCountByKind", args: [1] }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "activeObligationCountByKind", args: [2] }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "activeObligationCountByKind", args: [3] }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "activeObligationCountByKind", args: [4] }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "primaryMarketMode" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "bondingCurve" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "primaryMarketQuoteAsset" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "liquidityStatus" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "liquidityLocker" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "liquidityPool" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "liquidityQuoteAsset" }),
     ]);
-  const governanceConfig = boardroomGovernanceConfig(governanceConfigResult);
-  const [governanceEpoch] = governanceStateResult as readonly [bigint, bigint, bigint, bigint, number];
-  const governanceEligibleSupply = await client.readContract({
-    address: shareToken as Address,
-    abi: boardroomTokenAbi,
-    functionName: "governanceEligibleSupply",
-  });
+  const [governanceEligibleSupply, controllerState] = await Promise.all([
+    client.readContract({
+      address: shareToken as Address,
+      abi: boardroomTokenAbi,
+      functionName: "governanceEligibleSupply",
+    }),
+    launched && (controller as Address).toLowerCase() !== ZERO_ADDRESS
+      ? readBoardroomControllerState(client, controller as Address)
+      : Promise.resolve(undefined),
+  ]);
 
   return {
     address: boardroom,
@@ -249,17 +283,66 @@ export async function readBoardroomState(client: PledgeCashReadClient, boardroom
     wrappedNative: wrappedNative as Address,
     shareToken: shareToken as Address,
     rewardPool: rewardPool as Address,
+    redemptionExcessRecipient: redemptionExcessRecipient as Address,
     status: Number(status),
     launched: launched as boolean,
-    executor: executor as Address,
-    governanceDelay: governanceDelay as bigint,
-    governanceEpoch,
+    controller: controller as Address,
+    proposer: controllerState?.proposer ?? ZERO_ADDRESS,
+    controllerDelay: controllerState?.delay ?? 0n,
+    controllerGracePeriod: controllerState?.gracePeriod ?? 0n,
+    controllerGeneration: controllerGeneration as bigint,
+    controllerConfigurationEpoch: controllerState?.configurationEpoch ?? 0n,
+    governanceEpoch: governanceEpoch as bigint,
+    windDownDelay: windDownDelay as bigint,
+    windDownStartedAt: windDownStartedAt as bigint,
+    protectionStaker: protectionStaker as Address,
     governanceEligibleSupply: governanceEligibleSupply as bigint,
-    governanceConfig,
-    redeemableAssets: redeemableAssets as Address[],
-    issuedGrants: issuedGrants as Address[],
-    issuedDistributions: issuedDistributions as Address[],
-    lockedLiquidityPositions: lockedLiquidityPositions as Address[],
+    redeemableAssetCount: redeemableAssetCount as bigint,
+    snapshotAssetCount: (snapshotProgress as readonly [bigint, bigint, boolean])[0],
+    snapshotCursor: (snapshotProgress as readonly [bigint, bigint, boolean])[1],
+    snapshotFrozen: (snapshotProgress as readonly [bigint, bigint, boolean])[2],
+    redemptionSupply: (redemptionSupplyState as readonly [bigint, boolean])[0],
+    redemptionSupplyFrozen: (redemptionSupplyState as readonly [bigint, boolean])[1],
+    activeObligationCount: activeObligationCount as bigint,
+    activeGrantCount: activeGrantCount as bigint,
+    activeDistributionCount: activeDistributionCount as bigint,
+    activeLiquidityCount: activeLiquidityCount as bigint,
+    activeRewardCount: activeRewardCount as bigint,
+    primaryMarketMode: Number(primaryMarketMode),
+    bondingCurve: bondingCurve as Address,
+    primaryMarketQuoteAsset: primaryMarketQuoteAsset as Address,
+    liquidityStatus: Number(liquidityStatus),
+    liquidityLocker: liquidityLocker as Address,
+    liquidityPool: liquidityPool as Address,
+    liquidityQuoteAsset: liquidityQuoteAsset as Address,
+  };
+}
+
+export async function readBoardroomControllerState(
+  client: PledgeCashReadClient,
+  controller: Address,
+): Promise<BoardroomControllerState> {
+  const [factory, boardroom, proposer, delay, gracePeriod, generation, configurationEpoch, configurationHash] =
+    await Promise.all([
+      client.readContract({ address: controller, abi: boardroomControllerAbi, functionName: "factory" }),
+      client.readContract({ address: controller, abi: boardroomControllerAbi, functionName: "boardroom" }),
+      client.readContract({ address: controller, abi: boardroomControllerAbi, functionName: "proposer" }),
+      client.readContract({ address: controller, abi: boardroomControllerAbi, functionName: "delay" }),
+      client.readContract({ address: controller, abi: boardroomControllerAbi, functionName: "gracePeriod" }),
+      client.readContract({ address: controller, abi: boardroomControllerAbi, functionName: "generation" }),
+      client.readContract({ address: controller, abi: boardroomControllerAbi, functionName: "configurationEpoch" }),
+      client.readContract({ address: controller, abi: boardroomControllerAbi, functionName: "configurationHash" }),
+    ]);
+  return {
+    address: controller,
+    factory: factory as Address,
+    boardroom: boardroom as Address,
+    proposer: proposer as Address,
+    delay: delay as bigint,
+    gracePeriod: gracePeriod as bigint,
+    generation: generation as bigint,
+    configurationEpoch: configurationEpoch as bigint,
+    configurationHash: configurationHash as Hex,
   };
 }
 
@@ -277,18 +360,16 @@ export async function readBoardroomStakerPower(
   client: PledgeCashBlockReadClient,
   input: { boardroom: Address; account: Address },
 ): Promise<BoardroomStakerPower> {
-  const [blockNumber, shareToken, rewardPool, governanceConfigResult] = await Promise.all([
+  const [blockNumber, shareToken, rewardPool] = await Promise.all([
     client.getBlockNumber(),
     client.readContract({ address: input.boardroom, abi: boardroomAbi, functionName: "shareToken" }),
     client.readContract({ address: input.boardroom, abi: boardroomAbi, functionName: "rewardPool" }),
-    client.readContract({ address: input.boardroom, abi: boardroomAbi, functionName: "governanceConfig" }),
   ]);
   if (blockNumber === 0n) throw new Error("Staker power requires at least one mined block.");
 
   const snapshotBlock = blockNumber - 1n;
   const token = shareToken as Address;
   const rewards = rewardPool as Address;
-  const config = boardroomGovernanceConfig(governanceConfigResult);
   const [encumbered, currentTokenBalance, currentActiveStake, pastActiveStake, currentEligibleSupply, pastEligibleSupply] = await Promise.all([
     client.readContract({
       address: token,
@@ -341,8 +422,8 @@ export async function readBoardroomStakerPower(
   const balance = currentActiveStake as bigint;
   const priorBalance = pastActiveStake as bigint;
   const isEncumbered = encumbered as boolean;
-  const vetoRequired = governanceStakerPowerThreshold(currentSupply, pastSupply, config.vetoBps);
-  const windDownRequired = governanceStakerPowerThreshold(currentSupply, pastSupply, config.windDownBps);
+  const vetoRequired = governanceStakerPowerThreshold(currentSupply, pastSupply, VETO_BPS);
+  const windDownRequired = governanceStakerPowerThreshold(currentSupply, pastSupply, WIND_DOWN_BPS);
   const hasPower = (required: bigint): boolean =>
     !isEncumbered && currentSupply !== 0n && pastSupply !== 0n && balance >= required && priorBalance >= required;
 
@@ -516,6 +597,18 @@ export async function predictBoardroomAddress(
   })) as Address;
 }
 
+export async function predictBoardroomControllerAddress(
+  client: PledgeCashReadClient,
+  input: { controllerFactory: Address; boardroom: Address; generation: bigint },
+): Promise<Address> {
+  return (await client.readContract({
+    address: input.controllerFactory,
+    abi: boardroomControllerFactoryAbi,
+    functionName: "predictControllerAddress",
+    args: [input.boardroom, input.generation],
+  })) as Address;
+}
+
 export async function predictFixedPriceSaleAddress(
   client: PledgeCashReadClient,
   input: { factory: Address; boardroom: Address; salt: Hex },
@@ -540,16 +633,17 @@ export async function predictBondMarketAddress(
   })) as Address;
 }
 
-export async function readBondMarketsForBoardroom(
+export async function readBondMarketPageForBoardroom(
   client: PledgeCashReadClient,
-  input: { factory: Address; boardroom: Address },
-): Promise<Address[]> {
-  return (await client.readContract({
+  input: { factory: Address; boardroom: Address; cursor: bigint; size: bigint },
+): Promise<{ markets: Address[]; nextCursor: bigint }> {
+  const [markets, nextCursor] = (await client.readContract({
     address: input.factory,
     abi: bondMarketFactoryAbi,
-    functionName: "getBondMarketsForBoardroom",
-    args: [input.boardroom],
-  })) as Address[];
+    functionName: "bondMarketPageForBoardroom",
+    args: [input.boardroom, input.cursor, input.size],
+  })) as unknown as readonly [Address[], bigint];
+  return { markets, nextCursor };
 }
 
 export async function readBondMarketState(
@@ -865,17 +959,31 @@ export async function readMigratingBondingCurveState(
     saleSupply,
     migrationSupply,
     remainingSaleShares,
+    outstandingCurveShareLiability,
     basePrice,
     slope,
     graduationQuoteTarget,
     quoteToLpBps,
     startTime,
     endTime,
+    phaseEndsAt,
+    quarantineStartedAt,
+    forfeitureEligibleAt,
+    forfeitureWindowEndsAt,
     migrationSalt,
     curveStatus,
+    settlementReason,
+    postQuarantinePhase,
     soldShares,
     quoteReserve,
+    migrationAmounts,
+    terminalCurvePrice,
     graduationLatched,
+    migrationReservationHeld,
+    quoteQuarantined,
+    forfeitureFinalized,
+    unrecoveredQuote,
+    forfeitedQuote,
     canMigrate,
     closed,
   ] = await Promise.all([
@@ -889,17 +997,35 @@ export async function readMigratingBondingCurveState(
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "saleSupply" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "migrationSupply" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "remainingSaleShares" }),
+    client.readContract({
+      address: curve,
+      abi: migratingBondingCurveAbi,
+      functionName: "outstandingCurveShareLiability",
+    }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "basePrice" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "slope" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "graduationQuoteTarget" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "quoteToLpBps" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "startTime" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "endTime" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "phaseEndsAt" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "quarantineStartedAt" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "forfeitureEligibleAt" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "forfeitureWindowEndsAt" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "migrationSalt" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "curveStatus" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "settlementReason" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "postQuarantinePhase" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "soldShares" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "quoteReserve" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "migrationAmounts" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "terminalCurvePrice" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "graduationLatched" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "migrationReservationHeld" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "quoteQuarantined" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "forfeitureFinalized" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "unrecoveredQuote" }),
+    client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "forfeitedQuote" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "canMigrate" }),
     client.readContract({ address: curve, abi: migratingBondingCurveAbi, functionName: "isClosed" }),
   ]);
@@ -916,17 +1042,32 @@ export async function readMigratingBondingCurveState(
     saleSupply: saleSupply as bigint,
     migrationSupply: migrationSupply as bigint,
     remainingSaleShares: remainingSaleShares as bigint,
+    outstandingCurveShareLiability: outstandingCurveShareLiability as bigint,
     basePrice: basePrice as bigint,
     slope: slope as bigint,
     graduationQuoteTarget: graduationQuoteTarget as bigint,
     quoteToLpBps: Number(quoteToLpBps),
     startTime: startTime as bigint,
     endTime: endTime as bigint,
+    phaseEndsAt: phaseEndsAt as bigint,
+    quarantineStartedAt: quarantineStartedAt as bigint,
+    forfeitureEligibleAt: forfeitureEligibleAt as bigint,
+    forfeitureWindowEndsAt: forfeitureWindowEndsAt as bigint,
     migrationSalt: migrationSalt as Hex,
     curveStatus: Number(curveStatus),
+    settlementReason: Number(settlementReason),
+    postQuarantinePhase: Number(postQuarantinePhase),
     soldShares: soldShares as bigint,
     quoteReserve: quoteReserve as bigint,
+    terminalCurvePrice: terminalCurvePrice as bigint,
+    migrationShares: (migrationAmounts as readonly [bigint, bigint])[0],
+    migrationQuote: (migrationAmounts as readonly [bigint, bigint])[1],
     graduationLatched: graduationLatched as boolean,
+    migrationReservationHeld: migrationReservationHeld as boolean,
+    quoteQuarantined: quoteQuarantined as boolean,
+    forfeitureFinalized: forfeitureFinalized as boolean,
+    unrecoveredQuote: unrecoveredQuote as bigint,
+    forfeitedQuote: forfeitedQuote as bigint,
     canMigrate: canMigrate as boolean,
     closed: closed as boolean,
   };
@@ -983,7 +1124,7 @@ export async function readMigratingBondingCurveSellQuote(
     client.readContract({
       address: input.curve,
       abi: migratingBondingCurveAbi,
-      functionName: "sellableSharesBy",
+      functionName: "sellableShares",
       args: [input.seller],
     }),
     client.readContract({
@@ -1090,7 +1231,7 @@ export async function readLockedLiquidityState(
     tokenA,
     tokenB,
     pool,
-    seeded,
+    liquidityState,
     lockedLiquidity,
   ] = await Promise.all([
     client.readContract({ address: locker, abi: lockedLiquidityAbi, functionName: "factory" }),
@@ -1099,7 +1240,7 @@ export async function readLockedLiquidityState(
     client.readContract({ address: locker, abi: lockedLiquidityAbi, functionName: "tokenA" }),
     client.readContract({ address: locker, abi: lockedLiquidityAbi, functionName: "tokenB" }),
     client.readContract({ address: locker, abi: lockedLiquidityAbi, functionName: "pool" }),
-    client.readContract({ address: locker, abi: lockedLiquidityAbi, functionName: "seeded" }),
+    client.readContract({ address: locker, abi: lockedLiquidityAbi, functionName: "liquidityState" }),
     client.readContract({ address: locker, abi: lockedLiquidityAbi, functionName: "lockedLiquidity" }),
   ]);
 
@@ -1111,14 +1252,9 @@ export async function readLockedLiquidityState(
     tokenA: tokenA as Address,
     tokenB: tokenB as Address,
     pool: pool as Address,
-    seeded: seeded as boolean,
+    liquidityState: Number(liquidityState),
     lockedLiquidity: lockedLiquidity as bigint,
   };
-}
-
-function boardroomGovernanceConfig(result: unknown): BoardroomGovernanceConfig {
-  const [minimumDelay, actionGracePeriod, vetoBps, windDownBps] = result as readonly [bigint, bigint, bigint, bigint];
-  return { minimumDelay, actionGracePeriod, vetoBps, windDownBps };
 }
 
 function ceilMulDiv(value: bigint, multiplier: bigint, denominator: bigint): bigint {

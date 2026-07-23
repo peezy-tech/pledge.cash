@@ -1,4 +1,4 @@
-import { boardroomAbi } from "@pledge.cash/sdk";
+import { lockedLiquidityFactoryAbi } from "@pledge.cash/sdk";
 import { decodeFunctionData, type Hex } from "viem";
 
 import type { JsonValue } from "../db/schema";
@@ -17,8 +17,13 @@ export type RiskContext = {
   readonly actionId: string;
   readonly assetPolicy?: AddressString | string;
   readonly boardroom: AddressString | string;
+  readonly bondingCurve?: AddressString | string;
+  readonly controller?: AddressString | string;
   readonly decodeStatus: DecodeStatus;
+  readonly distributionFactory?: AddressString | string;
   readonly evaluatedAt?: Date;
+  readonly liquidityLocker?: AddressString | string;
+  readonly lockedLiquidityFactory?: AddressString | string;
   readonly policyRegistry?: AddressString | string;
 };
 
@@ -38,7 +43,7 @@ export function evaluateAction(calls: readonly StoredCall[], ctx: RiskContext): 
   if (findings.length === 0) {
     findings.push({
       callIndex: null,
-      detail: "The action did not contain any decoded calls for Sentinel to classify.",
+      detail: "The operation did not contain any decoded calls for Sentinel to classify.",
       ruleId: "unknown-selector",
       severity: "high"
     });
@@ -57,20 +62,45 @@ function evaluateCall(call: StoredCall, ctx: RiskContext): RiskFinding[] {
   const findings: RiskFinding[] = [];
   const selector = selectorForCall(call);
   const targetIsBoardroom = sameAddress(call.target, ctx.boardroom);
+  const targetIsController = sameAddress(call.target, ctx.controller);
+  const canonicalLiquidityFactoryCall =
+    sameAddress(call.policy, ctx.lockedLiquidityFactory) && sameAddress(call.target, ctx.lockedLiquidityFactory);
 
-  if (targetIsBoardroom && selector === SELECTORS.boardroom.setExecutor) {
+  if (targetIsController && selector === SELECTORS.controller.updateConfiguration) {
     findings.push(
       callFinding(
         call,
-        "set-executor",
+        "controller-configuration",
         "high",
-        "Changes who can queue governed actions; ready execution remains permissionless."
+        "Changes the proposer, delay, or grace period and advances the controller configuration epoch."
+      )
+    );
+  }
+
+  if (targetIsBoardroom && selector === SELECTORS.boardroom.replaceController) {
+    findings.push(
+      callFinding(
+        call,
+        "controller-replacement",
+        "high",
+        "Deploys and adopts the next controller generation in one delayed Boardroom self-call."
       )
     );
   }
 
   if (targetIsBoardroom && selector === SELECTORS.boardroom.mint) {
     findings.push(callFinding(call, "mint-shares", "high", "Mints new voting shares and dilutes holders."));
+  }
+
+  if (targetIsBoardroom && selector === SELECTORS.boardroom.setRedemptionExcessRecipient) {
+    findings.push(
+      callFinding(
+        call,
+        "redemption-excess-recipient",
+        "high",
+        "Changes who receives redemption assets left after holder claims."
+      )
+    );
   }
 
   if (!isZeroAddress(call.policy) && selector === SELECTORS.erc20.approve) {
@@ -81,20 +111,78 @@ function evaluateCall(call: StoredCall, ctx: RiskContext): RiskFinding[] {
 
   if (isPolicyAdminCall(call, ctx, selector)) {
     findings.push(
-      callFinding(call, "policy-admin", "high", "Changes global policy permissions outside the veto queue.")
+      callFinding(
+        call,
+        "policy-admin",
+        "high",
+        "Changes global policy permissions outside an individual Boardroom controller delay."
+      )
     );
   }
 
-  if (targetIsBoardroom && selector === SELECTORS.boardroom.exitLockedLiquidity) {
+  if (canonicalLiquidityFactoryCall && selector === SELECTORS.liquidityFactory.createLockedLiquidity) {
+    findings.push(
+      callFinding(
+        call,
+        "create-protocol-liquidity",
+        "high",
+        "Creates the permanent singleton protocol-liquidity locker, pool, and quote-asset identity."
+      )
+    );
+  }
+
+  if (canonicalLiquidityFactoryCall && selector === SELECTORS.liquidityFactory.addLockedLiquidity) {
+    findings.push(
+      callFinding(call, "add-protocol-liquidity", "medium", "Adds treasury assets to the permanent canonical liquidity pair.")
+    );
+  }
+
+  if (canonicalLiquidityFactoryCall && selector === SELECTORS.liquidityFactory.removeLockedLiquidity) {
     const zeroMinOut = hasZeroExitMinOut(call);
     findings.push(
       callFinding(
         call,
-        "exit-locked-liquidity",
+        "remove-protocol-liquidity",
         zeroMinOut ? "high" : "medium",
         zeroMinOut
-          ? "Exits locked liquidity with a zero minimum output, allowing severe slippage."
-          : "Exits a locked liquidity position during wind-down."
+          ? "Removes protocol liquidity with a zero minimum output, allowing severe slippage."
+          : "Removes protocol liquidity back to the Boardroom."
+      )
+    );
+  }
+
+  if (canonicalLiquidityFactoryCall && selector === SELECTORS.liquidityFactory.closeLockedLiquidity) {
+    findings.push(
+      callFinding(call, "close-protocol-liquidity", "medium", "Irreversibly closes the empty canonical liquidity position.")
+    );
+  }
+
+  if (
+    sameAddress(call.policy, ctx.lockedLiquidityFactory) &&
+    sameAddress(call.target, ctx.liquidityLocker) &&
+    selector === SELECTORS.liquidityLocker.claimFees
+  ) {
+    findings.push(
+      callFinding(
+        call,
+        "claim-protocol-liquidity-fees",
+        "low",
+        "Forwards accrued canonical locker fees to the Boardroom without moving LP principal."
+      )
+    );
+  }
+
+  if (
+    sameAddress(call.policy, ctx.distributionFactory) &&
+    sameAddress(call.target, ctx.bondingCurve) &&
+    selector === SELECTORS.bondingCurve.cancel
+  ) {
+    findings.push(
+      callFinding(
+        call,
+        "cancel-bonding-curve",
+        "high",
+        "Cancels the singleton primary sale into its bounded sell-only unwind."
       )
     );
   }
@@ -105,8 +193,21 @@ function evaluateCall(call: StoredCall, ctx: RiskContext): RiskFinding[] {
     );
   }
 
+  if (targetIsBoardroom && selector === SELECTORS.boardroom.beginSnapshot) {
+    findings.push(
+      callFinding(call, "begin-snapshot", "medium", "Freezes redemption accounting and starts snapshotting.")
+    );
+  }
+
   if (targetIsBoardroom && selector === SELECTORS.boardroom.openRedemptions) {
-    findings.push(callFinding(call, "open-redemptions", "medium", "Irreversibly opens shareholder redemptions."));
+    findings.push(
+      callFinding(
+        call,
+        "open-redemptions",
+        "medium",
+        "Irreversibly opens shareholder redemptions after snapshot completion."
+      )
+    );
   }
 
   if (targetIsBoardroom && selector === SELECTORS.boardroom.burnTreasuryShares) {
@@ -169,14 +270,10 @@ function decodeExitLockedLiquidity(data: string): { amountAMin: bigint; amountBM
   if (!isHex(data)) return undefined;
 
   try {
-    const decoded = decodeFunctionData({
-      abi: boardroomAbi,
-      data
-    });
-
-    if (decoded.functionName !== "exitLockedLiquidity") return undefined;
-    const [, amountAMin, amountBMin] = decoded.args;
-    return { amountAMin, amountBMin };
+    const decoded = decodeFunctionData({ abi: lockedLiquidityFactoryAbi, data });
+    if (decoded.functionName !== "removeLockedLiquidity") return undefined;
+    const [params] = decoded.args;
+    return { amountAMin: params.amountAMin, amountBMin: params.amountBMin };
   } catch {
     return undefined;
   }
@@ -198,8 +295,8 @@ function callFinding(call: StoredCall, ruleId: RiskRuleId, severity: Severity, d
 function undecodedFinding(callIndex: number | null): RiskFinding {
   return {
     callIndex,
-    detail: ruleDetail("undecoded-action"),
-    ruleId: "undecoded-action",
+    detail: ruleDetail("undecoded-operation"),
+    ruleId: "undecoded-operation",
     severity: "high"
   };
 }

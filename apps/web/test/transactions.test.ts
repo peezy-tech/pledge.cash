@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   boardroomAbi,
+  buildControllerScheduleBoardroomOperationTransaction,
   buildBoardroomRewardFundingCalls,
   buildBoardroomExecuteTransaction,
   buildBoardroomRewardsCreationCall,
-  buildBoardroomQueueActionTransaction,
   buildBoardroomSelfCall,
   buildBoardroomShareGrantIssuanceBatch,
   buildBoardroomCall,
@@ -101,16 +101,18 @@ describe("transaction review", () => {
     expect(review.parameters).toEqual([{ name: "delay", type: "uint256", value: "86400" }]);
   });
 
-  test("requires irreversible acknowledgement when queued Boardroom calldata opens redemptions", () => {
-    const request = buildBoardroomQueueActionTransaction({
-      boardroom: target,
-      call: buildBoardroomSelfCall({
+  test("requires irreversible acknowledgement when a controller operation opens redemptions", () => {
+    const request = buildControllerScheduleBoardroomOperationTransaction({
+      controller: factory,
+      calls: [buildBoardroomSelfCall({
         boardroom: target,
         data: encodeFunctionData({ abi: boardroomAbi, functionName: "openRedemptions" }),
-      }),
+      })],
       salt,
+      expectedBoardroomEpoch: 2n,
+      expectedConfigurationEpoch: 3n,
     });
-    const review = contractCallReview("Queue redemption opening", request);
+    const review = contractCallReview("Schedule redemption opening", request);
 
     expect(review.boardroomCalls?.[0]).toMatchObject({
       functionName: "openRedemptions",
@@ -194,7 +196,7 @@ describe("transaction review", () => {
     "mint",
     "setRedemptionExcessRecipient",
     "registerRedeemableAsset",
-    "cancelAction",
+    "veto",
     "claimFees",
     "executeWindDownCall",
     "buy",

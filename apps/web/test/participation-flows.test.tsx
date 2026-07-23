@@ -169,11 +169,15 @@ const dashboard: ProductBoardroomDashboardState = {
     shareToken,
     status: 0,
     launched: true,
-    executor: owner,
-    governanceDelay: 86_400n,
+    controller: owner,
+    proposer: owner,
+    controllerDelay: 86_400n,
+    controllerGracePeriod: 604_800n,
+    controllerGeneration: 1n,
+    controllerConfigurationEpoch: 1n,
+    windDownDelay: 86_400n,
     governanceEpoch: 1n,
     governanceEligibleSupply: 10_000_000_000_000_000_000n,
-    governanceConfig: { minimumDelay: 86_400n, actionGracePeriod: 604_800n, vetoBps: 2_000n, windDownBps: 3_000n },
     redeemableAssets: [],
     issuedGrants: [],
     issuedDistributions: [sale, curve, airdrop, bond],
@@ -581,7 +585,7 @@ describe("participation flow composition", () => {
     const curveHtml = renderToString(<ParticipationFlows {...context} path="migrating-bonding-curve" />);
     expect(curveHtml).toContain("Trade on the bonding curve");
     expect(curveHtml).toContain("Curve inventory");
-    expect(curveHtml).toContain("sell only the tokens");
+    expect(curveHtml).toContain("Sell rights follow transferable shares");
     expect(curveHtml).toContain("Advanced trade settings");
 
     const airdropHtml = renderToString(<ParticipationFlows {...context} path="merkle-airdrop" />);

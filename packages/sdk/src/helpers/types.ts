@@ -153,6 +153,8 @@ export type LockedLiquidityTerms = {
   salt: Hex;
 };
 
+export type LockedLiquidityAddTerms = Omit<LockedLiquidityTerms, "salt">;
+
 export type BoardroomLockedLiquidityTerms = {
   quoteToken: Address;
   shareAmountDesired: bigint;
@@ -163,6 +165,8 @@ export type BoardroomLockedLiquidityTerms = {
   salt: Hex;
   shareTokenSide?: "tokenA" | "tokenB";
 };
+
+export type BoardroomLockedLiquidityAddTerms = Omit<BoardroomLockedLiquidityTerms, "salt">;
 
 export type GrantCreationArgs = readonly [
   Address,
@@ -224,17 +228,32 @@ export type MigratingBondingCurveState = {
   saleSupply: bigint;
   migrationSupply: bigint;
   remainingSaleShares: bigint;
+  outstandingCurveShareLiability: bigint;
   basePrice: bigint;
   slope: bigint;
   graduationQuoteTarget: bigint;
   quoteToLpBps: number;
   startTime: bigint;
   endTime: bigint;
+  phaseEndsAt?: bigint;
+  quarantineStartedAt?: bigint;
+  forfeitureEligibleAt?: bigint;
+  forfeitureWindowEndsAt?: bigint;
   migrationSalt: Hex;
   curveStatus: number;
+  settlementReason?: number;
+  postQuarantinePhase?: number;
   soldShares: bigint;
   quoteReserve: bigint;
+  terminalCurvePrice?: bigint;
+  migrationShares?: bigint;
+  migrationQuote?: bigint;
   graduationLatched: boolean;
+  migrationReservationHeld?: boolean;
+  quoteQuarantined?: boolean;
+  forfeitureFinalized?: boolean;
+  unrecoveredQuote?: bigint;
+  forfeitedQuote?: bigint;
   canMigrate: boolean;
   closed: boolean;
 };
@@ -290,7 +309,7 @@ export type LockedLiquidityState = {
   tokenA: Address;
   tokenB: Address;
   pool: Address;
-  seeded: boolean;
+  liquidityState: number;
   lockedLiquidity: bigint;
 };
 
@@ -340,11 +359,28 @@ export type GrantSettlementQuote = {
   paymentAllowance?: bigint;
 };
 
-export type BoardroomGovernanceConfig = {
-  minimumDelay: bigint;
-  actionGracePeriod: bigint;
-  vetoBps: bigint;
-  windDownBps: bigint;
+export type BoardroomLaunchConfig = {
+  proposer: Address;
+  predictedController: Address;
+  protectionStaker: Address;
+  expectedRewardPool: Address;
+  expectedRedemptionExcessRecipient: Address;
+  controllerDelay: bigint;
+  windDownDelay: bigint;
+  gracePeriod: bigint;
+  generation: bigint;
+};
+
+export type BoardroomControllerState = {
+  address: Address;
+  factory: Address;
+  boardroom: Address;
+  proposer: Address;
+  delay: bigint;
+  gracePeriod: bigint;
+  generation: bigint;
+  configurationEpoch: bigint;
+  configurationHash: Hex;
 };
 
 export type BoardroomState = {
@@ -354,17 +390,38 @@ export type BoardroomState = {
   wrappedNative: Address;
   shareToken: Address;
   rewardPool: Address;
+  redemptionExcessRecipient: Address;
   status: number;
   launched: boolean;
-  executor: Address;
-  governanceDelay: bigint;
+  controller: Address;
+  proposer: Address;
+  controllerDelay: bigint;
+  controllerGracePeriod: bigint;
+  controllerGeneration: bigint;
+  controllerConfigurationEpoch: bigint;
   governanceEpoch: bigint;
+  windDownDelay: bigint;
+  windDownStartedAt: bigint;
+  protectionStaker: Address;
   governanceEligibleSupply: bigint;
-  governanceConfig: BoardroomGovernanceConfig;
-  redeemableAssets: Address[];
-  issuedGrants: Address[];
-  issuedDistributions: Address[];
-  lockedLiquidityPositions: Address[];
+  redeemableAssetCount: bigint;
+  snapshotAssetCount: bigint;
+  snapshotCursor: bigint;
+  snapshotFrozen: boolean;
+  redemptionSupply: bigint;
+  redemptionSupplyFrozen: boolean;
+  activeObligationCount: bigint;
+  activeGrantCount: bigint;
+  activeDistributionCount: bigint;
+  activeLiquidityCount: bigint;
+  activeRewardCount: bigint;
+  primaryMarketMode: number;
+  bondingCurve: Address;
+  primaryMarketQuoteAsset: Address;
+  liquidityStatus: number;
+  liquidityLocker: Address;
+  liquidityPool: Address;
+  liquidityQuoteAsset: Address;
 };
 
 export type BoardroomStakerPower = {

@@ -34,7 +34,7 @@ From the project, use:
 
 - `Overview` for authority, supply, treasury, obligations, and the next useful action.
 - `Participate` for live bond, sale, curve, airdrop, or AMM routes.
-- `Governance` for authority, delay, thresholds, and queued decisions.
+- `Governance` for controller authority, proposer, generations, epochs, delay, thresholds, and scheduled operations.
 - `Transparency` for detailed balances, commitments, history, and addresses.
 
 [Learn the project workspace](project-workspace)

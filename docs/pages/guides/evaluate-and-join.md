@@ -42,7 +42,10 @@ Read [Canonical identity](../reference/canonical-identity) for the checks behind
 | Merkle airdrop | Shares now or a vesting grant | Usually gas; a paid grant may require payment later | Exact published index, amount, proof, and claim mode |
 | AMM | Output token from a pool | Exact input token | Minimum output and quote deadline |
 
-A curve sell right is account-bound. It is created for the recipient of a curve buy and does **not** follow a later ERC20 transfer. To sell back to the curve, that account must still have both enough sell right and enough shares. Once graduation readiness latches, curve buys and sells stop while the Boardroom either migrates or cancels.
+A curve buy increases one global outstanding-share liability. Any current holder can sell up to the lesser of its
+transferable share balance and that global liability, so sell rights follow shares through ERC20 transfers. Graduation
+currently freezes trading; do not rely on migration, cancellation, or expiry until the gated terminal policies are
+implemented and verified.
 
 An AMM price is different from a sale or curve price. Check reserves, fee, slippage, route, and minimum output immediately before signing.
 
@@ -80,7 +83,8 @@ A successful join has all of these:
 - the expected token balance, claim index, sale inventory, curve position, or pool reserves changed onchain;
 - the refreshed project workspace shows the result without an incomplete-read warning.
 
-For an airdrop, also verify the claim index is marked used. For a curve buy, record the recipient wallet because its sell right stays with that account.
+For an airdrop, also verify the claim index is marked used. For a curve buy, verify the global liability increased by
+the purchased amount and the recipient received transferable shares.
 
 ## Recovery
 

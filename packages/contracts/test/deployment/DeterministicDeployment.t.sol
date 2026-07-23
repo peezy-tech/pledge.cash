@@ -10,8 +10,11 @@ import {AmmRouter} from "../../src/amm/AmmRouter.sol";
 import {BondMarketFactory} from "../../src/bonds/BondMarketFactory.sol";
 import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
 import {Boardroom} from "../../src/boardroom/Boardroom.sol";
+import {BoardroomController} from "../../src/boardroom/BoardroomController.sol";
+import {BoardroomControllerFactory} from "../../src/boardroom/BoardroomControllerFactory.sol";
 import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
 import {BoardroomGovernanceLogic} from "../../src/boardroom/BoardroomGovernanceLogic.sol";
+import {BoardroomMarketLogic} from "../../src/boardroom/BoardroomMarketLogic.sol";
 import {BoardroomPolicyRegistry} from "../../src/boardroom/BoardroomPolicyRegistry.sol";
 import {BoardroomRedemptionPayout} from "../../src/boardroom/BoardroomRedemptionPayout.sol";
 import {DistributionFactory} from "../../src/distribution/DistributionFactory.sol";
@@ -118,8 +121,8 @@ contract DeterministicDeploymentTest is Test {
         assertEq(deployedA, deployedB);
     }
 
-    function testV4RootSaltsAreMechanicallyCoupledToCreationCode() public pure {
-        assertEq(PledgeCashDeploymentSalts.version(), "pledge.cash.deterministic.v4");
+    function testV5RootSaltsAreMechanicallyCoupledToCreationCode() public pure {
+        assertEq(PledgeCashDeploymentSalts.version(), "pledge.cash.deterministic.v5");
         assertEq(
             PledgeCashDeploymentSalts.boardroomPolicyRegistry(),
             _releaseSalt("BoardroomPolicyRegistry", keccak256(type(BoardroomPolicyRegistry).creationCode))
@@ -170,6 +173,16 @@ contract DeterministicDeploymentTest is Test {
             PledgeCashDeploymentSalts.boardroomFactory(),
             _releaseSalt("BoardroomFactory", keccak256(type(BoardroomFactory).creationCode))
         );
+        bytes32 boardroomArchitectureCodeHash = keccak256(
+            abi.encode(
+                keccak256(type(BoardroomFactory).creationCode),
+                keccak256(type(BoardroomControllerFactory).creationCode),
+                keccak256(type(BoardroomController).creationCode),
+                keccak256(type(BoardroomMarketLogic).creationCode),
+                keccak256(type(Boardroom).creationCode)
+            )
+        );
+        assertEq(PledgeCashDeploymentSalts.boardroomArchitectureCodeHash(), boardroomArchitectureCodeHash);
         assertEq(
             PledgeCashDeploymentSalts.releaseCodeHash(),
             keccak256(
@@ -186,7 +199,7 @@ contract DeterministicDeploymentTest is Test {
                     keccak256(type(DistributionFactory).creationCode),
                     keccak256(type(BoardroomRewardsFactory).creationCode),
                     keccak256(type(BondMarketFactory).creationCode),
-                    keccak256(type(BoardroomFactory).creationCode)
+                    boardroomArchitectureCodeHash
                 )
             )
         );
@@ -299,10 +312,7 @@ contract DeterministicDeploymentTest is Test {
         assertEq(boardroomFactory.wrappedNative(), address(wrappedNative));
         assertEq(boardroomFactory.redemptionPayoutLogic(), address(deployedRedemptionPayout));
         assertEq(boardroomFactory.governanceLogic(), address(deployedGovernanceLogic));
-        Boardroom boardroomLogic = Boardroom(payable(boardroomFactory.boardroomLogic()));
-        assertGt(address(boardroomLogic).code.length, 0);
-        assertEq(boardroomLogic.redemptionPayoutLogic(), address(deployedRedemptionPayout));
-        assertEq(boardroomLogic.governanceLogic(), address(deployedGovernanceLogic));
+        _assertBoardroomArchitecture(boardroomFactory, deployedRedemptionPayout, deployedGovernanceLogic);
 
         vm.startPrank(owner);
         tokenGrantFactory.setFeeRecipient(address(protocolFeeRouter));
@@ -371,7 +381,28 @@ contract DeterministicDeploymentTest is Test {
         assertGt(deployed.code.length, 0);
     }
 
+    function _assertBoardroomArchitecture(
+        BoardroomFactory boardroomFactory,
+        BoardroomRedemptionPayout deployedRedemptionPayout,
+        BoardroomGovernanceLogic deployedGovernanceLogic
+    ) internal view {
+        BoardroomControllerFactory controllerFactory = BoardroomControllerFactory(boardroomFactory.controllerFactory());
+        BoardroomController controllerLogic = BoardroomController(controllerFactory.controllerImplementation());
+        BoardroomMarketLogic marketLogic = BoardroomMarketLogic(boardroomFactory.marketLogic());
+        Boardroom boardroomLogic = Boardroom(payable(boardroomFactory.boardroomLogic()));
+
+        assertGt(address(controllerFactory).code.length, 0);
+        assertGt(address(controllerLogic).code.length, 0);
+        assertGt(address(marketLogic).code.length, 0);
+        assertGt(address(boardroomLogic).code.length, 0);
+        assertEq(controllerFactory.boardroomFactory(), address(boardroomFactory));
+        assertEq(boardroomLogic.redemptionPayoutLogic(), address(deployedRedemptionPayout));
+        assertEq(boardroomLogic.governanceLogic(), address(deployedGovernanceLogic));
+        assertEq(boardroomLogic.controllerFactory(), address(controllerFactory));
+        assertEq(boardroomLogic.marketLogic(), address(marketLogic));
+    }
+
     function _releaseSalt(string memory contractName, bytes32 creationCodeHash) internal pure returns (bytes32) {
-        return keccak256(abi.encode("pledge.cash.deterministic.v4", contractName, creationCodeHash));
+        return keccak256(abi.encode("pledge.cash.deterministic.v5", contractName, creationCodeHash));
     }
 }

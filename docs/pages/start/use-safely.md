@@ -26,7 +26,7 @@ For an `Irreversible lifecycle change`, the app requires the acknowledgement “
 ## Asset and approval safety
 
 - Holder participation and grant-settlement approvals are separate transactions from the action that spends them.
-  Studio can instead batch a Boardroom approval call with module creation in one `executeBatch` or queued batch. Inspect
+  Studio can instead batch a Boardroom approval call with module creation in one `executeBatch` or scheduled controller operation. Inspect
   every nested call in the review to determine atomicity, and approve only the amount the workflow needs.
 - Quotes and limits can change between reading, simulation, and mining.
 - A grant can require payment; verify `Payment token`, `Price`, `Settleable now`, and `Expiry`.
@@ -43,6 +43,8 @@ If the receipt confirms but the page says `Confirmed — refreshing workspace da
 
 ## Current hard boundary
 
-`Secure governance launch is unavailable for this Boardroom version` is intentional. Do not work around it: the deployed launch calldata does not bind the expected executor, so pledge.cash will not submit or certify that permanent transition.
+Unsupported-version governance is intentionally blocked. Do not work around it: only a verified v5 Boardroom with the
+matching controller factory, predicted generation, epochs, and code identity may expose launch or controller writes.
+The candidate is not deployed or certified for mainnet.
 
 [Review networks and current limitations](networks-and-limitations) · [Open the app](../../explore)

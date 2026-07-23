@@ -3,7 +3,8 @@ import type { Address } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
 import { GovernancePage } from "../src/app/pages/governance-page";
 import { TransparencyPage } from "../src/app/pages/transparency-page";
-import { GovernanceProposalComposer, executorProposalError } from "../src/features/governance/governance-proposal-composer";
+import { GovernanceProposalComposer } from "../src/features/governance/governance-proposal-composer";
+import { governanceProposerError } from "../src/features/governance/view-model";
 import { DeliveryActivity } from "../src/features/notifications/delivery-activity";
 import {
   SubscriptionSettings,
@@ -20,7 +21,7 @@ const paymentToken = "0x4000000000000000000000000000000000000000" as Address;
 const sale = "0x5000000000000000000000000000000000000000" as Address;
 const grant = "0x6000000000000000000000000000000000000000" as Address;
 const pool = "0x7000000000000000000000000000000000000000" as Address;
-const executor = "0x8000000000000000000000000000000000000000" as Address;
+const controller = "0x8000000000000000000000000000000000000000" as Address;
 const recipient = "0x9000000000000000000000000000000000000000" as Address;
 const zero = "0x0000000000000000000000000000000000000000" as Address;
 
@@ -79,16 +80,37 @@ const dashboard: ProductBoardroomDashboardState = {
         startTime: 1n,
       },
     }],
-    executor,
-    governanceConfig: {
-      actionGracePeriod: 604_800n,
-      minimumDelay: 86_400n,
-      vetoBps: 2_000n,
-      windDownBps: 3_000n,
-    },
-    governanceDelay: 86_400n,
+    rewardPool: recipient,
+    redemptionExcessRecipient: recipient,
+    controller,
+    proposer: owner,
+    controllerDelay: 86_400n,
+    controllerGracePeriod: 604_800n,
+    controllerGeneration: 1n,
+    controllerConfigurationEpoch: 1n,
     governanceEligibleSupply: 8_000_000_000_000_000_000n,
     governanceEpoch: 2n,
+    windDownDelay: 86_400n,
+    windDownStartedAt: 0n,
+    protectionStaker: owner,
+    redeemableAssetCount: 1n,
+    snapshotAssetCount: 0n,
+    snapshotCursor: 0n,
+    snapshotFrozen: false,
+    redemptionSupply: 0n,
+    redemptionSupplyFrozen: false,
+    activeObligationCount: 2n,
+    activeGrantCount: 1n,
+    activeDistributionCount: 1n,
+    activeLiquidityCount: 0n,
+    activeRewardCount: 0n,
+    primaryMarketMode: 2,
+    bondingCurve: zero,
+    primaryMarketQuoteAsset: paymentToken,
+    liquidityStatus: 0,
+    liquidityLocker: pool,
+    liquidityPool: pool,
+    liquidityQuoteAsset: paymentToken,
     grantSummaries: [{
       address: grant,
       state: {
@@ -123,6 +145,9 @@ const dashboard: ProductBoardroomDashboardState = {
     }],
     issuedDistributions: [sale],
     issuedGrants: [grant],
+    grantRecordCount: 1,
+    distributionRecordCount: 1,
+    lockedLiquidityRecordCount: 1,
     launched: true,
     lockedLiquidityPositions: [pool],
     lockedLiquiditySummaries: [],
@@ -163,20 +188,20 @@ describe("transparency evidence semantics", () => {
 });
 
 describe("governance authority and proposal semantics", () => {
-  test("keeps authority, queue coverage, and optional alerts unavailability explicit", () => {
+  test("keeps authority, operation coverage, and optional alerts unavailability explicit", () => {
     const html = renderToString(
       <GovernancePage
         alertsAction={<a href="/settings/alerts">Review alert setup</a>}
         alertsUnavailable
         dashboard={dashboard}
         loading={false}
-        warning="One queued decision could not be verified."
+        warning="One scheduled operation could not be verified."
       />,
     );
 
     expect(html).toContain("Current authority");
-    expect(html).toContain("Governance delay");
-    expect(html).toContain("Queue coverage");
+    expect(html).toContain("Controller delay");
+    expect(html).toContain("Operation coverage");
     expect(html).toContain("Partial");
     expect(html).toContain("Governance alerts unavailable");
     expect(html).toContain("Alert sign-in is an offchain notification identity and never authorizes transactions");
@@ -184,16 +209,19 @@ describe("governance authority and proposal semantics", () => {
     expect(html).toContain("Protocol identifiers");
   });
 
-  test("uses a described semantic form and concise pending label for executor proposals", () => {
+  test("uses a semantic form and concise pending label for controller configuration", () => {
     const ready = renderToString(
       <GovernanceProposalComposer
         boardroom={boardroom}
         capability={{ status: "enabled" }}
-        currentExecutor={executor}
-        governanceDelay={86_400n}
+        configurationEpoch={1n}
+        controller={controller}
+        controllerDelay={86_400n}
+        currentProposer={owner}
+        governanceEpoch={2n}
         gracePeriod={604_800n}
         pendingAction={undefined}
-        queueExecutorChange={async () => undefined}
+        scheduleConfigurationChange={async () => undefined}
         runAction={async (_id, action) => action()}
       />,
     );
@@ -201,22 +229,24 @@ describe("governance authority and proposal semantics", () => {
       <GovernanceProposalComposer
         boardroom={boardroom}
         capability={{ status: "enabled" }}
-        currentExecutor={executor}
-        governanceDelay={86_400n}
+        configurationEpoch={1n}
+        controller={controller}
+        controllerDelay={86_400n}
+        currentProposer={owner}
+        governanceEpoch={2n}
         gracePeriod={604_800n}
-        pendingAction="governance-queue-executor-change"
-        queueExecutorChange={async () => undefined}
+        pendingAction="governance-schedule-controller-configuration"
+        scheduleConfigurationChange={async () => undefined}
         runAction={async (_id, action) => action()}
       />,
     );
 
-    expect(ready).toContain('<form aria-label="Executor rotation proposal"');
-    expect(ready).toContain('name="executor"');
-    expect(ready).toContain("aria-describedby");
+    expect(ready).toContain('<form aria-label="Controller configuration proposal"');
+    expect(ready).toContain('name="proposer"');
     expect(ready).toContain('type="submit"');
-    expect(executorProposalError("not-an-address", executor)).toBe("Enter a valid executor address.");
-    expect(pending).toContain("Queueing proposal");
-    expect(pending).toContain("Queueing executor proposal");
+    expect(governanceProposerError("not-an-address", owner)).toBe("Enter a valid proposer address.");
+    expect(pending).toContain("Scheduling operation");
+    expect(pending).toContain("Scheduling controller configuration");
   });
 });
 

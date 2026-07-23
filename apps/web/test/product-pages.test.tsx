@@ -70,22 +70,45 @@ const dashboard: ProductBoardroomDashboardState = {
     wrappedNative: "0x8000000000000000000000000000000000000000" as Address,
     shareToken,
     rewardPool: "0x0000000000000000000000000000000000000fed" as Address,
+    redemptionExcessRecipient: owner,
     status: 0,
     launched: true,
-    executor: "0x9000000000000000000000000000000000000000" as Address,
-    governanceDelay: 86_400n,
+    controller: "0x9000000000000000000000000000000000000000" as Address,
+    proposer: owner,
+    controllerDelay: 86_400n,
+    controllerGracePeriod: 604_800n,
+    controllerGeneration: 1n,
+    controllerConfigurationEpoch: 1n,
     governanceEpoch: 2n,
+    windDownDelay: 86_400n,
+    windDownStartedAt: 0n,
+    protectionStaker: owner,
     governanceEligibleSupply: 8_000_000_000_000_000_000n,
-    governanceConfig: {
-      minimumDelay: 86_400n,
-      actionGracePeriod: 604_800n,
-      vetoBps: 2_000n,
-      windDownBps: 3_000n,
-    },
+    redeemableAssetCount: 1n,
+    snapshotAssetCount: 0n,
+    snapshotCursor: 0n,
+    snapshotFrozen: false,
+    redemptionSupply: 0n,
+    redemptionSupplyFrozen: false,
+    activeObligationCount: 2n,
+    activeGrantCount: 1n,
+    activeDistributionCount: 1n,
+    activeLiquidityCount: 0n,
+    activeRewardCount: 0n,
+    primaryMarketMode: 2,
+    bondingCurve: zero,
+    primaryMarketQuoteAsset: paymentToken,
+    liquidityStatus: 0,
+    liquidityLocker: zero,
+    liquidityPool: zero,
+    liquidityQuoteAsset: paymentToken,
     redeemableAssets: [paymentToken],
     issuedGrants: [grant],
     issuedDistributions: [sale],
     lockedLiquidityPositions: [],
+    grantRecordCount: 1,
+    distributionRecordCount: 1,
+    lockedLiquidityRecordCount: 0,
     shareTokenMetadata: { address: shareToken, decimals: 18, symbol: "ATLAS" },
     grantSummaries: [{
       address: grant,
@@ -580,7 +603,7 @@ describe("read-first product pages", () => {
     const governance = renderToString(<GovernancePage dashboard={dashboard} stakerPower={stakerPower} loading={false} />);
     expect(governance).toContain("Decision system");
     expect(governance).toContain("Staker protections");
-    expect(governance).toContain("20%");
+    expect(governance).toContain("1%");
     expect(governance).toContain("This wallet can veto");
 
     const partialGovernance = renderToString(
@@ -590,18 +613,18 @@ describe("read-first product pages", () => {
         warning="1 indexed decision could not be verified and was ignored."
       />,
     );
-    expect(partialGovernance).toContain("Some queued decisions were not shown");
+    expect(partialGovernance).toContain("Some scheduled operations were not shown");
     expect(partialGovernance).toContain("1 indexed decision could not be verified and was ignored");
-    expect(partialGovernance).toContain("No verified queued decisions");
+    expect(partialGovernance).toContain("No verified scheduled operations");
     expect(partialGovernance).toContain("Retry before assuming no decisions are pending");
     expect(partialGovernance).not.toContain("Governance data is incomplete");
 
     const unavailableGovernance = renderToString(
       <GovernancePage dashboard={dashboard} error="The governance index could not be reached." loading={false} />,
     );
-    expect(unavailableGovernance).toContain("Queued decisions are unavailable");
-    expect(unavailableGovernance).toContain("Retry before concluding that no decisions are pending");
-    expect(unavailableGovernance).not.toContain("No queued decisions");
+    expect(unavailableGovernance).toContain("Scheduled operations are unavailable");
+    expect(unavailableGovernance).toContain("Retry before concluding that no decision is pending");
+    expect(unavailableGovernance).not.toContain("No scheduled operations");
 
     const transparency = renderToString(
       <TransparencyPage
@@ -617,7 +640,8 @@ describe("read-first product pages", () => {
     expect(transparency).toContain(`/pledge-cash/grants/31337/${grant}`);
     expect(transparency).toContain("Issued grants");
     expect(transparency).toContain("Technical details");
-    expect(transparency).toContain("Currently registered distributions");
+    expect(transparency).toContain("Grant provenance records");
+    expect(transparency).toContain("Distribution provenance records");
     expect(transparency).toContain("Closed, removed, or migrated distribution records shown above remain separate historical evidence");
     expect(transparency).not.toContain("Tracked distributions");
   });
@@ -686,7 +710,7 @@ describe("read-first product pages", () => {
     expect(portfolio.indexOf("Grant can settle")).toBeLessThan(portfolio.indexOf("Receipt confirmed"));
 
     expect(studioLifecycle(dashboard)).toBe("launched");
-    expect(studioGuidance("launched", dashboard).nextStep).toContain("queued action");
+    expect(studioGuidance("launched", dashboard).nextStep).toContain("scheduled operation");
     const studio = renderToString(<StudioPage account={owner} dashboard={dashboard} loading={false} />);
     expect(studio).toContain("Operate through governance");
     expect(studio).toContain("Project lifecycle");

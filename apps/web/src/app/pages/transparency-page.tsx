@@ -243,10 +243,13 @@ export function TransparencyPage({
               { label: "Policy registry", value: <AddressLink address={snapshot.policyRegistry} /> },
               { label: "Wrapped native", value: <AddressLink address={snapshot.wrappedNative} /> },
               { label: "Share token", value: <AddressLink address={snapshot.shareToken} /> },
-              { label: "Issued grants", value: String(snapshot.issuedGrants.length) },
               {
-                label: "Currently registered distributions",
-                value: String(snapshot.issuedDistributions.length),
+                label: "Grant provenance records",
+                value: snapshot.grantRecordCount === undefined ? "Unavailable" : String(snapshot.grantRecordCount),
+              },
+              {
+                label: "Distribution provenance records",
+                value: String(snapshot.distributionRecordCount),
                 detail: "Closed, removed, or migrated distribution records shown above remain separate historical evidence.",
               },
             ]}
@@ -569,16 +572,11 @@ function transparencyTotals(dashboard: ProductBoardroomDashboardState): {
   unsettledShareGrantShares?: bigint | undefined;
 } {
   const snapshot = dashboard.snapshot;
-  const grantAddresses = new Set(snapshot.issuedGrants.map((address) => address.toLowerCase()));
-  const distributionAddresses = new Set(snapshot.issuedDistributions.map((address) => address.toLowerCase()));
-  const grants = snapshot.grantSummaries.filter((grant) => grantAddresses.has(grant.address.toLowerCase()));
-  const distributions = snapshot.distributionSummaries.filter((distribution) =>
-    distributionAddresses.has(distribution.address.toLowerCase()));
+  const grants = snapshot.grantSummaries;
+  const distributions = snapshot.distributionSummaries;
   const grantsComplete = dashboard.currentStateCoverage?.grants.complete !== false
-    && grants.length === grantAddresses.size
     && grants.every((grant) => Boolean(grant.state) && !grant.error);
   const distributionsComplete = dashboard.currentStateCoverage?.distributions.complete !== false
-    && distributions.length === distributionAddresses.size
     && distributions.every((distribution) => Boolean(distribution.state) && !distribution.error);
 
   return {

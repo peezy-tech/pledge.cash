@@ -30,6 +30,8 @@ describe("analyzeAction", () => {
       expect(existsSync(join(req.workspaceDir, INPUT_FILENAME))).toBe(true);
       expect(existsSync(join(req.workspaceDir, INSTRUCTIONS_FILENAME))).toBe(true);
       expect(existsSync(join(req.workspaceDir, "docs", "boardroom-protocol.md"))).toBe(true);
+      expect(existsSync(join(req.workspaceDir, "docs", "distribution-protocol.md"))).toBe(true);
+      expect(existsSync(join(req.workspaceDir, "docs", "amm-protocol.md"))).toBe(true);
       expect(existsSync(join(req.workspaceDir, "docs", "abi-excerpts.json"))).toBe(true);
 
       const abiExcerpts = JSON.parse(
@@ -40,10 +42,17 @@ describe("analyzeAction", () => {
       );
       expect(abiExcerpts.Boardroom?.map((item) => item.name)).toEqual(
         expect.arrayContaining([
+          "BoardroomOperationVetoed",
+          "BoardroomSnapshottingStarted",
           "claimRedemptionAsset",
-          "RedemptionAssetClaimFailed",
-          "RedemptionAssetClaimed",
-          "SharesRedeemed"
+          "executeGovernance"
+        ])
+      );
+      expect(abiExcerpts.BoardroomController?.map((item) => item.name)).toEqual(
+        expect.arrayContaining([
+          "BoardroomOperationScheduled",
+          "ControllerOperationScheduled",
+          "updateConfiguration"
         ])
       );
       expect(abiExcerpts.AssetPolicy?.map((item) => item.name)).toEqual(
@@ -60,14 +69,40 @@ describe("analyzeAction", () => {
       expect(abiExcerpts.TokenGrantFactory?.map((item) => item.name)).toEqual(
         expect.arrayContaining(["createGrant", "createGrantFromDistribution", "setCreationFee"])
       );
+      expect(abiExcerpts.LockedLiquidityFactory?.map((item) => item.name)).toEqual(
+        expect.arrayContaining([
+          "ProtocolLiquidityCreated",
+          "MigrationReserved",
+          "createLockedLiquidity",
+          "addLockedLiquidity",
+          "removeLockedLiquidity",
+          "closeLockedLiquidity"
+        ])
+      );
+      expect(abiExcerpts.LockedLiquidity?.map((item) => item.name)).toEqual(
+        expect.arrayContaining(["claimFees", "FeesForwarded", "LiquidityReturnedAsLp"])
+      );
+      expect(abiExcerpts.MigratingBondingCurve?.map((item) => item.name)).toEqual(
+        expect.arrayContaining([
+          "migrate",
+          "cancel",
+          "CurveGraduationLatched",
+          "CurveMigrated",
+          "expire",
+          "fallbackToUnwind",
+          "finalizeUnwind",
+          "openQuoteForfeiture",
+          "finalizeQuoteForfeiture"
+        ])
+      );
 
       await writeFile(
         join(req.workspaceDir, ANALYSIS_FILENAME),
         JSON.stringify({
           affectedParties: ["share holders", "treasury"],
-          effects: ["Executor would be changed."],
-          severityRationale: "The rules already marked this as high because executor control changes.",
-          summary: "This changes the Boardroom executor after the veto window."
+          effects: ["controller would be changed."],
+          severityRationale: "The rules already marked this as high because controller control changes.",
+          summary: "This changes the Boardroom controller after the veto window."
         })
       );
 
@@ -89,7 +124,7 @@ describe("analyzeAction", () => {
     expect(result.source).toBe("harness");
     expect(result.harness).toBe("fake");
     expect(result.model).toBe("fixture-model");
-    expect(result.summary).toBe("This changes the Boardroom executor after the veto window.");
+    expect(result.summary).toBe("This changes the Boardroom controller after the veto window.");
     expect(store.puts).toBe(1);
     expect(capturedWorkspace).toBeDefined();
     expect(existsSync(capturedWorkspace!)).toBe(false);
@@ -103,7 +138,7 @@ describe("analyzeAction", () => {
         join(req.workspaceDir, ANALYSIS_FILENAME),
         JSON.stringify({
           affectedParties: ["share holders"],
-          effects: ["The action calls setExecutor."],
+          effects: ["The operation calls updateConfiguration."],
           severityRationale: "Rules engine severity is high.",
           summary: "Harness result."
         })
@@ -168,7 +203,7 @@ describe("analyzeAction", () => {
     expect(maxActiveRuns).toBe(1);
   });
 
-  test("prioritizes queued harness work by subscriber count", async () => {
+  test("prioritizes scheduled harness work by subscriber count", async () => {
     const store = new MemoryAnalysisStore();
     const workdir = await tempRoot();
     const order: string[] = [];
@@ -219,9 +254,9 @@ describe("analyzeAction", () => {
 
     expect(result.source).toBe("template");
     expect(result.harness).toBe("template");
-    expect(result.summary).toContain("HIGH severity governance action queued");
+    expect(result.summary).toContain("HIGH severity governance operation scheduled");
     expect(result.severityRationale).toContain("ruleset 7");
-    expect(result.effects).toContain("Rule executor-change (high): Changes the executor address.");
+    expect(result.effects).toContain("Rule controller-configuration (high): Changes the controller address.");
   });
 
   test("uses deterministic templates when harness output is missing", async () => {
@@ -446,41 +481,51 @@ function bytes32(value: string): string {
 
 function sampleInput(
   id = "11111111-1111-4111-8111-111111111111",
-  actionHash = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  operationId = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 ): AnalyzeActionInput {
   return {
     action: {
-      actionHash,
+      operationId,
       boardroom: "0x1111111111111111111111111111111111111111",
+      boardroomEpoch: 2n,
       chainId: 31337,
+      configurationEpoch: 1n,
+      controller: "0x2222222222222222222222222222222222222222",
+      controllerGeneration: 1n,
       decodeStatus: "decoded",
       eta: new Date("2026-07-10T00:00:00.000Z"),
-      executor: "0x2222222222222222222222222222222222222222",
       id,
-      queueBlock: 123n,
-      queueTxHash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      operationKind: "controller",
+      proposer: "0x3333333333333333333333333333333333333333",
+      scheduleBlock: 123n,
+      scheduleTxHash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       rawCalldata: "0x12345678",
       salt: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-      status: "queued"
+      status: "scheduled"
     },
     boardroom: {
       address: "0x1111111111111111111111111111111111111111",
       chainId: 31337,
-      executor: "0x2222222222222222222222222222222222222222",
-      governanceDelay: 86_400n,
+      configurationEpoch: 1n,
+      controller: "0x2222222222222222222222222222222222222222",
+      controllerGeneration: 1n,
+      controllerDelay: 86_400n,
+      gracePeriod: 604_800n,
       launched: true,
       name: "Test Boardroom",
       owner: "0x3333333333333333333333333333333333333333",
+      proposer: "0x3333333333333333333333333333333333333333",
       shareToken: "0x4444444444444444444444444444444444444444",
-      status: "active"
+      status: "active",
+      windDownDelay: 86_400n
     },
     calls: [
       {
         actionId: id,
         callIndex: 0,
         data: "0xabcdef01",
-        decodedArgs: { executor: "0x5555555555555555555555555555555555555555" },
-        decodedFunction: "setExecutor",
+        decodedArgs: { controller: "0x5555555555555555555555555555555555555555" },
+        decodedFunction: "updateConfiguration",
         policy: "0x0000000000000000000000000000000000000000",
         selector: "0xabcdef01",
         target: "0x1111111111111111111111111111111111111111",
@@ -493,8 +538,8 @@ function sampleInput(
       findings: [
         {
           callIndex: 0,
-          detail: "Changes the executor address.",
-          ruleId: "executor-change",
+          detail: "Changes the controller address.",
+          ruleId: "controller-configuration",
           severity: "high"
         }
       ],

@@ -33,9 +33,12 @@ Connect the operator wallet and open `Studio`. Choose an existing Boardroom or s
 
 ## I stake for governance power
 
-Open the project’s `Governance` section to inspect current authority, review delay, veto threshold, wind-down threshold, and queued decisions. Connect only when you need the app to compare your current and previous-block active stake or authorize an available action.
+Open the project’s `Governance` section to inspect controller/proposer authority, generation, epochs, delay, veto and
+wind-down thresholds, and scheduled operations. Connect only when the app must compare current and previous-block stake
+or authorize an available action.
 
-Creating a new secure governance launch is currently unavailable for the deployed Boardroom version. Existing launched Boardrooms can still expose their verified queue and staker actions when supported by their state.
+External-controller launch and governance writes require a verified v5 deployment. Legacy Boardrooms remain readable
+but fail closed. No public v5 artifact is currently broadcast.
 
 ## I need raw diagnostics or alerts
 

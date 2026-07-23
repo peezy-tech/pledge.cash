@@ -5,11 +5,14 @@ import { fileURLToPath } from "node:url";
 import {
   assetPolicyAbi,
   boardroomAbi,
+  boardroomControllerAbi,
   boardroomPolicyRegistryAbi,
   boardroomTokenAbi,
   distributionFactoryAbi,
   erc20Abi,
+  lockedLiquidityAbi,
   lockedLiquidityFactoryAbi,
+  migratingBondingCurveAbi,
   tokenGrantFactoryAbi
 } from "@pledge.cash/sdk";
 
@@ -46,7 +49,9 @@ export async function prepareAnalysisWorkspace(
     writeFile(inputPath, `${JSON.stringify(toWorkspaceInput(input), jsonReplacer, 2)}\n`),
     writeFile(instructionsPath, ANALYSIS_INSTRUCTIONS),
     writeFile(abiExcerptsPath, `${JSON.stringify(abiExcerpts(), null, 2)}\n`),
-    copyProtocolDoc(join(docsDir, "boardroom-protocol.md"))
+    copyProtocolDoc("boardroom-protocol.md", join(docsDir, "boardroom-protocol.md")),
+    copyProtocolDoc("distribution-protocol.md", join(docsDir, "distribution-protocol.md")),
+    copyProtocolDoc("amm-protocol.md", join(docsDir, "amm-protocol.md"))
   ]);
 
   return { abiExcerptsPath, docsDir, inputPath, instructionsPath, workspaceDir };
@@ -57,7 +62,7 @@ export async function cleanupAnalysisWorkspace(workspaceDir: string): Promise<vo
 }
 
 function workspaceName(input: AnalyzeActionInput): string {
-  return `${input.action.chainId}-${input.action.actionHash}`.replace(/[^a-zA-Z0-9_.-]/g, "_");
+  return `${input.action.chainId}-${input.action.operationId}`.replace(/[^a-zA-Z0-9_.-]/g, "_");
 }
 
 function toWorkspaceInput(input: AnalyzeActionInput): unknown {
@@ -78,9 +83,9 @@ function jsonReplacer(_key: string, value: unknown): unknown {
   return typeof value === "bigint" ? value.toString() : value;
 }
 
-async function copyProtocolDoc(targetPath: string): Promise<void> {
+async function copyProtocolDoc(sourceName: string, targetPath: string): Promise<void> {
   await mkdir(dirname(targetPath), { recursive: true });
-  await cp(join(repoRoot, "docs/boardroom-protocol.md"), targetPath);
+  await cp(join(repoRoot, "docs", sourceName), targetPath);
 }
 
 type AbiItem = {
@@ -92,29 +97,49 @@ function abiExcerpts(): Record<string, readonly unknown[]> {
   return {
     AssetPolicy: selectAbi(assetPolicyAbi, ["canCall", "setApprovalSpenderAllowed", "setAssetAllowed"]),
     Boardroom: selectAbi(boardroomAbi, [
-      "BoardroomActionCancelled",
-      "BoardroomActionExecuted",
-      "BoardroomActionQueued",
+      "BoardroomCallExecuted",
+      "BoardroomControllerReplaced",
       "BoardroomLaunched",
+      "BoardroomOperationVetoed",
       "BoardroomRedemptionsOpened",
-      "ExecutorSet",
+      "BoardroomSnapshottingStarted",
+      "BondingCurvePrecommitted",
+      "PrimaryMarketModeChanged",
+      "ProtocolLiquidityActivated",
+      "ProtocolLiquidityClosed",
+      "ProtocolLiquidityReservationReleased",
+      "ProtocolLiquidityReserved",
       "RedeemableAssetRegistered",
       "RedemptionAssetClaimFailed",
       "RedemptionAssetClaimed",
       "SharesRedeemed",
-      "cancelAction",
+      "beginSnapshot",
+      "closeProtocolLiquidityAfterWindDown",
       "claimRedemptionAsset",
       "execute",
       "executeBatch",
-      "executeQueuedAction",
-      "executeQueuedBatch",
+      "executeGovernance",
+      "exitProtocolLiquidity",
       "mint",
-      "queueAction",
-      "queueBatch",
       "redeem",
       "registerRedeemableAsset",
-      "setExecutor",
+      "replaceController",
+      "returnProtocolLiquidityAsLp",
+      "snapshotAssets",
       "startWindDown"
+    ]),
+    BoardroomController: selectAbi(boardroomControllerAbi, [
+      "BoardroomOperationScheduled",
+      "ConfigurationUpdated",
+      "ControllerOperationScheduled",
+      "OperationCancelled",
+      "OperationExecuted",
+      "cancelOperation",
+      "executeBoardroomOperation",
+      "executeControllerOperation",
+      "scheduleBoardroomOperation",
+      "scheduleControllerOperation",
+      "updateConfiguration"
     ]),
     BoardroomPolicyRegistry: selectAbi(boardroomPolicyRegistryAbi, [
       "ModulePolicyRegistered",
@@ -133,7 +158,50 @@ function abiExcerpts(): Record<string, readonly unknown[]> {
       "pruneClosedDistributions"
     ]),
     ERC20: selectAbi(erc20Abi, ["approve", "transfer", "transferFrom"]),
-    LockedLiquidityFactory: selectAbi(lockedLiquidityFactoryAbi, ["createLockedLiquidityForBoardroom"]),
+    LockedLiquidityFactory: selectAbi(lockedLiquidityFactoryAbi, [
+      "MigrationReservationReleased",
+      "MigrationReserved",
+      "ProtocolLiquidityAdded",
+      "ProtocolLiquidityCreated",
+      "ProtocolLiquidityPositionClosed",
+      "ProtocolLiquidityRemoved",
+      "addLockedLiquidity",
+      "closeLockedLiquidity",
+      "createLockedLiquidity",
+      "createLockedLiquidityForBoardroom",
+      "removeLockedLiquidity"
+    ]),
+    LockedLiquidity: selectAbi(lockedLiquidityAbi, [
+      "FeesForwarded",
+      "LiquidityAdded",
+      "LiquidityClosed",
+      "LiquidityRemoved",
+      "LiquidityReturnedAsLp",
+      "LockedLiquidityInitialized",
+      "claimFees"
+    ]),
+    MigratingBondingCurve: selectAbi(migratingBondingCurveAbi, [
+      "CurveGraduationLatched",
+      "CurveMigrated",
+      "CurvePhaseChanged",
+      "CurveQuoteQuarantined",
+      "CurveQuoteRecovered",
+      "CurveUnwindFinalized",
+      "ForfeitedQuoteRecovered",
+      "QuoteForfeitureFinalized",
+      "QuoteForfeitureOpened",
+      "QuoteForfeitureVetoed",
+      "cancel",
+      "expire",
+      "fallbackToUnwind",
+      "finalizeQuoteForfeiture",
+      "finalizeUnwind",
+      "migrate",
+      "openQuoteForfeiture",
+      "recoverForfeitedQuote",
+      "recoverQuarantinedQuote",
+      "vetoQuoteForfeiture"
+    ]),
     TokenGrantFactory: selectAbi(tokenGrantFactoryAbi, [
       "createGrant",
       "createGrantFromDistribution",

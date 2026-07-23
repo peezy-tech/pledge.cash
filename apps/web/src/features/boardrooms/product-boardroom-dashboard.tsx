@@ -600,7 +600,7 @@ function dashboardOverviewStatus(
 
 function openCommitmentsLabel(snapshot: BoardroomSnapshot | undefined): string {
   if (!snapshot) return "Unknown";
-  return `${snapshot.issuedGrants.length} grants / ${snapshot.issuedDistributions.length} distributions / ${snapshot.lockedLiquidityPositions.length} lockers`;
+  return `${snapshot.activeGrantCount.toString()} grants / ${snapshot.activeDistributionCount.toString()} distributions / ${snapshot.activeLiquidityCount.toString()} liquidity positions`;
 }
 
 function dashboardDistributionBadge(distribution: BoardroomDistributionSnapshot): { label: string; tone: StatusTone } {

@@ -132,10 +132,6 @@ contract BoardroomRewardsFactory is IBoardroomObligationPolicy {
         return rewardsBoardroom[target] == boardroom && selector == BoardroomRewards.terminalize.selector;
     }
 
-    function grantSlotReleaseForLifecycleCall(address, address, bytes4) external pure returns (address) {
-        return address(0);
-    }
-
     function predictRewardsAddress(address boardroom, bytes32 salt) external view returns (address) {
         return LibClone.predictDeterministicAddress(rewardsLogic, _cloneSalt(boardroom, salt), address(this));
     }

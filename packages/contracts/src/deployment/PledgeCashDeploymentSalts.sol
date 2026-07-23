@@ -5,8 +5,12 @@ import {AmmFactory} from "../amm/AmmFactory.sol";
 import {AmmRouter} from "../amm/AmmRouter.sol";
 import {BondMarketFactory} from "../bonds/BondMarketFactory.sol";
 import {AssetPolicy} from "../policy/AssetPolicy.sol";
+import {Boardroom} from "../boardroom/Boardroom.sol";
+import {BoardroomController} from "../boardroom/BoardroomController.sol";
+import {BoardroomControllerFactory} from "../boardroom/BoardroomControllerFactory.sol";
 import {BoardroomFactory} from "../boardroom/BoardroomFactory.sol";
 import {BoardroomGovernanceLogic} from "../boardroom/BoardroomGovernanceLogic.sol";
+import {BoardroomMarketLogic} from "../boardroom/BoardroomMarketLogic.sol";
 import {BoardroomPolicyRegistry} from "../boardroom/BoardroomPolicyRegistry.sol";
 import {BoardroomRedemptionPayout} from "../boardroom/BoardroomRedemptionPayout.sol";
 import {DistributionFactory} from "../distribution/DistributionFactory.sol";
@@ -16,7 +20,7 @@ import {LockedLiquidityFactory} from "../liquidity/LockedLiquidityFactory.sol";
 import {BoardroomRewardsFactory} from "../rewards/BoardroomRewardsFactory.sol";
 
 library PledgeCashDeploymentSalts {
-    string internal constant VERSION = "pledge.cash.deterministic.v4";
+    string internal constant VERSION = "pledge.cash.deterministic.v5";
 
     bytes32 internal constant DETERMINISTIC_DEPLOYER =
         keccak256("pledge.cash.deterministic.v1.PledgeCashDeterministicDeployer");
@@ -81,6 +85,18 @@ library PledgeCashDeploymentSalts {
         return _releaseSalt("BoardroomFactory", keccak256(type(BoardroomFactory).creationCode));
     }
 
+    function boardroomArchitectureCodeHash() internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                keccak256(type(BoardroomFactory).creationCode),
+                keccak256(type(BoardroomControllerFactory).creationCode),
+                keccak256(type(BoardroomController).creationCode),
+                keccak256(type(BoardroomMarketLogic).creationCode),
+                keccak256(type(Boardroom).creationCode)
+            )
+        );
+    }
+
     function releaseCodeHash() internal pure returns (bytes32) {
         return keccak256(
             abi.encode(
@@ -96,7 +112,7 @@ library PledgeCashDeploymentSalts {
                 keccak256(type(DistributionFactory).creationCode),
                 keccak256(type(BoardroomRewardsFactory).creationCode),
                 keccak256(type(BondMarketFactory).creationCode),
-                keccak256(type(BoardroomFactory).creationCode)
+                boardroomArchitectureCodeHash()
             )
         );
     }

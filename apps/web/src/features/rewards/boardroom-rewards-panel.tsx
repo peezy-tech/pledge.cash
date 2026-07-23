@@ -1,4 +1,5 @@
 import {
+  assertLiveBoardroomControlRelease,
   buildBoardroomRewardFundingCalls,
   buildBoardroomRewardsClaimTransaction,
   buildBoardroomRewardsCompleteUnstakeTransaction,
@@ -13,8 +14,8 @@ import {
   type Address,
   type BoardroomRewardsAccountState,
   type BoardroomRewardsState,
+  type BoardroomControlProofClient,
   type PledgeCashDeployment,
-  type PledgeCashReadClient,
 } from "@pledge.cash/sdk";
 import { CheckCircle2, LockKeyhole, TimerReset, WalletCards } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
@@ -22,6 +23,7 @@ import { ActionButton, AddressLink } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
+import { boardroomControlReleaseSupport } from "../../lib/deployment";
 import { errorMessage, randomSalt, requireAddress, uintInput } from "../../lib/forms";
 import type { ProductBoardroomDashboardState } from "../../lib/product-boardroom";
 import {
@@ -33,6 +35,7 @@ import {
   type TokenMetadata,
 } from "../../lib/token-amounts";
 import { KeyValueList, PageNotice, SectionHeading } from "../../app/pages/page-primitives";
+import type { Capability } from "../capabilities/project-capabilities";
 
 type RewardsSubmitTransaction = (label: string, request: Record<string, unknown>) => Promise<unknown>;
 type RewardsRunAction = (actionId: string, action: () => Promise<void>) => Promise<void>;
@@ -42,8 +45,9 @@ export type BoardroomRewardsPanelProps = {
   dashboard: ProductBoardroomDashboardState;
   deployment?: PledgeCashDeployment | undefined;
   operatorMode?: boolean | undefined;
+  operatorCapability?: Capability | undefined;
   pendingAction: string | undefined;
-  publicClient: PledgeCashReadClient;
+  publicClient: BoardroomControlProofClient;
   runAction: RewardsRunAction;
   submitTransaction: RewardsSubmitTransaction;
 };
@@ -53,6 +57,7 @@ export function BoardroomRewardsPanel({
   dashboard,
   deployment,
   operatorMode = false,
+  operatorCapability,
   pendingAction,
   publicClient,
   runAction,
@@ -110,7 +115,11 @@ export function BoardroomRewardsPanel({
   const governanceShare = dashboard.snapshot.governanceEligibleSupply === 0n
     ? 0
     : Number(activeShare * 10_000n / dashboard.snapshot.governanceEligibleSupply) / 100;
-  const canOperatePool = dashboard.snapshot.status === 0 && Boolean(deployment?.boardroomRewardsFactory);
+  const releaseSupport = boardroomControlReleaseSupport(deployment);
+  const canOperatePool = dashboard.snapshot.status === 0
+    && releaseSupport.supported
+    && operatorCapability?.status === "enabled"
+    && Boolean(deployment?.boardroomRewardsFactory);
 
   const submitAndRefresh = async (label: string, request: Record<string, unknown>): Promise<void> => {
     await submitTransaction(label, request);
@@ -136,6 +145,9 @@ export function BoardroomRewardsPanel({
   };
 
   const createPool = async (): Promise<void> => {
+    if (operatorCapability?.status !== "enabled") throw new Error(operatorCapability?.reason ?? "This wallet cannot manage Boardroom rewards.");
+    if (!releaseSupport.supported) throw new Error(releaseSupport.reason ?? "This Boardroom release is read-only.");
+    await assertLiveBoardroomControlRelease(publicClient, deployment, dashboard.address);
     const factory = deployment?.boardroomRewardsFactory;
     if (!factory) throw new Error("Boardroom reward factory is missing from this deployment.");
     const days = uintInput(cooldownDays, "Cooldown days");
@@ -144,16 +156,26 @@ export function BoardroomRewardsPanel({
     const plan = planBoardroomCallExecution({
       boardroom: dashboard.address,
       calls: [call],
-      lifecycle: { launched: dashboard.snapshot.launched, status: dashboard.snapshot.status },
+      lifecycle: {
+        launched: dashboard.snapshot.launched,
+        status: dashboard.snapshot.status,
+        controller: dashboard.snapshot.controller,
+        governanceEpoch: dashboard.snapshot.governanceEpoch,
+        controllerConfigurationEpoch: dashboard.snapshot.controllerConfigurationEpoch,
+        proposer: dashboard.snapshot.proposer,
+      },
       ...(dashboard.snapshot.launched ? { salt: randomSalt() } : {}),
     });
     await submitAndRefresh(
-      plan.kind === "queue" ? "Queue Boardroom reward pool creation" : "Create Boardroom reward pool",
+      plan.kind === "schedule" ? "Schedule Boardroom reward pool creation" : "Create Boardroom reward pool",
       plan.transaction,
     );
   };
 
   const fundReward = async (): Promise<void> => {
+    if (operatorCapability?.status !== "enabled") throw new Error(operatorCapability?.reason ?? "This wallet cannot manage Boardroom rewards.");
+    if (!releaseSupport.supported) throw new Error(releaseSupport.reason ?? "This Boardroom release is read-only.");
+    await assertLiveBoardroomControlRelease(publicClient, deployment, dashboard.address);
     const factory = deployment?.boardroomRewardsFactory;
     const assetPolicy = deployment?.assetPolicy;
     if (!factory || !assetPolicy) throw new Error("Reward factory or asset policy is missing from this deployment.");
@@ -174,10 +196,17 @@ export function BoardroomRewardsPanel({
     const plan = planBoardroomCallExecution({
       boardroom: dashboard.address,
       calls,
-      lifecycle: { launched: dashboard.snapshot.launched, status: dashboard.snapshot.status },
+      lifecycle: {
+        launched: dashboard.snapshot.launched,
+        status: dashboard.snapshot.status,
+        controller: dashboard.snapshot.controller,
+        governanceEpoch: dashboard.snapshot.governanceEpoch,
+        controllerConfigurationEpoch: dashboard.snapshot.controllerConfigurationEpoch,
+        proposer: dashboard.snapshot.proposer,
+      },
       ...(dashboard.snapshot.launched ? { salt: randomSalt() } : {}),
     });
-    await submitAndRefresh(plan.kind === "queue" ? "Queue Boardroom reward funding" : "Fund Boardroom rewards", plan.transaction);
+    await submitAndRefresh(plan.kind === "schedule" ? "Schedule Boardroom reward funding" : "Fund Boardroom rewards", plan.transaction);
     setRewardAmount("");
   };
 
@@ -193,6 +222,22 @@ export function BoardroomRewardsPanel({
         ) : undefined}
       />
 
+      {operatorMode && !releaseSupport.supported ? (
+        <div className="mt-4">
+          <PageNotice title="Boardroom controls are read-only" tone="warning">
+            {releaseSupport.reason ?? "This deployment does not identify the accepted secure Boardroom release."}
+          </PageNotice>
+        </div>
+      ) : null}
+
+      {operatorMode && releaseSupport.supported && operatorCapability?.status !== "enabled" ? (
+        <div className="mt-4">
+          <PageNotice title="Reward controls require current authority" tone="warning">
+            {operatorCapability?.reason ?? "Only the current owner before launch or controller proposer after launch may make this change."}
+          </PageNotice>
+        </div>
+      ) : null}
+
       {!poolExists ? (
         <div className="mt-4">
           <PageNotice title="Staking is not enabled">
@@ -205,8 +250,8 @@ export function BoardroomRewardsPanel({
                 <Input inputMode="numeric" value={cooldownDays} onChange={(event) => setCooldownDays(event.target.value)} />
               </Label>
               <div className="mt-3">
-                <ActionButton actionId="create-boardroom-rewards" disabled={!canOperatePool} pendingAction={pendingAction} onClick={() => void runAction("create-boardroom-rewards", createPool)}>
-                  {dashboard.snapshot.launched ? "Queue reward pool" : "Create reward pool"}
+                <ActionButton actionId="create-boardroom-rewards" disabled={!canOperatePool} pendingAction={pendingAction} title={operatorCapability?.reason} onClick={() => void runAction("create-boardroom-rewards", createPool)}>
+                  {dashboard.snapshot.launched ? "Schedule reward pool" : "Create reward pool"}
                 </ActionButton>
               </div>
             </div>
@@ -310,8 +355,8 @@ export function BoardroomRewardsPanel({
                 <Label className="text-zinc-400"><span>Duration in days</span><Input inputMode="numeric" value={rewardDurationDays} onChange={(event) => setRewardDurationDays(event.target.value)} /></Label>
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-3">
-                <ActionButton actionId="fund-boardroom-rewards" disabled={!canOperatePool || !rewardAsset.trim() || !rewardAmount.trim()} pendingAction={pendingAction} onClick={() => void runAction("fund-boardroom-rewards", fundReward)}>
-                  {dashboard.snapshot.launched ? "Queue reward funding" : "Fund rewards"}
+                <ActionButton actionId="fund-boardroom-rewards" disabled={!canOperatePool || !rewardAsset.trim() || !rewardAmount.trim()} pendingAction={pendingAction} title={operatorCapability?.reason} onClick={() => void runAction("fund-boardroom-rewards", fundReward)}>
+                  {dashboard.snapshot.launched ? "Schedule reward funding" : "Fund rewards"}
                 </ActionButton>
                 <span className="text-xs text-zinc-500">Pool <AddressLink address={rewardPool} /></span>
               </div>

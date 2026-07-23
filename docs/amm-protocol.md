@@ -76,8 +76,8 @@ Boardroom shares in the pool. Later public LP positions remain independently own
 3. Seeded once through the factory. LP tokens are held by the locker.
 4. Active fee-claiming phase. Principal remains locked.
 5. Boardroom wind-down exit. The locker claims fees, removes all LP it owns, and sends underlying tokens to the Boardroom.
-6. Closed locker may be pruned from the factory's bounded active list. Its permanent locker, Boardroom, and pool identity
-   mappings remain intact.
+6. The empty locker closes explicitly. Its permanent locker, Boardroom, quote-asset, and pool identity remain intact;
+   the singleton cannot be replaced.
 
 ### Boardroom
 
@@ -185,24 +185,23 @@ router or pool interaction with the expectation that they remain recoverable.
 
 ### Create Boardroom Locked Liquidity
 
-Boardroom governance executes a batch, directly by the owner before launch or through an executor-queued action after
-launch:
+Boardroom governance executes a batch, directly by the owner before launch or through a proposer-scheduled controller
+operation after launch:
 
 1. approve `LockedLiquidityFactory` for the Boardroom share token,
 2. approve `LockedLiquidityFactory` for the quote token,
 3. call `createLockedLiquidity`.
 
-The factory policy permits creation only when exactly one side is a canonical Boardroom share token and that share belongs
-to the creating Boardroom. Canonical share/share pairs are rejected because one Boardroom cannot authenticate AMM
-custody on behalf of the other token's governance. The factory pulls exact seed amounts from the Boardroom to the
-locker, then asks the locker to add liquidity through the router. The Boardroom records the returned locker.
+The factory policy permits creation only when exactly one side is the creating Boardroom's canonical share token. The
+Boardroom can configure exactly one permanent quote asset, locker, and pool. Canonical share/share pairs are rejected.
+The factory precommits the singleton, verifies the pool is unseeded, pulls exact seed amounts to the predicted locker,
+and activates the Boardroom position atomically. Repeated additions must use that same locker and pool.
 
 ### Claim Locked LP Fees
 
 The Boardroom may call `LockedLiquidity.claimFees` through policy while active or winding down. Before launch its owner
-can request the call directly; after launch active-state calls are queued, while a recorded locker's canonical
-zero-value lifecycle call can be submitted permissionlessly during wind-down. The locker claims its LP fees from the
-pool and forwards token balances to the Boardroom.
+can request the call directly; after launch active-state calls use the external controller. The locker claims its LP
+fees from the pool and forwards token balances to the Boardroom.
 
 ### Exit Locked LP
 
@@ -228,20 +227,17 @@ excluded because later public LP positions may own them.
 Redemptions can open only after all recorded lockers report zero locked LP. Unreserved pools retain permanently locked
 first-liquidity dust; a reserved pool has none unless later public liquidity changes the ownership set.
 
-### Prune Closed Lockers
+### Close The Singleton
 
-Anyone may call `LockedLiquidityFactory.pruneClosedLockers(boardroom)` to remove zero-principal lockers from the
-factory's bounded active list. Creation also performs this bounded pruning before enforcing capacity. Pruning never
-clears `isLocker`, `lockerBoardroom`, or `lockerForBoardroomPool`, so historical identity and the one-locker-per-pool
-rule remain permanent even though active capacity is restored.
+LP balance zero does not mean closed. Closure is a separate empty-only, reservation-free transition. It is irreversible
+and never clears the permanent quote asset, locker, or pool identity. During wind-down anyone may perform full exit and
+explicit closure; hostile-token fallback returns the LP claim to the Boardroom rather than blocking snapshotting.
 
 ## Bounds
 
 - `AmmRouter.MAX_SWAP_PATH_LENGTH` bounds swap path loops.
 - `AmmPool.MAX_SAMPLE_POINTS` bounds TWAP sample output size.
-- `LockedLiquidityFactory.MAX_LOCKERS_PER_BOARDROOM` bounds active lockers recorded by the factory; zero-principal
-  lockers can be pruned permissionlessly or during the next creation.
-- `Boardroom.MAX_LOCKED_LIQUIDITY_POSITIONS` bounds wind-down locker checks.
+- One explicit-state protocol-liquidity position exists per Boardroom; it is not an array capacity.
 - Boardroom batch execution remains bounded by `Boardroom.MAX_BATCH_CALLS`.
 
 `AmmPool.sample` locates observations with binary search, so lookup cost grows logarithmically with history. It rejects

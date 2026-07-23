@@ -17,11 +17,13 @@ export type ProjectCapability =
   | "studio.createDistribution"
   | "studio.manageLiquidity"
   | "governance.launch"
-  | "governance.queue"
+  | "governance.schedule"
   | "governance.veto"
   | "governance.executeReady"
   | "windDown.start"
   | "windDown.registerAsset"
+  | "windDown.beginSnapshot"
+  | "windDown.processSnapshot"
   | "windDown.openRedemptions"
   | "redemption.redeem";
 
@@ -41,12 +43,13 @@ export type ProjectCapabilityContext = {
   walletChainId?: number | undefined;
   project?: {
     owner: Address;
-    executor: Address;
+    proposer: Address;
     launched: boolean;
-    status: "active" | "winding-down" | "redemptions-open" | "closed";
+    status: "active" | "winding-down" | "snapshotting" | "redemptions-open" | "closed";
     launchReady?: boolean | undefined;
     launchBlockedReason?: string | undefined;
     windDownBlockers?: number | undefined;
+    snapshotComplete?: boolean | undefined;
   } | undefined;
   wallet?: {
     shareBalance?: bigint | undefined;
@@ -54,7 +57,7 @@ export type ProjectCapabilityContext = {
     windDownEligible?: boolean | undefined;
   } | undefined;
   governance?: {
-    queuedActionCount?: number | undefined;
+    scheduledOperationCount?: number | undefined;
     readyActionCount?: number | undefined;
   } | undefined;
   opportunities?: Partial<Record<OpportunityCapability, CapabilityOpportunity>> | undefined;
@@ -84,11 +87,13 @@ const PROJECT_CAPABILITIES: ProjectCapability[] = [
   "studio.createDistribution",
   "studio.manageLiquidity",
   "governance.launch",
-  "governance.queue",
+  "governance.schedule",
   "governance.veto",
   "governance.executeReady",
   "windDown.start",
   "windDown.registerAsset",
+  "windDown.beginSnapshot",
+  "windDown.processSnapshot",
   "windDown.openRedemptions",
   "redemption.redeem",
 ];
@@ -119,7 +124,7 @@ export function resolveProjectCapabilities(context: ProjectCapabilityContext): P
 
   const active = project.status === "active";
   const ownerAuthority = !project.launched && sameAddress(context.account, project.owner);
-  const executorAuthority = project.launched && sameAddress(context.account, project.executor);
+  const proposerAuthority = project.launched && sameAddress(context.account, project.proposer);
 
   for (const key of ["studio.mint", "studio.createGrant", "studio.createDistribution", "studio.manageLiquidity"] as const) {
     if (!active) {
@@ -127,19 +132,19 @@ export function resolveProjectCapabilities(context: ProjectCapabilityContext): P
     } else {
       capabilities[key] = authorityCapability(
         context,
-        ownerAuthority || executorAuthority,
-        project.launched ? "Only the project executor can queue this change." : "Only the project owner can make this change before launch.",
+        ownerAuthority || proposerAuthority,
+        project.launched ? "Only the controller proposer can schedule this change." : "Only the project owner can make this change before launch.",
       );
     }
   }
 
   capabilities["governance.launch"] = launchCapability(context);
-  capabilities["governance.queue"] = project.launched && active
-    ? authorityCapability(context, executorAuthority, "Only the project executor can queue a governance change.")
+  capabilities["governance.schedule"] = project.launched && active
+    ? authorityCapability(context, proposerAuthority, "Only the controller proposer can schedule a governance operation.")
     : hidden();
 
-  const queuedActionCount = context.governance?.queuedActionCount ?? 0;
-  capabilities["governance.veto"] = project.launched && active && queuedActionCount > 0
+  const scheduledOperationCount = context.governance?.scheduledOperationCount ?? 0;
+  capabilities["governance.veto"] = project.launched && active && scheduledOperationCount > 0
     ? authorityCapability(context, context.wallet?.vetoEligible === true, "This wallet does not have enough eligible governance power to veto.")
     : hidden();
 
@@ -151,20 +156,28 @@ export function resolveProjectCapabilities(context: ProjectCapabilityContext): P
   capabilities["windDown.start"] = windDownStartCapability(context);
 
   const windingDown = project.status === "winding-down";
-  if (windingDown) {
-    const authorized = project.launched ? context.wallet?.windDownEligible === true : ownerAuthority;
+  if (windingDown && !project.launched) {
     capabilities["windDown.registerAsset"] = authorityCapability(
       context,
-      authorized,
-      project.launched
-        ? "This wallet does not have enough eligible governance power to manage wind-down assets."
-        : "Only the project owner can manage wind-down assets before launch.",
+      ownerAuthority,
+      "Only the project owner can manage wind-down assets before launch.",
     );
-    capabilities["windDown.openRedemptions"] = walletGate(context);
   } else {
     capabilities["windDown.registerAsset"] = hidden();
-    capabilities["windDown.openRedemptions"] = hidden();
   }
+
+  capabilities["windDown.beginSnapshot"] = windingDown
+    ? (project.windDownBlockers ?? 0) === 0
+      ? walletGate(context)
+      : blocked("Every active obligation and protocol-liquidity reservation must close before snapshotting.")
+    : hidden();
+  const snapshotting = project.status === "snapshotting";
+  capabilities["windDown.processSnapshot"] = snapshotting && project.snapshotComplete !== true
+    ? walletGate(context)
+    : hidden();
+  capabilities["windDown.openRedemptions"] = snapshotting && project.snapshotComplete === true
+    ? walletGate(context)
+    : hidden();
 
   capabilities["redemption.redeem"] = redemptionCapability(context);
   return capabilities;

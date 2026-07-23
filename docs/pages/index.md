@@ -27,7 +27,7 @@ Every canonical project workspace uses the same sequence:
 
 1. **Overview** — identify the Boardroom, project token, lifecycle, and available actions.
 2. **Participate** — compare the exact bond, sale, curve, airdrop, or AMM routes discovered for that project.
-3. **Governance** — see who can act, what is queued, and when active stakers can intervene.
+3. **Governance** — see the controller/proposer, scheduled operations, and when active stakers can intervene.
 4. **Transparency** — inspect treasury assets, supply, obligations, distributions, liquidity, and provenance.
 
 See [Project workspace](using/project-workspace) for what each section proves—and what it does not.
@@ -46,7 +46,9 @@ Read [Use pledge.cash safely](start/use-safely) and [Transactions and wallet act
 
 The public HyperEVM testnet and Monad testnet deployment artifacts are currently marked **pending**. They do not contain a usable current contract stack. The HQ environment exposes a seeded local Anvil scenario for product testing, not a durable public deployment.
 
-Secure governance launch is also unavailable for the current legacy Boardroom version because its launch calldata does not bind the expected executor. The app intentionally refuses to submit or certify that permanent transition.
+External-controller launch is available only to a verified v5 candidate deployment. Legacy Boardrooms remain readable
+but fail closed for launch and control writes. No public v5 artifact is currently broadcast, and the project remains a
+mainnet NO-GO.
 
 Read [Networks and current limitations](start/networks-and-limitations) before interacting with any claimed deployment.
 

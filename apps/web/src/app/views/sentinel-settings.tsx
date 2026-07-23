@@ -59,7 +59,7 @@ export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSett
       <WorkspaceHeader
         eyebrow="Notifications"
         title="Governance alerts"
-        description="Get notified when queued governance actions affect wallets you control. Social sign-in establishes an alert identity only; it is not a transaction wallet and cannot authorize onchain actions."
+        description="Get notified when controller governance operations affect wallets you control. Social sign-in establishes an alert identity only; it is not a transaction wallet and cannot authorize onchain actions."
         action={
           session.authenticated ? (
             <div className="flex flex-wrap gap-2">
@@ -79,7 +79,7 @@ export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSett
         <GovernanceActivity
           boardroom={focus.boardroom}
           chainId={focus.chainId ?? governanceChainId}
-          highlightActionHash={focus.actionHash}
+          highlightOperationId={focus.operationId}
         />
       ) : null}
       {session.loading && !session.me ? <LoadingPanel /> : null}
@@ -131,7 +131,7 @@ export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSett
 }
 
 export function notificationFocusFromLocation(search?: string): {
-  readonly actionHash?: string;
+  readonly operationId?: string;
   readonly boardroom?: Address;
   readonly chainId?: number;
   readonly returnHref?: string;
@@ -145,18 +145,18 @@ export function notificationFocusFromLocation(search?: string): {
 }
 
 export function notificationFocusFromSearch(search: string): {
-  readonly actionHash?: string;
+  readonly operationId?: string;
   readonly boardroom?: Address;
   readonly chainId?: number;
   readonly returnHref?: string;
 } {
   const params = new URLSearchParams(search);
   const boardroom = normalizedHexParam(params.get("boardroom"), 20);
-  const actionHash = normalizedHexParam(params.get("action"), 32);
+  const operationId = normalizedHexParam(params.get("operation"), 32);
   const chainId = normalizedChainIdParam(params.get("chain"));
   const returnHref = safeReturnHref(params.get("return"));
   return {
-    ...(actionHash === undefined ? {} : { actionHash }),
+    ...(operationId === undefined ? {} : { operationId }),
     ...(boardroom === undefined ? {} : { boardroom: boardroom as Address }),
     ...(chainId === undefined ? {} : { chainId }),
     ...(returnHref === undefined ? {} : { returnHref }),

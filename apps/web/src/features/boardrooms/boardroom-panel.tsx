@@ -8,6 +8,7 @@ import type {
   PledgeCashDeployment,
 } from "@pledge.cash/sdk";
 import {
+  ArrowDownToLine,
   CheckCircle2,
   Coins,
   Flame,
@@ -154,12 +155,20 @@ export function BoardroomPanel({
     snapshot: migratingCurveSnapshot,
     cancel: cancelMigratingCurve,
     create: createMigratingCurve,
+    expire: expireMigratingCurve,
+    fallbackToUnwind: fallbackMigratingCurve,
+    finalizeForfeiture: finalizeMigratingCurveForfeiture,
+    finalizeUnwind: finalizeMigratingCurveUnwind,
     load: loadMigratingCurve,
     migrate: migrateCurve,
+    openForfeiture: openMigratingCurveForfeiture,
     predict: predictMigratingCurve,
+    recoverForfeitedQuote: recoverMigratingCurveForfeitedQuote,
+    recoverQuote: recoverMigratingCurveQuote,
     setCurveMigrationForm,
     setMigratingCurveAddress,
     setMigratingCurveForm,
+    vetoForfeiture: vetoMigratingCurveForfeiture,
   } = migratingCurve;
   const {
     address: lockedLiquidityAddress,
@@ -178,9 +187,13 @@ export function BoardroomPanel({
   } = lockedLiquidity;
   const {
     form: windDownForm,
+    beginSnapshot,
     burnTreasuryShares,
     claimRedemptionAsset,
     openRedemptions,
+    processSnapshot,
+    pruneObligation,
+    pruneObligations,
     redeemShares: redeemBoardroomShares,
     registerRedeemableAsset,
     setForm: setWindDownForm,
@@ -452,10 +465,18 @@ export function BoardroomPanel({
         setMigratingCurveForm={setMigratingCurveForm}
         cancelMigratingCurve={cancelMigratingCurve}
         createMigratingCurve={createMigratingCurve}
+        expireMigratingCurve={expireMigratingCurve}
+        fallbackMigratingCurve={fallbackMigratingCurve}
+        finalizeMigratingCurveForfeiture={finalizeMigratingCurveForfeiture}
+        finalizeMigratingCurveUnwind={finalizeMigratingCurveUnwind}
         loadMigratingCurve={loadMigratingCurve}
         migrateCurve={migrateCurve}
+        openMigratingCurveForfeiture={openMigratingCurveForfeiture}
         predictMigratingCurve={predictMigratingCurve}
+        recoverMigratingCurveForfeitedQuote={recoverMigratingCurveForfeitedQuote}
+        recoverMigratingCurveQuote={recoverMigratingCurveQuote}
         runAction={runAction}
+        vetoMigratingCurveForfeiture={vetoMigratingCurveForfeiture}
       /> : null}
       {section === "distributions" ? obligationList("distributions") : null}
       {section === "distributions" ? <CapabilityNotice capability={capabilities?.createDistribution} fallback={capabilities?.manageDistribution} /> : null}
@@ -475,11 +496,14 @@ export function BoardroomPanel({
         setLockedLiquidityAddress={setLockedLiquidityAddress}
         setLockedLiquidityExitForm={setLockedLiquidityExitForm}
         setLockedLiquidityForm={setLockedLiquidityForm}
+        addLockedLiquidity={lockedLiquidity.add}
         claimLockedLiquidityFees={claimLockedLiquidityFees}
+        closeLockedLiquidity={lockedLiquidity.close}
         createLockedLiquidity={createLockedLiquidity}
         exitLockedLiquidity={exitLockedLiquidity}
         loadLockedLiquidity={loadLockedLiquidity}
         predictLockedLiquidity={predictLockedLiquidity}
+        removeLockedLiquidity={lockedLiquidity.remove}
         runAction={runAction}
       /> : null}
       {section === "liquidity" ? obligationList("liquidity") : null}
@@ -487,16 +511,23 @@ export function BoardroomPanel({
 
       {section === "all" || section === "close" ? <WindDownPanel
         boardroomSnapshot={boardroomSnapshot}
+        beginSnapshotCapability={capabilities?.beginSnapshot}
         claimCapability={capabilities?.claimRedemption}
+        openRedemptionsCapability={capabilities?.openRedemptions}
+        processSnapshotCapability={capabilities?.processSnapshot}
         permissionlessCapability={capabilities?.permissionlessWindDown}
         pendingAction={pendingAction}
         redeemCapability={capabilities?.redeem}
         registerCapability={capabilities?.registerRedeemableAsset}
         setWindDownForm={setWindDownForm}
         windDownForm={windDownForm}
+        beginSnapshot={beginSnapshot}
         burnTreasuryShares={burnTreasuryShares}
         claimRedemptionAsset={claimRedemptionAsset}
         openRedemptions={openRedemptions}
+        processSnapshot={processSnapshot}
+        pruneObligation={pruneObligation}
+        pruneObligations={pruneObligations}
         redeemBoardroomShares={redeemBoardroomShares}
         registerRedeemableAsset={registerRedeemableAsset}
         runAction={runAction}
@@ -588,16 +619,19 @@ function boardroomAccountFacts(boardroomSnapshot: BoardroomSnapshot | undefined)
     },
     { label: "Share token", value: boardroomSnapshot?.shareToken ? <AddressLink address={boardroomSnapshot.shareToken} /> : "Unknown" },
     { label: "Status", value: <StatusBadge label={boardroomStatusLabel(boardroomSnapshot?.status)} tone={boardroomStatusTone(boardroomSnapshot?.status)} /> },
-    { label: "Redeemable assets", value: String(boardroomSnapshot?.redeemableAssets.length ?? 0) },
+    { label: "Redeemable assets", value: (boardroomSnapshot?.redeemableAssetCount ?? 0n).toString() },
     { label: "Obligations", value: boardroomObligationCount(boardroomSnapshot) },
   ];
 }
 
 function boardroomObligationCount(boardroomSnapshot: BoardroomSnapshot | undefined): string {
-  const grantCount = boardroomSnapshot?.issuedGrants.length ?? 0;
-  const distributionCount = boardroomSnapshot?.issuedDistributions.length ?? 0;
-  const lockerCount = boardroomSnapshot?.lockedLiquidityPositions.length ?? 0;
-  return `${grantCount} grants / ${distributionCount} distributions / ${lockerCount} lockers`;
+  if (!boardroomSnapshot) return "0 active";
+  const activeGrants = boardroomSnapshot.activeGrantCount ?? 0n;
+  const activeDistributions = boardroomSnapshot.activeDistributionCount ?? 0n;
+  const activeLiquidity = boardroomSnapshot.activeLiquidityCount ?? 0n;
+  const activeObligations = boardroomSnapshot.activeObligationCount
+    ?? activeGrants + activeDistributions + activeLiquidity;
+  return `${activeObligations.toString()} active (${activeGrants.toString()} grants / ${activeDistributions.toString()} distributions / ${activeLiquidity.toString()} liquidity)`;
 }
 
 function timestampPreview(value: unknown, zeroLabel = "Set a future date and time"): string {
@@ -673,9 +707,14 @@ function migratingCurveFacts(
       ),
     },
     { label: "Can migrate", value: migratingCurveSnapshot ? String(migratingCurveSnapshot.canMigrate) : "Unknown" },
+    { label: "Phase deadline", value: dateString(migratingCurveSnapshot?.phaseEndsAt) },
     { label: "Remaining sale shares", value: formatTokenAmount(migratingCurveSnapshot?.remainingSaleShares, distributionSummary?.shareTokenMetadata) },
     { label: "Sold shares", value: formatTokenAmount(migratingCurveSnapshot?.soldShares, distributionSummary?.shareTokenMetadata) },
     { label: "Quote reserve", value: formatTokenAmount(migratingCurveSnapshot?.quoteReserve, distributionSummary?.quoteTokenMetadata) },
+    { label: "Terminal price", value: formatTokenAmount(migratingCurveSnapshot?.terminalCurvePrice, distributionSummary?.quoteTokenMetadata) },
+    { label: "Migration shares", value: formatTokenAmount(migratingCurveSnapshot?.migrationShares, distributionSummary?.shareTokenMetadata) },
+    { label: "Migration quote", value: formatTokenAmount(migratingCurveSnapshot?.migrationQuote, distributionSummary?.quoteTokenMetadata) },
+    { label: "Quote quarantine", value: migratingCurveSnapshot ? String(Boolean(migratingCurveSnapshot.quoteQuarantined)) : "Unknown" },
     { label: "Quote token", value: migratingCurveSnapshot ? <AddressLink address={migratingCurveSnapshot.quoteToken} /> : "Unknown" },
     { label: "Locker", value: migratingCurveSnapshot?.locker ? <AddressLink address={migratingCurveSnapshot.locker} /> : "Unknown" },
     { label: "Pool", value: migratingCurveSnapshot?.pool ? <AddressLink address={migratingCurveSnapshot.pool} /> : "Unknown" },
@@ -689,7 +728,12 @@ function lockedLiquidityFacts(
 ): BoardroomFact[] {
   return [
     { label: "Predicted locker", value: predictedLockedLiquidity ? <AddressLink address={predictedLockedLiquidity} /> : "None" },
-    { label: "Seeded", value: lockedLiquiditySnapshot ? String(lockedLiquiditySnapshot.seeded) : "Unknown" },
+    {
+      label: "State",
+      value: lockedLiquiditySnapshot?.liquidityState === undefined
+        ? "Unknown"
+        : lockedLiquiditySnapshot.liquidityState.toString(),
+    },
     { label: "Locked LP", value: formatTokenAmount(lockedLiquiditySnapshot?.lockedLiquidity, lockerSummary?.liquidityMetadata) },
     { label: "Token A", value: lockedLiquiditySnapshot ? <AddressLink address={lockedLiquiditySnapshot.tokenA} /> : "Unknown" },
     { label: "Token B", value: lockedLiquiditySnapshot ? <AddressLink address={lockedLiquiditySnapshot.tokenB} /> : "Unknown" },
@@ -704,8 +748,9 @@ function boardroomWindDownFacts(
 ): BoardroomFact[] {
   return [
     { label: "Status", value: <StatusBadge label={boardroomStatusLabel(boardroomSnapshot?.status)} tone={boardroomStatusTone(boardroomSnapshot?.status)} /> },
-    { label: "Open blockers", value: coverageComplete ? String(blockerCount) : `${blockerCount.toString()} loaded + unknown` },
-    { label: "Redeemable assets", value: String(boardroomSnapshot?.redeemableAssets.length ?? 0) },
+    { label: "Active obligations", value: boardroomSnapshot?.activeObligationCount?.toString() ?? "Unknown" },
+    { label: "Loaded blocker details", value: coverageComplete ? String(blockerCount) : `${blockerCount.toString()} loaded + omitted history` },
+    { label: "Redeemable assets", value: (boardroomSnapshot?.redeemableAssetCount ?? 0n).toString() },
   ];
 }
 
@@ -1212,10 +1257,18 @@ function MigratingCurvePanel({
   setMigratingCurveForm,
   cancelMigratingCurve,
   createMigratingCurve,
+  expireMigratingCurve,
+  fallbackMigratingCurve,
+  finalizeMigratingCurveForfeiture,
+  finalizeMigratingCurveUnwind,
   loadMigratingCurve,
   migrateCurve,
+  openMigratingCurveForfeiture,
   predictMigratingCurve,
+  recoverMigratingCurveForfeitedQuote,
+  recoverMigratingCurveQuote,
   runAction,
+  vetoMigratingCurveForfeiture,
 }: {
   boardroomSnapshot: BoardroomSnapshot | undefined;
   createCapability: Capability | undefined;
@@ -1232,19 +1285,42 @@ function MigratingCurvePanel({
   setMigratingCurveForm: Dispatch<SetStateAction<MigratingCurveForm>>;
   cancelMigratingCurve: () => Promise<void>;
   createMigratingCurve: () => Promise<void>;
+  expireMigratingCurve: () => Promise<void>;
+  fallbackMigratingCurve: () => Promise<void>;
+  finalizeMigratingCurveForfeiture: () => Promise<void>;
+  finalizeMigratingCurveUnwind: () => Promise<void>;
   loadMigratingCurve: () => Promise<void>;
   migrateCurve: () => Promise<void>;
+  openMigratingCurveForfeiture: () => Promise<void>;
   predictMigratingCurve: () => Promise<void>;
+  recoverMigratingCurveForfeitedQuote: () => Promise<void>;
+  recoverMigratingCurveQuote: () => Promise<void>;
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
+  vetoMigratingCurveForfeiture: () => Promise<void>;
 }): React.JSX.Element {
   const distributionSummary = distributionSummaryFor(boardroomSnapshot, migratingCurveSnapshot?.address ?? migratingCurveAddress);
   const canUseDistributionFactory = Boolean(deployment?.distributionFactory);
   const curveFacts = migratingCurveFacts(migratingCurveSnapshot, distributionSummary, predictedMigratingCurve);
+  const phase = migratingCurveSnapshot?.curveStatus;
+  const now = BigInt(Math.floor(Date.now() / 1_000));
+  const phaseEndsAt = migratingCurveSnapshot?.phaseEndsAt ?? 0n;
+  const forfeitureEligibleAt = migratingCurveSnapshot?.forfeitureEligibleAt ?? 0n;
+  const forfeitureWindowEndsAt = migratingCurveSnapshot?.forfeitureWindowEndsAt ?? 0n;
+  const canCreate = createCapability?.status === "enabled" && !boardroomSnapshot?.launched;
+  const canCancel = phase === 0 && manageCapability?.status === "enabled" && !boardroomSnapshot?.launched;
+  const canExpire = phase === 0 && Boolean(migratingCurveSnapshot && now > migratingCurveSnapshot.endTime);
+  const canFallback = phase === 1 && phaseEndsAt !== 0n && now > phaseEndsAt;
+  const canFinalizeUnwind = phase === 2 && phaseEndsAt !== 0n && now > phaseEndsAt;
+  const canRecover = phase === 5;
+  const canOpenForfeiture = phase === 5 && boardroomSnapshot?.status === 1
+    && forfeitureEligibleAt !== 0n && now >= forfeitureEligibleAt && forfeitureWindowEndsAt === 0n;
+  const canVetoForfeiture = phase === 5 && forfeitureWindowEndsAt !== 0n && now <= forfeitureWindowEndsAt;
+  const canFinalizeForfeiture = phase === 5 && forfeitureWindowEndsAt !== 0n && now > forfeitureWindowEndsAt;
 
   return (
     <Panel
       title="Migrating Bonding Curve"
-      description="Configure token discovery and the later liquidity migration as one lifecycle. Review inventory, pricing, graduation, and migration bounds separately."
+      description="Operate the one lifetime primary-sale curve through selling, permissionless migration or unwind, and fail-closed quote recovery."
       action={
         <Button
           type="button"
@@ -1256,6 +1332,7 @@ function MigratingCurvePanel({
         </Button>
       }
     >
+      <p className="m-0 border-t border-zinc-800 bg-zinc-950/60 p-4 text-sm leading-6 text-zinc-300">90-day maximum sale · 7-day migration grace · 30-day sell-only unwind · 50 bps maximum migration-price deviation.</p>
       <details className="border-t border-zinc-800 px-4 py-3">
         <summary className="cursor-pointer text-sm font-medium text-zinc-300">Curve pricing and migration protocol fields</summary>
         <div className="mt-3 grid grid-cols-1 border border-zinc-800 md:grid-cols-2 xl:grid-cols-3">
@@ -1267,7 +1344,7 @@ function MigratingCurvePanel({
         <TextField form={migratingCurveForm} field="graduationQuoteTarget" inputMode="decimal" label="Graduation target" setForm={setMigratingCurveForm} />
         <TextField form={migratingCurveForm} field="quoteToLpBps" inputMode="numeric" label="Quote to LP bps" setForm={setMigratingCurveForm} />
         <TextField description={timestampPreview(migratingCurveForm.startTime, "Trading starts immediately")} form={migratingCurveForm} field="startTime" inputMode="numeric" label="Trading starts" setForm={setMigratingCurveForm} />
-        <TextField description={timestampPreview(migratingCurveForm.endTime, "No scheduled end")} form={migratingCurveForm} field="endTime" inputMode="numeric" label="Trading ends" setForm={setMigratingCurveForm} />
+        <TextField description={timestampPreview(migratingCurveForm.endTime, "A finite end is required")} form={migratingCurveForm} field="endTime" inputMode="numeric" label="Trading ends" setForm={setMigratingCurveForm} />
         <TextField description="Bytes32 identity for the deterministic liquidity migration." form={migratingCurveForm} field="migrationSalt" label="Migration salt" setForm={setMigratingCurveForm} className="xl:col-span-3" />
         <TextField description="Bytes32 identity for the deterministic curve deployment." form={migratingCurveForm} field="salt" label="Curve salt" setForm={setMigratingCurveForm} className="xl:col-span-3" />
         </div>
@@ -1285,9 +1362,9 @@ function MigratingCurvePanel({
         </ActionButton>
         <ActionButton
           actionId="create-migrating-curve"
-          disabled={!canUseDistributionFactory || !capabilityEnabled(createCapability)}
+          disabled={!canCreate}
           pendingAction={pendingAction}
-          title={capabilityReason(createCapability)}
+          title={canCreate ? undefined : createCapability?.reason}
           onClick={() => void runAction("create-migrating-curve", createMigratingCurve)}
         >
           <Coins className="h-4 w-4" />
@@ -1303,7 +1380,7 @@ function MigratingCurvePanel({
             <RefreshCw className="h-4 w-4" />
             Load
           </ActionButton>
-          <ActionButton actionId="cancel-migrating-curve" disabled={!capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} variant="danger" onClick={() => void runAction("cancel-migrating-curve", cancelMigratingCurve)}>
+          <ActionButton actionId="cancel-migrating-curve" disabled={!canCancel} pendingAction={pendingAction} title={canCancel ? undefined : "Cancellation is a pre-graduation governance action."} variant="danger" onClick={() => void runAction("cancel-migrating-curve", cancelMigratingCurve)}>
             <XCircle className="h-4 w-4" />
             Cancel
           </ActionButton>
@@ -1323,11 +1400,23 @@ function MigratingCurvePanel({
         </div>
       </details>
       <ActionRow>
-        <ActionButton actionId="migrate-curve" disabled={!capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} onClick={() => void runAction("migrate-curve", migrateCurve)}>
+        <ActionButton actionId="migrate-curve" disabled={!migratingCurveSnapshot?.canMigrate} pendingAction={pendingAction} title={migratingCurveSnapshot?.canMigrate ? undefined : "Migration opens permissionlessly during the graduated phase."} onClick={() => void runAction("migrate-curve", migrateCurve)}>
           <ShieldCheck className="h-4 w-4" />
           Migrate To Locked LP
         </ActionButton>
       </ActionRow>
+      <ActionRow>
+        <ActionButton actionId="expire-curve" disabled={!canExpire} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("expire-curve", expireMigratingCurve)}>Expire</ActionButton>
+        <ActionButton actionId="fallback-curve" disabled={!canFallback} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("fallback-curve", fallbackMigratingCurve)}>Open Unwind</ActionButton>
+        <ActionButton actionId="finalize-curve-unwind" disabled={!canFinalizeUnwind} pendingAction={pendingAction} onClick={() => void runAction("finalize-curve-unwind", finalizeMigratingCurveUnwind)}>Finalize Unwind</ActionButton>
+      </ActionRow>
+      {phase === 5 || migratingCurveSnapshot?.forfeitureFinalized ? <ActionRow>
+        <ActionButton actionId="recover-curve-quote" disabled={!canRecover} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("recover-curve-quote", recoverMigratingCurveQuote)}>Retry Quote Return</ActionButton>
+        <ActionButton actionId="open-curve-forfeiture" disabled={!canOpenForfeiture} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("open-curve-forfeiture", openMigratingCurveForfeiture)}>Open Forfeiture</ActionButton>
+        <ActionButton actionId="veto-curve-forfeiture" disabled={!canVetoForfeiture} pendingAction={pendingAction} variant="danger" onClick={() => void runAction("veto-curve-forfeiture", vetoMigratingCurveForfeiture)}>Veto Forfeiture</ActionButton>
+        <ActionButton actionId="finalize-curve-forfeiture" disabled={!canFinalizeForfeiture} pendingAction={pendingAction} onClick={() => void runAction("finalize-curve-forfeiture", finalizeMigratingCurveForfeiture)}>Accept Forfeiture</ActionButton>
+        <ActionButton actionId="recover-forfeited-curve-quote" disabled={!migratingCurveSnapshot?.forfeitureFinalized} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("recover-forfeited-curve-quote", recoverMigratingCurveForfeitedQuote)}>Recover Later Value</ActionButton>
+      </ActionRow> : null}
       <CapabilityNotice capability={createCapability} fallback={manageCapability} />
     </Panel>
   );
@@ -1347,11 +1436,14 @@ function LockedLiquidityPanel({
   setLockedLiquidityAddress,
   setLockedLiquidityExitForm,
   setLockedLiquidityForm,
+  addLockedLiquidity,
   claimLockedLiquidityFees,
+  closeLockedLiquidity,
   createLockedLiquidity,
   exitLockedLiquidity,
   loadLockedLiquidity,
   predictLockedLiquidity,
+  removeLockedLiquidity,
   runAction,
 }: {
   boardroomSnapshot: BoardroomSnapshot | undefined;
@@ -1367,11 +1459,14 @@ function LockedLiquidityPanel({
   setLockedLiquidityAddress: (address: string) => void;
   setLockedLiquidityExitForm: Dispatch<SetStateAction<LockedLiquidityExitForm>>;
   setLockedLiquidityForm: Dispatch<SetStateAction<LockedLiquidityForm>>;
+  addLockedLiquidity: () => Promise<void>;
   claimLockedLiquidityFees: () => Promise<void>;
+  closeLockedLiquidity: () => Promise<void>;
   createLockedLiquidity: () => Promise<void>;
   exitLockedLiquidity: () => Promise<void>;
   loadLockedLiquidity: () => Promise<void>;
   predictLockedLiquidity: () => Promise<void>;
+  removeLockedLiquidity: () => Promise<void>;
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
 }): React.JSX.Element {
   const lockerSummary = lockerSummaryFor(boardroomSnapshot, lockedLiquiditySnapshot?.address ?? lockedLiquidityAddress);
@@ -1381,7 +1476,7 @@ function LockedLiquidityPanel({
   return (
     <Panel
       title="Locked Liquidity"
-      description="Seed a locked AMM position with explicit minimums and a deadline. Fees remain manageable while principal exits only during wind-down."
+      description="Configure one permanent pool and locker, then add liquidity repeatedly to that same pair. Active removals use delayed governance; wind-down exits are permissionless, and empty closure is explicit and irreversible."
       action={
         <Button type="button" variant="secondary" onClick={() => setLockedLiquidityForm((current) => ({ ...current, salt: randomSalt() }))}>
           <Wand2 className="h-4 w-4" />
@@ -1440,13 +1535,23 @@ function LockedLiquidityPanel({
         </ActionButton>
         <ActionButton
           actionId="create-locked-liquidity"
-          disabled={!canUseLockedLiquidityFactory || !capabilityEnabled(createCapability)}
+          disabled={boardroomSnapshot?.status !== 0 || !canUseLockedLiquidityFactory || !capabilityEnabled(createCapability)}
           pendingAction={pendingAction}
           title={capabilityReason(createCapability)}
           onClick={() => void runAction("create-locked-liquidity", createLockedLiquidity)}
         >
           <Lock className="h-4 w-4" />
           Create Lock
+        </ActionButton>
+        <ActionButton
+          actionId="add-locked-liquidity"
+          disabled={boardroomSnapshot?.status !== 0 || !lockedLiquiditySnapshot || !capabilityEnabled(manageCapability)}
+          pendingAction={pendingAction}
+          title={capabilityReason(manageCapability)}
+          onClick={() => void runAction("add-locked-liquidity", addLockedLiquidity)}
+        >
+          <Plus className="h-4 w-4" />
+          Add To Canonical Pool
         </ActionButton>
       </ActionRow>
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-[minmax(0,1fr)_auto]">
@@ -1469,18 +1574,27 @@ function LockedLiquidityPanel({
         items={lockerFacts}
       />
       <details className="border-t border-zinc-800 px-4 py-3">
-        <summary className="cursor-pointer text-sm font-medium text-zinc-300">Wind-down exit bounds</summary>
-        <p className="m-0 mt-2 text-xs leading-5 text-zinc-500">Set minimum token outputs and a deadline before removing locked liquidity during wind-down.</p>
-        <div className="mt-3 grid grid-cols-1 border border-zinc-800 md:grid-cols-3">
+        <summary className="cursor-pointer text-sm font-medium text-zinc-300">Removal and wind-down exit bounds</summary>
+        <p className="m-0 mt-2 text-xs leading-5 text-zinc-500">Active removal is a delayed controller operation and always returns assets to the Boardroom. During wind-down, anyone may exit the whole position.</p>
+        <div className="mt-3 grid grid-cols-1 border border-zinc-800 md:grid-cols-2 xl:grid-cols-4">
+          <TextField form={lockedLiquidityExitForm} field="liquidity" inputMode="decimal" label="LP tokens to remove" setForm={setLockedLiquidityExitForm} />
           <TextField form={lockedLiquidityExitForm} field="amountAMin" inputMode="decimal" label="Minimum token A" setForm={setLockedLiquidityExitForm} />
           <TextField form={lockedLiquidityExitForm} field="amountBMin" inputMode="decimal" label="Minimum token B" setForm={setLockedLiquidityExitForm} />
-          <TextField description={timestampPreview(lockedLiquidityExitForm.deadline)} form={lockedLiquidityExitForm} field="deadline" inputMode="numeric" label="Exit deadline" setForm={setLockedLiquidityExitForm} />
+          <TextField description={timestampPreview(lockedLiquidityExitForm.deadline)} form={lockedLiquidityExitForm} field="deadline" inputMode="numeric" label="Removal deadline" setForm={setLockedLiquidityExitForm} />
         </div>
       </details>
       <ActionRow>
-        <ActionButton actionId="exit-locked-liquidity" disabled={!capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} variant="danger" onClick={() => void runAction("exit-locked-liquidity", exitLockedLiquidity)}>
+        <ActionButton actionId="remove-locked-liquidity" disabled={boardroomSnapshot?.status !== 0 || !lockedLiquiditySnapshot || !capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={boardroomSnapshot?.status !== 0 ? "Partial removal is available only while Active; use the permissionless full exit during wind-down." : capabilityReason(manageCapability)} onClick={() => void runAction("remove-locked-liquidity", removeLockedLiquidity)}>
+          <ArrowDownToLine className="h-4 w-4" />
+          Remove To Boardroom
+        </ActionButton>
+        <ActionButton actionId="exit-locked-liquidity" disabled={boardroomSnapshot?.status !== 1 || !capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={boardroomSnapshot?.status !== 1 ? "The full exit becomes permissionless only during wind-down." : capabilityReason(manageCapability)} variant="danger" onClick={() => void runAction("exit-locked-liquidity", exitLockedLiquidity)}>
           <Flame className="h-4 w-4" />
           Exit During Wind-Down
+        </ActionButton>
+        <ActionButton actionId="close-locked-liquidity" disabled={!lockedLiquiditySnapshot || (boardroomSnapshot?.status !== 0 && boardroomSnapshot?.status !== 1) || !capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} variant="danger" onClick={() => void runAction("close-locked-liquidity", closeLockedLiquidity)}>
+          <XCircle className="h-4 w-4" />
+          Close Empty Position
         </ActionButton>
       </ActionRow>
       <CapabilityNotice capability={createCapability} fallback={manageCapability} />
@@ -1490,54 +1604,79 @@ function LockedLiquidityPanel({
 
 export function WindDownPanel({
   boardroomSnapshot,
+  beginSnapshotCapability,
   claimCapability,
+  openRedemptionsCapability,
   pendingAction,
   permissionlessCapability,
+  processSnapshotCapability,
   redeemCapability,
   registerCapability,
   setWindDownForm,
   startCapability,
   windDownForm,
+  beginSnapshot,
   burnTreasuryShares,
   claimRedemptionAsset,
   openRedemptions,
+  processSnapshot,
+  pruneObligation,
+  pruneObligations,
   redeemBoardroomShares,
   registerRedeemableAsset,
   runAction,
   startWindDown,
 }: {
   boardroomSnapshot: BoardroomSnapshot | undefined;
+  beginSnapshotCapability: Capability | undefined;
   claimCapability: Capability | undefined;
+  openRedemptionsCapability: Capability | undefined;
   pendingAction: string | undefined;
   permissionlessCapability: Capability | undefined;
+  processSnapshotCapability: Capability | undefined;
   redeemCapability: Capability | undefined;
   registerCapability: Capability | undefined;
   setWindDownForm: Dispatch<SetStateAction<WindDownForm>>;
   startCapability: Capability | undefined;
   windDownForm: WindDownForm;
+  beginSnapshot: () => Promise<void>;
   burnTreasuryShares: () => Promise<void>;
   claimRedemptionAsset: () => Promise<void>;
   openRedemptions: () => Promise<void>;
+  processSnapshot: () => Promise<void>;
+  pruneObligation: (obligation: string) => Promise<void>;
+  pruneObligations: (obligations: string) => Promise<void>;
   redeemBoardroomShares: () => Promise<void>;
   registerRedeemableAsset: () => Promise<void>;
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
   startWindDown: () => Promise<void>;
 }): React.JSX.Element {
+  const [pruneAddress, setPruneAddress] = useState("");
+  const [pruneBatch, setPruneBatch] = useState("");
   const blockers = windDownBlockers(boardroomSnapshot);
-  const hasBlockers = blockers.length > 0;
+  const hasActiveObligations = (boardroomSnapshot?.activeObligationCount ?? 0n) > 0n;
   const coverage = windDownCoverage(boardroomSnapshot);
   const redeemableAssets = boardroomSnapshot?.redeemableAssets ?? [];
+  const snapshotCursor = boardroomSnapshot?.snapshotCursor ?? 0n;
+  const snapshotAssetCount = boardroomSnapshot?.snapshotAssetCount ?? 0n;
+  const snapshotComplete = snapshotCursor >= snapshotAssetCount;
   const windDownFacts = boardroomWindDownFacts(boardroomSnapshot, blockers.length, coverage.complete);
-  const nextSafeAction = windDownNextSafeAction(boardroomSnapshot, hasBlockers, coverage.complete);
+  const nextSafeAction = windDownNextSafeAction(boardroomSnapshot, hasActiveObligations, coverage.complete);
   const startDisabledReason = capabilityReason(startCapability)
     ?? (boardroomSnapshot?.status === 0 ? undefined : "Wind-down can start only while the Boardroom is active.");
-  const openDisabledReason = capabilityReason(permissionlessCapability)
-    ?? (hasBlockers
-      ? "Resolve every loaded grant, distribution, and liquidity blocker before opening redemptions."
-      : boardroomSnapshot?.status === 1 ? undefined : "Redemptions can open only after wind-down has started.");
+  const beginSnapshotDisabledReason = capabilityReason(beginSnapshotCapability)
+    ?? (hasActiveObligations
+      ? "Resolve every active obligation and protocol-liquidity reservation before snapshotting."
+      : boardroomSnapshot?.status === 1 ? undefined : "Snapshotting can begin only after wind-down has started.");
+  const processSnapshotDisabledReason = capabilityReason(processSnapshotCapability)
+    ?? (boardroomSnapshot?.status === 2 && !snapshotComplete ? undefined : "No unprocessed snapshot page is available.");
+  const openDisabledReason = capabilityReason(openRedemptionsCapability)
+    ?? (boardroomSnapshot?.status !== 2
+      ? "Redemptions can open only from Snapshotting."
+      : snapshotComplete ? undefined : "Process every frozen asset-registry entry before opening redemptions.");
 
   return (
-    <Panel title="Wind-Down" description="Move from active operation to cleanup, then open redemptions only after every tracked obligation is resolved.">
+    <Panel title="Wind-Down" description="Resolve obligations, freeze redemption inputs, process the asset registry in bounded pages, then open redemptions.">
       <Facts
         columns="three"
         items={windDownFacts}
@@ -1559,11 +1698,11 @@ export function WindDownPanel({
             {coverage.issues.map((issue) => <li key={issue}>{issue}</li>)}
           </ul>
           <p className="m-0 mt-2 text-xs leading-5">
-            Loaded blockers remain actionable, but older obligations may be omitted. The transaction simulation checks the complete onchain obligation set and rejects opening redemptions while any obligation remains open.
+            Loaded blockers remain actionable, but older records may be omitted. The begin-snapshot simulation checks the canonical active-obligation count and rejects the transition while any obligation or liquidity reservation remains open.
           </p>
         </div>
       ) : null}
-      {hasBlockers ? (
+      {blockers.length > 0 ? (
         <ol className="grid gap-px border-t border-zinc-800 bg-zinc-800">
           {blockers.map((blocker) => (
             <li className="grid gap-2 bg-zinc-950 p-4 text-sm" key={`${blocker.kind}-${blocker.address}`}>
@@ -1578,6 +1717,26 @@ export function WindDownPanel({
       ) : coverage.complete ? (
         <p className="m-0 border-t border-zinc-800 p-4 text-sm text-zinc-500">All tracked obligation reads are complete, and no blockers remain.</p>
       ) : null}
+      <details className="border-t border-zinc-800 px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium text-zinc-300">Permissionless bounded pruning</summary>
+        <p className="m-0 mt-2 text-xs leading-5 text-zinc-500">Remove terminal obligations from the active membership set without erasing provenance. Batch work is capped at 32 records per transaction.</p>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <Field label="Exact obligation">
+            <Input value={pruneAddress} onChange={(event) => setPruneAddress(event.target.value)} placeholder="0x…" spellCheck={false} />
+          </Field>
+          <Field label="Batch obligation addresses">
+            <Input value={pruneBatch} onChange={(event) => setPruneBatch(event.target.value)} placeholder="0x…, 0x… (maximum 32)" spellCheck={false} />
+          </Field>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <ActionButton actionId="prune-boardroom-obligation" disabled={!boardroomSnapshot || !pruneAddress.trim()} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("prune-boardroom-obligation", () => pruneObligation(pruneAddress))}>
+            Prune Exact Record
+          </ActionButton>
+          <ActionButton actionId="prune-boardroom-obligations" disabled={!boardroomSnapshot || !pruneBatch.trim()} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("prune-boardroom-obligations", () => pruneObligations(pruneBatch))}>
+            Prune Bounded Page
+          </ActionButton>
+        </div>
+      </details>
       <ActionRow>
         <ActionButton actionId="start-wind-down" aria-describedby={startDisabledReason ? "start-wind-down-disabled-reason" : undefined} disabled={boardroomSnapshot?.status !== 0 || !capabilityEnabled(startCapability)} pendingAction={pendingAction} pendingLabel="Starting the irreversible Boardroom wind-down" title={startDisabledReason} type="button" variant="danger" onClick={() => void runAction("start-wind-down", startWindDown)}>
           <Flame className="h-4 w-4" />
@@ -1587,14 +1746,30 @@ export function WindDownPanel({
           <Flame className="h-4 w-4" />
           Burn Treasury Shares
         </ActionButton>
-        <ActionButton actionId="open-redemptions" aria-describedby={openDisabledReason ? "open-redemptions-disabled-reason" : undefined} disabled={hasBlockers || boardroomSnapshot?.status !== 1 || !capabilityEnabled(permissionlessCapability)} pendingAction={pendingAction} pendingLabel="Opening project-token redemptions" title={openDisabledReason} type="button" onClick={() => void runAction("open-redemptions", openRedemptions)}>
+        <ActionButton actionId="begin-redemption-snapshot" disabled={hasActiveObligations || boardroomSnapshot?.status !== 1 || !capabilityEnabled(beginSnapshotCapability)} pendingAction={pendingAction} pendingLabel="Freezing redemption inputs" title={beginSnapshotDisabledReason} type="button" onClick={() => void runAction("begin-redemption-snapshot", beginSnapshot)}>
+          <ShieldCheck className="h-4 w-4" />
+          Begin Snapshot
+        </ActionButton>
+        <ActionButton actionId="process-redemption-snapshot" disabled={boardroomSnapshot?.status !== 2 || snapshotComplete || !capabilityEnabled(processSnapshotCapability)} pendingAction={pendingAction} pendingLabel="Processing the next asset page" title={processSnapshotDisabledReason} type="button" variant="secondary" onClick={() => void runAction("process-redemption-snapshot", processSnapshot)}>
+          <ShieldCheck className="h-4 w-4" />
+          Process Next Page
+        </ActionButton>
+        <ActionButton actionId="open-redemptions" aria-describedby={openDisabledReason ? "open-redemptions-disabled-reason" : undefined} disabled={boardroomSnapshot?.status !== 2 || !snapshotComplete || !capabilityEnabled(openRedemptionsCapability)} pendingAction={pendingAction} pendingLabel="Opening project-token redemptions" title={openDisabledReason} type="button" onClick={() => void runAction("open-redemptions", openRedemptions)}>
           <ShieldCheck className="h-4 w-4" />
           Open Redemptions
         </ActionButton>
       </ActionRow>
       {startDisabledReason ? <p className="m-0 border-t border-zinc-800 px-4 py-3 text-sm text-amber-200" id="start-wind-down-disabled-reason">{startDisabledReason}</p> : null}
+      {beginSnapshotDisabledReason ? <p className="m-0 border-t border-zinc-800 px-4 py-3 text-sm text-amber-200">{beginSnapshotDisabledReason}</p> : null}
       {openDisabledReason ? <p className="m-0 border-t border-zinc-800 px-4 py-3 text-sm text-amber-200" id="open-redemptions-disabled-reason">{openDisabledReason}</p> : null}
-      {boardroomSnapshot?.status === 0 && hasBlockers ? (
+      {boardroomSnapshot?.status === 2 ? (
+        <div className="border-t border-zinc-800 p-4 text-sm text-zinc-400">
+          <p className="m-0 font-semibold text-zinc-200">Snapshot progress</p>
+          <p className="m-0 mt-1">{snapshotCursor.toString()} of {snapshotAssetCount.toString()} frozen registry entries processed.</p>
+          <p className="m-0 mt-1 text-xs text-zinc-500">Each permissionless transaction processes at most 32 assets. Unreadable assets are explicitly classified rather than blocking an unbounded loop.</p>
+        </div>
+      ) : null}
+      {boardroomSnapshot?.status === 0 && blockers.length > 0 ? (
         <p className="m-0 border-t border-amber-400/25 bg-amber-400/8 p-4 text-sm leading-6 text-amber-100">
           Starting wind-down is allowed now. The obligations above become the permissionless cleanup plan and must be closed before redemptions can open.
         </p>
@@ -1602,7 +1777,7 @@ export function WindDownPanel({
       <CapabilityNotice capability={startCapability} fallback={permissionlessCapability} />
       <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2">
         <TextField form={windDownForm} field="redeemableAsset" label="Redeemable asset" setForm={setWindDownForm} />
-        <Field label="Registered assets">
+        <Field label="Newest registered assets">
           <div className="flex min-h-10 flex-wrap items-center gap-2">
             {redeemableAssets.length === 0 ? (
               <span className="text-sm text-zinc-500">None</span>
@@ -1613,18 +1788,16 @@ export function WindDownPanel({
         </Field>
       </div>
       <ActionRow>
-        <ActionButton actionId="register-redeemable-asset" disabled={!boardroomSnapshot || boardroomSnapshot.status === 2 || !capabilityEnabled(registerCapability)} pendingAction={pendingAction} title={capabilityReason(registerCapability)} variant="secondary" onClick={() => void runAction("register-redeemable-asset", registerRedeemableAsset)}>
+        <ActionButton actionId="register-redeemable-asset" disabled={!boardroomSnapshot || boardroomSnapshot.status >= 2 || !capabilityEnabled(registerCapability)} pendingAction={pendingAction} title={capabilityReason(registerCapability)} variant="secondary" onClick={() => void runAction("register-redeemable-asset", registerRedeemableAsset)}>
           <Plus className="h-4 w-4" />
           Register Asset
         </ActionButton>
       </ActionRow>
-      <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-3">
+      <div className="grid grid-cols-1 border-t border-zinc-800">
         <TextField form={windDownForm} field="redeemShares" inputMode="decimal" label="Redeem shares" setForm={setWindDownForm} />
-        <TextField form={windDownForm} field="redeemRecipient" label="Recipient" setForm={setWindDownForm} />
-        <TextField form={windDownForm} field="minAmountsOut" label="Min amounts out" setForm={setWindDownForm} />
       </div>
       <ActionRow>
-        <ActionButton actionId="redeem-boardroom-shares" disabled={boardroomSnapshot?.status !== 2 || !capabilityEnabled(redeemCapability)} pendingAction={pendingAction} title={capabilityReason(redeemCapability)} onClick={() => void runAction("redeem-boardroom-shares", redeemBoardroomShares)}>
+        <ActionButton actionId="redeem-boardroom-shares" disabled={boardroomSnapshot?.status !== 3 || !capabilityEnabled(redeemCapability)} pendingAction={pendingAction} title={capabilityReason(redeemCapability)} onClick={() => void runAction("redeem-boardroom-shares", redeemBoardroomShares)}>
           <Send className="h-4 w-4" />
           Redeem Shares
         </ActionButton>
@@ -1639,7 +1812,7 @@ export function WindDownPanel({
         <TextField form={windDownForm} field="claimMinAmount" inputMode="decimal" label="Retry minimum" setForm={setWindDownForm} />
       </div>
       <ActionRow>
-        <ActionButton actionId="claim-redemption-asset" disabled={boardroomSnapshot?.status !== 2 || !capabilityEnabled(claimCapability)} pendingAction={pendingAction} title={capabilityReason(claimCapability)} variant="secondary" onClick={() => void runAction("claim-redemption-asset", claimRedemptionAsset)}>
+        <ActionButton actionId="claim-redemption-asset" disabled={boardroomSnapshot?.status !== 3 || !capabilityEnabled(claimCapability)} pendingAction={pendingAction} title={capabilityReason(claimCapability)} variant="secondary" onClick={() => void runAction("claim-redemption-asset", claimRedemptionAsset)}>
           <Send className="h-4 w-4" />
           Retry Asset Claim
         </ActionButton>
@@ -1664,15 +1837,23 @@ function windDownNextSafeAction(
   };
   if (boardroomSnapshot.status === 1 && hasBlockers) return {
     title: "Clear the remaining obligations",
-    detail: "Close, cancel, migrate, exit, or withdraw each loaded blocker before opening redemptions.",
+    detail: "Close, cancel, migrate, exit, or withdraw each loaded blocker before freezing the redemption snapshot.",
   };
   if (boardroomSnapshot.status === 1 && !coverageComplete) return {
-    title: "Review and simulate opening redemptions",
-    detail: "Some older obligations are omitted from this browser view. Review the warning, then let the transaction simulation verify the complete onchain obligation set.",
+    title: "Review and simulate snapshotting",
+    detail: "Some older records are omitted from this browser view. The transaction simulation verifies the canonical active-obligation and liquidity state before freezing inputs.",
   };
   if (boardroomSnapshot.status === 1) return {
+    title: "Begin the redemption snapshot",
+    detail: "All tracked obligation reads are complete and no blocker remains. Recheck the asset registry, then freeze supply and asset inputs.",
+  };
+  if (boardroomSnapshot.status === 2 && boardroomSnapshot.snapshotCursor < boardroomSnapshot.snapshotAssetCount) return {
+    title: "Process the next snapshot page",
+    detail: `${boardroomSnapshot.snapshotCursor.toString()} of ${boardroomSnapshot.snapshotAssetCount.toString()} frozen registry entries are classified. Anyone may process up to 32 more.`,
+  };
+  if (boardroomSnapshot.status === 2) return {
     title: "Open redemptions",
-    detail: "All tracked obligation reads are complete and no blocker remains. Recheck the asset registry, then open project-token redemption.",
+    detail: "The frozen registry is completely processed. Anyone may now enter RedemptionsOpen.",
   };
   return {
     title: "Process holder redemptions",

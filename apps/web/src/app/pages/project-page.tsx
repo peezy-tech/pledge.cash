@@ -365,7 +365,8 @@ export function boardroomLifecycle(status: number | undefined): {
 } {
   if (status === 0) return { label: "Active", tone: "default" };
   if (status === 1) return { label: "Winding down", tone: "warning" };
-  if (status === 2) return { label: "Redemptions open", tone: "muted" };
+  if (status === 2) return { label: "Snapshotting", tone: "warning" };
+  if (status === 3) return { label: "Redemptions open", tone: "muted" };
   return { label: "Status unknown", tone: "muted" };
 }
 
@@ -398,14 +399,8 @@ function commitmentSummary(dashboard: ProductBoardroomDashboardState | undefined
   openGrants?: number | undefined;
   unsettledGrants?: string | undefined;
 } {
-  const grantAddresses = new Set(dashboard?.snapshot.issuedGrants.map((address) => address.toLowerCase()) ?? []);
-  const distributionAddresses = new Set(
-    dashboard?.snapshot.issuedDistributions.map((address) => address.toLowerCase()) ?? [],
-  );
-  const grants = dashboard?.snapshot.grantSummaries.filter((grant) =>
-    grantAddresses.has(grant.address.toLowerCase())) ?? [];
-  const distributions = dashboard?.snapshot.distributionSummaries.filter((distribution) =>
-    distributionAddresses.has(distribution.address.toLowerCase())) ?? [];
+  const grants = dashboard?.snapshot.grantSummaries ?? [];
+  const distributions = dashboard?.snapshot.distributionSummaries ?? [];
   const unsettled = grants.reduce((total, grant) =>
     total + (sameAddress(grant.state?.token, dashboard?.snapshot.shareToken) ? grant.state?.unsettledAmount ?? 0n : 0n), 0n);
   const hasAmm = Boolean(
@@ -553,7 +548,7 @@ function positionActionDescription(
     return `${formatTokenAmount(position?.nextGrantSettleableTokens, metadata)} can settle from the grant this recommendation opens. Review its schedule and payment before signing.`;
   }
   if (action.kind === "governance") {
-    return "Inspect the verified queue, review thresholds, and the actions this wallet can take before signing anything.";
+    return "Inspect verified controller operations, review thresholds, and the actions this wallet can take before signing anything.";
   }
   if (action.kind === "participate") {
     return account

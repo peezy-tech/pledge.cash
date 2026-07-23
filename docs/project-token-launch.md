@@ -38,8 +38,8 @@ native contract before entering `WindingDown`.
 10. Start wind-down as the prelaunch owner and verify native creation-fee revenue is normalized into wrapped HYPE.
 
 The script does not call `Boardroom.launch()`: “launch” here means the project-token market launch. Boardroom governance
-remains in its prelaunch owner-execution phase until the owner starts wind-down, so this scenario does not exercise the
-executor queue, timelock, active-staker veto, or permissionless ready-action execution.
+remains in its prelaunch owner-execution phase until the owner starts wind-down, so this scenario does not deploy an
+external controller or exercise delayed scheduling, active-staker veto, or permissionless ready-operation execution.
 
 ## Assets And Authorities
 
@@ -50,7 +50,7 @@ executor queue, timelock, active-staker veto, or permissionless ready-action exe
   the Boardroom and this scenario has explicitly selected the same Boardroom as recipient.
 - Boardroom owner: mints project tokens, approves Boardroom-owned assets through `AssetPolicy`, and creates locked
   liquidity through `LockedLiquidityFactory` as the Boardroom call policy. These are direct calls only because this
-  scenario never launches queued governance.
+  scenario never launches external-controller governance.
 - External trader: pays HYPE into the AMM and receives project tokens.
 - External grant issuer: escrows project tokens into a grant and pays the native creation fee.
 

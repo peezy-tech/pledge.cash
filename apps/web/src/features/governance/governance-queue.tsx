@@ -1,56 +1,56 @@
-import type { QueuedBoardroomAction } from "@pledge.cash/sdk";
+import type { ScheduledBoardroomOperation } from "@pledge.cash/sdk";
 import { CheckCircle2, ChevronDown, Clock3, ShieldX } from "lucide-react";
 import { AddressLink, ActionButton, TechnicalDetails } from "../../components/shell";
 import { Badge } from "../../components/ui/badge";
 import type { Capability } from "../capabilities/project-capabilities";
 import type {
   GovernanceControlContext,
-  GovernanceQueueCapabilities,
+  GovernanceOperationCapabilities,
 } from "./types";
 import {
   buildGovernanceExecutionRequest,
   buildGovernanceVetoRequest,
-  canExecuteQueuedAction,
-  canVetoQueuedAction,
-  effectiveGovernanceActionStatus,
+  canExecuteScheduledOperation,
+  canVetoScheduledOperation,
+  effectiveGovernanceOperationStatus,
   formatGovernanceTimestamp,
-  governanceActionView,
+  governanceOperationView,
 } from "./view-model";
 
-export type GovernanceQueueProps = GovernanceControlContext & {
-  actions: readonly QueuedBoardroomAction[];
-  capabilities: GovernanceQueueCapabilities;
+export type GovernanceOperationsProps = GovernanceControlContext & {
+  operations: readonly ScheduledBoardroomOperation[];
+  capabilities: GovernanceOperationCapabilities;
   now?: bigint | undefined;
 };
 
-export function GovernanceQueue({
+export function GovernanceOperations({
   account,
-  actions,
+  operations,
   capabilities,
   now,
   pendingAction,
   runAction,
   submitTransaction,
-}: GovernanceQueueProps): React.JSX.Element {
-  if (actions.length === 0) {
+}: GovernanceOperationsProps): React.JSX.Element {
+  if (operations.length === 0) {
     return (
       <div className="border-y border-[var(--pc-border)] py-5" role="status">
-        <p className="m-0 text-sm font-semibold text-[var(--pc-text)]">No queued decisions</p>
+        <p className="m-0 text-sm font-semibold text-[var(--pc-text)]">No scheduled operations</p>
         <p className="m-0 mt-1 text-sm leading-5 text-[var(--pc-text-muted)]">
-          New governance actions will appear here with their review and execution windows.
+          New controller operations will appear here with their review and execution windows.
         </p>
       </div>
     );
   }
 
   return (
-    <ol className="m-0 list-none border-t border-[var(--pc-border)] p-0" aria-label="Governance queue">
-      {actions.map((action) => (
-        <GovernanceQueueRow
+    <ol className="m-0 list-none border-t border-[var(--pc-border)] p-0" aria-label="Scheduled governance operations">
+      {operations.map((operation) => (
+        <GovernanceOperationRow
           account={account}
-          action={action}
+          operation={operation}
           capabilities={capabilities}
-          key={`${action.actionHash}:${action.queueBlockNumber.toString()}`}
+          key={`${operation.operationId}:${operation.scheduleBlockNumber.toString()}`}
           now={now}
           pendingAction={pendingAction}
           runAction={runAction}
@@ -61,35 +61,35 @@ export function GovernanceQueue({
   );
 }
 
-function GovernanceQueueRow({
+function GovernanceOperationRow({
   account,
-  action,
+  operation,
   capabilities,
   now,
   pendingAction,
   runAction,
   submitTransaction,
-}: Omit<GovernanceQueueProps, "actions"> & { action: QueuedBoardroomAction }): React.JSX.Element {
+}: Omit<GovernanceOperationsProps, "operations"> & { operation: ScheduledBoardroomOperation }): React.JSX.Element {
   const renderNow = now ?? BigInt(Math.floor(Date.now() / 1_000));
-  const effectiveStatus = effectiveGovernanceActionStatus(action, renderNow);
-  const effectiveAction = effectiveStatus === action.status ? action : { ...action, status: effectiveStatus };
-  const view = governanceActionView(effectiveAction, renderNow);
-  const vetoActionId = `governance-veto-${action.actionHash}`;
-  const executeActionId = `governance-execute-${action.actionHash}`;
-  const vetoAvailable = canVetoQueuedAction(effectiveAction, renderNow);
-  const executionVerified = canExecuteQueuedAction(effectiveAction, renderNow)
-    && view.calls.length > 0
-    && view.calls.every((call) => call.verification === "verified");
+  const effectiveStatus = effectiveGovernanceOperationStatus(operation, renderNow);
+  const effectiveOperation = effectiveStatus === operation.status ? operation : { ...operation, status: effectiveStatus };
+  const view = governanceOperationView(effectiveOperation, renderNow);
+  const vetoActionId = `governance-veto-${operation.operationId}`;
+  const executeActionId = `governance-execute-${operation.operationId}`;
+  const vetoAvailable = canVetoScheduledOperation(effectiveOperation, renderNow);
+  const executionVerified = canExecuteScheduledOperation(effectiveOperation, renderNow)
+    && (operation.kind === "controllerOperation"
+      || (view.calls.length > 0 && view.calls.every((call) => call.verification === "verified")));
   const showActions = vetoAvailable || effectiveStatus === "ready";
 
   const actionTime = (): bigint => now ?? BigInt(Math.floor(Date.now() / 1_000));
 
   const veto = async (): Promise<void> => {
-    await submitTransaction("Veto queued governance action", buildGovernanceVetoRequest(effectiveAction, actionTime()));
+    await submitTransaction("Veto scheduled governance operation", buildGovernanceVetoRequest(effectiveOperation, actionTime()));
   };
 
   const execute = async (): Promise<void> => {
-    await submitTransaction("Execute queued governance action", buildGovernanceExecutionRequest(effectiveAction, actionTime()));
+    await submitTransaction("Execute scheduled governance operation", buildGovernanceExecutionRequest(effectiveOperation, actionTime()));
   };
 
   return (
@@ -99,7 +99,9 @@ function GovernanceQueueRow({
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={view.statusTone}>{view.statusLabel}</Badge>
             <span className="text-xs text-[var(--pc-text-muted)]">
-              {action.kind === "queueBatch" ? `${view.calls.length.toString()} calls` : "Single action"}
+              {operation.kind === "controllerOperation"
+                ? "Controller configuration"
+                : view.calls.length > 1 ? `${view.calls.length.toString()} calls` : "Boardroom operation"}
             </span>
           </div>
           <h3 className="m-0 mt-3 text-base font-semibold text-[var(--pc-text)]">{view.title}</h3>
@@ -107,30 +109,32 @@ function GovernanceQueueRow({
         </div>
         <div className="shrink-0 text-left sm:text-right">
           <p className="m-0 text-xs font-medium uppercase tracking-[0.08em] text-[var(--pc-text-muted)]">Expires</p>
-          <time className="mt-1 block text-sm font-medium text-[var(--pc-text)]" dateTime={unixDateTime(action.expiresAt)}>
+          <time className="mt-1 block text-sm font-medium text-[var(--pc-text)]" dateTime={unixDateTime(operation.expiresAt)}>
             {view.expiryLabel}
           </time>
         </div>
       </div>
 
       <dl className="mt-4 grid gap-px border-y border-[var(--pc-border)] bg-[var(--pc-border)] sm:grid-cols-3">
-        <QueueFact label="Queued by"><AddressLink address={action.executor} /></QueueFact>
+        <QueueFact label="Scheduled by"><AddressLink address={operation.proposer} /></QueueFact>
         <QueueFact label="Review ends">
-          <time dateTime={unixDateTime(action.eta)}>{formatGovernanceTimestamp(action.eta)}</time>
+          <time dateTime={unixDateTime(operation.eta)}>{formatGovernanceTimestamp(operation.eta)}</time>
         </QueueFact>
-        <QueueFact label="Governance epoch">{action.epoch.toString()}</QueueFact>
+        <QueueFact label="Controller generation">{operation.controllerGeneration.toString()}</QueueFact>
       </dl>
 
       <TechnicalDetails summary="Inspect targets and calldata">
         <dl className="grid gap-2 text-xs sm:grid-cols-2">
-          <TechnicalFact label="Action hash"><code className="break-all text-[var(--pc-text)]">{action.actionHash}</code></TechnicalFact>
-          <TechnicalFact label="Queue transaction"><code className="break-all text-[var(--pc-text)]">{action.queueTransactionHash}</code></TechnicalFact>
-          <TechnicalFact label="Execution salt"><code className="break-all text-[var(--pc-text)]">{action.salt}</code></TechnicalFact>
-          <TechnicalFact label="Epoch check">Queued {action.epoch.toString()} · Current {action.currentEpoch.toString()}</TechnicalFact>
+          <TechnicalFact label="Operation ID"><code className="break-all text-[var(--pc-text)]">{operation.operationId}</code></TechnicalFact>
+          <TechnicalFact label="Schedule transaction"><code className="break-all text-[var(--pc-text)]">{operation.scheduleTransactionHash}</code></TechnicalFact>
+          <TechnicalFact label="Execution salt"><code className="break-all text-[var(--pc-text)]">{operation.salt}</code></TechnicalFact>
+          <TechnicalFact label="Boardroom epoch">Scheduled {operation.boardroomEpoch.toString()} · Current {operation.currentBoardroomEpoch.toString()}</TechnicalFact>
+          <TechnicalFact label="Configuration epoch">Scheduled {operation.configurationEpoch.toString()} · Current {operation.currentConfigurationEpoch.toString()}</TechnicalFact>
+          <TechnicalFact label="Controller"><AddressLink address={operation.controller} /></TechnicalFact>
         </dl>
         {view.payloadError ? (
           <p className="mt-3 border-l-2 border-[var(--pc-danger)] pl-3 text-sm text-[var(--pc-text-muted)]">
-            Calldata verification failed: {view.payloadError}
+            Scheduled calldata verification failed: {view.payloadError}
           </p>
         ) : null}
         {view.calls.length > 0 ? (
@@ -196,7 +200,7 @@ function GovernanceQueueRow({
                 onClick={() => void runAction(vetoActionId, veto)}
               >
                 <ShieldX className="h-4 w-4" aria-hidden="true" />
-                {pendingAction === vetoActionId ? "Vetoing" : "Veto action"}
+                {pendingAction === vetoActionId ? "Vetoing" : "Veto operation"}
               </ActionButton>
             ) : null}
             {effectiveStatus === "ready" ? (
@@ -250,7 +254,7 @@ function ActionAvailability({
   vetoCapability?: Capability | undefined;
 }): React.JSX.Element | null {
   const reasons = [
-    !executionVerified && executeCapability ? "Execution is disabled until the original queue calldata is verified and every inner call is decoded." : undefined,
+    !executionVerified && executeCapability ? "Execution is disabled until the original scheduled calldata is verified and every inner call is decoded." : undefined,
     capabilityReason(vetoCapability),
     capabilityReason(executeCapability),
   ].filter((reason, index, all): reason is string => Boolean(reason) && all.indexOf(reason) === index);

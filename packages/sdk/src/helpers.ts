@@ -4,3 +4,4 @@ export * from "./helpers/transactions";
 export * from "./helpers/discovery";
 export * from "./helpers/governance";
 export * from "./helpers/errors";
+export * from "./helpers/releases";

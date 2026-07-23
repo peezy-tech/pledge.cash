@@ -13,7 +13,7 @@ export type GovernanceRunAction = (
   action: () => Promise<void>,
 ) => Promise<void>;
 
-export type GovernanceQueueCapabilities = Pick<
+export type GovernanceOperationCapabilities = Pick<
   ProjectCapabilityMap,
   "governance.executeReady" | "governance.veto"
 >;

@@ -11,7 +11,10 @@ description: Use the seven Studio sections across project setup, operation, gove
 
 ## How Studio unlocks controls
 
-Studio verifies the canonical Boardroom and current lifecycle before exposing writes. Before governance launch, the recorded owner manages available sections. After launch, the executor manages operator sections while active-staker actions follow their own thresholds. A connected wallet on the wrong chain gets `Switch wallet network`; an unauthorized wallet gets `Open public project` instead of controls.
+Studio verifies the canonical Boardroom, supported deployment version, and current lifecycle before exposing writes.
+Before governance launch, the recorded owner manages available sections. After launch, the controller proposer schedules
+operator actions while permissionless execution and active-staker actions follow their own rules. A connected wallet on
+the wrong chain gets `Switch wallet network`; an unauthorized wallet gets `Open public project` instead of controls.
 
 The lifecycle shown under `Current stage` moves through `Define`, `Configure`, `Govern`, `Wind down`, and `Redeem`. Actions disappear or become blocked when the lifecycle makes them unsafe.
 
@@ -19,7 +22,8 @@ The lifecycle shown under `Current stage` moves through `Define`, `Configure`, `
 
 Use `Setup` to create or inspect a Boardroom. `Create Boardroom` asks for `Owner`, `Name`, `Symbol`, and `Salt`. `Predict` computes the deterministic address without deploying. `Create` opens transaction review.
 
-After loading a Boardroom, confirm its address, owner, project token, executor, governance settings, and current obligations before moving on.
+After loading a Boardroom, confirm its address, owner/controller, proposer, generation, epochs, project token,
+governance settings, scalar obligation counts, and discovery completeness before moving on.
 
 ## Token
 
@@ -52,9 +56,13 @@ If the app says `No project AMM pool is available`, create or migrate project li
 
 ## Governance
 
-Use `Governance` to inspect the decision system, active-staker protections, reward pool, and verified queue. Existing launched Boardrooms can expose queue, veto, and execution actions when the wallet and state qualify. After launch, the executor can prepare an executor-rotation proposal without pasting calldata. Enter the proposed executor, review the exact decoded `setExecutor(address)` self-call and its earliest execution time, then choose `Review proposal`. The wallet transaction only queues the decision; authority changes after the active-staker review window and a separate permissionless execution.
+Use `Governance` to inspect controller identity, proposer, generation, configuration epoch, Boardroom epoch, active-staker
+protections, reward pool, and verified operations. Only the proposer can schedule; anyone may execute a ready operation.
+Proposer/timing changes are delayed controller self-operations, and controller replacement deploys the next generation
+inside one delayed Boardroom self-call.
 
-For current pre-launch Boardrooms, the app shows `Secure governance launch is unavailable for this Boardroom version`. The deployed `launch(uint256)` call does not bind the expected executor, so there is no safe in-app launch action. Leave owner governance unchanged; do not bypass the block.
+Launch and governance writes are exposed only for a verified v5 deployment. Legacy or unknown versions remain readable
+but fail closed. No current public v5 artifact is broadcast, so do not treat a local surface as mainnet-ready.
 
 ## Wind-down and redemptions
 
@@ -64,21 +72,16 @@ Use `Close` for `Wind-Down` and redemptions. The safe sequence is:
    current-and-previous-block eligible-supply threshold.
 2. Resolve grants, distributions, and locked-liquidity blockers.
 3. `Burn Treasury Shares` where applicable.
-4. Verify the full admitted redemption basket. Wrapped native is admitted at initialization, and canonical module
-   lifecycle actions admit assets they return while those obligations are recorded. A late recovery from a closed,
-   pruned curve does not re-admit a quote asset that was removed while empty. Use `Register Asset` only for a missing
-   supported asset with a positive Boardroom balance, as the prelaunch owner or—after launch—a wallet meeting the 10%
-   threshold in both current and previous-block snapshots. Registering an existing asset reverts.
-5. `Open Redemptions` only when the app reports no loaded blockers and the wind-down delay has elapsed. The current app
-   does not precompute that time gate; an early attempt is rejected during simulation.
-6. Holders enter `Redeem shares` and a recipient, then redeem.
-7. Use the retry claim fields only when an asset transfer from a prior redemption needs recovery.
+4. Verify the frozen redeemable-asset registry and every dependency count.
+5. Enter `Snapshotting`, then process bounded asset pages until the frozen cursor reaches the frozen count. Treat an
+   explicitly unreadable asset as a blocker requiring the configured lifecycle response.
+6. Enter `RedemptionsOpen` only after the snapshot is complete.
+7. Holders redeem shares and claim assets independently; retry only the per-asset credits that remain unpaid.
 
 Lifecycle transitions and asset minimums can be irreversible. Treat every contract and recipient as exact data.
 
-Studio does not yet expose curve quote recovery, Boardroom-grant quarantine, redeemable-asset quarantine/removal, or
-redemption-excess sweeping. Those protocol liveness and terminal-recovery functions currently require a verified direct
-contract or developer integration; see [Wind down and redeem](../guides/wind-down-and-redeem) for the exact boundary.
+Curve quote disposition is intentionally unavailable until the explicit forfeiture, veto, and post-snapshot-recipient
+policy is approved. The contract fails closed instead of choosing a legacy recovery recipient.
 
 ## Recovery
 

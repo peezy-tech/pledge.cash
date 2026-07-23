@@ -29,9 +29,9 @@ export function createActionPipeline(options: CreateActionPipelineOptions): Acti
   return {
     async handle(event) {
       try {
-        const risk = evaluatePipelineRisk(event);
-        await persistRisk(options.db, risk);
         const boardroom = await loadBoardroom(options.db, event);
+        const risk = evaluatePipelineRisk(event, boardroom);
+        await persistRisk(options.db, risk);
         const subscriberCount = await countActionSubscribers(options.db, event);
         const allowlisted = options.config.harness.boardroomAllowlist.includes(
           event.action.boardroom.toLowerCase()
@@ -134,14 +134,27 @@ function rowsFromResult<T>(result: QueryResult<T>): readonly T[] {
   return (result as { readonly rows: readonly T[] }).rows;
 }
 
-function evaluatePipelineRisk(event: WatcherPipelineEvent): RiskAssessment {
+function evaluatePipelineRisk(event: WatcherPipelineEvent, boardroom: BoardroomRow | undefined): RiskAssessment {
   const deployment = getPledgeCashDeployment(event.action.chainId);
   return evaluateAction(event.calls, {
     actionId: event.action.id,
     ...(deployment?.assetPolicy === undefined ? {} : { assetPolicy: deployment.assetPolicy }),
     boardroom: event.action.boardroom,
+    ...(boardroom?.bondingCurve === null || boardroom?.bondingCurve === undefined
+      ? {}
+      : { bondingCurve: boardroom.bondingCurve }),
+    controller: event.action.controller,
     decodeStatus: event.action.decodeStatus,
+    ...(deployment?.distributionFactory === undefined
+      ? {}
+      : { distributionFactory: deployment.distributionFactory }),
     evaluatedAt: new Date(),
+    ...(boardroom?.liquidityLocker === null || boardroom?.liquidityLocker === undefined
+      ? {}
+      : { liquidityLocker: boardroom.liquidityLocker }),
+    ...(deployment?.lockedLiquidityFactory === undefined
+      ? {}
+      : { lockedLiquidityFactory: deployment.lockedLiquidityFactory }),
     ...(deployment?.boardroomPolicyRegistry === undefined
       ? {}
       : { policyRegistry: deployment.boardroomPolicyRegistry })

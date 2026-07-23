@@ -2,8 +2,12 @@ import { describe, expect, test } from "bun:test";
 import {
   assetPolicyAbi,
   boardroomAbi,
+  boardroomControllerAbi,
   boardroomPolicyRegistryAbi,
-  erc20Abi
+  erc20Abi,
+  lockedLiquidityAbi,
+  lockedLiquidityFactoryAbi,
+  migratingBondingCurveAbi
 } from "@pledge.cash/sdk";
 import { encodeFunctionData, type Address, type Hex } from "viem";
 
@@ -13,45 +17,62 @@ import type { RiskAssessment, Severity, StoredCall } from "../src/types";
 
 const actionId = "00000000-0000-0000-0000-000000000001";
 const boardroom = "0x0000000000000000000000000000000000000b0a" as Address;
-const executor = "0x0000000000000000000000000000000000000e0a" as Address;
+const controller = "0x0000000000000000000000000000000000000e0a" as Address;
+const nextController = "0x0000000000000000000000000000000000000e0b" as Address;
 const holder = "0x0000000000000000000000000000000000000123" as Address;
 const policy = "0x0000000000000000000000000000000000000a55" as Address;
 const token = "0x0000000000000000000000000000000000000aaa" as Address;
 const spender = "0x0000000000000000000000000000000000000b0b" as Address;
-const locker = "0x00000000000000000000000000000000000010cc" as Address;
 const policyRegistry = "0x0000000000000000000000000000000000000c01" as Address;
 const assetPolicy = "0x0000000000000000000000000000000000000a50" as Address;
+const distributionFactory = "0x0000000000000000000000000000000000000d15" as Address;
+const lockedLiquidityFactory = "0x00000000000000000000000000000000000010cc" as Address;
+const bondingCurve = "0x000000000000000000000000000000000000c011" as Address;
+const liquidityLocker = "0x00000000000000000000000000000000000010c0" as Address;
 const zeroAddress = "0x0000000000000000000000000000000000000000" as Address;
 
 const ctx = {
   actionId,
   assetPolicy,
   boardroom,
+  bondingCurve,
+  controller,
   decodeStatus: "decoded",
+  distributionFactory,
+  liquidityLocker,
+  lockedLiquidityFactory,
   policyRegistry
 } satisfies RiskContext;
 
 describe("risk matrix", () => {
-  test("declares ruleset version 2 and all WP3 rule ids", () => {
-    expect(RULESET_VERSION).toBe(2);
+  test("declares ruleset version 6 and canonical scheduled-market rule ids", () => {
+    expect(RULESET_VERSION).toBe(6);
     expect(new Set(RISK_MATRIX.map((rule) => rule.id))).toEqual(
       new Set<RiskRuleId>([
-        "set-executor",
+        "controller-configuration",
+        "controller-replacement",
         "mint-shares",
+        "redemption-excess-recipient",
         "external-approve",
         "policy-admin",
         "unknown-selector",
-        "undecoded-action",
-        "exit-locked-liquidity",
+        "undecoded-operation",
+        "create-protocol-liquidity",
+        "add-protocol-liquidity",
+        "close-protocol-liquidity",
+        "claim-protocol-liquidity-fees",
+        "remove-protocol-liquidity",
+        "cancel-bonding-curve",
         "register-redeemable-asset",
+        "begin-snapshot",
         "open-redemptions",
         "burn-treasury-shares",
         "wrap-native"
       ])
     );
 
-    expect(RISK_MATRIX.find((rule) => rule.id === "set-executor")?.detail).toBe(
-      "Changes the boardroom executor that can queue governed actions; ready execution remains permissionless."
+    expect(RISK_MATRIX.find((rule) => rule.id === "controller-configuration")?.detail).toBe(
+      "Changes the controller proposer, delay, or grace period through delayed controller self-governance."
     );
   });
 });
@@ -60,9 +81,36 @@ describe("evaluateAction", () => {
   const ruleCases = [
     {
       call: storedCall({
-        data: encodeFunctionData({ abi: boardroomAbi, functionName: "setExecutor", args: [executor] })
+        data: encodeFunctionData({
+          abi: boardroomControllerAbi,
+          functionName: "updateConfiguration",
+          args: [holder, 86_400n, 604_800n]
+        }),
+        target: controller
       }),
-      ruleId: "set-executor",
+      ruleId: "controller-configuration",
+      severity: "high"
+    },
+    {
+      call: storedCall({
+        data: encodeFunctionData({
+          abi: boardroomAbi,
+          functionName: "replaceController",
+          args: [controller, nextController, holder, 86_400n, 604_800n, 2n]
+        })
+      }),
+      ruleId: "controller-replacement",
+      severity: "high"
+    },
+    {
+      call: storedCall({
+        data: encodeFunctionData({
+          abi: boardroomAbi,
+          functionName: "setRedemptionExcessRecipient",
+          args: [holder]
+        })
+      }),
+      ruleId: "redemption-excess-recipient",
       severity: "high"
     },
     {
@@ -71,6 +119,13 @@ describe("evaluateAction", () => {
       }),
       ruleId: "mint-shares",
       severity: "high"
+    },
+    {
+      call: storedCall({
+        data: encodeFunctionData({ abi: boardroomAbi, functionName: "beginSnapshot" })
+      }),
+      ruleId: "begin-snapshot",
+      severity: "medium"
     },
     {
       call: storedCall({
@@ -192,51 +247,118 @@ describe("evaluateAction", () => {
     expectFinding(assessment, "unknown-selector", "high", 0);
   });
 
-  test("classifies undecoded actions as high even without calls", () => {
+  test("classifies undecoded operations as high even without calls", () => {
     const assessment = evaluateAction([], { ...ctx, decodeStatus: "undecoded" });
 
     expect(assessment.severity).toBe("high");
-    expectFinding(assessment, "undecoded-action", "high", null);
+    expectFinding(assessment, "undecoded-operation", "high", null);
   });
 
-  test("keeps exitLockedLiquidity medium when min-out args are nonzero", () => {
-    const assessment = evaluateAction(
-      [
-        storedCall({
-          data: encodeFunctionData({
-            abi: boardroomAbi,
-            functionName: "exitLockedLiquidity",
-            args: [locker, 1n, 2n, 9_999n]
-          })
-        })
-      ],
-      ctx
-    );
+  test("classifies canonical liquidity create, add, remove, close, and fee-claim calls", () => {
+    const create = evaluateAction([storedCall({
+      data: encodeFunctionData({
+        abi: lockedLiquidityFactoryAbi,
+        functionName: "createLockedLiquidity",
+        args: [{
+          tokenA: token,
+          tokenB: holder,
+          amountADesired: 10n,
+          amountBDesired: 20n,
+          amountAMin: 9n,
+          amountBMin: 19n,
+          deadline: 9_999n,
+          salt: `0x${"01".repeat(32)}`
+        }]
+      }),
+      policy: lockedLiquidityFactory,
+      target: lockedLiquidityFactory
+    })], ctx);
+    expectFinding(create, "create-protocol-liquidity", "high", 0);
 
-    expect(assessment.severity).toBe("medium");
-    expectFinding(assessment, "exit-locked-liquidity", "medium", 0);
+    const add = evaluateAction([storedCall({
+      data: encodeFunctionData({
+        abi: lockedLiquidityFactoryAbi,
+        functionName: "addLockedLiquidity",
+        args: [{
+          tokenA: token,
+          tokenB: holder,
+          amountADesired: 10n,
+          amountBDesired: 20n,
+          amountAMin: 9n,
+          amountBMin: 19n,
+          deadline: 9_999n
+        }]
+      }),
+      policy: lockedLiquidityFactory,
+      target: lockedLiquidityFactory
+    })], ctx);
+    expectFinding(add, "add-protocol-liquidity", "medium", 0);
+
+    const remove = evaluateAction([storedCall({
+      data: encodeFunctionData({
+        abi: lockedLiquidityFactoryAbi,
+        functionName: "removeLockedLiquidity",
+        args: [{ liquidity: 10n, amountAMin: 9n, amountBMin: 19n, deadline: 9_999n }]
+      }),
+      policy: lockedLiquidityFactory,
+      target: lockedLiquidityFactory
+    })], ctx);
+    expectFinding(remove, "remove-protocol-liquidity", "medium", 0);
+
+    const unsafeRemove = evaluateAction([storedCall({
+      data: encodeFunctionData({
+        abi: lockedLiquidityFactoryAbi,
+        functionName: "removeLockedLiquidity",
+        args: [{ liquidity: 10n, amountAMin: 0n, amountBMin: 19n, deadline: 9_999n }]
+      }),
+      policy: lockedLiquidityFactory,
+      target: lockedLiquidityFactory
+    })], ctx);
+    expectFinding(unsafeRemove, "remove-protocol-liquidity", "high", 0);
+
+    const close = evaluateAction([storedCall({
+      data: encodeFunctionData({ abi: lockedLiquidityFactoryAbi, functionName: "closeLockedLiquidity" }),
+      policy: lockedLiquidityFactory,
+      target: lockedLiquidityFactory
+    })], ctx);
+    expectFinding(close, "close-protocol-liquidity", "medium", 0);
+
+    const claim = evaluateAction([storedCall({
+      data: encodeFunctionData({ abi: lockedLiquidityAbi, functionName: "claimFees" }),
+      policy: lockedLiquidityFactory,
+      target: liquidityLocker
+    })], ctx);
+    expectFinding(claim, "claim-protocol-liquidity-fees", "low", 0);
+
+    const cancel = evaluateAction([storedCall({
+      data: encodeFunctionData({ abi: migratingBondingCurveAbi, functionName: "cancel" }),
+      policy: distributionFactory,
+      target: bondingCurve
+    })], ctx);
+    expectFinding(cancel, "cancel-bonding-curve", "high", 0);
   });
 
-  test("escalates exitLockedLiquidity to high when either min-out arg is zero", () => {
-    for (const args of [
-      [locker, 0n, 2n, 9_999n],
-      [locker, 1n, 0n, 9_999n]
-    ] as const) {
-      const assessment = evaluateAction(
-        [
-          storedCall({
-            data: encodeFunctionData({
-              abi: boardroomAbi,
-              functionName: "exitLockedLiquidity",
-              args
-            })
-          })
-        ],
-        ctx
-      );
-
-      expect(assessment.severity).toBe("high");
-      expectFinding(assessment, "exit-locked-liquidity", "high", 0);
+  test("fails closed on selector collisions and noncanonical market topology", () => {
+    const cases = [
+      storedCall({
+        data: encodeFunctionData({ abi: migratingBondingCurveAbi, functionName: "cancel" }),
+        policy: distributionFactory,
+        target: token
+      }),
+      storedCall({
+        data: encodeFunctionData({ abi: lockedLiquidityAbi, functionName: "claimFees" }),
+        policy: lockedLiquidityFactory,
+        target: token
+      }),
+      storedCall({
+        data: encodeFunctionData({ abi: lockedLiquidityFactoryAbi, functionName: "closeLockedLiquidity" }),
+        policy,
+        target: lockedLiquidityFactory
+      })
+    ];
+    for (const call of cases) {
+      const assessment = evaluateAction([call], ctx);
+      expectFinding(assessment, "unknown-selector", "high", 0);
     }
   });
 
@@ -252,7 +374,12 @@ describe("evaluateAction", () => {
       }),
       storedCall({
         callIndex: 2,
-        data: encodeFunctionData({ abi: boardroomAbi, functionName: "setExecutor", args: [executor] })
+        data: encodeFunctionData({
+          abi: boardroomControllerAbi,
+          functionName: "updateConfiguration",
+          args: [holder, 86_400n, 604_800n]
+        }),
+        target: controller
       })
     ];
 

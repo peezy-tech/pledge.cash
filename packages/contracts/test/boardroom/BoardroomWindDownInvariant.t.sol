@@ -91,8 +91,21 @@ contract BoardroomWindDownInvariantHandler is Test {
     }
 
     function openRedemptions() external {
-        if (boardroom.status() != Boardroom.BoardroomStatus.WindingDown) return;
+        if (boardroom.status() != Boardroom.BoardroomStatus.Snapshotting) return;
         try boardroom.openRedemptions() {} catch {}
+    }
+
+    function beginSnapshot() external {
+        if (boardroom.status() != Boardroom.BoardroomStatus.WindingDown) return;
+        uint256 readyAt = boardroom.windDownStartedAt() + boardroom.windDownDelay();
+        if (block.timestamp < readyAt) vm.warp(readyAt);
+        try boardroom.beginSnapshot() {} catch {}
+    }
+
+    function snapshotAssets(uint256 rawMaximum) external {
+        if (boardroom.status() != Boardroom.BoardroomStatus.Snapshotting) return;
+        uint256 maximum = bound(rawMaximum, 1, boardroom.MAX_SNAPSHOT_PAGE());
+        try boardroom.snapshotAssets(maximum) {} catch {}
     }
 
     function redeem(uint256 actorSeed, uint256 sharesSeed) external {
@@ -106,13 +119,13 @@ contract BoardroomWindDownInvariantHandler is Test {
         uint256 supplyBefore = shareToken.totalSupply();
         uint256 assetBefore = redeemableAsset.balanceOf(address(boardroom));
         uint256 expectedAmount = assetBefore * shares / supplyBefore;
-        uint256[] memory minimums = new uint256[](2);
-
         vm.prank(actor);
-        try boardroom.redeem(shares, actor, minimums) returns (uint256[] memory amounts) {
-            assertEq(amounts.length, 2);
-            assertEq(amounts[1], expectedAmount);
-            totalRedeemed += amounts[1];
+        try boardroom.redeem(shares) {
+            vm.prank(actor);
+            try boardroom.claimRedemptionAsset(address(redeemableAsset), actor, 0) returns (uint256 amount) {
+                assertEq(amount, expectedAmount);
+                totalRedeemed += amount;
+            } catch {}
         } catch {}
     }
 }

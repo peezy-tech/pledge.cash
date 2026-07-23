@@ -1,43 +1,54 @@
 ---
 title: Governance and staker protections
-description: Understand direct owner authority, delayed actions, historical active-stake checks, vetoes, and permissionless execution.
+description: Understand prelaunch ownership, external controller operations, historical active-stake checks, vetoes, and permissionless execution.
 ---
 
 # Governance and staker protections
 
-Boardroom governance deliberately separates proposing, waiting, reviewing, and executing.
+Boardroom governance separates proposing, waiting, reviewing, and executing. The external-controller architecture is a
+candidate v5 design and is not deployed or certified for mainnet.
 
 ## Before launch
 
-The owner can mint shares and execute policy-checked calls directly. The delayed queue and staker veto are not active. The owner can start wind-down.
+The owner can mint shares and execute policy-checked calls directly. No controller is deployed or adopted, although the
+generation-1 address is predictable. Launch calldata names the proposer, predicted controller, delays, grace period,
+generation, protection staker, reward pool, and redemption-excess recipient.
 
-Governance launch is permanent. The current app refuses to launch legacy Boardrooms because their launch calldata does not bind the expected executor. Leaving them pre-launch is the safe behavior until an upgraded contract closes that race.
+Launch requires the named protection staker to meet the 10% current-and-previous-block threshold. It deploys and verifies
+generation 1 and transfers ownership atomically. Legacy Boardrooms remain readable but cannot use this launch flow.
 
 ## After launch
 
-- The current executor queues a single action or bounded batch.
-- The action becomes executable after a delay of one to 30 days.
-- Any account can execute it once ready.
-- It expires seven days after its ETA.
-- Executor changes and wind-down invalidate actions from the previous governance epoch.
+- Only the current controller proposer schedules a Boardroom operation or controller self-operation.
+- Any account may execute after the configured delay and before expiry.
+- Every operation binds the full call batch or self-call, salt, Boardroom epoch, controller generation, configuration
+  epoch, proposer, and configuration hash.
+- Proposer or timing changes are delayed self-governance and advance the configuration epoch.
+- Starting wind-down or replacing the controller advances the Boardroom epoch and invalidates older operations in O(1).
 
-The action hash binds the ordered call fields and salt. Queue storage separately records ETA, expiry, governance epoch, and Boardroom status for that hash. Verify both the hash inputs and its current action context; a decoded description alone is not authority.
+The permissionless executor is never substituted for the scheduled proposer at the Boardroom policy gateway.
 
 ## Historical active-staker protections
 
-Veto requires active stake equal to 1% and wind-down requires active stake equal to 10% of governance-eligible supply. The contract uses both current and previous-block eligible supply and requires the caller to pass the stricter threshold with active stake in both checkpoints.
+Veto requires 1% active stake and wind-down requires 10%. Both checks use current and previous-block active stake against
+the corresponding current and previous-block governance-eligible supply, requiring the stricter rounded-up threshold.
 
-Liquid balances have economic ownership and redemption rights but no veto or wind-down power. Starting an unstake removes active power immediately; the cooldown lock does not preserve a vote. The denominator still includes unstaked circulating supply, so inactive holders dilute active stakers.
+Liquid balances retain economic ownership and redemption rights but no veto or wind-down power. Starting an unstake
+removes active power immediately. Treasury and authenticated protocol-custody shares are excluded from the governance
+denominator.
 
-The prior-block requirement excludes same-transaction activation. Shares held by the Boardroom treasury or authenticated grants, distributions, pools, and fee vaults remain excluded from governance-eligible supply. A locked-liquidity locker normally holds LP tokens; the pool and its fee vault are the classified project-share custody accounts.
+The Boardroom is the controller's immutable canceller. A qualified holder calls `Boardroom.veto(operationId)`; there is
+no privileged administrator or emergency-delay bypass.
 
 ## What stakers cannot do
 
-Staking does not let a wallet queue arbitrary actions, spend the treasury directly, or change a grant. Staker protections are bounded to veto and wind-down thresholds. Ordinary proposal authority remains with the current executor after launch.
+Staking does not let a wallet schedule arbitrary operations, spend the treasury, replace a controller, or change a
+grant. Staker powers are limited to veto and wind-down thresholds. Proposal authority remains with the controller's
+current proposer.
 
 ## Reading the UI
 
-An empty queue is trustworthy only when the RPC event scan completed. If the app reports incomplete or unavailable queue history, **Unknown is not zero** and “no action shown” is not proof that none exists.
+Operation history is trustworthy only when controller identity, epochs, and event scans are complete. `Unknown` is not
+zero. Unsupported Boardroom versions fail closed for governance writes.
 
 Follow [Govern a project](../guides/govern-a-project) for operational steps.
-See [Staking and funded rewards](staking-and-rewards) for lock, cooldown, and reward behavior.

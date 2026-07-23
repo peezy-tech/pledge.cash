@@ -1,29 +1,50 @@
 import {
   assetPolicyAbi,
   boardroomAbi,
+  boardroomControllerAbi,
   boardroomPolicyRegistryAbi,
-  erc20Abi
+  erc20Abi,
+  lockedLiquidityAbi,
+  lockedLiquidityFactoryAbi,
+  migratingBondingCurveAbi
 } from "@pledge.cash/sdk";
 import { toFunctionSelector, type Abi, type AbiFunction, type Hex } from "viem";
 
 import type { Severity } from "../types";
 
-export const RULESET_VERSION = 2;
+export const RULESET_VERSION = 6;
 
 export type RiskRuleId =
-  | "set-executor"
+  | "controller-configuration"
+  | "controller-replacement"
   | "mint-shares"
+  | "redemption-excess-recipient"
   | "external-approve"
   | "policy-admin"
   | "unknown-selector"
-  | "undecoded-action"
-  | "exit-locked-liquidity"
+  | "undecoded-operation"
+  | "create-protocol-liquidity"
+  | "add-protocol-liquidity"
+  | "close-protocol-liquidity"
+  | "claim-protocol-liquidity-fees"
+  | "remove-protocol-liquidity"
+  | "cancel-bonding-curve"
   | "register-redeemable-asset"
+  | "begin-snapshot"
   | "open-redemptions"
   | "burn-treasury-shares"
   | "wrap-native";
 
-export type RiskRuleTarget = "action" | "asset-policy" | "boardroom" | "external" | "policy-registry";
+export type RiskRuleTarget =
+  | "action"
+  | "asset-policy"
+  | "boardroom"
+  | "controller"
+  | "external"
+  | "bonding-curve"
+  | "liquidity-factory"
+  | "liquidity-locker"
+  | "policy-registry";
 
 export type RiskRuleDefinition = {
   readonly detail: string;
@@ -39,21 +60,39 @@ export const SELECTORS = {
     setAssetAllowed: selector(assetPolicyAbi, "setAssetAllowed", ["address", "bool"])
   },
   boardroom: {
+    beginSnapshot: selector(boardroomAbi, "beginSnapshot", []),
     burnTreasuryShares: selector(boardroomAbi, "burnTreasuryShares", []),
-    exitLockedLiquidity: selector(boardroomAbi, "exitLockedLiquidity", [
-      "address",
-      "uint256",
-      "uint256",
-      "uint256"
-    ]),
     mint: selector(boardroomAbi, "mint", ["address", "uint256"]),
     openRedemptions: selector(boardroomAbi, "openRedemptions", []),
     registerRedeemableAsset: selector(boardroomAbi, "registerRedeemableAsset", ["address"]),
-    setExecutor: selector(boardroomAbi, "setExecutor", ["address"]),
+    replaceController: selector(boardroomAbi, "replaceController", [
+      "address",
+      "address",
+      "address",
+      "uint64",
+      "uint64",
+      "uint64"
+    ]),
+    setRedemptionExcessRecipient: selector(boardroomAbi, "setRedemptionExcessRecipient", ["address"]),
     wrapNativeBalance: selector(boardroomAbi, "wrapNativeBalance", [])
+  },
+  controller: {
+    updateConfiguration: selector(boardroomControllerAbi, "updateConfiguration", ["address", "uint64", "uint64"])
   },
   erc20: {
     approve: selector(erc20Abi, "approve", ["address", "uint256"])
+  },
+  liquidityFactory: {
+    addLockedLiquidity: selector(lockedLiquidityFactoryAbi, "addLockedLiquidity", ["tuple"]),
+    closeLockedLiquidity: selector(lockedLiquidityFactoryAbi, "closeLockedLiquidity", []),
+    createLockedLiquidity: selector(lockedLiquidityFactoryAbi, "createLockedLiquidity", ["tuple"]),
+    removeLockedLiquidity: selector(lockedLiquidityFactoryAbi, "removeLockedLiquidity", ["tuple"])
+  },
+  liquidityLocker: {
+    claimFees: selector(lockedLiquidityAbi, "claimFees", [])
+  },
+  bondingCurve: {
+    cancel: selector(migratingBondingCurveAbi, "cancel", [])
   },
   policyRegistry: {
     registerModulePolicy: selector(boardroomPolicyRegistryAbi, "registerModulePolicy", ["address"]),
@@ -64,16 +103,30 @@ export const SELECTORS = {
 
 export const RISK_MATRIX = [
   {
-    detail: "Changes the boardroom executor that can queue governed actions; ready execution remains permissionless.",
-    id: "set-executor",
-    selector: SELECTORS.boardroom.setExecutor,
+    detail: "Changes the controller proposer, delay, or grace period through delayed controller self-governance.",
+    id: "controller-configuration",
+    selector: SELECTORS.controller.updateConfiguration,
+    severity: "high",
+    target: "controller"
+  },
+  {
+    detail: "Atomically deploys and adopts the next Boardroom controller generation.",
+    id: "controller-replacement",
+    selector: SELECTORS.boardroom.replaceController,
     severity: "high",
     target: "boardroom"
   },
   {
-    detail: "Mints new boardroom shares and can dilute existing shareholders.",
+    detail: "Mints new Boardroom shares and can dilute existing shareholders.",
     id: "mint-shares",
     selector: SELECTORS.boardroom.mint,
+    severity: "high",
+    target: "boardroom"
+  },
+  {
+    detail: "Changes the recipient of redemption assets left after holder claims.",
+    id: "redemption-excess-recipient",
+    selector: SELECTORS.boardroom.setRedemptionExcessRecipient,
     severity: "high",
     target: "boardroom"
   },
@@ -85,28 +138,28 @@ export const RISK_MATRIX = [
     target: "external"
   },
   {
-    detail: "Changes the global policy registry immediately, outside the boardroom veto queue.",
+    detail: "Changes global policy permissions outside an individual Boardroom controller delay.",
     id: "policy-admin",
     selector: SELECTORS.policyRegistry.registerModulePolicy,
     severity: "high",
     target: "policy-registry"
   },
   {
-    detail: "Changes the global policy registry immediately, outside the boardroom veto queue.",
+    detail: "Changes global policy permissions outside an individual Boardroom controller delay.",
     id: "policy-admin",
     selector: SELECTORS.policyRegistry.setPolicyAllowed,
     severity: "high",
     target: "policy-registry"
   },
   {
-    detail: "Changes the global policy registry immediately, outside the boardroom veto queue.",
+    detail: "Changes global policy permissions outside an individual Boardroom controller delay.",
     id: "policy-admin",
     selector: SELECTORS.policyRegistry.setPolicyStatus,
     severity: "high",
     target: "policy-registry"
   },
   {
-    detail: "Changes which assets the shared asset policy allows boardrooms to touch.",
+    detail: "Changes which assets the shared asset policy allows Boardrooms to touch.",
     id: "policy-admin",
     selector: SELECTORS.assetPolicy.setAssetAllowed,
     severity: "high",
@@ -120,8 +173,8 @@ export const RISK_MATRIX = [
     target: "asset-policy"
   },
   {
-    detail: "Queue calldata could not be decoded and must be treated as hostile.",
-    id: "undecoded-action",
+    detail: "Controller schedule calldata could not be decoded and must be treated as hostile.",
+    id: "undecoded-operation",
     severity: "high",
     target: "action"
   },
@@ -132,11 +185,46 @@ export const RISK_MATRIX = [
     target: "action"
   },
   {
-    detail: "Exits a locked liquidity position during wind-down.",
-    id: "exit-locked-liquidity",
-    selector: SELECTORS.boardroom.exitLockedLiquidity,
+    detail: "Creates the permanent singleton protocol-liquidity locker, pool, and quote-asset identity.",
+    id: "create-protocol-liquidity",
+    selector: SELECTORS.liquidityFactory.createLockedLiquidity,
+    severity: "high",
+    target: "liquidity-factory"
+  },
+  {
+    detail: "Adds Boardroom assets to the permanent canonical protocol-liquidity pair.",
+    id: "add-protocol-liquidity",
+    selector: SELECTORS.liquidityFactory.addLockedLiquidity,
     severity: "medium",
-    target: "boardroom"
+    target: "liquidity-factory"
+  },
+  {
+    detail: "Explicitly and irreversibly closes an empty canonical protocol-liquidity position.",
+    id: "close-protocol-liquidity",
+    selector: SELECTORS.liquidityFactory.closeLockedLiquidity,
+    severity: "medium",
+    target: "liquidity-factory"
+  },
+  {
+    detail: "Removes some or all protocol-owned liquidity back to the Boardroom.",
+    id: "remove-protocol-liquidity",
+    selector: SELECTORS.liquidityFactory.removeLockedLiquidity,
+    severity: "medium",
+    target: "liquidity-factory"
+  },
+  {
+    detail: "Forwards accrued canonical locker fees to the Boardroom without moving LP principal.",
+    id: "claim-protocol-liquidity-fees",
+    selector: SELECTORS.liquidityLocker.claimFees,
+    severity: "low",
+    target: "liquidity-locker"
+  },
+  {
+    detail: "Cancels the singleton primary sale into its bounded sell-only unwind.",
+    id: "cancel-bonding-curve",
+    selector: SELECTORS.bondingCurve.cancel,
+    severity: "high",
+    target: "bonding-curve"
   },
   {
     detail: "Registers an asset as redeemable by shareholders.",
@@ -146,7 +234,14 @@ export const RISK_MATRIX = [
     target: "boardroom"
   },
   {
-    detail: "Irreversibly opens shareholder redemptions.",
+    detail: "Freezes redemption accounting and begins paginated asset snapshotting.",
+    id: "begin-snapshot",
+    selector: SELECTORS.boardroom.beginSnapshot,
+    severity: "medium",
+    target: "boardroom"
+  },
+  {
+    detail: "Irreversibly opens shareholder redemptions after snapshot completion.",
     id: "open-redemptions",
     selector: SELECTORS.boardroom.openRedemptions,
     severity: "medium",
@@ -160,7 +255,7 @@ export const RISK_MATRIX = [
     target: "boardroom"
   },
   {
-    detail: "Wraps the boardroom native-token balance into the configured wrapped native asset.",
+    detail: "Wraps the Boardroom native-token balance into the configured wrapped native asset.",
     id: "wrap-native",
     selector: SELECTORS.boardroom.wrapNativeBalance,
     severity: "low",

@@ -44,7 +44,7 @@ Choose `Refresh portfolio` after a new grant, settlement, or network update. Ref
 - Saved projects switch to the selected network as well, but do not depend on the connected wallet.
 
 Grant settlement is available only to the current holder wallet. Grant issuer controls normally require the standalone
-issuer or, for an Active Boardroom, its current owner or executor. During Boardroom wind-down, the app also exposes
+issuer or, for an Active Boardroom, its current prelaunch owner or controller proposer. During Boardroom wind-down, the app also exposes
 canonical zero-value grant cleanup to any connected wallet through the Boardroom's permissionless
 `executeWindDownCall`; the contract restricts that path to recorded obligation policies and targets.
 

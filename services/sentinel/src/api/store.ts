@@ -44,7 +44,7 @@ type CursorRow = {
 };
 
 type PublicActionRow = {
-  readonly actionHash: string;
+  readonly operationId: string;
   readonly analysisAffectedParties: unknown;
   readonly analysisEffects: unknown;
   readonly analysisHarness: string | null;
@@ -53,23 +53,28 @@ type PublicActionRow = {
   readonly analysisSource: "harness" | "template" | null;
   readonly analysisSummary: string | null;
   readonly boardroom: string;
+  readonly boardroomEpoch: bigint | string | null;
   readonly boardroomName: string | null;
   readonly boardroomShareToken: string;
-  readonly boardroomStatus: "prelaunch" | "active" | "winddown";
+  readonly boardroomStatus: "prelaunch" | "active" | "winddown" | "snapshotting" | "redemptions-open";
   readonly chainId: number;
+  readonly configurationEpoch: bigint | string;
+  readonly controller: string;
+  readonly controllerGeneration: bigint | string;
   readonly decodeStatus: "decoded" | "undecoded";
-  readonly epoch: bigint | string | null;
   readonly eta: Date | string;
   readonly expiresAt: Date | string | null;
   readonly id: string;
   readonly invalidatedByEpoch: bigint | string | null;
-  readonly queueBlock: bigint | string;
-  readonly queueTxHash: string;
+  readonly operationKind: "boardroom" | "controller";
+  readonly proposer: string;
+  readonly scheduleBlock: bigint | string;
+  readonly scheduleTxHash: string;
   readonly riskEvaluatedAt: Date | string | null;
   readonly riskFindings: unknown;
   readonly riskRulesetVersion: number | null;
   readonly riskSeverity: "low" | "medium" | "high" | null;
-  readonly status: "queued" | "cancelled" | "executed" | "invalidated" | "expired";
+  readonly status: "scheduled" | "cancelled" | "executed" | "invalidated" | "expired";
 };
 
 type PublicActionCallRow = {
@@ -85,16 +90,16 @@ type PublicActionCallRow = {
 };
 
 type NotificationDeliveryRow = {
-  readonly actionHash: string;
+  readonly operationId: string;
   readonly actionId: string;
-  readonly actionStatus: "queued" | "cancelled" | "executed" | "invalidated";
+  readonly actionStatus: "scheduled" | "cancelled" | "executed" | "invalidated";
   readonly attempts: number;
   readonly boardroom: string;
   readonly chainId: number;
   readonly channelType: "telegram" | "twitter";
   readonly createdAt: Date | string;
   readonly eta: Date | string;
-  readonly event: "queued" | "cancelled" | "executed" | "invalidated" | "reminder" | "policy-admin";
+  readonly event: "scheduled" | "cancelled" | "executed" | "invalidated" | "reminder" | "policy-admin";
   readonly expiresAt: Date | string | null;
   readonly id: string;
   readonly nextAttemptAt: Date | string;
@@ -351,7 +356,7 @@ export async function getNotificationDeliveries(
           n.next_attempt_at AS "nextAttemptAt",
           n.sent_at AS "sentAt",
           n.payload->'action'->>'id' AS "actionId",
-          n.payload->'action'->>'actionHash' AS "actionHash",
+          n.payload->'action'->>'operationId' AS "operationId",
           n.payload->'action'->>'boardroom' AS boardroom,
           (n.payload->'action'->>'chainId')::integer AS "chainId",
           n.payload->'action'->>'eta' AS eta,
@@ -437,8 +442,8 @@ export async function getPublicActions(
   if (cursor !== undefined) {
     filters.push(
       sql`(
-        qa.queue_block < ${cursor.queueBlock}
-        OR (qa.queue_block = ${cursor.queueBlock} AND qa.id < ${cursor.id}::uuid)
+        qa.queue_block < ${cursor.scheduleBlock}
+        OR (qa.queue_block = ${cursor.scheduleBlock} AND qa.id < ${cursor.id}::uuid)
       )`
     );
   }
@@ -453,9 +458,9 @@ export async function getPublicActions(
 
   if (query.status !== undefined) {
     if (query.status === "expired") {
-      filters.push(sql`qa.status = 'queued' AND qa.expires_at IS NOT NULL AND qa.expires_at <= NOW()`);
-    } else if (query.status === "queued") {
-      filters.push(sql`qa.status = 'queued' AND (qa.expires_at IS NULL OR qa.expires_at > NOW())`);
+      filters.push(sql`qa.status = 'scheduled' AND qa.expires_at IS NOT NULL AND qa.expires_at <= NOW()`);
+    } else if (query.status === "scheduled") {
+      filters.push(sql`qa.status = 'scheduled' AND (qa.expires_at IS NULL OR qa.expires_at > NOW())`);
     } else {
       filters.push(sql`qa.status = ${query.status}::sentinel_queued_action_status`);
     }
@@ -482,16 +487,21 @@ export async function getPublicActions(
           qa.id,
           qa.chain_id AS "chainId",
           qa.boardroom,
-          qa.action_hash AS "actionHash",
-          qa.queue_tx_hash AS "queueTxHash",
-          qa.queue_block AS "queueBlock",
+          qa.action_hash AS "operationId",
+          qa.queue_tx_hash AS "scheduleTxHash",
+          qa.queue_block AS "scheduleBlock",
+          qa.executor AS controller,
+          qa.proposer,
+          qa.operation_kind AS "operationKind",
+          qa.controller_generation AS "controllerGeneration",
+          qa.configuration_epoch AS "configurationEpoch",
           CASE
-            WHEN qa.status = 'queued' AND qa.expires_at IS NOT NULL AND qa.expires_at <= NOW()
+            WHEN qa.status = 'scheduled' AND qa.expires_at IS NOT NULL AND qa.expires_at <= NOW()
               THEN 'expired'
             ELSE qa.status::text
           END AS status,
           qa.decode_status AS "decodeStatus",
-          qa.epoch,
+          qa.epoch AS "boardroomEpoch",
           qa.eta,
           qa.expires_at AS "expiresAt",
           qa.invalidated_by_epoch AS "invalidatedByEpoch",
@@ -672,8 +682,8 @@ function toPublicActionDto(
   calls: readonly PublicActionCallRow[]
 ): PublicActionDto {
   return {
-    actionHash: row.actionHash as PublicActionDto["actionHash"],
     analysis: toAnalysisDto(row),
+    boardroomEpoch: row.boardroomEpoch === null ? null : row.boardroomEpoch.toString(),
     boardroom: {
       address: row.boardroom as AddressDto,
       name: row.boardroomName,
@@ -691,15 +701,20 @@ function toPublicActionDto(
       value: call.value
     })),
     chainId: row.chainId,
+    configurationEpoch: row.configurationEpoch.toString(),
+    controller: row.controller as AddressDto,
+    controllerGeneration: row.controllerGeneration.toString(),
     decodeStatus: row.decodeStatus,
-    epoch: row.epoch === null ? null : row.epoch.toString(),
     eta: toIso(row.eta),
     ...(row.status === "expired" ? {} : { event: row.status }),
     expiresAt: row.expiresAt === null ? null : toIso(row.expiresAt),
     id: row.id,
     invalidatedByEpoch: row.invalidatedByEpoch === null ? null : row.invalidatedByEpoch.toString(),
-    queueBlock: row.queueBlock.toString(),
-    queueTxHash: row.queueTxHash as PublicActionDto["queueTxHash"],
+    operationId: row.operationId as PublicActionDto["operationId"],
+    operationKind: row.operationKind,
+    proposer: row.proposer as AddressDto,
+    scheduleBlock: row.scheduleBlock.toString(),
+    scheduleTxHash: row.scheduleTxHash as PublicActionDto["scheduleTxHash"],
     risk: toRiskDto(row),
     status: row.status
   };
@@ -708,7 +723,7 @@ function toPublicActionDto(
 function toNotificationDeliveryDto(row: NotificationDeliveryRow): NotificationDeliveryDto {
   return {
     action: {
-      actionHash: row.actionHash as NotificationDeliveryDto["action"]["actionHash"],
+      operationId: row.operationId as NotificationDeliveryDto["action"]["operationId"],
       boardroom: row.boardroom as AddressDto,
       chainId: row.chainId,
       eta: toIso(row.eta),
@@ -783,15 +798,15 @@ function toWalletDto(row: {
 
 type PublicActionsCursor = {
   readonly id: string;
-  readonly queueBlock: bigint;
+  readonly scheduleBlock: bigint;
 };
 
 export function encodePublicActionsCursor(input: {
   readonly id: string;
-  readonly queueBlock: bigint | string;
+  readonly scheduleBlock: bigint | string;
 }): string {
   return Buffer.from(
-    JSON.stringify({ id: input.id, queueBlock: input.queueBlock.toString() }),
+    JSON.stringify({ id: input.id, scheduleBlock: input.scheduleBlock.toString() }),
     "utf8"
   ).toString("base64url");
 }
@@ -804,19 +819,19 @@ export function decodePublicActionsCursor(
   try {
     const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
       id?: unknown;
-      queueBlock?: unknown;
+      scheduleBlock?: unknown;
     };
     if (
       typeof parsed.id !== "string" ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
         parsed.id
       ) ||
-      typeof parsed.queueBlock !== "string" ||
-      !/^\d+$/.test(parsed.queueBlock)
+      typeof parsed.scheduleBlock !== "string" ||
+      !/^\d+$/.test(parsed.scheduleBlock)
     ) {
       return undefined;
     }
-    return { id: parsed.id, queueBlock: BigInt(parsed.queueBlock) };
+    return { id: parsed.id, scheduleBlock: BigInt(parsed.scheduleBlock) };
   } catch {
     return undefined;
   }

@@ -16,7 +16,10 @@ export type PledgeCashDeployment = {
   boardroomStatus?: string;
   boardroomReason?: string;
   boardroomFactory?: Address;
+  boardroomControllerFactory?: Address;
+  boardroomControllerLogic?: Address;
   boardroomGovernanceLogic?: Address;
+  boardroomMarketLogic?: Address;
   boardroomRedemptionPayout?: Address;
   boardroomLogic?: Address;
   boardroomPolicyRegistry?: Address;
@@ -70,7 +73,10 @@ export type PledgeCashDeployment = {
   assetPolicyCodeHash?: string;
   protocolFeeRouterCodeHash?: string;
   boardroomFactoryCodeHash?: string;
+  boardroomControllerFactoryCodeHash?: string;
+  boardroomControllerCodeHash?: string;
   boardroomGovernanceLogicCodeHash?: string;
+  boardroomMarketLogicCodeHash?: string;
   boardroomRedemptionPayoutCodeHash?: string;
   boardroomLogicCodeHash?: string;
   tokenGrantFactoryCodeHash?: string;
@@ -3440,6 +3446,16 @@ export const boardroomAbi = [
         "name": "governanceLogic_",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "controllerFactory_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "marketLogic_",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
@@ -3463,7 +3479,7 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_GOVERNANCE_DELAY",
+    "name": "MAX_SNAPSHOT_PAGE",
     "inputs": [],
     "outputs": [
       {
@@ -3476,7 +3492,7 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_ISSUED_DISTRIBUTIONS",
+    "name": "MAX_WIND_DOWN_DELAY",
     "inputs": [],
     "outputs": [
       {
@@ -3489,7 +3505,7 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_ISSUED_GRANTS",
+    "name": "MIN_WIND_DOWN_DELAY",
     "inputs": [],
     "outputs": [
       {
@@ -3502,7 +3518,45 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_LOCKED_LIQUIDITY_POSITIONS",
+    "name": "activateProtocolLiquidity",
+    "inputs": [
+      {
+        "name": "locker",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "pool",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "quoteAsset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "curve",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "pairKey",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "activeObligationCount",
     "inputs": [],
     "outputs": [
       {
@@ -3515,8 +3569,14 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_REDEEMABLE_ASSETS",
-    "inputs": [],
+    "name": "activeObligationCountByKind",
+    "inputs": [
+      {
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "enum BoardroomObligationStorage.Kind"
+      }
+    ],
     "outputs": [
       {
         "name": "",
@@ -3552,6 +3612,68 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "assetDependencyCount",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "assetSnapshotProgress",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "frozenCount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "cursor",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "frozen",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "beginSnapshot",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "bondingCurve",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "burnTreasuryShares",
     "inputs": [],
     "outputs": [
@@ -3561,19 +3683,6 @@ export const boardroomAbi = [
         "internalType": "uint256"
       }
     ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "cancelAction",
-    "inputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
@@ -3614,6 +3723,26 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "closeProtocolLiquidityAfterWindDown",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "closeProtocolLiquidityFromFactory",
+    "inputs": [
+      {
+        "name": "locker",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "completeOwnershipHandover",
     "inputs": [
       {
@@ -3624,6 +3753,45 @@ export const boardroomAbi = [
     ],
     "outputs": [],
     "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "controller",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "controllerFactory",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "controllerGeneration",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -3709,58 +3877,22 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "executeQueuedAction",
+    "name": "executeGovernance",
     "inputs": [
       {
-        "name": "call_",
-        "type": "tuple",
-        "internalType": "struct Boardroom.Call",
-        "components": [
-          {
-            "name": "policy",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "target",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "value",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "data",
-            "type": "bytes",
-            "internalType": "bytes"
-          }
-        ]
+        "name": "expectedEpoch",
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "result",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "executeQueuedBatch",
-    "inputs": [
+        "name": "authority",
+        "type": "address",
+        "internalType": "address"
+      },
       {
         "name": "calls",
         "type": "tuple[]",
-        "internalType": "struct Boardroom.Call[]",
+        "internalType": "struct BoardroomCall[]",
         "components": [
           {
             "name": "policy",
@@ -3783,11 +3915,6 @@ export const boardroomAbi = [
             "internalType": "bytes"
           }
         ]
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
       }
     ],
     "outputs": [
@@ -3797,7 +3924,7 @@ export const boardroomAbi = [
         "internalType": "bytes[]"
       }
     ],
-    "stateMutability": "payable"
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -3842,26 +3969,8 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "executor",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "exitLockedLiquidity",
+    "name": "exitProtocolLiquidity",
     "inputs": [
-      {
-        "name": "locker",
-        "type": "address",
-        "internalType": "address"
-      },
       {
         "name": "amountAMin",
         "type": "uint256",
@@ -3899,87 +4008,7 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "getIssuedDistributions",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address[]",
-        "internalType": "address[]"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getIssuedGrants",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address[]",
-        "internalType": "address[]"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getLockedLiquidityPositions",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address[]",
-        "internalType": "address[]"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getRedeemableAssets",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address[]",
-        "internalType": "address[]"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "governanceConfig",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "minimumDelay",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "actionGracePeriod",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "vetoBps",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "windDownBps",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "pure"
-  },
-  {
-    "type": "function",
-    "name": "governanceDelay",
+    "name": "governanceEpoch",
     "inputs": [],
     "outputs": [
       {
@@ -4002,137 +4031,6 @@ export const boardroomAbi = [
       }
     ],
     "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "governanceState",
-    "inputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "currentEpoch",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "eta",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "expiresAt",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "actionEpoch",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "actionStatus",
-        "type": "uint8",
-        "internalType": "uint8"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "hashAction",
-    "inputs": [
-      {
-        "name": "call_",
-        "type": "tuple",
-        "internalType": "struct Boardroom.Call",
-        "components": [
-          {
-            "name": "policy",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "target",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "value",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "data",
-            "type": "bytes",
-            "internalType": "bytes"
-          }
-        ]
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "pure"
-  },
-  {
-    "type": "function",
-    "name": "hashBatch",
-    "inputs": [
-      {
-        "name": "calls",
-        "type": "tuple[]",
-        "internalType": "struct Boardroom.Call[]",
-        "components": [
-          {
-            "name": "policy",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "target",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "value",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "data",
-            "type": "bytes",
-            "internalType": "bytes"
-          }
-        ]
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "pure"
   },
   {
     "type": "function",
@@ -4169,10 +4067,49 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "isControllerDeploymentAuthorized",
+    "inputs": [
+      {
+        "name": "expectedController",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "proposer",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "delay",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "gracePeriod",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "generation",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "isIssuedDistribution",
     "inputs": [
       {
-        "name": "",
+        "name": "obligation",
         "type": "address",
         "internalType": "address"
       }
@@ -4191,7 +4128,7 @@ export const boardroomAbi = [
     "name": "isIssuedGrant",
     "inputs": [
       {
-        "name": "",
+        "name": "obligation",
         "type": "address",
         "internalType": "address"
       }
@@ -4210,7 +4147,7 @@ export const boardroomAbi = [
     "name": "isLockedLiquidity",
     "inputs": [
       {
-        "name": "",
+        "name": "obligation",
         "type": "address",
         "internalType": "address"
       }
@@ -4229,7 +4166,7 @@ export const boardroomAbi = [
     "name": "isRedeemableAsset",
     "inputs": [
       {
-        "name": "",
+        "name": "asset",
         "type": "address",
         "internalType": "address"
       }
@@ -4245,108 +4182,59 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "issuedDistributionAt",
-    "inputs": [
-      {
-        "name": "index",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "issuedDistributionCount",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "issuedGrantAt",
-    "inputs": [
-      {
-        "name": "index",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "issuedGrantCount",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "issuedGrantReservationsForDistribution",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "issuedGrantSlotReservations",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "launch",
     "inputs": [
       {
-        "name": "governanceDelay_",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "config",
+        "type": "tuple",
+        "internalType": "struct Boardroom.LaunchConfig",
+        "components": [
+          {
+            "name": "proposer",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "predictedController",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "protectionStaker",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "expectedRewardPool",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "expectedRedemptionExcessRecipient",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "controllerDelay",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "windDownDelay",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "gracePeriod",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "generation",
+            "type": "uint64",
+            "internalType": "uint64"
+          }
+        ]
       }
     ],
     "outputs": [],
@@ -4367,14 +4255,8 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "lockedLiquidityAt",
-    "inputs": [
-      {
-        "name": "index",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
+    "name": "liquidityLocker",
+    "inputs": [],
     "outputs": [
       {
         "name": "",
@@ -4386,13 +4268,85 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "lockedLiquidityCount",
+    "name": "liquidityMutationAllowed",
     "inputs": [],
     "outputs": [
       {
         "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "liquidityPool",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "liquidityQuoteAsset",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "liquidityReservation",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "curve",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expectedLocker",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "pairKey",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expiresAt",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "liquidityStatus",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "enum BoardroomLiquidityStorage.Status"
       }
     ],
     "stateMutability": "view"
@@ -4406,6 +4360,19 @@ export const boardroomAbi = [
         "name": "",
         "type": "bool",
         "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "marketLogic",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -4430,10 +4397,87 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "obligationDependencyAt",
+    "inputs": [
+      {
+        "name": "obligation",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "obligationDependencyCount",
+    "inputs": [
+      {
+        "name": "obligation",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "obligationOf",
+    "inputs": [
+      {
+        "name": "obligation",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "policy",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "enum BoardroomObligationStorage.Kind"
+      },
+      {
+        "name": "active",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "everRegistered",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "obligationPolicyOf",
     "inputs": [
       {
-        "name": "",
+        "name": "obligation",
         "type": "address",
         "internalType": "address"
       }
@@ -4488,40 +4532,6 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "payoutRedemptionAsset",
-    "inputs": [
-      {
-        "name": "holder",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "recipient",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "minAmountOut",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "amountOut",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "policyRegistry",
     "inputs": [],
     "outputs": [
@@ -4535,120 +4545,136 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "pruneClosedObligations",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "quarantineRedeemableAsset",
+    "name": "precommitBondingCurve",
     "inputs": [
       {
-        "name": "asset",
+        "name": "curve",
         "type": "address",
         "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "queueAction",
-    "inputs": [
-      {
-        "name": "call_",
-        "type": "tuple",
-        "internalType": "struct Boardroom.Call",
-        "components": [
-          {
-            "name": "policy",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "target",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "value",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "data",
-            "type": "bytes",
-            "internalType": "bytes"
-          }
-        ]
       },
       {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
+        "name": "quoteAsset",
+        "type": "address",
+        "internalType": "address"
       },
       {
-        "name": "eta",
+        "name": "fundingAmount",
         "type": "uint256",
         "internalType": "uint256"
       }
     ],
+    "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
     "type": "function",
-    "name": "queueBatch",
+    "name": "precommitProtocolLiquidity",
     "inputs": [
       {
-        "name": "calls",
-        "type": "tuple[]",
-        "internalType": "struct Boardroom.Call[]",
-        "components": [
-          {
-            "name": "policy",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "target",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "value",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "data",
-            "type": "bytes",
-            "internalType": "bytes"
-          }
-        ]
+        "name": "expectedLocker",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "quoteAsset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "curve",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "pairKey",
+        "type": "bytes32",
+        "internalType": "bytes32"
       },
       {
         "name": "salt",
         "type": "bytes32",
         "internalType": "bytes32"
+      },
+      {
+        "name": "expiresAt",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "primaryMarketMode",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "enum BoardroomPrimaryMarketStorage.Mode"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "primaryMarketQuoteAsset",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "protectionStaker",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "pruneObligation",
+    "inputs": [
+      {
+        "name": "obligation",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [
       {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
+        "name": "pruned",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "pruneObligations",
+    "inputs": [
       {
-        "name": "eta",
+        "name": "obligations",
+        "type": "address[]",
+        "internalType": "address[]"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "pruned",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -4694,25 +4720,9 @@ export const boardroomAbi = [
         "name": "shares",
         "type": "uint256",
         "internalType": "uint256"
-      },
-      {
-        "name": "recipient",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "minAmountsOut",
-        "type": "uint256[]",
-        "internalType": "uint256[]"
       }
     ],
-    "outputs": [
-      {
-        "name": "amountsOut",
-        "type": "uint256[]",
-        "internalType": "uint256[]"
-      }
-    ],
+    "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
@@ -4743,6 +4753,54 @@ export const boardroomAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "redeemableAssetPage",
+    "inputs": [
+      {
+        "name": "cursor",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "size",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "page",
+        "type": "address[]",
+        "internalType": "address[]"
+      },
+      {
+        "name": "nextCursor",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "redeemableAssetSnapshotStatus",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "enum BoardroomAssetStorage.SnapshotStatus"
       }
     ],
     "stateMutability": "view"
@@ -4818,12 +4876,53 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "redemptionSupplyState",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "supply",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "frozen",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "registerRedeemableAsset",
     "inputs": [
       {
         "name": "asset",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "releaseProtocolLiquidityReservation",
+    "inputs": [
+      {
+        "name": "curve",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "pairKey",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
       }
     ],
     "outputs": [],
@@ -4851,10 +4950,61 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "replaceController",
+    "inputs": [
+      {
+        "name": "expectedCurrentController",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expectedNextController",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "nextProposer",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "nextDelay",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "nextGracePeriod",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "nextGeneration",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "requestOwnershipHandover",
     "inputs": [],
     "outputs": [],
     "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "requireBondingCurveForfeitureVetoPower",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -4867,6 +5017,19 @@ export const boardroomAbi = [
       }
     ],
     "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "returnProtocolLiquidityAsLp",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "liquidity",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
     "stateMutability": "nonpayable"
   },
   {
@@ -4884,10 +5047,10 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "setExecutor",
+    "name": "setRedemptionExcessRecipient",
     "inputs": [
       {
-        "name": "executor_",
+        "name": "recipient",
         "type": "address",
         "internalType": "address"
       }
@@ -4897,14 +5060,8 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
-    "name": "setRedemptionExcessRecipient",
-    "inputs": [
-      {
-        "name": "recipient",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
+    "name": "settleBondingCurve",
+    "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -4920,6 +5077,25 @@ export const boardroomAbi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "snapshotAssets",
+    "inputs": [
+      {
+        "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "processed",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -4975,6 +5151,55 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "validatePrimaryMarketTransfer",
+    "inputs": [
+      {
+        "name": "from",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "veto",
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "windDownDelay",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "windDownStartedAt",
     "inputs": [],
     "outputs": [
@@ -5008,87 +5233,6 @@ export const boardroomAbi = [
   },
   {
     "type": "event",
-    "name": "BoardroomActionCancelled",
-    "inputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "caller",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomActionExecuted",
-    "inputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "caller",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomActionQueued",
-    "inputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "executor",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "eta",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "expiresAt",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "epoch",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
     "name": "BoardroomCallExecuted",
     "inputs": [
       {
@@ -5110,6 +5254,12 @@ export const boardroomAbi = [
         "internalType": "bytes4"
       },
       {
+        "name": "authority",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
         "name": "value",
         "type": "uint256",
         "indexed": false,
@@ -5126,87 +5276,40 @@ export const boardroomAbi = [
   },
   {
     "type": "event",
-    "name": "BoardroomDistributionPruned",
+    "name": "BoardroomControllerReplaced",
     "inputs": [
       {
-        "name": "distribution",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomDistributionRecorded",
-    "inputs": [
-      {
-        "name": "distribution",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomGrantPruned",
-    "inputs": [
-      {
-        "name": "grant",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomGrantRecorded",
-    "inputs": [
-      {
-        "name": "grant",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomGrantSlotsReleased",
-    "inputs": [
-      {
-        "name": "distribution",
+        "name": "oldController",
         "type": "address",
         "indexed": true,
         "internalType": "address"
       },
       {
-        "name": "count",
+        "name": "newController",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "generation",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "proposer",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "controllerDelay",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomGrantSlotsReserved",
-    "inputs": [
-      {
-        "name": "distribution",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
       },
       {
-        "name": "count",
+        "name": "gracePeriod",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -5262,13 +5365,43 @@ export const boardroomAbi = [
     "name": "BoardroomLaunched",
     "inputs": [
       {
-        "name": "executor",
+        "name": "controller",
         "type": "address",
         "indexed": true,
         "internalType": "address"
       },
       {
-        "name": "governanceDelay",
+        "name": "proposer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "protectionStaker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "controllerGeneration",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "controllerDelay",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "windDownDelay",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "gracePeriod",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -5278,47 +5411,16 @@ export const boardroomAbi = [
   },
   {
     "type": "event",
-    "name": "BoardroomLockedLiquidityExited",
+    "name": "BoardroomObligationDependency",
     "inputs": [
       {
-        "name": "locker",
+        "name": "obligation",
         "type": "address",
         "indexed": true,
         "internalType": "address"
       },
       {
-        "name": "pool",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "liquidity",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountA",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountB",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomLockedLiquidityPruned",
-    "inputs": [
-      {
-        "name": "locker",
+        "name": "asset",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -5328,38 +5430,69 @@ export const boardroomAbi = [
   },
   {
     "type": "event",
-    "name": "BoardroomLockedLiquidityRecorded",
+    "name": "BoardroomObligationPruned",
     "inputs": [
       {
-        "name": "locker",
+        "name": "obligation",
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      },
+      {
+        "name": "policy",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "indexed": true,
+        "internalType": "enum BoardroomObligationStorage.Kind"
       }
     ],
     "anonymous": false
   },
   {
     "type": "event",
-    "name": "BoardroomLockedLiquidityReturnedAsLp",
+    "name": "BoardroomObligationRecorded",
     "inputs": [
       {
-        "name": "locker",
+        "name": "obligation",
         "type": "address",
         "indexed": true,
         "internalType": "address"
       },
       {
-        "name": "pool",
+        "name": "policy",
         "type": "address",
         "indexed": true,
         "internalType": "address"
       },
       {
-        "name": "liquidity",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
+        "name": "kind",
+        "type": "uint8",
+        "indexed": true,
+        "internalType": "enum BoardroomObligationStorage.Kind"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BoardroomOperationVetoed",
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "staker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
       }
     ],
     "anonymous": false
@@ -5379,13 +5512,38 @@ export const boardroomAbi = [
   },
   {
     "type": "event",
-    "name": "BoardroomRewardPoolRecorded",
+    "name": "BoardroomSnapshotPageProcessed",
     "inputs": [
       {
-        "name": "rewards",
-        "type": "address",
+        "name": "fromIndex",
+        "type": "uint256",
         "indexed": true,
-        "internalType": "address"
+        "internalType": "uint256"
+      },
+      {
+        "name": "toIndex",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BoardroomSnapshottingStarted",
+    "inputs": [
+      {
+        "name": "assetCount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "redemptionSupply",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -5399,19 +5557,43 @@ export const boardroomAbi = [
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      },
+      {
+        "name": "epoch",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "windDownDelay",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
   },
   {
     "type": "event",
-    "name": "ExecutorSet",
+    "name": "BondingCurvePrecommitted",
     "inputs": [
       {
-        "name": "executor",
+        "name": "curve",
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      },
+      {
+        "name": "quoteAsset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "fundingAmount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -5438,25 +5620,6 @@ export const boardroomAbi = [
         "type": "uint64",
         "indexed": false,
         "internalType": "uint64"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "NativeWrappedForWindDown",
-    "inputs": [
-      {
-        "name": "wrappedNative",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -5508,13 +5671,137 @@ export const boardroomAbi = [
   },
   {
     "type": "event",
-    "name": "RedeemableAssetQuarantined",
+    "name": "PrimaryMarketModeChanged",
     "inputs": [
       {
-        "name": "asset",
+        "name": "mode",
+        "type": "uint8",
+        "indexed": true,
+        "internalType": "enum BoardroomPrimaryMarketStorage.Mode"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProtocolLiquidityActivated",
+    "inputs": [
+      {
+        "name": "locker",
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      },
+      {
+        "name": "pool",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "quoteAsset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "curve",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProtocolLiquidityClosed",
+    "inputs": [
+      {
+        "name": "locker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "pool",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "quoteAsset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProtocolLiquidityReservationReleased",
+    "inputs": [
+      {
+        "name": "curve",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "expectedLocker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProtocolLiquidityReserved",
+    "inputs": [
+      {
+        "name": "expectedLocker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "quoteAsset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "curve",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "pairKey",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expiresAt",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -5547,62 +5834,32 @@ export const boardroomAbi = [
   },
   {
     "type": "event",
-    "name": "RedemptionAssetClaimFailed",
+    "name": "RedeemableAssetSnapshot",
     "inputs": [
-      {
-        "name": "holder",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "recipient",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
       {
         "name": "asset",
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      },
+      {
+        "name": "balance",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
   },
   {
     "type": "event",
-    "name": "RedemptionAssetClaimed",
+    "name": "RedeemableAssetUnreadable",
     "inputs": [
-      {
-        "name": "holder",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "recipient",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
       {
         "name": "asset",
         "type": "address",
         "indexed": true,
         "internalType": "address"
-      },
-      {
-        "name": "shares",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -5616,31 +5873,6 @@ export const boardroomAbi = [
         "type": "address",
         "indexed": true,
         "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "RedemptionExcessSwept",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "recipient",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -5663,131 +5895,6 @@ export const boardroomAbi = [
       }
     ],
     "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "SharesRedeemed",
-    "inputs": [
-      {
-        "name": "holder",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "recipient",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "shares",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "assets",
-        "type": "address[]",
-        "indexed": false,
-        "internalType": "address[]"
-      },
-      {
-        "name": "amounts",
-        "type": "uint256[]",
-        "indexed": false,
-        "internalType": "uint256[]"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "TreasurySharesBurned",
-    "inputs": [
-      {
-        "name": "amount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "error",
-    "name": "ActionAlreadyQueued",
-    "inputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ActionContextMismatch",
-    "inputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ActionExpired",
-    "inputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "expiresAt",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "currentTime",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ActionNotQueued",
-    "inputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ActionNotReady",
-    "inputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "eta",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "currentTime",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
   },
   {
     "type": "error",
@@ -5838,6 +5945,17 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
+    "name": "ControllerAlreadyDeployed",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "EmptyBatch",
     "inputs": []
   },
@@ -5854,46 +5972,15 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "InsufficientRedemptionAmount",
+    "name": "GovernanceEpochMismatch",
     "inputs": [
       {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amountOut",
+        "name": "expected",
         "type": "uint256",
         "internalType": "uint256"
       },
       {
-        "name": "minAmountOut",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InsufficientStakerPower",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "currentStake",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "pastStake",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "requiredStake",
+        "name": "actual",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -5911,12 +5998,23 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "InvalidExecutor",
+    "name": "InvalidController",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidControllerReplacement",
     "inputs": []
   },
   {
     "type": "error",
-    "name": "InvalidGovernanceDelay",
+    "name": "InvalidExecutionContext",
     "inputs": []
   },
   {
@@ -5926,25 +6024,8 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "InvalidIssuedDistribution",
-    "inputs": [
-      {
-        "name": "distribution",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidIssuedGrant",
-    "inputs": [
-      {
-        "name": "grant",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
+    "name": "InvalidLaunchConfiguration",
+    "inputs": []
   },
   {
     "type": "error",
@@ -5959,10 +6040,37 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "InvalidLockedLiquidity",
+    "name": "InvalidObligation",
     "inputs": [
       {
-        "name": "locker",
+        "name": "obligation",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidObligationPolicy",
+    "inputs": [
+      {
+        "name": "policy",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidPrimaryMarketTransition",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidProtectionStaker",
+    "inputs": [
+      {
+        "name": "staker",
         "type": "address",
         "internalType": "address"
       }
@@ -5986,12 +6094,17 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "InvalidRewardPool",
+    "name": "InvalidSnapshotPage",
     "inputs": [
       {
-        "name": "rewards",
-        "type": "address",
-        "internalType": "address"
+        "name": "requested",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ]
   },
@@ -6013,56 +6126,7 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "IssuedDistributionStillOpen",
-    "inputs": [
-      {
-        "name": "distribution",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "IssuedGrantStillOpen",
-    "inputs": [
-      {
-        "name": "grant",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "LockedLiquidityStillOpen",
-    "inputs": [
-      {
-        "name": "locker",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ModulePolicyRequired",
-    "inputs": [
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
     "name": "NewOwnerIsZeroAddress",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "NoCirculatingShares",
     "inputs": []
   },
   {
@@ -6083,51 +6147,46 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "NoReservedIssuedGrantSlots",
-    "inputs": [
-      {
-        "name": "distribution",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "NotActiveStaker",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
     "name": "NotInitializing",
     "inputs": []
   },
   {
     "type": "error",
-    "name": "ObligationPolicyMismatch",
+    "name": "ObligationAlreadyRegistered",
     "inputs": [
       {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "expectedPolicy",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "actualPolicy",
+        "name": "obligation",
         "type": "address",
         "internalType": "address"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "ObligationNotActive",
+    "inputs": [
+      {
+        "name": "obligation",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ObligationStillOpen",
+    "inputs": [
+      {
+        "name": "obligation",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OwnershipLockedAfterLaunch",
+    "inputs": []
   },
   {
     "type": "error",
@@ -6136,12 +6195,22 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "PolicyNotAllowed",
+    "name": "PrimaryMarketTransferRestricted",
     "inputs": [
       {
-        "name": "policy",
+        "name": "from",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ]
   },
@@ -6153,6 +6222,22 @@ export const boardroomAbi = [
         "name": "asset",
         "type": "address",
         "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RedeemableAssetDependency",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "dependencies",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ]
   },
@@ -6174,23 +6259,1091 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "RedeemableAssetReserved",
+    "name": "Reentrancy",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SnapshotAlreadyFrozen",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SnapshotIncomplete",
     "inputs": [
       {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
+        "name": "cursor",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "count",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ]
   },
   {
     "type": "error",
-    "name": "RedeemableAssetStillValid",
+    "name": "SnapshotNotReady",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TooManyCalls",
     "inputs": [
       {
-        "name": "asset",
+        "name": "requested",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TooManyObligationDependencies",
+    "inputs": [
+      {
+        "name": "requested",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Unauthorized",
+    "inputs": []
+  }
+] as const;
+
+export const boardroomControllerAbi = [
+  {
+    "type": "constructor",
+    "inputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "ERC1271_MAGIC_VALUE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_BATCH_CALLS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_DELAY",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_GRACE_PERIOD",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MIN_DELAY",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MIN_GRACE_PERIOD",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "boardroom",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "cancelOperation",
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "configurationEpoch",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "configurationHash",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "delay",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "executeBoardroomOperation",
+    "inputs": [
+      {
+        "name": "calls",
+        "type": "tuple[]",
+        "internalType": "struct BoardroomCall[]",
+        "components": [
+          {
+            "name": "policy",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "target",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "data",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expectedBoardroomEpoch",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "expectedConfigurationEpoch",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "authority",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "results",
+        "type": "bytes[]",
+        "internalType": "bytes[]"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "executeControllerOperation",
+    "inputs": [
+      {
+        "name": "data",
+        "type": "bytes",
+        "internalType": "bytes"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expectedBoardroomEpoch",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "expectedConfigurationEpoch",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "authority",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "factory",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "generation",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "gracePeriod",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "hashBoardroomOperation",
+    "inputs": [
+      {
+        "name": "calls",
+        "type": "tuple[]",
+        "internalType": "struct BoardroomCall[]",
+        "components": [
+          {
+            "name": "policy",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "target",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "data",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expectedBoardroomEpoch",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "expectedConfigurationEpoch",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "authority",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "hashControllerOperation",
+    "inputs": [
+      {
+        "name": "data",
+        "type": "bytes",
+        "internalType": "bytes"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expectedBoardroomEpoch",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "expectedConfigurationEpoch",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "authority",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "inputs": [
+      {
+        "name": "boardroom_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "proposer_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "delay_",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "gracePeriod_",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "generation_",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "isValidSignature",
+    "inputs": [
+      {
+        "name": "hash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "signature",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "operationState",
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "eta",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "expiresAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "operationStatus",
+        "type": "uint8",
+        "internalType": "enum BoardroomController.OperationStatus"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "proposer",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "scheduleBoardroomOperation",
+    "inputs": [
+      {
+        "name": "calls",
+        "type": "tuple[]",
+        "internalType": "struct BoardroomCall[]",
+        "components": [
+          {
+            "name": "policy",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "target",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "data",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expectedBoardroomEpoch",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "expectedConfigurationEpoch",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "eta",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "scheduleControllerOperation",
+    "inputs": [
+      {
+        "name": "data",
+        "type": "bytes",
+        "internalType": "bytes"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expectedBoardroomEpoch",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "expectedConfigurationEpoch",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "eta",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updateConfiguration",
+    "inputs": [
+      {
+        "name": "proposer_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "delay_",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "gracePeriod_",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "BoardroomOperationScheduled",
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "proposer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "eta",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "expiresAt",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "boardroomEpoch",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "controllerGeneration",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "configurationEpoch",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "callsHash",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ConfigurationUpdated",
+    "inputs": [
+      {
+        "name": "oldProposer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newProposer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "oldDelay",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "newDelay",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "oldGracePeriod",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "newGracePeriod",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "configurationEpoch",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ControllerInitialized",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "proposer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "generation",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "delay",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "gracePeriod",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "configurationEpoch",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ControllerOperationScheduled",
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "proposer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "eta",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "expiresAt",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "boardroomEpoch",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "controllerGeneration",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "configurationEpoch",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "dataHash",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Initialized",
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OperationCancelled",
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OperationExecuted",
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "executor",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "BoardroomEpochMismatch",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "BoardroomNotActive",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ConfigurationEpochMismatch",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ControllerNotActive",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidConfiguration",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidInitialization",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotInitializing",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyBoardroom",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyFactory",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyProposer",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlySelf",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OperationAlreadyKnown",
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OperationContextMismatch",
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OperationExpired",
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expiresAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "currentTime",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OperationNotPending",
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OperationNotReady",
+    "inputs": [
+      {
+        "name": "operationId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "eta",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "currentTime",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ]
   },
@@ -6201,23 +7354,12 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "RewardPoolAlreadyRegistered",
+    "name": "SelfOperationFailed",
     "inputs": [
       {
-        "name": "rewards",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "RewardPoolStillOpen",
-    "inputs": [
-      {
-        "name": "rewards",
-        "type": "address",
-        "internalType": "address"
+        "name": "operationId",
+        "type": "bytes32",
+        "internalType": "bytes32"
       }
     ]
   },
@@ -6239,93 +7381,282 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "TooManyIssuedDistributions",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "TooManyIssuedGrantReservations",
+    "name": "UnsupportedSelfOperation",
     "inputs": [
       {
-        "name": "requested",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "available",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
       }
     ]
-  },
+  }
+] as const;
+
+export const boardroomControllerFactoryAbi = [
   {
-    "type": "error",
-    "name": "TooManyIssuedGrants",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "TooManyLockedLiquidityPositions",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "TooManyRedeemableAssets",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "Unauthorized",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "UnexpectedRedeemableAssetBalanceChange",
+    "type": "constructor",
     "inputs": [
       {
-        "name": "asset",
+        "name": "boardroomFactory_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "boardroomFactory",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "boardroomOfController",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "controllerImplementation",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "deployController",
+    "inputs": [
+      {
+        "name": "expectedController",
         "type": "address",
         "internalType": "address"
       },
       {
-        "name": "expected",
+        "name": "proposer",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "delay",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "gracePeriod",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "generation",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "generationOfController",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "generation",
         "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isController",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "canonical",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "predictControllerAddress",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "generation",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "ControllerDeployed",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "controller",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "generation",
+        "type": "uint256",
+        "indexed": true,
         "internalType": "uint256"
       },
       {
-        "name": "actual",
+        "name": "proposer",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "delay",
         "type": "uint256",
+        "indexed": false,
         "internalType": "uint256"
+      },
+      {
+        "name": "gracePeriod",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "ControllerAddressOccupied",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
       }
     ]
   },
   {
     "type": "error",
-    "name": "UnexpectedWrappedNativeBalanceChange",
+    "name": "ControllerPredictionMismatch",
     "inputs": [
       {
         "name": "expected",
-        "type": "uint256",
-        "internalType": "uint256"
+        "type": "address",
+        "internalType": "address"
       },
       {
         "name": "actual",
-        "type": "uint256",
-        "internalType": "uint256"
+        "type": "address",
+        "internalType": "address"
       }
     ]
   },
   {
     "type": "error",
-    "name": "WindDownFinalizationNotReady",
+    "name": "InvalidAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidGeneration",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "OnlyCanonicalBoardroom",
     "inputs": [
       {
-        "name": "readyAt",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "caller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnauthorizedDeploymentContext",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
       },
       {
-        "name": "currentTime",
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "generation",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -6395,6 +7726,19 @@ export const boardroomFactoryAbi = [
   {
     "type": "function",
     "name": "boardroomLogic",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "controllerFactory",
     "inputs": [],
     "outputs": [
       {
@@ -6486,6 +7830,19 @@ export const boardroomFactoryAbi = [
         "name": "",
         "type": "bool",
         "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "marketLogic",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -6628,43 +7985,22 @@ export const boardroomFactoryAbi = [
 export const boardroomGovernanceLogicAbi = [
   {
     "type": "function",
-    "name": "advanceEpoch",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "epoch",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "cancelAction",
+    "name": "addObligationDependency",
     "inputs": [
       {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "consumeReadyAction",
-    "inputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
       },
       {
-        "name": "status",
-        "type": "uint8",
-        "internalType": "uint8"
+        "name": "obligation",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "outputs": [],
@@ -6696,207 +8032,10 @@ export const boardroomGovernanceLogicAbi = [
   },
   {
     "type": "function",
-    "name": "exitLockedLiquidity",
+    "name": "executeCall",
     "inputs": [
       {
-        "name": "config",
-        "type": "tuple",
-        "internalType": "struct BoardroomGovernanceLogic.LifecycleConfig",
-        "components": [
-          {
-            "name": "policyRegistry",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "shareToken",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "maxAssets",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "maxGrants",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "maxDistributions",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "maxLockers",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ]
-      },
-      {
-        "name": "obligationSlots",
-        "type": "tuple",
-        "internalType": "struct BoardroomRedemptionPayout.ObligationSlots",
-        "components": [
-          {
-            "name": "issuedGrants",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "issuedDistributions",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "lockedLiquidityPositions",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "issuedGrantSlotReservations",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "isIssuedGrant",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "isIssuedDistribution",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "isLockedLiquidity",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "reservationsForDistribution",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ]
-      },
-      {
-        "name": "params",
-        "type": "tuple",
-        "internalType": "struct BoardroomGovernanceLogic.ExitParams",
-        "components": [
-          {
-            "name": "redemptionPayout",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "locker",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "amountAMin",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "amountBMin",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "deadline",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "governanceDelay",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ]
-      }
-    ],
-    "outputs": [
-      {
-        "name": "amountA",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountB",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "liquidity",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "finalizeWindDown",
-    "inputs": [
-      {
-        "name": "obligationSlots",
-        "type": "tuple",
-        "internalType": "struct BoardroomRedemptionPayout.ObligationSlots",
-        "components": [
-          {
-            "name": "issuedGrants",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "issuedDistributions",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "lockedLiquidityPositions",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "issuedGrantSlotReservations",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "isIssuedGrant",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "isIssuedDistribution",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "isLockedLiquidity",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "reservationsForDistribution",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ]
-      },
-      {
-        "name": "redemptionPayout",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "wrappedNative",
+        "name": "policyRegistry",
         "type": "address",
         "internalType": "address"
       },
@@ -6906,70 +8045,87 @@ export const boardroomGovernanceLogicAbi = [
         "internalType": "address"
       },
       {
-        "name": "redeemableAssets",
-        "type": "address[]",
-        "internalType": "address[]"
-      },
-      {
-        "name": "governanceDelay",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "quarantineRedeemableAsset",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "wrappedNative",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "queueAction",
-    "inputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "status",
+        "name": "currentStatus",
         "type": "uint8",
         "internalType": "uint8"
       },
       {
-        "name": "delay",
+        "name": "authority",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "policy",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "target",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "value",
         "type": "uint256",
         "internalType": "uint256"
       },
       {
-        "name": "gracePeriod",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "data",
+        "type": "bytes",
+        "internalType": "bytes"
       }
     ],
     "outputs": [
       {
-        "name": "eta",
+        "name": "result",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "pruneObligation",
+    "inputs": [
+      {
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "obligation",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "pruned",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "pruneObligations",
+    "inputs": [
+      {
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "obligations",
+        "type": "address[]",
+        "internalType": "address[]"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "pruned",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -6994,16 +8150,6 @@ export const boardroomGovernanceLogicAbi = [
         "name": "grant",
         "type": "address",
         "internalType": "address"
-      },
-      {
-        "name": "maxAssets",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "maxGrants",
-        "type": "uint256",
-        "internalType": "uint256"
       }
     ],
     "outputs": [],
@@ -7011,114 +8157,17 @@ export const boardroomGovernanceLogicAbi = [
   },
   {
     "type": "function",
-    "name": "recordIssuedObligation",
-    "inputs": [
-      {
-        "name": "config",
-        "type": "tuple",
-        "internalType": "struct BoardroomGovernanceLogic.LifecycleConfig",
-        "components": [
-          {
-            "name": "policyRegistry",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "shareToken",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "maxAssets",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "maxGrants",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "maxDistributions",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "maxLockers",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ]
-      },
-      {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "data",
-        "type": "bytes",
-        "internalType": "bytes"
-      },
-      {
-        "name": "result",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
     "name": "recordLockedLiquidityFromDistribution",
     "inputs": [
       {
-        "name": "config",
-        "type": "tuple",
-        "internalType": "struct BoardroomGovernanceLogic.LifecycleConfig",
-        "components": [
-          {
-            "name": "policyRegistry",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "shareToken",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "maxAssets",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "maxGrants",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "maxDistributions",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "maxLockers",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ]
+        "name": "policyRegistry",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
       },
       {
         "name": "locker",
@@ -7127,91 +8176,6 @@ export const boardroomGovernanceLogicAbi = [
       },
       {
         "name": "pool",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "registerRedeemableAsset",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "maximum",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "allowExisting",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "requirePositiveBalance",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "registered",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "releaseGrantSlotsForLifecycleCall",
-    "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "removeEmptyRedeemableAsset",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "wrappedNative",
         "type": "address",
         "internalType": "address"
       }
@@ -7253,82 +8217,61 @@ export const boardroomGovernanceLogicAbi = [
     "stateMutability": "view"
   },
   {
-    "type": "function",
-    "name": "reserveRedeemableAsset",
+    "type": "event",
+    "name": "BoardroomCallExecuted",
     "inputs": [
       {
-        "name": "policyRegistry",
+        "name": "policy",
         "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "target",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "indexed": true,
+        "internalType": "bytes4"
+      },
+      {
+        "name": "authority",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "dataHash",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "BoardroomObligationDependency",
+    "inputs": [
+      {
+        "name": "obligation",
+        "type": "address",
+        "indexed": true,
         "internalType": "address"
       },
       {
         "name": "asset",
         "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "maximum",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "startWindDown",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "epoch",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "validateRedeemableAsset",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "balance",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "event",
-    "name": "BoardroomDistributionRecorded",
-    "inputs": [
-      {
-        "name": "distribution",
-        "type": "address",
         "indexed": true,
         "internalType": "address"
       }
@@ -7337,152 +8280,50 @@ export const boardroomGovernanceLogicAbi = [
   },
   {
     "type": "event",
-    "name": "BoardroomGrantRecorded",
+    "name": "BoardroomObligationPruned",
     "inputs": [
       {
-        "name": "grant",
+        "name": "obligation",
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      },
+      {
+        "name": "policy",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "indexed": true,
+        "internalType": "enum BoardroomObligationStorage.Kind"
       }
     ],
     "anonymous": false
   },
   {
     "type": "event",
-    "name": "BoardroomGrantSlotsReleased",
+    "name": "BoardroomObligationRecorded",
     "inputs": [
       {
-        "name": "distribution",
+        "name": "obligation",
         "type": "address",
         "indexed": true,
         "internalType": "address"
       },
       {
-        "name": "count",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomGrantSlotsReserved",
-    "inputs": [
-      {
-        "name": "distribution",
+        "name": "policy",
         "type": "address",
         "indexed": true,
         "internalType": "address"
       },
       {
-        "name": "count",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomLockedLiquidityExited",
-    "inputs": [
-      {
-        "name": "locker",
-        "type": "address",
+        "name": "kind",
+        "type": "uint8",
         "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "pool",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "liquidity",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountA",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountB",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomLockedLiquidityRecorded",
-    "inputs": [
-      {
-        "name": "locker",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomLockedLiquidityReturnedAsLp",
-    "inputs": [
-      {
-        "name": "locker",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "pool",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "liquidity",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomRewardPoolRecorded",
-    "inputs": [
-      {
-        "name": "rewards",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "RedeemableAssetQuarantined",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
+        "internalType": "enum BoardroomObligationStorage.Kind"
       }
     ],
     "anonymous": false
@@ -7501,94 +8342,6 @@ export const boardroomGovernanceLogicAbi = [
     "anonymous": false
   },
   {
-    "type": "event",
-    "name": "RedeemableAssetRemoved",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "error",
-    "name": "ActionAlreadyQueued",
-    "inputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ActionContextMismatch",
-    "inputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ActionExpired",
-    "inputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "expiresAt",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "currentTime",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ActionNotQueued",
-    "inputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ActionNotReady",
-    "inputs": [
-      {
-        "name": "actionHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "eta",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "currentTime",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
     "type": "error",
     "name": "CallFailed",
     "inputs": [
@@ -7601,12 +8354,22 @@ export const boardroomGovernanceLogicAbi = [
   },
   {
     "type": "error",
-    "name": "EmptyRedeemableAsset",
+    "name": "CallNotAllowed",
     "inputs": [
       {
-        "name": "asset",
+        "name": "policy",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "target",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
       }
     ]
   },
@@ -7638,10 +8401,31 @@ export const boardroomGovernanceLogicAbi = [
   },
   {
     "type": "error",
-    "name": "InvalidIssuedDistribution",
+    "name": "InvalidAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidExecutionContext",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidExecutionStatus",
     "inputs": [
       {
-        "name": "distribution",
+        "name": "status",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidObligation",
+    "inputs": [
+      {
+        "name": "obligation",
         "type": "address",
         "internalType": "address"
       }
@@ -7649,21 +8433,10 @@ export const boardroomGovernanceLogicAbi = [
   },
   {
     "type": "error",
-    "name": "InvalidIssuedGrant",
+    "name": "InvalidParentTransition",
     "inputs": [
       {
-        "name": "grant",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidLockedLiquidity",
-    "inputs": [
-      {
-        "name": "locker",
+        "name": "parent",
         "type": "address",
         "internalType": "address"
       }
@@ -7682,63 +8455,8 @@ export const boardroomGovernanceLogicAbi = [
   },
   {
     "type": "error",
-    "name": "InvalidRewardPool",
-    "inputs": [
-      {
-        "name": "rewards",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "IssuedDistributionStillOpen",
-    "inputs": [
-      {
-        "name": "distribution",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "IssuedGrantStillOpen",
-    "inputs": [
-      {
-        "name": "grant",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "LockedLiquidityStillOpen",
-    "inputs": [
-      {
-        "name": "locker",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
     "name": "NoCirculatingShares",
     "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "NoReservedIssuedGrantSlots",
-    "inputs": [
-      {
-        "name": "distribution",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
   },
   {
     "type": "error",
@@ -7753,10 +8471,10 @@ export const boardroomGovernanceLogicAbi = [
   },
   {
     "type": "error",
-    "name": "PolicyNotAllowed",
+    "name": "ObligationAlreadyRegistered",
     "inputs": [
       {
-        "name": "policy",
+        "name": "obligation",
         "type": "address",
         "internalType": "address"
       }
@@ -7764,10 +8482,10 @@ export const boardroomGovernanceLogicAbi = [
   },
   {
     "type": "error",
-    "name": "RedeemableAssetAlreadyRegistered",
+    "name": "ObligationNotActive",
     "inputs": [
       {
-        "name": "asset",
+        "name": "obligation",
         "type": "address",
         "internalType": "address"
       }
@@ -7775,72 +8493,12 @@ export const boardroomGovernanceLogicAbi = [
   },
   {
     "type": "error",
-    "name": "RedeemableAssetHasBalance",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "balance",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "RedeemableAssetReserved",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "RedeemableAssetStillValid",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "RewardPoolAlreadyRegistered",
-    "inputs": [
-      {
-        "name": "rewards",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "RewardPoolStillOpen",
-    "inputs": [
-      {
-        "name": "rewards",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "TooManyIssuedDistributions",
+    "name": "SnapshotAlreadyFrozen",
     "inputs": []
   },
   {
     "type": "error",
-    "name": "TooManyIssuedGrantReservations",
+    "name": "TooManyCalls",
     "inputs": [
       {
         "name": "requested",
@@ -7848,7 +8506,7 @@ export const boardroomGovernanceLogicAbi = [
         "internalType": "uint256"
       },
       {
-        "name": "available",
+        "name": "maximum",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -7856,34 +8514,551 @@ export const boardroomGovernanceLogicAbi = [
   },
   {
     "type": "error",
-    "name": "TooManyIssuedGrants",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "TooManyLockedLiquidityPositions",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "TooManyRedeemableAssets",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "WindDownFinalizationNotReady",
+    "name": "TooManyObligationDependencies",
     "inputs": [
       {
-        "name": "readyAt",
+        "name": "requested",
         "type": "uint256",
         "internalType": "uint256"
       },
       {
-        "name": "currentTime",
+        "name": "maximum",
         "type": "uint256",
         "internalType": "uint256"
       }
     ]
+  }
+] as const;
+
+export const boardroomMarketLogicAbi = [
+  {
+    "type": "function",
+    "name": "activateProtocolLiquidity",
+    "inputs": [
+      {
+        "name": "policyRegistry",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "locker",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "pool",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "quoteAsset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "curve",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "pairKey",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "authorizeControllerDeployment",
+    "inputs": [
+      {
+        "name": "expectedController",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "proposer",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "delay",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "gracePeriod",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "generation",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "clearControllerDeploymentAuthorization",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "closeProtocolLiquidity",
+    "inputs": [
+      {
+        "name": "policyRegistry",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "locker",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "closeProtocolLiquidityForWindDown",
+    "inputs": [
+      {
+        "name": "locker",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "precommitBondingCurve",
+    "inputs": [
+      {
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "curve",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "quoteAsset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "fundingAmount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "precommitProtocolLiquidity",
+    "inputs": [
+      {
+        "name": "policyRegistry",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expectedLocker",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "quoteAsset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "curve",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "pairKey",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expiresAt",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "releaseProtocolLiquidityReservation",
+    "inputs": [
+      {
+        "name": "policyRegistry",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "curve",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "pairKey",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "settleBondingCurve",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "validatePrimaryMarketTransfer",
+    "inputs": [
+      {
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "from",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "verifyController",
+    "inputs": [
+      {
+        "name": "controllerFactory",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "candidate",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "proposer",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "delay",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "gracePeriod",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "generation",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "view"
+  },
+  {
+    "type": "event",
+    "name": "BondingCurvePrecommitted",
+    "inputs": [
+      {
+        "name": "curve",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "quoteAsset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "fundingAmount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PrimaryMarketModeChanged",
+    "inputs": [
+      {
+        "name": "mode",
+        "type": "uint8",
+        "indexed": true,
+        "internalType": "enum BoardroomPrimaryMarketStorage.Mode"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProtocolLiquidityActivated",
+    "inputs": [
+      {
+        "name": "locker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "pool",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "quoteAsset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "curve",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProtocolLiquidityClosed",
+    "inputs": [
+      {
+        "name": "locker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "pool",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "quoteAsset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProtocolLiquidityReservationReleased",
+    "inputs": [
+      {
+        "name": "curve",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "expectedLocker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProtocolLiquidityReserved",
+    "inputs": [
+      {
+        "name": "expectedLocker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "quoteAsset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "curve",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "pairKey",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expiresAt",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RedeemableAssetRegistered",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "InvalidController",
+    "inputs": [
+      {
+        "name": "controller",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidExecutionContext",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidLiquidityTransition",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidPrimaryMarketTransition",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidRedeemableAsset",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "PrimaryMarketTransferRestricted",
+    "inputs": [
+      {
+        "name": "from",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "SnapshotAlreadyFrozen",
+    "inputs": []
   }
 ] as const;
 
@@ -10489,35 +11664,6 @@ export const boardroomRewardsFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "grantSlotReleaseForLifecycleCall",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "pure"
-  },
-  {
-    "type": "function",
     "name": "isLifecycleCallAllowed",
     "inputs": [
       {
@@ -10614,11 +11760,6 @@ export const boardroomRewardsFactoryAbi = [
             "name": "aux",
             "type": "address",
             "internalType": "address"
-          },
-          {
-            "name": "grantSlotReservations",
-            "type": "uint256",
-            "internalType": "uint256"
           }
         ]
       }
@@ -11947,7 +13088,7 @@ export const bondMarketFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_BOND_MARKETS_PER_BOARDROOM",
+    "name": "MAX_DISCOVERY_PAGE",
     "inputs": [],
     "outputs": [
       {
@@ -12036,6 +13177,40 @@ export const bondMarketFactoryAbi = [
         "name": "",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "bondMarketPageForBoardroom",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "cursor",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "size",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "page",
+        "type": "address[]",
+        "internalType": "address[]"
+      },
+      {
+        "name": "nextCursor",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -12154,54 +13329,6 @@ export const bondMarketFactoryAbi = [
       }
     ],
     "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "getBondMarketsForBoardroom",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address[]",
-        "internalType": "address[]"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "grantSlotReleaseForLifecycleCall",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "pure"
   },
   {
     "type": "function",
@@ -12339,11 +13466,6 @@ export const bondMarketFactoryAbi = [
             "name": "aux",
             "type": "address",
             "internalType": "address"
-          },
-          {
-            "name": "grantSlotReservations",
-            "type": "uint256",
-            "internalType": "uint256"
           }
         ]
       }
@@ -12373,25 +13495,6 @@ export const bondMarketFactoryAbi = [
       }
     ],
     "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "pruneClosedBondMarkets",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "pruned",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
   },
   {
     "type": "event",
@@ -12443,25 +13546,6 @@ export const bondMarketFactoryAbi = [
     "anonymous": false
   },
   {
-    "type": "event",
-    "name": "ClosedBondMarketsPruned",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "count",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
     "type": "error",
     "name": "InvalidAddress",
     "inputs": []
@@ -12474,6 +13558,22 @@ export const bondMarketFactoryAbi = [
         "name": "boardroom",
         "type": "address",
         "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidDiscoveryPage",
+    "inputs": [
+      {
+        "name": "requested",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ]
   },
@@ -12494,17 +13594,6 @@ export const bondMarketFactoryAbi = [
     "inputs": [
       {
         "name": "quoteToken",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "TooManyBoardroomMarkets",
-    "inputs": [
-      {
-        "name": "boardroom",
         "type": "address",
         "internalType": "address"
       }
@@ -12536,6 +13625,24 @@ export const bondMarketFactoryAbi = [
 export const boardroomRedemptionPayoutAbi = [
   {
     "type": "function",
+    "name": "beginSnapshot",
+    "inputs": [
+      {
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "wrappedNative",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "burnTreasuryShares",
     "inputs": [
       {
@@ -12556,6 +13663,13 @@ export const boardroomRedemptionPayoutAbi = [
         "internalType": "uint256"
       }
     ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "openRedemptions",
+    "inputs": [],
+    "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
@@ -12594,117 +13708,26 @@ export const boardroomRedemptionPayoutAbi = [
   },
   {
     "type": "function",
-    "name": "pruneClosedObligation",
+    "name": "processSnapshotAssets",
     "inputs": [
       {
-        "name": "slots",
-        "type": "tuple",
-        "internalType": "struct BoardroomRedemptionPayout.ObligationSlots",
-        "components": [
-          {
-            "name": "issuedGrants",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "issuedDistributions",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "lockedLiquidityPositions",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "issuedGrantSlotReservations",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "isIssuedGrant",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "isIssuedDistribution",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "isLockedLiquidity",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "reservationsForDistribution",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ]
+        "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
+        "name": "maximumPage",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "pruneClosedObligations",
-    "inputs": [
+    "outputs": [
       {
-        "name": "slots",
-        "type": "tuple",
-        "internalType": "struct BoardroomRedemptionPayout.ObligationSlots",
-        "components": [
-          {
-            "name": "issuedGrants",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "issuedDistributions",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "lockedLiquidityPositions",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "issuedGrantSlotReservations",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "isIssuedGrant",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "isIssuedDistribution",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "isLockedLiquidity",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "reservationsForDistribution",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ]
+        "name": "processed",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
-    "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
@@ -12725,40 +13748,6 @@ export const boardroomRedemptionPayoutAbi = [
         "name": "shares",
         "type": "uint256",
         "internalType": "uint256"
-      },
-      {
-        "name": "recipient",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "assets",
-        "type": "address[]",
-        "internalType": "address[]"
-      },
-      {
-        "name": "minAmountsOut",
-        "type": "uint256[]",
-        "internalType": "uint256[]"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "amountsOut",
-        "type": "uint256[]",
-        "internalType": "uint256[]"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "snapshotAssets",
-    "inputs": [
-      {
-        "name": "assets",
-        "type": "address[]",
-        "internalType": "address[]"
       }
     ],
     "outputs": [],
@@ -12803,10 +13792,10 @@ export const boardroomRedemptionPayoutAbi = [
   },
   {
     "type": "event",
-    "name": "BoardroomDistributionPruned",
+    "name": "BoardroomRedemptionsOpened",
     "inputs": [
       {
-        "name": "distribution",
+        "name": "caller",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -12816,31 +13805,18 @@ export const boardroomRedemptionPayoutAbi = [
   },
   {
     "type": "event",
-    "name": "BoardroomGrantPruned",
+    "name": "BoardroomSnapshotPageProcessed",
     "inputs": [
       {
-        "name": "grant",
-        "type": "address",
+        "name": "fromIndex",
+        "type": "uint256",
         "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomGrantSlotsReleased",
-    "inputs": [
-      {
-        "name": "distribution",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
+        "internalType": "uint256"
       },
       {
-        "name": "count",
+        "name": "toIndex",
         "type": "uint256",
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256"
       }
     ],
@@ -12848,13 +13824,19 @@ export const boardroomRedemptionPayoutAbi = [
   },
   {
     "type": "event",
-    "name": "BoardroomLockedLiquidityPruned",
+    "name": "BoardroomSnapshottingStarted",
     "inputs": [
       {
-        "name": "locker",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
+        "name": "assetCount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "redemptionSupply",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -12880,20 +13862,27 @@ export const boardroomRedemptionPayoutAbi = [
   },
   {
     "type": "event",
-    "name": "RedemptionAssetClaimFailed",
+    "name": "RedeemableAssetSnapshot",
     "inputs": [
       {
-        "name": "holder",
+        "name": "asset",
         "type": "address",
         "indexed": true,
         "internalType": "address"
       },
       {
-        "name": "recipient",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
+        "name": "balance",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RedeemableAssetUnreadable",
+    "inputs": [
       {
         "name": "asset",
         "type": "address",
@@ -12967,43 +13956,6 @@ export const boardroomRedemptionPayoutAbi = [
   },
   {
     "type": "event",
-    "name": "SharesRedeemed",
-    "inputs": [
-      {
-        "name": "holder",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "recipient",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "shares",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "assets",
-        "type": "address[]",
-        "indexed": false,
-        "internalType": "address[]"
-      },
-      {
-        "name": "amounts",
-        "type": "uint256[]",
-        "indexed": false,
-        "internalType": "uint256[]"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
     "name": "TreasurySharesBurned",
     "inputs": [
       {
@@ -13038,6 +13990,22 @@ export const boardroomRedemptionPayoutAbi = [
   },
   {
     "type": "error",
+    "name": "InvalidLifecycleStatus",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "actual",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "InvalidRedeemableAsset",
     "inputs": [
       {
@@ -13054,6 +14022,22 @@ export const boardroomRedemptionPayoutAbi = [
   },
   {
     "type": "error",
+    "name": "InvalidSnapshotPage",
+    "inputs": [
+      {
+        "name": "requested",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "NoRedemptionExcess",
     "inputs": [
       {
@@ -13062,6 +14046,32 @@ export const boardroomRedemptionPayoutAbi = [
         "internalType": "address"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "SnapshotAlreadyFrozen",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SnapshotIncomplete",
+    "inputs": [
+      {
+        "name": "cursor",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "count",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "SnapshotNotReady",
+    "inputs": []
   },
   {
     "type": "error",
@@ -13121,13 +14131,32 @@ export const distributionFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_DISTRIBUTIONS_PER_BOARDROOM",
+    "name": "MAX_DISCOVERY_PAGE",
     "inputs": [],
     "outputs": [
       {
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "bondingCurveOfBoardroom",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -13452,59 +14481,45 @@ export const distributionFactoryAbi = [
   },
   {
     "type": "function",
+    "name": "distributionPageForBoardroom",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "cursor",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "size",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "page",
+        "type": "address[]",
+        "internalType": "address[]"
+      },
+      {
+        "name": "nextCursor",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "fixedPriceSaleLogic",
     "inputs": [],
     "outputs": [
       {
         "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getDistributionsForBoardroom",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address[]",
-        "internalType": "address[]"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "grantSlotReleaseForLifecycleCall",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "distribution",
         "type": "address",
         "internalType": "address"
       }
@@ -13648,11 +14663,6 @@ export const distributionFactoryAbi = [
             "name": "aux",
             "type": "address",
             "internalType": "address"
-          },
-          {
-            "name": "grantSlotReservations",
-            "type": "uint256",
-            "internalType": "uint256"
           }
         ]
       }
@@ -13733,25 +14743,6 @@ export const distributionFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "pruneClosedDistributions",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "pruned",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "tokenGrantFactory",
     "inputs": [],
     "outputs": [
@@ -13762,25 +14753,6 @@ export const distributionFactoryAbi = [
       }
     ],
     "stateMutability": "view"
-  },
-  {
-    "type": "event",
-    "name": "ClosedDistributionsPruned",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "count",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
   },
   {
     "type": "event",
@@ -13833,6 +14805,22 @@ export const distributionFactoryAbi = [
   },
   {
     "type": "error",
+    "name": "BondingCurveAlreadyConfigured",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "curve",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "InvalidAddress",
     "inputs": []
   },
@@ -13860,6 +14848,33 @@ export const distributionFactoryAbi = [
   },
   {
     "type": "error",
+    "name": "InvalidDiscoveryPage",
+    "inputs": [
+      {
+        "name": "requested",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidPrimaryMarketState",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "InvalidShareToken",
     "inputs": [
       {
@@ -13869,17 +14884,6 @@ export const distributionFactoryAbi = [
       },
       {
         "name": "actual",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "TooManyBoardroomDistributions",
-    "inputs": [
-      {
-        "name": "boardroom",
         "type": "address",
         "internalType": "address"
       }
@@ -14977,6 +15981,60 @@ export const lockedLiquidityAbi = [
   },
   {
     "type": "function",
+    "name": "addLiquidity",
+    "inputs": [
+      {
+        "name": "amountADesired",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "amountBDesired",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "amountAMin",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "amountBMin",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "deadline",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "canonicalPool",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountA",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "amountB",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "liquidity",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "boardroom",
     "inputs": [],
     "outputs": [
@@ -15004,6 +16062,13 @@ export const lockedLiquidityAbi = [
         "internalType": "uint256"
       }
     ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "close",
+    "inputs": [],
+    "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
@@ -15093,6 +16158,32 @@ export const lockedLiquidityAbi = [
   },
   {
     "type": "function",
+    "name": "isClosed",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "liquidityState",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "enum LockedLiquidity.LiquidityState"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "lockedLiquidity",
     "inputs": [],
     "outputs": [
@@ -15119,41 +16210,10 @@ export const lockedLiquidityAbi = [
   },
   {
     "type": "function",
-    "name": "returnLpToBoardroom",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "liquidity",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "router",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "seedLiquidity",
+    "name": "removeLiquidityToBoardroom",
     "inputs": [
       {
-        "name": "amountADesired",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "amountBDesired",
+        "name": "liquidity",
         "type": "uint256",
         "internalType": "uint256"
       },
@@ -15175,11 +16235,6 @@ export const lockedLiquidityAbi = [
     ],
     "outputs": [
       {
-        "name": "seededPool",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
         "name": "amountA",
         "type": "uint256",
         "internalType": "uint256"
@@ -15188,7 +16243,15 @@ export const lockedLiquidityAbi = [
         "name": "amountB",
         "type": "uint256",
         "internalType": "uint256"
-      },
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "returnLpToBoardroom",
+    "inputs": [],
+    "outputs": [
       {
         "name": "liquidity",
         "type": "uint256",
@@ -15199,13 +16262,13 @@ export const lockedLiquidityAbi = [
   },
   {
     "type": "function",
-    "name": "seeded",
+    "name": "router",
     "inputs": [],
     "outputs": [
       {
         "name": "",
-        "type": "bool",
-        "internalType": "bool"
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -15276,19 +16339,13 @@ export const lockedLiquidityAbi = [
   },
   {
     "type": "event",
-    "name": "LiquidityExited",
+    "name": "LiquidityAdded",
     "inputs": [
       {
         "name": "pool",
         "type": "address",
         "indexed": true,
         "internalType": "address"
-      },
-      {
-        "name": "liquidity",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
       },
       {
         "name": "amountA",
@@ -15298,6 +16355,12 @@ export const lockedLiquidityAbi = [
       },
       {
         "name": "amountB",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "liquidity",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -15307,13 +16370,32 @@ export const lockedLiquidityAbi = [
   },
   {
     "type": "event",
-    "name": "LiquidityLocked",
+    "name": "LiquidityClosed",
     "inputs": [
       {
         "name": "pool",
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "LiquidityRemoved",
+    "inputs": [
+      {
+        "name": "pool",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "liquidity",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       },
       {
         "name": "amountA",
@@ -15323,12 +16405,6 @@ export const lockedLiquidityAbi = [
       },
       {
         "name": "amountB",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "liquidity",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -15394,7 +16470,7 @@ export const lockedLiquidityAbi = [
   },
   {
     "type": "error",
-    "name": "AlreadySeeded",
+    "name": "BoardroomMutationForbidden",
     "inputs": []
   },
   {
@@ -15404,7 +16480,28 @@ export const lockedLiquidityAbi = [
   },
   {
     "type": "error",
+    "name": "CanonicalPoolMismatch",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "actual",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "InvalidAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidAmount",
     "inputs": []
   },
   {
@@ -15414,12 +16511,23 @@ export const lockedLiquidityAbi = [
   },
   {
     "type": "error",
-    "name": "NotInitializing",
-    "inputs": []
+    "name": "InvalidLiquidityState",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "uint8",
+        "internalType": "enum LockedLiquidity.LiquidityState"
+      },
+      {
+        "name": "actual",
+        "type": "uint8",
+        "internalType": "enum LockedLiquidity.LiquidityState"
+      }
+    ]
   },
   {
     "type": "error",
-    "name": "NotSeeded",
+    "name": "NotInitializing",
     "inputs": []
   },
   {
@@ -15430,6 +16538,22 @@ export const lockedLiquidityAbi = [
   {
     "type": "error",
     "name": "OnlyFactory",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PositionNotEmpty",
+    "inputs": [
+      {
+        "name": "liquidity",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Reentrancy",
     "inputs": []
   },
   {
@@ -15518,7 +16642,7 @@ export const lockedLiquidityFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_LOCKERS_PER_BOARDROOM",
+    "name": "MAX_SEED_SLIPPAGE_BPS",
     "inputs": [],
     "outputs": [
       {
@@ -15531,16 +16655,69 @@ export const lockedLiquidityFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_SEED_SLIPPAGE_BPS",
-    "inputs": [],
+    "name": "addLockedLiquidity",
+    "inputs": [
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct LockedLiquidityFactory.AddParams",
+        "components": [
+          {
+            "name": "tokenA",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "tokenB",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "amountADesired",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "amountBDesired",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "amountAMin",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "amountBMin",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
     "outputs": [
       {
-        "name": "",
+        "name": "amountA",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "amountB",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "liquidity",
         "type": "uint256",
         "internalType": "uint256"
       }
     ],
-    "stateMutability": "view"
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -15606,6 +16783,13 @@ export const lockedLiquidityFactoryAbi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "closeLockedLiquidity",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -15776,51 +16960,10 @@ export const lockedLiquidityFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "getLockersForBoardroom",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address[]",
-        "internalType": "address[]"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "grantSlotReleaseForLifecycleCall",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "distribution",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "pure"
+    "name": "finalizeWindDownClosure",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -15856,14 +16999,14 @@ export const lockedLiquidityFactoryAbi = [
     "name": "isLocker",
     "inputs": [
       {
-        "name": "",
+        "name": "locker",
         "type": "address",
         "internalType": "address"
       }
     ],
     "outputs": [
       {
-        "name": "",
+        "name": "canonical",
         "type": "bool",
         "internalType": "bool"
       }
@@ -15888,14 +17031,14 @@ export const lockedLiquidityFactoryAbi = [
     "name": "lockerBoardroom",
     "inputs": [
       {
-        "name": "",
+        "name": "locker",
         "type": "address",
         "internalType": "address"
       }
     ],
     "outputs": [
       {
-        "name": "",
+        "name": "boardroom",
         "type": "address",
         "internalType": "address"
       }
@@ -15904,7 +17047,7 @@ export const lockedLiquidityFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "lockerCountForBoardroom",
+    "name": "migrationReservationOf",
     "inputs": [
       {
         "name": "boardroom",
@@ -15914,124 +17057,39 @@ export const lockedLiquidityFactoryAbi = [
     ],
     "outputs": [
       {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "lockerForBoardroomAt",
-    "inputs": [
-      {
-        "name": "boardroom",
+        "name": "curve",
         "type": "address",
         "internalType": "address"
       },
       {
-        "name": "index",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "lockerForBoardroomPool",
-    "inputs": [
-      {
-        "name": "",
+        "name": "expectedLocker",
         "type": "address",
         "internalType": "address"
       },
       {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "migrationReservationCount",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "migrationReservationForPair",
-    "inputs": [
-      {
-        "name": "",
+        "name": "expectedPool",
         "type": "address",
         "internalType": "address"
       },
       {
-        "name": "",
+        "name": "shareToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "quoteAsset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "pairKey",
         "type": "bytes32",
         "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "migrationReservationForSalt",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
       },
       {
-        "name": "",
+        "name": "salt",
         "type": "bytes32",
         "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -16086,13 +17144,42 @@ export const lockedLiquidityFactoryAbi = [
             "name": "aux",
             "type": "address",
             "internalType": "address"
-          },
-          {
-            "name": "grantSlotReservations",
-            "type": "uint256",
-            "internalType": "uint256"
           }
         ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "positionOfBoardroom",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "locker",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "pool",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "quoteAsset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "status",
+        "type": "uint8",
+        "internalType": "enum LockedLiquidityFactory.PositionStatus"
       }
     ],
     "stateMutability": "view"
@@ -16120,25 +17207,6 @@ export const lockedLiquidityFactoryAbi = [
       }
     ],
     "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "pruneClosedLockers",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "pruned",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -16170,6 +17238,52 @@ export const lockedLiquidityFactoryAbi = [
   },
   {
     "type": "function",
+    "name": "removeLockedLiquidity",
+    "inputs": [
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct LockedLiquidityFactory.RemoveParams",
+        "components": [
+          {
+            "name": "liquidity",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "amountAMin",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "amountBMin",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "deadline",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "amountA",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "amountB",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "reserveMigration",
     "inputs": [
       {
@@ -16178,7 +17292,7 @@ export const lockedLiquidityFactoryAbi = [
         "internalType": "address"
       },
       {
-        "name": "distribution",
+        "name": "curve",
         "type": "address",
         "internalType": "address"
       },
@@ -16203,7 +17317,7 @@ export const lockedLiquidityFactoryAbi = [
   },
   {
     "type": "event",
-    "name": "ClosedLockerPruned",
+    "name": "MigrationReservationReleased",
     "inputs": [
       {
         "name": "boardroom",
@@ -16212,23 +17326,103 @@ export const lockedLiquidityFactoryAbi = [
         "internalType": "address"
       },
       {
-        "name": "locker",
+        "name": "curve",
         "type": "address",
         "indexed": true,
         "internalType": "address"
       },
       {
-        "name": "pool",
-        "type": "address",
+        "name": "salt",
+        "type": "bytes32",
         "indexed": true,
-        "internalType": "address"
+        "internalType": "bytes32"
       }
     ],
     "anonymous": false
   },
   {
     "type": "event",
-    "name": "LockedLiquidityCreated",
+    "name": "MigrationReserved",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "curve",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "expectedLocker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "expectedPool",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProtocolLiquidityAdded",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "locker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "pool",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amountA",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "amountB",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "liquidity",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProtocolLiquidityCreated",
     "inputs": [
       {
         "name": "locker",
@@ -16249,13 +17443,7 @@ export const lockedLiquidityFactoryAbi = [
         "internalType": "address"
       },
       {
-        "name": "tokenA",
-        "type": "address",
-        "indexed": false,
-        "internalType": "address"
-      },
-      {
-        "name": "tokenB",
+        "name": "quoteAsset",
         "type": "address",
         "indexed": false,
         "internalType": "address"
@@ -16283,65 +17471,9 @@ export const lockedLiquidityFactoryAbi = [
         "type": "bytes32",
         "indexed": false,
         "internalType": "bytes32"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "MigrationReservationReleased",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
       },
       {
-        "name": "distribution",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "MigrationReserved",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "distribution",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "tokenA",
-        "type": "address",
-        "indexed": false,
-        "internalType": "address"
-      },
-      {
-        "name": "tokenB",
+        "name": "curve",
         "type": "address",
         "indexed": false,
         "internalType": "address"
@@ -16350,20 +17482,72 @@ export const lockedLiquidityFactoryAbi = [
     "anonymous": false
   },
   {
-    "type": "error",
-    "name": "CanonicalSharePairNotAllowed",
+    "type": "event",
+    "name": "ProtocolLiquidityPositionClosed",
     "inputs": [
       {
-        "name": "tokenA",
+        "name": "boardroom",
         "type": "address",
+        "indexed": true,
         "internalType": "address"
       },
       {
-        "name": "tokenB",
+        "name": "locker",
         "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "pool",
+        "type": "address",
+        "indexed": true,
         "internalType": "address"
       }
-    ]
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ProtocolLiquidityRemoved",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "locker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "pool",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "liquidity",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "amountA",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "amountB",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
   },
   {
     "type": "error",
@@ -16399,13 +17583,51 @@ export const lockedLiquidityFactoryAbi = [
   },
   {
     "type": "error",
-    "name": "LockerAlreadyExists",
+    "name": "InvalidMigrationReservation",
     "inputs": [
       {
         "name": "boardroom",
         "type": "address",
         "internalType": "address"
       },
+      {
+        "name": "curve",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidPair",
+    "inputs": [
+      {
+        "name": "tokenA",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenB",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidPosition",
+    "inputs": [
+      {
+        "name": "boardroom",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "PoolAlreadySeeded",
+    "inputs": [
       {
         "name": "pool",
         "type": "address",
@@ -16415,94 +17637,10 @@ export const lockedLiquidityFactoryAbi = [
   },
   {
     "type": "error",
-    "name": "MigrationLockerSaltUsed",
+    "name": "PositionAlreadyConfigured",
     "inputs": [
       {
         "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "locker",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "MigrationPairReserved",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "tokenA",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "tokenB",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "MigrationSaltReserved",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "MissingBoardroomShareToken",
-    "inputs": [
-      {
-        "name": "tokenA",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "tokenB",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "MissingMigrationReservation",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "distribution",
         "type": "address",
         "internalType": "address"
       }
@@ -16515,18 +17653,7 @@ export const lockedLiquidityFactoryAbi = [
   },
   {
     "type": "error",
-    "name": "TooManyBoardroomLockers",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "TransferAmountMismatch",
+    "name": "UnexpectedTokenBalanceChange",
     "inputs": [
       {
         "name": "token",
@@ -16542,38 +17669,6 @@ export const lockedLiquidityFactoryAbi = [
         "name": "actual",
         "type": "uint256",
         "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "UnauthorizedBoardroomPayer",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "payer",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "UnauthorizedMigrationReservation",
-    "inputs": [
-      {
-        "name": "boardroom",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "caller",
-        "type": "address",
-        "internalType": "address"
       }
     ]
   },
@@ -16613,7 +17708,85 @@ export const migratingBondingCurveAbi = [
   },
   {
     "type": "function",
+    "name": "FORFEITURE_VETO_WINDOW",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_CURVE_LIFETIME",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MAX_CURVE_SUPPLY",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_MIGRATION_PRICE_DEVIATION_BPS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MIGRATION_GRACE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "QUARANTINE_FORFEITURE_DELAY",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "SETTLEMENT_GRACE",
     "inputs": [],
     "outputs": [
       {
@@ -16725,7 +17898,7 @@ export const migratingBondingCurveAbi = [
       {
         "name": "",
         "type": "uint8",
-        "internalType": "enum MigratingBondingCurve.CurveStatus"
+        "internalType": "enum MigratingBondingCurve.CurvePhase"
       }
     ],
     "stateMutability": "view"
@@ -16745,6 +17918,13 @@ export const migratingBondingCurveAbi = [
   },
   {
     "type": "function",
+    "name": "expire",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "factory",
     "inputs": [],
     "outputs": [
@@ -16752,6 +17932,79 @@ export const migratingBondingCurveAbi = [
         "name": "",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "fallbackToUnwind",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "finalizeQuoteForfeiture",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "finalizeUnwind",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "forfeitedQuote",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "forfeitureEligibleAt",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "forfeitureFinalized",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "forfeitureWindowEndsAt",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
       }
     ],
     "stateMutability": "view"
@@ -16995,6 +18248,50 @@ export const migratingBondingCurveAbi = [
   },
   {
     "type": "function",
+    "name": "migrationAmounts",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "sharesToLiquidity",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "quoteToLiquidity",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "migrationInProgress",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "migrationReservationHeld",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "migrationSalt",
     "inputs": [],
     "outputs": [
@@ -17021,6 +18318,39 @@ export const migratingBondingCurveAbi = [
   },
   {
     "type": "function",
+    "name": "openQuoteForfeiture",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "outstandingCurveShareLiability",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "phaseEndsAt",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "pool",
     "inputs": [],
     "outputs": [
@@ -17028,6 +18358,32 @@ export const migratingBondingCurveAbi = [
         "name": "",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "postQuarantinePhase",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "enum MigratingBondingCurve.CurvePhase"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "quarantineStartedAt",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
       }
     ],
     "stateMutability": "view"
@@ -17086,6 +18442,19 @@ export const migratingBondingCurveAbi = [
   },
   {
     "type": "function",
+    "name": "recoverForfeitedQuote",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "returnedQuote",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "recoverQuarantinedQuote",
     "inputs": [],
     "outputs": [
@@ -17106,6 +18475,19 @@ export const migratingBondingCurveAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "reservationExpiresAt",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
       }
     ],
     "stateMutability": "view"
@@ -17159,10 +18541,10 @@ export const migratingBondingCurveAbi = [
   },
   {
     "type": "function",
-    "name": "sellableSharesBy",
+    "name": "sellableShares",
     "inputs": [
       {
-        "name": "",
+        "name": "holder",
         "type": "address",
         "internalType": "address"
       }
@@ -17172,6 +18554,19 @@ export const migratingBondingCurveAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "settlementReason",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint8",
+        "internalType": "enum MigratingBondingCurve.SettlementReason"
       }
     ],
     "stateMutability": "view"
@@ -17230,6 +18625,19 @@ export const migratingBondingCurveAbi = [
   },
   {
     "type": "function",
+    "name": "terminalCurvePrice",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "unrecoveredQuote",
     "inputs": [],
     "outputs": [
@@ -17240,6 +18648,13 @@ export const migratingBondingCurveAbi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "vetoQuoteForfeiture",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "event",
@@ -17274,25 +18689,6 @@ export const migratingBondingCurveAbi = [
   },
   {
     "type": "event",
-    "name": "CurveCancelled",
-    "inputs": [
-      {
-        "name": "returnedShares",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "returnedQuote",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
     "name": "CurveGraduationLatched",
     "inputs": [
       {
@@ -17303,6 +18699,12 @@ export const migratingBondingCurveAbi = [
       },
       {
         "name": "remainingShares",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "migrationEndsAt",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -17346,6 +18748,37 @@ export const migratingBondingCurveAbi = [
       },
       {
         "name": "quoteToBoardroom",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "terminalPrice",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "CurvePhaseChanged",
+    "inputs": [
+      {
+        "name": "phase",
+        "type": "uint8",
+        "indexed": true,
+        "internalType": "enum MigratingBondingCurve.CurvePhase"
+      },
+      {
+        "name": "reason",
+        "type": "uint8",
+        "indexed": true,
+        "internalType": "enum MigratingBondingCurve.SettlementReason"
+      },
+      {
+        "name": "phaseEndsAt",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -17395,6 +18828,12 @@ export const migratingBondingCurveAbi = [
     "name": "CurveQuoteRecovered",
     "inputs": [
       {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
         "name": "returnedQuote",
         "type": "uint256",
         "indexed": false,
@@ -17407,7 +18846,7 @@ export const migratingBondingCurveAbi = [
         "internalType": "uint256"
       },
       {
-        "name": "balanceReadable",
+        "name": "readable",
         "type": "bool",
         "indexed": false,
         "internalType": "bool"
@@ -17442,6 +18881,56 @@ export const migratingBondingCurveAbi = [
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "CurveUnwindFinalized",
+    "inputs": [
+      {
+        "name": "returnedShares",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "returnedQuote",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "retainedHolderShares",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ForfeitedQuoteRecovered",
+    "inputs": [
+      {
+        "name": "recipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "returnedQuote",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "readable",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
       }
     ],
     "anonymous": false
@@ -17545,8 +19034,64 @@ export const migratingBondingCurveAbi = [
     "anonymous": false
   },
   {
+    "type": "event",
+    "name": "QuoteForfeitureFinalized",
+    "inputs": [
+      {
+        "name": "forfeitedQuote",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "terminalPhase",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum MigratingBondingCurve.CurvePhase"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "QuoteForfeitureOpened",
+    "inputs": [
+      {
+        "name": "windowEndsAt",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "QuoteForfeitureVetoed",
+    "inputs": [
+      {
+        "name": "staker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "nextEligibleAt",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
     "type": "error",
     "name": "BoardroomNotActive",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "BoardroomPastWindDown",
     "inputs": []
   },
   {
@@ -17556,18 +19101,46 @@ export const migratingBondingCurveAbi = [
   },
   {
     "type": "error",
-    "name": "CurveNotActive",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "Expired",
     "inputs": []
   },
   {
     "type": "error",
-    "name": "GraduationLatched",
+    "name": "ForfeitureNotAvailable",
+    "inputs": [
+      {
+        "name": "availableAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ForfeitureWindowNotOpen",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "GracePeriodActive",
+    "inputs": [
+      {
+        "name": "endsAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "GracePeriodExpired",
+    "inputs": [
+      {
+        "name": "endedAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",
@@ -17639,6 +19212,22 @@ export const migratingBondingCurveAbi = [
   },
   {
     "type": "error",
+    "name": "InvalidCurvePhase",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "uint8",
+        "internalType": "enum MigratingBondingCurve.CurvePhase"
+      },
+      {
+        "name": "actual",
+        "type": "uint8",
+        "internalType": "enum MigratingBondingCurve.CurvePhase"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "InvalidInitialization",
     "inputs": []
   },
@@ -17695,6 +19284,27 @@ export const migratingBondingCurveAbi = [
       },
       {
         "name": "remainingShares",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "MigrationPriceDeviation",
+    "inputs": [
+      {
+        "name": "actualPrice",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "terminalPrice",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "deviationBps",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -20344,35 +21954,6 @@ export const tokenGrantFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "grantSlotReleaseForLifecycleCall",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "distribution",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "pure"
-  },
-  {
-    "type": "function",
     "name": "isApprovedForAll",
     "inputs": [
       {
@@ -20506,11 +22087,6 @@ export const tokenGrantFactoryAbi = [
             "name": "aux",
             "type": "address",
             "internalType": "address"
-          },
-          {
-            "name": "grantSlotReservations",
-            "type": "uint256",
-            "internalType": "uint256"
           }
         ]
       }
@@ -21285,8 +22861,11 @@ export const pledgeCashAbis = {
   AmmRouter: ammRouterAbi,
   AssetPolicy: assetPolicyAbi,
   Boardroom: boardroomAbi,
+  BoardroomController: boardroomControllerAbi,
+  BoardroomControllerFactory: boardroomControllerFactoryAbi,
   BoardroomFactory: boardroomFactoryAbi,
   BoardroomGovernanceLogic: boardroomGovernanceLogicAbi,
+  BoardroomMarketLogic: boardroomMarketLogicAbi,
   BoardroomPolicyRegistry: boardroomPolicyRegistryAbi,
   BoardroomToken: boardroomTokenAbi,
   BoardroomRewards: boardroomRewardsAbi,
@@ -21313,11 +22892,11 @@ export const pledgeCashDeployments = {
   10143: {
     chainId: 10143,
     status: "pending",
-    reason: "Authority-hardened deterministic v4 deployment has not been broadcast yet"
+    reason: "Boardroom-controller deterministic v5 deployment has not been broadcast yet"
   },
   998: {
     chainId: 998,
     status: "pending",
-    reason: "Authority-hardened deterministic v4 deployment has not been broadcast yet"
+    reason: "Boardroom-controller deterministic v5 deployment has not been broadcast yet"
   }
 } as const satisfies Record<number, PledgeCashDeployment>;

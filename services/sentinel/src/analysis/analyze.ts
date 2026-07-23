@@ -7,7 +7,13 @@ import { z } from "zod";
 
 import type { SentinelDb } from "../db/client";
 import { analyses, harnessRuns } from "../db/schema";
-import type { AnalysisResult, BoardroomRow, QueuedActionRow, RiskAssessment, StoredCall } from "../types";
+import type {
+  AnalysisResult,
+  BoardroomRow,
+  RiskAssessment,
+  ScheduledOperationRow,
+  StoredCall
+} from "../types";
 import type { HarnessAdapter, HarnessResponse } from "./adapter";
 import { buildHarnessPrompt } from "./prompt";
 import { renderTemplateAnalysis } from "./templates";
@@ -31,16 +37,21 @@ export type AnalysisContent = z.infer<typeof AnalysisSchema>;
 
 export type AnalyzeActionInput = {
   readonly action: Pick<
-    QueuedActionRow,
-    | "actionHash"
+    ScheduledOperationRow,
+    | "operationId"
     | "boardroom"
+    | "boardroomEpoch"
     | "chainId"
+    | "configurationEpoch"
+    | "controller"
+    | "controllerGeneration"
     | "decodeStatus"
     | "eta"
-    | "executor"
     | "id"
-    | "queueBlock"
-    | "queueTxHash"
+    | "operationKind"
+    | "proposer"
+    | "scheduleBlock"
+    | "scheduleTxHash"
     | "rawCalldata"
     | "salt"
     | "status"
@@ -49,13 +60,34 @@ export type AnalyzeActionInput = {
     BoardroomRow,
     | "address"
     | "chainId"
-    | "executor"
-    | "governanceDelay"
+    | "configurationEpoch"
+    | "bondingCurve"
+    | "bondingCurvePhase"
+    | "bondingCurvePhaseEndsAt"
+    | "bondingCurveSettlementReason"
+    | "controller"
+    | "controllerGeneration"
+    | "controllerDelay"
+    | "gracePeriod"
     | "launched"
+    | "liquidityLocker"
+    | "liquidityPool"
+    | "liquidityQuoteAsset"
+    | "liquidityReservationCurve"
+    | "liquidityReservationExpectedLocker"
+    | "liquidityReservationExpectedPool"
+    | "liquidityReservationExpiresAt"
+    | "liquidityReservationPairKey"
+    | "liquidityReservationSalt"
+    | "liquidityStatus"
     | "name"
     | "owner"
+    | "proposer"
+    | "primaryMarketMode"
+    | "primaryMarketQuoteAsset"
     | "shareToken"
     | "status"
+    | "windDownDelay"
   >;
   readonly calls: readonly StoredCall[];
   readonly harness?: {

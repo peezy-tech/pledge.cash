@@ -3,6 +3,10 @@ pragma solidity ^0.8.30;
 
 import {ERC20} from "solady/tokens/ERC20.sol";
 
+interface IBoardroomPrimaryMarketGuard {
+    function validatePrimaryMarketTransfer(address from, address to, uint256 amount) external;
+}
+
 contract BoardroomToken is ERC20 {
     struct Checkpoint {
         uint48 fromBlock;
@@ -192,7 +196,8 @@ contract BoardroomToken is ERC20 {
         else _setEncumberedSupply(encumberedSupply + amount);
     }
 
-    function _beforeTokenTransfer(address from, address, uint256 amount) internal view override {
+    function _beforeTokenTransfer(address from, address to, uint256 amount) internal override {
+        IBoardroomPrimaryMarketGuard(boardroom).validatePrimaryMarketTransfer(from, to, amount);
         if (from == address(0) || rewardLocksDisabled) return;
         uint256 locked = lockedStakeBalance[from];
         if (locked == 0) return;

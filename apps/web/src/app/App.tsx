@@ -1,5 +1,8 @@
 import {
+  boardroomAbi,
+  boardroomControllerAbi,
   boardroomFactoryAbi,
+  assertLiveBoardroomControlRelease,
   buildBoardroomBondMarketBatch,
   buildBoardroomBondMarketCloseAction,
   buildBoardroomBurnTreasurySharesTransaction,
@@ -11,19 +14,34 @@ import {
   buildBoardroomGrantApprovalCall,
   buildBoardroomGrantCreationCall,
   buildBoardroomLockedLiquidityBatch,
+  buildBoardroomLockedLiquidityAddBatch,
+  buildBoardroomLockedLiquidityCloseAction,
+  buildBoardroomCloseProtocolLiquidityTransaction,
   buildBoardroomLockedLiquidityExitTransaction,
+  buildBoardroomLaunchTransaction,
   buildBoardroomLockedLiquidityFeeClaimAction,
+  buildBoardroomLockedLiquidityRemoveAction,
   buildBoardroomMerkleAirdropBatch,
   buildBoardroomMerkleAirdropCancelAction,
   buildBoardroomMerkleAirdropCloseAction,
   buildBoardroomMigratingCurveBatch,
   buildBoardroomMigratingCurveCancelAction,
-  buildBoardroomMigratingCurveMigrationAction,
+  buildMigratingBondingCurveExpireTransaction,
+  buildMigratingBondingCurveFallbackTransaction,
+  buildMigratingBondingCurveFinalizeForfeitureTransaction,
+  buildMigratingBondingCurveFinalizeUnwindTransaction,
+  buildMigratingBondingCurveMigrationTransaction,
+  buildMigratingBondingCurveOpenForfeitureTransaction,
+  buildMigratingBondingCurveRecoverForfeitedQuoteTransaction,
+  buildMigratingBondingCurveRecoverQuoteTransaction,
+  buildMigratingBondingCurveVetoForfeitureTransaction,
   buildBoardroomMintCall,
   buildBoardroomOpenRedemptionsTransaction,
+  buildBoardroomPruneObligationTransaction,
+  buildBoardroomPruneObligationsTransaction,
   buildBoardroomRedeemTransaction,
   buildBoardroomRegisterRedeemableAssetTransaction,
-  buildBoardroomSetExecutorCall,
+  buildBoardroomReplaceControllerCall,
   buildBoardroomShareGrantIssuanceBatch,
   buildBoardroomStartWindDownTransaction,
   buildDirectGrantCreationTransaction,
@@ -42,6 +60,7 @@ import {
   predictDirectGrantAddress as sdkPredictDirectGrantAddress,
   predictFixedPriceSaleAddress as sdkPredictFixedPriceSaleAddress,
   predictLockedLiquidityAddress as sdkPredictLockedLiquidityAddress,
+  predictBoardroomControllerAddress,
   predictMerkleAirdropAddress as sdkPredictMerkleAirdropAddress,
   predictMigratingBondingCurveAddress as sdkPredictMigratingBondingCurveAddress,
   planBoardroomCallExecution,
@@ -77,15 +96,14 @@ import {
   type MerkleAirdropState,
   type MigratingBondingCurveState,
   type PledgeCashDeployment,
-  type QueuedBoardroomAction,
+  type ScheduledBoardroomOperation,
 } from "@pledge.cash/sdk";
 import { Star } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { formatUnits, type Hex, type PublicClient, type WalletClient } from "viem";
+import { encodeFunctionData, formatUnits, type Hex, type PublicClient, type WalletClient } from "viem";
 import { TransactionReview } from "../components/transaction-review";
 import { ConnectWalletButton } from "../components/simplekit";
 import { Button, ButtonLink } from "../components/ui/button";
-import { windDownBlockers } from "../features/boardrooms/boardroom-panel-shared";
 import {
   resolveProjectCapabilities,
   type Capability,
@@ -95,7 +113,7 @@ import {
 } from "../features/capabilities/project-capabilities";
 import type { BoardroomPanelCapabilities } from "../features/boardrooms/boardroom-panel-types";
 import { BoardroomRewardsPanel } from "../features/rewards";
-import { GovernanceLaunchControl, GovernanceProposalComposer, GovernanceQueue } from "../features/governance";
+import { GovernanceLaunchControl, GovernanceOperations, GovernanceProposalComposer } from "../features/governance";
 import {
   prepareSmartGrantSettlement,
   submitPreparedGrantSettlement,
@@ -174,7 +192,7 @@ import {
   shortAddress,
   uintInput,
 } from "../lib/forms";
-import { deploymentRuntimeIdentity } from "../lib/deployment";
+import { boardroomControlReleaseSupport, deploymentRuntimeIdentity } from "../lib/deployment";
 import {
   readProductBoardroomCatalogPage,
   readProductBoardroomDashboard,
@@ -385,7 +403,7 @@ export function verifiedStateForKey<T>(
 }
 export type GrantIssuerBoardroomAccess = {
   boardroom: Address;
-  executor: Address;
+  proposer: Address;
   launched: boolean;
   owner: Address;
   status: number;
@@ -441,24 +459,6 @@ export function isGovernanceBackgroundRefresh(
   requestKey: string,
 ): boolean {
   return verifiedSnapshotKey === requestKey;
-}
-
-async function parseMinAmountsOut(client: PublicClient, value: string, assets: readonly Address[]): Promise<bigint[]> {
-  const trimmed = value.trim();
-  if (!trimmed) return Array.from({ length: assets.length }, () => 0n);
-
-  const values = trimmed.split(",").map((part) => part.trim()).filter(Boolean);
-  if (values.length !== assets.length) {
-    throw new Error(`Minimum amounts must include ${assets.length} comma-separated values.`);
-  }
-
-  return await Promise.all(
-    values.map(async (part, index) => {
-      const asset = assets[index];
-      if (!asset) throw new Error(`Missing redeemable asset for minimum amount ${index + 1}.`);
-      return parseErc20Amount(client, part, asset, `Minimum amount ${index + 1}`);
-    }),
-  );
 }
 
 export function raceWithGovernanceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -987,10 +987,12 @@ export function App(): React.JSX.Element {
   const [projectPositionLoading, setProjectPositionLoading] = useState(false);
   const [projectPositionLoadingKey, setProjectPositionLoadingKey] = useState<string>();
   const [projectPositionRefreshGeneration, setProjectPositionRefreshGeneration] = useState(0);
-  const [queuedBoardroomActions, setQueuedBoardroomActions] = useState<QueuedBoardroomAction[]>([]);
-  const [productGovernanceQueueVerifiedKey, setProductGovernanceQueueVerifiedKey] = useState<string>();
-  const [productGovernanceQueueComplete, setProductGovernanceQueueComplete] = useState(false);
-  const [productGovernanceQueueLoaded, setProductGovernanceQueueLoaded] = useState(false);
+  const [scheduledBoardroomOperations, setScheduledBoardroomOperations] = useState<ScheduledBoardroomOperation[]>([]);
+  const [predictedGovernanceController, setPredictedGovernanceController] = useState<Address>();
+  const [predictedReplacementController, setPredictedReplacementController] = useState<Address>();
+  const [productGovernanceOperationsVerifiedKey, setProductGovernanceOperationsVerifiedKey] = useState<string>();
+  const [productGovernanceOperationsComplete, setProductGovernanceOperationsComplete] = useState(false);
+  const [productGovernanceOperationsLoaded, setProductGovernanceOperationsLoaded] = useState(false);
   const [productGovernanceError, setProductGovernanceError] = useState<string>();
   const [productGovernanceWarning, setProductGovernanceWarning] = useState<string>();
   const [productGovernanceLoading, setProductGovernanceLoading] = useState(false);
@@ -1038,6 +1040,33 @@ export function App(): React.JSX.Element {
     exactProjectVerifiedKey,
     exactProjectAddress,
   );
+  const boardroomControlSupport = boardroomControlReleaseSupport(deployment);
+  useEffect(() => {
+    let current = true;
+    setPredictedGovernanceController(undefined);
+    setPredictedReplacementController(undefined);
+    const controllerFactory = deployment?.boardroomControllerFactory;
+    if (!boardroomControlSupport.supported || !exactProjectDashboard || !controllerFactory) {
+      return () => { current = false; };
+    }
+    const generation = exactProjectDashboard.snapshot.launched
+      ? exactProjectDashboard.snapshot.controllerGeneration + 1n
+      : 1n;
+    void predictBoardroomControllerAddress(publicClient, {
+      controllerFactory,
+      boardroom: exactProjectDashboard.address,
+      generation,
+    }).then((prediction) => {
+      if (!current) return;
+      if (exactProjectDashboard.snapshot.launched) setPredictedReplacementController(prediction);
+      else setPredictedGovernanceController(prediction);
+    }).catch(() => {
+      if (!current) return;
+      setPredictedGovernanceController(undefined);
+      setPredictedReplacementController(undefined);
+    });
+    return () => { current = false; };
+  }, [boardroomControlSupport.supported, deployment?.boardroomControllerFactory, exactProjectDashboard, publicClient]);
   const canonicalStudioBoardroom = appRoute.kind === "studio-project" ? appRoute.boardroom : undefined;
   const displayedBoardroomSnapshot = canonicalStudioBoardroom
     ? verifiedAddressState(
@@ -1319,16 +1348,16 @@ export function App(): React.JSX.Element {
   const verifiedBoardroomStakerPower = boardroomStakerPower
     ? verifiedStateForKey(boardroomStakerPower, boardroomStakerPowerVerifiedKey, activeGovernanceKey)
     : undefined;
-  const verifiedQueuedBoardroomActions = verifiedStateForKey(
-    queuedBoardroomActions,
-    productGovernanceQueueVerifiedKey,
+  const verifiedScheduledBoardroomOperations = verifiedStateForKey(
+    scheduledBoardroomOperations,
+    productGovernanceOperationsVerifiedKey,
     activeGovernanceKey,
   ) ?? [];
-  const verifiedProductGovernanceQueueLoaded = productGovernanceQueueVerifiedKey === activeGovernanceKey
-    && productGovernanceQueueLoaded;
-  const verifiedProductGovernanceQueueComplete = productGovernanceQueueVerifiedKey === activeGovernanceKey
-    && productGovernanceQueueComplete;
-  const verifiedProductGovernanceWarning = productGovernanceQueueVerifiedKey === activeGovernanceKey
+  const verifiedProductGovernanceOperationsLoaded = productGovernanceOperationsVerifiedKey === activeGovernanceKey
+    && productGovernanceOperationsLoaded;
+  const verifiedProductGovernanceOperationsComplete = productGovernanceOperationsVerifiedKey === activeGovernanceKey
+    && productGovernanceOperationsComplete;
+  const verifiedProductGovernanceWarning = productGovernanceOperationsVerifiedKey === activeGovernanceKey
     ? productGovernanceWarning
     : undefined;
   const {
@@ -1659,10 +1688,10 @@ export function App(): React.JSX.Element {
     setProjectPositionLoading(false);
     setProjectPositionLoadingKey(undefined);
     setProjectPositionRefreshGeneration(0);
-    setQueuedBoardroomActions([]);
-    setProductGovernanceQueueVerifiedKey(undefined);
-    setProductGovernanceQueueComplete(false);
-    setProductGovernanceQueueLoaded(false);
+    setScheduledBoardroomOperations([]);
+    setProductGovernanceOperationsVerifiedKey(undefined);
+    setProductGovernanceOperationsComplete(false);
+    setProductGovernanceOperationsLoaded(false);
     setProductGovernanceError(undefined);
     setProductGovernanceWarning(undefined);
     setProductGovernanceLoading(false);
@@ -1731,6 +1760,7 @@ export function App(): React.JSX.Element {
       const next = await readProductBoardroomDashboard(publicClient, {
         address: requestedAddress,
         catalog: [...productCatalogRef.current],
+        deployment,
         signal: abortController.signal,
       });
       if (!requestIsCurrent()) return "stale";
@@ -1855,10 +1885,10 @@ export function App(): React.JSX.Element {
     const backgroundRefresh = isGovernanceBackgroundRefresh(productGovernanceSnapshotKeyRef.current, key);
     productGovernanceLoadedKeyRef.current = key;
     if (!backgroundRefresh) {
-      setQueuedBoardroomActions([]);
-      setProductGovernanceQueueVerifiedKey(undefined);
-      setProductGovernanceQueueComplete(false);
-      setProductGovernanceQueueLoaded(false);
+      setScheduledBoardroomOperations([]);
+      setProductGovernanceOperationsVerifiedKey(undefined);
+      setProductGovernanceOperationsComplete(false);
+      setProductGovernanceOperationsLoaded(false);
       setBoardroomStakerPower(undefined);
       setBoardroomStakerPowerVerifiedKey(undefined);
       setProductGovernanceWarning(undefined);
@@ -1866,17 +1896,23 @@ export function App(): React.JSX.Element {
     setProductGovernanceLoading(true);
     setProductGovernanceError(undefined);
     try {
-      const [queuedResult, stakerResult] = await Promise.allSettled([
-        raceWithGovernanceAbort(
-          import("../lib/governance-actions").then(({ loadQueuedGovernanceActions }) =>
-            loadQueuedGovernanceActions(publicClient, {
+      const releaseSupport = boardroomControlReleaseSupport(deployment);
+      const [operationsResult, stakerResult] = await Promise.allSettled([
+        releaseSupport.supported ? raceWithGovernanceAbort(
+          import("../lib/governance-actions").then(({ loadScheduledGovernanceOperations }) =>
+            loadScheduledGovernanceOperations(publicClient, {
               boardroom: address,
               chainId: activeNetwork.chainId,
               signal: abortController.signal,
               sentinelClient,
             })),
           abortController.signal,
-        ),
+        ) : Promise.resolve({
+          operations: [],
+          complete: false,
+          source: "chain" as const,
+          warning: releaseSupport.reason,
+        }),
         wallet.account
           ? raceWithGovernanceAbort(
               readBoardroomStakerPower(publicClient, { boardroom: address, account: wallet.account }),
@@ -1885,19 +1921,19 @@ export function App(): React.JSX.Element {
           : Promise.resolve(undefined),
       ]);
       if (governanceRequestVersionRef.current !== requestVersion || activeGovernanceKeyRef.current !== key) return "stale";
-      if (queuedResult.status === "fulfilled") {
-        setQueuedBoardroomActions(queuedResult.value.actions.filter((action) => sameAddress(action.boardroom, address)));
-        setProductGovernanceQueueComplete(queuedResult.value.complete);
-        setProductGovernanceQueueLoaded(true);
-        setProductGovernanceWarning(queuedResult.value.warning);
-        setProductGovernanceQueueVerifiedKey(key);
+      if (operationsResult.status === "fulfilled") {
+        setScheduledBoardroomOperations(operationsResult.value.operations.filter((operation) => sameAddress(operation.boardroom, address)));
+        setProductGovernanceOperationsComplete(operationsResult.value.complete);
+        setProductGovernanceOperationsLoaded(true);
+        setProductGovernanceWarning(operationsResult.value.warning);
+        setProductGovernanceOperationsVerifiedKey(key);
         productGovernanceSnapshotKeyRef.current = key;
       }
       if (stakerResult.status === "fulfilled" && stakerResult.value?.boardroom && sameAddress(stakerResult.value.boardroom, address)) {
         setBoardroomStakerPower(stakerResult.value);
         setBoardroomStakerPowerVerifiedKey(key);
       }
-      const errors = [...new Set([queuedResult, stakerResult]
+      const errors = [...new Set([operationsResult, stakerResult]
         .filter((result): result is PromiseRejectedResult => result.status === "rejected")
         .map((result) => errorMessage(result.reason)))];
       if (errors.length > 0) {
@@ -1915,7 +1951,7 @@ export function App(): React.JSX.Element {
         setProductGovernanceLoading(false);
       }
     }
-  }, [activeNetwork.chainId, publicClient, runtimeDeploymentIdentity, sentinelClient, wallet.account]);
+  }, [activeNetwork.chainId, deployment, publicClient, runtimeDeploymentIdentity, sentinelClient, wallet.account]);
 
   useEffect(() => {
     setDiscovery(loadDiscoverySnapshot(discoveryKey));
@@ -2000,10 +2036,10 @@ export function App(): React.JSX.Element {
     governanceRequestVersionRef.current += 1;
     productGovernanceLoadedKeyRef.current = undefined;
     productGovernanceSnapshotKeyRef.current = undefined;
-    setQueuedBoardroomActions([]);
-    setProductGovernanceQueueVerifiedKey(undefined);
-    setProductGovernanceQueueComplete(false);
-    setProductGovernanceQueueLoaded(false);
+    setScheduledBoardroomOperations([]);
+    setProductGovernanceOperationsVerifiedKey(undefined);
+    setProductGovernanceOperationsComplete(false);
+    setProductGovernanceOperationsLoaded(false);
     setBoardroomStakerPower(undefined);
     setBoardroomStakerPowerVerifiedKey(undefined);
     setProductGovernanceError(undefined);
@@ -2025,7 +2061,7 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     if (!activeGovernanceKey || productGovernanceLoading) return;
-    const delay = governanceRefreshDelay(verifiedQueuedBoardroomActions);
+    const delay = governanceRefreshDelay(verifiedScheduledBoardroomOperations);
     const timer = window.setTimeout(() => {
       const route = activeAppRouteRef.current;
       if (activeGovernanceKeyRef.current !== activeGovernanceKey || route.kind !== "project" && route.kind !== "studio-project") return;
@@ -2033,7 +2069,7 @@ export function App(): React.JSX.Element {
       void loadProductGovernance(route.boardroom);
     }, delay);
     return () => window.clearTimeout(timer);
-  }, [activeGovernanceKey, loadProductGovernance, productGovernanceLoading, verifiedQueuedBoardroomActions]);
+  }, [activeGovernanceKey, loadProductGovernance, productGovernanceLoading, verifiedScheduledBoardroomOperations]);
 
   useEffect(() => {
     setSwapQuote(undefined);
@@ -2227,7 +2263,7 @@ export function App(): React.JSX.Element {
       throw new Error("Studio project identity changed. Reload the Boardroom from its canonical route before continuing.");
     }
     setBoardroomSnapshotVerifiedKey(undefined);
-    const snapshot = await readBoardroomSnapshot(publicClient, boardroom);
+    const snapshot = await readBoardroomSnapshot(publicClient, boardroom, deployment);
     if (activeStudioReadScopeKeyRef.current !== requestScope || boardroomLoadVersionRef.current !== requestVersion) return snapshot;
     setBoardroomSnapshot(snapshot);
     setBoardroomSnapshotVerifiedKey(canonicalProjectStateKey(
@@ -2345,21 +2381,37 @@ export function App(): React.JSX.Element {
 
   const submitBoardroomExecution = async (
     label: string,
-    boardroom: { address: Address; launched: boolean; status: number },
+    boardroom: {
+      address: Address;
+      controller: Address;
+      controllerConfigurationEpoch: bigint;
+      governanceEpoch: bigint;
+      launched: boolean;
+      proposer: Address;
+      status: number;
+    },
     request: Record<string, unknown>,
     actionGuard?: TransactionActionGuard,
-  ): Promise<"execute" | "queue" | "windDown"> => {
+  ): Promise<"execute" | "schedule" | "windDown"> => {
+    await assertLiveBoardroomControlRelease(publicClient, deployment, boardroom.address);
     const calls = boardroomCallsFromExecution(request);
     const plan = planBoardroomCallExecution({
       boardroom: boardroom.address,
       calls,
-      lifecycle: { launched: boardroom.launched, status: boardroom.status },
+      lifecycle: {
+        launched: boardroom.launched,
+        status: boardroom.status,
+        controller: boardroom.controller,
+        governanceEpoch: boardroom.governanceEpoch,
+        controllerConfigurationEpoch: boardroom.controllerConfigurationEpoch,
+        proposer: boardroom.proposer,
+      },
       ...(boardroom.launched && boardroom.status === 0 ? { salt: randomSalt() } : {}),
     });
-    const transactionLabel = plan.kind === "queue" ? `Queue ${label.toLowerCase()}` : label;
+    const transactionLabel = plan.kind === "schedule" ? `Schedule ${label.toLowerCase()}` : label;
     await submitContractTransaction(transactionLabel, plan.transaction, actionGuard);
-    if (plan.kind === "queue") {
-      pushLog(`${label} is queued. It can execute after the project governance delay.`, "success");
+    if (plan.kind === "schedule") {
+      pushLog(`${label} is scheduled on the current controller. Anyone may execute it after the delay.`, "success");
     }
     return plan.kind;
   };
@@ -2874,7 +2926,7 @@ export function App(): React.JSX.Element {
       if (isZeroAddress(snapshot.policyRegistry)) return undefined;
       return {
         boardroom: issuer,
-        executor: snapshot.executor,
+        proposer: snapshot.proposer,
         launched: snapshot.launched,
         owner: snapshot.owner,
         status: snapshot.status,
@@ -2987,7 +3039,7 @@ export function App(): React.JSX.Element {
     governanceLoadAbortControllerRef.current = undefined;
     productGovernanceLoadedKeyRef.current = undefined;
     productGovernanceSnapshotKeyRef.current = undefined;
-    setProductGovernanceQueueVerifiedKey(undefined);
+    setProductGovernanceOperationsVerifiedKey(undefined);
     setBoardroomStakerPowerVerifiedKey(undefined);
     setProductGovernanceLoading(false);
     const invalidateCurrentProjectChild = (current: string | undefined): string | undefined =>
@@ -3348,7 +3400,7 @@ export function App(): React.JSX.Element {
     if (!activeActionOriginIsCurrent()) return;
     setPredictedBondMarket(predicted);
     updateBondMarketAddress(predicted);
-    if (executionKind !== "queue") await loadBondMarketAddress(predicted);
+    if (executionKind !== "schedule") await loadBondMarketAddress(predicted);
   };
 
   const closeBondMarket = async (): Promise<void> => {
@@ -3470,7 +3522,7 @@ export function App(): React.JSX.Element {
     if (!activeActionOriginIsCurrent()) return;
     setPredictedFixedPriceSale(predicted);
     updateFixedPriceSaleAddress(predicted);
-    if (executionKind !== "queue") await loadFixedPriceSaleAddress(predicted);
+    if (executionKind !== "schedule") await loadFixedPriceSaleAddress(predicted);
   };
 
   const closeFixedPriceSale = async (): Promise<void> => {
@@ -3588,7 +3640,7 @@ export function App(): React.JSX.Element {
     if (!activeActionOriginIsCurrent()) return;
     setPredictedMerkleAirdrop(predicted);
     updateMerkleAirdropAddress(predicted);
-    if (executionKind !== "queue") await loadMerkleAirdropAddress(predicted);
+    if (executionKind !== "schedule") await loadMerkleAirdropAddress(predicted);
   };
 
   const closeMerkleAirdrop = async (): Promise<void> => {
@@ -3620,7 +3672,7 @@ export function App(): React.JSX.Element {
   const migratingCurveTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomMigratingBondingCurveTerms> => {
     const quoteToken = requireAddress(migratingCurveForm.quoteToken, "Quote token");
     const quoteToLpBps = uintInput(migratingCurveForm.quoteToLpBps, "Quote-to-LP bps");
-    if (quoteToLpBps > 10_000n) throw new Error("Quote-to-LP bps must be at most 10000.");
+    if (quoteToLpBps === 0n || quoteToLpBps > 10_000n) throw new Error("Quote-to-LP bps must be between 1 and 10000.");
     const [saleSupply, migrationSupply, basePrice, slope, graduationQuoteTarget] = await Promise.all([
       parseErc20Amount(publicClient, migratingCurveForm.saleSupply, boardroom.shareToken, "Curve sale supply"),
       parseErc20Amount(publicClient, migratingCurveForm.migrationSupply, boardroom.shareToken, "Curve migration supply"),
@@ -3628,6 +3680,14 @@ export function App(): React.JSX.Element {
       parseErc20Amount(publicClient, migratingCurveForm.slope, quoteToken, "Curve slope"),
       parseErc20Amount(publicClient, migratingCurveForm.graduationQuoteTarget, quoteToken, "Graduation quote target"),
     ]);
+
+    const startTime = uintInput(migratingCurveForm.startTime, "Curve start time");
+    const endTime = uintInput(migratingCurveForm.endTime, "Curve end time");
+    const now = BigInt(Math.floor(Date.now() / 1_000));
+    const maximumLifetime = 90n * 24n * 60n * 60n;
+    if (endTime === 0n || endTime <= startTime || endTime > now + maximumLifetime) {
+      throw new Error("Curve end time must be after its start and no more than 90 days from now.");
+    }
 
     return {
       quoteToken,
@@ -3637,8 +3697,8 @@ export function App(): React.JSX.Element {
       slope,
       graduationQuoteTarget,
       quoteToLpBps: Number(quoteToLpBps),
-      startTime: uintInput(migratingCurveForm.startTime, "Curve start time"),
-      endTime: uintInput(migratingCurveForm.endTime, "Curve end time"),
+      startTime,
+      endTime,
       migrationSalt: requireBytes32(migratingCurveForm.migrationSalt, "Migration salt"),
       salt: requireBytes32(migratingCurveForm.salt, "Curve salt"),
     };
@@ -3716,7 +3776,7 @@ export function App(): React.JSX.Element {
     if (!activeActionOriginIsCurrent()) return;
     setPredictedMigratingCurve(predicted);
     updateMigratingCurveAddress(predicted);
-    if (executionKind !== "queue") await loadMigratingCurveAddress(predicted);
+    if (executionKind !== "schedule") await loadMigratingCurveAddress(predicted);
   };
 
   const cancelMigratingCurve = async (): Promise<void> => {
@@ -3733,20 +3793,15 @@ export function App(): React.JSX.Element {
   };
 
   const migrateCurve = async (): Promise<void> => {
-    const boardroom = requireLoadedBoardroom();
-    const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
     const curveState = requireLoadedMigratingCurve();
     const curve = curveState.address;
     const [minShareLiquidity, minQuoteLiquidity] = await Promise.all([
       parseErc20Amount(publicClient, curveMigrationForm.minShareLiquidity, curveState.shareToken, "Minimum share liquidity"),
       parseErc20Amount(publicClient, curveMigrationForm.minQuoteLiquidity, curveState.quoteToken, "Minimum quote liquidity"),
     ]);
-    await submitBoardroomExecution(
+    await submitContractTransaction(
       "Migrating curve migration",
-      boardroom,
-      buildBoardroomMigratingCurveMigrationAction({
-        boardroom: boardroom.address,
-        policy: factory,
+      buildMigratingBondingCurveMigrationTransaction({
         curve,
         minShareLiquidity,
         minQuoteLiquidity,
@@ -3756,6 +3811,39 @@ export function App(): React.JSX.Element {
     if (!activeActionOriginIsCurrent()) return;
     await loadMigratingCurveAddress(curve);
   };
+
+  const runMigratingCurveLifecycle = async (
+    label: string,
+    build: (curve: Address) => Record<string, unknown>,
+  ): Promise<void> => {
+    const curve = requireLoadedMigratingCurve().address;
+    await submitContractTransaction(label, build(curve));
+    if (!activeActionOriginIsCurrent()) return;
+    await loadMigratingCurveAddress(curve);
+  };
+
+  const expireMigratingCurve = () =>
+    runMigratingCurveLifecycle("Expire migrating curve", buildMigratingBondingCurveExpireTransaction);
+  const fallbackMigratingCurve = () =>
+    runMigratingCurveLifecycle("Open curve unwind fallback", buildMigratingBondingCurveFallbackTransaction);
+  const finalizeMigratingCurveUnwind = () =>
+    runMigratingCurveLifecycle("Finalize curve unwind", buildMigratingBondingCurveFinalizeUnwindTransaction);
+  const recoverMigratingCurveQuote = () =>
+    runMigratingCurveLifecycle("Recover quarantined curve quote", buildMigratingBondingCurveRecoverQuoteTransaction);
+  const openMigratingCurveForfeiture = () =>
+    runMigratingCurveLifecycle("Open curve quote forfeiture", buildMigratingBondingCurveOpenForfeitureTransaction);
+  const vetoMigratingCurveForfeiture = () =>
+    runMigratingCurveLifecycle("Veto curve quote forfeiture", buildMigratingBondingCurveVetoForfeitureTransaction);
+  const finalizeMigratingCurveForfeiture = () =>
+    runMigratingCurveLifecycle(
+      "Finalize curve quote forfeiture",
+      buildMigratingBondingCurveFinalizeForfeitureTransaction,
+    );
+  const recoverMigratingCurveForfeitedQuote = () =>
+    runMigratingCurveLifecycle(
+      "Recover forfeited curve quote",
+      buildMigratingBondingCurveRecoverForfeitedQuoteTransaction,
+    );
 
   const lockedLiquidityTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomLockedLiquidityTerms> => {
     const quoteToken = requireAddress(lockedLiquidityForm.quoteToken, "Quote token");
@@ -3850,7 +3938,7 @@ export function App(): React.JSX.Element {
     if (!activeActionOriginIsCurrent()) return;
     setPredictedLockedLiquidity(predicted);
     updateLockedLiquidityAddress(predicted);
-    if (executionKind !== "queue") await loadLockedLiquidityAddress(predicted);
+    if (executionKind !== "schedule") await loadLockedLiquidityAddress(predicted);
   };
 
   const claimLockedLiquidityFees = async (): Promise<void> => {
@@ -3866,19 +3954,97 @@ export function App(): React.JSX.Element {
     await loadLockedLiquidityAddress(locker);
   };
 
+  const addLockedLiquidity = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    if (boardroom.status !== 0) throw new Error("Canonical liquidity can be added only while the Boardroom is Active.");
+    const lockerState = requireLoadedLockedLiquidity();
+    const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
+    const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
+    const terms = await lockedLiquidityTerms(boardroom);
+    const tokenA = terms.shareTokenSide === "tokenA" ? boardroom.shareToken : terms.quoteToken;
+    const tokenB = terms.shareTokenSide === "tokenA" ? terms.quoteToken : boardroom.shareToken;
+    if (!sameAddress(tokenA, lockerState.tokenA) || !sameAddress(tokenB, lockerState.tokenB)) {
+      throw new Error("Additional liquidity must use the permanent canonical token pair and ordering.");
+    }
+    await submitBoardroomExecution(
+      "Add canonical protocol liquidity",
+      boardroom,
+      buildBoardroomLockedLiquidityAddBatch({
+        boardroom: boardroom.address,
+        factory,
+        shareToken: boardroom.shareToken,
+        terms,
+        policy: factory,
+        assetPolicy,
+      }),
+    );
+    if (!activeActionOriginIsCurrent()) return;
+    await loadLockedLiquidityAddress(lockerState.address);
+  };
+
+  const removeLockedLiquidity = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    if (boardroom.status !== 0) throw new Error("Partial liquidity removal is available only while the Boardroom is Active.");
+    const lockerState = requireLoadedLockedLiquidity();
+    const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
+    const [liquidity, amountAMin, amountBMin] = await Promise.all([
+      parseErc20Amount(publicClient, lockedLiquidityExitForm.liquidity, lockerState.pool, "LP liquidity"),
+      parseErc20Amount(publicClient, lockedLiquidityExitForm.amountAMin, lockerState.tokenA, "Removal amount A minimum"),
+      parseErc20Amount(publicClient, lockedLiquidityExitForm.amountBMin, lockerState.tokenB, "Removal amount B minimum"),
+    ]);
+    if (liquidity === 0n) throw new Error("LP liquidity to remove must be greater than zero.");
+    await submitBoardroomExecution(
+      "Remove canonical protocol liquidity",
+      boardroom,
+      buildBoardroomLockedLiquidityRemoveAction({
+        boardroom: boardroom.address,
+        policy: factory,
+        factory,
+        liquidity,
+        amountAMin,
+        amountBMin,
+        deadline: uintInput(lockedLiquidityExitForm.deadline, "Removal deadline"),
+      }),
+    );
+    if (!activeActionOriginIsCurrent()) return;
+    await loadLockedLiquidityAddress(lockerState.address);
+  };
+
+  const closeLockedLiquidity = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const lockerState = requireLoadedLockedLiquidity();
+    const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
+    if (boardroom.status === 1) {
+      await assertLiveBoardroomControlRelease(publicClient, deployment, boardroom.address);
+      await submitContractTransaction(
+        "Close empty protocol liquidity after wind-down",
+        buildBoardroomCloseProtocolLiquidityTransaction({ boardroom: boardroom.address }),
+      );
+    } else {
+      await submitBoardroomExecution(
+        "Close empty canonical protocol liquidity",
+        boardroom,
+        buildBoardroomLockedLiquidityCloseAction({ boardroom: boardroom.address, policy: factory, factory }),
+      );
+    }
+    if (!activeActionOriginIsCurrent()) return;
+    await loadLockedLiquidityAddress(lockerState.address);
+  };
+
   const exitLockedLiquidity = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
+    if (boardroom.status !== 1) throw new Error("The permissionless full liquidity exit is available only during wind-down.");
     const lockerState = requireLoadedLockedLiquidity();
     const locker = lockerState.address;
     const [amountAMin, amountBMin] = await Promise.all([
       parseErc20Amount(publicClient, lockedLiquidityExitForm.amountAMin, lockerState.tokenA, "Exit amount A minimum"),
       parseErc20Amount(publicClient, lockedLiquidityExitForm.amountBMin, lockerState.tokenB, "Exit amount B minimum"),
     ]);
+    await assertLiveBoardroomControlRelease(publicClient, deployment, boardroom.address);
     await submitContractTransaction(
       "Locked-liquidity exit",
       buildBoardroomLockedLiquidityExitTransaction({
         boardroom: boardroom.address,
-        locker,
         amountAMin,
         amountBMin,
         deadline: uintInput(lockedLiquidityExitForm.deadline, "Exit deadline"),
@@ -3898,6 +4064,34 @@ export function App(): React.JSX.Element {
     await submitContractTransaction("Treasury share burn", buildBoardroomBurnTreasurySharesTransaction({ boardroom: boardroom.address }));
   };
 
+  const pruneBoardroomObligation = async (obligationInput: string): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const obligation = requireAddress(obligationInput, "Obligation");
+    await assertLiveBoardroomControlRelease(publicClient, deployment, boardroom.address);
+    await submitContractTransaction(
+      "Prune terminal Boardroom obligation",
+      buildBoardroomPruneObligationTransaction({ boardroom: boardroom.address, obligation }),
+    );
+    if (!activeActionOriginIsCurrent()) return;
+    await refreshBoardroom(boardroom.address);
+  };
+
+  const pruneBoardroomObligations = async (obligationsInput: string): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const rawObligations = obligationsInput.split(/[\s,]+/).filter(Boolean);
+    if (rawObligations.length === 0 || rawObligations.length > 32) {
+      throw new Error("Provide between 1 and 32 obligation addresses.");
+    }
+    const obligations = rawObligations.map((value, index) => requireAddress(value, `Obligation ${index + 1}`));
+    await assertLiveBoardroomControlRelease(publicClient, deployment, boardroom.address);
+    await submitContractTransaction(
+      "Prune terminal Boardroom obligations",
+      buildBoardroomPruneObligationsTransaction({ boardroom: boardroom.address, obligations }),
+    );
+    if (!activeActionOriginIsCurrent()) return;
+    await refreshBoardroom(boardroom.address);
+  };
+
   const registerRedeemableAsset = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const asset = requireAddress(windDownForm.redeemableAsset, "Redeemable asset");
@@ -3907,6 +4101,25 @@ export function App(): React.JSX.Element {
     );
   };
 
+  const beginRedemptionSnapshot = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    await submitContractTransaction("Begin Boardroom redemption snapshot", {
+      address: boardroom.address,
+      abi: boardroomAbi,
+      functionName: "beginSnapshot",
+    });
+  };
+
+  const processRedemptionSnapshot = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    await submitContractTransaction("Process Boardroom redemption snapshot page", {
+      address: boardroom.address,
+      abi: boardroomAbi,
+      functionName: "snapshotAssets",
+      args: [32n] as const,
+    });
+  };
+
   const openRedemptions = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     await submitContractTransaction("Boardroom redemptions open", buildBoardroomOpenRedemptionsTransaction({ boardroom: boardroom.address }));
@@ -3914,20 +4127,17 @@ export function App(): React.JSX.Element {
 
   const redeemBoardroomShares = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
-    const recipient = windDownForm.redeemRecipient.trim()
-      ? requireAddress(windDownForm.redeemRecipient, "Redemption recipient")
-      : activeAccount();
-    const [shares, minAmountsOut] = await Promise.all([
-      parseErc20Amount(publicClient, windDownForm.redeemShares, boardroom.shareToken, "Redeem shares"),
-      parseMinAmountsOut(publicClient, windDownForm.minAmountsOut, boardroom.redeemableAssets),
-    ]);
+    const shares = await parseErc20Amount(
+      publicClient,
+      windDownForm.redeemShares,
+      boardroom.shareToken,
+      "Redeem shares",
+    );
     await submitContractTransaction(
       "Boardroom share redemption",
       buildBoardroomRedeemTransaction({
         boardroom: boardroom.address,
         shares,
-        recipient,
-        minAmountsOut,
       }),
     );
   };
@@ -4171,14 +4381,16 @@ export function App(): React.JSX.Element {
     walletChainId: wallet.chainId,
     project: exactProjectDashboard ? {
       owner: exactProjectDashboard.snapshot.owner,
-      executor: exactProjectDashboard.snapshot.executor,
+      proposer: exactProjectDashboard.snapshot.proposer,
       launched: exactProjectDashboard.snapshot.launched,
       status: capabilityLifecycle(exactProjectDashboard.snapshot.status),
       launchReady: boardroomLaunchReady(exactProjectDashboard.snapshot),
       launchBlockedReason: boardroomLaunchReady(exactProjectDashboard.snapshot)
         ? undefined
         : "Distribute at least one whole governance-eligible project token before launch.",
-      windDownBlockers: windDownBlockers(exactProjectDashboard.snapshot).length,
+      windDownBlockers: exactProjectDashboard.snapshot.activeObligationCount > 0n ? 1 : 0,
+      snapshotComplete: exactProjectDashboard.snapshot.snapshotCursor
+        >= exactProjectDashboard.snapshot.snapshotAssetCount,
     } : undefined,
     wallet: {
       shareBalance: verifiedBoardroomStakerPower?.currentTokenBalance,
@@ -4186,8 +4398,8 @@ export function App(): React.JSX.Element {
       windDownEligible: verifiedBoardroomStakerPower?.canStartWindDown,
     },
     governance: {
-      queuedActionCount: verifiedQueuedBoardroomActions.filter((action) => action.status === "waiting" || action.status === "ready").length,
-      readyActionCount: verifiedQueuedBoardroomActions.filter((action) => action.status === "ready").length,
+      scheduledOperationCount: verifiedScheduledBoardroomOperations.filter((operation) => operation.status === "waiting" || operation.status === "ready").length,
+      readyActionCount: verifiedScheduledBoardroomOperations.filter((operation) => operation.status === "ready").length,
     },
     opportunities: participationCapabilityOpportunities(exactProjectDashboard),
   });
@@ -4197,6 +4409,7 @@ export function App(): React.JSX.Element {
   const boardroomPanelCapabilities: BoardroomPanelCapabilities | undefined = appRoute.kind === "studio"
     ? {
         claimRedemption: lifecycleUnavailable,
+        beginSnapshot: lifecycleUnavailable,
         createBoardroom: routeWalletCapability,
         createDistribution: lifecycleUnavailable,
         createGrant: lifecycleUnavailable,
@@ -4204,14 +4417,17 @@ export function App(): React.JSX.Element {
         manageDistribution: lifecycleUnavailable,
         manageLiquidity: lifecycleUnavailable,
         mint: lifecycleUnavailable,
+        openRedemptions: lifecycleUnavailable,
         permissionlessWindDown: lifecycleUnavailable,
+        processSnapshot: lifecycleUnavailable,
         redeem: lifecycleUnavailable,
         registerRedeemableAsset: lifecycleUnavailable,
         startWindDown: lifecycleUnavailable,
       }
     : appRoute.kind === "studio-project"
       ? {
-        claimRedemption: projectLifecycle === 2 ? routeWalletCapability : lifecycleUnavailable,
+        claimRedemption: projectLifecycle === 3 ? routeWalletCapability : lifecycleUnavailable,
+        beginSnapshot: projectCapabilities["windDown.beginSnapshot"],
         createBoardroom: lifecycleUnavailable,
         createDistribution: projectCapabilities["studio.createDistribution"],
         createGrant: projectCapabilities["studio.createGrant"],
@@ -4223,7 +4439,9 @@ export function App(): React.JSX.Element {
           ? routeWalletCapability
           : projectCapabilities["studio.manageLiquidity"],
         mint: projectCapabilities["studio.mint"],
-        permissionlessWindDown: projectCapabilities["windDown.openRedemptions"],
+        openRedemptions: projectCapabilities["windDown.openRedemptions"],
+        permissionlessWindDown: projectLifecycle === 1 ? routeWalletCapability : lifecycleUnavailable,
+        processSnapshot: projectCapabilities["windDown.processSnapshot"],
         redeem: projectCapabilities["redemption.redeem"],
         registerRedeemableAsset: projectCapabilities["windDown.registerAsset"],
         startWindDown: projectCapabilities["windDown.start"],
@@ -4236,14 +4454,14 @@ export function App(): React.JSX.Element {
       : sameAddress(
           wallet.account,
           exactProjectDashboard.snapshot.launched
-            ? exactProjectDashboard.snapshot.executor
+            ? exactProjectDashboard.snapshot.proposer
             : exactProjectDashboard.snapshot.owner,
         )
         ? { status: "enabled" }
         : {
             status: "blocked",
             reason: exactProjectDashboard.snapshot.launched
-              ? "Only the project executor can manage this Studio section after launch."
+              ? "Only the controller proposer can schedule changes for this Studio section after launch."
               : "Only the project owner can manage this Studio section before launch.",
           };
   const studioSectionCapability = appRoute.kind === "studio-project"
@@ -4405,7 +4623,9 @@ export function App(): React.JSX.Element {
         setForm: setBoardroomGrantForm,
       }}
       lockedLiquidity={{
+        add: addLockedLiquidity,
         address: lockedLiquidityAddress,
+        close: closeLockedLiquidity,
         exitForm: lockedLiquidityExitForm,
         form: lockedLiquidityForm,
         predicted: predictedLockedLiquidity,
@@ -4415,6 +4635,7 @@ export function App(): React.JSX.Element {
         exit: exitLockedLiquidity,
         load: loadLockedLiquidity,
         predict: predictLockedLiquidity,
+        remove: removeLockedLiquidity,
         setLockedLiquidityAddress: updateLockedLiquidityAddress,
         setLockedLiquidityExitForm,
         setLockedLiquidityForm,
@@ -4440,18 +4661,30 @@ export function App(): React.JSX.Element {
         snapshot: displayedMigratingCurveSnapshot,
         cancel: cancelMigratingCurve,
         create: createMigratingCurve,
+        expire: expireMigratingCurve,
+        fallbackToUnwind: fallbackMigratingCurve,
+        finalizeForfeiture: finalizeMigratingCurveForfeiture,
+        finalizeUnwind: finalizeMigratingCurveUnwind,
         load: loadMigratingCurve,
         migrate: migrateCurve,
+        openForfeiture: openMigratingCurveForfeiture,
         predict: predictMigratingCurve,
+        recoverForfeitedQuote: recoverMigratingCurveForfeitedQuote,
+        recoverQuote: recoverMigratingCurveQuote,
         setCurveMigrationForm,
         setMigratingCurveAddress: updateMigratingCurveAddress,
         setMigratingCurveForm,
+        vetoForfeiture: vetoMigratingCurveForfeiture,
       }}
       windDown={{
         form: windDownForm,
+        beginSnapshot: beginRedemptionSnapshot,
         burnTreasuryShares,
         claimRedemptionAsset: claimBoardroomRedemptionAsset,
         openRedemptions,
+        processSnapshot: processRedemptionSnapshot,
+        pruneObligation: pruneBoardroomObligation,
+        pruneObligations: pruneBoardroomObligations,
         redeemShares: redeemBoardroomShares,
         registerRedeemableAsset,
         setForm: setWindDownForm,
@@ -4505,55 +4738,131 @@ export function App(): React.JSX.Element {
     />
   );
 
-  const governanceQueueControls = exactProjectDashboard?.snapshot.launched && verifiedProductGovernanceQueueLoaded ? (
-    !verifiedProductGovernanceQueueComplete && verifiedQueuedBoardroomActions.length === 0 ? (
-      <PageNotice title="No verified queued decisions" tone="warning">
-        Queue coverage is incomplete, and no candidate was safe to display. The app checks again every 30 seconds; retry before assuming the queue is empty.
+  const governanceOperationControls = exactProjectDashboard?.snapshot.launched && !boardroomControlSupport.supported ? (
+    <PageNotice title="Controller writes are unavailable" tone="warning">
+      {boardroomControlSupport.reason}
+    </PageNotice>
+  ) : exactProjectDashboard?.snapshot.launched && verifiedProductGovernanceOperationsLoaded ? (
+    !verifiedProductGovernanceOperationsComplete && verifiedScheduledBoardroomOperations.length === 0 ? (
+      <PageNotice title="No verified scheduled operations" tone="warning">
+        Operation coverage is incomplete, and no candidate was safe to display. The app checks again every 30 seconds; retry before assuming no operation is pending.
       </PageNotice>
     ) : (
-      <GovernanceQueue
+      <GovernanceOperations
         account={wallet.account}
-        actions={verifiedQueuedBoardroomActions}
+        operations={verifiedScheduledBoardroomOperations}
         capabilities={projectCapabilities}
         pendingAction={pendingAction}
         runAction={runAction}
-        submitTransaction={submitContractTransaction}
+        submitTransaction={async (label, request) => {
+          await assertLiveBoardroomControlRelease(publicClient, deployment, exactProjectDashboard.address);
+          return await submitContractTransaction(label, request);
+        }}
       />
     )
   ) : undefined;
-  const governanceProposalComposer = exactProjectDashboard?.snapshot.launched ? (
+  const governanceProposalComposer = exactProjectDashboard?.snapshot.launched && boardroomControlSupport.supported ? (
     <GovernanceProposalComposer
       boardroom={exactProjectDashboard.address}
-      capability={projectCapabilities["governance.queue"]}
-      currentExecutor={exactProjectDashboard.snapshot.executor}
-      governanceDelay={exactProjectDashboard.snapshot.governanceDelay}
-      gracePeriod={exactProjectDashboard.snapshot.governanceConfig.actionGracePeriod}
+      capability={projectCapabilities["governance.schedule"]}
+      configurationEpoch={exactProjectDashboard.snapshot.controllerConfigurationEpoch}
+      controller={exactProjectDashboard.snapshot.controller}
+      controllerDelay={exactProjectDashboard.snapshot.controllerDelay}
+      controllerGeneration={exactProjectDashboard.snapshot.controllerGeneration}
+      currentProposer={exactProjectDashboard.snapshot.proposer}
+      governanceEpoch={exactProjectDashboard.snapshot.governanceEpoch}
+      gracePeriod={exactProjectDashboard.snapshot.controllerGracePeriod}
+      predictedNextController={predictedReplacementController}
       pendingAction={pendingAction}
       runAction={runAction}
-      queueExecutorChange={async (executor, actionGuard) => {
+      scheduleConfigurationChange={async (proposer, delay, gracePeriod, actionGuard) => {
         const route = activeAppRouteRef.current;
         if (route.kind !== "studio-project" || route.section !== "governance"
           || !sameAddress(route.boardroom, exactProjectDashboard.address)) {
-          throw new Error("The selected Studio project changed. Reopen Governance before queueing this proposal.");
+          throw new Error("The selected Studio project changed. Reopen Governance before scheduling this operation.");
         }
-        const kind = await submitBoardroomExecution(
-          "executor rotation",
-          exactProjectDashboard.snapshot,
-          buildBoardroomExecuteTransaction({
-            boardroom: exactProjectDashboard.address,
-            call: buildBoardroomSetExecutorCall({ boardroom: exactProjectDashboard.address, executor }),
-          }),
+        await assertLiveBoardroomControlRelease(publicClient, deployment, exactProjectDashboard.address);
+        const data = encodeFunctionData({
+          abi: boardroomControllerAbi,
+          functionName: "updateConfiguration",
+          args: [proposer, delay, gracePeriod],
+        });
+        await submitContractTransaction(
+          "Schedule controller configuration",
+          {
+            address: exactProjectDashboard.snapshot.controller,
+            abi: boardroomControllerAbi,
+            functionName: "scheduleControllerOperation",
+            args: [
+              data,
+              randomSalt(),
+              exactProjectDashboard.snapshot.governanceEpoch,
+              exactProjectDashboard.snapshot.controllerConfigurationEpoch,
+            ] as const,
+          },
           actionGuard,
         );
-        if (kind !== "queue") throw new Error("Executor rotation must enter the governance queue after launch.");
+      }}
+      scheduleControllerReplacement={async (proposer, delay, gracePeriod, expectedNextController, nextGeneration, actionGuard) => {
+        const route = activeAppRouteRef.current;
+        if (route.kind !== "studio-project" || route.section !== "governance"
+          || !sameAddress(route.boardroom, exactProjectDashboard.address)) {
+          throw new Error("The selected Studio project changed. Reopen Governance before scheduling replacement.");
+        }
+        await assertLiveBoardroomControlRelease(publicClient, deployment, exactProjectDashboard.address);
+        const call = buildBoardroomReplaceControllerCall({
+          boardroom: exactProjectDashboard.address,
+          expectedCurrentController: exactProjectDashboard.snapshot.controller,
+          expectedNextController,
+          nextProposer: proposer,
+          nextDelay: delay,
+          nextGracePeriod: gracePeriod,
+          nextGeneration,
+        });
+        const plan = planBoardroomCallExecution({
+          boardroom: exactProjectDashboard.address,
+          calls: [call],
+          lifecycle: {
+            launched: true,
+            status: exactProjectDashboard.snapshot.status,
+            controller: exactProjectDashboard.snapshot.controller,
+            governanceEpoch: exactProjectDashboard.snapshot.governanceEpoch,
+            controllerConfigurationEpoch: exactProjectDashboard.snapshot.controllerConfigurationEpoch,
+            proposer: exactProjectDashboard.snapshot.proposer,
+          },
+          salt: randomSalt(),
+        });
+        if (plan.kind !== "schedule") throw new Error("Controller replacement must use delayed governance.");
+        await submitContractTransaction("Schedule Boardroom controller replacement", plan.transaction, actionGuard);
       }}
     />
   ) : undefined;
   const governanceLaunchControls = exactProjectDashboard && !exactProjectDashboard.snapshot.launched ? (
     <GovernanceLaunchControl
+      account={wallet.account}
       boardroom={exactProjectDashboard.address}
-      currentExecutor={exactProjectDashboard.snapshot.executor}
-      minimumDelay={exactProjectDashboard.snapshot.governanceConfig.minimumDelay}
+      capability={boardroomControlSupport.supported
+        ? projectCapabilities["governance.launch"]
+        : { status: "blocked", reason: boardroomControlSupport.reason }}
+      pendingAction={pendingAction}
+      predictedController={predictedGovernanceController}
+      redemptionExcessRecipient={exactProjectDashboard.snapshot.redemptionExcessRecipient}
+      rewardPool={exactProjectDashboard.snapshot.rewardPool}
+      runAction={runAction}
+      stakerCanProtect={verifiedBoardroomStakerPower?.canStartWindDown}
+      submitLaunch={async (config, actionGuard) => {
+        const route = activeAppRouteRef.current;
+        if (route.kind !== "studio-project" || route.section !== "governance"
+          || !sameAddress(route.boardroom, exactProjectDashboard.address)) {
+          throw new Error("The selected Studio project changed. Reopen Governance before launching.");
+        }
+        await assertLiveBoardroomControlRelease(publicClient, deployment, exactProjectDashboard.address);
+        await submitContractTransaction(
+          "Launch Boardroom controller governance",
+          buildBoardroomLaunchTransaction({ boardroom: exactProjectDashboard.address, config }),
+          actionGuard,
+        );
+      }}
     />
   ) : undefined;
   const publicRewardsPanel = exactProjectDashboard ? (
@@ -4573,6 +4882,7 @@ export function App(): React.JSX.Element {
       dashboard={exactProjectDashboard}
       deployment={deployment}
       operatorMode
+      operatorCapability={projectCapabilities["studio.createGrant"]}
       pendingAction={pendingAction}
       publicClient={publicClient}
       runAction={runAction}
@@ -4650,7 +4960,6 @@ export function App(): React.JSX.Element {
     account: wallet.account,
     discovery,
     inspectGrant: inspectDiscoveredGrant,
-    openBoardroom: useDiscoveredBoardroom,
   });
   const studioDirectory = productCatalog.length ? (
     <>
@@ -4850,7 +5159,7 @@ export function App(): React.JSX.Element {
                 primaryAction={retryGovernanceAction || governanceWatchAction ? (
                   <div className="flex flex-wrap gap-2">{retryGovernanceAction}{governanceWatchAction}</div>
                 ) : undefined}
-                queueContent={governanceQueueControls}
+                operationsContent={governanceOperationControls}
                 stakingContent={publicRewardsPanel}
                 warning={verifiedProductGovernanceWarning}
               />
@@ -4973,7 +5282,7 @@ export function App(): React.JSX.Element {
             loading={productBoardroomLoading || productGovernanceLoading}
             primaryAction={retryGovernanceAction}
             proposalContent={governanceProposalComposer}
-            queueContent={governanceQueueControls ?? governanceLaunchControls}
+            operationsContent={governanceOperationControls ?? governanceLaunchControls}
             stakingContent={operatorRewardsPanel}
             warning={verifiedProductGovernanceWarning}
           />
@@ -5119,7 +5428,7 @@ export function canRunGrantIssuerActions(
   if (grantIssuerBoardroom && sameAddress(grantSnapshot.issuer, grantIssuerBoardroom.boardroom)) {
     if (grantIssuerBoardroom.status === 1) return true;
     if (grantIssuerBoardroom.status !== 0) return false;
-    const authority = grantIssuerBoardroom?.launched ? grantIssuerBoardroom.executor : grantIssuerBoardroom?.owner;
+    const authority = grantIssuerBoardroom?.launched ? grantIssuerBoardroom.proposer : grantIssuerBoardroom?.owner;
     if (sameAddress(account, authority)) return true;
   }
   return false;
@@ -5145,12 +5454,10 @@ function walletPortfolioTasks({
   account,
   discovery,
   inspectGrant,
-  openBoardroom,
 }: {
   account: Address | undefined;
   discovery: DiscoverySnapshot;
   inspectGrant: (grant: Address) => void;
-  openBoardroom: (boardroom: Address) => void;
 }): PortfolioTask[] {
   if (!account) return [];
   const tasks: PortfolioTask[] = [];
@@ -5167,24 +5474,14 @@ function walletPortfolioTasks({
       action: <Button size="sm" variant="secondary" onClick={() => inspectGrant(grant.grantAddress)}>Open grant</Button>,
     });
   }
-  for (const boardroom of Object.values(discovery.boardroomsByAddress)) {
-    if (!sameAddress(boardroom.owner, account)) continue;
-    tasks.push({
-      id: `boardroom:${boardroom.boardroom}`,
-      title: `Operate ${boardroom.name || boardroom.symbol || "project"}`,
-      description: "This wallet is the recorded project owner. Studio shows the next lifecycle-safe operation.",
-      project: boardroom.symbol,
-      status: "informational",
-      action: <Button size="sm" variant="secondary" onClick={() => openBoardroom(boardroom.boardroom)}>Open Studio</Button>,
-    });
-  }
   return tasks;
 }
 
 function capabilityLifecycle(status: number): NonNullable<ProjectCapabilityContext["project"]>["status"] {
   if (status === 0) return "active";
   if (status === 1) return "winding-down";
-  if (status === 2) return "redemptions-open";
+  if (status === 2) return "snapshotting";
+  if (status === 3) return "redemptions-open";
   return "closed";
 }
 
@@ -5219,7 +5516,7 @@ export function studioProjectSectionCapability(
           : section === "governance"
             ? [
                 projectCapabilities["governance.launch"],
-                projectCapabilities["governance.queue"],
+                projectCapabilities["governance.schedule"],
                 projectCapabilities["governance.veto"],
                 projectCapabilities["governance.executeReady"],
               ]

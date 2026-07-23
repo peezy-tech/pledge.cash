@@ -2,13 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { decodeFunctionData, type Address, type Hex } from "viem";
 import {
   boardroomAbi,
-  buildBoardroomCancelActionTransaction,
-  buildBoardroomExecuteQueuedActionTransaction,
-  buildBoardroomExecuteQueuedBatchTransaction,
+  boardroomControllerAbi,
+  buildBoardroomReplaceControllerCall,
+  buildBoardroomVetoOperationTransaction,
+  buildControllerExecuteBoardroomOperationTransaction,
+  buildControllerScheduleBoardroomOperationTransaction,
+  buildControllerUpdateConfigurationData,
   buildBoardroomLaunchTransaction,
   buildBoardroomMintCall,
-  buildBoardroomQueueActionTransaction,
-  buildBoardroomSetExecutorCall,
   buildFixedPriceSaleBuyTransaction,
   buildGrantRightTransferTransaction,
   buildGrantSettlementTransaction,
@@ -40,6 +41,7 @@ const grant = "0x0000000000000000000000000000000000000123" as Address;
 const policy = "0x0000000000000000000000000000000000000a55" as Address;
 const salt = "0x1111111111111111111111111111111111111111111111111111111111111111" as Hex;
 const actionHash = "0x2222222222222222222222222222222222222222222222222222222222222222" as Hex;
+const controller = "0x000000000000000000000000000000000000c011" as Address;
 
 const call = {
   policy,
@@ -49,39 +51,72 @@ const call = {
 } satisfies BoardroomCall;
 
 describe("governance transaction planning", () => {
-  test("builds raw governance envelopes with value only on execution", () => {
-    expect(buildBoardroomLaunchTransaction({ boardroom, governanceDelay: 86_400n })).toMatchObject({
+  test("builds launch, schedule, execution, and veto envelopes for the external controller", () => {
+    const launchConfig = {
+      proposer: account,
+      predictedController: controller,
+      protectionStaker: account,
+      expectedRewardPool: rewardPool,
+      expectedRedemptionExcessRecipient: recipient,
+      controllerDelay: 86_400n,
+      windDownDelay: 172_800n,
+      gracePeriod: 604_800n,
+      generation: 1n,
+    } as const;
+    expect(buildBoardroomLaunchTransaction({ boardroom, config: launchConfig })).toMatchObject({
       address: boardroom,
       functionName: "launch",
-      args: [86_400n],
+      args: [launchConfig],
     });
-    expect(buildBoardroomCancelActionTransaction({ boardroom, actionHash })).toMatchObject({
-      functionName: "cancelAction",
+    expect(buildBoardroomVetoOperationTransaction({ boardroom, operationId: actionHash })).toMatchObject({
+      functionName: "veto",
       args: [actionHash],
     });
 
-    const queued = buildBoardroomQueueActionTransaction({ boardroom, call, salt });
-    expect(queued).toMatchObject({ functionName: "queueAction", args: [call, salt] });
-    expect("value" in queued).toBe(false);
-    expect(buildBoardroomExecuteQueuedActionTransaction({ boardroom, call, salt })).toMatchObject({
-      functionName: "executeQueuedAction",
-      value: 7n,
+    const scheduled = buildControllerScheduleBoardroomOperationTransaction({
+      controller,
+      calls: [call],
+      salt,
+      expectedBoardroomEpoch: 3n,
+      expectedConfigurationEpoch: 2n,
     });
-    expect(buildBoardroomExecuteQueuedBatchTransaction({ boardroom, calls: [call, { ...call, value: 5n }], salt })).toMatchObject({
-      functionName: "executeQueuedBatch",
-      value: 12n,
+    expect(scheduled).toMatchObject({
+      address: controller,
+      functionName: "scheduleBoardroomOperation",
+      args: [[call], salt, 3n, 2n],
+    });
+    expect(buildControllerExecuteBoardroomOperationTransaction({
+      controller,
+      calls: [call],
+      salt,
+      expectedBoardroomEpoch: 3n,
+      expectedConfigurationEpoch: 2n,
+      authority: account,
+    })).toMatchObject({
+      address: controller,
+      functionName: "executeBoardroomOperation",
+      args: [[call], salt, 3n, 2n, account],
     });
   });
 
-  test("selects prelaunch execution, launched queueing, and wind-down cleanup", () => {
+  test("selects prelaunch execution, launched scheduling, and wind-down cleanup", () => {
     expect(planBoardroomCallExecution({ boardroom, calls: [call], lifecycle: { launched: false, status: 0 } })).toMatchObject({
       kind: "execute",
       transaction: { functionName: "execute", value: 7n },
     });
-    expect(planBoardroomCallExecution({ boardroom, calls: [call], lifecycle: { launched: true, status: 0 }, salt })).toMatchObject({
-      kind: "queue",
-      transaction: { functionName: "queueAction" },
-    });
+    expect(planBoardroomCallExecution({
+      boardroom,
+      calls: [call],
+      lifecycle: {
+        launched: true,
+        status: 0,
+        controller,
+        governanceEpoch: 3n,
+        controllerConfigurationEpoch: 2n,
+        proposer: account,
+      },
+      salt,
+    })).toMatchObject({ kind: "schedule", transaction: { functionName: "scheduleBoardroomOperation" } });
     expect(
       planBoardroomCallExecution({
         boardroom,
@@ -94,20 +129,31 @@ describe("governance transaction planning", () => {
       "governance salt",
     );
     expect(() => planBoardroomCallExecution({ boardroom, calls: [call], lifecycle: { launched: true, status: 2 } })).toThrow(
-      "redemptions open",
+      "snapshotting",
     );
   });
 
-  test("builds Boardroom self-calls for post-launch governance", () => {
-    const executorCall = buildBoardroomSetExecutorCall({ boardroom, executor: recipient });
-    expect(executorCall).toMatchObject({
+  test("builds delayed configuration data and atomic controller replacement self-calls", () => {
+    const configData = buildControllerUpdateConfigurationData({ proposer: recipient, delay: 172_800n, gracePeriod: 604_800n });
+    const decodedConfiguration = decodeFunctionData({ abi: boardroomControllerAbi, data: configData });
+    expect(decodedConfiguration.functionName).toBe("updateConfiguration");
+    expect(String(decodedConfiguration.args?.[0]).toLowerCase()).toBe(recipient.toLowerCase());
+    expect(decodedConfiguration.args?.slice(1)).toEqual([172_800n, 604_800n]);
+    const replacement = buildBoardroomReplaceControllerCall({
+      boardroom,
+      expectedCurrentController: controller,
+      expectedNextController: recipient,
+      nextProposer: account,
+      nextDelay: 172_800n,
+      nextGracePeriod: 604_800n,
+      nextGeneration: 2n,
+    });
+    expect(replacement).toMatchObject({
       policy: "0x0000000000000000000000000000000000000000",
       target: boardroom,
       value: 0n,
     });
-    const decodedExecutor = decodeFunctionData({ abi: boardroomAbi, data: executorCall.data });
-    expect(decodedExecutor.functionName).toBe("setExecutor");
-    expect(String(decodedExecutor.args?.[0]).toLowerCase()).toBe(recipient.toLowerCase());
+    expect(decodeFunctionData({ abi: boardroomAbi, data: replacement.data }).functionName).toBe("replaceController");
     const decodedMint = decodeFunctionData({
       abi: boardroomAbi,
       data: buildBoardroomMintCall({ boardroom, to: account, amount: 10n }).data,
@@ -132,7 +178,6 @@ describe("staker power", () => {
         switch (parameters.functionName) {
           case "shareToken": return shareToken;
           case "rewardPool": return rewardPool;
-          case "governanceConfig": return [86_400n, 604_800n, 100n, 1_000n];
           case "isEncumberedAccount": return false;
           case "balanceOf": return 1_500n;
           case "activeStakeOf": return 1_001n;
@@ -216,22 +261,36 @@ describe("participation readers and builders", () => {
         saleSupply: 1_000n,
         migrationSupply: 500n,
         remainingSaleShares: 800n,
+        outstandingCurveShareLiability: 200n,
         basePrice: 25n,
         slope: 2n,
         graduationQuoteTarget: 10_000n,
         quoteToLpBps: 5_000,
         startTime: 100n,
         endTime: 1_000n,
+        phaseEndsAt: 0n,
+        quarantineStartedAt: 0n,
+        forfeitureEligibleAt: 0n,
+        forfeitureWindowEndsAt: 0n,
         migrationSalt: salt,
         curveStatus: 0,
+        settlementReason: 0,
+        postQuarantinePhase: 0,
         soldShares: 200n,
         quoteReserve: 5_000n,
+        migrationAmounts: [100n, 2_500n],
+        terminalCurvePrice: 25n,
         graduationLatched: false,
+        migrationReservationHeld: true,
+        quoteQuarantined: false,
+        forfeitureFinalized: false,
+        unrecoveredQuote: 0n,
+        forfeitedQuote: 0n,
         canMigrate: false,
         isClosed: false,
         getBuyQuote: 275n,
         getSellQuote: 225n,
-        sellableSharesBy: 175n,
+        sellableShares: 175n,
       }[functionName];
     });
 
