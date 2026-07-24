@@ -37,6 +37,8 @@ import {
   PostgresAdapterOperationStore,
   PostgresIntentExecutionStore,
   PostgresQuoteRepository,
+  PostgresSupportRepository,
+  QuotePaymentBindingError,
   type X402RouterDbClient
 } from "../src/db";
 import { DurableX402SettlementJournal } from "../src/execution/settlement-journal";
@@ -68,6 +70,11 @@ describeWithDatabase("Postgres router durability", () => {
   beforeEach(async () => {
     await client.sql`
       truncate table
+        x402_router_support_invoice_quotes,
+        x402_router_support_invoices,
+        x402_router_support_subscriptions,
+        x402_router_support_plans,
+        x402_router_support_challenges,
         x402_router_adapter_operations,
         x402_router_intent_payments,
         x402_router_quote_payment_bindings,
@@ -76,6 +83,363 @@ describeWithDatabase("Postgres router durability", () => {
       restart identity cascade
     `;
   });
+
+  test("consumes one support challenge into immutable plan terms", async () => {
+    const support = new PostgresSupportRepository(
+      client.sql,
+      client.coordinationSql,
+    );
+    const createdAt = new Date();
+    const challenge = {
+      id: "00000000-0000-4000-8000-000000000001",
+      action: "plan_create" as const,
+      actor: PAYER,
+      authority: PAYER,
+      authorityMode: "launched_controller" as const,
+      boardroom: TARGET,
+      chainId: 998 as const,
+      configurationEpoch: 1n,
+      controllerGeneration: 1n,
+      planId: "00000000-0000-4000-8000-000000000002",
+      payload: {
+        version: 1,
+        planId: "00000000-0000-4000-8000-000000000002",
+      },
+      payloadHash: HASH_A,
+      message: "publish immutable support terms",
+      issuedBlock: 100n,
+      issuedBlockHash: HASH_B,
+      expiresAt: new Date(createdAt.getTime() + 300_000),
+      createdAt,
+    };
+    await support.createChallenge(challenge);
+    expect(await support.getChallenge(challenge.id)).toEqual(challenge);
+
+    const plan = {
+      id: challenge.planId,
+      chainId: 998 as const,
+      boardroom: TARGET,
+      asset: DESTINATION_USDC,
+      amount: "10000000",
+      cadence: "monthly" as const,
+      title: "Core support",
+      description: "Keep the project operating.",
+      termsHash: HASH_A,
+      status: "active" as const,
+      authority: PAYER,
+      authorityMode: "launched_controller" as const,
+      controllerGeneration: 1n,
+      configurationEpoch: 1n,
+      verifiedBlock: 101n,
+      verifiedBlockHash: HASH_C,
+      createdAt: new Date(createdAt.getTime() + 1_000),
+    };
+    await expect(support.createPlanFromChallenge({
+      challenge,
+      plan,
+      signatureHash: HASH_D,
+    })).resolves.toEqual(plan);
+    await expect(support.listPlans(TARGET, 50)).resolves.toEqual([plan]);
+    await expect(support.createPlanFromChallenge({
+      challenge,
+      plan,
+      signatureHash: HASH_D,
+    })).rejects.toMatchObject({ code: "support_challenge_consumed" });
+
+    const retiredAt = new Date(plan.createdAt.getTime() + 1_000);
+    await client.sql`
+      update x402_router_support_plans
+      set status = 'retired',
+          retired_at = ${retiredAt.toISOString()}
+      where id = ${plan.id}
+    `;
+    await expect(support.listPlans(TARGET, 50)).resolves.toEqual([
+      { ...plan, status: "retired", retiredAt },
+    ]);
+  });
+
+  test("binds payment only to the active recurring-support invoice quote", async () => {
+    const planId = "00000000-0000-4000-8000-000000000011";
+    const subscriptionId = "00000000-0000-4000-8000-000000000012";
+    const invoiceId = "00000000-0000-4000-8000-000000000013";
+    const createdAt = new Date();
+    const periodEnd = new Date(createdAt.getTime() + 28 * 24 * 60 * 60_000);
+    await client.sql`
+      insert into x402_router_support_plans (
+        id, chain_id, boardroom, asset, amount, cadence, title, description,
+        terms_hash, status, authority_mode, authority,
+        controller_generation, configuration_epoch, verified_block,
+        verified_block_hash, created_at
+      ) values (
+        ${planId}, 998, ${TARGET.toLowerCase()},
+        ${DESTINATION_USDC.toLowerCase()}, '10000000', 'monthly',
+        'Core support', 'Keep the project operating.', ${HASH_A},
+        'active', 'launched_controller', ${PAYER.toLowerCase()},
+        '1', '1', '100', ${HASH_B}, ${createdAt.toISOString()}
+      )
+    `;
+    await client.sql`
+      insert into x402_router_support_subscriptions (
+        id, plan_id, payer, status, started_at, created_at
+      ) values (
+        ${subscriptionId}, ${planId}, ${PAYER.toLowerCase()}, 'active',
+        ${createdAt.toISOString()}, ${createdAt.toISOString()}
+      )
+    `;
+    await client.sql`
+      insert into x402_router_support_invoices (
+        id, subscription_id, plan_id, period_index, period_start, period_end,
+        due_at, payer, boardroom, asset, amount, status, created_at
+      ) values (
+        ${invoiceId}, ${subscriptionId}, ${planId}, 0,
+        ${createdAt.toISOString()}, ${periodEnd.toISOString()},
+        ${createdAt.toISOString()}, ${PAYER.toLowerCase()},
+        ${TARGET.toLowerCase()}, ${DESTINATION_USDC.toLowerCase()},
+        '10000000', 'open', ${createdAt.toISOString()}
+      )
+    `;
+
+    const quotes = new PostgresQuoteRepository(client.sql);
+    const support = new PostgresSupportRepository(
+      client.sql,
+      client.coordinationSql,
+    );
+    const recurringQuote = (
+      id: string,
+      supportInvoiceId = invoiceId,
+    ): MarketplaceQuote => ({
+      ...marketplaceQuote(id, [destinationReservation("10")]),
+      kind: "recurring_support",
+      supportInvoiceId,
+      maxSlippageBps: 0,
+    });
+    const first = recurringQuote("support-attempt-a");
+    const second = recurringQuote("support-attempt-b");
+    for (const value of [first, second]) {
+      await quotes.createReserved({
+        quote: value,
+        availability: value.inventoryReservations.map(reservation => ({
+          reservation,
+          maximumAvailableInventory: 100n,
+        })),
+      });
+      await support.linkInvoiceQuote({
+        invoiceId,
+        quoteId: value.id,
+        createdAt,
+      });
+    }
+
+    await expect(quotes.bindPaymentPayload({
+      quoteId: first.id,
+      attemptId: HASH_C,
+      paymentPayloadHash: HASH_C,
+      paymentRequirementsHash: hashPaymentRequirements(
+        first.paymentRequirements,
+      ),
+    })).rejects.toBeInstanceOf(QuotePaymentBindingError);
+    await expect(quotes.bindPaymentPayload({
+      quoteId: second.id,
+      attemptId: HASH_D,
+      paymentPayloadHash: HASH_D,
+      paymentRequirementsHash: hashPaymentRequirements(
+        second.paymentRequirements,
+      ),
+    })).resolves.toMatchObject({ quoteId: second.id });
+
+    const nextInvoiceId = "00000000-0000-4000-8000-000000000014";
+    const nextPeriodEnd = new Date(
+      periodEnd.getTime() + 31 * 24 * 60 * 60_000,
+    );
+    await client.sql`
+      insert into x402_router_support_invoices (
+        id, subscription_id, plan_id, period_index, period_start, period_end,
+        due_at, payer, boardroom, asset, amount, status, created_at
+      ) values (
+        ${nextInvoiceId}, ${subscriptionId}, ${planId}, 1,
+        ${periodEnd.toISOString()}, ${nextPeriodEnd.toISOString()},
+        ${periodEnd.toISOString()}, ${PAYER.toLowerCase()},
+        ${TARGET.toLowerCase()}, ${DESTINATION_USDC.toLowerCase()},
+        '10000000', 'open', ${periodEnd.toISOString()}
+      )
+    `;
+    const next = recurringQuote("support-attempt-next-period", nextInvoiceId);
+    await quotes.createReserved({
+      quote: next,
+      availability: next.inventoryReservations.map(reservation => ({
+        reservation,
+        maximumAvailableInventory: 100n,
+      })),
+    });
+    await support.linkInvoiceQuote({
+      invoiceId: nextInvoiceId,
+      quoteId: next.id,
+      createdAt,
+    });
+    await expect(quotes.bindPaymentPayload({
+      quoteId: next.id,
+      attemptId: HASH_A,
+      paymentPayloadHash: HASH_A,
+      paymentRequirementsHash: hashPaymentRequirements(
+        next.paymentRequirements,
+      ),
+    })).rejects.toMatchObject({ code: "binding_conflict" });
+
+    const replacementSubscriptionId =
+      "00000000-0000-4000-8000-000000000015";
+    const replacementInvoiceId =
+      "00000000-0000-4000-8000-000000000016";
+    const cancelledAt = new Date(createdAt.getTime() + 1_000);
+    await client.sql`
+      update x402_router_support_subscriptions
+      set status = 'cancelled',
+          cancelled_at = ${cancelledAt.toISOString()}
+      where id = ${subscriptionId}
+    `;
+    await client.sql`
+      update x402_router_support_invoices
+      set status = 'cancelled',
+          cancelled_at = ${cancelledAt.toISOString()}
+      where subscription_id = ${subscriptionId}
+    `;
+    const replacementChallenge = {
+      id: "00000000-0000-4000-8000-000000000017",
+      action: "subscription_create" as const,
+      actor: PAYER,
+      boardroom: TARGET,
+      chainId: 998 as const,
+      configurationEpoch: 1n,
+      controllerGeneration: 1n,
+      planId,
+      payload: { planId, subscriptionId: replacementSubscriptionId },
+      payloadHash: HASH_B,
+      message: "start replacement schedule",
+      issuedBlock: 102n,
+      issuedBlockHash: HASH_C,
+      expiresAt: new Date(cancelledAt.getTime() + 300_000),
+      createdAt: cancelledAt,
+    };
+    await support.createChallenge(replacementChallenge);
+    await expect(support.createSubscriptionFromChallenge({
+      challenge: replacementChallenge,
+      invoice: {
+        id: replacementInvoiceId,
+        subscriptionId: replacementSubscriptionId,
+        planId,
+        periodIndex: 0,
+        periodStart: cancelledAt,
+        periodEnd,
+        dueAt: cancelledAt,
+        payer: PAYER,
+        boardroom: TARGET,
+        asset: DESTINATION_USDC,
+        amount: "10000000",
+        status: "open",
+        createdAt: cancelledAt,
+      },
+      signatureHash: HASH_D,
+      subscription: {
+        id: replacementSubscriptionId,
+        planId,
+        payer: PAYER,
+        status: "active",
+        startedAt: cancelledAt,
+        createdAt: cancelledAt,
+      },
+      verifiedBlock: 103n,
+      verifiedBlockHash: HASH_D,
+    })).rejects.toMatchObject({ code: "support_payer_payment_locked" });
+    await client.sql`
+      insert into x402_router_support_subscriptions (
+        id, plan_id, payer, status, started_at, created_at
+      ) values (
+        ${replacementSubscriptionId}, ${planId}, ${PAYER.toLowerCase()},
+        'active', ${cancelledAt.toISOString()}, ${cancelledAt.toISOString()}
+      )
+    `;
+    await client.sql`
+      insert into x402_router_support_invoices (
+        id, subscription_id, plan_id, period_index, period_start, period_end,
+        due_at, payer, boardroom, asset, amount, status, created_at
+      ) values (
+        ${replacementInvoiceId}, ${replacementSubscriptionId}, ${planId}, 0,
+        ${cancelledAt.toISOString()}, ${periodEnd.toISOString()},
+        ${cancelledAt.toISOString()}, ${PAYER.toLowerCase()},
+        ${TARGET.toLowerCase()}, ${DESTINATION_USDC.toLowerCase()},
+        '10000000', 'open', ${cancelledAt.toISOString()}
+      )
+    `;
+    const replacement = recurringQuote(
+      "support-attempt-replacement-schedule",
+      replacementInvoiceId,
+    );
+    await quotes.createReserved({
+      quote: replacement,
+      availability: replacement.inventoryReservations.map(reservation => ({
+        reservation,
+        maximumAvailableInventory: 100n,
+      })),
+    });
+    await support.linkInvoiceQuote({
+      invoiceId: replacementInvoiceId,
+      quoteId: replacement.id,
+      createdAt: cancelledAt,
+    });
+    await expect(quotes.bindPaymentPayload({
+      quoteId: replacement.id,
+      attemptId: HASH_A,
+      paymentPayloadHash: HASH_A,
+      paymentRequirementsHash: hashPaymentRequirements(
+        replacement.paymentRequirements,
+      ),
+    })).rejects.toMatchObject({ code: "binding_conflict" });
+  });
+
+  test("keeps recurring invoice locks off a constrained query pool", async () => {
+    const constrained = createDbClient(databaseUrl!, { maxConnections: 1 });
+    const support = new PostgresSupportRepository(
+      constrained.sql,
+      constrained.coordinationSql,
+    );
+    let markEntered!: () => void;
+    let releaseFirst!: () => void;
+    const entered = new Promise<void>(resolve => {
+      markEntered = resolve;
+    });
+    const holdFirst = new Promise<void>(resolve => {
+      releaseFirst = resolve;
+    });
+    const order: string[] = [];
+
+    try {
+      const first = support.withInvoiceLock("constrained-invoice", async () => {
+        await constrained.sql`select 1`;
+        order.push("first-entered");
+        markEntered();
+        await holdFirst;
+        await constrained.sql`select 1`;
+        order.push("first-released");
+      });
+      await entered;
+      const second = support.withInvoiceLock(
+        "constrained-invoice",
+        async () => {
+          await constrained.sql`select 1`;
+          order.push("second-entered");
+        },
+      );
+      releaseFirst();
+      await Promise.all([first, second]);
+      expect(order).toEqual([
+        "first-entered",
+        "first-released",
+        "second-entered",
+      ]);
+    } finally {
+      releaseFirst();
+      await constrained.close();
+    }
+  }, 5_000);
 
   afterAll(async () => {
     await client.close();

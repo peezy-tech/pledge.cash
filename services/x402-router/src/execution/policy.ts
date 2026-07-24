@@ -1,5 +1,6 @@
 import {
   ammRouterAbi,
+  erc20Abi,
   fixedPriceSaleAbi,
 } from "@pledge.cash/sdk";
 import {
@@ -18,6 +19,7 @@ import type {
 } from "x402-hl/intents/server";
 import type { MarketplaceQuote, QuoteRepository } from "../domain";
 import type { CanonicalExecutionValidator } from "../quotes/canonical";
+import type { RecurringSupportExecutionValidator } from "../support/execution";
 import {
   buildEip1559TransactionEnvelope,
   simulationMetadata,
@@ -26,6 +28,7 @@ import {
 export function createMarketplaceExecutionPolicy(
   repository: QuoteRepository,
   canonical: CanonicalExecutionValidator | undefined,
+  recurringSupport?: RecurringSupportExecutionValidator,
 ) {
   return async (
     context: IntentExecutionContext,
@@ -41,6 +44,10 @@ export function createMarketplaceExecutionPolicy(
     }
     try {
       await canonical.assertCanonicalExecution(quote);
+      if (quote.kind === "recurring_support") {
+        if (!recurringSupport) return { allowed: false };
+        await recurringSupport.assertPayable(quote);
+      }
     } catch {
       return { allowed: false };
     }
@@ -181,6 +188,33 @@ function decodeAndValidateCanonicalCall(quote: MarketplaceQuote): boolean {
       return (
         encodeFunctionData({
           abi: ammRouterAbi,
+          functionName: decoded.functionName,
+          args: decoded.args,
+        }).toLowerCase() === quote.execution.callData.toLowerCase()
+      );
+    }
+
+    if (quote.kind === "recurring_support") {
+      const decoded = decodeFunctionData({
+        abi: erc20Abi,
+        data: quote.execution.callData,
+      });
+      if (decoded.functionName !== "transfer" || !decoded.args) return false;
+      const [boardroom, amount] = decoded.args;
+      if (
+        !sameAddress(quote.execution.target, quote.canonicalTarget) ||
+        !sameAddress(quote.execution.inputToken, quote.canonicalTarget) ||
+        !sameAddress(quote.execution.outputToken, quote.canonicalTarget) ||
+        !sameAddress(boardroom, quote.boardroom) ||
+        BigInt(amount) !== BigInt(quote.execution.inputAmount) ||
+        quote.execution.inputAmount !== quote.execution.expectedOutput ||
+        quote.execution.inputAmount !== quote.execution.minimumOutput
+      ) {
+        return false;
+      }
+      return (
+        encodeFunctionData({
+          abi: erc20Abi,
           functionName: decoded.functionName,
           args: decoded.args,
         }).toLowerCase() === quote.execution.callData.toLowerCase()

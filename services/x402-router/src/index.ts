@@ -14,6 +14,7 @@ import {
   PostgresAdapterOperationStore,
   PostgresIntentExecutionStore,
   PostgresQuoteRepository,
+  PostgresSupportRepository,
 } from "./db";
 import { resolveRouterDeployment } from "./deployment";
 import { DurableHyperCoreRefundAdapter } from "./execution/hypercore-refund";
@@ -32,6 +33,9 @@ import { DurableX402SettlementJournal } from "./execution/settlement-journal";
 import { MarketplaceQuoteService } from "./quotes/service";
 import { CanonicalMarketplaceReader } from "./quotes/canonical";
 import { readRouterReadiness } from "./readiness";
+import { CanonicalSupportAuthorityReader } from "./support/authority";
+import { RecurringSupportExecutionGuard } from "./support/execution";
+import { RecurringSupportService } from "./support/service";
 import {
   createLocalHyperliquidTestnetFacilitator,
   createX402ServerLayer,
@@ -59,6 +63,10 @@ export async function startX402Router(
     config.hyperliquid.refundPrivateKey,
   );
   const quoteRepository = new PostgresQuoteRepository(database.sql);
+  const supportRepository = new PostgresSupportRepository(
+    database.sql,
+    database.coordinationSql,
+  );
   const intentStore = new PostgresIntentExecutionStore(database.sql);
   const operationStore = new PostgresAdapterOperationStore(
     database.sql,
@@ -97,6 +105,19 @@ export async function startX402Router(
         },
       )
     : undefined;
+  const supportAuthority = deployment.ready
+    ? new CanonicalSupportAuthorityReader(publicClient, {
+        boardroomFactory: deployment.deployment.boardroomFactory,
+        destinationUsdc: deployment.deployment.destinationUsdc,
+      })
+    : undefined;
+  const supportExecution =
+    supportAuthority
+      ? new RecurringSupportExecutionGuard(
+          supportRepository,
+          supportAuthority,
+        )
+      : undefined;
 
   const facilitator = createLocalHyperliquidTestnetFacilitator();
   const destinationExecutor = new DurableHyperEvmExecutor(
@@ -120,7 +141,11 @@ export async function startX402Router(
   const intentExecutor = createIntentExecutor({
     store: intentStore,
     domain: config.intentDomain,
-    policy: createMarketplaceExecutionPolicy(quoteRepository, canonical),
+    policy: createMarketplaceExecutionPolicy(
+      quoteRepository,
+      canonical,
+      supportExecution,
+    ),
     simulate: createMarketplaceSimulation(
       publicClient,
       config.hyperevm.executor,
@@ -142,6 +167,21 @@ export async function startX402Router(
     settlementJournal,
   });
   const payments = new X402MarketplacePaymentSaga(paymentLayer);
+  const support =
+    liveQuoteService && supportAuthority
+      ? new RecurringSupportService(
+          supportRepository,
+          supportAuthority,
+          liveQuoteService,
+          quoteRepository,
+          intentStore,
+          payments,
+          {
+            destinationUsdc: config.hyperevm.destinationUsdc,
+            publicOrigin: config.publicOrigin,
+          },
+        )
+      : undefined;
   const recoveryStaleAfterMs = safeRecoveryStaleAfterMs({
     operationLeaseMs: config.operationLeaseMs,
     receiptTimeoutMs: config.hyperevm.receiptTimeoutMs,
@@ -190,6 +230,7 @@ export async function startX402Router(
     quoteRepository,
     payments,
     orders: intentStore,
+    ...(support ? { support } : {}),
     readiness: () =>
       readRouterReadiness({
         deployment,
@@ -270,4 +311,9 @@ export {
 } from "./config";
 export * from "./deployment";
 export * from "./domain";
+export * from "./support/domain";
+export * from "./support/dto";
+export * from "./support/execution";
+export * from "./support/schedule";
+export * from "./support/service";
 export * from "./x402";

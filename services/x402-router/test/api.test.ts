@@ -5,7 +5,10 @@ import {
   encodePaymentSignatureHeader,
 } from "@x402/core/http";
 import type { PaymentPayload, SettleResponse } from "@x402/core/types";
-import { createRouterApi } from "../src/api/server";
+import {
+  createRouterApi,
+  type RouterApiDependencies,
+} from "../src/api/server";
 import type { MarketplaceQuote, QuoteRepository } from "../src/domain";
 import { X402PaymentError } from "../src/x402/server";
 
@@ -86,6 +89,7 @@ function app(options: {
   paymentError?: Error;
   onReleaseQuotedReservations?: () => void;
   storedQuote?: MarketplaceQuote;
+  support?: RouterApiDependencies["support"];
 } = {}) {
   const stored = options.storedQuote ?? quote();
   const repository: QuoteRepository = {
@@ -147,6 +151,7 @@ function app(options: {
         return undefined;
       },
     },
+    ...(options.support ? { support: options.support } : {}),
     async readiness() {
       const accepting = options.acceptingPayments ?? true;
       return {
@@ -177,6 +182,34 @@ function paidRequest(error: X402PaymentError) {
 }
 
 describe("router API", () => {
+  test("advertises and serves recurring support only when the service is wired", async () => {
+    const unavailable = await app().request(
+      `/v1/support/plans?boardroom=${payer}`,
+    );
+    expect(unavailable.status).toBe(503);
+
+    const enabled = app({
+      support: {
+        async listPlans() {
+          return [];
+        },
+      } as never,
+    });
+    const status = await enabled.request("/v1/status");
+    await expect(status.json()).resolves.toMatchObject({
+      supportedActions: [
+        "amm_swap",
+        "fixed_price_sale",
+        "recurring_support",
+      ],
+    });
+    const plans = await enabled.request(
+      `/v1/support/plans?boardroom=${payer}`,
+    );
+    expect(plans.status).toBe(200);
+    await expect(plans.json()).resolves.toEqual({ plans: [] });
+  });
+
   test("returns the exact stored 402 requirement and CORS exposure", async () => {
     const response = await app().request("/v1/quotes/quote-1/execute", {
       method: "POST",

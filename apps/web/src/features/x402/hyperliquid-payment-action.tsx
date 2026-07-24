@@ -44,9 +44,11 @@ export function HyperliquidPaymentAction({
   disabledReason,
   expectations,
   kind,
+  onOrderChange,
   output,
   payer,
   pendingAction,
+  quoteFactory,
   request,
   runAction,
 }: {
@@ -54,9 +56,11 @@ export function HyperliquidPaymentAction({
   disabledReason?: string | undefined;
   expectations: HyperliquidRouteExpectations | undefined;
   kind: HyperliquidMarketplaceQuoteRequest["kind"];
+  onOrderChange?: ((order: HyperliquidMarketplaceOrder) => void) | undefined;
   output: HyperliquidOutputMetadata;
   payer: Address | undefined;
   pendingAction: string | undefined;
+  quoteFactory?: (() => Promise<HyperliquidMarketplaceQuote>) | undefined;
   request: HyperliquidMarketplaceQuoteRequest | undefined;
   runAction: RunParticipationAction;
 }): React.JSX.Element {
@@ -192,6 +196,7 @@ export function HyperliquidPaymentAction({
 
   const applyOrder = useCallback((next: HyperliquidMarketplaceOrder): void => {
     setOrder(next);
+    onOrderChange?.(next);
     if (!shouldRetainHyperliquidPendingPayment(next.status)) {
       try {
         releasePendingPayment(next.orderId);
@@ -201,7 +206,7 @@ export function HyperliquidPaymentAction({
         );
       }
     }
-  }, [releasePendingPayment]);
+  }, [onOrderChange, releasePendingPayment]);
 
   useEffect(() => {
     if (!paymentAttempted || !quote || (order && isTerminalHyperliquidOrder(order))) {
@@ -273,11 +278,13 @@ export function HyperliquidPaymentAction({
     setError(undefined);
     void runAction(quoteActionId, async () => {
       try {
-        const next = await createHyperliquidMarketplaceQuote(
-          checkout,
-          request,
-          expectations,
-        );
+        const next = quoteFactory
+          ? await quoteFactory()
+          : await createHyperliquidMarketplaceQuote(
+              checkout,
+              request,
+              expectations,
+            );
         setQuote(next);
         setOrder(undefined);
         setPaymentAttempted(false);
@@ -400,7 +407,9 @@ export function HyperliquidPaymentAction({
           <div className="min-w-0">
             <p className="m-0 text-sm font-semibold text-zinc-200">Pay from Hyperliquid</p>
             <p className="m-0 mt-0.5 text-xs leading-5 text-zinc-500">
-              Settle USDC on HyperCore, then execute this exact marketplace action on HyperEVM.
+              {kind === "recurring_support"
+                ? "Settle USDC on HyperCore, then transfer this exact invoice amount to the Boardroom on HyperEVM."
+                : "Settle USDC on HyperCore, then execute this exact marketplace action on HyperEVM."}
             </p>
           </div>
           <ActionButton
@@ -493,7 +502,7 @@ function orderNotice(
   }
   if (order.status === "executed") {
     return {
-      detail: order.message ?? "The marketplace transaction completed on HyperEVM.",
+      detail: order.message ?? "The destination transaction completed on HyperEVM.",
       title: "Hyperliquid order executed",
       tone: "success",
     };

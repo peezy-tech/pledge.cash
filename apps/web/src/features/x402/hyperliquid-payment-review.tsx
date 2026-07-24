@@ -52,6 +52,7 @@ export function HyperliquidPaymentReview({
     quote.payment.decimals,
     quote.payment.symbol,
   );
+  const recurringSupport = quote.kind === "recurring_support";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -65,7 +66,9 @@ export function HyperliquidPaymentReview({
             </div>
             <DialogTitle className="pt-1">Review Hyperliquid payment</DialogTitle>
             <DialogDescription>
-              Confirm the source transfer and the exact marketplace execution it authorizes.
+              {recurringSupport
+                ? "Confirm the source transfer and the exact Boardroom contribution it authorizes."
+                : "Confirm the source transfer and the exact marketplace execution it authorizes."}
             </DialogDescription>
           </DialogHeader>
         </div>
@@ -87,9 +90,11 @@ export function HyperliquidPaymentReview({
               detail="Included in total payment"
             />
             <ReviewRow
-              label="Expected receive"
+              label={recurringSupport ? "Boardroom receives" : "Expected receive"}
               value={formatOutput(quote.execution.expectedOutput, output)}
-              detail={`Minimum ${formatOutput(quote.execution.minimumOutput, output)}`}
+              detail={recurringSupport
+                ? "Exact recurring-support invoice amount"
+                : `Minimum ${formatOutput(quote.execution.minimumOutput, output)}`}
             />
             <ReviewRow
               label="Recipient and refund"
@@ -99,9 +104,10 @@ export function HyperliquidPaymentReview({
           </dl>
 
           <StatusNotice className="my-4" title="Payment settles before execution" tone="warning">
-            Pledge’s router will execute this reviewed HyperEVM call after the
-            HyperCore payment settles. If execution cannot complete, the order
-            enters the refund path; keep the order ID until it reaches a terminal state.
+            Pledge’s router will execute this reviewed HyperEVM
+            {recurringSupport ? " contribution" : " call"} after the HyperCore
+            payment settles. If execution cannot complete, the order enters the
+            refund path; keep the order ID until it reaches a terminal state.
           </StatusNotice>
 
           {error ? (
@@ -253,7 +259,7 @@ function orderStatusTitle(status: HyperliquidMarketplaceOrder["status"]): string
   if (status === "quoted") return "Payment not observed yet";
   if (status === "paid") return "Payment settled";
   if (status === "executing") return "HyperEVM execution in progress";
-  if (status === "executed") return "Marketplace execution confirmed";
+  if (status === "executed") return "Destination execution confirmed";
   if (status === "recovery_pending") return "Payment recovery in progress";
   if (status === "refund_pending") return "Refund in progress";
   if (status === "refunded") return "Payment refunded";

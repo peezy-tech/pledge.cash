@@ -59,6 +59,21 @@ export const createQuoteRequestSchema = z.discriminatedUnion("kind", [
 
 export type CreateQuoteRequest = z.infer<typeof createQuoteRequestSchema>;
 
+export const recurringSupportQuoteRequestSchema = baseQuoteRequestSchema
+  .extend({
+    kind: z.literal("recurring_support"),
+    invoiceId: z.string().uuid(),
+    amount: decimalIntegerSchema,
+  })
+  .strict();
+
+export type RecurringSupportQuoteRequest = z.infer<
+  typeof recurringSupportQuoteRequestSchema
+>;
+export type RouterQuoteRequest =
+  | CreateQuoteRequest
+  | RecurringSupportQuoteRequest;
+
 export function requireSameParty(input: {
   payer: Address;
   recipient: Address;
@@ -82,6 +97,9 @@ export function toQuoteDto(quote: MarketplaceQuote) {
     quoteId: quote.id,
     paymentId: quote.paymentId,
     kind: quote.kind,
+    ...(quote.supportInvoiceId === undefined
+      ? {}
+      : { supportInvoiceId: quote.supportInvoiceId }),
     expiresAt: quote.expiresAt.toISOString(),
     payer: quote.payer,
     recipient: quote.recipient,

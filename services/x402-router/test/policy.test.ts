@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { encodeFunctionData, keccak256 } from "viem";
 import {
   ammRouterAbi,
+  erc20Abi,
 } from "@pledge.cash/sdk";
 import {
   createMarketplaceExecutionPolicy,
@@ -154,6 +155,110 @@ describe("canonical execution policy", () => {
       },
     });
     await expect(changed(context())).resolves.toEqual({ allowed: false });
+  });
+
+  test("allows only the invoice-bound USDC transfer to the Boardroom", async () => {
+    const supportCall = encodeFunctionData({
+      abi: erc20Abi,
+      functionName: "transfer",
+      args: [payer, 1_000_000n],
+    });
+    const supportQuote: MarketplaceQuote = {
+      ...quote(),
+      id: "support-quote",
+      kind: "recurring_support",
+      canonicalTarget: usdc,
+      supportInvoiceId: "00000000-0000-4000-8000-000000000001",
+      maxSlippageBps: 0,
+      execution: {
+        ...quote().execution,
+        target: usdc,
+        callData: supportCall,
+        callDataHash: keccak256(supportCall),
+        selector: supportCall.slice(0, 10) as `0x${string}`,
+        inputToken: usdc,
+        outputToken: usdc,
+        inputAmount: "1000000",
+        expectedOutput: "1000000",
+        minimumOutput: "1000000",
+      },
+    };
+    const supportRepository = {
+      ...repository,
+      async get(id: string) {
+        return id === supportQuote.id ? supportQuote : undefined;
+      },
+    };
+    const supportContext = {
+      idempotencyKey: "support-intent",
+      record: { quoteId: supportQuote.id },
+      intent: {
+        quoteId: supportQuote.id,
+        user: payer,
+        recipient: payer,
+        refundAddress: payer,
+        chainId: 998,
+        target: usdc,
+        callData: supportCall,
+        value: "0",
+        maxGasCost: "1000000000000000",
+        maxSlippageBps: 0,
+        deadline: 1_700_000_060,
+      },
+    };
+    const recurringSupport = {
+      async assertPayable() {},
+    };
+    await expect(
+      createMarketplaceExecutionPolicy(
+        supportRepository,
+        canonical,
+        recurringSupport,
+      )(supportContext as never),
+    ).resolves.toMatchObject({ allowed: true, target: usdc });
+    await expect(
+      createMarketplaceExecutionPolicy(
+        supportRepository,
+        canonical,
+        {
+          async assertPayable() {
+            throw new Error("invoice cancelled");
+          },
+        },
+      )(supportContext as never),
+    ).resolves.toEqual({ allowed: false });
+
+    const divertedCall = encodeFunctionData({
+      abi: erc20Abi,
+      functionName: "transfer",
+      args: [shares, 1_000_000n],
+    });
+    const diverted = {
+      ...supportQuote,
+      execution: {
+        ...supportQuote.execution,
+        callData: divertedCall,
+        callDataHash: keccak256(divertedCall),
+      },
+    };
+    await expect(
+      createMarketplaceExecutionPolicy(
+        {
+          ...repository,
+          async get() {
+            return diverted;
+          },
+        },
+        canonical,
+        recurringSupport,
+      )({
+        ...supportContext,
+        intent: {
+          ...supportContext.intent,
+          callData: divertedCall,
+        },
+      } as never),
+    ).resolves.toEqual({ allowed: false });
   });
 
   test("binds the padded gas and exact EIP-1559 fee tuple into simulation", async () => {

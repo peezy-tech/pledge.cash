@@ -14,6 +14,7 @@ export const ROUTER_MIGRATIONS_TABLE = "__drizzle_migrations";
 export type X402RouterDb = PostgresJsDatabase<typeof schema>;
 
 export type X402RouterDbClient = {
+  readonly coordinationSql: Sql;
   readonly db: X402RouterDb;
   readonly sql: Sql;
   close(): Promise<void>;
@@ -44,6 +45,10 @@ export function createDbClient(
   const db = drizzle(drizzleSql, { schema });
 
   return {
+    // Runtime advisory-lock coordinators use this isolated one-connection pool.
+    // Their winning action remains free to use the main query pool even when
+    // other requests are queued behind the same cross-process lock.
+    coordinationSql: drizzleSql,
     db,
     sql,
     async close() {

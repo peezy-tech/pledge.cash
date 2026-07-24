@@ -417,6 +417,9 @@ function unavailableRouteGuidance(
   if (option.path === "merkle-airdrop") {
     return "This claim route is closed or fully claimed. Its allocation contract remains visible in the route details.";
   }
+  if (option.path === "support") {
+    return "Monthly support pauses when the project Boardroom is not Active.";
+  }
   return "You can inspect this route’s history and contract, but it is not currently accepting participation.";
 }
 
@@ -465,6 +468,28 @@ export function participationOptions(
       path: "amm",
       reason,
       status: "Unavailable",
+    });
+  }
+
+  if (content.support) {
+    const available = dashboard.snapshot.status === 0;
+    const reason = available
+      ? undefined
+      : "The project Boardroom is not Active, so recurring-support invoices are paused.";
+    options.push({
+      address: dashboard.address,
+      available,
+      description:
+        "Schedule a voluntary monthly USDC contribution; authorize every period separately.",
+      group: available ? "live" : "unavailable",
+      id: "support",
+      label: "Monthly support",
+      liveness: available
+        ? routeLiveness("live")
+        : routeLiveness("unavailable", reason!),
+      path: "support",
+      ...(reason ? { reason } : {}),
+      status: available ? "Live" : "Paused",
     });
   }
 
@@ -859,6 +884,7 @@ function fallbackOption(id: ParticipationContentKey): ParticipationOption {
   if (path === "fixed-price-sale") return { ...common, description: "Buy at a published unit price.", label: "Fixed-price sale" };
   if (path === "migrating-bonding-curve") return { ...common, description: "Buy or sell against a price curve.", label: "Bonding curve" };
   if (path === "merkle-airdrop") return { ...common, description: "Claim a published allocation.", label: "Airdrop" };
+  if (path === "support") return { ...common, description: "Schedule a voluntary monthly USDC contribution with explicit renewals.", label: "Monthly support" };
   return { ...common, description: "Swap through the project liquidity pool.", label: "AMM market" };
 }
 

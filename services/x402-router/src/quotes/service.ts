@@ -4,7 +4,7 @@ import type { ResolvedIntentQuote } from "x402-hl/intents/server";
 import {
   QuoteRequestError,
   requireSameParty,
-  type CreateQuoteRequest,
+  type RouterQuoteRequest,
 } from "../api/dto";
 import {
   HYPERCORE_TESTNET,
@@ -47,7 +47,7 @@ export interface PaymentQuoteBuilder {
     maxGasCost: bigint;
     maxSlippageBps: number;
     deadline: number;
-    kind: CreateQuoteRequest["kind"];
+    kind: RouterQuoteRequest["kind"];
     metadata: Record<string, string | number | boolean>;
   }): Promise<PreparedPaymentQuote>;
 }
@@ -67,7 +67,7 @@ export class MarketplaceQuoteService {
     private readonly id: () => string = () => crypto.randomUUID(),
   ) {}
 
-  async create(request: CreateQuoteRequest): Promise<MarketplaceQuote> {
+  async create(request: RouterQuoteRequest): Promise<MarketplaceQuote> {
     requireSameParty(request);
     if (request.maxSlippageBps > this.policy.maxSlippageBps) {
       throw new QuoteRequestError(
@@ -91,7 +91,10 @@ export class MarketplaceQuoteService {
     const deadline = nowSeconds + this.policy.quoteTtlSeconds;
     const canonical = await this.chain.quote(request, deadline);
 
-    if (canonical.allowance < canonical.destinationPrincipal) {
+    if (
+      canonical.allowance !== undefined
+      && canonical.allowance < canonical.destinationPrincipal
+    ) {
       throw new QuoteRequestError(
         "Executor allowance is below the requested HyperEVM input.",
         "executor_allowance_low",
@@ -151,6 +154,9 @@ export class MarketplaceQuoteService {
         inputAmount: canonical.execution.inputAmount,
         outputToken: canonical.execution.outputToken,
         minimumOutput: canonical.execution.minimumOutput,
+        ...(request.kind === "recurring_support"
+          ? { supportInvoiceId: request.invoiceId }
+          : {}),
       },
     });
 
@@ -165,6 +171,9 @@ export class MarketplaceQuoteService {
       refundAddress: request.refundAddress,
       boardroom: canonical.boardroom,
       canonicalTarget: canonical.canonicalTarget,
+      ...(request.kind === "recurring_support"
+        ? { supportInvoiceId: request.invoiceId }
+        : {}),
       ...(canonical.canonicalPool === undefined
         ? {}
         : { canonicalPool: canonical.canonicalPool }),
@@ -202,16 +211,19 @@ export class MarketplaceQuoteService {
       expiresAt: new Date(deadline * 1_000),
       createdAt,
     };
+    const maximumDestinationInventory =
+      canonical.allowance === undefined
+        ? canonical.availableInventory
+        : canonical.availableInventory < canonical.allowance
+          ? canonical.availableInventory
+          : canonical.allowance;
 
     return this.repository.createReserved({
       quote,
       availability: [
         {
           reservation: quote.inventoryReservations[0]!,
-          maximumAvailableInventory:
-            canonical.availableInventory < canonical.allowance
-              ? canonical.availableInventory
-              : canonical.allowance,
+          maximumAvailableInventory: maximumDestinationInventory,
         },
         {
           reservation: quote.inventoryReservations[1]!,
