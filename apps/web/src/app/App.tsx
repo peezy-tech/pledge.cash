@@ -5166,6 +5166,7 @@ export function App(): React.JSX.Element {
           support: (
             <RecurringSupportPanel
               account={wallet.account}
+              boardroomActive={exactProjectDashboard.snapshot.status === 0}
               boardroom={exactProjectDashboard.address}
               canPublish={Boolean(
                 wallet.account

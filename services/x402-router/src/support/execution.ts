@@ -6,6 +6,7 @@ import {
   type SupportPlan,
   type SupportRepository,
 } from "./domain";
+import { monthlyPeriodAt } from "./schedule";
 
 export interface RecurringSupportExecutionValidator {
   assertPayable(quote: MarketplaceQuote): Promise<void>;
@@ -17,6 +18,7 @@ export class RecurringSupportExecutionGuard
   constructor(
     private readonly repository: SupportRepository,
     private readonly authority: SupportAuthorityReader,
+    private readonly clock: () => number = () => Date.now(),
   ) {}
 
   async assertPayable(quote: MarketplaceQuote): Promise<void> {
@@ -48,9 +50,13 @@ export class RecurringSupportExecutionGuard
         invoice.id,
       ),
     ]);
+    const currentPeriod = subscription
+      ? monthlyPeriodAt(subscription.startedAt, new Date(this.clock()))
+      : undefined;
     if (
       !subscription
       || !plan
+      || !currentPeriod
       || hasBlockingPayment
       || invoice.status !== "open"
       || subscription.status !== "active"
@@ -64,6 +70,9 @@ export class RecurringSupportExecutionGuard
       || invoice.boardroom.toLowerCase() !== plan.boardroom.toLowerCase()
       || invoice.asset.toLowerCase() !== plan.asset.toLowerCase()
       || invoice.amount !== plan.amount
+      || invoice.periodIndex !== currentPeriod.index
+      || invoice.periodStart.getTime() !== currentPeriod.start.getTime()
+      || invoice.periodEnd.getTime() !== currentPeriod.end.getTime()
       || quote.payer.toLowerCase() !== invoice.payer.toLowerCase()
       || quote.recipient.toLowerCase() !== invoice.payer.toLowerCase()
       || quote.refundAddress.toLowerCase() !== invoice.payer.toLowerCase()

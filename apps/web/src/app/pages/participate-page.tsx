@@ -261,7 +261,10 @@ export function ParticipatePage({
   const activeRoute = selection.route;
   const activeOption = options.find((option) => option.id === activeRoute);
   const activeContent = activeOption ? content[activeOption.id] ?? content[activeOption.path] : undefined;
-  const actionableContent = activeOption?.available ? activeContent : undefined;
+  const actionableContent =
+    activeOption?.available || activeOption?.path === "support"
+      ? activeContent
+      : undefined;
 
   useEffect(() => {
     const notification = nextParticipationSelectionNotification(notificationKeyRef.current, selectionScope, selection);

@@ -49,6 +49,7 @@ const DESTINATION_USDC_DECIMALS = 6;
 
 export function RecurringSupportPanel({
   account,
+  boardroomActive,
   boardroom,
   canPublish,
   checkout,
@@ -56,6 +57,7 @@ export function RecurringSupportPanel({
   runAction,
 }: {
   account: Address | undefined;
+  boardroomActive: boolean;
   boardroom: Address;
   canPublish: boolean;
   checkout: HyperliquidCheckoutContext;
@@ -258,7 +260,12 @@ export function RecurringSupportPanel({
   };
 
   const subscribe = (): void => {
-    if (!account || !selectedPlan || selectedPlan.status !== "active") return;
+    if (
+      !account
+      || !boardroomActive
+      || !selectedPlan
+      || selectedPlan.status !== "active"
+    ) return;
     void runAction(`subscribe-support-${selectedPlan.id}`, async () => {
       try {
         assertRecurringSupportStorageAvailable(window.localStorage);
@@ -573,8 +580,14 @@ export function RecurringSupportPanel({
                 </div>
                 <ActionButton
                   actionId={`subscribe-support-${selectedPlan.id}`}
+                  disabled={!boardroomActive}
                   pendingAction={pendingAction}
                   pendingLabel="Signing schedule"
+                  title={
+                    boardroomActive
+                      ? undefined
+                      : "New support schedules are paused while the Boardroom is not Active."
+                  }
                   onClick={subscribe}
                 >
                   <CalendarClock className="h-4 w-4" />
@@ -647,7 +660,9 @@ export function RecurringSupportPanel({
                 <HyperliquidPaymentAction
                   checkout={checkout}
                   disabledReason={
-                    activeSubscription.invoice?.status === "payment_pending"
+                    !boardroomActive
+                      ? "Support payments are paused while the Boardroom is not Active. You can still cancel this schedule."
+                      : activeSubscription.invoice?.status === "payment_pending"
                       ? "A payment is already being reconciled for this invoice."
                       : activeSubscription.plan.status === "retired"
                         || activeSubscription.invoice?.status === "cancelled"
@@ -679,7 +694,7 @@ export function RecurringSupportPanel({
         </div>
       ) : null}
 
-      {canPublish ? (
+      {canPublish && boardroomActive ? (
         <div className="mt-6 border-t border-zinc-800 pt-5">
           {!publisherOpen ? (
             <Button variant="secondary" onClick={() => setPublisherOpen(true)}>

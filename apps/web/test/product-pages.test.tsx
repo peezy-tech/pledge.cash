@@ -581,6 +581,36 @@ describe("read-first product pages", () => {
     expect(participate).not.toContain('role="tabpanel"');
   });
 
+  test("keeps recurring-support recovery controls visible after wind-down", () => {
+    const windingDown = {
+      ...dashboard,
+      snapshot: {
+        ...dashboard.snapshot,
+        status: 1,
+      },
+    } satisfies ProductBoardroomDashboardState;
+    const support = participationOptions(
+      windingDown,
+      { support: <button type="button">Recover or cancel schedule</button> },
+    ).find(option => option.path === "support");
+    expect(support).toMatchObject({
+      available: false,
+      status: "Paused",
+    });
+
+    const participate = renderToString(
+      <ParticipatePage
+        content={{
+          support: <button type="button">Recover or cancel schedule</button>,
+        }}
+        dashboard={windingDown}
+        loading={false}
+        selectedRoute="support"
+      />,
+    );
+    expect(participate).toContain("Recover or cancel schedule");
+  });
+
   test("keeps every project AMM pool as a distinct participation route", () => {
     const firstPool = "0xf100000000000000000000000000000000000000" as Address;
     const secondPool = "0xf200000000000000000000000000000000000000" as Address;

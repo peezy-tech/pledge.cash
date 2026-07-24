@@ -14,6 +14,7 @@ import type {
   SupportRepository,
   SupportSubscription,
 } from "../src/support/domain";
+import { SupportError } from "../src/support/domain";
 import { RecurringSupportService } from "../src/support/service";
 
 const boardroom =
@@ -80,8 +81,10 @@ function fixture() {
     },
   };
   let currentIdentity = identity();
+  let authorityError: unknown;
   const authority = {
     async resolve() {
+      if (authorityError) throw authorityError;
       return currentIdentity;
     },
     async assertCurrent(expected: SupportAuthorityIdentity) {
@@ -145,6 +148,9 @@ function fixture() {
     service,
     setIdentity(value: SupportAuthorityIdentity) {
       currentIdentity = value;
+    },
+    setAuthorityError(value: unknown) {
+      authorityError = value;
     },
     setNow(value: string) {
       now = Date.parse(value);
@@ -276,7 +282,7 @@ describe("RecurringSupportService", () => {
     });
   });
 
-  test("materializes only the current missed period and rejects stale authority", async () => {
+  test("materializes only the current missed period and rejects historical payment", async () => {
     const state = fixture();
     const planChallenge = await state.service.issuePlanChallenge({
       amount: "10000000",
@@ -295,6 +301,10 @@ describe("RecurringSupportService", () => {
       subscribe.id,
       signature,
     );
+    if (!initial.invoice) throw new Error("expected initial invoice");
+    const initialQuote = await state.service.createInvoiceQuote(
+      initial.invoice.id,
+    );
 
     state.setNow("2026-04-30T16:00:00.000Z");
     const current = await state.service.getSubscription(
@@ -302,15 +312,42 @@ describe("RecurringSupportService", () => {
     );
     expect(current.invoice).toMatchObject({ periodIndex: 3 });
     expect(state.support.invoiceCount()).toBe(2);
-
-    state.setIdentity(identity({ configurationEpoch: 2n }));
-    state.setNow("2026-05-31T16:00:00.000Z");
     await expect(
-      state.service.getSubscription(initial.subscription.id),
+      state.service.createInvoiceQuote(initial.invoice.id),
     ).rejects.toMatchObject({
-      code: "support_authority_stale",
+      code: "support_invoice_not_current",
+      status: 409,
     });
+    await expect(
+      state.service.assertQuotePayable(initialQuote),
+    ).rejects.toMatchObject({
+      code: "support_quote_not_payable",
+      status: 409,
+    });
+
+    state.setNow("2026-05-31T16:00:00.000Z");
+    state.setAuthorityError(new SupportError(
+      "Recurring support is available only while the Boardroom is Active.",
+      "boardroom_not_active",
+      409,
+    ));
+    const paused = await state.service.getSubscription(initial.subscription.id);
+    expect(paused.invoice).toMatchObject({ periodIndex: 3 });
     expect(state.support.invoiceCount()).toBe(2);
+
+    state.setAuthorityError(undefined);
+    state.setIdentity(identity({ configurationEpoch: 2n }));
+    const stale = await state.service.getSubscription(initial.subscription.id);
+    expect(stale.invoice).toMatchObject({ periodIndex: 3 });
+
+    const cancellation = await state.service.issueCancellationChallenge(
+      initial.subscription.id,
+    );
+    const cancelled = await state.service.cancelSubscription(
+      cancellation.id,
+      signature,
+    );
+    expect(cancelled.subscription.status).toBe("cancelled");
   });
 });
 

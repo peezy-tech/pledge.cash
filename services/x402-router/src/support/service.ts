@@ -104,6 +104,7 @@ export class RecurringSupportService {
     this.executionGuard = new RecurringSupportExecutionGuard(
       repository,
       authority,
+      clock,
     );
   }
 
@@ -310,14 +311,19 @@ export class RecurringSupportService {
     const plan = await this.requirePlan(subscription.planId);
     let invoice: SupportInvoice | undefined;
     if (subscription.status === "active" && plan.status === "active") {
-      await this.requireCurrentPlanAuthority(plan);
-      const candidate = createInvoice({
-        id: this.id(),
-        now: new Date(this.clock()),
-        plan,
-        subscription,
-      });
-      invoice = await this.repository.getOrCreateInvoice(candidate);
+      try {
+        await this.requireCurrentPlanAuthority(plan);
+        const candidate = createInvoice({
+          id: this.id(),
+          now: new Date(this.clock()),
+          plan,
+          subscription,
+        });
+        invoice = await this.repository.getOrCreateInvoice(candidate);
+      } catch (error) {
+        if (!invoiceMaterializationIsPaused(error)) throw error;
+        invoice = await this.repository.getLatestInvoice(subscription.id);
+      }
     } else {
       invoice = await this.repository.getLatestInvoice(subscription.id);
     }
@@ -430,6 +436,21 @@ export class RecurringSupportService {
         throw new SupportError(
           "The support invoice no longer matches its immutable plan and subscription.",
           "support_invoice_invalid",
+          409,
+        );
+      }
+      const currentPeriod = monthlyPeriodAt(
+        subscription.startedAt,
+        new Date(this.clock()),
+      );
+      if (
+        invoice.periodIndex !== currentPeriod.index
+        || invoice.periodStart.getTime() !== currentPeriod.start.getTime()
+        || invoice.periodEnd.getTime() !== currentPeriod.end.getTime()
+      ) {
+        throw new SupportError(
+          "This support invoice belongs to an earlier schedule period and is no longer payable.",
+          "support_invoice_not_current",
           409,
         );
       }
@@ -863,6 +884,14 @@ function createInvoice(input: {
     status: "open",
     createdAt: input.now,
   };
+}
+
+function invoiceMaterializationIsPaused(error: unknown): boolean {
+  return error instanceof SupportError
+    && (
+      error.code === "boardroom_not_active"
+      || error.code === "support_authority_stale"
+    );
 }
 
 function authorityFromChallenge(
