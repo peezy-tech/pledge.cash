@@ -4,6 +4,7 @@ import type { IntentExecutionRecord } from "x402-hl/intents/server";
 import type {
   PostgresIntentExecutionStore,
   PostgresQuoteRepository,
+  PostgresSupportRepository,
 } from "../db";
 import type { MarketplaceQuote } from "../domain";
 import type { X402SettlementJournal } from "../x402";
@@ -62,6 +63,7 @@ export type RecoveryRefundReconciler = {
 };
 
 export type RouterRecoveryResult = {
+  prunedChallenges: number;
   scannedBindings: number;
   scannedIntents: number;
   recovered: number;
@@ -78,6 +80,10 @@ type RouterRecoveryWorkerOptions = {
     PostgresIntentExecutionStore,
     "listRecoverable" | "transition"
   >;
+  readonly support?: Pick<
+    PostgresSupportRepository,
+    "pruneExpiredChallenges"
+  >;
   readonly journal: Pick<
     X402SettlementJournal,
     "lookupByQuoteId"
@@ -90,7 +96,7 @@ type RouterRecoveryWorkerOptions = {
   readonly batchSize?: number;
   readonly now?: () => Date;
   readonly onError?: (input: {
-    phase: "payment" | "intent";
+    phase: "payment" | "intent" | "support_challenges";
     id: string;
     error: unknown;
   }) => void;
@@ -128,6 +134,7 @@ export class RouterRecoveryWorker {
   async runOnce(): Promise<RouterRecoveryResult> {
     if (this.running) {
       return {
+        prunedChallenges: 0,
         scannedBindings: 0,
         scannedIntents: 0,
         recovered: 0,
@@ -137,15 +144,33 @@ export class RouterRecoveryWorker {
     }
     this.running = true;
     try {
+      const now = this.now();
       const before = new Date(
-        this.now().getTime() - this.options.staleAfterMs,
+        now.getTime() - this.options.staleAfterMs,
       );
+      let prunedChallenges = 0;
+      let failed = 0;
+      if (this.options.support) {
+        try {
+          prunedChallenges =
+            await this.options.support.pruneExpiredChallenges({
+              before: now,
+              limit: this.batchSize,
+            });
+        } catch (error) {
+          failed += 1;
+          this.options.onError?.({
+            phase: "support_challenges",
+            id: before.toISOString(),
+            error,
+          });
+        }
+      }
       const bindings = await this.options.quotes.listPaymentBindingsWithoutOrder({
         before,
         limit: this.batchSize,
       });
       let recovered = 0;
-      let failed = 0;
       let skipped = 0;
 
       for (const binding of bindings) {
@@ -185,6 +210,7 @@ export class RouterRecoveryWorker {
       }
 
       return {
+        prunedChallenges,
         scannedBindings: bindings.length,
         scannedIntents: intents.length,
         recovered,

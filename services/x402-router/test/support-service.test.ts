@@ -304,11 +304,13 @@ describe("RecurringSupportService", () => {
     expect(state.support.invoiceCount()).toBe(2);
 
     state.setIdentity(identity({ configurationEpoch: 2n }));
+    state.setNow("2026-05-31T16:00:00.000Z");
     await expect(
-      state.service.issueSubscriptionChallenge(plan.id, payer),
+      state.service.getSubscription(initial.subscription.id),
     ).rejects.toMatchObject({
       code: "support_authority_stale",
     });
+    expect(state.support.invoiceCount()).toBe(2);
   });
 });
 

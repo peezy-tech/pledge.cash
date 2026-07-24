@@ -195,9 +195,9 @@ requires funded executor and refund inventories, the hardened pinned `x402-hl`
 runtime, configured web/router origins, and end-to-end proof against a canonical
 Active Boardroom with registered USDC.
 
-The public edge must rate-limit challenge issuance, and operations must prune
-expired, unconsumed challenges on a bounded retention schedule before enabling
-the service for untrusted traffic.
+The router prunes expired, unconsumed challenges in bounded batches at startup
+and during each recovery pass. The public edge must still rate-limit challenge
+issuance before enabling the service for untrusted traffic.
 
 Sentinel remains notification-only. A later iteration may emit invoice-due
 events to it, but Sentinel never receives spend authority.

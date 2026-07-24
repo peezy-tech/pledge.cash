@@ -139,6 +139,40 @@ export class PostgresSupportRepository implements SupportRepository {
     `;
   }
 
+  async pruneExpiredChallenges(input: {
+    before: Date;
+    limit: number;
+  }): Promise<number> {
+    if (Number.isNaN(input.before.getTime())) {
+      throw new Error("Support challenge prune cutoff must be a valid date.");
+    }
+    if (
+      !Number.isSafeInteger(input.limit)
+      || input.limit <= 0
+      || input.limit > 1_000
+    ) {
+      throw new Error(
+        "Support challenge prune limit must be between 1 and 1000.",
+      );
+    }
+    const rows = await this.sql<Array<{ id: string }>>`
+      with expired as (
+        select id
+        from x402_router_support_challenges
+        where consumed_at is null
+          and expires_at <= ${input.before.toISOString()}
+        order by expires_at asc, id asc
+        limit ${input.limit}
+        for update skip locked
+      )
+      delete from x402_router_support_challenges challenge
+      using expired
+      where challenge.id = expired.id
+      returning challenge.id
+    `;
+    return rows.length;
+  }
+
   async getChallenge(id: string): Promise<SupportChallenge | undefined> {
     const rows = await this.sql<ChallengeRow[]>`
       select

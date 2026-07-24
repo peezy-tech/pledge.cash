@@ -350,6 +350,63 @@ describe("x402 safe settlement orchestration", () => {
     ]);
   });
 
+  test("does not bind a live signed payment owned by another request", async () => {
+    const quote = createHarness([], "0.2.2").createQuote();
+    const payload = await paymentPayload(quote);
+    let bindCalls = 0;
+    const claimedAt = new Date(NOW * 1_000);
+    const journal = new DurableX402SettlementJournal(
+      {
+        async claim(input: {
+          kind: "payment_settlement";
+          idempotencyKey: string;
+          requestHash: `0x${string}`;
+          network: string;
+          signer: `0x${string}`;
+        }) {
+          return {
+            kind: "existing" as const,
+            operation: {
+              id: "payment-settlement-operation",
+              kind: input.kind,
+              idempotencyKey: input.idempotencyKey,
+              requestHash: input.requestHash,
+              network: input.network,
+              signer: input.signer,
+              status: "signed" as const,
+              revision: 1,
+              leaseToken: "active-lease",
+              leaseExpiresAt: new Date(claimedAt.getTime() + 1_000),
+              createdAt: claimedAt,
+              updatedAt: claimedAt,
+              hasEncryptedPayload: true
+            }
+          };
+        }
+      } as never,
+      {
+        async bindPaymentPayload() {
+          bindCalls += 1;
+          throw new Error("must not bind");
+        }
+      } as never,
+      1_000
+    );
+
+    await expect(
+      journal.prepare({
+        quoteId: quote.id,
+        paymentId: quote.paymentId,
+        paymentIdentityHash: INTENT_HASH,
+        paymentPayloadHash: INTENT_HASH,
+        paymentRequirementsHash: INTENT_HASH,
+        paymentPayload: payload,
+        paymentRequirements: quote.paymentRequirements
+      })
+    ).rejects.toMatchObject({ code: "settlement_identity_conflict" });
+    expect(bindCalls).toBe(0);
+  });
+
   test("journals exact signed terms before settlement and result before execution", async () => {
     const events: string[] = [];
     const harness = createHarness(events, "0.2.2");

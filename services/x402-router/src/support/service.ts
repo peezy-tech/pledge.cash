@@ -310,6 +310,7 @@ export class RecurringSupportService {
     const plan = await this.requirePlan(subscription.planId);
     let invoice: SupportInvoice | undefined;
     if (subscription.status === "active" && plan.status === "active") {
+      await this.requireCurrentPlanAuthority(plan);
       const candidate = createInvoice({
         id: this.id(),
         now: new Date(this.clock()),

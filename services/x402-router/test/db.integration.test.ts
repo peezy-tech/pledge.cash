@@ -158,6 +158,77 @@ describeWithDatabase("Postgres router durability", () => {
     ]);
   });
 
+  test("prunes expired unconsumed support challenges in bounded batches", async () => {
+    const support = new PostgresSupportRepository(
+      client.sql,
+      client.coordinationSql,
+    );
+    const createdAt = new Date("2026-01-01T00:00:00.000Z");
+    const challenges = [
+      {
+        id: "00000000-0000-4000-8000-000000000091",
+        expiresAt: new Date("2026-01-01T00:05:00.000Z"),
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000092",
+        expiresAt: new Date("2026-01-01T00:06:00.000Z"),
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000093",
+        expiresAt: new Date("2026-01-01T00:07:00.000Z"),
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000094",
+        expiresAt: new Date("2026-01-01T00:20:00.000Z"),
+      },
+    ];
+    for (const [index, challenge] of challenges.entries()) {
+      await support.createChallenge({
+        id: challenge.id,
+        action: "subscription_create",
+        actor: PAYER,
+        boardroom: TARGET,
+        chainId: 998,
+        configurationEpoch: 1n,
+        controllerGeneration: 1n,
+        planId:
+          `00000000-0000-4000-8000-${String(100 + index).padStart(12, "0")}`,
+        payload: { version: 1 },
+        payloadHash: HASH_A,
+        message: `support challenge ${index}`,
+        issuedBlock: 100n,
+        issuedBlockHash: HASH_B,
+        expiresAt: challenge.expiresAt,
+        createdAt,
+      });
+    }
+    await client.sql`
+      update x402_router_support_challenges
+      set consumed_at = ${new Date("2026-01-01T00:01:00.000Z").toISOString()},
+          signature_hash = ${HASH_C},
+          verified_block = '101',
+          verified_block_hash = ${HASH_D}
+      where id = ${challenges[2]!.id}
+    `;
+
+    const before = new Date("2026-01-01T00:10:00.000Z");
+    expect(
+      await support.pruneExpiredChallenges({ before, limit: 1 }),
+    ).toBe(1);
+    expect(
+      await support.pruneExpiredChallenges({ before, limit: 10 }),
+    ).toBe(1);
+    const remaining = await client.sql<Array<{ id: string }>>`
+      select id
+      from x402_router_support_challenges
+      order by id
+    `;
+    expect(remaining.map(row => row.id)).toEqual([
+      challenges[2]!.id,
+      challenges[3]!.id,
+    ]);
+  });
+
   test("binds payment only to the active recurring-support invoice quote", async () => {
     const planId = "00000000-0000-4000-8000-000000000011";
     const subscriptionId = "00000000-0000-4000-8000-000000000012";
@@ -910,6 +981,80 @@ describeWithDatabase("Postgres router durability", () => {
       { scope: "destination_execution", status: "committed" },
       { scope: "source_refund", status: "committed" }
     ]);
+  });
+
+  test("records a rejected pre-settlement quote binding without disabling readiness", async () => {
+    const quote = marketplaceQuote(
+      "journal-binding-rejected",
+      [destinationReservation("7")],
+    );
+    const signer = privateKeyToAccount(
+      `0x${"01".repeat(32)}` as Hex,
+    );
+    const created = await new ExactHyperliquidClient(
+      signer,
+    ).createPaymentPayload(2, quote.paymentRequirements);
+    const paymentPayload: PaymentPayload = {
+      ...created,
+      accepted: quote.paymentRequirements,
+    };
+    const paymentPayloadHash = keccak256(
+      stringToBytes(stableJson(paymentPayload)),
+    );
+    const store = new PostgresAdapterOperationStore(
+      client.sql,
+      JOURNAL_KEY,
+    );
+    let bindingCalls = 0;
+    const journal = new DurableX402SettlementJournal(
+      store,
+      {
+        async getPaymentBinding() {
+          return undefined;
+        },
+        async bindPaymentPayload() {
+          bindingCalls += 1;
+          throw new QuotePaymentBindingError(
+            "Recurring quote was cancelled before payment binding.",
+            "binding_conflict",
+          );
+        },
+      } as never,
+      1_000,
+    );
+
+    await expect(
+      journal.prepare({
+        quoteId: quote.id,
+        paymentId: quote.paymentId,
+        paymentIdentityHash: HASH_A,
+        paymentPayloadHash,
+        paymentRequirementsHash: hashPaymentRequirements(
+          quote.paymentRequirements,
+        ),
+        paymentPayload,
+        paymentRequirements: quote.paymentRequirements,
+      }),
+    ).rejects.toMatchObject({ code: "binding_conflict" });
+    expect(await store.get("payment_settlement", HASH_A)).toMatchObject({
+      status: "confirmed_failure",
+      failureCode: "quote_payment_binding_failed",
+    });
+    expect(await store.hasManualIntervention()).toBe(false);
+    await expect(
+      journal.prepare({
+        quoteId: quote.id,
+        paymentId: quote.paymentId,
+        paymentIdentityHash: HASH_A,
+        paymentPayloadHash,
+        paymentRequirementsHash: hashPaymentRequirements(
+          quote.paymentRequirements,
+        ),
+        paymentPayload,
+        paymentRequirements: quote.paymentRequirements,
+      }),
+    ).resolves.toMatchObject({ status: "failed" });
+    expect(bindingCalls).toBe(1);
   });
 
   test("keeps ambiguous incoming settlement evidence submitted and replays the exact envelope", async () => {

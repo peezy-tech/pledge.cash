@@ -43,6 +43,8 @@ import {
   X402PaymentQuoteBuilder,
 } from "./x402";
 
+const SUPPORT_CHALLENGE_PRUNE_BATCH_SIZE = 100;
+
 export async function startX402Router(
   config: X402RouterConfig = loadConfig(),
 ) {
@@ -67,6 +69,10 @@ export async function startX402Router(
     database.sql,
     database.coordinationSql,
   );
+  await supportRepository.pruneExpiredChallenges({
+    before: new Date(),
+    limit: SUPPORT_CHALLENGE_PRUNE_BATCH_SIZE,
+  });
   const intentStore = new PostgresIntentExecutionStore(database.sql);
   const operationStore = new PostgresAdapterOperationStore(
     database.sql,
@@ -189,6 +195,7 @@ export async function startX402Router(
   const recoveryWorker = new RouterRecoveryWorker({
     quotes: quoteRepository,
     intents: intentStore,
+    support: supportRepository,
     journal: settlementJournal,
     payments,
     executor: intentExecutor,
@@ -207,7 +214,11 @@ export async function startX402Router(
     worker: recoveryWorker,
     intervalMs: Math.max(5_000, config.operationLeaseMs),
     onResult(result) {
-      if (result.recovered > 0 || result.failed > 0) {
+      if (
+        result.prunedChallenges > 0
+        || result.recovered > 0
+        || result.failed > 0
+      ) {
         console.info("x402_router_recovery_pass", result);
       }
     },
