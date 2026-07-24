@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import type { Address } from "@pledge.cash/sdk";
+import type { Address, DutchAuctionState } from "@pledge.cash/sdk";
 import { renderToString } from "react-dom/server";
 import type { PublicClient } from "viem";
 import { GrantVerificationLoadingState, StudioPage, studioGuidance } from "../src/app/pages";
-import { WIND_DOWN_IRREVERSIBLE_WARNING, WindDownPanel } from "../src/features/boardrooms/boardroom-panel";
+import {
+  dutchAuctionLifecycleActions,
+  WIND_DOWN_IRREVERSIBLE_WARNING,
+  WindDownPanel,
+} from "../src/features/boardrooms/boardroom-panel";
 import { windDownCoverage } from "../src/features/boardrooms/boardroom-panel-shared";
 import { GrantInspector } from "../src/features/grants/grant-inspector";
 import {
@@ -22,6 +26,27 @@ const paymentToken = "0x5000000000000000000000000000000000000000" as Address;
 const boardroom = "0x6000000000000000000000000000000000000000" as Address;
 const airdrop = "0x7000000000000000000000000000000000000000" as Address;
 const zeroHash = `0x${"00".repeat(32)}` as const;
+
+const dutchAuctionSnapshot = {
+  factory: issuer,
+  boardroom,
+  shareToken: token,
+  paymentToken,
+  saleSupply: 100n,
+  remainingShares: 100n,
+  startPrice: 10n,
+  floorPrice: 1n,
+  currentPrice: 10n,
+  maxPerBuyer: 0n,
+  totalPayment: 0n,
+  soldShares: 0n,
+  lastPurchasePrice: 0n,
+  settlementPrice: 0n,
+  startTime: 200n,
+  endTime: 300n,
+  saleStatus: 0,
+  closed: false,
+} satisfies DutchAuctionState;
 
 const grantSnapshot: GrantSnapshot = {
   address: grant,
@@ -43,6 +68,51 @@ const grantSnapshot: GrantSnapshot = {
   tokenMetadata: { address: token, decimals: 18, symbol: "SHARE" },
   paymentTokenMetadata: { address: paymentToken, decimals: 6, symbol: "USDC" },
 };
+
+describe("Dutch auction lifecycle actions", () => {
+  test("matches finalize, close, and cancel contract preconditions", () => {
+    const activeBoardroom = { address: boardroom, status: 0 };
+    const windingDownBoardroom = { address: boardroom, status: 1 };
+
+    expect(dutchAuctionLifecycleActions(dutchAuctionSnapshot, activeBoardroom, 150n)).toMatchObject({
+      finalize: { enabled: false },
+      close: { enabled: false },
+      cancel: { enabled: true },
+    });
+    expect(dutchAuctionLifecycleActions(dutchAuctionSnapshot, activeBoardroom, 250n)).toMatchObject({
+      finalize: { enabled: false },
+      close: { enabled: false },
+      cancel: { enabled: false },
+    });
+    expect(dutchAuctionLifecycleActions(dutchAuctionSnapshot, activeBoardroom, 300n)).toMatchObject({
+      finalize: { enabled: true },
+      close: { enabled: false },
+      cancel: { enabled: false },
+    });
+    expect(dutchAuctionLifecycleActions(dutchAuctionSnapshot, windingDownBoardroom, 150n)).toMatchObject({
+      finalize: { enabled: false },
+      close: { enabled: true },
+      cancel: { enabled: true },
+    });
+  });
+
+  test("keeps cancel disabled after any purchase and all actions disabled after closure", () => {
+    expect(dutchAuctionLifecycleActions(
+      { ...dutchAuctionSnapshot, remainingShares: 99n, soldShares: 1n },
+      { address: boardroom, status: 1 },
+      150n,
+    ).cancel.enabled).toBe(false);
+    expect(dutchAuctionLifecycleActions(
+      { ...dutchAuctionSnapshot, closed: true, saleStatus: 1 },
+      { address: boardroom, status: 1 },
+      300n,
+    )).toMatchObject({
+      finalize: { enabled: false },
+      close: { enabled: false },
+      cancel: { enabled: false },
+    });
+  });
+});
 
 const airdropDistribution: BoardroomDistributionSnapshot = {
   address: airdrop,

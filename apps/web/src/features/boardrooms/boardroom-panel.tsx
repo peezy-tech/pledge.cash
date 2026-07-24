@@ -68,6 +68,50 @@ import type { BoardroomPanelProps } from "./boardroom-panel-types";
 
 export const WIND_DOWN_IRREVERSIBLE_WARNING = "Starting wind-down is irreversible. It ends normal project operation and turns the obligations below into the cleanup plan required before redemptions can open.";
 
+type LifecycleActionAvailability = {
+  enabled: boolean;
+  reason?: string;
+};
+
+export function dutchAuctionLifecycleActions(
+  auctionSnapshot: DutchAuctionState | undefined,
+  boardroomSnapshot: Pick<BoardroomSnapshot, "address" | "status"> | undefined,
+  now = BigInt(Math.floor(Date.now() / 1_000)),
+): {
+  finalize: LifecycleActionAvailability;
+  close: LifecycleActionAvailability;
+  cancel: LifecycleActionAvailability;
+} {
+  if (!auctionSnapshot) {
+    const unavailable = { enabled: false, reason: "Load the Dutch auction state first." };
+    return { finalize: unavailable, close: unavailable, cancel: unavailable };
+  }
+  if (auctionSnapshot.closed) {
+    const unavailable = { enabled: false, reason: "This Dutch auction is already closed." };
+    return { finalize: unavailable, close: unavailable, cancel: unavailable };
+  }
+
+  const finalize = now >= auctionSnapshot.endTime
+    ? { enabled: true }
+    : { enabled: false, reason: "Finalization is available after the auction ends." };
+  const matchingBoardroom = boardroomSnapshot
+    && boardroomSnapshot.address.toLowerCase() === auctionSnapshot.boardroom.toLowerCase();
+  const close = !matchingBoardroom
+    ? { enabled: false, reason: "Load the Boardroom that owns this Dutch auction first." }
+    : boardroomSnapshot.status !== 0
+      ? { enabled: true }
+      : { enabled: false, reason: "Closing is available only after Boardroom wind-down starts." };
+  const cancel = !matchingBoardroom
+    ? { enabled: false, reason: "Load the Boardroom that owns this Dutch auction first." }
+    : now >= auctionSnapshot.startTime
+      ? { enabled: false, reason: "Cancellation is available only before the auction starts." }
+      : auctionSnapshot.remainingShares !== auctionSnapshot.saleSupply
+        ? { enabled: false, reason: "Cancellation is unavailable after a purchase." }
+        : { enabled: true };
+
+  return { finalize, close, cancel };
+}
+
 export function BoardroomPanel({
   section = "all",
   boardroomIdentityLocked = false,
@@ -1120,6 +1164,8 @@ function DutchAuctionPanel({
 }): React.JSX.Element {
   const distributionSummary = distributionSummaryFor(boardroomSnapshot, dutchAuctionSnapshot?.address ?? dutchAuctionAddress);
   const canUseDistributionFactory = Boolean(deployment?.distributionFactory);
+  const lifecycleActions = dutchAuctionLifecycleActions(dutchAuctionSnapshot, boardroomSnapshot);
+  const manageReason = capabilityReason(manageCapability);
 
   return (
     <Panel
@@ -1181,15 +1227,15 @@ function DutchAuctionPanel({
             <RefreshCw className="h-4 w-4" />
             Load
           </ActionButton>
-          <ActionButton actionId="finalize-dutch-auction" disabled={!dutchAuctionSnapshot || dutchAuctionSnapshot.closed} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("finalize-dutch-auction", finalizeDutchAuction)}>
+          <ActionButton actionId="finalize-dutch-auction" disabled={!lifecycleActions.finalize.enabled} pendingAction={pendingAction} title={lifecycleActions.finalize.reason} variant="secondary" onClick={() => void runAction("finalize-dutch-auction", finalizeDutchAuction)}>
             <CheckCircle2 className="h-4 w-4" />
             Finalize
           </ActionButton>
-          <ActionButton actionId="close-dutch-auction" disabled={!capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} variant="secondary" onClick={() => void runAction("close-dutch-auction", closeDutchAuction)}>
+          <ActionButton actionId="close-dutch-auction" disabled={!lifecycleActions.close.enabled || !capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={manageReason ?? lifecycleActions.close.reason} variant="secondary" onClick={() => void runAction("close-dutch-auction", closeDutchAuction)}>
             <ShieldCheck className="h-4 w-4" />
             Close
           </ActionButton>
-          <ActionButton actionId="cancel-dutch-auction" disabled={!capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} variant="danger" onClick={() => void runAction("cancel-dutch-auction", cancelDutchAuction)}>
+          <ActionButton actionId="cancel-dutch-auction" disabled={!lifecycleActions.cancel.enabled || !capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={manageReason ?? lifecycleActions.cancel.reason} variant="danger" onClick={() => void runAction("cancel-dutch-auction", cancelDutchAuction)}>
             <XCircle className="h-4 w-4" />
             Cancel
           </ActionButton>
