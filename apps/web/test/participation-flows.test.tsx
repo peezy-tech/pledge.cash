@@ -16,6 +16,7 @@ import {
   ParticipationFlows,
   createParticipationFlowContent,
   findParticipationDistribution,
+  fixedPriceHyperliquidBlocker,
   maximumWithSlippage,
   ClaimTicketVerificationGuard,
   claimTicketVerificationSourceIdentity,
@@ -622,6 +623,59 @@ describe("participation bounds and proof parsing", () => {
 });
 
 describe("participation flow composition", () => {
+  test("shows the configured Hyperliquid rail but fails closed for capped sales", () => {
+    const html = renderToString(
+      <ParticipationFlows
+        {...context}
+        chainId={998}
+        hyperliquid={{
+          config: {
+            application: "api.pledge.cash/x402-router/v1/execute",
+            baseUrl: "https://x402.example",
+            gateway: owner,
+            hyperevmUsdc: paymentToken,
+          },
+          walletClient: () => {
+            throw new Error("not invoked while rendering");
+          },
+        }}
+        path="fixed-price-sale"
+      />,
+    );
+    expect(html).toContain("Pay from Hyperliquid");
+    expect(html).toContain("Buyer-capped fixed-price sales are not supported");
+
+    const state = fixedSaleDistribution.state as FixedPriceSaleState;
+    expect(fixedPriceHyperliquidBlocker({
+      account: owner,
+      amount: 1n,
+      amountError: undefined,
+      boardroomStatus: 0,
+      chainId: 998,
+      destinationUsdc: paymentToken,
+      distributionError: undefined,
+      recipient: owner,
+      recipientError: undefined,
+      slippageBps: 100n,
+      slippageError: undefined,
+      state: { ...state, maxPerBuyer: 0n },
+    })).toBeUndefined();
+    expect(fixedPriceHyperliquidBlocker({
+      account: owner,
+      amount: 1n,
+      amountError: undefined,
+      boardroomStatus: 0,
+      chainId: 998,
+      destinationUsdc: owner,
+      distributionError: undefined,
+      recipient: owner,
+      recipientError: undefined,
+      slippageBps: 100n,
+      slippageError: undefined,
+      state: { ...state, maxPerBuyer: 0n },
+    })).toContain("configured HyperEVM USDC payment token");
+  });
+
   test("prefers a live distribution over older closed deployments", () => {
     const closed: BoardroomDistributionSnapshot = {
       ...fixedSaleDistribution,

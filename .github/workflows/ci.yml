@@ -171,3 +171,64 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: bun --cwd services/sentinel integration:anvil
+
+  x402-router:
+    name: x402 Router
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: x402_router
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d x402_router"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify toolchain
+        run: |
+          bun --version
+          forge --version
+          anvil --version
+
+      - name: Verify x402 router migration snapshot
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/x402_router
+        run: |
+          bun --cwd services/x402-router drizzle:generate
+          test -z "$(git status --porcelain -- services/x402-router/drizzle)"
+
+      - name: Test x402 router
+        env:
+          X402_ROUTER_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/x402_router
+        run: bun run router:test
+
+      - name: Run deterministic router integration
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/x402_router
+        run: bun run router:integration:anvil

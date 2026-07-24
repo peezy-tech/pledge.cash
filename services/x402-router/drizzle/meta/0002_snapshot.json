@@ -1,0 +1,899 @@
+{
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "1fb773b2-f97a-4c67-8a89-7fbb5292d54a",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.x402_router_adapter_operations": {
+      "name": "x402_router_adapter_operations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "network": {
+          "name": "network",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "signer": {
+          "name": "signer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'claimed'"
+        },
+        "signer_nonce": {
+          "name": "signer_nonce",
+          "type": "numeric(20, 0)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payload_ciphertext": {
+          "name": "payload_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payload_iv": {
+          "name": "payload_iv",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payload_auth_tag": {
+          "name": "payload_auth_tag",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "transaction_hash": {
+          "name": "transaction_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "receipt": {
+          "name": "receipt",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failure_code": {
+          "name": "failure_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "lease_token": {
+          "name": "lease_token",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lease_expires_at": {
+          "name": "lease_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "x402_router_adapter_operations_idempotency_unique": {
+          "name": "x402_router_adapter_operations_idempotency_unique",
+          "columns": [
+            {
+              "expression": "kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "idempotency_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "x402_router_adapter_operations_transaction_unique": {
+          "name": "x402_router_adapter_operations_transaction_unique",
+          "columns": [
+            {
+              "expression": "network",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "transaction_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"x402_router_adapter_operations\".\"transaction_hash\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "x402_router_adapter_operations_signer_nonce_unique": {
+          "name": "x402_router_adapter_operations_signer_nonce_unique",
+          "columns": [
+            {
+              "expression": "network",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "signer",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "signer_nonce",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"x402_router_adapter_operations\".\"signer_nonce\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "x402_router_adapter_operations_lease_idx": {
+          "name": "x402_router_adapter_operations_lease_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "lease_expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "x402_router_adapter_operations_kind_check": {
+          "name": "x402_router_adapter_operations_kind_check",
+          "value": "\"x402_router_adapter_operations\".\"kind\" in ('payment_settlement', 'execution', 'refund')"
+        },
+        "x402_router_adapter_operations_status_check": {
+          "name": "x402_router_adapter_operations_status_check",
+          "value": "\"x402_router_adapter_operations\".\"status\" in (\n        'claimed',\n        'signed',\n        'submitted',\n        'confirmed_success',\n        'confirmed_failure',\n        'manual_intervention'\n      )"
+        },
+        "x402_router_adapter_operations_signer_nonce_check": {
+          "name": "x402_router_adapter_operations_signer_nonce_check",
+          "value": "\"x402_router_adapter_operations\".\"signer_nonce\" is null or (\n        \"x402_router_adapter_operations\".\"signer_nonce\" >= 0\n        and \"x402_router_adapter_operations\".\"signer_nonce\" <= 9007199254740991\n      )"
+        },
+        "x402_router_adapter_operations_execution_signed_fields_check": {
+          "name": "x402_router_adapter_operations_execution_signed_fields_check",
+          "value": "\"x402_router_adapter_operations\".\"kind\" <> 'execution' or (\n        (\n          \"x402_router_adapter_operations\".\"status\" = 'claimed'\n          and \"x402_router_adapter_operations\".\"signer_nonce\" is null\n          and \"x402_router_adapter_operations\".\"transaction_hash\" is null\n          and \"x402_router_adapter_operations\".\"payload_ciphertext\" is null\n        )\n        or (\n          \"x402_router_adapter_operations\".\"status\" = 'manual_intervention'\n          and (\n            \"x402_router_adapter_operations\".\"signer_nonce\" is null\n            or (\n              \"x402_router_adapter_operations\".\"signer_nonce\" is not null\n              and \"x402_router_adapter_operations\".\"transaction_hash\" is not null\n            )\n          )\n        )\n        or (\n          \"x402_router_adapter_operations\".\"status\" in (\n            'signed',\n            'submitted',\n            'confirmed_success',\n            'confirmed_failure'\n          )\n          and \"x402_router_adapter_operations\".\"signer_nonce\" is not null\n          and \"x402_router_adapter_operations\".\"transaction_hash\" is not null\n        )\n      )"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.x402_router_intent_payments": {
+      "name": "x402_router_intent_payments",
+      "schema": "",
+      "columns": {
+        "payment_network": {
+          "name": "payment_network",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_transaction": {
+          "name": "payment_transaction",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "intent_hash": {
+          "name": "intent_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "primary_payment": {
+          "name": "primary_payment",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "application": {
+          "name": "application",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gateway": {
+          "name": "gateway",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quote_id": {
+          "name": "quote_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "execution_network": {
+          "name": "execution_network",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "execution_transaction": {
+          "name": "execution_transaction",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refund_network": {
+          "name": "refund_network",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refund_transaction": {
+          "name": "refund_transaction",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "claim_token": {
+          "name": "claim_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "record": {
+          "name": "record",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "x402_router_intent_primary_unique": {
+          "name": "x402_router_intent_primary_unique",
+          "columns": [
+            {
+              "expression": "intent_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"x402_router_intent_payments\".\"primary_payment\"",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "x402_router_intent_quote_primary_unique": {
+          "name": "x402_router_intent_quote_primary_unique",
+          "columns": [
+            {
+              "expression": "application",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "gateway",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "quote_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"x402_router_intent_payments\".\"primary_payment\"",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "x402_router_intent_execution_tx_unique": {
+          "name": "x402_router_intent_execution_tx_unique",
+          "columns": [
+            {
+              "expression": "execution_network",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "execution_transaction",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"x402_router_intent_payments\".\"execution_transaction\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "x402_router_intent_refund_tx_unique": {
+          "name": "x402_router_intent_refund_tx_unique",
+          "columns": [
+            {
+              "expression": "refund_network",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "refund_transaction",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"x402_router_intent_payments\".\"refund_transaction\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "x402_router_intent_status_idx": {
+          "name": "x402_router_intent_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "x402_router_intent_payments_payment_network_payment_transaction_pk": {
+          "name": "x402_router_intent_payments_payment_network_payment_transaction_pk",
+          "columns": [
+            "payment_network",
+            "payment_transaction"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.x402_router_inventory_reservations": {
+      "name": "x402_router_inventory_reservations",
+      "schema": "",
+      "columns": {
+        "quote_id": {
+          "name": "quote_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "network": {
+          "name": "network",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "asset": {
+          "name": "asset",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "numeric(78, 0)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "x402_router_inventory_asset_status_idx": {
+          "name": "x402_router_inventory_asset_status_idx",
+          "columns": [
+            {
+              "expression": "network",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "asset",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "x402_router_inventory_reservations_quote_id_x402_router_quotes_id_fk": {
+          "name": "x402_router_inventory_reservations_quote_id_x402_router_quotes_id_fk",
+          "tableFrom": "x402_router_inventory_reservations",
+          "tableTo": "x402_router_quotes",
+          "columnsFrom": [
+            "quote_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "x402_router_inventory_reservations_quote_id_scope_network_asset_pk": {
+          "name": "x402_router_inventory_reservations_quote_id_scope_network_asset_pk",
+          "columns": [
+            "quote_id",
+            "scope",
+            "network",
+            "asset"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "x402_router_inventory_scope_check": {
+          "name": "x402_router_inventory_scope_check",
+          "value": "\"x402_router_inventory_reservations\".\"scope\" in ('destination_execution', 'source_refund')"
+        },
+        "x402_router_inventory_status_check": {
+          "name": "x402_router_inventory_status_check",
+          "value": "\"x402_router_inventory_reservations\".\"status\" in ('active', 'committed', 'consumed', 'released')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.x402_router_quote_payment_bindings": {
+      "name": "x402_router_quote_payment_bindings",
+      "schema": "",
+      "columns": {
+        "quote_id": {
+          "name": "quote_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "attempt_id": {
+          "name": "attempt_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_payload_hash": {
+          "name": "payment_payload_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_requirements_hash": {
+          "name": "payment_requirements_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "bound_at": {
+          "name": "bound_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "x402_router_quote_payment_bindings_attempt_unique": {
+          "name": "x402_router_quote_payment_bindings_attempt_unique",
+          "columns": [
+            {
+              "expression": "attempt_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "x402_router_quote_payment_bindings_payload_unique": {
+          "name": "x402_router_quote_payment_bindings_payload_unique",
+          "columns": [
+            {
+              "expression": "payment_payload_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "x402_router_quote_payment_bindings_quote_id_x402_router_quotes_id_fk": {
+          "name": "x402_router_quote_payment_bindings_quote_id_x402_router_quotes_id_fk",
+          "tableFrom": "x402_router_quote_payment_bindings",
+          "tableTo": "x402_router_quotes",
+          "columnsFrom": [
+            "quote_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.x402_router_quotes": {
+      "name": "x402_router_quotes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "action_kind": {
+          "name": "action_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chain_id": {
+          "name": "chain_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payer": {
+          "name": "payer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recipient": {
+          "name": "recipient",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "refund_address": {
+          "name": "refund_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target": {
+          "name": "target",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quote": {
+          "name": "quote",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_identifier_hash": {
+          "name": "payment_identifier_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_network": {
+          "name": "payment_network",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_asset": {
+          "name": "payment_asset",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_amount": {
+          "name": "payment_amount",
+          "type": "numeric(78, 0)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "application": {
+          "name": "application",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gateway": {
+          "name": "gateway",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "intent_template_hash": {
+          "name": "intent_template_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_requirements": {
+          "name": "payment_requirements",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "intent": {
+          "name": "intent",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "x402_router_quotes_expires_at_idx": {
+          "name": "x402_router_quotes_expires_at_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "x402_router_quotes_payment_identifier_hash_unique": {
+          "name": "x402_router_quotes_payment_identifier_hash_unique",
+          "columns": [
+            {
+              "expression": "payment_identifier_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "x402_router_quotes_action_kind_check": {
+          "name": "x402_router_quotes_action_kind_check",
+          "value": "\"x402_router_quotes\".\"action_kind\" in ('amm_swap', 'fixed_price_sale')"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

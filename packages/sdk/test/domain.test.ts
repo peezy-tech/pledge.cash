@@ -3,6 +3,7 @@ import { decodeFunctionData, type Address, type Hex } from "viem";
 import {
   boardroomAbi,
   boardroomControllerAbi,
+  buildAmmSwapExactTokensForTokensTransaction,
   buildBoardroomReplaceControllerCall,
   buildBoardroomVetoOperationTransaction,
   buildControllerExecuteBoardroomOperationTransaction,
@@ -243,6 +244,18 @@ describe("participation readers and builders", () => {
     expect(buildFixedPriceSaleBuyTransaction({ sale, shareAmount: 100n, recipient, maxPayment: 251n, deadline: 900n })).toMatchObject({
       functionName: "buy",
       args: [100n, recipient, 251n, 900n],
+    });
+    expect(buildAmmSwapExactTokensForTokensTransaction({
+      router: factory,
+      amountIn: 250n,
+      amountOutMin: 99n,
+      path: [paymentToken, shareToken],
+      recipient,
+      deadline: 900n,
+    })).toMatchObject({
+      address: factory,
+      functionName: "swapExactTokensForTokens",
+      args: [250n, 99n, [paymentToken, shareToken], recipient, 900n],
     });
   });
 

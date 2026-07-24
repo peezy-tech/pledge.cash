@@ -1,5 +1,6 @@
 import { encodeFunctionData, type Address, type Hex } from "viem";
 import {
+  ammRouterAbi,
   boardroomAbi,
   boardroomControllerAbi,
   boardroomRewardsAbi,
@@ -765,8 +766,30 @@ export function buildFixedPriceSaleBuyTransaction(input: {
   return {
     address: input.sale,
     abi: fixedPriceSaleAbi,
-    functionName: "buy",
+    functionName: "buy" as const,
     args: [input.shareAmount, input.recipient, input.maxPayment, input.deadline] as const,
+  };
+}
+
+export function buildAmmSwapExactTokensForTokensTransaction(input: {
+  router: Address;
+  amountIn: bigint;
+  amountOutMin: bigint;
+  path: readonly [Address, Address];
+  recipient: Address;
+  deadline: bigint;
+}) {
+  return {
+    address: input.router,
+    abi: ammRouterAbi,
+    functionName: "swapExactTokensForTokens" as const,
+    args: [
+      input.amountIn,
+      input.amountOutMin,
+      input.path,
+      input.recipient,
+      input.deadline,
+    ] as const,
   };
 }
 

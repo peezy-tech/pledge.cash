@@ -3,6 +3,7 @@ import type { PublicClient } from "viem";
 import type { ProductBoardroomDashboardState } from "../../lib/product-boardroom";
 import type { BoardroomDistributionSnapshot } from "../../lib/types";
 import type { TransactionActionGuard } from "../../lib/transaction-identity";
+import type { HyperliquidCheckoutContext } from "../../lib/x402-router";
 
 export type ParticipationPath = "bond-market" | "dutch-auction" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop";
 export type ParticipationRoutePath = ParticipationPath | "amm";
@@ -45,6 +46,7 @@ export type ParticipationFlowContext = {
   account: Address | undefined;
   chainId: number;
   dashboard: ProductBoardroomDashboardState;
+  hyperliquid?: HyperliquidCheckoutContext | undefined;
   pendingAction: string | undefined;
   publicClient: PublicClient;
   runAction: RunParticipationAction;
