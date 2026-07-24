@@ -217,7 +217,8 @@ describe("recurring support browser boundary", () => {
       },
     };
     const challengeId = "00000000-0000-4000-8000-000000000010";
-    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    const serverNow = new Date();
+    const expiresAt = new Date(serverNow.getTime() + 60_000).toISOString();
     const payload = {
       version: 1,
       action: "subscribe",
@@ -254,18 +255,24 @@ describe("recurring support browser boundary", () => {
     const fetch = async () => {
       calls += 1;
       if (calls === 1) {
-        return Response.json({
-          action: "subscription_create",
-          actor: payer,
-          boardroom,
-          chainId: 998,
-          challengeId,
-          expiresAt,
-          message,
-          payload,
-          payloadHash,
-          planId,
-        }, { status: 201 });
+        return Response.json(
+          {
+            action: "subscription_create",
+            actor: payer,
+            boardroom,
+            chainId: 998,
+            challengeId,
+            expiresAt,
+            message,
+            payload,
+            payloadHash,
+            planId,
+          },
+          {
+            headers: { Date: serverNow.toUTCString() },
+            status: 201,
+          },
+        );
       }
       expect(
         loadRecurringSupportSubscriptionId(
@@ -310,8 +317,100 @@ describe("recurring support browser boundary", () => {
     expect(calls).toBe(2);
   });
 
+  test("uses router time when the browser clock is behind", async () => {
+    const challengeId = "00000000-0000-4000-8000-000000000010";
+    const serverNow = new Date("2030-01-01T00:00:00.000Z");
+    const expiresAt = new Date(
+      serverNow.getTime() + 5 * 60_000,
+    ).toISOString();
+    const payload = {
+      version: 1,
+      action: "subscribe",
+      subscriptionId,
+      planId,
+      boardroom: boardroom.toLowerCase(),
+      payer: payer.toLowerCase(),
+    };
+    const canonicalPayload = Object.fromEntries(
+      Object.entries(payload).sort(([left], [right]) =>
+        left.localeCompare(right)
+      ),
+    );
+    const payloadHash = keccak256(
+      stringToHex(JSON.stringify(canonicalPayload)),
+    );
+    const message = [
+      "pledge.cash recurring support",
+      "",
+      "Action: Create support subscription",
+      `Actor: ${payer}`,
+      "Chain ID: 998",
+      `Boardroom: ${boardroom}`,
+      `Plan ID: ${planId}`,
+      `Payload hash: ${payloadHash}`,
+      `Challenge ID: ${challengeId}`,
+      `Origin: ${config.baseUrl}`,
+      `Expires at: ${expiresAt}`,
+      "",
+      "This records a monthly schedule. It cannot move funds or approve future payments.",
+      "Every contribution still requires a separate x402 payment signature.",
+    ].join("\n");
+    let signatures = 0;
+    let calls = 0;
+    const fetch = async () => {
+      calls += 1;
+      if (calls === 1) {
+        return Response.json(
+          {
+            action: "subscription_create",
+            actor: payer,
+            boardroom,
+            chainId: 998,
+            challengeId,
+            expiresAt,
+            message,
+            payload,
+            payloadHash,
+            planId,
+          },
+          {
+            headers: { Date: serverNow.toUTCString() },
+            status: 201,
+          },
+        );
+      }
+      throw new Error("signed with a skewed browser clock");
+    };
+    const originalNow = Date.now;
+    Date.now = () => serverNow.getTime() - 60_000;
+    try {
+      await expect(
+        createRecurringSupportSubscription(
+          {
+            config,
+            walletClient: () => ({
+              account: { address: payer },
+              async signMessage() {
+                signatures += 1;
+                return `0x${"11".repeat(65)}`;
+              },
+            } as never),
+          },
+          view().plan,
+          payer,
+          { fetch: fetch as typeof globalThis.fetch },
+        ),
+      ).rejects.toThrow("signed with a skewed browser clock");
+    } finally {
+      Date.now = originalNow;
+    }
+    expect(signatures).toBe(1);
+    expect(calls).toBe(2);
+  });
+
   test("rejects a changed support challenge before asking the wallet to sign", async () => {
     let signatures = 0;
+    const serverNow = new Date();
     const fetch = async () =>
       new Response(JSON.stringify({
         action: "subscription_create",
@@ -319,13 +418,16 @@ describe("recurring support browser boundary", () => {
         boardroom,
         chainId: 998,
         challengeId: "00000000-0000-4000-8000-000000000010",
-        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        expiresAt: new Date(serverNow.getTime() + 60_000).toISOString(),
         message: "changed action",
         payload: {},
         payloadHash: `0x${"00".repeat(32)}`,
         planId: "00000000-0000-4000-8000-000000000011",
       }), {
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          Date: serverNow.toUTCString(),
+        },
         status: 201,
       });
     await expect(publishRecurringSupportPlan(

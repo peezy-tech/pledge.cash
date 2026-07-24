@@ -18,6 +18,8 @@ import {
 
 const SUPPORT_SUBSCRIPTION_STORAGE_PREFIX =
   "pledge.cash:recurring-support:subscription:v1";
+const SUPPORT_CHALLENGE_TTL_MS = 5 * 60 * 1_000;
+const SUPPORT_CHALLENGE_EXPIRY_GRACE_MS = 5_000;
 
 export type RecurringSupportPlan = {
   id: string;
@@ -516,13 +518,19 @@ async function createChallenge(
   body: unknown,
   options: FetchOptions,
 ): Promise<RecurringSupportChallenge> {
+  let serverDate: string | null = null;
   const response = await supportRequest(`${config.baseUrl}${path}`, {
     ...(body === undefined ? {} : { body }),
     fetch: options.fetch,
     method: "POST",
+    onResponse(value) {
+      serverDate = value.headers.get("date");
+    },
     signal: options.signal,
   });
-  return supportChallengeValue(response);
+  const challenge = supportChallengeValue(response);
+  assertChallengeExpiry(challenge, serverDate);
+  return challenge;
 }
 
 async function signChallenge(
@@ -568,11 +576,6 @@ function assertChallengeBoundary(
   ) {
     throw new Error("The router challenge changed the requested support action.");
   }
-  const expiry = Date.parse(challenge.expiresAt);
-  const now = Date.now();
-  if (expiry <= now || expiry > now + 5 * 60 * 1_000 + 5_000) {
-    throw new Error("The router challenge has an invalid expiry.");
-  }
   const expectedMessage = buildChallengeMessage({
     action: challenge.action,
     actor: challenge.actor,
@@ -586,6 +589,24 @@ function assertChallengeBoundary(
   });
   if (challenge.message !== expectedMessage) {
     throw new Error("The router challenge message changed the signed support terms.");
+  }
+}
+
+function assertChallengeExpiry(
+  challenge: RecurringSupportChallenge,
+  serverDate: string | null,
+): void {
+  const expiry = Date.parse(challenge.expiresAt);
+  const serverNow = Date.parse(serverDate ?? "");
+  if (
+    !Number.isFinite(serverNow)
+    || expiry <= serverNow
+    || expiry
+      > serverNow
+        + SUPPORT_CHALLENGE_TTL_MS
+        + SUPPORT_CHALLENGE_EXPIRY_GRACE_MS
+  ) {
+    throw new Error("The router challenge has an invalid expiry.");
   }
 }
 
@@ -638,6 +659,7 @@ async function supportRequest(
     body?: unknown;
     fetch?: typeof globalThis.fetch | undefined;
     method?: "GET" | "POST";
+    onResponse?: ((response: Response) => void) | undefined;
     signal?: AbortSignal | undefined;
   },
 ): Promise<unknown> {
@@ -651,6 +673,7 @@ async function supportRequest(
     method: options.method ?? "GET",
     ...(options.signal ? { signal: options.signal } : {}),
   });
+  options.onResponse?.(response);
   let body: unknown;
   try {
     body = await response.json();

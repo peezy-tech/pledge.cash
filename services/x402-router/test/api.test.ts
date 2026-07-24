@@ -219,6 +219,11 @@ describe("router API", () => {
     expect(response.headers.get("access-control-expose-headers")).toContain(
       "PAYMENT-REQUIRED",
     );
+    expect(response.headers.get("access-control-expose-headers")).toContain(
+      "Date",
+    );
+    expect(Number.isFinite(Date.parse(response.headers.get("date") ?? "")))
+      .toBe(true);
     const encoded = response.headers.get("PAYMENT-REQUIRED");
     expect(encoded).toBeTruthy();
     expect(decodePaymentRequiredHeader(encoded!)).toEqual(quote().paymentRequired);

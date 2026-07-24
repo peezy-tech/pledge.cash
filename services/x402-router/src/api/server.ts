@@ -114,11 +114,19 @@ export function createRouterApi(deps: RouterApiDependencies): Hono {
     cors({
       origin: deps.webOrigin,
       allowHeaders: ["Content-Type", PAYMENT_SIGNATURE_HEADER],
-      exposeHeaders: [PAYMENT_REQUIRED_HEADER, PAYMENT_RESPONSE_HEADER],
+      exposeHeaders: [
+        "Date",
+        PAYMENT_REQUIRED_HEADER,
+        PAYMENT_RESPONSE_HEADER,
+      ],
       allowMethods: ["GET", "POST", "OPTIONS"],
       maxAge: 600,
     }),
   );
+  app.use("/v1/*", async (c, next) => {
+    await next();
+    c.header("Date", new Date().toUTCString());
+  });
   app.use(
     "/v1/quotes",
     bodyLimit({
