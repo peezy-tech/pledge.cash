@@ -815,6 +815,16 @@ export class PostgresAdapterOperationStore {
     return rows.map(recordFromRow);
   }
 
+  async hasManualIntervention(): Promise<boolean> {
+    const rows = await this.sql<{ exists: boolean }[]>`
+      select exists(
+        select 1 from x402_router_adapter_operations
+        where status = 'manual_intervention'
+      )
+    `;
+    return rows[0]?.exists ?? false;
+  }
+
   private async transition(input: {
     readonly kind: AdapterOperationKind;
     readonly idempotencyKey: string;

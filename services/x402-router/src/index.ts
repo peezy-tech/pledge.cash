@@ -212,6 +212,7 @@ export async function startX402Router(
           }
           await canonical.assertReady();
         },
+        hasManualIntervention: () => operationStore.hasManualIntervention(),
       }),
   });
 

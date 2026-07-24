@@ -41,7 +41,8 @@ export function resolveRouterDeployment(input: {
   if (
     !release.ammFactory ||
     !release.ammRouter ||
-    !release.distributionFactory
+    !release.distributionFactory ||
+    !release.boardroomFactory
   ) {
     return {
       ready: false,
@@ -70,6 +71,7 @@ export function resolveRouterDeployment(input: {
       ammFactory: release.ammFactory,
       ammRouter: release.ammRouter,
       distributionFactory: release.distributionFactory,
+      boardroomFactory: release.boardroomFactory,
       destinationUsdc: input.destinationUsdc,
       executor: input.executor,
     },

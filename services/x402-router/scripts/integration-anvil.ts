@@ -90,6 +90,7 @@ const fixtureAbi = parseAbi([
   "function paymentToken() view returns (address)",
   "function shareToken() view returns (address)",
   "function boardroom() view returns (address)",
+  "function boardroomFactory() view returns (address)",
   "function pool() view returns (address)",
   "function ammRouter() view returns (address)",
   "function ammFactory() view returns (address)",
@@ -157,6 +158,7 @@ try {
       | "paymentToken"
       | "shareToken"
       | "boardroom"
+      | "boardroomFactory"
       | "pool"
       | "ammRouter"
       | "ammFactory"
@@ -174,6 +176,7 @@ try {
     paymentToken,
     shareToken,
     boardroom,
+    boardroomFactory,
     pool,
     ammRouter,
     ammFactory,
@@ -183,6 +186,7 @@ try {
     readFixtureAddress("paymentToken"),
     readFixtureAddress("shareToken"),
     readFixtureAddress("boardroom"),
+    readFixtureAddress("boardroomFactory"),
     readFixtureAddress("pool"),
     readFixtureAddress("ammRouter"),
     readFixtureAddress("ammFactory"),
@@ -223,6 +227,7 @@ try {
     ammFactory: getAddress(ammFactory),
     ammRouter: getAddress(ammRouter),
     distributionFactory: getAddress(distributionFactory),
+    boardroomFactory: getAddress(boardroomFactory),
     destinationUsdc: getAddress(paymentToken),
     executor: executor.address,
   });

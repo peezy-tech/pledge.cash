@@ -2,6 +2,7 @@ import {
   ammFactoryAbi,
   ammRouterAbi,
   boardroomAbi,
+  boardroomFactoryAbi,
   buildAmmSwapExactTokensForTokensTransaction,
   buildFixedPriceSaleBuyTransaction,
   distributionFactoryAbi,
@@ -26,6 +27,7 @@ export type CanonicalMarketplaceDeployment = {
   ammFactory: Address;
   ammRouter: Address;
   distributionFactory: Address;
+  boardroomFactory: Address;
   destinationUsdc: Address;
   executor: Address;
 };
@@ -65,6 +67,7 @@ export class CanonicalMarketplaceReader {
       this.deployment.ammFactory,
       this.deployment.ammRouter,
       this.deployment.distributionFactory,
+      this.deployment.boardroomFactory,
       this.deployment.destinationUsdc,
     ];
     const code = await Promise.all(addresses.map(address => this.client.getCode({ address })));
@@ -132,12 +135,14 @@ export class CanonicalMarketplaceReader {
     }
 
     const [
+      isBoardroom,
       isPool,
       registeredPool,
       configuredRouter,
       boardroomShareToken,
       boardroomStatus,
     ] = await Promise.all([
+      this.client.readContract({ address: this.deployment.boardroomFactory, abi: boardroomFactoryAbi, functionName: "isBoardroom", args: [quote.boardroom] }),
       this.client.readContract({
         address: this.deployment.ammFactory,
         abi: ammFactoryAbi,
@@ -168,7 +173,7 @@ export class CanonicalMarketplaceReader {
     ]);
 
     if (
-      !isPool ||
+      !isBoardroom || !isPool ||
       !sameAddress(registeredPool, pool) ||
       !sameAddress(configuredRouter, this.deployment.ammRouter) ||
       !sameAddress(boardroomShareToken, quote.execution.outputToken) ||
@@ -193,6 +198,7 @@ export class CanonicalMarketplaceReader {
     }
 
     const [
+      isBoardroom,
       isDistribution,
       distributionKind,
       distributionBoardroom,
@@ -209,6 +215,7 @@ export class CanonicalMarketplaceReader {
       boardroomStatus,
       paymentAmount,
     ] = await Promise.all([
+      this.client.readContract({ address: this.deployment.boardroomFactory, abi: boardroomFactoryAbi, functionName: "isBoardroom", args: [quote.boardroom] }),
       this.client.readContract({
         address: this.deployment.distributionFactory,
         abi: distributionFactoryAbi,
@@ -294,7 +301,7 @@ export class CanonicalMarketplaceReader {
     const notStarted = BigInt(startTime) > now;
     const ended = BigInt(endTime) !== 0n && BigInt(endTime) < now;
     if (
-      !isDistribution ||
+      !isBoardroom || !isDistribution ||
       Number(distributionKind) !== 0 ||
       !sameAddress(distributionBoardroom, quote.boardroom) ||
       !sameAddress(factory, this.deployment.distributionFactory) ||
@@ -332,8 +339,9 @@ export class CanonicalMarketplaceReader {
       throw new CanonicalRouteError("AMM input and output assets must differ.", "invalid_pair");
     }
 
-    const [isPool, registeredPool, boardroomShareToken, boardroomStatus] =
+    const [isBoardroom, isPool, registeredPool, boardroomShareToken, boardroomStatus] =
       await Promise.all([
+        this.client.readContract({ address: this.deployment.boardroomFactory, abi: boardroomFactoryAbi, functionName: "isBoardroom", args: [request.boardroom] }),
         this.client.readContract({
           address: this.deployment.ammFactory,
           abi: ammFactoryAbi,
@@ -359,7 +367,7 @@ export class CanonicalMarketplaceReader {
       ]);
 
     if (
-      !isPool ||
+      !isBoardroom || !isPool ||
       !sameAddress(registeredPool, request.pool) ||
       !sameAddress(boardroomShareToken, request.tokenOut)
     ) {
@@ -434,8 +442,9 @@ export class CanonicalMarketplaceReader {
     request: Extract<CreateQuoteRequest, { kind: "fixed_price_sale" }>,
     deadline: number,
   ): Promise<CanonicalQuoteResult> {
-    const [isDistribution, distributionKind, distributionBoardroom] =
+    const [isBoardroom, isDistribution, distributionKind, distributionBoardroom] =
       await Promise.all([
+        this.client.readContract({ address: this.deployment.boardroomFactory, abi: boardroomFactoryAbi, functionName: "isBoardroom", args: [request.boardroom] }),
         this.client.readContract({
           address: this.deployment.distributionFactory,
           abi: distributionFactoryAbi,
@@ -456,7 +465,7 @@ export class CanonicalMarketplaceReader {
         }),
       ]);
     if (
-      !isDistribution ||
+      !isBoardroom || !isDistribution ||
       Number(distributionKind) !== 0 ||
       !sameAddress(distributionBoardroom, request.boardroom)
     ) {

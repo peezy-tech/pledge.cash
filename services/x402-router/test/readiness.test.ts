@@ -27,6 +27,9 @@ describe("router readiness", () => {
       async canonicalReady() {
         throw new Error(secret);
       },
+      async hasManualIntervention() {
+        return false;
+      },
     });
 
     expect(readiness.acceptingQuotes).toBe(false);

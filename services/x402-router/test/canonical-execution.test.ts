@@ -13,6 +13,7 @@ import {
 const ammFactory = "0x0000000000000000000000000000000000000011" as const;
 const ammRouter = "0x0000000000000000000000000000000000000012" as const;
 const distributionFactory = "0x0000000000000000000000000000000000000013" as const;
+const boardroomFactory = "0x0000000000000000000000000000000000000016" as const;
 const usdc = "0x0000000000000000000000000000000000000014" as const;
 const executor = "0x0000000000000000000000000000000000000015" as const;
 const boardroom = "0x0000000000000000000000000000000000000021" as const;
@@ -110,6 +111,7 @@ function reader(overrides: Record<string, unknown> = {}) {
   const values: Record<string, unknown> = {
     liquidityRouter: ammRouter,
     isPool: true,
+    isBoardroom: true,
     getPool: pool,
     shareToken: shares,
     status: 0,
@@ -143,6 +145,7 @@ function reader(overrides: Record<string, unknown> = {}) {
     ammFactory,
     ammRouter,
     distributionFactory,
+    boardroomFactory,
     destinationUsdc: usdc,
     executor,
   });

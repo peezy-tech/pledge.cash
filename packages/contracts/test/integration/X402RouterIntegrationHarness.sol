@@ -40,6 +40,14 @@ contract X402RouterTestBoardroom {
     }
 }
 
+contract X402RouterTestBoardroomFactory {
+    mapping(address => bool) public isBoardroom;
+
+    function register(address boardroom_) external {
+        isBoardroom[boardroom_] = true;
+    }
+}
+
 contract X402RouterTestPool {}
 
 contract X402RouterTestAmmRouter {
@@ -180,6 +188,7 @@ contract X402RouterTestDistributionFactory {
 }
 
 contract X402RouterIntegrationHarness {
+    X402RouterTestBoardroomFactory public immutable boardroomFactory;
     X402RouterTestToken public immutable paymentToken;
     X402RouterTestToken public immutable shareToken;
     X402RouterTestBoardroom public immutable boardroom;
@@ -190,9 +199,11 @@ contract X402RouterIntegrationHarness {
     X402RouterTestFixedPriceSale public immutable fixedPriceSale;
 
     constructor() {
+        boardroomFactory = new X402RouterTestBoardroomFactory();
         paymentToken = new X402RouterTestToken("Test USDC", "USDC", 6);
         shareToken = new X402RouterTestToken("Test Project Share", "SHARE", 18);
         boardroom = new X402RouterTestBoardroom(address(shareToken));
+        boardroomFactory.register(address(boardroom));
         pool = new X402RouterTestPool();
         ammRouter = new X402RouterTestAmmRouter(address(paymentToken), address(shareToken), address(pool));
         ammFactory =

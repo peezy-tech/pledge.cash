@@ -12,6 +12,7 @@ export type RouterReadinessDependencies = {
   refundInventory: RefundInventoryReader;
   databasePing(): Promise<void>;
   canonicalReady(): Promise<void>;
+  hasManualIntervention(): Promise<boolean>;
 };
 
 export async function readRouterReadiness(
@@ -24,6 +25,15 @@ export async function readRouterReadiness(
     checks.database = { ok: true };
   } catch {
     checks.database = { ok: false, message: "Database is unavailable." };
+  }
+
+  try {
+    const blocked = await deps.hasManualIntervention();
+    checks.operations = blocked
+      ? { ok: false, message: "Manual intervention is required for an unresolved operation." }
+      : { ok: true };
+  } catch {
+    checks.operations = { ok: false, message: "Operation safety state could not be read." };
   }
 
   if (!deps.deployment.ready) {

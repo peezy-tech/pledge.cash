@@ -86,13 +86,11 @@ export class DurableX402SettlementJournal implements X402SettlementJournal {
     }
 
     let operation = claim.operation;
-    if (
-      claim.kind === "existing" &&
-      operation.status !== "confirmed_success" &&
-      operation.status !== "confirmed_failure" &&
-      operation.status !== "manual_intervention"
-    ) {
-      throw new Error("Payment settlement journal attempt is still leased.");
+    // An existing signed/submitted operation is already durable even when the
+    // first caller has not yet installed the quote binding. Continue with the
+    // same record so a concurrent retry cannot be mistaken for a fresh payment.
+    if (claim.kind === "existing" && operation.status === "claimed") {
+      throw new Error("Payment settlement journal is currently being prepared.");
     }
     if (operation.status === "claimed") {
       if (claim.kind !== "claimed") {
