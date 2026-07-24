@@ -18,6 +18,7 @@ import {BoardroomRedemptionPayout} from "../../src/boardroom/BoardroomRedemption
 import {BoardroomToken} from "../../src/boardroom/BoardroomToken.sol";
 import {BoardroomPrimaryMarketStorage} from "../../src/boardroom/storage/BoardroomPrimaryMarketStorage.sol";
 import {DistributionFactory} from "../../src/distribution/DistributionFactory.sol";
+import {DutchAuctionSale} from "../../src/distribution/DutchAuctionSale.sol";
 import {FixedPriceSale} from "../../src/distribution/FixedPriceSale.sol";
 import {IBoardroomCallPolicy} from "../../src/policy/IBoardroomCallPolicy.sol";
 import {LockedLiquidity} from "../../src/liquidity/LockedLiquidity.sol";
@@ -275,6 +276,8 @@ contract DistributionTest is Test {
     uint256 internal constant PRICE = 2_000000;
     uint256 internal constant BUY_SHARES = 250 ether;
     uint256 internal constant BUY_PAYMENT = 500_000000;
+    uint256 internal constant AUCTION_START_PRICE = 4_000000;
+    uint256 internal constant AUCTION_FLOOR_PRICE = 2_000000;
     uint256 internal constant CURVE_SALE_SHARES = 500 ether;
     uint256 internal constant CURVE_MIGRATION_SHARES = 500 ether;
     uint256 internal constant CURVE_BUY_SHARES = 200 ether;
@@ -349,6 +352,219 @@ contract DistributionTest is Test {
         assertEq(sale.purchasedBy(buyer), BUY_SHARES);
         assertEq(shareToken.encumberedSupply(), SALE_SHARES - BUY_SHARES);
         assertEq(shareToken.governanceEligibleSupply(), BUY_SHARES);
+    }
+
+    function testBoardroomCanCreateDutchAuctionAndBuyerPaysCurrentPrice() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("dutch-auction");
+        DutchAuctionSale auction =
+            _createDutchAuction(boardroom, shareToken, paymentToken, "dutch-auction-create", block.timestamp, 10 days);
+
+        assertEq(auction.boardroom(), address(boardroom));
+        assertEq(auction.shareToken(), address(shareToken));
+        assertEq(auction.paymentToken(), address(paymentToken));
+        assertEq(auction.saleSupply(), SALE_SHARES);
+        assertEq(auction.currentPrice(), AUCTION_START_PRICE);
+        assertEq(distributionFactory.distributionCountForBoardroom(address(boardroom)), 1);
+        assertEq(distributionFactory.distributionForBoardroomAt(address(boardroom), 0), address(auction));
+        assertEq(
+            uint8(distributionFactory.distributionKind(address(auction))),
+            uint8(DistributionFactory.DistributionKind.DutchAuction)
+        );
+        assertTrue(boardroom.isRedeemableAsset(address(paymentToken)));
+        assertTrue(shareToken.isEncumberedAccount(address(auction)));
+
+        vm.warp(block.timestamp + 5 days);
+        assertEq(auction.currentPrice(), 3_000000);
+        uint256 expectedPayment = 750_000000;
+
+        vm.prank(buyer);
+        paymentToken.approve(address(auction), expectedPayment);
+        vm.prank(buyer);
+        uint256 payment = auction.buy(BUY_SHARES, recipient, expectedPayment, block.timestamp);
+
+        assertEq(payment, expectedPayment);
+        assertEq(auction.lastPurchasePrice(), 3_000000);
+        assertEq(auction.totalPayment(), expectedPayment);
+        assertEq(auction.soldShares(), BUY_SHARES);
+        assertEq(auction.remainingShares(), SALE_SHARES - BUY_SHARES);
+        assertEq(shareToken.balanceOf(recipient), BUY_SHARES);
+        assertEq(paymentToken.balanceOf(address(boardroom)), expectedPayment);
+    }
+
+    function testDutchAuctionSelloutLatchesSettlementPriceAndTerminalState() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("dutch-auction-sellout");
+        DutchAuctionSale auction = _createDutchAuction(
+            boardroom, shareToken, paymentToken, "dutch-auction-sellout-create", block.timestamp, 10 days
+        );
+
+        vm.warp(block.timestamp + 5 days);
+        uint256 expectedPayment = 3_000_000000;
+        vm.prank(buyer);
+        paymentToken.approve(address(auction), expectedPayment);
+        vm.prank(buyer);
+        auction.buy(SALE_SHARES, buyer, expectedPayment, block.timestamp);
+
+        assertTrue(auction.isClosed());
+        assertEq(auction.remainingShares(), 0);
+        assertEq(auction.settlementPrice(), 3_000000);
+        assertEq(auction.totalPayment(), expectedPayment);
+        assertTrue(boardroom.pruneObligation(address(auction)));
+        assertFalse(boardroom.isIssuedDistribution(address(auction)));
+    }
+
+    function testDutchAuctionPermissionlessFinalizeReturnsUnsoldSharesAndPreservesLastPrice() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("dutch-auction-finalize");
+        DutchAuctionSale auction = _createDutchAuction(
+            boardroom, shareToken, paymentToken, "dutch-auction-finalize-create", block.timestamp, 10 days
+        );
+
+        vm.warp(block.timestamp + 5 days);
+        uint256 expectedPayment = 750_000000;
+        vm.prank(buyer);
+        paymentToken.approve(address(auction), expectedPayment);
+        vm.prank(buyer);
+        auction.buy(BUY_SHARES, buyer, expectedPayment, block.timestamp);
+
+        vm.warp(auction.endTime());
+        uint256 floorPayment = auction.getPaymentAmount(1 ether);
+        vm.prank(buyer);
+        vm.expectRevert(DutchAuctionSale.SaleNotOpen.selector);
+        auction.buy(1 ether, buyer, floorPayment, block.timestamp);
+
+        vm.prank(recipient);
+        uint256 returned = auction.finalize();
+
+        assertEq(returned, SALE_SHARES - BUY_SHARES);
+        assertEq(auction.soldShares(), BUY_SHARES);
+        assertEq(auction.settlementPrice(), 3_000000);
+        assertEq(shareToken.balanceOf(address(boardroom)), returned);
+        assertEq(shareToken.encumberedSupply(), 0);
+        assertTrue(boardroom.pruneObligation(address(auction)));
+    }
+
+    function testDutchAuctionCanSeedCanonicalLiquidityAfterSettlement() public {
+        assetPolicy.setApprovalSpenderAllowed(address(lockedLiquidityFactory), true);
+        assetPolicy.setAssetAllowed(address(paymentToken), true);
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("dutch-auction-liquidity");
+        DutchAuctionSale auction = _createDutchAuction(
+            boardroom, shareToken, paymentToken, "dutch-auction-liquidity-create", block.timestamp, 10 days
+        );
+
+        vm.warp(block.timestamp + 5 days);
+        uint256 expectedPayment = 750_000000;
+        vm.prank(buyer);
+        paymentToken.approve(address(auction), expectedPayment);
+        vm.prank(buyer);
+        auction.buy(BUY_SHARES, buyer, expectedPayment, block.timestamp);
+        vm.warp(auction.endTime());
+        auction.finalize();
+
+        uint256 liquidityShares = 100 ether;
+        uint256 liquidityQuote = 300_000000;
+        LockedLiquidityFactory.CreateParams memory params = LockedLiquidityFactory.CreateParams({
+            tokenA: address(shareToken),
+            tokenB: address(paymentToken),
+            amountADesired: liquidityShares,
+            amountBDesired: liquidityQuote,
+            amountAMin: liquidityShares * 95 / 100,
+            amountBMin: liquidityQuote * 95 / 100,
+            deadline: block.timestamp,
+            salt: keccak256("dutch-auction-liquidity-lock")
+        });
+        Boardroom.Call[] memory calls = new Boardroom.Call[](3);
+        calls[0] = _policyCall(
+            address(assetPolicy),
+            address(shareToken),
+            0,
+            abi.encodeWithSignature("approve(address,uint256)", address(lockedLiquidityFactory), liquidityShares)
+        );
+        calls[1] = _policyCall(
+            address(assetPolicy),
+            address(paymentToken),
+            0,
+            abi.encodeWithSignature("approve(address,uint256)", address(lockedLiquidityFactory), liquidityQuote)
+        );
+        calls[2] = _policyCall(
+            address(lockedLiquidityFactory),
+            address(lockedLiquidityFactory),
+            0,
+            abi.encodeCall(LockedLiquidityFactory.createLockedLiquidity, (params))
+        );
+
+        vm.prank(owner);
+        bytes[] memory results = boardroom.executeBatch(calls);
+        (address locker, address pool,,,) = abi.decode(results[2], (address, address, uint256, uint256, uint256));
+
+        assertEq(auction.settlementPrice(), 3_000000);
+        assertEq(boardroom.liquidityLocker(), locker);
+        assertEq(boardroom.liquidityPool(), pool);
+        assertEq(boardroom.liquidityQuoteAsset(), address(paymentToken));
+        assertGt(LockedLiquidity(locker).lockedLiquidity(), 0);
+    }
+
+    function testDutchAuctionCancellationAndWindDownLifecycleAreBounded() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("dutch-auction-lifecycle");
+        DutchAuctionSale auction = _createDutchAuction(
+            boardroom, shareToken, paymentToken, "dutch-auction-lifecycle-create", block.timestamp + 1 days, 10 days
+        );
+
+        vm.prank(owner);
+        vm.expectRevert(DutchAuctionSale.WindDownRequired.selector);
+        boardroom.execute(
+            _policyCall(address(distributionFactory), address(auction), 0, abi.encodeCall(DutchAuctionSale.close, ()))
+        );
+
+        vm.prank(owner);
+        boardroom.execute(
+            _policyCall(address(distributionFactory), address(auction), 0, abi.encodeCall(DutchAuctionSale.cancel, ()))
+        );
+        assertTrue(auction.isClosed());
+        assertEq(uint8(auction.saleStatus()), uint8(DutchAuctionSale.SaleStatus.Cancelled));
+        assertEq(auction.soldShares(), 0);
+
+        DutchAuctionSale windDownAuction = _createDutchAuction(
+            boardroom, shareToken, paymentToken, "dutch-auction-wind-down-create", block.timestamp, 10 days
+        );
+        vm.prank(owner);
+        boardroom.startWindDown();
+        boardroom.executeWindDownCall(
+            _policyCall(
+                address(distributionFactory), address(windDownAuction), 0, abi.encodeCall(DutchAuctionSale.close, ())
+            )
+        );
+
+        assertTrue(windDownAuction.isClosed());
+        assertEq(windDownAuction.soldShares(), 0);
+        assertFalse(boardroom.isIssuedDistribution(address(windDownAuction)));
+    }
+
+    function testDutchAuctionRejectsFeeOnTransferPaymentAtomically() public {
+        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("dutch-auction-fee-token");
+        FeeOnTransferDistributionCurrency feeToken = new FeeOnTransferDistributionCurrency("Fee USD", "FUSD", 6, 100);
+        feeToken.mint(buyer, 1_000_000000);
+
+        DutchAuctionSale auction = _createDutchAuction(
+            boardroom, shareToken, feeToken, "dutch-auction-fee-token-create", block.timestamp, 10 days
+        );
+        uint256 requiredPayment = auction.getPaymentAmount(50 ether);
+        vm.prank(buyer);
+        feeToken.approve(address(auction), requiredPayment);
+
+        vm.prank(buyer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DutchAuctionSale.UnexpectedTokenBalanceChange.selector,
+                address(feeToken),
+                requiredPayment,
+                requiredPayment * 99 / 100
+            )
+        );
+        auction.buy(50 ether, buyer, requiredPayment, block.timestamp);
+
+        assertEq(feeToken.balanceOf(address(boardroom)), 0);
+        assertEq(shareToken.balanceOf(buyer), 0);
+        assertEq(auction.remainingShares(), SALE_SHARES);
+        assertEq(auction.totalPayment(), 0);
     }
 
     function testProposerLossWindDownExcludesCanonicalDistributionInventory() public {
@@ -2142,6 +2358,44 @@ contract DistributionTest is Test {
         sale = FixedPriceSale(createdSale);
     }
 
+    function _createDutchAuction(
+        Boardroom boardroom,
+        BoardroomToken shareToken,
+        DistributionCurrency paymentToken_,
+        string memory saltLabel,
+        uint256 startsAt,
+        uint256 duration
+    ) internal returns (DutchAuctionSale auction) {
+        vm.startPrank(owner);
+        boardroom.mint(address(boardroom), SALE_SHARES);
+
+        bytes32 salt = keccak256(bytes(saltLabel));
+        address predictedAuction = distributionFactory.predictDutchAuctionAddress(address(boardroom), salt);
+        DutchAuctionSale.CreateParams memory params =
+            _auctionParams(address(shareToken), address(paymentToken_), SALE_SHARES, salt, startsAt, duration);
+
+        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        calls[0] = _policyCall(
+            address(assetPolicy),
+            address(shareToken),
+            0,
+            abi.encodeWithSignature("approve(address,uint256)", address(distributionFactory), SALE_SHARES)
+        );
+        calls[1] = _policyCall(
+            address(distributionFactory),
+            address(distributionFactory),
+            0,
+            abi.encodeCall(DistributionFactory.createDutchAuction, (params))
+        );
+
+        bytes[] memory results = boardroom.executeBatch(calls);
+        vm.stopPrank();
+
+        address createdAuction = abi.decode(results[1], (address));
+        assertEq(createdAuction, predictedAuction);
+        auction = DutchAuctionSale(createdAuction);
+    }
+
     function _createMigratingCurve(Boardroom boardroom, BoardroomToken shareToken, string memory saltLabel)
         internal
         returns (MigratingBondingCurve curve)
@@ -2284,6 +2538,27 @@ contract DistributionTest is Test {
             maxPerBuyer: 0,
             startTime: uint64(block.timestamp),
             endTime: 0,
+            salt: salt
+        });
+    }
+
+    function _auctionParams(
+        address shareToken,
+        address paymentToken_,
+        uint256 shareAmount,
+        bytes32 salt,
+        uint256 startsAt,
+        uint256 duration
+    ) internal pure returns (DutchAuctionSale.CreateParams memory params) {
+        params = DutchAuctionSale.CreateParams({
+            shareToken: shareToken,
+            paymentToken: paymentToken_,
+            shareAmount: shareAmount,
+            startPrice: AUCTION_START_PRICE,
+            floorPrice: AUCTION_FLOOR_PRICE,
+            maxPerBuyer: 0,
+            startTime: uint64(startsAt),
+            endTime: uint64(startsAt + duration),
             salt: salt
         });
     }

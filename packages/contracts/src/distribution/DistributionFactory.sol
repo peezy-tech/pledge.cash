@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import {LibClone} from "solady/utils/LibClone.sol";
 import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
+import {DutchAuctionSale} from "./DutchAuctionSale.sol";
 import {FixedPriceSale} from "./FixedPriceSale.sol";
 import {MerkleAirdrop} from "./MerkleAirdrop.sol";
 import {MigratingBondingCurve} from "./MigratingBondingCurve.sol";
@@ -23,6 +24,7 @@ interface IDistributionBoardroom {
 
 contract DistributionFactory is IBoardroomObligationPolicy {
     uint256 internal constant FIXED_PRICE_SALE_CREATE_DATA_LENGTH = 4 + 32 * 8;
+    uint256 internal constant DUTCH_AUCTION_CREATE_DATA_LENGTH = 4 + 32 * 9;
     uint256 internal constant MIGRATING_CURVE_CREATE_DATA_LENGTH = 4 + 32 * 12;
     uint256 internal constant MERKLE_AIRDROP_CREATE_DATA_LENGTH = 4 + 32 * 7;
     uint256 internal constant BPS = 10_000;
@@ -30,18 +32,21 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     uint256 internal constant MINIMUM_MIGRATION_FILL_BPS = 9_500;
     uint256 internal constant AMM_MINIMUM_LIQUIDITY = 1_000;
     uint256 internal constant MAX_CURVE_LIFETIME = 90 days;
+    uint256 internal constant MAX_DUTCH_AUCTION_LIFETIME = 90 days;
     uint256 internal constant MAX_CURVE_SUPPLY = type(uint112).max;
     uint256 public constant MAX_DISCOVERY_PAGE = 100;
 
     enum DistributionKind {
         FixedPriceSale,
         MigratingBondingCurve,
-        MerkleAirdrop
+        MerkleAirdrop,
+        DutchAuction
     }
 
     address public immutable lockedLiquidityFactory;
     address public immutable tokenGrantFactory;
     address public immutable fixedPriceSaleLogic;
+    address public immutable dutchAuctionLogic;
     address public immutable migratingBondingCurveLogic;
     address public immutable merkleAirdropLogic;
 
@@ -75,6 +80,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         lockedLiquidityFactory = lockedLiquidityFactory_;
         tokenGrantFactory = tokenGrantFactory_;
         fixedPriceSaleLogic = address(new FixedPriceSale());
+        dutchAuctionLogic = address(new DutchAuctionSale());
         migratingBondingCurveLogic = address(new MigratingBondingCurve());
         merkleAirdropLogic = address(new MerkleAirdrop());
     }
@@ -96,6 +102,26 @@ contract DistributionFactory is IBoardroomObligationPolicy {
 
         FixedPriceSale(sale).initialize(msg.sender, params);
         _checkedTransferFrom(params.shareToken, msg.sender, sale, params.shareAmount);
+    }
+
+    function createDutchAuction(DutchAuctionSale.CreateParams calldata params) external returns (address auction) {
+        _requireBoardroomShareToken(msg.sender, params.shareToken);
+        if (params.paymentToken == params.shareToken) revert InvalidAsset(params.paymentToken);
+        _requireAsset(params.paymentToken);
+        IDistributionBoardroom(msg.sender).reserveRedeemableAsset(params.paymentToken);
+
+        auction = _createDistribution(
+            dutchAuctionLogic,
+            msg.sender,
+            params.shareToken,
+            params.paymentToken,
+            params.shareAmount,
+            params.salt,
+            DistributionKind.DutchAuction
+        );
+
+        DutchAuctionSale(auction).initialize(msg.sender, params);
+        _checkedTransferFrom(params.shareToken, msg.sender, auction, params.shareAmount);
     }
 
     function createMigratingBondingCurve(MigratingBondingCurve.CreateParams calldata params)
@@ -222,6 +248,12 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         );
     }
 
+    function predictDutchAuctionAddress(address boardroom, bytes32 salt) external view returns (address) {
+        return LibClone.predictDeterministicAddress(
+            dutchAuctionLogic, _cloneSalt(boardroom, DistributionKind.DutchAuction, salt), address(this)
+        );
+    }
+
     function predictMigratingBondingCurveAddress(address boardroom, bytes32 salt) external view returns (address) {
         return LibClone.predictDeterministicAddress(
             migratingBondingCurveLogic,
@@ -250,6 +282,9 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         if (selector == DistributionFactory.createMerkleAirdrop.selector) {
             return _canCreateMerkleAirdrop(boardroom, data);
         }
+        if (selector == DistributionFactory.createDutchAuction.selector) {
+            return _canCreateDutchAuction(boardroom, data);
+        }
 
         return false;
     }
@@ -270,6 +305,9 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         }
         if (kind == DistributionKind.MerkleAirdrop) {
             return _isMerkleAirdropLifecycleSelector(selector);
+        }
+        if (kind == DistributionKind.DutchAuction) {
+            return _isDutchAuctionLifecycleSelector(selector);
         }
 
         return false;
@@ -325,6 +363,23 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         if (params.shareToken != IDistributionBoardroom(boardroom).shareToken()) return false;
         if (params.shareAmount == 0 || params.merkleRoot == bytes32(0)) return false;
         return _hasValidTimeWindow(params.startTime, params.endTime);
+    }
+
+    function _canCreateDutchAuction(address boardroom, bytes calldata data) internal view returns (bool) {
+        if (data.length != DUTCH_AUCTION_CREATE_DATA_LENGTH) return false;
+
+        DutchAuctionSale.CreateParams memory params = abi.decode(data[4:], (DutchAuctionSale.CreateParams));
+        if (params.shareToken != IDistributionBoardroom(boardroom).shareToken()) return false;
+        if (
+            params.paymentToken == address(0) || params.paymentToken == params.shareToken
+                || !_isAsset(params.paymentToken)
+        ) return false;
+        if (params.shareAmount == 0 || params.startPrice <= params.floorPrice || params.floorPrice == 0) return false;
+
+        uint256 effectiveStartTime = params.startTime == 0 ? block.timestamp : params.startTime;
+        if (params.endTime <= effectiveStartTime || uint256(params.endTime) <= block.timestamp) return false;
+        return uint256(params.endTime) - effectiveStartTime <= MAX_DUTCH_AUCTION_LIFETIME
+            && uint256(params.endTime) <= block.timestamp + MAX_DUTCH_AUCTION_LIFETIME;
     }
 
     function _createDistribution(
@@ -395,7 +450,8 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     function _isCreateDistributionSelector(bytes4 selector) internal pure returns (bool) {
         return selector == DistributionFactory.createFixedPriceSale.selector
             || selector == DistributionFactory.createMigratingBondingCurve.selector
-            || selector == DistributionFactory.createMerkleAirdrop.selector;
+            || selector == DistributionFactory.createMerkleAirdrop.selector
+            || selector == DistributionFactory.createDutchAuction.selector;
     }
 
     function _isFixedPriceSaleLifecycleSelector(bytes4 selector) internal pure returns (bool) {
@@ -408,6 +464,10 @@ contract DistributionFactory is IBoardroomObligationPolicy {
 
     function _isMerkleAirdropLifecycleSelector(bytes4 selector) internal pure returns (bool) {
         return selector == MerkleAirdrop.close.selector || selector == MerkleAirdrop.cancel.selector;
+    }
+
+    function _isDutchAuctionLifecycleSelector(bytes4 selector) internal pure returns (bool) {
+        return selector == DutchAuctionSale.close.selector || selector == DutchAuctionSale.cancel.selector;
     }
 
     function _requireBoardroomShareToken(address boardroom, address shareToken) internal view {

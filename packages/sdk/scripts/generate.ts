@@ -56,6 +56,7 @@ const contracts = [
     "boardroomRedemptionPayoutAbi",
   ],
   ["DistributionFactory", "packages/contracts/out/DistributionFactory.sol/DistributionFactory.json", "distributionFactoryAbi"],
+  ["DutchAuctionSale", "packages/contracts/out/DutchAuctionSale.sol/DutchAuctionSale.json", "dutchAuctionSaleAbi"],
   ["ERC20", "packages/contracts/out/ERC20.sol/ERC20.json", "erc20Abi"],
   ["FixedPriceSale", "packages/contracts/out/FixedPriceSale.sol/FixedPriceSale.json", "fixedPriceSaleAbi"],
   ["IBoardroomCallPolicy", "packages/contracts/out/IBoardroomCallPolicy.sol/IBoardroomCallPolicy.json", "boardroomCallPolicyAbi"],

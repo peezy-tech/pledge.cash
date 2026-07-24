@@ -103,6 +103,7 @@ export function sameAddress(first: string | undefined, second: string | undefine
 }
 
 export function distributionKindLabel(kind: BoardroomDistributionSnapshot["kind"]): string {
+  if (kind === "dutch-auction") return "Dutch auction";
   if (kind === "fixed-price-sale") return "Sale";
   if (kind === "migrating-bonding-curve") return "Curve";
   if (kind === "merkle-airdrop") return "Airdrop";
@@ -112,6 +113,9 @@ export function distributionKindLabel(kind: BoardroomDistributionSnapshot["kind"
 
 export function distributionStatusLabel(distribution: BoardroomDistributionSnapshot): string {
   if (distribution.error) return "Read failed";
+  if (distribution.kind === "dutch-auction" && distribution.state && "saleStatus" in distribution.state) {
+    return saleStatusLabel(distribution.state.saleStatus);
+  }
   if (distribution.kind === "fixed-price-sale" && distribution.state && "saleStatus" in distribution.state) {
     return saleStatusLabel(distribution.state.saleStatus);
   }

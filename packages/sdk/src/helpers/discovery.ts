@@ -9,6 +9,7 @@ import {
 import { pledgeCashErrorMessage } from "./errors";
 import {
   readBoardroomState,
+  readDutchAuctionState,
   readFixedPriceSaleState,
   readGrantState,
   readLockedLiquidityState,
@@ -27,6 +28,7 @@ import type {
   DiscoveryResult,
   EnrichedDiscovery,
   FixedPriceSaleState,
+  DutchAuctionState,
   GrantDiscoveryRange,
   GrantState,
   LockedLiquidityState,
@@ -325,7 +327,7 @@ export async function enrichDiscoveredGrants(
 export async function enrichDiscoveredDistributions(
   client: PledgeCashReadClient,
   distributions: readonly DiscoveredDistribution[],
-): Promise<EnrichedDiscovery<DiscoveredDistribution, FixedPriceSaleState | MigratingBondingCurveState | MerkleAirdropState>[]> {
+): Promise<EnrichedDiscovery<DiscoveredDistribution, FixedPriceSaleState | DutchAuctionState | MigratingBondingCurveState | MerkleAirdropState>[]> {
   return await Promise.all(
     distributions.map(async (distribution) => {
       try {
@@ -337,6 +339,9 @@ export async function enrichDiscoveredDistributions(
         }
         if (distribution.kind === "merkle-airdrop") {
           return { ...distribution, state: await readMerkleAirdropState(client, distribution.distribution), stale: false };
+        }
+        if (distribution.kind === "dutch-auction") {
+          return { ...distribution, state: await readDutchAuctionState(client, distribution.distribution), stale: false };
         }
 
         try {
@@ -618,6 +623,7 @@ function distributionKindLabel(kind: bigint | undefined): DiscoveredDistribution
   if (kind === 0n) return "fixed-price-sale";
   if (kind === 1n) return "migrating-bonding-curve";
   if (kind === 2n) return "merkle-airdrop";
+  if (kind === 3n) return "dutch-auction";
   return "unknown";
 }
 

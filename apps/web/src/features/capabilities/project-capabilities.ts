@@ -4,6 +4,7 @@ export type CapabilityStatus = "enabled" | "connect" | "switch" | "blocked" | "h
 
 export type ProjectCapability =
   | "participate.bond.purchase"
+  | "participate.dutchAuction.buy"
   | "participate.fixedSale.buy"
   | "participate.curve.buy"
   | "participate.curve.sell"
@@ -74,6 +75,7 @@ export type OpportunityCapability = Extract<
 
 const PROJECT_CAPABILITIES: ProjectCapability[] = [
   "participate.bond.purchase",
+  "participate.dutchAuction.buy",
   "participate.fixedSale.buy",
   "participate.curve.buy",
   "participate.curve.sell",
@@ -100,6 +102,7 @@ const PROJECT_CAPABILITIES: ProjectCapability[] = [
 
 const OPPORTUNITY_CAPABILITIES: OpportunityCapability[] = [
   "participate.bond.purchase",
+  "participate.dutchAuction.buy",
   "participate.fixedSale.buy",
   "participate.curve.buy",
   "participate.curve.sell",

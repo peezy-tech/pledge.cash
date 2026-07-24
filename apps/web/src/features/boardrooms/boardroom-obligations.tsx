@@ -1,4 +1,4 @@
-import type { BondMarketState, FixedPriceSaleState, MerkleAirdropState, MigratingBondingCurveState } from "@pledge.cash/sdk";
+import type { BondMarketState, DutchAuctionState, FixedPriceSaleState, MerkleAirdropState, MigratingBondingCurveState } from "@pledge.cash/sdk";
 import { Children } from "react";
 import type React from "react";
 import { AddressLink, Facts } from "../../components/shell";
@@ -25,6 +25,7 @@ import {
 export function ObligationLists({
   boardroomSnapshot,
   scope = "all",
+  setDutchAuctionAddress,
   setFixedPriceSaleAddress,
   setBondMarketAddress,
   setMerkleAirdropAddress,
@@ -33,6 +34,7 @@ export function ObligationLists({
 }: {
   boardroomSnapshot: BoardroomSnapshot | undefined;
   scope?: "all" | "distributions" | "grants" | "liquidity";
+  setDutchAuctionAddress: (address: string) => void;
   setFixedPriceSaleAddress: (address: string) => void;
   setBondMarketAddress: (address: string) => void;
   setMerkleAirdropAddress: (address: string) => void;
@@ -56,6 +58,7 @@ export function ObligationLists({
             distribution={distribution}
             key={distribution.address}
             setBondMarketAddress={setBondMarketAddress}
+            setDutchAuctionAddress={setDutchAuctionAddress}
             setFixedPriceSaleAddress={setFixedPriceSaleAddress}
             setMerkleAirdropAddress={setMerkleAirdropAddress}
             setMigratingCurveAddress={setMigratingCurveAddress}
@@ -120,18 +123,21 @@ function GrantRow({ grant }: { grant: BoardroomGrantSnapshot }): React.JSX.Eleme
 function DistributionRow({
   distribution,
   setBondMarketAddress,
+  setDutchAuctionAddress,
   setFixedPriceSaleAddress,
   setMerkleAirdropAddress,
   setMigratingCurveAddress,
 }: {
   distribution: BoardroomDistributionSnapshot;
   setBondMarketAddress: (address: string) => void;
+  setDutchAuctionAddress: (address: string) => void;
   setFixedPriceSaleAddress: (address: string) => void;
   setMerkleAirdropAddress: (address: string) => void;
   setMigratingCurveAddress: (address: string) => void;
 }): React.JSX.Element {
   const addressAction = distributionAddressAction(distribution.kind, {
     setBondMarketAddress,
+    setDutchAuctionAddress,
     setFixedPriceSaleAddress,
     setMerkleAirdropAddress,
     setMigratingCurveAddress,
@@ -163,12 +169,14 @@ function distributionAddressAction(
   kind: BoardroomDistributionSnapshot["kind"],
   setters: {
     setBondMarketAddress: (address: string) => void;
+    setDutchAuctionAddress: (address: string) => void;
     setFixedPriceSaleAddress: (address: string) => void;
     setMerkleAirdropAddress: (address: string) => void;
     setMigratingCurveAddress: (address: string) => void;
   },
 ): { label: string; setAddress: (address: string) => void } | undefined {
   if (kind === "bond-market") return { label: "Use Bond", setAddress: setters.setBondMarketAddress };
+  if (kind === "dutch-auction") return { label: "Use Auction", setAddress: setters.setDutchAuctionAddress };
   if (kind === "fixed-price-sale") return { label: "Use Sale", setAddress: setters.setFixedPriceSaleAddress };
   if (kind === "migrating-bonding-curve") return { label: "Use Curve", setAddress: setters.setMigratingCurveAddress };
   if (kind === "merkle-airdrop") return { label: "Use Airdrop", setAddress: setters.setMerkleAirdropAddress };
@@ -202,6 +210,16 @@ function LockerRow({ locker, setLockedLiquidityAddress }: { locker: BoardroomLoc
 }
 
 function distributionFacts(distribution: BoardroomDistributionSnapshot): { label: string; value: React.ReactNode }[] {
+  if (distribution.kind === "dutch-auction") {
+    const state = distribution.state as DutchAuctionState | undefined;
+    const paymentToken = distributionPaymentTokenAddress(distribution);
+    return [
+      { label: "Remaining shares", value: formatTokenAmount(remainingDistributionShares(distribution), distribution.shareTokenMetadata) },
+      { label: "Payment token", value: paymentToken ? <AddressLink address={paymentToken} /> : "Unknown" },
+      { label: "Current price", value: formatTokenAmount(state?.currentPrice, distribution.paymentTokenMetadata) },
+      { label: "Settlement price", value: formatTokenAmount(state?.settlementPrice, distribution.paymentTokenMetadata) },
+    ];
+  }
   if (distribution.kind === "fixed-price-sale") {
     const state = distribution.state as FixedPriceSaleState | undefined;
     const paymentToken = distributionPaymentTokenAddress(distribution);

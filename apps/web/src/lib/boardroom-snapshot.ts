@@ -13,6 +13,7 @@ import {
   type PledgeCashLogClient,
   readBoardroomState,
   readBondMarketState,
+  readDutchAuctionState,
   readFixedPriceSaleState,
   readGrantState,
   readLockedLiquidityState,
@@ -248,7 +249,23 @@ async function readDistributionSummary(
       state: await readFixedPriceSaleState(client, distribution),
     };
   } catch (fixedPriceError) {
-    return await readCurveDistributionSummary(client, distribution, fixedPriceError);
+    return await readDutchAuctionDistributionSummary(client, distribution, fixedPriceError);
+  }
+}
+
+async function readDutchAuctionDistributionSummary(
+  client: PledgeCashReadClient,
+  distribution: Address,
+  fixedPriceError: unknown,
+): Promise<BoardroomDistributionSnapshot> {
+  try {
+    return {
+      address: distribution,
+      kind: "dutch-auction",
+      state: await readDutchAuctionState(client, distribution),
+    };
+  } catch (dutchAuctionError) {
+    return await readCurveDistributionSummary(client, distribution, fixedPriceError, dutchAuctionError);
   }
 }
 
@@ -256,6 +273,7 @@ async function readCurveDistributionSummary(
   client: PledgeCashReadClient,
   distribution: Address,
   fixedPriceError: unknown,
+  dutchAuctionError: unknown,
 ): Promise<BoardroomDistributionSnapshot> {
   try {
     return {
@@ -264,7 +282,7 @@ async function readCurveDistributionSummary(
       state: await readMigratingBondingCurveState(client, distribution),
     };
   } catch (curveError) {
-    return await readMerkleAirdropDistributionSummary(client, distribution, fixedPriceError, curveError);
+    return await readMerkleAirdropDistributionSummary(client, distribution, fixedPriceError, dutchAuctionError, curveError);
   }
 }
 
@@ -272,6 +290,7 @@ async function readMerkleAirdropDistributionSummary(
   client: PledgeCashReadClient,
   distribution: Address,
   fixedPriceError: unknown,
+  dutchAuctionError: unknown,
   curveError: unknown,
 ): Promise<BoardroomDistributionSnapshot> {
   try {
@@ -282,7 +301,7 @@ async function readMerkleAirdropDistributionSummary(
     };
   } catch (airdropError) {
     return await readBondMarketDistributionSummary(
-      client, distribution, fixedPriceError, curveError, airdropError,
+      client, distribution, fixedPriceError, dutchAuctionError, curveError, airdropError,
     );
   }
 }
@@ -291,6 +310,7 @@ async function readBondMarketDistributionSummary(
   client: PledgeCashReadClient,
   distribution: Address,
   fixedPriceError: unknown,
+  dutchAuctionError: unknown,
   curveError: unknown,
   airdropError: unknown,
 ): Promise<BoardroomDistributionSnapshot> {
@@ -304,7 +324,7 @@ async function readBondMarketDistributionSummary(
     return {
       address: distribution,
       kind: "unknown",
-      error: `${errorMessage(fixedPriceError)}; ${errorMessage(curveError)}; ${errorMessage(airdropError)}; ${errorMessage(bondError)}`,
+      error: `${errorMessage(fixedPriceError)}; ${errorMessage(dutchAuctionError)}; ${errorMessage(curveError)}; ${errorMessage(airdropError)}; ${errorMessage(bondError)}`,
     };
   }
 }

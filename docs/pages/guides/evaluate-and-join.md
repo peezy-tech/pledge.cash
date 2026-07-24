@@ -38,6 +38,7 @@ Read [Canonical identity](../reference/canonical-identity) for the checks behind
 | Path | What you receive | What you pay | Important limit |
 | --- | --- | --- | --- |
 | Fixed-price sale | Project shares from sale escrow | The configured payment token, sent to the Boardroom | Maximum payment and per-wallet cap |
+| Dutch auction | Project shares from auction escrow | Payment token at the descending execution price | Fresh quote, maximum payment, deadline, and per-wallet cap |
 | Migrating curve | Project shares from curve inventory | Quote token held in the curve reserve | Maximum buy cost or minimum sell refund |
 | Merkle airdrop | Shares now or a vesting grant | Usually gas; a paid grant may require payment later | Exact published index, amount, proof, and claim mode |
 | AMM | Output token from a pool | Exact input token | Minimum output and quote deadline |

@@ -1,6 +1,6 @@
 ---
 title: Distributions and liquidity
-description: Compare bond markets, fixed-price sales, Merkle airdrops, migrating curves, AMM pools, and Boardroom-owned locked liquidity.
+description: Compare bond markets, Dutch auctions, fixed-price sales, Merkle airdrops, migrating curves, AMM pools, and Boardroom-owned locked liquidity.
 ---
 
 # Distributions and liquidity
@@ -12,6 +12,17 @@ Distribution contracts put project shares into a defined participation path. AMM
 A sale escrows a fixed share inventory. Buyers pay the configured ERC20 directly to the Boardroom and receive shares from escrow. Payment rounds up to the payment token's smallest unit. Limits include the sale window, remaining inventory, buyer cap, user maximum, and deadline.
 
 Close or cancellation returns unsold shares to the Boardroom. Buying also stops automatically when Boardroom wind-down begins.
+
+## Dutch auction
+
+A Dutch auction escrows a fixed inventory and starts at a high unit price that descends linearly toward a floor during
+a finite window. A buyer receives shares immediately and pays the price when the purchase transaction executes—not the
+price shown when the form first opened. Maximum payment and deadline protect the order.
+
+Selling out closes the auction. Otherwise anyone can finalize it after the end and return unsold shares. The settlement
+price is the last successful purchase price, not an average. The Boardroom may later choose to put some shares and
+proceeds into locked liquidity, but no percentage is promised or selected by default. A new pool can use settlement
+price as its initial ratio; an existing pool must use its live reserve ratio.
 
 ## Bond market
 
@@ -66,4 +77,6 @@ redeemable asset before closing. Snapshotting and RedemptionsOpen forbid liquidi
 
 ## One project, several prices
 
-The bond auction price, fixed sale price, curve quote, and AMM spot price can differ. None is guaranteed to equal treasury value or final redemption value. Compare contract address, inventory, reserves, fees, position rights, slippage, deadlines, lifecycle status, and exit route before participating.
+The bond auction price, Dutch-auction price, fixed sale price, curve quote, and AMM spot price can differ. None is
+guaranteed to equal treasury value or final redemption value. Compare contract address, inventory, reserves, fees,
+position rights, slippage, deadlines, lifecycle status, and exit route before participating.

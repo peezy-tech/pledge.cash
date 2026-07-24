@@ -551,6 +551,52 @@ describe("product market surfaces", () => {
     expect(mounted.timers.pendingCount).toBe(0);
   });
 
+  test("recomputes a live Dutch-auction price each second from its schedule", () => {
+    const mounted = mountMarketMetrics(
+      <ProjectMarketOverview dashboard={timedDutchAuctionDashboard(100n, 110n)} />,
+      100_000,
+    );
+
+    try {
+      expect(metricValueStartingWith(mounted.container, "Current project market metrics", "Price ·"))
+        .toBe("5 USDC / ATLAS");
+      act(() => mounted.timers.advanceBy(1_000));
+      expect(metricValueStartingWith(mounted.container, "Current project market metrics", "Price ·"))
+        .toBe("4.6 USDC / ATLAS");
+      expect(mounted.timers.pendingCount).toBe(1);
+    } finally {
+      mounted.cleanup();
+    }
+  });
+
+  test("does not present a terminal Dutch-auction snapshot as a live price", () => {
+    const closed = timedDutchAuctionDashboard(100n, 110n);
+    const distribution = closed.snapshot.distributionSummaries[0];
+    if (!distribution?.state || !("startPrice" in distribution.state)) throw new Error("Expected Dutch-auction fixture");
+    const terminal = {
+      ...closed,
+      snapshot: {
+        ...closed.snapshot,
+        distributionSummaries: [{
+          ...distribution,
+          state: {
+            ...distribution.state,
+            closed: true,
+            remainingShares: 0n,
+            saleStatus: 1,
+            settlementPrice: 4_600_000n,
+          },
+        }],
+      },
+    } satisfies ProductBoardroomDashboardState;
+    const view = projectMarketViewModel(terminal, 105n);
+
+    expect(view.liveness.status).toBe("unavailable");
+    expect(view.price.status).toBe("unavailable");
+    expect(view.routeSource).toBe("No live Dutch auction price");
+    expect(view.metrics.find((metric) => metric.label.startsWith("Price ·"))?.label).not.toContain("Live");
+  });
+
   test("preserves Explore query/filter URL semantics and unrelated parameters", () => {
     const calls: string[] = [];
     const href = replaceExploreSearchState(
@@ -681,6 +727,51 @@ function timedSaleDashboard(startTime: bigint, endTime: bigint): ProductBoardroo
   };
 }
 
+function timedDutchAuctionDashboard(startTime: bigint, endTime: bigint): ProductBoardroomDashboardState {
+  const base = timedSaleDashboard(startTime, endTime);
+  const distribution = base.snapshot.distributionSummaries[0];
+  const entry = base.catalog[0];
+  if (!distribution?.state || !("paymentToken" in distribution.state) || !entry) {
+    throw new Error("Expected sale fixture");
+  }
+  return {
+    ...base,
+    catalog: [{
+      ...entry,
+      distributionKind: "dutch-auction",
+      path: "Dutch auction",
+    }],
+    snapshot: {
+      ...base.snapshot,
+      distributionSummaries: [{
+        ...distribution,
+        kind: "dutch-auction",
+        state: {
+          address: distribution.address,
+          factory: distribution.state.factory,
+          boardroom: distribution.state.boardroom,
+          shareToken: distribution.state.shareToken,
+          paymentToken: distribution.state.paymentToken,
+          saleSupply: distribution.state.saleSupply,
+          remainingShares: distribution.state.remainingShares,
+          startPrice: 5_000_000n,
+          floorPrice: 1_000_000n,
+          currentPrice: 5_000_000n,
+          maxPerBuyer: distribution.state.maxPerBuyer,
+          totalPayment: 0n,
+          soldShares: 2n * 10n ** 18n,
+          lastPurchasePrice: 0n,
+          settlementPrice: 0n,
+          startTime,
+          endTime,
+          saleStatus: 0,
+          closed: false,
+        },
+      }],
+    },
+  };
+}
+
 function metricValue(container: HTMLElement, groupLabel: string, metricLabel: string): string | undefined {
   const group = container.querySelector(`[aria-label="${groupLabel}"]`);
   const term = Array.from(group?.querySelectorAll("dt") ?? []).find((candidate) => candidate.textContent === metricLabel);
@@ -691,6 +782,13 @@ function metricDetail(container: HTMLElement, groupLabel: string, metricLabel: s
   const group = container.querySelector(`[aria-label="${groupLabel}"]`);
   const term = Array.from(group?.querySelectorAll("dt") ?? []).find((candidate) => candidate.textContent === metricLabel);
   return term?.parentElement?.querySelectorAll("dd")[1]?.textContent ?? undefined;
+}
+
+function metricValueStartingWith(container: HTMLElement, groupLabel: string, metricLabelPrefix: string): string | undefined {
+  const group = container.querySelector(`[aria-label="${groupLabel}"]`);
+  const term = Array.from(group?.querySelectorAll("dt") ?? [])
+    .find((candidate) => candidate.textContent?.startsWith(metricLabelPrefix));
+  return term?.parentElement?.querySelector("dd")?.textContent ?? undefined;
 }
 
 function mountMarketMetrics(element: ReactNode, nowMilliseconds: number): {

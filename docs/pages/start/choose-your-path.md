@@ -15,7 +15,9 @@ Open `Explore`, search by name, symbol, or Boardroom address, then select a proj
 
 ## I want to buy, claim, or swap project tokens
 
-Open the project’s `Participate` section. The app shows only the routes discovered for that Boardroom: non-transferable bond markets, fixed-price sales, bonding curves, airdrops, and AMM markets. Review whether the route is live, then connect the wallet that will act.
+Open the project’s `Participate` section. The app shows only the routes discovered for that Boardroom: non-transferable
+bond markets, Dutch auctions, fixed-price sales, bonding curves, airdrops, and AMM markets. Review whether the route is
+live, then connect the wallet that will act.
 
 [Learn about the project workspace](../using/project-workspace)
 

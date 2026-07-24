@@ -10,6 +10,7 @@ import {
   buildControllerUpdateConfigurationData,
   buildBoardroomLaunchTransaction,
   buildBoardroomMintCall,
+  buildDutchAuctionBuyTransaction,
   buildFixedPriceSaleBuyTransaction,
   buildGrantRightTransferTransaction,
   buildGrantSettlementTransaction,
@@ -18,6 +19,7 @@ import {
   governanceStakerPowerThreshold,
   planBoardroomCallExecution,
   readBoardroomStakerPower,
+  readDutchAuctionParticipationQuote,
   readFixedPriceSaleParticipationQuote,
   readGrantSettlementQuote,
   readMerkleAirdropClaimState,
@@ -239,6 +241,48 @@ describe("participation readers and builders", () => {
       paymentAllowance: 500n,
     });
     expect(buildFixedPriceSaleBuyTransaction({ sale, shareAmount: 100n, recipient, maxPayment: 251n, deadline: 900n })).toMatchObject({
+      functionName: "buy",
+      args: [100n, recipient, 251n, 900n],
+    });
+  });
+
+  test("reads Dutch-auction live cost, cap, balance, and allowance", async () => {
+    const client = readClient((address, functionName) => {
+      if (address === paymentToken && functionName === "balanceOf") return 1_000n;
+      if (address === paymentToken && functionName === "allowance") return 500n;
+      return {
+        factory,
+        boardroom,
+        shareToken,
+        paymentToken,
+        saleSupply: 1_000n,
+        remainingShares: 600n,
+        startPrice: 40n,
+        floorPrice: 20n,
+        currentPrice: 30n,
+        maxPerBuyer: 500n,
+        totalPayment: 10_000n,
+        soldShares: 400n,
+        lastPurchasePrice: 31n,
+        settlementPrice: 0n,
+        startTime: 100n,
+        endTime: 1_000n,
+        saleStatus: 0,
+        isClosed: false,
+        getPaymentAmount: 250n,
+        purchasedBy: 450n,
+      }[functionName];
+    });
+
+    await expect(readDutchAuctionParticipationQuote(client, { auction: sale, buyer: account, shareAmount: 100n })).resolves.toMatchObject({
+      paymentAmount: 250n,
+      purchasedBy: 450n,
+      remainingBuyerCapacity: 50n,
+      paymentBalance: 1_000n,
+      paymentAllowance: 500n,
+      state: { currentPrice: 30n, totalPayment: 10_000n },
+    });
+    expect(buildDutchAuctionBuyTransaction({ auction: sale, shareAmount: 100n, recipient, maxPayment: 251n, deadline: 900n })).toMatchObject({
       functionName: "buy",
       args: [100n, recipient, 251n, 900n],
     });

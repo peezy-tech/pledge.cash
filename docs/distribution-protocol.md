@@ -1,9 +1,9 @@
 # Distribution Protocol
 
 This document describes the candidate distribution contracts in `packages/contracts/src/distribution/`. The candidate is
-a mainnet NO-GO. Fixed-price and Merkle paths use the accepted unbounded obligation model. The bonding-curve terminal
-paths implement the product decisions approved for this candidate, but still require release-candidate and independent
-security proof before deployment.
+a mainnet NO-GO. Fixed-price, Dutch-auction, and Merkle paths use the accepted unbounded obligation model. The
+bonding-curve terminal paths implement the product decisions approved for this candidate, but still require
+release-candidate and independent security proof before deployment.
 
 ## Governance envelope
 
@@ -29,6 +29,9 @@ Per-Boardroom discovery is append-only and exposed through `distributionCountFor
 from discovery. Boardroom active membership is separate: permissionless pruning decrements scalar active counts without
 erasing provenance.
 
+`DistributionKind.DutchAuction` is appended as kind `3`; the legacy fixed-price, curve, and Merkle values remain `0`,
+`1`, and `2`.
+
 There is no concurrent-distribution capacity ceiling.
 
 ## Fixed-price sale
@@ -49,6 +52,34 @@ checks.
 Only a policy-checked Boardroom call closes or cancels the sale. Unsold inventory returns exactly to the Boardroom.
 Starting wind-down stops new buys. A closed sale remains permanent factory history and can be pruned from active
 Boardroom membership.
+
+## Dutch auction
+
+A Dutch auction escrows a fixed share inventory and exposes one immutable linear price schedule:
+
+```text
+price(t) = startPrice - floor((startPrice - floorPrice) * elapsed / duration)
+```
+
+Creation requires a readable non-share payment token, nonzero inventory, a strictly descending positive price range,
+and a finite window that ends no more than 90 days after creation. A zero start timestamp means “start now”; a future
+start does not extend the absolute 90-day bound.
+
+Purchases deliver shares immediately and move payment directly from the buyer to the Boardroom. Payment rounds up at
+the price observed during execution. The purchase window is end-exclusive: at `endTime`, buys are closed and
+permissionless finalization is available. Each call binds recipient, exact share amount, maximum payment, and deadline;
+the optional per-buyer cap is keyed to `msg.sender`, not the recipient. Exact sender and recipient balance checks reject
+fee-on-transfer and sender-surcharge behavior atomically.
+
+Selling the final share closes the auction immediately. Otherwise anyone may call `finalize` at or after the end time,
+which closes the obligation and returns unsold shares. The recorded `settlementPrice` is the last successful purchase
+price, not the average paid price or the scheduled floor; it is zero when no purchase occurred. A Boardroom may cancel
+only before the scheduled start and before any purchase. Early closure is available only through Boardroom wind-down.
+
+Post-auction liquidity is a separate, optional Boardroom decision. The auction neither reserves liquidity nor commits
+proceeds. For a new canonical pool, the settlement price is the reference ratio for the operator's explicit
+locked-liquidity transaction. If that canonical pool already exists, additions use its live reserve ratio. The UI
+intentionally supplies no default proceeds percentage, and all amounts and minimums remain explicit.
 
 ## Merkle airdrop
 
@@ -173,6 +204,9 @@ snapshot rule.
 - No stranded quote path may mark the curve closed before recovery or the delayed, vetoable wind-down forfeiture.
 - Factory discovery is append-only and bounded by page size, not lifetime count.
 - Parent-to-child creation is atomic and reentrancy-safe.
+- Dutch-auction prices never increase, payment rounds up, and settlement records only the last successful execution
+  price.
+- Auction finalization is permissionless and bounded; optional liquidity remains a separate governed action.
 - No lifecycle transition performs work proportional to unbounded history.
 
 ## Deterministic proof

@@ -49,6 +49,8 @@ Studio can coordinate these canonical modules while the Boardroom is active:
 
 - **Grant:** approve grant-token escrow, then create an escrow-backed schedule. Paid grants also admit their payment token as a potential treasury asset.
 - **Fixed-price sale:** approve project-share inventory, then create a sale whose buyer payments go directly to the Boardroom.
+- **Dutch auction:** approve project-share inventory, then create a finite descending-price sale. Finalization is
+  permissionless after expiry; any later locked-liquidity allocation is explicit and optional.
 - **Merkle airdrop:** approve project-share inventory and publish a root, claim window, and distribution-specific maximum grant-claim count. There is no global Boardroom grant-slot capacity.
 - **Migrating curve:** approve sale plus migration inventory, configure quote economics, and reserve the future locker and AMM initialization path.
 - **Locked liquidity:** approve both assets and create the one permanent Boardroom pool/locker pair. Liquidity may be

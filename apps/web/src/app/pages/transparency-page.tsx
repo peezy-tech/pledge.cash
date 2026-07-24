@@ -551,7 +551,7 @@ function GrantStatus({ grant }: { grant: BoardroomGrantSnapshot }): React.JSX.El
 
 function DistributionStatus({ distribution }: { distribution: BoardroomDistributionSnapshot }): React.JSX.Element {
   if (distribution.error || !distribution.state) return <Badge variant="danger">Read issue</Badge>;
-  if ("currentPrice" in distribution.state) {
+  if ("live" in distribution.state) {
     if (distribution.state.closed) return <Badge variant="muted">Settled</Badge>;
     if (distribution.state.live) return <Badge variant="default">Live</Badge>;
     return <Badge variant={distribution.state.status === 0 ? "warning" : "muted"}>{distribution.state.status === 0 ? "Scheduled / concluded" : "Claims pending"}</Badge>;
@@ -628,6 +628,7 @@ function distributionRemaining(distribution: BoardroomDistributionSnapshot): big
 
 function distributionKindLabel(kind: BoardroomDistributionSnapshot["kind"]): string {
   if (kind === "bond-market") return "Bond market";
+  if (kind === "dutch-auction") return "Dutch auction";
   if (kind === "fixed-price-sale") return "Fixed-price sale";
   if (kind === "migrating-bonding-curve") return "Bonding curve";
   if (kind === "merkle-airdrop") return "Airdrop";

@@ -39,20 +39,26 @@ An issued grant is a contract commitment. Confirm funding, payment terms, and da
 
 ## Distributions
 
-Use `Distributions` to choose `Fixed price`, `Bond market`, `Airdrop`, or `Bonding curve`.
+Use `Distributions` to choose `Dutch auction`, `Fixed price`, `Bond market`, `Airdrop`, or `Bonding curve`.
 
+- a Dutch auction sets inventory, payment token, descending start/floor prices, buyer cap, finite schedule, and salt.
 - A fixed-price sale sets inventory, payment token, unit price, buyer cap, and schedule.
 - a bond market sets reserve or first-party LP quote asset, pre-funded capacity, auction prices, debt buffer, vesting, cadence, and schedule. Bond positions are non-transferable.
 - a Merkle airdrop sets inventory, root, claim schedule, optional grant-claim cap, and salt.
 - a migrating bonding curve sets sale and migration inventory, quote token, curve terms, graduation target, liquidity share, schedule, and salts.
 
-Existing routes remain listed. Available lifecycle actions include closing a bond market, closing or cancelling other distributions, and curve migration when the contract state and authority allow them.
+Existing routes remain listed. Dutch auctions can be finalized permissionlessly after expiry; Boardroom cancellation is
+pre-start only and Boardroom closure is reserved for wind-down. Other lifecycle actions include closing a bond market,
+closing or cancelling other distributions, and curve migration when the contract state and authority allow them.
 
 ## Liquidity
 
 Use `Liquidity` for Boardroom-owned `Locked Liquidity` and, when a project AMM pool exists, `Add Liquidity` and `Manage LP`. Confirm token pair, desired amounts, minimums, recipient, deadlines, and whether native-asset wrapping is enabled.
 
 If the app says `No project AMM pool is available`, create or migrate project liquidity first. Studio does not accept an unrelated pool as project liquidity.
+
+After a Dutch auction, liquidity remains optional. Studio does not prefill a proceeds percentage. Use the auction's last
+successful price only when initializing a new pool; add to an existing canonical pool at its live ratio.
 
 ## Governance
 

@@ -3,6 +3,7 @@ import type {
   Address,
   BondMarketState,
   BoardroomState,
+  DutchAuctionState,
   FixedPriceSaleState,
   GrantState,
   LockedLiquidityState,
@@ -14,6 +15,7 @@ import type {
 import {
   assertCanonicalBondMarket,
   assertCanonicalBoardroom,
+  assertCanonicalDutchAuction,
   assertCanonicalFixedPriceSale,
   assertCanonicalGrant,
   assertCanonicalLockedLiquidity,
@@ -59,6 +61,12 @@ const saleState = {
   factory: distributionFactory,
   shareToken,
 } as FixedPriceSaleState;
+const auctionState = {
+  address: sale,
+  boardroom,
+  factory: distributionFactory,
+  shareToken,
+} as DutchAuctionState;
 const airdropState = {
   address: airdrop,
   boardroom,
@@ -154,6 +162,21 @@ describe("canonical product provenance", () => {
       { ...boardroomState, issuedDistributions: [] },
       saleState,
     )).resolves.toBeUndefined();
+  });
+
+  test("binds Dutch auctions to the appended factory kind without changing legacy kinds", async () => {
+    await expect(assertCanonicalDutchAuction(
+      registryClient({ distributionKind: 3 }),
+      deployment,
+      boardroomState,
+      auctionState,
+    )).resolves.toBeUndefined();
+    await expect(assertCanonicalDutchAuction(
+      registryClient({ distributionKind: 0 }),
+      deployment,
+      boardroomState,
+      auctionState,
+    )).rejects.toThrow("type record");
   });
 
   test("verifies airdrop and curve deployment dependencies", async () => {

@@ -29,10 +29,10 @@ Use the exact commands in the engineering deployment note; network gas behavior 
 
 Local Anvil uses chain id `31337`, normally on port `8547`. Deploy the full stack with a local wrapped-native contract, write the ignored local artifact, then run the maintained seed scenario.
 
-The seed covers standalone grant variants plus eight Boardroom projects: direct canonical AMM, active fixed price, active curve,
-closed sale, live Merkle airdrop, launched generation-1 controller governance with a scheduled operation, winding down
-with an open distribution blocker, and winding down with CASH registered while the snapshot delay remains pending. The
-fixture does not skip the required Snapshotting phase. The seed manifest carries deterministic
+The seed covers standalone grant variants plus nine Boardroom projects: direct canonical AMM, active fixed price, active
+Dutch auction, active curve, closed sale, live Merkle airdrop, launched generation-1 controller governance with a
+scheduled operation, winding down with an open distribution blocker, and winding down with CASH registered while the
+snapshot delay remains pending. The fixture does not skip the required Snapshotting phase. The seed manifest carries deterministic
 actors, controller/proposer identity, operation hash/salt/calldata/Boardroom epoch, airdrop proofs, blocker identity,
 and snapshot-pending balances. Read ETA and expiry from the controller's `operationState`; Forge simulation timestamps are
 deliberately excluded from the fixture.

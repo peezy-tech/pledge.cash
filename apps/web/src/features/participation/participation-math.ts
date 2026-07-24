@@ -71,10 +71,11 @@ export function unixWindowStatus(
   startTime: bigint,
   endTime: bigint,
   nowSeconds = Math.floor(Date.now() / 1_000),
+  endExclusive = false,
 ): "ended" | "not-started" | "open" {
   const now = BigInt(nowSeconds);
   if (now < startTime) return "not-started";
-  if (endTime !== 0n && now > endTime) return "ended";
+  if (endTime !== 0n && (endExclusive ? now >= endTime : now > endTime)) return "ended";
   return "open";
 }
 

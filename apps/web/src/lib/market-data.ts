@@ -41,6 +41,11 @@ export type FixedSaleRoutePrice = NormalizedPrice & {
   sale: Address;
 };
 
+export type DutchAuctionRoutePrice = NormalizedPrice & {
+  source: "dutch-auction";
+  auction: Address;
+};
+
 export type BondMarketRoutePrice = NormalizedPrice & {
   source: "bond-market";
   market: Address;
@@ -54,7 +59,7 @@ export type CurveQuoteRoutePrice = NormalizedPrice & {
   quoteAmount: ExactTokenAmount;
 };
 
-export type RoutePrice = VerifiedAmmSpotPrice | FixedSaleRoutePrice | BondMarketRoutePrice | CurveQuoteRoutePrice;
+export type RoutePrice = VerifiedAmmSpotPrice | FixedSaleRoutePrice | DutchAuctionRoutePrice | BondMarketRoutePrice | CurveQuoteRoutePrice;
 export type RoutePriceState = MetricState<RoutePrice>;
 
 export type RouteLiveness =
@@ -92,6 +97,10 @@ type ExecutableRouteCommonInput = {
 
 export type ExecutableDistributionRouteInput =
   | (ExecutableRouteCommonInput & {
+      kind: "dutch-auction";
+      remainingShares: bigint;
+    })
+  | (ExecutableRouteCommonInput & {
       kind: "fixed-price-sale";
       remainingShares: bigint;
     })
@@ -113,6 +122,12 @@ export type MarketActivity24h = {
 };
 
 export type DistributionSupplyRecord =
+  | {
+      address: Address;
+      kind: "dutch-auction";
+      saleSupply: bigint;
+      soldShares: bigint;
+    }
   | {
       address: Address;
       kind: "fixed-price-sale";
@@ -304,6 +319,31 @@ export function fixedSaleUnitPrice(input: {
   });
 }
 
+export function dutchAuctionUnitPrice(input: {
+  auction: Address;
+  projectToken: Address;
+  projectDecimals: number;
+  quoteToken: Address;
+  quoteDecimals: number;
+  priceWad: bigint;
+}): MetricState<DutchAuctionRoutePrice> {
+  if (input.priceWad <= 0n) return unavailableMetric("The Dutch auction does not expose a positive current price.");
+  const projectDecimals = checkedDecimals(input.projectDecimals);
+  const quoteDecimals = checkedDecimals(input.quoteDecimals);
+  return knownMetric({
+    source: "dutch-auction",
+    auction: input.auction,
+    baseToken: input.projectToken,
+    baseDecimals: projectDecimals,
+    quoteToken: input.quoteToken,
+    quoteDecimals,
+    quotePerBase: exactRational(
+      input.priceWad * powerOfTen(projectDecimals),
+      WAD * powerOfTen(quoteDecimals),
+    ),
+  });
+}
+
 export function bondMarketUnitPrice(input: {
   market: Address;
   projectToken: Address;
@@ -406,12 +446,12 @@ export function deriveExecutableDistributionRoute(
     };
   }
 
-  if (input.kind === "fixed-price-sale") {
+  if (input.kind === "fixed-price-sale" || input.kind === "dutch-auction") {
     const window = routeWindowState(input);
     const buy = window.available
       ? input.remainingShares > 0n
         ? { available: true } as const
-        : unavailable("No project-token inventory remains in this fixed-price sale.")
+        : unavailable(`No project-token inventory remains in this ${input.kind === "dutch-auction" ? "Dutch auction" : "fixed-price sale"}.`)
       : unavailable(window.reason);
     return executableRouteFromActions({ buy, claim: unavailable("This route does not support claims."), sell: unavailable("This route does not support sells.") }, window.phase);
   }
@@ -628,6 +668,8 @@ function inactiveRouteReason(input: ExecutableDistributionRouteInput): {
   if (input.routeStatus !== 0 || input.closed) {
     const route = input.kind === "fixed-price-sale"
       ? "fixed-price sale"
+      : input.kind === "dutch-auction"
+        ? "Dutch auction"
       : input.kind === "migrating-bonding-curve"
         ? "bonding curve"
         : "airdrop";
@@ -650,13 +692,15 @@ function inactiveRouteReason(input: ExecutableDistributionRouteInput): {
   return undefined;
 }
 
-function routeWindowState(input: Pick<ExecutableRouteCommonInput, "endTime" | "now" | "startTime">):
+function routeWindowState(input: Pick<ExecutableDistributionRouteInput, "endTime" | "kind" | "now" | "startTime">):
   | { available: true; phase: "live" }
   | { available: false; phase: "future" | "expired"; reason: string } {
   if (input.now < input.startTime) {
     return { available: false, phase: "future", reason: "This route has not reached its configured start time." };
   }
-  if (input.endTime !== 0n && input.now > input.endTime) {
+  const ended = input.endTime !== 0n
+    && (input.kind === "dutch-auction" ? input.now >= input.endTime : input.now > input.endTime);
+  if (ended) {
     return { available: false, phase: "expired", reason: "This route is past its configured end time." };
   }
   return { available: true, phase: "live" };
@@ -722,6 +766,12 @@ function valueSupplyAtSpot(
 }
 
 function distributedAmount(record: DistributionSupplyRecord): MetricState<bigint> {
+  if (record.kind === "dutch-auction") {
+    if (record.saleSupply < 0n || record.soldShares < 0n || record.soldShares > record.saleSupply) {
+      return unknownMetric(`Dutch-auction supply state is invalid for ${record.address}.`);
+    }
+    return knownMetric(record.soldShares);
+  }
   if (record.kind === "fixed-price-sale") {
     if (record.saleSupply < 0n || record.remainingShares < 0n || record.remainingShares > record.saleSupply) {
       return unknownMetric(`Fixed-sale supply state is invalid for ${record.address}.`);

@@ -7,6 +7,7 @@ import type {
   DiscoveredGrant,
   DiscoveredLockedLiquidity,
   DiscoveredPool,
+  DutchAuctionState,
   FixedPriceSaleState,
   GrantState,
   LockedLiquidityState,
@@ -81,8 +82,8 @@ export type BoardroomGrantSnapshot = {
 
 export type BoardroomDistributionSnapshot = {
   address: Address;
-  kind: "bond-market" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "unknown";
-  state?: BondMarketState | FixedPriceSaleState | MigratingBondingCurveState | MerkleAirdropState;
+  kind: "bond-market" | "dutch-auction" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "unknown";
+  state?: BondMarketState | DutchAuctionState | FixedPriceSaleState | MigratingBondingCurveState | MerkleAirdropState;
   error?: string;
   shareTokenMetadata?: TokenMetadata | undefined;
   paymentTokenMetadata?: TokenMetadata | undefined;
@@ -133,6 +134,17 @@ export type FixedPriceSaleForm = {
   paymentToken: string;
   shareAmount: string;
   price: string;
+  maxPerBuyer: string;
+  startTime: string;
+  endTime: string;
+  salt: string;
+};
+
+export type DutchAuctionForm = {
+  paymentToken: string;
+  shareAmount: string;
+  startPrice: string;
+  floorPrice: string;
   maxPerBuyer: string;
   startTime: string;
   endTime: string;

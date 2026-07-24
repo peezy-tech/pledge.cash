@@ -1,6 +1,6 @@
 ---
 title: Distribution and airdrop integration
-description: Developer bridge for bond markets, fixed-price sales, migrating curves, Merkle leaves, proofs, and lifecycle cleanup.
+description: Developer bridge for bond markets, Dutch auctions, fixed-price sales, migrating curves, Merkle leaves, proofs, and lifecycle cleanup.
 ---
 
 # Distribution and airdrop integration
@@ -30,9 +30,17 @@ There is no transfer or approval flow: the owner recorded by the market is immut
 always pays that owner. `buildBondFinalizeTransaction` is permissionless after conclusion; Boardroom-authorized early
 close uses `buildBoardroomBondMarketCloseAction`.
 
-## Fixed-price and curve quotes
+## Sale, Dutch-auction, and curve quotes
 
-Fixed-price buys round payment up. Curve buys round cost up and sells round refund down. Use contract or SDK quote helpers immediately before submission and bind maximum/minimum plus deadline onchain.
+Fixed-price and Dutch-auction buys round payment up. Curve buys round cost up and sells round refund down. Use contract
+or SDK quote helpers immediately before submission and bind maximum/minimum plus deadline onchain.
+
+For a Dutch auction, read `currentPrice` and `getPaymentAmount` again immediately before approval or purchase. The
+client must not cache an earlier quote as a clearing price. `settlementPrice` is the last successful purchase price;
+`totalPayment` is the authoritative proceeds accumulator because buyers may execute at different prices. Finalization
+is permissionless at `endTime`, when the end-exclusive purchase window closes. Liquidity is never automatic: a later
+Boardroom action chooses explicit amounts and
+minimums, uses settlement price only for a new pool's initial ratio, and uses live reserves for an existing pool.
 
 Read the global `outstandingCurveShareLiability` and derive a holder's current sellable amount as the lesser of that
 liability and its transferable share balance. Do not persist recipient-specific rights. Once graduation latches, disable
@@ -74,4 +82,4 @@ bun --cwd apps/web test
 
 Test direct and grant claims, duplicate indices, wrong chain/address, malformed proof, inventory overflow,
 distribution-specific grant-claim cap exhaustion, atomic parent-to-child accounting, curve migration/unwind/quarantine
-transitions, and wind-down gating.
+transitions, Dutch-auction price/rounding/finalization/liquidity handoff, and wind-down gating.
