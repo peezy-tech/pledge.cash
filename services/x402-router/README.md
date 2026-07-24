@@ -26,7 +26,8 @@ The service fails closed until every readiness check passes. In particular, the
 tracked `packages/contracts/deployments/998.json` artifact is currently
 `pending`, so this checkout is not evidence of a live funded route. Do not
 advertise the rail or fund an operator until a verified non-pending artifact
-with the canonical AMM and distribution addresses is checked in.
+with the canonical Boardroom, AMM, and distribution factory addresses is
+checked in.
 
 Funded settlement also requires `x402-hl` version `0.2.2` or newer. This service
 pins version `0.2.2` to Git commit
@@ -162,7 +163,7 @@ baseline. Running the generation command without a schema change must report
 | Route | Meaning |
 | --- | --- |
 | `GET /health/live` | Process liveness only. |
-| `GET /health/ready` | Fail-closed database, deployment, gas, refund-inventory, and x402 runtime gate. |
+| `GET /health/ready` | Fail-closed database, deployment, unresolved-operation, gas, refund-inventory, and x402 runtime gate. |
 | `GET /v1/status` | Public supported-boundary and x402 runtime status. |
 | `POST /v1/quotes` | Validate a canonical action and atomically reserve destination and refund inventory. |
 | `POST /v1/quotes/:id/execute` | Return `402` requirements or settle the signed payment and run the durable saga. New unbound payments re-run readiness; an exact bound payment remains recoverable while quote traffic is paused. |

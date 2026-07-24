@@ -111,6 +111,7 @@ An AMM quote is accepted only when:
 
 - `tokenIn` is the configured HyperEVM USDC;
 - `tokenOut` is the requested active Boardroom's share token;
+- `BoardroomFactory.isBoardroom(boardroom)` is true;
 - `AmmFactory.isPool(pool)` is true;
 - `AmmFactory.getPool(tokenIn, tokenOut)` returns the same pool;
 - the tracked router equals `AmmFactory.liquidityRouter()`;
@@ -126,12 +127,14 @@ zero value.
 
 A fixed-price quote is accepted only when:
 
+- `BoardroomFactory.isBoardroom(boardroom)` is true;
 - `DistributionFactory.isDistribution(sale)` is true;
 - the recorded distribution kind is fixed-price;
 - the factory and Boardroom relationships match live state;
 - the sale share token equals the Boardroom share token;
 - the payment token is the configured HyperEVM USDC;
-- the Boardroom and sale are active and the sale is inside its time window;
+- the Boardroom and sale are active and the latest HyperEVM block timestamp is
+  inside the sale window;
 - `maxPerBuyer` is zero;
 - remaining supply covers the request; and
 - the executor's balance and sale allowance cover the quoted payment.
@@ -271,7 +274,8 @@ The following must hold before and after every externally reachable action:
   can bind only one quote and one sealed x402 envelope; state changes use
   revisions and claim tokens.
 - **Inventory overcommit:** Quote creation atomically accounts for active
-  destination and refund reservations.
+  destination and refund reservations, conservatively capping destination
+  capacity by the lower of executor balance and live allowance.
 - **Crash ambiguity:** Signed requests are encrypted before submit. Expired
   crash leases reconcile only the sealed payload and public receipt; an absent
   receipt remains pending, while an ambiguous request-path timeout becomes
@@ -312,6 +316,7 @@ broader arbitrary-call API.
 - the executor HYPE balance is below `HYPEREVM_MIN_GAS_BALANCE_WEI`;
 - HyperCore available spot USDC is below
   `X402_ROUTER_MIN_REFUND_RESERVE_ATOMIC`; or
+- any adapter operation requires manual intervention; or
 - the installed x402 runtime is below the funded-settlement minimum.
 
 Quote creation and every new unbound signed payment re-run this readiness gate.
@@ -326,8 +331,8 @@ every item below:
   version `0.2.2`, and passes its release gate.
 - [ ] `packages/contracts/deployments/998.json` is verified and no longer
   `pending`.
-- [ ] Configured USDC, AMM router, AMM factory, and distribution factory match
-  the tracked artifact and live code.
+- [ ] Configured USDC, Boardroom factory, AMM router, AMM factory, and
+  distribution factory match the tracked artifact and live code.
 - [ ] `X402_ROUTER_SERVICE_FEE_BPS` and
   `X402_ROUTER_MAX_ORDER_ATOMIC` have explicit economic approval.
 - [ ] Quote TTL, slippage, gas-cost, confirmation, and operation-lease bounds

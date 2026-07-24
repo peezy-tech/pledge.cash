@@ -38,6 +38,7 @@ import {
   type X402SettlementJournalRecord
 } from "../src/x402";
 import { classifyHyperCoreSettlement } from "../src/execution/hypercore-settlement";
+import { DurableX402SettlementJournal } from "../src/execution/settlement-journal";
 
 const PAYER_ACCOUNT = privateKeyToAccount(
   `0x${"11".repeat(32)}` as const
@@ -283,6 +284,72 @@ describe("x402 quote construction", () => {
 });
 
 describe("x402 safe settlement orchestration", () => {
+  test("treats a concurrently claimed identical payment as uncertain", async () => {
+    const events: string[] = [];
+    const claimedAt = new Date(NOW * 1_000);
+    const journal = new DurableX402SettlementJournal(
+      {
+        async claim(input: {
+          kind: "payment_settlement";
+          idempotencyKey: string;
+          requestHash: `0x${string}`;
+          network: string;
+          signer: `0x${string}`;
+        }) {
+          events.push("journal:claim-existing");
+          return {
+            kind: "existing" as const,
+            operation: {
+              id: "payment-settlement-operation",
+              kind: input.kind,
+              idempotencyKey: input.idempotencyKey,
+              requestHash: input.requestHash,
+              network: input.network,
+              signer: input.signer,
+              status: "claimed" as const,
+              revision: 0,
+              leaseToken: "active-lease",
+              leaseExpiresAt: new Date(claimedAt.getTime() + 1_000),
+              createdAt: claimedAt,
+              updatedAt: claimedAt,
+              hasEncryptedPayload: false
+            }
+          };
+        }
+      } as never,
+      {
+        async getPaymentBinding() {
+          return undefined;
+        }
+      } as never,
+      1_000
+    );
+    const harness = createHarness(
+      events,
+      "0.2.2",
+      PAYER,
+      undefined,
+      journal
+    );
+    const quote = harness.createQuote();
+
+    await expect(
+      harness.layer.settleAndExecute({
+        quote,
+        paymentPayload: await paymentPayload(quote)
+      })
+    ).rejects.toMatchObject({
+      code: "settlement_uncertain",
+      phase: "settlement",
+      paymentMoved: "unknown"
+    } satisfies Partial<X402PaymentError>);
+    expect(events).toEqual([
+      "intent:verify",
+      "facilitator:verify",
+      "journal:claim-existing"
+    ]);
+  });
+
   test("journals exact signed terms before settlement and result before execution", async () => {
     const events: string[] = [];
     const harness = createHarness(events, "0.2.2");
@@ -467,7 +534,8 @@ function createHarness(
   events: string[],
   installedVersion: string,
   facilitatorPayer = PAYER,
-  settlementResult?: SettleResponse
+  settlementResult?: SettleResponse,
+  settlementJournal?: X402SettlementJournal
 ) {
   let currentQuote: PersistedX402Quote | undefined;
   let prepared: X402SettlementJournalRecord | undefined;
@@ -526,7 +594,7 @@ function createHarness(
     paymentPayTo: PAY_TO,
     installedX402HlVersion: installedVersion,
     now: () => NOW,
-    settlementJournal: journal,
+    settlementJournal: settlementJournal ?? journal,
     facilitator: {
       async verify() {
         events.push("facilitator:verify");

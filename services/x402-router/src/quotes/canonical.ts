@@ -214,6 +214,7 @@ export class CanonicalMarketplaceReader {
       boardroomShareToken,
       boardroomStatus,
       paymentAmount,
+      latestBlock,
     ] = await Promise.all([
       this.client.readContract({ address: this.deployment.boardroomFactory, abi: boardroomFactoryAbi, functionName: "isBoardroom", args: [quote.boardroom] }),
       this.client.readContract({
@@ -295,11 +296,12 @@ export class CanonicalMarketplaceReader {
         functionName: "getPaymentAmount",
         args: [BigInt(quote.execution.minimumOutput)],
       }),
+      this.client.getBlock({ blockTag: "latest" }),
     ]);
 
-    const now = BigInt(Math.floor(Date.now() / 1_000));
-    const notStarted = BigInt(startTime) > now;
-    const ended = BigInt(endTime) !== 0n && BigInt(endTime) < now;
+    const notStarted = BigInt(startTime) > latestBlock.timestamp;
+    const ended =
+      BigInt(endTime) !== 0n && BigInt(endTime) < latestBlock.timestamp;
     if (
       !isBoardroom || !isDistribution ||
       Number(distributionKind) !== 0 ||
@@ -488,6 +490,7 @@ export class CanonicalMarketplaceReader {
       boardroomShareToken,
       boardroomStatus,
       paymentAmount,
+      latestBlock,
     ] = await Promise.all([
       this.client.readContract({
         address: request.sale,
@@ -550,11 +553,12 @@ export class CanonicalMarketplaceReader {
         functionName: "getPaymentAmount",
         args: [BigInt(request.shareAmount)],
       }),
+      this.client.getBlock({ blockTag: "latest" }),
     ]);
 
-    const now = Math.floor(Date.now() / 1_000);
-    const notStarted = BigInt(startTime) > BigInt(now);
-    const ended = BigInt(endTime) !== 0n && BigInt(endTime) < BigInt(now);
+    const notStarted = BigInt(startTime) > latestBlock.timestamp;
+    const ended =
+      BigInt(endTime) !== 0n && BigInt(endTime) < latestBlock.timestamp;
     if (
       !sameAddress(factory, this.deployment.distributionFactory) ||
       !sameAddress(saleBoardroom, request.boardroom) ||

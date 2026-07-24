@@ -86,11 +86,13 @@ export class DurableX402SettlementJournal implements X402SettlementJournal {
     }
 
     let operation = claim.operation;
-    // An existing signed/submitted operation is already durable even when the
-    // first caller has not yet installed the quote binding. Continue with the
-    // same record so a concurrent retry cannot be mistaken for a fresh payment.
+    // A live claim means another request already owns this signed payment.
+    // Classify that overlap as uncertain so the caller can never authorize a
+    // fresh payment while the first request may still sign, bind, and settle.
     if (claim.kind === "existing" && operation.status === "claimed") {
-      throw new Error("Payment settlement journal is currently being prepared.");
+      throw new X402SettlementIdentityConflictError(
+        "Payment settlement journal is currently being prepared.",
+      );
     }
     if (operation.status === "claimed") {
       if (claim.kind !== "claimed") {

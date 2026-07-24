@@ -127,6 +127,9 @@ function reader(overrides: Record<string, unknown> = {}) {
     startTime: 0n,
     endTime: 0n,
     getPaymentAmount: 1_000_000n,
+    balanceOf: 2_000_000n,
+    allowance: 2_000_000n,
+    blockTimestamp: 1_800_000_000n,
     ...overrides,
   };
   const client = {
@@ -138,6 +141,10 @@ function reader(overrides: Record<string, unknown> = {}) {
     },
     async readContract(input: { functionName: string }) {
       return values[input.functionName];
+    },
+    async getBlock(input: { blockTag: string }) {
+      expect(input).toEqual({ blockTag: "latest" });
+      return { timestamp: values.blockTimestamp };
     },
   };
   return new CanonicalMarketplaceReader(client as never, {
@@ -169,5 +176,65 @@ describe("live canonical execution validation", () => {
           "0x00000000000000000000000000000000000000ff",
       }).assertCanonicalExecution(fixedPriceQuote()),
     ).rejects.toBeInstanceOf(CanonicalRouteError);
+  });
+
+  test("uses the latest HyperEVM block time to revalidate the fixed-sale window", async () => {
+    const futureWindow = {
+      startTime: 4_000_000_000n,
+      endTime: 5_000_000_000n,
+    };
+
+    await expect(
+      reader({
+        ...futureWindow,
+        blockTimestamp: 4_500_000_000n,
+      }).assertCanonicalExecution(fixedPriceQuote()),
+    ).resolves.toBeUndefined();
+    await expect(
+      reader({
+        ...futureWindow,
+        blockTimestamp: 5_000_000_001n,
+      }).assertCanonicalExecution(fixedPriceQuote()),
+    ).rejects.toMatchObject({
+      code: "fixed_price_configuration_mismatch",
+    });
+  });
+});
+
+describe("canonical fixed-price quoting", () => {
+  test("uses the latest HyperEVM block time to check the sale window", async () => {
+    const request = {
+      kind: "fixed_price_sale" as const,
+      chainId: 998 as const,
+      boardroom,
+      payer,
+      recipient: payer,
+      refundAddress: payer,
+      maxSlippageBps: 50,
+      sale,
+      shareAmount: "100",
+    };
+    const futureWindow = {
+      startTime: 4_000_000_000n,
+      endTime: 5_000_000_000n,
+    };
+
+    await expect(
+      reader({
+        ...futureWindow,
+        blockTimestamp: 4_500_000_000n,
+      }).quote(request, 4_500_000_060),
+    ).resolves.toMatchObject({
+      canonicalTarget: sale,
+      destinationPrincipal: 1_000_000n,
+    });
+    await expect(
+      reader({
+        ...futureWindow,
+        blockTimestamp: 5_000_000_001n,
+      }).quote(request, 5_000_000_061),
+    ).rejects.toMatchObject({
+      code: "sale_not_open",
+    });
   });
 });

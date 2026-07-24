@@ -421,6 +421,24 @@ describe("router API", () => {
     });
   });
 
+  test("forbids a replacement payment while the same journal claim is in flight", async () => {
+    const response = await paidRequest(new X402PaymentError({
+      code: "settlement_uncertain",
+      phase: "settlement",
+      message: "another request is preparing this exact payment",
+      paymentMoved: "unknown",
+    }));
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      status: "recovery_pending",
+      recovery: {
+        code: "settlement_uncertain",
+        paymentMoved: "unknown",
+        retryPayment: false,
+      },
+    });
+  });
+
   test("returns 202 and forbids a replacement payment for an ambiguous HyperCore result", async () => {
     const settlement: SettleResponse = {
       success: false,

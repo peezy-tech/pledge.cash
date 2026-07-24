@@ -208,7 +208,10 @@ export class MarketplaceQuoteService {
       availability: [
         {
           reservation: quote.inventoryReservations[0]!,
-          maximumAvailableInventory: canonical.availableInventory,
+          maximumAvailableInventory:
+            canonical.availableInventory < canonical.allowance
+              ? canonical.availableInventory
+              : canonical.allowance,
         },
         {
           reservation: quote.inventoryReservations[1]!,

@@ -11,13 +11,37 @@ function fixture(overrides: {
   refundInventory?: bigint;
   serviceFeeBps?: number;
   maxSourcePayment?: bigint;
+  reserveAcrossQuotes?: boolean;
 } = {}) {
   let stored: MarketplaceQuote | undefined;
+  let reservedDestination = 0n;
+  let destinationAvailability: bigint | undefined;
   const repository: QuoteRepository = {
     async createReserved(input) {
       stored = input.quote;
       for (const item of input.availability) {
-        if (BigInt(item.reservation.amount) > item.maximumAvailableInventory) {
+        const amount = BigInt(item.reservation.amount);
+        if (
+          item.reservation.scope === "destination_execution" &&
+          overrides.reserveAcrossQuotes
+        ) {
+          if (
+            destinationAvailability !== undefined &&
+            destinationAvailability !== item.maximumAvailableInventory
+          ) {
+            throw new Error("availability mismatch");
+          }
+          destinationAvailability = item.maximumAvailableInventory;
+          if (
+            reservedDestination + amount >
+            item.maximumAvailableInventory
+          ) {
+            throw new Error("oversubscribed");
+          }
+          reservedDestination += amount;
+          continue;
+        }
+        if (amount > item.maximumAvailableInventory) {
           throw new Error("oversubscribed");
         }
       }
@@ -162,6 +186,25 @@ describe("MarketplaceQuoteService", () => {
       .rejects.toThrow("inventory");
     await expect(fixture({ refundInventory: 100_499_999n }).service.create(request))
       .rejects.toThrow("refund inventory");
+  });
+
+  test("reserves finite executor allowance across concurrent quotes", async () => {
+    const { service } = fixture({
+      allowance: 1_000_000n,
+      availableInventory: 10_000_000n,
+      reserveAcrossQuotes: true,
+    });
+
+    const results = await Promise.allSettled([
+      service.create(request),
+      service.create(request),
+    ]);
+
+    expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter(result => result.status === "rejected")).toHaveLength(1);
+    const rejected = results.find(result => result.status === "rejected");
+    if (rejected?.status !== "rejected") throw new Error("expected one rejection");
+    expect(rejected.reason).toEqual(new Error("oversubscribed"));
   });
 
   test("enforces the configured maximum order", async () => {
