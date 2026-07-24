@@ -105,6 +105,10 @@ type FetchOptions = {
   signal?: AbortSignal | undefined;
 };
 
+type CreateSubscriptionOptions = FetchOptions & {
+  onSubscriptionSigned?: (subscriptionId: string) => void;
+};
+
 export async function getRecurringSupportPlans(
   config: X402RouterConfig,
   boardroom: Address,
@@ -227,7 +231,7 @@ export async function createRecurringSupportSubscription(
   context: HyperliquidCheckoutContext,
   plan: RecurringSupportPlan,
   payer: Address,
-  options: FetchOptions = {},
+  options: CreateSubscriptionOptions = {},
 ): Promise<RecurringSupportSubscriptionView> {
   assertPlanBoundary(plan, context.config, plan.boardroom);
   const challenge = await createChallenge(
@@ -255,6 +259,7 @@ export async function createRecurringSupportSubscription(
     planId: plan.id,
   });
   const signature = await signChallenge(context, challenge);
+  options.onSubscriptionSigned?.(subscriptionId);
   const body = await supportRequest(
     `${context.config.baseUrl}/v1/support/subscriptions`,
     {
@@ -348,14 +353,14 @@ export async function createRecurringSupportInvoiceQuote(
   const invoiceId = uuidValue(request.invoiceId, "support invoice ID");
   if (
     expectations.target.toLowerCase()
-      !== context.config.hyperevmUsdc.toLowerCase()
+      !== request.boardroom.toLowerCase()
     || expectations.inputToken.toLowerCase()
       !== context.config.hyperevmUsdc.toLowerCase()
     || expectations.outputToken.toLowerCase()
       !== context.config.hyperevmUsdc.toLowerCase()
   ) {
     throw new Error(
-      "The support invoice does not use the trusted HyperEVM USDC asset.",
+      "The support invoice does not use the trusted Boardroom and HyperEVM USDC route.",
     );
   }
   const body = await supportRequest(
@@ -408,7 +413,7 @@ export function recurringSupportExpectations(
   return {
     inputToken: invoice.asset,
     outputToken: invoice.asset,
-    target: invoice.asset,
+    target: invoice.boardroom,
   };
 }
 
@@ -432,15 +437,33 @@ export function saveRecurringSupportSubscription(
   config: Pick<X402RouterConfig, "gateway">,
   view: RecurringSupportSubscriptionView,
 ): void {
+  saveRecurringSupportSubscriptionId(
+    storage,
+    config,
+    view.plan.boardroom,
+    view.subscription.payer,
+    view.plan.id,
+    view.subscription.id,
+  );
+}
+
+export function saveRecurringSupportSubscriptionId(
+  storage: Pick<Storage, "setItem">,
+  config: Pick<X402RouterConfig, "gateway">,
+  boardroom: Address,
+  payer: Address,
+  planId: string,
+  subscriptionId: string,
+): void {
   storage.setItem(
     recurringSupportSubscriptionStorageKey(
       config,
-      view.plan.boardroom,
-      view.subscription.payer,
-      view.plan.id,
+      boardroom,
+      payer,
+      planId,
     ),
     JSON.stringify({
-      id: view.subscription.id,
+      id: uuidValue(subscriptionId, "support subscription ID"),
       version: 1,
     }),
   );

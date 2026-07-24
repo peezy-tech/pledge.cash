@@ -488,7 +488,7 @@ function recurringQuote(input: {
     recipient: input.payer,
     refundAddress: input.payer,
     boardroom,
-    canonicalTarget: usdc,
+    canonicalTarget: boardroom,
     supportInvoiceId: input.invoiceId,
     sourcePayment: {
       network: "hyperliquid:testnet",
@@ -502,10 +502,10 @@ function recurringQuote(input: {
     },
     execution: {
       chainId: 998,
-      target: usdc,
-      callData: "0xa9059cbb",
+      target: boardroom,
+      callData: "0xeeeb934f",
       callDataHash: `0x${"55".repeat(32)}`,
-      selector: "0xa9059cbb",
+      selector: "0xeeeb934f",
       value: "0",
       recipient: input.payer,
       inputToken: usdc,

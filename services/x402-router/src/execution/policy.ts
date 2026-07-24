@@ -1,6 +1,6 @@
 import {
   ammRouterAbi,
-  erc20Abi,
+  boardroomAbi,
   fixedPriceSaleAbi,
 } from "@pledge.cash/sdk";
 import {
@@ -196,17 +196,24 @@ function decodeAndValidateCanonicalCall(quote: MarketplaceQuote): boolean {
 
     if (quote.kind === "recurring_support") {
       const decoded = decodeFunctionData({
-        abi: erc20Abi,
+        abi: boardroomAbi,
         data: quote.execution.callData,
       });
-      if (decoded.functionName !== "transfer" || !decoded.args) return false;
-      const [boardroom, amount] = decoded.args;
+      if (
+        decoded.functionName !== "contributeTreasuryAsset"
+        || !decoded.args
+      ) return false;
+      const [asset, amount, deadline] = decoded.args;
       if (
         !sameAddress(quote.execution.target, quote.canonicalTarget) ||
-        !sameAddress(quote.execution.inputToken, quote.canonicalTarget) ||
-        !sameAddress(quote.execution.outputToken, quote.canonicalTarget) ||
-        !sameAddress(boardroom, quote.boardroom) ||
+        !sameAddress(quote.canonicalTarget, quote.boardroom) ||
+        !sameAddress(asset, quote.execution.inputToken) ||
+        !sameAddress(
+          quote.execution.outputToken,
+          quote.execution.inputToken,
+        ) ||
         BigInt(amount) !== BigInt(quote.execution.inputAmount) ||
+        Number(deadline) !== quote.execution.deadline ||
         quote.execution.inputAmount !== quote.execution.expectedOutput ||
         quote.execution.inputAmount !== quote.execution.minimumOutput
       ) {
@@ -214,7 +221,7 @@ function decodeAndValidateCanonicalCall(quote: MarketplaceQuote): boolean {
       }
       return (
         encodeFunctionData({
-          abi: erc20Abi,
+          abi: boardroomAbi,
           functionName: decoded.functionName,
           args: decoded.args,
         }).toLowerCase() === quote.execution.callData.toLowerCase()

@@ -7,6 +7,7 @@ import {BoardroomAssetStorage} from "./storage/BoardroomAssetStorage.sol";
 import {BoardroomCoreStorage} from "./storage/BoardroomCoreStorage.sol";
 import {BoardroomObligationStorage} from "./storage/BoardroomObligationStorage.sol";
 import {BestEffortTokenLib} from "../lib/BestEffortTokenLib.sol";
+import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 import {IBoardroomObligationPolicy} from "../policy/IBoardroomObligationPolicy.sol";
 
 interface IBoardroomGovernanceRewards {
@@ -76,6 +77,9 @@ contract BoardroomGovernanceLogic {
     error TooManyCalls(uint256 requested, uint256 maximum);
     error InvalidParentTransition(address parent);
     error InvalidExecutionContext();
+    error InvalidAmount();
+    error TreasuryContributionExpired(uint256 deadline);
+    error TreasuryContributionAmountMismatch(address asset, uint256 expected, uint256 received);
 
     event BoardroomCallExecuted(
         address indexed policy,
@@ -93,9 +97,26 @@ contract BoardroomGovernanceLogic {
     );
     event BoardroomObligationDependency(address indexed obligation, address indexed asset);
     event RedeemableAssetRegistered(address indexed asset);
+    event TreasuryAssetContributed(address indexed contributor, address indexed asset, uint256 amount);
 
     function deployShareToken(string calldata name, string calldata symbol) external returns (address token) {
         token = address(new BoardroomToken(address(this), name, symbol));
+    }
+
+    function contributeTreasuryAsset(address asset, uint256 amount, uint256 deadline) external {
+        if (deadline < block.timestamp) revert TreasuryContributionExpired(deadline);
+        uint8 currentStatus = uint8(BoardroomCoreStorage.layout().status);
+        if (currentStatus != uint8(BoardroomCoreStorage.Status.Active)) {
+            revert InvalidExecutionStatus(currentStatus);
+        }
+        if (!BoardroomAssetStorage.layout().isRegistered[asset]) revert InvalidRedeemableAsset(asset);
+        if (amount == 0) revert InvalidAmount();
+
+        ExactTransferLib.RecipientDelta memory delta = ExactTransferLib.pullTo(asset, msg.sender, address(this), amount);
+        if (delta.balanceDecreased || delta.received != amount) {
+            revert TreasuryContributionAmountMismatch(asset, amount, delta.received);
+        }
+        emit TreasuryAssetContributed(msg.sender, asset, amount);
     }
 
     function requireStakerPower(

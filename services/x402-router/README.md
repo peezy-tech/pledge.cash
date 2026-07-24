@@ -13,8 +13,9 @@ V1 supports only:
 - exact-input swaps through the tracked pledge.cash `AmmRouter`, from the
   configured HyperEVM USDC token into the active Boardroom share token;
 - canonical, open, uncapped fixed-price sales paid in that same USDC token; and
-- hosted monthly support plans whose manually approved invoices transfer the
-  configured HyperEVM USDC directly to a canonical Active Boardroom;
+- hosted monthly support plans whose manually approved invoices call the
+  canonical Active Boardroom's deadline-bound treasury contribution path for
+  the configured HyperEVM USDC;
 - one address as payer, destination recipient, and refund recipient.
 
 Recurring support does not grant the router a debit mandate: publishing,
@@ -121,10 +122,11 @@ build time:
 The browser additionally requires chain `998`, the connected payer to equal
 the destination and refund recipient, and the selected AMM input, sale payment
 token, or support-plan asset to equal the configured destination USDC. For
-recurring support, it also verifies exact ERC-20 transfer calldata against the
-invoice amount and canonical Boardroom. A signed unresolved order identifier
-is retained locally. An account-scoped watcher continues status recovery
-across navigation and unavailable marketplace routes.
+recurring support, it also verifies exact Boardroom contribution calldata
+against the configured asset, invoice amount, signed deadline, and canonical
+Boardroom. A signed unresolved order identifier is retained locally. An
+account-scoped watcher continues status recovery across navigation and
+unavailable marketplace routes.
 Serialized, abortable polling resumes after reload, while an exclusive browser
 lock and a fresh storage check prevent two tabs from creating overlapping
 payments. Unreadable recovery data is preserved and disables new payments

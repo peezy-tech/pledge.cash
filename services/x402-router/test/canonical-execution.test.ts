@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   ammRouterAbi,
-  erc20Abi,
+  boardroomAbi,
   fixedPriceSaleAbi,
 } from "@pledge.cash/sdk";
 import { encodeFunctionData, keccak256 } from "viem";
@@ -25,7 +25,7 @@ const payer = "0x0000000000000000000000000000000000000031" as const;
 
 function baseQuote(input: {
   kind: "amm_swap" | "fixed_price_sale" | "recurring_support";
-  target: typeof ammRouter | typeof sale | typeof usdc;
+  target: typeof ammRouter | typeof sale | typeof boardroom;
   callData: `0x${string}`;
   inputAmount: string;
   outputAmount: string;
@@ -112,18 +112,26 @@ function fixedPriceQuote(): MarketplaceQuote {
 }
 
 function recurringSupportQuote(): MarketplaceQuote {
+  const deadline = Math.floor(Date.now() / 1_000) + 60;
   const callData = encodeFunctionData({
-    abi: erc20Abi,
-    functionName: "transfer",
-    args: [boardroom, 1_000_000n],
+    abi: boardroomAbi,
+    functionName: "contributeTreasuryAsset",
+    args: [usdc, 1_000_000n, BigInt(deadline)],
   });
-  return baseQuote({
+  const quote = baseQuote({
     kind: "recurring_support",
-    target: usdc,
+    target: boardroom,
     callData,
     inputAmount: "1000000",
     outputAmount: "1000000",
   });
+  return {
+    ...quote,
+    execution: {
+      ...quote.execution,
+      deadline,
+    },
+  };
 }
 
 function reader(overrides: Record<string, unknown> = {}) {
@@ -233,7 +241,7 @@ describe("live canonical execution validation", () => {
 });
 
 describe("canonical recurring-support quoting", () => {
-  test("builds one exact USDC transfer to the Boardroom without allowance", async () => {
+  test("builds one deadline-bound Boardroom contribution with caller allowance", async () => {
     const result = await reader().quote({
       kind: "recurring_support",
       chainId: 998,
@@ -247,16 +255,17 @@ describe("canonical recurring-support quoting", () => {
     }, 1_800_000_060);
 
     expect(result).toMatchObject({
-      canonicalTarget: usdc,
+      canonicalTarget: boardroom,
       destinationPrincipal: 1_000_000n,
       availableInventory: 2_000_000n,
+      allowance: 2_000_000n,
+      spender: boardroom,
     });
-    expect("allowance" in result).toBe(false);
     expect(
       encodeFunctionData({
-        abi: erc20Abi,
-        functionName: "transfer",
-        args: [boardroom, 1_000_000n],
+        abi: boardroomAbi,
+        functionName: "contributeTreasuryAsset",
+        args: [usdc, 1_000_000n, 1_800_000_060n],
       }),
     ).toBe(result.execution.callData);
   });

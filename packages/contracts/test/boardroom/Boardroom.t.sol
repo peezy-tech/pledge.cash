@@ -325,6 +325,7 @@ contract BoardroomTest is Test {
     uint256 internal constant EXPIRY = VESTING_END + 2 days;
 
     event PolicyAllowedSet(address indexed policy, bool allowed);
+    event TreasuryAssetContributed(address indexed contributor, address indexed asset, uint256 amount);
 
     function setUp() public {
         wrappedNative = new WETH();
@@ -1860,6 +1861,55 @@ contract BoardroomTest is Test {
         );
         boardroom.registerRedeemableAsset(address(paymentToken));
         vm.stopPrank();
+    }
+
+    function testTreasuryContributionEnforcesCallerDeadlineAndEligibility() public {
+        (Boardroom boardroom,) = _createBoardroom("treasury-contribution");
+        vm.prank(owner);
+        boardroom.registerRedeemableAsset(address(paymentToken));
+        vm.prank(holder);
+        paymentToken.approve(address(boardroom), 3_000000);
+
+        vm.warp(1_000);
+        vm.expectEmit(true, true, false, true, address(boardroom));
+        emit TreasuryAssetContributed(holder, address(paymentToken), 1_000000);
+        vm.prank(holder);
+        boardroom.contributeTreasuryAsset(address(paymentToken), 1_000000, 1_000);
+        assertEq(paymentToken.balanceOf(holder), 999_000000);
+        assertEq(paymentToken.balanceOf(address(boardroom)), 1_000000);
+
+        vm.prank(holder);
+        vm.expectRevert(abi.encodeWithSelector(Boardroom.TreasuryContributionExpired.selector, 999));
+        boardroom.contributeTreasuryAsset(address(paymentToken), 1_000000, 999);
+
+        uint256 holderBalance = paymentToken.balanceOf(holder);
+        vm.prank(stranger);
+        vm.expectRevert();
+        boardroom.contributeTreasuryAsset(address(paymentToken), 1_000000, 1_001);
+        assertEq(paymentToken.balanceOf(holder), holderBalance);
+
+        vm.prank(owner);
+        boardroom.startWindDown();
+        vm.prank(holder);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BoardroomGovernanceLogic.InvalidExecutionStatus.selector, uint8(Boardroom.BoardroomStatus.WindingDown)
+            )
+        );
+        boardroom.contributeTreasuryAsset(address(paymentToken), 1_000000, 1_001);
+
+        (Boardroom removedAssetBoardroom,) = _createBoardroom("removed-treasury-asset");
+        vm.startPrank(owner);
+        removedAssetBoardroom.registerRedeemableAsset(address(paymentToken));
+        removedAssetBoardroom.removeRedeemableAsset(address(paymentToken));
+        vm.stopPrank();
+        vm.prank(holder);
+        paymentToken.approve(address(removedAssetBoardroom), 1_000000);
+        vm.prank(holder);
+        vm.expectRevert(
+            abi.encodeWithSelector(BoardroomGovernanceLogic.InvalidRedeemableAsset.selector, address(paymentToken))
+        );
+        removedAssetBoardroom.contributeTreasuryAsset(address(paymentToken), 1_000000, 1_001);
     }
 
     function testSnapshotMarksUnreadableAssetAndDoesNotBlockProgress() public {

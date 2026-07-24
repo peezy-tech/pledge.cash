@@ -34,6 +34,7 @@ import {
   recurringSupportQuoteRequest,
   retireRecurringSupportPlan,
   saveRecurringSupportSubscription,
+  saveRecurringSupportSubscriptionId,
   type RecurringSupportPlan,
   type RecurringSupportInvoice,
   type RecurringSupportSubscriptionView,
@@ -265,20 +266,20 @@ export function RecurringSupportPanel({
           checkout,
           selectedPlan,
           account,
+          {
+            onSubscriptionSigned(subscriptionId) {
+              saveRecurringSupportSubscriptionId(
+                window.localStorage,
+                checkout.config,
+                selectedPlan.boardroom,
+                account,
+                selectedPlan.id,
+                subscriptionId,
+              );
+            },
+          },
         );
         setSubscription(next);
-        try {
-          saveRecurringSupportSubscription(
-            window.localStorage,
-            checkout.config,
-            next,
-          );
-        } catch {
-          setError(
-            `The schedule was created, but this browser could not save it. Keep subscription ID ${next.subscription.id}.`,
-          );
-          return;
-        }
         setError(undefined);
       } catch (caught) {
         setError(errorMessage(caught));

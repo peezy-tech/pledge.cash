@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import type { Address, Hex } from "viem";
+import { keccak256, stringToHex, type Address, type Hex } from "viem";
 import {
   createRecurringSupportInvoiceQuote,
+  createRecurringSupportSubscription,
   loadRecurringSupportSubscriptionId,
   publishRecurringSupportPlan,
   recurringSupportExpectations,
   recurringSupportQuoteRequest,
   saveRecurringSupportSubscription,
+  saveRecurringSupportSubscriptionId,
   type RecurringSupportSubscriptionView,
 } from "../src/lib/recurring-support";
 import type {
@@ -99,8 +101,8 @@ function quote(
       minimumOutput: "10000000",
       outputToken: usdc,
       recipient: payer,
-      selector: "0xa9059cbb",
-      target: usdc,
+      selector: "0xeeeb934f",
+      target: boardroom,
     },
     expiresAt: new Date(deadline * 1_000).toISOString(),
     kind: "recurring_support",
@@ -141,7 +143,7 @@ describe("recurring support browser boundary", () => {
     expect(recurringSupportExpectations(view())).toEqual({
       inputToken: usdc,
       outputToken: usdc,
-      target: usdc,
+      target: boardroom,
     });
   });
 
@@ -151,14 +153,13 @@ describe("recurring support browser boundary", () => {
         headers: { "content-type": "application/json" },
         status: 201,
       });
-    await expect(
-      createRecurringSupportInvoiceQuote(
-        { config, walletClient: () => { throw new Error("unused"); } },
-        request(),
-        recurringSupportExpectations(view())!,
-        { fetch: fetch as typeof globalThis.fetch },
-      ),
-    ).resolves.toMatchObject({
+    const accepted = await createRecurringSupportInvoiceQuote(
+      { config, walletClient: () => { throw new Error("unused"); } },
+      request(),
+      recurringSupportExpectations(view())!,
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+    expect(accepted).toMatchObject({
       kind: "recurring_support",
       supportInvoiceId: invoiceId,
     });
@@ -203,6 +204,110 @@ describe("recurring support browser boundary", () => {
     expect([...values.values()][0]).toBe(
       JSON.stringify({ id: subscriptionId, version: 1 }),
     );
+  });
+
+  test("persists the signed subscription ID before creation can commit", async () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem(key: string) {
+        return values.get(key) ?? null;
+      },
+      setItem(key: string, value: string) {
+        values.set(key, value);
+      },
+    };
+    const challengeId = "00000000-0000-4000-8000-000000000010";
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    const payload = {
+      version: 1,
+      action: "subscribe",
+      subscriptionId,
+      planId,
+      boardroom: boardroom.toLowerCase(),
+      payer: payer.toLowerCase(),
+    };
+    const canonicalPayload = Object.fromEntries(
+      Object.entries(payload).sort(([left], [right]) =>
+        left.localeCompare(right)
+      ),
+    );
+    const payloadHash = keccak256(
+      stringToHex(JSON.stringify(canonicalPayload)),
+    );
+    const message = [
+      "pledge.cash recurring support",
+      "",
+      "Action: Create support subscription",
+      `Actor: ${payer}`,
+      "Chain ID: 998",
+      `Boardroom: ${boardroom}`,
+      `Plan ID: ${planId}`,
+      `Payload hash: ${payloadHash}`,
+      `Challenge ID: ${challengeId}`,
+      `Origin: ${config.baseUrl}`,
+      `Expires at: ${expiresAt}`,
+      "",
+      "This records a monthly schedule. It cannot move funds or approve future payments.",
+      "Every contribution still requires a separate x402 payment signature.",
+    ].join("\n");
+    let calls = 0;
+    const fetch = async () => {
+      calls += 1;
+      if (calls === 1) {
+        return Response.json({
+          action: "subscription_create",
+          actor: payer,
+          boardroom,
+          chainId: 998,
+          challengeId,
+          expiresAt,
+          message,
+          payload,
+          payloadHash,
+          planId,
+        }, { status: 201 });
+      }
+      expect(
+        loadRecurringSupportSubscriptionId(
+          storage,
+          config,
+          boardroom,
+          payer,
+          planId,
+        ),
+      ).toBe(subscriptionId);
+      throw new Error("connection lost after commit");
+    };
+
+    await expect(
+      createRecurringSupportSubscription(
+        {
+          config,
+          walletClient: () => ({
+            account: { address: payer },
+            async signMessage() {
+              return `0x${"11".repeat(65)}`;
+            },
+          } as never),
+        },
+        view().plan,
+        payer,
+        {
+          fetch: fetch as typeof globalThis.fetch,
+          onSubscriptionSigned(id) {
+            saveRecurringSupportSubscriptionId(
+              storage,
+              config,
+              boardroom,
+              payer,
+              planId,
+              id,
+            );
+          },
+        },
+      ),
+    ).rejects.toThrow("connection lost after commit");
+    expect(calls).toBe(2);
   });
 
   test("rejects a changed support challenge before asking the wallet to sign", async () => {

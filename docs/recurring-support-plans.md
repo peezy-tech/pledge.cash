@@ -91,13 +91,20 @@ after the destination USDC transfer to the canonical Boardroom is confirmed.
 The only new destination call is:
 
 ```text
-configured HyperEVM USDC.transfer(canonical Boardroom, invoice amount)
+canonical Boardroom.contributeTreasuryAsset(
+  configured HyperEVM USDC,
+  invoice amount,
+  signed deadline
+)
 ```
 
 The x402 gateway's executor supplies prefunded HyperEVM USDC after the
-supporter's HyperCore payment settles. The gateway therefore remains
-inventory-backed and custodial during the settlement/execution interval, just
-as it is for existing marketplace actions.
+supporter's HyperCore payment settles and grants only the required Boardroom
+allowance. The Boardroom pulls from the signed transaction caller, checks the
+deadline, Active state, registered asset, and exact recipient balance increase
+atomically, and rejects a stale or inexact contribution. The gateway therefore
+remains inventory-backed and custodial during the settlement/execution
+interval, just as it is for existing marketplace actions.
 
 Plans, subscriptions, and invoices are hosted attestations, not an on-chain
 registry. Challenge messages bind the origin, chain, Boardroom, actor, plan,
@@ -112,13 +119,14 @@ The execution policy revalidates immediately before simulation that:
 - the plan is active and its authority identity has not gone stale;
 - the quote is still the invoice's active attempt and no earlier payment from
   that payer to the Boardroom remains unresolved;
-- calldata is exactly one ERC-20 `transfer` to that Boardroom for that invoice
-  amount;
+- calldata is exactly one Boardroom `contributeTreasuryAsset` call for the
+  configured USDC, invoice amount, and signed deadline;
 - payer, x402 recipient, and refund address are the same wallet;
 - no second live or uncertain attempt exists for the invoice.
 
-The Boardroom does not make an external call when it receives ERC-20 funds.
-Non-standard tokens are excluded by pinning the configured deployment USDC.
+The Boardroom's only external call is the reentrancy-guarded USDC pull from the
+transaction caller. Non-standard tokens are excluded by pinning the configured
+deployment USDC and requiring the Boardroom to receive the exact amount.
 
 ## Time and bounds
 

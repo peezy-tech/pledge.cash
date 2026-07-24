@@ -408,7 +408,7 @@ export function HyperliquidPaymentAction({
             <p className="m-0 text-sm font-semibold text-zinc-200">Pay from Hyperliquid</p>
             <p className="m-0 mt-0.5 text-xs leading-5 text-zinc-500">
               {kind === "recurring_support"
-                ? "Settle USDC on HyperCore, then transfer this exact invoice amount to the Boardroom on HyperEVM."
+                ? "Settle USDC on HyperCore, then contribute this exact invoice amount through the guarded Boardroom route on HyperEVM."
                 : "Settle USDC on HyperCore, then execute this exact marketplace action on HyperEVM."}
             </p>
           </div>

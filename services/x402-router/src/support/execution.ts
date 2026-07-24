@@ -68,9 +68,9 @@ export class RecurringSupportExecutionGuard
       || quote.recipient.toLowerCase() !== invoice.payer.toLowerCase()
       || quote.refundAddress.toLowerCase() !== invoice.payer.toLowerCase()
       || quote.boardroom.toLowerCase() !== invoice.boardroom.toLowerCase()
-      || quote.canonicalTarget.toLowerCase() !== invoice.asset.toLowerCase()
+      || quote.canonicalTarget.toLowerCase() !== invoice.boardroom.toLowerCase()
       || quote.execution.chainId !== SUPPORT_CHAIN_ID
-      || quote.execution.target.toLowerCase() !== invoice.asset.toLowerCase()
+      || quote.execution.target.toLowerCase() !== invoice.boardroom.toLowerCase()
       || quote.execution.recipient.toLowerCase() !== invoice.payer.toLowerCase()
       || quote.execution.inputToken.toLowerCase() !== invoice.asset.toLowerCase()
       || quote.execution.outputToken.toLowerCase() !== invoice.asset.toLowerCase()

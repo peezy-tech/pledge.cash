@@ -441,6 +441,48 @@ describeWithDatabase("Postgres router durability", () => {
     }
   }, 5_000);
 
+  test("runs distinct recurring invoice locks concurrently", async () => {
+    const concurrent = createDbClient(databaseUrl!, { maxConnections: 2 });
+    const support = new PostgresSupportRepository(
+      concurrent.sql,
+      concurrent.coordinationSql,
+    );
+    let entered = 0;
+    let bothEntered!: () => void;
+    let release!: () => void;
+    const enteredBoth = new Promise<void>(resolve => {
+      bothEntered = resolve;
+    });
+    const hold = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const action = (invoiceId: string) =>
+      support.withInvoiceLock(invoiceId, async () => {
+        await concurrent.sql`select 1`;
+        entered += 1;
+        if (entered === 2) bothEntered();
+        await hold;
+      });
+
+    const first = action("concurrent-invoice-a");
+    const second = action("concurrent-invoice-b");
+    try {
+      await Promise.race([
+        enteredBoth,
+        Bun.sleep(2_000).then(() => {
+          throw new Error("distinct invoice locks were globally serialized");
+        }),
+      ]);
+      release();
+      await Promise.all([first, second]);
+      expect(entered).toBe(2);
+    } finally {
+      release();
+      await Promise.allSettled([first, second]);
+      await concurrent.close();
+    }
+  }, 5_000);
+
   afterAll(async () => {
     await client.close();
   });

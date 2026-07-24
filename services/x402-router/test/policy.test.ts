@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { encodeFunctionData, keccak256 } from "viem";
 import {
   ammRouterAbi,
-  erc20Abi,
+  boardroomAbi,
 } from "@pledge.cash/sdk";
 import {
   createMarketplaceExecutionPolicy,
@@ -157,22 +157,22 @@ describe("canonical execution policy", () => {
     await expect(changed(context())).resolves.toEqual({ allowed: false });
   });
 
-  test("allows only the invoice-bound USDC transfer to the Boardroom", async () => {
+  test("allows only the invoice-bound deadline-guarded Boardroom contribution", async () => {
     const supportCall = encodeFunctionData({
-      abi: erc20Abi,
-      functionName: "transfer",
-      args: [payer, 1_000_000n],
+      abi: boardroomAbi,
+      functionName: "contributeTreasuryAsset",
+      args: [usdc, 1_000_000n, 1_700_000_060n],
     });
     const supportQuote: MarketplaceQuote = {
       ...quote(),
       id: "support-quote",
       kind: "recurring_support",
-      canonicalTarget: usdc,
+      canonicalTarget: payer,
       supportInvoiceId: "00000000-0000-4000-8000-000000000001",
       maxSlippageBps: 0,
       execution: {
         ...quote().execution,
-        target: usdc,
+        target: payer,
         callData: supportCall,
         callDataHash: keccak256(supportCall),
         selector: supportCall.slice(0, 10) as `0x${string}`,
@@ -198,7 +198,7 @@ describe("canonical execution policy", () => {
         recipient: payer,
         refundAddress: payer,
         chainId: 998,
-        target: usdc,
+        target: payer,
         callData: supportCall,
         value: "0",
         maxGasCost: "1000000000000000",
@@ -215,7 +215,7 @@ describe("canonical execution policy", () => {
         canonical,
         recurringSupport,
       )(supportContext as never),
-    ).resolves.toMatchObject({ allowed: true, target: usdc });
+    ).resolves.toMatchObject({ allowed: true, target: payer });
     await expect(
       createMarketplaceExecutionPolicy(
         supportRepository,
@@ -229,9 +229,9 @@ describe("canonical execution policy", () => {
     ).resolves.toEqual({ allowed: false });
 
     const divertedCall = encodeFunctionData({
-      abi: erc20Abi,
-      functionName: "transfer",
-      args: [shares, 1_000_000n],
+      abi: boardroomAbi,
+      functionName: "contributeTreasuryAsset",
+      args: [shares, 1_000_000n, 1_700_000_060n],
     });
     const diverted = {
       ...supportQuote,

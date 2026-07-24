@@ -1,6 +1,6 @@
 import {
   ammRouterAbi,
-  erc20Abi,
+  boardroomAbi,
   fixedPriceSaleAbi,
   type Address,
 } from "@pledge.cash/sdk";
@@ -894,10 +894,12 @@ function assertRequestBoundary(
     uuidValue(request.invoiceId, "support invoice ID");
     if (
       request.maxSlippageBps !== 0
-      || !sameAddress(expectations.target, expectations.inputToken)
-      || !sameAddress(expectations.target, expectations.outputToken)
+      || !sameAddress(expectations.inputToken, expectations.outputToken)
+      || !sameAddress(expectations.target, request.boardroom)
     ) {
-      throw new Error("The support invoice must use one exact USDC transfer.");
+      throw new Error(
+        "The support invoice must use one exact Boardroom treasury contribution.",
+      );
     }
   }
 }
@@ -1024,19 +1026,25 @@ function assertCanonicalCalldata(
 
   if (request.kind === "recurring_support") {
     const decoded = decodeFunctionData({
-      abi: erc20Abi,
+      abi: boardroomAbi,
       data: intent.callData as Hex,
     });
-    if (decoded.functionName !== "transfer") {
-      throw new Error("The support execution is not an ERC-20 transfer.");
+    if (decoded.functionName !== "contributeTreasuryAsset") {
+      throw new Error(
+        "The support execution is not a guarded Boardroom contribution.",
+      );
     }
-    const [boardroom, amount] = decoded.args;
+    const [asset, amount, deadline] = decoded.args;
     if (
-      !sameAddress(boardroom, request.boardroom)
+      !sameAddress(asset, expectations.inputToken)
       || amount !== BigInt(request.amount)
+      || deadline !== BigInt(quote.execution.deadline)
+      || !sameAddress(intent.target, request.boardroom)
       || !sameAddress(intent.target, expectations.target)
     ) {
-      throw new Error("The support calldata changed the Boardroom or invoice amount.");
+      throw new Error(
+        "The support calldata changed the Boardroom, asset, amount, or deadline.",
+      );
     }
     return;
   }

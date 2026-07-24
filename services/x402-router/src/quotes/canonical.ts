@@ -130,8 +130,8 @@ export class CanonicalMarketplaceReader {
   ): Promise<void> {
     if (
       quote.supportInvoiceId === undefined ||
-      !sameAddress(quote.canonicalTarget, this.deployment.destinationUsdc) ||
-      !sameAddress(quote.execution.target, this.deployment.destinationUsdc) ||
+      !sameAddress(quote.canonicalTarget, quote.boardroom) ||
+      !sameAddress(quote.execution.target, quote.boardroom) ||
       !sameAddress(quote.execution.inputToken, this.deployment.destinationUsdc) ||
       !sameAddress(quote.execution.outputToken, this.deployment.destinationUsdc) ||
       quote.execution.inputAmount !== quote.execution.expectedOutput ||
@@ -699,7 +699,12 @@ export class CanonicalMarketplaceReader {
     request: Extract<RouterQuoteRequest, { kind: "recurring_support" }>,
     deadline: number,
   ): Promise<CanonicalQuoteResult> {
-    const [isBoardroom, boardroomStatus, isRedeemableAsset, availableInventory] =
+    const [
+      isBoardroom,
+      boardroomStatus,
+      isRedeemableAsset,
+      [availableInventory, allowance],
+    ] =
       await Promise.all([
         this.client.readContract({
           address: this.deployment.boardroomFactory,
@@ -718,12 +723,10 @@ export class CanonicalMarketplaceReader {
           functionName: "isRedeemableAsset",
           args: [this.deployment.destinationUsdc],
         }),
-        this.client.readContract({
-          address: this.deployment.destinationUsdc,
-          abi: erc20Abi,
-          functionName: "balanceOf",
-          args: [this.deployment.executor],
-        }),
+        this.readInventory(
+          this.deployment.destinationUsdc,
+          request.boardroom,
+        ),
       ]);
     if (!isBoardroom) {
       throw new CanonicalRouteError(
@@ -746,15 +749,17 @@ export class CanonicalMarketplaceReader {
 
     const amount = BigInt(request.amount);
     const callData = encodeFunctionData({
-      abi: erc20Abi,
-      functionName: "transfer",
-      args: [request.boardroom, amount],
+      abi: boardroomAbi,
+      functionName: "contributeTreasuryAsset",
+      args: [this.deployment.destinationUsdc, amount, BigInt(deadline)],
     });
     return {
       boardroom: request.boardroom,
-      canonicalTarget: this.deployment.destinationUsdc,
+      canonicalTarget: request.boardroom,
       destinationPrincipal: amount,
       availableInventory,
+      allowance,
+      spender: request.boardroom,
       execution: executionEnvelope({
         callData,
         deadline,
@@ -763,7 +768,7 @@ export class CanonicalMarketplaceReader {
         inputToken: this.deployment.destinationUsdc,
         outputToken: this.deployment.destinationUsdc,
         recipient: request.recipient,
-        target: this.deployment.destinationUsdc,
+        target: request.boardroom,
         minimumOutput: amount,
       }),
     };
