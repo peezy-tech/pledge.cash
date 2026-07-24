@@ -2,6 +2,7 @@ import {
   ammPoolAbi,
   boardroomAbi,
   boardroomFactoryAbi,
+  dutchAuctionSaleAbi,
   erc20Abi,
   fixedPriceSaleAbi,
   isZeroAddress,
@@ -110,6 +111,7 @@ export type ProductBoardroomHistory = {
   completeness?: "complete" | "partial" | "state-derived" | undefined;
   curve?: ProductBoardroomCurveHistory | undefined;
   distribution?: Address | undefined;
+  dutchAuction?: ProductBoardroomFixedPriceSaleHistory | undefined;
   fixedPriceSale?: ProductBoardroomFixedPriceSaleHistory | undefined;
   pool?: Address | undefined;
   scanError?: string | undefined;
@@ -197,8 +199,8 @@ type ProductBoardroomEventLog = {
   args?: Record<string, unknown>;
   blockNumber?: bigint | null | undefined;
 };
-type ProductBoardroomEventAbi = typeof ammPoolAbi | typeof boardroomAbi | typeof fixedPriceSaleAbi | typeof migratingBondingCurveAbi;
-type ProductBoardroomEventName = "CurveBuy" | "CurveMigrated" | "CurveSell" | "FixedPricePurchase" | "Swap";
+type ProductBoardroomEventAbi = typeof ammPoolAbi | typeof boardroomAbi | typeof dutchAuctionSaleAbi | typeof fixedPriceSaleAbi | typeof migratingBondingCurveAbi;
+type ProductBoardroomEventName = "CurveBuy" | "CurveMigrated" | "CurveSell" | "DutchAuctionPurchase" | "FixedPricePurchase" | "Swap";
 
 type HistoricalDistributionHydration = {
   error?: string | undefined;
@@ -704,7 +706,15 @@ function stateDerivedPartialHistory(
     scanError,
   };
   if (!distribution.state) return base;
-  if ("paymentToken" in distribution.state) {
+  if (distribution.kind === "dutch-auction" && "totalPayment" in distribution.state) {
+    const soldShares = distribution.state.saleSupply - distribution.state.remainingShares;
+    return {
+      ...base,
+      cashRaised: distribution.state.totalPayment,
+      soldShares,
+    };
+  }
+  if ("price" in distribution.state) {
     if (
       typeof distribution.state.saleSupply !== "bigint"
       || typeof distribution.state.remainingShares !== "bigint"
@@ -824,7 +834,38 @@ function deriveDistributionCatalogFields(
     };
   }
 
-  if ("paymentToken" in distribution.state) {
+  if (distribution.kind === "dutch-auction" && "totalPayment" in distribution.state) {
+    const state = distribution.state;
+    const soldShares = state.saleSupply - state.remainingShares;
+    const route = deriveExecutableDistributionRoute({
+      boardroomStatus,
+      closed: state.closed,
+      endTime: state.endTime,
+      kind: "dutch-auction",
+      now,
+      remainingShares: state.remainingShares,
+      routeStatus: state.saleStatus,
+      startTime: state.startTime,
+    });
+    return {
+      cashRaised: state.totalPayment,
+      cashToken: state.paymentToken,
+      cashTokenDecimals: distribution.paymentTokenMetadata?.decimals,
+      cashTokenSymbol: distribution.paymentTokenMetadata?.symbol,
+      distribution: distribution.address,
+      distributionKind: "dutch-auction",
+      path: "Dutch auction",
+      routeBuyInventory: state.remainingShares,
+      routeClosed: state.closed,
+      routeEndTime: state.endTime,
+      routeStartTime: state.startTime,
+      routeStatus: state.saleStatus,
+      soldShares,
+      status: catalogRouteStatusLabel(route, fixedPriceSaleStatusLabel(state.saleStatus).replace("sale", "auction")),
+    };
+  }
+
+  if ("price" in distribution.state) {
     const state = distribution.state;
     const soldShares = state.saleSupply - state.remainingShares;
     const route = deriveExecutableDistributionRoute({
@@ -882,7 +923,7 @@ function deriveDistributionCatalogFields(
     };
   }
 
-  if ("currentPrice" in distribution.state) {
+  if ("live" in distribution.state) {
     const state = distribution.state;
     return {
       cashRaised: state.purchased,
@@ -953,6 +994,19 @@ async function readDistributionHistory(
   eventScan: EventScanContext,
 ): Promise<ProductBoardroomHistory | undefined> {
   if (!distribution.state) return undefined;
+
+  if (distribution.kind === "dutch-auction" && "paymentToken" in distribution.state) {
+    const dutchAuction = await readDutchAuctionHistory(client, distribution.address, eventScan);
+    if (!dutchAuction) return undefined;
+    return {
+      buyerCount: dutchAuction.buyerCount,
+      cashRaised: dutchAuction.cashRaised,
+      completeness: "complete",
+      distribution: distribution.address,
+      dutchAuction,
+      soldShares: dutchAuction.soldShares,
+    };
+  }
 
   if ("paymentToken" in distribution.state) {
     const fixedPriceSale = await readFixedPriceSaleHistory(client, distribution.address, eventScan);
@@ -1028,6 +1082,33 @@ async function readFixedPriceSaleHistory(
   eventScan: EventScanContext,
 ): Promise<ProductBoardroomFixedPriceSaleHistory | undefined> {
   const logs = await readEventLogs(client, sale, fixedPriceSaleAbi, "FixedPricePurchase", eventScan);
+  if (!logs) return undefined;
+
+  const buyers = new Set<string>();
+  let soldShares = 0n;
+  let cashRaised = 0n;
+
+  for (const log of logs) {
+    const buyer = addressArg(log.args, "buyer");
+    if (buyer) buyers.add(buyer.toLowerCase());
+    soldShares += bigintArg(log.args, "shares");
+    cashRaised += bigintArg(log.args, "payment");
+  }
+
+  return {
+    buyerCount: buyers.size,
+    cashRaised,
+    purchaseCount: logs.length,
+    soldShares,
+  };
+}
+
+async function readDutchAuctionHistory(
+  client: ProductBoardroomClient,
+  auction: Address,
+  eventScan: EventScanContext,
+): Promise<ProductBoardroomFixedPriceSaleHistory | undefined> {
+  const logs = await readEventLogs(client, auction, dutchAuctionSaleAbi, "DutchAuctionPurchase", eventScan);
   if (!logs) return undefined;
 
   const buyers = new Set<string>();
@@ -1544,7 +1625,7 @@ function executableRouteInput(
       boardroomStatus,
       closed: state.closed,
       endTime: state.endTime,
-      kind: "fixed-price-sale" as const,
+      kind: distribution.kind === "dutch-auction" ? "dutch-auction" as const : "fixed-price-sale" as const,
       now,
       remainingShares: state.remainingShares,
       routeStatus: state.saleStatus,

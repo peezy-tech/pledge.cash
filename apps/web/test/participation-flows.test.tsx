@@ -3,6 +3,8 @@ import type {
   Address,
   BondMarketState,
   BondPurchaseQuote,
+  DutchAuctionParticipationQuote,
+  DutchAuctionState,
   FixedPriceSaleParticipationQuote,
   FixedPriceSaleState,
   MigratingBondingCurveBuyQuote,
@@ -25,6 +27,7 @@ import {
   participationDistributionKey,
   prepareBondMarketAction,
   prepareBondingCurveAction,
+  prepareDutchAuctionAction,
   prepareFixedPriceSaleAction,
   transactionDeadline,
 } from "../src/features/participation";
@@ -42,6 +45,7 @@ const shareToken = "0x3000000000000000000000000000000000000000" as Address;
 const paymentToken = "0x4000000000000000000000000000000000000000" as Address;
 const sale = "0x5000000000000000000000000000000000000000" as Address;
 const oldSale = "0x5100000000000000000000000000000000000000" as Address;
+const auction = "0x5200000000000000000000000000000000000000" as Address;
 const curve = "0x6000000000000000000000000000000000000000" as Address;
 const airdrop = "0x7000000000000000000000000000000000000000" as Address;
 const bond = "0x7100000000000000000000000000000000000000" as Address;
@@ -63,6 +67,33 @@ const fixedSaleDistribution: BoardroomDistributionSnapshot = {
     maxPerBuyer: 2_000_000_000_000_000_000n,
     startTime: 0n,
     endTime: 0n,
+    saleStatus: 0,
+    closed: false,
+  },
+  shareTokenMetadata: { address: shareToken, decimals: 18, symbol: "ATLAS" },
+  paymentTokenMetadata: { address: paymentToken, decimals: 6, symbol: "USDC" },
+};
+
+const dutchAuctionDistribution: BoardroomDistributionSnapshot = {
+  address: auction,
+  kind: "dutch-auction",
+  state: {
+    address: auction,
+    factory: owner,
+    boardroom,
+    shareToken,
+    paymentToken,
+    saleSupply: 10_000_000_000_000_000_000n,
+    remainingShares: 8_000_000_000_000_000_000n,
+    startPrice: 5_000_000n,
+    floorPrice: 2_000_000n,
+    currentPrice: 3_000_000n,
+    maxPerBuyer: 2_000_000_000_000_000_000n,
+    totalPayment: 6_000_000n,
+    lastPurchasePrice: 3_100_000n,
+    settlementPrice: 0n,
+    startTime: 0n,
+    endTime: 4_102_444_800n,
     saleStatus: 0,
     closed: false,
   },
@@ -180,11 +211,11 @@ const dashboard: ProductBoardroomDashboardState = {
     governanceEligibleSupply: 10_000_000_000_000_000_000n,
     redeemableAssets: [],
     issuedGrants: [],
-    issuedDistributions: [sale, curve, airdrop, bond],
+    issuedDistributions: [sale, auction, curve, airdrop, bond],
     lockedLiquidityPositions: [],
     shareTokenMetadata: { address: shareToken, decimals: 18, symbol: "ATLAS" },
     grantSummaries: [],
-    distributionSummaries: [fixedSaleDistribution, curveDistribution, airdropDistribution, bondDistribution],
+    distributionSummaries: [fixedSaleDistribution, dutchAuctionDistribution, curveDistribution, airdropDistribution, bondDistribution],
     lockedLiquiditySummaries: [],
   },
   treasuryAssets: [],
@@ -309,6 +340,38 @@ describe("participation bounds and proof parsing", () => {
       intent: fixedPriceIntent(state),
       async readQuote() { return fixedPriceQuote(state, { paymentAllowance: 1_000n }); },
     })).rejects.toThrow("Approval is now sufficient");
+  });
+
+  test("re-quotes Dutch-auction orders and binds the transaction to the fresh descending price", async () => {
+    const state = dutchAuctionDistribution.state as DutchAuctionState;
+    const result = await prepareDutchAuctionAction(publicClient, {
+      clock: () => 1_000,
+      expectedAction: "trade",
+      intent: dutchAuctionIntent(state),
+      async readQuote(_client, input) {
+        expect(input).toEqual({ auction, buyer: owner, shareAmount: 1n });
+        return dutchAuctionQuote({ ...state, currentPrice: 2_900_000n }, { paymentAmount: 101n });
+      },
+    });
+
+    expect(result.maxPayment).toBe(103n);
+    expect(result.request).toMatchObject({ address: auction, functionName: "buy" });
+    expect(result.request.args).toEqual([1n, owner, 103n, 2_200n]);
+  });
+
+  test("rejects a Dutch-auction order at its end-exclusive boundary", async () => {
+    const state = {
+      ...(dutchAuctionDistribution.state as DutchAuctionState),
+      endTime: 1_000n,
+    };
+    await expect(prepareDutchAuctionAction(publicClient, {
+      clock: () => 1_000,
+      expectedAction: "trade",
+      intent: dutchAuctionIntent(state),
+      async readQuote() {
+        return dutchAuctionQuote(state);
+      },
+    })).rejects.toThrow("auction window has ended");
   });
 
   test("uses one fresh bond quote for action selection and minimum-payout protection", async () => {
@@ -572,10 +635,11 @@ describe("participation flow composition", () => {
   test("builds injectable content for every discovered buyer path", () => {
     const content = createParticipationFlowContent(context);
     const fixedKey = participationDistributionKey("fixed-price-sale", sale);
+    const auctionKey = participationDistributionKey("dutch-auction", auction);
     const curveKey = participationDistributionKey("migrating-bonding-curve", curve);
     const airdropKey = participationDistributionKey("merkle-airdrop", airdrop);
     const bondKey = participationDistributionKey("bond-market", bond);
-    expect(Object.keys(content)).toEqual([fixedKey, curveKey, airdropKey, bondKey]);
+    expect(Object.keys(content)).toEqual([fixedKey, auctionKey, curveKey, airdropKey, bondKey]);
 
     const fixedHtml = renderToString(content[fixedKey]);
     expect(fixedHtml).toContain("Buy from the fixed-price sale");
@@ -736,6 +800,39 @@ function fixedPriceQuote(
   state: FixedPriceSaleState,
   overrides: Partial<FixedPriceSaleParticipationQuote> = {},
 ): FixedPriceSaleParticipationQuote {
+  return {
+    state,
+    buyer: owner,
+    shareAmount: 1n,
+    paymentAmount: 100n,
+    purchasedBy: 0n,
+    remainingBuyerCapacity: state.remainingShares,
+    paymentBalance: 1_000n,
+    paymentAllowance: 1_000n,
+    ...overrides,
+  };
+}
+
+function dutchAuctionIntent(state: DutchAuctionState) {
+  return {
+    account: owner,
+    auction: state.address,
+    boardroom,
+    boardroomStatus: 0,
+    deadlineMinutes: "20",
+    factory: state.factory,
+    paymentToken: state.paymentToken,
+    recipient: owner,
+    shareAmount: 1n,
+    shareToken: state.shareToken,
+    slippageBps: 100n,
+  } as const;
+}
+
+function dutchAuctionQuote(
+  state: DutchAuctionState,
+  overrides: Partial<DutchAuctionParticipationQuote> = {},
+): DutchAuctionParticipationQuote {
   return {
     state,
     buyer: owner,

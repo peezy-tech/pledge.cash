@@ -213,7 +213,13 @@ function marketBoundaries(input: MarketBoundaryClockInput): bigint[] {
         : "curveStatus" in state
           ? state.curveStatus
           : state.airdropStatus;
-      addMarketBoundaries(boundaries, routeStatus, state.startTime, state.endTime);
+      addMarketBoundaries(
+        boundaries,
+        routeStatus,
+        state.startTime,
+        state.endTime,
+        distribution.kind === "dutch-auction",
+      );
     }
   }
   for (const project of input.projects ?? []) {
@@ -224,7 +230,13 @@ function marketBoundaries(input: MarketBoundaryClockInput): bigint[] {
       || project.routeStartTime === undefined
       || project.routeEndTime === undefined
     ) continue;
-    addMarketBoundaries(boundaries, project.routeStatus, project.routeStartTime, project.routeEndTime);
+    addMarketBoundaries(
+      boundaries,
+      project.routeStatus,
+      project.routeStartTime,
+      project.routeEndTime,
+      project.distributionKind === "dutch-auction",
+    );
   }
   return boundaries;
 }
@@ -234,10 +246,11 @@ function addMarketBoundaries(
   routeStatus: number,
   startTime: bigint,
   endTime: bigint,
+  endExclusive: boolean,
 ): void {
   if (routeStatus !== 0) return;
   boundaries.push(startTime * 1_000n);
-  if (endTime !== 0n) boundaries.push((endTime + 1n) * 1_000n);
+  if (endTime !== 0n) boundaries.push((endTime + (endExclusive ? 0n : 1n)) * 1_000n);
 }
 
 function marketTimingIdentity(input: MarketBoundaryClockInput): string {

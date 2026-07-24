@@ -8,6 +8,9 @@ import {
   buildBoardroomBurnTreasurySharesTransaction,
   buildBoardroomClaimRedemptionAssetTransaction,
   buildBoardroomExecuteTransaction,
+  buildBoardroomDutchAuctionBatch,
+  buildBoardroomDutchAuctionCancelAction,
+  buildBoardroomDutchAuctionCloseAction,
   buildBoardroomFixedPriceSaleBatch,
   buildBoardroomFixedPriceSaleCancelAction,
   buildBoardroomFixedPriceSaleCloseAction,
@@ -45,6 +48,7 @@ import {
   buildBoardroomShareGrantIssuanceBatch,
   buildBoardroomStartWindDownTransaction,
   buildDirectGrantCreationTransaction,
+  buildDutchAuctionFinalizeTransaction,
   buildErc20Approval,
   buildGrantIssuerBoardroomAction,
   discoverBoardroomDistributions,
@@ -58,6 +62,7 @@ import {
   predictBondMarketAddress as sdkPredictBondMarketAddress,
   predictBoardroomGrantAddress as sdkPredictBoardroomGrantAddress,
   predictDirectGrantAddress as sdkPredictDirectGrantAddress,
+  predictDutchAuctionAddress as sdkPredictDutchAuctionAddress,
   predictFixedPriceSaleAddress as sdkPredictFixedPriceSaleAddress,
   predictLockedLiquidityAddress as sdkPredictLockedLiquidityAddress,
   predictBoardroomControllerAddress,
@@ -67,6 +72,7 @@ import {
   readBoardroomState,
   readBoardroomStakerPower,
   readBondMarketState,
+  readDutchAuctionState,
   readFixedPriceSaleState,
   readGrantState,
   readGrantSettlementQuote,
@@ -78,6 +84,7 @@ import {
   type BondMarketState,
   type BondMarketTerms,
   type BoardroomFixedPriceSaleTerms,
+  type BoardroomDutchAuctionTerms,
   type BoardroomCall,
   type BoardroomStakerPower,
   type BoardroomLockedLiquidityTerms,
@@ -90,6 +97,7 @@ import {
   type DiscoveredLockedLiquidity,
   type DiscoveredPool,
   type DiscoveryResult,
+  type DutchAuctionState,
   type FixedPriceSaleState,
   type GrantCreationTerms,
   type LockedLiquidityState,
@@ -134,6 +142,7 @@ import { useWagmiWallet } from "../hooks/use-wagmi-wallet";
 import { readBoardroomSnapshot } from "../lib/boardroom-snapshot";
 import {
   assertCanonicalFixedPriceSale,
+  assertCanonicalDutchAuction,
   assertCanonicalBondMarket,
   assertCanonicalBoardroom,
   assertCanonicalGrant,
@@ -176,6 +185,7 @@ import {
   defaultBoardroomGrantForm,
   defaultBondMarketForm,
   defaultCurveMigrationForm,
+  defaultDutchAuctionForm,
   defaultFixedPriceSaleForm,
   defaultGrantForm,
   defaultLockedLiquidityExitForm,
@@ -280,6 +290,7 @@ import type {
   CurveMigrationForm,
   DiscoveryForm,
   DiscoverySnapshot,
+  DutchAuctionForm,
   FixedPriceSaleForm,
   GrantForm,
   GrantSnapshot,
@@ -804,6 +815,7 @@ export function App(): React.JSX.Element {
   const grantLoadVersionRef = useRef(0);
   const boardroomLoadVersionRef = useRef(0);
   const bondMarketLoadVersionRef = useRef(0);
+  const dutchAuctionLoadVersionRef = useRef(0);
   const fixedPriceSaleLoadVersionRef = useRef(0);
   const merkleAirdropLoadVersionRef = useRef(0);
   const migratingCurveLoadVersionRef = useRef(0);
@@ -936,6 +948,11 @@ export function App(): React.JSX.Element {
   const [bondMarketSnapshot, setBondMarketSnapshot] = useState<BondMarketState>();
   const [bondMarketSnapshotVerifiedKey, setBondMarketSnapshotVerifiedKey] = useState<string>();
   const [predictedBondMarket, setPredictedBondMarket] = useState<Address>();
+  const [dutchAuctionForm, setDutchAuctionForm] = useState<DutchAuctionForm>(() => defaultDutchAuctionForm());
+  const [dutchAuctionAddress, setDutchAuctionAddress] = useState("");
+  const [dutchAuctionSnapshot, setDutchAuctionSnapshot] = useState<DutchAuctionState>();
+  const [dutchAuctionSnapshotVerifiedKey, setDutchAuctionSnapshotVerifiedKey] = useState<string>();
+  const [predictedDutchAuction, setPredictedDutchAuction] = useState<Address>();
   const [fixedPriceSaleForm, setFixedPriceSaleForm] = useState<FixedPriceSaleForm>(() => defaultFixedPriceSaleForm());
   const [fixedPriceSaleAddress, setFixedPriceSaleAddress] = useState("");
   const [fixedPriceSaleSnapshot, setFixedPriceSaleSnapshot] = useState<FixedPriceSaleState>();
@@ -1018,6 +1035,8 @@ export function App(): React.JSX.Element {
     boardroomGrantForm,
     bondMarketForm,
     bondMarketAddress,
+    dutchAuctionForm,
+    dutchAuctionAddress,
     fixedPriceSaleForm,
     fixedPriceSaleAddress,
     merkleAirdropForm,
@@ -1084,6 +1103,14 @@ export function App(): React.JSX.Element {
         canonicalStudioBoardroom,
       )
     : fixedPriceSaleSnapshot;
+  const displayedDutchAuctionSnapshot = canonicalStudioBoardroom
+    ? verifiedStudioChildState(
+        dutchAuctionSnapshot,
+        dutchAuctionSnapshotVerifiedKey,
+        exactProjectVerifiedKey,
+        canonicalStudioBoardroom,
+      )
+    : dutchAuctionSnapshot;
   const displayedBondMarketSnapshot = canonicalStudioBoardroom
     ? verifiedStudioChildState(
         bondMarketSnapshot,
@@ -1651,6 +1678,10 @@ export function App(): React.JSX.Element {
     setBondMarketSnapshot(undefined);
     setBondMarketSnapshotVerifiedKey(undefined);
     setPredictedBondMarket(undefined);
+    setDutchAuctionAddress("");
+    setDutchAuctionSnapshot(undefined);
+    setDutchAuctionSnapshotVerifiedKey(undefined);
+    setPredictedDutchAuction(undefined);
     setFixedPriceSaleAddress("");
     setFixedPriceSaleSnapshot(undefined);
     setFixedPriceSaleSnapshotVerifiedKey(undefined);
@@ -2161,6 +2192,7 @@ export function App(): React.JSX.Element {
   const updateBoardroomAddress = useCallback((address: string): void => {
     boardroomLoadVersionRef.current += 1;
     bondMarketLoadVersionRef.current += 1;
+    dutchAuctionLoadVersionRef.current += 1;
     fixedPriceSaleLoadVersionRef.current += 1;
     merkleAirdropLoadVersionRef.current += 1;
     migratingCurveLoadVersionRef.current += 1;
@@ -2175,6 +2207,10 @@ export function App(): React.JSX.Element {
     setBondMarketForm(defaultBondMarketForm());
     setBondMarketSnapshot(undefined);
     setBondMarketSnapshotVerifiedKey(undefined);
+    setDutchAuctionAddress("");
+    setDutchAuctionForm(defaultDutchAuctionForm());
+    setDutchAuctionSnapshot(undefined);
+    setDutchAuctionSnapshotVerifiedKey(undefined);
     setFixedPriceSaleAddress("");
     setFixedPriceSaleForm(defaultFixedPriceSaleForm());
     setFixedPriceSaleSnapshot(undefined);
@@ -2196,6 +2232,7 @@ export function App(): React.JSX.Element {
     setWindDownForm(defaultWindDownForm());
     setPredictedBoardroomGrant(undefined);
     setPredictedBondMarket(undefined);
+    setPredictedDutchAuction(undefined);
     setPredictedFixedPriceSale(undefined);
     setPredictedMerkleAirdrop(undefined);
     setPredictedMigratingCurve(undefined);
@@ -2215,6 +2252,13 @@ export function App(): React.JSX.Element {
     setFixedPriceSaleAddress(address);
     setFixedPriceSaleSnapshot(undefined);
     setFixedPriceSaleSnapshotVerifiedKey(undefined);
+  }, []);
+
+  const updateDutchAuctionAddress = useCallback((address: string): void => {
+    dutchAuctionLoadVersionRef.current += 1;
+    setDutchAuctionAddress(address);
+    setDutchAuctionSnapshot(undefined);
+    setDutchAuctionSnapshotVerifiedKey(undefined);
   }, []);
 
   const updateBondMarketAddress = useCallback((address: string): void => {
@@ -3030,6 +3074,7 @@ export function App(): React.JSX.Element {
       runtimeDeploymentIdentity,
     );
     boardroomLoadVersionRef.current += 1;
+    dutchAuctionLoadVersionRef.current += 1;
     fixedPriceSaleLoadVersionRef.current += 1;
     merkleAirdropLoadVersionRef.current += 1;
     migratingCurveLoadVersionRef.current += 1;
@@ -3045,6 +3090,7 @@ export function App(): React.JSX.Element {
     const invalidateCurrentProjectChild = (current: string | undefined): string | undefined =>
       current === activeProjectKey ? undefined : current;
     setBoardroomSnapshotVerifiedKey(invalidateCurrentProjectChild);
+    setDutchAuctionSnapshotVerifiedKey(invalidateCurrentProjectChild);
     setFixedPriceSaleSnapshotVerifiedKey(invalidateCurrentProjectChild);
     setMerkleAirdropSnapshotVerifiedKey(invalidateCurrentProjectChild);
     setMigratingCurveSnapshotVerifiedKey(invalidateCurrentProjectChild);
@@ -3307,6 +3353,11 @@ export function App(): React.JSX.Element {
     return requireVerifiedChildState(displayedFixedPriceSaleSnapshot, address, "fixed-price sale");
   };
 
+  const requireLoadedDutchAuction = (): DutchAuctionState => {
+    const address = requireAddress(dutchAuctionAddress, "Dutch auction address");
+    return requireVerifiedChildState(displayedDutchAuctionSnapshot, address, "Dutch auction");
+  };
+
   const bondMarketTerms = async (boardroom: BoardroomSnapshot): Promise<BondMarketTerms> => {
     const quoteToken = requireAddress(bondMarketForm.quoteToken, "Bond quote token");
     const [capacity, initialPrice, minimumPrice] = await Promise.all([
@@ -3429,6 +3480,137 @@ export function App(): React.JSX.Element {
   const requireLoadedLockedLiquidity = (): LockedLiquidityState => {
     const address = requireAddress(lockedLiquidityAddress, "Locked-liquidity address");
     return requireVerifiedChildState(displayedLockedLiquiditySnapshot, address, "locked-liquidity position");
+  };
+
+  const dutchAuctionTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomDutchAuctionTerms> => {
+    const paymentToken = requireAddress(dutchAuctionForm.paymentToken, "Payment token");
+    const [shareAmount, startPrice, floorPrice, maxPerBuyer] = await Promise.all([
+      parseErc20Amount(publicClient, dutchAuctionForm.shareAmount, boardroom.shareToken, "Auction share amount"),
+      parseErc20Amount(publicClient, dutchAuctionForm.startPrice, paymentToken, "Auction start price"),
+      parseErc20Amount(publicClient, dutchAuctionForm.floorPrice, paymentToken, "Auction floor price"),
+      parseErc20Amount(publicClient, dutchAuctionForm.maxPerBuyer, boardroom.shareToken, "Max per buyer"),
+    ]);
+    const startTime = uintInput(dutchAuctionForm.startTime, "Auction start time");
+    const endTime = uintInput(dutchAuctionForm.endTime, "Auction end time");
+    if (shareAmount === 0n) throw new Error("Auction share amount must be greater than zero.");
+    if (floorPrice === 0n || startPrice <= floorPrice) {
+      throw new Error("The start price must be greater than a positive floor price.");
+    }
+    if (endTime <= startTime) throw new Error("Auction end time must be after its start time.");
+
+    return {
+      paymentToken,
+      shareAmount,
+      startPrice,
+      floorPrice,
+      maxPerBuyer,
+      startTime,
+      endTime,
+      salt: requireBytes32(dutchAuctionForm.salt, "Auction salt"),
+    };
+  };
+
+  const predictDutchAuction = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
+    const { salt } = await dutchAuctionTerms(boardroom);
+    const predicted = await sdkPredictDutchAuctionAddress(publicClient, { factory, boardroom: boardroom.address, salt });
+    setPredictedDutchAuction(predicted);
+    updateDutchAuctionAddress(predicted);
+    pushLog(`Predicted Dutch auction ${predicted}`, "success");
+  };
+
+  const loadDutchAuctionAddress = async (address?: Address): Promise<DutchAuctionState> => {
+    const auction = address ?? requireAddress(dutchAuctionAddress, "Dutch auction address");
+    const requestVersion = ++dutchAuctionLoadVersionRef.current;
+    const requestScope = activeStudioReadScopeKeyRef.current;
+    const requestChainId = activeNetwork.chainId;
+    const requestDeploymentIdentity = runtimeDeploymentIdentity;
+    const routeAtRequest = activeAppRouteRef.current;
+    const requestIsCurrent = (): boolean =>
+      activeStudioReadScopeKeyRef.current === requestScope
+      && dutchAuctionLoadVersionRef.current === requestVersion;
+    setDutchAuctionSnapshotVerifiedKey(undefined);
+    const [snapshot, canonicalBoardroom] = await Promise.all([
+      readDutchAuctionState(publicClient, auction),
+      routeAtRequest.kind === "studio-project" ? readBoardroomState(publicClient, routeAtRequest.boardroom) : undefined,
+    ]);
+    if (!requestIsCurrent()) return snapshot;
+    if (routeAtRequest.kind === "studio-project" && canonicalBoardroom) {
+      await assertCanonicalDutchAuction(publicClient, deployment, canonicalBoardroom, snapshot);
+      if (!requestIsCurrent()) return snapshot;
+    }
+    setDutchAuctionSnapshot(snapshot);
+    setDutchAuctionSnapshotVerifiedKey(canonicalProjectStateKey(
+      requestChainId,
+      snapshot.boardroom,
+      requestDeploymentIdentity,
+    ));
+    setDutchAuctionAddress(auction);
+    return snapshot;
+  };
+
+  const loadDutchAuction = async (): Promise<void> => {
+    const auction = requireAddress(dutchAuctionAddress, "Dutch auction address");
+    await loadDutchAuctionAddress(auction);
+    pushLog(`Loaded Dutch auction ${auction}`, "success");
+  };
+
+  const createDutchAuction = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
+    const assetPolicy = requireDeploymentAddress(deployment?.assetPolicy, "AssetPolicy");
+    const terms = await dutchAuctionTerms(boardroom);
+    const predicted = await sdkPredictDutchAuctionAddress(publicClient, { factory, boardroom: boardroom.address, salt: terms.salt });
+    const executionKind = await submitBoardroomExecution(
+      "Dutch auction creation",
+      boardroom,
+      buildBoardroomDutchAuctionBatch({
+        boardroom: boardroom.address,
+        factory,
+        shareToken: boardroom.shareToken,
+        terms,
+        policy: factory,
+        assetPolicy,
+      }),
+    );
+    if (!activeActionOriginIsCurrent()) return;
+    setPredictedDutchAuction(predicted);
+    updateDutchAuctionAddress(predicted);
+    if (executionKind !== "schedule") await loadDutchAuctionAddress(predicted);
+  };
+
+  const finalizeDutchAuction = async (): Promise<void> => {
+    const auction = requireLoadedDutchAuction().address;
+    await submitContractTransaction("Dutch auction finalization", buildDutchAuctionFinalizeTransaction({ auction }));
+    if (!activeActionOriginIsCurrent()) return;
+    await loadDutchAuctionAddress(auction);
+  };
+
+  const closeDutchAuction = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
+    const auction = requireLoadedDutchAuction().address;
+    await submitBoardroomExecution(
+      "Dutch auction close",
+      boardroom,
+      buildBoardroomDutchAuctionCloseAction({ boardroom: boardroom.address, policy: factory, auction }),
+    );
+    if (!activeActionOriginIsCurrent()) return;
+    await loadDutchAuctionAddress(auction);
+  };
+
+  const cancelDutchAuction = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const factory = requireDeploymentAddress(deployment?.distributionFactory, "DistributionFactory");
+    const auction = requireLoadedDutchAuction().address;
+    await submitBoardroomExecution(
+      "Dutch auction cancel",
+      boardroom,
+      buildBoardroomDutchAuctionCancelAction({ boardroom: boardroom.address, policy: factory, auction }),
+    );
+    if (!activeActionOriginIsCurrent()) return;
+    await loadDutchAuctionAddress(auction);
   };
 
   const fixedPriceSaleTerms = async (boardroom: BoardroomSnapshot): Promise<BoardroomFixedPriceSaleTerms> => {
@@ -4599,6 +4781,20 @@ export function App(): React.JSX.Element {
         setAddress: updateBondMarketAddress,
         setForm: setBondMarketForm,
       }}
+      dutchAuction={{
+        address: dutchAuctionAddress,
+        form: dutchAuctionForm,
+        predicted: predictedDutchAuction,
+        snapshot: displayedDutchAuctionSnapshot,
+        cancel: cancelDutchAuction,
+        close: closeDutchAuction,
+        create: createDutchAuction,
+        finalize: finalizeDutchAuction,
+        load: loadDutchAuction,
+        predict: predictDutchAuction,
+        setAddress: updateDutchAuctionAddress,
+        setForm: setDutchAuctionForm,
+      }}
       fixedPriceSale={{
         address: fixedPriceSaleAddress,
         form: fixedPriceSaleForm,
@@ -5586,6 +5782,15 @@ function participationCapabilityOpportunities(
       opportunities["participate.fixedSale.buy"] = mergeCapabilityOpportunity(
         opportunities["participate.fixedSale.buy"],
         { available, ...(!available ? { reason: "The fixed-price sale is not accepting purchases." } : {}) },
+      );
+    }
+    if (distribution.kind === "dutch-auction" && "saleStatus" in distribution.state) {
+      const available = distribution.state.saleStatus === 0
+        && !distribution.state.closed
+        && distribution.state.remainingShares > 0n;
+      opportunities["participate.dutchAuction.buy"] = mergeCapabilityOpportunity(
+        opportunities["participate.dutchAuction.buy"],
+        { available, ...(!available ? { reason: "The Dutch auction is not accepting purchases." } : {}) },
       );
     }
     if (distribution.kind === "migrating-bonding-curve" && "curveStatus" in distribution.state) {

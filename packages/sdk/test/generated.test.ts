@@ -14,6 +14,7 @@ import {
   boardroomRewardsFactoryAbi,
   boardroomTokenAbi,
   distributionFactoryAbi,
+  dutchAuctionSaleAbi,
   fixedPriceSaleAbi,
   lockedLiquidityAbi,
   lockedLiquidityFactoryAbi,
@@ -41,6 +42,7 @@ describe("generated SDK exports", () => {
     expect(pledgeCashAbis.BoardroomRewards).toBe(boardroomRewardsAbi);
     expect(pledgeCashAbis.BoardroomRewardsFactory).toBe(boardroomRewardsFactoryAbi);
     expect(pledgeCashAbis.FixedPriceSale).toBe(fixedPriceSaleAbi);
+    expect(pledgeCashAbis.DutchAuctionSale).toBe(dutchAuctionSaleAbi);
     expect(pledgeCashAbis.LockedLiquidity).toBe(lockedLiquidityAbi);
     expect(pledgeCashAbis.LockedLiquidityFactory).toBe(lockedLiquidityFactoryAbi);
     expect(pledgeCashAbis.MerkleAirdrop).toBe(merkleAirdropAbi);
@@ -49,9 +51,11 @@ describe("generated SDK exports", () => {
     expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "createGrant")).toBe(true);
     expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "predictGrantAddress")).toBe(true);
     expect(distributionFactoryAbi.some((item) => item.type === "function" && item.name === "createFixedPriceSale")).toBe(true);
+    expect(distributionFactoryAbi.some((item) => item.type === "function" && item.name === "createDutchAuction")).toBe(true);
     expect(distributionFactoryAbi.some((item) => item.type === "function" && item.name === "createMigratingBondingCurve")).toBe(true);
     expect(distributionFactoryAbi.some((item) => item.type === "function" && item.name === "createMerkleAirdrop")).toBe(true);
     expect(fixedPriceSaleAbi.some((item) => item.type === "function" && item.name === "buy")).toBe(true);
+    expect(dutchAuctionSaleAbi.some((item) => item.type === "function" && item.name === "finalize")).toBe(true);
     expect(merkleAirdropAbi.some((item) => item.type === "function" && item.name === "claimGrant")).toBe(true);
     expect(migratingBondingCurveAbi.some((item) => item.type === "function" && item.name === "migrate")).toBe(true);
     expect(ammRouterAbi.some((item) => item.type === "function" && item.name === "swapExactTokensForTokens")).toBe(true);
@@ -100,6 +104,7 @@ describe("generated SDK exports", () => {
       "transferable",
     ]));
     expect(functionNames(fixedPriceSaleAbi)).toEqual(expect.arrayContaining(["getPaymentAmount", "purchasedBy"]));
+    expect(functionNames(dutchAuctionSaleAbi)).toEqual(expect.arrayContaining(["currentPrice", "getPaymentAmount", "purchasedBy", "settlementPrice"]));
     expect(functionNames(migratingBondingCurveAbi)).toEqual(expect.arrayContaining([
       "getBuyQuote",
       "getSellQuote",

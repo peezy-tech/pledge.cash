@@ -7,6 +7,7 @@ import {
   type Address,
   type BoardroomState,
   type BondMarketState,
+  type DutchAuctionState,
   type FixedPriceSaleState,
   type GrantState,
   type LockedLiquidityState,
@@ -88,6 +89,15 @@ export async function assertCanonicalFixedPriceSale(
   sale: FixedPriceSaleState,
 ): Promise<void> {
   await assertCanonicalDistributionBase(client, deployment, boardroom, sale, 0);
+}
+
+export async function assertCanonicalDutchAuction(
+  client: PledgeCashReadClient,
+  deployment: PledgeCashDeployment | undefined,
+  boardroom: BoardroomState,
+  auction: DutchAuctionState,
+): Promise<void> {
+  await assertCanonicalDistributionBase(client, deployment, boardroom, auction, 3);
 }
 
 export async function assertCanonicalBondMarket(
@@ -227,8 +237,8 @@ async function assertCanonicalDistributionBase(
   client: PledgeCashReadClient,
   deployment: PledgeCashDeployment | undefined,
   boardroom: BoardroomState,
-  distribution: FixedPriceSaleState | MerkleAirdropState | MigratingBondingCurveState,
-  expectedKind: 0 | 1 | 2,
+  distribution: DutchAuctionState | FixedPriceSaleState | MerkleAirdropState | MigratingBondingCurveState,
+  expectedKind: 0 | 1 | 2 | 3,
 ): Promise<void> {
   const factory = requireConfiguredAddress(
     deployment?.distributionFactory,

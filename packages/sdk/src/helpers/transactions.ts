@@ -8,6 +8,7 @@ import {
   bondMarketAbi,
   bondMarketFactoryAbi,
   distributionFactoryAbi,
+  dutchAuctionSaleAbi,
   erc20Abi,
   fixedPriceSaleAbi,
   lockedLiquidityAbi,
@@ -21,6 +22,7 @@ import type {
   BoardroomCall,
   BoardroomLaunchConfig,
   BoardroomFixedPriceSaleTerms,
+  BoardroomDutchAuctionTerms,
   BoardroomLockedLiquidityTerms,
   BoardroomLockedLiquidityAddTerms,
   BoardroomMerkleAirdropTerms,
@@ -28,6 +30,7 @@ import type {
   BoardroomShareGrantTerms,
   BondMarketTerms,
   FixedPriceSaleTerms,
+  DutchAuctionTerms,
   GrantCreationArgs,
   GrantCreationTerms,
   LockedLiquidityTerms,
@@ -767,6 +770,41 @@ export function buildFixedPriceSaleBuyTransaction(input: {
   };
 }
 
+export function dutchAuctionArgs(terms: DutchAuctionTerms) {
+  return [
+    {
+      shareToken: terms.shareToken,
+      paymentToken: terms.paymentToken,
+      shareAmount: terms.shareAmount,
+      startPrice: terms.startPrice,
+      floorPrice: terms.floorPrice,
+      maxPerBuyer: terms.maxPerBuyer,
+      startTime: terms.startTime,
+      endTime: terms.endTime,
+      salt: terms.salt,
+    },
+  ] as const;
+}
+
+export function buildDutchAuctionBuyTransaction(input: {
+  auction: Address;
+  shareAmount: bigint;
+  recipient: Address;
+  maxPayment: bigint;
+  deadline: bigint;
+}) {
+  return {
+    address: input.auction,
+    abi: dutchAuctionSaleAbi,
+    functionName: "buy",
+    args: [input.shareAmount, input.recipient, input.maxPayment, input.deadline] as const,
+  };
+}
+
+export function buildDutchAuctionFinalizeTransaction(input: { auction: Address }) {
+  return { address: input.auction, abi: dutchAuctionSaleAbi, functionName: "finalize" };
+}
+
 export function migratingBondingCurveArgs(terms: MigratingBondingCurveTerms) {
   return [
     {
@@ -971,6 +1009,71 @@ export function buildBoardroomFixedPriceSaleCancelCall(input: { policy: Address;
     policy: input.policy,
     target: input.sale,
     data: encodeFunctionData({ abi: fixedPriceSaleAbi, functionName: "cancel" }),
+  });
+}
+
+export function buildBoardroomDutchAuctionBatch(input: {
+  boardroom: Address;
+  factory: Address;
+  shareToken: Address;
+  terms: BoardroomDutchAuctionTerms;
+  policy?: Address;
+  assetPolicy?: Address;
+}) {
+  const policy = input.policy ?? input.factory;
+  const assetPolicy = requireAssetPolicy(input.assetPolicy);
+  const terms = { ...input.terms, shareToken: input.shareToken } satisfies DutchAuctionTerms;
+  const calls = [
+    buildBoardroomCall({
+      policy: assetPolicy,
+      target: input.shareToken,
+      data: encodeFunctionData({
+        abi: boardroomTokenAbi,
+        functionName: "approve",
+        args: [input.factory, input.terms.shareAmount],
+      }),
+    }),
+    buildBoardroomCall({
+      policy,
+      target: input.factory,
+      data: encodeFunctionData({
+        abi: distributionFactoryAbi,
+        functionName: "createDutchAuction",
+        args: dutchAuctionArgs(terms),
+      }),
+    }),
+  ] as const;
+
+  return buildBoardroomExecuteBatchTransaction({ boardroom: input.boardroom, calls });
+}
+
+export function buildBoardroomDutchAuctionCloseAction(input: {
+  boardroom: Address;
+  policy: Address;
+  auction: Address;
+}) {
+  return buildBoardroomExecuteTransaction({
+    boardroom: input.boardroom,
+    call: buildBoardroomCall({
+      policy: input.policy,
+      target: input.auction,
+      data: encodeFunctionData({ abi: dutchAuctionSaleAbi, functionName: "close" }),
+    }),
+  });
+}
+
+export function buildBoardroomDutchAuctionCancelAction(input: {
+  boardroom: Address;
+  policy: Address;
+  auction: Address;
+}) {
+  return buildBoardroomExecuteTransaction({
+    boardroom: input.boardroom,
+    call: buildBoardroomCall({
+      policy: input.policy,
+      target: input.auction,
+      data: encodeFunctionData({ abi: dutchAuctionSaleAbi, functionName: "cancel" }),
+    }),
   });
 }
 

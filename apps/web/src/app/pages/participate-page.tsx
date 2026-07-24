@@ -150,7 +150,9 @@ export function participationRefreshDelayMs(
         : state.airdropStatus;
     if (routeStatus !== 0) continue;
     boundaries.push(state.startTime * 1_000n);
-    if (state.endTime !== 0n) boundaries.push((state.endTime + 1n) * 1_000n);
+    if (state.endTime !== 0n) {
+      boundaries.push((state.endTime + (distribution.kind === "dutch-auction" ? 0n : 1n)) * 1_000n);
+    }
   }
   const nextBoundary = boundaries
     .filter((boundary) => boundary > now)
@@ -403,6 +405,9 @@ function unavailableRouteGuidance(
   if (option.path === "migrating-bonding-curve" && options.some((candidate) => candidate.path === "amm" && candidate.available)) {
     return "This curve has migrated. Choose the live AMM route to keep trading, or inspect its historical contract in the route details.";
   }
+  if (option.path === "dutch-auction") {
+    return "This auction is scheduled, ended, sold out, or cancelled. Its final settlement price and historical terms remain visible in the route details.";
+  }
   if (option.path === "fixed-price-sale") {
     return "This sale is closed or sold out. Its historical terms and contract remain visible in the route details.";
   }
@@ -539,6 +544,32 @@ function distributionOption(
     };
   }
 
+  if (distribution.kind === "dutch-auction") {
+    const base = distributionBase(
+      distribution,
+      "dutch-auction",
+      "Dutch auction",
+      "Buy project tokens at a price that descends linearly until the auction closes.",
+    );
+    if (!distribution.state || !("saleStatus" in distribution.state)) return unreadDistribution(base, distribution, "auction");
+    const state = distribution.state;
+    return executableDistributionOption(
+      base,
+      deriveExecutableDistributionRoute({
+        boardroomStatus,
+        closed: state.closed,
+        endTime: state.endTime,
+        kind: "dutch-auction",
+        now,
+        remainingShares: state.remainingShares,
+        routeStatus: state.saleStatus,
+        startTime: state.startTime,
+      }),
+      state.remainingShares,
+      distribution.shareTokenMetadata?.symbol,
+    );
+  }
+
   if (distribution.kind === "fixed-price-sale") {
     const base = distributionBase(distribution, "fixed-price-sale", "Fixed-price sale", "Buy a known number of project tokens at a fixed unit price.");
     if (!distribution.state || !("saleStatus" in distribution.state)) return unreadDistribution(base, distribution, "sale");
@@ -617,7 +648,7 @@ function distributionBase(
   return {
     address: distribution.address,
     description,
-    id: participationDistributionKey(path as "bond-market" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop", distribution.address),
+    id: participationDistributionKey(path as "bond-market" | "dutch-auction" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop", distribution.address),
     label,
     path,
   };
@@ -655,7 +686,7 @@ function executableDistributionOption(
   const livenessReason = "reason" in executable.liveness ? executable.liveness.reason : undefined;
   const reason = executable.mode === "sell-only" && !executable.buy.available
     ? `Buy unavailable: ${executable.buy.reason} Sells remain available against the current curve reserve.`
-    : base.path === "fixed-price-sale" && !available && executable.phase !== "future"
+    : (base.path === "fixed-price-sale" || base.path === "dutch-auction") && !available && executable.phase !== "future"
       ? `This sale is closed or sold out. ${livenessReason ?? "The contract does not currently accept purchases."}`
       : livenessReason;
   return {
@@ -824,6 +855,7 @@ function fallbackOption(id: ParticipationContentKey): ParticipationOption {
     status: "Unknown",
   };
   if (path === "bond-market") return { ...common, description: "Commit reserve or LP assets for a vested project-token position.", label: "Bond market" };
+  if (path === "dutch-auction") return { ...common, description: "Buy while the published unit price descends.", label: "Dutch auction" };
   if (path === "fixed-price-sale") return { ...common, description: "Buy at a published unit price.", label: "Fixed-price sale" };
   if (path === "migrating-bonding-curve") return { ...common, description: "Buy or sell against a price curve.", label: "Bonding curve" };
   if (path === "merkle-airdrop") return { ...common, description: "Claim a published allocation.", label: "Airdrop" };

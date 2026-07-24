@@ -1,6 +1,7 @@
 import type {
   Address,
   BondMarketState,
+  DutchAuctionState,
   FixedPriceSaleState,
   LockedLiquidityState,
   MerkleAirdropState,
@@ -15,6 +16,7 @@ import type {
   BoardroomGrantForm,
   BoardroomSnapshot,
   CurveMigrationForm,
+  DutchAuctionForm,
   FixedPriceSaleForm,
   LockedLiquidityExitForm,
   LockedLiquidityForm,
@@ -29,6 +31,7 @@ export type BoardroomPanelProps = {
   capabilities?: BoardroomPanelCapabilities | undefined;
   boardroom: BoardroomPanelState;
   bondMarket: BondMarketPanelState;
+  dutchAuction: DutchAuctionPanelState;
   fixedPriceSale: FixedPriceSalePanelState;
   grant: BoardroomGrantPanelState;
   lockedLiquidity: LockedLiquidityPanelState;
@@ -116,6 +119,21 @@ export type FixedPriceSalePanelState = {
   predict: () => Promise<void>;
   setFixedPriceSaleAddress: (address: string) => void;
   setFixedPriceSaleForm: Dispatch<SetStateAction<FixedPriceSaleForm>>;
+};
+
+export type DutchAuctionPanelState = {
+  address: string;
+  form: DutchAuctionForm;
+  predicted: Address | undefined;
+  snapshot: DutchAuctionState | undefined;
+  cancel: () => Promise<void>;
+  close: () => Promise<void>;
+  create: () => Promise<void>;
+  finalize: () => Promise<void>;
+  load: () => Promise<void>;
+  predict: () => Promise<void>;
+  setAddress: (address: string) => void;
+  setForm: Dispatch<SetStateAction<DutchAuctionForm>>;
 };
 
 export type MerkleAirdropPanelState = {

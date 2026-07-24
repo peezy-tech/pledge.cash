@@ -3,6 +3,7 @@ import { getAddress, isAddress, type Hex } from "viem";
 import type {
   BondMarketForm,
   CurveMigrationForm,
+  DutchAuctionForm,
   FixedPriceSaleForm,
   GrantForm,
   LockedLiquidityExitForm,
@@ -88,6 +89,18 @@ export function defaultFixedPriceSaleForm(): FixedPriceSaleForm {
     paymentToken: "",
     shareAmount: "1",
     price: "1",
+    maxPerBuyer: "0",
+    ...defaultWorkflowWindow(),
+    salt: randomSalt(),
+  };
+}
+
+export function defaultDutchAuctionForm(): DutchAuctionForm {
+  return {
+    paymentToken: "",
+    shareAmount: "1",
+    startPrice: "2",
+    floorPrice: "1",
     maxPerBuyer: "0",
     ...defaultWorkflowWindow(),
     salt: randomSalt(),

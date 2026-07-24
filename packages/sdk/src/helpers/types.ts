@@ -45,6 +45,20 @@ export type FixedPriceSaleTerms = {
 
 export type BoardroomFixedPriceSaleTerms = Omit<FixedPriceSaleTerms, "shareToken">;
 
+export type DutchAuctionTerms = {
+  shareToken: Address;
+  paymentToken: Address;
+  shareAmount: bigint;
+  startPrice: bigint;
+  floorPrice: bigint;
+  maxPerBuyer: bigint;
+  startTime: bigint;
+  endTime: bigint;
+  salt: Hex;
+};
+
+export type BoardroomDutchAuctionTerms = Omit<DutchAuctionTerms, "shareToken">;
+
 export type MigratingBondingCurveTerms = {
   shareToken: Address;
   quoteToken: Address;
@@ -207,6 +221,38 @@ export type FixedPriceSaleState = {
 
 export type FixedPriceSaleParticipationQuote = {
   state: FixedPriceSaleState;
+  buyer: Address;
+  shareAmount: bigint;
+  paymentAmount: bigint;
+  purchasedBy: bigint;
+  remainingBuyerCapacity: bigint;
+  paymentBalance: bigint;
+  paymentAllowance: bigint;
+};
+
+export type DutchAuctionState = {
+  address: Address;
+  factory: Address;
+  boardroom: Address;
+  shareToken: Address;
+  paymentToken: Address;
+  saleSupply: bigint;
+  remainingShares: bigint;
+  startPrice: bigint;
+  floorPrice: bigint;
+  currentPrice: bigint;
+  maxPerBuyer: bigint;
+  totalPayment: bigint;
+  lastPurchasePrice: bigint;
+  settlementPrice: bigint;
+  startTime: bigint;
+  endTime: bigint;
+  saleStatus: number;
+  closed: boolean;
+};
+
+export type DutchAuctionParticipationQuote = {
+  state: DutchAuctionState;
   buyer: Address;
   shareAmount: bigint;
   paymentAmount: bigint;
@@ -531,7 +577,7 @@ export type DiscoveredDistribution = {
   distribution: Address;
   boardroom: Address;
   factory: Address;
-  kind: "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "unknown";
+  kind: "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "dutch-auction" | "unknown";
   shareToken: Address;
   paymentToken: Address;
   shareAmount: bigint;

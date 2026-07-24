@@ -1,6 +1,7 @@
 import type {
   Address,
   BondMarketState,
+  DutchAuctionState,
   FixedPriceSaleState,
   LockedLiquidityState,
   MerkleAirdropState,
@@ -39,6 +40,7 @@ import type {
   BoardroomLockedLiquiditySnapshot,
   BoardroomSnapshot,
   CurveMigrationForm,
+  DutchAuctionForm,
   FixedPriceSaleForm,
   LockedLiquidityExitForm,
   LockedLiquidityForm,
@@ -72,6 +74,7 @@ export function BoardroomPanel({
   capabilities,
   boardroom,
   bondMarket,
+  dutchAuction,
   fixedPriceSale,
   grant,
   lockedLiquidity,
@@ -80,7 +83,7 @@ export function BoardroomPanel({
   windDown,
   workflow,
 }: BoardroomPanelProps): React.JSX.Element {
-  const [distributionTool, setDistributionTool] = useState<"airdrop" | "bond" | "curve" | "fixed-price">("fixed-price");
+  const [distributionTool, setDistributionTool] = useState<"airdrop" | "bond" | "curve" | "dutch-auction" | "fixed-price">("dutch-auction");
   const { deployment, pendingAction, runAction } = workflow;
   const {
     address: boardroomAddress,
@@ -111,6 +114,20 @@ export function BoardroomPanel({
     setAddress: setBondMarketAddress,
     setForm: setBondMarketForm,
   } = bondMarket;
+  const {
+    address: dutchAuctionAddress,
+    form: dutchAuctionForm,
+    predicted: predictedDutchAuction,
+    snapshot: dutchAuctionSnapshot,
+    cancel: cancelDutchAuction,
+    close: closeDutchAuction,
+    create: createDutchAuction,
+    finalize: finalizeDutchAuction,
+    load: loadDutchAuction,
+    predict: predictDutchAuction,
+    setAddress: setDutchAuctionAddress,
+    setForm: setDutchAuctionForm,
+  } = dutchAuction;
   const {
     form: boardroomGrantForm,
     predicted: predictedBoardroomGrant,
@@ -230,6 +247,7 @@ export function BoardroomPanel({
           boardroomSnapshot={boardroomSnapshot}
           scope={scope}
           setBondMarketAddress={setBondMarketAddress}
+          setDutchAuctionAddress={setDutchAuctionAddress}
           setFixedPriceSaleAddress={setFixedPriceSaleAddress}
           setMerkleAirdropAddress={setMerkleAirdropAddress}
           setLockedLiquidityAddress={setLockedLiquidityAddress}
@@ -320,6 +338,7 @@ export function BoardroomPanel({
         pendingAction={pendingAction}
         setBoardroomAddress={setBoardroomAddress}
         setBondMarketAddress={setBondMarketAddress}
+        setDutchAuctionAddress={setDutchAuctionAddress}
         setFixedPriceSaleAddress={setFixedPriceSaleAddress}
         setMerkleAirdropAddress={setMerkleAirdropAddress}
         setLockedLiquidityAddress={setLockedLiquidityAddress}
@@ -371,8 +390,9 @@ export function BoardroomPanel({
 
       {section === "all" || section === "distributions" ? <>
       {section === "distributions" ? (
-        <div aria-label="Distribution type" className="grid grid-cols-2 gap-2 border-y border-zinc-800 py-3 lg:grid-cols-4" role="group">
+        <div aria-label="Distribution type" className="grid grid-cols-2 gap-2 border-y border-zinc-800 py-3 lg:grid-cols-5" role="group">
           {([
+            ["dutch-auction", "Dutch auction"],
             ["fixed-price", "Fixed price"],
             ["bond", "Bond market"],
             ["airdrop", "Airdrop"],
@@ -390,6 +410,27 @@ export function BoardroomPanel({
           ))}
         </div>
       ) : null}
+      {section === "all" || distributionTool === "dutch-auction" ? <DutchAuctionPanel
+        boardroomSnapshot={boardroomSnapshot}
+        createCapability={capabilities?.createDistribution}
+        deployment={deployment}
+        dutchAuctionAddress={dutchAuctionAddress}
+        dutchAuctionForm={dutchAuctionForm}
+        dutchAuctionSnapshot={dutchAuctionSnapshot}
+        pendingAction={pendingAction}
+        manageCapability={capabilities?.manageDistribution}
+        predictedDutchAuction={predictedDutchAuction}
+        setDutchAuctionAddress={setDutchAuctionAddress}
+        setDutchAuctionForm={setDutchAuctionForm}
+        cancelDutchAuction={cancelDutchAuction}
+        closeDutchAuction={closeDutchAuction}
+        createDutchAuction={createDutchAuction}
+        finalizeDutchAuction={finalizeDutchAuction}
+        loadDutchAuction={loadDutchAuction}
+        predictDutchAuction={predictDutchAuction}
+        runAction={runAction}
+      /> : null}
+
       {section === "all" || distributionTool === "fixed-price" ? <FixedPriceSalePanel
         boardroomSnapshot={boardroomSnapshot}
         createCapability={capabilities?.createDistribution}
@@ -545,6 +586,7 @@ function BoardroomOverview({
   pendingAction,
   setBoardroomAddress,
   setBondMarketAddress,
+  setDutchAuctionAddress,
   setFixedPriceSaleAddress,
   setMerkleAirdropAddress,
   setLockedLiquidityAddress,
@@ -559,6 +601,7 @@ function BoardroomOverview({
   pendingAction: string | undefined;
   setBoardroomAddress: (address: string) => void;
   setBondMarketAddress: (address: string) => void;
+  setDutchAuctionAddress: (address: string) => void;
   setFixedPriceSaleAddress: (address: string) => void;
   setMerkleAirdropAddress: (address: string) => void;
   setLockedLiquidityAddress: (address: string) => void;
@@ -601,6 +644,7 @@ function BoardroomOverview({
         boardroomSnapshot={boardroomSnapshot}
         scope={obligationScope}
         setBondMarketAddress={setBondMarketAddress}
+        setDutchAuctionAddress={setDutchAuctionAddress}
         setFixedPriceSaleAddress={setFixedPriceSaleAddress}
         setMerkleAirdropAddress={setMerkleAirdropAddress}
         setLockedLiquidityAddress={setLockedLiquidityAddress}
@@ -662,6 +706,31 @@ function fixedPriceSaleFacts(
     { label: "Payment token", value: fixedPriceSaleSnapshot ? <AddressLink address={fixedPriceSaleSnapshot.paymentToken} /> : "Unknown" },
     { label: "Price", value: formatTokenAmount(fixedPriceSaleSnapshot?.price, distributionSummary?.paymentTokenMetadata) },
     { label: "Window", value: fixedPriceSaleSnapshot ? `${dateString(fixedPriceSaleSnapshot.startTime)} -> ${dateString(fixedPriceSaleSnapshot.endTime)}` : "Unknown" },
+  ];
+}
+
+function dutchAuctionFacts(
+  auctionSnapshot: DutchAuctionState | undefined,
+  distributionSummary: BoardroomDistributionSnapshot | undefined,
+  predictedAuction: Address | undefined,
+): BoardroomFact[] {
+  return [
+    { label: "Predicted auction", value: predictedAuction ? <AddressLink address={predictedAuction} /> : "None" },
+    {
+      label: "Status",
+      value: auctionSnapshot ? (
+        <StatusBadge label={saleStatusLabel(auctionSnapshot.saleStatus)} tone={auctionSnapshot.closed ? "warning" : "default"} />
+      ) : (
+        "Not loaded"
+      ),
+    },
+    { label: "Remaining shares", value: formatTokenAmount(auctionSnapshot?.remainingShares, distributionSummary?.shareTokenMetadata) },
+    { label: "Payment token", value: auctionSnapshot ? <AddressLink address={auctionSnapshot.paymentToken} /> : "Unknown" },
+    { label: "Current price", value: formatTokenAmount(auctionSnapshot?.currentPrice, distributionSummary?.paymentTokenMetadata) },
+    { label: "Start / floor", value: auctionSnapshot ? `${formatTokenAmount(auctionSnapshot.startPrice, distributionSummary?.paymentTokenMetadata)} / ${formatTokenAmount(auctionSnapshot.floorPrice, distributionSummary?.paymentTokenMetadata)}` : "Unknown" },
+    { label: "Proceeds", value: formatTokenAmount(auctionSnapshot?.totalPayment, distributionSummary?.paymentTokenMetadata) },
+    { label: "Settlement price", value: formatTokenAmount(auctionSnapshot?.settlementPrice, distributionSummary?.paymentTokenMetadata) },
+    { label: "Window", value: auctionSnapshot ? `${dateString(auctionSnapshot.startTime)} -> ${dateString(auctionSnapshot.endTime)}` : "Unknown" },
   ];
 }
 
@@ -1006,6 +1075,131 @@ function BondMarketPanel({
         { label: "Window", value: bondMarketSnapshot ? `${dateString(BigInt(bondMarketSnapshot.startTime))} -> ${dateString(BigInt(bondMarketSnapshot.conclusion))}` : "Unknown" },
         { label: "Receipt", value: "Internal and non-transferable" },
       ]} />
+    </Panel>
+  );
+}
+
+function DutchAuctionPanel({
+  boardroomSnapshot,
+  createCapability,
+  deployment,
+  dutchAuctionAddress,
+  dutchAuctionForm,
+  dutchAuctionSnapshot,
+  manageCapability,
+  pendingAction,
+  predictedDutchAuction,
+  setDutchAuctionAddress,
+  setDutchAuctionForm,
+  cancelDutchAuction,
+  closeDutchAuction,
+  createDutchAuction,
+  finalizeDutchAuction,
+  loadDutchAuction,
+  predictDutchAuction,
+  runAction,
+}: {
+  boardroomSnapshot: BoardroomSnapshot | undefined;
+  createCapability: Capability | undefined;
+  deployment: PledgeCashDeployment | undefined;
+  dutchAuctionAddress: string;
+  dutchAuctionForm: DutchAuctionForm;
+  dutchAuctionSnapshot: DutchAuctionState | undefined;
+  manageCapability: Capability | undefined;
+  pendingAction: string | undefined;
+  predictedDutchAuction: Address | undefined;
+  setDutchAuctionAddress: (address: string) => void;
+  setDutchAuctionForm: Dispatch<SetStateAction<DutchAuctionForm>>;
+  cancelDutchAuction: () => Promise<void>;
+  closeDutchAuction: () => Promise<void>;
+  createDutchAuction: () => Promise<void>;
+  finalizeDutchAuction: () => Promise<void>;
+  loadDutchAuction: () => Promise<void>;
+  predictDutchAuction: () => Promise<void>;
+  runAction: (label: string, action: () => Promise<void>) => Promise<void>;
+}): React.JSX.Element {
+  const distributionSummary = distributionSummaryFor(boardroomSnapshot, dutchAuctionSnapshot?.address ?? dutchAuctionAddress);
+  const canUseDistributionFactory = Boolean(deployment?.distributionFactory);
+
+  return (
+    <Panel
+      title="Dutch Auction"
+      description="Sell shares immediately at a price that descends linearly from the start price to the floor. Buyers pay the live price when their transaction executes."
+      action={
+        <Button type="button" variant="secondary" onClick={() => setDutchAuctionForm((current) => ({ ...current, salt: randomSalt() }))}>
+          <Wand2 className="h-4 w-4" />
+          Salt
+        </Button>
+      }
+    >
+      <div className="border-t border-amber-900/60 bg-amber-950/20 px-4 py-3 text-sm leading-6 text-amber-100">
+        Creating this auction selects General Availability for the Boardroom and permanently gives up its one-time migrating-curve path.
+      </div>
+      <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-2">
+        <TextField form={dutchAuctionForm} field="paymentToken" label="Payment token" setForm={setDutchAuctionForm} />
+        <TextField form={dutchAuctionForm} field="shareAmount" inputMode="decimal" label="Share amount" setForm={setDutchAuctionForm} />
+        <TextField form={dutchAuctionForm} field="startPrice" inputMode="decimal" label="Start price" setForm={setDutchAuctionForm} />
+        <TextField form={dutchAuctionForm} field="floorPrice" inputMode="decimal" label="Floor price" setForm={setDutchAuctionForm} />
+        <TextField description="Zero means no per-wallet limit." form={dutchAuctionForm} field="maxPerBuyer" inputMode="decimal" label="Max per buyer" setForm={setDutchAuctionForm} />
+        <TextField description={timestampPreview(dutchAuctionForm.startTime, "Starts immediately")} form={dutchAuctionForm} field="startTime" inputMode="numeric" label="Auction starts" setForm={setDutchAuctionForm} />
+        <TextField description={timestampPreview(dutchAuctionForm.endTime)} form={dutchAuctionForm} field="endTime" inputMode="numeric" label="Auction ends" setForm={setDutchAuctionForm} />
+      </div>
+      <details className="border-t border-zinc-800 px-4 py-3">
+        <summary className="cursor-pointer text-sm font-medium text-zinc-300">Advanced auction identity</summary>
+        <div className="mt-3">
+          <TextField className="border border-zinc-800 md:border-r" description="The bytes32 salt fixes the predicted auction address." form={dutchAuctionForm} field="salt" label="Auction salt" setForm={setDutchAuctionForm} />
+        </div>
+      </details>
+      <ActionRow>
+        <ActionButton
+          actionId="predict-dutch-auction"
+          disabled={!canUseDistributionFactory}
+          pendingAction={pendingAction}
+          variant="secondary"
+          onClick={() => void runAction("predict-dutch-auction", predictDutchAuction)}
+        >
+          <Search className="h-4 w-4" />
+          Predict
+        </ActionButton>
+        <ActionButton
+          actionId="create-dutch-auction"
+          disabled={!canUseDistributionFactory || !capabilityEnabled(createCapability)}
+          pendingAction={pendingAction}
+          title={capabilityReason(createCapability)}
+          onClick={() => void runAction("create-dutch-auction", createDutchAuction)}
+        >
+          <Coins className="h-4 w-4" />
+          Create Auction
+        </ActionButton>
+      </ActionRow>
+      <div className="grid grid-cols-1 border-t border-zinc-800 md:grid-cols-[minmax(0,1fr)_auto]">
+        <Field label="Auction address">
+          <Input value={dutchAuctionAddress} onChange={(event) => setDutchAuctionAddress(event.target.value)} spellCheck={false} />
+        </Field>
+        <div className="flex flex-wrap items-end gap-2 border-b border-zinc-800 p-4">
+          <ActionButton actionId="load-dutch-auction" pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("load-dutch-auction", loadDutchAuction)}>
+            <RefreshCw className="h-4 w-4" />
+            Load
+          </ActionButton>
+          <ActionButton actionId="finalize-dutch-auction" disabled={!dutchAuctionSnapshot || dutchAuctionSnapshot.closed} pendingAction={pendingAction} variant="secondary" onClick={() => void runAction("finalize-dutch-auction", finalizeDutchAuction)}>
+            <CheckCircle2 className="h-4 w-4" />
+            Finalize
+          </ActionButton>
+          <ActionButton actionId="close-dutch-auction" disabled={!capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} variant="secondary" onClick={() => void runAction("close-dutch-auction", closeDutchAuction)}>
+            <ShieldCheck className="h-4 w-4" />
+            Close
+          </ActionButton>
+          <ActionButton actionId="cancel-dutch-auction" disabled={!capabilityEnabled(manageCapability)} pendingAction={pendingAction} title={capabilityReason(manageCapability)} variant="danger" onClick={() => void runAction("cancel-dutch-auction", cancelDutchAuction)}>
+            <XCircle className="h-4 w-4" />
+            Cancel
+          </ActionButton>
+        </div>
+      </div>
+      <div className="border-t border-zinc-800 px-4 py-3 text-sm leading-6 text-zinc-400">
+        After settlement, liquidity stays optional. Use the settlement price as the initial ratio for a new canonical pool; if a pool already exists, add liquidity at its live reserve ratio. Choose the amount in Liquidity—there is intentionally no default proceeds percentage.
+      </div>
+      <CapabilityNotice capability={createCapability} fallback={manageCapability} />
+      <Facts columns="three" items={dutchAuctionFacts(dutchAuctionSnapshot, distributionSummary, predictedDutchAuction)} />
     </Panel>
   );
 }

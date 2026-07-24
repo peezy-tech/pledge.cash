@@ -30,7 +30,10 @@ function context(overrides: Partial<ProjectCapabilityContext> = {}): ProjectCapa
 
 describe("project capability resolver", () => {
   test("turns an available public opportunity into connect, switch, or enabled states", () => {
-    const opportunity = { "participate.fixedSale.buy": { available: true } } as const;
+    const opportunity = {
+      "participate.dutchAuction.buy": { available: true },
+      "participate.fixedSale.buy": { available: true },
+    } as const;
 
     const anonymous = resolveProjectCapabilities(context({ account: undefined, walletChainId: undefined, opportunities: opportunity }));
     expect(anonymous["participate.fixedSale.buy"]).toEqual({ status: "connect", reason: "Connect a wallet to continue." });
@@ -41,6 +44,7 @@ describe("project capability resolver", () => {
 
     const ready = resolveProjectCapabilities(context({ opportunities: opportunity }));
     expect(capabilityAllowsAction(ready["participate.fixedSale.buy"])).toBe(true);
+    expect(capabilityAllowsAction(ready["participate.dutchAuction.buy"])).toBe(true);
     expect(ready["participate.curve.buy"].status).toBe("hidden");
   });
 

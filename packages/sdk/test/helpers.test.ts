@@ -11,6 +11,9 @@ import {
   bondMarketFactoryAbi,
   buildBoardroomBondMarketBatch,
   buildBoardroomBondMarketCloseAction,
+  buildBoardroomDutchAuctionBatch,
+  buildBoardroomDutchAuctionCancelAction,
+  buildBoardroomDutchAuctionCloseAction,
   buildBondFinalizeTransaction,
   buildBondPurchaseTransaction,
   buildBondRedeemTransaction,
@@ -60,6 +63,7 @@ import {
   discoverGrantHistory,
   discoverPools,
   distributionFactoryAbi,
+  dutchAuctionSaleAbi,
   erc20Abi,
   fixedPriceSaleAbi,
   lockedLiquidityAbi,
@@ -68,6 +72,7 @@ import {
   migratingBondingCurveAbi,
   poolFeesAbi,
   predictBondMarketAddress,
+  predictDutchAuctionAddress,
   predictAmmPoolAddress,
   predictLockedLiquidityAddress,
   predictMerkleAirdropAddress,
@@ -78,6 +83,7 @@ import {
   readBoardroomRewardsAccountState,
   readBoardroomRewardsState,
   readBondMarketState,
+  readDutchAuctionState,
   readFactoryState,
   readFixedPriceSaleState,
   readGrantState,
@@ -87,6 +93,7 @@ import {
   tokenGrantFactoryAbi,
   type BoardroomLockedLiquidityTerms,
   type BondMarketTerms,
+  type BoardroomDutchAuctionTerms,
   type BoardroomFixedPriceSaleTerms,
   type BoardroomMerkleAirdropTerms,
   type BoardroomMigratingBondingCurveTerms,
@@ -110,6 +117,7 @@ const bondMarketFactory = "0x0000000000000000000000000000000000000b0d" as Addres
 const bondMarket = "0x000000000000000000000000000000000000b0a1" as Address;
 const assetPolicy = "0x0000000000000000000000000000000000000a55" as Address;
 const sale = "0x0000000000000000000000000000000000000a1e" as Address;
+const auction = "0x0000000000000000000000000000000000000a0c" as Address;
 const airdrop = "0x0000000000000000000000000000000000000a1d" as Address;
 const curve = "0x0000000000000000000000000000000000000c0e" as Address;
 const ammFactory = "0x0000000000000000000000000000000000000aee" as Address;
@@ -158,6 +166,17 @@ const saleTerms = {
   endTime: 1000n,
   salt,
 } satisfies BoardroomFixedPriceSaleTerms;
+
+const auctionTerms = {
+  paymentToken,
+  shareAmount: 1000n,
+  startPrice: 40n,
+  floorPrice: 20n,
+  maxPerBuyer: 500n,
+  startTime: 100n,
+  endTime: 1000n,
+  salt,
+} satisfies BoardroomDutchAuctionTerms;
 
 const curveTerms = {
   quoteToken: paymentToken,
@@ -328,6 +347,12 @@ describe("SDK action and query helpers", () => {
       maxGrantClaims: 3,
       claimedGrantCount: 1,
       maxPerBuyer: 500n,
+      startPrice: 40n,
+      floorPrice: 20n,
+      currentPrice: 30n,
+      totalPayment: 7_500n,
+      lastPurchasePrice: 31n,
+      settlementPrice: 0n,
       startTime: 100n,
       endTime: 1000n,
       phaseEndsAt: 0n,
@@ -424,6 +449,18 @@ describe("SDK action and query helpers", () => {
       shareToken,
       paymentToken,
       remainingShares: 900n,
+      closed: false,
+    });
+    await expect(readDutchAuctionState(client, auction)).resolves.toMatchObject({
+      address: auction,
+      boardroom,
+      shareToken,
+      paymentToken,
+      remainingShares: 900n,
+      startPrice: 40n,
+      floorPrice: 20n,
+      currentPrice: 30n,
+      totalPayment: 7_500n,
       closed: false,
     });
     await expect(readMerkleAirdropState(client, airdrop)).resolves.toMatchObject({
@@ -740,6 +777,47 @@ describe("SDK action and query helpers", () => {
     expect(cancel.functionName).toBe("execute");
     expect(cancel.args[0]).toMatchObject({ policy: distributionFactory, target: sale, value: 0n });
     expect(cancel.args[0].data).toBe(encodeFunctionData({ abi: fixedPriceSaleAbi, functionName: "cancel" }));
+  });
+
+  test("builds Boardroom Dutch-auction creation and lifecycle transactions", () => {
+    const batch = buildBoardroomDutchAuctionBatch({
+      boardroom,
+      factory: distributionFactory,
+      shareToken,
+      terms: auctionTerms,
+      policy: distributionFactory,
+      assetPolicy,
+    });
+
+    expect(batch.address).toBe(boardroom);
+    expect(batch.functionName).toBe("executeBatch");
+    const calls = batch.args[0];
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.data).toBe(encodeFunctionData({
+      abi: boardroomTokenAbi,
+      functionName: "approve",
+      args: [distributionFactory, auctionTerms.shareAmount],
+    }));
+    expect(calls[1]?.data).toBe(encodeFunctionData({
+      abi: distributionFactoryAbi,
+      functionName: "createDutchAuction",
+      args: [{
+        shareToken,
+        paymentToken,
+        shareAmount: 1000n,
+        startPrice: 40n,
+        floorPrice: 20n,
+        maxPerBuyer: 500n,
+        startTime: 100n,
+        endTime: 1000n,
+        salt,
+      }],
+    }));
+
+    const close = buildBoardroomDutchAuctionCloseAction({ boardroom, policy: distributionFactory, auction });
+    expect(close.args[0].data).toBe(encodeFunctionData({ abi: dutchAuctionSaleAbi, functionName: "close" }));
+    const cancel = buildBoardroomDutchAuctionCancelAction({ boardroom, policy: distributionFactory, auction });
+    expect(cancel.args[0].data).toBe(encodeFunctionData({ abi: dutchAuctionSaleAbi, functionName: "cancel" }));
   });
 
   test("builds non-transferable bond market transactions", () => {
@@ -1126,12 +1204,14 @@ describe("SDK action and query helpers", () => {
     const client = mockReadClient({
       predictPoolAddress: pool,
       predictLockedLiquidityAddress: locker,
+      predictDutchAuctionAddress: auction,
       predictMigratingBondingCurveAddress: curve,
       predictMerkleAirdropAddress: airdrop,
     });
 
     await expect(predictAmmPoolAddress(client, { factory: ammFactory, tokenA: shareToken, tokenB: paymentToken })).resolves.toBe(pool);
     await expect(predictLockedLiquidityAddress(client, { factory: lockedLiquidityFactory, boardroom, salt })).resolves.toBe(locker);
+    await expect(predictDutchAuctionAddress(client, { factory: distributionFactory, boardroom, salt })).resolves.toBe(auction);
     await expect(predictMigratingBondingCurveAddress(client, { factory: distributionFactory, boardroom, salt })).resolves.toBe(curve);
     await expect(predictMerkleAirdropAddress(client, { factory: distributionFactory, boardroom, salt })).resolves.toBe(airdrop);
   });
@@ -1176,6 +1256,7 @@ describe("SDK action and query helpers", () => {
         distributionCreatedLog(22n, 0, sale, boardroom, 0n),
         distributionCreatedLog(23n, 0, curve, boardroom, 1n),
         distributionCreatedLog(24n, 0, airdrop, boardroom, 2n),
+        distributionCreatedLog(25n, 0, auction, boardroom, 3n),
         distributionCreatedLog(24n, 0, other, holder, 1n),
       ],
       ProtocolLiquidityCreated: [
@@ -1194,8 +1275,8 @@ describe("SDK action and query helpers", () => {
     expect(boardrooms.items[0]).toMatchObject({ boardroom, owner: issuer, shareToken, name: "Pledge Common" });
 
     const distributions = await discoverBoardroomDistributions(client, { factory: distributionFactory, boardroom });
-    expect(distributions.items.map((item) => item.kind)).toEqual(["merkle-airdrop", "migrating-bonding-curve", "fixed-price-sale"]);
-    expect(distributions.items.map((item) => item.distribution)).toEqual([airdrop, curve, sale]);
+    expect(distributions.items.map((item) => item.kind)).toEqual(["dutch-auction", "merkle-airdrop", "migrating-bonding-curve", "fixed-price-sale"]);
+    expect(distributions.items.map((item) => item.distribution)).toEqual([auction, airdrop, curve, sale]);
 
     const lockers = await discoverBoardroomLockedLiquidity(client, { factory: lockedLiquidityFactory, boardroom });
     expect(lockers.items).toHaveLength(1);

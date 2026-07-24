@@ -9,6 +9,7 @@ import {
   boardroomPolicyRegistryAbi,
   boardroomTokenAbi,
   distributionFactoryAbi,
+  dutchAuctionSaleAbi,
   erc20Abi,
   lockedLiquidityAbi,
   lockedLiquidityFactoryAbi,
@@ -151,6 +152,7 @@ function abiExcerpts(): Record<string, readonly unknown[]> {
     ]),
     BoardroomToken: selectAbi(boardroomTokenAbi, ["approve", "burn", "mint", "transfer", "transferFrom"]),
     DistributionFactory: selectAbi(distributionFactoryAbi, [
+      "createDutchAuction",
       "createFixedPriceSale",
       "createMerkleAirdrop",
       "createMigratingBondingCurve",
@@ -158,6 +160,14 @@ function abiExcerpts(): Record<string, readonly unknown[]> {
       "pruneClosedDistributions"
     ]),
     ERC20: selectAbi(erc20Abi, ["approve", "transfer", "transferFrom"]),
+    DutchAuctionSale: selectAbi(dutchAuctionSaleAbi, [
+      "DutchAuctionClosed",
+      "DutchAuctionPurchase",
+      "buy",
+      "cancel",
+      "close",
+      "finalize"
+    ]),
     LockedLiquidityFactory: selectAbi(lockedLiquidityFactoryAbi, [
       "MigrationReservationReleased",
       "MigrationReserved",

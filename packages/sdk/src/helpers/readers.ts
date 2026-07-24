@@ -10,6 +10,7 @@ import {
   bondMarketAbi,
   bondMarketFactoryAbi,
   distributionFactoryAbi,
+  dutchAuctionSaleAbi,
   erc20Abi,
   fixedPriceSaleAbi,
   lockedLiquidityAbi,
@@ -31,6 +32,8 @@ import type {
   FactoryState,
   FixedPriceSaleParticipationQuote,
   FixedPriceSaleState,
+  DutchAuctionParticipationQuote,
+  DutchAuctionState,
   GrantSettlementQuote,
   GrantState,
   LockedLiquidityState,
@@ -811,6 +814,18 @@ export async function predictMigratingBondingCurveAddress(
   })) as Address;
 }
 
+export async function predictDutchAuctionAddress(
+  client: PledgeCashReadClient,
+  input: { factory: Address; boardroom: Address; salt: Hex },
+): Promise<Address> {
+  return (await client.readContract({
+    address: input.factory,
+    abi: distributionFactoryAbi,
+    functionName: "predictDutchAuctionAddress",
+    args: [input.boardroom, input.salt],
+  })) as Address;
+}
+
 export async function predictMerkleAirdropAddress(
   client: PledgeCashReadClient,
   input: { factory: Address; boardroom: Address; salt: Hex },
@@ -925,6 +940,118 @@ export async function readFixedPriceSaleParticipationQuote(
       abi: erc20Abi,
       functionName: "allowance",
       args: [input.buyer, input.sale],
+    }),
+  ]);
+  const purchased = purchasedBy as bigint;
+  const buyerCapacity = state.maxPerBuyer === 0n
+    ? state.remainingShares
+    : minBigInt(state.remainingShares, saturatingSub(state.maxPerBuyer, purchased));
+
+  return {
+    state,
+    buyer: input.buyer,
+    shareAmount: input.shareAmount,
+    paymentAmount: paymentAmount as bigint,
+    purchasedBy: purchased,
+    remainingBuyerCapacity: buyerCapacity,
+    paymentBalance: paymentBalance as bigint,
+    paymentAllowance: paymentAllowance as bigint,
+  };
+}
+
+export async function readDutchAuctionState(
+  client: PledgeCashReadClient,
+  auction: Address,
+): Promise<DutchAuctionState> {
+  const [
+    factory,
+    boardroom,
+    shareToken,
+    paymentToken,
+    saleSupply,
+    remainingShares,
+    startPrice,
+    floorPrice,
+    currentPrice,
+    maxPerBuyer,
+    totalPayment,
+    lastPurchasePrice,
+    settlementPrice,
+    startTime,
+    endTime,
+    saleStatus,
+    closed,
+  ] = await Promise.all([
+    client.readContract({ address: auction, abi: dutchAuctionSaleAbi, functionName: "factory" }),
+    client.readContract({ address: auction, abi: dutchAuctionSaleAbi, functionName: "boardroom" }),
+    client.readContract({ address: auction, abi: dutchAuctionSaleAbi, functionName: "shareToken" }),
+    client.readContract({ address: auction, abi: dutchAuctionSaleAbi, functionName: "paymentToken" }),
+    client.readContract({ address: auction, abi: dutchAuctionSaleAbi, functionName: "saleSupply" }),
+    client.readContract({ address: auction, abi: dutchAuctionSaleAbi, functionName: "remainingShares" }),
+    client.readContract({ address: auction, abi: dutchAuctionSaleAbi, functionName: "startPrice" }),
+    client.readContract({ address: auction, abi: dutchAuctionSaleAbi, functionName: "floorPrice" }),
+    client.readContract({ address: auction, abi: dutchAuctionSaleAbi, functionName: "currentPrice" }),
+    client.readContract({ address: auction, abi: dutchAuctionSaleAbi, functionName: "maxPerBuyer" }),
+    client.readContract({ address: auction, abi: dutchAuctionSaleAbi, functionName: "totalPayment" }),
+    client.readContract({ address: auction, abi: dutchAuctionSaleAbi, functionName: "lastPurchasePrice" }),
+    client.readContract({ address: auction, abi: dutchAuctionSaleAbi, functionName: "settlementPrice" }),
+    client.readContract({ address: auction, abi: dutchAuctionSaleAbi, functionName: "startTime" }),
+    client.readContract({ address: auction, abi: dutchAuctionSaleAbi, functionName: "endTime" }),
+    client.readContract({ address: auction, abi: dutchAuctionSaleAbi, functionName: "saleStatus" }),
+    client.readContract({ address: auction, abi: dutchAuctionSaleAbi, functionName: "isClosed" }),
+  ]);
+
+  return {
+    address: auction,
+    factory: factory as Address,
+    boardroom: boardroom as Address,
+    shareToken: shareToken as Address,
+    paymentToken: paymentToken as Address,
+    saleSupply: saleSupply as bigint,
+    remainingShares: remainingShares as bigint,
+    startPrice: startPrice as bigint,
+    floorPrice: floorPrice as bigint,
+    currentPrice: currentPrice as bigint,
+    maxPerBuyer: maxPerBuyer as bigint,
+    totalPayment: totalPayment as bigint,
+    lastPurchasePrice: lastPurchasePrice as bigint,
+    settlementPrice: settlementPrice as bigint,
+    startTime: startTime as bigint,
+    endTime: endTime as bigint,
+    saleStatus: Number(saleStatus),
+    closed: closed as boolean,
+  };
+}
+
+export async function readDutchAuctionParticipationQuote(
+  client: PledgeCashReadClient,
+  input: { auction: Address; buyer: Address; shareAmount: bigint },
+): Promise<DutchAuctionParticipationQuote> {
+  const state = await readDutchAuctionState(client, input.auction);
+  const [paymentAmount, purchasedBy, paymentBalance, paymentAllowance] = await Promise.all([
+    client.readContract({
+      address: input.auction,
+      abi: dutchAuctionSaleAbi,
+      functionName: "getPaymentAmount",
+      args: [input.shareAmount],
+    }),
+    client.readContract({
+      address: input.auction,
+      abi: dutchAuctionSaleAbi,
+      functionName: "purchasedBy",
+      args: [input.buyer],
+    }),
+    client.readContract({
+      address: state.paymentToken,
+      abi: erc20Abi,
+      functionName: "balanceOf",
+      args: [input.buyer],
+    }),
+    client.readContract({
+      address: state.paymentToken,
+      abi: erc20Abi,
+      functionName: "allowance",
+      args: [input.buyer, input.auction],
     }),
   ]);
   const purchased = purchasedBy as bigint;

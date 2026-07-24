@@ -367,7 +367,7 @@ export function BondMarketFlow({
 
 function bondMarketState(distribution: BoardroomDistributionSnapshot): BondMarketState | undefined {
   const state = distribution.state;
-  return distribution.kind === "bond-market" && state && "currentPrice" in state ? state : undefined;
+  return distribution.kind === "bond-market" && state && "live" in state ? state : undefined;
 }
 
 function bondPurchaseBlocker(input: {

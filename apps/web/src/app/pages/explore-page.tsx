@@ -10,7 +10,7 @@ import type { ProductBoardroomCatalogEntry } from "../../lib/product-boardroom";
 import { cn } from "../../lib/utils";
 import { PageHeading, PageNotice, RuledSection, SectionHeading } from "./page-primitives";
 
-export type ExploreFilter = "all" | "saved" | "bond-market" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "amm";
+export type ExploreFilter = "all" | "saved" | "bond-market" | "dutch-auction" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop" | "amm";
 export type ExploreSearchState = { filter: ExploreFilter; query: string };
 
 export type ExplorePageProps = {
@@ -38,6 +38,7 @@ export type ExplorePageProps = {
 const filters: readonly { label: string; value: ExploreFilter }[] = [
   { label: "All", value: "all" },
   { label: "Saved", value: "saved" },
+  { label: "Dutch auction", value: "dutch-auction" },
   { label: "Fixed price", value: "fixed-price-sale" },
   { label: "Bonds", value: "bond-market" },
   { label: "Curve", value: "migrating-bonding-curve" },
@@ -444,6 +445,7 @@ function emptyDirectoryDescription(
 function participationLabel(project: ProductBoardroomCatalogEntry): string {
   if (project.pool) return "AMM market";
   if (project.distributionKind === "bond-market") return "Bond market";
+  if (project.distributionKind === "dutch-auction") return "Dutch auction";
   if (project.distributionKind === "fixed-price-sale") return "Fixed-price sale";
   if (project.distributionKind === "migrating-bonding-curve") return "Bonding curve";
   if (project.distributionKind === "merkle-airdrop") return "Airdrop";

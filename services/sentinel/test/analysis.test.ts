@@ -60,11 +60,15 @@ describe("analyzeAction", () => {
       );
       expect(abiExcerpts.DistributionFactory?.map((item) => item.name)).toEqual(
         expect.arrayContaining([
+          "createDutchAuction",
           "createFixedPriceSale",
           "createMerkleAirdrop",
           "createMigratingBondingCurve",
           "isDistribution"
         ])
+      );
+      expect(abiExcerpts.DutchAuctionSale?.map((item) => item.name)).toEqual(
+        expect.arrayContaining(["DutchAuctionPurchase", "buy", "cancel", "close", "finalize"])
       );
       expect(abiExcerpts.TokenGrantFactory?.map((item) => item.name)).toEqual(
         expect.arrayContaining(["createGrant", "createGrantFromDistribution", "setCreationFee"])

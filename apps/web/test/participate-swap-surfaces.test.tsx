@@ -65,6 +65,35 @@ function fixedSaleSummary(startTime: bigint, endTime: bigint): BoardroomDistribu
   };
 }
 
+function dutchAuctionSummary(startTime: bigint, endTime: bigint): BoardroomDistributionSnapshot {
+  return {
+    address: distribution,
+    kind: "dutch-auction",
+    state: {
+      address: distribution,
+      factory: owner,
+      boardroom,
+      shareToken,
+      paymentToken: quoteToken,
+      saleSupply: 10n,
+      remainingShares: 10n,
+      startPrice: 2n,
+      floorPrice: 1n,
+      currentPrice: 2n,
+      maxPerBuyer: 0n,
+      totalPayment: 0n,
+      lastPurchasePrice: 0n,
+      settlementPrice: 0n,
+      startTime,
+      endTime,
+      saleStatus: 0,
+      closed: false,
+    },
+    shareTokenMetadata: { address: shareToken, decimals: 18, symbol: "PLEDGE" },
+    paymentTokenMetadata: { address: quoteToken, decimals: 6, symbol: "USDC" },
+  };
+}
+
 function migratedCurveSummary(address: Address, poolAddress: Address): BoardroomDistributionSnapshot {
   return {
     address,
@@ -594,6 +623,36 @@ describe("participation route liveness", () => {
     expect(statuses).toEqual(["Live"]);
     timers.advanceBy(1);
     expect(statuses).toEqual(["Live", "Window ended"]);
+    stop();
+  });
+
+  test("expires a Dutch auction at its exclusive end boundary", () => {
+    const auctionDashboard = {
+      ...dashboard,
+      histories: [],
+      snapshot: {
+        ...dashboard.snapshot,
+        issuedDistributions: [distribution],
+        distributionSummaries: [dutchAuctionSummary(101n, 102n)],
+      },
+    } satisfies ProductBoardroomDashboardState;
+    const timers = new ParticipationFakeTimers(101_000);
+    const statuses: string[] = [];
+    const stop = scheduleParticipationRefresh(
+      auctionDashboard,
+      (now) => statuses.push(participationOptions(auctionDashboard, {}, undefined, now)[0]?.status ?? "missing"),
+      {
+        clearTimeoutFn: timers.clearTimeout,
+        nowMilliseconds: () => timers.now,
+        setTimeoutFn: timers.setTimeout,
+      },
+    );
+
+    expect(participationOptions(auctionDashboard, {}, undefined, 101n)[0]?.status).toBe("Live");
+    timers.advanceBy(999);
+    expect(statuses).toEqual([]);
+    timers.advanceBy(1);
+    expect(statuses).toEqual(["Window ended"]);
     stop();
   });
 

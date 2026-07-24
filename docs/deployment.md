@@ -343,6 +343,7 @@ scenario matrix implemented by `SeedLocal.s.sol`:
   three employee option variants (partially settled active, unvested future-cliff, and vested partially settled), plus
   a 30-day prefunded CASH reward stream with an investor actively staking 1,000 SEED shares behind a seven-day cooldown;
 - Atlas Payroll: prelaunch active fixed-price sale with two buyers;
+- Kepler Systems: prelaunch active Dutch auction with two buyers;
 - Northstar Robotics: prelaunch active bonding curve with three buys and one sell;
 - Harbor Analytics: prelaunch closed fixed-price sale with two historical buyers and treasury cash already raised;
 - Beacon Contributors: live two-leaf Merkle airdrop with index `0` already claimed, index `1` still claimable, and both
@@ -354,7 +355,7 @@ scenario matrix implemented by `SeedLocal.s.sol`:
 - Final Harbor: winding down with CASH registered and the snapshot delay still pending while the seeded holder retains
   the full circulating share balance. It does not skip the required Snapshotting phase.
 
-The first four project Boardrooms remain prelaunch. The lifecycle Boardrooms are intentionally independent so airdrop,
+The first five project Boardrooms remain prelaunch. The lifecycle Boardrooms are intentionally independent so airdrop,
 governance and wind-down browser checks cannot invalidate one another. The ignored
 `deployments/31337.seed.json` manifest includes the actor identities, Merkle root/leaves/proofs, scheduled-operation
 hash, salt, calldata, Boardroom epoch, wind-down blocker identity, and snapshot-pending asset values needed by

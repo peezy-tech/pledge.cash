@@ -8,6 +8,7 @@ import {
   deriveDistributedProjectSupply,
   deriveExecutableDistributionRoute,
   deriveMarketValuation,
+  dutchAuctionUnitPrice,
   exactRational,
   exactTokenAmount,
   fixedSaleUnitPrice,
@@ -102,7 +103,7 @@ describe("truthful market data", () => {
     expect(requireIssue(mismatch).reason).toContain("does not match");
   });
 
-  test("keeps fixed-sale and exact curve quotes as route prices, not AMM spot", () => {
+  test("keeps fixed-sale, Dutch-auction, and exact curve quotes as route prices, not AMM spot", () => {
     const fixed = requireKnown(fixedSaleUnitPrice({
       sale,
       projectToken: project,
@@ -113,6 +114,16 @@ describe("truthful market data", () => {
     }));
     expect(fixed.source).toBe("fixed-sale");
     expect(fixed.quotePerBase).toEqual(exactRational(3n));
+    const auction = requireKnown(dutchAuctionUnitPrice({
+      auction: sale,
+      projectToken: project,
+      projectDecimals: 18,
+      quoteToken: quote,
+      quoteDecimals: 6,
+      priceWad: 2_500_000n,
+    }));
+    expect(auction.source).toBe("dutch-auction");
+    expect(auction.quotePerBase).toEqual(exactRational(5n, 2n));
 
     const projectAmountRaw = 10n ** 18n;
     const buyQuote = curveBuyQuoteRaw({
@@ -164,6 +175,18 @@ describe("truthful market data", () => {
       phase: "future",
     });
     expect(deriveExecutableDistributionRoute({ ...fixed, now: 201n })).toMatchObject({
+      buy: { available: false },
+      phase: "expired",
+    });
+    expect(deriveExecutableDistributionRoute({ ...fixed, kind: "dutch-auction" })).toMatchObject({
+      buy: { available: true },
+      liveness: { status: "live" },
+    });
+    expect(deriveExecutableDistributionRoute({ ...fixed, now: 200n })).toMatchObject({
+      buy: { available: true },
+      phase: "live",
+    });
+    expect(deriveExecutableDistributionRoute({ ...fixed, kind: "dutch-auction", now: 200n })).toMatchObject({
       buy: { available: false },
       phase: "expired",
     });

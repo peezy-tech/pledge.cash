@@ -7,6 +7,7 @@ import {
   curveQuoteUnitPrice,
   deriveExecutableDistributionRoute,
   deriveMarketValuation,
+  dutchAuctionUnitPrice,
   exactTokenAmount,
   fixedSaleUnitPrice,
   knownMetric,
@@ -296,6 +297,9 @@ function catalogRoutePrice(project: ProductBoardroomCatalogEntry): RoutePriceSta
   if (project.distributionKind === "fixed-price-sale") {
     return unknownMetric("The directory does not expose the current fixed-sale unit price. Open the project for exact sale terms.");
   }
+  if (project.distributionKind === "dutch-auction") {
+    return unknownMetric("The directory does not expose the current Dutch-auction price. Open the project for exact terms.");
+  }
   if (project.distributionKind === "bond-market") {
     return unknownMetric("The directory does not expose the bond market's current sequential-auction price. Open the project for exact terms.");
   }
@@ -345,7 +349,7 @@ function dashboardRoute(
     };
   }
 
-  if (distribution.kind === "bond-market" && "currentPrice" in distribution.state) {
+  if (distribution.kind === "bond-market" && "live" in distribution.state) {
     const metadata = distribution.shareTokenMetadata ?? dashboard.snapshot.shareTokenMetadata;
     const quote = distribution.quoteTokenMetadata;
     const price = metadata?.decimals === undefined || quote?.decimals === undefined
@@ -381,7 +385,39 @@ function dashboardRoute(
     };
   }
 
-  if ("paymentToken" in distribution.state) {
+  if (distribution.kind === "dutch-auction" && "paymentToken" in distribution.state && "startPrice" in distribution.state) {
+    const metadata = distribution.shareTokenMetadata ?? dashboard.snapshot.shareTokenMetadata;
+    const quote = distribution.paymentTokenMetadata;
+    const price = metadata?.decimals === undefined || quote?.decimals === undefined
+      ? unknownMetric<never>("Token decimals are required to normalize the Dutch auction's current price.")
+      : dutchAuctionUnitPrice({
+          auction: distribution.address,
+          projectToken: distribution.state.shareToken,
+          projectDecimals: metadata.decimals,
+          quoteToken: distribution.state.paymentToken,
+          quoteDecimals: quote.decimals,
+          priceWad: distribution.state.currentPrice,
+        });
+    const executable = deriveExecutableDistributionRoute({
+      boardroomStatus: dashboard.snapshot.status,
+      closed: distribution.state.closed,
+      endTime: distribution.state.endTime,
+      kind: "dutch-auction",
+      now,
+      remainingShares: distribution.state.remainingShares,
+      routeStatus: distribution.state.saleStatus,
+      startTime: distribution.state.startTime,
+    });
+    return {
+      liveness: executable.liveness,
+      price,
+      routeLabel: "Dutch auction",
+      routeSource: "Live Dutch auction",
+      tradeable: true,
+    };
+  }
+
+  if (distribution.kind === "fixed-price-sale" && "paymentToken" in distribution.state && "price" in distribution.state) {
     const metadata = distribution.shareTokenMetadata ?? dashboard.snapshot.shareTokenMetadata;
     const quote = distribution.paymentTokenMetadata;
     const price = metadata?.decimals === undefined || quote?.decimals === undefined
@@ -577,6 +613,9 @@ function catalogExecutableRoute(
   if (project.distributionKind === "fixed-price-sale" && project.routeBuyInventory !== undefined) {
     return deriveExecutableDistributionRoute({ ...common, kind: "fixed-price-sale", remainingShares: project.routeBuyInventory });
   }
+  if (project.distributionKind === "dutch-auction" && project.routeBuyInventory !== undefined) {
+    return deriveExecutableDistributionRoute({ ...common, kind: "dutch-auction", remainingShares: project.routeBuyInventory });
+  }
   if (project.distributionKind === "merkle-airdrop" && project.routeClaimInventory !== undefined) {
     return deriveExecutableDistributionRoute({ ...common, kind: "merkle-airdrop", remainingShares: project.routeClaimInventory });
   }
@@ -720,6 +759,18 @@ function dashboardExecutableRoute(
       startTime: state.startTime,
     });
   }
+  if (distribution.kind === "dutch-auction" && "paymentToken" in state) {
+    return deriveExecutableDistributionRoute({
+      boardroomStatus: dashboard.snapshot.status,
+      closed: state.closed,
+      endTime: state.endTime,
+      kind: "dutch-auction",
+      now,
+      remainingShares: state.remainingShares,
+      routeStatus: state.saleStatus,
+      startTime: state.startTime,
+    });
+  }
   if (distribution.kind === "migrating-bonding-curve" && "curveStatus" in state) {
     return deriveExecutableDistributionRoute({
       boardroomStatus: dashboard.snapshot.status,
@@ -775,6 +826,7 @@ function priceDetail(price: RoutePriceState): string | undefined {
     return `Current reserve ratio from pool ${shortAddress(price.value.pool)}; not a 24-hour average or external price feed.`;
   }
   if (price.value.source === "fixed-sale") return "Current contract sale price, denominated in the route quote token.";
+  if (price.value.source === "dutch-auction") return "Current onchain Dutch-auction price; it continues descending until the purchase executes.";
   if (price.value.source === "bond-market") return `Current sequential-auction bond price from market ${shortAddress(price.value.market)}.`;
   const quotedAmount = formatTokenAmount(price.value.projectAmount.raw, {
     address: price.value.projectAmount.token,
@@ -802,6 +854,7 @@ function routePriceSource(price: RoutePriceState, fallback: string): string {
   if (price.status !== "known") return fallback;
   if (price.value.source === "amm-spot") return `AMM spot · ${shortAddress(price.value.pool)}`;
   if (price.value.source === "fixed-sale") return "Fixed sale";
+  if (price.value.source === "dutch-auction") return "Dutch auction";
   if (price.value.source === "bond-market") return `Bond market · ${shortAddress(price.value.market)}`;
   return `Curve buy quote · ${formatTokenAmount(price.value.projectAmount.raw, {
     address: price.value.projectAmount.token,
@@ -817,6 +870,7 @@ function catalogRouteLabel(project: ProductBoardroomCatalogEntry, now: bigint): 
 
 function distributionKindLabel(kind: string | undefined): string {
   if (kind === "bond-market") return "Bond market";
+  if (kind === "dutch-auction") return "Dutch auction";
   if (kind === "fixed-price-sale") return "Fixed-price sale";
   if (kind === "migrating-bonding-curve") return "Bonding curve";
   if (kind === "merkle-airdrop") return "Airdrop claim";
@@ -824,7 +878,7 @@ function distributionKindLabel(kind: string | undefined): string {
 }
 
 function isTradeRoute(kind: string | undefined): boolean {
-  return kind === "bond-market" || kind === "fixed-price-sale" || kind === "migrating-bonding-curve";
+  return kind === "bond-market" || kind === "dutch-auction" || kind === "fixed-price-sale" || kind === "migrating-bonding-curve";
 }
 
 function pairMatches(project: Address, quote: Address, token0: Address, token1: Address): boolean {

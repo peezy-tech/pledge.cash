@@ -16,6 +16,7 @@ import {BoardroomFactory} from "../src/boardroom/BoardroomFactory.sol";
 import {BoardroomCall} from "../src/boardroom/IBoardroomGovernance.sol";
 import {BoardroomToken} from "../src/boardroom/BoardroomToken.sol";
 import {DistributionFactory} from "../src/distribution/DistributionFactory.sol";
+import {DutchAuctionSale} from "../src/distribution/DutchAuctionSale.sol";
 import {FixedPriceSale} from "../src/distribution/FixedPriceSale.sol";
 import {MerkleAirdrop} from "../src/distribution/MerkleAirdrop.sol";
 import {LockedLiquidity} from "../src/liquidity/LockedLiquidity.sol";
@@ -97,6 +98,11 @@ contract SeedLocal is Script {
     uint256 internal constant FIXED_ACTIVE_BUY_ONE = 700 * PLEDGE;
     uint256 internal constant FIXED_ACTIVE_BUY_TWO = 450 * PLEDGE;
     uint256 internal constant FIXED_ACTIVE_PRICE = 3 * CASH;
+    uint256 internal constant DUTCH_ACTIVE_SALE_SUPPLY = 2_000 * PLEDGE;
+    uint256 internal constant DUTCH_ACTIVE_BUY_ONE = 400 * PLEDGE;
+    uint256 internal constant DUTCH_ACTIVE_BUY_TWO = 300 * PLEDGE;
+    uint256 internal constant DUTCH_ACTIVE_START_PRICE = 5 * CASH;
+    uint256 internal constant DUTCH_ACTIVE_FLOOR_PRICE = 2 * CASH;
     uint256 internal constant ACTIVE_CURVE_SALE_SUPPLY = 3_600 * PLEDGE;
     uint256 internal constant ACTIVE_CURVE_MIGRATION_SUPPLY = 1_400 * PLEDGE;
     uint256 internal constant ACTIVE_CURVE_BUY_ONE = 450 * PLEDGE;
@@ -237,6 +243,7 @@ contract SeedLocal is Script {
     FixedPriceSale internal activeFixedSale;
     BondMarket internal reserveBond;
     BondMarket internal liquidityBond;
+    DutchAuctionSale internal activeDutchAuction;
     MigratingBondingCurve internal activeCurve;
     FixedPriceSale internal closedFixedSale;
     BoardroomRewards internal boardroomRewards;
@@ -473,6 +480,7 @@ contract SeedLocal is Script {
 
     function _seedAdditionalBoardrooms() internal {
         _seedActiveFixedPriceBoardroom();
+        _seedActiveDutchAuctionBoardroom();
         _seedActiveCurveBoardroom();
         _seedClosedFixedPriceBoardroom();
     }
@@ -760,6 +768,38 @@ contract SeedLocal is Script {
         );
     }
 
+    function _seedActiveDutchAuctionBoardroom() internal {
+        Boardroom target = _createBoardroom("Kepler Systems Common", "KEPL", "kepler-boardroom", 1_000 * PLEDGE);
+        activeDutchAuction = _createDutchAuction(
+            target,
+            DUTCH_ACTIVE_SALE_SUPPLY,
+            DUTCH_ACTIVE_START_PRICE,
+            DUTCH_ACTIVE_FLOOR_PRICE,
+            1_000 * PLEDGE,
+            "kepler-dutch-auction"
+        );
+
+        uint256 raised;
+        raised += _buyDutchAuction(activeDutchAuction, HOLDER_KEY, actors.holder, DUTCH_ACTIVE_BUY_ONE);
+        raised += _buyDutchAuction(activeDutchAuction, INVESTOR_KEY, actors.investor, DUTCH_ACTIVE_BUY_TWO);
+
+        _recordSeededBoardroom(
+            target,
+            "Kepler Systems",
+            "KEPL",
+            "Dutch auction",
+            "Live auction",
+            "dutch-auction",
+            address(activeDutchAuction),
+            address(0),
+            address(0),
+            DUTCH_ACTIVE_BUY_ONE + DUTCH_ACTIVE_BUY_TWO,
+            raised,
+            cash.balanceOf(address(target)),
+            2
+        );
+    }
+
     function _seedClosedFixedPriceBoardroom() internal {
         Boardroom target = _createBoardroom("Harbor Analytics Common", "HARB", "harbor-boardroom", 1_100 * PLEDGE);
         closedFixedSale = _createFixedPriceSale(
@@ -863,6 +903,69 @@ contract SeedLocal is Script {
         vm.stopBroadcast();
 
         if (actualPayment != payment) revert ScenarioInvariantFailed("fixed-sale-payment");
+    }
+
+    function _createDutchAuction(
+        Boardroom target,
+        uint256 shareAmount,
+        uint256 startPrice,
+        uint256 floorPrice,
+        uint256 maxPerBuyer,
+        string memory saltLabel
+    ) internal returns (DutchAuctionSale auction) {
+        bytes32 auctionSalt = _salt(saltLabel);
+        address predictedAuction =
+            deployment.distributionFactory.predictDutchAuctionAddress(address(target), auctionSalt);
+        DutchAuctionSale.CreateParams memory params = DutchAuctionSale.CreateParams({
+            shareToken: target.shareToken(),
+            paymentToken: address(cash),
+            shareAmount: shareAmount,
+            startPrice: startPrice,
+            floorPrice: floorPrice,
+            maxPerBuyer: maxPerBuyer,
+            startTime: uint64(block.timestamp),
+            endTime: uint64(block.timestamp + 14 days),
+            salt: auctionSalt
+        });
+
+        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        calls[0] = Boardroom.Call({
+            policy: address(deployment.assetPolicy),
+            target: target.shareToken(),
+            value: 0,
+            data: abi.encodeWithSignature(
+                "approve(address,uint256)", address(deployment.distributionFactory), shareAmount
+            )
+        });
+        calls[1] = Boardroom.Call({
+            policy: address(deployment.distributionFactory),
+            target: address(deployment.distributionFactory),
+            value: 0,
+            data: abi.encodeCall(DistributionFactory.createDutchAuction, (params))
+        });
+
+        vm.startBroadcast(BOARDROOM_OWNER_KEY);
+        target.mint(address(target), shareAmount);
+        bytes[] memory results = target.executeBatch(calls);
+        vm.stopBroadcast();
+
+        address createdAuction = abi.decode(results[1], (address));
+        if (createdAuction != predictedAuction) revert ScenarioInvariantFailed("dutch-auction-prediction");
+        auction = DutchAuctionSale(createdAuction);
+    }
+
+    function _buyDutchAuction(DutchAuctionSale auction, uint256 buyerKey, address buyer, uint256 shareAmount)
+        internal
+        returns (uint256 payment)
+    {
+        payment = auction.getPaymentAmount(shareAmount);
+
+        vm.startBroadcast(buyerKey);
+        cash.approve(address(auction), payment);
+        uint256 actualPayment = auction.buy(shareAmount, buyer, payment, block.timestamp + 1 hours);
+        vm.stopBroadcast();
+
+        if (actualPayment != payment) revert ScenarioInvariantFailed("dutch-auction-payment");
     }
 
     function _closeFixedPriceSale(Boardroom target, FixedPriceSale sale) internal {
@@ -1466,7 +1569,7 @@ contract SeedLocal is Script {
     }
 
     function _assertSeededBoardrooms() internal view {
-        _check(seededBoardrooms.length == 8, "seeded-boardroom-count");
+        _check(seededBoardrooms.length == 9, "seeded-boardroom-count");
 
         _check(seededBoardrooms[0].boardroom == boardroom, "seeded-primary-boardroom");
         _check(seededBoardrooms[0].distribution == address(reserveBond), "seeded-primary-distribution");
@@ -1480,27 +1583,35 @@ contract SeedLocal is Script {
         );
         _check(cash.balanceOf(activeFixedSale.boardroom()) == seededBoardrooms[1].cashRaised, "active-fixed-sale-cash");
 
+        _check(activeDutchAuction.saleStatus() == DutchAuctionSale.SaleStatus.Active, "active-dutch-auction-status");
+        _check(
+            activeDutchAuction.remainingShares()
+                == DUTCH_ACTIVE_SALE_SUPPLY - DUTCH_ACTIVE_BUY_ONE - DUTCH_ACTIVE_BUY_TWO,
+            "active-dutch-auction-remaining"
+        );
+        _check(activeDutchAuction.totalPayment() == seededBoardrooms[2].cashRaised, "active-dutch-auction-raised");
+
         _check(activeCurve.curveStatus() == MigratingBondingCurve.CurvePhase.Selling, "active-curve-status");
         _check(
             activeCurve.soldShares()
                 == ACTIVE_CURVE_BUY_ONE + ACTIVE_CURVE_BUY_TWO + ACTIVE_CURVE_BUY_THREE - ACTIVE_CURVE_SELL,
             "active-curve-sold"
         );
-        _check(activeCurve.quoteReserve() == seededBoardrooms[2].cashRaised, "active-curve-raised");
+        _check(activeCurve.quoteReserve() == seededBoardrooms[3].cashRaised, "active-curve-raised");
         _check(activeCurve.quoteReserve() < ACTIVE_CURVE_GRADUATION_TARGET, "active-curve-not-graduated");
 
         _check(closedFixedSale.saleStatus() == FixedPriceSale.SaleStatus.Closed, "closed-fixed-sale-status");
         _check(closedFixedSale.remainingShares() == 0, "closed-fixed-sale-remaining");
-        _check(cash.balanceOf(closedFixedSale.boardroom()) == seededBoardrooms[3].cashRaised, "closed-fixed-sale-cash");
+        _check(cash.balanceOf(closedFixedSale.boardroom()) == seededBoardrooms[4].cashRaised, "closed-fixed-sale-cash");
 
-        _check(seededBoardrooms[4].boardroom == lifecycle.airdropBoardroom, "seeded-airdrop-boardroom");
-        _check(seededBoardrooms[4].distribution == address(lifecycle.airdrop), "seeded-airdrop-distribution");
-        _check(seededBoardrooms[5].boardroom == lifecycle.governanceBoardroom, "seeded-governance-boardroom");
-        _check(seededBoardrooms[5].distribution == address(0), "seeded-governance-no-route");
-        _check(seededBoardrooms[6].boardroom == lifecycle.windDownBoardroom, "seeded-wind-down-boardroom");
-        _check(seededBoardrooms[6].distribution == address(lifecycle.windDownBlocker), "seeded-wind-down-distribution");
-        _check(seededBoardrooms[7].boardroom == lifecycle.snapshotPendingBoardroom, "seeded-snapshot-boardroom");
-        _check(seededBoardrooms[7].distribution == address(0), "seeded-snapshot-no-route");
+        _check(seededBoardrooms[5].boardroom == lifecycle.airdropBoardroom, "seeded-airdrop-boardroom");
+        _check(seededBoardrooms[5].distribution == address(lifecycle.airdrop), "seeded-airdrop-distribution");
+        _check(seededBoardrooms[6].boardroom == lifecycle.governanceBoardroom, "seeded-governance-boardroom");
+        _check(seededBoardrooms[6].distribution == address(0), "seeded-governance-no-route");
+        _check(seededBoardrooms[7].boardroom == lifecycle.windDownBoardroom, "seeded-wind-down-boardroom");
+        _check(seededBoardrooms[7].distribution == address(lifecycle.windDownBlocker), "seeded-wind-down-distribution");
+        _check(seededBoardrooms[8].boardroom == lifecycle.snapshotPendingBoardroom, "seeded-snapshot-boardroom");
+        _check(seededBoardrooms[8].distribution == address(0), "seeded-snapshot-no-route");
     }
 
     function _directClaimLeaf(
