@@ -126,7 +126,7 @@ export type DistributionSupplyRecord =
       address: Address;
       kind: "dutch-auction";
       saleSupply: bigint;
-      remainingShares: bigint;
+      soldShares: bigint;
     }
   | {
       address: Address;
@@ -766,9 +766,15 @@ function valueSupplyAtSpot(
 }
 
 function distributedAmount(record: DistributionSupplyRecord): MetricState<bigint> {
-  if (record.kind === "fixed-price-sale" || record.kind === "dutch-auction") {
+  if (record.kind === "dutch-auction") {
+    if (record.saleSupply < 0n || record.soldShares < 0n || record.soldShares > record.saleSupply) {
+      return unknownMetric(`Dutch-auction supply state is invalid for ${record.address}.`);
+    }
+    return knownMetric(record.soldShares);
+  }
+  if (record.kind === "fixed-price-sale") {
     if (record.saleSupply < 0n || record.remainingShares < 0n || record.remainingShares > record.saleSupply) {
-      return unknownMetric(`${record.kind === "dutch-auction" ? "Dutch-auction" : "Fixed-sale"} supply state is invalid for ${record.address}.`);
+      return unknownMetric(`Fixed-sale supply state is invalid for ${record.address}.`);
     }
     return knownMetric(record.saleSupply - record.remainingShares);
   }

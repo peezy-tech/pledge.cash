@@ -262,6 +262,7 @@ describe("participation readers and builders", () => {
         currentPrice: 30n,
         maxPerBuyer: 500n,
         totalPayment: 10_000n,
+        soldShares: 400n,
         lastPurchasePrice: 31n,
         settlementPrice: 0n,
         startTime: 100n,

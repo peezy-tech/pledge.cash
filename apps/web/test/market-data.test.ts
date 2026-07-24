@@ -313,6 +313,23 @@ describe("truthful market data", () => {
     expect(complete.raw).toBe(160n);
   });
 
+  test("uses recorded Dutch-auction sales after returned inventory clears remaining shares", () => {
+    const distributed = requireKnown(deriveDistributedProjectSupply({
+      projectToken: project,
+      projectDecimals: 18,
+      expectedDistributionCount: 1,
+      distributions: [{
+        address: distributionA,
+        kind: "dutch-auction",
+        saleSupply: 100n,
+        soldShares: 25n,
+      }],
+      coverage: completeCoverage,
+    }));
+
+    expect(distributed.raw).toBe(25n);
+  });
+
   test("keeps market cap and FDV independent and uses AMM spot only", () => {
     const spot = verifiedAmmSpotPrice({
       pool,

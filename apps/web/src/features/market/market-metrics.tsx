@@ -150,7 +150,7 @@ export function nextMarketBoundaryMilliseconds(
   nowMilliseconds = Date.now(),
 ): bigint | undefined {
   const now = BigInt(Math.floor(nowMilliseconds));
-  const boundaries = marketBoundaries(input)
+  const boundaries = marketBoundaries(input, now)
     .filter((boundary) => boundary > now)
     .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
   return boundaries[0];
@@ -194,7 +194,7 @@ export function scheduleMarketBoundaryRefresh(
   };
 }
 
-function marketBoundaries(input: MarketBoundaryClockInput): bigint[] {
+function marketBoundaries(input: MarketBoundaryClockInput, nowMilliseconds: bigint): bigint[] {
   const boundaries: bigint[] = [];
   if (input.dashboard?.snapshot.status === 0) {
     for (const distribution of input.dashboard.snapshot.distributionSummaries) {
@@ -220,6 +220,16 @@ function marketBoundaries(input: MarketBoundaryClockInput): bigint[] {
         state.endTime,
         distribution.kind === "dutch-auction",
       );
+      if (
+        distribution.kind === "dutch-auction"
+        && "remainingShares" in state
+        && routeStatus === 0
+        && state.remainingShares > 0n
+        && nowMilliseconds >= state.startTime * 1_000n
+        && nowMilliseconds < state.endTime * 1_000n
+      ) {
+        boundaries.push(((nowMilliseconds / 1_000n) + 1n) * 1_000n);
+      }
     }
   }
   for (const project of input.projects ?? []) {

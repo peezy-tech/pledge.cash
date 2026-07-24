@@ -1,4 +1,4 @@
-import { isZeroAddress, type Address } from "@pledge.cash/sdk";
+import { isZeroAddress, type Address, type DutchAuctionState } from "@pledge.cash/sdk";
 import {
   currentUnixTimestamp,
   bondMarketUnitPrice,
@@ -15,6 +15,7 @@ import {
   notIndexedMarketActivity24h,
   routeLiveness,
   routeLivenessForAmm,
+  unavailableMetric,
   unknownMetric,
   verifiedAmmSpotPrice,
   verifiedSupplyOutsideTreasury,
@@ -388,16 +389,6 @@ function dashboardRoute(
   if (distribution.kind === "dutch-auction" && "paymentToken" in distribution.state && "startPrice" in distribution.state) {
     const metadata = distribution.shareTokenMetadata ?? dashboard.snapshot.shareTokenMetadata;
     const quote = distribution.paymentTokenMetadata;
-    const price = metadata?.decimals === undefined || quote?.decimals === undefined
-      ? unknownMetric<never>("Token decimals are required to normalize the Dutch auction's current price.")
-      : dutchAuctionUnitPrice({
-          auction: distribution.address,
-          projectToken: distribution.state.shareToken,
-          projectDecimals: metadata.decimals,
-          quoteToken: distribution.state.paymentToken,
-          quoteDecimals: quote.decimals,
-          priceWad: distribution.state.currentPrice,
-        });
     const executable = deriveExecutableDistributionRoute({
       boardroomStatus: dashboard.snapshot.status,
       closed: distribution.state.closed,
@@ -408,11 +399,25 @@ function dashboardRoute(
       routeStatus: distribution.state.saleStatus,
       startTime: distribution.state.startTime,
     });
+    const price = executable.liveness.status !== "live"
+      ? unavailableMetric<never>(
+          `No executable Dutch-auction price is available: ${executable.buy.available ? "the auction is not live." : executable.buy.reason}`,
+        )
+      : metadata?.decimals === undefined || quote?.decimals === undefined
+        ? unknownMetric<never>("Token decimals are required to normalize the Dutch auction's current price.")
+        : dutchAuctionUnitPrice({
+            auction: distribution.address,
+            projectToken: distribution.state.shareToken,
+            projectDecimals: metadata.decimals,
+            quoteToken: distribution.state.paymentToken,
+            quoteDecimals: quote.decimals,
+            priceWad: dutchAuctionPriceAt(distribution.state, now),
+          });
     return {
       liveness: executable.liveness,
       price,
       routeLabel: "Dutch auction",
-      routeSource: "Live Dutch auction",
+      routeSource: executable.liveness.status === "live" ? "Live Dutch auction" : "No live Dutch auction price",
       tradeable: true,
     };
   }
@@ -525,6 +530,18 @@ function dashboardRoute(
     routeSource: "No purchase price",
     tradeable: false,
   };
+}
+
+function dutchAuctionPriceAt(
+  state: Pick<DutchAuctionState, "endTime" | "floorPrice" | "startPrice" | "startTime">,
+  now: bigint,
+): bigint {
+  if (now <= state.startTime) return state.startPrice;
+  if (now >= state.endTime) return state.floorPrice;
+  const elapsed = now - state.startTime;
+  const duration = state.endTime - state.startTime;
+  const decrease = ((state.startPrice - state.floorPrice) * elapsed) / duration;
+  return state.startPrice - decrease;
 }
 
 function dashboardSupplyOutsideTreasury(

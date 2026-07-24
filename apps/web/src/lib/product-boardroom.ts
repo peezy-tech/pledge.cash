@@ -707,11 +707,10 @@ function stateDerivedPartialHistory(
   };
   if (!distribution.state) return base;
   if (distribution.kind === "dutch-auction" && "totalPayment" in distribution.state) {
-    const soldShares = distribution.state.saleSupply - distribution.state.remainingShares;
     return {
       ...base,
       cashRaised: distribution.state.totalPayment,
-      soldShares,
+      soldShares: distribution.state.soldShares,
     };
   }
   if ("price" in distribution.state) {
@@ -836,7 +835,6 @@ function deriveDistributionCatalogFields(
 
   if (distribution.kind === "dutch-auction" && "totalPayment" in distribution.state) {
     const state = distribution.state;
-    const soldShares = state.saleSupply - state.remainingShares;
     const route = deriveExecutableDistributionRoute({
       boardroomStatus,
       closed: state.closed,
@@ -860,7 +858,7 @@ function deriveDistributionCatalogFields(
       routeEndTime: state.endTime,
       routeStartTime: state.startTime,
       routeStatus: state.saleStatus,
-      soldShares,
+      soldShares: state.soldShares,
       status: catalogRouteStatusLabel(route, fixedPriceSaleStatusLabel(state.saleStatus).replace("sale", "auction")),
     };
   }
@@ -1696,6 +1694,7 @@ export function distributionCirculatingShares(
   distribution: BoardroomDistributionSnapshot,
 ): bigint | undefined {
   if (!distribution.state) return undefined;
+  if ("startPrice" in distribution.state) return distribution.state.soldShares;
   if ("paymentToken" in distribution.state) return distribution.state.saleSupply - distribution.state.remainingShares;
   if ("airdropSupply" in distribution.state) return distribution.state.claimedShares;
   if ("currentPrice" in distribution.state) return distribution.state.sold;

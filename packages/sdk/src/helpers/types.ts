@@ -243,6 +243,7 @@ export type DutchAuctionState = {
   currentPrice: bigint;
   maxPerBuyer: bigint;
   totalPayment: bigint;
+  soldShares: bigint;
   lastPurchasePrice: bigint;
   settlementPrice: bigint;
   startTime: bigint;

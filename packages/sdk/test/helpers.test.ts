@@ -461,6 +461,7 @@ describe("SDK action and query helpers", () => {
       floorPrice: 20n,
       currentPrice: 30n,
       totalPayment: 7_500n,
+      soldShares: 200n,
       closed: false,
     });
     await expect(readMerkleAirdropState(client, airdrop)).resolves.toMatchObject({

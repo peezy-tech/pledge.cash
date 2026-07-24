@@ -32,6 +32,21 @@ describe("product boardroom runtime discovery", () => {
     expect(distributionCirculatingShares(distribution)).toBe(125n);
   });
 
+  test("uses recorded Dutch-auction sales after unsold inventory is returned", () => {
+    const distribution = {
+      address: "0x6100000000000000000000000000000000000000",
+      kind: "dutch-auction",
+      state: {
+        saleSupply: 1_000n,
+        remainingShares: 0n,
+        soldShares: 125n,
+        startPrice: 5n,
+      },
+    } as BoardroomDistributionSnapshot;
+
+    expect(distributionCirculatingShares(distribution)).toBe(125n);
+  });
+
   test("pages through factory Boardrooms newest first with an explicit cursor", async () => {
     const factory = "0x0100000000000000000000000000000000000000" as Address;
     const addresses = Array.from({ length: 65 }, (_, index) =>

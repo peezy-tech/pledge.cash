@@ -82,6 +82,7 @@ function dutchAuctionSummary(startTime: bigint, endTime: bigint): BoardroomDistr
       currentPrice: 2n,
       maxPerBuyer: 0n,
       totalPayment: 0n,
+      soldShares: 0n,
       lastPurchasePrice: 0n,
       settlementPrice: 0n,
       startTime,

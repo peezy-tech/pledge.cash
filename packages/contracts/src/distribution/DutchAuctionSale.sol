@@ -43,6 +43,7 @@ contract DutchAuctionSale is Initializable, ReentrancyGuard {
     uint256 public floorPrice;
     uint256 public maxPerBuyer;
     uint256 public totalPayment;
+    uint256 public soldShares;
     uint256 public lastPurchasePrice;
     uint256 public settlementPrice;
     uint64 public startTime;
@@ -141,6 +142,7 @@ contract DutchAuctionSale is Initializable, ReentrancyGuard {
         remainingShares -= shareAmount;
         purchasedBy[msg.sender] = buyerPurchased;
         totalPayment += payment;
+        soldShares += shareAmount;
         lastPurchasePrice = price;
         if (remainingShares == 0) {
             saleStatus = SaleStatus.Closed;
@@ -179,10 +181,6 @@ contract DutchAuctionSale is Initializable, ReentrancyGuard {
 
     function isClosed() external view returns (bool) {
         return saleStatus != SaleStatus.Active;
-    }
-
-    function soldShares() external view returns (uint256) {
-        return saleSupply - remainingShares;
     }
 
     function currentPrice() public view returns (uint256) {

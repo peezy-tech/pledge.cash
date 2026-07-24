@@ -435,6 +435,7 @@ contract DistributionTest is Test {
         uint256 returned = auction.finalize();
 
         assertEq(returned, SALE_SHARES - BUY_SHARES);
+        assertEq(auction.soldShares(), BUY_SHARES);
         assertEq(auction.settlementPrice(), 3_000000);
         assertEq(shareToken.balanceOf(address(boardroom)), returned);
         assertEq(shareToken.encumberedSupply(), 0);
@@ -519,6 +520,7 @@ contract DistributionTest is Test {
         );
         assertTrue(auction.isClosed());
         assertEq(uint8(auction.saleStatus()), uint8(DutchAuctionSale.SaleStatus.Cancelled));
+        assertEq(auction.soldShares(), 0);
 
         DutchAuctionSale windDownAuction = _createDutchAuction(
             boardroom, shareToken, paymentToken, "dutch-auction-wind-down-create", block.timestamp, 10 days
@@ -532,6 +534,7 @@ contract DistributionTest is Test {
         );
 
         assertTrue(windDownAuction.isClosed());
+        assertEq(windDownAuction.soldShares(), 0);
         assertFalse(boardroom.isIssuedDistribution(address(windDownAuction)));
     }
 

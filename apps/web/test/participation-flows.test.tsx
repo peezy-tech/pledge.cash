@@ -90,6 +90,7 @@ const dutchAuctionDistribution: BoardroomDistributionSnapshot = {
     currentPrice: 3_000_000n,
     maxPerBuyer: 2_000_000_000_000_000_000n,
     totalPayment: 6_000_000n,
+    soldShares: 2_000_000_000_000_000_000n,
     lastPurchasePrice: 3_100_000n,
     settlementPrice: 0n,
     startTime: 0n,
