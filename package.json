@@ -19,7 +19,7 @@
     "catalog": {
       "@types/node": "^25.6.1",
       "typescript": "5.9.3",
-      "viem": "^2.48.8"
+      "viem": "2.55.8"
     }
   },
   "scripts": {
@@ -36,6 +36,9 @@
     "scenario:local-seed:local": "bun --cwd packages/contracts scenario:local-seed:local",
     "scenario:project-token:dry-run": "bun --cwd packages/contracts scenario:project-token:dry-run",
     "scenario:project-token:local": "bun --cwd packages/contracts scenario:project-token:local",
+    "router:dev": "bun run --cwd services/x402-router dev",
+    "router:integration:anvil": "bun run --cwd services/x402-router integration:anvil",
+    "router:test": "bun run --cwd services/x402-router test",
     "sentinel:dev": "bun --cwd services/sentinel dev",
     "sentinel:integration:anvil": "bun --cwd services/sentinel integration:anvil",
     "sentinel:test": "bun --cwd services/sentinel test",

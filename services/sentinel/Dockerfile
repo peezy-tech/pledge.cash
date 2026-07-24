@@ -8,6 +8,7 @@ COPY docs/package.json docs/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/sdk/package.json packages/sdk/package.json
 COPY services/sentinel/package.json services/sentinel/package.json
+COPY services/x402-router/package.json services/x402-router/package.json
 
 RUN bun install --frozen-lockfile
 

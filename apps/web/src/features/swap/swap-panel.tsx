@@ -15,7 +15,9 @@ import {
 import { Input } from "../../components/ui/input";
 import type { Capability } from "../capabilities/project-capabilities";
 import { ConnectWalletPrompt } from "../wallet/connect-wallet-prompt";
+import { HyperliquidPaymentAction } from "../x402";
 import type { ExactRational, MetricState, NormalizedPrice } from "../../lib/market-data";
+import type { HyperliquidCheckoutContext } from "../../lib/x402-router";
 import {
   formatPoolShareBps,
   formatSwapAmount,
@@ -41,6 +43,7 @@ import {
 type SwapPanelProps = {
   account: Address | undefined;
   actionCapability: Capability;
+  boardroom?: Address | undefined;
   deployment: PledgeCashDeployment | undefined;
   form: SwapForm;
   liquidityForm: LiquidityForm;
@@ -57,8 +60,10 @@ type SwapPanelProps = {
   tokenList: SwapTokenListState;
   tokenListLoading: boolean;
   wrappedNativeSymbol: string;
+  hyperliquid?: HyperliquidCheckoutContext | undefined;
   mode?: "all" | "liquidity" | "swap";
   lockSwapPair?: boolean | undefined;
+  projectShareToken?: Address | undefined;
   addLiquidity: () => Promise<void>;
   approveLiquidityTokenA: () => Promise<void>;
   approveLiquidityTokenB: () => Promise<void>;
@@ -114,6 +119,7 @@ type PositionActionState = {
 export function SwapPanel({
   account,
   actionCapability,
+  boardroom,
   deployment,
   form,
   liquidityForm,
@@ -130,8 +136,10 @@ export function SwapPanel({
   tokenList,
   tokenListLoading,
   wrappedNativeSymbol,
+  hyperliquid,
   mode = "all",
   lockSwapPair = false,
+  projectShareToken,
   addLiquidity,
   approveLiquidityTokenA,
   approveLiquidityTokenB,
@@ -177,6 +185,43 @@ export function SwapPanel({
   );
   const inputToken = selectedTokenOption(form.tokenIn, tokenList.tokens, currentSwapQuote?.tokenIn);
   const outputToken = selectedTokenOption(form.tokenOut, tokenList.tokens, currentSwapQuote?.tokenOut);
+  const hyperliquidBlocker = ammHyperliquidBlocker({
+    account,
+    actionCapability,
+    boardroom,
+    deployment,
+    destinationUsdc: hyperliquid?.config.hyperevmUsdc,
+    form,
+    projectShareToken,
+    quote: currentSwapQuote,
+  });
+  const hyperliquidExpectations = hyperliquid && !hyperliquidBlocker
+    && deployment?.ammRouter && currentSwapQuote?.tokenIn
+    && currentSwapQuote.tokenOut
+    ? {
+        inputToken: currentSwapQuote.tokenIn.address,
+        outputToken: currentSwapQuote.tokenOut.address,
+        target: deployment.ammRouter,
+      }
+    : undefined;
+  const hyperliquidRequest = hyperliquid && !hyperliquidBlocker
+    && account && boardroom && currentSwapQuote?.pool
+    && currentSwapQuote.tokenIn && currentSwapQuote.tokenOut
+    && currentSwapQuote.amountIn !== undefined
+    ? {
+        amountIn: currentSwapQuote.amountIn.toString(),
+        boardroom,
+        chainId: 998 as const,
+        kind: "amm_swap" as const,
+        maxSlippageBps: currentSwapQuote.slippageBps,
+        payer: account,
+        pool: currentSwapQuote.pool.address,
+        recipient: account,
+        refundAddress: account,
+        tokenIn: currentSwapQuote.tokenIn.address,
+        tokenOut: currentSwapQuote.tokenOut.address,
+      }
+    : undefined;
 
   const tokenA = selectedTokenOption(liquidityForm.tokenA, tokenList.tokens, liquidityQuote?.tokenA ?? position?.tokenA);
   const tokenB = selectedTokenOption(liquidityForm.tokenB, tokenList.tokens, liquidityQuote?.tokenB ?? position?.tokenB);
@@ -370,6 +415,22 @@ export function SwapPanel({
               </ActionButton>
             </ActionControl>
           </ActionRow>
+          {hyperliquid && boardroom ? (
+            <HyperliquidPaymentAction
+              checkout={hyperliquid}
+              disabledReason={hyperliquidBlocker}
+              expectations={hyperliquidExpectations}
+              kind="amm_swap"
+              output={{
+                decimals: currentSwapQuote?.tokenOut?.decimals,
+                symbol: currentSwapQuote?.tokenOut?.symbol,
+              }}
+              payer={account}
+              pendingAction={pendingAction}
+              request={hyperliquidRequest}
+              runAction={runAction}
+            />
+          ) : null}
         </form>
       </Panel> : null}
 
@@ -598,6 +659,60 @@ function ActionControl({
       {reason ? <p className="m-0 mt-2 max-w-sm text-xs leading-5 text-zinc-400" id={reasonId}>{reason}</p> : null}
     </div>
   );
+}
+
+export function ammHyperliquidBlocker(input: {
+  account: Address | undefined;
+  actionCapability: Capability;
+  boardroom: Address | undefined;
+  deployment: PledgeCashDeployment | undefined;
+  destinationUsdc: Address | undefined;
+  form: SwapForm;
+  projectShareToken: Address | undefined;
+  quote: SwapQuoteState | undefined;
+}): string | undefined {
+  if (!input.account) return "Connect the wallet that will pay from HyperCore.";
+  if (input.actionCapability.status !== "enabled") {
+    return input.actionCapability.reason
+      ?? "Switch the connected wallet to HyperEVM testnet.";
+  }
+  if (!input.boardroom || !input.projectShareToken) {
+    return "Open a verified project pool before using the Hyperliquid rail.";
+  }
+  if (!input.deployment?.ammRouter) {
+    return "The canonical AMM router is unavailable.";
+  }
+  if (!input.destinationUsdc) {
+    return "The trusted HyperEVM USDC address is unavailable.";
+  }
+  if (input.form.useNative) {
+    return "Hyperliquid v1 executes the ERC-20 route; turn off native asset handling.";
+  }
+  const recipient = input.form.recipient.trim();
+  if (
+    recipient
+    && (!isAddress(recipient) || !sameAddress(recipient, input.account))
+  ) {
+    return "Payer, recipient, and refund address must be the connected wallet in v1.";
+  }
+  if (!input.quote) return "Refresh the AMM quote before requesting a Hyperliquid payment.";
+  if (input.quote.error) return input.quote.error;
+  if (!swapQuoteReady(input.quote)) {
+    return "A complete, current AMM quote is required.";
+  }
+  if (!sameAddress(input.quote.tokenOut.address, input.projectShareToken)) {
+    return "Hyperliquid v1 supports the canonical USDC-to-project-token direction only.";
+  }
+  if (!sameAddress(input.quote.tokenIn.address, input.destinationUsdc)) {
+    return "Hyperliquid v1 requires the configured HyperEVM USDC input token.";
+  }
+  if (
+    input.quote.slippageBps < 0
+    || input.quote.slippageBps > 1_000
+  ) {
+    return "Hyperliquid v1 slippage must be between 0 and 1,000 bps.";
+  }
+  return undefined;
 }
 
 function TokenSelectField({
