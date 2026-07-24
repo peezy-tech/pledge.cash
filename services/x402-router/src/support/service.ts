@@ -890,6 +890,7 @@ function invoiceMaterializationIsPaused(error: unknown): boolean {
   return error instanceof SupportError
     && (
       error.code === "boardroom_not_active"
+      || error.code === "support_asset_not_registered"
       || error.code === "support_authority_stale"
     );
 }

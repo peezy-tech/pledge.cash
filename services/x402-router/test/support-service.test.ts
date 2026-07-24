@@ -335,6 +335,17 @@ describe("RecurringSupportService", () => {
     expect(paused.invoice).toMatchObject({ periodIndex: 3 });
     expect(state.support.invoiceCount()).toBe(2);
 
+    state.setAuthorityError(new SupportError(
+      "Configured HyperEVM USDC is not registered as a Boardroom treasury asset.",
+      "support_asset_not_registered",
+      409,
+    ));
+    const deregistered = await state.service.getSubscription(
+      initial.subscription.id,
+    );
+    expect(deregistered.invoice).toMatchObject({ periodIndex: 3 });
+    expect(state.support.invoiceCount()).toBe(2);
+
     state.setAuthorityError(undefined);
     state.setIdentity(identity({ configurationEpoch: 2n }));
     const stale = await state.service.getSubscription(initial.subscription.id);
