@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Address, Hex } from "viem";
+import { getAddress, type Address, type Hex } from "viem";
 import type {
   MarketplaceQuote,
   QuotePaymentBinding,
@@ -161,6 +161,47 @@ function fixture() {
 }
 
 describe("RecurringSupportService", () => {
+  test("survives repository normalization of checksummed challenge addresses", async () => {
+    const state = fixture();
+    const mixedCaseBoardroom = getAddress(
+      "0x5aeda56215b167893e80b4fe645ba6d5bab767de",
+    );
+    const mixedCaseActor = getAddress(
+      "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+    );
+    const normalizedActor = mixedCaseActor.toLowerCase() as Address;
+    const normalizedBoardroom = mixedCaseBoardroom.toLowerCase() as Address;
+    state.setIdentity(identity({
+      authority: mixedCaseActor,
+      boardroom: mixedCaseBoardroom,
+      signer: mixedCaseActor,
+    }));
+
+    const challenge = await state.service.issuePlanChallenge({
+      amount: "10000000",
+      boardroom: mixedCaseBoardroom,
+      cadence: "monthly",
+      chainId: 998,
+      description: "Keep the project operating.",
+      title: "Core support",
+    });
+
+    expect(challenge.actor).toBe(normalizedActor);
+    expect(challenge.boardroom).toBe(normalizedBoardroom);
+    expect(challenge.message).toContain(
+      `Actor: ${normalizedActor}`,
+    );
+    expect(challenge.message).toContain(
+      `Boardroom: ${normalizedBoardroom}`,
+    );
+    await expect(
+      state.service.createPlan(challenge.id, signature),
+    ).resolves.toMatchObject({
+      boardroom: mixedCaseBoardroom,
+      status: "active",
+    });
+  });
+
   test("publishes immutable terms and records a non-spending monthly schedule", async () => {
     const state = fixture();
     const challenge = await state.service.issuePlanChallenge({
@@ -379,7 +420,11 @@ class MemorySupportRepository implements SupportRepository {
   }
 
   async createChallenge(challenge: SupportChallenge): Promise<void> {
-    this.challenges.set(challenge.id, challenge);
+    this.challenges.set(challenge.id, {
+      ...challenge,
+      actor: challenge.actor.toLowerCase() as Address,
+      boardroom: challenge.boardroom.toLowerCase() as Address,
+    });
   }
 
   async getChallenge(id: string): Promise<SupportChallenge | undefined> {

@@ -551,17 +551,19 @@ export class RecurringSupportService {
     const expiresAt = new Date(createdAt.getTime() + CHALLENGE_TTL_MS);
     const id = this.id();
     const payloadHash = hashPayload(input.payload);
+    const actor = input.actor.toLowerCase() as Address;
+    const boardroom = input.authority.boardroom.toLowerCase() as Address;
     const challenge: SupportChallenge = {
       id,
       action: input.action,
-      actor: input.actor,
+      actor,
       ...(input.action === "plan_create" || input.action === "plan_retire"
         ? {
             authority: input.authority.authority,
             authorityMode: input.authority.mode,
           }
         : {}),
-      boardroom: input.authority.boardroom,
+      boardroom,
       chainId: SUPPORT_CHAIN_ID,
       configurationEpoch: input.authority.configurationEpoch,
       controllerGeneration: input.authority.controllerGeneration,
@@ -570,8 +572,8 @@ export class RecurringSupportService {
       payloadHash,
       message: buildSupportChallengeMessage({
         action: input.action,
-        actor: input.actor,
-        boardroom: input.authority.boardroom,
+        actor,
+        boardroom,
         chainId: SUPPORT_CHAIN_ID,
         challengeId: id,
         expiresAt,

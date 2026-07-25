@@ -168,10 +168,9 @@ describeWithDatabase("Postgres router durability", () => {
     await expect(support.listPlans(TARGET, 1)).resolves.toMatchObject([
       { id: newerPlanId },
     ]);
-    await expect(support.listPlans(TARGET, 1, PAYER)).resolves.toMatchObject([
-      { id: newerPlanId },
-      { id: plan.id },
-    ]);
+    const payerPlans = await support.listPlans(TARGET, 1, PAYER);
+    expect(payerPlans).toHaveLength(1);
+    expect(payerPlans[0]).toMatchObject({ id: newerPlanId });
     await client.sql`
       delete from x402_router_support_subscriptions
       where id = ${subscriptionId}

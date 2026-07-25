@@ -558,6 +558,7 @@ export class PostgresSupportRepository implements SupportRepository {
             and subscription.status = 'active'
         )
       order by (plan.status = 'active') desc, plan.created_at desc, plan.id desc
+      limit ${limit}
     `;
     const listedIds = new Set(rows.map(row => row.id));
     return [
@@ -565,7 +566,7 @@ export class PostgresSupportRepository implements SupportRepository {
       ...subscribedRows
         .filter(row => !listedIds.has(row.id))
         .map(planFromRow),
-    ];
+    ].slice(0, limit);
   }
 
   async getPlan(id: string): Promise<SupportPlan | undefined> {
