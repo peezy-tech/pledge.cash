@@ -65,6 +65,11 @@ const quote: HyperliquidMarketplaceQuote = {
   recipient: payer,
   refundAddress: payer,
 };
+const recurringSupportQuote: HyperliquidMarketplaceQuote = {
+  ...quote,
+  kind: "recurring_support",
+  supportInvoiceId: "12345678-1234-4234-8234-123456789abc",
+};
 
 const { JSDOM } = createRequire(import.meta.url)(
   "../../../node_modules/.bun/node_modules/jsdom",
@@ -192,7 +197,7 @@ describe("Hyperliquid payment recovery surface", () => {
     }
   });
 
-  test("keeps recovery visible outside a marketplace route and clears a resolved lock", async () => {
+  test("keeps recurring support recovery visible outside its route and clears a resolved lock", async () => {
     const dom = new JSDOM(
       "<!doctype html><html><body><div id=\"root\"></div></body></html>",
       { url: "https://pledge.test" },
@@ -231,6 +236,7 @@ describe("Hyperliquid payment recovery surface", () => {
         order: {
           ...recoveryOrder(),
           executionTransaction: `0x${"22".repeat(32)}`,
+          kind: "recurring_support",
           message: "The marketplace transaction completed.",
           status: "executed",
         },
@@ -241,8 +247,8 @@ describe("Hyperliquid payment recovery surface", () => {
       dom.window.localStorage,
       config,
       payer,
-      "fixed_price_sale",
-      quote,
+      "recurring_support",
+      recurringSupportQuote,
       { decimals: 18, symbol: "PLEDGE" },
     );
 

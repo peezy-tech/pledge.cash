@@ -21,6 +21,7 @@ const RECOVERY_POLL_TIMEOUT_MS = 10_000;
 const RECOVERY_KINDS = [
   "amm_swap",
   "fixed_price_sale",
+  "recurring_support",
 ] as const satisfies readonly HyperliquidMarketplaceQuoteRequest["kind"][];
 
 type RecoveryEntry = {
