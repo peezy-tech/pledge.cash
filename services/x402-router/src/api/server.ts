@@ -204,8 +204,9 @@ export function createRouterApi(deps: RouterApiDependencies): Hono {
     const support = requireSupport(deps);
     const query = supportPlansQuerySchema.parse({
       boardroom: c.req.query("boardroom"),
+      payer: c.req.query("payer"),
     });
-    const plans = await support.listPlans(query.boardroom);
+    const plans = await support.listPlans(query.boardroom, query.payer);
     return c.json({ plans: plans.map(supportPlanDto) });
   });
 

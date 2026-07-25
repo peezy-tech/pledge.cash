@@ -165,7 +165,11 @@ export interface SupportRepository {
     verifiedBlock: bigint;
     verifiedBlockHash: Hex;
   }): Promise<SupportSubscription>;
-  listPlans(boardroom: Address, limit: number): Promise<readonly SupportPlan[]>;
+  listPlans(
+    boardroom: Address,
+    limit: number,
+    payer?: Address,
+  ): Promise<readonly SupportPlan[]>;
   getPlan(id: string): Promise<SupportPlan | undefined>;
   getSubscription(id: string): Promise<SupportSubscription | undefined>;
   getInvoice(id: string): Promise<SupportInvoice | undefined>;

@@ -140,6 +140,46 @@ describeWithDatabase("Postgres router durability", () => {
       signatureHash: HASH_D,
     })).resolves.toEqual(plan);
     await expect(support.listPlans(TARGET, 50)).resolves.toEqual([plan]);
+    const newerPlanId = "00000000-0000-4000-8000-000000000004";
+    const subscriptionId = "00000000-0000-4000-8000-000000000005";
+    await client.sql`
+      insert into x402_router_support_plans (
+        id, chain_id, boardroom, asset, amount, cadence, title, description,
+        terms_hash, status, authority_mode, authority,
+        controller_generation, configuration_epoch, verified_block,
+        verified_block_hash, created_at
+      ) values (
+        ${newerPlanId}, 998, ${TARGET.toLowerCase()},
+        ${DESTINATION_USDC.toLowerCase()}, '20000000', 'monthly',
+        'Newer support', 'A newer public plan.', ${HASH_C},
+        'active', 'launched_controller', ${PAYER.toLowerCase()},
+        '1', '1', '101', ${HASH_D},
+        ${new Date(plan.createdAt.getTime() + 2_000).toISOString()}
+      )
+    `;
+    await client.sql`
+      insert into x402_router_support_subscriptions (
+        id, plan_id, payer, status, started_at, created_at
+      ) values (
+        ${subscriptionId}, ${plan.id}, ${PAYER.toLowerCase()}, 'active',
+        ${plan.createdAt.toISOString()}, ${plan.createdAt.toISOString()}
+      )
+    `;
+    await expect(support.listPlans(TARGET, 1)).resolves.toMatchObject([
+      { id: newerPlanId },
+    ]);
+    await expect(support.listPlans(TARGET, 1, PAYER)).resolves.toMatchObject([
+      { id: newerPlanId },
+      { id: plan.id },
+    ]);
+    await client.sql`
+      delete from x402_router_support_subscriptions
+      where id = ${subscriptionId}
+    `;
+    await client.sql`
+      delete from x402_router_support_plans
+      where id = ${newerPlanId}
+    `;
     await expect(support.createPlanFromChallenge({
       challenge,
       plan,
@@ -270,7 +310,7 @@ describeWithDatabase("Postgres router durability", () => {
       )
     `;
 
-    const quotes = new PostgresQuoteRepository(client.sql);
+    const quotes = new PostgresQuoteRepository(client.sql, client.coordinationSql);
     const support = new PostgresSupportRepository(
       client.sql,
       client.coordinationSql,
@@ -512,6 +552,132 @@ describeWithDatabase("Postgres router durability", () => {
     }
   }, 5_000);
 
+  test("does not hold a main-pool transaction while waiting for a recurring invoice lock", async () => {
+    const planId = "00000000-0000-4000-8000-000000000021";
+    const subscriptionId = "00000000-0000-4000-8000-000000000022";
+    const invoiceId = "00000000-0000-4000-8000-000000000023";
+    const createdAt = new Date();
+    const periodEnd = new Date(createdAt.getTime() + 28 * 24 * 60 * 60_000);
+    await client.sql`
+      insert into x402_router_support_plans (
+        id, chain_id, boardroom, asset, amount, cadence, title, description,
+        terms_hash, status, authority_mode, authority,
+        controller_generation, configuration_epoch, verified_block,
+        verified_block_hash, created_at
+      ) values (
+        ${planId}, 998, ${TARGET.toLowerCase()},
+        ${DESTINATION_USDC.toLowerCase()}, '10000000', 'monthly',
+        'Core support', 'Keep the project operating.', ${HASH_A},
+        'active', 'launched_controller', ${PAYER.toLowerCase()},
+        '1', '1', '100', ${HASH_B}, ${createdAt.toISOString()}
+      )
+    `;
+    await client.sql`
+      insert into x402_router_support_subscriptions (
+        id, plan_id, payer, status, started_at, created_at
+      ) values (
+        ${subscriptionId}, ${planId}, ${PAYER.toLowerCase()}, 'active',
+        ${createdAt.toISOString()}, ${createdAt.toISOString()}
+      )
+    `;
+    await client.sql`
+      insert into x402_router_support_invoices (
+        id, subscription_id, plan_id, period_index, period_start, period_end,
+        due_at, payer, boardroom, asset, amount, status, created_at
+      ) values (
+        ${invoiceId}, ${subscriptionId}, ${planId}, 0,
+        ${createdAt.toISOString()}, ${periodEnd.toISOString()},
+        ${createdAt.toISOString()}, ${PAYER.toLowerCase()},
+        ${TARGET.toLowerCase()}, ${DESTINATION_USDC.toLowerCase()},
+        '10000000', 'open', ${createdAt.toISOString()}
+      )
+    `;
+
+    const constrained = createDbClient(databaseUrl!, { maxConnections: 1 });
+    const quotes = new PostgresQuoteRepository(
+      constrained.sql,
+      client.coordinationSql,
+    );
+    const support = new PostgresSupportRepository(
+      constrained.sql,
+      constrained.coordinationSql,
+    );
+    const value: MarketplaceQuote = {
+      ...marketplaceQuote(
+        "support-constrained-binding",
+        [destinationReservation("10")],
+      ),
+      kind: "recurring_support",
+      supportInvoiceId: invoiceId,
+      maxSlippageBps: 0,
+    };
+    let markLockEntered!: () => void;
+    let markBindingStarted!: () => void;
+    const lockEntered = new Promise<void>(resolve => {
+      markLockEntered = resolve;
+    });
+    const bindingStarted = new Promise<void>(resolve => {
+      markBindingStarted = resolve;
+    });
+
+    try {
+      await quotes.createReserved({
+        quote: value,
+        availability: value.inventoryReservations.map(reservation => ({
+          reservation,
+          maximumAvailableInventory: 100n,
+        })),
+      });
+      await support.linkInvoiceQuote({
+        invoiceId,
+        quoteId: value.id,
+        createdAt,
+      });
+
+      const lockHolder = support.withInvoiceLock(invoiceId, async () => {
+        markLockEntered();
+        await bindingStarted;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const rows = await client.sql<Array<{ waiting: boolean }>>`
+            select exists (
+              select 1
+              from pg_locks
+              where locktype = 'advisory'
+                and not granted
+            ) as waiting
+          `;
+          if (rows[0]?.waiting) break;
+          if (attempt === 99) {
+            throw new Error("payment binding did not wait for the invoice lock");
+          }
+          await Bun.sleep(10);
+        }
+        await Promise.race([
+          constrained.sql`select 1`,
+          Bun.sleep(1_000).then(() => {
+            throw new Error(
+              "invoice lock holder could not obtain a main-pool connection",
+            );
+          }),
+        ]);
+      });
+      await lockEntered;
+      const binding = quotes.bindPaymentPayload({
+        quoteId: value.id,
+        attemptId: HASH_C,
+        paymentPayloadHash: HASH_C,
+        paymentRequirementsHash: hashPaymentRequirements(
+          value.paymentRequirements,
+        ),
+      });
+      markBindingStarted();
+      await Promise.all([lockHolder, binding]);
+    } finally {
+      markBindingStarted();
+      await constrained.close();
+    }
+  }, 5_000);
+
   test("runs distinct recurring invoice locks concurrently", async () => {
     const concurrent = createDbClient(databaseUrl!, { maxConnections: 2 });
     const support = new PostgresSupportRepository(
@@ -559,7 +725,7 @@ describeWithDatabase("Postgres router durability", () => {
   });
 
   test("serializes concurrent inventory reservations without oversubscribing", async () => {
-    const quotes = new PostgresQuoteRepository(client.sql);
+    const quotes = new PostgresQuoteRepository(client.sql, client.coordinationSql);
     const reservation = destinationReservation("60");
     const availability = [
       { reservation, maximumAvailableInventory: 100n }
@@ -591,7 +757,7 @@ describeWithDatabase("Postgres router durability", () => {
   });
 
   test("keeps paid inventory committed through expiry and finalizes each scope", async () => {
-    const quotes = new PostgresQuoteRepository(client.sql);
+    const quotes = new PostgresQuoteRepository(client.sql, client.coordinationSql);
     const destination = destinationReservation("30");
     const refund = refundReservation("40");
     const executionQuote = marketplaceQuote(
@@ -677,7 +843,7 @@ describeWithDatabase("Postgres router durability", () => {
   });
 
   test("atomically binds one payment payload and commits inventory before settlement", async () => {
-    const quotes = new PostgresQuoteRepository(client.sql);
+    const quotes = new PostgresQuoteRepository(client.sql, client.coordinationSql);
     const quote = marketplaceQuote(
       "payment-binding",
       [destinationReservation("30"), refundReservation("40")]
@@ -728,7 +894,7 @@ describeWithDatabase("Postgres router durability", () => {
   });
 
   test("never releases inventory after a payment claim wins the quote lock", async () => {
-    const quotes = new PostgresQuoteRepository(client.sql);
+    const quotes = new PostgresQuoteRepository(client.sql, client.coordinationSql);
     const quote = marketplaceQuote(
       "binding-expiry-race",
       [destinationReservation("9"), refundReservation("11")],
@@ -761,7 +927,7 @@ describeWithDatabase("Postgres router durability", () => {
   });
 
   test("rejects a queued near-expiry binding before a replacement quote reuses inventory", async () => {
-    const quotes = new PostgresQuoteRepository(client.sql);
+    const quotes = new PostgresQuoteRepository(client.sql, client.coordinationSql);
     const reservation = destinationReservation("100");
     const expiringQuote = marketplaceQuote(
       "binding-inventory-lock-race",
@@ -871,7 +1037,7 @@ describeWithDatabase("Postgres router durability", () => {
   }, 10_000);
 
   test("recovers the exact sealed settlement after expiry and rejects an alternate payload", async () => {
-    const quotes = new PostgresQuoteRepository(client.sql);
+    const quotes = new PostgresQuoteRepository(client.sql, client.coordinationSql);
     const quote = marketplaceQuote(
       "journal-expired-replay",
       [destinationReservation("7"), refundReservation("8")],
@@ -1058,7 +1224,7 @@ describeWithDatabase("Postgres router durability", () => {
   });
 
   test("keeps ambiguous incoming settlement evidence submitted and replays the exact envelope", async () => {
-    const quotes = new PostgresQuoteRepository(client.sql);
+    const quotes = new PostgresQuoteRepository(client.sql, client.coordinationSql);
     const quote = marketplaceQuote(
       "journal-ambiguous-replay",
       [destinationReservation("7"), refundReservation("8")]
@@ -1159,7 +1325,7 @@ describeWithDatabase("Postgres router durability", () => {
   });
 
   test("binds one signed HyperCore action to at most one quote envelope", async () => {
-    const quotes = new PostgresQuoteRepository(client.sql);
+    const quotes = new PostgresQuoteRepository(client.sql, client.coordinationSql);
     const leftQuote = marketplaceQuote(
       "identity-left",
       [destinationReservation("7"), refundReservation("8")]
@@ -1250,7 +1416,7 @@ describeWithDatabase("Postgres router durability", () => {
   });
 
   test("queues a confirmed settlement failure for one idempotent hold release", async () => {
-    const quotes = new PostgresQuoteRepository(client.sql);
+    const quotes = new PostgresQuoteRepository(client.sql, client.coordinationSql);
     const quote = marketplaceQuote(
       "settlement-failure-recovery",
       [destinationReservation("7"), refundReservation("8")]
@@ -1596,7 +1762,7 @@ describeWithDatabase("Postgres router durability", () => {
         }
       },
       store,
-      new PostgresQuoteRepository(client.sql),
+      new PostgresQuoteRepository(client.sql, client.coordinationSql),
       1_000,
       () => fixedNow.getTime()
     );
@@ -1686,7 +1852,7 @@ describeWithDatabase("Postgres router durability", () => {
         }
       },
       store,
-      new PostgresQuoteRepository(client.sql),
+      new PostgresQuoteRepository(client.sql, client.coordinationSql),
       1_000,
       () => storeNow.getTime()
     );
@@ -1738,7 +1904,7 @@ describeWithDatabase("Postgres router durability", () => {
   });
 
   test("recovers a confirmed refund after crashing before reservation finalization", async () => {
-    const quotes = new PostgresQuoteRepository(client.sql);
+    const quotes = new PostgresQuoteRepository(client.sql, client.coordinationSql);
     const quote = marketplaceQuote(
       "refund-finalization-crash",
       [destinationReservation("12"), refundReservation("13")]
@@ -1845,7 +2011,7 @@ describeWithDatabase("Postgres router durability", () => {
   });
 
   test("uses one durable operation per definite refund retry and never consumes primary inventory for a duplicate", async () => {
-    const quotes = new PostgresQuoteRepository(client.sql);
+    const quotes = new PostgresQuoteRepository(client.sql, client.coordinationSql);
     const quote = marketplaceQuote(
       "refund-attempts",
       [destinationReservation("12"), refundReservation("13")]

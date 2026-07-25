@@ -107,6 +107,10 @@ type FetchOptions = {
   signal?: AbortSignal | undefined;
 };
 
+type GetPlansOptions = FetchOptions & {
+  payer?: Address | undefined;
+};
+
 type CreateSubscriptionOptions = FetchOptions & {
   onSubscriptionSigned?: (subscriptionId: string) => void;
 };
@@ -114,10 +118,11 @@ type CreateSubscriptionOptions = FetchOptions & {
 export async function getRecurringSupportPlans(
   config: X402RouterConfig,
   boardroom: Address,
-  options: FetchOptions = {},
+  options: GetPlansOptions = {},
 ): Promise<readonly RecurringSupportPlan[]> {
   const url = new URL(`${config.baseUrl}/v1/support/plans`);
   url.searchParams.set("boardroom", boardroom);
+  if (options.payer) url.searchParams.set("payer", options.payer);
   const body = await supportRequest(url.toString(), {
     fetch: options.fetch,
     signal: options.signal,

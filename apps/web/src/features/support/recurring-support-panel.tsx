@@ -121,7 +121,7 @@ export function RecurringSupportPanel({
       const next = await getRecurringSupportPlans(
         checkout.config,
         boardroom,
-        { signal },
+        { payer: account, signal },
       );
       if (
         signal?.aborted
@@ -148,7 +148,7 @@ export function RecurringSupportPanel({
         setLoadingPlans(false);
       }
     }
-  }, [boardroom, checkout.config]);
+  }, [account, boardroom, checkout.config]);
 
   useEffect(() => {
     const request = new AbortController();

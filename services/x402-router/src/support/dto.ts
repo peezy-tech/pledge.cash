@@ -65,6 +65,7 @@ export const supportInvoiceIdParamsSchema = z.object({
 
 export const supportPlansQuerySchema = z.object({
   boardroom: supportAddressSchema,
+  payer: supportAddressSchema.optional(),
 });
 
 export type SupportPlanDraft = z.infer<typeof supportPlanDraftSchema>;

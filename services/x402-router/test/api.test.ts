@@ -5,6 +5,7 @@ import {
   encodePaymentSignatureHeader,
 } from "@x402/core/http";
 import type { PaymentPayload, SettleResponse } from "@x402/core/types";
+import type { Address } from "viem";
 import {
   createRouterApi,
   type RouterApiDependencies,
@@ -13,6 +14,7 @@ import type { MarketplaceQuote, QuoteRepository } from "../src/domain";
 import { X402PaymentError } from "../src/x402/server";
 
 const payer = "0x00000000000000000000000000000000000000A1" as const;
+const recipient = "0x00000000000000000000000000000000000000A2" as const;
 
 function quote(): MarketplaceQuote {
   return {
@@ -188,9 +190,13 @@ describe("router API", () => {
     );
     expect(unavailable.status).toBe(503);
 
+    let listedFor:
+      | { boardroom: Address; payer: Address | undefined }
+      | undefined;
     const enabled = app({
       support: {
-        async listPlans() {
+        async listPlans(boardroom: Address, listedPayer?: Address) {
+          listedFor = { boardroom, payer: listedPayer };
           return [];
         },
       } as never,
@@ -204,10 +210,14 @@ describe("router API", () => {
       ],
     });
     const plans = await enabled.request(
-      `/v1/support/plans?boardroom=${payer}`,
+      `/v1/support/plans?boardroom=${payer}&payer=${recipient}`,
     );
     expect(plans.status).toBe(200);
     await expect(plans.json()).resolves.toEqual({ plans: [] });
+    expect(listedFor).toEqual({
+      boardroom: payer,
+      payer: recipient,
+    });
   });
 
   test("returns the exact stored 402 requirement and CORS exposure", async () => {

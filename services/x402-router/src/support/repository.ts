@@ -497,6 +497,7 @@ export class PostgresSupportRepository implements SupportRepository {
   async listPlans(
     boardroom: Address,
     limit: number,
+    payer?: Address,
   ): Promise<readonly SupportPlan[]> {
     const rows = await this.sql<PlanRow[]>`
       select
@@ -524,7 +525,47 @@ export class PostgresSupportRepository implements SupportRepository {
       order by (status = 'active') desc, created_at desc, id desc
       limit ${limit}
     `;
-    return rows.map(planFromRow);
+    if (!payer) return rows.map(planFromRow);
+
+    const subscribedRows = await this.sql<PlanRow[]>`
+      select
+        plan.id,
+        plan.chain_id,
+        plan.boardroom,
+        plan.asset,
+        plan.amount::text,
+        plan.cadence,
+        plan.title,
+        plan.description,
+        plan.terms_hash,
+        plan.status,
+        plan.authority_mode,
+        plan.authority,
+        plan.controller_generation::text,
+        plan.configuration_epoch::text,
+        plan.verified_block::text,
+        plan.verified_block_hash,
+        plan.created_at,
+        plan.retired_at
+      from x402_router_support_plans plan
+      where plan.chain_id = 998
+        and plan.boardroom = ${lower(boardroom)}
+        and exists (
+          select 1
+          from x402_router_support_subscriptions subscription
+          where subscription.plan_id = plan.id
+            and subscription.payer = ${lower(payer)}
+            and subscription.status = 'active'
+        )
+      order by (plan.status = 'active') desc, plan.created_at desc, plan.id desc
+    `;
+    const listedIds = new Set(rows.map(row => row.id));
+    return [
+      ...rows.map(planFromRow),
+      ...subscribedRows
+        .filter(row => !listedIds.has(row.id))
+        .map(planFromRow),
+    ];
   }
 
   async getPlan(id: string): Promise<SupportPlan | undefined> {

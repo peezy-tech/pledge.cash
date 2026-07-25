@@ -108,8 +108,11 @@ export class RecurringSupportService {
     );
   }
 
-  async listPlans(boardroom: Address): Promise<readonly SupportPlan[]> {
-    return this.repository.listPlans(boardroom, PLAN_LIST_LIMIT);
+  async listPlans(
+    boardroom: Address,
+    payer?: Address,
+  ): Promise<readonly SupportPlan[]> {
+    return this.repository.listPlans(boardroom, PLAN_LIST_LIMIT, payer);
   }
 
   async issuePlanChallenge(

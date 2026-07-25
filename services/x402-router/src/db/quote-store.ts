@@ -329,7 +329,10 @@ function normalizedAvailability(
 }
 
 export class PostgresQuoteRepository implements QuoteRepository {
-  constructor(private readonly sql: Sql) {}
+  constructor(
+    private readonly sql: Sql,
+    private readonly coordinationSql: Sql
+  ) {}
 
   async createReserved(input: {
     quote: MarketplaceQuote;
@@ -515,7 +518,50 @@ export class PostgresQuoteRepository implements QuoteRepository {
       "Payment requirements hash"
     );
 
-    return this.sql.begin(async (transaction) => {
+    // Resolve immutable support lock keys before opening the main-pool
+    // transaction. Waiting on the coordination pool must never retain a main
+    // connection that an invoice-lock holder may need.
+    const storedQuote = await this.get(input.quoteId);
+    if (storedQuote === undefined) {
+      throw new QuotePaymentBindingError(
+        `Quote ${input.quoteId} was not found`,
+        "quote_not_found"
+      );
+    }
+    if (
+      storedQuote.kind === "recurring_support" &&
+      storedQuote.supportInvoiceId === undefined
+    ) {
+      throw new QuotePaymentBindingError(
+        `Recurring quote ${input.quoteId} has no invoice binding`,
+        "binding_conflict"
+      );
+    }
+    let supportLockKeys: readonly string[] = [];
+    if (storedQuote.supportInvoiceId !== undefined) {
+      const supportIdentityRows = await this.sql<SupportInvoiceIdentityRow[]>`
+        select boardroom, payer, subscription_id
+        from x402_router_support_invoices
+        where id = ${storedQuote.supportInvoiceId}
+        limit 1
+      `;
+      const supportIdentity = supportIdentityRows[0];
+      if (!supportIdentity) {
+        throw new QuotePaymentBindingError(
+          `Recurring quote ${input.quoteId} references a missing invoice`,
+          "binding_conflict"
+        );
+      }
+      supportLockKeys = [
+        supportInvoiceLockKey(storedQuote.supportInvoiceId),
+        supportPayerBoardroomPaymentLockKey(
+          supportIdentity.boardroom,
+          supportIdentity.payer
+        )
+      ];
+    }
+
+    const bind = () => this.sql.begin(async (transaction) => {
       const preliminaryQuoteRows = await transaction<QuoteRow[]>`
         select quote
         from x402_router_quotes
@@ -568,15 +614,6 @@ export class PostgresQuoteRepository implements QuoteRepository {
         where quote_id = ${input.quoteId}
         order by network, asset
       `;
-      if (preliminaryQuote.supportInvoiceId !== undefined) {
-        await advisoryLocks(transaction, [
-          supportInvoiceLockKey(preliminaryQuote.supportInvoiceId),
-          supportPayerBoardroomPaymentLockKey(
-            supportBoardroom,
-            supportPayer
-          )
-        ]);
-      }
       await advisoryLocks(transaction, [
         quoteLockKey(input.quoteId),
         ...reservationIdentities.map(inventoryLockKey)
@@ -777,6 +814,11 @@ export class PostgresQuoteRepository implements QuoteRepository {
       }
       return paymentBindingFromRow(inserted[0]);
     });
+    if (supportLockKeys.length === 0) return bind();
+    return this.coordinationSql.begin(async transaction => {
+      await advisoryLocks(transaction, supportLockKeys);
+      return bind();
+    }) as Promise<QuotePaymentBinding>;
   }
 
   async getPaymentBinding(

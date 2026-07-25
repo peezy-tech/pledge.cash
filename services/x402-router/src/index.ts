@@ -64,7 +64,10 @@ export async function startX402Router(
   const refundAccount = privateKeyToAccount(
     config.hyperliquid.refundPrivateKey,
   );
-  const quoteRepository = new PostgresQuoteRepository(database.sql);
+  const quoteRepository = new PostgresQuoteRepository(
+    database.sql,
+    database.coordinationSql,
+  );
   const supportRepository = new PostgresSupportRepository(
     database.sql,
     database.coordinationSql,

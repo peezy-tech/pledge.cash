@@ -219,7 +219,10 @@ try {
   database = createDbClient(tempDatabase.databaseUrl);
   await database.migrate();
 
-  const quoteRepository = new PostgresQuoteRepository(database.sql);
+  const quoteRepository = new PostgresQuoteRepository(
+    database.sql,
+    database.coordinationSql,
+  );
   const operationStore = new PostgresAdapterOperationStore(database.sql, journalKey);
   const intentStore = new PostgresIntentExecutionStore(database.sql);
   const canonical = new CanonicalMarketplaceReader(publicClient as PublicClient, {

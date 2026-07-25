@@ -87,6 +87,7 @@ describe("recurring support plan identity", () => {
     setGlobal("fetch", async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
       if (url.pathname === "/v1/support/plans") {
+        expect(url.searchParams.get("payer")).toBe(payer);
         return Response.json({ plans: [activePlan, retiredPlan] });
       }
       if (url.pathname.endsWith(activeSubscriptionId)) return activeResponse;
