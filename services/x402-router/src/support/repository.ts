@@ -560,11 +560,11 @@ export class PostgresSupportRepository implements SupportRepository {
       order by (plan.status = 'active') desc, plan.created_at desc, plan.id desc
       limit ${limit}
     `;
-    const listedIds = new Set(rows.map(row => row.id));
+    const subscribedIds = new Set(subscribedRows.map(row => row.id));
     return [
-      ...rows.map(planFromRow),
-      ...subscribedRows
-        .filter(row => !listedIds.has(row.id))
+      ...subscribedRows.map(planFromRow),
+      ...rows
+        .filter(row => !subscribedIds.has(row.id))
         .map(planFromRow),
     ].slice(0, limit);
   }
@@ -664,6 +664,54 @@ export class PostgresSupportRepository implements SupportRepository {
       from x402_router_support_invoices
       where subscription_id = ${subscriptionId}
       order by period_index desc
+      limit 1
+    `;
+    return rows[0] ? invoiceFromRow(rows[0]) : undefined;
+  }
+
+  async getBlockingSubscriptionInvoice(
+    subscriptionId: string,
+  ): Promise<SupportInvoice | undefined> {
+    const rows = await this.sql<InvoiceRow[]>`
+      select
+        invoice.id,
+        invoice.subscription_id,
+        invoice.plan_id,
+        invoice.active_quote_id,
+        invoice.period_index,
+        invoice.period_start,
+        invoice.period_end,
+        invoice.due_at,
+        invoice.payer,
+        invoice.boardroom,
+        invoice.asset,
+        invoice.amount::text,
+        invoice.status,
+        invoice.created_at,
+        invoice.cancelled_at
+      from x402_router_support_invoices invoice
+      where invoice.subscription_id = ${subscriptionId}
+        and exists (
+          select 1
+          from x402_router_support_invoice_quotes link
+          join x402_router_quote_payment_bindings binding
+            on binding.quote_id = link.quote_id
+          left join x402_router_intent_payments intent
+            on intent.quote_id = link.quote_id
+            and intent.primary_payment
+          left join x402_router_adapter_operations settlement
+            on settlement.kind = 'payment_settlement'
+            and settlement.idempotency_key = binding.attempt_id
+          where link.invoice_id = invoice.id
+            and not (
+              coalesce(intent.status in ('executed', 'refunded'), false)
+              or (
+                intent.quote_id is null
+                and coalesce(settlement.status = 'confirmed_failure', false)
+              )
+            )
+        )
+      order by invoice.period_index asc, invoice.created_at asc, invoice.id asc
       limit 1
     `;
     return rows[0] ? invoiceFromRow(rows[0]) : undefined;

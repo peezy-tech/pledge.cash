@@ -312,8 +312,14 @@ export class RecurringSupportService {
       );
     }
     const plan = await this.requirePlan(subscription.planId);
-    let invoice: SupportInvoice | undefined;
-    if (subscription.status === "active" && plan.status === "active") {
+    let invoice = await this.repository.getBlockingSubscriptionInvoice(
+      subscription.id,
+    );
+    if (
+      !invoice
+      && subscription.status === "active"
+      && plan.status === "active"
+    ) {
       try {
         await this.requireCurrentPlanAuthority(plan);
         const candidate = createInvoice({
@@ -327,7 +333,7 @@ export class RecurringSupportService {
         if (!invoiceMaterializationIsPaused(error)) throw error;
         invoice = await this.repository.getLatestInvoice(subscription.id);
       }
-    } else {
+    } else if (!invoice) {
       invoice = await this.repository.getLatestInvoice(subscription.id);
     }
     return {

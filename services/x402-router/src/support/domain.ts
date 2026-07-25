@@ -176,6 +176,9 @@ export interface SupportRepository {
   getLatestInvoice(
     subscriptionId: string,
   ): Promise<SupportInvoice | undefined>;
+  getBlockingSubscriptionInvoice(
+    subscriptionId: string,
+  ): Promise<SupportInvoice | undefined>;
   getOrCreateInvoice(invoice: SupportInvoice): Promise<SupportInvoice>;
   listInvoiceQuotes(
     invoiceId: string,

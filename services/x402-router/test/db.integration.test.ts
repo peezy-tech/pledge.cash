@@ -170,7 +170,7 @@ describeWithDatabase("Postgres router durability", () => {
     ]);
     const payerPlans = await support.listPlans(TARGET, 1, PAYER);
     expect(payerPlans).toHaveLength(1);
-    expect(payerPlans[0]).toMatchObject({ id: newerPlanId });
+    expect(payerPlans[0]).toMatchObject({ id: plan.id });
     await client.sql`
       delete from x402_router_support_subscriptions
       where id = ${subscriptionId}
@@ -394,6 +394,12 @@ describeWithDatabase("Postgres router durability", () => {
         next.paymentRequirements,
       ),
     })).rejects.toMatchObject({ code: "binding_conflict" });
+    await expect(
+      support.getBlockingSubscriptionInvoice(subscriptionId),
+    ).resolves.toMatchObject({
+      id: invoiceId,
+      activeQuoteId: second.id,
+    });
 
     const replacementSubscriptionId =
       "00000000-0000-4000-8000-000000000015";

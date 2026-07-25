@@ -49,6 +49,7 @@ function fixture() {
   const support = new MemorySupportRepository();
   const quotes = new Map<string, MarketplaceQuote>();
   const bindings = new Map<string, QuotePaymentBinding>();
+  const orderStatuses = new Map<string, "manual_intervention">();
   const quoteRepository: QuoteRepository = {
     async createReserved(input) {
       quotes.set(input.quote.id, input.quote);
@@ -133,7 +134,12 @@ function fixture() {
     authority,
     quoteService as never,
     quoteRepository,
-    { async getByQuoteId() { return undefined; } },
+    {
+      async getByQuoteId(quoteId: string) {
+        const status = orderStatuses.get(quoteId);
+        return status ? { status } as never : undefined;
+      },
+    },
     { async paymentAttempt() { return undefined; } },
     {
       destinationUsdc: usdc,
@@ -154,6 +160,9 @@ function fixture() {
     },
     setNow(value: string) {
       now = Date.parse(value);
+    },
+    setOrderManualIntervention(quoteId: string) {
+      orderStatuses.set(quoteId, "manual_intervention");
     },
     support,
     quoteCalls: () => quoteCalls,
@@ -401,6 +410,72 @@ describe("RecurringSupportService", () => {
     );
     expect(cancelled.subscription.status).toBe("cancelled");
   });
+
+  test("returns an earlier unresolved invoice so its order can be recovered", async () => {
+    const state = fixture();
+    const planChallenge = await state.service.issuePlanChallenge({
+      amount: "10000000",
+      boardroom,
+      cadence: "monthly",
+      chainId: 998,
+      description: "Keep the project operating.",
+      title: "Core support",
+    });
+    const plan = await state.service.createPlan(planChallenge.id, signature);
+    const subscribe = await state.service.issueSubscriptionChallenge(
+      plan.id,
+      payer,
+    );
+    const initial = await state.service.createSubscription(
+      subscribe.id,
+      signature,
+    );
+    if (!initial.invoice) throw new Error("expected initial invoice");
+    const quote = await state.service.createInvoiceQuote(initial.invoice.id);
+
+    state.setNow("2026-03-31T16:00:00.000Z");
+    state.support.blockOnInvoice(initial.invoice.id);
+    state.setOrderManualIntervention(quote.id);
+    const blocked = await state.service.getSubscription(initial.subscription.id);
+    expect(blocked.invoice).toMatchObject({
+      id: initial.invoice.id,
+      latestQuoteId: quote.id,
+      periodIndex: 0,
+      publicStatus: "manual_intervention",
+    });
+    expect(state.support.invoiceCount()).toBe(1);
+
+    state.support.clearBlockingInvoice();
+    const current = await state.service.getSubscription(initial.subscription.id);
+    expect(current.invoice).toMatchObject({ periodIndex: 2 });
+
+    state.support.blockOnInvoice(initial.invoice.id);
+    const recovered = await state.service.getSubscription(
+      initial.subscription.id,
+    );
+    expect(recovered.invoice).toMatchObject({
+      id: initial.invoice.id,
+      latestQuoteId: quote.id,
+      periodIndex: 0,
+      publicStatus: "manual_intervention",
+    });
+
+    const cancellation = await state.service.issueCancellationChallenge(
+      initial.subscription.id,
+    );
+    await state.service.cancelSubscription(cancellation.id, signature);
+    const cancelledRecovery = await state.service.getSubscription(
+      initial.subscription.id,
+    );
+    expect(cancelledRecovery).toMatchObject({
+      subscription: { status: "cancelled" },
+      invoice: {
+        id: initial.invoice.id,
+        latestQuoteId: quote.id,
+        publicStatus: "manual_intervention",
+      },
+    });
+  });
 });
 
 class MemorySupportRepository implements SupportRepository {
@@ -409,6 +484,7 @@ class MemorySupportRepository implements SupportRepository {
   private readonly subscriptions = new Map<string, SupportSubscription>();
   private readonly invoices = new Map<string, SupportInvoice>();
   private readonly links: SupportInvoiceQuote[] = [];
+  private blockingInvoiceId: string | undefined;
   private failLinkAfterCommit = false;
 
   invoiceCount(): number {
@@ -417,6 +493,14 @@ class MemorySupportRepository implements SupportRepository {
 
   failNextLinkAfterCommit(): void {
     this.failLinkAfterCommit = true;
+  }
+
+  blockOnInvoice(invoiceId: string): void {
+    this.blockingInvoiceId = invoiceId;
+  }
+
+  clearBlockingInvoice(): void {
+    this.blockingInvoiceId = undefined;
   }
 
   async createChallenge(challenge: SupportChallenge): Promise<void> {
@@ -512,6 +596,17 @@ class MemorySupportRepository implements SupportRepository {
     return [...this.invoices.values()]
       .filter(invoice => invoice.subscriptionId === subscriptionId)
       .sort((left, right) => right.periodIndex - left.periodIndex)[0];
+  }
+
+  async getBlockingSubscriptionInvoice(
+    subscriptionId: string,
+  ): Promise<SupportInvoice | undefined> {
+    const invoice = this.blockingInvoiceId
+      ? this.invoices.get(this.blockingInvoiceId)
+      : undefined;
+    return invoice?.subscriptionId === subscriptionId
+      ? invoice
+      : undefined;
   }
 
   async getOrCreateInvoice(
