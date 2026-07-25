@@ -5,11 +5,16 @@ import {
   encodePaymentSignatureHeader,
 } from "@x402/core/http";
 import type { PaymentPayload, SettleResponse } from "@x402/core/types";
-import { createRouterApi } from "../src/api/server";
+import type { Address } from "viem";
+import {
+  createRouterApi,
+  type RouterApiDependencies,
+} from "../src/api/server";
 import type { MarketplaceQuote, QuoteRepository } from "../src/domain";
 import { X402PaymentError } from "../src/x402/server";
 
 const payer = "0x00000000000000000000000000000000000000A1" as const;
+const recipient = "0x00000000000000000000000000000000000000A2" as const;
 
 function quote(): MarketplaceQuote {
   return {
@@ -86,6 +91,7 @@ function app(options: {
   paymentError?: Error;
   onReleaseQuotedReservations?: () => void;
   storedQuote?: MarketplaceQuote;
+  support?: RouterApiDependencies["support"];
 } = {}) {
   const stored = options.storedQuote ?? quote();
   const repository: QuoteRepository = {
@@ -147,6 +153,7 @@ function app(options: {
         return undefined;
       },
     },
+    ...(options.support ? { support: options.support } : {}),
     async readiness() {
       const accepting = options.acceptingPayments ?? true;
       return {
@@ -177,6 +184,42 @@ function paidRequest(error: X402PaymentError) {
 }
 
 describe("router API", () => {
+  test("advertises and serves recurring support only when the service is wired", async () => {
+    const unavailable = await app().request(
+      `/v1/support/plans?boardroom=${payer}`,
+    );
+    expect(unavailable.status).toBe(503);
+
+    let listedFor:
+      | { boardroom: Address; payer: Address | undefined }
+      | undefined;
+    const enabled = app({
+      support: {
+        async listPlans(boardroom: Address, listedPayer?: Address) {
+          listedFor = { boardroom, payer: listedPayer };
+          return [];
+        },
+      } as never,
+    });
+    const status = await enabled.request("/v1/status");
+    await expect(status.json()).resolves.toMatchObject({
+      supportedActions: [
+        "amm_swap",
+        "fixed_price_sale",
+        "recurring_support",
+      ],
+    });
+    const plans = await enabled.request(
+      `/v1/support/plans?boardroom=${payer}&payer=${recipient}`,
+    );
+    expect(plans.status).toBe(200);
+    await expect(plans.json()).resolves.toEqual({ plans: [] });
+    expect(listedFor).toEqual({
+      boardroom: payer,
+      payer: recipient,
+    });
+  });
+
   test("returns the exact stored 402 requirement and CORS exposure", async () => {
     const response = await app().request("/v1/quotes/quote-1/execute", {
       method: "POST",
@@ -186,6 +229,11 @@ describe("router API", () => {
     expect(response.headers.get("access-control-expose-headers")).toContain(
       "PAYMENT-REQUIRED",
     );
+    expect(response.headers.get("access-control-expose-headers")).toContain(
+      "Date",
+    );
+    expect(Number.isFinite(Date.parse(response.headers.get("date") ?? "")))
+      .toBe(true);
     const encoded = response.headers.get("PAYMENT-REQUIRED");
     expect(encoded).toBeTruthy();
     expect(decodePaymentRequiredHeader(encoded!)).toEqual(quote().paymentRequired);

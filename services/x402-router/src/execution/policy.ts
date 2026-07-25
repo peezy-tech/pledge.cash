@@ -1,5 +1,6 @@
 import {
   ammRouterAbi,
+  boardroomAbi,
   fixedPriceSaleAbi,
 } from "@pledge.cash/sdk";
 import {
@@ -18,6 +19,7 @@ import type {
 } from "x402-hl/intents/server";
 import type { MarketplaceQuote, QuoteRepository } from "../domain";
 import type { CanonicalExecutionValidator } from "../quotes/canonical";
+import type { RecurringSupportExecutionValidator } from "../support/execution";
 import {
   buildEip1559TransactionEnvelope,
   simulationMetadata,
@@ -26,6 +28,7 @@ import {
 export function createMarketplaceExecutionPolicy(
   repository: QuoteRepository,
   canonical: CanonicalExecutionValidator | undefined,
+  recurringSupport?: RecurringSupportExecutionValidator,
 ) {
   return async (
     context: IntentExecutionContext,
@@ -41,6 +44,10 @@ export function createMarketplaceExecutionPolicy(
     }
     try {
       await canonical.assertCanonicalExecution(quote);
+      if (quote.kind === "recurring_support") {
+        if (!recurringSupport) return { allowed: false };
+        await recurringSupport.assertPayable(quote);
+      }
     } catch {
       return { allowed: false };
     }
@@ -181,6 +188,40 @@ function decodeAndValidateCanonicalCall(quote: MarketplaceQuote): boolean {
       return (
         encodeFunctionData({
           abi: ammRouterAbi,
+          functionName: decoded.functionName,
+          args: decoded.args,
+        }).toLowerCase() === quote.execution.callData.toLowerCase()
+      );
+    }
+
+    if (quote.kind === "recurring_support") {
+      const decoded = decodeFunctionData({
+        abi: boardroomAbi,
+        data: quote.execution.callData,
+      });
+      if (
+        decoded.functionName !== "contributeTreasuryAsset"
+        || !decoded.args
+      ) return false;
+      const [asset, amount, deadline] = decoded.args;
+      if (
+        !sameAddress(quote.execution.target, quote.canonicalTarget) ||
+        !sameAddress(quote.canonicalTarget, quote.boardroom) ||
+        !sameAddress(asset, quote.execution.inputToken) ||
+        !sameAddress(
+          quote.execution.outputToken,
+          quote.execution.inputToken,
+        ) ||
+        BigInt(amount) !== BigInt(quote.execution.inputAmount) ||
+        Number(deadline) !== quote.execution.deadline ||
+        quote.execution.inputAmount !== quote.execution.expectedOutput ||
+        quote.execution.inputAmount !== quote.execution.minimumOutput
+      ) {
+        return false;
+      }
+      return (
+        encodeFunctionData({
+          abi: boardroomAbi,
           functionName: decoded.functionName,
           args: decoded.args,
         }).toLowerCase() === quote.execution.callData.toLowerCase()

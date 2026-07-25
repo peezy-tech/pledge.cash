@@ -3756,6 +3756,29 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "contributeTreasuryAsset",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "deadline",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "controller",
     "inputs": [],
     "outputs": [
@@ -5897,6 +5920,31 @@ export const boardroomAbi = [
     "anonymous": false
   },
   {
+    "type": "event",
+    "name": "TreasuryAssetContributed",
+    "inputs": [
+      {
+        "name": "contributor",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
     "type": "error",
     "name": "AlreadyInitialized",
     "inputs": []
@@ -6315,6 +6363,38 @@ export const boardroomAbi = [
       },
       {
         "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TreasuryContributionAmountMismatch",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "received",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TreasuryContributionExpired",
+    "inputs": [
+      {
+        "name": "deadline",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -8008,6 +8088,29 @@ export const boardroomGovernanceLogicAbi = [
   },
   {
     "type": "function",
+    "name": "contributeTreasuryAsset",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "deadline",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "deployShareToken",
     "inputs": [
       {
@@ -8342,6 +8445,31 @@ export const boardroomGovernanceLogicAbi = [
     "anonymous": false
   },
   {
+    "type": "event",
+    "name": "TreasuryAssetContributed",
+    "inputs": [
+      {
+        "name": "contributor",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "asset",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
     "type": "error",
     "name": "CallFailed",
     "inputs": [
@@ -8402,6 +8530,11 @@ export const boardroomGovernanceLogicAbi = [
   {
     "type": "error",
     "name": "InvalidAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidAmount",
     "inputs": []
   },
   {
@@ -8523,6 +8656,38 @@ export const boardroomGovernanceLogicAbi = [
       },
       {
         "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TreasuryContributionAmountMismatch",
+    "inputs": [
+      {
+        "name": "asset",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expected",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "received",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TreasuryContributionExpired",
+    "inputs": [
+      {
+        "name": "deadline",
         "type": "uint256",
         "internalType": "uint256"
       }

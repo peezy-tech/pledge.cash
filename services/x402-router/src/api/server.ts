@@ -25,6 +25,20 @@ import type {
   QuoteRepository,
 } from "../domain";
 import type { MarketplaceQuoteService } from "../quotes/service";
+import {
+  supportChallengeCompletionSchema,
+  supportChallengeDto,
+  supportInvoiceIdParamsSchema,
+  supportPlanDraftSchema,
+  supportPlanDto,
+  supportPlanIdParamsSchema,
+  supportPlansQuerySchema,
+  supportSubscriptionChallengeSchema,
+  supportSubscriptionDto,
+  supportSubscriptionIdParamsSchema,
+} from "../support/dto";
+import { SupportError } from "../support/domain";
+import type { RecurringSupportService } from "../support/service";
 import { X402PaymentError } from "../x402/server";
 
 const PAYMENT_SIGNATURE_HEADER = "PAYMENT-SIGNATURE";
@@ -74,6 +88,21 @@ export type RouterApiDependencies = {
   quoteRepository: QuoteRepository;
   payments: PaymentSaga;
   orders: OrderReader;
+  support?: Pick<
+    RecurringSupportService,
+    | "listPlans"
+    | "issuePlanChallenge"
+    | "createPlan"
+    | "issueRetirementChallenge"
+    | "retirePlan"
+    | "issueSubscriptionChallenge"
+    | "createSubscription"
+    | "getSubscription"
+    | "issueCancellationChallenge"
+    | "cancelSubscription"
+    | "createInvoiceQuote"
+    | "assertQuotePayable"
+  >;
   readiness(): Promise<ReadinessCheck>;
 };
 
@@ -85,13 +114,32 @@ export function createRouterApi(deps: RouterApiDependencies): Hono {
     cors({
       origin: deps.webOrigin,
       allowHeaders: ["Content-Type", PAYMENT_SIGNATURE_HEADER],
-      exposeHeaders: [PAYMENT_REQUIRED_HEADER, PAYMENT_RESPONSE_HEADER],
+      exposeHeaders: [
+        "Date",
+        PAYMENT_REQUIRED_HEADER,
+        PAYMENT_RESPONSE_HEADER,
+      ],
       allowMethods: ["GET", "POST", "OPTIONS"],
       maxAge: 600,
     }),
   );
+  app.use("/v1/*", async (c, next) => {
+    await next();
+    c.header("Date", new Date().toUTCString());
+  });
   app.use(
     "/v1/quotes",
+    bodyLimit({
+      maxSize: 16 * 1024,
+      onError: c =>
+        c.json(
+          { error: { code: "request_too_large", message: "Request is too large." } },
+          413,
+        ),
+    }),
+  );
+  app.use(
+    "/v1/support/*",
     bodyLimit({
       maxSize: 16 * 1024,
       onError: c =>
@@ -118,7 +166,11 @@ export function createRouterApi(deps: RouterApiDependencies): Hono {
       sourceNetwork: "hyperliquid:testnet",
       destinationNetwork: "eip155:998",
       paymentAsset: "USDC",
-      supportedActions: ["amm_swap", "fixed_price_sale"],
+      supportedActions: [
+        "amm_swap",
+        "fixed_price_sale",
+        ...(deps.support ? ["recurring_support"] : []),
+      ],
       acceptingQuotes: readiness.acceptingQuotes,
       x402Runtime: {
         installedVersion: deps.payments.installedVersion,
@@ -148,6 +200,123 @@ export function createRouterApi(deps: RouterApiDependencies): Hono {
     return c.json(toQuoteDto(quote), 201);
   });
 
+  app.get("/v1/support/plans", async c => {
+    const support = requireSupport(deps);
+    const query = supportPlansQuerySchema.parse({
+      boardroom: c.req.query("boardroom"),
+      payer: c.req.query("payer"),
+    });
+    const plans = await support.listPlans(query.boardroom, query.payer);
+    return c.json({ plans: plans.map(supportPlanDto) });
+  });
+
+  app.post("/v1/support/plans/challenges", async c => {
+    const support = requireSupport(deps);
+    const request = supportPlanDraftSchema.parse(await c.req.json());
+    const challenge = await support.issuePlanChallenge(request);
+    return c.json(supportChallengeDto(challenge), 201);
+  });
+
+  app.post("/v1/support/plans", async c => {
+    const support = requireSupport(deps);
+    const request = supportChallengeCompletionSchema.parse(await c.req.json());
+    const plan = await support.createPlan(
+      request.challengeId,
+      request.signature as `0x${string}`,
+    );
+    return c.json({ plan: supportPlanDto(plan) }, 201);
+  });
+
+  app.post("/v1/support/plans/:id/retirement-challenges", async c => {
+    const support = requireSupport(deps);
+    const { id } = supportPlanIdParamsSchema.parse(c.req.param());
+    const challenge = await support.issueRetirementChallenge(id);
+    return c.json(supportChallengeDto(challenge), 201);
+  });
+
+  app.post("/v1/support/plans/:id/retire", async c => {
+    const support = requireSupport(deps);
+    const { id } = supportPlanIdParamsSchema.parse(c.req.param());
+    const request = supportChallengeCompletionSchema.parse(await c.req.json());
+    const plan = await support.retirePlan(
+      request.challengeId,
+      request.signature as `0x${string}`,
+      id,
+    );
+    return c.json({ plan: supportPlanDto(plan) });
+  });
+
+  app.post("/v1/support/subscriptions/challenges", async c => {
+    const support = requireSupport(deps);
+    const request = supportSubscriptionChallengeSchema.parse(
+      await c.req.json(),
+    );
+    const challenge = await support.issueSubscriptionChallenge(
+      request.planId,
+      request.payer,
+    );
+    return c.json(supportChallengeDto(challenge), 201);
+  });
+
+  app.post("/v1/support/subscriptions", async c => {
+    const support = requireSupport(deps);
+    const request = supportChallengeCompletionSchema.parse(await c.req.json());
+    const subscription = await support.createSubscription(
+      request.challengeId,
+      request.signature as `0x${string}`,
+    );
+    return c.json(supportSubscriptionDto(subscription), 201);
+  });
+
+  app.get("/v1/support/subscriptions/:id", async c => {
+    const support = requireSupport(deps);
+    const { id } = supportSubscriptionIdParamsSchema.parse(c.req.param());
+    const subscription = await support.getSubscription(id);
+    return c.json(supportSubscriptionDto(subscription));
+  });
+
+  app.post(
+    "/v1/support/subscriptions/:id/cancellation-challenges",
+    async c => {
+      const support = requireSupport(deps);
+      const { id } = supportSubscriptionIdParamsSchema.parse(c.req.param());
+      const challenge = await support.issueCancellationChallenge(id);
+      return c.json(supportChallengeDto(challenge), 201);
+    },
+  );
+
+  app.post("/v1/support/subscriptions/:id/cancel", async c => {
+    const support = requireSupport(deps);
+    const { id } = supportSubscriptionIdParamsSchema.parse(c.req.param());
+    const request = supportChallengeCompletionSchema.parse(await c.req.json());
+    const subscription = await support.cancelSubscription(
+      request.challengeId,
+      request.signature as `0x${string}`,
+      id,
+    );
+    return c.json(supportSubscriptionDto(subscription));
+  });
+
+  app.post("/v1/support/invoices/:id/quotes", async c => {
+    const support = requireSupport(deps);
+    const readiness = await safeReadiness(deps);
+    if (!readiness.acceptingQuotes) {
+      return c.json(
+        {
+          error: {
+            code: "router_not_ready",
+            message: "The Hyperliquid payment rail is not accepting quotes.",
+          },
+          checks: readiness.checks,
+        },
+        503,
+      );
+    }
+    const { id } = supportInvoiceIdParamsSchema.parse(c.req.param());
+    const quote = await support.createInvoiceQuote(id);
+    return c.json(toQuoteDto(quote), 201);
+  });
+
   app.post("/v1/quotes/:id/execute", async c => {
     const quote = await deps.quoteRepository.get(c.req.param("id"));
     if (!quote) {
@@ -160,6 +329,9 @@ export function createRouterApi(deps: RouterApiDependencies): Hono {
     const paymentBinding = await deps.quoteRepository.getPaymentBinding(
       quote.id,
     );
+    if (quote.kind === "recurring_support" && !paymentBinding) {
+      await requireSupport(deps).assertQuotePayable(quote);
+    }
     if (!paymentSignature) {
       if (paymentBinding) {
         return c.json(
@@ -356,6 +528,12 @@ export function createRouterApi(deps: RouterApiDependencies): Hono {
   );
 
   app.onError((error, c) => {
+    if (error instanceof SupportError) {
+      return c.json(
+        { error: { code: error.code, message: error.message } },
+        error.status as 400,
+      );
+    }
     if (error instanceof QuoteRequestError) {
       return c.json(
         { error: { code: error.code, message: error.message } },
@@ -396,6 +574,19 @@ export function createRouterApi(deps: RouterApiDependencies): Hono {
   });
 
   return app;
+}
+
+function requireSupport(
+  deps: RouterApiDependencies,
+): NonNullable<RouterApiDependencies["support"]> {
+  if (!deps.support) {
+    throw new SupportError(
+      "Recurring support is unavailable until the canonical deployment is ready.",
+      "support_unavailable",
+      503,
+    );
+  }
+  return deps.support;
 }
 
 async function safePaymentAttempt(

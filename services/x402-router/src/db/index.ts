@@ -33,4 +33,5 @@ export {
   QuoteConflictError,
   QuotePaymentBindingError
 } from "./quote-store";
+export { PostgresSupportRepository } from "../support/repository";
 export * from "./schema";

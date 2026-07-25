@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   ammRouterAbi,
+  boardroomAbi,
   fixedPriceSaleAbi,
 } from "@pledge.cash/sdk";
 import { encodeFunctionData, keccak256 } from "viem";
@@ -23,8 +24,8 @@ const sale = "0x0000000000000000000000000000000000000024" as const;
 const payer = "0x0000000000000000000000000000000000000031" as const;
 
 function baseQuote(input: {
-  kind: "amm_swap" | "fixed_price_sale";
-  target: typeof ammRouter | typeof sale;
+  kind: "amm_swap" | "fixed_price_sale" | "recurring_support";
+  target: typeof ammRouter | typeof sale | typeof boardroom;
   callData: `0x${string}`;
   inputAmount: string;
   outputAmount: string;
@@ -40,6 +41,9 @@ function baseQuote(input: {
     boardroom,
     canonicalTarget: input.target,
     ...(input.kind === "amm_swap" ? { canonicalPool: pool } : {}),
+    ...(input.kind === "recurring_support"
+      ? { supportInvoiceId: "00000000-0000-4000-8000-000000000001" }
+      : {}),
     sourcePayment: {
       network: "hyperliquid:testnet",
       asset: "USDC:0xeb62eee3685fc4c43992febcd9e75443",
@@ -60,13 +64,13 @@ function baseQuote(input: {
       recipient: payer,
       inputToken: usdc,
       inputAmount: input.inputAmount,
-      outputToken: shares,
+      outputToken: input.kind === "recurring_support" ? usdc : shares,
       expectedOutput: input.outputAmount,
       minimumOutput: input.outputAmount,
       deadline: Math.floor(Date.now() / 1_000) + 60,
     },
     maxGasCost: "1000000000000000",
-    maxSlippageBps: 50,
+    maxSlippageBps: input.kind === "recurring_support" ? 0 : 50,
     intentQuote: {} as never,
     paymentRequirements: {} as never,
     paymentRequired: {} as never,
@@ -107,6 +111,29 @@ function fixedPriceQuote(): MarketplaceQuote {
   });
 }
 
+function recurringSupportQuote(): MarketplaceQuote {
+  const deadline = Math.floor(Date.now() / 1_000) + 60;
+  const callData = encodeFunctionData({
+    abi: boardroomAbi,
+    functionName: "contributeTreasuryAsset",
+    args: [usdc, 1_000_000n, BigInt(deadline)],
+  });
+  const quote = baseQuote({
+    kind: "recurring_support",
+    target: boardroom,
+    callData,
+    inputAmount: "1000000",
+    outputAmount: "1000000",
+  });
+  return {
+    ...quote,
+    execution: {
+      ...quote.execution,
+      deadline,
+    },
+  };
+}
+
 function reader(overrides: Record<string, unknown> = {}) {
   const values: Record<string, unknown> = {
     liquidityRouter: ammRouter,
@@ -115,6 +142,7 @@ function reader(overrides: Record<string, unknown> = {}) {
     getPool: pool,
     shareToken: shares,
     status: 0,
+    isRedeemableAsset: true,
     isDistribution: true,
     distributionKind: 0,
     distributionBoardroom: boardroom,
@@ -198,6 +226,48 @@ describe("live canonical execution validation", () => {
     ).rejects.toMatchObject({
       code: "fixed_price_configuration_mismatch",
     });
+  });
+
+  test("accepts only an Active canonical Boardroom with registered USDC", async () => {
+    await expect(
+      reader().assertCanonicalExecution(recurringSupportQuote()),
+    ).resolves.toBeUndefined();
+    await expect(
+      reader({ isRedeemableAsset: false }).assertCanonicalExecution(
+        recurringSupportQuote(),
+      ),
+    ).rejects.toMatchObject({ code: "support_route_unavailable" });
+  });
+});
+
+describe("canonical recurring-support quoting", () => {
+  test("builds one deadline-bound Boardroom contribution with caller allowance", async () => {
+    const result = await reader().quote({
+      kind: "recurring_support",
+      chainId: 998,
+      boardroom,
+      payer,
+      recipient: payer,
+      refundAddress: payer,
+      maxSlippageBps: 0,
+      invoiceId: "00000000-0000-4000-8000-000000000001",
+      amount: "1000000",
+    }, 1_800_000_060);
+
+    expect(result).toMatchObject({
+      canonicalTarget: boardroom,
+      destinationPrincipal: 1_000_000n,
+      availableInventory: 2_000_000n,
+      allowance: 2_000_000n,
+      spender: boardroom,
+    });
+    expect(
+      encodeFunctionData({
+        abi: boardroomAbi,
+        functionName: "contributeTreasuryAsset",
+        args: [usdc, 1_000_000n, 1_800_000_060n],
+      }),
+    ).toBe(result.execution.callData);
   });
 });
 

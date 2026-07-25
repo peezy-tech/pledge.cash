@@ -96,7 +96,7 @@ const LEGAL_TRANSITIONS: Readonly<
   Record<AdapterOperationStatus, readonly AdapterOperationStatus[]>
 > = {
   claimed: ["signed", "confirmed_failure", "manual_intervention"],
-  signed: ["submitted", "manual_intervention"],
+  signed: ["submitted", "confirmed_failure", "manual_intervention"],
   submitted: [
     "submitted",
     "confirmed_success",
@@ -742,6 +742,23 @@ export class PostgresAdapterOperationStore {
       ...input,
       from: "signed",
       to: "submitted"
+    });
+  }
+
+  async recordUnsubmittedPaymentFailure(input: {
+    readonly idempotencyKey: string;
+    readonly expectedRevision: number;
+    readonly leaseToken: string;
+    readonly failureCode: string;
+  }): Promise<AdapterOperationTransitionResult> {
+    return this.transition({
+      kind: "payment_settlement",
+      idempotencyKey: input.idempotencyKey,
+      expectedRevision: input.expectedRevision,
+      leaseToken: input.leaseToken,
+      from: "signed",
+      to: "confirmed_failure",
+      failureCode: input.failureCode,
     });
   }
 

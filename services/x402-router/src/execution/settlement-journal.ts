@@ -86,12 +86,20 @@ export class DurableX402SettlementJournal implements X402SettlementJournal {
     }
 
     let operation = claim.operation;
-    // A live claim means another request already owns this signed payment.
-    // Classify that overlap as uncertain so the caller can never authorize a
-    // fresh payment while the first request may still sign, bind, and settle.
-    if (claim.kind === "existing" && operation.status === "claimed") {
+    // A live nonterminal claim means another request already owns this signed
+    // payment. Only its lease holder may bind or settle, which also makes a
+    // signed-state binding failure definitive: no concurrent request can have
+    // moved the payment while the owner was still preparing it.
+    if (
+      claim.kind === "existing" &&
+      (
+        operation.status === "claimed" ||
+        operation.status === "signed" ||
+        operation.status === "submitted"
+      )
+    ) {
       throw new X402SettlementIdentityConflictError(
-        "Payment settlement journal is currently being prepared.",
+        "Payment settlement journal is currently being prepared or settled.",
       );
     }
     if (operation.status === "claimed") {
@@ -143,6 +151,9 @@ export class DurableX402SettlementJournal implements X402SettlementJournal {
     if (operation.status === "manual_intervention") {
       throw new Error("Payment settlement journal requires manual intervention.");
     }
+    if (operation.status === "confirmed_failure") {
+      return record;
+    }
     try {
       await this.quotes.bindPaymentPayload({
         quoteId: record.quoteId,
@@ -151,9 +162,16 @@ export class DurableX402SettlementJournal implements X402SettlementJournal {
         paymentRequirementsHash: record.paymentRequirementsHash,
       });
     } catch (error) {
-      if (
+      if (claim.kind === "claimed" && operation.status === "signed") {
+        await this.operations.recordUnsubmittedPaymentFailure({
+          idempotencyKey,
+          expectedRevision: operation.revision,
+          leaseToken: operation.leaseToken,
+          failureCode: "quote_payment_binding_failed",
+        });
+      } else if (
         claim.kind === "claimed" &&
-        (operation.status === "signed" || operation.status === "submitted")
+        operation.status === "submitted"
       ) {
         await this.operations.markManualIntervention({
           kind: "payment_settlement",

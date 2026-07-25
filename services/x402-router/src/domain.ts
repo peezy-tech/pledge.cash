@@ -9,7 +9,10 @@ export const HYPERCORE_USDC_ASSET =
 export const HYPERCORE_USDC_DECIMALS = 8 as const;
 export const HYPEREVM_USDC_DECIMALS = 6 as const;
 
-export type MarketplaceActionKind = "amm_swap" | "fixed_price_sale";
+export type MarketplaceActionKind =
+  | "amm_swap"
+  | "fixed_price_sale"
+  | "recurring_support";
 export type QuoteLifecycle = "quoted" | "paid" | "executed" | "released";
 
 export type DestinationExecution = {
@@ -50,6 +53,7 @@ export type MarketplaceQuote = {
   boardroom: Address;
   canonicalTarget: Address;
   canonicalPool?: Address;
+  supportInvoiceId?: string;
   sourcePayment: SourcePayment;
   execution: DestinationExecution;
   maxGasCost: string;

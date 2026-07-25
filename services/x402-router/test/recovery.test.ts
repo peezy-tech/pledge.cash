@@ -29,6 +29,41 @@ describe("router recovery worker", () => {
     ).toBe(300_000);
   });
 
+  test("prunes one bounded batch of expired support challenges per pass", async () => {
+    const now = new Date("2030-01-01T00:01:00.000Z");
+    let pruneInput: { before: Date; limit: number } | undefined;
+    const worker = new RouterRecoveryWorker({
+      quotes: unusedQuotes(),
+      intents: {
+        async listRecoverable() {
+          return [];
+        },
+        async transition() {
+          throw new Error("not used");
+        },
+      },
+      support: {
+        async pruneExpiredChallenges(input) {
+          pruneInput = input;
+          return 4;
+        },
+      },
+      journal: unusedJournal(),
+      payments: unusedPayments(),
+      executor: unusedExecutor(),
+      execution: unusedExecution(),
+      refund: unusedRefund(),
+      staleAfterMs: 1_000,
+      now: () => now,
+    });
+
+    await expect(worker.runOnce()).resolves.toMatchObject({
+      prunedChallenges: 4,
+      failed: 0,
+    });
+    expect(pruneInput).toEqual({ before: now, limit: 25 });
+  });
+
   test("replays one sealed payment after a crash without moving funds twice", async () => {
     let orderCreated = false;
     let settled = false;

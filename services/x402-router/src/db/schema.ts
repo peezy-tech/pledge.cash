@@ -22,7 +22,19 @@ export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | { readonly [key: string]: JsonValue } | readonly JsonValue[];
 export type JsonRecord = { readonly [key: string]: JsonValue };
 
-export type RouterActionKind = "amm_swap" | "fixed_price_sale";
+export type RouterActionKind =
+  | "amm_swap"
+  | "fixed_price_sale"
+  | "recurring_support";
+export type SupportChallengeAction =
+  | "plan_create"
+  | "plan_retire"
+  | "subscription_create"
+  | "subscription_cancel";
+export type SupportAuthorityMode = "prelaunch_owner" | "launched_controller";
+export type SupportPlanStatus = "active" | "retired";
+export type SupportSubscriptionStatus = "active" | "cancelled";
+export type SupportInvoiceStatus = "open" | "cancelled";
 export type InventoryReservationScope = "destination_execution" | "source_refund";
 export type InventoryReservationStatus =
   | "active"
@@ -64,13 +76,398 @@ export const routerQuotes = pgTable(
   (table) => ({
     actionKindCheck: check(
       "x402_router_quotes_action_kind_check",
-      sql`${table.actionKind} in ('amm_swap', 'fixed_price_sale')`
+      sql`${table.actionKind} in ('amm_swap', 'fixed_price_sale', 'recurring_support')`
     ),
     expiresAtIdx: index("x402_router_quotes_expires_at_idx").on(table.expiresAt),
     paymentIdentifierUnique: uniqueIndex(
       "x402_router_quotes_payment_identifier_hash_unique"
     ).on(table.paymentIdentifierHash)
   })
+);
+
+export const supportChallenges = pgTable(
+  "x402_router_support_challenges",
+  {
+    id: uuid("id").primaryKey(),
+    action: text("action").$type<SupportChallengeAction>().notNull(),
+    actor: text("actor").notNull(),
+    boardroom: text("boardroom").notNull(),
+    chainId: integer("chain_id").notNull(),
+    authorityMode: text("authority_mode").$type<SupportAuthorityMode>(),
+    authority: text("authority"),
+    controllerGeneration: numeric("controller_generation", {
+      precision: 78,
+      scale: 0,
+      mode: "bigint",
+    }).notNull(),
+    configurationEpoch: numeric("configuration_epoch", {
+      precision: 78,
+      scale: 0,
+      mode: "bigint",
+    }).notNull(),
+    planId: uuid("plan_id").notNull(),
+    payload: jsonb("payload").$type<JsonRecord>().notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    message: text("message").notNull(),
+    issuedBlock: numeric("issued_block", {
+      precision: 78,
+      scale: 0,
+      mode: "bigint",
+    }).notNull(),
+    issuedBlockHash: text("issued_block_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    signatureHash: text("signature_hash"),
+    verifiedBlock: numeric("verified_block", {
+      precision: 78,
+      scale: 0,
+      mode: "bigint",
+    }),
+    verifiedBlockHash: text("verified_block_hash"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    actionCheck: check(
+      "x402_router_support_challenges_action_check",
+      sql`${table.action} in (
+        'plan_create',
+        'plan_retire',
+        'subscription_create',
+        'subscription_cancel'
+      )`,
+    ),
+    authorityModeCheck: check(
+      "x402_router_support_challenges_authority_mode_check",
+      sql`${table.authorityMode} is null or ${table.authorityMode} in (
+        'prelaunch_owner',
+        'launched_controller'
+      )`,
+    ),
+    authorityCheck: check(
+      "x402_router_support_challenges_authority_check",
+      sql`(
+          ${table.action} in ('plan_create', 'plan_retire')
+          and ${table.authorityMode} is not null
+          and ${table.authority} is not null
+          and ${table.authority} = lower(btrim(${table.authority}))
+          and ${table.authority} ~ '^0x[0-9a-f]{40}$'
+        ) or (
+          ${table.action} in ('subscription_create', 'subscription_cancel')
+          and ${table.authorityMode} is null
+          and ${table.authority} is null
+        )`,
+    ),
+    actorCheck: check(
+      "x402_router_support_challenges_actor_check",
+      sql`${table.actor} = lower(btrim(${table.actor}))
+        and ${table.actor} ~ '^0x[0-9a-f]{40}$'`,
+    ),
+    boardroomCheck: check(
+      "x402_router_support_challenges_boardroom_check",
+      sql`${table.boardroom} = lower(btrim(${table.boardroom}))
+        and ${table.boardroom} ~ '^0x[0-9a-f]{40}$'`,
+    ),
+    chainCheck: check(
+      "x402_router_support_challenges_chain_check",
+      sql`${table.chainId} = 998`,
+    ),
+    generationCheck: check(
+      "x402_router_support_challenges_generation_check",
+      sql`${table.controllerGeneration} >= 0
+        and ${table.configurationEpoch} >= 0`,
+    ),
+    payloadCheck: check(
+      "x402_router_support_challenges_payload_check",
+      sql`jsonb_typeof(${table.payload}) = 'object'`,
+    ),
+    payloadHashCheck: check(
+      "x402_router_support_challenges_payload_hash_check",
+      sql`${table.payloadHash} = lower(${table.payloadHash})
+        and ${table.payloadHash} ~ '^0x[0-9a-f]{64}$'`,
+    ),
+    issuedBlockCheck: check(
+      "x402_router_support_challenges_issued_block_check",
+      sql`${table.issuedBlock} >= 0
+        and ${table.issuedBlockHash} = lower(${table.issuedBlockHash})
+        and ${table.issuedBlockHash} ~ '^0x[0-9a-f]{64}$'`,
+    ),
+    expiryCheck: check(
+      "x402_router_support_challenges_expiry_check",
+      sql`${table.expiresAt} > ${table.createdAt}`,
+    ),
+    consumedCheck: check(
+      "x402_router_support_challenges_consumed_check",
+      sql`(
+          ${table.consumedAt} is null
+          and ${table.signatureHash} is null
+          and ${table.verifiedBlock} is null
+          and ${table.verifiedBlockHash} is null
+        ) or (
+          ${table.consumedAt} is not null
+          and ${table.signatureHash} is not null
+          and ${table.signatureHash} ~ '^0x[0-9a-f]{64}$'
+          and ${table.verifiedBlock} is not null
+          and ${table.verifiedBlock} >= 0
+          and ${table.verifiedBlockHash} is not null
+          and ${table.verifiedBlockHash} ~ '^0x[0-9a-f]{64}$'
+        )`,
+    ),
+    expiryIdx: index("x402_router_support_challenges_expiry_idx").on(
+      table.expiresAt,
+    ),
+  }),
+);
+
+export const supportPlans = pgTable(
+  "x402_router_support_plans",
+  {
+    id: uuid("id").primaryKey(),
+    chainId: integer("chain_id").notNull(),
+    boardroom: text("boardroom").notNull(),
+    asset: text("asset").notNull(),
+    amount: numeric("amount", { precision: 78, scale: 0 }).notNull(),
+    cadence: text("cadence").notNull(),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    termsHash: text("terms_hash").notNull(),
+    status: text("status").$type<SupportPlanStatus>().notNull(),
+    authorityMode: text("authority_mode").$type<SupportAuthorityMode>().notNull(),
+    authority: text("authority").notNull(),
+    controllerGeneration: numeric("controller_generation", {
+      precision: 78,
+      scale: 0,
+      mode: "bigint",
+    }).notNull(),
+    configurationEpoch: numeric("configuration_epoch", {
+      precision: 78,
+      scale: 0,
+      mode: "bigint",
+    }).notNull(),
+    verifiedBlock: numeric("verified_block", {
+      precision: 78,
+      scale: 0,
+      mode: "bigint",
+    }).notNull(),
+    verifiedBlockHash: text("verified_block_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+  },
+  (table) => ({
+    chainCheck: check(
+      "x402_router_support_plans_chain_check",
+      sql`${table.chainId} = 998`,
+    ),
+    boardroomCheck: check(
+      "x402_router_support_plans_boardroom_check",
+      sql`${table.boardroom} = lower(btrim(${table.boardroom}))
+        and ${table.boardroom} ~ '^0x[0-9a-f]{40}$'`,
+    ),
+    assetCheck: check(
+      "x402_router_support_plans_asset_check",
+      sql`${table.asset} = lower(btrim(${table.asset}))
+        and ${table.asset} ~ '^0x[0-9a-f]{40}$'`,
+    ),
+    amountCheck: check(
+      "x402_router_support_plans_amount_check",
+      sql`${table.amount} > 0`,
+    ),
+    cadenceCheck: check(
+      "x402_router_support_plans_cadence_check",
+      sql`${table.cadence} = 'monthly'`,
+    ),
+    titleCheck: check(
+      "x402_router_support_plans_title_check",
+      sql`length(${table.title}) between 1 and 80
+        and ${table.title} = btrim(${table.title})`,
+    ),
+    descriptionCheck: check(
+      "x402_router_support_plans_description_check",
+      sql`length(${table.description}) between 1 and 280
+        and ${table.description} = btrim(${table.description})`,
+    ),
+    termsHashCheck: check(
+      "x402_router_support_plans_terms_hash_check",
+      sql`${table.termsHash} = lower(${table.termsHash})
+        and ${table.termsHash} ~ '^0x[0-9a-f]{64}$'`,
+    ),
+    statusCheck: check(
+      "x402_router_support_plans_status_check",
+      sql`${table.status} in ('active', 'retired')`,
+    ),
+    authorityModeCheck: check(
+      "x402_router_support_plans_authority_mode_check",
+      sql`${table.authorityMode} in ('prelaunch_owner', 'launched_controller')`,
+    ),
+    authorityCheck: check(
+      "x402_router_support_plans_authority_check",
+      sql`${table.authority} = lower(btrim(${table.authority}))
+        and ${table.authority} ~ '^0x[0-9a-f]{40}$'`,
+    ),
+    generationCheck: check(
+      "x402_router_support_plans_generation_check",
+      sql`${table.controllerGeneration} >= 0
+        and ${table.configurationEpoch} >= 0`,
+    ),
+    verifiedBlockHashCheck: check(
+      "x402_router_support_plans_verified_block_hash_check",
+      sql`${table.verifiedBlock} >= 0
+        and ${table.verifiedBlockHash} = lower(${table.verifiedBlockHash})
+        and ${table.verifiedBlockHash} ~ '^0x[0-9a-f]{64}$'`,
+    ),
+    retiredCheck: check(
+      "x402_router_support_plans_retired_check",
+      sql`(
+          ${table.status} = 'active'
+          and ${table.retiredAt} is null
+        ) or (
+          ${table.status} = 'retired'
+          and ${table.retiredAt} is not null
+        )`,
+    ),
+    boardroomStatusIdx: index(
+      "x402_router_support_plans_boardroom_status_idx",
+    ).on(table.chainId, table.boardroom, table.status, table.createdAt),
+    termsHashUnique: uniqueIndex(
+      "x402_router_support_plans_terms_hash_unique",
+    ).on(table.termsHash),
+  }),
+);
+
+export const supportSubscriptions = pgTable(
+  "x402_router_support_subscriptions",
+  {
+    id: uuid("id").primaryKey(),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => supportPlans.id, { onDelete: "restrict" }),
+    payer: text("payer").notNull(),
+    status: text("status").$type<SupportSubscriptionStatus>().notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+  },
+  (table) => ({
+    payerCheck: check(
+      "x402_router_support_subscriptions_payer_check",
+      sql`${table.payer} = lower(btrim(${table.payer}))
+        and ${table.payer} ~ '^0x[0-9a-f]{40}$'`,
+    ),
+    statusCheck: check(
+      "x402_router_support_subscriptions_status_check",
+      sql`${table.status} in ('active', 'cancelled')`,
+    ),
+    cancelledCheck: check(
+      "x402_router_support_subscriptions_cancelled_check",
+      sql`(
+          ${table.status} = 'active'
+          and ${table.cancelledAt} is null
+        ) or (
+          ${table.status} = 'cancelled'
+          and ${table.cancelledAt} is not null
+        )`,
+    ),
+    activePayerUnique: uniqueIndex(
+      "x402_router_support_subscriptions_active_payer_unique",
+    )
+      .on(table.planId, table.payer)
+      .where(sql`${table.status} = 'active'`),
+  }),
+);
+
+export const supportInvoices = pgTable(
+  "x402_router_support_invoices",
+  {
+    id: uuid("id").primaryKey(),
+    subscriptionId: uuid("subscription_id")
+      .notNull()
+      .references(() => supportSubscriptions.id, { onDelete: "restrict" }),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => supportPlans.id, { onDelete: "restrict" }),
+    activeQuoteId: text("active_quote_id").references(() => routerQuotes.id, {
+      onDelete: "restrict",
+    }),
+    periodIndex: integer("period_index").notNull(),
+    periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+    periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    payer: text("payer").notNull(),
+    boardroom: text("boardroom").notNull(),
+    asset: text("asset").notNull(),
+    amount: numeric("amount", { precision: 78, scale: 0 }).notNull(),
+    status: text("status").$type<SupportInvoiceStatus>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+  },
+  (table) => ({
+    payerCheck: check(
+      "x402_router_support_invoices_payer_check",
+      sql`${table.payer} = lower(btrim(${table.payer}))
+        and ${table.payer} ~ '^0x[0-9a-f]{40}$'`,
+    ),
+    boardroomCheck: check(
+      "x402_router_support_invoices_boardroom_check",
+      sql`${table.boardroom} = lower(btrim(${table.boardroom}))
+        and ${table.boardroom} ~ '^0x[0-9a-f]{40}$'`,
+    ),
+    assetCheck: check(
+      "x402_router_support_invoices_asset_check",
+      sql`${table.asset} = lower(btrim(${table.asset}))
+        and ${table.asset} ~ '^0x[0-9a-f]{40}$'`,
+    ),
+    amountCheck: check(
+      "x402_router_support_invoices_amount_check",
+      sql`${table.amount} > 0`,
+    ),
+    statusCheck: check(
+      "x402_router_support_invoices_status_check",
+      sql`${table.status} in ('open', 'cancelled')`,
+    ),
+    periodCheck: check(
+      "x402_router_support_invoices_period_check",
+      sql`${table.periodIndex} >= 0
+        and ${table.periodEnd} > ${table.periodStart}
+        and ${table.dueAt} = ${table.periodStart}`,
+    ),
+    cancelledCheck: check(
+      "x402_router_support_invoices_cancelled_check",
+      sql`(
+          ${table.status} = 'open'
+          and ${table.cancelledAt} is null
+        ) or (
+          ${table.status} = 'cancelled'
+          and ${table.cancelledAt} is not null
+        )`,
+    ),
+    subscriptionPeriodUnique: uniqueIndex(
+      "x402_router_support_invoices_subscription_period_unique",
+    ).on(table.subscriptionId, table.periodIndex),
+    boardroomPayerIdx: index(
+      "x402_router_support_invoices_boardroom_payer_idx",
+    ).on(table.boardroom, table.payer),
+  }),
+);
+
+export const supportInvoiceQuotes = pgTable(
+  "x402_router_support_invoice_quotes",
+  {
+    invoiceId: uuid("invoice_id")
+      .notNull()
+      .references(() => supportInvoices.id, { onDelete: "restrict" }),
+    quoteId: text("quote_id")
+      .notNull()
+      .references(() => routerQuotes.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.invoiceId, table.quoteId] }),
+    quoteUnique: uniqueIndex(
+      "x402_router_support_invoice_quotes_quote_unique",
+    ).on(table.quoteId),
+    invoiceCreatedIdx: index(
+      "x402_router_support_invoice_quotes_invoice_created_idx",
+    ).on(table.invoiceId, table.createdAt),
+  }),
 );
 
 export const quotePaymentBindings = pgTable(

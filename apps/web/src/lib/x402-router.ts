@@ -1,5 +1,6 @@
 import {
   ammRouterAbi,
+  boardroomAbi,
   fixedPriceSaleAbi,
   type Address,
 } from "@pledge.cash/sdk";
@@ -89,9 +90,16 @@ export type FixedPriceSaleQuoteRequest = BaseQuoteRequest & {
   shareAmount: string;
 };
 
+export type RecurringSupportQuoteRequest = BaseQuoteRequest & {
+  amount: string;
+  invoiceId: string;
+  kind: "recurring_support";
+};
+
 export type HyperliquidMarketplaceQuoteRequest =
   | AmmSwapQuoteRequest
-  | FixedPriceSaleQuoteRequest;
+  | FixedPriceSaleQuoteRequest
+  | RecurringSupportQuoteRequest;
 
 export type HyperliquidRouteExpectations = {
   inputToken: Address;
@@ -135,6 +143,7 @@ export type HyperliquidMarketplaceQuote = {
   quoteId: string;
   recipient: Address;
   refundAddress: Address;
+  supportInvoiceId?: string;
 };
 
 export type HyperliquidOrderStatus =
@@ -230,6 +239,7 @@ export type HyperliquidPaymentLockManager = {
 const HYPERLIQUID_MARKETPLACE_KINDS = [
   "amm_swap",
   "fixed_price_sale",
+  "recurring_support",
 ] as const satisfies readonly HyperliquidMarketplaceQuoteRequest["kind"][];
 
 export function getX402RouterConfig(
@@ -713,6 +723,15 @@ export function assertHyperliquidMarketplaceOrderMatchesQuote(
   return assertOrderBoundary(order, quote);
 }
 
+export function assertHyperliquidMarketplaceQuoteMatchesRequest(
+  quote: HyperliquidMarketplaceQuote,
+  request: HyperliquidMarketplaceQuoteRequest,
+  expectations: HyperliquidRouteExpectations,
+): HyperliquidMarketplaceQuote {
+  assertQuoteBoundary(quote, request, expectations);
+  return quote;
+}
+
 export function parseHyperliquidMarketplaceQuote(
   value: unknown,
 ): HyperliquidMarketplaceQuote {
@@ -729,6 +748,14 @@ export function parseHyperliquidMarketplaceQuote(
     quoteId: nonemptyString(record.quoteId, "quote.quoteId"),
     recipient: addressValue(record.recipient, "quote.recipient"),
     refundAddress: addressValue(record.refundAddress, "quote.refundAddress"),
+    ...(record.supportInvoiceId === undefined
+      ? {}
+      : {
+          supportInvoiceId: uuidValue(
+            record.supportInvoiceId,
+            "quote.supportInvoiceId",
+          ),
+        }),
   };
   if (quote.orderId !== quote.quoteId) {
     throw new Error("The router returned mismatched quote and order identifiers.");
@@ -857,10 +884,22 @@ function assertRequestBoundary(
     ) {
       throw new Error("The requested AMM pair does not match the locally selected route.");
     }
-  } else {
+  } else if (request.kind === "fixed_price_sale") {
     positiveDecimal(request.shareAmount, "Sale share amount");
     if (!sameAddress(request.sale, expectations.target)) {
       throw new Error("The requested sale does not match the locally selected route.");
+    }
+  } else {
+    positiveDecimal(request.amount, "Support invoice amount");
+    uuidValue(request.invoiceId, "support invoice ID");
+    if (
+      request.maxSlippageBps !== 0
+      || !sameAddress(expectations.inputToken, expectations.outputToken)
+      || !sameAddress(expectations.target, request.boardroom)
+    ) {
+      throw new Error(
+        "The support invoice must use one exact Boardroom treasury contribution.",
+      );
     }
   }
 }
@@ -934,11 +973,21 @@ function assertQuoteBoundary(
     if (minimumOutput !== expectedMinimum) {
       throw new Error("The AMM minimum output does not match the requested slippage.");
     }
-  } else if (
+  } else if (request.kind === "fixed_price_sale" && (
     quote.execution.expectedOutput !== request.shareAmount
     || quote.execution.minimumOutput !== request.shareAmount
-  ) {
+  )) {
     throw new Error("The router quote changed the fixed-price share amount.");
+  } else if (
+    request.kind === "recurring_support"
+    && (
+      quote.supportInvoiceId !== request.invoiceId
+      || quote.execution.inputAmount !== request.amount
+      || quote.execution.expectedOutput !== request.amount
+      || quote.execution.minimumOutput !== request.amount
+    )
+  ) {
+    throw new Error("The router quote changed the support invoice.");
   }
   const expirySeconds = Math.floor(Date.parse(quote.expiresAt) / 1_000);
   if (quote.execution.deadline !== expirySeconds) {
@@ -971,6 +1020,31 @@ function assertCanonicalCalldata(
       || deadline !== BigInt(quote.execution.deadline)
     ) {
       throw new Error("The AMM calldata changed the reviewed route or limits.");
+    }
+    return;
+  }
+
+  if (request.kind === "recurring_support") {
+    const decoded = decodeFunctionData({
+      abi: boardroomAbi,
+      data: intent.callData as Hex,
+    });
+    if (decoded.functionName !== "contributeTreasuryAsset") {
+      throw new Error(
+        "The support execution is not a guarded Boardroom contribution.",
+      );
+    }
+    const [asset, amount, deadline] = decoded.args;
+    if (
+      !sameAddress(asset, expectations.inputToken)
+      || amount !== BigInt(request.amount)
+      || deadline !== BigInt(quote.execution.deadline)
+      || !sameAddress(intent.target, request.boardroom)
+      || !sameAddress(intent.target, expectations.target)
+    ) {
+      throw new Error(
+        "The support calldata changed the Boardroom, asset, amount, or deadline.",
+      );
     }
     return;
   }
@@ -1128,7 +1202,11 @@ function sourcePaymentValue(
 }
 
 function actionKind(value: unknown): HyperliquidMarketplaceQuoteRequest["kind"] {
-  if (value === "amm_swap" || value === "fixed_price_sale") return value;
+  if (
+    value === "amm_swap"
+    || value === "fixed_price_sale"
+    || value === "recurring_support"
+  ) return value;
   throw new Error("The router returned an unsupported marketplace action.");
 }
 
@@ -1152,6 +1230,16 @@ function orderStatus(value: unknown): HyperliquidOrderStatus {
 function objectValue(value: unknown, label: string): Record<string, unknown> {
   if (!isObject(value)) throw new Error(`The router returned an invalid ${label}.`);
   return value;
+}
+
+function uuidValue(value: unknown, label: string): string {
+  if (
+    typeof value !== "string"
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+  ) {
+    throw new Error(`The router returned an invalid ${label}.`);
+  }
+  return value.toLowerCase();
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

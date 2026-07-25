@@ -13,12 +13,19 @@ V1 supports only:
 - exact-input swaps through the tracked pledge.cash `AmmRouter`, from the
   configured HyperEVM USDC token into the active Boardroom share token;
 - canonical, open, uncapped fixed-price sales paid in that same USDC token; and
+- hosted monthly support plans whose manually approved invoices call the
+  canonical Active Boardroom's deadline-bound treasury contribution path for
+  the configured HyperEVM USDC;
 - one address as payer, destination recipient, and refund recipient.
 
-Bonding curves, grants, capped sales, arbitrary calldata, delegated recipients,
-mainnet, and best-effort or operator-edited orders are outside this boundary.
+Recurring support does not grant the router a debit mandate: publishing,
+subscribing, cancellation, and every monthly renewal require fresh wallet
+signatures. Bonding curves, grants, capped sales, automatic debits, arbitrary
+calldata, delegated recipients, mainnet, and best-effort or operator-edited
+orders are outside this boundary.
 See [the architecture and operations document](../../docs/x402-marketplace-router-v1.md)
-for the trust model, state machine, and launch gates.
+and [the recurring-support contract](../../docs/recurring-support-plans.md) for
+the trust model, state machines, and launch gates.
 
 ## Current availability
 
@@ -113,10 +120,13 @@ build time:
 | `VITE_X402_ROUTER_HYPEREVM_USDC_ADDRESS` | `X402_ROUTER_HYPEREVM_USDC_ADDRESS` |
 
 The browser additionally requires chain `998`, the connected payer to equal
-the destination and refund recipient, and the selected AMM input or sale
-payment token to equal the configured destination USDC. A signed unresolved
-order identifier is retained locally. An account-scoped watcher continues
-status recovery across navigation and unavailable marketplace routes.
+the destination and refund recipient, and the selected AMM input, sale payment
+token, or support-plan asset to equal the configured destination USDC. For
+recurring support, it also verifies exact Boardroom contribution calldata
+against the configured asset, invoice amount, signed deadline, and canonical
+Boardroom. A signed unresolved order identifier is retained locally. An
+account-scoped watcher continues status recovery across navigation and
+unavailable marketplace routes.
 Serialized, abortable polling resumes after reload, while an exclusive browser
 lock and a fresh storage check prevent two tabs from creating overlapping
 payments. Unreadable recovery data is preserved and disables new payments
@@ -139,11 +149,11 @@ bun run router:dev
 
 The first test command runs unit tests and type checking. Setting
 `X402_ROUTER_TEST_DATABASE_URL` also enables the Postgres concurrency,
-uniqueness, reservation, and sealed-journal tests. The deterministic Anvil
-integration uses Postgres, a mock HyperCore settlement boundary, and
-test-only marketplace contract doubles. It does not deploy the production
-pledge.cash marketplace bytecode, spend funded testnet assets, or prove either
-public route.
+uniqueness, recurring-invoice, reservation, and sealed-journal tests. The
+deterministic Anvil integration uses Postgres, a mock HyperCore settlement
+boundary, and test-only marketplace contract doubles. It does not deploy the
+production pledge.cash marketplace bytecode, spend funded testnet assets, or
+prove any public route.
 
 The checked-in Drizzle migrations are applied by the runtime before it accepts
 traffic. For schema changes, generate and review a new immutable migration:
@@ -153,10 +163,10 @@ DATABASE_URL=postgres://x402_router:x402_router@127.0.0.1:5432/x402_router \
 bun run --cwd services/x402-router drizzle:generate
 ```
 
-Never edit a migration that has been applied to an environment.
-The checked-in `drizzle/meta/0002_snapshot.json` is the schema-generation
-baseline. Running the generation command without a schema change must report
-`No schema changes`; a duplicate-table migration is a release blocker.
+Never edit a migration that has been applied to an environment. The newest
+checked-in snapshot is the schema-generation baseline. Running the generation
+command without a schema change must report `No schema changes`; a
+duplicate-table migration is a release blocker.
 
 ## HTTP surface
 
@@ -168,6 +178,10 @@ baseline. Running the generation command without a schema change must report
 | `POST /v1/quotes` | Validate a canonical action and atomically reserve destination and refund inventory. |
 | `POST /v1/quotes/:id/execute` | Return `402` requirements or settle the signed payment and run the durable saga. New unbound payments re-run readiness; an exact bound payment remains recoverable while quote traffic is paused. |
 | `GET /v1/orders/:id` | Read the sanitized order, execution, and refund status by quote id. |
+| `GET /v1/support/plans` | List active and recent retired monthly plans for one canonical Boardroom. |
+| `POST /v1/support/plans/*` | Issue signed-authority challenges, publish immutable plans, or retire plans. |
+| `/v1/support/subscriptions/*` | Issue supporter challenges and create, inspect, or cancel hosted schedules. |
+| `POST /v1/support/invoices/:id/quotes` | Create the exact x402 attempt for one current-period invoice. |
 
 Only the configured web origin receives CORS access. Treat order responses as
 public receipts: they intentionally omit signed payloads, private keys,

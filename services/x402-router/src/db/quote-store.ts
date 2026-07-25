@@ -8,6 +8,10 @@ import type {
   QuotePaymentBindingInput,
   QuoteRepository
 } from "../domain";
+import {
+  supportInvoiceLockKey,
+  supportPayerBoardroomPaymentLockKey
+} from "../support/lock";
 import type { JsonRecord } from "./schema";
 
 type QuoteRow = {
@@ -45,6 +49,21 @@ type PaymentBindingRow = {
 
 type QuoteExpiryRow = QuoteRow & {
   readonly expires_at: Date;
+};
+
+type SupportInvoiceBindingRow = {
+  readonly active_quote_id: string | null;
+  readonly invoice_status: "open" | "cancelled";
+  readonly linked: boolean;
+  readonly plan_status: "active" | "retired";
+  readonly subscription_id: string;
+  readonly subscription_status: "active" | "cancelled";
+};
+
+type SupportInvoiceIdentityRow = {
+  readonly boardroom: string;
+  readonly payer: string;
+  readonly subscription_id: string;
 };
 
 const UINT256_MAX = (1n << 256n) - 1n;
@@ -310,7 +329,10 @@ function normalizedAvailability(
 }
 
 export class PostgresQuoteRepository implements QuoteRepository {
-  constructor(private readonly sql: Sql) {}
+  constructor(
+    private readonly sql: Sql,
+    private readonly coordinationSql: Sql
+  ) {}
 
   async createReserved(input: {
     quote: MarketplaceQuote;
@@ -496,7 +518,96 @@ export class PostgresQuoteRepository implements QuoteRepository {
       "Payment requirements hash"
     );
 
-    return this.sql.begin(async (transaction) => {
+    // Resolve immutable support lock keys before opening the main-pool
+    // transaction. Waiting on the coordination pool must never retain a main
+    // connection that an invoice-lock holder may need.
+    const storedQuote = await this.get(input.quoteId);
+    if (storedQuote === undefined) {
+      throw new QuotePaymentBindingError(
+        `Quote ${input.quoteId} was not found`,
+        "quote_not_found"
+      );
+    }
+    if (
+      storedQuote.kind === "recurring_support" &&
+      storedQuote.supportInvoiceId === undefined
+    ) {
+      throw new QuotePaymentBindingError(
+        `Recurring quote ${input.quoteId} has no invoice binding`,
+        "binding_conflict"
+      );
+    }
+    let supportLockKeys: readonly string[] = [];
+    if (storedQuote.supportInvoiceId !== undefined) {
+      const supportIdentityRows = await this.sql<SupportInvoiceIdentityRow[]>`
+        select boardroom, payer, subscription_id
+        from x402_router_support_invoices
+        where id = ${storedQuote.supportInvoiceId}
+        limit 1
+      `;
+      const supportIdentity = supportIdentityRows[0];
+      if (!supportIdentity) {
+        throw new QuotePaymentBindingError(
+          `Recurring quote ${input.quoteId} references a missing invoice`,
+          "binding_conflict"
+        );
+      }
+      supportLockKeys = [
+        supportInvoiceLockKey(storedQuote.supportInvoiceId),
+        supportPayerBoardroomPaymentLockKey(
+          supportIdentity.boardroom,
+          supportIdentity.payer
+        )
+      ];
+    }
+
+    const bind = () => this.sql.begin(async (transaction) => {
+      const preliminaryQuoteRows = await transaction<QuoteRow[]>`
+        select quote
+        from x402_router_quotes
+        where id = ${input.quoteId}
+        limit 1
+      `;
+      const preliminaryQuoteRow = preliminaryQuoteRows[0];
+      if (preliminaryQuoteRow === undefined) {
+        throw new QuotePaymentBindingError(
+          `Quote ${input.quoteId} was not found`,
+          "quote_not_found"
+        );
+      }
+      const preliminaryQuote = deserializeQuote(preliminaryQuoteRow.quote);
+      if (
+        preliminaryQuote.kind === "recurring_support" &&
+        preliminaryQuote.supportInvoiceId === undefined
+      ) {
+        throw new QuotePaymentBindingError(
+          `Recurring quote ${input.quoteId} has no invoice binding`,
+          "binding_conflict"
+        );
+      }
+      let supportSubscriptionId = "";
+      let supportBoardroom = "";
+      let supportPayer = "";
+      if (preliminaryQuote.supportInvoiceId !== undefined) {
+        const supportIdentityRows = await transaction<
+          SupportInvoiceIdentityRow[]
+        >`
+          select boardroom, payer, subscription_id
+          from x402_router_support_invoices
+          where id = ${preliminaryQuote.supportInvoiceId}
+          limit 1
+        `;
+        const supportIdentity = supportIdentityRows[0];
+        if (!supportIdentity) {
+          throw new QuotePaymentBindingError(
+            `Recurring quote ${input.quoteId} references a missing invoice`,
+            "binding_conflict"
+          );
+        }
+        supportSubscriptionId = supportIdentity.subscription_id;
+        supportBoardroom = supportIdentity.boardroom;
+        supportPayer = supportIdentity.payer;
+      }
       const reservationIdentities = await transaction<ReservationIdentityRow[]>`
         select distinct network, asset
         from x402_router_inventory_reservations
@@ -551,6 +662,86 @@ export class PostgresQuoteRepository implements QuoteRepository {
       }
 
       const quote = deserializeQuote(quoteRow.quote);
+      if (
+        quote.kind === "recurring_support" &&
+        quote.supportInvoiceId !== undefined
+      ) {
+        const supportRows = await transaction<SupportInvoiceBindingRow[]>`
+          select
+            invoice.active_quote_id,
+            invoice.status as invoice_status,
+            invoice.subscription_id,
+            subscription.status as subscription_status,
+            plan.status as plan_status,
+            exists (
+              select 1
+              from x402_router_support_invoice_quotes link
+              where link.invoice_id = invoice.id
+                and link.quote_id = ${quote.id}
+            ) as linked
+          from x402_router_support_invoices invoice
+          join x402_router_support_subscriptions subscription
+            on subscription.id = invoice.subscription_id
+          join x402_router_support_plans plan
+            on plan.id = invoice.plan_id
+          where invoice.id = ${quote.supportInvoiceId}
+          limit 1
+          for update of invoice, subscription, plan
+        `;
+        const support = supportRows[0];
+        if (
+          !support ||
+          !support.linked ||
+          support.active_quote_id !== quote.id ||
+          support.subscription_id !== supportSubscriptionId ||
+          support.invoice_status !== "open" ||
+          support.subscription_status !== "active" ||
+          support.plan_status !== "active"
+        ) {
+          throw new QuotePaymentBindingError(
+            `Recurring quote ${input.quoteId} is no longer the payable invoice attempt`,
+            "binding_conflict"
+          );
+        }
+        const blockingRows = await transaction<Array<{ blocked: boolean }>>`
+          select exists (
+            select 1
+            from x402_router_support_invoices prior_invoice
+            join x402_router_support_invoice_quotes prior_link
+              on prior_link.invoice_id = prior_invoice.id
+            join x402_router_quote_payment_bindings prior_binding
+              on prior_binding.quote_id = prior_link.quote_id
+            left join x402_router_intent_payments prior_intent
+              on prior_intent.quote_id = prior_link.quote_id
+              and prior_intent.primary_payment
+            left join x402_router_adapter_operations prior_settlement
+              on prior_settlement.kind = 'payment_settlement'
+              and prior_settlement.idempotency_key = prior_binding.attempt_id
+            where prior_invoice.boardroom = ${supportBoardroom}
+              and prior_invoice.payer = ${supportPayer}
+              and prior_invoice.id <> ${quote.supportInvoiceId}
+              and not (
+                coalesce(
+                  prior_intent.status in ('executed', 'refunded'),
+                  false
+                )
+                or (
+                  prior_intent.quote_id is null
+                  and coalesce(
+                    prior_settlement.status = 'confirmed_failure',
+                    false
+                  )
+                )
+              )
+          ) as blocked
+        `;
+        if (blockingRows[0]?.blocked !== false) {
+          throw new QuotePaymentBindingError(
+            `Recurring quote ${input.quoteId} is blocked by an unresolved payment for this payer and Boardroom`,
+            "binding_conflict"
+          );
+        }
+      }
       const storedRequirementsHash = canonicalHash(
         hashPaymentRequirements(quote.paymentRequirements),
         "Stored payment requirements hash"
@@ -623,6 +814,11 @@ export class PostgresQuoteRepository implements QuoteRepository {
       }
       return paymentBindingFromRow(inserted[0]);
     });
+    if (supportLockKeys.length === 0) return bind();
+    return this.coordinationSql.begin(async transaction => {
+      await advisoryLocks(transaction, supportLockKeys);
+      return bind();
+    }) as Promise<QuotePaymentBinding>;
   }
 
   async getPaymentBinding(

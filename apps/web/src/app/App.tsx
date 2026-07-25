@@ -121,6 +121,7 @@ import {
 } from "../features/capabilities/project-capabilities";
 import type { BoardroomPanelCapabilities } from "../features/boardrooms/boardroom-panel-types";
 import { BoardroomRewardsPanel } from "../features/rewards";
+import { RecurringSupportPanel } from "../features/support";
 import { GovernanceLaunchControl, GovernanceOperations, GovernanceProposalComposer } from "../features/governance";
 import {
   prepareSmartGrantSettlement,
@@ -5159,6 +5160,30 @@ export function App(): React.JSX.Element {
   const participationAmmContent = Object.fromEntries(
     exactProjectPools.map((pool) => [participationAmmKey(pool), marketPanel]),
   ) as Partial<Record<ParticipationContentKey, React.JSX.Element>>;
+  const recurringSupportContent =
+    exactProjectDashboard && hyperliquidCheckout
+      ? {
+          support: (
+            <RecurringSupportPanel
+              account={wallet.account}
+              boardroomActive={exactProjectDashboard.snapshot.status === 0}
+              boardroom={exactProjectDashboard.address}
+              canPublish={Boolean(
+                wallet.account
+                && sameAddress(
+                  wallet.account,
+                  exactProjectDashboard.snapshot.launched
+                    ? exactProjectDashboard.snapshot.proposer
+                    : exactProjectDashboard.snapshot.owner,
+                )
+              )}
+              checkout={hyperliquidCheckout}
+              pendingAction={pendingAction}
+              runAction={runAction}
+            />
+          ),
+        }
+      : {};
   const participationContent = exactProjectDashboard ? {
     ...createParticipationFlowContent({
       account: wallet.account,
@@ -5171,6 +5196,7 @@ export function App(): React.JSX.Element {
       submitTransaction: submitContractTransaction,
     }),
     ...participationAmmContent,
+    ...recurringSupportContent,
   } : {};
   const portfolioTasks = walletPortfolioTasks({
     account: wallet.account,

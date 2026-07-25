@@ -17,7 +17,7 @@ import {
   type Hex,
   type PublicClient,
 } from "viem";
-import type { CreateQuoteRequest } from "../api/dto";
+import type { RouterQuoteRequest } from "../api/dto";
 import { QuoteRequestError } from "../api/dto";
 import type { DestinationExecution, MarketplaceQuote } from "../domain";
 import { minimumWithSlippage, maximumWithSlippage } from "./math";
@@ -38,8 +38,8 @@ export type CanonicalQuoteResult = {
   canonicalPool?: Address;
   destinationPrincipal: bigint;
   availableInventory: bigint;
-  allowance: bigint;
-  spender: Address;
+  allowance?: bigint;
+  spender?: Address;
   execution: DestinationExecution;
 };
 
@@ -94,13 +94,16 @@ export class CanonicalMarketplaceReader {
   }
 
   async quote(
-    request: CreateQuoteRequest,
+    request: RouterQuoteRequest,
     deadline: number,
   ): Promise<CanonicalQuoteResult> {
     if (request.kind === "amm_swap") {
       return this.quoteAmm(request, deadline);
     }
-    return this.quoteFixedPrice(request, deadline);
+    if (request.kind === "fixed_price_sale") {
+      return this.quoteFixedPrice(request, deadline);
+    }
+    return this.quoteRecurringSupport(request, deadline);
   }
 
   /**
@@ -115,7 +118,62 @@ export class CanonicalMarketplaceReader {
       await this.assertCanonicalAmmExecution(quote);
       return;
     }
-    await this.assertCanonicalFixedPriceExecution(quote);
+    if (quote.kind === "fixed_price_sale") {
+      await this.assertCanonicalFixedPriceExecution(quote);
+      return;
+    }
+    await this.assertCanonicalRecurringSupportExecution(quote);
+  }
+
+  private async assertCanonicalRecurringSupportExecution(
+    quote: MarketplaceQuote,
+  ): Promise<void> {
+    if (
+      quote.supportInvoiceId === undefined ||
+      !sameAddress(quote.canonicalTarget, quote.boardroom) ||
+      !sameAddress(quote.execution.target, quote.boardroom) ||
+      !sameAddress(quote.execution.inputToken, this.deployment.destinationUsdc) ||
+      !sameAddress(quote.execution.outputToken, this.deployment.destinationUsdc) ||
+      quote.execution.inputAmount !== quote.execution.expectedOutput ||
+      quote.execution.inputAmount !== quote.execution.minimumOutput
+    ) {
+      throw new CanonicalRouteError(
+        "The stored support execution no longer identifies the configured USDC contribution route.",
+        "noncanonical_support_route",
+      );
+    }
+
+    const [isBoardroom, boardroomStatus, isRedeemableAsset] =
+      await Promise.all([
+        this.client.readContract({
+          address: this.deployment.boardroomFactory,
+          abi: boardroomFactoryAbi,
+          functionName: "isBoardroom",
+          args: [quote.boardroom],
+        }),
+        this.client.readContract({
+          address: quote.boardroom,
+          abi: boardroomAbi,
+          functionName: "status",
+        }),
+        this.client.readContract({
+          address: quote.boardroom,
+          abi: boardroomAbi,
+          functionName: "isRedeemableAsset",
+          args: [this.deployment.destinationUsdc],
+        }),
+      ]);
+
+    if (
+      !isBoardroom ||
+      Number(boardroomStatus) !== 0 ||
+      !isRedeemableAsset
+    ) {
+      throw new CanonicalRouteError(
+        "The support plan's Boardroom or treasury asset is no longer eligible to receive renewals.",
+        "support_route_unavailable",
+      );
+    }
   }
 
   private async assertCanonicalAmmExecution(
@@ -328,7 +386,7 @@ export class CanonicalMarketplaceReader {
   }
 
   private async quoteAmm(
-    request: Extract<CreateQuoteRequest, { kind: "amm_swap" }>,
+    request: Extract<RouterQuoteRequest, { kind: "amm_swap" }>,
     deadline: number,
   ): Promise<CanonicalQuoteResult> {
     if (!sameAddress(request.tokenIn, this.deployment.destinationUsdc)) {
@@ -441,7 +499,7 @@ export class CanonicalMarketplaceReader {
   }
 
   private async quoteFixedPrice(
-    request: Extract<CreateQuoteRequest, { kind: "fixed_price_sale" }>,
+    request: Extract<RouterQuoteRequest, { kind: "fixed_price_sale" }>,
     deadline: number,
   ): Promise<CanonicalQuoteResult> {
     const [isBoardroom, isDistribution, distributionKind, distributionBoardroom] =
@@ -633,6 +691,85 @@ export class CanonicalMarketplaceReader {
         recipient: request.recipient,
         target: request.sale,
         minimumOutput: shareAmount,
+      }),
+    };
+  }
+
+  private async quoteRecurringSupport(
+    request: Extract<RouterQuoteRequest, { kind: "recurring_support" }>,
+    deadline: number,
+  ): Promise<CanonicalQuoteResult> {
+    const [
+      isBoardroom,
+      boardroomStatus,
+      isRedeemableAsset,
+      [availableInventory, allowance],
+    ] =
+      await Promise.all([
+        this.client.readContract({
+          address: this.deployment.boardroomFactory,
+          abi: boardroomFactoryAbi,
+          functionName: "isBoardroom",
+          args: [request.boardroom],
+        }),
+        this.client.readContract({
+          address: request.boardroom,
+          abi: boardroomAbi,
+          functionName: "status",
+        }),
+        this.client.readContract({
+          address: request.boardroom,
+          abi: boardroomAbi,
+          functionName: "isRedeemableAsset",
+          args: [this.deployment.destinationUsdc],
+        }),
+        this.readInventory(
+          this.deployment.destinationUsdc,
+          request.boardroom,
+        ),
+      ]);
+    if (!isBoardroom) {
+      throw new CanonicalRouteError(
+        "The support plan does not belong to a canonical Boardroom.",
+        "noncanonical_boardroom",
+      );
+    }
+    if (Number(boardroomStatus) !== 0) {
+      throw new CanonicalRouteError(
+        "The project Boardroom is not active.",
+        "boardroom_not_active",
+      );
+    }
+    if (!isRedeemableAsset) {
+      throw new CanonicalRouteError(
+        "Configured HyperEVM USDC is not registered as a Boardroom treasury asset.",
+        "support_asset_not_registered",
+      );
+    }
+
+    const amount = BigInt(request.amount);
+    const callData = encodeFunctionData({
+      abi: boardroomAbi,
+      functionName: "contributeTreasuryAsset",
+      args: [this.deployment.destinationUsdc, amount, BigInt(deadline)],
+    });
+    return {
+      boardroom: request.boardroom,
+      canonicalTarget: request.boardroom,
+      destinationPrincipal: amount,
+      availableInventory,
+      allowance,
+      spender: request.boardroom,
+      execution: executionEnvelope({
+        callData,
+        deadline,
+        expectedOutput: amount,
+        inputAmount: amount,
+        inputToken: this.deployment.destinationUsdc,
+        outputToken: this.deployment.destinationUsdc,
+        recipient: request.recipient,
+        target: request.boardroom,
+        minimumOutput: amount,
       }),
     };
   }

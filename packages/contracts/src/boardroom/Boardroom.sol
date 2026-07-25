@@ -125,6 +125,8 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     error PrimaryMarketTransferRestricted(address from, address to, uint256 amount);
     error InvalidExecutionContext();
     error InvalidControllerReplacement();
+    error TreasuryContributionExpired(uint256 deadline);
+    error TreasuryContributionAmountMismatch(address asset, uint256 expected, uint256 received);
 
     event BoardroomInitialized(
         address indexed owner,
@@ -169,6 +171,7 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
     event BoardroomRedemptionsOpened(address indexed caller);
     event RedeemableAssetRegistered(address indexed asset);
     event RedeemableAssetRemoved(address indexed asset);
+    event TreasuryAssetContributed(address indexed contributor, address indexed asset, uint256 amount);
     event RedeemableAssetSnapshot(address indexed asset, uint256 balance);
     event RedeemableAssetUnreadable(address indexed asset);
     event BoardroomObligationRecorded(
@@ -572,6 +575,13 @@ contract Boardroom is Ownable, Initializable, ReentrancyGuard {
             revert RedeemableAssetAlreadyRegistered(asset);
         }
         _registerAsset(asset);
+    }
+
+    /// @notice Pulls an exact registered treasury asset contribution from the caller.
+    /// @dev The caller's approval is the transfer authority; lifecycle, asset, and
+    /// deadline checks execute atomically with the transfer.
+    function contributeTreasuryAsset(address asset, uint256 amount, uint256 deadline) external nonReentrant {
+        _delegateGovernance(abi.encodeCall(BoardroomGovernanceLogic.contributeTreasuryAsset, (asset, amount, deadline)));
     }
 
     function removeRedeemableAsset(address asset) external {

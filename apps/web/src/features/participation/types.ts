@@ -6,7 +6,7 @@ import type { TransactionActionGuard } from "../../lib/transaction-identity";
 import type { HyperliquidCheckoutContext } from "../../lib/x402-router";
 
 export type ParticipationPath = "bond-market" | "dutch-auction" | "fixed-price-sale" | "migrating-bonding-curve" | "merkle-airdrop";
-export type ParticipationRoutePath = ParticipationPath | "amm";
+export type ParticipationRoutePath = ParticipationPath | "amm" | "support";
 export type DistributionParticipationKey = `${ParticipationPath}:${Address}`;
 export type AmmParticipationKey = `amm:${Address}`;
 export type ParticipationContentKey = ParticipationRoutePath | DistributionParticipationKey | AmmParticipationKey;
@@ -23,6 +23,7 @@ export function participationAmmKey(address: Address): AmmParticipationKey {
 }
 
 export function participationPathFromContentKey(key: ParticipationContentKey): ParticipationRoutePath {
+  if (key === "support") return "support";
   if (key === "amm" || key.startsWith("amm:")) return "amm";
   if (key.startsWith("bond-market")) return "bond-market";
   if (key.startsWith("dutch-auction")) return "dutch-auction";
