@@ -16,6 +16,26 @@ runtime code hashes, and an adjacent 29-transaction receipt manifest. Monad rema
 only a chain id, `status`, and `reason`; do not treat Monad as a live pledge.cash deployment until its wrapper promotes a
 fully verified candidate artifact.
 
+### Live HyperEVM testnet staging
+
+The public testnet staging surfaces run from the checked-in HyperEVM deployment:
+
+- `https://pledge.cash` is the browser origin;
+- `https://api.pledge.cash/health` is the Sentinel health boundary;
+- `https://api.pledge.cash/health/live`, `/health/ready`, and `/v1/*` are the x402 router boundary; and
+- `https://rpcs.chain.link/hyperevm/testnet` is the staging RPC override. The Pages workflow verifies that it reports
+  chain id `998` before embedding it in the browser build.
+
+On 2026-07-26, staging completed one funded fixed-price-sale canary through the production web client and public router.
+Order `e8722f79-11ef-49d0-a95e-1f7e03e900a3` settled 1 testnet USDC on HyperCore and executed transaction
+`0x7955c3773ee9ea341aa9897f5bbe059a6c11bbff3f604aa24a66e6425ecadf56` on HyperEVM. The purchaser received exactly
+one HCAN share, the Boardroom received exactly 1 native testnet USDC, and Sentinel indexed the resulting share balance.
+The minimized receipt and postcondition ledger is
+[`998-lifecycle.json`](../packages/contracts/deployments/998-lifecycle.json).
+
+That ledger proves only the named funded path. It does not prove every protocol lifecycle, every maximum-gas path,
+production authority ceremonies, or mainnet readiness. Mainnet remains a NO-GO.
+
 The deploy script creates or reuses one `PledgeCashDeterministicDeployer`, then creates one
 `BoardroomPolicyRegistry`, one `AssetPolicy`, one `BoardroomGovernanceLogic`, one `BoardroomRedemptionPayout`, one
 `ProtocolFeeRouter`, one `BoardroomFactory`, one `TokenGrantFactory`, one `AmmFactory`, one `AmmRouter`, one
@@ -354,6 +374,8 @@ bun --cwd apps/web dev:local
 ```
 
 Use `VITE_PLEDGE_CASH_LOCAL_RPC_URL` to override the Local Anvil RPC endpoint without changing the testnet profiles.
+Use `VITE_PLEDGE_CASH_HYPEREVM_RPC_URL` to select an alternate HyperEVM testnet RPC for a deployed browser environment.
+The Pages workflow checks that a configured override reports chain id `998` before building.
 If `VITE_PLEDGE_CASH_CHAIN_ID` is set to another chain id, the app preserves the legacy single-network behavior by
 adding a custom selectable profile from `VITE_PLEDGE_CASH_RPC_URL`, `VITE_PLEDGE_CASH_CHAIN_NAME`,
 `VITE_PLEDGE_CASH_EXPLORER_URL`, and `VITE_PLEDGE_CASH_WRAPPED_NATIVE_SYMBOL`.

@@ -106,6 +106,10 @@ The testnet deployment must use the same:
 Exercise the complete lifecycle with real RPCs and real wallet software. Local Anvil remains useful but is not a
 substitute for this step.
 
+The limited funded fixed-price x402 canary in
+`packages/contracts/deployments/998-lifecycle.json` is evidence toward this requirement, but does not clear the complete
+lifecycle, maximum-gas, authority-rehearsal, or mainnet promotion gates.
+
 ### 4. Create a protected artifact-promotion gate
 
 The promotion process must reject any artifact that lacks required data. At minimum it must verify:

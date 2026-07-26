@@ -42,6 +42,19 @@ jobs:
       - name: Check docs
         run: bun run docs:check
 
+      - name: Verify configured HyperEVM RPC
+        if: ${{ vars.VITE_PLEDGE_CASH_HYPEREVM_RPC_URL != '' }}
+        env:
+          HYPEREVM_RPC_URL: ${{ vars.VITE_PLEDGE_CASH_HYPEREVM_RPC_URL }}
+        run: |
+          response="$(
+            curl --fail --silent --show-error --retry 3 --retry-all-errors \
+              --header "content-type: application/json" \
+              --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
+              "$HYPEREVM_RPC_URL"
+          )"
+          jq -e '.result == "0x3e6"' <<<"$response" >/dev/null
+
       - name: Verify configured Sentinel API
         if: ${{ vars.VITE_SENTINEL_API_URL != '' }}
         env:
@@ -131,6 +144,7 @@ jobs:
 
       - name: Build site
         env:
+          VITE_PLEDGE_CASH_HYPEREVM_RPC_URL: ${{ vars.VITE_PLEDGE_CASH_HYPEREVM_RPC_URL }}
           VITE_SENTINEL_API_URL: ${{ vars.VITE_SENTINEL_API_URL }}
           VITE_X402_ROUTER_API_URL: ${{ vars.VITE_X402_ROUTER_API_URL }}
           VITE_X402_ROUTER_APPLICATION: ${{ vars.VITE_X402_ROUTER_APPLICATION }}

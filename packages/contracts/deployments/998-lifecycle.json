@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 1,
+  "chainId": 998,
+  "network": "HyperEVM Testnet",
+  "scope": "limited-funded-fixed-price-x402-canary",
+  "status": "executed",
+  "recordedAt": "2026-07-26T06:13:44Z",
+  "deploymentSourceCommit": "87f51633f437a0164d7a2a2503a3660b01a6450a",
+  "stagingSourceCommit": "cd324b24502ce518721a260482c16a19b9a3f719",
+  "deploymentArtifact": "packages/contracts/deployments/998.json",
+  "staging": {
+    "webOrigin": "https://pledge.cash",
+    "apiOrigin": "https://api.pledge.cash",
+    "rpcUrl": "https://rpcs.chain.link/hyperevm/testnet",
+    "pagesRun": "https://github.com/peezy-tech/pledge.cash/actions/runs/30190538566",
+    "sentinelHealthPath": "/health",
+    "router": {
+      "application": "pledge.cash:x402-router:testnet:v1",
+      "gateway": "0x21e0BB3E641aA5d3D6FCa9d3C7eaeE9384D8FA50",
+      "destinationUsdc": "0x2B3370eE501B4a559b57D449569354196457D8Ab",
+      "payTo": "0x48E5EE7845e63a3E9d77A39d9260Af2e79582c62"
+    }
+  },
+  "canary": {
+    "kind": "fixed_price_sale",
+    "orderId": "e8722f79-11ef-49d0-a95e-1f7e03e900a3",
+    "paymentId": "9c16b952-2d2e-463c-a4b0-9410746df9ed",
+    "payer": "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c",
+    "recipient": "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c",
+    "refundAddress": "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c",
+    "boardroom": "0xA720c9a0a8a5360e5d34748D649638618c5d93e5",
+    "shareToken": "0x8AC48674B02a4301eF226DEcfe8633f27d87a267",
+    "sale": "0xb39796F935515Cd616043C1B28eeE8EB39C9d6ea",
+    "paymentToken": "0x2B3370eE501B4a559b57D449569354196457D8Ab",
+    "sourcePayment": {
+      "asset": "USDC:0xeb62eee3685fc4c43992febcd9e75443",
+      "amountAtomic": "100000000",
+      "decimals": 8,
+      "serviceFeeAtomic": "0"
+    },
+    "destinationExecution": {
+      "paymentAmountAtomic": "1000000",
+      "paymentDecimals": 6,
+      "shareAmountAtomic": "1000000000000000000",
+      "shareDecimals": 18,
+      "callDataHash": "0x2b20d3304b65e02bff72c975e4a7a3a43c116a476816742497ef8bd154cf8e8f",
+      "selector": "0x706910ff",
+      "deadline": 1785046714
+    },
+    "transactions": {
+      "executorNativeFunding": {
+        "transactionHash": "0xc9903bb4dec6531ad50cfb9ab92d93df8312009c39a411ade159ee0518fea08b",
+        "blockNumber": "0x391532c",
+        "status": "0x1",
+        "gasUsed": "0x5208",
+        "from": "0xdab9c778e4d42b27e4c1b892eea62dfc08d1300c",
+        "to": "0x21e0bb3e641aa5d3d6fca9d3c7eaee9384d8fa50"
+      },
+      "executorUsdcFunding": {
+        "transactionHash": "0x3ae3f28b7c8b2211c80369f55cba0789601de827ea82f6f965c1db8a9ceb2534",
+        "blockNumber": "0x3915338",
+        "status": "0x1",
+        "gasUsed": "0xf2cf",
+        "from": "0xdab9c778e4d42b27e4c1b892eea62dfc08d1300c",
+        "to": "0x2b3370ee501b4a559b57d449569354196457d8ab"
+      },
+      "boardroomCreate": {
+        "transactionHash": "0xe4a03e433d71cafc427f5bc202543e55564677144c3a038640813be05e2c4e52",
+        "blockNumber": "0x39153dc",
+        "status": "0x1",
+        "gasUsed": "0x1bb694",
+        "from": "0xdab9c778e4d42b27e4c1b892eea62dfc08d1300c",
+        "to": "0xd0b2ae6603d7ae140cd0cb4eb4451923c28caaef"
+      },
+      "usdcAssetPolicy": {
+        "transactionHash": "0xc3720c4028334e41c482c25f99c168f255e94dea9ad20f4f1d1fd01916131c8f",
+        "blockNumber": "0x39153ed",
+        "status": "0x1",
+        "gasUsed": "0xbaef",
+        "from": "0xdab9c778e4d42b27e4c1b892eea62dfc08d1300c",
+        "to": "0x65f9960431f5fb2e8d23ae5dd93e59c805291870"
+      },
+      "shareAssetPolicy": {
+        "transactionHash": "0x4568699507b7faa093c70f74f486e1285ce3c3d13b21985e4dae39fc1c78aa28",
+        "blockNumber": "0x39153f1",
+        "status": "0x1",
+        "gasUsed": "0xbaef",
+        "from": "0xdab9c778e4d42b27e4c1b892eea62dfc08d1300c",
+        "to": "0x65f9960431f5fb2e8d23ae5dd93e59c805291870"
+      },
+      "treasuryShareMint": {
+        "transactionHash": "0x7e959ef09ffba0c84782a123470ae460dbb05dbf0b7deafd13ac320810878aaa",
+        "blockNumber": "0x39153f3",
+        "status": "0x1",
+        "gasUsed": "0x2d1e1",
+        "from": "0xdab9c778e4d42b27e4c1b892eea62dfc08d1300c",
+        "to": "0xa720c9a0a8a5360e5d34748d649638618c5d93e5"
+      },
+      "boardroomDistributionApproval": {
+        "transactionHash": "0xfe91d8c4251c7181a4cf06c69a94499a1ed449fec8b2edcfc182171bdb9e941f",
+        "blockNumber": "0x39153f7",
+        "status": "0x1",
+        "gasUsed": "0x24d78",
+        "from": "0xdab9c778e4d42b27e4c1b892eea62dfc08d1300c",
+        "to": "0xa720c9a0a8a5360e5d34748d649638618c5d93e5"
+      },
+      "saleCreate": {
+        "transactionHash": "0x1f7c381a477381c786d6ba7eb91dabb7df9be3317eefbc765d5a1caf8424f644",
+        "blockNumber": "0x391540d",
+        "status": "0x1",
+        "gasUsed": "0xdc55f",
+        "from": "0xdab9c778e4d42b27e4c1b892eea62dfc08d1300c",
+        "to": "0xa720c9a0a8a5360e5d34748d649638618c5d93e5"
+      },
+      "executorSaleApproval": {
+        "transactionHash": "0x944d4081305ac35016d4b336edff0fe419b0f0cdaa551bc683e4f33c44cd855e",
+        "blockNumber": "0x3915490",
+        "status": "0x1",
+        "gasUsed": "0xd88d",
+        "from": "0x21e0bb3e641aa5d3d6fca9d3c7eaee9384d8fa50",
+        "to": "0x2b3370ee501b4a559b57d449569354196457d8ab"
+      },
+      "hypercorePayment": {
+        "transactionHash": "0x34a88b278d2f931a3622042572c689010d00a30d2822b1ecd871367a4c236d04"
+      },
+      "hyperevmExecution": {
+        "transactionHash": "0x7955c3773ee9ea341aa9897f5bbe059a6c11bbff3f604aa24a66e6425ecadf56",
+        "blockNumber": "0x39154e6",
+        "blockTimestamp": "2026-07-26T06:13:44Z",
+        "status": "0x1",
+        "gasUsed": "0x4e90d",
+        "from": "0x21e0bb3e641aa5d3d6fca9d3c7eaee9384d8fa50",
+        "to": "0xb39796f935515cd616043c1b28eee8eb39c9d6ea"
+      }
+    },
+    "postconditions": {
+      "payerHypercoreUsdc": "14547.383222",
+      "payToHypercoreUsdc": "11.000003",
+      "executorHyperevmUsdcAtomic": "4000000",
+      "executorSaleAllowanceAtomic": "4000000",
+      "executorHypeWei": "499962275800000000",
+      "boardroomHyperevmUsdcAtomic": "1000000",
+      "recipientShareBalanceAtomic": "1000000000000000000",
+      "saleRemainingSharesAtomic": "99000000000000000000",
+      "sentinelIndexedRecipientShareBalanceAtomic": "1000000000000000000",
+      "sentinelIndexedAtBlock": "59856102"
+    }
+  },
+  "limitations": [
+    "This is one limited funded fixed-price-sale path, not a complete protocol lifecycle rehearsal.",
+    "It does not prove maximum gas for every deployment or user transaction.",
+    "It does not rehearse production governance or authority ceremonies.",
+    "It is testnet evidence only and does not change the mainnet NO-GO."
+  ]
+}
