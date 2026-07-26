@@ -11,8 +11,8 @@
   "staging": {
     "webOrigin": "https://pledge.cash",
     "apiOrigin": "https://api.pledge.cash",
-    "rpcUrl": "https://rpcs.chain.link/hyperevm/testnet",
-    "pagesRun": "https://github.com/peezy-tech/pledge.cash/actions/runs/30190538566",
+    "rpcUrl": "https://rpc.hyperliquid-testnet.xyz/evm",
+    "pagesRun": "https://github.com/peezy-tech/pledge.cash/actions/runs/30190171397",
     "sentinelHealthPath": "/health",
     "router": {
       "application": "pledge.cash:x402-router:testnet:v1",

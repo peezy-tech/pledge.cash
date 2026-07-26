@@ -28,6 +28,15 @@ describe("web network profiles", () => {
     expect(PLEDGE_CASH_NETWORKS.map((network) => network.chainId)).toEqual([998, 10143, 31337]);
   });
 
+  test("uses the built-in HyperEVM RPC when the optional override is empty", () => {
+    const hyperEvm = createPledgeCashNetworks({
+      VITE_PLEDGE_CASH_HYPEREVM_RPC_URL: "",
+    }).find((network) => network.chainId === 998);
+
+    expect(hyperEvm?.rpcUrl).toBe("https://rpc.hyperliquid-testnet.xyz/evm");
+    expect(hyperEvm?.chain.rpcUrls.default.http).toEqual(["https://rpc.hyperliquid-testnet.xyz/evm"]);
+  });
+
   test("identifies unseeded Local, Testnet, and Custom environments truthfully", () => {
     const local = networkEnvironmentIdentity(networkForChainId(LOCAL_ANVIL_CHAIN_ID));
     const localByChainId = networkEnvironmentIdentity({ chainId: LOCAL_ANVIL_CHAIN_ID, key: "custom" });
