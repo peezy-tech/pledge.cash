@@ -83,7 +83,7 @@ protection staker, reward pool, redemption-excess recipient, delays, grace perio
 controller is deployed only inside launch and every mismatch reverts atomically.
 
 Legacy and unknown versions remain readable but fail closed for launch, controller writes, and Boardroom-control
-claims. No public v5 artifact is currently broadcast.
+claims. The verified public v5 artifact is limited to HyperEVM testnet; it does not authorize mainnet use.
 
 Read [Govern a project](govern-a-project) for the launched state machine.
 

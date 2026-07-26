@@ -40,7 +40,8 @@ wind-down thresholds, and scheduled operations. Connect only when the app must c
 or authorize an available action.
 
 External-controller launch and governance writes require a verified v5 deployment. Legacy Boardrooms remain readable
-but fail closed. No public v5 artifact is currently broadcast.
+but fail closed. The verified public v5 artifact is limited to HyperEVM testnet; Monad remains pending and mainnet
+remains unsupported.
 
 ## I need raw diagnostics or alerts
 
