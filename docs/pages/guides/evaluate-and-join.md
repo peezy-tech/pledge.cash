@@ -7,7 +7,7 @@ description: Verify a project, compare its participation paths, and complete a p
 
 Start with evidence, not the project name. A pledge.cash project is a Boardroom contract plus the share token, distributions, grants, and liquidity contracts that can be proven to belong to it.
 
-> **Current availability:** the checked-in HyperEVM testnet (`998`) and Monad testnet (`10143`) deployments are pending, not live protocol stacks. Do not approve or submit transactions on either network until the app resolves a current deployment. See [Networks and deployments](../reference/networks-and-deployments).
+> **Current availability:** the checked-in HyperEVM testnet (`998`) deployment is verified and uses testnet assets. Monad testnet (`10143`) remains pending. Do not approve or submit a transaction unless the app resolves the current artifact and matching wallet chain. See [Networks and deployments](../reference/networks-and-deployments).
 
 ## Prerequisites
 

@@ -57,8 +57,9 @@ the canonical root deployment route.
 
 The creation fee is chain-native and does not hard-code a gas-token symbol. The wider root stack supplies a
 chain-specific wrapped-native address for Boardroom and AMM accounting. The repository has deployment wrappers for
-HyperEVM testnet (`998`) and Monad testnet (`10143`), but the current checked-in artifacts contain only their chain id
-plus this pending state:
+HyperEVM testnet (`998`) and Monad testnet (`10143`). The current HyperEVM artifact records a verified deterministic v5
+TokenGrantFactory and its canonical BoardroomFactory provenance. Monad still contains only its chain id plus this
+pending state:
 
 ```json
 {
@@ -67,9 +68,9 @@ plus this pending state:
 }
 ```
 
-These pending files are not contract addresses or evidence of a live TokenGrant deployment. The wrappers write a
-candidate artifact, verify its live code, wiring, policy state, and authorities, and only then promote it to the
-checked-in path. See `docs/deployment.md` for both networks' dry-run, broadcast, and verification procedures.
+The pending Monad file is not a contract address or evidence of a live TokenGrant deployment. The wrappers write a
+candidate artifact, verify its live code, wiring, policy state, authorities, and receipts, and only then promote it to
+the checked-in path. See `docs/deployment.md` for both networks' dry-run, broadcast, and verification procedures.
 
 ## Lifecycle
 

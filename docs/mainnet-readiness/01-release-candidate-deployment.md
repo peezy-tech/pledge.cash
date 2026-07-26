@@ -17,15 +17,16 @@ native asset, runtime bytecode, immutable wiring, deployment transaction set, an
 
 - The [security policy](../../SECURITY.md) says the contracts are not mainnet production software and that the
   repository does not support a mainnet deployment.
-- The checked-in [HyperEVM testnet artifact](../../packages/contracts/deployments/998.json) is marked `pending`.
+- The checked-in [HyperEVM testnet artifact](../../packages/contracts/deployments/998.json) is a verified deterministic
+  v5 deployment with an adjacent 29-transaction source-bound receipt manifest.
 - The checked-in [Monad testnet artifact](../../packages/contracts/deployments/10143.json) is marked `pending`.
 - [Network documentation](../pages/reference/networks-and-deployments.md) tells users that no mainnet is supported and
   that pending artifacts do not certify usable addresses.
 - [Deployment documentation](../deployment.md) covers local Anvil plus HyperEVM and Monad testnet procedures, not a
   mainnet release procedure.
 - Chain-specific deployment and artifact-verification wrappers exist only for HyperEVM testnet and Monad testnet.
-- The SDK and web application expose the pending testnets and local/custom development paths; they do not contain an
-  authorized mainnet release profile.
+- The SDK and web application expose the verified HyperEVM testnet, pending Monad testnet, and local/custom development
+  paths; they do not contain an authorized mainnet release profile.
 - There is no tagged release or published GitHub release identifying an auditable contract release candidate.
 
 ## Why this is a hard blocker
@@ -145,7 +146,7 @@ This blocker is cleared only when all of the following are true:
 
 - [ ] One first mainnet and one exact release version are approved.
 - [ ] The exact release has been deployed to the corresponding public testnet.
-- [ ] The testnet artifact is complete, non-pending, checked in, and independently verified.
+- [x] The HyperEVM testnet artifact is complete, non-pending, checked in, and independently verified.
 - [ ] Full lifecycle tests have passed against the deployed testnet contracts through the supported SDK and web paths.
 - [ ] Maximum-gas deployment and user transactions fit the target chain's intended execution lane.
 - [ ] The production authority ceremony has been rehearsed with the same transaction shape.

@@ -30,11 +30,11 @@ the trust model, state machines, and launch gates.
 ## Current availability
 
 The service fails closed until every readiness check passes. In particular, the
-tracked `packages/contracts/deployments/998.json` artifact is currently
-`pending`, so this checkout is not evidence of a live funded route. Do not
-advertise the rail or fund an operator until a verified non-pending artifact
-with the canonical Boardroom, AMM, and distribution factory addresses is
-checked in.
+tracked `packages/contracts/deployments/998.json` artifact now records a
+verified non-pending deployment with the canonical Boardroom, AMM, and
+distribution factory addresses. The artifact clears the deployment gate, but
+does not by itself prove a live funded route. Do not advertise the rail or fund
+an operator until every runtime readiness check passes.
 
 Funded settlement also requires `x402-hl` version `0.2.2` or newer. This service
 pins version `0.2.2` to Git commit

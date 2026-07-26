@@ -68,7 +68,7 @@ Proposer/timing changes are delayed controller self-operations, and controller r
 inside one delayed Boardroom self-call.
 
 Launch and governance writes are exposed only for a verified v5 deployment. Legacy or unknown versions remain readable
-but fail closed. No current public v5 artifact is broadcast, so do not treat a local surface as mainnet-ready.
+but fail closed. The current public v5 artifact is limited to HyperEVM testnet; it is not a mainnet deployment.
 
 ## Wind-down and redemptions
 

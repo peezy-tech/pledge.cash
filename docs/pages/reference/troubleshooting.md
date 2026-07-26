@@ -9,8 +9,9 @@ Start with chain, deployment, address, wallet, and receipt. Most dangerous recov
 
 ## The app says the deployment is pending
 
-Both HyperEVM testnet `998` and Monad testnet `10143` v5 candidate deployments are pending. Nothing has been
-broadcast or certified. Do not paste legacy addresses or override the warning; use a maintained local scenario.
+Monad testnet `10143` remains pending. HyperEVM testnet `998` has a verified v5 artifact, so a pending warning on
+HyperEVM means the client did not load the current artifact. Refresh the published app and confirm the selected chain,
+artifact source commit, and RPC before signing. Do not paste legacy addresses or override the warning.
 
 ## No browser wallet is detected
 

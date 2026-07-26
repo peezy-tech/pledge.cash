@@ -117,11 +117,23 @@ describe("generated SDK exports", () => {
 
   test("includes checked-in deployment metadata", () => {
     expect(pledgeCashDeployments[998]?.chainId).toBe(998);
-    expect(pledgeCashDeployments[998]?.status).toBe("pending");
-    expect(pledgeCashDeployments[998]?.reason).toContain("deterministic v5 deployment");
-    expect(pledgeCashDeployments[998]?.tokenGrantFactory).toBeUndefined();
-    expect(pledgeCashDeployments[998]?.boardroomFactory).toBeUndefined();
-    expect(pledgeCashDeployments[998]?.distributionFactory).toBeUndefined();
+    expect(pledgeCashDeployments[998]?.status).toBeUndefined();
+    expect(pledgeCashDeployments[998]?.sourceCommit).toBe(
+      "87f51633f437a0164d7a2a2503a3660b01a6450a",
+    );
+    expect(pledgeCashDeployments[998]?.deploymentBlock).toBe(59_850_507n);
+    expect(pledgeCashDeployments[998]?.deterministicDeploymentVersion).toBe(
+      "pledge.cash.deterministic.v5",
+    );
+    expect(pledgeCashDeployments[998]?.tokenGrantFactory).toBe(
+      "0xC6abe7071Bbf81fA2372Fc01503761E146685343",
+    );
+    expect(pledgeCashDeployments[998]?.boardroomFactory).toBe(
+      "0xd0b2aE6603d7Ae140cd0Cb4Eb4451923C28cAaef",
+    );
+    expect(pledgeCashDeployments[998]?.distributionFactory).toBe(
+      "0xc15a24eE0e281Ca68F29869816E48B57760DDB2F",
+    );
     expect(pledgeCashDeployments[10143]?.chainId).toBe(10143);
     expect(pledgeCashDeployments[10143]?.status).toBe("pending");
     expect(pledgeCashDeployments[10143]?.tokenGrantFactory).toBeUndefined();

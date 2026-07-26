@@ -1,6 +1,6 @@
 ---
 title: Deployment and local scenarios
-description: Developer bridge for deterministic broadcasts, pending artifacts, local Anvil deployment, seeding, and browser verification.
+description: Developer bridge for deterministic broadcasts, verified and pending artifacts, local Anvil deployment, seeding, and browser verification.
 ---
 
 # Deployment and local scenarios
@@ -9,8 +9,8 @@ Use the [deployment specification](https://github.com/peezy-tech/pledge.cash/blo
 
 ## Public testnet status
 
-Artifacts for HyperEVM testnet `998` and Monad testnet `10143` are pending because the deterministic v5 candidate has
-not been broadcast or verified. Clients must withhold stale root addresses while pending.
+HyperEVM testnet `998` has a promoted deterministic v5 artifact and 29 source-bound successful receipts. Monad testnet
+`10143` remains pending; clients must withhold stale Monad root addresses while that status persists.
 
 Do not develop against guessed legacy addresses. A candidate artifact becomes publishable only after live code, ownership, policy, helper, factory, router, fee, and immutable-wiring verification succeeds.
 

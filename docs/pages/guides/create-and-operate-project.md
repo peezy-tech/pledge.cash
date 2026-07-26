@@ -7,7 +7,7 @@ description: Create a Boardroom, issue its token, and operate grants, distributi
 
 Studio is the operator workspace. A Boardroom is the project account, share-token issuer, treasury, and obligation coordinator; it is not a company record or multisig substitute.
 
-> **Availability boundary:** HyperEVM testnet (`998`) and Monad testnet (`10143`) are currently marked pending. Creation is available only against a current deployment, such as the maintained local scenario, until those artifacts are replaced by verified broadcasts.
+> **Availability boundary:** HyperEVM testnet (`998`) has a verified deterministic v5 deployment. Monad testnet (`10143`) remains pending. Creation requires the current artifact, matching wallet chain, and testnet assets; a local scenario remains isolated from the public testnet.
 
 ## Prerequisites
 
@@ -83,7 +83,7 @@ protection staker, reward pool, redemption-excess recipient, delays, grace perio
 controller is deployed only inside launch and every mismatch reverts atomically.
 
 Legacy and unknown versions remain readable but fail closed for launch, controller writes, and Boardroom-control
-claims. No public v5 artifact is currently broadcast.
+claims. The verified public v5 artifact is limited to HyperEVM testnet; it does not authorize mainnet use.
 
 Read [Govern a project](govern-a-project) for the launched state machine.
 
