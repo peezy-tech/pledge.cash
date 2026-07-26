@@ -129,7 +129,7 @@ The many-operation wind-down test measured 22,012 gas for epoch invalidation, de
 | New deterministic release identity | v5 salts, deployment artifacts, release helpers, and fail-closed discovery implemented. |
 | Legacy/unknown blocked | Implemented in launch, SDK, web, watcher, and control proof. |
 | Independent security review | **Open external requirement.** |
-| Public-testnet product rehearsal | **Open external requirement.** |
+| Public-testnet product rehearsal | One funded fixed-price x402 path passed on HyperEVM testnet; the complete lifecycle remains open. |
 
 ## Blocker 05 exit-criterion mapping
 
@@ -150,17 +150,18 @@ The many-operation wind-down test measured 22,012 gas for epoch invalidation, de
 | Dependency-count paginated snapshotting | Implemented with unreadable-asset handling and no unbounded loop. |
 | Named namespaced storage | Implemented; exact ERC-7201 namespaces are tested distinct. |
 | Cross-package surfaces | Contracts, deployment, SDK, web, Sentinel, and docs updated and green locally. |
-| Selected release-chain max gas | Local Anvil gas evidence is green; **selected public release-chain proof remains open.** |
+| Selected release-chain max gas | The funded fixed-price execution used 321,805 gas on HyperEVM testnet; **complete selected-chain maximum-gas proof remains open.** |
 | Independent security/economic review | **Open external requirement.** |
 
 ## Unresolved risks and release blockers
 
 - Boardroom has only 361 runtime bytes of EIP-170 headroom; further changes need size discipline.
 - Foundry reports timestamp and demonstrably-safe uint64-cast lint warnings; these should be considered during independent review.
-- No public-testnet end-to-end rehearsal or selected release-chain gas proof has occurred.
+- One limited funded fixed-price x402 rehearsal passed on HyperEVM testnet; complete lifecycle and selected-chain
+  maximum-gas proof remain open. See `packages/contracts/deployments/998-lifecycle.json`.
 - No independent security or economic review has occurred for this exact tree.
 - Blockers 01, 03, and 04 remain open: release-candidate proof, production authority ceremony, and independent security assurance.
-- No mainnet deployment, testnet deployment, publication, commit, push, or PR occurred during this work.
+- A verified HyperEVM testnet deployment and limited funded canary now exist. No mainnet deployment occurred.
 
 ## Every implementation file changed
 

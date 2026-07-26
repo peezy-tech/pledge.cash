@@ -185,8 +185,8 @@ function createHyperEvmNetwork(env: PledgeCashNetworkEnv, legacy: LegacyNetworkP
     nativeCurrency: hyperEvmTestnet.nativeCurrency,
     rpcUrl:
       env.VITE_PLEDGE_CASH_HYPEREVM_RPC_URL
-      ?? legacyProfileValue(legacy, hyperEvmTestnet.id, legacy.rpcUrl)
-      ?? hyperEvmTestnet.rpcUrls.default.http[0],
+      || legacyProfileValue(legacy, hyperEvmTestnet.id, legacy.rpcUrl)
+      || hyperEvmTestnet.rpcUrls.default.http[0],
     explorerName:
       env.VITE_PLEDGE_CASH_HYPEREVM_EXPLORER_NAME
       ?? legacyProfileValue(legacy, hyperEvmTestnet.id, legacy.explorerName)

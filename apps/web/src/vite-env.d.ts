@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
+  readonly VITE_PLEDGE_CASH_HYPEREVM_RPC_URL?: string;
   readonly VITE_SENTINEL_API_URL?: string;
   readonly VITE_X402_ROUTER_API_URL?: string;
   readonly VITE_X402_ROUTER_APPLICATION?: string;
