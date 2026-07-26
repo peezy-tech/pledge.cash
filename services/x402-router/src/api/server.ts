@@ -87,6 +87,7 @@ export type RouterApiDependencies = {
   webOrigin: string;
   identity: {
     application: string;
+    publicOrigin: string;
     gateway: Address;
     destinationUsdc: Address;
   };

@@ -6,6 +6,7 @@ set -euo pipefail
 : "${RECEIPTS:?Set RECEIPTS}"
 : "${BROADCAST_FILE:?Set BROADCAST_FILE}"
 : "${SOURCE_COMMIT:?Set SOURCE_COMMIT}"
+: "${PREVIOUS_ARTIFACT:?Set PREVIOUS_ARTIFACT}"
 
 fail() {
   echo "Broadcast finalization failed: $*" >&2
@@ -77,6 +78,54 @@ while IFS= read -r block_hex; do
 done < <(jq -r '.receipts[].blockNumber' "$BROADCAST_FILE")
 
 [[ -n "$deployment_block" ]] || fail "could not derive a deployment block from receipts"
+
+# A deterministic no-op rerun has only new receipts. Keep Sentinel's original
+# scan boundary when the checked-in artifact describes the same release.
+if [[ -f "$PREVIOUS_ARTIFACT" ]] && ! jq -e '.status == "pending"' "$PREVIOUS_ARTIFACT" >/dev/null; then
+  jq -e --argjson chainId "$CHAIN_ID" '
+    .chainId == $chainId
+    and (.deploymentBlock | type == "number" and . > 0 and floor == .)
+    and (
+      .deterministicDeploymentVersion
+      | type == "string" and length > 0
+    )
+    and (
+      .deterministicReleaseCodeHash
+      | type == "string" and test("^0x[0-9a-fA-F]{64}$")
+    )
+    and (
+      .deterministicDeployer
+      | type == "string" and test("^0x[0-9a-fA-F]{40}$")
+    )
+    and (
+      .boardroomFactory
+      | type == "string" and test("^0x[0-9a-fA-F]{40}$")
+    )
+  ' "$PREVIOUS_ARTIFACT" >/dev/null || fail "existing deployment artifact is malformed"
+
+  if jq -e --slurpfile candidate "$ARTIFACT" '
+    $candidate[0] as $candidate
+    | .chainId == $candidate.chainId
+      and .deterministicDeploymentVersion == $candidate.deterministicDeploymentVersion
+      and (
+        (.deterministicReleaseCodeHash | ascii_downcase)
+        == ($candidate.deterministicReleaseCodeHash | ascii_downcase)
+      )
+      and (
+        (.deterministicDeployer | ascii_downcase)
+        == ($candidate.deterministicDeployer | ascii_downcase)
+      )
+      and (
+        (.boardroomFactory | ascii_downcase)
+        == ($candidate.boardroomFactory | ascii_downcase)
+      )
+  ' "$PREVIOUS_ARTIFACT" >/dev/null; then
+    previous_deployment_block="$(jq -r '.deploymentBlock' "$PREVIOUS_ARTIFACT")"
+    if [[ "$previous_deployment_block" -lt "$deployment_block" ]]; then
+      deployment_block="$previous_deployment_block"
+    fi
+  fi
+fi
 
 artifact_tmp="$(mktemp "${ARTIFACT}.XXXXXX")"
 receipts_tmp="$(mktemp "${RECEIPTS}.XXXXXX")"

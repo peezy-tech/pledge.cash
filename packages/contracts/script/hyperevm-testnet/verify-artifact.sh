@@ -505,7 +505,10 @@ verify_receipt_manifest() {
     fi
   done < <(jq -c '.transactions[]' "$RECEIPTS")
 
-  expect_equal "deployment block" "$deployment_block" "$min_block"
+  # Idempotent reruns may retain an earlier, already verified scan boundary.
+  if [[ "$deployment_block" -gt "$min_block" ]]; then
+    fail "deploymentBlock $deployment_block is later than the earliest receipt block $min_block"
+  fi
   receipt_count="$(jq '.transactions | length' "$RECEIPTS")"
   echo "Verified $receipt_count live deployment receipts."
 }

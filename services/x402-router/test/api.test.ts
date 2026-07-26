@@ -16,6 +16,7 @@ import { X402PaymentError } from "../src/x402/server";
 const payer = "0x00000000000000000000000000000000000000A1" as const;
 const recipient = "0x00000000000000000000000000000000000000A2" as const;
 const routerApplication = "x402-router.pledge.cash/v1";
+const routerPublicOrigin = "https://router.example";
 const routerGateway = "0x00000000000000000000000000000000000000A3" as const;
 const destinationUsdc = "0x00000000000000000000000000000000000000B1" as const;
 
@@ -139,6 +140,7 @@ function app(options: {
     webOrigin: "https://app.example",
     identity: {
       application: routerApplication,
+      publicOrigin: routerPublicOrigin,
       gateway: routerGateway,
       destinationUsdc,
     },
@@ -192,11 +194,17 @@ function paidRequest(error: X402PaymentError) {
 }
 
 describe("router API", () => {
-  test("reports the exact trusted router identity", async () => {
-    const status = await app().request("/v1/status");
+  test("reports the exact trusted router identity and browser origin", async () => {
+    const status = await app().request("/v1/status", {
+      headers: { Origin: "https://app.example" },
+    });
+    expect(status.headers.get("access-control-allow-origin")).toBe(
+      "https://app.example",
+    );
     await expect(status.json()).resolves.toMatchObject({
       routerIdentity: {
         application: routerApplication,
+        publicOrigin: routerPublicOrigin,
         gateway: routerGateway,
         destinationUsdc,
       },

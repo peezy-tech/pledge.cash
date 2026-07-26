@@ -231,6 +231,7 @@ export async function startX402Router(
     webOrigin: config.webOrigin,
     identity: {
       application: config.intentDomain.application,
+      publicOrigin: config.publicOrigin,
       gateway: config.intentDomain.gateway,
       destinationUsdc: config.hyperevm.destinationUsdc,
     },
