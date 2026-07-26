@@ -71,9 +71,20 @@ jobs:
           fi
 
           if [[ "$configured" -eq 4 ]]; then
+            router_api_url="$(
+              bun -e '
+                import { getX402RouterConfig } from "./apps/web/src/lib/x402-router.ts";
+                const config = getX402RouterConfig(process.env);
+                if (!config) {
+                  console.error("Configured VITE_X402_ROUTER_* values are invalid.");
+                  process.exit(1);
+                }
+                console.log(config.baseUrl);
+              '
+            )"
             readiness="$(
               curl --fail --silent --show-error --retry 3 --retry-all-errors \
-                "${VITE_X402_ROUTER_API_URL%/}/health/ready"
+                "${router_api_url}/health/ready"
             )"
             jq -e '.ready == true and .acceptingQuotes == true' <<<"$readiness" >/dev/null
           fi

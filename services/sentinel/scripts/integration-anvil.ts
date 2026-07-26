@@ -130,7 +130,7 @@ try {
     DATABASE_URL: tempDb.databaseUrl,
     SENTINEL_CHAIN_IDS: String(chainId),
     SENTINEL_HARNESS: "none",
-    SENTINEL_MAX_BLOCK_RANGE: "100000",
+    SENTINEL_MAX_BLOCK_RANGE: "1000",
     SENTINEL_PORT: String(sentinelPort),
     SENTINEL_RPC_URL_31337: rpcUrl,
     SENTINEL_WEB_ORIGIN: "https://example.invalid",

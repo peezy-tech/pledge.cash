@@ -8,7 +8,7 @@
     "build": "forge build",
     "deploy:hyperevm-testnet": "BROADCAST=1 script/hyperevm-testnet/deploy.sh && bun --cwd ../sdk generate",
     "deploy:monad-testnet": "BROADCAST=1 script/monad-testnet/deploy.sh && bun --cwd ../sdk generate",
-    "deploy:testnets": "bun run deploy:hyperevm-testnet && bun run deploy:monad-testnet",
+    "deploy:testnets": "BROADCAST=1 script/hyperevm-testnet/deploy.sh && PLEDGE_CASH_ALLOW_998_DEPLOYMENT_OUTPUTS=1 BROADCAST=1 script/monad-testnet/deploy.sh && bun --cwd ../sdk generate",
     "format": "forge fmt",
     "format:check": "forge fmt --check",
     "scenario:local-seed:dry-run": "forge script script/SeedLocal.s.sol:SeedLocal --rpc-url ${LOCAL_RPC_URL:-local} -vvv",

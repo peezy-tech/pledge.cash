@@ -18,14 +18,54 @@ fail() {
 [[ -f "$BROADCAST_FILE" ]] || fail "missing Foundry broadcast record $BROADCAST_FILE"
 
 jq -e '
-  .receipts
-  | type == "array"
-    and length > 0
-    and all(
-      (.transactionHash | type == "string" and test("^0x[0-9a-fA-F]{64}$"))
-      and (.blockNumber | type == "string" and test("^0x[0-9a-fA-F]+$"))
-      and (.status | ascii_downcase == "0x1")
+  (.receipts | type == "array" and length > 0)
+  and (.transactions | type == "array")
+  and ((.transactions | length) == (.receipts | length))
+  and all(
+    .receipts[];
+    (.transactionHash | type == "string" and test("^0x[0-9a-fA-F]{64}$"))
+    and (.blockNumber | type == "string" and test("^0x[0-9a-fA-F]+$"))
+    and (.status | type == "string" and ascii_downcase == "0x1")
+    and (.gasUsed | type == "string" and test("^0x[0-9a-fA-F]+$"))
+    and (
+      .contractAddress == null
+      or (.contractAddress | type == "string" and test("^0x[0-9a-fA-F]{40}$"))
     )
+  )
+  and all(
+    .transactions[];
+    (.hash | type == "string" and test("^0x[0-9a-fA-F]{64}$"))
+    and (.transaction | type == "object")
+    and (.transaction.from | type == "string" and test("^0x[0-9a-fA-F]{40}$"))
+    and (
+      .transaction.to == null
+      or (.transaction.to | type == "string" and test("^0x[0-9a-fA-F]{40}$"))
+    )
+    and (.transaction.input | type == "string" and test("^0x([0-9a-fA-F]{2})*$"))
+    and (.transaction.value | type == "string" and test("^0x[0-9a-fA-F]+$"))
+  )
+  and (
+    . as $broadcast
+    | all(
+      $broadcast.receipts[];
+      .transactionHash as $receiptHash
+      | ([
+          $broadcast.transactions[]
+          | select((.hash | ascii_downcase) == ($receiptHash | ascii_downcase))
+        ] | length) == 1
+    )
+  )
+  and (
+    . as $broadcast
+    | all(
+      $broadcast.transactions[];
+      .hash as $transactionHash
+      | ([
+          $broadcast.receipts[]
+          | select((.transactionHash | ascii_downcase) == ($transactionHash | ascii_downcase))
+        ] | length) == 1
+    )
+  )
 ' "$BROADCAST_FILE" >/dev/null || fail "Foundry broadcast record has missing or unsuccessful receipts"
 
 deployment_block=""
@@ -40,8 +80,9 @@ done < <(jq -r '.receipts[].blockNumber' "$BROADCAST_FILE")
 
 artifact_tmp="$(mktemp "${ARTIFACT}.XXXXXX")"
 receipts_tmp="$(mktemp "${RECEIPTS}.XXXXXX")"
+transactions_tmp="$(mktemp "${RECEIPTS}.transactions.XXXXXX")"
 cleanup() {
-  rm -f "$artifact_tmp" "$receipts_tmp"
+  rm -f "$artifact_tmp" "$receipts_tmp" "$transactions_tmp"
 }
 trap cleanup EXIT
 
@@ -51,27 +92,49 @@ jq \
   '.sourceCommit = $sourceCommit | .deploymentBlock = $deploymentBlock' \
   "$ARTIFACT" >"$artifact_tmp"
 
-jq \
+: >"$transactions_tmp"
+while IFS= read -r transaction; do
+  input="$(printf '%s' "$transaction" | jq -r '.input')"
+  input_hash="$(cast keccak "$input")" || fail "could not hash broadcast transaction calldata"
+  printf '%s' "$transaction" \
+    | jq -c --arg inputHash "$input_hash" 'del(.input) | .inputHash = $inputHash' \
+    >>"$transactions_tmp"
+done < <(
+  jq -c '
+    . as $broadcast
+    | $broadcast.receipts[] as $receipt
+    | (
+        $broadcast.transactions[]
+        | select((.hash | ascii_downcase) == ($receipt.transactionHash | ascii_downcase))
+      ) as $transaction
+    | {
+        transactionHash: $receipt.transactionHash,
+        blockNumber: $receipt.blockNumber,
+        status: $receipt.status,
+        gasUsed: $receipt.gasUsed,
+        contractAddress: $receipt.contractAddress,
+        from: $transaction.transaction.from,
+        to: $transaction.transaction.to,
+        input: $transaction.transaction.input,
+        value: $transaction.transaction.value
+      }
+  ' "$BROADCAST_FILE"
+)
+
+jq -s \
   --argjson chainId "$CHAIN_ID" \
   --arg sourceCommit "$SOURCE_COMMIT" \
   '{
-    schemaVersion: 1,
+    schemaVersion: 2,
     chainId: $chainId,
     sourceCommit: $sourceCommit,
-    transactions: [
-      .receipts[] | {
-        transactionHash,
-        blockNumber,
-        status,
-        gasUsed,
-        contractAddress
-      }
-    ]
+    transactions: .
   }' \
-  "$BROADCAST_FILE" >"$receipts_tmp"
+  "$transactions_tmp" >"$receipts_tmp"
 
 mv "$artifact_tmp" "$ARTIFACT"
 mv "$receipts_tmp" "$RECEIPTS"
+rm -f "$transactions_tmp"
 trap - EXIT
 
 echo "Recorded deployment block $deployment_block and $(jq '.transactions | length' "$RECEIPTS") successful receipts."

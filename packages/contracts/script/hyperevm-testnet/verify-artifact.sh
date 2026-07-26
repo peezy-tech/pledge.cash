@@ -104,20 +104,39 @@ require_code_hash() {
 }
 
 call_address() {
-  cast_retry cast call --rpc-url "$RPC_URL" "$1" "$2" | first_token
+  local address="$1"
+  local signature="$2"
+  shift 2
+  cast_retry cast call --rpc-url "$RPC_URL" "$address" "$signature" "$@" | first_token
 }
 
 call_uint() {
   cast_retry cast call --rpc-url "$RPC_URL" "$1" "$2" | first_token
 }
 
+call_hash() {
+  cast_retry cast call --rpc-url "$RPC_URL" "$1" "$2" "$3" | first_token
+}
+
 call_bool() {
   cast_retry cast call --rpc-url "$RPC_URL" "$1" "$2" "$3" | first_token
 }
 
-creation_code_hash() {
+contract_creation_code() {
   local bytecode
   bytecode="$(forge inspect "$1" bytecode)" || fail "could not reproduce creation bytecode for $1"
+  [[ "$bytecode" =~ ^0x([0-9a-fA-F]{2})+$ ]] || fail "invalid locally compiled creation bytecode for $1"
+  printf '%s\n' "$bytecode"
+}
+
+creation_code_hash() {
+  cast keccak "$(contract_creation_code "$1")"
+}
+
+runtime_code_hash() {
+  local bytecode
+  bytecode="$(forge inspect "$1" deployedBytecode)" || fail "could not reproduce runtime bytecode for $1"
+  [[ "$bytecode" =~ ^0x([0-9a-fA-F]{2})+$ ]] || fail "invalid locally compiled runtime bytecode for $1"
   cast keccak "$bytecode"
 }
 
@@ -179,32 +198,271 @@ local_release_code_hash() {
     "$boardroom_architecture"
 }
 
+verify_deterministic_deployer_provenance() {
+  local broadcaster owner create2_factory deterministic_deployer
+  local creation_code constructor_args init_code init_code_hash salt expected_deployer
+  local expected_runtime_hash live_code live_runtime_hash
+
+  broadcaster="$(field deployer)"
+  owner="$(field deterministicDeployerOwner)"
+  create2_factory="$(field create2Factory)"
+  deterministic_deployer="$(field deterministicDeployer)"
+  expect_address_equal "deterministic deployer broadcaster" "$owner" "$broadcaster"
+
+  creation_code="$(contract_creation_code PledgeCashDeterministicDeployer)"
+  constructor_args="$(cast abi-encode "f(address)" "$owner")" \
+    || fail "could not encode PledgeCashDeterministicDeployer constructor"
+  init_code="${creation_code}${constructor_args#0x}"
+  init_code_hash="$(cast keccak "$init_code")"
+  salt="$(cast keccak "pledge.cash.deterministic.v1.PledgeCashDeterministicDeployer")"
+  expected_deployer="$(
+    cast create2 \
+      --deployer "$create2_factory" \
+      --salt "$salt" \
+      --init-code-hash "$init_code_hash"
+  )" || fail "could not reproduce the deterministic deployer address"
+  expect_address_equal \
+    "locally reproduced PledgeCashDeterministicDeployer address" \
+    "$expected_deployer" \
+    "$deterministic_deployer"
+
+  expected_runtime_hash="$(runtime_code_hash PledgeCashDeterministicDeployer)"
+  require_field deterministicDeployerCodeHash
+  expect_hash_equal \
+    "locally reproduced PledgeCashDeterministicDeployer artifact code hash" \
+    "$expected_runtime_hash" \
+    "$(field deterministicDeployerCodeHash)"
+  live_code="$(cast_retry cast code --rpc-url "$RPC_URL" "$deterministic_deployer")"
+  [[ "$live_code" != "0x" ]] || fail "PledgeCashDeterministicDeployer has no code at $deterministic_deployer"
+  live_runtime_hash="$(cast keccak "$live_code")"
+  expect_hash_equal \
+    "locally reproduced PledgeCashDeterministicDeployer live code hash" \
+    "$expected_runtime_hash" \
+    "$live_runtime_hash"
+}
+
+verify_release_deployment() {
+  local label="$1"
+  local contract_name="$2"
+  local artifact_field="$3"
+  local constructor_signature="$4"
+  shift 4
+
+  local creation_code creation_code_hash constructor_args init_code init_code_hash salt
+  local deterministic_deployer live_init_code_hash predicted_address expected_calldata expected_input_hash
+  local broadcaster_lower deterministic_deployer_lower transaction_count
+
+  creation_code="$(contract_creation_code "$contract_name")"
+  creation_code_hash="$(cast keccak "$creation_code")"
+  salt="$(
+    encoded_hash \
+      "f(string,string,bytes32)" \
+      "pledge.cash.deterministic.v5" \
+      "$label" \
+      "$creation_code_hash"
+  )"
+
+  constructor_args=""
+  if [[ -n "$constructor_signature" ]]; then
+    constructor_args="$(cast abi-encode "$constructor_signature" "$@")" \
+      || fail "could not encode $label constructor"
+  fi
+  init_code="${creation_code}${constructor_args#0x}"
+  init_code_hash="$(cast keccak "$init_code")"
+
+  deterministic_deployer="$(field deterministicDeployer)"
+  live_init_code_hash="$(
+    call_hash \
+      "$deterministic_deployer" \
+      "initCodeHashForSalt(bytes32)(bytes32)" \
+      "$salt"
+  )"
+  expect_hash_equal "$label deterministic init-code hash" "$init_code_hash" "$live_init_code_hash"
+
+  predicted_address="$(
+    call_address \
+      "$deterministic_deployer" \
+      "predict(bytes32)(address)" \
+      "$salt"
+  )"
+  expect_address_equal "$label deterministic address" "$(field "$artifact_field")" "$predicted_address"
+
+  expected_calldata="$(cast calldata "deploy(bytes32,bytes)" "$salt" "$init_code")" \
+    || fail "could not reproduce $label deployment calldata"
+  expected_input_hash="$(cast keccak "$expected_calldata" | lower)"
+  broadcaster_lower="$(field deployer | lower)"
+  deterministic_deployer_lower="$(printf '%s' "$deterministic_deployer" | lower)"
+  transaction_count="$(
+    jq -r \
+      --arg from "$broadcaster_lower" \
+      --arg to "$deterministic_deployer_lower" \
+      --arg inputHash "$expected_input_hash" \
+      '[
+        .transactions[]
+        | select(
+            (.from | ascii_downcase) == $from
+            and .to != null
+            and (.to | ascii_downcase) == $to
+            and (.inputHash | ascii_downcase) == $inputHash
+            and (.value | ascii_downcase) == "0x0"
+          )
+      ] | length' \
+      "$RECEIPTS"
+  )"
+  expect_equal "$label source-bound deployment transaction count" "1" "$transaction_count"
+}
+
+verify_release_provenance() {
+  local bootstrap_deployer
+  bootstrap_deployer="$(field deployer)"
+
+  verify_deterministic_deployer_provenance
+  verify_release_deployment \
+    "BoardroomPolicyRegistry" \
+    "BoardroomPolicyRegistry" \
+    boardroomPolicyRegistry \
+    "f(address)" \
+    "$bootstrap_deployer"
+  verify_release_deployment \
+    "AssetPolicy" \
+    "AssetPolicy" \
+    assetPolicy \
+    "f(address,address)" \
+    "$bootstrap_deployer" \
+    "$(field wrappedNative)"
+  verify_release_deployment \
+    "BoardroomGovernanceLogic" \
+    "BoardroomGovernanceLogic" \
+    boardroomGovernanceLogic \
+    ""
+  verify_release_deployment \
+    "BoardroomRedemptionPayout" \
+    "BoardroomRedemptionPayout" \
+    boardroomRedemptionPayout \
+    ""
+  verify_release_deployment \
+    "BoardroomFactory" \
+    "BoardroomFactory" \
+    boardroomFactory \
+    "f(address,address,address,address)" \
+    "$(field boardroomPolicyRegistry)" \
+    "$(field wrappedNative)" \
+    "$(field boardroomRedemptionPayout)" \
+    "$(field boardroomGovernanceLogic)"
+  verify_release_deployment \
+    "ProtocolFeeRouter" \
+    "ProtocolFeeRouter" \
+    protocolFeeRouter \
+    "f(address,address)" \
+    "$bootstrap_deployer" \
+    "$bootstrap_deployer"
+  verify_release_deployment \
+    "TokenGrantFactory" \
+    "TokenGrantFactory" \
+    tokenGrantFactory \
+    "f(address,address)" \
+    "$bootstrap_deployer" \
+    "$(field boardroomFactory)"
+  verify_release_deployment \
+    "AmmFactory" \
+    "AmmFactory" \
+    ammFactory \
+    "f(address,address)" \
+    "$bootstrap_deployer" \
+    "$(field boardroomFactory)"
+  verify_release_deployment \
+    "AmmRouter" \
+    "AmmRouter" \
+    ammRouter \
+    "f(address,address)" \
+    "$(field ammFactory)" \
+    "$(field wrappedNative)"
+  verify_release_deployment \
+    "LockedLiquidityFactory" \
+    "LockedLiquidityFactory" \
+    lockedLiquidityFactory \
+    "f(address,address)" \
+    "$(field ammRouter)" \
+    "$(field boardroomFactory)"
+  verify_release_deployment \
+    "DistributionFactory" \
+    "DistributionFactory" \
+    distributionFactory \
+    "f(address,address)" \
+    "$(field lockedLiquidityFactory)" \
+    "$(field tokenGrantFactory)"
+  verify_release_deployment \
+    "BoardroomRewardsFactory" \
+    "BoardroomRewardsFactory" \
+    boardroomRewardsFactory \
+    "f(address)" \
+    "$(field boardroomFactory)"
+  verify_release_deployment \
+    "BondMarketFactory" \
+    "BondMarketFactory" \
+    bondMarketFactory \
+    "f(address,address)" \
+    "$(field ammFactory)" \
+    "$(field boardroomFactory)"
+}
+
 normalized_receipt() {
   jq -c '{
     transactionHash: (.transactionHash | ascii_downcase),
     blockNumber: (.blockNumber | ascii_downcase),
     status: (.status | ascii_downcase),
+    gasUsed: (.gasUsed | ascii_downcase),
     contractAddress: (
       if .contractAddress == null then null else (.contractAddress | ascii_downcase) end
     )
   }'
 }
 
+normalized_transaction() {
+  local input_hash="$1"
+  jq -c --arg inputHash "$input_hash" '{
+    transactionHash: ((.transactionHash // .hash) | ascii_downcase),
+    from: (.from | ascii_downcase),
+    to: (if .to == null then null else (.to | ascii_downcase) end),
+    inputHash: ($inputHash | ascii_downcase),
+    value: (.value | ascii_downcase)
+  }'
+}
+
 verify_receipt_manifest() {
   local deployment_block="$1"
   local source_commit="$2"
-  local manifest_chain manifest_commit receipt_count min_block
-  local row transaction_hash block_hex block_decimal expected live actual
+  local manifest_chain manifest_commit manifest_deployer receipt_count min_block
+  local row transaction_hash block_hex block_decimal expected_receipt live_receipt actual_receipt
+  local expected_input_hash expected_transaction live_transaction live_input live_input_hash actual_transaction
 
   [[ -f "$RECEIPTS" ]] || fail "missing deployment receipt manifest $RECEIPTS"
   jq -e '
-    .schemaVersion == 1
+    .schemaVersion == 2
+    and (.chainId | type == "number")
+    and (.sourceCommit | type == "string" and test("^[0-9a-f]{40}$"))
     and (.transactions | type == "array" and length > 0)
     and all(
       .transactions[];
       (.transactionHash | type == "string" and test("^0x[0-9a-fA-F]{64}$"))
       and (.blockNumber | type == "string" and test("^0x[0-9a-fA-F]+$"))
-      and (.status | ascii_downcase == "0x1")
+      and (.status | type == "string" and ascii_downcase == "0x1")
+      and (.gasUsed | type == "string" and test("^0x[0-9a-fA-F]+$"))
+      and (
+        .contractAddress == null
+        or (.contractAddress | type == "string" and test("^0x[0-9a-fA-F]{40}$"))
+      )
+      and (.from | type == "string" and test("^0x[0-9a-fA-F]{40}$"))
+      and (
+        .to == null
+        or (.to | type == "string" and test("^0x[0-9a-fA-F]{40}$"))
+      )
+      and (.inputHash | type == "string" and test("^0x[0-9a-fA-F]{64}$"))
+      and (.value | type == "string" and test("^0x[0-9a-fA-F]+$"))
+    )
+    and (
+      [.transactions[].transactionHash | ascii_downcase] as $hashes
+      | ($hashes | unique | length) == ($hashes | length)
     )
   ' "$RECEIPTS" >/dev/null || fail "deployment receipt manifest is malformed or contains a failed transaction"
 
@@ -212,6 +470,11 @@ verify_receipt_manifest() {
   manifest_commit="$(jq -r '.sourceCommit' "$RECEIPTS")"
   expect_equal "receipt manifest chain id" "$(field chainId)" "$manifest_chain"
   expect_equal "receipt manifest source commit" "$source_commit" "$manifest_commit"
+  manifest_deployer="$(field deployer | lower)"
+  jq -e \
+    --arg deployer "$manifest_deployer" \
+    'all(.transactions[]; (.from | ascii_downcase) == $deployer)' \
+    "$RECEIPTS" >/dev/null || fail "deployment receipt manifest contains a transaction from another sender"
 
   min_block=""
   while IFS= read -r row; do
@@ -222,11 +485,23 @@ verify_receipt_manifest() {
       min_block="$block_decimal"
     fi
 
-    expected="$(printf '%s' "$row" | normalized_receipt)"
-    live="$(cast_retry cast rpc --rpc-url "$RPC_URL" eth_getTransactionReceipt "$transaction_hash")"
-    actual="$(printf '%s' "$live" | normalized_receipt)"
-    if [[ "$expected" != "$actual" ]]; then
+    expected_receipt="$(printf '%s' "$row" | normalized_receipt)"
+    live_receipt="$(cast_retry cast rpc --rpc-url "$RPC_URL" eth_getTransactionReceipt "$transaction_hash")"
+    [[ "$live_receipt" != "null" ]] || fail "missing live receipt for $transaction_hash"
+    actual_receipt="$(printf '%s' "$live_receipt" | normalized_receipt)"
+    if [[ "$expected_receipt" != "$actual_receipt" ]]; then
       fail "live receipt mismatch for $transaction_hash"
+    fi
+
+    expected_input_hash="$(printf '%s' "$row" | jq -r '.inputHash')"
+    expected_transaction="$(printf '%s' "$row" | normalized_transaction "$expected_input_hash")"
+    live_transaction="$(cast_retry cast rpc --rpc-url "$RPC_URL" eth_getTransactionByHash "$transaction_hash")"
+    [[ "$live_transaction" != "null" ]] || fail "missing live transaction for $transaction_hash"
+    live_input="$(printf '%s' "$live_transaction" | jq -r '.input')"
+    live_input_hash="$(cast keccak "$live_input")" || fail "could not hash live calldata for $transaction_hash"
+    actual_transaction="$(printf '%s' "$live_transaction" | normalized_transaction "$live_input_hash")"
+    if [[ "$expected_transaction" != "$actual_transaction" ]]; then
+      fail "live sender, target, calldata, or value mismatch for $transaction_hash"
     fi
   done < <(jq -c '.transactions[]' "$RECEIPTS")
 
@@ -251,7 +526,7 @@ expect_equal "chain id" "$(field chainId)" "$chain_id"
 
 for required in \
   sourceCommit deterministicDeployment deterministicDeploymentVersion deterministicReleaseCodeHash \
-  create2Factory deterministicDeployer deterministicDeployerOwner \
+  deployer create2Factory deterministicDeployer deterministicDeployerOwner \
   protocolGovernance protocolTreasury protocolFeeRouter protocolFeeRouterOwner protocolFeeRouterRecipient \
   boardroomPolicyRegistry policyRegistryOwner assetPolicy assetPolicyOwner boardroomFactory \
   boardroomGovernanceLogic boardroomRedemptionPayout boardroomLogic \
@@ -286,6 +561,7 @@ expect_hash_equal \
   "locally reproduced deterministic release code hash" \
   "$expected_release_code_hash" \
   "$(field deterministicReleaseCodeHash)"
+verify_release_provenance
 
 require_code "CREATE2 factory" "$(field create2Factory)"
 require_code "Wrapped native" "$(field wrappedNative)"
