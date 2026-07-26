@@ -87,6 +87,14 @@ jobs:
                 "${router_api_url}/health/ready"
             )"
             jq -e '.ready == true and .acceptingQuotes == true' <<<"$readiness" >/dev/null
+            status="$(
+              curl --fail --silent --show-error --retry 3 --retry-all-errors \
+                "${router_api_url}/v1/status"
+            )"
+            jq -e '
+              .supportedActions
+              | type == "array" and index("recurring_support") != null
+            ' <<<"$status" >/dev/null
           fi
 
       - name: Build site
