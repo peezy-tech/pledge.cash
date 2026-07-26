@@ -12,6 +12,11 @@ const baseEnv = {
 };
 
 describe("Sentinel config", () => {
+  test("uses an RPC-safe watcher range and rejects wider windows", () => {
+    expect(loadConfig(baseEnv).maxBlockRange).toBe(1_000);
+    expect(() => loadConfig({ ...baseEnv, SENTINEL_MAX_BLOCK_RANGE: "1001" })).toThrow();
+  });
+
   test("loads Better Auth and complete optional social provider credentials", () => {
     const config = loadConfig({
       ...baseEnv,

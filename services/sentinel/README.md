@@ -24,7 +24,7 @@ Copy `.env.example` and set values for your environment.
 | `SENTINEL_RPC_URL_<chainId>` | yes | RPC URL for each configured chain. |
 | `SENTINEL_CONFIRMATIONS_<chainId>` | no | Confirmation lag per chain, default `5`, local chain `31337` default `0`. |
 | `SENTINEL_POLL_INTERVAL_MS` | no | Watcher loop delay, default `12000`. |
-| `SENTINEL_MAX_BLOCK_RANGE` | no | Maximum block span per watcher pass, default `2000`. |
+| `SENTINEL_MAX_BLOCK_RANGE` | no | Maximum block span per watcher pass, capped at and defaulting to `1000` for the public HyperEVM testnet RPC. |
 | `SENTINEL_EXPLORER_URL_<chainId>` | no | Explorer base URL used in rendered notifications. |
 | `BETTER_AUTH_SECRET` | yes | Unique 32+ character secret used to protect self-hosted auth state and tokens. |
 | `BETTER_AUTH_URL` | yes | Public Sentinel API origin. Better Auth is mounted at `/auth`. |

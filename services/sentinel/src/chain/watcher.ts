@@ -1923,10 +1923,10 @@ function safeHeadFor(latestBlock: bigint, confirmations: number): bigint {
 function deploymentStartBlock(deployment: PledgeCashDeployment): bigint {
   const raw = deployment as PledgeCashDeployment & {
     blockNumber?: bigint | number | string;
-    deploymentBlock?: bigint | number | string;
     startBlock?: bigint | number | string;
   };
-  return blockValue(raw.startBlock ?? raw.deploymentBlock ?? raw.blockNumber) ?? 0n;
+  const firstBlock = blockValue(raw.deploymentBlock ?? raw.startBlock ?? raw.blockNumber);
+  return firstBlock === undefined || firstBlock === 0n ? 0n : firstBlock - 1n;
 }
 
 function blockValue(value: unknown): bigint | undefined {

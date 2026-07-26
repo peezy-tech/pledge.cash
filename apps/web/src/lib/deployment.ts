@@ -12,6 +12,7 @@ export type { BoardroomControlReleaseSupport };
 const STRING_DEPLOYMENT_FIELDS = [
   "status",
   "reason",
+  "sourceCommit",
   "deterministicDeploymentVersion",
   "deterministicReleaseCodeHash",
   "boardroomStatus",
@@ -28,11 +29,19 @@ const STRING_DEPLOYMENT_FIELDS = [
   "boardroomRedemptionPayoutCodeHash",
   "boardroomLogicCodeHash",
   "tokenGrantFactoryCodeHash",
+  "tokenGrantLogicCodeHash",
   "ammFactoryCodeHash",
+  "ammPoolImplementationCodeHash",
   "ammRouterCodeHash",
   "lockedLiquidityFactoryCodeHash",
+  "lockedLiquidityLogicCodeHash",
   "distributionFactoryCodeHash",
+  "fixedPriceSaleLogicCodeHash",
+  "dutchAuctionLogicCodeHash",
+  "migratingBondingCurveLogicCodeHash",
+  "merkleAirdropLogicCodeHash",
   "boardroomRewardsFactoryCodeHash",
+  "boardroomRewardsLogicCodeHash",
   "bondMarketFactoryCodeHash",
   "bondMarketLogicCodeHash",
   "wrappedNativeCodeHash",
@@ -52,13 +61,20 @@ const ADDRESS_DEPLOYMENT_FIELDS = [
   "assetPolicy",
   "protocolFeeRouter",
   "distributionFactory",
+  "fixedPriceSaleLogic",
+  "dutchAuctionLogic",
+  "migratingBondingCurveLogic",
+  "merkleAirdropLogic",
   "boardroomRewardsFactory",
+  "boardroomRewardsLogic",
   "bondMarketFactory",
   "bondMarketLogic",
   "ammFactory",
+  "ammPoolImplementation",
   "ammProtocolFeeRecipient",
   "ammRouter",
   "lockedLiquidityFactory",
+  "lockedLiquidityLogic",
   "tokenGrantFactory",
   "tokenGrantLogic",
   "wrappedNative",
@@ -96,7 +112,7 @@ const BOOLEAN_DEPLOYMENT_FIELDS = [
   "assetBondMarketSpenderAllowed",
   "assetLockedLiquiditySpenderAllowed",
 ] as const;
-const BIGINT_DEPLOYMENT_FIELDS = ["creationFee", "deploymentTimestamp"] as const;
+const BIGINT_DEPLOYMENT_FIELDS = ["creationFee", "deploymentBlock", "deploymentTimestamp"] as const;
 const JSON_PRIMITIVE_TOKEN_PATTERN = '"([^"\\\\]|\\\\.)*"|-?\\d+|true|false|null';
 export function deploymentText(deployment: PledgeCashDeployment | undefined): string {
   if (!deployment) return "{}";

@@ -32,6 +32,9 @@ RPC_URL="${MONAD_TESTNET_RPC_URL:-https://testnet-rpc.monad.xyz}"
 BROADCAST="${BROADCAST:-0}"
 GAS_ESTIMATE_MULTIPLIER="${MONAD_GAS_ESTIMATE_MULTIPLIER:-100}"
 CREATE2_FACTORY_ADDRESS="${CREATE2_FACTORY_ADDRESS:-0x4e59b44847b379578588920cA78FbF26c0B4956C}"
+DEPLOYMENT_ARTIFACT_PATH="deployments/10143.candidate.json"
+DEPLOYMENT_RECEIPTS_PATH="deployments/10143.receipts.candidate.json"
+BROADCAST_FILE="broadcast/Deploy.s.sol/10143/run-latest.json"
 export CREATE2_FACTORY_ADDRESS
 
 if [[ -z "${PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER:-}" ]]; then
@@ -55,6 +58,16 @@ require_address WRAPPED_NATIVE_ADDRESS "$WRAPPED_NATIVE_ADDRESS"
 
 if [[ -z "${MONAD_TESTNET_PRIVATE_KEY:-}" ]]; then
   echo "Set MONAD_TESTNET_PRIVATE_KEY or PRIVATE_KEY before dry-running or broadcasting." >&2
+  exit 1
+fi
+
+SOURCE_COMMIT="$(git -C "$REPO_DIR" rev-parse HEAD)"
+if [[ ! "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Could not resolve an exact source commit." >&2
+  exit 1
+fi
+if [[ -n "$(git -C "$REPO_DIR" status --porcelain --untracked-files=normal)" ]]; then
+  echo "Refusing to deploy from a dirty worktree." >&2
   exit 1
 fi
 
@@ -84,7 +97,7 @@ args=(
 
 if [[ "$BROADCAST" == "1" ]]; then
   export WRITE_DEPLOYMENT_STATE=true
-  export DEPLOYMENT_ARTIFACT_PATH="deployments/10143.candidate.json"
+  export DEPLOYMENT_ARTIFACT_PATH
   args+=(--broadcast --slow)
 else
   export WRITE_DEPLOYMENT_STATE=false
@@ -93,12 +106,20 @@ fi
 
 cd "$ROOT_DIR"
 if [[ "$BROADCAST" == "1" ]]; then
-  rm -f "$DEPLOYMENT_ARTIFACT_PATH"
+  rm -f "$DEPLOYMENT_ARTIFACT_PATH" "$DEPLOYMENT_RECEIPTS_PATH"
 fi
 "${args[@]}"
 
 if [[ "$BROADCAST" == "1" ]]; then
-  ARTIFACT="$DEPLOYMENT_ARTIFACT_PATH" RPC_URL="$RPC_URL" REQUIRE_DEPLOYMENT=1 \
+  CHAIN_ID="$CHAIN_ID" \
+    ARTIFACT="$DEPLOYMENT_ARTIFACT_PATH" \
+    RECEIPTS="$DEPLOYMENT_RECEIPTS_PATH" \
+    BROADCAST_FILE="$BROADCAST_FILE" \
+    SOURCE_COMMIT="$SOURCE_COMMIT" \
+    script/finalize-broadcast-artifact.sh
+  ARTIFACT="$DEPLOYMENT_ARTIFACT_PATH" RECEIPTS="$DEPLOYMENT_RECEIPTS_PATH" \
+    RPC_URL="$RPC_URL" REQUIRE_DEPLOYMENT=1 \
     script/monad-testnet/verify-artifact.sh
+  mv "$DEPLOYMENT_RECEIPTS_PATH" deployments/10143.receipts.json
   mv "$DEPLOYMENT_ARTIFACT_PATH" deployments/10143.json
 fi

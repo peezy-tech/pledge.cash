@@ -22,7 +22,7 @@ export const sentinelEnvSchema = z
     SENTINEL_RPC_URL_10143: z.string().url().default("https://testnet-rpc.monad.xyz"),
     SENTINEL_RPC_URL_31337: optionalStringSchema,
     SENTINEL_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(12_000),
-    SENTINEL_MAX_BLOCK_RANGE: z.coerce.number().int().positive().default(2_000),
+    SENTINEL_MAX_BLOCK_RANGE: z.coerce.number().int().positive().max(1_000).default(1_000),
     BETTER_AUTH_SECRET: z.string().min(32),
     BETTER_AUTH_URL: z.string().url(),
     GITHUB_CLIENT_ID: optionalStringSchema,

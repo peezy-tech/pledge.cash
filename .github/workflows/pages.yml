@@ -47,9 +47,44 @@ jobs:
           SENTINEL_API_URL: ${{ vars.VITE_SENTINEL_API_URL }}
         run: curl --fail --silent --show-error --retry 3 --retry-all-errors "${SENTINEL_API_URL%/}/health"
 
+      - name: Verify configured x402 router
+        env:
+          VITE_X402_ROUTER_API_URL: ${{ vars.VITE_X402_ROUTER_API_URL }}
+          VITE_X402_ROUTER_APPLICATION: ${{ vars.VITE_X402_ROUTER_APPLICATION }}
+          VITE_X402_ROUTER_GATEWAY_ADDRESS: ${{ vars.VITE_X402_ROUTER_GATEWAY_ADDRESS }}
+          VITE_X402_ROUTER_HYPEREVM_USDC_ADDRESS: ${{ vars.VITE_X402_ROUTER_HYPEREVM_USDC_ADDRESS }}
+        run: |
+          configured=0
+          for variable in \
+            VITE_X402_ROUTER_API_URL \
+            VITE_X402_ROUTER_APPLICATION \
+            VITE_X402_ROUTER_GATEWAY_ADDRESS \
+            VITE_X402_ROUTER_HYPEREVM_USDC_ADDRESS; do
+            if [[ -n "${!variable}" ]]; then
+              configured=$((configured + 1))
+            fi
+          done
+
+          if [[ "$configured" -ne 0 && "$configured" -ne 4 ]]; then
+            echo "All four VITE_X402_ROUTER_* variables must be configured together." >&2
+            exit 1
+          fi
+
+          if [[ "$configured" -eq 4 ]]; then
+            readiness="$(
+              curl --fail --silent --show-error --retry 3 --retry-all-errors \
+                "${VITE_X402_ROUTER_API_URL%/}/health/ready"
+            )"
+            jq -e '.ready == true and .acceptingQuotes == true' <<<"$readiness" >/dev/null
+          fi
+
       - name: Build site
         env:
           VITE_SENTINEL_API_URL: ${{ vars.VITE_SENTINEL_API_URL }}
+          VITE_X402_ROUTER_API_URL: ${{ vars.VITE_X402_ROUTER_API_URL }}
+          VITE_X402_ROUTER_APPLICATION: ${{ vars.VITE_X402_ROUTER_APPLICATION }}
+          VITE_X402_ROUTER_GATEWAY_ADDRESS: ${{ vars.VITE_X402_ROUTER_GATEWAY_ADDRESS }}
+          VITE_X402_ROUTER_HYPEREVM_USDC_ADDRESS: ${{ vars.VITE_X402_ROUTER_HYPEREVM_USDC_ADDRESS }}
         run: bun --cwd apps/web build:pages
 
       - name: Verify Alerts return route

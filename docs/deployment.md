@@ -181,16 +181,21 @@ bun run deploy:testnets
 ```
 
 Broadcasts require the chain-specific private key or `PRIVATE_KEY`. The wrappers copy the chain-specific key into
-`PRIVATE_KEY` for Foundry. The Foundry script first writes a chain-specific `.candidate.json` artifact. The wrapper then
-verifies all live wiring, owners, policy state, and runtime code hashes through the target RPC. It promotes the candidate
-to the checked-in artifact path only if every check succeeds; a failed verification never overwrites the last published
-artifact.
+`PRIVATE_KEY` for Foundry and refuse a dirty source worktree. The Foundry script first writes a chain-specific
+`.candidate.json` artifact. The wrapper derives the first deployment block from Foundry's successful receipts, records
+the exact 40-character source commit, and writes a minimized `.receipts.candidate.json` evidence file without raw signed
+transactions. It then verifies every receipt against the live RPC together with all wiring, owners, policy state,
+locally reproduced release bytecode identity, and runtime code hashes. Both candidates are promoted to the checked-in
+artifact and receipt paths only if every check succeeds; failed verification never overwrites the last published
+evidence.
 
 ## Artifact Checks
 
 After a broadcast, verify each chain artifact contains:
 
 - `chainId`
+- `sourceCommit`
+- `deploymentBlock`
 - `deployer`
 - `deterministicDeployment`
 - `deterministicDeploymentVersion`
@@ -206,13 +211,20 @@ After a broadcast, verify each chain artifact contains:
 - `boardroomRedemptionPayout`
 - `boardroomLogic`
 - `distributionFactory`
+- `fixedPriceSaleLogic`
+- `dutchAuctionLogic`
+- `migratingBondingCurveLogic`
+- `merkleAirdropLogic`
 - `boardroomRewardsFactory`
+- `boardroomRewardsLogic`
 - `bondMarketFactory`
 - `bondMarketLogic`
 - `ammFactory`
+- `ammPoolImplementation`
 - `wrappedNative`
 - `ammRouter`
 - `lockedLiquidityFactory`
+- `lockedLiquidityLogic`
 - `protocolGovernance`
 - `protocolTreasury`
 - `policyRegistryOwner`
@@ -256,14 +268,26 @@ After a broadcast, verify each chain artifact contains:
 - `boardroomRedemptionPayoutCodeHash`
 - `boardroomLogicCodeHash`
 - `tokenGrantFactoryCodeHash`
+- `tokenGrantLogicCodeHash`
 - `ammFactoryCodeHash`
+- `ammPoolImplementationCodeHash`
 - `ammRouterCodeHash`
 - `lockedLiquidityFactoryCodeHash`
+- `lockedLiquidityLogicCodeHash`
 - `distributionFactoryCodeHash`
+- `fixedPriceSaleLogicCodeHash`
+- `dutchAuctionLogicCodeHash`
+- `migratingBondingCurveLogicCodeHash`
+- `merkleAirdropLogicCodeHash`
 - `boardroomRewardsFactoryCodeHash`
+- `boardroomRewardsLogicCodeHash`
 - `bondMarketFactoryCodeHash`
 - `bondMarketLogicCodeHash`
 - `wrappedNativeCodeHash`
+
+The adjacent `<chain-id>.receipts.json` manifest must identify the same chain and source commit, contain at least one
+successful transaction, and place its earliest live receipt at `deploymentBlock`. The deployment block is an inclusive
+discovery boundary: Sentinel begins its first log query at that block so events cannot be lost at the boundary.
 
 The five `*ModulePolicy` identity fields must be `true`. Unlike the corresponding mutable `*PolicyAllowed` status,
 module identity is permanent and remains true if an operator later disables new calls to that module.
@@ -281,7 +305,10 @@ liquidity.
 The verifier also requires `TokenGrantFactory.feeRecipient()` and `AmmFactory.protocolFeeRecipient()` to equal the
 artifact's `protocolFeeRouter`, requires that router's destination to equal `protocolTreasury`, and requires the AMM
 liquidity router and reservation manager to equal `AmmRouter` and `LockedLiquidityFactory` respectively. Every serialized
-runtime code hash is recomputed from live bytecode.
+runtime code hash is recomputed from live bytecode. Factory child implementations for grants, pools, locked liquidity,
+fixed-price sales, Dutch auctions, migrating curves, Merkle airdrops, rewards, bonds, and Boardroom control are serialized,
+wiring-checked, and code-hash checked. The aggregate deterministic release code hash is independently reproduced from
+the locally compiled creation bytecode before artifact promotion.
 
 For a partial artifact, keep the deployed subsystem fields and add the relevant pending status/reason fields for the
 missing subsystem.
