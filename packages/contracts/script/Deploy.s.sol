@@ -481,6 +481,7 @@ contract Deploy is Script {
         _serializePolicyState(json, state);
         _serializeOwnershipState(json, state);
         _serializeCodeHashes(json, state);
+        json.serialize("deploymentBlock", block.number);
         json.serialize("deploymentTimestamp", block.timestamp);
         output = json.serialize("deployer", state.deployer);
     }
@@ -503,14 +504,21 @@ contract Deploy is Script {
         json.serialize("boardroomControllerLogic", address(state.boardroomControllerLogic));
         json.serialize("boardroomMarketLogic", address(state.boardroomMarketLogic));
         json.serialize("distributionFactory", address(state.distributionFactory));
+        json.serialize("fixedPriceSaleLogic", state.distributionFactory.fixedPriceSaleLogic());
+        json.serialize("dutchAuctionLogic", state.distributionFactory.dutchAuctionLogic());
+        json.serialize("migratingBondingCurveLogic", state.distributionFactory.migratingBondingCurveLogic());
+        json.serialize("merkleAirdropLogic", state.distributionFactory.merkleAirdropLogic());
         json.serialize("boardroomRewardsFactory", address(state.boardroomRewardsFactory));
+        json.serialize("boardroomRewardsLogic", state.boardroomRewardsFactory.rewardsLogic());
         json.serialize("bondMarketFactory", address(state.bondMarketFactory));
         json.serialize("bondMarketLogic", state.bondMarketFactory.bondMarketLogic());
         json.serialize("ammFactory", address(state.ammFactory));
+        json.serialize("ammPoolImplementation", state.ammFactory.poolImplementation());
         json.serialize("ammProtocolFeeRecipient", state.ammFactory.protocolFeeRecipient());
         json.serialize("wrappedNative", state.wrappedNative);
         json.serialize("ammRouter", address(state.ammRouter));
         json.serialize("lockedLiquidityFactory", address(state.lockedLiquidityFactory));
+        json.serialize("lockedLiquidityLogic", state.lockedLiquidityFactory.lockedLiquidityLogic());
         json.serialize("tokenGrantFactory", address(state.tokenGrantFactory));
         json.serialize("tokenGrantLogic", state.tokenGrantFactory.tokenGrantLogic());
     }
@@ -604,11 +612,21 @@ contract Deploy is Script {
         json.serialize("boardroomControllerCodeHash", address(state.boardroomControllerLogic).codehash);
         json.serialize("boardroomMarketLogicCodeHash", address(state.boardroomMarketLogic).codehash);
         json.serialize("tokenGrantFactoryCodeHash", address(state.tokenGrantFactory).codehash);
+        json.serialize("tokenGrantLogicCodeHash", state.tokenGrantFactory.tokenGrantLogic().codehash);
         json.serialize("ammFactoryCodeHash", address(state.ammFactory).codehash);
+        json.serialize("ammPoolImplementationCodeHash", state.ammFactory.poolImplementation().codehash);
         json.serialize("ammRouterCodeHash", address(state.ammRouter).codehash);
         json.serialize("lockedLiquidityFactoryCodeHash", address(state.lockedLiquidityFactory).codehash);
+        json.serialize("lockedLiquidityLogicCodeHash", state.lockedLiquidityFactory.lockedLiquidityLogic().codehash);
         json.serialize("distributionFactoryCodeHash", address(state.distributionFactory).codehash);
+        json.serialize("fixedPriceSaleLogicCodeHash", state.distributionFactory.fixedPriceSaleLogic().codehash);
+        json.serialize("dutchAuctionLogicCodeHash", state.distributionFactory.dutchAuctionLogic().codehash);
+        json.serialize(
+            "migratingBondingCurveLogicCodeHash", state.distributionFactory.migratingBondingCurveLogic().codehash
+        );
+        json.serialize("merkleAirdropLogicCodeHash", state.distributionFactory.merkleAirdropLogic().codehash);
         json.serialize("boardroomRewardsFactoryCodeHash", address(state.boardroomRewardsFactory).codehash);
+        json.serialize("boardroomRewardsLogicCodeHash", state.boardroomRewardsFactory.rewardsLogic().codehash);
         json.serialize("bondMarketFactoryCodeHash", address(state.bondMarketFactory).codehash);
         json.serialize("bondMarketLogicCodeHash", state.bondMarketFactory.bondMarketLogic().codehash);
         json.serialize("wrappedNativeCodeHash", state.wrappedNative.codehash);

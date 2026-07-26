@@ -229,6 +229,8 @@ describe("runtime deployment artifacts", () => {
   test("preserves deterministic provenance and code hashes from runtime artifacts", () => {
     const deployment = parseDeployment(`{
       "chainId": 998,
+      "sourceCommit": "fd145b60a72fcd949d8c4000ad3f24311eec73c8",
+      "deploymentBlock": 59834000,
       "deterministicDeployment": true,
       "deterministicDeploymentVersion": "v2",
       "deterministicDeployer": "0x1000000000000000000000000000000000000001",
@@ -236,6 +238,8 @@ describe("runtime deployment artifacts", () => {
       "ammRouterCodeHash": "0xabc123"
     }`);
 
+    expect(deployment.sourceCommit).toBe("fd145b60a72fcd949d8c4000ad3f24311eec73c8");
+    expect(deployment.deploymentBlock).toBe(59834000n);
     expect(deployment.deterministicDeployment).toBe(true);
     expect(deployment.deterministicDeploymentVersion).toBe("v2");
     expect(deployment.deterministicDeployer).toBe("0x1000000000000000000000000000000000000001");

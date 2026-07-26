@@ -33,6 +33,7 @@ jobs:
           bun-version: 1.3.11
 
       - name: Setup Pages
+        id: pages
         uses: actions/configure-pages@v6
 
       - name: Install dependencies
@@ -47,9 +48,94 @@ jobs:
           SENTINEL_API_URL: ${{ vars.VITE_SENTINEL_API_URL }}
         run: curl --fail --silent --show-error --retry 3 --retry-all-errors "${SENTINEL_API_URL%/}/health"
 
+      - name: Verify configured x402 router
+        env:
+          VITE_X402_ROUTER_API_URL: ${{ vars.VITE_X402_ROUTER_API_URL }}
+          VITE_X402_ROUTER_APPLICATION: ${{ vars.VITE_X402_ROUTER_APPLICATION }}
+          VITE_X402_ROUTER_GATEWAY_ADDRESS: ${{ vars.VITE_X402_ROUTER_GATEWAY_ADDRESS }}
+          VITE_X402_ROUTER_HYPEREVM_USDC_ADDRESS: ${{ vars.VITE_X402_ROUTER_HYPEREVM_USDC_ADDRESS }}
+          PAGES_ORIGIN: ${{ steps.pages.outputs.origin }}
+        run: |
+          configured=0
+          for variable in \
+            VITE_X402_ROUTER_API_URL \
+            VITE_X402_ROUTER_APPLICATION \
+            VITE_X402_ROUTER_GATEWAY_ADDRESS \
+            VITE_X402_ROUTER_HYPEREVM_USDC_ADDRESS; do
+            if [[ -n "${!variable}" ]]; then
+              configured=$((configured + 1))
+            fi
+          done
+
+          if [[ "$configured" -ne 0 && "$configured" -ne 4 ]]; then
+            echo "All four VITE_X402_ROUTER_* variables must be configured together." >&2
+            exit 1
+          fi
+
+          if [[ "$configured" -eq 4 ]]; then
+            if [[ -z "$PAGES_ORIGIN" ]]; then
+              echo "GitHub Pages did not report the browser origin." >&2
+              exit 1
+            fi
+            router_config="$(
+              bun -e '
+                import { getX402RouterConfig } from "./apps/web/src/lib/x402-router.ts";
+                const config = getX402RouterConfig(process.env);
+                if (!config) {
+                  console.error("Configured VITE_X402_ROUTER_* values are invalid.");
+                  process.exit(1);
+                }
+                console.log(JSON.stringify(config));
+              '
+            )"
+            router_api_url="$(jq -r '.baseUrl' <<<"$router_config")"
+            readiness="$(
+              curl --fail --silent --show-error --retry 3 --retry-all-errors \
+                "${router_api_url}/health/ready"
+            )"
+            jq -e '.ready == true and .acceptingQuotes == true' <<<"$readiness" >/dev/null
+            status_headers="${RUNNER_TEMP}/x402-router-status.headers"
+            status="$(
+              curl --fail --silent --show-error --retry 3 --retry-all-errors \
+                --header "Origin: ${PAGES_ORIGIN}" \
+                --dump-header "$status_headers" \
+                "${router_api_url}/v1/status"
+            )"
+            cors_origin="$(
+              awk '
+                tolower($1) == "access-control-allow-origin:" {
+                  value = $2
+                  sub(/\r$/, "", value)
+                  print value
+                }
+              ' "$status_headers" | tail -n 1
+            )"
+            if [[ "$cors_origin" != "$PAGES_ORIGIN" ]]; then
+              echo "The x402 router does not allow the configured Pages origin." >&2
+              exit 1
+            fi
+            jq -e --argjson config "$router_config" '
+              (.supportedActions | type == "array" and index("recurring_support") != null)
+              and .routerIdentity.application == $config.application
+              and .routerIdentity.publicOrigin == $config.baseUrl
+              and (
+                (.routerIdentity.gateway | ascii_downcase)
+                == ($config.gateway | ascii_downcase)
+              )
+              and (
+                (.routerIdentity.destinationUsdc | ascii_downcase)
+                == ($config.hyperevmUsdc | ascii_downcase)
+              )
+            ' <<<"$status" >/dev/null
+          fi
+
       - name: Build site
         env:
           VITE_SENTINEL_API_URL: ${{ vars.VITE_SENTINEL_API_URL }}
+          VITE_X402_ROUTER_API_URL: ${{ vars.VITE_X402_ROUTER_API_URL }}
+          VITE_X402_ROUTER_APPLICATION: ${{ vars.VITE_X402_ROUTER_APPLICATION }}
+          VITE_X402_ROUTER_GATEWAY_ADDRESS: ${{ vars.VITE_X402_ROUTER_GATEWAY_ADDRESS }}
+          VITE_X402_ROUTER_HYPEREVM_USDC_ADDRESS: ${{ vars.VITE_X402_ROUTER_HYPEREVM_USDC_ADDRESS }}
         run: bun --cwd apps/web build:pages
 
       - name: Verify Alerts return route

@@ -189,6 +189,27 @@ describe("runWatcherOnce", () => {
     expect(result.skipReason).toContain("remain read-only");
   });
 
+  test("includes the recorded deployment block in the first scan", async () => {
+    const fromBlocks: bigint[] = [];
+
+    await runWatcherOnce(chainId, {
+      client: createClient({
+        latestBlock: 45n,
+        logs: [],
+        txInputs: {},
+        onGetLogs: (params) => {
+          if (params.fromBlock !== undefined) fromBlocks.push(params.fromBlock);
+        }
+      }),
+      config: testConfig(10),
+      deployment: { ...testDeployment(), deploymentBlock: 42n },
+      store: new MemoryWatcherStore()
+    });
+
+    expect(fromBlocks.length).toBeGreaterThan(0);
+    expect(fromBlocks.every((block) => block === 42n)).toBe(true);
+  });
+
   test("discovers boardrooms, decodes scheduled actions, projects holders, and advances cursors", async () => {
     const store = new MemoryWatcherStore();
     const events: WatcherPipelineEvent[] = [];
@@ -1314,6 +1335,12 @@ function testDeployment() {
 function createClient(input: {
   readonly latestBlock: bigint;
   readonly logs: readonly RawLog[];
+  readonly onGetLogs?: (params: {
+    address?: Address | Address[];
+    event?: { name?: string };
+    fromBlock?: bigint;
+    toBlock?: bigint | "latest";
+  }) => void;
   readonly txInputs: Record<string, Hex>;
 }): WatcherClient {
   return {
@@ -1326,6 +1353,7 @@ function createClient(input: {
       fromBlock?: bigint;
       toBlock?: bigint | "latest";
     }) {
+      input.onGetLogs?.(params);
       const eventName = params.event?.name;
       const addresses = new Set(
         (Array.isArray(params.address) ? params.address : params.address ? [params.address] : []).map((item) =>

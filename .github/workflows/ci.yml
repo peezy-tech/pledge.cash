@@ -75,6 +75,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           submodules: recursive
           persist-credentials: false
 
@@ -110,8 +111,8 @@ jobs:
           bun --cwd packages/sdk generate
           git diff --exit-code -- packages/sdk/src/generated.ts
 
-      - name: Verify HyperEVM testnet artifact
-        run: bun --cwd packages/contracts verify:hyperevm-testnet-artifact
+      - name: Verify testnet artifacts
+        run: bun --cwd packages/contracts verify:testnet-artifacts
 
       - name: Test
         working-directory: packages/contracts
