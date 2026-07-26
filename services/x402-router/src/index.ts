@@ -229,6 +229,11 @@ export async function startX402Router(
 
   const app = createRouterApi({
     webOrigin: config.webOrigin,
+    identity: {
+      application: config.intentDomain.application,
+      gateway: config.intentDomain.gateway,
+      destinationUsdc: config.hyperevm.destinationUsdc,
+    },
     quotes: {
       async create(request) {
         if (!liveQuoteService) {

@@ -71,7 +71,7 @@ jobs:
           fi
 
           if [[ "$configured" -eq 4 ]]; then
-            router_api_url="$(
+            router_config="$(
               bun -e '
                 import { getX402RouterConfig } from "./apps/web/src/lib/x402-router.ts";
                 const config = getX402RouterConfig(process.env);
@@ -79,9 +79,10 @@ jobs:
                   console.error("Configured VITE_X402_ROUTER_* values are invalid.");
                   process.exit(1);
                 }
-                console.log(config.baseUrl);
+                console.log(JSON.stringify(config));
               '
             )"
+            router_api_url="$(jq -r '.baseUrl' <<<"$router_config")"
             readiness="$(
               curl --fail --silent --show-error --retry 3 --retry-all-errors \
                 "${router_api_url}/health/ready"
@@ -91,9 +92,17 @@ jobs:
               curl --fail --silent --show-error --retry 3 --retry-all-errors \
                 "${router_api_url}/v1/status"
             )"
-            jq -e '
-              .supportedActions
-              | type == "array" and index("recurring_support") != null
+            jq -e --argjson config "$router_config" '
+              (.supportedActions | type == "array" and index("recurring_support") != null)
+              and .routerIdentity.application == $config.application
+              and (
+                (.routerIdentity.gateway | ascii_downcase)
+                == ($config.gateway | ascii_downcase)
+              )
+              and (
+                (.routerIdentity.destinationUsdc | ascii_downcase)
+                == ($config.hyperevmUsdc | ascii_downcase)
+              )
             ' <<<"$status" >/dev/null
           fi
 

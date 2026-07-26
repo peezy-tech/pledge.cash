@@ -15,6 +15,9 @@ import { X402PaymentError } from "../src/x402/server";
 
 const payer = "0x00000000000000000000000000000000000000A1" as const;
 const recipient = "0x00000000000000000000000000000000000000A2" as const;
+const routerApplication = "x402-router.pledge.cash/v1";
+const routerGateway = "0x00000000000000000000000000000000000000A3" as const;
+const destinationUsdc = "0x00000000000000000000000000000000000000B1" as const;
 
 function quote(): MarketplaceQuote {
   return {
@@ -134,6 +137,11 @@ function app(options: {
   };
   return createRouterApi({
     webOrigin: "https://app.example",
+    identity: {
+      application: routerApplication,
+      gateway: routerGateway,
+      destinationUsdc,
+    },
     quotes: { create: async () => stored } as never,
     quoteRepository: repository,
     payments: {
@@ -184,6 +192,17 @@ function paidRequest(error: X402PaymentError) {
 }
 
 describe("router API", () => {
+  test("reports the exact trusted router identity", async () => {
+    const status = await app().request("/v1/status");
+    await expect(status.json()).resolves.toMatchObject({
+      routerIdentity: {
+        application: routerApplication,
+        gateway: routerGateway,
+        destinationUsdc,
+      },
+    });
+  });
+
   test("advertises and serves recurring support only when the service is wired", async () => {
     const unavailable = await app().request(
       `/v1/support/plans?boardroom=${payer}`,

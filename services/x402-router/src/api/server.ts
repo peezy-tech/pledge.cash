@@ -11,6 +11,7 @@ import type {
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
+import type { Address } from "viem";
 import type { IntentExecutionRecord } from "x402-hl/intents/server";
 import { ZodError } from "zod";
 import {
@@ -84,6 +85,11 @@ export interface OrderReader {
 
 export type RouterApiDependencies = {
   webOrigin: string;
+  identity: {
+    application: string;
+    gateway: Address;
+    destinationUsdc: Address;
+  };
   quotes: Pick<MarketplaceQuoteService, "create">;
   quoteRepository: QuoteRepository;
   payments: PaymentSaga;
@@ -171,6 +177,7 @@ export function createRouterApi(deps: RouterApiDependencies): Hono {
         "fixed_price_sale",
         ...(deps.support ? ["recurring_support"] : []),
       ],
+      routerIdentity: deps.identity,
       acceptingQuotes: readiness.acceptingQuotes,
       x402Runtime: {
         installedVersion: deps.payments.installedVersion,
