@@ -39,7 +39,10 @@ Transient RPC failure is different. The app can report that a canonical object i
 
 Chain id alone is insufficient, especially on local Anvil. A reset can deploy a new stack on the same chain id. Transaction refresh and cached state must also match the deployment identity active when the read or transaction began.
 
-The public testnet artifacts for chain `998` and `10143` are currently pending, so there is no current root identity to use for writes on those networks.
+The current HyperEVM testnet identity is the verified chain `998` artifact anchored by BoardroomFactory
+`0xd0b2aE6603d7Ae140cd0Cb4Eb4451923C28cAaef`, deployment block `59850507`, and source commit
+`87f51633f437a0164d7a2a2503a3660b01a6450a`. Chain `10143` remains pending and has no current root identity for
+writes.
 
 ## Current state and history
 

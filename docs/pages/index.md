@@ -44,7 +44,7 @@ Read [Use pledge.cash safely](start/use-safely) and [Transactions and wallet act
 
 ## Current Availability
 
-The public HyperEVM testnet and Monad testnet deployment artifacts are currently marked **pending**. They do not contain a usable current contract stack. The HQ environment exposes a seeded local Anvil scenario for product testing, not a durable public deployment.
+HyperEVM testnet has a verified deterministic v5 deployment and a source-bound receipt manifest. Monad testnet remains **pending** and has no usable current contract stack. The HQ environment also exposes a seeded local Anvil scenario for isolated product testing; local state is not the public HyperEVM deployment.
 
 External-controller launch is available only to a verified v5 candidate deployment. Legacy Boardrooms remain readable
 but fail closed for launch and control writes. No public v5 artifact is currently broadcast, and the project remains a

@@ -5,10 +5,10 @@
 This document defines the implemented v1 boundary and the gates required before
 funded use. It does not claim a live deployment.
 
-At the time of this change, `packages/contracts/deployments/998.json` is
-`pending`. The router therefore reports not ready and refuses quotes. Funded
-readiness requires a checked-in, verified HyperEVM testnet release artifact and
-all of the operational gates below.
+`packages/contracts/deployments/998.json` now records the verified deterministic
+v5 HyperEVM testnet release. The router still reports not ready and refuses
+quotes unless that exact artifact and every operational gate below pass in its
+running environment.
 
 The router pins `x402-hl` version `0.2.2` to the exact Git commit
 `131aff37cf87c48036ab0e347f008e77bf446150`. That version is the first accepted
@@ -329,7 +329,7 @@ every item below:
 - [ ] Exact `x402-hl` commit
   `131aff37cf87c48036ab0e347f008e77bf446150` is present in `bun.lock`, reports
   version `0.2.2`, and passes its release gate.
-- [ ] `packages/contracts/deployments/998.json` is verified and no longer
+- [x] `packages/contracts/deployments/998.json` is verified and no longer
   `pending`.
 - [ ] Configured USDC, Boardroom factory, AMM router, AMM factory, and
   distribution factory match the tracked artifact and live code.

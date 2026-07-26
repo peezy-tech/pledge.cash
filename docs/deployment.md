@@ -7,13 +7,14 @@ Merkle airdrop, migrating bonding curve, AMM, and locked-liquidity primitives.
 
 | Network | Chain id | Default RPC | Wrapped native | Wrapper | Artifact status |
 | --- | ---: | --- | --- | --- | --- |
-| HyperEVM Testnet | `998` | `https://rpc.hyperliquid-testnet.xyz/evm` | `0x5555555555555555555555555555555555555555` | `packages/contracts/script/hyperevm-testnet/deploy.sh` | `998.json`: `pending` |
+| HyperEVM Testnet | `998` | `https://rpc.hyperliquid-testnet.xyz/evm` | `0x5555555555555555555555555555555555555555` | `packages/contracts/script/hyperevm-testnet/deploy.sh` | `998.json`: verified v5 deployment |
 | Monad Testnet | `10143` | `https://testnet-rpc.monad.xyz` | `0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541` | `packages/contracts/script/monad-testnet/deploy.sh` | `10143.json`: `pending` |
 
-Target support is not deployment evidence. Both checked-in artifacts currently say
-`Boardroom-controller deterministic v5 deployment has not been broadcast yet`; each contains a chain id, `status`, and
-`reason`, but no protocol addresses. Treat HyperEVM and Monad as supported broadcast targets, not live pledge.cash
-deployments, until a wrapper has promoted a fully verified candidate artifact.
+Target support is not deployment evidence. The checked-in HyperEVM artifact records the deterministic v5 deployment
+from source commit `87f51633f437a0164d7a2a2503a3660b01a6450a`, discovery block `59850507`, live authorities and wiring,
+runtime code hashes, and an adjacent 29-transaction receipt manifest. Monad remains pending and its artifact contains
+only a chain id, `status`, and `reason`; do not treat Monad as a live pledge.cash deployment until its wrapper promotes a
+fully verified candidate artifact.
 
 The deploy script creates or reuses one `PledgeCashDeterministicDeployer`, then creates one
 `BoardroomPolicyRegistry`, one `AssetPolicy`, one `BoardroomGovernanceLogic`, one `BoardroomRedemptionPayout`, one
@@ -327,8 +328,8 @@ The web app can switch between the checked-in HyperEVM testnet, Monad testnet, a
 The selected chain is stored in browser local storage and can also be opened directly with `?chain=998`, `?chain=10143`,
 or `?chain=31337`.
 
-A selectable network profile proves only RPC and chain metadata. With the current pending `998.json` and `10143.json`
-artifacts, the app has no verified root contracts to transact with on either testnet. Local Anvil is the current complete
+A selectable network profile proves only RPC and chain metadata. The current `998.json` identifies a verified HyperEVM
+testnet stack; `10143.json` remains pending and supplies no usable Monad root contracts. Local Anvil remains an isolated
 interactive scenario when its ignored deployment and seed artifacts have been generated.
 
 Local Anvil uses chain id `31337` and reads ignored runtime artifacts from:

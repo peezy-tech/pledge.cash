@@ -11,7 +11,7 @@ The app’s `Network` selector can show HyperEVM Testnet, Monad Testnet, and `Lo
 
 | Network | Chain ID | Current status |
 | --- | ---: | --- |
-| HyperEVM Testnet | `998` | The checked-in deterministic v5 candidate artifact is `pending`; it has not been broadcast. Contract-dependent app workflows are unavailable. |
+| HyperEVM Testnet | `998` | The checked-in deterministic v5 artifact and its 29 source-bound receipts are verified. Contract workflows use testnet assets only. |
 | Monad Testnet | `10143` | The checked-in deterministic v5 candidate artifact is `pending`; it has not been broadcast. Contract-dependent app workflows are unavailable. |
 | Local Anvil | `31337` | Intended for a host or developer environment that provides the matching RPC and local deployment artifact. Local addresses and state are not durable public deployments. |
 
