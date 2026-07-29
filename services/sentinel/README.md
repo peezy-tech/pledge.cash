@@ -21,6 +21,7 @@ Copy `.env.example` and set values for your environment.
 | --- | --- | --- |
 | `DATABASE_URL` | yes | Postgres connection string used by Drizzle migrations and runtime queries. |
 | `SENTINEL_PORT` | no | API port, default `8787`. |
+| `SENTINEL_TRUSTED_PROXY_IPS` | yes for HTTPS shared mode | Comma-separated exact socket-peer IPs for the TLS edge. Only these peers may supply the client address used by authentication rate limits and Identity. |
 | `SENTINEL_WEB_ORIGIN` | yes | Browser app origin allowed by CORS and SIWE wallet-link messages. |
 | `SENTINEL_CHAIN_IDS` | yes | Comma-separated chain ids to monitor. |
 | `SENTINEL_RPC_URL_<chainId>` | yes | RPC URL for each configured chain. |
@@ -101,6 +102,11 @@ Shared mode registers `${BETTER_AUTH_URL}/auth/oauth2/callback/peezy` as the
 PledgeCash OIDC redirect URI. Social-provider callbacks terminate at the
 Identity provider, and Telegram authentication still does not grant alert
 delivery access, which remains an explicit bot-linking step.
+Before accepting shared-mode traffic, Sentinel removes access, refresh, and ID
+tokens (and their expiry metadata) from every pre-existing local auth account.
+The configured TLS edge must overwrite client-address headers or append its
+observed client as the rightmost `X-Forwarded-For` value. Sentinel ignores those
+headers from every socket peer outside `SENTINEL_TRUSTED_PROXY_IPS`.
 
 In legacy mode, built-in OAuth provider callbacks use
 `${BETTER_AUTH_URL}/auth/callback/<provider>`. Telegram uses

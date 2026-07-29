@@ -775,7 +775,7 @@ describe("Sentinel WP5 API", () => {
     expect(identityHarness.auth.forwarded).toHaveLength(9);
   });
 
-  test("rate limits public Identity challenges by socket peer despite rotated forwarding headers", async () => {
+  test("keeps public Identity challenge limits independent across resolved edge clients", async () => {
     const identityHarness = createHarness({ sharedIdentity: true });
     const statuses: number[] = [];
     for (let index = 0; index < 11; index += 1) {
@@ -794,14 +794,13 @@ describe("Sentinel WP5 API", () => {
           },
           method: "POST"
         },
-        { clientIp: "198.51.100.44" }
+        { clientIp: `192.0.2.${index + 1}` }
       );
       statuses.push(response.status);
     }
 
-    expect(statuses.slice(0, 10).every((status) => status === 200)).toBe(true);
-    expect(statuses[10]).toBe(429);
-    expect(identityHarness.auth.forwarded).toHaveLength(10);
+    expect(statuses.every((status) => status === 200)).toBe(true);
+    expect(identityHarness.auth.forwarded).toHaveLength(11);
   });
 
   test("rejects oversized SIWE requests before parsing or quota work", async () => {

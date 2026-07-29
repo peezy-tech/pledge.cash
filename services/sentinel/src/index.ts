@@ -8,9 +8,13 @@ import {
 } from "./api/better-auth";
 import { createDrizzleBoardroomControlStore } from "./api/boardroom-control-store";
 import { createApp } from "./api/server";
-import { createPeezyIdentityAuthAdapter } from "./api/peezy-identity";
+import {
+  createPeezyIdentityAuthAdapter,
+  discardOAuthTokensForSharedIdentity
+} from "./api/peezy-identity";
 import { createDrizzleApiStore } from "./api/store";
 import { createConfiguredBoardroomControlChainReader } from "./chain/boardroom-control";
+import { resolveClientIp } from "./client-ip";
 import { runWatcherOnce, type WatcherActionEventHandler } from "./chain/watcher";
 import { loadConfig, type Config, type SentinelChainConfig } from "./config";
 import { createDbClient, type SentinelDbClient } from "./db/client";
@@ -82,6 +86,13 @@ export async function startSentinel(options: StartSentinelOptions = {}): Promise
   const config = options.config ?? loadConfig();
   const dbClient = createDbClient(config);
   await dbClient.migrate();
+  if (config.auth.identity !== undefined) {
+    await discardOAuthTokensForSharedIdentity(dbClient.db);
+  }
+  const auth =
+    config.auth.identity === undefined
+      ? createBetterAuthAdapter(config, dbClient.db)
+      : createPeezyIdentityAuthAdapter(config, dbClient.db);
 
   const adapter = createHarnessAdapter(config);
   const pipeline = createActionPipeline({
@@ -120,10 +131,6 @@ export async function startSentinel(options: StartSentinelOptions = {}): Promise
     reminderHoursBeforeEta: config.reminderHoursBeforeEta,
     twitterEnabled: config.twitter.enabled
   });
-  const auth =
-    config.auth.identity === undefined
-      ? createBetterAuthAdapter(config, dbClient.db)
-      : createPeezyIdentityAuthAdapter(config, dbClient.db);
   const app = createApp({
     auth,
     boardroomControl: {
@@ -139,7 +146,15 @@ export async function startSentinel(options: StartSentinelOptions = {}): Promise
       const peer = bunServer.requestIP(request);
       return app.fetch(
         request,
-        peer === null ? {} : { clientIp: peer.address }
+        peer === null
+          ? {}
+          : {
+              clientIp: resolveClientIp(
+                request.headers,
+                peer.address,
+                config.trustedProxyIps
+              )
+            }
       );
     },
     port: config.port

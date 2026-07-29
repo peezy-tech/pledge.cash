@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { tmpdir } from "node:os";
 
 import { z } from "zod";
@@ -30,6 +31,7 @@ export const sentinelEnvSchema = z
   .object({
     DATABASE_URL: z.string().url(),
     SENTINEL_PORT: z.coerce.number().int().positive().default(8787),
+    SENTINEL_TRUSTED_PROXY_IPS: optionalStringSchema,
     SENTINEL_WEB_ORIGIN: z.string().url(),
     SENTINEL_CHAIN_IDS: z.string().min(1).default("998,10143"),
     SENTINEL_RPC_URL_998: z.string().url().default("https://rpc.hyperliquid-testnet.xyz/evm"),
@@ -123,6 +125,7 @@ export type Config = {
     readonly botToken?: string;
     readonly botUsername?: string;
   };
+  readonly trustedProxyIps: readonly string[];
   readonly twitter: {
     readonly accessToken?: string;
     readonly accessTokenSecret?: string;
@@ -159,6 +162,25 @@ function parseAddressList(value: string | undefined): string[] {
         .map((part) => {
           if (!/^0x[0-9a-f]{40}$/.test(part)) {
             throw new Error(`Invalid boardroom address in SENTINEL_HARNESS_BOARDROOM_ALLOWLIST: ${part}`);
+          }
+          return part;
+        })
+    )
+  ];
+}
+
+function parseIpList(value: string | undefined): string[] {
+  if (value === undefined) return [];
+
+  return [
+    ...new Set(
+      value
+        .split(",")
+        .map((part) => part.trim())
+        .filter((part) => part.length > 0)
+        .map((part) => {
+          if (isIP(part) === 0) {
+            throw new Error(`Invalid IP address in SENTINEL_TRUSTED_PROXY_IPS: ${part}`);
           }
           return part;
         })
@@ -276,6 +298,16 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       "PEEZY_IDENTITY_APP_CLIENT_SECRET and PEEZY_IDENTITY_OIDC_CLIENT_SECRET must be distinct"
     );
   }
+  const trustedProxyIps = parseIpList(raw.SENTINEL_TRUSTED_PROXY_IPS);
+  if (
+    identityBaseUrl !== undefined &&
+    new URL(authBaseUrl).protocol === "https:" &&
+    trustedProxyIps.length === 0
+  ) {
+    throw new Error(
+      "SENTINEL_TRUSTED_PROXY_IPS must identify the HTTPS edge in shared Identity mode"
+    );
+  }
   const webOrigin = readOrigin(raw.SENTINEL_WEB_ORIGIN, "SENTINEL_WEB_ORIGIN");
 
   const chains = chainIds.map((chainId): SentinelChainConfig => {
@@ -344,6 +376,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       "botUsername",
       raw.TELEGRAM_BOT_USERNAME
     ),
+    trustedProxyIps,
     twitter: withOptional(
       withOptional(
         withOptional(

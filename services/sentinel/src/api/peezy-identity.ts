@@ -100,6 +100,28 @@ type IdentityHydrator = {
 };
 type SentinelTransaction = Parameters<Parameters<SentinelDb["transaction"]>[0]>[0];
 
+export async function discardOAuthTokensForSharedIdentity(
+  db: SentinelDb
+): Promise<void> {
+  await db
+    .update(authAccounts)
+    .set({
+      accessToken: null,
+      accessTokenExpiresAt: null,
+      idToken: null,
+      refreshToken: null,
+      refreshTokenExpiresAt: null,
+      updatedAt: new Date()
+    })
+    .where(
+      sql`${authAccounts.accessToken} IS NOT NULL
+        OR ${authAccounts.accessTokenExpiresAt} IS NOT NULL
+        OR ${authAccounts.idToken} IS NOT NULL
+        OR ${authAccounts.refreshToken} IS NOT NULL
+        OR ${authAccounts.refreshTokenExpiresAt} IS NOT NULL`
+    );
+}
+
 export function createPeezyIdentityAuthAdapter(
   config: Pick<Config, "auth" | "webOrigin">,
   db: SentinelDb,

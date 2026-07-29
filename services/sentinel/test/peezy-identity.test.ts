@@ -109,7 +109,7 @@ test("aborts stalled Identity response bodies at the application deadline", asyn
   expect(signal?.aborted).toBe(true);
 });
 
-test("forwards only Sentinel's trusted socket peer to the Identity challenge endpoint", async () => {
+test("forwards only Sentinel's resolved client address to the Identity challenge endpoint", async () => {
   let forwardedFor: string | null = null;
   const adapter = createPeezyIdentityAuthAdapter(
     config,
