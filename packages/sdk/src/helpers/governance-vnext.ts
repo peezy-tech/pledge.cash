@@ -408,6 +408,9 @@ export async function queryScheduledBoardroomVNextOperations(
   throwIfAborted(input.signal);
   const boardrooms = uniqueAddresses(input.boardrooms);
   if (boardrooms.length === 0) return [];
+  if (boardrooms.length > MAX_BOARDROOMS) {
+    throw new Error(`Governance discovery supports at most ${MAX_BOARDROOMS} Boardrooms per query.`);
+  }
   // Controller discovery and readiness must describe one chain snapshot.
   const snapshotBlockNumber = await readSnapshotBlockNumber(client);
   const controllerPairs = (await Promise.all(boardrooms.map(async (boardroom) => {
@@ -589,33 +592,9 @@ async function hydrateScheduleEvent(
   const payload = knownPayload ?? verifiedSchedulePayload(transaction!, event.controller);
   verifyPayloadAgainstEvent(payload, event);
 
-  // Operation IDs bind the configuration that existed when they were scheduled.
-  const operationHash = await client.readContract({
-    address: event.controller,
-    abi: boardroomVNextControllerAbi,
-    functionName: payload.kind === "boardroomOperation" ? "hashBoardroomOperation" : "hashControllerOperation",
-    args: payload.kind === "boardroomOperation"
-      ? [
-          payload.expectedFacetSetHash,
-          payload.calls,
-          payload.salt,
-          payload.expectedBoardroomEpoch,
-          payload.expectedConfigurationEpoch,
-          event.proposer,
-        ]
-      : [
-          payload.expectedFacetSetHash,
-          payload.data,
-          payload.salt,
-          payload.expectedBoardroomEpoch,
-          payload.expectedConfigurationEpoch,
-          event.proposer,
-        ],
-    blockNumber: event.blockNumber,
-  });
-  if (!sameHex(operationHash as Hex, event.operationId)) {
-    throw new Error("Schedule calldata does not match the controller operation hash.");
-  }
+  // The controller event is authoritative for the operation ID. Its calldata
+  // context and payload hash are checked above; re-calling the hash helper can
+  // observe a configuration update executed later in the same block.
 
   const [
     operationState,

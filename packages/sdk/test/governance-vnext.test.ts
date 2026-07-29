@@ -350,7 +350,29 @@ describe("Boardroom vNext governance discovery and hydration", () => {
     });
   });
 
-  test("hydrates with vNext ABIs and propagates the facet hash into operation hashing and results", async () => {
+  test("rejects oversized Boardroom discovery before any controller RPC reads", async () => {
+    let rpcReads = 0;
+    const client = {
+      async getBlockNumber() {
+        rpcReads += 1;
+        return 20n;
+      },
+      async readContract() {
+        rpcReads += 1;
+        throw new Error("Unexpected controller read.");
+      },
+    } as unknown as PledgeCashGovernanceClient;
+    const boardrooms = Array.from(
+      { length: 65 },
+      (_, index) => `0x${(index + 1).toString(16).padStart(40, "0")}` as Address,
+    );
+
+    await expect(queryScheduledBoardroomVNextOperations(client, { boardrooms }))
+      .rejects.toThrow("Governance discovery supports at most 64 Boardrooms per query.");
+    expect(rpcReads).toBe(0);
+  });
+
+  test("hydrates with vNext ABIs and validates emitted payload hashes without live hash reads", async () => {
     const reads: ContractRead[] = [];
     const operations = await queryScheduledBoardroomVNextOperations(governanceClient({ reads }), {
       boardrooms: [boardroom],
@@ -382,23 +404,19 @@ describe("Boardroom vNext governance discovery and hydration", () => {
       calls: [call],
     }]);
 
-    const hashRead = reads.find((read) => read.functionName === "hashBoardroomOperation");
-    expect(hashRead?.abi).toBe(boardroomVNextControllerAbi);
-    expect(hashRead?.args?.[0]).toBe(facetSetHash);
-    expect(hashRead?.blockNumber).toBe(11n);
     const facetHashRead = reads.find((read) => read.functionName === "facetSetHash");
     expect(facetHashRead?.abi).toBe(boardroomDiamondAbi);
-    expect(reads.filter((read) => read !== hashRead).every((read) => read.blockNumber === 20n)).toBe(true);
+    expect(reads.some((read) => read.functionName === "hashBoardroomOperation")).toBe(false);
+    expect(reads.every((read) => read.blockNumber === 20n)).toBe(true);
   });
 
-  test("hydrates executed operations against one block after controller configuration changes", async () => {
+  test("hydrates operations after a later same-block controller configuration update", async () => {
     const reads: ContractRead[] = [];
     const [executed] = await queryScheduledBoardroomVNextOperations(
       governanceClient({
         controllerOperation: true,
         reads,
         currentConfigurationEpoch: 2n,
-        historicalHashOnly: true,
         operationStatus: 2,
         unpinnedOperationStatus: 1,
       }),
@@ -419,9 +437,8 @@ describe("Boardroom vNext governance discovery and hydration", () => {
       kind: "controllerOperation",
       controllerData: updateConfigurationData,
     });
-    const hashRead = reads.find((read) => read.functionName === "hashControllerOperation");
-    expect(hashRead?.blockNumber).toBe(11n);
-    expect(reads.filter((read) => read !== hashRead).every((read) => read.blockNumber === 20n)).toBe(true);
+    expect(reads.some((read) => read.functionName === "hashControllerOperation")).toBe(false);
+    expect(reads.every((read) => read.blockNumber === 20n)).toBe(true);
   });
 
   test("invalidates a pending operation after facet activation and rejects schedule/event hash substitution", async () => {
@@ -478,9 +495,8 @@ describe("Boardroom vNext governance discovery and hydration", () => {
       status: "ready",
       calls: [call],
     });
-    const hashRead = reads.find((read) => read.functionName === "hashBoardroomOperation");
-    expect(hashRead?.blockNumber).toBe(11n);
-    expect(reads.filter((read) => read !== hashRead).every((read) => read.blockNumber === 20n)).toBe(true);
+    expect(reads.some((read) => read.functionName === "hashBoardroomOperation")).toBe(false);
+    expect(reads.every((read) => read.blockNumber === 20n)).toBe(true);
   });
 });
 
@@ -489,7 +505,6 @@ function governanceClient(overrides: {
   currentConfigurationEpoch?: bigint;
   currentFacetSetHash?: Hex;
   eventFacetSetHash?: Hex;
-  historicalHashOnly?: boolean;
   operationStatus?: number;
   reads?: ContractRead[];
   unpinnedOperationStatus?: number;
@@ -552,9 +567,7 @@ function governanceClient(overrides: {
         case "controller": return controller;
         case "hashBoardroomOperation":
         case "hashControllerOperation":
-          return !overrides.historicalHashOnly || parameters.blockNumber === 11n
-            ? operationId
-            : successorFacetSetHash;
+          throw new Error("Operation hashes must not be read from mutable controller state.");
         case "operationState":
           return [
             100n,
