@@ -35,7 +35,7 @@ import {
 
 const AUTH_SIWE_MAX_AGE_MS = 15 * 60_000;
 const AUTH_SIWE_CLOCK_SKEW_MS = 5 * 60_000;
-const AUTH_SIWE_MAX_BODY_BYTES = 128 * 1024;
+const AUTH_JSON_MAX_BODY_BYTES = 128 * 1024;
 const DEFAULT_RATE_LIMIT_MAX_BUCKETS = 10_000;
 const IDENTITY_RATE_WINDOW_MS = 5 * 60_000;
 // Identity v0.1 permits 20 challenges per observed caller and wallet. Keep one
@@ -49,6 +49,13 @@ const PUBLIC_SIWE_GLOBAL_LIMIT = 50;
 const LegacyTelegramAuthRedirectRequestSchema = AuthRedirectRequestSchema
   .omit({ provider: true })
   .extend({ providerId: z.literal("telegram") });
+
+export class AuthRateLimitError extends Error {
+  constructor(message = "Rate limit exceeded") {
+    super(message);
+    this.name = "AuthRateLimitError";
+  }
+}
 
 export type ApiChainConfig = {
   readonly chainId: number;
@@ -432,8 +439,8 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     PUBLIC_SIWE_ATTEMPT_GLOBAL_LIMIT,
     IDENTITY_RATE_WINDOW_MS
   );
-  const publicSiweBodyLimit = bodyLimit({
-    maxSize: AUTH_SIWE_MAX_BODY_BYTES,
+  const authBodyLimit = bodyLimit({
+    maxSize: AUTH_JSON_MAX_BODY_BYTES,
     onError: (c) => jsonError(c, 413, "Request body is too large")
   });
 
@@ -514,43 +521,61 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       return c.json(result.response);
     };
 
-    app.post("/peezy/sign-in", async (c) => {
+    app.post("/peezy/sign-in", authBodyLimit, async (c) => {
       const body = await parseJson(c, AuthRedirectRequestSchema);
       if (!body.ok) return body.response;
       return start(c, body.value, false);
     });
-    app.post("/peezy/link", createSessionMiddleware(deps), async (c) => {
-      const body = await parseJson(c, AuthRedirectRequestSchema);
-      if (!body.ok) return body.response;
-      return start(c, body.value, true, c.get("user").id);
-    });
+    app.post(
+      "/peezy/link",
+      createSessionMiddleware(deps),
+      authBodyLimit,
+      async (c) => {
+        const body = await parseJson(c, AuthRedirectRequestSchema);
+        if (!body.ok) return body.response;
+        return start(c, body.value, true, c.get("user").id);
+      }
+    );
 
     if (deps.auth.usesSharedIdentity === true) {
-      app.post("/sign-in/social", async (c) => {
+      app.post("/sign-in/social", authBodyLimit, async (c) => {
         const body = await parseJson(c, AuthRedirectRequestSchema);
         if (!body.ok) return body.response;
         return start(c, body.value, false);
       });
-      app.post("/link-social", createSessionMiddleware(deps), async (c) => {
-        const body = await parseJson(c, AuthRedirectRequestSchema);
-        if (!body.ok) return body.response;
-        return start(c, body.value, true, c.get("user").id);
-      });
-      app.post("/sign-in/oauth2", async (c) => {
+      app.post(
+        "/link-social",
+        createSessionMiddleware(deps),
+        authBodyLimit,
+        async (c) => {
+          const body = await parseJson(c, AuthRedirectRequestSchema);
+          if (!body.ok) return body.response;
+          return start(c, body.value, true, c.get("user").id);
+        }
+      );
+      app.post("/sign-in/oauth2", authBodyLimit, async (c) => {
         const body = await parseJson(c, LegacyTelegramAuthRedirectRequestSchema);
         if (!body.ok) return body.response;
         return start(c, { ...body.value, provider: "telegram" }, false);
       });
-      app.post("/oauth2/link", createSessionMiddleware(deps), async (c) => {
-        const body = await parseJson(c, LegacyTelegramAuthRedirectRequestSchema);
-        if (!body.ok) return body.response;
-        return start(
-          c,
-          { ...body.value, provider: "telegram" },
-          true,
-          c.get("user").id
-        );
-      });
+      app.post(
+        "/oauth2/link",
+        createSessionMiddleware(deps),
+        authBodyLimit,
+        async (c) => {
+          const body = await parseJson(
+            c,
+            LegacyTelegramAuthRedirectRequestSchema
+          );
+          if (!body.ok) return body.response;
+          return start(
+            c,
+            { ...body.value, provider: "telegram" },
+            true,
+            c.get("user").id
+          );
+        }
+      );
     }
   }
 
@@ -634,7 +659,7 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     );
     app.post(
       "/peezy/siwe/verify",
-      publicSiweBodyLimit,
+      authBodyLimit,
       publicSiweClientRateLimit,
       publicSiweAttemptGlobalRateLimit,
       validateIdentitySiwe,
@@ -643,7 +668,7 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     );
     app.post(
       "/siwe/verify",
-      publicSiweBodyLimit,
+      authBodyLimit,
       publicSiweClientRateLimit,
       publicSiweAttemptGlobalRateLimit,
       validateIdentitySiwe,

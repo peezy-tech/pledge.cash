@@ -3,6 +3,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { createSiweMessage } from "viem/siwe";
 
 import {
+  AuthRateLimitError,
   type AuthAdapter,
   type AuthSnapshot,
   type RateLimitConfig,
@@ -723,6 +724,77 @@ describe("Sentinel WP5 API", () => {
     ]);
   });
 
+  test("rejects oversized social-auth request bodies before parsing them", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const oversizedPadding = "a".repeat(129 * 1024);
+    const requests = [
+      {
+        body: {
+          callbackURL: `${WEB_ORIGIN}/notifications`,
+          padding: oversizedPadding,
+          provider: "github"
+        },
+        path: "/auth/peezy/sign-in"
+      },
+      {
+        body: {
+          callbackURL: `${WEB_ORIGIN}/notifications`,
+          padding: oversizedPadding,
+          provider: "github"
+        },
+        path: "/auth/peezy/link",
+        session: true
+      },
+      {
+        body: {
+          callbackURL: `${WEB_ORIGIN}/notifications`,
+          padding: oversizedPadding,
+          provider: "github"
+        },
+        path: "/auth/sign-in/social"
+      },
+      {
+        body: {
+          callbackURL: `${WEB_ORIGIN}/notifications`,
+          padding: oversizedPadding,
+          provider: "github"
+        },
+        path: "/auth/link-social",
+        session: true
+      },
+      {
+        body: {
+          callbackURL: `${WEB_ORIGIN}/notifications`,
+          padding: oversizedPadding,
+          providerId: "telegram"
+        },
+        path: "/auth/sign-in/oauth2"
+      },
+      {
+        body: {
+          callbackURL: `${WEB_ORIGIN}/notifications`,
+          padding: oversizedPadding,
+          providerId: "telegram"
+        },
+        path: "/auth/oauth2/link",
+        session: true
+      }
+    ] as const;
+
+    for (const request of requests) {
+      const response = await identityHarness.app.request(request.path, {
+        body: JSON.stringify(request.body),
+        headers: {
+          "Content-Type": "application/json",
+          ...(request.session ? { Cookie: SESSION_COOKIE } : {})
+        },
+        method: "POST"
+      });
+      expect(response.status).toBe(413);
+    }
+    expect(identityHarness.auth.socialStarts).toEqual([]);
+  });
+
   test("rejects invalid EOA SIWE proofs before forwarding them", async () => {
     const identityHarness = createHarness({ sharedIdentity: true });
     const request = await authSiweRequest();
@@ -1004,6 +1076,15 @@ describe("Sentinel WP5 API", () => {
     const linkWalletCredential = async (
         input: Parameters<NonNullable<AuthAdapter["linkWalletCredential"]>>[0]
       ): Promise<WalletDto> => {
+        const admitted = await store.takeIdentityQuota({
+          capacity: 10,
+          now: input.verifiedAt,
+          scope: "pledge-cash-test:wallet-grant-link",
+          windowMs: 5 * 60_000
+        });
+        if (!admitted) {
+          throw new AuthRateLimitError();
+        }
         linkCalls += 1;
         return {
           address: input.address,

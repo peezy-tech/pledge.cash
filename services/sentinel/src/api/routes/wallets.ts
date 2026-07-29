@@ -6,13 +6,13 @@ import { WALLET_LINK_SIWE_STATEMENT } from "../better-auth";
 import {
   createRateLimitMiddleware,
   createSessionMiddleware,
+  AuthRateLimitError,
   getNow,
   jsonError,
   parseJson,
   type ApiEnv,
   type SentinelApiDeps
 } from "../auth";
-import { identityQuotaScope } from "../identity-quota";
 import {
   DeleteWalletResponseSchema,
   LinkWalletRequestSchema,
@@ -28,8 +28,6 @@ import {
 } from "../dto";
 
 const WALLET_NONCE_TTL_MS = 10 * 60 * 1_000;
-const IDENTITY_WALLET_LINK_WINDOW_MS = 5 * 60_000;
-const IDENTITY_WALLET_LINK_LIMIT = 10;
 
 function webOriginHost(webOrigin: string): string {
   return new URL(webOrigin).host;
@@ -182,20 +180,6 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
         return jsonError(c, 400, "SIWE signature is invalid");
       }
 
-      if (
-        deps.auth.usesSharedIdentity === true &&
-        !(await deps.store.takeIdentityQuota({
-          capacity: IDENTITY_WALLET_LINK_LIMIT,
-          now,
-          scope: identityQuotaScope(
-            deps.auth.sharedIdentityClientId ?? "shared-identity",
-            "wallet-grant-link"
-          ),
-          windowMs: IDENTITY_WALLET_LINK_WINDOW_MS
-        }))
-      ) {
-        return jsonError(c, 429, "Rate limit exceeded");
-      }
       let wallet;
       try {
         wallet = await deps.auth.linkWalletCredential({
@@ -207,6 +191,9 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
           verifiedAt: now
         });
       } catch (error) {
+        if (error instanceof AuthRateLimitError) {
+          return jsonError(c, 429, error.message);
+        }
         const message = error instanceof Error ? error.message : "";
         const migrationRequired =
           /must sign in through peezy\.tech Identity/i.test(message);

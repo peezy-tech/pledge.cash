@@ -298,6 +298,38 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
         canSignIn: true
       }
     });
+    const [quotaAfterLink] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "identity_quota_events"
+      WHERE "scope" = 'pledge-cash:wallet-grant-link'
+    `;
+    expect(quotaAfterLink?.count).toBe("1");
+
+    const replayStatuses = await Promise.all(
+      Array.from({ length: 10 }, async () => {
+        const response = await app.request(`${apiOrigin}/wallets`, {
+          body: JSON.stringify({
+            message: linkChallenge.message,
+            signature: linkSignature
+          }),
+          headers: {
+            "Content-Type": "application/json",
+            Cookie: cookie,
+            Origin: webOrigin
+          },
+          method: "POST"
+        });
+        return response.status;
+      })
+    );
+    expect(replayStatuses.every((status) => status === 200)).toBe(true);
+    const [quotaAfterReplays] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "identity_quota_events"
+      WHERE "scope" = 'pledge-cash:wallet-grant-link'
+    `;
+    expect(quotaAfterReplays?.count).toBe("1");
+
     const [localCredential] = await dbClient.sql<{ count: string }[]>`
       SELECT count(*)::text AS "count"
       FROM "auth_wallets"
@@ -1202,8 +1234,92 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       FROM "wallets"
       WHERE lower("address") = ${centrallyOwnedWallet.address.toLowerCase()}
     `;
+    const [pendingReconciliation] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "identity_wallet_link_reconciliations"
+      WHERE lower("address") = ${centrallyOwnedWallet.address.toLowerCase()}
+    `;
     expect(localOwner?.count).toBe("0");
     expect(localCoverage?.count).toBe("0");
+    expect(pendingReconciliation?.count).toBe("0");
+  });
+
+  test("expires centrally absent wallet-link reconciliations before enforcing the cap", async () => {
+    const sessionWallet = privateKeyToAccount(
+      `0x${randomBytes(32).toString("hex")}`
+    );
+    const linkedWallet = privateKeyToAccount(
+      `0x${randomBytes(32).toString("hex")}`
+    );
+    const signIn = await signInWallet(app, sessionWallet);
+    expect(signIn.status).toBe(200);
+    const cookie = responseCookie(signIn, "pledge-cash.session_token");
+    const session = (await signIn.json()) as { user: { id: string } };
+    const [mapping] = await dbClient.sql<{ subject: string }[]>`
+      SELECT "account_id" AS "subject"
+      FROM "auth_accounts"
+      WHERE "provider_id" = 'peezy'
+        AND "user_id" = ${session.user.id}::uuid
+    `;
+    if (mapping === undefined) {
+      throw new Error("Expected a peezy.tech subject mapping");
+    }
+
+    const staleAt = new Date(Date.now() - 6 * 60_000);
+    for (let index = 0; index < 10; index += 1) {
+      const address = `0x${(index + 1).toString(16).padStart(40, "0")}`;
+      await dbClient.sql`
+        INSERT INTO "identity_wallet_link_reconciliations" (
+          "id", "subject", "user_id", "address", "chain_id",
+          "siwe_message", "verified_at", "created_at"
+        )
+        VALUES (
+          ${randomUUID()}::uuid,
+          ${mapping.subject},
+          ${session.user.id}::uuid,
+          ${address},
+          999,
+          ${`stale wallet link ${index}`},
+          ${staleAt},
+          ${staleAt}
+        )
+      `;
+    }
+
+    const nonceResponse = await app.request(`${apiOrigin}/wallets/nonce`, {
+      body: JSON.stringify({
+        address: linkedWallet.address,
+        chainId: 999
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookie,
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+    expect(nonceResponse.status).toBe(200);
+    const challenge = (await nonceResponse.json()) as { message: string };
+    const signature = await linkedWallet.signMessage({
+      message: challenge.message
+    });
+    const linkResponse = await app.request(`${apiOrigin}/wallets`, {
+      body: JSON.stringify({ message: challenge.message, signature }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookie,
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+    expect(linkResponse.status).toBe(200);
+
+    const [pendingAfter] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "identity_wallet_link_reconciliations"
+      WHERE "subject" = ${mapping.subject}
+    `;
+    expect(pendingAfter?.count).toBe("0");
   });
 
   test("refuses a wallet link when the central credentials span product users", async () => {

@@ -22,7 +22,7 @@ import {
   organization,
   type GenericOAuthConfig
 } from "better-auth/plugins";
-import { and, eq, gt, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, lte, sql } from "drizzle-orm";
 import { getAddress } from "viem";
 import { parseSiweMessage } from "viem/siwe";
 import { z } from "zod";
@@ -41,7 +41,8 @@ import {
 } from "../db/schema";
 import {
   identityQuotaScope,
-  takeIdentityQuota
+  takeIdentityQuota,
+  takeIdentityQuotaInTransaction
 } from "./identity-quota";
 import {
   AUTH_SIWE_MAX_MESSAGE_LENGTH,
@@ -51,7 +52,7 @@ import {
   type SocialProviderDto,
   type WalletDto
 } from "./dto";
-import type { AuthAdapter, AuthSnapshot } from "./auth";
+import { AuthRateLimitError, type AuthAdapter, type AuthSnapshot } from "./auth";
 import {
   createSentinelAuthDatabaseAdapter,
   createPledgeCashSiweVerifier,
@@ -68,12 +69,15 @@ const IDENTITY_RECORD_MAX_BYTES = 256 * 1024;
 const IDENTITY_HYDRATION_CACHE_TTL_MS = 60_000;
 const IDENTITY_HYDRATION_CACHE_MAX_ENTRIES = 1_000;
 const IDENTITY_PRESENTATION_READ_WINDOW_MS = 5 * 60_000;
+const IDENTITY_WALLET_LINK_WINDOW_MS = 5 * 60_000;
+const IDENTITY_WALLET_LINK_LIMIT = 10;
 // Identity v0.1 allows 300 reads per client and window. Wallet sign-in reserves
 // 50 reads and ten wallet links reserve two reads each, leaving 230 for
 // presentation hydration and social callbacks.
 const IDENTITY_PRESENTATION_READ_BUDGET = 230;
 const LEGACY_SIWE_NONCE_TTL_MS = 15 * 60_000;
 const IDENTITY_PENDING_LINK_LIMIT = 10;
+const IDENTITY_PENDING_LINK_TTL_MS = 5 * 60_000;
 const SOCIAL_PROVIDERS = new Set<SocialProvider>([
   "apple",
   "discord",
@@ -99,6 +103,17 @@ type IdentityHydrator = {
   set(subject: string, identity: IdentityMeResponse): void;
 };
 type SentinelTransaction = Parameters<Parameters<SentinelDb["transaction"]>[0]>[0];
+
+class IdentityWalletGrantRejectedError extends Error {
+  constructor(error: unknown) {
+    super(
+      error instanceof Error
+        ? error.message
+        : "Identity rejected the wallet grant"
+    );
+    this.name = "IdentityWalletGrantRejectedError";
+  }
+}
 
 export async function discardOAuthTokensForSharedIdentity(
   db: SentinelDb
@@ -339,6 +354,7 @@ export function createPeezyIdentityAuthAdapter(
         db,
         gateway,
         identityHydrator,
+        identity.clientId,
         {
           ...input,
           ...(subject === undefined ? {} : { subject })
@@ -877,11 +893,30 @@ function createIdentityGateway(
         fetcher: identityRecordFetcher,
         subject
       }),
-    issueWalletGrant: (input: {
+    async issueWalletGrant(input: {
       message: string;
       signature: string;
       subject?: string;
-    }) => issueWalletGrant({ ...client, ...input })
+    }) {
+      let rejected = false;
+      const grantFetcher: IdentityFetch = async (request, init) => {
+        const response = await client.fetcher(request, init);
+        rejected = !response.ok;
+        return response;
+      };
+      try {
+        return await issueWalletGrant({
+          ...client,
+          ...input,
+          fetcher: grantFetcher
+        });
+      } catch (error) {
+        if (rejected) {
+          throw new IdentityWalletGrantRejectedError(error);
+        }
+        throw error;
+      }
+    }
   };
 }
 
@@ -1404,6 +1439,7 @@ async function linkIdentityWalletCredential(
   db: SentinelDb,
   gateway: ReturnType<typeof createIdentityGateway>,
   identityHydrator: IdentityHydrator,
+  identityClientId: string,
   input: {
     readonly address: AddressDto;
     readonly chainId: number;
@@ -1429,7 +1465,14 @@ async function linkIdentityWalletCredential(
   await reconcilePendingIdentityWalletLinks(
     db,
     subject,
-    existingIdentity
+    existingIdentity,
+    {
+      // Prune only against this fresh central read; cached hydration cannot
+      // prove that an ambiguous grant attempt never linked the wallet.
+      pruneMissingBefore: new Date(
+        input.verifiedAt.getTime() - IDENTITY_PENDING_LINK_TTL_MS
+      )
+    }
   );
   const existingCentralWallet = findCentralIdentityWallet(
     existingIdentity,
@@ -1448,7 +1491,7 @@ async function linkIdentityWalletCredential(
     });
   }
 
-  await stageIdentityWalletLink(db, existingIdentity, {
+  await stageIdentityWalletLink(db, existingIdentity, identityClientId, {
     address: input.address,
     chainId: input.chainId,
     siweMessage: input.message,
@@ -1460,11 +1503,23 @@ async function linkIdentityWalletCredential(
   // A timeout can hide a successful remote mutation, so force the next
   // authenticated read to re-fetch Identity even when issuance never returns.
   identityHydrator.invalidate(subject);
-  const issued = await gateway.issueWalletGrant({
-    message: input.message,
-    signature: input.signature,
-    subject
-  });
+  let issued: Awaited<ReturnType<typeof gateway.issueWalletGrant>>;
+  try {
+    issued = await gateway.issueWalletGrant({
+      message: input.message,
+      signature: input.signature,
+      subject
+    });
+  } catch (error) {
+    if (error instanceof IdentityWalletGrantRejectedError) {
+      await deleteRejectedIdentityWalletLink(db, {
+        address: input.address,
+        subject,
+        verifiedAt: input.verifiedAt
+      });
+    }
+    throw error;
+  }
   identityHydrator.invalidate(issued.user.id);
   const exchanged = await gateway.exchangeWalletGrant(issued.grant);
   if (
@@ -1512,6 +1567,7 @@ function findCentralIdentityWallet(
 async function stageIdentityWalletLink(
   db: SentinelDb,
   identity: IdentityMeResponse,
+  identityClientId: string,
   input: {
     readonly address: AddressDto;
     readonly chainId: number;
@@ -1560,12 +1616,25 @@ async function stageIdentityWalletLink(
     ) {
       throw new Error("Too many pending Identity wallet links");
     }
+    // Central replays return before staging. Local conflicts fail above, so a
+    // quota event now corresponds to an actual wallet-grant issuance attempt.
+    if (
+      !(await takeIdentityQuotaInTransaction(transaction, {
+        capacity: IDENTITY_WALLET_LINK_LIMIT,
+        now: input.verifiedAt,
+        scope: identityQuotaScope(identityClientId, "wallet-grant-link"),
+        windowMs: IDENTITY_WALLET_LINK_WINDOW_MS
+      }))
+    ) {
+      throw new AuthRateLimitError();
+    }
     if (pending === undefined) {
       await transaction
         .insert(identityWalletLinkReconciliations)
         .values({
           address: input.address.toLowerCase(),
           chainId: input.chainId,
+          createdAt: input.verifiedAt,
           siweMessage: input.siweMessage,
           subject: input.subject,
           userId: input.userId,
@@ -1595,6 +1664,7 @@ async function stageIdentityWalletLink(
       .update(identityWalletLinkReconciliations)
       .set({
         chainId: input.chainId,
+        createdAt: input.verifiedAt,
         siweMessage: input.siweMessage,
         verifiedAt: input.verifiedAt
       })
@@ -1605,7 +1675,10 @@ async function stageIdentityWalletLink(
 async function reconcilePendingIdentityWalletLinks(
   db: SentinelDb,
   subject: string,
-  identity: IdentityMeResponse
+  identity: IdentityMeResponse,
+  options: {
+    readonly pruneMissingBefore?: Date;
+  } = {}
 ): Promise<WalletDto[]> {
   if (identity.user.id !== subject) {
     throw new Error("Identity reconciliation subject mismatch");
@@ -1620,13 +1693,22 @@ async function reconcilePendingIdentityWalletLinks(
     throw new Error("Too many pending Identity wallet links");
   }
   const reconciled: WalletDto[] = [];
+  const staleMissingIds: string[] = [];
   for (const link of pending) {
     const centralWallet = findCentralIdentityWallet(
       identity,
       link.address as AddressDto,
       link.chainId
     );
-    if (centralWallet === undefined) continue;
+    if (centralWallet === undefined) {
+      if (
+        options.pruneMissingBefore !== undefined &&
+        link.createdAt <= options.pruneMissingBefore
+      ) {
+        staleMissingIds.push(link.id);
+      }
+      continue;
+    }
     reconciled.push(
       await finalizeIdentityWalletCoverage(db, identity, {
         address: link.address as AddressDto,
@@ -1639,7 +1721,55 @@ async function reconcilePendingIdentityWalletLinks(
       })
     );
   }
+  if (
+    options.pruneMissingBefore !== undefined &&
+    staleMissingIds.length > 0
+  ) {
+    const pruneMissingBefore = options.pruneMissingBefore;
+    await db.transaction(async (transaction) => {
+      await transaction.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`peezy-user:${subject}`}))`
+      );
+      await transaction
+        .delete(identityWalletLinkReconciliations)
+        .where(
+          and(
+            eq(identityWalletLinkReconciliations.subject, subject),
+            inArray(identityWalletLinkReconciliations.id, staleMissingIds),
+            lte(
+              identityWalletLinkReconciliations.createdAt,
+              pruneMissingBefore
+            )
+          )
+        );
+    });
+  }
   return reconciled;
+}
+
+async function deleteRejectedIdentityWalletLink(
+  db: SentinelDb,
+  input: {
+    readonly address: AddressDto;
+    readonly subject: string;
+    readonly verifiedAt: Date;
+  }
+): Promise<void> {
+  await db.transaction(async (transaction) => {
+    await transaction.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`peezy-user:${input.subject}`}))`
+    );
+    await lockWalletAddress(transaction, input.address);
+    await transaction
+      .delete(identityWalletLinkReconciliations)
+      .where(
+        and(
+          eq(identityWalletLinkReconciliations.subject, input.subject),
+          eq(identityWalletLinkReconciliations.verifiedAt, input.verifiedAt),
+          sql`lower(${identityWalletLinkReconciliations.address}) = lower(${input.address})`
+        )
+      );
+  });
 }
 
 async function finalizeIdentityWalletCoverage(
