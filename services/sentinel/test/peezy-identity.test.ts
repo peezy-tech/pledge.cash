@@ -374,3 +374,76 @@ test("hydrates wallet sign-in authority from the central Identity credential", a
   });
   expect(identityReads).toBe(1);
 });
+
+test("caps presentation reads at 230 to preserve wallet authentication capacity", async () => {
+  const subject = "00000000-0000-4000-8000-000000000020";
+  const identitySubjectQuery = {
+    from() {
+      return this;
+    },
+    limit() {
+      return Promise.resolve([{ subject }]);
+    },
+    where() {
+      return this;
+    }
+  };
+  let quotaInserts = 0;
+  const db = {
+    select: () => identitySubjectQuery,
+    transaction: async (
+      callback: (transaction: {
+        delete(): {
+          where(): Promise<never[]>;
+        };
+        execute(): Promise<never[]>;
+        insert(): {
+          values(): Promise<never[]>;
+        };
+        select(): {
+          from(): {
+            where(): Promise<Array<{ value: number }>>;
+          };
+        };
+      }) => Promise<unknown>
+    ) =>
+      callback({
+        delete: () => ({
+          where: () => Promise.resolve([])
+        }),
+        execute: () => Promise.resolve([]),
+        insert: () => ({
+          values: () => {
+            quotaInserts += 1;
+            return Promise.resolve([]);
+          }
+        }),
+        select: () => ({
+          from: () => ({
+            where: () => Promise.resolve([{ value: 230 }])
+          })
+        })
+      })
+  } as unknown as SentinelDb;
+  let identityReads = 0;
+  const adapter = createPeezyIdentityAuthAdapter(config, db, async () => {
+    identityReads += 1;
+    throw new Error("unexpected Identity read");
+  });
+  const snapshot: AuthSnapshot = {
+    channels: [],
+    providers: [],
+    subscription: {
+      boardrooms: [],
+      minSeverity: "medium",
+      mode: "holdings"
+    },
+    wallets: []
+  };
+
+  await expect(
+    adapter.hydrateAuthSnapshot?.(subject, snapshot)
+  ).rejects.toThrow("Identity presentation read budget exhausted");
+  expect(identityReads).toBe(0);
+  expect(quotaInserts).toBe(0);
+});

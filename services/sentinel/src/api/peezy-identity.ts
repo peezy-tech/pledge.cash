@@ -60,9 +60,10 @@ const IDENTITY_PROVISIONING_MAX_CREDENTIALS = 256;
 const IDENTITY_HYDRATION_CACHE_TTL_MS = 60_000;
 const IDENTITY_HYDRATION_CACHE_MAX_ENTRIES = 1_000;
 const IDENTITY_PRESENTATION_READ_WINDOW_MS = 5 * 60_000;
-// Identity v0.1 allows 300 reads per client and window. Hydration and social
-// callbacks share 240 reads, leaving 60 for wallet sign-in and linking.
-const IDENTITY_PRESENTATION_READ_BUDGET = 240;
+// Identity v0.1 allows 300 reads per client and window. Wallet sign-in reserves
+// 50 reads and ten wallet links reserve two reads each, leaving 230 for
+// presentation hydration and social callbacks.
+const IDENTITY_PRESENTATION_READ_BUDGET = 230;
 const SOCIAL_PROVIDERS = new Set<SocialProvider>([
   "apple",
   "discord",
@@ -1208,11 +1209,25 @@ async function upsertWalletCoverage(
     throw new Error("Wallet is already linked to another account");
   }
 
+  const [alertPreference] = await transaction
+    .select({
+      alertsEnabled: sql<boolean | null>`bool_or(${wallets.alertsEnabled})`
+    })
+    .from(wallets)
+    .where(
+      and(
+        eq(wallets.userId, input.userId),
+        sql`lower(${wallets.address}) = lower(${checksumAddress})`
+      )
+    );
+  const alertsEnabled =
+    input.reenableAlerts || (alertPreference?.alertsEnabled ?? true);
+
   await transaction
     .insert(wallets)
     .values({
       address: checksumAddress,
-      alertsEnabled: true,
+      alertsEnabled,
       chainId: input.chainId,
       siweMessage: input.siweMessage,
       userId: input.userId,

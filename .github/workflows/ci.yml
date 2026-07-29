@@ -170,6 +170,7 @@ jobs:
           git -C "$identity_dir" checkout --detach "$PEEZY_IDENTITY_COMMIT"
           test "$(git -C "$identity_dir" rev-parse HEAD)" = "$PEEZY_IDENTITY_COMMIT"
           bun install --cwd "$identity_dir" --frozen-lockfile
+          bun --cwd "$identity_dir" build
 
       - name: Foundry version
         run: forge --version

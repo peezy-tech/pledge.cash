@@ -441,6 +441,58 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     });
   });
 
+  test("preserves an alert opt-out when wallet sign-in adds another chain", async () => {
+    const wallet = privateKeyToAccount(
+      `0x${randomBytes(32).toString("hex")}`
+    );
+    const firstSignIn = await signInWallet(app, wallet, 999, "192.0.2.81");
+    expect(firstSignIn.status).toBe(200);
+    const cookie = responseCookie(
+      firstSignIn,
+      "pledge-cash.session_token"
+    );
+    const firstSession = (await firstSignIn.json()) as {
+      user: { id: string };
+    };
+
+    const stopWatching = await app.request(
+      `${apiOrigin}/wallets/${wallet.address}`,
+      {
+        body: JSON.stringify({ alertsEnabled: false }),
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: cookie,
+          Origin: webOrigin
+        },
+        method: "PATCH"
+      }
+    );
+    expect(stopWatching.status).toBe(200);
+
+    const secondSignIn = await signInWallet(app, wallet, 1, "192.0.2.81");
+    expect(secondSignIn.status).toBe(200);
+    const secondSession = (await secondSignIn.json()) as {
+      user: { id: string };
+    };
+    expect(secondSession.user.id).toBe(firstSession.user.id);
+
+    const coverage = await dbClient.sql<
+      Array<{ alertsEnabled: boolean; chainId: number }>
+    >`
+      SELECT
+        "alerts_enabled" AS "alertsEnabled",
+        "chain_id" AS "chainId"
+      FROM "wallets"
+      WHERE "user_id" = ${firstSession.user.id}::uuid
+        AND lower("address") = ${wallet.address.toLowerCase()}
+      ORDER BY "chain_id"
+    `;
+    expect(coverage).toEqual([
+      { alertsEnabled: false, chainId: 1 },
+      { alertsEnabled: false, chainId: 999 }
+    ]);
+  });
+
   test("routes legacy SIWE endpoints through canonical Identity authentication", async () => {
     const account = privateKeyToAccount(
       `0x${randomBytes(32).toString("hex")}`
@@ -1643,16 +1695,19 @@ function responseCookie(response: Response, name: string): string {
 
 async function signInWallet(
   app: ReturnType<typeof createApp>,
-  wallet: ReturnType<typeof privateKeyToAccount>
+  wallet: ReturnType<typeof privateKeyToAccount>,
+  chainId = 999,
+  clientIp?: string
 ): Promise<Response> {
   const nonceResponse = await app.request(`${apiOrigin}/auth/peezy/siwe/nonce`, {
     body: JSON.stringify({
-      chainId: 999,
+      chainId,
       walletAddress: wallet.address
     }),
     headers: {
       "Content-Type": "application/json",
-      Origin: webOrigin
+      Origin: webOrigin,
+      ...(clientIp === undefined ? {} : { "X-Forwarded-For": clientIp })
     },
     method: "POST"
   });
@@ -1663,14 +1718,15 @@ async function signInWallet(
   });
   return app.request(`${apiOrigin}/auth/peezy/siwe/verify`, {
     body: JSON.stringify({
-      chainId: 999,
+      chainId,
       message: challenge.message,
       signature,
       walletAddress: wallet.address
     }),
     headers: {
       "Content-Type": "application/json",
-      Origin: webOrigin
+      Origin: webOrigin,
+      ...(clientIp === undefined ? {} : { "X-Forwarded-For": clientIp })
     },
     method: "POST"
   });
