@@ -84,6 +84,114 @@ test("aborts every stalled Identity request at the application deadline", async 
   expect(signals.every((signal) => signal.aborted)).toBe(true);
 });
 
+test("aborts stalled Identity response bodies at the application deadline", async () => {
+  let signal: AbortSignal | undefined;
+  const adapter = createPeezyIdentityAuthAdapter(
+    config,
+    {} as SentinelDb,
+    async (_input, init) => {
+      signal = init?.signal ?? undefined;
+      return new Response(new ReadableStream({ start() {} }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200
+      });
+    },
+    { requestTimeoutMs: 10 }
+  );
+
+  await expect(adapter.getSocialProviders?.()).rejects.toThrow(
+    "Identity request timed out after 10ms"
+  );
+  expect(signal?.aborted).toBe(true);
+});
+
+test("rejects oversized Identity credential sets before provisioning", async () => {
+  const subject = "00000000-0000-4000-8000-000000000001";
+  const address = "0x1111111111111111111111111111111111111111";
+  let transactions = 0;
+  const db = {
+    transaction: () => {
+      transactions += 1;
+      throw new Error("unexpected provisioning transaction");
+    }
+  } as unknown as SentinelDb;
+  const adapter = createPeezyIdentityAuthAdapter(
+    config,
+    db,
+    async (input) => {
+      const pathname = new URL(input.toString()).pathname;
+      if (pathname === "/v1/wallet/grants/issue") {
+        return Response.json({
+          expiresAt: "2026-07-29T00:05:00.000Z",
+          grant: "g".repeat(32),
+          user: {
+            createdAt: "2026-07-29T00:00:00.000Z",
+            id: subject,
+            status: "active"
+          }
+        });
+      }
+      if (pathname === "/v1/wallet/grants/exchange") {
+        return Response.json({
+          expiresAt: "2026-07-29T00:05:00.000Z",
+          subject
+        });
+      }
+      if (pathname === `/v1/users/${subject}`) {
+        return Response.json({
+          credentials: [
+            {
+              accountKind: "eoa",
+              address,
+              family: "evm",
+              id: "00000000-0000-4000-8000-000000000002",
+              kind: "wallet",
+              linkedAt: "2026-07-29T00:00:00.000Z",
+              signInEnabled: true,
+              verifiedChainIds: [1]
+            },
+            ...Array.from({ length: 256 }, (_, index) => ({
+              id: `00000000-0000-4000-8000-${(index + 3)
+                .toString(16)
+                .padStart(12, "0")}`,
+              kind: "passkey",
+              linkedAt: "2026-07-29T00:00:00.000Z"
+            }))
+          ],
+          user: {
+            createdAt: "2026-07-29T00:00:00.000Z",
+            id: subject,
+            status: "active"
+          }
+        });
+      }
+      throw new Error(`Unexpected Identity request: ${pathname}`);
+    }
+  );
+
+  const response = await adapter.handler(
+    new Request("http://localhost:8787/auth/siwe/verify", {
+      body: JSON.stringify({
+        chainId: 1,
+        message: "oversized identity",
+        signature: `0x${"ab".repeat(65)}`,
+        walletAddress: address
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "http://localhost:5173"
+      },
+      method: "POST"
+    })
+  );
+
+  expect(response.status).toBe(401);
+  expect(await response.json()).toMatchObject({
+    message: "peezy.tech identity exceeds the 256-credential provisioning limit"
+  });
+  expect(transactions).toBe(0);
+});
+
 test("hydrates wallet sign-in authority from the central Identity credential", async () => {
   const subject = "00000000-0000-4000-8000-000000000010";
   const address = "0x1111111111111111111111111111111111111111";

@@ -16,7 +16,7 @@ import { betterAuth } from "better-auth";
 import { APIError, createAuthEndpoint } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
 import { genericOAuth, organization } from "better-auth/plugins";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { getAddress } from "viem";
 import { z } from "zod";
 
@@ -48,6 +48,9 @@ import {
 
 const PEEZY_PROVIDER_ID = "peezy";
 const IDENTITY_REQUEST_TIMEOUT_MS = 2_000;
+// Identity v0.1 does not cap a user's total credentials. Fail closed instead
+// of skipping conflict checks or building an unbounded migration query.
+const IDENTITY_PROVISIONING_MAX_CREDENTIALS = 256;
 const IDENTITY_HYDRATION_CACHE_TTL_MS = 60_000;
 const IDENTITY_HYDRATION_CACHE_MAX_ENTRIES = 1_000;
 const IDENTITY_PRESENTATION_READ_WINDOW_MS = 5 * 60_000;
@@ -654,6 +657,11 @@ function createTimeoutFetcher(
   return async (input, init) => {
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    const clearDeadline = () => {
+      if (timeout === undefined) return;
+      clearTimeout(timeout);
+      timeout = undefined;
+    };
     const deadline = new Promise<never>((_, reject) => {
       timeout = setTimeout(() => {
         const error = new Error(`Identity request timed out after ${timeoutMs}ms`);
@@ -662,14 +670,56 @@ function createTimeoutFetcher(
       }, timeoutMs);
     });
 
+    let response: Response;
     try {
-      return await Promise.race([
+      response = await Promise.race([
         fetcher(input, { ...init, signal: controller.signal }),
         deadline
       ]);
-    } finally {
-      if (timeout !== undefined) clearTimeout(timeout);
+    } catch (error) {
+      clearDeadline();
+      throw error;
     }
+
+    if (response.body === null) {
+      clearDeadline();
+      return response;
+    }
+
+    const reader = response.body.getReader();
+    const timedBody = new ReadableStream<Uint8Array>({
+      async pull(bodyController) {
+        try {
+          const result = await Promise.race([reader.read(), deadline]);
+          if (result.done) {
+            clearDeadline();
+            bodyController.close();
+            return;
+          }
+          bodyController.enqueue(result.value);
+        } catch (error) {
+          clearDeadline();
+          bodyController.error(error);
+          void reader.cancel(error).catch(() => undefined);
+        }
+      },
+      cancel(reason) {
+        clearDeadline();
+        controller.abort(reason);
+        return reader.cancel(reason);
+      }
+    });
+    const timedResponse = new Response(timedBody, {
+      headers: response.headers,
+      status: response.status,
+      statusText: response.statusText
+    });
+    Object.defineProperties(timedResponse, {
+      redirected: { value: response.redirected },
+      type: { value: response.type },
+      url: { value: response.url }
+    });
+    return timedResponse;
   };
 }
 
@@ -687,6 +737,7 @@ async function provisionProductUser(
     };
   } = {}
 ): Promise<typeof users.$inferSelect> {
+  assertProvisionableIdentity(identity);
   return db.transaction(async (transaction) => {
     const identityUser = identity.user;
     await transaction.execute(
@@ -789,32 +840,59 @@ async function identityCandidateUserIds(
     .limit(1);
   if (sameSubjectUser !== undefined) candidateUserIds.add(sameSubjectUser.id);
 
+  const walletAddresses = new Set<string>();
+  const socialProvidersByCredentialId = new Map<string, Set<SocialProvider>>();
   for (const credential of identity.credentials) {
     if (credential.kind === "wallet") {
-      const [owner] = await transaction
-        .select({ userId: walletOwners.userId })
-        .from(walletOwners)
-        .where(eq(walletOwners.address, credential.address))
-        .limit(1);
-      if (owner !== undefined) candidateUserIds.add(owner.userId);
+      walletAddresses.add(credential.address);
     }
     if (credential.kind === "social") {
-      const [legacyAccount] = await transaction
-        .select({ userId: authAccounts.userId })
-        .from(authAccounts)
-        .where(
-          and(
-            eq(authAccounts.id, credential.id),
-            eq(authAccounts.providerId, credential.provider)
-          )
-        )
-        .limit(1);
-      if (legacyAccount !== undefined) {
-        candidateUserIds.add(legacyAccount.userId);
+      const providers =
+        socialProvidersByCredentialId.get(credential.id) ??
+        new Set<SocialProvider>();
+      providers.add(credential.provider);
+      socialProvidersByCredentialId.set(credential.id, providers);
+    }
+  }
+
+  if (walletAddresses.size > 0) {
+    const owners = await transaction
+      .select({ userId: walletOwners.userId })
+      .from(walletOwners)
+      .where(inArray(walletOwners.address, [...walletAddresses]));
+    for (const owner of owners) candidateUserIds.add(owner.userId);
+  }
+
+  if (socialProvidersByCredentialId.size > 0) {
+    const legacyAccounts = await transaction
+      .select({
+        id: authAccounts.id,
+        providerId: authAccounts.providerId,
+        userId: authAccounts.userId
+      })
+      .from(authAccounts)
+      .where(
+        inArray(authAccounts.id, [...socialProvidersByCredentialId.keys()])
+      );
+    for (const account of legacyAccounts) {
+      if (
+        socialProvidersByCredentialId
+          .get(account.id)
+          ?.has(account.providerId as SocialProvider)
+      ) {
+        candidateUserIds.add(account.userId);
       }
     }
   }
   return candidateUserIds;
+}
+
+function assertProvisionableIdentity(identity: IdentityMeResponse): void {
+  if (identity.credentials.length > IDENTITY_PROVISIONING_MAX_CREDENTIALS) {
+    throw new Error(
+      `peezy.tech identity exceeds the ${IDENTITY_PROVISIONING_MAX_CREDENTIALS}-credential provisioning limit`
+    );
+  }
 }
 
 async function identitySubjectForProductUser(
@@ -916,6 +994,7 @@ async function linkIdentityWalletCredential(
   }
   const centralIdentity = await gateway.getIdentity(exchanged.subject);
   identityHydrator.set(exchanged.subject, centralIdentity);
+  assertProvisionableIdentity(centralIdentity);
   const centralWallet = centralIdentity.credentials.find(
     (credential) =>
       credential.kind === "wallet" &&
