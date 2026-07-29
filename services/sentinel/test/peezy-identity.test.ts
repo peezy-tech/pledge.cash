@@ -19,7 +19,7 @@ const config = {
   webOrigin: "http://localhost:5173"
 } satisfies Pick<Config, "auth" | "webOrigin">;
 
-test("aborts stalled Identity provider metadata requests at the application deadline", async () => {
+test("aborts every stalled Identity request at the application deadline", async () => {
   const signals: AbortSignal[] = [];
   const stalledFetcher = (
     _input: RequestInfo | URL,
@@ -34,24 +34,51 @@ test("aborts stalled Identity provider metadata requests at the application dead
     config,
     {} as SentinelDb,
     stalledFetcher,
-    { metadataTimeoutMs: 10 }
+    { requestTimeoutMs: 10 }
   );
 
   const results = await Promise.allSettled([
-    adapter.getProviders?.("00000000-0000-4000-8000-000000000001"),
-    adapter.getSocialProviders?.()
+    adapter.createWalletChallenge?.({
+      address: "0x1111111111111111111111111111111111111111",
+      chainId: 1,
+      purpose: "sign-in"
+    }),
+    adapter.getSocialProviders?.(),
+    adapter.handler(
+      new Request("http://localhost:8787/auth/siwe/verify", {
+        body: JSON.stringify({
+          chainId: 1,
+          message: "stalled wallet grant",
+          signature: `0x${"ab".repeat(65)}`,
+          walletAddress: "0x1111111111111111111111111111111111111111"
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Origin: "http://localhost:5173"
+        },
+        method: "POST"
+      })
+    )
   ]);
 
-  expect(results).toHaveLength(2);
-  for (const result of results) {
+  expect(results).toHaveLength(3);
+  for (const result of results.slice(0, 2)) {
     expect(result.status).toBe("rejected");
     if (result.status === "rejected") {
       expect(result.reason).toBeInstanceOf(Error);
       expect((result.reason as Error).message).toBe(
-        "Identity metadata request timed out after 10ms"
+        "Identity request timed out after 10ms"
       );
     }
   }
-  expect(signals).toHaveLength(2);
+  const verify = results[2];
+  expect(verify?.status).toBe("fulfilled");
+  if (verify?.status === "fulfilled") {
+    expect(verify.value.status).toBe(401);
+    expect(await verify.value.json()).toMatchObject({
+      message: "Identity request timed out after 10ms"
+    });
+  }
+  expect(signals).toHaveLength(3);
   expect(signals.every((signal) => signal.aborted)).toBe(true);
 });

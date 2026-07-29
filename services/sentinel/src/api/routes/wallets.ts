@@ -159,11 +159,15 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
 
     const user = c.get("user");
     if (delegatesCredentialLink && deps.auth.linkWalletCredential !== undefined) {
+      let wallet;
       try {
-        await deps.auth.linkWalletCredential({
+        wallet = await deps.auth.linkWalletCredential({
+          address: normalizeAddress(siwe.address),
+          chainId: siwe.chainId,
           message: parsed.value.message,
           signature: parsed.value.signature,
-          userId: user.id
+          userId: user.id,
+          verifiedAt: now
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "";
@@ -174,17 +178,6 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
             ? "Wallet is already linked to another account"
             : "SIWE signature is invalid"
         );
-      }
-
-      const wallet = await deps.store.linkWalletCoverage({
-        address: normalizeAddress(siwe.address),
-        chainId: siwe.chainId,
-        siweMessage: parsed.value.message,
-        userId: user.id,
-        verifiedAt: now
-      });
-      if (wallet === null) {
-        return jsonError(c, 409, "Wallet is already linked to another account");
       }
       return c.json(LinkWalletResponseSchema.parse({ wallet }));
     }

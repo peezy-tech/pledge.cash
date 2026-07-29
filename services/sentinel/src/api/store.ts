@@ -253,55 +253,6 @@ export function createDrizzleApiStore(db: SentinelDb): SentinelApiStore {
         return toWalletDto(row);
       });
     },
-    async linkWalletCoverage(input) {
-      return db.transaction(async (tx) => {
-        const checksumAddress = getAddress(input.address);
-        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(lower(${checksumAddress})))`);
-        await tx
-          .insert(wallets)
-          .values({
-            address: checksumAddress,
-            alertsEnabled: true,
-            chainId: input.chainId,
-            siweMessage: input.siweMessage,
-            userId: input.userId,
-            verifiedAt: input.verifiedAt
-          })
-          .onConflictDoNothing();
-
-        const [existing] = await tx
-          .select({ userId: wallets.userId })
-          .from(wallets)
-          .where(
-            and(
-              eq(wallets.chainId, input.chainId),
-              sql`lower(${wallets.address}) = lower(${checksumAddress})`
-            )
-          )
-          .for("update")
-          .limit(1);
-        if (existing?.userId !== input.userId) {
-          return null;
-        }
-
-        const [row] = await tx
-          .update(wallets)
-          .set({
-            alertsEnabled: true,
-            siweMessage: input.siweMessage,
-            verifiedAt: input.verifiedAt
-          })
-          .where(
-            and(
-              eq(wallets.userId, input.userId),
-              eq(wallets.chainId, input.chainId),
-              sql`lower(${wallets.address}) = lower(${checksumAddress})`
-            )
-          )
-          .returning();
-        return row === undefined ? null : toWalletDto(row);
-      });
-    },
     async ping() {
       await db.execute(sql`SELECT 1`);
     },

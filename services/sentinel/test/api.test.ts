@@ -296,16 +296,6 @@ class InMemoryStore implements SentinelApiStore {
     return wallet;
   }
 
-  async linkWalletCoverage(input: {
-    readonly address: AddressDto;
-    readonly chainId: number;
-    readonly siweMessage: string;
-    readonly userId: string;
-    readonly verifiedAt: Date;
-  }): Promise<WalletDto | null> {
-    return this.linkWallet(input);
-  }
-
   async ping(): Promise<void> {
     this.pingCount += 1;
   }

@@ -31,6 +31,12 @@ const firstWallet = privateKeyToAccount(
 const secondWallet = privateKeyToAccount(
   "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 );
+const legacyWallet = privateKeyToAccount(
+  "0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef"
+);
+const conflictedWallet = privateKeyToAccount(
+  "0x1111111111111111111111111111111111111111111111111111111111111111"
+);
 
 describeWithIdentity("peezy.tech Identity compatibility integration", () => {
   let adminSql: Sql;
@@ -139,11 +145,15 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     const me = (await meResponse.json()) as {
       providers: string[];
       user: { id: string };
+      wallets: Array<{ address: string }>;
     };
     expect(me.user.id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
     );
     expect(me.providers).toContain("siwe");
+    expect(me.wallets).toContainEqual(
+      expect.objectContaining({ address: firstWallet.address.toLowerCase() })
+    );
 
     const socialLinkStart = await app.request(`${apiOrigin}/auth/peezy/link`, {
       body: JSON.stringify({
@@ -255,6 +265,315 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     `;
     expect(localCredential?.count).toBe("0");
     expect(alertCoverage?.count).toBe("1");
+
+    const otherUserId = randomUUID();
+    await dbClient.sql`
+      INSERT INTO "users" (
+        "id", "name", "email", "email_verified", "created_at", "updated_at"
+      )
+      VALUES (
+        ${otherUserId}::uuid,
+        'Other local user',
+        ${`${otherUserId}@wallet.pledge.cash.invalid`},
+        false,
+        now(),
+        now()
+      )
+    `;
+    await dbClient.sql`
+      INSERT INTO "wallets" (
+        "user_id", "address", "chain_id", "alerts_enabled", "verified_at"
+      )
+      VALUES (
+        ${otherUserId}::uuid,
+        ${conflictedWallet.address.toLowerCase()},
+        999,
+        true,
+        now()
+      )
+    `;
+    const conflictNonceResponse = await app.request(`${apiOrigin}/wallets/nonce`, {
+      body: JSON.stringify({
+        address: conflictedWallet.address,
+        chainId: 999
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookie,
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+    expect(conflictNonceResponse.status).toBe(200);
+    const conflictChallenge = (await conflictNonceResponse.json()) as {
+      message: string;
+    };
+    const conflictSignature = await conflictedWallet.signMessage({
+      message: conflictChallenge.message
+    });
+    const conflictResponse = await app.request(`${apiOrigin}/wallets`, {
+      body: JSON.stringify({
+        message: conflictChallenge.message,
+        signature: conflictSignature
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookie,
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+    expect(conflictResponse.status).toBe(409);
+    const [centralConflict] = await identitySql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "wallet_principal"
+      WHERE lower("address") = ${conflictedWallet.address.toLowerCase()}
+    `;
+    expect(centralConflict?.count).toBe("0");
+  });
+
+  test("maps a central subject back to legacy PledgeCash product data by wallet ownership", async () => {
+    const legacyUserId = randomUUID();
+    await dbClient.sql`
+      INSERT INTO "users" (
+        "id", "name", "email", "email_verified", "created_at", "updated_at"
+      )
+      VALUES (
+        ${legacyUserId}::uuid,
+        'Legacy product user',
+        ${`${legacyUserId}@wallet.pledge.cash.invalid`},
+        false,
+        now(),
+        now()
+      )
+    `;
+    await dbClient.sql`
+      INSERT INTO "wallets" (
+        "user_id", "address", "chain_id", "alerts_enabled", "verified_at"
+      )
+      VALUES (
+        ${legacyUserId}::uuid,
+        ${legacyWallet.address.toLowerCase()},
+        999,
+        false,
+        now()
+      )
+    `;
+    await dbClient.sql`
+      INSERT INTO "subscriptions" ("user_id", "mode", "min_severity")
+      VALUES (${legacyUserId}::uuid, 'explicit', 'high')
+    `;
+    await dbClient.sql`
+      INSERT INTO "channels" ("user_id", "type", "telegram_chat_id")
+      VALUES (${legacyUserId}::uuid, 'telegram', ${`legacy-${legacyUserId}`})
+    `;
+
+    const nonceResponse = await app.request(`${apiOrigin}/auth/siwe/nonce`, {
+      body: JSON.stringify({
+        chainId: 999,
+        walletAddress: legacyWallet.address
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+    expect(nonceResponse.status).toBe(200);
+    const challenge = (await nonceResponse.json()) as { message: string };
+    const signature = await legacyWallet.signMessage({
+      message: challenge.message
+    });
+    const verifyResponse = await app.request(`${apiOrigin}/auth/siwe/verify`, {
+      body: JSON.stringify({
+        chainId: 999,
+        message: challenge.message,
+        signature,
+        walletAddress: legacyWallet.address
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+    expect(verifyResponse.status).toBe(200);
+    const cookie = responseCookie(verifyResponse, "pledge-cash.session_token");
+    const meResponse = await app.request(`${apiOrigin}/auth/me`, {
+      headers: { Cookie: cookie, Origin: webOrigin }
+    });
+    expect(meResponse.status).toBe(200);
+    expect(await meResponse.json()).toMatchObject({
+      channels: [
+        {
+          enabled: true,
+          telegramChatId: `legacy-${legacyUserId}`,
+          type: "telegram"
+        }
+      ],
+      subscription: {
+        minSeverity: "high",
+        mode: "explicit"
+      },
+      user: { id: legacyUserId },
+      wallets: [
+        {
+          address: legacyWallet.address.toLowerCase(),
+          alertsEnabled: false
+        }
+      ]
+    });
+    const [mapping] = await dbClient.sql<{ subject: string }[]>`
+      SELECT "account_id" AS "subject"
+      FROM "auth_accounts"
+      WHERE "provider_id" = 'peezy'
+        AND "user_id" = ${legacyUserId}::uuid
+    `;
+    expect(mapping?.subject).toBeDefined();
+    expect(mapping?.subject).not.toBe(legacyUserId);
+  });
+
+  test("maps imported social credentials back to legacy PledgeCash product data", async () => {
+    if (!identityUrl || !identityAppSecret) return;
+    const legacyUserId = randomUUID();
+    const subject = randomUUID();
+    const socialAccountId = randomUUID();
+    const email = `${subject}@example.com`;
+    const now = new Date();
+    await dbClient.sql`
+      INSERT INTO "users" (
+        "id", "name", "email", "email_verified", "created_at", "updated_at"
+      )
+      VALUES (
+        ${legacyUserId}::uuid,
+        'Legacy social user',
+        ${email},
+        true,
+        now(),
+        now()
+      )
+    `;
+    await dbClient.sql`
+      INSERT INTO "auth_accounts" (
+        "id", "account_id", "provider_id", "user_id", "created_at", "updated_at"
+      )
+      VALUES (
+        ${socialAccountId}::uuid,
+        ${`github-${subject}`},
+        'github',
+        ${legacyUserId}::uuid,
+        now(),
+        now()
+      )
+    `;
+    await dbClient.sql`
+      INSERT INTO "subscriptions" ("user_id", "mode", "min_severity")
+      VALUES (${legacyUserId}::uuid, 'explicit', 'high')
+    `;
+    await identitySql`
+      INSERT INTO "user" (
+        "id", "name", "email", "email_verified", "status", "created_at", "updated_at"
+      )
+      VALUES (
+        ${subject},
+        'Legacy social user',
+        ${email},
+        true,
+        'active',
+        ${now},
+        ${now}
+      )
+    `;
+    await identitySql`
+      INSERT INTO "account" (
+        "id", "account_id", "provider_id", "user_id", "created_at", "updated_at"
+      )
+      VALUES (
+        ${socialAccountId},
+        ${`github-${subject}`},
+        'github',
+        ${subject},
+        ${now},
+        ${now}
+      )
+    `;
+
+    const handoffResponse = await fetch(
+      `${identityUrl}/v1/social-link-handoffs`,
+      {
+        body: JSON.stringify({
+          callbackUrl: `${webOrigin}/alerts`,
+          clientId: "pledge-cash",
+          provider: "github",
+          subject
+        }),
+        headers: {
+          Authorization: `Basic ${Buffer.from(
+            `pledge-cash:${identityAppSecret}`
+          ).toString("base64")}`,
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      }
+    );
+    expect(handoffResponse.status).toBe(201);
+    const handoff = (await handoffResponse.json()) as { url: string };
+    const identitySessionResponse = await fetch(handoff.url, {
+      redirect: "manual"
+    });
+    expect(identitySessionResponse.status).toBe(302);
+    const identityCookie = responseCookie(
+      identitySessionResponse,
+      "peezy-identity.session_token"
+    );
+    const oidcStart = await app.request(`${apiOrigin}/auth/peezy/sign-in`, {
+      body: JSON.stringify({
+        callbackURL: `${webOrigin}/alerts`,
+        provider: "github"
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+    expect(oidcStart.status).toBe(200);
+    const stateCookie = responseCookie(oidcStart, "pledge-cash.state");
+    const authorization = (await oidcStart.json()) as { url: string };
+    const authorizationResponse = await fetch(authorization.url, {
+      headers: { Cookie: identityCookie },
+      redirect: "manual"
+    });
+    expect(authorizationResponse.status).toBe(302);
+    const callbackUrl = authorizationResponse.headers.get("location");
+    if (!callbackUrl) throw new Error("Expected OIDC callback redirect");
+    const callbackResponse = await app.request(callbackUrl, {
+      headers: { Cookie: stateCookie }
+    });
+    expect(callbackResponse.status).toBe(302);
+    const productCookie = responseCookie(
+      callbackResponse,
+      "pledge-cash.session_token"
+    );
+    const meResponse = await app.request(`${apiOrigin}/auth/me`, {
+      headers: { Cookie: productCookie, Origin: webOrigin }
+    });
+    expect(meResponse.status).toBe(200);
+    expect(await meResponse.json()).toMatchObject({
+      providers: ["github"],
+      subscription: {
+        minSeverity: "high",
+        mode: "explicit"
+      },
+      user: { id: legacyUserId }
+    });
+    const [mapping] = await dbClient.sql<{ userId: string }[]>`
+      SELECT "user_id"::text AS "userId"
+      FROM "auth_accounts"
+      WHERE "provider_id" = 'peezy'
+        AND "account_id" = ${subject}
+    `;
+    expect(mapping?.userId).toBe(legacyUserId);
   });
 
   test("creates a PledgeCash product session for a walletless central account", async () => {

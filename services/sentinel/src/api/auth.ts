@@ -67,10 +67,13 @@ export type AuthAdapter = {
   getSession(input: { readonly headers: Headers }): Promise<AuthSession | null>;
   handler(request: Request): Promise<Response>;
   linkWalletCredential?(input: {
+    readonly address: AddressDto;
+    readonly chainId: number;
     readonly message: string;
     readonly signature: string;
     readonly userId: string;
-  }): Promise<void>;
+    readonly verifiedAt: Date;
+  }): Promise<WalletDto>;
   startSocial?(input: {
     readonly headers: Headers;
     readonly link: boolean;
@@ -129,13 +132,6 @@ export type SentinelApiStore = {
   getSubscription(userId: string): Promise<SubscriptionDto>;
   getWalletNonce(nonce: string): Promise<WalletNonceRecord | null>;
   linkWallet(input: {
-    readonly address: AddressDto;
-    readonly chainId: number;
-    readonly siweMessage: string;
-    readonly userId: string;
-    readonly verifiedAt: Date;
-  }): Promise<WalletDto | null>;
-  linkWalletCoverage(input: {
     readonly address: AddressDto;
     readonly chainId: number;
     readonly siweMessage: string;
