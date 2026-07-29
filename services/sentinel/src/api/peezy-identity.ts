@@ -15,7 +15,12 @@ import {
 import { betterAuth } from "better-auth";
 import { APIError, createAuthEndpoint } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
-import { genericOAuth, organization } from "better-auth/plugins";
+import { authorizationCodeRequest, getOAuth2Tokens } from "better-auth/oauth2";
+import {
+  genericOAuth,
+  organization,
+  type GenericOAuthConfig
+} from "better-auth/plugins";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getAddress } from "viem";
 import { z } from "zod";
@@ -173,16 +178,10 @@ export function createPeezyIdentityAuthAdapter(
     plugins: [
       genericOAuth({
         config: [
-          {
-            authentication: "basic",
-            authorizationUrlParams: (context) => {
-              const provider = context.body.additionalData?.provider;
-              return isSocialProvider(provider) ? { login_hint: provider } : {};
-            },
-            clientId: identity.clientId,
-            clientSecret: identity.oidcClientSecret,
-            discoveryUrl: `${identity.baseUrl}/api/auth/.well-known/openid-configuration`,
-            getUserInfo: async (tokens) => {
+          createPeezyOidcProviderConfig(
+            identity,
+            identityFetcher,
+            async (tokens) => {
               if (tokens.accessToken === undefined) return null;
               const profile = await fetchIdentityProfile(
                 identity.baseUrl,
@@ -206,13 +205,8 @@ export function createPeezyIdentityAuthAdapter(
                 name: productUser.name,
                 sub: profile.sub
               };
-            },
-            issuer: `${identity.baseUrl}/api/auth`,
-            pkce: true,
-            providerId: PEEZY_PROVIDER_ID,
-            requireIssuerValidation: true,
-            scopes: ["openid", "profile", "email"]
-          }
+            }
+          )
         ]
       }),
       peezyWalletSessionPlugin(gateway, db, identityHydrator),
@@ -365,6 +359,69 @@ export function createPeezyIdentityAuthAdapter(
         response: (await response.json()) as AuthRedirectResponse
       };
     }
+  };
+}
+
+export function createPeezyOidcProviderConfig(
+  identity: Pick<
+    IdentityConfig,
+    "baseUrl" | "clientId" | "oidcClientSecret"
+  >,
+  fetcher: IdentityFetch,
+  getUserInfo: NonNullable<GenericOAuthConfig["getUserInfo"]>
+): GenericOAuthConfig {
+  const issuer = `${identity.baseUrl}/api/auth`;
+  const tokenUrl = `${issuer}/oauth2/token`;
+
+  return {
+    authentication: "basic",
+    authorizationUrl: `${issuer}/oauth2/authorize`,
+    authorizationUrlParams: (context) => {
+      const provider = context.body.additionalData?.provider;
+      return isSocialProvider(provider) ? { login_hint: provider } : {};
+    },
+    clientId: identity.clientId,
+    clientSecret: identity.oidcClientSecret,
+    getToken: async ({ code, codeVerifier, redirectURI }) => {
+      const request = await authorizationCodeRequest({
+        authentication: "basic",
+        code,
+        ...(codeVerifier === undefined ? {} : { codeVerifier }),
+        options: {
+          clientId: identity.clientId,
+          clientSecret: identity.oidcClientSecret,
+          redirectURI
+        },
+        redirectURI
+      });
+      const response = await fetcher(tokenUrl, {
+        body: request.body,
+        headers: request.headers,
+        method: "POST",
+        redirect: "manual"
+      });
+      if (
+        response.type === "opaqueredirect" ||
+        (response.status >= 300 && response.status < 400)
+      ) {
+        throw new Error("Identity OIDC token endpoint returned a redirect");
+      }
+      if (!response.ok) {
+        throw new Error(
+          `Identity OIDC token exchange failed with status ${response.status}`
+        );
+      }
+      return getOAuth2Tokens(
+        z.record(z.unknown()).parse(await response.json())
+      );
+    },
+    getUserInfo,
+    issuer,
+    pkce: true,
+    providerId: PEEZY_PROVIDER_ID,
+    requireIssuerValidation: true,
+    scopes: ["openid", "profile", "email"],
+    tokenUrl
   };
 }
 
@@ -663,7 +720,7 @@ function createIdentityHydrator(
   };
 }
 
-function createTimeoutFetcher(
+export function createTimeoutFetcher(
   fetcher: IdentityFetch,
   timeoutMs: number
 ): IdentityFetch {

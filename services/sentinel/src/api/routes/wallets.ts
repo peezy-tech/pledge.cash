@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { getAddress } from "viem";
+import { getAddress, verifyMessage, type Address, type Hex } from "viem";
 import { parseSiweMessage } from "viem/siwe";
 
 import { WALLET_LINK_SIWE_STATEMENT } from "../better-auth";
@@ -164,6 +164,24 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
 
     const user = c.get("user");
     if (delegatesCredentialLink && deps.auth.linkWalletCredential !== undefined) {
+      // Identity v0.1 accepts only standard 65-byte EOA signatures. Reject invalid
+      // proofs locally so they cannot consume the shared wallet-grant quota.
+      let signatureValid = false;
+      if (parsed.value.signature.length === 132) {
+        try {
+          signatureValid = await verifyMessage({
+            address: siwe.address as Address,
+            message: parsed.value.message,
+            signature: parsed.value.signature as Hex
+          });
+        } catch {
+          signatureValid = false;
+        }
+      }
+      if (!signatureValid) {
+        return jsonError(c, 400, "SIWE signature is invalid");
+      }
+
       if (
         deps.auth.usesSharedIdentity === true &&
         !(await deps.store.takeIdentityQuota({

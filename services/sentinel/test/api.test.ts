@@ -808,6 +808,25 @@ describe("Sentinel WP5 API", () => {
       Object.assign(harness.auth, { linkWalletCredential });
     }
     const request = await authSiweRequest();
+    const invalidStatuses: number[] = [];
+    for (let index = 0; index < 10; index += 1) {
+      const harness = identityHarnesses[index % identityHarnesses.length]!;
+      const response = await harness.app.request("/wallets", {
+        body: JSON.stringify({
+          message: request.message,
+          signature: `0x${"ab".repeat(65)}`
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: SESSION_COOKIE,
+          "X-Forwarded-For": `203.0.113.${index + 1}`
+        },
+        method: "POST"
+      });
+      invalidStatuses.push(response.status);
+    }
+    expect(invalidStatuses.every((status) => status === 400)).toBe(true);
+
     const statuses: number[] = [];
     for (let index = 0; index < 11; index += 1) {
       const harness = identityHarnesses[index % identityHarnesses.length]!;

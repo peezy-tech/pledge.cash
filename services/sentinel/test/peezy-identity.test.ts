@@ -1,7 +1,11 @@
 import { expect, test } from "bun:test";
 
 import type { AuthSnapshot } from "../src/api/auth";
-import { createPeezyIdentityAuthAdapter } from "../src/api/peezy-identity";
+import {
+  createPeezyIdentityAuthAdapter,
+  createPeezyOidcProviderConfig,
+  createTimeoutFetcher
+} from "../src/api/peezy-identity";
 import type { Config } from "../src/config";
 import type { SentinelDb } from "../src/db/client";
 
@@ -102,6 +106,60 @@ test("aborts stalled Identity response bodies at the application deadline", asyn
   await expect(adapter.getSocialProviders?.()).rejects.toThrow(
     "Identity request timed out after 10ms"
   );
+  expect(signal?.aborted).toBe(true);
+});
+
+test("uses the application deadline for the static Identity OIDC token exchange", async () => {
+  let requestInit: RequestInit | undefined;
+  let requestUrl: string | undefined;
+  let signal: AbortSignal | undefined;
+  const oidc = createPeezyOidcProviderConfig(
+    config.auth.identity,
+    createTimeoutFetcher(
+      (input, init) => {
+        requestInit = init;
+        requestUrl = input.toString();
+        signal = init?.signal ?? undefined;
+        return new Promise(() => {});
+      },
+      10
+    ),
+    async () => null
+  );
+
+  expect(oidc).toMatchObject({
+    authorizationUrl:
+      "https://identity.peezy.tech/api/auth/oauth2/authorize",
+    issuer: "https://identity.peezy.tech/api/auth",
+    tokenUrl: "https://identity.peezy.tech/api/auth/oauth2/token"
+  });
+  expect(oidc).not.toHaveProperty("discoveryUrl");
+  await expect(
+    oidc.getToken?.({
+      code: "authorization-code",
+      codeVerifier: "pkce-verifier",
+      redirectURI: "http://localhost:8787/auth/oauth2/callback/peezy"
+    })
+  ).rejects.toThrow("Identity request timed out after 10ms");
+  expect(requestUrl).toBe(
+    "https://identity.peezy.tech/api/auth/oauth2/token"
+  );
+  expect(requestInit?.method).toBe("POST");
+  expect(requestInit?.redirect).toBe("manual");
+  expect(new Headers(requestInit?.headers).get("authorization")).toMatch(
+    /^Basic /
+  );
+  const requestBody = requestInit?.body;
+  expect(requestBody).toBeInstanceOf(URLSearchParams);
+  if (!(requestBody instanceof URLSearchParams)) {
+    throw new Error("Expected an OIDC token form body");
+  }
+  expect(Object.fromEntries(requestBody)).toMatchObject({
+    code: "authorization-code",
+    code_verifier: "pkce-verifier",
+    grant_type: "authorization_code",
+    redirect_uri: "http://localhost:8787/auth/oauth2/callback/peezy"
+  });
   expect(signal?.aborted).toBe(true);
 });
 
