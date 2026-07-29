@@ -142,7 +142,7 @@ describe("sentinel web client", () => {
     expect(calls[0]?.init?.body).toBe(JSON.stringify({ alertsEnabled: false }));
   });
 
-  test("starts direct-provider social linking with the current callback", async () => {
+  test("starts peezy.tech social linking with the current callback", async () => {
     const calls: { input: string; init: RequestInit | undefined }[] = [];
     const fetcher: SentinelFetch = async (input, init) => {
       calls.push({ input: input.toString(), init });
@@ -157,12 +157,12 @@ describe("sentinel web client", () => {
 
     await client.linkSocial(body);
 
-    expect(calls[0]?.input).toBe("https://api.example.test/auth/link-social");
+    expect(calls[0]?.input).toBe("https://api.example.test/auth/peezy/link");
     expect(calls[0]?.init?.method).toBe("POST");
     expect(calls[0]?.init?.body).toBe(JSON.stringify(body));
   });
 
-  test("uses the Generic OAuth routes and providerId body for Telegram", async () => {
+  test("routes every provider through the shared peezy.tech identity endpoints", async () => {
     const calls: { input: string; init: RequestInit | undefined }[] = [];
     const fetcher: SentinelFetch = async (input, init) => {
       calls.push({ input: input.toString(), init });
@@ -179,17 +179,13 @@ describe("sentinel web client", () => {
     await client.signInSocial(body);
 
     expect(calls.map((call) => call.input)).toEqual([
-      "https://api.example.test/auth/oauth2/link",
-      "https://api.example.test/auth/sign-in/oauth2",
+      "https://api.example.test/auth/peezy/link",
+      "https://api.example.test/auth/peezy/sign-in",
     ]);
     for (const call of calls) {
       expect(call.init?.method).toBe("POST");
       expect(call.init?.body).toBe(
-        JSON.stringify({
-          callbackURL: body.callbackURL,
-          errorCallbackURL: body.errorCallbackURL,
-          providerId: "telegram",
-        }),
+        JSON.stringify(body),
       );
     }
   });

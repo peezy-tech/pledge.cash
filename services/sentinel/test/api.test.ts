@@ -296,6 +296,16 @@ class InMemoryStore implements SentinelApiStore {
     return wallet;
   }
 
+  async linkWalletCoverage(input: {
+    readonly address: AddressDto;
+    readonly chainId: number;
+    readonly siweMessage: string;
+    readonly userId: string;
+    readonly verifiedAt: Date;
+  }): Promise<WalletDto | null> {
+    return this.linkWallet(input);
+  }
+
   async ping(): Promise<void> {
     this.pingCount += 1;
   }
@@ -448,6 +458,34 @@ describe("Sentinel WP5 API", () => {
     });
     expect(meBody.user).not.toHaveProperty("email");
     expect(meBody.user).not.toHaveProperty("workosUserId");
+  });
+
+  test("keeps an existing product session readable when Identity metadata is unavailable", async () => {
+    Object.assign(harness.auth, {
+      getProviders: async () => {
+        throw new Error("Identity unavailable");
+      },
+      getSocialProviders: async () => {
+        throw new Error("Identity unavailable");
+      }
+    });
+    harness.store.providersByUser.set(USER_ID, ["siwe"]);
+    const cookie = await signedInCookie(harness);
+
+    const capabilities = await harness.app.request("/auth/capabilities");
+    expect(capabilities.status).toBe(200);
+    expect(await readJson<{ socialProviders: string[] }>(capabilities)).toEqual({
+      socialProviders: ["discord", "twitter", "telegram"]
+    });
+
+    const me = await harness.app.request("/auth/me", {
+      headers: { Cookie: cookie }
+    });
+    expect(me.status).toBe(200);
+    expect(await readJson<AuthMeResponse>(me)).toMatchObject({
+      providers: ["siwe"],
+      user: { id: USER_ID }
+    });
   });
 
   test("forwards SIWE and sign-out requests to the Better Auth handler", async () => {

@@ -10,6 +10,7 @@ import {
 
 import {
   configuredSocialProviders,
+  internalAuthHeaders,
   telegramUserInfo,
   verifyTelegramIdToken
 } from "../src/api/better-auth";
@@ -35,6 +36,28 @@ describe("Better Auth social providers", () => {
       "github",
       "apple"
     ]);
+  });
+
+  test("forwards only session, origin, agent, and proxy identity into internal auth requests", () => {
+    const headers = internalAuthHeaders(
+      new Headers({
+        Authorization: "Bearer must-not-cross-the-auth-facade",
+        "Content-Length": "999",
+        Cookie: "pledge-cash.session_token=session",
+        Host: "attacker.example",
+        Origin: "https://pledge.cash",
+        "User-Agent": "PledgeCash test",
+        "X-Forwarded-For": "192.0.2.1"
+      })
+    );
+
+    expect(Object.fromEntries(headers)).toEqual({
+      "content-type": "application/json",
+      cookie: "pledge-cash.session_token=session",
+      origin: "https://pledge.cash",
+      "user-agent": "PledgeCash test",
+      "x-forwarded-for": "192.0.2.1"
+    });
   });
 
   test("verifies Telegram signatures and maps only pseudonymous identity fields", async () => {

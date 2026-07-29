@@ -72,6 +72,8 @@
       "name": "@pledge.cash/sentinel",
       "version": "0.1.0",
       "dependencies": {
+        "@peezy.tech/identity": "https://github.com/peezy-tech/identity/releases/download/v0.1.0/peezy.tech-identity-0.1.0.tgz",
+        "@peezy.tech/identity-server": "https://github.com/peezy-tech/identity/releases/download/v0.1.0/peezy.tech-identity-server-0.1.0.tgz",
         "@pledge.cash/sdk": "workspace:*",
         "better-auth": "1.6.23",
         "drizzle-orm": "0.45.2",
@@ -319,6 +321,10 @@
     "@pagefind/windows-arm64": ["@pagefind/windows-arm64@1.5.2", "", { "os": "win32", "cpu": "arm64" }, "sha512-hN9Nh90fNW61nNRCW9ZyQrAj/mD0eRvmJ8NlTUzkbuW8kIzGJUi3cxjFkEcMZ5h/8FsKWD/VcouZl4yo1F7B6g=="],
 
     "@pagefind/windows-x64": ["@pagefind/windows-x64@1.5.2", "", { "os": "win32", "cpu": "x64" }, "sha512-Fa2Iyw7kaDRzGMfNYNUXNW2zbL5FQVDgSOcbDHdzBrDEdpqOqg8TcZ68F22ol6NJ9IGzvUdmeyZypLW5dyhqsg=="],
+
+    "@peezy.tech/identity": ["@peezy.tech/identity@https://github.com/peezy-tech/identity/releases/download/v0.1.0/peezy.tech-identity-0.1.0.tgz", { "dependencies": { "zod": "4.4.3" } }, "sha512-JHCzHcVW9JFik3AhFpLjaFHxnHjgDTh8myRwc+SqJu6DNEiS98g/lxxqOXACikUQw8KDXqcdcyq7X4WpvwnH2Q=="],
+
+    "@peezy.tech/identity-server": ["@peezy.tech/identity-server@https://github.com/peezy-tech/identity/releases/download/v0.1.0/peezy.tech-identity-server-0.1.0.tgz", { "dependencies": { "jose": "6.2.4" } }, "sha512-rh/kKaW/LBPhopxRXIt5UOqNPe+4mcdNrqgcwI7OSlkJYUnXuZ2B11wuFfkX521W6xmpr0KOiZC1q5L6x+5J9Q=="],
 
     "@pledge.cash/contracts": ["@pledge.cash/contracts@workspace:packages/contracts"],
 
@@ -1363,6 +1369,10 @@
     "@modelcontextprotocol/sdk/zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
 
     "@nktkas/hyperliquid/@noble/hashes": ["@noble/hashes@2.2.0", "", {}, "sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg=="],
+
+    "@peezy.tech/identity/zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
+
+    "@peezy.tech/identity-server/jose": ["jose@6.2.4", "", {}, "sha512-N8acGzVsQy6M/fjFcxtysNc4Q379TcM5dM/qKkNtsHFji88yANnXTr7BLeP75iPnFwBfQzM/jg2BZ9+HZrHCZA=="],
 
     "@rollup/pluginutils/estree-walker": ["estree-walker@2.0.2", "", {}, "sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w=="],
 

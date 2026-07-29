@@ -81,6 +81,18 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       return parsed.response;
     }
 
+    if (deps.auth.createWalletChallenge !== undefined) {
+      if (parsed.value.address === undefined || parsed.value.chainId === undefined) {
+        return jsonError(c, 400, "address and chainId are required");
+      }
+      const challenge = await deps.auth.createWalletChallenge({
+        address: normalizeAddress(parsed.value.address),
+        chainId: parsed.value.chainId,
+        purpose: "link"
+      });
+      return c.json(WalletNonceResponseSchema.parse(challenge));
+    }
+
     const issuedAt = getNow(deps);
     const expiresAt = new Date(issuedAt.getTime() + WALLET_NONCE_TTL_MS);
     const nonce = deps.generateNonce?.() ?? crypto.randomUUID().replaceAll("-", "");
@@ -108,13 +120,14 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     }
 
     const siwe = parseSiweMessage(parsed.value.message);
+    const delegatesCredentialLink = deps.auth.linkWalletCredential !== undefined;
     if (
       siwe.address === undefined ||
       siwe.chainId === undefined ||
       siwe.domain === undefined ||
       siwe.nonce === undefined ||
       siwe.uri === undefined ||
-      siwe.statement !== WALLET_LINK_SIWE_STATEMENT ||
+      (!delegatesCredentialLink && siwe.statement !== WALLET_LINK_SIWE_STATEMENT) ||
       siwe.version !== "1"
     ) {
       return jsonError(c, 400, "SIWE message is missing required fields");
@@ -145,6 +158,37 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     }
 
     const user = c.get("user");
+    if (delegatesCredentialLink && deps.auth.linkWalletCredential !== undefined) {
+      try {
+        await deps.auth.linkWalletCredential({
+          message: parsed.value.message,
+          signature: parsed.value.signature,
+          userId: user.id
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        return jsonError(
+          c,
+          /already linked|another account/i.test(message) ? 409 : 400,
+          /already linked|another account/i.test(message)
+            ? "Wallet is already linked to another account"
+            : "SIWE signature is invalid"
+        );
+      }
+
+      const wallet = await deps.store.linkWalletCoverage({
+        address: normalizeAddress(siwe.address),
+        chainId: siwe.chainId,
+        siweMessage: parsed.value.message,
+        userId: user.id,
+        verifiedAt: now
+      });
+      if (wallet === null) {
+        return jsonError(c, 409, "Wallet is already linked to another account");
+      }
+      return c.json(LinkWalletResponseSchema.parse({ wallet }));
+    }
+
     const nonce = await deps.store.getWalletNonce(siwe.nonce);
     if (nonce === null || nonce.userId !== user.id) {
       return jsonError(c, 400, "Unknown SIWE nonce");

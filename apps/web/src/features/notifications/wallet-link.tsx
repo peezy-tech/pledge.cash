@@ -179,6 +179,7 @@ export function buildSentinelSiweMessage(
   fallbackAddress: Address,
   fallbackChainId: number,
 ): string {
+  if (nonce.message !== undefined) return nonce.message;
   const address = nonce.address ?? fallbackAddress;
   const chainId = nonce.chainId ?? fallbackChainId;
 

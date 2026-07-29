@@ -6,6 +6,20 @@ const optionalStringSchema = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
   z.string().trim().min(1).optional()
 );
+const optionalSecretSchema = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().min(32).optional()
+);
+const optionalClientIdSchema = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z
+    .string()
+    .trim()
+    .min(1)
+    .max(128)
+    .regex(/^[A-Za-z0-9._~-]+$/)
+    .optional()
+);
 
 const booleanFlagSchema = z
   .enum(["0", "1", "false", "true"])
@@ -25,6 +39,10 @@ export const sentinelEnvSchema = z
     SENTINEL_MAX_BLOCK_RANGE: z.coerce.number().int().positive().max(1_000).default(1_000),
     BETTER_AUTH_SECRET: z.string().min(32),
     BETTER_AUTH_URL: z.string().url(),
+    PEEZY_IDENTITY_URL: optionalStringSchema,
+    PEEZY_IDENTITY_CLIENT_ID: optionalClientIdSchema,
+    PEEZY_IDENTITY_APP_CLIENT_SECRET: optionalSecretSchema,
+    PEEZY_IDENTITY_OIDC_CLIENT_SECRET: optionalSecretSchema,
     GITHUB_CLIENT_ID: optionalStringSchema,
     GITHUB_CLIENT_SECRET: optionalStringSchema,
     DISCORD_CLIENT_ID: optionalStringSchema,
@@ -77,6 +95,12 @@ export type SentinelChainConfig = {
 export type Config = {
   readonly auth: {
     readonly baseUrl: string;
+    readonly identity?: {
+      readonly baseUrl: string;
+      readonly appClientSecret: string;
+      readonly clientId: string;
+      readonly oidcClientSecret: string;
+    };
     readonly secret: string;
     readonly socialProviders: Partial<Record<SocialProviderName, SocialProviderConfig>>;
   };
@@ -163,10 +187,28 @@ function readUrl(env: Record<string, unknown>, key: string): string {
 
 function readOrigin(value: string, key: string): string {
   const url = new URL(value);
-  if (url.pathname !== "/" || url.search.length > 0 || url.hash.length > 0) {
-    throw new Error(`${key} must be an origin without a path, query, or fragment`);
+  if (
+    url.pathname !== "/" ||
+    url.search.length > 0 ||
+    url.hash.length > 0 ||
+    url.username.length > 0 ||
+    url.password.length > 0
+  ) {
+    throw new Error(
+      `${key} must be an origin without credentials, a path, a query, or a fragment`
+    );
   }
   return url.origin;
+}
+
+function readIdentityOrigin(value: string): string {
+  const origin = readOrigin(value, "PEEZY_IDENTITY_URL");
+  const url = new URL(origin);
+  const loopback = new Set(["127.0.0.1", "[::1]", "localhost"]).has(url.hostname);
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+    throw new Error("PEEZY_IDENTITY_URL must use HTTPS outside loopback development");
+  }
+  return origin;
 }
 
 function readSocialProvider(
@@ -207,6 +249,33 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const telegram = readSocialProvider(rawEnv, "TELEGRAM_OAUTH");
   const twitter = readSocialProvider(rawEnv, "TWITTER");
   const authBaseUrl = readOrigin(raw.BETTER_AUTH_URL, "BETTER_AUTH_URL");
+  const identityBaseUrl =
+    raw.PEEZY_IDENTITY_URL === undefined
+      ? undefined
+      : readIdentityOrigin(raw.PEEZY_IDENTITY_URL);
+  const identityValues = [
+    identityBaseUrl,
+    raw.PEEZY_IDENTITY_CLIENT_ID,
+    raw.PEEZY_IDENTITY_APP_CLIENT_SECRET,
+    raw.PEEZY_IDENTITY_OIDC_CLIENT_SECRET
+  ];
+  if (
+    identityValues.some((value) => value !== undefined) &&
+    identityValues.some((value) => value === undefined)
+  ) {
+    throw new Error(
+      "PEEZY_IDENTITY_URL, PEEZY_IDENTITY_CLIENT_ID, PEEZY_IDENTITY_APP_CLIENT_SECRET, and PEEZY_IDENTITY_OIDC_CLIENT_SECRET must be configured together"
+    );
+  }
+  if (
+    raw.PEEZY_IDENTITY_APP_CLIENT_SECRET !== undefined &&
+    raw.PEEZY_IDENTITY_OIDC_CLIENT_SECRET !== undefined &&
+    raw.PEEZY_IDENTITY_APP_CLIENT_SECRET === raw.PEEZY_IDENTITY_OIDC_CLIENT_SECRET
+  ) {
+    throw new Error(
+      "PEEZY_IDENTITY_APP_CLIENT_SECRET and PEEZY_IDENTITY_OIDC_CLIENT_SECRET must be distinct"
+    );
+  }
   const webOrigin = readOrigin(raw.SENTINEL_WEB_ORIGIN, "SENTINEL_WEB_ORIGIN");
 
   const chains = chainIds.map((chainId): SentinelChainConfig => {
@@ -227,17 +296,31 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   });
 
   return {
-    auth: {
-      baseUrl: authBaseUrl,
-      secret: raw.BETTER_AUTH_SECRET,
-      socialProviders: {
-        ...(apple === undefined ? {} : { apple }),
-        ...(discord === undefined ? {} : { discord }),
-        ...(github === undefined ? {} : { github }),
-        ...(telegram === undefined ? {} : { telegram }),
-        ...(twitter === undefined ? {} : { twitter })
-      }
-    },
+    auth: withOptional(
+      {
+        baseUrl: authBaseUrl,
+        secret: raw.BETTER_AUTH_SECRET,
+        socialProviders: {
+          ...(apple === undefined ? {} : { apple }),
+          ...(discord === undefined ? {} : { discord }),
+          ...(github === undefined ? {} : { github }),
+          ...(telegram === undefined ? {} : { telegram }),
+          ...(twitter === undefined ? {} : { twitter })
+        }
+      },
+      "identity",
+      identityBaseUrl === undefined ||
+        raw.PEEZY_IDENTITY_CLIENT_ID === undefined ||
+        raw.PEEZY_IDENTITY_APP_CLIENT_SECRET === undefined ||
+        raw.PEEZY_IDENTITY_OIDC_CLIENT_SECRET === undefined
+        ? undefined
+        : {
+            appClientSecret: raw.PEEZY_IDENTITY_APP_CLIENT_SECRET,
+            baseUrl: identityBaseUrl,
+            clientId: raw.PEEZY_IDENTITY_CLIENT_ID,
+            oidcClientSecret: raw.PEEZY_IDENTITY_OIDC_CLIENT_SECRET
+          }
+    ),
     chains,
     databaseUrl: raw.DATABASE_URL,
     harness: withOptional(

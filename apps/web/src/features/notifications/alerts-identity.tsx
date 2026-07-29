@@ -65,14 +65,16 @@ export function AlertsIdentity({
     setPending("siwe");
     setError(undefined);
     try {
-      const { nonce } = await client.createAuthSiweNonce({ walletAddress: account, chainId });
-      const message = buildAlertsSiweMessage({
-        address: account,
-        chainId,
-        domain: browserAuthDomain(),
-        nonce,
-        uri: browserCallbackUrl(),
-      });
+      const challenge = await client.createAuthSiweNonce({ walletAddress: account, chainId });
+      const message =
+        challenge.message ??
+        buildAlertsSiweMessage({
+          address: account,
+          chainId,
+          domain: browserAuthDomain(),
+          nonce: challenge.nonce,
+          uri: browserCallbackUrl(),
+        });
       const signature = await signMessageAsync({ account, message });
       await client.verifyAuthSiwe({ chainId, message, signature, walletAddress: account });
       await onChanged();
@@ -123,7 +125,7 @@ export function AlertsIdentity({
         <Facts
           columns="three"
           items={[
-            { label: "Wallet sign-ins", value: session.wallets.length.toString() },
+            { label: "Alert wallets", value: session.wallets.length.toString() },
             { label: "Watching alerts", value: enabledWalletCount.toString() },
             {
               label: "Social sign-ins",
@@ -145,12 +147,12 @@ export function AlertsIdentity({
         <div className="flex flex-col gap-3 border-t border-zinc-800 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <p className="m-0 text-sm font-medium text-zinc-300">
-              {session ? "Social sign-ins" : "Already linked a social sign-in?"}
+              {session ? "Social sign-ins" : "Social sign-in"}
             </p>
             <p className="m-0 mt-1 text-xs leading-5 text-zinc-500">
               {session
                 ? "Link another way to sign in to this account. It never affects on-chain authority."
-                : "Social sign-ins open an existing account. Create one with a wallet first."}
+                : "Social sign-in can create a walletless peezy.tech account or open an existing one."}
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
@@ -207,8 +209,8 @@ function identityStatus(state: AlertsViewState): { description: string; title: s
   switch (state) {
     case "connect-wallet":
       return {
-        description: "Create an account with a wallet. You can link more wallets or social sign-ins later.",
-        title: "Connect a wallet",
+        description: "Use social sign-in below, or connect a wallet for wallet-based alerts.",
+        title: "Choose how to sign in",
       };
     case "sign-wallet":
       return {
@@ -217,7 +219,7 @@ function identityStatus(state: AlertsViewState): { description: string; title: s
       };
     case "link-delivery":
       return {
-        description: "Wallet verified. Link Telegram below to start receiving governance alerts.",
+        description: "Account ready. Link Telegram below to start receiving governance alerts.",
         title: "Choose alert delivery",
       };
     case "active":

@@ -8,6 +8,7 @@ import {
 } from "./api/better-auth";
 import { createDrizzleBoardroomControlStore } from "./api/boardroom-control-store";
 import { createApp } from "./api/server";
+import { createPeezyIdentityAuthAdapter } from "./api/peezy-identity";
 import { createDrizzleApiStore } from "./api/store";
 import { createConfiguredBoardroomControlChainReader } from "./chain/boardroom-control";
 import { runWatcherOnce, type WatcherActionEventHandler } from "./chain/watcher";
@@ -115,8 +116,12 @@ export async function startSentinel(options: StartSentinelOptions = {}): Promise
     reminderHoursBeforeEta: config.reminderHoursBeforeEta,
     twitterEnabled: config.twitter.enabled
   });
+  const auth =
+    config.auth.identity === undefined
+      ? createBetterAuthAdapter(config, dbClient.db)
+      : createPeezyIdentityAuthAdapter(config, dbClient.db);
   const app = createApp({
-    auth: createBetterAuthAdapter(config, dbClient.db),
+    auth,
     boardroomControl: {
       chain: createConfiguredBoardroomControlChainReader(config),
       store: createDrizzleBoardroomControlStore(dbClient.db)

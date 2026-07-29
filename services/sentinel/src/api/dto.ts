@@ -93,6 +93,7 @@ export const AuthSiweNonceRequestSchema = z.object({
 });
 
 export const AuthSiweNonceResponseSchema = z.object({
+  message: z.string().min(1).optional(),
   nonce: z.string().min(8)
 });
 
@@ -127,6 +128,7 @@ export const WalletNonceResponseSchema = z.object({
   domain: z.string().min(1),
   expirationTime: IsoDateSchema,
   issuedAt: IsoDateSchema,
+  message: z.string().min(1).optional(),
   nonce: z.string().min(8),
   statement: z.string().min(1),
   uri: z.string().url(),

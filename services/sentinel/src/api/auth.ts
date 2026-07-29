@@ -7,6 +7,7 @@ import type { BoardroomControlStore } from "./boardroom-control-store";
 import {
   AuthCapabilitiesResponseSchema,
   AuthMeResponseSchema,
+  AuthRedirectRequestSchema,
   UserDtoSchema,
   type AddressDto,
   type AuthMeResponse,
@@ -18,6 +19,9 @@ import {
   type NotificationDeliveriesResponse,
   type PublicActionsQuery,
   type PublicActionsResponse,
+  type AuthRedirectRequest,
+  type AuthRedirectResponse,
+  type AuthSiweNonceResponse,
   type SocialProviderDto,
   type SubscriptionDto,
   type UserDto,
@@ -44,8 +48,38 @@ export type AuthSession = {
 
 export type AuthAdapter = {
   readonly socialProviders: readonly SocialProviderDto[];
+  createWalletChallenge?(input: {
+    readonly address: AddressDto;
+    readonly chainId: number;
+    readonly purpose: "link" | "sign-in";
+  }): Promise<AuthSiweNonceResponse & {
+    readonly address: AddressDto;
+    readonly chainId: number;
+    readonly domain: string;
+    readonly expirationTime: string;
+    readonly issuedAt: string;
+    readonly statement: string;
+    readonly uri: string;
+    readonly version: "1";
+  }>;
+  getProviders?(userId: string): Promise<AuthProviderDto[]>;
+  getSocialProviders?(): Promise<SocialProviderDto[]>;
   getSession(input: { readonly headers: Headers }): Promise<AuthSession | null>;
   handler(request: Request): Promise<Response>;
+  linkWalletCredential?(input: {
+    readonly message: string;
+    readonly signature: string;
+    readonly userId: string;
+  }): Promise<void>;
+  startSocial?(input: {
+    readonly headers: Headers;
+    readonly link: boolean;
+    readonly request: AuthRedirectRequest;
+    readonly userId?: string;
+  }): Promise<{
+    readonly headers?: Headers;
+    readonly response: AuthRedirectResponse;
+  }>;
 };
 
 export type AuthSnapshot = {
@@ -95,6 +129,13 @@ export type SentinelApiStore = {
   getSubscription(userId: string): Promise<SubscriptionDto>;
   getWalletNonce(nonce: string): Promise<WalletNonceRecord | null>;
   linkWallet(input: {
+    readonly address: AddressDto;
+    readonly chainId: number;
+    readonly siweMessage: string;
+    readonly userId: string;
+    readonly verifiedAt: Date;
+  }): Promise<WalletDto | null>;
+  linkWalletCoverage(input: {
     readonly address: AddressDto;
     readonly chainId: number;
     readonly siweMessage: string;
@@ -267,11 +308,17 @@ export function createRateLimitMiddleware(
 export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
   const app = new Hono<ApiEnv>();
 
-  app.get("/capabilities", (c) =>
-    c.json(
-      AuthCapabilitiesResponseSchema.parse({ socialProviders: deps.auth.socialProviders })
-    )
-  );
+  app.get("/capabilities", async (c) => {
+    let socialProviders = deps.auth.socialProviders;
+    try {
+      socialProviders =
+        (await deps.auth.getSocialProviders?.()) ?? socialProviders;
+    } catch {
+      // Product sessions and alert delivery remain usable during an Identity
+      // outage; only new central social authentication is unavailable.
+    }
+    return c.json(AuthCapabilitiesResponseSchema.parse({ socialProviders }));
+  });
 
   app.get("/me", async (c) => {
     const session = await deps.auth.getSession({ headers: c.req.raw.headers });
@@ -281,9 +328,58 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
 
     const user = UserDtoSchema.parse({ id: session.user.id });
     const snapshot = await deps.store.getAuthSnapshot(user.id);
-    const response: AuthMeResponse = AuthMeResponseSchema.parse({ user, ...snapshot });
+    let providers = snapshot.providers;
+    try {
+      providers = (await deps.auth.getProviders?.(user.id)) ?? providers;
+    } catch {
+      // Provider labels are presentation data. Do not turn an Identity outage
+      // into revocation of an otherwise valid PledgeCash product session.
+    }
+    const response: AuthMeResponse = AuthMeResponseSchema.parse({
+      user,
+      ...snapshot,
+      providers
+    });
     return c.json(response);
   });
 
+  const startSocial = deps.auth.startSocial;
+  if (startSocial !== undefined) {
+    app.post("/peezy/sign-in", async (c) => {
+      const body = await parseJson(c, AuthRedirectRequestSchema);
+      if (!body.ok) return body.response;
+      const result = await startSocial({
+        headers: c.req.raw.headers,
+        link: false,
+        request: body.value
+      });
+      copySetCookies(c, result.headers);
+      return c.json(result.response);
+    });
+    app.post("/peezy/link", createSessionMiddleware(deps), async (c) => {
+      const body = await parseJson(c, AuthRedirectRequestSchema);
+      if (!body.ok) return body.response;
+      const result = await startSocial({
+        headers: c.req.raw.headers,
+        link: true,
+        request: body.value,
+        userId: c.get("user").id
+      });
+      copySetCookies(c, result.headers);
+      return c.json(result.response);
+    });
+  }
+
   return app;
+}
+
+function copySetCookies(c: Context<ApiEnv>, headers: Headers | undefined): void {
+  if (headers === undefined) return;
+  const values =
+    typeof headers.getSetCookie === "function"
+      ? headers.getSetCookie()
+      : [headers.get("set-cookie")].filter((value): value is string => value !== null);
+  for (const value of values) {
+    c.header("Set-Cookie", value, { append: true });
+  }
 }
