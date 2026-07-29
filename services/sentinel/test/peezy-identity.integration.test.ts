@@ -919,6 +919,201 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     expect(linkedWallet?.count).toBe("0");
   });
 
+  test("refreshes central credentials before OIDC provisioning conflict checks", async () => {
+    if (!identityUrl || !identityAppSecret) return;
+    const subject = randomUUID();
+    const socialAccountId = randomUUID();
+    const conflictingUserId = randomUUID();
+    const conflictingSocialAccountId = randomUUID();
+    await identitySql`
+      INSERT INTO "user" (
+        "id", "name", "email", "email_verified", "status", "created_at", "updated_at"
+      )
+      VALUES (
+        ${subject},
+        'OIDC cache conflict user',
+        ${`${subject}@example.com`},
+        true,
+        'active',
+        now(),
+        now()
+      )
+    `;
+    await identitySql`
+      INSERT INTO "account" (
+        "id", "account_id", "provider_id", "user_id", "created_at", "updated_at"
+      )
+      VALUES (
+        ${socialAccountId},
+        ${`github-${subject}`},
+        'github',
+        ${subject},
+        now(),
+        now()
+      )
+    `;
+    const handoffResponse = await fetch(
+      `${identityUrl}/v1/social-link-handoffs`,
+      {
+        body: JSON.stringify({
+          callbackUrl: `${webOrigin}/alerts`,
+          clientId: "pledge-cash",
+          provider: "github",
+          subject
+        }),
+        headers: {
+          Authorization: `Basic ${Buffer.from(
+            `pledge-cash:${identityAppSecret}`
+          ).toString("base64")}`,
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      }
+    );
+    expect(handoffResponse.status).toBe(201);
+    const handoff = (await handoffResponse.json()) as { url: string };
+    const identitySessionResponse = await fetch(handoff.url, {
+      redirect: "manual"
+    });
+    expect(identitySessionResponse.status).toBe(302);
+    const identityCookie = responseCookie(
+      identitySessionResponse,
+      "peezy-identity.session_token"
+    );
+
+    const initialOidcStart = await app.request(
+      `${apiOrigin}/auth/peezy/sign-in`,
+      {
+        body: JSON.stringify({
+          callbackURL: `${webOrigin}/alerts`,
+          provider: "github"
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Origin: webOrigin
+        },
+        method: "POST"
+      }
+    );
+    expect(initialOidcStart.status).toBe(200);
+    const initialStateCookie = responseCookie(
+      initialOidcStart,
+      "pledge-cash.state"
+    );
+    const initialAuthorization = (await initialOidcStart.json()) as {
+      url: string;
+    };
+    const initialAuthorizationResponse = await fetch(initialAuthorization.url, {
+      headers: { Cookie: identityCookie },
+      redirect: "manual"
+    });
+    expect(initialAuthorizationResponse.status).toBe(302);
+    const initialCallbackUrl =
+      initialAuthorizationResponse.headers.get("location");
+    if (!initialCallbackUrl) throw new Error("Expected OIDC callback redirect");
+    const initialCallbackResponse = await app.request(initialCallbackUrl, {
+      headers: { Cookie: initialStateCookie }
+    });
+    expect(initialCallbackResponse.status).toBe(302);
+    const productCookie = responseCookie(
+      initialCallbackResponse,
+      "pledge-cash.session_token"
+    );
+    const cachedMeResponse = await app.request(`${apiOrigin}/auth/me`, {
+      headers: { Cookie: productCookie, Origin: webOrigin }
+    });
+    expect(cachedMeResponse.status).toBe(200);
+
+    await dbClient.sql`
+      INSERT INTO "users" (
+        "id", "name", "email", "email_verified", "created_at", "updated_at"
+      )
+      VALUES (
+        ${conflictingUserId}::uuid,
+        'OIDC conflicting product user',
+        ${`${conflictingUserId}@wallet.pledge.cash.invalid`},
+        false,
+        now(),
+        now()
+      )
+    `;
+    await dbClient.sql`
+      INSERT INTO "auth_accounts" (
+        "id", "account_id", "provider_id", "user_id", "created_at", "updated_at"
+      )
+      VALUES (
+        ${conflictingSocialAccountId}::uuid,
+        ${`discord-${subject}`},
+        'discord',
+        ${conflictingUserId}::uuid,
+        now(),
+        now()
+      )
+    `;
+    await identitySql`
+      INSERT INTO "account" (
+        "id", "account_id", "provider_id", "user_id", "created_at", "updated_at"
+      )
+      VALUES (
+        ${conflictingSocialAccountId},
+        ${`discord-${subject}`},
+        'discord',
+        ${subject},
+        now(),
+        now()
+      )
+    `;
+
+    const conflictingOidcStart = await app.request(
+      `${apiOrigin}/auth/peezy/sign-in`,
+      {
+        body: JSON.stringify({
+          callbackURL: `${webOrigin}/alerts`,
+          provider: "github"
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Origin: webOrigin
+        },
+        method: "POST"
+      }
+    );
+    expect(conflictingOidcStart.status).toBe(200);
+    const conflictingStateCookie = responseCookie(
+      conflictingOidcStart,
+      "pledge-cash.state"
+    );
+    const conflictingAuthorization = (await conflictingOidcStart.json()) as {
+      url: string;
+    };
+    const conflictingAuthorizationResponse = await fetch(
+      conflictingAuthorization.url,
+      {
+        headers: { Cookie: identityCookie },
+        redirect: "manual"
+      }
+    );
+    expect(conflictingAuthorizationResponse.status).toBe(302);
+    const conflictingCallbackUrl =
+      conflictingAuthorizationResponse.headers.get("location");
+    if (!conflictingCallbackUrl) {
+      throw new Error("Expected conflicting OIDC callback redirect");
+    }
+    const conflictingCallbackResponse = await app.request(
+      conflictingCallbackUrl,
+      {
+        headers: { Cookie: conflictingStateCookie }
+      }
+    );
+    expect(conflictingCallbackResponse.status).toBe(500);
+    const [productSessionCount] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "auth_sessions"
+      WHERE "user_id" = ${subject}::uuid
+    `;
+    expect(productSessionCount?.count).toBe("1");
+  });
+
   test("maps imported social credentials back to legacy PledgeCash product data", async () => {
     if (!identityUrl || !identityAppSecret) return;
     const legacyUserId = randomUUID();

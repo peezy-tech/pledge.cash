@@ -73,6 +73,7 @@ type PeezyIdentityAuthAdapterOptions = {
 };
 type IdentityHydrator = {
   get(subject: string): Promise<IdentityMeResponse>;
+  getFresh(subject: string): Promise<IdentityMeResponse>;
   invalidate(subject: string): void;
   set(subject: string, identity: IdentityMeResponse): void;
 };
@@ -188,7 +189,9 @@ export function createPeezyIdentityAuthAdapter(
                 tokens.accessToken,
                 identityFetcher
               );
-              const centralIdentity = await identityHydrator.get(profile.sub);
+              const centralIdentity = await identityHydrator.getFresh(
+                profile.sub
+              );
               const linkUserId = requestContext.getStore()?.linkUserId;
               const productUser = await provisionProductUser(db, centralIdentity, {
                 ...(linkUserId === undefined ? {} : { requiredUserId: linkUserId })
@@ -600,6 +603,35 @@ function createIdentityHydrator(
     }
   };
 
+  const readIdentity = (subject: string, now: number) => {
+    const token = Symbol(subject);
+    const read = takeIdentityQuota(db, {
+      capacity: IDENTITY_PRESENTATION_READ_BUDGET,
+      now: new Date(now),
+      scope: identityQuotaScope(clientId, "presentation-read"),
+      windowMs: IDENTITY_PRESENTATION_READ_WINDOW_MS
+    })
+      .then((admitted) => {
+        if (!admitted) {
+          throw new Error("Identity presentation read budget exhausted");
+        }
+        return gateway.getIdentity(subject);
+      })
+      .then((identity) => {
+        if (pending.get(subject)?.token === token) {
+          cacheIdentity(subject, identity);
+        }
+        return identity;
+      })
+      .finally(() => {
+        if (pending.get(subject)?.token === token) {
+          pending.delete(subject);
+        }
+      });
+    pending.set(subject, { read, token });
+    return read;
+  };
+
   return {
     async get(subject) {
       const now = Date.now();
@@ -612,32 +644,13 @@ function createIdentityHydrator(
       const pendingRead = pending.get(subject);
       if (pendingRead !== undefined) return pendingRead.read;
 
-      const token = Symbol(subject);
-      const read = takeIdentityQuota(db, {
-        capacity: IDENTITY_PRESENTATION_READ_BUDGET,
-        now: new Date(now),
-        scope: identityQuotaScope(clientId, "presentation-read"),
-        windowMs: IDENTITY_PRESENTATION_READ_WINDOW_MS
-      })
-        .then((admitted) => {
-          if (!admitted) {
-            throw new Error("Identity presentation read budget exhausted");
-          }
-          return gateway.getIdentity(subject);
-        })
-        .then((identity) => {
-          if (pending.get(subject)?.token === token) {
-            cacheIdentity(subject, identity);
-          }
-          return identity;
-        })
-        .finally(() => {
-          if (pending.get(subject)?.token === token) {
-            pending.delete(subject);
-          }
-        });
-      pending.set(subject, { read, token });
-      return read;
+      return readIdentity(subject, now);
+    },
+    getFresh(subject) {
+      // Provisioning must not reuse credentials fetched before this callback.
+      cache.delete(subject);
+      pending.delete(subject);
+      return readIdentity(subject, Date.now());
     },
     invalidate(subject) {
       cache.delete(subject);
