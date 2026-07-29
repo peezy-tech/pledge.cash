@@ -101,7 +101,9 @@ test("hydrates wallet sign-in authority from the central Identity credential", a
   const db = {
     select: () => query
   } as unknown as SentinelDb;
+  let identityReads = 0;
   const adapter = createPeezyIdentityAuthAdapter(config, db, async (input) => {
+    identityReads += 1;
     expect(input.toString()).toBe(
       `https://identity.peezy.tech/v1/users/${subject}`
     );
@@ -149,9 +151,7 @@ test("hydrates wallet sign-in authority from the central Identity credential", a
     ]
   };
 
-  await expect(
-    adapter.hydrateAuthSnapshot?.(subject, snapshot)
-  ).resolves.toEqual({
+  const expected = {
     ...snapshot,
     providers: ["github"],
     wallets: [
@@ -160,5 +160,15 @@ test("hydrates wallet sign-in authority from the central Identity credential", a
         canSignIn: false
       }
     ]
-  });
+  };
+  await expect(
+    Promise.all([
+      adapter.hydrateAuthSnapshot?.(subject, snapshot),
+      adapter.hydrateAuthSnapshot?.(subject, snapshot)
+    ])
+  ).resolves.toEqual([expected, expected]);
+  await expect(
+    adapter.hydrateAuthSnapshot?.(subject, snapshot)
+  ).resolves.toEqual(expected);
+  expect(identityReads).toBe(1);
 });

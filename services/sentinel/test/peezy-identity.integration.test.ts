@@ -84,7 +84,12 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     dbClient = createDbClient(config);
     await dbClient.migrate();
     app = createApp({
-      auth: createPeezyIdentityAuthAdapter(config, dbClient.db),
+      auth: createPeezyIdentityAuthAdapter(
+        config,
+        dbClient.db,
+        fetch,
+        { hydrationCacheMs: 0 }
+      ),
       config,
       store: createDrizzleApiStore(dbClient.db)
     });
@@ -689,6 +694,180 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     `;
     expect(mapping?.subject).toBeDefined();
     expect(mapping?.subject).not.toBe(legacyUserId);
+  });
+
+  test("refuses a wallet link when the central credentials span product users", async () => {
+    const sessionUserId = randomUUID();
+    const conflictingUserId = randomUUID();
+    const centralSubject = randomUUID();
+    const sessionWallet = privateKeyToAccount(
+      `0x${randomBytes(32).toString("hex")}`
+    );
+    const requestedWallet = privateKeyToAccount(
+      `0x${randomBytes(32).toString("hex")}`
+    );
+    const conflictingWallet = privateKeyToAccount(
+      `0x${randomBytes(32).toString("hex")}`
+    );
+    await dbClient.sql`
+      INSERT INTO "users" (
+        "id", "name", "email", "email_verified", "created_at", "updated_at"
+      )
+      VALUES
+        (
+          ${sessionUserId}::uuid,
+          'Linking session user',
+          ${`${sessionUserId}@wallet.pledge.cash.invalid`},
+          false,
+          now(),
+          now()
+        ),
+        (
+          ${conflictingUserId}::uuid,
+          'Conflicting credential user',
+          ${`${conflictingUserId}@wallet.pledge.cash.invalid`},
+          false,
+          now(),
+          now()
+        )
+    `;
+    await dbClient.sql`
+      INSERT INTO "wallets" (
+        "user_id", "address", "chain_id", "alerts_enabled", "verified_at"
+      )
+      VALUES
+        (
+          ${sessionUserId}::uuid,
+          ${sessionWallet.address.toLowerCase()},
+          999,
+          true,
+          now()
+        ),
+        (
+          ${conflictingUserId}::uuid,
+          ${conflictingWallet.address.toLowerCase()},
+          999,
+          true,
+          now()
+        )
+    `;
+    const signIn = await signInWallet(app, sessionWallet);
+    expect(signIn.status).toBe(200);
+    const cookie = responseCookie(signIn, "pledge-cash.session_token");
+    await dbClient.sql`
+      DELETE FROM "auth_accounts"
+      WHERE "provider_id" = 'peezy'
+        AND "user_id" = ${sessionUserId}::uuid
+    `;
+
+    await identitySql`
+      INSERT INTO "user" (
+        "id", "name", "email", "email_verified", "status", "created_at", "updated_at"
+      )
+      VALUES (
+        ${centralSubject},
+        'Conflicting central user',
+        ${`${centralSubject}@example.com`},
+        true,
+        'active',
+        now(),
+        now()
+      )
+    `;
+    await identitySql`
+      INSERT INTO "wallet_principal" (
+        "id", "user_id", "family", "account_kind", "address",
+        "chain_id", "sign_in_enabled", "created_at", "updated_at"
+      )
+      VALUES
+        (
+          ${randomUUID()},
+          ${centralSubject},
+          'evm',
+          'eoa',
+          ${requestedWallet.address},
+          NULL,
+          true,
+          now(),
+          now()
+        ),
+        (
+          ${randomUUID()},
+          ${centralSubject},
+          'evm',
+          'eoa',
+          ${conflictingWallet.address},
+          NULL,
+          true,
+          now(),
+          now()
+        )
+    `;
+    await identitySql`
+      INSERT INTO "wallet_address" (
+        "id", "user_id", "address", "chain_id", "is_primary", "created_at"
+      )
+      VALUES
+        (
+          ${randomUUID()},
+          ${centralSubject},
+          ${requestedWallet.address},
+          999,
+          true,
+          now()
+        ),
+        (
+          ${randomUUID()},
+          ${centralSubject},
+          ${conflictingWallet.address},
+          999,
+          false,
+          now()
+        )
+    `;
+
+    const nonceResponse = await app.request(`${apiOrigin}/wallets/nonce`, {
+      body: JSON.stringify({
+        address: requestedWallet.address,
+        chainId: 999
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookie,
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+    expect(nonceResponse.status).toBe(200);
+    const challenge = (await nonceResponse.json()) as { message: string };
+    const signature = await requestedWallet.signMessage({
+      message: challenge.message
+    });
+    const linkResponse = await app.request(`${apiOrigin}/wallets`, {
+      body: JSON.stringify({ message: challenge.message, signature }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookie,
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+
+    expect(linkResponse.status).toBe(409);
+    const [mapping] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "auth_accounts"
+      WHERE "provider_id" = 'peezy'
+        AND "user_id" = ${sessionUserId}::uuid
+    `;
+    expect(mapping?.count).toBe("0");
+    const [linkedWallet] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "wallets"
+      WHERE "user_id" = ${sessionUserId}::uuid
+        AND lower("address") = ${requestedWallet.address.toLowerCase()}
+    `;
+    expect(linkedWallet?.count).toBe("0");
   });
 
   test("maps imported social credentials back to legacy PledgeCash product data", async () => {

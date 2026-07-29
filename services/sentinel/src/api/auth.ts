@@ -1,4 +1,6 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
+import { verifyMessage, type Address, type Hex } from "viem";
+import { parseSiweMessage } from "viem/siwe";
 import { z } from "zod";
 
 import type { BoardroomControlChainReader } from "../chain/boardroom-control";
@@ -8,6 +10,7 @@ import {
   AuthCapabilitiesResponseSchema,
   AuthMeResponseSchema,
   AuthRedirectRequestSchema,
+  AuthSiweVerifyRequestSchema,
   UserDtoSchema,
   type AddressDto,
   type AuthMeResponse,
@@ -27,6 +30,14 @@ import {
   type UserDto,
   type WalletDto
 } from "./dto";
+
+const AUTH_SIWE_MAX_AGE_MS = 15 * 60_000;
+const AUTH_SIWE_CLOCK_SKEW_MS = 5 * 60_000;
+const IDENTITY_RATE_WINDOW_MS = 5 * 60_000;
+const PUBLIC_SIWE_CLIENT_LIMIT = 10;
+// Identity v0.1 allows 60 wallet-grant issues per client and window. Keep ten
+// available for authenticated wallet links even if the public sign-in route is abused.
+const PUBLIC_SIWE_GLOBAL_LIMIT = 50;
 
 export type ApiChainConfig = {
   readonly chainId: number;
@@ -241,12 +252,13 @@ export function parseQuery<T>(
 
 export async function parseJson<T>(
   c: Context<ApiEnv>,
-  schema: z.ZodType<T>
+  schema: z.ZodType<T>,
+  request: Request = c.req.raw
 ): Promise<ParseResult<T>> {
   let value: unknown = {};
 
   try {
-    const text = await c.req.text();
+    const text = await request.text();
     value = text.trim().length === 0 ? {} : JSON.parse(text);
   } catch {
     return { ok: false, response: jsonError(c, 400, "Body must be valid JSON") };
@@ -280,11 +292,12 @@ function clientIp(c: Context<ApiEnv>): string {
 
 export function createRateLimitMiddleware(
   deps: SentinelApiDeps,
-  scope: string
+  scope: string,
+  options: RateLimitConfig = {}
 ): MiddlewareHandler<ApiEnv> {
   const buckets = new Map<string, { tokens: number; updatedAt: number }>();
-  const capacity = deps.rateLimit?.capacity ?? 60;
-  const refillMs = deps.rateLimit?.refillMs ?? 60_000;
+  const capacity = options.capacity ?? deps.rateLimit?.capacity ?? 60;
+  const refillMs = options.refillMs ?? deps.rateLimit?.refillMs ?? 60_000;
 
   return async (c, next) => {
     const nowMs = getNow(deps).getTime();
@@ -306,8 +319,44 @@ export function createRateLimitMiddleware(
   };
 }
 
+function createGlobalSlidingWindowRateLimitMiddleware(
+  deps: SentinelApiDeps,
+  capacity: number,
+  windowMs: number
+): MiddlewareHandler<ApiEnv> {
+  const requestTimes: number[] = [];
+
+  return async (c, next) => {
+    const nowMs = getNow(deps).getTime();
+    while (
+      requestTimes[0] !== undefined &&
+      requestTimes[0] <= nowMs - windowMs
+    ) {
+      requestTimes.shift();
+    }
+    if (requestTimes.length >= capacity) {
+      return jsonError(c, 429, "Rate limit exceeded");
+    }
+    requestTimes.push(nowMs);
+    return await next();
+  };
+}
+
 export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
   const app = new Hono<ApiEnv>();
+  const publicSiweClientRateLimit = createRateLimitMiddleware(
+    deps,
+    "auth-siwe-verify-client",
+    {
+      capacity: PUBLIC_SIWE_CLIENT_LIMIT,
+      refillMs: IDENTITY_RATE_WINDOW_MS
+    }
+  );
+  const publicSiweGlobalRateLimit = createGlobalSlidingWindowRateLimitMiddleware(
+    deps,
+    PUBLIC_SIWE_GLOBAL_LIMIT,
+    IDENTITY_RATE_WINDOW_MS
+  );
 
   app.get("/capabilities", async (c) => {
     let socialProviders = deps.auth.socialProviders;
@@ -334,10 +383,10 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
         snapshot = await deps.auth.hydrateAuthSnapshot(user.id, snapshot);
       } catch {
         // Keep the product session readable during an Identity outage, but do
-        // not claim that an unverified wallet still has central sign-in authority.
+        // not claim that any centrally owned credential is still active.
         snapshot = {
           ...snapshot,
-          providers: snapshot.providers.filter((provider) => provider !== "siwe"),
+          providers: [],
           wallets: snapshot.wallets.map((wallet) => ({
             ...wallet,
             canSignIn: false
@@ -389,6 +438,75 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       return c.json(result.response);
     });
   }
+
+  app.post(
+    "/siwe/verify",
+    publicSiweClientRateLimit,
+    async (c, next) => {
+      const body = await parseJson(
+        c,
+        AuthSiweVerifyRequestSchema,
+        c.req.raw.clone()
+      );
+      if (!body.ok) return body.response;
+
+      let siwe: ReturnType<typeof parseSiweMessage>;
+      try {
+        siwe = parseSiweMessage(body.value.message);
+      } catch {
+        return jsonError(c, 400, "SIWE message is invalid");
+      }
+      const expectedOrigin = new URL(deps.config.webOrigin);
+      let siweOrigin: string | undefined;
+      try {
+        siweOrigin =
+          siwe.uri === undefined ? undefined : new URL(siwe.uri).origin;
+      } catch {
+        return jsonError(c, 400, "SIWE message is invalid");
+      }
+      const nowMs = getNow(deps).getTime();
+      if (
+        siwe.address === undefined ||
+        siwe.address.toLowerCase() !== body.value.walletAddress.toLowerCase() ||
+        siwe.chainId !== body.value.chainId ||
+        siwe.domain !== expectedOrigin.host ||
+        siweOrigin !== expectedOrigin.origin ||
+        siwe.version !== "1" ||
+        siwe.issuedAt === undefined ||
+        siwe.expirationTime === undefined ||
+        siwe.issuedAt.getTime() > nowMs + AUTH_SIWE_CLOCK_SKEW_MS ||
+        nowMs - siwe.issuedAt.getTime() > AUTH_SIWE_MAX_AGE_MS ||
+        siwe.expirationTime.getTime() <= nowMs ||
+        siwe.expirationTime.getTime() - siwe.issuedAt.getTime() >
+          AUTH_SIWE_MAX_AGE_MS ||
+        (siwe.notBefore !== undefined && siwe.notBefore.getTime() > nowMs)
+      ) {
+        return jsonError(c, 400, "SIWE message is invalid");
+      }
+
+      // Standard EOA signatures can be rejected locally without spending the
+      // confidential Identity client's shared grant quota. Longer signatures
+      // may be ERC-1271 or EIP-6492 proofs and remain Identity-owned.
+      if (body.value.signature.length === 132) {
+        let signatureValid = false;
+        try {
+          signatureValid = await verifyMessage({
+            address: body.value.walletAddress as Address,
+            message: body.value.message,
+            signature: body.value.signature as Hex
+          });
+        } catch {
+          signatureValid = false;
+        }
+        if (!signatureValid) {
+          return jsonError(c, 401, "Wallet signature could not be verified");
+        }
+      }
+      return await next();
+    },
+    publicSiweGlobalRateLimit,
+    (c) => deps.auth.handler(c.req.raw)
+  );
 
   return app;
 }

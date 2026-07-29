@@ -44,6 +44,12 @@ import {
 
 const PEEZY_PROVIDER_ID = "peezy";
 const IDENTITY_REQUEST_TIMEOUT_MS = 2_000;
+const IDENTITY_HYDRATION_CACHE_TTL_MS = 60_000;
+const IDENTITY_HYDRATION_CACHE_MAX_ENTRIES = 1_000;
+const IDENTITY_HYDRATION_READ_WINDOW_MS = 5 * 60_000;
+// Identity v0.1 allows 300 reads per client and window. Reserve 60 reads for
+// sign-in and linking paths that must bypass presentation-cache throttling.
+const IDENTITY_HYDRATION_READ_BUDGET = 240;
 const SOCIAL_PROVIDERS = new Set<SocialProvider>([
   "apple",
   "discord",
@@ -55,6 +61,7 @@ const SOCIAL_PROVIDERS = new Set<SocialProvider>([
 type IdentityConfig = NonNullable<Config["auth"]["identity"]>;
 type IdentityFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type PeezyIdentityAuthAdapterOptions = {
+  readonly hydrationCacheMs?: number;
   readonly requestTimeoutMs?: number;
 };
 type SentinelTransaction = Parameters<Parameters<SentinelDb["transaction"]>[0]>[0];
@@ -74,6 +81,10 @@ export function createPeezyIdentityAuthAdapter(
     options.requestTimeoutMs ?? IDENTITY_REQUEST_TIMEOUT_MS
   );
   const gateway = createIdentityGateway(identity, config.webOrigin, identityFetcher);
+  const hydrateIdentity = createIdentityHydrator(
+    gateway,
+    options.hydrationCacheMs ?? IDENTITY_HYDRATION_CACHE_TTL_MS
+  );
   const requestContext = new AsyncLocalStorage<{
     readonly linkUserId?: string;
   }>();
@@ -227,7 +238,7 @@ export function createPeezyIdentityAuthAdapter(
           }))
         };
       }
-      const identityUser = await gateway.getIdentity(subject);
+      const identityUser = await hydrateIdentity(subject);
       return hydrateIdentitySnapshot(snapshot, identityUser);
     },
     async getSocialProviders() {
@@ -537,6 +548,61 @@ function createIdentityGateway(
   };
 }
 
+function createIdentityHydrator(
+  gateway: ReturnType<typeof createIdentityGateway>,
+  cacheTtlMs: number
+): (subject: string) => Promise<IdentityMeResponse> {
+  const cache = new Map<
+    string,
+    { readonly expiresAt: number; readonly identity: IdentityMeResponse }
+  >();
+  const pending = new Map<string, Promise<IdentityMeResponse>>();
+  const readTimes: number[] = [];
+  const ttlMs = Math.max(0, cacheTtlMs);
+
+  return async (subject) => {
+    const now = Date.now();
+    const cached = cache.get(subject);
+    if (cached !== undefined && cached.expiresAt > now) {
+      return cached.identity;
+    }
+    cache.delete(subject);
+
+    const pendingRead = pending.get(subject);
+    if (pendingRead !== undefined) return pendingRead;
+
+    while (
+      readTimes[0] !== undefined &&
+      readTimes[0] <= now - IDENTITY_HYDRATION_READ_WINDOW_MS
+    ) {
+      readTimes.shift();
+    }
+    if (readTimes.length >= IDENTITY_HYDRATION_READ_BUDGET) {
+      throw new Error("Identity hydration read budget exhausted");
+    }
+    readTimes.push(now);
+
+    const read = gateway
+      .getIdentity(subject)
+      .then((identity) => {
+        if (ttlMs > 0) {
+          cache.set(subject, { expiresAt: Date.now() + ttlMs, identity });
+          while (cache.size > IDENTITY_HYDRATION_CACHE_MAX_ENTRIES) {
+            const oldest = cache.keys().next().value as string | undefined;
+            if (oldest === undefined) break;
+            cache.delete(oldest);
+          }
+        }
+        return identity;
+      })
+      .finally(() => {
+        pending.delete(subject);
+      });
+    pending.set(subject, read);
+    return read;
+  };
+}
+
 function createTimeoutFetcher(
   fetcher: IdentityFetch,
   timeoutMs: number
@@ -586,52 +652,11 @@ async function provisionProductUser(
       await lockWalletAddress(transaction, options.walletCoverage.address);
     }
 
-    const candidateUserIds = new Set<string>();
-    if (options.requiredUserId !== undefined) {
-      candidateUserIds.add(options.requiredUserId);
-    }
-    const [mappedAccount] = await transaction
-      .select({ userId: authAccounts.userId })
-      .from(authAccounts)
-      .where(
-        and(
-          eq(authAccounts.providerId, PEEZY_PROVIDER_ID),
-          eq(authAccounts.accountId, identityUser.id)
-        )
-      )
-      .limit(1);
-    if (mappedAccount !== undefined) candidateUserIds.add(mappedAccount.userId);
-
-    const [sameSubjectUser] = await transaction
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.id, identityUser.id))
-      .limit(1);
-    if (sameSubjectUser !== undefined) candidateUserIds.add(sameSubjectUser.id);
-
-    for (const credential of identity.credentials) {
-      if (credential.kind === "wallet") {
-        const [owner] = await transaction
-          .select({ userId: walletOwners.userId })
-          .from(walletOwners)
-          .where(eq(walletOwners.address, credential.address))
-          .limit(1);
-        if (owner !== undefined) candidateUserIds.add(owner.userId);
-      }
-      if (credential.kind === "social") {
-        const [legacyAccount] = await transaction
-          .select({ userId: authAccounts.userId })
-          .from(authAccounts)
-          .where(
-            and(
-              eq(authAccounts.id, credential.id),
-              eq(authAccounts.providerId, credential.provider)
-            )
-          )
-          .limit(1);
-        if (legacyAccount !== undefined) candidateUserIds.add(legacyAccount.userId);
-      }
-    }
+    const candidateUserIds = await identityCandidateUserIds(
+      transaction,
+      identity,
+      options.requiredUserId
+    );
 
     if (candidateUserIds.size > 1) {
       throw new Error("peezy.tech credentials resolve to multiple PledgeCash users");
@@ -691,6 +716,61 @@ async function provisionProductUser(
     }
     return productUser;
   });
+}
+
+async function identityCandidateUserIds(
+  transaction: SentinelTransaction,
+  identity: IdentityMeResponse,
+  requiredUserId?: string
+): Promise<Set<string>> {
+  const candidateUserIds = new Set<string>();
+  if (requiredUserId !== undefined) candidateUserIds.add(requiredUserId);
+
+  const [mappedAccount] = await transaction
+    .select({ userId: authAccounts.userId })
+    .from(authAccounts)
+    .where(
+      and(
+        eq(authAccounts.providerId, PEEZY_PROVIDER_ID),
+        eq(authAccounts.accountId, identity.user.id)
+      )
+    )
+    .limit(1);
+  if (mappedAccount !== undefined) candidateUserIds.add(mappedAccount.userId);
+
+  const [sameSubjectUser] = await transaction
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, identity.user.id))
+    .limit(1);
+  if (sameSubjectUser !== undefined) candidateUserIds.add(sameSubjectUser.id);
+
+  for (const credential of identity.credentials) {
+    if (credential.kind === "wallet") {
+      const [owner] = await transaction
+        .select({ userId: walletOwners.userId })
+        .from(walletOwners)
+        .where(eq(walletOwners.address, credential.address))
+        .limit(1);
+      if (owner !== undefined) candidateUserIds.add(owner.userId);
+    }
+    if (credential.kind === "social") {
+      const [legacyAccount] = await transaction
+        .select({ userId: authAccounts.userId })
+        .from(authAccounts)
+        .where(
+          and(
+            eq(authAccounts.id, credential.id),
+            eq(authAccounts.providerId, credential.provider)
+          )
+        )
+        .limit(1);
+      if (legacyAccount !== undefined) {
+        candidateUserIds.add(legacyAccount.userId);
+      }
+    }
+  }
+  return candidateUserIds;
 }
 
 async function identitySubjectForProductUser(
@@ -800,12 +880,18 @@ async function linkIdentityWalletCredential(
   }
 
   return db.transaction(async (transaction) => {
+    await transaction.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`peezy-user:${centralIdentity.user.id}`}))`
+    );
     await lockWalletAddress(transaction, input.address);
-    await assertWalletOwnerAvailable(
+    const candidateUserIds = await identityCandidateUserIds(
       transaction,
-      input.address,
+      centralIdentity,
       input.userId
     );
+    if (candidateUserIds.size > 1) {
+      throw new Error("peezy.tech credentials resolve to multiple PledgeCash users");
+    }
     await bindIdentitySubject(transaction, exchanged.subject, input.userId);
     return upsertWalletCoverage(transaction, {
       address: input.address,

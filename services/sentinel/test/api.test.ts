@@ -32,6 +32,9 @@ const CHANNEL_ID = "00000000-0000-4000-8000-000000000002";
 const ACTION_ID = "00000000-0000-4000-8000-000000000003";
 const SESSION_COOKIE = "better-auth.session_token=stub-session";
 const PRIMARY_WALLET = "0x5555555555555555555555555555555555555555" as AddressDto;
+const AUTH_ACCOUNT = privateKeyToAccount(
+  "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+);
 const BOARDROOM = "0x1111111111111111111111111111111111111111" as AddressDto;
 const SHARE_TOKEN = "0x2222222222222222222222222222222222222222" as AddressDto;
 const POLICY = "0x3333333333333333333333333333333333333333" as AddressDto;
@@ -366,14 +369,29 @@ async function readJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function authSiweRequest() {
+  const message = createSiweMessage({
+    address: AUTH_ACCOUNT.address,
+    chainId: 31337,
+    domain: "pledge.cash",
+    expirationTime: new Date(FIXED_NOW.getTime() + 5 * 60_000),
+    issuedAt: FIXED_NOW,
+    nonce: "0123456789abcdef",
+    statement: "Sign in to pledge.cash.",
+    uri: WEB_ORIGIN,
+    version: "1"
+  });
+  return {
+    chainId: 31337,
+    message,
+    signature: await AUTH_ACCOUNT.signMessage({ message }),
+    walletAddress: AUTH_ACCOUNT.address
+  };
+}
+
 async function signedInCookie(harness: ReturnType<typeof createHarness>): Promise<string> {
   const verify = await harness.app.request("/auth/siwe/verify", {
-    body: JSON.stringify({
-      chainId: 31337,
-      message: "stub SIWE message",
-      signature: `0x${"ab".repeat(65)}`,
-      walletAddress: PRIMARY_WALLET
-    }),
+    body: JSON.stringify(await authSiweRequest()),
     headers: { "Content-Type": "application/json" },
     method: "POST"
   });
@@ -483,7 +501,7 @@ describe("Sentinel WP5 API", () => {
   });
 
   test("uses shared Identity hydration and fails closed on wallet sign-in metadata", async () => {
-    harness.store.providersByUser.set(USER_ID, ["siwe"]);
+    harness.store.providersByUser.set(USER_ID, ["siwe", "github"]);
     harness.store.walletsByUser.set(USER_ID, [
       {
         alertsEnabled: true,
@@ -547,17 +565,50 @@ describe("Sentinel WP5 API", () => {
     expect(harness.auth.forwarded).toEqual([
       { body: nonceBody, method: "POST", path: "/auth/siwe/nonce" },
       {
-        body: {
-          chainId: 31337,
-          message: "stub SIWE message",
-          signature: `0x${"ab".repeat(65)}`,
-          walletAddress: PRIMARY_WALLET
-        },
+        body: await authSiweRequest(),
         method: "POST",
         path: "/auth/siwe/verify"
       },
       { body: null, method: "POST", path: "/auth/sign-out" }
     ]);
+  });
+
+  test("rejects malformed EOA SIWE proofs before forwarding them", async () => {
+    const request = await authSiweRequest();
+    const response = await harness.app.request("/auth/siwe/verify", {
+      body: JSON.stringify({
+        ...request,
+        signature: `0x${"ab".repeat(65)}`
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    });
+
+    expect(response.status).toBe(401);
+    expect(harness.auth.forwarded).toEqual([]);
+  });
+
+  test("reserves shared Identity wallet-grant quota from anonymous traffic", async () => {
+    const request = await authSiweRequest();
+    const statuses: number[] = [];
+    for (let index = 0; index < 51; index += 1) {
+      const response = await harness.app.request("/auth/siwe/verify", {
+        body: JSON.stringify({
+          ...request,
+          signature: `0x${"ab".repeat(66)}`
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": `192.0.2.${index + 1}`
+        },
+        method: "POST"
+      });
+      statuses.push(response.status);
+    }
+
+    expect(statuses.slice(0, 50).every((status) => status === 200)).toBe(true);
+    expect(statuses[50]).toBe(429);
+    expect(harness.auth.forwarded).toHaveLength(50);
   });
 
   test("reports an anonymous session without noisy errors and protects account routes", async () => {

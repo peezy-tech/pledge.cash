@@ -173,10 +173,14 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "";
+        const credentialConflict =
+          /already linked|another account|multiple PledgeCash users/i.test(
+            message
+          );
         return jsonError(
           c,
-          /already linked|another account/i.test(message) ? 409 : 400,
-          /already linked|another account/i.test(message)
+          credentialConflict ? 409 : 400,
+          credentialConflict
             ? "Wallet is already linked to another account"
             : "SIWE signature is invalid"
         );
