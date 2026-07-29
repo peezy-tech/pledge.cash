@@ -624,12 +624,14 @@ contract BoardroomVNextModuleParityTest is Test {
         );
 
         _assertSelector(MerkleAirdrop.initialize.selector, MerkleAirdropVNext.initialize.selector);
-        _assertSelector(MerkleAirdrop.claim.selector, MerkleAirdropVNext.claim.selector);
-        _assertSelector(MerkleAirdrop.claimGrant.selector, MerkleAirdropVNext.claimGrant.selector);
+        _assertSelectorChanged(MerkleAirdrop.claim.selector, MerkleAirdropVNext.claim.selector);
+        _assertSelectorChanged(MerkleAirdrop.claimGrant.selector, MerkleAirdropVNext.claimGrant.selector);
         _assertSelector(MerkleAirdrop.close.selector, MerkleAirdropVNext.close.selector);
         _assertSelector(MerkleAirdrop.cancel.selector, MerkleAirdropVNext.cancel.selector);
-        _assertSelector(MerkleAirdrop.getDirectClaimLeaf.selector, MerkleAirdropVNext.getDirectClaimLeaf.selector);
-        _assertSelector(MerkleAirdrop.getGrantClaimLeaf.selector, MerkleAirdropVNext.getGrantClaimLeaf.selector);
+        _assertSelectorChanged(
+            MerkleAirdrop.getDirectClaimLeaf.selector, MerkleAirdropVNext.getDirectClaimLeaf.selector
+        );
+        _assertSelectorChanged(MerkleAirdrop.getGrantClaimLeaf.selector, MerkleAirdropVNext.getGrantClaimLeaf.selector);
         _assertSelector(MerkleAirdrop.getGrantTermsHash.selector, MerkleAirdropVNext.getGrantTermsHash.selector);
         _assertSelector(MerkleAirdrop.getGrantSalt.selector, MerkleAirdropVNext.getGrantSalt.selector);
 
@@ -675,15 +677,20 @@ contract BoardroomVNextModuleParityTest is Test {
     function _assertSelector(bytes4 v5Selector, bytes4 vNextSelector) internal pure {
         assert(v5Selector == vNextSelector);
     }
+
+    function _assertSelectorChanged(bytes4 v5Selector, bytes4 vNextSelector) internal pure {
+        assert(v5Selector != vNextSelector);
+    }
 }
 
 contract BoardroomVNextRealModuleParityTest is Test {
     bytes32 internal constant RELEASE_HASH = keccak256("module-parity-release");
+    bytes32 internal constant RELEASE_B_HASH = keccak256("module-parity-release-b");
     bytes32 internal constant DIRECT_CLAIM_TYPEHASH = keccak256(
-        "MerkleAirdropDirectClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
+        "MerkleAirdropDirectClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
     );
     bytes32 internal constant GRANT_CLAIM_TYPEHASH = keccak256(
-        "MerkleAirdropGrantClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)"
+        "MerkleAirdropGrantClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)"
     );
     bytes32 internal constant GRANT_TERMS_TYPEHASH = keccak256(
         "MerkleAirdropGrantTerms(address paymentToken,uint256 price,uint256 expiry,uint256 vestingCliff,uint256 vestingEnd,bool transferable,uint256 transferUnlockTime,bytes32 salt)"
@@ -836,7 +843,7 @@ contract BoardroomVNextRealModuleParityTest is Test {
             transferUnlockTime: 0,
             salt: keccak256("real-airdrop-grant")
         });
-        bytes32 root = _grantClaimLeaf(predicted, 0, recipient, grantShares, grantParams);
+        bytes32 root = _grantClaimLeaf(predicted, RELEASE_HASH, 0, recipient, grantShares, grantParams);
         MerkleAirdropVNext.CreateParams memory params = MerkleAirdropVNext.CreateParams({
             shareToken: address(shares),
             shareAmount: airdropShares,
@@ -853,7 +860,8 @@ contract BoardroomVNextRealModuleParityTest is Test {
         boardroom.setIssuedDistribution(address(airdrop), true);
 
         vm.prank(recipient);
-        TokenGrant grant = TokenGrant(airdrop.claimGrant(0, recipient, grantShares, grantParams, new bytes32[](0)));
+        TokenGrant grant =
+            TokenGrant(airdrop.claimGrant(RELEASE_HASH, 0, recipient, grantShares, grantParams, new bytes32[](0)));
         assertEq(grant.factory(), address(grantFactory));
         assertEq(grant.issuer(), address(boardroom));
         assertEq(grant.holder(), recipient);
@@ -878,6 +886,107 @@ contract BoardroomVNextRealModuleParityTest is Test {
         assertEq(airdrop.DIRECT_CLAIM_TYPEHASH(), DIRECT_CLAIM_TYPEHASH);
         assertEq(airdrop.GRANT_CLAIM_TYPEHASH(), GRANT_CLAIM_TYPEHASH);
         assertEq(airdrop.GRANT_TERMS_TYPEHASH(), GRANT_TERMS_TYPEHASH);
+    }
+
+    function testMerkleDirectClaimRejectsStaleReleaseProofAndAcceptsCurrentReleaseProof() public {
+        uint256 claimShares = 25 ether;
+        bytes32 salt = keccak256("release-bound-direct-airdrop");
+        address predicted = distributionFactory.predictMerkleAirdropAddress(address(boardroom), salt);
+        bytes32 releaseALeaf = _directClaimLeaf(predicted, RELEASE_HASH, 0, recipient, claimShares);
+        bytes32 releaseBLeaf = _directClaimLeaf(predicted, RELEASE_B_HASH, 1, recipient, claimShares);
+        MerkleAirdropVNext.CreateParams memory params = MerkleAirdropVNext.CreateParams({
+            shareToken: address(shares),
+            shareAmount: 2 * claimShares,
+            merkleRoot: _hashPair(releaseALeaf, releaseBLeaf),
+            startTime: uint64(block.timestamp),
+            endTime: 0,
+            maxGrantClaims: 0,
+            salt: salt
+        });
+
+        _approveAsBoardroom(address(shares), address(distributionFactory), params.shareAmount);
+        vm.prank(address(boardroom));
+        MerkleAirdropVNext airdrop = MerkleAirdropVNext(distributionFactory.createMerkleAirdrop(params));
+        boardroom.setFacetSetHash(RELEASE_B_HASH);
+
+        bytes32[] memory releaseAProof = new bytes32[](1);
+        releaseAProof[0] = releaseBLeaf;
+        uint256 recipientBalanceBefore = shares.balanceOf(recipient);
+        vm.expectRevert(
+            abi.encodeWithSelector(MerkleAirdropVNext.FacetSetHashMismatch.selector, RELEASE_HASH, RELEASE_B_HASH)
+        );
+        airdrop.claim(RELEASE_HASH, 0, recipient, claimShares, releaseAProof);
+
+        assertFalse(airdrop.isClaimed(0));
+        assertEq(airdrop.claimedShares(), 0);
+        assertEq(airdrop.remainingShares(), params.shareAmount);
+        assertEq(shares.balanceOf(recipient), recipientBalanceBefore);
+
+        bytes32[] memory releaseBProof = new bytes32[](1);
+        releaseBProof[0] = releaseALeaf;
+        airdrop.claim(RELEASE_B_HASH, 1, recipient, claimShares, releaseBProof);
+
+        assertTrue(airdrop.isClaimed(1));
+        assertEq(airdrop.claimedShares(), claimShares);
+        assertEq(airdrop.remainingShares(), claimShares);
+        assertEq(shares.balanceOf(recipient), recipientBalanceBefore + claimShares);
+    }
+
+    function testMerkleGrantClaimRejectsStaleReleaseBeforeGrantOrObligationSideEffects() public {
+        uint256 grantShares = 40 ether;
+        MerkleAirdropVNext.GrantClaimParams memory grantParams = MerkleAirdropVNext.GrantClaimParams({
+            paymentToken: address(quote),
+            price: PRICE,
+            expiry: block.timestamp + 2 days,
+            vestingCliff: block.timestamp,
+            vestingEnd: block.timestamp,
+            transferable: false,
+            transferUnlockTime: 0,
+            salt: keccak256("release-bound-grant")
+        });
+        (MerkleAirdropVNext airdrop, bytes32 releaseALeaf, bytes32 releaseBLeaf) =
+            _createReleaseBoundGrantAirdrop(grantShares, grantParams);
+        boardroom.setIssuedDistribution(address(airdrop), true);
+        boardroom.setFacetSetHash(RELEASE_B_HASH);
+
+        _assertStaleGrantClaimHasNoSideEffects(airdrop, grantShares, grantParams, releaseBLeaf);
+
+        uint256 callbackCountBefore = boardroom.callbackCount();
+        bytes32[] memory releaseBProof = new bytes32[](1);
+        releaseBProof[0] = releaseALeaf;
+        TokenGrant grant =
+            TokenGrant(airdrop.claimGrant(RELEASE_B_HASH, 1, recipient, grantShares, grantParams, releaseBProof));
+
+        assertTrue(airdrop.isClaimed(1));
+        assertEq(airdrop.claimedGrantCount(), 1);
+        assertEq(shares.balanceOf(address(grant)), grantShares);
+        assertEq(boardroom.callbackCount(), callbackCountBefore + 1);
+        assertEq(boardroom.lastExpectedFacetSetHash(), RELEASE_B_HASH);
+        assertEq(boardroom.lastSelector(), VNextCallbackTargetMock.recordGrantFromDistribution.selector);
+    }
+
+    function _assertStaleGrantClaimHasNoSideEffects(
+        MerkleAirdropVNext airdrop,
+        uint256 grantShares,
+        MerkleAirdropVNext.GrantClaimParams memory grantParams,
+        bytes32 releaseBLeaf
+    ) internal {
+        bytes32 releaseAGrantSalt = airdrop.getGrantSalt(0, recipient, grantParams.salt);
+        address predictedReleaseAGrant = grantFactory.predictGrantAddress(address(boardroom), releaseAGrantSalt);
+        bytes32[] memory releaseAProof = new bytes32[](1);
+        releaseAProof[0] = releaseBLeaf;
+        uint256 callbackCountBefore = boardroom.callbackCount();
+        vm.expectRevert(
+            abi.encodeWithSelector(MerkleAirdropVNext.FacetSetHashMismatch.selector, RELEASE_HASH, RELEASE_B_HASH)
+        );
+        airdrop.claimGrant(RELEASE_HASH, 0, recipient, grantShares, grantParams, releaseAProof);
+
+        assertFalse(airdrop.isClaimed(0));
+        assertEq(airdrop.claimedGrantCount(), 0);
+        assertEq(airdrop.claimedShares(), 0);
+        assertEq(airdrop.remainingShares(), 2 * grantShares);
+        assertEq(predictedReleaseAGrant.code.length, 0);
+        assertEq(boardroom.callbackCount(), callbackCountBefore);
     }
 
     function testRealBondMarketPurchasesRedeemsAndCloses() public {
@@ -1069,8 +1178,32 @@ contract BoardroomVNextRealModuleParityTest is Test {
         ERC20(token).approve(spender, amount);
     }
 
+    function _createReleaseBoundGrantAirdrop(
+        uint256 grantShares,
+        MerkleAirdropVNext.GrantClaimParams memory grantParams
+    ) internal returns (MerkleAirdropVNext airdrop, bytes32 releaseALeaf, bytes32 releaseBLeaf) {
+        bytes32 salt = keccak256("release-bound-grant-airdrop");
+        address predicted = distributionFactory.predictMerkleAirdropAddress(address(boardroom), salt);
+        releaseALeaf = _grantClaimLeaf(predicted, RELEASE_HASH, 0, recipient, grantShares, grantParams);
+        releaseBLeaf = _grantClaimLeaf(predicted, RELEASE_B_HASH, 1, recipient, grantShares, grantParams);
+        MerkleAirdropVNext.CreateParams memory params = MerkleAirdropVNext.CreateParams({
+            shareToken: address(shares),
+            shareAmount: 2 * grantShares,
+            merkleRoot: _hashPair(releaseALeaf, releaseBLeaf),
+            startTime: uint64(block.timestamp),
+            endTime: 0,
+            maxGrantClaims: 1,
+            salt: salt
+        });
+
+        _approveAsBoardroom(address(shares), address(distributionFactory), params.shareAmount);
+        vm.prank(address(boardroom));
+        airdrop = MerkleAirdropVNext(distributionFactory.createMerkleAirdrop(params));
+    }
+
     function _grantClaimLeaf(
         address airdrop,
+        bytes32 expectedFacetSetHash,
         uint256 index,
         address account,
         uint256 amount,
@@ -1092,6 +1225,7 @@ contract BoardroomVNextRealModuleParityTest is Test {
         return keccak256(
             abi.encode(
                 GRANT_CLAIM_TYPEHASH,
+                expectedFacetSetHash,
                 block.chainid,
                 index,
                 airdrop,
@@ -1103,5 +1237,31 @@ contract BoardroomVNextRealModuleParityTest is Test {
                 termsHash
             )
         );
+    }
+
+    function _directClaimLeaf(
+        address airdrop,
+        bytes32 expectedFacetSetHash,
+        uint256 index,
+        address account,
+        uint256 amount
+    ) internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                DIRECT_CLAIM_TYPEHASH,
+                expectedFacetSetHash,
+                block.chainid,
+                index,
+                airdrop,
+                address(boardroom),
+                address(shares),
+                account,
+                amount
+            )
+        );
+    }
+
+    function _hashPair(bytes32 a, bytes32 b) internal pure returns (bytes32) {
+        return a < b ? keccak256(abi.encodePacked(a, b)) : keccak256(abi.encodePacked(b, a));
     }
 }

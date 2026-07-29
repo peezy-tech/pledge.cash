@@ -24,6 +24,8 @@ interface IBoardroomDiamond {
 
     function facetRegistry() external view returns (address);
 
+    function kernelSelectorSetHash() external view returns (bytes32);
+
     function facetSetHash() external view returns (bytes32);
 
     function appliedStorageVersion() external view returns (uint64);

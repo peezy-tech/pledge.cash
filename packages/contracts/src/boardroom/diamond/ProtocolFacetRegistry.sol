@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {Ownable} from "solady/auth/Ownable.sol";
+import {BoardroomKernelSelectors} from "./BoardroomKernelSelectors.sol";
 import {IProtocolFacetRegistry} from "./IProtocolFacetRegistry.sol";
 import {ProtocolFacetTypes} from "./ProtocolFacetTypes.sol";
 
@@ -40,6 +41,7 @@ contract ProtocolFacetRegistry is Ownable, IProtocolFacetRegistry {
 
     struct ActiveRoute {
         address facet;
+        bytes32 codeHash;
         ProtocolFacetTypes.RouteKind kind;
     }
 
@@ -48,6 +50,7 @@ contract ProtocolFacetRegistry is Ownable, IProtocolFacetRegistry {
 
     bytes4[] internal _reservedKernelSelectors;
     mapping(bytes4 selector => bool reserved) public isReservedKernelSelector;
+    bytes32 public immutable kernelSelectorSetHash;
 
     bytes32 internal _activeFacetSetHash;
     uint64 internal _activeRelease;
@@ -66,6 +69,7 @@ contract ProtocolFacetRegistry is Ownable, IProtocolFacetRegistry {
     error MigrationRouteContinuityRequired(bytes32 predecessorFacetSetHash, uint64 requiredStorageVersion);
     error TooManySelectors(uint256 requested, uint256 maximum);
     error SelectorsNotStrictlyAscending(bytes4 previous, bytes4 current);
+    error InvalidKernelSelectorSetHash(bytes32 expected, bytes32 actual);
     error ReservedKernelSelector(bytes4 selector);
     error InvalidFacet(bytes4 selector, address facet);
     error FacetCodeHashMismatch(address facet, bytes32 expected, bytes32 actual);
@@ -122,6 +126,12 @@ contract ProtocolFacetRegistry is Ownable, IProtocolFacetRegistry {
             _reservedKernelSelectors.push(selector);
             isReservedKernelSelector[selector] = true;
         }
+        bytes32 expectedSelectorSetHash = BoardroomKernelSelectors.selectorSetHash();
+        bytes32 actualSelectorSetHash = keccak256(abi.encode(reservedKernelSelectors_));
+        if (actualSelectorSetHash != expectedSelectorSetHash) {
+            revert InvalidKernelSelectorSetHash(expectedSelectorSetHash, actualSelectorSetHash);
+        }
+        kernelSelectorSetHash = actualSelectorSetHash;
         _initializeOwner(protocolGovernance);
     }
 
@@ -272,7 +282,8 @@ contract ProtocolFacetRegistry is Ownable, IProtocolFacetRegistry {
             bytes4 selector = next.selectors[i];
             StoredRoute storage storedRoute = next.routeOf[selector];
             _activeSelectors.push(selector);
-            _activeRouteOf[selector] = ActiveRoute({facet: storedRoute.facet, kind: storedRoute.kind});
+            _activeRouteOf[selector] =
+                ActiveRoute({facet: storedRoute.facet, codeHash: storedRoute.codeHash, kind: storedRoute.kind});
             if (_activeSelectorsOfFacet[storedRoute.facet].length == 0) {
                 _activeFacetAddresses.push(storedRoute.facet);
             }
@@ -333,9 +344,13 @@ contract ProtocolFacetRegistry is Ownable, IProtocolFacetRegistry {
         return (active.migrationFacet, active.migrationSelector);
     }
 
-    function route(bytes4 selector) external view returns (address facet, uint8 kind, uint64 requiredStorageVersion) {
+    function route(bytes4 selector)
+        external
+        view
+        returns (address facet, bytes32 codeHash, uint8 kind, uint64 requiredStorageVersion)
+    {
         ActiveRoute storage active = _activeRouteOf[selector];
-        return (active.facet, uint8(active.kind), _activeStorageVersion);
+        return (active.facet, active.codeHash, uint8(active.kind), _activeStorageVersion);
     }
 
     function facetAddress(bytes4 selector) external view returns (address) {

@@ -49,7 +49,7 @@ contract BoardroomDiamondVNextScenario is Script {
     uint256 internal constant DEFAULT_DEPLOYER_KEY = 0xA11CE;
     uint256 internal constant DEFAULT_HOLDER_KEY = 0xB0B;
     bytes32 internal constant GRANT_CLAIM_TYPEHASH = keccak256(
-        "MerkleAirdropGrantClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)"
+        "MerkleAirdropGrantClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)"
     );
     bytes32 internal constant GRANT_TERMS_TYPEHASH = keccak256(
         "MerkleAirdropGrantTerms(address paymentToken,uint256 price,uint256 expiry,uint256 vestingCliff,uint256 vestingEnd,bool transferable,uint256 transferUnlockTime,bytes32 salt)"
@@ -420,6 +420,7 @@ contract BoardroomDiamondVNextScenario is Script {
         bytes32 grantLeaf = keccak256(
             abi.encode(
                 GRANT_CLAIM_TYPEHASH,
+                releaseAHash,
                 block.chainid,
                 uint256(0),
                 predictedAirdrop,
@@ -434,8 +435,9 @@ contract BoardroomDiamondVNextScenario is Script {
         bytes32 directLeaf = keccak256(
             abi.encode(
                 keccak256(
-                    "MerkleAirdropDirectClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
+                    "MerkleAirdropDirectClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
                 ),
+                releaseAHash,
                 block.chainid,
                 uint256(1),
                 predictedAirdrop,
@@ -469,10 +471,10 @@ contract BoardroomDiamondVNextScenario is Script {
 
         bytes32[] memory grantProof = new bytes32[](1);
         grantProof[0] = directLeaf;
-        airdropGrant = TokenGrant(merkleAirdrop.claimGrant(0, holder, 10 ether, grantParams, grantProof));
+        airdropGrant = TokenGrant(merkleAirdrop.claimGrant(releaseAHash, 0, holder, 10 ether, grantParams, grantProof));
         bytes32[] memory directProof = new bytes32[](1);
         directProof[0] = grantLeaf;
-        merkleAirdrop.claim(1, holder, 5 ether, directProof);
+        merkleAirdrop.claim(releaseAHash, 1, holder, 5 ether, directProof);
         require(boardroom.isIssuedGrant(address(airdropGrant)), "airdrop-grant-not-recorded");
     }
 
@@ -1000,7 +1002,7 @@ contract BoardroomDiamondVNextScenario is Script {
     }
 
     function _reservedKernelSelectors() internal pure returns (bytes4[] memory reserved) {
-        reserved = new bytes4[](7);
+        reserved = new bytes4[](8);
         reserved[0] = bytes4(keccak256("facetRegistry()"));
         reserved[1] = bytes4(keccak256("facetSetHash()"));
         reserved[2] = BoardroomKernel.initialize.selector;
@@ -1008,6 +1010,7 @@ contract BoardroomDiamondVNextScenario is Script {
         reserved[4] = BoardroomKernel.migrationRequired.selector;
         reserved[5] = BoardroomKernel.dispatchViewAndRollback.selector;
         reserved[6] = BoardroomKernel.appliedStorageLayoutHash.selector;
+        reserved[7] = BoardroomKernel.kernelSelectorSetHash.selector;
         for (uint256 i = 1; i < reserved.length; ++i) {
             bytes4 current = reserved[i];
             uint256 j = i;

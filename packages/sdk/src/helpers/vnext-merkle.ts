@@ -1,0 +1,183 @@
+import {
+  encodeAbiParameters,
+  keccak256,
+  stringToHex,
+  type Address,
+  type Hex,
+} from "viem";
+import { merkleAirdropVNextAbi } from "../generated";
+import type { MerkleAirdropGrantClaimTerms } from "./types";
+
+const DIRECT_CLAIM_TYPEHASH = keccak256(stringToHex(
+  "MerkleAirdropDirectClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)",
+));
+const GRANT_CLAIM_TYPEHASH = keccak256(stringToHex(
+  "MerkleAirdropGrantClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)",
+));
+const GRANT_TERMS_TYPEHASH = keccak256(stringToHex(
+  "MerkleAirdropGrantTerms(address paymentToken,uint256 price,uint256 expiry,uint256 vestingCliff,uint256 vestingEnd,bool transferable,uint256 transferUnlockTime,bytes32 salt)",
+));
+
+function requireBytes32(name: string, value: Hex): Hex {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(value)) {
+    throw new Error(`${name} must be a 32-byte hex value.`);
+  }
+  return value;
+}
+
+export function buildMerkleAirdropVNextClaimTransaction(input: {
+  airdrop: Address;
+  expectedFacetSetHash: Hex;
+  index: bigint;
+  account: Address;
+  amount: bigint;
+  proof: readonly Hex[];
+}) {
+  return {
+    address: input.airdrop,
+    abi: merkleAirdropVNextAbi,
+    functionName: "claim",
+    args: [
+      requireBytes32("expectedFacetSetHash", input.expectedFacetSetHash),
+      input.index,
+      input.account,
+      input.amount,
+      input.proof,
+    ] as const,
+  } as const;
+}
+
+export function buildMerkleAirdropVNextGrantClaimTransaction(input: {
+  airdrop: Address;
+  expectedFacetSetHash: Hex;
+  index: bigint;
+  account: Address;
+  amount: bigint;
+  terms: MerkleAirdropGrantClaimTerms;
+  proof: readonly Hex[];
+}) {
+  return {
+    address: input.airdrop,
+    abi: merkleAirdropVNextAbi,
+    functionName: "claimGrant",
+    args: [
+      requireBytes32("expectedFacetSetHash", input.expectedFacetSetHash),
+      input.index,
+      input.account,
+      input.amount,
+      input.terms,
+      input.proof,
+    ] as const,
+  } as const;
+}
+
+export function hashMerkleAirdropVNextGrantTerms(terms: MerkleAirdropGrantClaimTerms): Hex {
+  return keccak256(encodeAbiParameters(
+    [
+      { type: "bytes32" },
+      { type: "address" },
+      { type: "uint256" },
+      { type: "uint256" },
+      { type: "uint256" },
+      { type: "uint256" },
+      { type: "bool" },
+      { type: "uint256" },
+      { type: "bytes32" },
+    ],
+    [
+      GRANT_TERMS_TYPEHASH,
+      terms.paymentToken,
+      terms.price,
+      terms.expiry,
+      terms.vestingCliff,
+      terms.vestingEnd,
+      terms.transferable,
+      terms.transferUnlockTime,
+      requireBytes32("terms.salt", terms.salt),
+    ],
+  ));
+}
+
+export function buildMerkleAirdropVNextDirectClaimLeaf(input: {
+  expectedFacetSetHash: Hex;
+  chainId: bigint;
+  index: bigint;
+  airdrop: Address;
+  boardroom: Address;
+  shareToken: Address;
+  account: Address;
+  amount: bigint;
+}): Hex {
+  return keccak256(encodeAbiParameters(
+    [
+      { type: "bytes32" },
+      { type: "bytes32" },
+      { type: "uint256" },
+      { type: "uint256" },
+      { type: "address" },
+      { type: "address" },
+      { type: "address" },
+      { type: "address" },
+      { type: "uint256" },
+    ],
+    [
+      DIRECT_CLAIM_TYPEHASH,
+      requireBytes32("expectedFacetSetHash", input.expectedFacetSetHash),
+      input.chainId,
+      input.index,
+      input.airdrop,
+      input.boardroom,
+      input.shareToken,
+      input.account,
+      input.amount,
+    ],
+  ));
+}
+
+export function buildMerkleAirdropVNextGrantClaimLeaf(input: {
+  expectedFacetSetHash: Hex;
+  chainId: bigint;
+  index: bigint;
+  airdrop: Address;
+  boardroom: Address;
+  shareToken: Address;
+  tokenGrantFactory: Address;
+  account: Address;
+  amount: bigint;
+  terms: MerkleAirdropGrantClaimTerms;
+}): Hex {
+  return keccak256(encodeAbiParameters(
+    [
+      { type: "bytes32" },
+      { type: "bytes32" },
+      { type: "uint256" },
+      { type: "uint256" },
+      { type: "address" },
+      { type: "address" },
+      { type: "address" },
+      { type: "address" },
+      { type: "address" },
+      { type: "uint256" },
+      { type: "bytes32" },
+    ],
+    [
+      GRANT_CLAIM_TYPEHASH,
+      requireBytes32("expectedFacetSetHash", input.expectedFacetSetHash),
+      input.chainId,
+      input.index,
+      input.airdrop,
+      input.boardroom,
+      input.shareToken,
+      input.tokenGrantFactory,
+      input.account,
+      input.amount,
+      hashMerkleAirdropVNextGrantTerms(input.terms),
+    ],
+  ));
+}
+
+export function hashSortedMerklePair(left: Hex, right: Hex): Hex {
+  const a = requireBytes32("left", left);
+  const b = requireBytes32("right", right);
+  return keccak256(BigInt(a) < BigInt(b) ? `${a}${b.slice(2)}` as Hex : `${b}${a.slice(2)}` as Hex);
+}

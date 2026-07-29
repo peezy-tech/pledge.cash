@@ -87,7 +87,12 @@ keccak256(
 Publication rejects zero releases, empty manifest/layout commitments, invalid predecessors, more than 256 selectors,
 non-ascending or duplicate selectors, kernel-reserved selectors, zero/no-code facets, runtime code-hash mismatches, and
 inconsistent migration metadata. Activation rechecks every runtime code hash before changing the table. Releases and
-release numbers are immutable once published.
+release numbers are immutable once published. Active routes retain the committed code hash, and the kernel compares it
+with the facet's live `EXTCODEHASH` before every initialization, view, mutation, and migration delegatecall.
+
+The kernel selector list is canonical rather than an arbitrary deployment input. Its exact hash is checked when the
+registry is constructed, when the kernel binds to the registry, and again when the vNext factory binds both contracts.
+This keeps registry loupe metadata from claiming selectors that Solidity dispatch resolves inside the kernel.
 
 Activation additionally requires:
 
@@ -146,6 +151,7 @@ whose persistent surface is limited to:
 - `appliedStorageVersion()`;
 - `appliedStorageLayoutHash()`;
 - `migrationRequired()`;
+- `kernelSelectorSetHash()`;
 - fallback routing;
 - the rollback-only view dispatcher used internally by fallback.
 
@@ -173,6 +179,25 @@ one.
 
 SDK builders require an explicit 32-byte hash. They do not fetch it while constructing an authorization. SDK readers
 pin all component reads to one block so a release activation cannot produce a mixed registry/Boardroom report.
+
+### Release-bound ERC-1271 proofs
+
+The vNext controller does not accept a legacy raw proposer signature. Its opaque ERC-1271 signature is a canonical,
+versioned envelope containing the facet-set hash, Boardroom epoch, controller generation, configuration epoch/hash,
+and the proposer signature. The proposer signs an EIP-712 `BoardroomControlProof` that commits the caller's original
+message hash and every envelope field. The EIP-712 domain commits chain ID and controller address; the proof struct
+also commits the Boardroom address. Relabeling an old signature with a new release hash therefore changes the signed
+digest and fails.
+
+Validation returns the invalid ERC-1271 value, rather than leaking a revert, for malformed/noncanonical envelopes,
+failed Boardroom reads, a release mismatch, migration downtime, non-Active lifecycle, controller/generation mismatch,
+configuration drift, or a bad EOA/recursive contract-proposer signature. The Active-only rule deliberately revokes
+offchain control proofs when wind-down starts. EOAs sign the SDK's typed-data object; Safe or other contract-wallet
+tooling signs or approves the same digest through its normal ERC-1271 flow.
+
+All proof context must come from one pinned block. Challenge issuers must refuse to issue while
+`migrationRequired == true`; the contract rejects validation during that interval, but a legitimate proposer can
+pre-sign deterministic future context just as it can for any published release.
 
 ### Enforced view behavior
 
@@ -287,20 +312,20 @@ The default local rehearsal produced deterministic metadata:
 
 | Field | Value |
 | --- | --- |
-| Registry | `0x7318DD813942c0FF662f21973b32e3f36F26f536` |
-| vNext factory | `0x794B88F11172de74adAb7bB00bb1d57509294Cda` |
-| Sample Boardroom | `0x2F67bBbE6e611cDfd063Db0304B25EbD794c9D3B` |
-| Release-A facet-set hash | `0xd012edc31cb152f4fe2c64b940aa0a1941286d05c442fd6183e933c7004b778f` |
-| Release-B facet-set hash | `0x08fa4f5dd6bbf62b10492a8a68afb65f17763c1b2767adad9c62457a9c351f86` |
+| Registry | `0xF2940FF81f8C665ee291D460ce6ecf7FD07A335E` |
+| vNext factory | `0x50Ef110D3FB3d3B11A305E9C8BC41309374Dc7cE` |
+| Sample Boardroom | `0x9E7fF86BAA64E5F6982389440B03c6b4a1817B92` |
+| Release-A facet-set hash | `0x1eabee240f60e93a8d526c6bd87207d620a08343f17ed70e36994574a0a96288` |
+| Release-B facet-set hash | `0xc818bbe647f20b56af4eabb0bc9971e5816e51db6ba9055149dd44dd3d0af91e` |
 
 These addresses are evidence for the default local keys and script environment only. They are not target-chain
 deployment addresses.
 
 The separate phased broadcast used the standard Anvil deployer on an unmodified chain-id-31337 node. Its ignored
-`complete` checkpoint records registry `0xF4d34183638c3F9787fFCD197304F0a6Dca4c6a8`, factory
-`0x1868a8DC8d4Ae39c2224C47d7916619e02305f69`, primary Boardroom
-`0x83fc960018a6Ddf588bb013bcF0EA3A5F6DE3267`, and active release-B hash
-`0x5d670fc6aa853f8af6c24bb46c6fb2654d392f1ed3c4ecd760d14690af454748`. Direct post-run reads at block 115
+`complete` checkpoint records registry `0x50924E13C718E7C78a31Bcd7d44d35088DFe7D76`, factory
+`0x639c241A588cE08b0948DA0a642eEaEFce901CC1`, primary Boardroom
+`0x4041C2156D12A9E3380c1Ae423845b0aab631624`, and active release-B hash
+`0xb48306473ab6b009dc064a50b27566653ed199f94aaaca69fc6cad9e64b94bb3`. Direct post-run reads at block 115
 reported release `2`, storage version `2`, `migrationRequired == false`, and zero active obligations on the primary,
 cancelled-curve, and successfully graduated-curve Boardrooms.
 
@@ -318,6 +343,10 @@ hash, and the wind-down builder rejects native value exactly as the contract doe
 `BoardroomVNextCreated` identity separately from v5 creation events. The vNext release helper pins one block while
 checking registry, factory, kernel, controller, compatibility Boardroom, governance, market, redemption, facet,
 storage, and reciprocal canonical identity.
+
+The SDK also exposes the exact vNext controller EIP-712 typed-data/hash construction and strict v1 envelope
+encoder/decoder. These helpers require explicit context and never fetch or substitute a release hash during
+authorization construction.
 
 ## Local scenario coverage
 
@@ -363,22 +392,30 @@ Measured with Foundry 1.7.1 using `forge build --sizes`:
 
 | Contract | Runtime bytes | Initcode bytes |
 | --- | ---: | ---: |
-| `BoardroomKernel` | 5,815 | 6,101 |
-| `ProtocolFacetRegistry` | 8,938 | 9,719 |
-| `BoardroomAuthorityFacet` | 10,303 | 10,518 |
+| `BoardroomKernel` | 6,924 | 8,290 |
+| `ProtocolFacetRegistry` | 9,067 | 10,807 |
+| `BoardroomAuthorityFacet` | 10,304 | 10,519 |
 | `BoardroomExecutionFacet` | 3,760 | 3,983 |
 | `BoardroomMarketFacet` | 1,407 | 1,622 |
 | `BoardroomRedemptionFacet` | 901 | 1,116 |
 | `BoardroomViewFacet` | 178 | 390 |
 | `BoardroomReleaseBMigrationFacet` | 741 | 769 |
 | `BoardroomViewFacetV2` | 324 | 352 |
-| `BoardroomVNextFactory` | 3,092 | 39,293 |
+| `BoardroomVNextController` | 10,166 | 10,303 |
+| `BoardroomVNextFactory` | 3,092 | 41,899 |
+| `BoardroomVNextControllerFactory` | 2,030 | 12,598 |
+| `BoardroomRewardsFactoryVNext` | 5,110 | 15,261 |
+| `BondMarketFactoryVNext` | 7,033 | 18,216 |
+| `DistributionFactoryVNext` | 12,534 | 47,698 |
+| `LockedLiquidityFactoryVNext` | 16,354 | 23,771 |
+| `TokenGrantFactoryVNext` | 13,416 | 21,138 |
 | v5 compatibility `Boardroom` | 24,418 | 24,966 |
 
-The kernel is 2,377 bytes below the spike's 8 KiB target. The registry and every facet are below 20 KiB. Each deployed
-Boardroom clone has a 45-byte runtime. Foundry reports 9,859 bytes of factory-initcode margin; its seven static
-constructor arguments consume another 224 bytes, leaving 9,635 bytes under the EIP-3860 transaction limit. The
-normal-limit Anvil broadcast proves that the complete constructor deploys without a node override.
+The kernel is 1,268 bytes below the spike's 8 KiB target. The registry, every facet, and every vNext factory runtime are
+below 20 KiB. Each deployed Boardroom clone has a 45-byte runtime. The Boardroom factory's seven static constructor
+arguments leave 7,029 bytes under the EIP-3860 transaction-initcode limit. `DistributionFactoryVNext` has the narrowest
+creation margin: its two static constructor arguments leave 1,390 bytes. The normal-limit Anvil broadcast proves both
+complete constructors deploy without a node override.
 
 The compatibility `Boardroom` runtime remains only 158 bytes below the 24,576-byte EIP-170 limit and should not be
 treated as a comfortable production margin.
@@ -397,20 +434,23 @@ forge test --gas-report \
 
 | Operation | Representative gas | Notes |
 | --- | ---: | --- |
-| Publish complete release | 7,103,307 max | 97/99 selector manifests plus validation/revert cases |
-| Activate complete release | 1,707,403 median; 4,141,533 max | release B replaces the complete active table |
-| `route(bytes4)` registry lookup | 4,960 median/max | warm/cold mix reported separately by Foundry |
-| Create and initialize vNext Boardroom | 1,908,484 median | includes share-token deployment |
+| Publish complete release | 7,103,451 max | 97/99 selector manifests plus validation/revert cases |
+| Activate complete release | 7,342,654 max | release B replaces the complete active table |
+| `route(bytes4)` registry lookup | 7,217 integration median; 9,217 max | returns and loads the release-pinned runtime code hash |
+| Create and initialize vNext Boardroom | 1,917,604 median | includes share-token deployment |
 | Release-B storage migration facet | 48,159 median; 65,262 max | normal migration plus release-B genesis paths |
+| Kernel fallback | 27,138 integration median; 542,125 max | spans small views through full routed mutations |
 | `facetSetHash()` kernel read | 5,523 median | registry-backed |
+| ERC-1271 release-bound validation | 8,623 median; 118,839 max | malformed, stale, EOA, and recursive-contract paths |
+| ERC-1271 EIP-712 digest helper | 1,593 median/max | explicit proof context |
 
 Within the same routed traces, the outer compatibility facets versus the inner v5 Boardroom behavior cost:
 
 | Representative mutation | Inner v5-compatible behavior | Routed facet | Routing/adaptation delta |
 | --- | ---: | ---: | ---: |
-| `mint` | 198,054 | 201,281 | +3,227 |
+| `mint` | 202,621 | 205,848 | +3,227 |
 | `startWindDown` | 69,614 | 72,701 | +3,087 |
-| `execute` minimum | 222,455 | 227,150 | +4,695 |
+| `execute` minimum | 227,000 | 231,695 | +4,695 |
 
 These are local test-VM measurements, not chain fee predictions. Registry activation is intentionally expensive and
 rare. The compatibility runtime margin and complete-table activation cost should be addressed before any production
@@ -418,7 +458,7 @@ proposal.
 
 ## Verification evidence
 
-Source baseline while the spike remains uncommitted:
+Comparison baseline before the vNext spike:
 
 ```text
 55f2ebf138ce078e7790a475e358d1ffe2a6c64b
@@ -428,31 +468,33 @@ Focused evidence on the formatted tree:
 
 | Command | Result |
 | --- | --- |
-| `forge test --match-path test/boardroom/ProtocolFacetRegistry.t.sol -vv` | 16 passed, 0 failed |
-| `forge test --match-path test/boardroom/BoardroomKernel.t.sol -vv` | 22 passed, 0 failed |
-| `forge test --match-path test/boardroom/BoardroomDiamondVNext.t.sol -vv` | 13 passed, 0 failed |
-| `forge test --match-path test/boardroom/BoardroomVNextModuleParity.t.sol -vv` | 12 passed, 0 failed |
+| `forge test --match-path test/boardroom/ProtocolFacetRegistry.t.sol -vv` | 17 passed, 0 failed |
+| `forge test --match-path test/boardroom/BoardroomKernel.t.sol -vv` | 28 passed, 0 failed |
+| `forge test --match-path test/boardroom/BoardroomDiamondVNext.t.sol -vv` | 20 passed, 0 failed |
+| `forge test --match-path test/boardroom/BoardroomVNextModuleParity.t.sol -vv` | 14 passed, 0 failed |
 | `forge test --match-path test/boardroom/BoardroomDiamondVNextWindDownInvariant.t.sol -vv` | 7 passed, 0 failed; six invariants at 128,000 calls each |
-| focused registry/kernel/integration gas-report run | 51 passed, 0 failed |
-| `bun --cwd packages/sdk test` | 56 passed, 0 failed; 583 assertions |
+| focused registry/kernel/integration gas-report run | 65 passed, 0 failed |
+| `bun --cwd packages/sdk test` | 71 passed, 0 failed; 656 assertions |
 | `bunx tsc -p packages/sdk/tsconfig.json --noEmit` | passed |
 | `bun --cwd packages/contracts check:diamond-vnext-manifests` | passed |
-| `bun --cwd packages/contracts scenario:diamond-vnext:dry-run` | passed; aggregate script gas 100,662,828 |
+| `bun --cwd packages/contracts scenario:diamond-vnext:dry-run` | passed; aggregate script gas 104,934,370 |
 | fresh normal-limit Anvil plus `bun --cwd packages/contracts scenario:diamond-vnext:local` | passed; checkpoint `complete`, three obligation counts zero, migration cleared |
 | `forge build --sizes` | passed; sizes recorded above |
 | `bun --cwd packages/contracts build` | passed |
-| `bun --cwd packages/contracts test` | 25 suites; 401 passed, 0 failed, 0 skipped |
+| `bun --cwd packages/contracts test` | 25 suites; 417 passed, 0 failed, 0 skipped |
+| `bun --cwd packages/contracts verify:testnet-artifacts` | chain 998 verified with 29 receipts; chain 10143 pending and skipped |
 | `bun --cwd packages/sdk build` | passed |
 | generated `packages/sdk/src/generated.ts` before/after SHA-256 | identical |
 | `bun run docs:check` | passed; 36 pages and 36 navigation entries checked |
 | `bun run format:check` | passed |
 | `git diff --check` | passed |
 
-These results are from an uncommitted working tree over the baseline SHA above. A future commit containing the exact
-spike tree is required before this evidence is reproducible by commit hash.
+These results were recorded from the review-hardened implementation tree on top of the comparison baseline above. The
+final exact-head review and hosted CI gate remain separate from this local evidence ledger.
 
 Adversarial coverage includes ownership, canonical publication, duplicate/unsorted/reserved selectors, missing code,
-code-hash mismatch, add/replace/remove activation, loupe accuracy, predecessor/layout rules, registry failure,
+code-hash mismatch at activation and dispatch, canonical kernel-selector binding, add/replace/remove activation, loupe
+accuracy, predecessor/layout rules, registry failure,
 unknown/removed selectors, delegatecall context and ETH behavior, revert fidelity, malicious View routes, shared
 reentrancy, storage-slot isolation, kernel-metadata corruption, migration-to-mutation reentrancy, in-flight release
 activation, stale hashes, release-bound callbacks, queued operations, ERC-1271 signatures, wrong migration source,
@@ -477,6 +519,10 @@ callback ABI. That systematic audit matrix remains production acceptance work, n
 7. How are failed or gas-infeasible migrations detected and recovered without violating atomicity?
 8. What maximum supported selector count and activation gas are acceptable on each target chain?
 9. What invariant harness proves asset/redemption conservation across every future terminal-state migration?
+10. How will release review prove facets contain no mutable proxy, fallback-forwarder, or other implementation
+    indirection that can change behavior while the facet runtime code hash stays constant?
+11. Which Safe versions, fallback handlers, nested contract-proposer topologies, and RPC gas limits form the required
+    production ERC-1271 compatibility matrix?
 
 Until those questions are resolved, this spike is architecture and local lifecycle evidence, not deployment
 authorization.

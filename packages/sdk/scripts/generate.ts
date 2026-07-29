@@ -7,6 +7,17 @@ type Artifact = {
   abi?: unknown;
 };
 
+type AbiParameter = {
+  type?: unknown;
+  components?: unknown;
+};
+
+type AbiItem = {
+  type?: unknown;
+  name?: unknown;
+  inputs?: unknown;
+};
+
 type DeploymentFieldKind = "address" | "bigint" | "boolean" | "number" | "string";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -151,6 +162,18 @@ const contracts = [
     "packages/contracts/out/ProtocolFacetRegistry.sol/ProtocolFacetRegistry.json",
     "protocolFacetRegistryAbi",
   ],
+] as const;
+
+const boardroomDiamondSupplementArtifacts = [
+  "packages/contracts/out/Boardroom.sol/Boardroom.json",
+  "packages/contracts/out/BoardroomKernel.sol/BoardroomKernel.json",
+  "packages/contracts/out/BoardroomAuthorityFacet.sol/BoardroomAuthorityFacet.json",
+  "packages/contracts/out/BoardroomExecutionFacet.sol/BoardroomExecutionFacet.json",
+  "packages/contracts/out/BoardroomMarketFacet.sol/BoardroomMarketFacet.json",
+  "packages/contracts/out/BoardroomRedemptionFacet.sol/BoardroomRedemptionFacet.json",
+  "packages/contracts/out/BoardroomReleaseBMigrationFacet.sol/BoardroomReleaseBMigrationFacet.json",
+  "packages/contracts/out/BoardroomViewFacet.sol/BoardroomViewFacet.json",
+  "packages/contracts/out/BoardroomViewFacetV2.sol/BoardroomViewFacetV2.json",
 ] as const;
 
 const deploymentFields = [
@@ -538,6 +561,46 @@ async function readAbi(path: string): Promise<unknown[]> {
   return artifact.abi;
 }
 
+function canonicalAbiParameterType(parameter: unknown): string {
+  if (typeof parameter !== "object" || parameter === null) return "";
+  const typed = parameter as AbiParameter;
+  if (typeof typed.type !== "string") return "";
+  if (!typed.type.startsWith("tuple")) return typed.type;
+  const suffix = typed.type.slice("tuple".length);
+  const components = Array.isArray(typed.components)
+    ? typed.components.map(canonicalAbiParameterType).join(",")
+    : "";
+  return `(${components})${suffix}`;
+}
+
+function abiItemKey(item: unknown): string {
+  if (typeof item !== "object" || item === null) return JSON.stringify(item);
+  const typed = item as AbiItem;
+  const inputs = Array.isArray(typed.inputs) ? typed.inputs.map(canonicalAbiParameterType).join(",") : "";
+  return `${String(typed.type)}:${String(typed.name)}(${inputs})`;
+}
+
+async function readBoardroomDiamondAbi(path: string): Promise<unknown[]> {
+  const aggregate = await readAbi(path);
+  const result = [...aggregate];
+  const seen = new Set(result.map(abiItemKey));
+
+  for (const supplementPath of boardroomDiamondSupplementArtifacts) {
+    const supplement = await readAbi(supplementPath);
+    for (const item of supplement) {
+      if (typeof item !== "object" || item === null) continue;
+      const type = (item as AbiItem).type;
+      if (type !== "event" && type !== "error") continue;
+      const key = abiItemKey(item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(item);
+    }
+  }
+
+  return result;
+}
+
 async function deploymentEntries(): Promise<string[]> {
   const deploymentDir = join(repoRoot, "packages/contracts/deployments");
   const files = await readdir(deploymentDir).catch(() => []);
@@ -558,7 +621,9 @@ const abiExports: string[] = [];
 const abiMapEntries: string[] = [];
 
 for (const [contractName, artifactPath, exportName] of contracts) {
-  const abi = await readAbi(artifactPath);
+  const abi = exportName === "boardroomDiamondAbi"
+    ? await readBoardroomDiamondAbi(artifactPath)
+    : await readAbi(artifactPath);
   abiExports.push(`export const ${exportName} = ${literal(abi)} as const;`);
   abiMapEntries.push(`${contractName}: ${exportName}`);
 }

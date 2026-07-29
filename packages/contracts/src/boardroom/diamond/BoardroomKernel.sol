@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {BoardroomDiamondStorage} from "./BoardroomDiamondStorage.sol";
+import {BoardroomKernelSelectors} from "./BoardroomKernelSelectors.sol";
 import {IBoardroomFacetRegistry} from "./IBoardroomFacetRegistry.sol";
 
 /// @notice Minimal, clone-safe Boardroom selector kernel.
@@ -17,9 +18,11 @@ contract BoardroomKernel {
     error AlreadyInitialized();
     error NotInitialized();
     error InvalidRegistry(address registry);
+    error InvalidKernelSelectorSetHash(bytes32 expected, bytes32 actual);
     error RegistryCallFailed();
     error UnknownSelector(bytes4 selector);
     error InvalidFacet(bytes4 selector, address facet);
+    error FacetCodeHashMismatch(bytes4 selector, address facet, bytes32 expected, bytes32 actual);
     error InvalidRouteKind(bytes4 selector, uint8 kind);
     error MissingExpectedFacetSetHash(bytes4 selector);
     error FacetSetHashMismatch(bytes32 expected, bytes32 actual);
@@ -57,7 +60,18 @@ contract BoardroomKernel {
         if (facetRegistry_ == address(0) || facetRegistry_.code.length == 0) {
             revert InvalidRegistry(facetRegistry_);
         }
-        facetRegistry = IBoardroomFacetRegistry(facetRegistry_);
+        IBoardroomFacetRegistry registry = IBoardroomFacetRegistry(facetRegistry_);
+        bytes32 expectedSelectorSetHash = BoardroomKernelSelectors.selectorSetHash();
+        bytes32 actualSelectorSetHash;
+        try registry.kernelSelectorSetHash() returns (bytes32 value) {
+            actualSelectorSetHash = value;
+        } catch {
+            revert InvalidRegistry(facetRegistry_);
+        }
+        if (actualSelectorSetHash != expectedSelectorSetHash) {
+            revert InvalidKernelSelectorSetHash(expectedSelectorSetHash, actualSelectorSetHash);
+        }
+        facetRegistry = registry;
         // Disable initialization of the implementation while leaving clone storage untouched.
         BoardroomDiamondStorage.layout().initialized = true;
     }
@@ -75,10 +89,11 @@ contract BoardroomKernel {
         }
         uint64 activeVersion = _activeStorageVersion();
         bytes32 activeLayoutHash = _activeStorageLayoutHash();
-        (address facet, uint8 kind, uint64 routeVersion) = _route(INITIALIZE_BOARDROOM_SELECTOR);
+        (address facet, bytes32 codeHash, uint8 kind, uint64 routeVersion) = _route(INITIALIZE_BOARDROOM_SELECTOR);
         if (facet.code.length == 0 || kind != ROUTE_KIND_MUTATING || routeVersion != activeVersion) {
             revert InvalidInitializationRoute(facet, kind, routeVersion, activeVersion);
         }
+        _requireFacetCodeHash(INITIALIZE_BOARDROOM_SELECTOR, facet, codeHash);
 
         kernel.initialized = true;
         kernel.initializing = true;
@@ -111,7 +126,8 @@ contract BoardroomKernel {
             BoardroomDiamondStorage.setAppliedStorage(activeVersion, activeLayoutHash);
             return;
         }
-        (address routeFacet, uint8 migrationKind, uint64 migrationVersion) = _route(migrationSelector);
+        (address routeFacet, bytes32 routeCodeHash, uint8 migrationKind, uint64 migrationVersion) =
+            _route(migrationSelector);
         if (
             migrationFacet.code.length == 0 || routeFacet != migrationFacet || migrationKind != ROUTE_KIND_MIGRATION
                 || migrationVersion != activeVersion
@@ -120,6 +136,7 @@ contract BoardroomKernel {
                 migrationFacet, routeFacet, migrationSelector, migrationKind, migrationVersion, activeVersion
             );
         }
+        _requireFacetCodeHash(migrationSelector, routeFacet, routeCodeHash);
         kernel.migrating = true;
         (bool success, bytes memory output) =
             migrationFacet.delegatecall(abi.encodeWithSelector(migrationSelector, expectedFacetSetHash));
@@ -129,6 +146,10 @@ contract BoardroomKernel {
 
     function facetSetHash() external view returns (bytes32) {
         return _activeFacetSetHash();
+    }
+
+    function kernelSelectorSetHash() external pure returns (bytes32) {
+        return BoardroomKernelSelectors.selectorSetHash();
     }
 
     function appliedStorageVersion() external view returns (uint64) {
@@ -159,9 +180,10 @@ contract BoardroomKernel {
     fallback() external payable {
         if (!BoardroomDiamondStorage.initialized()) revert NotInitialized();
 
-        (address facet, uint8 kind, uint64 routeVersion) = _route(msg.sig);
+        (address facet, bytes32 codeHash, uint8 kind, uint64 routeVersion) = _route(msg.sig);
         if (facet == address(0)) revert UnknownSelector(msg.sig);
         if (facet.code.length == 0) revert InvalidFacet(msg.sig, facet);
+        _requireFacetCodeHash(msg.sig, facet, codeHash);
         if (kind > ROUTE_KIND_MIGRATION) revert InvalidRouteKind(msg.sig, kind);
 
         if (kind == ROUTE_KIND_VIEW) {
@@ -251,11 +273,24 @@ contract BoardroomKernel {
         }
     }
 
-    function _route(bytes4 selector) internal view returns (address facet, uint8 kind, uint64 version) {
-        try facetRegistry.route(selector) returns (address routeFacet, uint8 routeKind, uint64 requiredVersion) {
-            return (routeFacet, routeKind, requiredVersion);
+    function _route(bytes4 selector)
+        internal
+        view
+        returns (address facet, bytes32 codeHash, uint8 kind, uint64 version)
+    {
+        try facetRegistry.route(selector) returns (
+            address routeFacet, bytes32 routeCodeHash, uint8 routeKind, uint64 requiredVersion
+        ) {
+            return (routeFacet, routeCodeHash, routeKind, requiredVersion);
         } catch {
             revert RegistryCallFailed();
+        }
+    }
+
+    function _requireFacetCodeHash(bytes4 selector, address facet, bytes32 expectedCodeHash) internal view {
+        bytes32 actualCodeHash = facet.codehash;
+        if (expectedCodeHash == bytes32(0) || actualCodeHash != expectedCodeHash) {
+            revert FacetCodeHashMismatch(selector, facet, expectedCodeHash, actualCodeHash);
         }
     }
 

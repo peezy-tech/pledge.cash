@@ -4,6 +4,8 @@ pragma solidity ^0.8.30;
 import {ProtocolFacetTypes} from "./ProtocolFacetTypes.sol";
 
 interface IProtocolFacetRegistry {
+    function kernelSelectorSetHash() external view returns (bytes32);
+
     function activeFacetSetHash() external view returns (bytes32);
 
     function activeRelease() external view returns (uint64);
@@ -14,7 +16,10 @@ interface IProtocolFacetRegistry {
 
     function activeMigration() external view returns (address facet, bytes4 selector);
 
-    function route(bytes4 selector) external view returns (address facet, uint8 kind, uint64 requiredStorageVersion);
+    function route(bytes4 selector)
+        external
+        view
+        returns (address facet, bytes32 codeHash, uint8 kind, uint64 requiredStorageVersion);
 
     function facetAddress(bytes4 selector) external view returns (address);
 

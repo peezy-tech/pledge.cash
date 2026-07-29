@@ -31,6 +31,9 @@ interface IBoardroomVNextGovernance {
 /// Boardroom facet-set hash.
 contract BoardroomVNextController is Initializable, ReentrancyGuard {
     bytes4 public constant ERC1271_MAGIC_VALUE = 0x1626ba7e;
+    bytes4 public constant ERC1271_INVALID_VALUE = 0xffffffff;
+    bytes4 public constant ERC1271_ENVELOPE_SCHEME =
+        bytes4(keccak256("PledgeCash.BoardroomVNextController.ERC1271Envelope.v1"));
     uint256 public constant MIN_DELAY = 1 days;
     uint256 public constant MAX_DELAY = 30 days;
     uint256 public constant MIN_GRACE_PERIOD = 1 days;
@@ -44,6 +47,13 @@ contract BoardroomVNextController is Initializable, ReentrancyGuard {
     bytes32 internal constant CONTROLLER_OPERATION_TYPEHASH = keccak256(
         "ControllerVNextOperation(address controller,address boardroom,bytes32 facetSetHash,bytes32 dataHash,bytes32 salt,uint256 boardroomEpoch,uint256 controllerGeneration,uint256 configurationEpoch,address authority,bytes32 configurationHash)"
     );
+    bytes32 public constant EIP712_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 public constant EIP712_NAME_HASH = keccak256("PledgeCash Boardroom vNext Controller");
+    bytes32 public constant EIP712_VERSION_HASH = keccak256("1");
+    bytes32 public constant BOARDROOM_CONTROL_PROOF_TYPEHASH = keccak256(
+        "BoardroomControlProof(bytes32 messageHash,address boardroom,bytes32 facetSetHash,uint256 boardroomEpoch,uint256 controllerGeneration,uint256 configurationEpoch,bytes32 configurationHash)"
+    );
 
     enum OperationStatus {
         Unset,
@@ -56,6 +66,14 @@ contract BoardroomVNextController is Initializable, ReentrancyGuard {
         uint64 eta;
         uint64 expiresAt;
         OperationStatus status;
+    }
+
+    struct ERC1271Envelope {
+        bytes32 facetSetHash;
+        uint256 boardroomEpoch;
+        uint256 controllerGeneration;
+        uint256 configurationEpoch;
+        bytes32 configurationHash;
     }
 
     address public factory;
@@ -287,10 +305,50 @@ contract BoardroomVNextController is Initializable, ReentrancyGuard {
         );
     }
 
+    /// @notice Validates a proposer signature only in the live Boardroom release context.
+    /// @dev `signature` must be the canonical ABI encoding
+    /// `abi.encode(ERC1271_ENVELOPE_SCHEME, facetSetHash, boardroomEpoch,
+    /// controllerGeneration, configurationEpoch, configurationHash,
+    /// proposerSignature)`. The proposer signs the EIP-712
+    /// `BoardroomControlProof`, not `hash` directly. There is no legacy raw
+    /// signature fallback.
+    /// Malformed envelopes, failed Boardroom reads, stale releases, migration
+    /// downtime, inactive lifecycle/controller state, and invalid nested
+    /// EOA/ERC-1271 proposer signatures all return `ERC1271_INVALID_VALUE`.
     function isValidSignature(bytes32 hash, bytes calldata signature) external view returns (bytes4) {
-        return SignatureCheckerLib.isValidSignatureNowCalldata(proposer, hash, signature)
+        (bool decoded, ERC1271Envelope memory envelope, bytes calldata proposerSignature) =
+            _decodeERC1271SignatureEnvelope(signature);
+        if (!decoded) return ERC1271_INVALID_VALUE;
+
+        if (!_liveSignatureContext(envelope)) return ERC1271_INVALID_VALUE;
+
+        bytes32 digest = _hashERC1271Digest(hash, boardroom, envelope);
+        return SignatureCheckerLib.isValidSignatureNowCalldata(proposer, digest, proposerSignature)
             ? ERC1271_MAGIC_VALUE
-            : bytes4(0xffffffff);
+            : ERC1271_INVALID_VALUE;
+    }
+
+    /// @notice Returns the EIP-712 digest for an explicit Boardroom control context.
+    /// @dev This helper does not fetch or validate live context. EOAs should sign
+    /// the corresponding typed data. Contract-wallet tooling should sign or
+    /// approve this resulting digest according to that wallet's ERC-1271 flow.
+    function hashERC1271Digest(
+        bytes32 hash,
+        address boardroom_,
+        bytes32 facetSetHash,
+        uint256 boardroomEpoch,
+        uint256 controllerGeneration,
+        uint256 expectedConfigurationEpoch,
+        bytes32 expectedConfigurationHash
+    ) external view returns (bytes32) {
+        ERC1271Envelope memory envelope = ERC1271Envelope({
+            facetSetHash: facetSetHash,
+            boardroomEpoch: boardroomEpoch,
+            controllerGeneration: controllerGeneration,
+            configurationEpoch: expectedConfigurationEpoch,
+            configurationHash: expectedConfigurationHash
+        });
+        return _hashERC1271Digest(hash, boardroom_, envelope);
     }
 
     function operationState(bytes32 operationId)
@@ -385,6 +443,113 @@ contract BoardroomVNextController is Initializable, ReentrancyGuard {
                 configurationHash()
             )
         );
+    }
+
+    function _hashERC1271Digest(bytes32 hash, address boardroom_, ERC1271Envelope memory envelope)
+        internal
+        view
+        returns (bytes32)
+    {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                BOARDROOM_CONTROL_PROOF_TYPEHASH,
+                hash,
+                boardroom_,
+                envelope.facetSetHash,
+                envelope.boardroomEpoch,
+                envelope.controllerGeneration,
+                envelope.configurationEpoch,
+                envelope.configurationHash
+            )
+        );
+        bytes32 domainSeparator = keccak256(
+            abi.encode(EIP712_DOMAIN_TYPEHASH, EIP712_NAME_HASH, EIP712_VERSION_HASH, block.chainid, address(this))
+        );
+        return keccak256(abi.encodePacked(hex"1901", domainSeparator, structHash));
+    }
+
+    function _liveSignatureContext(ERC1271Envelope memory envelope) internal view returns (bool active) {
+        if (
+            envelope.controllerGeneration != generation || envelope.configurationEpoch != configurationEpoch
+                || envelope.configurationHash != configurationHash()
+        ) {
+            return false;
+        }
+        if (boardroom.code.length == 0) return false;
+
+        IBoardroomVNextGovernance governed = IBoardroomVNextGovernance(boardroom);
+        try governed.facetSetHash() returns (bytes32 actualFacetSetHash) {
+            if (actualFacetSetHash != envelope.facetSetHash) return false;
+        } catch {
+            return false;
+        }
+        try governed.migrationRequired() returns (bool required) {
+            if (required) return false;
+        } catch {
+            return false;
+        }
+        try governed.status() returns (uint8 boardroomStatus) {
+            if (boardroomStatus != BOARDROOM_STATUS_ACTIVE) return false;
+        } catch {
+            return false;
+        }
+        try governed.controller() returns (address activeController) {
+            if (activeController != address(this)) return false;
+        } catch {
+            return false;
+        }
+        try governed.controllerGeneration() returns (uint256 activeGeneration) {
+            if (activeGeneration != envelope.controllerGeneration) return false;
+        } catch {
+            return false;
+        }
+        try governed.governanceEpoch() returns (uint256 activeEpoch) {
+            if (activeEpoch != envelope.boardroomEpoch) return false;
+        } catch {
+            return false;
+        }
+        return true;
+    }
+
+    function _decodeERC1271SignatureEnvelope(bytes calldata signature)
+        internal
+        pure
+        returns (bool valid, ERC1271Envelope memory envelope, bytes calldata proposerSignature)
+    {
+        proposerSignature = signature[:0];
+        if (signature.length < 256) return (false, envelope, proposerSignature);
+
+        bytes32 schemeWord;
+        uint256 dynamicOffset;
+        uint256 proposerSignatureLength;
+        assembly ("memory-safe") {
+            schemeWord := calldataload(signature.offset)
+            mstore(envelope, calldataload(add(signature.offset, 0x20)))
+            mstore(add(envelope, 0x20), calldataload(add(signature.offset, 0x40)))
+            mstore(add(envelope, 0x40), calldataload(add(signature.offset, 0x60)))
+            mstore(add(envelope, 0x60), calldataload(add(signature.offset, 0x80)))
+            mstore(add(envelope, 0x80), calldataload(add(signature.offset, 0xa0)))
+            dynamicOffset := calldataload(add(signature.offset, 0xc0))
+            proposerSignatureLength := calldataload(add(signature.offset, 0xe0))
+        }
+        if (
+            schemeWord != bytes32(ERC1271_ENVELOPE_SCHEME) || dynamicOffset != 224
+                || proposerSignatureLength > signature.length - 256
+        ) {
+            return (false, envelope, proposerSignature);
+        }
+
+        uint256 paddedSignatureLength = (proposerSignatureLength + 31) & ~uint256(31);
+        if (signature.length != 256 + paddedSignatureLength) {
+            return (false, envelope, proposerSignature);
+        }
+        uint256 paddingStart = 256 + proposerSignatureLength;
+        for (uint256 i = paddingStart; i < signature.length; ++i) {
+            if (signature[i] != bytes1(0)) return (false, envelope, proposerSignature);
+        }
+
+        proposerSignature = signature[256:256 + proposerSignatureLength];
+        return (true, envelope, proposerSignature);
     }
 
     function _schedule(bytes32 operationId) internal returns (uint256 eta) {

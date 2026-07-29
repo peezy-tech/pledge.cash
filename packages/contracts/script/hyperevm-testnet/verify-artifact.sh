@@ -547,8 +547,12 @@ done
 source_commit="$(field sourceCommit)"
 [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]] || fail "sourceCommit must be an exact lowercase Git commit"
 git cat-file -e "${source_commit}^{commit}" 2>/dev/null || fail "source commit $source_commit is not present locally"
-if ! git diff --quiet "$source_commit" -- . ':(exclude)deployments/**'; then
-  fail "local contract sources differ from recorded source commit $source_commit"
+# New parallel, undeployed contracts may legitimately be absent from this v5
+# deployment commit. Existing contract sources must remain byte-for-byte
+# unchanged; the release-code and source-bound init-code checks below then bind
+# the locally reproduced deployment bytecode.
+if ! git diff --quiet --diff-filter=MDR "$source_commit" -- src; then
+  fail "existing contract sources differ from recorded source commit $source_commit"
 fi
 
 deployment_block="$(field deploymentBlock)"

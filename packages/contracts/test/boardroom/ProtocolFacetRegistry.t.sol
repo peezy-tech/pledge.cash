@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
+import {BoardroomKernelSelectors} from "../../src/boardroom/diamond/BoardroomKernelSelectors.sol";
 import {ProtocolFacetRegistry} from "../../src/boardroom/diamond/ProtocolFacetRegistry.sol";
 import {ProtocolFacetTypes} from "../../src/boardroom/diamond/ProtocolFacetTypes.sol";
 
@@ -23,8 +24,8 @@ contract RegistryTestMigrationFacet {
 }
 
 contract ProtocolFacetRegistryTest is Test {
-    bytes4 internal constant RESERVED_A = 0x01020304;
-    bytes4 internal constant RESERVED_B = 0x05060708;
+    bytes4 internal constant RESERVED_A = bytes4(keccak256("facetRegistry()"));
+    bytes4 internal constant RESERVED_B = bytes4(keccak256("appliedStorageLayoutHash()"));
     bytes4 internal constant SELECTOR_A = 0x10000001;
     bytes4 internal constant SELECTOR_B = 0x10000002;
     bytes4 internal constant SELECTOR_C = 0x10000003;
@@ -72,9 +73,7 @@ contract ProtocolFacetRegistryTest is Test {
         facetB = new RegistryTestFacetB();
         migrationFacet = new RegistryTestMigrationFacet();
 
-        bytes4[] memory reserved = new bytes4[](2);
-        reserved[0] = RESERVED_A;
-        reserved[1] = RESERVED_B;
+        bytes4[] memory reserved = BoardroomKernelSelectors.selectors();
         registry = new ProtocolFacetRegistry(address(this), reserved);
     }
 
@@ -85,9 +84,10 @@ contract ProtocolFacetRegistryTest is Test {
         assertFalse(registry.isReservedKernelSelector(SELECTOR_A));
 
         bytes4[] memory reserved = registry.reservedKernelSelectors();
-        assertEq(reserved.length, 2);
+        assertEq(reserved.length, 8);
         assertEq(reserved[0], RESERVED_A);
         assertEq(reserved[1], RESERVED_B);
+        assertEq(registry.kernelSelectorSetHash(), BoardroomKernelSelectors.selectorSetHash());
         assertEq(registry.MAX_SELECTORS(), 256);
         assertEq(registry.MAX_RESERVED_KERNEL_SELECTORS(), 128);
     }
@@ -121,6 +121,17 @@ contract ProtocolFacetRegistryTest is Test {
         }
         vm.expectRevert(abi.encodeWithSelector(ProtocolFacetRegistry.TooManySelectors.selector, 129, 128));
         new ProtocolFacetRegistry(address(this), excessive);
+
+        bytes4[] memory incomplete = new bytes4[](1);
+        incomplete[0] = RESERVED_A;
+        bytes32 expectedHash = BoardroomKernelSelectors.selectorSetHash();
+        bytes32 actualHash = keccak256(abi.encode(incomplete));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ProtocolFacetRegistry.InvalidKernelSelectorSetHash.selector, expectedHash, actualHash
+            )
+        );
+        new ProtocolFacetRegistry(address(this), incomplete);
     }
 
     function testOnlyProtocolGovernanceMayPublishOrActivate() public {
@@ -470,8 +481,9 @@ contract ProtocolFacetRegistryTest is Test {
         (address activeMigrationFacet, bytes4 activeMigrationSelector) = registry.activeMigration();
         assertEq(activeMigrationFacet, address(migrationFacet));
         assertEq(activeMigrationSelector, MIGRATION_SELECTOR);
-        (address facet, uint8 kind, uint64 storageVersion) = registry.route(MIGRATION_SELECTOR);
+        (address facet, bytes32 codeHash, uint8 kind, uint64 storageVersion) = registry.route(MIGRATION_SELECTOR);
         assertEq(facet, address(migrationFacet));
+        assertEq(codeHash, address(migrationFacet).codehash);
         assertEq(kind, uint8(ProtocolFacetTypes.RouteKind.Migration));
         assertEq(storageVersion, 5);
     }
@@ -531,6 +543,34 @@ contract ProtocolFacetRegistryTest is Test {
         registry.activateFacetSet(facetSetHash);
     }
 
+    function testActiveRouteRetainsPublishedCodeHashAndLoupeInventoryAfterRuntimeChange() public {
+        ProtocolFacetTypes.FacetSetManifest memory manifest = _singleRouteManifest(1, 1, SELECTOR_A, address(facetA));
+        bytes32 expectedCodeHash = address(facetA).codehash;
+        bytes32 facetSetHash = registry.publishFacetSet(manifest);
+        registry.activateFacetSet(facetSetHash);
+
+        vm.etch(address(facetA), hex"00");
+        (address facet, bytes32 committedCodeHash, uint8 kind, uint64 storageVersion) = registry.route(SELECTOR_A);
+        assertEq(facet, address(facetA));
+        assertEq(committedCodeHash, expectedCodeHash);
+        assertNotEq(committedCodeHash, address(facetA).codehash);
+        assertEq(kind, uint8(ProtocolFacetTypes.RouteKind.View));
+        assertEq(storageVersion, 1);
+
+        assertEq(registry.facetAddress(SELECTOR_A), address(facetA));
+        address[] memory addresses = registry.facetAddresses();
+        assertEq(addresses.length, 1);
+        assertEq(addresses[0], address(facetA));
+        bytes4[] memory selectors = registry.facetFunctionSelectors(address(facetA));
+        assertEq(selectors.length, 1);
+        assertEq(selectors[0], SELECTOR_A);
+        ProtocolFacetTypes.Facet[] memory activeFacets = registry.facets();
+        assertEq(activeFacets.length, 1);
+        assertEq(activeFacets[0].facetAddress, address(facetA));
+        assertEq(activeFacets[0].functionSelectors.length, 1);
+        assertEq(activeFacets[0].functionSelectors[0], SELECTOR_A);
+    }
+
     function testActivationAtomicallyAddsReplacesRemovesAndProvidesLoupe() public {
         ProtocolFacetTypes.RouteDefinition[] memory firstRoutes = new ProtocolFacetTypes.RouteDefinition[](3);
         firstRoutes[0] = _route(SELECTOR_A, address(facetA), ProtocolFacetTypes.RouteKind.View);
@@ -569,8 +609,10 @@ contract ProtocolFacetRegistryTest is Test {
         assertEq(registry.facetAddress(SELECTOR_C), address(facetB));
         assertEq(registry.facetAddress(SELECTOR_D), address(facetA));
 
-        (address replacedFacet, uint8 replacedKind, uint64 storageVersion) = registry.route(SELECTOR_A);
+        (address replacedFacet, bytes32 replacedCodeHash, uint8 replacedKind, uint64 storageVersion) =
+            registry.route(SELECTOR_A);
         assertEq(replacedFacet, address(facetB));
+        assertEq(replacedCodeHash, address(facetB).codehash);
         assertEq(replacedKind, uint8(ProtocolFacetTypes.RouteKind.Mutating));
         assertEq(storageVersion, 1);
 

@@ -10,6 +10,7 @@ import {TokenGrantFactory} from "../grants/TokenGrantFactory.sol";
 import {BoardroomVNextCallbackLib} from "../policy/BoardroomVNextCallbackLib.sol";
 
 interface IMerkleAirdropVNextBoardroom {
+    function facetSetHash() external view returns (bytes32);
     function status() external view returns (uint8);
 }
 
@@ -19,10 +20,10 @@ contract MerkleAirdropVNext is Initializable, ReentrancyGuard {
     uint8 internal constant BOARDROOM_STATUS_ACTIVE = 0;
 
     bytes32 public constant DIRECT_CLAIM_TYPEHASH = keccak256(
-        "MerkleAirdropDirectClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
+        "MerkleAirdropDirectClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
     );
     bytes32 public constant GRANT_CLAIM_TYPEHASH = keccak256(
-        "MerkleAirdropGrantClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)"
+        "MerkleAirdropGrantClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)"
     );
     bytes32 public constant GRANT_TERMS_TYPEHASH = keccak256(
         "MerkleAirdropGrantTerms(address paymentToken,uint256 price,uint256 expiry,uint256 vestingCliff,uint256 vestingEnd,bool transferable,uint256 transferUnlockTime,bytes32 salt)"
@@ -82,6 +83,7 @@ contract MerkleAirdropVNext is Initializable, ReentrancyGuard {
     error InvalidProof();
     error InsufficientShares(uint256 requested, uint256 available);
     error TooManyGrantClaims(uint256 maximum);
+    error FacetSetHashMismatch(bytes32 expected, bytes32 actual);
     error UnexpectedTokenBalanceChange(address token, uint256 expected, uint256 actual);
 
     event MerkleAirdropInitialized(
@@ -135,23 +137,32 @@ contract MerkleAirdropVNext is Initializable, ReentrancyGuard {
         );
     }
 
-    function claim(uint256 index, address account, uint256 amount, bytes32[] calldata proof) external nonReentrant {
-        _claim(index, account, amount, getDirectClaimLeaf(index, account, amount), proof);
+    function claim(
+        bytes32 expectedFacetSetHash,
+        uint256 index,
+        address account,
+        uint256 amount,
+        bytes32[] calldata proof
+    ) external nonReentrant {
+        _requireFacetSetHash(expectedFacetSetHash);
+        _claim(index, account, amount, getDirectClaimLeaf(expectedFacetSetHash, index, account, amount), proof);
         _checkedTransfer(account, amount);
 
         emit AirdropClaimed(index, account, amount);
     }
 
     function claimGrant(
+        bytes32 expectedFacetSetHash,
         uint256 index,
         address account,
         uint256 amount,
         GrantClaimParams calldata params,
         bytes32[] calldata proof
     ) external nonReentrant returns (address grant) {
+        _requireFacetSetHash(expectedFacetSetHash);
         uint16 nextClaimedGrantCount = _nextClaimedGrantCount();
 
-        _claim(index, account, amount, getGrantClaimLeaf(index, account, amount, params), proof);
+        _claim(index, account, amount, getGrantClaimLeaf(expectedFacetSetHash, index, account, amount, params), proof);
         claimedGrantCount = nextClaimedGrantCount;
 
         grant = _createGrantFromClaim(index, account, amount, params);
@@ -188,22 +199,37 @@ contract MerkleAirdropVNext is Initializable, ReentrancyGuard {
         return (claimedWord & mask) == mask;
     }
 
-    function getDirectClaimLeaf(uint256 index, address account, uint256 amount) public view returns (bytes32) {
-        return keccak256(
-            abi.encode(
-                DIRECT_CLAIM_TYPEHASH, block.chainid, index, address(this), boardroom, shareToken, account, amount
-            )
-        );
-    }
-
-    function getGrantClaimLeaf(uint256 index, address account, uint256 amount, GrantClaimParams calldata params)
+    function getDirectClaimLeaf(bytes32 expectedFacetSetHash, uint256 index, address account, uint256 amount)
         public
         view
         returns (bytes32)
     {
         return keccak256(
             abi.encode(
+                DIRECT_CLAIM_TYPEHASH,
+                expectedFacetSetHash,
+                block.chainid,
+                index,
+                address(this),
+                boardroom,
+                shareToken,
+                account,
+                amount
+            )
+        );
+    }
+
+    function getGrantClaimLeaf(
+        bytes32 expectedFacetSetHash,
+        uint256 index,
+        address account,
+        uint256 amount,
+        GrantClaimParams calldata params
+    ) public view returns (bytes32) {
+        return keccak256(
+            abi.encode(
                 GRANT_CLAIM_TYPEHASH,
+                expectedFacetSetHash,
                 block.chainid,
                 index,
                 address(this),
@@ -286,6 +312,13 @@ contract MerkleAirdropVNext is Initializable, ReentrancyGuard {
 
     function _requireActive() internal view {
         if (airdropStatus != AirdropStatus.Active) revert AirdropNotActive();
+    }
+
+    function _requireFacetSetHash(bytes32 expectedFacetSetHash) internal view {
+        bytes32 actualFacetSetHash = IMerkleAirdropVNextBoardroom(boardroom).facetSetHash();
+        if (expectedFacetSetHash != actualFacetSetHash) {
+            revert FacetSetHashMismatch(expectedFacetSetHash, actualFacetSetHash);
+        }
     }
 
     function _requireOpen() internal view {

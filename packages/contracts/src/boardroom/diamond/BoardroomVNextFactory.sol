@@ -42,6 +42,7 @@ contract BoardroomVNextFactory {
 
     error InvalidAddress(address account);
     error InvalidKernelRegistry(address expected, address actual);
+    error InvalidKernelSelectorSetHash(bytes32 expected, bytes32 actual);
     error FacetSetHashMismatch(bytes32 expected, bytes32 actual);
 
     event BoardroomVNextCreated(
@@ -75,6 +76,11 @@ contract BoardroomVNextFactory {
 
         address actualRegistry = address(BoardroomKernel(payable(boardroomKernelLogic_)).facetRegistry());
         if (actualRegistry != facetRegistry_) revert InvalidKernelRegistry(facetRegistry_, actualRegistry);
+        bytes32 expectedSelectorSetHash = IProtocolFacetRegistry(facetRegistry_).kernelSelectorSetHash();
+        bytes32 actualSelectorSetHash = BoardroomKernel(payable(boardroomKernelLogic_)).kernelSelectorSetHash();
+        if (actualSelectorSetHash != expectedSelectorSetHash) {
+            revert InvalidKernelSelectorSetHash(expectedSelectorSetHash, actualSelectorSetHash);
+        }
 
         facetRegistry = IProtocolFacetRegistry(facetRegistry_);
         policyRegistry = policyRegistry_;

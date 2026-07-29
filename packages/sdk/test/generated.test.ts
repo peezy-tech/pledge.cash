@@ -77,6 +77,7 @@ describe("generated SDK exports", () => {
       "execute",
       "facetRegistry",
       "facetSetHash",
+      "kernelSelectorSetHash",
       "migrateBoardroom",
       "migrationRequired",
       "redeem",
@@ -90,14 +91,18 @@ describe("generated SDK exports", () => {
       "facetSetRoute",
       "facetSetSelectors",
       "facets",
+      "kernelSelectorSetHash",
     ]));
     expect(functionNames(boardroomVNextFactoryAbi)).toEqual(expect.arrayContaining([
       "createBoardroom",
       "predictBoardroomAddress",
     ]));
     expect(functionNames(boardroomVNextControllerAbi)).toEqual(expect.arrayContaining([
+      "ERC1271_ENVELOPE_SCHEME",
       "executeBoardroomOperation",
       "hashBoardroomOperation",
+      "hashERC1271Digest",
+      "isValidSignature",
       "scheduleBoardroomOperation",
     ]));
     expect(functionNames(boardroomAbi)).toEqual(expect.arrayContaining([
@@ -152,6 +157,21 @@ describe("generated SDK exports", () => {
     expect(functionNames(merkleAirdropAbi)).toEqual(expect.arrayContaining(["claimedShares", "isClaimed"]));
   });
 
+  test("includes vNext Boardroom lifecycle events and routed errors", () => {
+    expect(itemNames(boardroomDiamondAbi, "event")).toEqual(expect.arrayContaining([
+      "BoardroomInitialized",
+      "BoardroomLaunched",
+      "BoardroomWindDownStarted",
+      "RedeemableAssetRegistered",
+    ]));
+    expect(itemNames(boardroomDiamondAbi, "error")).toEqual(expect.arrayContaining([
+      "FacetCodeHashMismatch",
+      "FacetSetHashMismatch",
+      "StorageMigrationRequired",
+      "Unauthorized",
+    ]));
+  });
+
   test("includes checked-in deployment metadata", () => {
     expect(pledgeCashDeployments[998]?.chainId).toBe(998);
     expect(pledgeCashDeployments[998]?.status).toBeUndefined();
@@ -185,4 +205,8 @@ describe("generated SDK exports", () => {
 
 function functionNames(abi: readonly { type: string; name?: string }[]): string[] {
   return abi.flatMap((item) => item.type === "function" && item.name ? [item.name] : []);
+}
+
+function itemNames(abi: readonly { type: string; name?: string }[], type: string): string[] {
+  return abi.flatMap((item) => item.type === type && item.name ? [item.name] : []);
 }

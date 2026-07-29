@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {LibClone} from "solady/utils/LibClone.sol";
 import {BoardroomDiamondStorage} from "../../src/boardroom/diamond/BoardroomDiamondStorage.sol";
 import {BoardroomKernel} from "../../src/boardroom/diamond/BoardroomKernel.sol";
+import {BoardroomKernelSelectors} from "../../src/boardroom/diamond/BoardroomKernelSelectors.sol";
 import {IBoardroomFacetRegistry} from "../../src/boardroom/diamond/IBoardroomFacetRegistry.sol";
 
 library BoardroomKernelTestStorage {
@@ -145,6 +146,7 @@ contract BoardroomKernelTestFacet {
 contract MockBoardroomFacetRegistry is IBoardroomFacetRegistry {
     struct Route {
         address facet;
+        bytes32 codeHash;
         uint8 kind;
         uint64 requiredStorageVersion;
     }
@@ -155,8 +157,17 @@ contract MockBoardroomFacetRegistry is IBoardroomFacetRegistry {
     address internal activeMigrationFacet;
     bytes4 internal activeMigrationSelector;
     mapping(bytes4 selector => Route) internal routeOf;
+    bytes32 internal selectorSetHash = BoardroomKernelSelectors.selectorSetHash();
     bool internal failActiveReads;
     bool internal failRouteReads;
+
+    function setKernelSelectorSetHash(bytes32 value) external {
+        selectorSetHash = value;
+    }
+
+    function kernelSelectorSetHash() external view returns (bytes32) {
+        return selectorSetHash;
+    }
 
     function setActive(bytes32 hash, uint64 version) external {
         activeHash = hash;
@@ -165,7 +176,7 @@ contract MockBoardroomFacetRegistry is IBoardroomFacetRegistry {
     }
 
     function setRoute(bytes4 selector, address facet, uint8 kind, uint64 requiredStorageVersion) external {
-        routeOf[selector] = Route(facet, kind, requiredStorageVersion);
+        routeOf[selector] = Route(facet, facet.codehash, kind, requiredStorageVersion);
     }
 
     function setActiveMigration(address facet, bytes4 selector) external {
@@ -198,10 +209,14 @@ contract MockBoardroomFacetRegistry is IBoardroomFacetRegistry {
         return (activeMigrationFacet, activeMigrationSelector);
     }
 
-    function route(bytes4 selector) external view returns (address facet, uint8 kind, uint64 requiredStorageVersion) {
+    function route(bytes4 selector)
+        external
+        view
+        returns (address facet, bytes32 codeHash, uint8 kind, uint64 requiredStorageVersion)
+    {
         if (failRouteReads) revert("ROUTE_READ_FAILED");
         Route storage selected = routeOf[selector];
-        return (selected.facet, selected.kind, selected.requiredStorageVersion);
+        return (selected.facet, selected.codeHash, selected.kind, selected.requiredStorageVersion);
     }
 }
 
@@ -238,6 +253,7 @@ contract BoardroomKernelTest is Test {
 
     function testInitializationIsCloneSafeAtomicAndImplementationDisabled() public {
         assertEq(address(kernel.facetRegistry()), address(registry));
+        assertEq(kernel.kernelSelectorSetHash(), BoardroomKernelSelectors.selectorSetHash());
         assertEq(kernel.facetSetHash(), RELEASE_HASH_V1);
         assertEq(kernel.appliedStorageVersion(), 1);
         assertEq(kernel.appliedStorageLayoutHash(), bytes32(uint256(1)));
@@ -254,6 +270,18 @@ contract BoardroomKernelTest is Test {
         implementation.initialize(RELEASE_HASH_V1, abi.encode(uint256(12)));
     }
 
+    function testConstructorRejectsRegistryWithDifferentKernelSelectorSet() public {
+        MockBoardroomFacetRegistry mismatchedRegistry = new MockBoardroomFacetRegistry();
+        bytes32 expectedHash = BoardroomKernelSelectors.selectorSetHash();
+        bytes32 actualHash = keccak256("different-kernel-selectors");
+        mismatchedRegistry.setKernelSelectorSetHash(actualHash);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(BoardroomKernel.InvalidKernelSelectorSetHash.selector, expectedHash, actualHash)
+        );
+        new BoardroomKernel(address(mismatchedRegistry));
+    }
+
     function testInitializationHookFailureRollsBackKernelMetadata() public {
         BoardroomKernel candidate = _newKernel();
         vm.expectRevert(abi.encodeWithSelector(BoardroomKernelTestFacet.FacetFailure.selector, uint256(8)));
@@ -263,6 +291,23 @@ contract BoardroomKernelTest is Test {
         assertEq(candidate.appliedStorageVersion(), 1);
         (,,,, uint256 stored) = _readContext(candidate);
         assertEq(stored, 19);
+    }
+
+    function testInitializationRejectsFacetWhoseRuntimeCodeNoLongerMatchesRelease() public {
+        BoardroomKernel candidate = _newKernel();
+        bytes32 committedCodeHash = address(facet).codehash;
+        vm.etch(address(facet), hex"00");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BoardroomKernel.FacetCodeHashMismatch.selector,
+                BoardroomKernelTestFacet.initializeBoardroom.selector,
+                address(facet),
+                committedCodeHash,
+                address(facet).codehash
+            )
+        );
+        candidate.initialize(RELEASE_HASH_V1, abi.encode(uint256(19)));
     }
 
     function testInitializationRunsActiveReleaseGenesisMigration() public {
@@ -281,6 +326,30 @@ contract BoardroomKernelTest is Test {
         assertTrue(_migrationMarker(candidate));
         (,,,, uint256 stored) = _readContext(candidate);
         assertEq(stored, 23);
+    }
+
+    function testInitializationRejectsGenesisMigrationFacetWhoseRuntimeCodeNoLongerMatchesRelease() public {
+        BoardroomKernelTestFacet genesisMigrationFacet = new BoardroomKernelTestFacet();
+        registry.setActive(RELEASE_HASH_V2, 2);
+        registry.setRoute(BoardroomKernelTestFacet.initializeBoardroom.selector, address(facet), MUTATING, 2);
+        registry.setRoute(
+            BoardroomKernelTestFacet.finalizeGenesis.selector, address(genesisMigrationFacet), MIGRATION, 2
+        );
+        registry.setActiveMigration(address(genesisMigrationFacet), BoardroomKernelTestFacet.finalizeGenesis.selector);
+        bytes32 committedCodeHash = address(genesisMigrationFacet).codehash;
+        vm.etch(address(genesisMigrationFacet), hex"00");
+
+        BoardroomKernel candidate = _newKernel();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BoardroomKernel.FacetCodeHashMismatch.selector,
+                BoardroomKernelTestFacet.finalizeGenesis.selector,
+                address(genesisMigrationFacet),
+                committedCodeHash,
+                address(genesisMigrationFacet).codehash
+            )
+        );
+        candidate.initialize(RELEASE_HASH_V2, abi.encode(uint256(23)));
     }
 
     function testUninitializedCloneCannotRoute() public {
@@ -332,6 +401,38 @@ contract BoardroomKernelTest is Test {
         (address observedCaller, address observedContext) = abi.decode(output, (address, address));
         assertEq(observedCaller, caller);
         assertEq(observedContext, address(kernel));
+    }
+
+    function testViewDispatchRejectsFacetWhoseRuntimeCodeNoLongerMatchesRelease() public {
+        bytes32 committedCodeHash = address(facet).codehash;
+        vm.etch(address(facet), hex"00");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BoardroomKernel.FacetCodeHashMismatch.selector,
+                BoardroomKernelTestFacet.readContext.selector,
+                address(facet),
+                committedCodeHash,
+                address(facet).codehash
+            )
+        );
+        _call(kernel, abi.encodeWithSelector(BoardroomKernelTestFacet.readContext.selector));
+    }
+
+    function testMutatingDispatchRejectsFacetWhoseRuntimeCodeNoLongerMatchesRelease() public {
+        bytes32 committedCodeHash = address(facet).codehash;
+        vm.etch(address(facet), hex"00");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BoardroomKernel.FacetCodeHashMismatch.selector,
+                BoardroomKernelTestFacet.mutate.selector,
+                address(facet),
+                committedCodeHash,
+                address(facet).codehash
+            )
+        );
+        _call(kernel, abi.encodeCall(BoardroomKernelTestFacet.mutate, (RELEASE_HASH_V1, uint256(77))));
     }
 
     function testFacetReturnAndRevertDataAreBubbled() public {
@@ -482,6 +583,25 @@ contract BoardroomKernelTest is Test {
 
         vm.expectRevert(abi.encodeWithSelector(BoardroomKernel.AlreadyMigrated.selector, uint64(2)));
         _call(kernel, abi.encodeCall(BoardroomKernelTestFacet.migrate, (RELEASE_HASH_V2, uint64(2))));
+    }
+
+    function testMigrationDispatchRejectsFacetWhoseRuntimeCodeNoLongerMatchesRelease() public {
+        _activateV2Routes();
+        registry.setRoute(BoardroomKernelTestFacet.migrate.selector, address(facet), MIGRATION, 2);
+        bytes32 committedCodeHash = address(facet).codehash;
+        vm.etch(address(facet), hex"00");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BoardroomKernel.FacetCodeHashMismatch.selector,
+                BoardroomKernelTestFacet.migrate.selector,
+                address(facet),
+                committedCodeHash,
+                address(facet).codehash
+            )
+        );
+        _call(kernel, abi.encodeCall(BoardroomKernelTestFacet.migrate, (RELEASE_HASH_V2, uint64(2))));
+        assertEq(kernel.appliedStorageVersion(), 1);
     }
 
     function testActiveMigrationCanUpgradeMultiVersionStragglerInOneCall() public {

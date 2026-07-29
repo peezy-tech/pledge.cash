@@ -1,4 +1,4 @@
-import type { Address, Hex } from "viem";
+import { encodeFunctionData, type Address, type Hex } from "viem";
 import {
   boardroomDiamondAbi,
   boardroomVNextControllerAbi,
@@ -10,6 +10,10 @@ import type {
   BoardroomLaunchConfig,
   PledgeCashBlockReadClient,
 } from "./types";
+import type {
+  buildBoardroomExecuteBatchTransaction,
+  buildBoardroomExecuteTransaction,
+} from "./transactions";
 
 export type ProtocolFacetRouteKind = 0 | 1 | 2;
 
@@ -91,6 +95,12 @@ export type BoardroomVNextMutationFunctionName = Extract<
   (typeof boardroomDiamondAbi)[number],
   { type: "function"; stateMutability: "nonpayable" | "payable" }
 >["name"];
+
+export type BoardroomV5ExecutionTransaction =
+  | ReturnType<typeof buildBoardroomExecuteTransaction>
+  | ReturnType<typeof buildBoardroomExecuteBatchTransaction>;
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const satisfies Address;
 
 function requireFacetSetHash(value: Hex): Hex {
   if (!/^0x[0-9a-fA-F]{64}$/.test(value)) {
@@ -234,6 +244,204 @@ export function buildBoardroomVNextExecuteWindDownCallTransaction(input: {
     functionName: "executeWindDownCall",
     args: [requireFacetSetHash(input.expectedFacetSetHash), input.call] as const,
   } as const;
+}
+
+export function adaptBoardroomV5ExecutionTransactionToVNext(input: {
+  expectedFacetSetHash: Hex;
+  transaction: BoardroomV5ExecutionTransaction;
+}) {
+  const legacy = boardroomCallsFromV5ExecutionTransaction(input.transaction);
+  return legacy.functionName === "execute"
+    ? buildBoardroomVNextExecuteTransaction({
+        boardroom: legacy.boardroom,
+        expectedFacetSetHash: input.expectedFacetSetHash,
+        call: legacy.calls[0]!,
+        ...(legacy.value === undefined ? {} : { value: legacy.value }),
+      })
+    : buildBoardroomVNextExecuteBatchTransaction({
+        boardroom: legacy.boardroom,
+        expectedFacetSetHash: input.expectedFacetSetHash,
+        calls: legacy.calls,
+        ...(legacy.value === undefined ? {} : { value: legacy.value }),
+      });
+}
+
+export function buildBoardroomVNextReplaceControllerCall(input: {
+  boardroom: Address;
+  expectedFacetSetHash: Hex;
+  expectedCurrentController: Address;
+  expectedNextController: Address;
+  nextProposer: Address;
+  nextDelay: bigint;
+  nextGracePeriod: bigint;
+  nextGeneration: bigint;
+}): BoardroomCall {
+  return buildBoardroomVNextSelfCall(
+    input.boardroom,
+    encodeFunctionData({
+      abi: boardroomDiamondAbi,
+      functionName: "replaceController",
+      args: [
+        requireFacetSetHash(input.expectedFacetSetHash),
+        input.expectedCurrentController,
+        input.expectedNextController,
+        input.nextProposer,
+        input.nextDelay,
+        input.nextGracePeriod,
+        input.nextGeneration,
+      ],
+    }),
+  );
+}
+
+export function buildBoardroomVNextMintCall(input: {
+  boardroom: Address;
+  expectedFacetSetHash: Hex;
+  to: Address;
+  amount: bigint;
+}): BoardroomCall {
+  return buildBoardroomVNextSelfCall(
+    input.boardroom,
+    encodeFunctionData({
+      abi: boardroomDiamondAbi,
+      functionName: "mint",
+      args: [
+        requireFacetSetHash(input.expectedFacetSetHash),
+        input.to,
+        input.amount,
+      ],
+    }),
+  );
+}
+
+export function buildBoardroomVNextRegisterRedeemableAssetCall(input: {
+  boardroom: Address;
+  expectedFacetSetHash: Hex;
+  asset: Address;
+}): BoardroomCall {
+  return buildBoardroomVNextSelfCall(
+    input.boardroom,
+    encodeFunctionData({
+      abi: boardroomDiamondAbi,
+      functionName: "registerRedeemableAsset",
+      args: [
+        requireFacetSetHash(input.expectedFacetSetHash),
+        input.asset,
+      ],
+    }),
+  );
+}
+
+export type BoardroomVNextCallExecutionPlan =
+  | {
+      kind: "execute";
+      transaction:
+        | ReturnType<typeof buildBoardroomVNextExecuteTransaction>
+        | ReturnType<typeof buildBoardroomVNextExecuteBatchTransaction>;
+    }
+  | {
+      kind: "schedule";
+      transaction: ReturnType<typeof buildBoardroomVNextScheduleOperationTransaction>;
+    }
+  | {
+      kind: "windDown";
+      transaction: ReturnType<typeof buildBoardroomVNextExecuteWindDownCallTransaction>;
+    };
+
+export type BoardroomVNextLifecycle = {
+  launched: boolean;
+  status: number;
+  migrationRequired: boolean;
+  controller?: Address;
+  governanceEpoch?: bigint;
+  controllerConfigurationEpoch?: bigint;
+};
+
+export function planBoardroomVNextCallExecution(input: {
+  boardroom: Address;
+  expectedFacetSetHash: Hex;
+  calls: readonly BoardroomCall[];
+  lifecycle: BoardroomVNextLifecycle;
+  salt?: Hex;
+  value?: bigint;
+}): BoardroomVNextCallExecutionPlan {
+  requireFacetSetHash(input.expectedFacetSetHash);
+  if (input.calls.length === 0) throw new Error("At least one Boardroom call is required.");
+  if (input.lifecycle.migrationRequired) {
+    throw new Error("The Boardroom must be migrated before vNext calls can be prepared.");
+  }
+
+  if (input.lifecycle.status === 0) {
+    if (input.lifecycle.launched) {
+      if (!input.salt) throw new Error("A governance salt is required after launch.");
+      const { controller, governanceEpoch, controllerConfigurationEpoch } = input.lifecycle;
+      if (!controller || governanceEpoch === undefined || controllerConfigurationEpoch === undefined) {
+        throw new Error("Current controller and governance epochs are required after launch.");
+      }
+      return {
+        kind: "schedule",
+        transaction: buildBoardroomVNextScheduleOperationTransaction({
+          controller,
+          expectedFacetSetHash: input.expectedFacetSetHash,
+          calls: input.calls,
+          salt: input.salt,
+          expectedBoardroomEpoch: governanceEpoch,
+          expectedConfigurationEpoch: controllerConfigurationEpoch,
+        }),
+      };
+    }
+
+    return input.calls.length === 1
+      ? {
+          kind: "execute",
+          transaction: buildBoardroomVNextExecuteTransaction({
+            boardroom: input.boardroom,
+            expectedFacetSetHash: input.expectedFacetSetHash,
+            call: input.calls[0]!,
+            ...(input.value === undefined ? {} : { value: input.value }),
+          }),
+        }
+      : {
+          kind: "execute",
+          transaction: buildBoardroomVNextExecuteBatchTransaction({
+            boardroom: input.boardroom,
+            expectedFacetSetHash: input.expectedFacetSetHash,
+            calls: input.calls,
+            ...(input.value === undefined ? {} : { value: input.value }),
+          }),
+        };
+  }
+
+  if (input.lifecycle.status === 1) {
+    if (input.calls.length !== 1) throw new Error("Wind-down calls must be submitted one at a time.");
+    return {
+      kind: "windDown",
+      transaction: buildBoardroomVNextExecuteWindDownCallTransaction({
+        boardroom: input.boardroom,
+        expectedFacetSetHash: input.expectedFacetSetHash,
+        call: input.calls[0]!,
+      }),
+    };
+  }
+
+  throw new Error("Boardroom calls are unavailable during snapshotting or after redemptions open.");
+}
+
+export function planBoardroomVNextExecutionTransaction(input: {
+  expectedFacetSetHash: Hex;
+  transaction: BoardroomV5ExecutionTransaction;
+  lifecycle: BoardroomVNextLifecycle;
+  salt?: Hex;
+}): BoardroomVNextCallExecutionPlan {
+  const legacy = boardroomCallsFromV5ExecutionTransaction(input.transaction);
+  return planBoardroomVNextCallExecution({
+    boardroom: legacy.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
+    calls: legacy.calls,
+    lifecycle: input.lifecycle,
+    ...(input.salt === undefined ? {} : { salt: input.salt }),
+    ...(legacy.value === undefined ? {} : { value: legacy.value }),
+  });
 }
 
 export function buildBoardroomVNextPruneObligationsTransaction(input: {
@@ -553,6 +761,58 @@ export function buildBoardroomVNextExecuteControllerOperationTransaction(input: 
       input.authority,
     ] as const,
   } as const;
+}
+
+function buildBoardroomVNextSelfCall(boardroom: Address, data: Hex): BoardroomCall {
+  return {
+    policy: ZERO_ADDRESS,
+    target: boardroom,
+    value: 0n,
+    data,
+  };
+}
+
+function boardroomCallsFromV5ExecutionTransaction(transaction: BoardroomV5ExecutionTransaction): {
+  boardroom: Address;
+  functionName: "execute" | "executeBatch";
+  calls: readonly BoardroomCall[];
+  value?: bigint;
+} {
+  const args = transaction.args as readonly unknown[];
+  if (transaction.functionName === "execute") {
+    const call = args[0];
+    if (!isBoardroomCall(call)) {
+      throw new Error("The v5 execute transaction does not contain a valid Boardroom call.");
+    }
+    return {
+      boardroom: transaction.address,
+      functionName: "execute",
+      calls: [call],
+      value: transaction.value,
+    };
+  }
+  if (transaction.functionName === "executeBatch") {
+    const calls = args[0];
+    if (!Array.isArray(calls) || !calls.every(isBoardroomCall)) {
+      throw new Error("The v5 executeBatch transaction does not contain valid Boardroom calls.");
+    }
+    return {
+      boardroom: transaction.address,
+      functionName: "executeBatch",
+      calls,
+      value: transaction.value,
+    };
+  }
+  throw new Error("Only v5 Boardroom execute and executeBatch transactions can be adapted to vNext.");
+}
+
+function isBoardroomCall(value: unknown): value is BoardroomCall {
+  if (!value || typeof value !== "object") return false;
+  const call = value as Partial<BoardroomCall>;
+  return typeof call.policy === "string"
+    && typeof call.target === "string"
+    && typeof call.value === "bigint"
+    && typeof call.data === "string";
 }
 
 type FacetTuple = {

@@ -2,7 +2,9 @@
 pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {LibClone} from "solady/utils/LibClone.sol";
+import {SignatureCheckerLib} from "solady/utils/SignatureCheckerLib.sol";
 import {WETH} from "solady/tokens/WETH.sol";
 import {Boardroom} from "../../src/boardroom/Boardroom.sol";
 import {BoardroomGovernanceLogic} from "../../src/boardroom/BoardroomGovernanceLogic.sol";
@@ -87,6 +89,33 @@ contract VNextTestModule is IBoardroomObligationPolicy {
 
     function isLifecycleCallAllowed(address, address, bytes4 selector) external pure returns (bool) {
         return selector == VNextTestObligation.close.selector;
+    }
+}
+
+contract VNextMismatchedKernel {
+    address public immutable facetRegistry;
+    bytes32 public immutable kernelSelectorSetHash;
+
+    constructor(address facetRegistry_, bytes32 kernelSelectorSetHash_) {
+        facetRegistry = facetRegistry_;
+        kernelSelectorSetHash = kernelSelectorSetHash_;
+    }
+}
+
+contract VNextRecursive1271Authority {
+    bytes4 internal constant MAGIC_VALUE = 0x1626ba7e;
+
+    address public immutable authority;
+
+    constructor(address authority_) {
+        authority = authority_;
+    }
+
+    function isValidSignature(bytes32 hash, bytes calldata signature) external view returns (bytes4) {
+        return
+            SignatureCheckerLib.isValidSignatureNowCalldata(authority, hash, signature)
+                ? MAGIC_VALUE
+                : bytes4(0xffffffff);
     }
 }
 
@@ -179,6 +208,57 @@ contract BoardroomDiamondVNextTest is Test {
             abi.encodeWithSelector(BoardroomKernel.FacetSetHashMismatch.selector, bytes32("stale"), releaseAHash)
         );
         boardroom.mint(bytes32("stale"), owner, 1 ether);
+    }
+
+    function testFactoryRejectsKernelSelectorSetMismatch() public {
+        bytes32 expectedHash = registry.kernelSelectorSetHash();
+        bytes32 actualHash = keccak256("different-kernel-selectors");
+        VNextMismatchedKernel mismatchedKernel = new VNextMismatchedKernel(address(registry), actualHash);
+        address redemptionPayout = factory.redemptionPayoutLogic();
+        address governance = factory.governanceLogic();
+        address market = factory.marketLogic();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BoardroomVNextFactory.InvalidKernelSelectorSetHash.selector, expectedHash, actualHash
+            )
+        );
+        new BoardroomVNextFactory(
+            address(registry),
+            address(policyRegistry),
+            address(wrappedNative),
+            address(mismatchedKernel),
+            redemptionPayout,
+            governance,
+            market
+        );
+    }
+
+    function testReleaseAInitializationPreservesV5EventOrder() public {
+        bytes32 salt = bytes32("event-order");
+        address predicted = factory.predictBoardroomAddress(owner, "Event Boardroom", "EVT", salt);
+        bytes32 assetRegisteredTopic = keccak256("RedeemableAssetRegistered(address)");
+        bytes32 initializedTopic = keccak256("BoardroomInitialized(address,address,address,address,string,string)");
+        bytes32 excessRecipientTopic = keccak256("RedemptionExcessRecipientSet(address)");
+
+        vm.recordLogs();
+        factory.createBoardroom(releaseAHash, owner, "Event Boardroom", "EVT", salt);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        bytes32[3] memory observedTopics;
+        uint256 observedCount;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter != predicted || logs[i].topics.length == 0) continue;
+            bytes32 topic = logs[i].topics[0];
+            if (topic != assetRegisteredTopic && topic != initializedTopic && topic != excessRecipientTopic) continue;
+            assertLt(observedCount, observedTopics.length);
+            observedTopics[observedCount++] = topic;
+        }
+
+        assertEq(observedCount, observedTopics.length);
+        assertEq(observedTopics[0], assetRegisteredTopic);
+        assertEq(observedTopics[1], initializedTopic);
+        assertEq(observedTopics[2], excessRecipientTopic);
     }
 
     function testGlobalReleaseDuringRedemptionsBlocksWritesUntilPermissionlessMigration() public {
@@ -370,8 +450,7 @@ contract BoardroomDiamondVNextTest is Test {
     }
 
     function testControllerOperationIdentityCommitsFacetSetHash() public {
-        uint256 proposerKey = 0x5151;
-        address proposer = vm.addr(proposerKey);
+        address proposer = vm.addr(0x5151);
         BoardroomVNextController implementation = new BoardroomVNextController();
         BoardroomVNextController controller = BoardroomVNextController(LibClone.clone(address(implementation)));
         controller.initialize(address(boardroom), proposer, uint64(1 days), uint64(1 days), 1);
@@ -386,17 +465,12 @@ contract BoardroomDiamondVNextTest is Test {
         bytes32 hashB =
             controller.hashBoardroomOperation(bytes32("other-release"), calls, bytes32("salt"), 1, 1, proposer);
         assertNotEq(hashA, hashB);
-
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(proposerKey, hashA);
-        bytes memory signature = abi.encodePacked(r, s, v);
-        assertEq(controller.isValidSignature(hashA, signature), controller.ERC1271_MAGIC_VALUE());
-        assertEq(controller.isValidSignature(hashB, signature), bytes4(0xffffffff));
     }
 
-    function testERC1271OperationProofCannotBeSubstitutedAcrossLiveReleaseActivation() public {
+    function testERC1271ReleaseAEnvelopeBecomesInvalidAfterLiveReleaseBActivation() public {
         uint256 proposerKey = 0x5151;
         address proposer = vm.addr(proposerKey);
-        BoardroomVNextController controller = _newStandaloneController(proposer);
+        BoardroomVNextController controller = _launchVNextBoardroom(proposer);
         BoardroomCall[] memory calls = new BoardroomCall[](1);
         calls[0] = BoardroomCall({
             policy: address(0),
@@ -406,16 +480,207 @@ contract BoardroomDiamondVNextTest is Test {
         });
         bytes32 salt = keccak256("erc1271-live-release");
         bytes32 releaseAOperation = controller.hashBoardroomOperation(releaseAHash, calls, salt, 1, 1, proposer);
-        bytes memory releaseASignature = _sign(proposerKey, releaseAOperation);
+        bytes memory releaseAEnvelope = _erc1271Envelope(controller, releaseAOperation, releaseAHash, proposerKey);
+        assertEq(controller.isValidSignature(releaseAOperation, releaseAEnvelope), controller.ERC1271_MAGIC_VALUE());
 
         bytes32 releaseBHash = _activateReleaseB();
         bytes32 releaseBOperation = controller.hashBoardroomOperation(releaseBHash, calls, salt, 1, 1, proposer);
-
         assertNotEq(releaseAOperation, releaseBOperation);
-        assertEq(controller.isValidSignature(releaseBOperation, releaseASignature), bytes4(0xffffffff));
-        // ERC-1271 remains a generic offchain proposer proof: release binding
-        // comes from signing the release-committed operation digest.
-        assertEq(controller.isValidSignature(releaseAOperation, releaseASignature), controller.ERC1271_MAGIC_VALUE());
+        assertEq(controller.isValidSignature(releaseAOperation, releaseAEnvelope), controller.ERC1271_INVALID_VALUE());
+
+        bytes memory releaseBEnvelope = _erc1271Envelope(controller, releaseBOperation, releaseBHash, proposerKey);
+        assertEq(controller.isValidSignature(releaseBOperation, releaseBEnvelope), controller.ERC1271_INVALID_VALUE());
+
+        boardroom.migrateBoardroom(releaseBHash);
+        assertEq(controller.isValidSignature(releaseBOperation, releaseBEnvelope), controller.ERC1271_MAGIC_VALUE());
+    }
+
+    function testERC1271EnvelopeFailsClosedForMalformedWrongSignerAndInactiveLifecycle() public {
+        uint256 proposerKey = 0x5151;
+        BoardroomVNextController controller = _launchVNextBoardroom(vm.addr(proposerKey));
+        bytes32 messageHash = keccak256("release-bound-message");
+        bytes32 digest = _erc1271Digest(controller, messageHash, releaseAHash);
+
+        assertEq(controller.isValidSignature(messageHash, hex"1234"), controller.ERC1271_INVALID_VALUE());
+        assertEq(
+            controller.isValidSignature(
+                messageHash, _erc1271EnvelopeForSignature(controller, releaseAHash, _sign(0xBAD, digest))
+            ),
+            controller.ERC1271_INVALID_VALUE()
+        );
+
+        bytes memory envelope = _erc1271EnvelopeForSignature(controller, releaseAHash, _sign(proposerKey, digest));
+        vm.prank(address(0x5157));
+        boardroom.startWindDown(releaseAHash);
+        assertEq(controller.isValidSignature(messageHash, envelope), controller.ERC1271_INVALID_VALUE());
+    }
+
+    function testERC1271EnvelopeRejectsWrongSchemeAndEveryExplicitContextChange() public {
+        uint256 proposerKey = 0x5151;
+        BoardroomVNextController controller = _launchVNextBoardroom(vm.addr(proposerKey));
+        bytes32 messageHash = keccak256("explicit-context");
+        uint256 boardroomEpoch = boardroom.governanceEpoch();
+        uint256 controllerGeneration = controller.generation();
+        uint256 configurationEpoch = controller.configurationEpoch();
+        bytes32 configurationHash = controller.configurationHash();
+        bytes32 digest = controller.hashERC1271Digest(
+            messageHash,
+            address(boardroom),
+            releaseAHash,
+            boardroomEpoch,
+            controllerGeneration,
+            configurationEpoch,
+            configurationHash
+        );
+        bytes memory proposerSignature = _sign(proposerKey, digest);
+        bytes4 scheme = controller.ERC1271_ENVELOPE_SCHEME();
+        bytes memory validEnvelope = abi.encode(
+            scheme,
+            releaseAHash,
+            boardroomEpoch,
+            controllerGeneration,
+            configurationEpoch,
+            configurationHash,
+            proposerSignature
+        );
+        assertEq(controller.isValidSignature(messageHash, validEnvelope), controller.ERC1271_MAGIC_VALUE());
+
+        assertEq(
+            controller.isValidSignature(
+                messageHash,
+                abi.encode(
+                    bytes4(0),
+                    releaseAHash,
+                    boardroomEpoch,
+                    controllerGeneration,
+                    configurationEpoch,
+                    configurationHash,
+                    proposerSignature
+                )
+            ),
+            controller.ERC1271_INVALID_VALUE()
+        );
+        assertEq(
+            controller.isValidSignature(
+                messageHash,
+                abi.encode(
+                    scheme,
+                    bytes32("wrong-release"),
+                    boardroomEpoch,
+                    controllerGeneration,
+                    configurationEpoch,
+                    configurationHash,
+                    proposerSignature
+                )
+            ),
+            controller.ERC1271_INVALID_VALUE()
+        );
+        assertEq(
+            controller.isValidSignature(
+                messageHash,
+                abi.encode(
+                    scheme,
+                    releaseAHash,
+                    boardroomEpoch + 1,
+                    controllerGeneration,
+                    configurationEpoch,
+                    configurationHash,
+                    proposerSignature
+                )
+            ),
+            controller.ERC1271_INVALID_VALUE()
+        );
+        assertEq(
+            controller.isValidSignature(
+                messageHash,
+                abi.encode(
+                    scheme,
+                    releaseAHash,
+                    boardroomEpoch,
+                    controllerGeneration + 1,
+                    configurationEpoch,
+                    configurationHash,
+                    proposerSignature
+                )
+            ),
+            controller.ERC1271_INVALID_VALUE()
+        );
+        assertEq(
+            controller.isValidSignature(
+                messageHash,
+                abi.encode(
+                    scheme,
+                    releaseAHash,
+                    boardroomEpoch,
+                    controllerGeneration,
+                    configurationEpoch + 1,
+                    configurationHash,
+                    proposerSignature
+                )
+            ),
+            controller.ERC1271_INVALID_VALUE()
+        );
+        assertEq(
+            controller.isValidSignature(
+                messageHash,
+                abi.encode(
+                    scheme,
+                    releaseAHash,
+                    boardroomEpoch,
+                    controllerGeneration,
+                    configurationEpoch,
+                    bytes32("wrong-configuration"),
+                    proposerSignature
+                )
+            ),
+            controller.ERC1271_INVALID_VALUE()
+        );
+        assertEq(
+            controller.isValidSignature(messageHash, bytes.concat(validEnvelope, hex"00")),
+            controller.ERC1271_INVALID_VALUE()
+        );
+    }
+
+    function testERC1271ReleaseBoundEnvelopeRecursesThroughContractProposer() public {
+        uint256 signerKey = 0x5151;
+        VNextRecursive1271Authority recursive = new VNextRecursive1271Authority(vm.addr(signerKey));
+        BoardroomVNextController controller = _launchVNextBoardroom(address(recursive));
+        bytes32 messageHash = keccak256("recursive-release-bound-message");
+        bytes memory envelope = _erc1271Envelope(controller, messageHash, releaseAHash, signerKey);
+
+        assertEq(controller.isValidSignature(messageHash, envelope), controller.ERC1271_MAGIC_VALUE());
+    }
+
+    function testERC1271FailsClosedWhenControllerIsNotActiveForBoardroom() public {
+        uint256 proposerKey = 0x5151;
+        BoardroomVNextController controller = _newStandaloneController(vm.addr(proposerKey));
+        bytes32 messageHash = keccak256("inactive-controller");
+        bytes memory envelope = _erc1271Envelope(controller, messageHash, releaseAHash, proposerKey);
+
+        assertEq(controller.isValidSignature(messageHash, envelope), controller.ERC1271_INVALID_VALUE());
+    }
+
+    function testERC1271FailsClosedWhenBoardroomContextReadsRevert() public {
+        uint256 proposerKey = 0x5151;
+        address nonexistentBoardroom = address(0xBEEF);
+        BoardroomVNextController implementation = new BoardroomVNextController();
+        BoardroomVNextController controller = BoardroomVNextController(LibClone.clone(address(implementation)));
+        controller.initialize(nonexistentBoardroom, vm.addr(proposerKey), uint64(1 days), uint64(1 days), 1);
+        bytes32 messageHash = keccak256("failed-boardroom-read");
+        bytes32 configurationHash = controller.configurationHash();
+        bytes32 digest =
+            controller.hashERC1271Digest(messageHash, nonexistentBoardroom, releaseAHash, 1, 1, 1, configurationHash);
+        bytes memory envelope = abi.encode(
+            controller.ERC1271_ENVELOPE_SCHEME(),
+            releaseAHash,
+            uint256(1),
+            uint256(1),
+            uint256(1),
+            configurationHash,
+            _sign(proposerKey, digest)
+        );
+
+        assertEq(controller.isValidSignature(messageHash, envelope), controller.ERC1271_INVALID_VALUE());
     }
 
     function testControllerCannotScheduleWhileBoardroomMigrationIsRequired() public {
@@ -553,6 +818,10 @@ contract BoardroomDiamondVNextTest is Test {
     }
 
     function _launchVNextBoardroom() internal returns (BoardroomVNextController controller) {
+        return _launchVNextBoardroom(owner);
+    }
+
+    function _launchVNextBoardroom(address proposer) internal returns (BoardroomVNextController controller) {
         address protection = address(0x5157);
         BoardroomRewardsFactory rewardsFactory = new BoardroomRewardsFactory(address(factory));
         policyRegistry.registerModulePolicy(address(rewardsFactory));
@@ -579,7 +848,7 @@ contract BoardroomDiamondVNextTest is Test {
             BoardroomVNextControllerFactory(boardroom.controllerFactory());
         address predictedController = controllerFactory.predictControllerAddress(address(boardroom), 1);
         Boardroom.LaunchConfig memory config = Boardroom.LaunchConfig({
-            proposer: owner,
+            proposer: proposer,
             predictedController: predictedController,
             protectionStaker: protection,
             expectedRewardPool: address(rewards),
@@ -600,6 +869,49 @@ contract BoardroomDiamondVNextTest is Test {
         controller.initialize(address(boardroom), proposer, uint64(1 days), uint64(1 days), 1);
     }
 
+    function _erc1271Digest(BoardroomVNextController controller, bytes32 messageHash, bytes32 facetSetHash)
+        internal
+        view
+        returns (bytes32)
+    {
+        return controller.hashERC1271Digest(
+            messageHash,
+            address(boardroom),
+            facetSetHash,
+            boardroom.governanceEpoch(),
+            controller.generation(),
+            controller.configurationEpoch(),
+            controller.configurationHash()
+        );
+    }
+
+    function _erc1271Envelope(
+        BoardroomVNextController controller,
+        bytes32 messageHash,
+        bytes32 facetSetHash,
+        uint256 signerKey
+    ) internal view returns (bytes memory) {
+        return _erc1271EnvelopeForSignature(
+            controller, facetSetHash, _sign(signerKey, _erc1271Digest(controller, messageHash, facetSetHash))
+        );
+    }
+
+    function _erc1271EnvelopeForSignature(
+        BoardroomVNextController controller,
+        bytes32 facetSetHash,
+        bytes memory proposerSignature
+    ) internal view returns (bytes memory) {
+        return abi.encode(
+            controller.ERC1271_ENVELOPE_SCHEME(),
+            facetSetHash,
+            boardroom.governanceEpoch(),
+            controller.generation(),
+            controller.configurationEpoch(),
+            controller.configurationHash(),
+            proposerSignature
+        );
+    }
+
     function _activateReleaseB() internal returns (bytes32 releaseBHash) {
         ProtocolFacetTypes.FacetSetManifest memory releaseB = BoardroomVNextRelease.releaseB(facets, releaseAHash);
         releaseBHash = registry.publishFacetSet(releaseB);
@@ -612,7 +924,7 @@ contract BoardroomDiamondVNextTest is Test {
     }
 
     function _reservedKernelSelectors() internal pure returns (bytes4[] memory reserved) {
-        reserved = new bytes4[](7);
+        reserved = new bytes4[](8);
         reserved[0] = bytes4(keccak256("facetRegistry()"));
         reserved[1] = bytes4(keccak256("facetSetHash()"));
         reserved[2] = BoardroomKernel.initialize.selector;
@@ -620,6 +932,7 @@ contract BoardroomDiamondVNextTest is Test {
         reserved[4] = BoardroomKernel.migrationRequired.selector;
         reserved[5] = BoardroomKernel.dispatchViewAndRollback.selector;
         reserved[6] = BoardroomKernel.appliedStorageLayoutHash.selector;
+        reserved[7] = BoardroomKernel.kernelSelectorSetHash.selector;
         for (uint256 i = 1; i < reserved.length; ++i) {
             bytes4 current = reserved[i];
             uint256 j = i;

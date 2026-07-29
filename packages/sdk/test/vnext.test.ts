@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import type { Address, Hex } from "viem";
+import { decodeFunctionData, type Address, type Hex } from "viem";
 import {
+  adaptBoardroomV5ExecutionTransactionToVNext,
   boardroomAbi,
   boardroomDiamondAbi,
+  buildBoardroomExecuteTransaction,
+  buildBoardroomRewardFundingBatch,
+  buildBoardroomRewardsCreationTransaction,
   buildBoardroomVNextBeginSnapshotTransaction,
   buildBoardroomVNextBurnTreasurySharesTransaction,
   buildBoardroomVNextClaimRedemptionAssetTransaction,
@@ -16,13 +20,16 @@ import {
   buildBoardroomVNextExecuteWindDownCallTransaction,
   buildBoardroomVNextLaunchTransaction,
   buildBoardroomVNextMigrateTransaction,
+  buildBoardroomVNextMintCall,
   buildBoardroomVNextMintTransaction,
   buildBoardroomVNextOpenRedemptionsTransaction,
   buildBoardroomVNextMutationTransaction,
   buildBoardroomVNextPruneObligationTransaction,
   buildBoardroomVNextPruneObligationsTransaction,
+  buildBoardroomVNextRegisterRedeemableAssetCall,
   buildBoardroomVNextRegisterRedeemableAssetTransaction,
   buildBoardroomVNextRedeemTransaction,
+  buildBoardroomVNextReplaceControllerCall,
   buildBoardroomVNextReturnProtocolLiquidityAsLpTransaction,
   buildBoardroomVNextScheduleControllerOperationTransaction,
   buildBoardroomVNextScheduleOperationTransaction,
@@ -30,6 +37,8 @@ import {
   buildBoardroomVNextStartWindDownTransaction,
   buildBoardroomVNextVetoTransaction,
   buildBoardroomVNextWrapNativeBalanceTransaction,
+  planBoardroomVNextCallExecution,
+  planBoardroomVNextExecutionTransaction,
   protocolFacetRegistryAbi,
   readBoardroomVNextControllerState,
   readBoardroomVNextState,
@@ -298,6 +307,245 @@ describe("vNext Boardroom SDK", () => {
       2n,
       asset,
     ]);
+  });
+
+  test("builds hash-bound Boardroom self-calls for controller, mint, and asset workflows", () => {
+    const replacement = buildBoardroomVNextReplaceControllerCall({
+      boardroom,
+      expectedFacetSetHash,
+      expectedCurrentController: facet,
+      expectedNextController: registry,
+      nextProposer: recipient,
+      nextDelay: 86_400n,
+      nextGracePeriod: 604_800n,
+      nextGeneration: 2n,
+    });
+    expect(replacement).toMatchObject({
+      policy: "0x0000000000000000000000000000000000000000",
+      target: boardroom,
+      value: 0n,
+    });
+    const decodedReplacement = decodeFunctionData({
+      abi: boardroomDiamondAbi,
+      data: replacement.data,
+    });
+    expect(decodedReplacement.functionName).toBe("replaceController");
+    expect(decodedReplacement.args?.[0]).toBe(expectedFacetSetHash);
+    expect(String(decodedReplacement.args?.[1]).toLowerCase()).toBe(facet.toLowerCase());
+    expect(String(decodedReplacement.args?.[2]).toLowerCase()).toBe(registry.toLowerCase());
+    expect(String(decodedReplacement.args?.[3]).toLowerCase()).toBe(recipient.toLowerCase());
+    expect(decodedReplacement.args?.slice(4)).toEqual([
+      86_400n,
+      604_800n,
+      2n,
+    ]);
+
+    const mint = buildBoardroomVNextMintCall({
+      boardroom,
+      expectedFacetSetHash,
+      to: recipient,
+      amount: 10n,
+    });
+    expect(mint).toMatchObject({
+      policy: "0x0000000000000000000000000000000000000000",
+      target: boardroom,
+      value: 0n,
+    });
+    const decodedMint = decodeFunctionData({
+      abi: boardroomDiamondAbi,
+      data: mint.data,
+    });
+    expect(decodedMint.functionName).toBe("mint");
+    expect(decodedMint.args?.[0]).toBe(expectedFacetSetHash);
+    expect(String(decodedMint.args?.[1]).toLowerCase()).toBe(recipient.toLowerCase());
+    expect(decodedMint.args?.[2]).toBe(10n);
+
+    const registration = buildBoardroomVNextRegisterRedeemableAssetCall({
+      boardroom,
+      expectedFacetSetHash,
+      asset,
+    });
+    expect(registration).toMatchObject({
+      policy: "0x0000000000000000000000000000000000000000",
+      target: boardroom,
+      value: 0n,
+    });
+    const decodedRegistration = decodeFunctionData({
+      abi: boardroomDiamondAbi,
+      data: registration.data,
+    });
+    expect(decodedRegistration.functionName).toBe("registerRedeemableAsset");
+    expect(decodedRegistration.args?.[0]).toBe(expectedFacetSetHash);
+    expect(String(decodedRegistration.args?.[1]).toLowerCase()).toBe(asset.toLowerCase());
+  });
+
+  test("adapts existing v5 domain execution helpers without unpacking their calls", () => {
+    const rewardCreation = buildBoardroomRewardsCreationTransaction({
+      boardroom,
+      factory: facet,
+      cooldown: 86_400n,
+      salt: manifestHash,
+    });
+    expect(adaptBoardroomV5ExecutionTransactionToVNext({
+      expectedFacetSetHash,
+      transaction: rewardCreation,
+    })).toMatchObject({
+      address: boardroom,
+      abi: boardroomDiamondAbi,
+      functionName: "execute",
+      args: [expectedFacetSetHash, rewardCreation.args[0]],
+      value: rewardCreation.value,
+    });
+
+    const rewardFunding = buildBoardroomRewardFundingBatch({
+      boardroom,
+      factory: facet,
+      assetPolicy: registry,
+      rewards: recipient,
+      asset,
+      amount: 100n,
+      duration: 604_800n,
+    });
+    expect(adaptBoardroomV5ExecutionTransactionToVNext({
+      expectedFacetSetHash,
+      transaction: rewardFunding,
+    })).toMatchObject({
+      address: boardroom,
+      abi: boardroomDiamondAbi,
+      functionName: "executeBatch",
+      args: [expectedFacetSetHash, rewardFunding.args[0]],
+      value: rewardFunding.value,
+    });
+
+    const valueBearingCall = {
+      policy: asset,
+      target: recipient,
+      value: 7n,
+      data: "0x1234" as Hex,
+    };
+    expect(adaptBoardroomV5ExecutionTransactionToVNext({
+      expectedFacetSetHash,
+      transaction: buildBoardroomExecuteTransaction({
+        boardroom,
+        call: valueBearingCall,
+        value: 11n,
+      }),
+    })).toMatchObject({
+      functionName: "execute",
+      args: [expectedFacetSetHash, valueBearingCall],
+      value: 11n,
+    });
+  });
+
+  test("plans hash-bound prelaunch, governed, and wind-down domain execution", () => {
+    const call = {
+      policy: asset,
+      target: recipient,
+      value: 0n,
+      data: "0x1234" as Hex,
+    };
+    expect(planBoardroomVNextCallExecution({
+      boardroom,
+      expectedFacetSetHash,
+      calls: [call],
+      lifecycle: {
+        launched: false,
+        status: 0,
+        migrationRequired: false,
+      },
+    })).toMatchObject({
+      kind: "execute",
+      transaction: {
+        functionName: "execute",
+        args: [expectedFacetSetHash, call],
+      },
+    });
+    expect(planBoardroomVNextCallExecution({
+      boardroom,
+      expectedFacetSetHash,
+      calls: [call, call],
+      lifecycle: {
+        launched: false,
+        status: 0,
+        migrationRequired: false,
+      },
+    })).toMatchObject({
+      kind: "execute",
+      transaction: {
+        functionName: "executeBatch",
+        args: [expectedFacetSetHash, [call, call]],
+      },
+    });
+
+    const rewardCreation = buildBoardroomRewardsCreationTransaction({
+      boardroom,
+      factory: facet,
+      cooldown: 86_400n,
+      salt: manifestHash,
+    });
+    expect(planBoardroomVNextExecutionTransaction({
+      expectedFacetSetHash,
+      transaction: rewardCreation,
+      lifecycle: {
+        launched: true,
+        status: 0,
+        migrationRequired: false,
+        controller: facet,
+        governanceEpoch: 3n,
+        controllerConfigurationEpoch: 2n,
+      },
+      salt: manifestHash,
+    })).toMatchObject({
+      kind: "schedule",
+      transaction: {
+        address: facet,
+        functionName: "scheduleBoardroomOperation",
+        args: [
+          expectedFacetSetHash,
+          [rewardCreation.args[0]],
+          manifestHash,
+          3n,
+          2n,
+        ],
+      },
+    });
+    expect(planBoardroomVNextCallExecution({
+      boardroom,
+      expectedFacetSetHash,
+      calls: [call],
+      lifecycle: {
+        launched: true,
+        status: 1,
+        migrationRequired: false,
+      },
+    })).toMatchObject({
+      kind: "windDown",
+      transaction: {
+        functionName: "executeWindDownCall",
+        args: [expectedFacetSetHash, call],
+      },
+    });
+
+    expect(() => planBoardroomVNextCallExecution({
+      boardroom,
+      expectedFacetSetHash,
+      calls: [call],
+      lifecycle: {
+        launched: true,
+        status: 0,
+        migrationRequired: true,
+      },
+    })).toThrow("must be migrated");
+    expect(() => planBoardroomVNextCallExecution({
+      boardroom,
+      expectedFacetSetHash,
+      calls: [call],
+      lifecycle: {
+        launched: true,
+        status: 2,
+        migrationRequired: false,
+      },
+    })).toThrow("snapshotting");
   });
 
   test("rejects missing or malformed facet-set hashes at runtime", () => {

@@ -223,7 +223,7 @@ contract BoardroomDiamondVNextWindDownHandler is Test {
     }
 
     function _reservedKernelSelectors() internal pure returns (bytes4[] memory reserved) {
-        reserved = new bytes4[](7);
+        reserved = new bytes4[](8);
         reserved[0] = bytes4(keccak256("facetRegistry()"));
         reserved[1] = bytes4(keccak256("facetSetHash()"));
         reserved[2] = BoardroomKernel.initialize.selector;
@@ -231,6 +231,7 @@ contract BoardroomDiamondVNextWindDownHandler is Test {
         reserved[4] = BoardroomKernel.migrationRequired.selector;
         reserved[5] = BoardroomKernel.dispatchViewAndRollback.selector;
         reserved[6] = BoardroomKernel.appliedStorageLayoutHash.selector;
+        reserved[7] = BoardroomKernel.kernelSelectorSetHash.selector;
         for (uint256 i = 1; i < reserved.length; ++i) {
             bytes4 current = reserved[i];
             uint256 j = i;

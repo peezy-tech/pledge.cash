@@ -57,9 +57,9 @@ contract BoardroomAuthorityFacet is LegacyBoardroomFacet {
         assets.isRegistered[wrappedNative_] = true;
         assets.registry.push(wrappedNative_);
 
+        emit Boardroom.RedeemableAssetRegistered(wrappedNative_);
         emit Boardroom.BoardroomInitialized(owner_, policyRegistry_, tokenAddress, wrappedNative_, name_, symbol_);
         emit Boardroom.RedemptionExcessRecipientSet(owner_);
-        emit Boardroom.RedeemableAssetRegistered(wrappedNative_);
     }
 
     function transferOwnership(bytes32, address) external payable {
