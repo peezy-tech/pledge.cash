@@ -297,7 +297,8 @@ export function createSessionMiddleware(deps: SentinelApiDeps): MiddlewareHandle
 }
 
 function clientIp(c: Context<ApiEnv>): string {
-  const forwardedFor = c.req.header("x-forwarded-for")?.split(",")[0]?.trim();
+  const forwardedAddresses = c.req.header("x-forwarded-for")?.split(",");
+  const forwardedFor = forwardedAddresses?.[forwardedAddresses.length - 1]?.trim();
   return forwardedFor ?? c.req.header("cf-connecting-ip") ?? "unknown";
 }
 
@@ -514,23 +515,23 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       return jsonError(c, 400, "SIWE message is invalid");
     }
 
-    // Standard EOA signatures can be rejected locally without spending the
-    // confidential Identity client's shared grant quota. Longer signatures
-    // may be ERC-1271 or EIP-6492 proofs and remain Identity-owned.
-    if (body.value.signature.length === 132) {
-      let signatureValid = false;
-      try {
-        signatureValid = await verifyMessage({
-          address: body.value.walletAddress as Address,
-          message: body.value.message,
-          signature: body.value.signature as Hex
-        });
-      } catch {
-        signatureValid = false;
-      }
-      if (!signatureValid) {
-        return jsonError(c, 401, "Wallet signature could not be verified");
-      }
+    // Identity v0.1 accepts only standard 65-byte EOA signatures. Reject every
+    // other proof shape locally so it cannot spend the shared wallet-grant quota.
+    if (body.value.signature.length !== 132) {
+      return jsonError(c, 401, "Wallet signature could not be verified");
+    }
+    let signatureValid = false;
+    try {
+      signatureValid = await verifyMessage({
+        address: body.value.walletAddress as Address,
+        message: body.value.message,
+        signature: body.value.signature as Hex
+      });
+    } catch {
+      signatureValid = false;
+    }
+    if (!signatureValid) {
+      return jsonError(c, 401, "Wallet signature could not be verified");
     }
     return await next();
   };

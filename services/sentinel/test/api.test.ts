@@ -606,19 +606,23 @@ describe("Sentinel WP5 API", () => {
     ]);
   });
 
-  test("rejects malformed EOA SIWE proofs before forwarding them", async () => {
+  test("rejects invalid EOA SIWE proofs before forwarding them", async () => {
     const identityHarness = createHarness({ sharedIdentity: true });
     const request = await authSiweRequest();
-    const response = await identityHarness.app.request("/auth/siwe/verify", {
-      body: JSON.stringify({
-        ...request,
-        signature: `0x${"ab".repeat(65)}`
-      }),
-      headers: { "Content-Type": "application/json" },
-      method: "POST"
-    });
+    const statuses: number[] = [];
+    for (const signature of [
+      `0x${"ab".repeat(65)}`,
+      `0x${"ab".repeat(66)}`
+    ]) {
+      const response = await identityHarness.app.request("/auth/siwe/verify", {
+        body: JSON.stringify({ ...request, signature }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      statuses.push(response.status);
+    }
 
-    expect(response.status).toBe(401);
+    expect(statuses).toEqual([401, 401]);
     expect(identityHarness.auth.forwarded).toEqual([]);
   });
 
@@ -639,10 +643,7 @@ describe("Sentinel WP5 API", () => {
     const statuses: number[] = [];
     for (let index = 0; index < 11; index += 1) {
       const response = await identityHarness.app.request("/auth/siwe/verify", {
-        body: JSON.stringify({
-          ...request,
-          signature: `0x${"ab".repeat(66)}`
-        }),
+        body: JSON.stringify(request),
         headers: {
           "Content-Type": "application/json",
           "X-Forwarded-For": clientAddress
@@ -657,6 +658,40 @@ describe("Sentinel WP5 API", () => {
     expect(identityHarness.auth.forwarded).toHaveLength(10);
   });
 
+  test("does not allocate shared Identity quota to invalid signatures", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const request = await authSiweRequest();
+    const statuses: number[] = [];
+    for (let index = 0; index < 51; index += 1) {
+      const response = await identityHarness.app.request("/auth/siwe/verify", {
+        body: JSON.stringify({
+          ...request,
+          signature: `0x${"ab".repeat(66)}`
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": `203.0.113.${index + 1}, 192.0.2.1`
+        },
+        method: "POST"
+      });
+      statuses.push(response.status);
+    }
+
+    expect(statuses.every((status) => status === 401)).toBe(true);
+    expect(identityHarness.auth.forwarded).toEqual([]);
+
+    const valid = await identityHarness.app.request("/auth/siwe/verify", {
+      body: JSON.stringify(request),
+      headers: {
+        "Content-Type": "application/json",
+        "X-Forwarded-For": "192.0.2.1"
+      },
+      method: "POST"
+    });
+    expect(valid.status).toBe(200);
+    expect(identityHarness.auth.forwarded).toHaveLength(1);
+  });
+
   test("reserves shared Identity wallet-grant quota from anonymous traffic", async () => {
     const store = new InMemoryStore();
     const identityHarnesses = [
@@ -668,10 +703,7 @@ describe("Sentinel WP5 API", () => {
     for (let index = 0; index < 51; index += 1) {
       const harness = identityHarnesses[index % identityHarnesses.length]!;
       const response = await harness.app.request("/auth/siwe/verify", {
-        body: JSON.stringify({
-          ...request,
-          signature: `0x${"ab".repeat(66)}`
-        }),
+        body: JSON.stringify(request),
         headers: {
           "Content-Type": "application/json",
           "X-Forwarded-For": `192.0.2.${index + 1}`
@@ -689,6 +721,27 @@ describe("Sentinel WP5 API", () => {
         0
       )
     ).toBe(50);
+  });
+
+  test("ignores caller-controlled leading forwarded addresses for client quota", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const request = await authSiweRequest();
+    const statuses: number[] = [];
+    for (let index = 0; index < 11; index += 1) {
+      const response = await identityHarness.app.request("/auth/siwe/verify", {
+        body: JSON.stringify(request),
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": `203.0.113.${index + 1}, 192.0.2.1`
+        },
+        method: "POST"
+      });
+      statuses.push(response.status);
+    }
+
+    expect(statuses.slice(0, 10).every((status) => status === 200)).toBe(true);
+    expect(statuses[10]).toBe(429);
+    expect(identityHarness.auth.forwarded).toHaveLength(10);
   });
 
   test("does not apply the shared Identity quota to legacy SIWE authentication", async () => {
