@@ -33,6 +33,7 @@ import {
 
 const AUTH_SIWE_MAX_AGE_MS = 15 * 60_000;
 const AUTH_SIWE_CLOCK_SKEW_MS = 5 * 60_000;
+const DEFAULT_RATE_LIMIT_MAX_BUCKETS = 10_000;
 const IDENTITY_RATE_WINDOW_MS = 5 * 60_000;
 const PUBLIC_SIWE_CLIENT_LIMIT = 10;
 // Identity v0.1 allows 60 wallet-grant issues per client and window. Keep ten
@@ -59,6 +60,7 @@ export type AuthSession = {
 
 export type AuthAdapter = {
   readonly socialProviders: readonly SocialProviderDto[];
+  readonly usesSharedIdentity?: boolean;
   createWalletChallenge?(input: {
     readonly address: AddressDto;
     readonly chainId: number;
@@ -177,6 +179,7 @@ export type SiweSignatureVerifier = (input: {
 
 export type RateLimitConfig = {
   readonly capacity?: number;
+  readonly maxBuckets?: number;
   readonly refillMs?: number;
 };
 
@@ -297,6 +300,14 @@ export function createRateLimitMiddleware(
 ): MiddlewareHandler<ApiEnv> {
   const buckets = new Map<string, { tokens: number; updatedAt: number }>();
   const capacity = options.capacity ?? deps.rateLimit?.capacity ?? 60;
+  const maxBuckets = Math.max(
+    1,
+    Math.floor(
+      options.maxBuckets ??
+        deps.rateLimit?.maxBuckets ??
+        DEFAULT_RATE_LIMIT_MAX_BUCKETS
+    )
+  );
   const refillMs = options.refillMs ?? deps.rateLimit?.refillMs ?? 60_000;
 
   return async (c, next) => {
@@ -308,14 +319,45 @@ export function createRateLimitMiddleware(
     const refill = Math.floor(elapsed / refillMs) * capacity;
     const tokens = Math.min(capacity, bucket.tokens + refill);
     const updatedAt = refill > 0 ? nowMs : bucket.updatedAt;
+    const storeBucket = (nextBucket: {
+      readonly tokens: number;
+      readonly updatedAt: number;
+    }) => {
+      buckets.delete(key);
+      buckets.set(key, nextBucket);
+      while (buckets.size > maxBuckets) {
+        const oldest = buckets.keys().next().value as string | undefined;
+        if (oldest === undefined) break;
+        buckets.delete(oldest);
+      }
+    };
 
     if (tokens <= 0) {
-      buckets.set(key, { tokens, updatedAt });
+      storeBucket({ tokens, updatedAt });
       return jsonError(c, 429, "Rate limit exceeded");
     }
 
-    buckets.set(key, { tokens: tokens - 1, updatedAt });
+    storeBucket({ tokens: tokens - 1, updatedAt });
     return await next();
+  };
+}
+
+export function createSlidingWindowQuota(
+  capacity: number,
+  windowMs: number
+): (nowMs: number) => boolean {
+  const requestTimes: number[] = [];
+
+  return (nowMs) => {
+    while (
+      requestTimes[0] !== undefined &&
+      requestTimes[0] <= nowMs - windowMs
+    ) {
+      requestTimes.shift();
+    }
+    if (requestTimes.length >= capacity) return false;
+    requestTimes.push(nowMs);
+    return true;
   };
 }
 
@@ -324,20 +366,13 @@ function createGlobalSlidingWindowRateLimitMiddleware(
   capacity: number,
   windowMs: number
 ): MiddlewareHandler<ApiEnv> {
-  const requestTimes: number[] = [];
+  const take = createSlidingWindowQuota(capacity, windowMs);
 
   return async (c, next) => {
     const nowMs = getNow(deps).getTime();
-    while (
-      requestTimes[0] !== undefined &&
-      requestTimes[0] <= nowMs - windowMs
-    ) {
-      requestTimes.shift();
-    }
-    if (requestTimes.length >= capacity) {
+    if (!take(nowMs)) {
       return jsonError(c, 429, "Rate limit exceeded");
     }
-    requestTimes.push(nowMs);
     return await next();
   };
 }
@@ -349,6 +384,7 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     "auth-siwe-verify-client",
     {
       capacity: PUBLIC_SIWE_CLIENT_LIMIT,
+      maxBuckets: PUBLIC_SIWE_GLOBAL_LIMIT,
       refillMs: IDENTITY_RATE_WINDOW_MS
     }
   );
@@ -439,74 +475,82 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     });
   }
 
-  app.post(
-    "/siwe/verify",
-    publicSiweClientRateLimit,
-    async (c, next) => {
-      const body = await parseJson(
-        c,
-        AuthSiweVerifyRequestSchema,
-        c.req.raw.clone()
-      );
-      if (!body.ok) return body.response;
+  const validateIdentitySiwe: MiddlewareHandler<ApiEnv> = async (c, next) => {
+    const body = await parseJson(
+      c,
+      AuthSiweVerifyRequestSchema,
+      c.req.raw.clone()
+    );
+    if (!body.ok) return body.response;
 
-      let siwe: ReturnType<typeof parseSiweMessage>;
-      try {
-        siwe = parseSiweMessage(body.value.message);
-      } catch {
-        return jsonError(c, 400, "SIWE message is invalid");
-      }
-      const expectedOrigin = new URL(deps.config.webOrigin);
-      let siweOrigin: string | undefined;
-      try {
-        siweOrigin =
-          siwe.uri === undefined ? undefined : new URL(siwe.uri).origin;
-      } catch {
-        return jsonError(c, 400, "SIWE message is invalid");
-      }
-      const nowMs = getNow(deps).getTime();
-      if (
-        siwe.address === undefined ||
-        siwe.address.toLowerCase() !== body.value.walletAddress.toLowerCase() ||
-        siwe.chainId !== body.value.chainId ||
-        siwe.domain !== expectedOrigin.host ||
-        siweOrigin !== expectedOrigin.origin ||
-        siwe.version !== "1" ||
-        siwe.issuedAt === undefined ||
-        siwe.expirationTime === undefined ||
-        siwe.issuedAt.getTime() > nowMs + AUTH_SIWE_CLOCK_SKEW_MS ||
-        nowMs - siwe.issuedAt.getTime() > AUTH_SIWE_MAX_AGE_MS ||
-        siwe.expirationTime.getTime() <= nowMs ||
-        siwe.expirationTime.getTime() - siwe.issuedAt.getTime() >
-          AUTH_SIWE_MAX_AGE_MS ||
-        (siwe.notBefore !== undefined && siwe.notBefore.getTime() > nowMs)
-      ) {
-        return jsonError(c, 400, "SIWE message is invalid");
-      }
+    let siwe: ReturnType<typeof parseSiweMessage>;
+    try {
+      siwe = parseSiweMessage(body.value.message);
+    } catch {
+      return jsonError(c, 400, "SIWE message is invalid");
+    }
+    const expectedOrigin = new URL(deps.config.webOrigin);
+    let siweOrigin: string | undefined;
+    try {
+      siweOrigin =
+        siwe.uri === undefined ? undefined : new URL(siwe.uri).origin;
+    } catch {
+      return jsonError(c, 400, "SIWE message is invalid");
+    }
+    const nowMs = getNow(deps).getTime();
+    if (
+      siwe.address === undefined ||
+      siwe.address.toLowerCase() !== body.value.walletAddress.toLowerCase() ||
+      siwe.chainId !== body.value.chainId ||
+      siwe.domain !== expectedOrigin.host ||
+      siweOrigin !== expectedOrigin.origin ||
+      siwe.version !== "1" ||
+      siwe.issuedAt === undefined ||
+      siwe.expirationTime === undefined ||
+      siwe.issuedAt.getTime() > nowMs + AUTH_SIWE_CLOCK_SKEW_MS ||
+      nowMs - siwe.issuedAt.getTime() > AUTH_SIWE_MAX_AGE_MS ||
+      siwe.expirationTime.getTime() <= nowMs ||
+      siwe.expirationTime.getTime() - siwe.issuedAt.getTime() >
+        AUTH_SIWE_MAX_AGE_MS ||
+      (siwe.notBefore !== undefined && siwe.notBefore.getTime() > nowMs)
+    ) {
+      return jsonError(c, 400, "SIWE message is invalid");
+    }
 
-      // Standard EOA signatures can be rejected locally without spending the
-      // confidential Identity client's shared grant quota. Longer signatures
-      // may be ERC-1271 or EIP-6492 proofs and remain Identity-owned.
-      if (body.value.signature.length === 132) {
-        let signatureValid = false;
-        try {
-          signatureValid = await verifyMessage({
-            address: body.value.walletAddress as Address,
-            message: body.value.message,
-            signature: body.value.signature as Hex
-          });
-        } catch {
-          signatureValid = false;
-        }
-        if (!signatureValid) {
-          return jsonError(c, 401, "Wallet signature could not be verified");
-        }
+    // Standard EOA signatures can be rejected locally without spending the
+    // confidential Identity client's shared grant quota. Longer signatures
+    // may be ERC-1271 or EIP-6492 proofs and remain Identity-owned.
+    if (body.value.signature.length === 132) {
+      let signatureValid = false;
+      try {
+        signatureValid = await verifyMessage({
+          address: body.value.walletAddress as Address,
+          message: body.value.message,
+          signature: body.value.signature as Hex
+        });
+      } catch {
+        signatureValid = false;
       }
-      return await next();
-    },
-    publicSiweGlobalRateLimit,
-    (c) => deps.auth.handler(c.req.raw)
-  );
+      if (!signatureValid) {
+        return jsonError(c, 401, "Wallet signature could not be verified");
+      }
+    }
+    return await next();
+  };
+  const forwardSiweVerify = (c: Context<ApiEnv>) =>
+    deps.auth.handler(c.req.raw);
+
+  if (deps.auth.usesSharedIdentity === true) {
+    app.post(
+      "/siwe/verify",
+      validateIdentitySiwe,
+      publicSiweClientRateLimit,
+      publicSiweGlobalRateLimit,
+      forwardSiweVerify
+    );
+  } else {
+    app.post("/siwe/verify", forwardSiweVerify);
+  }
 
   return app;
 }

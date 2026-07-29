@@ -6,6 +6,7 @@ import { WALLET_LINK_SIWE_STATEMENT } from "../better-auth";
 import {
   createRateLimitMiddleware,
   createSessionMiddleware,
+  createSlidingWindowQuota,
   getNow,
   jsonError,
   parseJson,
@@ -27,6 +28,8 @@ import {
 } from "../dto";
 
 const WALLET_NONCE_TTL_MS = 10 * 60 * 1_000;
+const IDENTITY_WALLET_LINK_WINDOW_MS = 5 * 60_000;
+const IDENTITY_WALLET_LINK_LIMIT = 10;
 
 function webOriginHost(webOrigin: string): string {
   return new URL(webOrigin).host;
@@ -72,6 +75,10 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
   const app = new Hono<ApiEnv>();
   const requireSession = createSessionMiddleware(deps);
   const rateLimit = createRateLimitMiddleware(deps, "wallets");
+  const takeIdentityWalletLinkQuota = createSlidingWindowQuota(
+    IDENTITY_WALLET_LINK_LIMIT,
+    IDENTITY_WALLET_LINK_WINDOW_MS
+  );
 
   app.use("*", requireSession);
 
@@ -161,6 +168,12 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
 
     const user = c.get("user");
     if (delegatesCredentialLink && deps.auth.linkWalletCredential !== undefined) {
+      if (
+        deps.auth.usesSharedIdentity === true &&
+        !takeIdentityWalletLinkQuota(now.getTime())
+      ) {
+        return jsonError(c, 429, "Rate limit exceeded");
+      }
       let wallet;
       try {
         wallet = await deps.auth.linkWalletCredential({

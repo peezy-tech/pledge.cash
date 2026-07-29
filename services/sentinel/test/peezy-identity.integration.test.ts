@@ -84,12 +84,7 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     dbClient = createDbClient(config);
     await dbClient.migrate();
     app = createApp({
-      auth: createPeezyIdentityAuthAdapter(
-        config,
-        dbClient.db,
-        fetch,
-        { hydrationCacheMs: 0 }
-      ),
+      auth: createPeezyIdentityAuthAdapter(config, dbClient.db),
       config,
       store: createDrizzleApiStore(dbClient.db)
     });
@@ -181,6 +176,41 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     });
     expect(socialLinkStart.status).toBe(200);
     const socialHandoff = (await socialLinkStart.json()) as { url: string };
+    const [identityMapping] = await dbClient.sql<{ subject: string }[]>`
+      SELECT "account_id" AS "subject"
+      FROM "auth_accounts"
+      WHERE "provider_id" = 'peezy'
+        AND "user_id" = ${me.user.id}::uuid
+    `;
+    if (identityMapping === undefined) {
+      throw new Error("Expected a peezy.tech subject mapping");
+    }
+    await identitySql`
+      INSERT INTO "account" (
+        "id",
+        "account_id",
+        "provider_id",
+        "user_id",
+        "created_at",
+        "updated_at"
+      )
+      VALUES (
+        ${randomUUID()},
+        ${`github-${randomUUID()}`},
+        'github',
+        ${identityMapping.subject},
+        now(),
+        now()
+      )
+    `;
+    const socialMeResponse = await app.request(`${apiOrigin}/auth/me`, {
+      headers: { Cookie: cookie, Origin: webOrigin }
+    });
+    expect(socialMeResponse.status).toBe(200);
+    expect(await socialMeResponse.json()).toMatchObject({
+      providers: expect.arrayContaining(["github", "siwe"])
+    });
+
     const handoffResponse = await fetch(socialHandoff.url, {
       redirect: "manual"
     });
@@ -276,6 +306,18 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     `;
     expect(localCredential?.count).toBe("0");
     expect(alertCoverage?.count).toBe("1");
+    const linkedMeResponse = await app.request(`${apiOrigin}/auth/me`, {
+      headers: { Cookie: cookie, Origin: webOrigin }
+    });
+    expect(linkedMeResponse.status).toBe(200);
+    expect(await linkedMeResponse.json()).toMatchObject({
+      wallets: expect.arrayContaining([
+        expect.objectContaining({
+          address: secondWallet.address.toLowerCase(),
+          canSignIn: true
+        })
+      ])
+    });
 
     const otherUserId = randomUUID();
     await dbClient.sql`
@@ -350,7 +392,14 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
         ${secondWallet.address.toLowerCase()}
       )
     `;
-    const disabledResponse = await app.request(`${apiOrigin}/auth/me`, {
+    const uncachedApp = createApp({
+      auth: createPeezyIdentityAuthAdapter(config, dbClient.db, fetch, {
+        hydrationCacheMs: 0
+      }),
+      config,
+      store: createDrizzleApiStore(dbClient.db)
+    });
+    const disabledResponse = await uncachedApp.request(`${apiOrigin}/auth/me`, {
       headers: { Cookie: cookie, Origin: webOrigin }
     });
     expect(disabledResponse.status).toBe(200);

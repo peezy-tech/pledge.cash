@@ -5,6 +5,7 @@ import { createSiweMessage } from "viem/siwe";
 import {
   type AuthAdapter,
   type AuthSnapshot,
+  type RateLimitConfig,
   type WalletNonceRecord
 } from "../src/api/auth";
 import { createApp, type SentinelApiDeps, type SentinelApiStore } from "../src/api/server";
@@ -341,8 +342,16 @@ class InMemoryStore implements SentinelApiStore {
   }
 }
 
-function createHarness() {
+function createHarness(
+  options: {
+    readonly rateLimit?: RateLimitConfig;
+    readonly sharedIdentity?: boolean;
+  } = {}
+) {
   const auth = new StubAuth();
+  if (options.sharedIdentity === true) {
+    Object.assign(auth, { usesSharedIdentity: true });
+  }
   const store = new InMemoryStore();
   let nonceSequence = 0;
   const deps: SentinelApiDeps = {
@@ -358,7 +367,7 @@ function createHarness() {
       return `nonce${nonceSequence.toString().padStart(4, "0")}`;
     },
     now: () => FIXED_NOW,
-    rateLimit: { capacity: 100 },
+    rateLimit: options.rateLimit ?? { capacity: 100 },
     store
   };
 
@@ -574,8 +583,9 @@ describe("Sentinel WP5 API", () => {
   });
 
   test("rejects malformed EOA SIWE proofs before forwarding them", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
     const request = await authSiweRequest();
-    const response = await harness.app.request("/auth/siwe/verify", {
+    const response = await identityHarness.app.request("/auth/siwe/verify", {
       body: JSON.stringify({
         ...request,
         signature: `0x${"ab".repeat(65)}`
@@ -585,14 +595,50 @@ describe("Sentinel WP5 API", () => {
     });
 
     expect(response.status).toBe(401);
-    expect(harness.auth.forwarded).toEqual([]);
+    expect(identityHarness.auth.forwarded).toEqual([]);
+  });
+
+  test("does not allocate Identity client quota for malformed SIWE bodies", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const clientAddress = "192.0.2.1";
+    const malformed = await identityHarness.app.request("/auth/siwe/verify", {
+      body: "{",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Forwarded-For": clientAddress
+      },
+      method: "POST"
+    });
+    expect(malformed.status).toBe(400);
+
+    const request = await authSiweRequest();
+    const statuses: number[] = [];
+    for (let index = 0; index < 11; index += 1) {
+      const response = await identityHarness.app.request("/auth/siwe/verify", {
+        body: JSON.stringify({
+          ...request,
+          signature: `0x${"ab".repeat(66)}`
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": clientAddress
+        },
+        method: "POST"
+      });
+      statuses.push(response.status);
+    }
+
+    expect(statuses.slice(0, 10).every((status) => status === 200)).toBe(true);
+    expect(statuses[10]).toBe(429);
+    expect(identityHarness.auth.forwarded).toHaveLength(10);
   });
 
   test("reserves shared Identity wallet-grant quota from anonymous traffic", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
     const request = await authSiweRequest();
     const statuses: number[] = [];
     for (let index = 0; index < 51; index += 1) {
-      const response = await harness.app.request("/auth/siwe/verify", {
+      const response = await identityHarness.app.request("/auth/siwe/verify", {
         body: JSON.stringify({
           ...request,
           signature: `0x${"ab".repeat(66)}`
@@ -608,7 +654,89 @@ describe("Sentinel WP5 API", () => {
 
     expect(statuses.slice(0, 50).every((status) => status === 200)).toBe(true);
     expect(statuses[50]).toBe(429);
-    expect(harness.auth.forwarded).toHaveLength(50);
+    expect(identityHarness.auth.forwarded).toHaveLength(50);
+  });
+
+  test("does not apply the shared Identity quota to legacy SIWE authentication", async () => {
+    const request = await authSiweRequest();
+    const statuses = await Promise.all(
+      Array.from({ length: 51 }, async () => {
+        const response = await harness.app.request("/auth/siwe/verify", {
+          body: JSON.stringify(request),
+          headers: { "Content-Type": "application/json" },
+          method: "POST"
+        });
+        return response.status;
+      })
+    );
+
+    expect(statuses.every((status) => status === 200)).toBe(true);
+    expect(harness.auth.forwarded).toHaveLength(51);
+  });
+
+  test("bounds client rate-limit buckets under caller-controlled addresses", async () => {
+    const boundedHarness = createHarness({
+      rateLimit: {
+        capacity: 1,
+        maxBuckets: 2,
+        refillMs: 5 * 60_000
+      }
+    });
+    const statuses: number[] = [];
+    for (const address of ["192.0.2.1", "192.0.2.2", "192.0.2.3", "192.0.2.1"]) {
+      const response = await boundedHarness.app.request("/wallets/nonce", {
+        body: "{}",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: SESSION_COOKIE,
+          "X-Forwarded-For": address
+        },
+        method: "POST"
+      });
+      statuses.push(response.status);
+    }
+
+    expect(statuses).toEqual([200, 200, 200, 200]);
+  });
+
+  test("reserves ten shared Identity grants for authenticated wallet links", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    let linkCalls = 0;
+    Object.assign(identityHarness.auth, {
+      linkWalletCredential: async (
+        input: Parameters<NonNullable<AuthAdapter["linkWalletCredential"]>>[0]
+      ): Promise<WalletDto> => {
+        linkCalls += 1;
+        return {
+          address: input.address,
+          alertsEnabled: true,
+          canSignIn: true,
+          verifiedAt: input.verifiedAt.toISOString()
+        };
+      }
+    });
+    const cookie = await signedInCookie(identityHarness);
+    const request = await authSiweRequest();
+    const statuses: number[] = [];
+    for (let index = 0; index < 11; index += 1) {
+      const response = await identityHarness.app.request("/wallets", {
+        body: JSON.stringify({
+          message: request.message,
+          signature: request.signature
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: cookie,
+          "X-Forwarded-For": `198.51.100.${index + 1}`
+        },
+        method: "POST"
+      });
+      statuses.push(response.status);
+    }
+
+    expect(statuses.slice(0, 10).every((status) => status === 200)).toBe(true);
+    expect(statuses[10]).toBe(429);
+    expect(linkCalls).toBe(10);
   });
 
   test("reports an anonymous session without noisy errors and protects account routes", async () => {

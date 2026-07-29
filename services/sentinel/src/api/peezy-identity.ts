@@ -64,6 +64,11 @@ type PeezyIdentityAuthAdapterOptions = {
   readonly hydrationCacheMs?: number;
   readonly requestTimeoutMs?: number;
 };
+type IdentityHydrator = {
+  get(subject: string): Promise<IdentityMeResponse>;
+  invalidate(subject: string): void;
+  set(subject: string, identity: IdentityMeResponse): void;
+};
 type SentinelTransaction = Parameters<Parameters<SentinelDb["transaction"]>[0]>[0];
 
 export function createPeezyIdentityAuthAdapter(
@@ -81,7 +86,7 @@ export function createPeezyIdentityAuthAdapter(
     options.requestTimeoutMs ?? IDENTITY_REQUEST_TIMEOUT_MS
   );
   const gateway = createIdentityGateway(identity, config.webOrigin, identityFetcher);
-  const hydrateIdentity = createIdentityHydrator(
+  const identityHydrator = createIdentityHydrator(
     gateway,
     options.hydrationCacheMs ?? IDENTITY_HYDRATION_CACHE_TTL_MS
   );
@@ -175,6 +180,7 @@ export function createPeezyIdentityAuthAdapter(
                 identityFetcher
               );
               const centralIdentity = await gateway.getIdentity(profile.sub);
+              identityHydrator.set(profile.sub, centralIdentity);
               const linkUserId = requestContext.getStore()?.linkUserId;
               const productUser = await provisionProductUser(db, centralIdentity, {
                 ...(linkUserId === undefined ? {} : { requiredUserId: linkUserId })
@@ -198,7 +204,7 @@ export function createPeezyIdentityAuthAdapter(
           }
         ]
       }),
-      peezyWalletSessionPlugin(gateway, db),
+      peezyWalletSessionPlugin(gateway, db, identityHydrator),
       organization({
         allowUserToCreateOrganization: false,
         requireEmailVerificationOnInvitation: true,
@@ -214,6 +220,7 @@ export function createPeezyIdentityAuthAdapter(
 
   return {
     socialProviders: [],
+    usesSharedIdentity: true,
     async createWalletChallenge({ address, chainId, purpose, userId }) {
       const subject =
         purpose === "link" && userId !== undefined
@@ -238,7 +245,7 @@ export function createPeezyIdentityAuthAdapter(
           }))
         };
       }
-      const identityUser = await hydrateIdentity(subject);
+      const identityUser = await identityHydrator.get(subject);
       return hydrateIdentitySnapshot(snapshot, identityUser);
     },
     async getSocialProviders() {
@@ -258,10 +265,15 @@ export function createPeezyIdentityAuthAdapter(
     },
     async linkWalletCredential(input) {
       const subject = await identitySubjectForProductUser(db, input.userId);
-      return linkIdentityWalletCredential(db, gateway, {
-        ...input,
-        ...(subject === undefined ? {} : { subject })
-      });
+      return linkIdentityWalletCredential(
+        db,
+        gateway,
+        identityHydrator,
+        {
+          ...input,
+          ...(subject === undefined ? {} : { subject })
+        }
+      );
     },
     async startSocial(input): Promise<{
       headers?: Headers;
@@ -310,6 +322,7 @@ export function createPeezyIdentityAuthAdapter(
           provider: input.request.provider,
           subject
         });
+        identityHydrator.invalidate(subject);
         return {
           response: { redirect: true, url: handoff.url }
         };
@@ -406,7 +419,8 @@ async function identityLinkUserForCallback(
 
 function peezyWalletSessionPlugin(
   gateway: ReturnType<typeof createIdentityGateway>,
-  db: SentinelDb
+  db: SentinelDb,
+  identityHydrator: IdentityHydrator
 ) {
   return {
     id: "peezy-wallet-session",
@@ -446,11 +460,13 @@ function peezyWalletSessionPlugin(
               message: context.body.message,
               signature: context.body.signature
             });
+            identityHydrator.invalidate(issued.user.id);
             const exchanged = await gateway.exchangeWalletGrant(issued.grant);
             if (exchanged.subject !== issued.user.id) {
               throw new Error("Wallet grant subject mismatch");
             }
             const centralIdentity = await gateway.getIdentity(exchanged.subject);
+            identityHydrator.set(exchanged.subject, centralIdentity);
             const address = getAddress(context.body.walletAddress).toLowerCase() as AddressDto;
             const verifiedWallet = centralIdentity.credentials.find(
               (credential) =>
@@ -551,55 +567,77 @@ function createIdentityGateway(
 function createIdentityHydrator(
   gateway: ReturnType<typeof createIdentityGateway>,
   cacheTtlMs: number
-): (subject: string) => Promise<IdentityMeResponse> {
+): IdentityHydrator {
   const cache = new Map<
     string,
     { readonly expiresAt: number; readonly identity: IdentityMeResponse }
   >();
-  const pending = new Map<string, Promise<IdentityMeResponse>>();
+  const pending = new Map<
+    string,
+    { readonly read: Promise<IdentityMeResponse>; readonly token: symbol }
+  >();
   const readTimes: number[] = [];
   const ttlMs = Math.max(0, cacheTtlMs);
 
-  return async (subject) => {
-    const now = Date.now();
-    const cached = cache.get(subject);
-    if (cached !== undefined && cached.expiresAt > now) {
-      return cached.identity;
-    }
+  const cacheIdentity = (subject: string, identity: IdentityMeResponse) => {
     cache.delete(subject);
-
-    const pendingRead = pending.get(subject);
-    if (pendingRead !== undefined) return pendingRead;
-
-    while (
-      readTimes[0] !== undefined &&
-      readTimes[0] <= now - IDENTITY_HYDRATION_READ_WINDOW_MS
-    ) {
-      readTimes.shift();
+    if (ttlMs <= 0) return;
+    cache.set(subject, { expiresAt: Date.now() + ttlMs, identity });
+    while (cache.size > IDENTITY_HYDRATION_CACHE_MAX_ENTRIES) {
+      const oldest = cache.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      cache.delete(oldest);
     }
-    if (readTimes.length >= IDENTITY_HYDRATION_READ_BUDGET) {
-      throw new Error("Identity hydration read budget exhausted");
-    }
-    readTimes.push(now);
+  };
 
-    const read = gateway
-      .getIdentity(subject)
-      .then((identity) => {
-        if (ttlMs > 0) {
-          cache.set(subject, { expiresAt: Date.now() + ttlMs, identity });
-          while (cache.size > IDENTITY_HYDRATION_CACHE_MAX_ENTRIES) {
-            const oldest = cache.keys().next().value as string | undefined;
-            if (oldest === undefined) break;
-            cache.delete(oldest);
+  return {
+    async get(subject) {
+      const now = Date.now();
+      const cached = cache.get(subject);
+      if (cached !== undefined && cached.expiresAt > now) {
+        return cached.identity;
+      }
+      cache.delete(subject);
+
+      const pendingRead = pending.get(subject);
+      if (pendingRead !== undefined) return pendingRead.read;
+
+      while (
+        readTimes[0] !== undefined &&
+        readTimes[0] <= now - IDENTITY_HYDRATION_READ_WINDOW_MS
+      ) {
+        readTimes.shift();
+      }
+      if (readTimes.length >= IDENTITY_HYDRATION_READ_BUDGET) {
+        throw new Error("Identity hydration read budget exhausted");
+      }
+      readTimes.push(now);
+
+      const token = Symbol(subject);
+      const read = gateway
+        .getIdentity(subject)
+        .then((identity) => {
+          if (pending.get(subject)?.token === token) {
+            cacheIdentity(subject, identity);
           }
-        }
-        return identity;
-      })
-      .finally(() => {
-        pending.delete(subject);
-      });
-    pending.set(subject, read);
-    return read;
+          return identity;
+        })
+        .finally(() => {
+          if (pending.get(subject)?.token === token) {
+            pending.delete(subject);
+          }
+        });
+      pending.set(subject, { read, token });
+      return read;
+    },
+    invalidate(subject) {
+      cache.delete(subject);
+      pending.delete(subject);
+    },
+    set(subject, identity) {
+      pending.delete(subject);
+      cacheIdentity(subject, identity);
+    }
   };
 }
 
@@ -845,6 +883,7 @@ async function bindIdentitySubject(
 async function linkIdentityWalletCredential(
   db: SentinelDb,
   gateway: ReturnType<typeof createIdentityGateway>,
+  identityHydrator: IdentityHydrator,
   input: {
     readonly address: AddressDto;
     readonly chainId: number;
@@ -861,6 +900,7 @@ async function linkIdentityWalletCredential(
     signature: input.signature,
     ...(input.subject === undefined ? {} : { subject: input.subject })
   });
+  identityHydrator.invalidate(issued.user.id);
   const exchanged = await gateway.exchangeWalletGrant(issued.grant);
   if (
     exchanged.subject !== issued.user.id ||
@@ -869,6 +909,7 @@ async function linkIdentityWalletCredential(
     throw new Error("Identity wallet grant resolved to another subject");
   }
   const centralIdentity = await gateway.getIdentity(exchanged.subject);
+  identityHydrator.set(exchanged.subject, centralIdentity);
   const centralWallet = centralIdentity.credentials.find(
     (credential) =>
       credential.kind === "wallet" &&
