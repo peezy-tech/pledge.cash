@@ -38,6 +38,9 @@ const AUTH_SIWE_CLOCK_SKEW_MS = 5 * 60_000;
 const AUTH_SIWE_MAX_BODY_BYTES = 128 * 1024;
 const DEFAULT_RATE_LIMIT_MAX_BUCKETS = 10_000;
 const IDENTITY_RATE_WINDOW_MS = 5 * 60_000;
+// Identity v0.1 permits 20 challenges per observed caller and wallet. Keep one
+// anonymous Sentinel caller from consuming that entire upstream bucket.
+const PUBLIC_SIWE_CHALLENGE_CLIENT_LIMIT = 10;
 const PUBLIC_SIWE_CLIENT_LIMIT = 10;
 const PUBLIC_SIWE_ATTEMPT_GLOBAL_LIMIT = 300;
 // Identity v0.1 allows 60 wallet-grant issues per client and window. Keep ten
@@ -405,6 +408,14 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       refillMs: IDENTITY_RATE_WINDOW_MS
     }
   );
+  const publicSiweChallengeClientRateLimit = createRateLimitMiddleware(
+    deps,
+    "auth-siwe-challenge-client",
+    {
+      capacity: PUBLIC_SIWE_CHALLENGE_CLIENT_LIMIT,
+      refillMs: IDENTITY_RATE_WINDOW_MS
+    }
+  );
   const publicSiweGlobalRateLimit = createIdentityQuotaMiddleware(
     deps,
     "wallet-grant-public",
@@ -431,7 +442,12 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       // Product sessions and alert delivery remain usable during an Identity
       // outage; only new central social authentication is unavailable.
     }
-    return c.json(AuthCapabilitiesResponseSchema.parse({ socialProviders }));
+    return c.json(
+      AuthCapabilitiesResponseSchema.parse({
+        socialProviders,
+        walletlessSocialSignIn: deps.auth.usesSharedIdentity === true
+      })
+    );
   });
 
   app.get("/me", async (c) => {
@@ -600,6 +616,13 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     deps.auth.handler(c.req.raw);
 
   if (deps.auth.usesSharedIdentity === true) {
+    for (const path of ["/peezy/siwe/nonce", "/siwe/nonce"]) {
+      app.post(
+        path,
+        publicSiweChallengeClientRateLimit,
+        (c) => deps.auth.handler(c.req.raw)
+      );
+    }
     for (const path of ["/peezy/siwe/verify", "/siwe/verify"]) {
       app.post(
         path,

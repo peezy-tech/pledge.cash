@@ -57,6 +57,7 @@ const IDENTITY_REQUEST_TIMEOUT_MS = 2_000;
 // Identity v0.1 does not cap a user's total credentials. Fail closed instead
 // of skipping conflict checks or building an unbounded migration query.
 const IDENTITY_PROVISIONING_MAX_CREDENTIALS = 256;
+const IDENTITY_RECORD_MAX_BYTES = 256 * 1024;
 const IDENTITY_HYDRATION_CACHE_TTL_MS = 60_000;
 const IDENTITY_HYDRATION_CACHE_MAX_ENTRIES = 1_000;
 const IDENTITY_PRESENTATION_READ_WINDOW_MS = 5 * 60_000;
@@ -449,13 +450,34 @@ function rewriteLegacyWalletAuthRequest(request: Request): Request {
   return new Request(url, request);
 }
 
+function identityChallengeForwardedFor(
+  headers: Headers | undefined
+): string | undefined {
+  if (headers === undefined) return undefined;
+  const forwardedAddresses = headers.get("x-forwarded-for")?.split(",");
+  const forwardedFor = forwardedAddresses?.at(-1)?.trim();
+  return (
+    forwardedFor ||
+    headers.get("cf-connecting-ip")?.trim() ||
+    headers.get("true-client-ip")?.trim() ||
+    headers.get("x-real-ip")?.trim() ||
+    undefined
+  );
+}
+
 function hydrateIdentitySnapshot(
   snapshot: AuthSnapshot,
   identity: IdentityMeResponse
 ): AuthSnapshot {
+  assertIdentityCredentialLimit(identity);
   const providers = new Set<AuthSnapshot["providers"][number]>();
+  const walletSignIn = new Map<string, boolean>();
   for (const credential of identity.credentials) {
     if (credential.kind === "wallet") {
+      walletSignIn.set(
+        credential.address.toLowerCase(),
+        credential.signInEnabled
+      );
       if (credential.signInEnabled) providers.add("siwe");
     }
     if (credential.kind === "social") providers.add(credential.provider);
@@ -463,9 +485,10 @@ function hydrateIdentitySnapshot(
   return {
     ...snapshot,
     providers: [...providers],
-    wallets: snapshot.wallets.map((wallet) =>
-      hydrateIdentityWallet(wallet, identity)
-    )
+    wallets: snapshot.wallets.map((wallet) => ({
+      ...wallet,
+      canSignIn: walletSignIn.get(wallet.address.toLowerCase()) ?? false
+    }))
   };
 }
 
@@ -541,10 +564,14 @@ function peezyWalletSessionPlugin(
           })
         },
         async (context) => {
+          const forwardedFor = identityChallengeForwardedFor(
+            context.request?.headers
+          );
           const challenge = await gateway.createWalletChallenge({
             address: context.body.walletAddress,
             chainId: context.body.chainId,
-            purpose: "sign-in"
+            purpose: "sign-in",
+            ...(forwardedFor === undefined ? {} : { forwardedFor })
           });
           return context.json(challenge);
         }
@@ -634,6 +661,10 @@ function createIdentityGateway(
     clientSecret: identity.appClientSecret,
     fetcher
   };
+  const identityRecordFetcher = createResponseSizeLimitFetcher(
+    fetcher,
+    IDENTITY_RECORD_MAX_BYTES
+  );
   return {
     async capabilities() {
       const response = await fetcher(`${identity.baseUrl}/v1/capabilities`, {
@@ -652,16 +683,33 @@ function createIdentityGateway(
     createWalletChallenge: (input: {
       address: string;
       chainId: number;
+      forwardedFor?: string;
       purpose: "link" | "sign-in";
-    }) =>
-      createWalletChallenge({
+    }) => {
+      const { forwardedFor, ...challenge } = input;
+      const challengeFetcher =
+        forwardedFor === undefined
+          ? client.fetcher
+          : (request: RequestInfo | URL, init?: RequestInit) => {
+              const headers = new Headers(init?.headers);
+              headers.set("X-Forwarded-For", forwardedFor);
+              return client.fetcher(request, { ...init, headers });
+            };
+      return createWalletChallenge({
         ...client,
-        ...input,
+        ...challenge,
+        fetcher: challengeFetcher,
         origin: webOrigin
-      }),
+      });
+    },
     exchangeWalletGrant: (grant: string) =>
       exchangeWalletGrant({ ...client, grant }),
-    getIdentity: (subject: string) => getIdentity({ ...client, subject }),
+    getIdentity: (subject: string) =>
+      getIdentity({
+        ...client,
+        fetcher: identityRecordFetcher,
+        subject
+      }),
     issueWalletGrant: (input: {
       message: string;
       signature: string;
@@ -712,6 +760,7 @@ function createIdentityHydrator(
         return gateway.getIdentity(subject);
       })
       .then((identity) => {
+        assertIdentityCredentialLimit(identity);
         if (pending.get(subject)?.token === token) {
           cacheIdentity(subject, identity);
         }
@@ -751,6 +800,7 @@ function createIdentityHydrator(
       pending.delete(subject);
     },
     set(subject, identity) {
+      assertIdentityCredentialLimit(identity);
       pending.delete(subject);
       cacheIdentity(subject, identity);
     }
@@ -830,6 +880,65 @@ export function createTimeoutFetcher(
   };
 }
 
+function createResponseSizeLimitFetcher(
+  fetcher: IdentityFetch,
+  maxBytes: number
+): IdentityFetch {
+  return async (input, init) => {
+    const response = await fetcher(input, init);
+    const error = new Error(
+      `peezy.tech identity exceeds the ${maxBytes}-byte response limit`
+    );
+    const contentLength = response.headers.get("content-length");
+    if (
+      contentLength !== null &&
+      /^\d+$/.test(contentLength) &&
+      Number(contentLength) > maxBytes
+    ) {
+      void response.body?.cancel(error).catch(() => undefined);
+      throw error;
+    }
+    if (response.body === null) return response;
+
+    const reader = response.body.getReader();
+    let receivedBytes = 0;
+    const limitedBody = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          const result = await reader.read();
+          if (result.done) {
+            controller.close();
+            return;
+          }
+          receivedBytes += result.value.byteLength;
+          if (receivedBytes > maxBytes) {
+            controller.error(error);
+            void reader.cancel(error).catch(() => undefined);
+            return;
+          }
+          controller.enqueue(result.value);
+        } catch (readError) {
+          controller.error(readError);
+        }
+      },
+      cancel(reason) {
+        return reader.cancel(reason);
+      }
+    });
+    const limitedResponse = new Response(limitedBody, {
+      headers: response.headers,
+      status: response.status,
+      statusText: response.statusText
+    });
+    Object.defineProperties(limitedResponse, {
+      redirected: { value: response.redirected },
+      type: { value: response.type },
+      url: { value: response.url }
+    });
+    return limitedResponse;
+  };
+}
+
 async function provisionProductUser(
   db: SentinelDb,
   identity: IdentityMeResponse,
@@ -844,7 +953,7 @@ async function provisionProductUser(
     };
   } = {}
 ): Promise<typeof users.$inferSelect> {
-  assertProvisionableIdentity(identity);
+  assertIdentityCredentialLimit(identity);
   return db.transaction(async (transaction) => {
     const identityUser = identity.user;
     await transaction.execute(
@@ -994,7 +1103,7 @@ async function identityCandidateUserIds(
   return candidateUserIds;
 }
 
-function assertProvisionableIdentity(identity: IdentityMeResponse): void {
+function assertIdentityCredentialLimit(identity: IdentityMeResponse): void {
   if (identity.credentials.length > IDENTITY_PROVISIONING_MAX_CREDENTIALS) {
     throw new Error(
       `peezy.tech identity exceeds the ${IDENTITY_PROVISIONING_MAX_CREDENTIALS}-credential provisioning limit`
@@ -1093,7 +1202,7 @@ async function linkIdentityWalletCredential(
   const subject = input.subject;
 
   const existingIdentity = await gateway.getIdentity(subject);
-  assertProvisionableIdentity(existingIdentity);
+  assertIdentityCredentialLimit(existingIdentity);
   return db.transaction(async (transaction) => {
     await transaction.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`peezy-user:${subject}`}))`
@@ -1131,7 +1240,7 @@ async function linkIdentityWalletCredential(
     }
     const centralIdentity = await gateway.getIdentity(exchanged.subject);
     identityHydrator.set(exchanged.subject, centralIdentity);
-    assertProvisionableIdentity(centralIdentity);
+    assertIdentityCredentialLimit(centralIdentity);
     const centralWallet = centralIdentity.credentials.find(
       (credential) =>
         credential.kind === "wallet" &&

@@ -108,7 +108,10 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       headers: { Origin: webOrigin }
     });
     expect(capabilities.status).toBe(200);
-    expect(await capabilities.json()).toEqual({ socialProviders: ["github"] });
+    expect(await capabilities.json()).toEqual({
+      socialProviders: ["github"],
+      walletlessSocialSignIn: true
+    });
 
     const nonceResponse = await app.request(`${apiOrigin}/auth/peezy/siwe/nonce`, {
       body: JSON.stringify({

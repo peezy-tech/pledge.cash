@@ -11,7 +11,10 @@ import { GovernanceActivity } from "../../features/notifications/governance-acti
 import { useSentinelSession } from "../../features/notifications/hooks";
 import { SubscriptionSettings } from "../../features/notifications/subscription-settings";
 import { WalletLink } from "../../features/notifications/wallet-link";
-import { getSentinelBaseUrl, type SentinelSocialProvider } from "../../lib/sentinel";
+import {
+  getSentinelBaseUrl,
+  type SentinelAuthCapabilities,
+} from "../../lib/sentinel";
 import type { WalletState } from "../../lib/types";
 
 type SentinelSettingsViewProps = {
@@ -22,22 +25,33 @@ type SentinelSettingsViewProps = {
 export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSettingsViewProps): React.JSX.Element | null {
   const baseUrl = getSentinelBaseUrl();
   const session = useSentinelSession();
-  const [socialProviders, setSocialProviders] = useState<SentinelSocialProvider[]>([]);
+  const [authCapabilities, setAuthCapabilities] = useState<SentinelAuthCapabilities>({
+    socialProviders: [],
+    walletlessSocialSignIn: false,
+  });
   const [logoutPending, setLogoutPending] = useState(false);
   const focus = notificationFocusFromLocation();
   const viewState = alertsViewState(wallet, session.me);
 
   useEffect(() => {
     if (!session.client) {
-      setSocialProviders([]);
+      setAuthCapabilities({
+        socialProviders: [],
+        walletlessSocialSignIn: false,
+      });
       return;
     }
 
     const controller = new AbortController();
     void session.client
       .authCapabilities(controller.signal)
-      .then((capabilities) => setSocialProviders(capabilities.socialProviders))
-      .catch(() => setSocialProviders([]));
+      .then(setAuthCapabilities)
+      .catch(() =>
+        setAuthCapabilities({
+          socialProviders: [],
+          walletlessSocialSignIn: false,
+        }),
+      );
     return () => controller.abort();
   }, [session.client]);
 
@@ -99,9 +113,10 @@ export function SentinelSettingsView({ governanceChainId, wallet }: SentinelSett
           client={session.client}
           onChanged={session.refresh}
           session={session.me}
-          socialProviders={socialProviders}
+          socialProviders={authCapabilities.socialProviders}
           state={viewState}
           wallet={wallet}
+          walletlessSocialSignIn={authCapabilities.walletlessSocialSignIn}
         />
       ) : null}
       {session.client && session.me ? (

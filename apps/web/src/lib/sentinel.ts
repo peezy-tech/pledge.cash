@@ -33,6 +33,7 @@ export type SentinelEnv = {
 export type SentinelFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export type SentinelSocialProvider = SocialProviderDto;
+export type SentinelAuthCapabilities = AuthCapabilitiesResponse;
 
 export type AuthSiweVerifyResponse = {
   success: boolean;

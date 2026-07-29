@@ -84,7 +84,8 @@ export const AuthMeResponseSchema = z.object({
 });
 
 export const AuthCapabilitiesResponseSchema = z.object({
-  socialProviders: z.array(SocialProviderSchema)
+  socialProviders: z.array(SocialProviderSchema),
+  walletlessSocialSignIn: z.boolean()
 });
 
 export const AuthSiweNonceRequestSchema = z.object({

@@ -109,6 +109,53 @@ test("aborts stalled Identity response bodies at the application deadline", asyn
   expect(signal?.aborted).toBe(true);
 });
 
+test("forwards the observed Sentinel caller to the Identity challenge endpoint", async () => {
+  let forwardedFor: string | null = null;
+  const adapter = createPeezyIdentityAuthAdapter(
+    config,
+    {} as SentinelDb,
+    async (input, init) => {
+      expect(new URL(input.toString()).pathname).toBe(
+        "/v1/wallet/challenges"
+      );
+      forwardedFor = new Headers(init?.headers).get("x-forwarded-for");
+      return Response.json(
+        {
+          address: "0x1111111111111111111111111111111111111111",
+          chainId: 1,
+          domain: "localhost:5173",
+          expirationTime: "2026-07-29T00:10:00.000Z",
+          issuedAt: "2026-07-29T00:00:00.000Z",
+          message: "identity challenge",
+          nonce: "abcdef0123456789",
+          statement: "Sign in to pledge.cash.",
+          uri: "http://localhost:5173",
+          version: "1"
+        },
+        { status: 201 }
+      );
+    }
+  );
+
+  const response = await adapter.handler(
+    new Request("http://localhost:8787/auth/peezy/siwe/nonce", {
+      body: JSON.stringify({
+        chainId: 1,
+        walletAddress: "0x1111111111111111111111111111111111111111"
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "http://localhost:5173",
+        "X-Forwarded-For": "203.0.113.9, 192.0.2.44"
+      },
+      method: "POST"
+    })
+  );
+
+  expect(response.status).toBe(200);
+  expect(forwardedFor).toBe("192.0.2.44");
+});
+
 test("uses the application deadline for the static Identity OIDC token exchange", async () => {
   let requestInit: RequestInit | undefined;
   let requestUrl: string | undefined;
@@ -248,6 +295,105 @@ test("rejects oversized Identity credential sets before provisioning", async () 
     message: "peezy.tech identity exceeds the 256-credential provisioning limit"
   });
   expect(transactions).toBe(0);
+});
+
+test("rejects oversized Identity credential sets during session hydration without caching them", async () => {
+  const subject = "00000000-0000-4000-8000-000000000030";
+  const identitySubjectQuery = {
+    from() {
+      return this;
+    },
+    limit() {
+      return Promise.resolve([{ subject }]);
+    },
+    where() {
+      return this;
+    }
+  };
+  const db = {
+    select: () => identitySubjectQuery,
+    transaction: async (
+      callback: (transaction: {
+        delete(): {
+          where(): Promise<never[]>;
+        };
+        execute(): Promise<never[]>;
+        insert(): {
+          values(): Promise<never[]>;
+        };
+        select(): {
+          from(): {
+            where(): Promise<Array<{ value: number }>>;
+          };
+        };
+      }) => Promise<unknown>
+    ) =>
+      callback({
+        delete: () => ({
+          where: () => Promise.resolve([])
+        }),
+        execute: () => Promise.resolve([]),
+        insert: () => ({
+          values: () => Promise.resolve([])
+        }),
+        select: () => ({
+          from: () => ({
+            where: () => Promise.resolve([{ value: 0 }])
+          })
+        })
+      })
+  } as unknown as SentinelDb;
+  let identityReads = 0;
+  const adapter = createPeezyIdentityAuthAdapter(config, db, async (input) => {
+    identityReads += 1;
+    expect(input.toString()).toBe(
+      `https://identity.peezy.tech/v1/users/${subject}`
+    );
+    return Response.json({
+      credentials: Array.from({ length: 257 }, (_, index) => ({
+        id: `00000000-0000-4000-8000-${(index + 1)
+          .toString(16)
+          .padStart(12, "0")}`,
+        kind: "passkey",
+        linkedAt: "2026-07-29T00:00:00.000Z"
+      })),
+      user: {
+        createdAt: "2026-07-29T00:00:00.000Z",
+        id: subject,
+        status: "active"
+      }
+    });
+  });
+  const snapshot: AuthSnapshot = {
+    channels: [],
+    providers: [],
+    subscription: {
+      boardrooms: [],
+      minSeverity: "medium",
+      mode: "holdings"
+    },
+    wallets: []
+  };
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await expect(
+      adapter.hydrateAuthSnapshot?.(subject, snapshot)
+    ).rejects.toThrow(
+      "peezy.tech identity exceeds the 256-credential provisioning limit"
+    );
+  }
+  expect(identityReads).toBe(2);
+
+  const responseLimitedAdapter = createPeezyIdentityAuthAdapter(
+    config,
+    db,
+    async () => new Response("x".repeat(256 * 1024 + 1))
+  );
+  await expect(
+    responseLimitedAdapter.hydrateAuthSnapshot?.(subject, snapshot)
+  ).rejects.toThrow(
+    "peezy.tech identity exceeds the 262144-byte response limit"
+  );
 });
 
 test("hydrates wallet sign-in authority from the central Identity credential", async () => {

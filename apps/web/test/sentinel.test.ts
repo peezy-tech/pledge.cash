@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { Address } from "@pledge.cash/sdk";
-import { buildAlertsSiweMessage } from "../src/features/notifications/alerts-identity";
+import {
+  alertsSocialProviders,
+  buildAlertsSiweMessage,
+  identityStatus,
+} from "../src/features/notifications/alerts-identity";
 import { alertsViewState } from "../src/features/notifications/alerts-view-state";
 import { buildSentinelSiweMessage } from "../src/features/notifications/wallet-link";
 import {
@@ -16,6 +20,26 @@ import {
 } from "../src/features/notifications/subscription-settings";
 
 describe("sentinel web client", () => {
+  test("keeps legacy authentication wallet-first without hiding social account linking", () => {
+    const providers = ["github", "telegram"] as const;
+
+    expect(alertsSocialProviders([...providers], false, false)).toEqual([]);
+    expect(alertsSocialProviders([...providers], true, false)).toEqual(
+      providers,
+    );
+    expect(alertsSocialProviders([...providers], false, true)).toEqual(
+      providers,
+    );
+    expect(identityStatus("connect-wallet", false)).toEqual({
+      description:
+        "Connect a wallet first, then sign a message to create or open your alert account.",
+      title: "Connect a wallet to sign in",
+    });
+    expect(identityStatus("connect-wallet", true).description).toContain(
+      "social sign-in",
+    );
+  });
+
   test("preserves local alert-rule drafts when adding a governance watch", () => {
     const existing = {
       address: "0x2000000000000000000000000000000000000000" as const,

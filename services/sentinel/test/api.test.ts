@@ -484,8 +484,14 @@ describe("Sentinel WP5 API", () => {
   test("reports auth capabilities and returns a wallet-first auth snapshot", async () => {
     const capabilities = await harness.app.request("/auth/capabilities");
     expect(capabilities.status).toBe(200);
-    expect(await readJson<{ socialProviders: string[] }>(capabilities)).toEqual({
-      socialProviders: ["discord", "twitter", "telegram"]
+    expect(
+      await readJson<{
+        socialProviders: string[];
+        walletlessSocialSignIn: boolean;
+      }>(capabilities)
+    ).toEqual({
+      socialProviders: ["discord", "twitter", "telegram"],
+      walletlessSocialSignIn: false
     });
 
     harness.store.providersByUser.set(USER_ID, ["siwe", "github"]);
@@ -534,8 +540,14 @@ describe("Sentinel WP5 API", () => {
 
     const capabilities = await harness.app.request("/auth/capabilities");
     expect(capabilities.status).toBe(200);
-    expect(await readJson<{ socialProviders: string[] }>(capabilities)).toEqual({
-      socialProviders: ["discord", "twitter", "telegram"]
+    expect(
+      await readJson<{
+        socialProviders: string[];
+        walletlessSocialSignIn: boolean;
+      }>(capabilities)
+    ).toEqual({
+      socialProviders: ["discord", "twitter", "telegram"],
+      walletlessSocialSignIn: false
     });
 
     const me = await harness.app.request("/auth/me", {
@@ -657,6 +669,12 @@ describe("Sentinel WP5 API", () => {
 
   test("keeps the previous social-auth routes compatible in shared Identity mode", async () => {
     const identityHarness = createHarness({ sharedIdentity: true });
+    const capabilities = await identityHarness.app.request(
+      "/auth/capabilities"
+    );
+    expect(await capabilities.json()).toMatchObject({
+      walletlessSocialSignIn: true
+    });
     const callbackURL = `${WEB_ORIGIN}/notifications`;
     const requests = [
       {
@@ -755,6 +773,34 @@ describe("Sentinel WP5 API", () => {
     expect(statuses.slice(0, 9).every((status) => status === 200)).toBe(true);
     expect(statuses.slice(9)).toEqual([429, 429]);
     expect(identityHarness.auth.forwarded).toHaveLength(9);
+  });
+
+  test("rate limits public Identity challenges before they reach the shared upstream bucket", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const statuses: number[] = [];
+    for (let index = 0; index < 11; index += 1) {
+      const response = await identityHarness.app.request(
+        index % 2 === 0
+          ? "/auth/peezy/siwe/nonce"
+          : "/auth/siwe/nonce",
+        {
+          body: JSON.stringify({
+            chainId: 31337,
+            walletAddress: PRIMARY_WALLET
+          }),
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "192.0.2.44"
+          },
+          method: "POST"
+        }
+      );
+      statuses.push(response.status);
+    }
+
+    expect(statuses.slice(0, 10).every((status) => status === 200)).toBe(true);
+    expect(statuses[10]).toBe(429);
+    expect(identityHarness.auth.forwarded).toHaveLength(10);
   });
 
   test("rejects oversized SIWE requests before parsing or quota work", async () => {
