@@ -54,6 +54,23 @@ const scheduleData = encodeFunctionData({
   functionName: "scheduleBoardroomOperation",
   args: [facetSetHash, [call], salt, 3n, 1n],
 });
+const updateConfigurationData = encodeFunctionData({
+  abi: boardroomVNextControllerAbi,
+  functionName: "updateConfiguration",
+  args: [executor, 172_800n, 604_800n],
+});
+const controllerScheduleData = encodeFunctionData({
+  abi: boardroomVNextControllerAbi,
+  functionName: "scheduleControllerOperation",
+  args: [facetSetHash, updateConfigurationData, salt, 3n, 1n],
+});
+
+type ContractRead = {
+  abi: unknown;
+  functionName: string;
+  args?: readonly unknown[];
+  blockNumber?: bigint;
+};
 
 describe("Boardroom vNext governance discovery and hydration", () => {
   test("builds and hashes the exact release-bound EIP-712 control proof", () => {
@@ -276,20 +293,10 @@ describe("Boardroom vNext governance discovery and hydration", () => {
       expectedConfigurationEpoch: 1n,
     });
 
-    const updateData = encodeFunctionData({
-      abi: boardroomVNextControllerAbi,
-      functionName: "updateConfiguration",
-      args: [executor, 172_800n, 604_800n],
-    });
-    const controllerSchedule = encodeFunctionData({
-      abi: boardroomVNextControllerAbi,
-      functionName: "scheduleControllerOperation",
-      args: [facetSetHash, updateData, salt, 3n, 1n],
-    });
-    expect(decodeBoardroomVNextControllerScheduleCalldata(controllerSchedule)).toEqual({
+    expect(decodeBoardroomVNextControllerScheduleCalldata(controllerScheduleData)).toEqual({
       kind: "controllerOperation",
       expectedFacetSetHash: facetSetHash,
-      data: updateData,
+      data: updateConfigurationData,
       salt,
       expectedBoardroomEpoch: 3n,
       expectedConfigurationEpoch: 1n,
@@ -344,7 +351,7 @@ describe("Boardroom vNext governance discovery and hydration", () => {
   });
 
   test("hydrates with vNext ABIs and propagates the facet hash into operation hashing and results", async () => {
-    const reads: Array<{ abi: unknown; functionName: string; args?: readonly unknown[] }> = [];
+    const reads: ContractRead[] = [];
     const operations = await queryScheduledBoardroomVNextOperations(governanceClient({ reads }), {
       boardrooms: [boardroom],
       fromBlock: 1n,
@@ -378,8 +385,43 @@ describe("Boardroom vNext governance discovery and hydration", () => {
     const hashRead = reads.find((read) => read.functionName === "hashBoardroomOperation");
     expect(hashRead?.abi).toBe(boardroomVNextControllerAbi);
     expect(hashRead?.args?.[0]).toBe(facetSetHash);
+    expect(hashRead?.blockNumber).toBe(11n);
     const facetHashRead = reads.find((read) => read.functionName === "facetSetHash");
     expect(facetHashRead?.abi).toBe(boardroomDiamondAbi);
+    expect(reads.filter((read) => read !== hashRead).every((read) => read.blockNumber === 20n)).toBe(true);
+  });
+
+  test("hydrates executed operations against one block after controller configuration changes", async () => {
+    const reads: ContractRead[] = [];
+    const [executed] = await queryScheduledBoardroomVNextOperations(
+      governanceClient({
+        controllerOperation: true,
+        reads,
+        currentConfigurationEpoch: 2n,
+        historicalHashOnly: true,
+        operationStatus: 2,
+        unpinnedOperationStatus: 1,
+      }),
+      {
+        boardrooms: [boardroom],
+        fromBlock: 1n,
+        toBlock: "latest",
+        currentTime: 150n,
+      },
+    );
+
+    expect(executed).toMatchObject({
+      operationId,
+      configurationEpoch: 1n,
+      currentConfigurationEpoch: 2n,
+      operationStatus: 2,
+      status: "executed",
+      kind: "controllerOperation",
+      controllerData: updateConfigurationData,
+    });
+    const hashRead = reads.find((read) => read.functionName === "hashControllerOperation");
+    expect(hashRead?.blockNumber).toBe(11n);
+    expect(reads.filter((read) => read !== hashRead).every((read) => read.blockNumber === 20n)).toBe(true);
   });
 
   test("invalidates a pending operation after facet activation and rejects schedule/event hash substitution", async () => {
@@ -415,7 +457,8 @@ describe("Boardroom vNext governance discovery and hydration", () => {
   });
 
   test("decodes a successful vNext receipt when hydrating an explicit candidate", async () => {
-    const result = await hydrateScheduledBoardroomVNextOperationCandidates(governanceClient(), {
+    const reads: ContractRead[] = [];
+    const result = await hydrateScheduledBoardroomVNextOperationCandidates(governanceClient({ reads }), {
       candidates: [{
         boardroom,
         controller,
@@ -435,15 +478,26 @@ describe("Boardroom vNext governance discovery and hydration", () => {
       status: "ready",
       calls: [call],
     });
+    const hashRead = reads.find((read) => read.functionName === "hashBoardroomOperation");
+    expect(hashRead?.blockNumber).toBe(11n);
+    expect(reads.filter((read) => read !== hashRead).every((read) => read.blockNumber === 20n)).toBe(true);
   });
 });
 
 function governanceClient(overrides: {
+  controllerOperation?: boolean;
+  currentConfigurationEpoch?: bigint;
   currentFacetSetHash?: Hex;
   eventFacetSetHash?: Hex;
-  reads?: Array<{ abi: unknown; functionName: string; args?: readonly unknown[] }>;
+  historicalHashOnly?: boolean;
+  operationStatus?: number;
+  reads?: ContractRead[];
+  unpinnedOperationStatus?: number;
 } = {}): PledgeCashGovernanceClient {
   return {
+    async getBlockNumber() {
+      return 20n;
+    },
     async getLogs(input: { events: readonly { name: string }[] }) {
       if (input.events.some((event) => event.name === "BoardroomLaunched")) {
         return [{
@@ -457,8 +511,12 @@ function governanceClient(overrides: {
       }
       return [{
         address: controller,
-        eventName: "BoardroomOperationScheduled",
-        args: scheduleArgs(overrides.eventFacetSetHash),
+        eventName: overrides.controllerOperation
+          ? "ControllerOperationScheduled"
+          : "BoardroomOperationScheduled",
+        args: overrides.controllerOperation
+          ? controllerScheduleArgs(overrides.eventFacetSetHash)
+          : scheduleArgs(overrides.eventFacetSetHash),
         blockNumber: 11n,
         logIndex: 1,
         transactionHash,
@@ -469,7 +527,7 @@ function governanceClient(overrides: {
         blockNumber: 11n,
         from: proposer,
         hash: transactionHash,
-        input: scheduleData,
+        input: overrides.controllerOperation ? controllerScheduleData : scheduleData,
         to: controller,
       } as never;
     },
@@ -481,22 +539,35 @@ function governanceClient(overrides: {
       address: Address;
       functionName: string;
       args?: readonly unknown[];
+      blockNumber?: bigint;
     }) {
       overrides.reads?.push({
         abi: parameters.abi,
         functionName: parameters.functionName,
         ...(parameters.args ? { args: parameters.args } : {}),
+        ...(parameters.blockNumber !== undefined ? { blockNumber: parameters.blockNumber } : {}),
       });
       switch (parameters.functionName) {
         case "launched": return true;
         case "controller": return controller;
-        case "hashBoardroomOperation": return operationId;
-        case "operationState": return [100n, 200n, 1];
+        case "hashBoardroomOperation":
+        case "hashControllerOperation":
+          return !overrides.historicalHashOnly || parameters.blockNumber === 11n
+            ? operationId
+            : successorFacetSetHash;
+        case "operationState":
+          return [
+            100n,
+            200n,
+            parameters.blockNumber === 20n
+              ? (overrides.operationStatus ?? 1)
+              : (overrides.unpinnedOperationStatus ?? overrides.operationStatus ?? 1),
+          ];
         case "governanceEpoch": return 3n;
         case "controllerGeneration": return 1n;
         case "status": return 0;
         case "facetSetHash": return overrides.currentFacetSetHash ?? facetSetHash;
-        case "configurationEpoch": return 1n;
+        case "configurationEpoch": return overrides.currentConfigurationEpoch ?? 1n;
         case "proposer": return proposer;
         default: throw new Error(`Unexpected read: ${parameters.functionName}`);
       }
@@ -528,6 +599,21 @@ function scheduleArgs(eventFacetSetHash: Hex = facetSetHash) {
     configurationEpoch: 1n,
     salt,
     callsHash: hashBoardroomCalls([call]),
+  };
+}
+
+function controllerScheduleArgs(eventFacetSetHash: Hex = facetSetHash) {
+  return {
+    operationId,
+    proposer,
+    facetSetHash: eventFacetSetHash,
+    eta: 100n,
+    expiresAt: 200n,
+    boardroomEpoch: 3n,
+    controllerGeneration: 1n,
+    configurationEpoch: 1n,
+    salt,
+    dataHash: keccak256(updateConfigurationData),
   };
 }
 

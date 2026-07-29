@@ -407,10 +407,23 @@ export async function queryScheduledBoardroomVNextOperations(
 ): Promise<ScheduledBoardroomVNextOperation[]> {
   throwIfAborted(input.signal);
   const boardrooms = uniqueAddresses(input.boardrooms);
+  if (boardrooms.length === 0) return [];
+  // Controller discovery and readiness must describe one chain snapshot.
+  const snapshotBlockNumber = await readSnapshotBlockNumber(client);
   const controllerPairs = (await Promise.all(boardrooms.map(async (boardroom) => {
     const [launched, controller] = await Promise.all([
-      client.readContract({ address: boardroom, abi: boardroomDiamondAbi, functionName: "launched" }),
-      client.readContract({ address: boardroom, abi: boardroomDiamondAbi, functionName: "controller" }),
+      client.readContract({
+        address: boardroom,
+        abi: boardroomDiamondAbi,
+        functionName: "launched",
+        blockNumber: snapshotBlockNumber,
+      }),
+      client.readContract({
+        address: boardroom,
+        abi: boardroomDiamondAbi,
+        functionName: "controller",
+        blockNumber: snapshotBlockNumber,
+      }),
     ]);
     return launched && !isZeroAddress(controller as Address)
       ? { boardroom, controller: controller as Address }
@@ -418,7 +431,15 @@ export async function queryScheduledBoardroomVNextOperations(
   }))).flatMap((pair) => pair ? [pair] : []);
   if (controllerPairs.length === 0) return [];
 
-  const events = await queryBoardroomVNextGovernanceEvents(client, { ...input, controllers: controllerPairs });
+  const requestedToBlock = input.toBlock;
+  const eventToBlock = typeof requestedToBlock === "bigint" && requestedToBlock < snapshotBlockNumber
+    ? requestedToBlock
+    : snapshotBlockNumber;
+  const events = await queryBoardroomVNextGovernanceEvents(client, {
+    ...input,
+    toBlock: eventToBlock,
+    controllers: controllerPairs,
+  });
   const currentControllers = new Set(controllerPairs.map((pair) => pair.controller.toLowerCase()));
   const schedules = latestScheduleEvents(events).filter((event) => currentControllers.has(event.controller.toLowerCase()));
   if (schedules.length > MAX_OPERATIONS) {
@@ -428,7 +449,7 @@ export async function queryScheduledBoardroomVNextOperations(
   const currentTime = input.currentTime ?? BigInt(Math.floor(Date.now() / 1_000));
   const operations = await Promise.all(schedules.map(async (event) => {
     try {
-      return await hydrateScheduleEvent(client, event, currentTime, input.signal);
+      return await hydrateScheduleEvent(client, event, snapshotBlockNumber, currentTime, input.signal);
     } catch (error) {
       return scheduleFromEvent(event, {
         currentBoardroomEpoch: 0n,
@@ -456,6 +477,8 @@ export async function hydrateScheduledBoardroomVNextOperationCandidates(
   if (candidates.length > MAX_OPERATIONS) {
     throw new Error(`Governance candidate hydration exceeds its ${MAX_OPERATIONS}-operation safety bound.`);
   }
+  if (candidates.length === 0) return { operations: [], errors };
+  const snapshotBlockNumber = await readSnapshotBlockNumber(client);
   const currentTime = input.currentTime ?? BigInt(Math.floor(Date.now() / 1_000));
   const results = await Promise.all(candidates.map(async (candidate) => {
     try {
@@ -469,7 +492,14 @@ export async function hydrateScheduledBoardroomVNextOperationCandidates(
       verifyTransactionProvenance(candidate, tx, minedReceipt);
       const decoded = verifiedSchedulePayload(tx, candidate.controller);
       const event = scheduleEventFromReceipt(candidate, decoded, minedReceipt);
-      const operation = await hydrateScheduleEvent(client, event, currentTime, input.signal, decoded);
+      const operation = await hydrateScheduleEvent(
+        client,
+        event,
+        snapshotBlockNumber,
+        currentTime,
+        input.signal,
+        decoded,
+      );
       return { operation };
     } catch (error) {
       return {
@@ -537,9 +567,17 @@ export function decodeBoardroomVNextControllerScheduleCalldata(
   }
 }
 
+async function readSnapshotBlockNumber(client: PledgeCashGovernanceClient): Promise<bigint> {
+  if (!client.getBlockNumber) {
+    throw new Error("Governance operation hydration requires a client that can read the latest block.");
+  }
+  return client.getBlockNumber();
+}
+
 async function hydrateScheduleEvent(
   client: PledgeCashGovernanceClient,
   event: BoardroomVNextScheduleEvent,
+  snapshotBlockNumber: bigint,
   currentTime: bigint,
   signal?: AbortSignal,
   knownPayload?: DecodedBoardroomVNextControllerScheduleInput,
@@ -551,6 +589,7 @@ async function hydrateScheduleEvent(
   const payload = knownPayload ?? verifiedSchedulePayload(transaction!, event.controller);
   verifyPayloadAgainstEvent(payload, event);
 
+  // Operation IDs bind the configuration that existed when they were scheduled.
   const operationHash = await client.readContract({
     address: event.controller,
     abi: boardroomVNextControllerAbi,
@@ -572,6 +611,7 @@ async function hydrateScheduleEvent(
           payload.expectedConfigurationEpoch,
           event.proposer,
         ],
+    blockNumber: event.blockNumber,
   });
   if (!sameHex(operationHash as Hex, event.operationId)) {
     throw new Error("Schedule calldata does not match the controller operation hash.");
@@ -592,18 +632,50 @@ async function hydrateScheduleEvent(
       abi: boardroomVNextControllerAbi,
       functionName: "operationState",
       args: [event.operationId],
+      blockNumber: snapshotBlockNumber,
     }),
-    client.readContract({ address: event.boardroom, abi: boardroomDiamondAbi, functionName: "governanceEpoch" }),
-    client.readContract({ address: event.boardroom, abi: boardroomDiamondAbi, functionName: "controller" }),
-    client.readContract({ address: event.boardroom, abi: boardroomDiamondAbi, functionName: "controllerGeneration" }),
-    client.readContract({ address: event.boardroom, abi: boardroomDiamondAbi, functionName: "status" }),
-    client.readContract({ address: event.boardroom, abi: boardroomDiamondAbi, functionName: "facetSetHash" }),
+    client.readContract({
+      address: event.boardroom,
+      abi: boardroomDiamondAbi,
+      functionName: "governanceEpoch",
+      blockNumber: snapshotBlockNumber,
+    }),
+    client.readContract({
+      address: event.boardroom,
+      abi: boardroomDiamondAbi,
+      functionName: "controller",
+      blockNumber: snapshotBlockNumber,
+    }),
+    client.readContract({
+      address: event.boardroom,
+      abi: boardroomDiamondAbi,
+      functionName: "controllerGeneration",
+      blockNumber: snapshotBlockNumber,
+    }),
+    client.readContract({
+      address: event.boardroom,
+      abi: boardroomDiamondAbi,
+      functionName: "status",
+      blockNumber: snapshotBlockNumber,
+    }),
+    client.readContract({
+      address: event.boardroom,
+      abi: boardroomDiamondAbi,
+      functionName: "facetSetHash",
+      blockNumber: snapshotBlockNumber,
+    }),
     client.readContract({
       address: event.controller,
       abi: boardroomVNextControllerAbi,
       functionName: "configurationEpoch",
+      blockNumber: snapshotBlockNumber,
     }),
-    client.readContract({ address: event.controller, abi: boardroomVNextControllerAbi, functionName: "proposer" }),
+    client.readContract({
+      address: event.controller,
+      abi: boardroomVNextControllerAbi,
+      functionName: "proposer",
+      blockNumber: snapshotBlockNumber,
+    }),
   ]);
   const [eta, expiresAt, rawStatus] = operationState as readonly [bigint, bigint, number];
   if (eta !== event.eta || expiresAt !== event.expiresAt) {
