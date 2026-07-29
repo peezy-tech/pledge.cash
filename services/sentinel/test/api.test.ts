@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import { getAddress, type Address } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { createSiweMessage } from "viem/siwe";
 
@@ -24,8 +25,10 @@ import type {
   PublicActionsResponse,
   SubscriptionDto,
   TelegramLinkCodeResponse,
-  WalletDto
+  WalletDto,
+  WalletNonceResponse
 } from "../src/api/dto";
+import { AUTH_SIWE_MAX_MESSAGE_LENGTH } from "../src/api/dto";
 
 const WEB_ORIGIN = "https://pledge.cash";
 const FIXED_NOW = new Date("2026-07-09T12:00:00.000Z");
@@ -699,28 +702,56 @@ describe("Sentinel WP5 API", () => {
     ] as const;
 
     for (const request of requests) {
-      const response = await identityHarness.app.request(request.path, {
-        body: JSON.stringify(request.body),
-        headers: {
-          "Content-Type": "application/json",
-          ...(request.session ? { Cookie: SESSION_COOKIE } : {})
+      const response = await identityHarness.app.request(
+        request.path,
+        {
+          body: JSON.stringify(request.body),
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "192.0.2.250",
+            ...(request.session ? { Cookie: SESSION_COOKIE } : {})
+          },
+          method: "POST"
         },
-        method: "POST"
-      });
+        { clientIp: "198.51.100.7" }
+      );
       expect(response.status).toBe(200);
     }
 
     expect(
-      identityHarness.auth.socialStarts.map(({ link, request, userId }) => ({
-        link,
-        provider: request.provider,
-        userId
-      }))
+      identityHarness.auth.socialStarts.map(
+        ({ clientIp, link, request, userId }) => ({
+          clientIp,
+          link,
+          provider: request.provider,
+          userId
+        })
+      )
     ).toEqual([
-      { link: false, provider: "github", userId: undefined },
-      { link: false, provider: "telegram", userId: undefined },
-      { link: true, provider: "github", userId: USER_ID },
-      { link: true, provider: "telegram", userId: USER_ID }
+      {
+        clientIp: "198.51.100.7",
+        link: false,
+        provider: "github",
+        userId: undefined
+      },
+      {
+        clientIp: "198.51.100.7",
+        link: false,
+        provider: "telegram",
+        userId: undefined
+      },
+      {
+        clientIp: "198.51.100.7",
+        link: true,
+        provider: "github",
+        userId: USER_ID
+      },
+      {
+        clientIp: "198.51.100.7",
+        link: true,
+        provider: "telegram",
+        userId: USER_ID
+      }
     ]);
   });
 
@@ -1157,6 +1188,90 @@ describe("Sentinel WP5 API", () => {
         error: { message: "Authentication required" }
       });
     }
+  });
+
+  test("preserves Identity's checksum address for pre-rollout wallet-link clients", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const cookie = await signedInCookie(identityHarness);
+    const address = "0x8ba1f109551bd432803012645ac136ddd64dba72";
+    const checksumAddress = getAddress(address);
+    const issuedAt = FIXED_NOW;
+    const expirationTime = new Date(FIXED_NOW.getTime() + 10 * 60_000);
+    const challenge = {
+      address,
+      chainId: 1,
+      domain: "pledge.cash",
+      expirationTime: expirationTime.toISOString(),
+      issuedAt: issuedAt.toISOString(),
+      nonce: "0123456789abcdef",
+      statement: "Link this wallet to pledge.cash Sentinel notifications.",
+      uri: WEB_ORIGIN,
+      version: "1" as const
+    };
+    const message = createSiweMessage({
+      ...challenge,
+      address: checksumAddress,
+      expirationTime,
+      issuedAt
+    });
+    Object.assign(identityHarness.auth, {
+      createWalletChallenge: async () => ({ ...challenge, message })
+    });
+
+    const response = await identityHarness.app.request("/wallets/nonce", {
+      body: JSON.stringify({ address, chainId: 1 }),
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      method: "POST"
+    });
+
+    expect(response.status).toBe(200);
+    const returned = await readJson<WalletNonceResponse>(response);
+    expect(returned.address).toBe(checksumAddress);
+    expect(
+      createSiweMessage({
+        address: returned.address as Address,
+        chainId: returned.chainId!,
+        domain: returned.domain,
+        expirationTime: new Date(returned.expirationTime),
+        issuedAt: new Date(returned.issuedAt),
+        nonce: returned.nonce,
+        statement: returned.statement,
+        uri: returned.uri,
+        version: returned.version
+      })
+    ).toBe(returned.message);
+  });
+
+  test("rejects oversized wallet-link messages and request bodies before linking", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    let linkCalls = 0;
+    Object.assign(identityHarness.auth, {
+      linkWalletCredential: async () => {
+        linkCalls += 1;
+        throw new Error("unexpected wallet link");
+      }
+    });
+
+    const overlongMessage = await identityHarness.app.request("/wallets", {
+      body: JSON.stringify({
+        message: "a".repeat(AUTH_SIWE_MAX_MESSAGE_LENGTH + 1),
+        signature: "0x"
+      }),
+      headers: { "Content-Type": "application/json", Cookie: SESSION_COOKIE },
+      method: "POST"
+    });
+    const oversizedBody = await identityHarness.app.request("/wallets", {
+      body: JSON.stringify({
+        message: "a".repeat(AUTH_SIWE_MAX_MESSAGE_LENGTH * 2),
+        signature: "0x"
+      }),
+      headers: { "Content-Type": "application/json", Cookie: SESSION_COOKIE },
+      method: "POST"
+    });
+
+    expect(overlongMessage.status).toBe(400);
+    expect(oversizedBody.status).toBe(413);
+    expect(linkCalls).toBe(0);
   });
 
   test("links equal wallet credentials and controls alert coverage with chain and conflict checks", async () => {

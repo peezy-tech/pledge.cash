@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { getAddress, verifyMessage, type Address, type Hex } from "viem";
 import { parseSiweMessage } from "viem/siwe";
 
@@ -14,6 +15,7 @@ import {
   type SentinelApiDeps
 } from "../auth";
 import {
+  AUTH_SIWE_MAX_MESSAGE_LENGTH,
   DeleteWalletResponseSchema,
   LinkWalletRequestSchema,
   LinkWalletResponseSchema,
@@ -28,6 +30,7 @@ import {
 } from "../dto";
 
 const WALLET_NONCE_TTL_MS = 10 * 60 * 1_000;
+const WALLET_LINK_JSON_MAX_BODY_BYTES = AUTH_SIWE_MAX_MESSAGE_LENGTH * 2;
 
 function webOriginHost(webOrigin: string): string {
   return new URL(webOrigin).host;
@@ -73,6 +76,10 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
   const app = new Hono<ApiEnv>();
   const requireSession = createSessionMiddleware(deps);
   const rateLimit = createRateLimitMiddleware(deps, "wallets");
+  const walletLinkBodyLimit = bodyLimit({
+    maxSize: WALLET_LINK_JSON_MAX_BODY_BYTES,
+    onError: (c) => jsonError(c, 413, "Request body is too large")
+  });
 
   app.use("*", requireSession);
 
@@ -93,7 +100,15 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
         purpose: "link",
         userId: user.id
       });
-      return c.json(WalletNonceResponseSchema.parse(challenge));
+      return c.json(
+        WalletNonceResponseSchema.parse({
+          ...challenge,
+          // Identity normalizes its response address to lowercase, but the
+          // exact SIWE message uses checksum casing. Preserve that casing for
+          // pre-rollout clients that still reconstruct the signed message.
+          address: getAddress(challenge.address)
+        })
+      );
     }
 
     const issuedAt = getNow(deps);
@@ -116,7 +131,7 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     return c.json(response);
   });
 
-  app.post("/", rateLimit, async (c) => {
+  app.post("/", walletLinkBodyLimit, rateLimit, async (c) => {
     const parsed = await parseJson(c, LinkWalletRequestSchema);
     if (!parsed.ok) {
       return parsed.response;

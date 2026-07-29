@@ -380,7 +380,7 @@ export function createPeezyIdentityAuthAdapter(
                   : { errorCallbackURL: input.request.errorCallbackURL }),
                 providerId: PEEZY_PROVIDER_ID
               }),
-              headers: internalAuthHeaders(input.headers),
+              headers: internalAuthHeaders(input.headers, input.clientIp),
               method: "POST"
             })
           );
@@ -425,7 +425,7 @@ export function createPeezyIdentityAuthAdapter(
             providerId: PEEZY_PROVIDER_ID,
             requestSignUp: true
           }),
-          headers: internalAuthHeaders(input.headers),
+          headers: internalAuthHeaders(input.headers, input.clientIp),
           method: "POST"
         })
       );
@@ -692,23 +692,36 @@ function peezyWalletSessionPlugin(
                 "Legacy SIWE sign-in is limited to an existing PledgeCash wallet; refresh to use peezy.tech Identity"
               );
             }
-            const subject = await identitySubjectForProductUser(db, userId);
-            if (subject !== undefined) {
-              const centralIdentity = await identityHydrator.getFresh(subject);
-              const centralWallet = centralIdentity.credentials.find(
-                (credential) =>
-                  credential.kind === "wallet" &&
-                  credential.address.toLowerCase() === address &&
-                  credential.verifiedChainIds.includes(context.body.chainId)
+            const mappedSubject = await identitySubjectForProductUser(
+              db,
+              userId
+            );
+            // The compatibility import preserves every PledgeCash user UUID
+            // as its Identity subject. Until the local mapping is hydrated,
+            // that UUID is the only deterministic central account to trust.
+            const subject = mappedSubject ?? userId;
+            const centralIdentity = await identityHydrator.getFresh(subject);
+            if (centralIdentity.user.id !== subject) {
+              throw new Error("peezy.tech Identity subject mismatch");
+            }
+            const centralWallet = centralIdentity.credentials.find(
+              (credential) =>
+                credential.kind === "wallet" &&
+                credential.address.toLowerCase() === address &&
+                credential.verifiedChainIds.includes(context.body.chainId)
+            );
+            if (
+              centralWallet?.kind !== "wallet" ||
+              !centralWallet.signInEnabled
+            ) {
+              throw new Error(
+                "Wallet sign-in is not enabled by peezy.tech Identity"
               );
-              if (
-                centralWallet?.kind !== "wallet" ||
-                !centralWallet.signInEnabled
-              ) {
-                throw new Error(
-                  "Wallet sign-in is not enabled by peezy.tech Identity"
-                );
-              }
+            }
+            if (mappedSubject === undefined) {
+              await db.transaction((transaction) =>
+                bindIdentitySubject(transaction, subject, userId)
+              );
             }
             const [user] = await db
               .select()
@@ -1457,8 +1470,7 @@ async function linkIdentityWalletCredential(
   }
   const subject = input.subject;
 
-  const existingIdentity = await gateway.getIdentity(subject);
-  assertIdentityCredentialLimit(existingIdentity);
+  const existingIdentity = await identityHydrator.getFresh(subject);
   if (existingIdentity.user.id !== subject) {
     throw new Error("Identity wallet link subject mismatch");
   }

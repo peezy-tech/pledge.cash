@@ -304,6 +304,11 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       WHERE "scope" = 'pledge-cash:wallet-grant-link'
     `;
     expect(quotaAfterLink?.count).toBe("1");
+    const [readQuotaBeforeReplays] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "identity_quota_events"
+      WHERE "scope" = 'pledge-cash:presentation-read'
+    `;
 
     const replayStatuses = await Promise.all(
       Array.from({ length: 10 }, async () => {
@@ -329,6 +334,14 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       WHERE "scope" = 'pledge-cash:wallet-grant-link'
     `;
     expect(quotaAfterReplays?.count).toBe("1");
+    const [readQuotaAfterReplays] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "identity_quota_events"
+      WHERE "scope" = 'pledge-cash:presentation-read'
+    `;
+    expect(Number(readQuotaAfterReplays?.count ?? 0)).toBe(
+      Number(readQuotaBeforeReplays?.count ?? 0) + replayStatuses.length
+    );
 
     const [localCredential] = await dbClient.sql<{ count: string }[]>`
       SELECT count(*)::text AS "count"
@@ -670,6 +683,50 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       INSERT INTO "auth_wallets" ("user_id", "address", "chain_id", "is_primary")
       VALUES (${legacyUserId}::uuid, ${account.address}, 999, true)
     `;
+    await identitySql`
+      INSERT INTO "user" (
+        "id", "name", "email", "email_verified", "status", "created_at", "updated_at"
+      )
+      VALUES (
+        ${legacyUserId},
+        'Imported legacy client',
+        ${`${legacyUserId}@wallet.pledge.cash.invalid`},
+        false,
+        'active',
+        now(),
+        now()
+      )
+    `;
+    await identitySql`
+      INSERT INTO "wallet_principal" (
+        "id", "user_id", "family", "account_kind", "address",
+        "chain_id", "sign_in_enabled", "created_at", "updated_at"
+      )
+      VALUES (
+        ${randomUUID()},
+        ${legacyUserId},
+        'evm',
+        'eoa',
+        ${account.address},
+        NULL,
+        true,
+        now(),
+        now()
+      )
+    `;
+    await identitySql`
+      INSERT INTO "wallet_address" (
+        "id", "user_id", "address", "chain_id", "is_primary", "created_at"
+      )
+      VALUES (
+        ${randomUUID()},
+        ${legacyUserId},
+        ${account.address},
+        999,
+        true,
+        now()
+      )
+    `;
     const nonceResponse = await app.request(`${apiOrigin}/auth/siwe/nonce`, {
       body: JSON.stringify({
         chainId: 999,
@@ -720,13 +777,20 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       FROM "wallet_principal"
       WHERE lower("address") = ${account.address.toLowerCase()}
     `;
-    expect(centralClaim?.count).toBe("0");
+    expect(centralClaim?.count).toBe("1");
     const [localCredentials] = await dbClient.sql<{ count: string }[]>`
       SELECT count(*)::text AS "count"
       FROM "auth_wallets"
       WHERE lower("address") = ${account.address.toLowerCase()}
     `;
     expect(localCredentials?.count).toBe("1");
+    const [legacyMapping] = await dbClient.sql<{ subject: string }[]>`
+      SELECT "account_id" AS "subject"
+      FROM "auth_accounts"
+      WHERE "provider_id" = 'peezy'
+        AND "user_id" = ${legacyUserId}::uuid
+    `;
+    expect(legacyMapping?.subject).toBe(legacyUserId);
 
     const socialResponse = await app.request(
       `${apiOrigin}/auth/sign-in/social`,
@@ -741,7 +805,8 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
           "X-Forwarded-For": "192.0.2.6"
         },
         method: "POST"
-      }
+      },
+      { clientIp: "192.0.2.6" }
     );
     expect(socialResponse.status).toBe(200);
     expect(await socialResponse.json()).toMatchObject({
@@ -752,9 +817,14 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     const centralSignIn = await signInWallet(app, account);
     expect(centralSignIn.status).toBe(200);
     await identitySql`
-      UPDATE "wallet_principal"
-      SET "sign_in_enabled" = false
-      WHERE lower("address") = ${account.address.toLowerCase()}
+      UPDATE "user"
+      SET "status" = 'disabled', "updated_at" = now()
+      WHERE "id" = ${legacyUserId}
+    `;
+    await dbClient.sql`
+      DELETE FROM "auth_accounts"
+      WHERE "provider_id" = 'peezy'
+        AND "user_id" = ${legacyUserId}::uuid
     `;
     const disabledNonceResponse = await app.request(
       `${apiOrigin}/auth/siwe/nonce`,

@@ -63,10 +63,12 @@ wallet-dependent feature requires one. Current clients use the
 the previous social and `/auth/siwe/*` routes so clients loaded before a rolling
 deployment can finish authenticating. The legacy SIWE route accepts the
 previous client-built message only for a wallet already recorded on a
-PledgeCash account; it creates no new local or central credential, and an
-unrecognized wallet must reload before signing in. If that account is already
-mapped to Identity, the central wallet must still be sign-in-enabled for the
-signed chain. Every centrally linked EOA wallet can sign into the same subject.
+PledgeCash account and imported under the same UUID in Identity. It creates no
+new local or central credential, rejects a missing or disabled central account,
+requires the central wallet to remain sign-in-enabled for the signed chain, and
+lazily records the product-to-Identity mapping. An unrecognized or unimported
+wallet must reload before signing in. Every centrally linked EOA wallet can sign
+into the same subject.
 PledgeCash stores a local product shadow of that subject for its existing
 relational data and continues to own product sessions, alert coverage, delivery
 channels, subscriptions, and roles. Social and email matches never implicitly

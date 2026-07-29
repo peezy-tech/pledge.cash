@@ -139,7 +139,7 @@ export const WalletNonceResponseSchema = z.object({
 });
 
 export const LinkWalletRequestSchema = z.object({
-  message: z.string().min(1),
+  message: z.string().min(1).max(AUTH_SIWE_MAX_MESSAGE_LENGTH),
   signature: HexSchema
 });
 

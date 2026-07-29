@@ -118,6 +118,7 @@ export type AuthAdapter = {
     readonly verifiedAt: Date;
   }): Promise<WalletDto>;
   startSocial?(input: {
+    readonly clientIp?: string;
     readonly headers: Headers;
     readonly link: boolean;
     readonly request: AuthRedirectRequest;
@@ -515,6 +516,7 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
         headers: c.req.raw.headers,
         link,
         request,
+        ...(c.env?.clientIp === undefined ? {} : { clientIp: c.env.clientIp }),
         ...(userId === undefined ? {} : { userId })
       });
       copySetCookies(c, result.headers);

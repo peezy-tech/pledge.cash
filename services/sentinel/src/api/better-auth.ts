@@ -21,13 +21,9 @@ import type { AuthAdapter, SiweSignatureVerifier } from "./auth";
 export const ALERTS_SIWE_STATEMENT = "Sign in to pledge.cash alerts.";
 export const WALLET_LINK_SIWE_STATEMENT = "Link this wallet to pledge.cash Sentinel notifications.";
 const INTERNAL_AUTH_HEADER_ALLOWLIST = [
-  "cf-connecting-ip",
   "cookie",
   "origin",
-  "true-client-ip",
-  "user-agent",
-  "x-forwarded-for",
-  "x-real-ip"
+  "user-agent"
 ] as const;
 const SIWE_MAX_AGE_MS = 15 * 60 * 1_000;
 const SIWE_CLOCK_SKEW_MS = 5 * 60 * 1_000;
@@ -233,7 +229,7 @@ export function createBetterAuthAdapter(
       const response = await auth.handler(
         new Request(`${config.auth.baseUrl}/auth${path}`, {
           body: JSON.stringify(body),
-          headers: internalAuthHeaders(input.headers),
+          headers: internalAuthHeaders(input.headers, input.clientIp),
           method: "POST"
         })
       );
@@ -251,11 +247,18 @@ export function createBetterAuthAdapter(
   };
 }
 
-export function internalAuthHeaders(source: Headers): Headers {
+export function internalAuthHeaders(
+  source: Headers,
+  clientIp?: string
+): Headers {
   const headers = new Headers({ "Content-Type": "application/json" });
   for (const name of INTERNAL_AUTH_HEADER_ALLOWLIST) {
     const value = source.get(name);
     if (value !== null) headers.set(name, value);
+  }
+  const resolvedClientIp = clientIp?.trim();
+  if (resolvedClientIp) {
+    headers.set("X-Forwarded-For", resolvedClientIp);
   }
   return headers;
 }
