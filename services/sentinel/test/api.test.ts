@@ -79,6 +79,7 @@ class InMemoryStore implements SentinelApiStore {
   deliveriesByUser = new Map<string, NotificationDeliveryDto[]>();
   readonly linkCodes = new Map<string, { expiresAt: Date; userId: string }>();
   readonly nonces = new Map<string, WalletNonceRecord>();
+  readonly identityQuotaEvents = new Map<string, number[]>();
   channelsByUser = new Map<string, ChannelDto[]>();
   conflictedWallets = new Set<AddressDto>();
   lastPublicQuery: PublicActionsQuery | undefined;
@@ -340,19 +341,42 @@ class InMemoryStore implements SentinelApiStore {
     this.walletsByUser.set(input.userId, nextWallets);
     return nextWallets.find((wallet) => wallet.address === input.address) ?? null;
   }
+
+  async takeIdentityQuota(input: {
+    readonly capacity: number;
+    readonly now: Date;
+    readonly scope: string;
+    readonly windowMs: number;
+  }): Promise<boolean> {
+    const windowStart = input.now.getTime() - input.windowMs;
+    const events = (this.identityQuotaEvents.get(input.scope) ?? []).filter(
+      (consumedAt) => consumedAt > windowStart
+    );
+    if (events.length >= input.capacity) {
+      this.identityQuotaEvents.set(input.scope, events);
+      return false;
+    }
+    events.push(input.now.getTime());
+    this.identityQuotaEvents.set(input.scope, events);
+    return true;
+  }
 }
 
 function createHarness(
   options: {
     readonly rateLimit?: RateLimitConfig;
     readonly sharedIdentity?: boolean;
+    readonly store?: InMemoryStore;
   } = {}
 ) {
   const auth = new StubAuth();
   if (options.sharedIdentity === true) {
-    Object.assign(auth, { usesSharedIdentity: true });
+    Object.assign(auth, {
+      sharedIdentityClientId: "pledge-cash-test",
+      usesSharedIdentity: true
+    });
   }
-  const store = new InMemoryStore();
+  const store = options.store ?? new InMemoryStore();
   let nonceSequence = 0;
   const deps: SentinelApiDeps = {
     auth,
@@ -634,11 +658,16 @@ describe("Sentinel WP5 API", () => {
   });
 
   test("reserves shared Identity wallet-grant quota from anonymous traffic", async () => {
-    const identityHarness = createHarness({ sharedIdentity: true });
+    const store = new InMemoryStore();
+    const identityHarnesses = [
+      createHarness({ sharedIdentity: true, store }),
+      createHarness({ sharedIdentity: true, store })
+    ] as const;
     const request = await authSiweRequest();
     const statuses: number[] = [];
     for (let index = 0; index < 51; index += 1) {
-      const response = await identityHarness.app.request("/auth/siwe/verify", {
+      const harness = identityHarnesses[index % identityHarnesses.length]!;
+      const response = await harness.app.request("/auth/siwe/verify", {
         body: JSON.stringify({
           ...request,
           signature: `0x${"ab".repeat(66)}`
@@ -654,7 +683,12 @@ describe("Sentinel WP5 API", () => {
 
     expect(statuses.slice(0, 50).every((status) => status === 200)).toBe(true);
     expect(statuses[50]).toBe(429);
-    expect(identityHarness.auth.forwarded).toHaveLength(50);
+    expect(
+      identityHarnesses.reduce(
+        (total, harness) => total + harness.auth.forwarded.length,
+        0
+      )
+    ).toBe(50);
   });
 
   test("does not apply the shared Identity quota to legacy SIWE authentication", async () => {
@@ -700,10 +734,13 @@ describe("Sentinel WP5 API", () => {
   });
 
   test("reserves ten shared Identity grants for authenticated wallet links", async () => {
-    const identityHarness = createHarness({ sharedIdentity: true });
+    const store = new InMemoryStore();
+    const identityHarnesses = [
+      createHarness({ sharedIdentity: true, store }),
+      createHarness({ sharedIdentity: true, store })
+    ] as const;
     let linkCalls = 0;
-    Object.assign(identityHarness.auth, {
-      linkWalletCredential: async (
+    const linkWalletCredential = async (
         input: Parameters<NonNullable<AuthAdapter["linkWalletCredential"]>>[0]
       ): Promise<WalletDto> => {
         linkCalls += 1;
@@ -713,20 +750,22 @@ describe("Sentinel WP5 API", () => {
           canSignIn: true,
           verifiedAt: input.verifiedAt.toISOString()
         };
-      }
-    });
-    const cookie = await signedInCookie(identityHarness);
+      };
+    for (const harness of identityHarnesses) {
+      Object.assign(harness.auth, { linkWalletCredential });
+    }
     const request = await authSiweRequest();
     const statuses: number[] = [];
     for (let index = 0; index < 11; index += 1) {
-      const response = await identityHarness.app.request("/wallets", {
+      const harness = identityHarnesses[index % identityHarnesses.length]!;
+      const response = await harness.app.request("/wallets", {
         body: JSON.stringify({
           message: request.message,
           signature: request.signature
         }),
         headers: {
           "Content-Type": "application/json",
-          Cookie: cookie,
+          Cookie: SESSION_COOKIE,
           "X-Forwarded-For": `198.51.100.${index + 1}`
         },
         method: "POST"

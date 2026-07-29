@@ -148,6 +148,25 @@ describeWithDatabase("Better Auth Postgres integration", () => {
     expect(await afterLogout.json()).toBeNull();
   });
 
+  test("shares Identity client quotas across store instances", async () => {
+    const firstStore = createDrizzleApiStore(dbClient.db);
+    const secondStore = createDrizzleApiStore(dbClient.db);
+    const input = {
+      capacity: 2,
+      now: new Date(),
+      scope: `integration:${randomBytes(8).toString("hex")}`,
+      windowMs: 5 * 60_000
+    };
+
+    const results = await Promise.all([
+      firstStore.takeIdentityQuota(input),
+      secondStore.takeIdentityQuota(input),
+      firstStore.takeIdentityQuota(input)
+    ]);
+    expect(results.filter(Boolean)).toHaveLength(2);
+    expect(results.filter((result) => !result)).toHaveLength(1);
+  });
+
   test("rejects a SIWE message with an untrusted URI", async () => {
     const nonce = await authNonce(app, 10);
     const issuedAt = new Date();

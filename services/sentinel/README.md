@@ -76,12 +76,15 @@ alert state remain readable; starting a new central sign-in or credential link
 requires Identity to recover.
 
 When `PEEZY_IDENTITY_*` is entirely unset, Sentinel retains its previous
-wallet-first, self-hosted implementation as a rollback-compatible legacy mode.
-In either mode, alert coverage is separate from sign-in credentials. Ordinary
-sign-in and wallet linking remain EOA-only. ERC-1271 Boardroom control uses the
-separate chain-scoped flow below and never creates a wallet credential. Better
-Auth organization creation and UI remain disabled; an existing organization
-membership can be named as the destination of a Boardroom-control proof.
+wallet-first, self-hosted implementation as a separate legacy deployment mode.
+Disabling Identity is not an account rollback: shared-mode credentials are not
+mirrored into the legacy Better Auth providers, so changing modes requires a
+separate, explicit credential migration plan. In either mode, alert coverage is
+separate from sign-in credentials. Ordinary sign-in and wallet linking remain
+EOA-only. ERC-1271 Boardroom control uses the separate chain-scoped flow below
+and never creates a wallet credential. Better Auth organization creation and UI
+remain disabled; an existing organization membership can be named as the
+destination of a Boardroom-control proof.
 
 `POST /boardroom-control/challenges` creates an exactly serialized, five-minute SIWE challenge for one scope and one user or organization destination. `POST /boardroom-control/claims` accepts only the server nonce and controller signature. Sentinel re-resolves the v5 canonical Boardroom/controller topology and calls controller ERC-1271 at one pinned finalized block, rechecks the block hash, and atomically consumes the nonce with claim creation. Claims are audit receipts, not reusable authorization: every privileged Boardroom write must repeat the fresh challenge and proof flow. Unknown chains, legacy or incomplete release identities, changed controller generations or configuration epochs, malformed RPC results, and finality uncertainty fail closed.
 

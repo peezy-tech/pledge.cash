@@ -1012,6 +1012,11 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       identitySessionResponse,
       "peezy-identity.session_token"
     );
+    const [quotaBefore] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "identity_quota_events"
+      WHERE "scope" = 'pledge-cash:presentation-read'
+    `;
     const oidcStart = await app.request(`${apiOrigin}/auth/peezy/sign-in`, {
       body: JSON.stringify({
         callbackURL: `${webOrigin}/alerts`,
@@ -1037,6 +1042,14 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       headers: { Cookie: stateCookie }
     });
     expect(callbackResponse.status).toBe(302);
+    const [quotaAfter] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "identity_quota_events"
+      WHERE "scope" = 'pledge-cash:presentation-read'
+    `;
+    expect(Number(quotaAfter?.count ?? 0)).toBe(
+      Number(quotaBefore?.count ?? 0) + 1
+    );
     const productCookie = responseCookie(
       callbackResponse,
       "pledge-cash.session_token"

@@ -415,6 +415,23 @@ export const authVerifications = pgTable(
   })
 );
 
+export const identityQuotaEvents = pgTable(
+  "identity_quota_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    scope: text("scope").notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+  },
+  (table) => ({
+    scopeConsumedAtIdx: index("identity_quota_events_scope_consumed_at_idx").on(
+      table.scope,
+      table.consumedAt
+    )
+  })
+);
+
 export const organizationMembers = pgTable(
   "organization_members",
   {

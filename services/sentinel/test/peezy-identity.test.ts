@@ -99,7 +99,37 @@ test("hydrates wallet sign-in authority from the central Identity credential", a
     }
   };
   const db = {
-    select: () => query
+    select: () => query,
+    transaction: async (
+      callback: (transaction: {
+        delete(): {
+          where(): Promise<never[]>;
+        };
+        execute(): Promise<never[]>;
+        insert(): {
+          values(): Promise<never[]>;
+        };
+        select(): {
+          from(): {
+            where(): Promise<Array<{ value: number }>>;
+          };
+        };
+      }) => Promise<unknown>
+    ) =>
+      callback({
+        delete: () => ({
+          where: () => Promise.resolve([])
+        }),
+        execute: () => Promise.resolve([]),
+        insert: () => ({
+          values: () => Promise.resolve([])
+        }),
+        select: () => ({
+          from: () => ({
+            where: () => Promise.resolve([{ value: 0 }])
+          })
+        })
+      })
   } as unknown as SentinelDb;
   let identityReads = 0;
   const adapter = createPeezyIdentityAuthAdapter(config, db, async (input) => {

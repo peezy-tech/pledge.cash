@@ -29,6 +29,10 @@ import {
   walletOwners,
   wallets
 } from "../db/schema";
+import {
+  identityQuotaScope,
+  takeIdentityQuota
+} from "./identity-quota";
 import type {
   AddressDto,
   AuthRedirectResponse,
@@ -46,10 +50,10 @@ const PEEZY_PROVIDER_ID = "peezy";
 const IDENTITY_REQUEST_TIMEOUT_MS = 2_000;
 const IDENTITY_HYDRATION_CACHE_TTL_MS = 60_000;
 const IDENTITY_HYDRATION_CACHE_MAX_ENTRIES = 1_000;
-const IDENTITY_HYDRATION_READ_WINDOW_MS = 5 * 60_000;
-// Identity v0.1 allows 300 reads per client and window. Reserve 60 reads for
-// sign-in and linking paths that must bypass presentation-cache throttling.
-const IDENTITY_HYDRATION_READ_BUDGET = 240;
+const IDENTITY_PRESENTATION_READ_WINDOW_MS = 5 * 60_000;
+// Identity v0.1 allows 300 reads per client and window. Hydration and social
+// callbacks share 240 reads, leaving 60 for wallet sign-in and linking.
+const IDENTITY_PRESENTATION_READ_BUDGET = 240;
 const SOCIAL_PROVIDERS = new Set<SocialProvider>([
   "apple",
   "discord",
@@ -88,6 +92,8 @@ export function createPeezyIdentityAuthAdapter(
   const gateway = createIdentityGateway(identity, config.webOrigin, identityFetcher);
   const identityHydrator = createIdentityHydrator(
     gateway,
+    db,
+    identity.clientId,
     options.hydrationCacheMs ?? IDENTITY_HYDRATION_CACHE_TTL_MS
   );
   const requestContext = new AsyncLocalStorage<{
@@ -179,8 +185,7 @@ export function createPeezyIdentityAuthAdapter(
                 tokens.accessToken,
                 identityFetcher
               );
-              const centralIdentity = await gateway.getIdentity(profile.sub);
-              identityHydrator.set(profile.sub, centralIdentity);
+              const centralIdentity = await identityHydrator.get(profile.sub);
               const linkUserId = requestContext.getStore()?.linkUserId;
               const productUser = await provisionProductUser(db, centralIdentity, {
                 ...(linkUserId === undefined ? {} : { requiredUserId: linkUserId })
@@ -220,6 +225,7 @@ export function createPeezyIdentityAuthAdapter(
 
   return {
     socialProviders: [],
+    sharedIdentityClientId: identity.clientId,
     usesSharedIdentity: true,
     async createWalletChallenge({ address, chainId, purpose, userId }) {
       const subject =
@@ -566,6 +572,8 @@ function createIdentityGateway(
 
 function createIdentityHydrator(
   gateway: ReturnType<typeof createIdentityGateway>,
+  db: SentinelDb,
+  clientId: string,
   cacheTtlMs: number
 ): IdentityHydrator {
   const cache = new Map<
@@ -576,7 +584,6 @@ function createIdentityHydrator(
     string,
     { readonly read: Promise<IdentityMeResponse>; readonly token: symbol }
   >();
-  const readTimes: number[] = [];
   const ttlMs = Math.max(0, cacheTtlMs);
 
   const cacheIdentity = (subject: string, identity: IdentityMeResponse) => {
@@ -602,20 +609,19 @@ function createIdentityHydrator(
       const pendingRead = pending.get(subject);
       if (pendingRead !== undefined) return pendingRead.read;
 
-      while (
-        readTimes[0] !== undefined &&
-        readTimes[0] <= now - IDENTITY_HYDRATION_READ_WINDOW_MS
-      ) {
-        readTimes.shift();
-      }
-      if (readTimes.length >= IDENTITY_HYDRATION_READ_BUDGET) {
-        throw new Error("Identity hydration read budget exhausted");
-      }
-      readTimes.push(now);
-
       const token = Symbol(subject);
-      const read = gateway
-        .getIdentity(subject)
+      const read = takeIdentityQuota(db, {
+        capacity: IDENTITY_PRESENTATION_READ_BUDGET,
+        now: new Date(now),
+        scope: identityQuotaScope(clientId, "presentation-read"),
+        windowMs: IDENTITY_PRESENTATION_READ_WINDOW_MS
+      })
+        .then((admitted) => {
+          if (!admitted) {
+            throw new Error("Identity presentation read budget exhausted");
+          }
+          return gateway.getIdentity(subject);
+        })
         .then((identity) => {
           if (pending.get(subject)?.token === token) {
             cacheIdentity(subject, identity);

@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import type { BoardroomControlChainReader } from "../chain/boardroom-control";
 import type { BoardroomControlStore } from "./boardroom-control-store";
+import { identityQuotaScope } from "./identity-quota";
 
 import {
   AuthCapabilitiesResponseSchema,
@@ -60,6 +61,7 @@ export type AuthSession = {
 
 export type AuthAdapter = {
   readonly socialProviders: readonly SocialProviderDto[];
+  readonly sharedIdentityClientId?: string;
   readonly usesSharedIdentity?: boolean;
   createWalletChallenge?(input: {
     readonly address: AddressDto;
@@ -168,6 +170,12 @@ export type SentinelApiStore = {
     readonly alertsEnabled: boolean;
     readonly userId: string;
   }): Promise<WalletDto | null>;
+  takeIdentityQuota(input: {
+    readonly capacity: number;
+    readonly now: Date;
+    readonly scope: string;
+    readonly windowMs: number;
+  }): Promise<boolean>;
 };
 
 export type SiweSignatureVerifier = (input: {
@@ -342,35 +350,23 @@ export function createRateLimitMiddleware(
   };
 }
 
-export function createSlidingWindowQuota(
-  capacity: number,
-  windowMs: number
-): (nowMs: number) => boolean {
-  const requestTimes: number[] = [];
-
-  return (nowMs) => {
-    while (
-      requestTimes[0] !== undefined &&
-      requestTimes[0] <= nowMs - windowMs
-    ) {
-      requestTimes.shift();
-    }
-    if (requestTimes.length >= capacity) return false;
-    requestTimes.push(nowMs);
-    return true;
-  };
-}
-
-function createGlobalSlidingWindowRateLimitMiddleware(
+function createIdentityQuotaMiddleware(
   deps: SentinelApiDeps,
+  kind: "wallet-grant-public",
   capacity: number,
   windowMs: number
 ): MiddlewareHandler<ApiEnv> {
-  const take = createSlidingWindowQuota(capacity, windowMs);
-
   return async (c, next) => {
-    const nowMs = getNow(deps).getTime();
-    if (!take(nowMs)) {
+    const admitted = await deps.store.takeIdentityQuota({
+      capacity,
+      now: getNow(deps),
+      scope: identityQuotaScope(
+        deps.auth.sharedIdentityClientId ?? "shared-identity",
+        kind
+      ),
+      windowMs
+    });
+    if (!admitted) {
       return jsonError(c, 429, "Rate limit exceeded");
     }
     return await next();
@@ -388,8 +384,9 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       refillMs: IDENTITY_RATE_WINDOW_MS
     }
   );
-  const publicSiweGlobalRateLimit = createGlobalSlidingWindowRateLimitMiddleware(
+  const publicSiweGlobalRateLimit = createIdentityQuotaMiddleware(
     deps,
+    "wallet-grant-public",
     PUBLIC_SIWE_GLOBAL_LIMIT,
     IDENTITY_RATE_WINDOW_MS
   );
