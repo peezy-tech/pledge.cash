@@ -34,6 +34,7 @@ import {
 } from "./better-auth";
 
 const PEEZY_PROVIDER_ID = "peezy";
+const IDENTITY_METADATA_TIMEOUT_MS = 2_000;
 const SOCIAL_PROVIDERS = new Set<SocialProvider>([
   "apple",
   "discord",
@@ -44,17 +45,30 @@ const SOCIAL_PROVIDERS = new Set<SocialProvider>([
 
 type IdentityConfig = NonNullable<Config["auth"]["identity"]>;
 type IdentityFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type PeezyIdentityAuthAdapterOptions = {
+  readonly metadataTimeoutMs?: number;
+};
 
 export function createPeezyIdentityAuthAdapter(
   config: Pick<Config, "auth" | "webOrigin">,
   db: SentinelDb,
-  fetcher: IdentityFetch = fetch
+  fetcher: IdentityFetch = fetch,
+  options: PeezyIdentityAuthAdapterOptions = {}
 ): AuthAdapter {
   if (config.auth.identity === undefined) {
     throw new Error("peezy.tech Identity is not configured");
   }
   const identity = config.auth.identity;
-  const gateway = createIdentityGateway(identity, config.webOrigin, fetcher);
+  const metadataFetcher = createTimeoutFetcher(
+    fetcher,
+    options.metadataTimeoutMs ?? IDENTITY_METADATA_TIMEOUT_MS
+  );
+  const gateway = createIdentityGateway(
+    identity,
+    config.webOrigin,
+    fetcher,
+    metadataFetcher
+  );
   const auth = betterAuth({
     appName: "pledge.cash",
     basePath: "/auth",
@@ -139,7 +153,7 @@ export function createPeezyIdentityAuthAdapter(
               const profile = await fetchIdentityProfile(
                 identity.baseUrl,
                 tokens.accessToken,
-                fetcher
+                metadataFetcher
               );
               const centralIdentity = await gateway.getIdentity(profile.sub);
               const productUser = await provisionProductUser(db, centralIdentity.user);
@@ -336,7 +350,8 @@ function peezyWalletSessionPlugin(
 function createIdentityGateway(
   identity: IdentityConfig,
   webOrigin: string,
-  fetcher: IdentityFetch
+  fetcher: IdentityFetch,
+  metadataFetcher: IdentityFetch
 ) {
   const client = {
     baseUrl: identity.baseUrl,
@@ -346,7 +361,7 @@ function createIdentityGateway(
   };
   return {
     async capabilities() {
-      const response = await fetcher(`${identity.baseUrl}/v1/capabilities`, {
+      const response = await metadataFetcher(`${identity.baseUrl}/v1/capabilities`, {
         headers: { Accept: "application/json" }
       });
       if (!response.ok) {
@@ -371,12 +386,41 @@ function createIdentityGateway(
       }),
     exchangeWalletGrant: (grant: string) =>
       exchangeWalletGrant({ ...client, grant }),
-    getIdentity: (subject: string) => getIdentity({ ...client, subject }),
+    getIdentity: (subject: string) =>
+      getIdentity({ ...client, fetcher: metadataFetcher, subject }),
     issueWalletGrant: (input: {
       message: string;
       signature: string;
       subject?: string;
     }) => issueWalletGrant({ ...client, ...input })
+  };
+}
+
+function createTimeoutFetcher(
+  fetcher: IdentityFetch,
+  timeoutMs: number
+): IdentityFetch {
+  return async (input, init) => {
+    const controller = new AbortController();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => {
+        const error = new Error(
+          `Identity metadata request timed out after ${timeoutMs}ms`
+        );
+        controller.abort(error);
+        reject(error);
+      }, timeoutMs);
+    });
+
+    try {
+      return await Promise.race([
+        fetcher(input, { ...init, signal: controller.signal }),
+        deadline
+      ]);
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+    }
   };
 }
 
