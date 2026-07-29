@@ -574,6 +574,20 @@ export type DiscoveredBoardroom = {
   transactionHash: Hex;
 };
 
+export type DiscoveredBoardroomVNext = {
+  boardroom: Address;
+  owner: Address;
+  policyRegistry: Address;
+  wrappedNative: Address;
+  shareToken: Address;
+  name: string;
+  symbol: string;
+  salt: Hex;
+  facetSetHash: Hex;
+  createdAtBlock: bigint;
+  transactionHash: Hex;
+};
+
 export type DiscoveredDistribution = {
   distribution: Address;
   boardroom: Address;

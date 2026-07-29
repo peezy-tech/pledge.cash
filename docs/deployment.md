@@ -380,6 +380,35 @@ If `VITE_PLEDGE_CASH_CHAIN_ID` is set to another chain id, the app preserves the
 adding a custom selectable profile from `VITE_PLEDGE_CASH_RPC_URL`, `VITE_PLEDGE_CASH_CHAIN_NAME`,
 `VITE_PLEDGE_CASH_EXPLORER_URL`, and `VITE_PLEDGE_CASH_WRAPPED_NATIVE_SYMBOL`.
 
+## Local vNext Boardroom Lifecycle Proof
+
+The vNext Boardroom prototype has a separate, proof-only lifecycle harness. Start a fresh dedicated Anvil instance; do
+not point the harness at the semi-persistent v5 seed chain:
+
+```sh
+anvil --port 8547 --chain-id 31337
+```
+
+In another shell, run:
+
+```sh
+LOCAL_RPC_URL=http://127.0.0.1:8547 \
+bun run scenario:diamond-vnext:local
+```
+
+The wrapper uses Anvil's first two public development keys and runs four phased Forge broadcasts. Between phases it
+mines the stake checkpoint, advances the controller delay, proves the release-B write gate reverts with
+`StorageMigrationRequired`, and advances the cancelled curve's 30-day unwind grace. It accepts the run only when the
+checkpoint phase is `complete`, migration is cleared, and every primary and auxiliary Boardroom reports zero active
+obligations. The expanded proof uses three Boardrooms: the primary lifecycle, a cancelled curve that completes its
+sell-only unwind, and a graduated curve whose reservation becomes canonical locked liquidity before wind-down.
+
+The ignored checkpoint is
+`packages/contracts/deployments/31337.diamond-vnext.local.json`, separate from both the v5 deployment artifact and its
+seed manifest. Set `PLEDGE_CASH_VNEXT_DEPLOYMENT_PATH` to another path under `packages/contracts/deployments/` for an
+isolated proof. These broadcasts are local architecture evidence only: they neither update a checked-in target-chain
+artifact nor authorize a testnet or mainnet deployment.
+
 ## Local Anvil Seed
 
 For a semi-persistent local deployment, run Anvil on chain id `31337`, broadcast

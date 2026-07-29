@@ -5,3 +5,5 @@ export * from "./helpers/discovery";
 export * from "./helpers/governance";
 export * from "./helpers/errors";
 export * from "./helpers/releases";
+export * from "./helpers/vnext";
+export * from "./helpers/vnext-release";

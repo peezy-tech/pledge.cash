@@ -6,13 +6,16 @@ import {
   ammRouterAbi,
   boardroomAbi,
   boardroomControllerAbi,
+  boardroomVNextControllerAbi,
   boardroomControllerFactoryAbi,
+  boardroomDiamondAbi,
   boardroomGovernanceLogicAbi,
   boardroomMarketLogicAbi,
   boardroomRedemptionPayoutAbi,
   boardroomRewardsAbi,
   boardroomRewardsFactoryAbi,
   boardroomTokenAbi,
+  boardroomVNextFactoryAbi,
   distributionFactoryAbi,
   dutchAuctionSaleAbi,
   fixedPriceSaleAbi,
@@ -23,6 +26,7 @@ import {
   pledgeCashAbis,
   pledgeCashDeployments,
   poolFeesAbi,
+  protocolFacetRegistryAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
 } from "../src";
@@ -36,11 +40,14 @@ describe("generated SDK exports", () => {
     expect(pledgeCashAbis.AmmRouter).toBe(ammRouterAbi);
     expect(pledgeCashAbis.BoardroomGovernanceLogic).toBe(boardroomGovernanceLogicAbi);
     expect(pledgeCashAbis.BoardroomController).toBe(boardroomControllerAbi);
+    expect(pledgeCashAbis.BoardroomVNextController).toBe(boardroomVNextControllerAbi);
     expect(pledgeCashAbis.BoardroomControllerFactory).toBe(boardroomControllerFactoryAbi);
+    expect(pledgeCashAbis.BoardroomDiamond).toBe(boardroomDiamondAbi);
     expect(pledgeCashAbis.BoardroomMarketLogic).toBe(boardroomMarketLogicAbi);
     expect(pledgeCashAbis.BoardroomRedemptionPayout).toBe(boardroomRedemptionPayoutAbi);
     expect(pledgeCashAbis.BoardroomRewards).toBe(boardroomRewardsAbi);
     expect(pledgeCashAbis.BoardroomRewardsFactory).toBe(boardroomRewardsFactoryAbi);
+    expect(pledgeCashAbis.BoardroomVNextFactory).toBe(boardroomVNextFactoryAbi);
     expect(pledgeCashAbis.FixedPriceSale).toBe(fixedPriceSaleAbi);
     expect(pledgeCashAbis.DutchAuctionSale).toBe(dutchAuctionSaleAbi);
     expect(pledgeCashAbis.LockedLiquidity).toBe(lockedLiquidityAbi);
@@ -48,6 +55,7 @@ describe("generated SDK exports", () => {
     expect(pledgeCashAbis.MerkleAirdrop).toBe(merkleAirdropAbi);
     expect(pledgeCashAbis.MigratingBondingCurve).toBe(migratingBondingCurveAbi);
     expect(pledgeCashAbis.PoolFees).toBe(poolFeesAbi);
+    expect(pledgeCashAbis.ProtocolFacetRegistry).toBe(protocolFacetRegistryAbi);
     expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "createGrant")).toBe(true);
     expect(tokenGrantFactoryAbi.some((item) => item.type === "function" && item.name === "predictGrantAddress")).toBe(true);
     expect(distributionFactoryAbi.some((item) => item.type === "function" && item.name === "createFixedPriceSale")).toBe(true);
@@ -63,6 +71,35 @@ describe("generated SDK exports", () => {
   });
 
   test("includes governance and participation functions consumed by helpers", () => {
+    expect(functionNames(boardroomDiamondAbi)).toEqual(expect.arrayContaining([
+      "appliedStorageVersion",
+      "claimRedemptionAsset",
+      "execute",
+      "facetRegistry",
+      "facetSetHash",
+      "migrateBoardroom",
+      "migrationRequired",
+      "redeem",
+      "startWindDown",
+    ]));
+    expect(functionNames(protocolFacetRegistryAbi)).toEqual(expect.arrayContaining([
+      "activeFacetSetHash",
+      "activeRelease",
+      "activeStorageVersion",
+      "facetSetMetadata",
+      "facetSetRoute",
+      "facetSetSelectors",
+      "facets",
+    ]));
+    expect(functionNames(boardroomVNextFactoryAbi)).toEqual(expect.arrayContaining([
+      "createBoardroom",
+      "predictBoardroomAddress",
+    ]));
+    expect(functionNames(boardroomVNextControllerAbi)).toEqual(expect.arrayContaining([
+      "executeBoardroomOperation",
+      "hashBoardroomOperation",
+      "scheduleBoardroomOperation",
+    ]));
     expect(functionNames(boardroomAbi)).toEqual(expect.arrayContaining([
       "assetSnapshotProgress",
       "beginSnapshot",
