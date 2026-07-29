@@ -85,10 +85,12 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       if (parsed.value.address === undefined || parsed.value.chainId === undefined) {
         return jsonError(c, 400, "address and chainId are required");
       }
+      const user = c.get("user");
       const challenge = await deps.auth.createWalletChallenge({
         address: normalizeAddress(parsed.value.address),
         chainId: parsed.value.chainId,
-        purpose: "link"
+        purpose: "link",
+        userId: user.id
       });
       return c.json(WalletNonceResponseSchema.parse(challenge));
     }

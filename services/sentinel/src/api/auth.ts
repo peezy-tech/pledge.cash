@@ -52,6 +52,7 @@ export type AuthAdapter = {
     readonly address: AddressDto;
     readonly chainId: number;
     readonly purpose: "link" | "sign-in";
+    readonly userId?: string;
   }): Promise<AuthSiweNonceResponse & {
     readonly address: AddressDto;
     readonly chainId: number;
@@ -62,6 +63,10 @@ export type AuthAdapter = {
     readonly uri: string;
     readonly version: "1";
   }>;
+  hydrateAuthSnapshot?(
+    userId: string,
+    snapshot: AuthSnapshot
+  ): Promise<AuthSnapshot>;
   getProviders?(userId: string): Promise<AuthProviderDto[]>;
   getSocialProviders?(): Promise<SocialProviderDto[]>;
   getSession(input: { readonly headers: Headers }): Promise<AuthSession | null>;
@@ -323,18 +328,37 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     }
 
     const user = UserDtoSchema.parse({ id: session.user.id });
-    const snapshot = await deps.store.getAuthSnapshot(user.id);
-    let providers = snapshot.providers;
-    try {
-      providers = (await deps.auth.getProviders?.(user.id)) ?? providers;
-    } catch {
-      // Provider labels are presentation data. Do not turn an Identity outage
-      // into revocation of an otherwise valid PledgeCash product session.
+    let snapshot = await deps.store.getAuthSnapshot(user.id);
+    if (deps.auth.hydrateAuthSnapshot !== undefined) {
+      try {
+        snapshot = await deps.auth.hydrateAuthSnapshot(user.id, snapshot);
+      } catch {
+        // Keep the product session readable during an Identity outage, but do
+        // not claim that an unverified wallet still has central sign-in authority.
+        snapshot = {
+          ...snapshot,
+          providers: snapshot.providers.filter((provider) => provider !== "siwe"),
+          wallets: snapshot.wallets.map((wallet) => ({
+            ...wallet,
+            canSignIn: false
+          }))
+        };
+      }
+    } else {
+      try {
+        snapshot = {
+          ...snapshot,
+          providers:
+            (await deps.auth.getProviders?.(user.id)) ?? snapshot.providers
+        };
+      } catch {
+        // Provider labels are presentation data. Do not turn an Identity outage
+        // into revocation of an otherwise valid PledgeCash product session.
+      }
     }
     const response: AuthMeResponse = AuthMeResponseSchema.parse({
       user,
-      ...snapshot,
-      providers
+      ...snapshot
     });
     return c.json(response);
   });

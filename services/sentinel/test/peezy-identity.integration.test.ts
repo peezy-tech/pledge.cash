@@ -37,6 +37,12 @@ const legacyWallet = privateKeyToAccount(
 const conflictedWallet = privateKeyToAccount(
   "0x1111111111111111111111111111111111111111111111111111111111111111"
 );
+const secondLegacyWallet = privateKeyToAccount(
+  "0x2222222222222222222222222222222222222222222222222222222222222222"
+);
+const migrationWallet = privateKeyToAccount(
+  "0x3333333333333333333333333333333333333333333333333333333333333333"
+);
 
 describeWithIdentity("peezy.tech Identity compatibility integration", () => {
   let adminSql: Sql;
@@ -330,6 +336,33 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       WHERE lower("address") = ${conflictedWallet.address.toLowerCase()}
     `;
     expect(centralConflict?.count).toBe("0");
+
+    await identitySql`
+      UPDATE "wallet_principal"
+      SET "sign_in_enabled" = false
+      WHERE lower("address") IN (
+        ${firstWallet.address.toLowerCase()},
+        ${secondWallet.address.toLowerCase()}
+      )
+    `;
+    const disabledResponse = await app.request(`${apiOrigin}/auth/me`, {
+      headers: { Cookie: cookie, Origin: webOrigin }
+    });
+    expect(disabledResponse.status).toBe(200);
+    const disabledSnapshot = (await disabledResponse.json()) as {
+      providers: string[];
+      wallets: Array<{ address: string; canSignIn: boolean }>;
+    };
+    expect(disabledSnapshot.providers).not.toContain("siwe");
+    const disabledWallets = disabledSnapshot.wallets.filter((wallet) =>
+      [firstWallet.address, secondWallet.address]
+        .map((address) => address.toLowerCase())
+        .includes(wallet.address)
+    );
+    expect(disabledWallets).toHaveLength(2);
+    expect(disabledWallets.every((wallet) => wallet.canSignIn === false)).toBe(
+      true
+    );
   });
 
   test("maps a central subject back to legacy PledgeCash product data by wallet ownership", async () => {
@@ -422,6 +455,231 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
           alertsEnabled: false
         }
       ]
+    });
+    const [mapping] = await dbClient.sql<{ subject: string }[]>`
+      SELECT "account_id" AS "subject"
+      FROM "auth_accounts"
+      WHERE "provider_id" = 'peezy'
+        AND "user_id" = ${legacyUserId}::uuid
+    `;
+    expect(mapping?.subject).toBeDefined();
+    expect(mapping?.subject).not.toBe(legacyUserId);
+  });
+
+  test("refuses to bind a second central subject to one legacy product user", async () => {
+    const legacyUserId = randomUUID();
+    await dbClient.sql`
+      INSERT INTO "users" (
+        "id", "name", "email", "email_verified", "created_at", "updated_at"
+      )
+      VALUES (
+        ${legacyUserId}::uuid,
+        'Multi-wallet legacy user',
+        ${`${legacyUserId}@wallet.pledge.cash.invalid`},
+        false,
+        now(),
+        now()
+      )
+    `;
+    await dbClient.sql`
+      INSERT INTO "wallets" (
+        "user_id", "address", "chain_id", "alerts_enabled", "verified_at"
+      )
+      VALUES
+        (
+          ${legacyUserId}::uuid,
+          ${secondLegacyWallet.address.toLowerCase()},
+          999,
+          true,
+          now()
+        ),
+        (
+          ${legacyUserId}::uuid,
+          ${migrationWallet.address.toLowerCase()},
+          999,
+          true,
+          now()
+        )
+    `;
+
+    const firstSignIn = await signInWallet(app, secondLegacyWallet);
+    expect(firstSignIn.status).toBe(200);
+    const secondSignIn = await signInWallet(app, migrationWallet);
+    expect(secondSignIn.status).toBe(401);
+
+    const [mappingCount] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "auth_accounts"
+      WHERE "provider_id" = 'peezy'
+        AND "user_id" = ${legacyUserId}::uuid
+    `;
+    expect(mappingCount?.count).toBe("1");
+  });
+
+  test("migrates an existing unmapped product session while linking credentials", async () => {
+    const legacyUserId = randomUUID();
+    const sessionWallet = privateKeyToAccount(
+      "0x4444444444444444444444444444444444444444444444444444444444444444"
+    );
+    const linkedWallet = privateKeyToAccount(
+      "0x5555555555555555555555555555555555555555555555555555555555555555"
+    );
+    await dbClient.sql`
+      INSERT INTO "users" (
+        "id", "name", "email", "email_verified", "created_at", "updated_at"
+      )
+      VALUES (
+        ${legacyUserId}::uuid,
+        'Unmapped legacy user',
+        ${`${legacyUserId}@wallet.pledge.cash.invalid`},
+        false,
+        now(),
+        now()
+      )
+    `;
+    await dbClient.sql`
+      INSERT INTO "wallets" (
+        "user_id", "address", "chain_id", "alerts_enabled", "verified_at"
+      )
+      VALUES (
+        ${legacyUserId}::uuid,
+        ${sessionWallet.address.toLowerCase()},
+        999,
+        true,
+        now()
+      )
+    `;
+    const signIn = await signInWallet(app, sessionWallet);
+    expect(signIn.status).toBe(200);
+    const cookie = responseCookie(signIn, "pledge-cash.session_token");
+    const [initialMapping] = await dbClient.sql<{ subject: string }[]>`
+      SELECT "account_id" AS "subject"
+      FROM "auth_accounts"
+      WHERE "provider_id" = 'peezy'
+        AND "user_id" = ${legacyUserId}::uuid
+    `;
+    if (initialMapping === undefined) {
+      throw new Error("Expected initial peezy.tech subject mapping");
+    }
+    const handoffResponse = await fetch(
+      `${identityUrl}/v1/social-link-handoffs`,
+      {
+        body: JSON.stringify({
+          callbackUrl: `${webOrigin}/alerts`,
+          clientId: "pledge-cash",
+          provider: "github",
+          subject: initialMapping.subject
+        }),
+        headers: {
+          Authorization: `Basic ${Buffer.from(
+            `pledge-cash:${identityAppSecret}`
+          ).toString("base64")}`,
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      }
+    );
+    expect(handoffResponse.status).toBe(201);
+    const handoff = (await handoffResponse.json()) as { url: string };
+    const identitySessionResponse = await fetch(handoff.url, {
+      redirect: "manual"
+    });
+    expect(identitySessionResponse.status).toBe(302);
+    const identityCookie = responseCookie(
+      identitySessionResponse,
+      "peezy-identity.session_token"
+    );
+    await dbClient.sql`
+      DELETE FROM "auth_accounts"
+      WHERE "provider_id" = 'peezy'
+        AND "user_id" = ${legacyUserId}::uuid
+    `;
+
+    const socialLinkResponse = await app.request(
+      `${apiOrigin}/auth/peezy/link`,
+      {
+        body: JSON.stringify({
+          callbackURL: `${webOrigin}/alerts`,
+          errorCallbackURL: `${webOrigin}/alerts`,
+          provider: "github"
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: cookie,
+          Origin: webOrigin
+        },
+        method: "POST"
+      }
+    );
+    expect(socialLinkResponse.status).toBe(200);
+    const socialLink = (await socialLinkResponse.json()) as { url: string };
+    expect(new URL(socialLink.url).searchParams.get("login_hint")).toBe(
+      "github"
+    );
+    const stateCookie = responseCookie(
+      socialLinkResponse,
+      "pledge-cash.state"
+    );
+    const authorizationResponse = await fetch(socialLink.url, {
+      headers: { Cookie: identityCookie },
+      redirect: "manual"
+    });
+    expect(authorizationResponse.status).toBe(302);
+    const callbackUrl = authorizationResponse.headers.get("location");
+    if (!callbackUrl) throw new Error("Expected OIDC callback redirect");
+    const callbackResponse = await app.request(callbackUrl, {
+      headers: { Cookie: stateCookie }
+    });
+    expect(callbackResponse.status).toBe(302);
+    const [socialMapping] = await dbClient.sql<{ subject: string }[]>`
+      SELECT "account_id" AS "subject"
+      FROM "auth_accounts"
+      WHERE "provider_id" = 'peezy'
+        AND "user_id" = ${legacyUserId}::uuid
+    `;
+    expect(socialMapping?.subject).toBe(initialMapping.subject);
+    await dbClient.sql`
+      DELETE FROM "auth_accounts"
+      WHERE "provider_id" = 'peezy'
+        AND "user_id" = ${legacyUserId}::uuid
+    `;
+
+    const nonceResponse = await app.request(`${apiOrigin}/wallets/nonce`, {
+      body: JSON.stringify({
+        address: linkedWallet.address,
+        chainId: 999
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookie,
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+    expect(nonceResponse.status).toBe(200);
+    const challenge = (await nonceResponse.json()) as { message: string };
+    const signature = await linkedWallet.signMessage({
+      message: challenge.message
+    });
+    const linkResponse = await app.request(`${apiOrigin}/wallets`, {
+      body: JSON.stringify({
+        message: challenge.message,
+        signature
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookie,
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+    const linkBody = await linkResponse.json();
+    expect(linkResponse.status, JSON.stringify(linkBody)).toBe(200);
+    expect(linkBody).toMatchObject({
+      wallet: {
+        address: linkedWallet.address.toLowerCase(),
+        canSignIn: true
+      }
     });
     const [mapping] = await dbClient.sql<{ subject: string }[]>`
       SELECT "account_id" AS "subject"
@@ -727,4 +985,39 @@ function responseCookie(response: Response, name: string): string {
     }
   }
   throw new Error(`Expected ${name} cookie`);
+}
+
+async function signInWallet(
+  app: ReturnType<typeof createApp>,
+  wallet: ReturnType<typeof privateKeyToAccount>
+): Promise<Response> {
+  const nonceResponse = await app.request(`${apiOrigin}/auth/siwe/nonce`, {
+    body: JSON.stringify({
+      chainId: 999,
+      walletAddress: wallet.address
+    }),
+    headers: {
+      "Content-Type": "application/json",
+      Origin: webOrigin
+    },
+    method: "POST"
+  });
+  expect(nonceResponse.status).toBe(200);
+  const challenge = (await nonceResponse.json()) as { message: string };
+  const signature = await wallet.signMessage({
+    message: challenge.message
+  });
+  return app.request(`${apiOrigin}/auth/siwe/verify`, {
+    body: JSON.stringify({
+      chainId: 999,
+      message: challenge.message,
+      signature,
+      walletAddress: wallet.address
+    }),
+    headers: {
+      "Content-Type": "application/json",
+      Origin: webOrigin
+    },
+    method: "POST"
+  });
 }

@@ -53,7 +53,7 @@ export const UserDtoSchema = z.object({
 export const WalletDtoSchema = z.object({
   alertsEnabled: z.boolean(),
   address: AddressSchema,
-  canSignIn: z.literal(true),
+  canSignIn: z.boolean(),
   verifiedAt: IsoDateSchema
 });
 

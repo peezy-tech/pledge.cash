@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { privateKeyToAccount } from "viem/accounts";
 import { createSiweMessage } from "viem/siwe";
 
-import { type AuthAdapter, type WalletNonceRecord } from "../src/api/auth";
+import {
+  type AuthAdapter,
+  type AuthSnapshot,
+  type WalletNonceRecord
+} from "../src/api/auth";
 import { createApp, type SentinelApiDeps, type SentinelApiStore } from "../src/api/server";
 import type {
   AddressDto,
@@ -475,6 +479,53 @@ describe("Sentinel WP5 API", () => {
     expect(await readJson<AuthMeResponse>(me)).toMatchObject({
       providers: ["siwe"],
       user: { id: USER_ID }
+    });
+  });
+
+  test("uses shared Identity hydration and fails closed on wallet sign-in metadata", async () => {
+    harness.store.providersByUser.set(USER_ID, ["siwe"]);
+    harness.store.walletsByUser.set(USER_ID, [
+      {
+        alertsEnabled: true,
+        address: PRIMARY_WALLET,
+        canSignIn: true,
+        verifiedAt: FIXED_NOW.toISOString()
+      }
+    ]);
+    Object.assign(harness.auth, {
+      hydrateAuthSnapshot: async (
+        _userId: string,
+        snapshot: AuthSnapshot
+      ): Promise<AuthSnapshot> => ({
+        ...snapshot,
+        providers: [],
+        wallets: snapshot.wallets.map((wallet) => ({
+          ...wallet,
+          canSignIn: false
+        }))
+      })
+    });
+    const cookie = await signedInCookie(harness);
+
+    const hydrated = await harness.app.request("/auth/me", {
+      headers: { Cookie: cookie }
+    });
+    expect(await readJson<AuthMeResponse>(hydrated)).toMatchObject({
+      providers: [],
+      wallets: [{ canSignIn: false }]
+    });
+
+    Object.assign(harness.auth, {
+      hydrateAuthSnapshot: async () => {
+        throw new Error("Identity unavailable");
+      }
+    });
+    const unavailable = await harness.app.request("/auth/me", {
+      headers: { Cookie: cookie }
+    });
+    expect(await readJson<AuthMeResponse>(unavailable)).toMatchObject({
+      providers: [],
+      wallets: [{ canSignIn: false }]
     });
   });
 

@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import {
   IdentityCapabilitiesSchema,
   type IdentityMeResponse,
@@ -20,16 +22,21 @@ import { z } from "zod";
 
 import type { Config } from "../config";
 import type { SentinelDb } from "../db/client";
-import { authAccounts, users, walletOwners, wallets } from "../db/schema";
+import {
+  authAccounts,
+  authVerifications,
+  users,
+  walletOwners,
+  wallets
+} from "../db/schema";
 import type {
   AddressDto,
-  AuthProviderDto,
   AuthRedirectResponse,
   AuthSiweNonceResponse,
   SocialProviderDto,
   WalletDto
 } from "./dto";
-import type { AuthAdapter } from "./auth";
+import type { AuthAdapter, AuthSnapshot } from "./auth";
 import {
   createSentinelAuthDatabaseAdapter,
   internalAuthHeaders
@@ -67,6 +74,9 @@ export function createPeezyIdentityAuthAdapter(
     options.requestTimeoutMs ?? IDENTITY_REQUEST_TIMEOUT_MS
   );
   const gateway = createIdentityGateway(identity, config.webOrigin, identityFetcher);
+  const requestContext = new AsyncLocalStorage<{
+    readonly linkUserId?: string;
+  }>();
   const auth = betterAuth({
     appName: "pledge.cash",
     basePath: "/auth",
@@ -154,7 +164,10 @@ export function createPeezyIdentityAuthAdapter(
                 identityFetcher
               );
               const centralIdentity = await gateway.getIdentity(profile.sub);
-              const productUser = await provisionProductUser(db, centralIdentity);
+              const linkUserId = requestContext.getStore()?.linkUserId;
+              const productUser = await provisionProductUser(db, centralIdentity, {
+                ...(linkUserId === undefined ? {} : { requiredUserId: linkUserId })
+              });
               return {
                 email: productUser.email,
                 emailVerified: productUser.emailVerified,
@@ -190,17 +203,32 @@ export function createPeezyIdentityAuthAdapter(
 
   return {
     socialProviders: [],
-    createWalletChallenge: ({ address, chainId, purpose }) =>
-      gateway.createWalletChallenge({ address, chainId, purpose }),
-    async getProviders(userId) {
+    async createWalletChallenge({ address, chainId, purpose, userId }) {
+      const subject =
+        purpose === "link" && userId !== undefined
+          ? await identitySubjectForProductUser(db, userId)
+          : undefined;
+      return gateway.createWalletChallenge({
+        address,
+        chainId,
+        purpose:
+          purpose === "link" && subject === undefined ? "sign-in" : purpose
+      });
+    },
+    async hydrateAuthSnapshot(userId, snapshot) {
       const subject = await identitySubjectForProductUser(db, userId);
-      const identityUser = await gateway.getIdentity(subject);
-      const providers: AuthProviderDto[] = [];
-      for (const credential of identityUser.credentials) {
-        if (credential.kind === "wallet") providers.push("siwe");
-        if (credential.kind === "social") providers.push(credential.provider);
+      if (subject === undefined) {
+        return {
+          ...snapshot,
+          providers: [],
+          wallets: snapshot.wallets.map((wallet) => ({
+            ...wallet,
+            canSignIn: false
+          }))
+        };
       }
-      return [...new Set(providers)];
+      const identityUser = await gateway.getIdentity(subject);
+      return hydrateIdentitySnapshot(snapshot, identityUser);
     },
     async getSocialProviders() {
       const capabilities = await gateway.capabilities();
@@ -210,12 +238,18 @@ export function createPeezyIdentityAuthAdapter(
       const session = await auth.api.getSession({ headers: input.headers });
       return session === null ? null : { user: { id: session.user.id } };
     },
-    handler: (request) => auth.handler(request),
+    async handler(request) {
+      const linkUserId = await identityLinkUserForCallback(db, request);
+      return requestContext.run(
+        linkUserId === undefined ? {} : { linkUserId },
+        () => auth.handler(request)
+      );
+    },
     async linkWalletCredential(input) {
       const subject = await identitySubjectForProductUser(db, input.userId);
       return linkIdentityWalletCredential(db, gateway, {
         ...input,
-        subject
+        ...(subject === undefined ? {} : { subject })
       });
     },
     async startSocial(input): Promise<{
@@ -227,6 +261,39 @@ export function createPeezyIdentityAuthAdapter(
           throw new Error("A PledgeCash session is required to link a social credential");
         }
         const subject = await identitySubjectForProductUser(db, input.userId);
+        if (subject === undefined) {
+          const response = await auth.handler(
+            new Request(`${config.auth.baseUrl}/auth/oauth2/link`, {
+              body: JSON.stringify({
+                callbackURL: input.request.callbackURL,
+                ...(input.request.errorCallbackURL === undefined
+                  ? {}
+                  : { errorCallbackURL: input.request.errorCallbackURL }),
+                providerId: PEEZY_PROVIDER_ID
+              }),
+              headers: internalAuthHeaders(input.headers),
+              method: "POST"
+            })
+          );
+          if (!response.ok) {
+            throw new Error(
+              `peezy.tech OIDC account migration failed with status ${response.status}`
+            );
+          }
+          const result = (await response.json()) as AuthRedirectResponse;
+          if (result.url !== undefined) {
+            const authorizationUrl = new URL(result.url);
+            authorizationUrl.searchParams.set(
+              "login_hint",
+              input.request.provider
+            );
+            result.url = authorizationUrl.toString();
+          }
+          return {
+            headers: response.headers,
+            response: result
+          };
+        }
         const handoff = await gateway.createSocialLinkHandoff({
           callbackUrl: input.request.callbackURL,
           provider: input.request.provider,
@@ -263,6 +330,67 @@ export function createPeezyIdentityAuthAdapter(
       };
     }
   };
+}
+
+function hydrateIdentitySnapshot(
+  snapshot: AuthSnapshot,
+  identity: IdentityMeResponse
+): AuthSnapshot {
+  const providers = new Set<AuthSnapshot["providers"][number]>();
+  const walletSignIn = new Map<string, boolean>();
+  for (const credential of identity.credentials) {
+    if (credential.kind === "wallet") {
+      walletSignIn.set(credential.address.toLowerCase(), credential.signInEnabled);
+      if (credential.signInEnabled) providers.add("siwe");
+    }
+    if (credential.kind === "social") providers.add(credential.provider);
+  }
+  return {
+    ...snapshot,
+    providers: [...providers],
+    wallets: snapshot.wallets.map((wallet) => ({
+      ...wallet,
+      canSignIn: walletSignIn.get(wallet.address.toLowerCase()) ?? false
+    }))
+  };
+}
+
+async function identityLinkUserForCallback(
+  db: SentinelDb,
+  request: Request
+): Promise<string | undefined> {
+  const url = new URL(request.url);
+  if (
+    request.method !== "GET" ||
+    url.pathname !== `/auth/oauth2/callback/${PEEZY_PROVIDER_ID}`
+  ) {
+    return undefined;
+  }
+  const state = url.searchParams.get("state");
+  if (state === null) return undefined;
+  const [verification] = await db
+    .select({ value: authVerifications.value })
+    .from(authVerifications)
+    .where(eq(authVerifications.identifier, state))
+    .limit(1);
+  if (verification === undefined) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(verification.value);
+  } catch {
+    return undefined;
+  }
+  const parsed = z
+    .object({
+      link: z
+        .object({
+          userId: z.string().uuid()
+        })
+        .optional()
+    })
+    .passthrough()
+    .safeParse(value);
+  return parsed.success ? parsed.data.link?.userId : undefined;
 }
 
 function peezyWalletSessionPlugin(
@@ -313,18 +441,19 @@ function peezyWalletSessionPlugin(
             }
             const centralIdentity = await gateway.getIdentity(exchanged.subject);
             const address = getAddress(context.body.walletAddress).toLowerCase() as AddressDto;
-            const verifiedWallet = centralIdentity.credentials.some(
+            const verifiedWallet = centralIdentity.credentials.find(
               (credential) =>
                 credential.kind === "wallet" &&
                 credential.address === address &&
                 credential.verifiedChainIds.includes(context.body.chainId)
             );
-            if (!verifiedWallet) {
+            if (verifiedWallet?.kind !== "wallet") {
               throw new Error("Wallet grant did not verify the requested wallet");
             }
             const productUser = await provisionProductUser(db, centralIdentity, {
               walletCoverage: {
                 address,
+                canSignIn: verifiedWallet.signInEnabled,
                 chainId: context.body.chainId,
                 siweMessage: context.body.message,
                 verifiedAt: new Date()
@@ -438,8 +567,10 @@ async function provisionProductUser(
   db: SentinelDb,
   identity: IdentityMeResponse,
   options: {
+    readonly requiredUserId?: string;
     readonly walletCoverage?: {
       readonly address: AddressDto;
+      readonly canSignIn: boolean;
       readonly chainId: number;
       readonly siweMessage: string;
       readonly verifiedAt: Date;
@@ -456,6 +587,9 @@ async function provisionProductUser(
     }
 
     const candidateUserIds = new Set<string>();
+    if (options.requiredUserId !== undefined) {
+      candidateUserIds.add(options.requiredUserId);
+    }
     const [mappedAccount] = await transaction
       .select({ userId: authAccounts.userId })
       .from(authAccounts)
@@ -562,7 +696,7 @@ async function provisionProductUser(
 async function identitySubjectForProductUser(
   db: SentinelDb,
   userId: string
-): Promise<string> {
+): Promise<string | undefined> {
   const accounts = await db
     .select({ subject: authAccounts.accountId })
     .from(authAccounts)
@@ -576,7 +710,7 @@ async function identitySubjectForProductUser(
   if (accounts.length > 1) {
     throw new Error("PledgeCash user is linked to multiple peezy.tech subjects");
   }
-  return accounts[0]?.subject ?? userId;
+  return accounts[0]?.subject;
 }
 
 async function bindIdentitySubject(
@@ -584,6 +718,25 @@ async function bindIdentitySubject(
   subject: string,
   userId: string
 ): Promise<void> {
+  await transaction.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext(${`peezy-product-user:${userId}`}))`
+  );
+  const [existingUserAccount] = await transaction
+    .select({ subject: authAccounts.accountId })
+    .from(authAccounts)
+    .where(
+      and(
+        eq(authAccounts.providerId, PEEZY_PROVIDER_ID),
+        eq(authAccounts.userId, userId)
+      )
+    )
+    .limit(1);
+  if (
+    existingUserAccount !== undefined &&
+    existingUserAccount.subject !== subject
+  ) {
+    throw new Error("PledgeCash user is linked to another peezy.tech subject");
+  }
   await transaction
     .insert(authAccounts)
     .values({
@@ -617,35 +770,46 @@ async function linkIdentityWalletCredential(
     readonly chainId: number;
     readonly message: string;
     readonly signature: string;
-    readonly subject: string;
+    readonly subject?: string;
     readonly userId: string;
     readonly verifiedAt: Date;
   }
 ): Promise<WalletDto> {
+  await assertWalletOwnerAvailable(db, input.address, input.userId);
+  const issued = await gateway.issueWalletGrant({
+    message: input.message,
+    signature: input.signature,
+    ...(input.subject === undefined ? {} : { subject: input.subject })
+  });
+  const exchanged = await gateway.exchangeWalletGrant(issued.grant);
+  if (
+    exchanged.subject !== issued.user.id ||
+    (input.subject !== undefined && exchanged.subject !== input.subject)
+  ) {
+    throw new Error("Identity wallet grant resolved to another subject");
+  }
+  const centralIdentity = await gateway.getIdentity(exchanged.subject);
+  const centralWallet = centralIdentity.credentials.find(
+    (credential) =>
+      credential.kind === "wallet" &&
+      credential.address.toLowerCase() === input.address.toLowerCase() &&
+      credential.verifiedChainIds.includes(input.chainId)
+  );
+  if (centralWallet?.kind !== "wallet") {
+    throw new Error("Identity wallet grant did not link the requested wallet");
+  }
+
   return db.transaction(async (transaction) => {
     await lockWalletAddress(transaction, input.address);
-    const [owner] = await transaction
-      .select({ userId: walletOwners.userId })
-      .from(walletOwners)
-      .where(eq(walletOwners.address, input.address))
-      .limit(1);
-    if (owner !== undefined && owner.userId !== input.userId) {
-      throw new Error("Wallet is already linked to another account");
-    }
-
-    const issued = await gateway.issueWalletGrant({
-      message: input.message,
-      signature: input.signature,
-      subject: input.subject
-    });
-    const exchanged = await gateway.exchangeWalletGrant(issued.grant);
-    if (exchanged.subject !== input.subject || issued.user.id !== input.subject) {
-      throw new Error("Identity wallet grant resolved to another subject");
-    }
-
-    await bindIdentitySubject(transaction, input.subject, input.userId);
+    await assertWalletOwnerAvailable(
+      transaction,
+      input.address,
+      input.userId
+    );
+    await bindIdentitySubject(transaction, exchanged.subject, input.userId);
     return upsertWalletCoverage(transaction, {
       address: input.address,
+      canSignIn: centralWallet.signInEnabled,
       chainId: input.chainId,
       reenableAlerts: true,
       siweMessage: input.message,
@@ -653,6 +817,21 @@ async function linkIdentityWalletCredential(
       verifiedAt: input.verifiedAt
     });
   });
+}
+
+async function assertWalletOwnerAvailable(
+  db: SentinelDb | SentinelTransaction,
+  address: AddressDto,
+  userId: string
+): Promise<void> {
+  const [owner] = await db
+    .select({ userId: walletOwners.userId })
+    .from(walletOwners)
+    .where(eq(walletOwners.address, address))
+    .limit(1);
+  if (owner !== undefined && owner.userId !== userId) {
+    throw new Error("Wallet is already linked to another account");
+  }
 }
 
 async function lockWalletAddress(
@@ -668,6 +847,7 @@ async function upsertWalletCoverage(
   transaction: SentinelTransaction,
   input: {
     readonly address: AddressDto;
+    readonly canSignIn: boolean;
     readonly chainId: number;
     readonly reenableAlerts: boolean;
     readonly siweMessage: string;
@@ -724,7 +904,7 @@ async function upsertWalletCoverage(
   return {
     address: row.address.toLowerCase() as AddressDto,
     alertsEnabled: row.alertsEnabled,
-    canSignIn: true,
+    canSignIn: input.canSignIn,
     verifiedAt: row.verifiedAt.toISOString()
   };
 }

@@ -126,7 +126,11 @@ export function WalletLink({
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <WalletCards className="h-4 w-4 text-zinc-500" />
                   <AddressLink address={linkedWalletRow.address as Address} />
-                  <Badge>Sign-in enabled</Badge>
+                  {linkedWalletRow.canSignIn ? (
+                    <Badge>Sign-in enabled</Badge>
+                  ) : (
+                    <Badge variant="muted">Sign-in disabled</Badge>
+                  )}
                   {walletAlertsEnabled(linkedWalletRow) ? (
                     <Badge variant="muted">Watching alerts</Badge>
                   ) : (

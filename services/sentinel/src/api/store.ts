@@ -643,7 +643,7 @@ async function listWallets(db: SentinelDb, userId: string): Promise<WalletDto[]>
     byAddress.set(key, {
       address: existing.address,
       alertsEnabled: existing.alertsEnabled || wallet.alertsEnabled,
-      canSignIn: true,
+      canSignIn: existing.canSignIn || wallet.canSignIn,
       verifiedAt:
         Date.parse(existing.verifiedAt) >= Date.parse(wallet.verifiedAt)
           ? existing.verifiedAt
