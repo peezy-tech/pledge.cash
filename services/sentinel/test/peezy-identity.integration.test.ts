@@ -358,6 +358,32 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       user: { id: subject },
       wallets: []
     });
+    const [productIdentityAccount] = await dbClient.sql<
+      {
+        accessToken: string | null;
+        accessTokenExpiresAt: Date | null;
+        idToken: string | null;
+        refreshToken: string | null;
+        refreshTokenExpiresAt: Date | null;
+      }[]
+    >`
+      SELECT
+        "access_token" AS "accessToken",
+        "access_token_expires_at" AS "accessTokenExpiresAt",
+        "id_token" AS "idToken",
+        "refresh_token" AS "refreshToken",
+        "refresh_token_expires_at" AS "refreshTokenExpiresAt"
+      FROM "auth_accounts"
+      WHERE "provider_id" = 'peezy'
+        AND "account_id" = ${subject}
+    `;
+    expect(productIdentityAccount).toEqual({
+      accessToken: null,
+      accessTokenExpiresAt: null,
+      idToken: null,
+      refreshToken: null,
+      refreshTokenExpiresAt: null
+    });
   });
 });
 

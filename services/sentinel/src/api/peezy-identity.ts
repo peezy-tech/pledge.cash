@@ -87,10 +87,28 @@ export function createPeezyIdentityAuthAdapter(
     databaseHooks: {
       account: {
         create: {
-          before: async (account) => ({ data: { ...account, idToken: null } })
+          before: async (account) => ({
+            data: {
+              ...account,
+              accessToken: null,
+              accessTokenExpiresAt: null,
+              idToken: null,
+              refreshToken: null,
+              refreshTokenExpiresAt: null
+            }
+          })
         },
         update: {
-          before: async (account) => ({ data: { ...account, idToken: null } })
+          before: async (account) => ({
+            data: {
+              ...account,
+              accessToken: null,
+              accessTokenExpiresAt: null,
+              idToken: null,
+              refreshToken: null,
+              refreshTokenExpiresAt: null
+            }
+          })
         }
       }
     },
