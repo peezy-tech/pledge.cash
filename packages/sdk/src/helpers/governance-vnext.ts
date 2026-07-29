@@ -481,7 +481,6 @@ export async function hydrateScheduledBoardroomVNextOperationCandidates(
     throw new Error(`Governance candidate hydration exceeds its ${MAX_OPERATIONS}-operation safety bound.`);
   }
   if (candidates.length === 0) return { operations: [], errors };
-  const snapshotBlockNumber = await readSnapshotBlockNumber(client);
   const currentTime = input.currentTime ?? BigInt(Math.floor(Date.now() / 1_000));
   const results = await Promise.all(candidates.map(async (candidate) => {
     try {
@@ -494,11 +493,24 @@ export async function hydrateScheduledBoardroomVNextOperationCandidates(
       const minedReceipt = receipt as unknown as ScheduleReceipt;
       verifyTransactionProvenance(candidate, tx, minedReceipt);
       const decoded = verifiedSchedulePayload(tx, candidate.controller);
+      const snapshotBlockNumber = await readSnapshotBlockNumber(client);
+      const hydrationBlockNumber = snapshotBlockNumber < minedReceipt.blockNumber
+        ? minedReceipt.blockNumber
+        : snapshotBlockNumber;
+      const controllerBoardroom = await client.readContract({
+        address: candidate.controller,
+        abi: boardroomVNextControllerAbi,
+        functionName: "boardroom",
+        blockNumber: hydrationBlockNumber,
+      }) as Address;
+      if (!sameAddress(controllerBoardroom, candidate.boardroom)) {
+        throw new Error("Candidate Boardroom does not match the controller association.");
+      }
       const event = scheduleEventFromReceipt(candidate, decoded, minedReceipt);
       const operation = await hydrateScheduleEvent(
         client,
         event,
-        snapshotBlockNumber,
+        hydrationBlockNumber,
         currentTime,
         input.signal,
         decoded,

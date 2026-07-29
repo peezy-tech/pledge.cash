@@ -498,19 +498,74 @@ describe("Boardroom vNext governance discovery and hydration", () => {
     expect(reads.some((read) => read.functionName === "hashBoardroomOperation")).toBe(false);
     expect(reads.every((read) => read.blockNumber === 20n)).toBe(true);
   });
+
+  test("rejects a candidate whose Boardroom is not registered by the controller", async () => {
+    const result = await hydrateScheduledBoardroomVNextOperationCandidates(
+      governanceClient({ controllerBoardroom: target }),
+      {
+        candidates: [{
+          boardroom,
+          controller,
+          operationId,
+          scheduleTransactionHash: transactionHash,
+          scheduleBlockNumber: 11n,
+        }],
+        currentTime: 150n,
+      },
+    );
+
+    expect(result.operations).toEqual([]);
+    expect(result.errors).toEqual([{
+      boardroom,
+      controller,
+      operationId,
+      message: "Candidate Boardroom does not match the controller association.",
+    }]);
+  });
+
+  test("takes the hydration snapshot after the candidate receipt is verified", async () => {
+    let receiptFetched = false;
+    const result = await hydrateScheduledBoardroomVNextOperationCandidates(
+      governanceClient({
+        onReceiptRead: () => {
+          receiptFetched = true;
+        },
+        onBlockNumberRead: () => {
+          expect(receiptFetched).toBe(true);
+        },
+      }),
+      {
+        candidates: [{
+          boardroom,
+          controller,
+          operationId,
+          scheduleTransactionHash: transactionHash,
+          scheduleBlockNumber: 11n,
+        }],
+        currentTime: 150n,
+      },
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(result.operations[0]?.status).toBe("ready");
+  });
 });
 
 function governanceClient(overrides: {
   controllerOperation?: boolean;
+  controllerBoardroom?: Address;
   currentConfigurationEpoch?: bigint;
   currentFacetSetHash?: Hex;
   eventFacetSetHash?: Hex;
+  onBlockNumberRead?: () => void;
+  onReceiptRead?: () => void;
   operationStatus?: number;
   reads?: ContractRead[];
   unpinnedOperationStatus?: number;
 } = {}): PledgeCashGovernanceClient {
   return {
     async getBlockNumber() {
+      overrides.onBlockNumberRead?.();
       return 20n;
     },
     async getLogs(input: { events: readonly { name: string }[] }) {
@@ -547,6 +602,7 @@ function governanceClient(overrides: {
       } as never;
     },
     async getTransactionReceipt() {
+      overrides.onReceiptRead?.();
       return scheduleReceipt(overrides.eventFacetSetHash) as never;
     },
     async readContract(parameters: {
@@ -565,6 +621,7 @@ function governanceClient(overrides: {
       switch (parameters.functionName) {
         case "launched": return true;
         case "controller": return controller;
+        case "boardroom": return overrides.controllerBoardroom ?? boardroom;
         case "hashBoardroomOperation":
         case "hashControllerOperation":
           throw new Error("Operation hashes must not be read from mutable controller state.");
