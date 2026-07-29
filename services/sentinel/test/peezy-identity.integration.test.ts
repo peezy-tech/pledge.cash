@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import postgres, { type Sql } from "postgres";
 import { privateKeyToAccount } from "viem/accounts";
+import { createSiweMessage } from "viem/siwe";
 
 import { createPeezyIdentityAuthAdapter } from "../src/api/peezy-identity";
 import { createApp } from "../src/api/server";
@@ -109,7 +110,7 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     expect(capabilities.status).toBe(200);
     expect(await capabilities.json()).toEqual({ socialProviders: ["github"] });
 
-    const nonceResponse = await app.request(`${apiOrigin}/auth/siwe/nonce`, {
+    const nonceResponse = await app.request(`${apiOrigin}/auth/peezy/siwe/nonce`, {
       body: JSON.stringify({
         chainId: 999,
         walletAddress: firstWallet.address
@@ -125,7 +126,7 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     const signature = await firstWallet.signMessage({
       message: challenge.message
     });
-    const verifyResponse = await app.request(`${apiOrigin}/auth/siwe/verify`, {
+    const verifyResponse = await app.request(`${apiOrigin}/auth/peezy/siwe/verify`, {
       body: JSON.stringify({
         chainId: 999,
         message: challenge.message,
@@ -228,7 +229,8 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       }),
       headers: {
         "Content-Type": "application/json",
-        Origin: webOrigin
+        Origin: webOrigin,
+        "X-Forwarded-For": "192.0.2.1"
       },
       method: "POST"
     });
@@ -417,6 +419,154 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     expect(disabledWallets.every((wallet) => wallet.canSignIn === false)).toBe(
       true
     );
+    const updatedCoverage = await uncachedApp.request(
+      `${apiOrigin}/wallets/${firstWallet.address}`,
+      {
+        body: JSON.stringify({ alertsEnabled: false }),
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: cookie,
+          Origin: webOrigin
+        },
+        method: "PATCH"
+      }
+    );
+    expect(updatedCoverage.status).toBe(200);
+    expect(await updatedCoverage.json()).toMatchObject({
+      wallet: {
+        address: firstWallet.address.toLowerCase(),
+        alertsEnabled: false,
+        canSignIn: false
+      }
+    });
+  });
+
+  test("keeps clients from the previous web revision usable during rollout", async () => {
+    const account = privateKeyToAccount(
+      `0x${randomBytes(32).toString("hex")}`
+    );
+    const nonceResponse = await app.request(`${apiOrigin}/auth/siwe/nonce`, {
+      body: JSON.stringify({
+        chainId: 999,
+        walletAddress: account.address
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+    expect(nonceResponse.status).toBe(200);
+    const nonce = (await nonceResponse.json()) as { nonce: string };
+    const issuedAt = new Date();
+    const message = createSiweMessage({
+      address: account.address,
+      chainId: 999,
+      domain: new URL(webOrigin).host,
+      expirationTime: new Date(issuedAt.getTime() + 10 * 60_000),
+      issuedAt,
+      nonce: nonce.nonce,
+      statement: "Sign in to pledge.cash alerts.",
+      uri: webOrigin,
+      version: "1"
+    });
+    const signature = await account.signMessage({ message });
+    const verifyResponse = await app.request(`${apiOrigin}/auth/siwe/verify`, {
+      body: JSON.stringify({
+        chainId: 999,
+        message,
+        signature,
+        walletAddress: account.address
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+    expect(verifyResponse.status).toBe(200);
+    expect(
+      responseCookie(verifyResponse, "pledge-cash.session_token")
+    ).toContain("pledge-cash.session_token");
+
+    const socialResponse = await app.request(
+      `${apiOrigin}/auth/sign-in/social`,
+      {
+        body: JSON.stringify({
+          callbackURL: `${webOrigin}/alerts`,
+          provider: "github"
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Origin: webOrigin,
+          "X-Forwarded-For": "192.0.2.6"
+        },
+        method: "POST"
+      }
+    );
+    expect(socialResponse.status).toBe(200);
+    expect(await socialResponse.json()).toMatchObject({
+      redirect: true,
+      url: expect.any(String)
+    });
+
+    const centralSignIn = await signInWallet(app, account);
+    expect(centralSignIn.status).toBe(200);
+    await identitySql`
+      UPDATE "wallet_principal"
+      SET "sign_in_enabled" = false
+      WHERE lower("address") = ${account.address.toLowerCase()}
+    `;
+    const disabledNonceResponse = await app.request(
+      `${apiOrigin}/auth/siwe/nonce`,
+      {
+        body: JSON.stringify({
+          chainId: 999,
+          walletAddress: account.address
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Origin: webOrigin
+        },
+        method: "POST"
+      }
+    );
+    expect(disabledNonceResponse.status).toBe(200);
+    const disabledNonce = (await disabledNonceResponse.json()) as {
+      nonce: string;
+    };
+    const disabledIssuedAt = new Date();
+    const disabledMessage = createSiweMessage({
+      address: account.address,
+      chainId: 999,
+      domain: new URL(webOrigin).host,
+      expirationTime: new Date(disabledIssuedAt.getTime() + 10 * 60_000),
+      issuedAt: disabledIssuedAt,
+      nonce: disabledNonce.nonce,
+      statement: "Sign in to pledge.cash alerts.",
+      uri: webOrigin,
+      version: "1"
+    });
+    const disabledSignature = await account.signMessage({
+      message: disabledMessage
+    });
+    const disabledVerifyResponse = await app.request(
+      `${apiOrigin}/auth/siwe/verify`,
+      {
+        body: JSON.stringify({
+          chainId: 999,
+          message: disabledMessage,
+          signature: disabledSignature,
+          walletAddress: account.address
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Origin: webOrigin
+        },
+        method: "POST"
+      }
+    );
+    expect(disabledVerifyResponse.status).toBe(401);
   });
 
   test("maps a central subject back to legacy PledgeCash product data by wallet ownership", async () => {
@@ -455,7 +605,7 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       VALUES (${legacyUserId}::uuid, 'telegram', ${`legacy-${legacyUserId}`})
     `;
 
-    const nonceResponse = await app.request(`${apiOrigin}/auth/siwe/nonce`, {
+    const nonceResponse = await app.request(`${apiOrigin}/auth/peezy/siwe/nonce`, {
       body: JSON.stringify({
         chainId: 999,
         walletAddress: legacyWallet.address
@@ -471,7 +621,7 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     const signature = await legacyWallet.signMessage({
       message: challenge.message
     });
-    const verifyResponse = await app.request(`${apiOrigin}/auth/siwe/verify`, {
+    const verifyResponse = await app.request(`${apiOrigin}/auth/peezy/siwe/verify`, {
       body: JSON.stringify({
         chainId: 999,
         message: challenge.message,
@@ -570,7 +720,7 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     expect(mappingCount?.count).toBe("1");
   });
 
-  test("migrates an existing unmapped product session while linking credentials", async () => {
+  test("does not mutate Identity when an unmapped product session links a wallet", async () => {
     const legacyUserId = randomUUID();
     const sessionWallet = privateKeyToAccount(
       "0x4444444444444444444444444444444444444444444444444444444444444444"
@@ -728,11 +878,11 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       method: "POST"
     });
     const linkBody = await linkResponse.json();
-    expect(linkResponse.status, JSON.stringify(linkBody)).toBe(200);
+    expect(linkResponse.status, JSON.stringify(linkBody)).toBe(409);
     expect(linkBody).toMatchObject({
-      wallet: {
-        address: linkedWallet.address.toLowerCase(),
-        canSignIn: true
+      error: {
+        message:
+          "Sign in through peezy.tech Identity before linking another wallet"
       }
     });
     const [mapping] = await dbClient.sql<{ subject: string }[]>`
@@ -741,14 +891,18 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       WHERE "provider_id" = 'peezy'
         AND "user_id" = ${legacyUserId}::uuid
     `;
-    expect(mapping?.subject).toBeDefined();
-    expect(mapping?.subject).not.toBe(legacyUserId);
+    expect(mapping).toBeUndefined();
+    const [centralWallet] = await identitySql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "wallet_principal"
+      WHERE lower("address") = ${linkedWallet.address.toLowerCase()}
+    `;
+    expect(centralWallet?.count).toBe("0");
   });
 
   test("refuses a wallet link when the central credentials span product users", async () => {
     const sessionUserId = randomUUID();
     const conflictingUserId = randomUUID();
-    const centralSubject = randomUUID();
     const sessionWallet = privateKeyToAccount(
       `0x${randomBytes(32).toString("hex")}`
     );
@@ -803,76 +957,45 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     const signIn = await signInWallet(app, sessionWallet);
     expect(signIn.status).toBe(200);
     const cookie = responseCookie(signIn, "pledge-cash.session_token");
-    await dbClient.sql`
-      DELETE FROM "auth_accounts"
+    const [mapping] = await dbClient.sql<{ subject: string }[]>`
+      SELECT "account_id" AS "subject"
+      FROM "auth_accounts"
       WHERE "provider_id" = 'peezy'
         AND "user_id" = ${sessionUserId}::uuid
     `;
-
-    await identitySql`
-      INSERT INTO "user" (
-        "id", "name", "email", "email_verified", "status", "created_at", "updated_at"
-      )
-      VALUES (
-        ${centralSubject},
-        'Conflicting central user',
-        ${`${centralSubject}@example.com`},
-        true,
-        'active',
-        now(),
-        now()
-      )
-    `;
+    if (mapping === undefined) {
+      throw new Error("Expected a peezy.tech subject mapping");
+    }
+    const centralSubject = mapping.subject;
     await identitySql`
       INSERT INTO "wallet_principal" (
         "id", "user_id", "family", "account_kind", "address",
         "chain_id", "sign_in_enabled", "created_at", "updated_at"
       )
-      VALUES
-        (
-          ${randomUUID()},
-          ${centralSubject},
-          'evm',
-          'eoa',
-          ${requestedWallet.address},
-          NULL,
-          true,
-          now(),
-          now()
-        ),
-        (
-          ${randomUUID()},
-          ${centralSubject},
-          'evm',
-          'eoa',
-          ${conflictingWallet.address},
-          NULL,
-          true,
-          now(),
-          now()
-        )
+      VALUES (
+        ${randomUUID()},
+        ${centralSubject},
+        'evm',
+        'eoa',
+        ${conflictingWallet.address},
+        NULL,
+        true,
+        now(),
+        now()
+      )
     `;
     await identitySql`
       INSERT INTO "wallet_address" (
         "id", "user_id", "address", "chain_id", "is_primary", "created_at"
       )
-      VALUES
-        (
-          ${randomUUID()},
-          ${centralSubject},
-          ${requestedWallet.address},
-          999,
-          true,
-          now()
-        ),
-        (
-          ${randomUUID()},
-          ${centralSubject},
-          ${conflictingWallet.address},
-          999,
-          false,
-          now()
-        )
+      VALUES (
+        ${randomUUID()},
+        ${centralSubject},
+        ${conflictingWallet.address},
+        999,
+        false,
+        now()
+      )
     `;
 
     const nonceResponse = await app.request(`${apiOrigin}/wallets/nonce`, {
@@ -903,13 +1026,13 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     });
 
     expect(linkResponse.status).toBe(409);
-    const [mapping] = await dbClient.sql<{ count: string }[]>`
+    const [mappingCount] = await dbClient.sql<{ count: string }[]>`
       SELECT count(*)::text AS "count"
       FROM "auth_accounts"
       WHERE "provider_id" = 'peezy'
         AND "user_id" = ${sessionUserId}::uuid
     `;
-    expect(mapping?.count).toBe("0");
+    expect(mappingCount?.count).toBe("1");
     const [linkedWallet] = await dbClient.sql<{ count: string }[]>`
       SELECT count(*)::text AS "count"
       FROM "wallets"
@@ -917,6 +1040,12 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
         AND lower("address") = ${requestedWallet.address.toLowerCase()}
     `;
     expect(linkedWallet?.count).toBe("0");
+    const [centralWallet] = await identitySql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "wallet_principal"
+      WHERE lower("address") = ${requestedWallet.address.toLowerCase()}
+    `;
+    expect(centralWallet?.count).toBe("0");
   });
 
   test("refreshes central credentials before OIDC provisioning conflict checks", async () => {
@@ -990,7 +1119,8 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
         }),
         headers: {
           "Content-Type": "application/json",
-          Origin: webOrigin
+          Origin: webOrigin,
+          "X-Forwarded-For": "192.0.2.2"
         },
         method: "POST"
       }
@@ -1073,7 +1203,8 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
         }),
         headers: {
           "Content-Type": "application/json",
-          Origin: webOrigin
+          Origin: webOrigin,
+          "X-Forwarded-For": "192.0.2.3"
         },
         method: "POST"
       }
@@ -1219,7 +1350,8 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       }),
       headers: {
         "Content-Type": "application/json",
-        Origin: webOrigin
+        Origin: webOrigin,
+        "X-Forwarded-For": "192.0.2.4"
       },
       method: "POST"
     });
@@ -1339,7 +1471,8 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       }),
       headers: {
         "Content-Type": "application/json",
-        Origin: webOrigin
+        Origin: webOrigin,
+        "X-Forwarded-For": "192.0.2.5"
       },
       method: "POST"
     });
@@ -1427,7 +1560,7 @@ async function signInWallet(
   app: ReturnType<typeof createApp>,
   wallet: ReturnType<typeof privateKeyToAccount>
 ): Promise<Response> {
-  const nonceResponse = await app.request(`${apiOrigin}/auth/siwe/nonce`, {
+  const nonceResponse = await app.request(`${apiOrigin}/auth/peezy/siwe/nonce`, {
     body: JSON.stringify({
       chainId: 999,
       walletAddress: wallet.address
@@ -1443,7 +1576,7 @@ async function signInWallet(
   const signature = await wallet.signMessage({
     message: challenge.message
   });
-  return app.request(`${apiOrigin}/auth/siwe/verify`, {
+  return app.request(`${apiOrigin}/auth/peezy/siwe/verify`, {
     body: JSON.stringify({
       chainId: 999,
       message: challenge.message,

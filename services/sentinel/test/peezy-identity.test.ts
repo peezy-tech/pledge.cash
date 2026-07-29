@@ -50,7 +50,7 @@ test("aborts every stalled Identity request at the application deadline", async 
     }),
     adapter.getSocialProviders?.(),
     adapter.handler(
-      new Request("http://localhost:8787/auth/siwe/verify", {
+      new Request("http://localhost:8787/auth/peezy/siwe/verify", {
         body: JSON.stringify({
           chainId: 1,
           message: "stalled wallet grant",
@@ -228,7 +228,7 @@ test("rejects oversized Identity credential sets before provisioning", async () 
   );
 
   const response = await adapter.handler(
-    new Request("http://localhost:8787/auth/siwe/verify", {
+    new Request("http://localhost:8787/auth/peezy/siwe/verify", {
       body: JSON.stringify({
         chainId: 1,
         message: "oversized identity",
@@ -366,5 +366,11 @@ test("hydrates wallet sign-in authority from the central Identity credential", a
   await expect(
     adapter.hydrateAuthSnapshot?.(subject, snapshot)
   ).resolves.toEqual(expected);
+  await expect(
+    adapter.hydrateWallet?.(subject, snapshot.wallets[0]!)
+  ).resolves.toEqual({
+    ...snapshot.wallets[0],
+    canSignIn: false
+  });
   expect(identityReads).toBe(1);
 });

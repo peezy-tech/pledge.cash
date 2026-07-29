@@ -57,14 +57,17 @@ Harness credentials such as API keys or CLI logins belong to the host environmen
 In shared identity mode, peezy.tech Identity is canonical for the stable user
 subject and all social and wallet credentials. An account may be created with a
 social provider and remain walletless; PledgeCash asks for a wallet only when a
-wallet-dependent feature requires one. The existing in-page SIWE sign-in and
-wallet-link routes remain unchanged, and every explicitly linked EOA wallet can
+wallet-dependent feature requires one. Current clients use the
+`/auth/peezy/*` social and exact-message SIWE routes. Shared mode also retains
+the previous social and `/auth/siwe/*` routes so clients loaded before a rolling
+deployment can finish authenticating. Every centrally linked EOA wallet can
 sign into the same subject. PledgeCash stores a local product shadow of that
 subject for its existing relational data and continues to own product sessions,
 alert coverage, delivery channels, subscriptions, and roles. Social and email
-matches never implicitly merge accounts. New wallet proofs are written only to
-Identity; Sentinel records the separate per-chain alert coverage row and does
-not mirror a second local sign-in credential.
+matches never implicitly merge accounts. Wallet proofs through the current
+shared-mode routes are written only to Identity; Sentinel records the separate
+per-chain alert coverage row and does not mirror a second local sign-in
+credential.
 
 PledgeCash product sessions keep their existing local expiry and revocation
 semantics. Disabling an Identity account prevents new central sign-ins,
@@ -146,6 +149,11 @@ docker run --rm --env-file .env -p 8787:8787 pledge-cash-sentinel
 
 Sentinel does not require deployment-specific files in this repository. Provide networking, TLS, persistence, backups, and process supervision in your own hosting environment.
 
-The static web app remains Sentinel-free unless its build receives `VITE_SENTINEL_API_URL`. For
-GitHub Pages, set that repository variable only after the API is deployed and healthy; the Pages
-workflow probes its `/health` endpoint before building or deploying an enabled UI.
+The static web app remains Sentinel-free unless its build receives
+`VITE_SENTINEL_API_URL`. For GitHub Pages, set that repository variable only
+after the API is deployed and healthy; the Pages workflow probes its `/health`
+endpoint before building or deploying an enabled UI. Adjacent web and API
+revisions are compatible in either deployment order: the new web client falls
+back to the previous auth routes only when a `/auth/peezy/*` route returns 404,
+and the shared-mode API retains the previous social and SIWE routes for clients
+that were loaded before the Pages deployment.

@@ -208,14 +208,18 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : "";
+        const migrationRequired =
+          /must sign in through peezy\.tech Identity/i.test(message);
         const credentialConflict =
           /already linked|another account|multiple PledgeCash users/i.test(
             message
           );
         return jsonError(
           c,
-          credentialConflict ? 409 : 400,
-          credentialConflict
+          credentialConflict || migrationRequired ? 409 : 400,
+          migrationRequired
+            ? "Sign in through peezy.tech Identity before linking another wallet"
+            : credentialConflict
             ? "Wallet is already linked to another account"
             : "SIWE signature is invalid"
         );
@@ -280,7 +284,7 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     }
 
     const user = c.get("user");
-    const wallet = await deps.store.setWalletAlerts({
+    let wallet = await deps.store.setWalletAlerts({
       address: normalizeAddress(parsed.data.address),
       alertsEnabled: body.value.alertsEnabled,
       userId: user.id
@@ -288,6 +292,14 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
 
     if (wallet === null) {
       return jsonError(c, 404, "Wallet link not found");
+    }
+
+    if (deps.auth.hydrateWallet !== undefined) {
+      try {
+        wallet = await deps.auth.hydrateWallet(user.id, wallet);
+      } catch {
+        wallet = { ...wallet, canSignIn: false };
+      }
     }
 
     return c.json(UpdateWalletAlertsResponseSchema.parse({ wallet }));

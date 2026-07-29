@@ -49,6 +49,9 @@ type ForwardedAuthRequest = {
 
 class StubAuth implements AuthAdapter {
   readonly forwarded: ForwardedAuthRequest[] = [];
+  readonly socialStarts: Array<
+    Parameters<NonNullable<AuthAdapter["startSocial"]>>[0]
+  > = [];
   readonly socialProviders = ["discord", "twitter", "telegram"] as const;
 
   async getSession(input: { readonly headers: Headers }) {
@@ -64,7 +67,7 @@ class StubAuth implements AuthAdapter {
     this.forwarded.push({ body, method: request.method, path });
 
     const headers = new Headers({ "Content-Type": "application/json" });
-    if (path === "/auth/siwe/verify") {
+    if (path.endsWith("/siwe/verify")) {
       headers.set(
         "Set-Cookie",
         `${SESSION_COOKIE}; Path=/; HttpOnly; Secure; SameSite=Lax`
@@ -73,6 +76,18 @@ class StubAuth implements AuthAdapter {
 
     return new Response(JSON.stringify({ forwarded: true, path }), { headers, status: 200 });
   }
+
+  startSocial = async (
+    input: Parameters<NonNullable<AuthAdapter["startSocial"]>>[0]
+  ) => {
+    this.socialStarts.push(input);
+    return {
+      response: {
+        redirect: true,
+        url: `https://identity.example.test/${input.request.provider}`
+      }
+    };
+  };
 }
 
 class InMemoryStore implements SentinelApiStore {
@@ -554,6 +569,10 @@ describe("Sentinel WP5 API", () => {
           ...wallet,
           canSignIn: false
         }))
+      }),
+      hydrateWallet: async (_userId: string, wallet: WalletDto) => ({
+        ...wallet,
+        canSignIn: false
       })
     });
     const cookie = await signedInCookie(harness);
@@ -565,9 +584,23 @@ describe("Sentinel WP5 API", () => {
       providers: [],
       wallets: [{ canSignIn: false }]
     });
+    const updated = await harness.app.request(`/wallets/${PRIMARY_WALLET}`, {
+      body: JSON.stringify({ alertsEnabled: false }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookie
+      },
+      method: "PATCH"
+    });
+    expect(await readJson<{ wallet: WalletDto }>(updated)).toMatchObject({
+      wallet: { alertsEnabled: false, canSignIn: false }
+    });
 
     Object.assign(harness.auth, {
       hydrateAuthSnapshot: async () => {
+        throw new Error("Identity unavailable");
+      },
+      hydrateWallet: async () => {
         throw new Error("Identity unavailable");
       }
     });
@@ -577,6 +610,22 @@ describe("Sentinel WP5 API", () => {
     expect(await readJson<AuthMeResponse>(unavailable)).toMatchObject({
       providers: [],
       wallets: [{ canSignIn: false }]
+    });
+    const unavailableUpdate = await harness.app.request(
+      `/wallets/${PRIMARY_WALLET}`,
+      {
+        body: JSON.stringify({ alertsEnabled: true }),
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: cookie
+        },
+        method: "PATCH"
+      }
+    );
+    expect(
+      await readJson<{ wallet: WalletDto }>(unavailableUpdate)
+    ).toMatchObject({
+      wallet: { alertsEnabled: true, canSignIn: false }
     });
   });
 
@@ -606,6 +655,56 @@ describe("Sentinel WP5 API", () => {
     ]);
   });
 
+  test("keeps the previous social-auth routes compatible in shared Identity mode", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const callbackURL = `${WEB_ORIGIN}/notifications`;
+    const requests = [
+      {
+        body: { callbackURL, provider: "github" },
+        path: "/auth/sign-in/social"
+      },
+      {
+        body: { callbackURL, providerId: "telegram" },
+        path: "/auth/sign-in/oauth2"
+      },
+      {
+        body: { callbackURL, provider: "github" },
+        path: "/auth/link-social",
+        session: true
+      },
+      {
+        body: { callbackURL, providerId: "telegram" },
+        path: "/auth/oauth2/link",
+        session: true
+      }
+    ] as const;
+
+    for (const request of requests) {
+      const response = await identityHarness.app.request(request.path, {
+        body: JSON.stringify(request.body),
+        headers: {
+          "Content-Type": "application/json",
+          ...(request.session ? { Cookie: SESSION_COOKIE } : {})
+        },
+        method: "POST"
+      });
+      expect(response.status).toBe(200);
+    }
+
+    expect(
+      identityHarness.auth.socialStarts.map(({ link, request, userId }) => ({
+        link,
+        provider: request.provider,
+        userId
+      }))
+    ).toEqual([
+      { link: false, provider: "github", userId: undefined },
+      { link: false, provider: "telegram", userId: undefined },
+      { link: true, provider: "github", userId: USER_ID },
+      { link: true, provider: "telegram", userId: USER_ID }
+    ]);
+  });
+
   test("rejects invalid EOA SIWE proofs before forwarding them", async () => {
     const identityHarness = createHarness({ sharedIdentity: true });
     const request = await authSiweRequest();
@@ -614,7 +713,7 @@ describe("Sentinel WP5 API", () => {
       `0x${"ab".repeat(65)}`,
       `0x${"ab".repeat(66)}`
     ]) {
-      const response = await identityHarness.app.request("/auth/siwe/verify", {
+      const response = await identityHarness.app.request("/auth/peezy/siwe/verify", {
         body: JSON.stringify({ ...request, signature }),
         headers: { "Content-Type": "application/json" },
         method: "POST"
@@ -629,7 +728,7 @@ describe("Sentinel WP5 API", () => {
   test("does not allocate Identity client quota for malformed SIWE bodies", async () => {
     const identityHarness = createHarness({ sharedIdentity: true });
     const clientAddress = "192.0.2.1";
-    const malformed = await identityHarness.app.request("/auth/siwe/verify", {
+    const malformed = await identityHarness.app.request("/auth/peezy/siwe/verify", {
       body: "{",
       headers: {
         "Content-Type": "application/json",
@@ -642,7 +741,7 @@ describe("Sentinel WP5 API", () => {
     const request = await authSiweRequest();
     const statuses: number[] = [];
     for (let index = 0; index < 11; index += 1) {
-      const response = await identityHarness.app.request("/auth/siwe/verify", {
+      const response = await identityHarness.app.request("/auth/peezy/siwe/verify", {
         body: JSON.stringify(request),
         headers: {
           "Content-Type": "application/json",
@@ -663,7 +762,7 @@ describe("Sentinel WP5 API", () => {
     const request = await authSiweRequest();
     const statuses: number[] = [];
     for (let index = 0; index < 51; index += 1) {
-      const response = await identityHarness.app.request("/auth/siwe/verify", {
+      const response = await identityHarness.app.request("/auth/peezy/siwe/verify", {
         body: JSON.stringify({
           ...request,
           signature: `0x${"ab".repeat(66)}`
@@ -680,7 +779,7 @@ describe("Sentinel WP5 API", () => {
     expect(statuses.every((status) => status === 401)).toBe(true);
     expect(identityHarness.auth.forwarded).toEqual([]);
 
-    const valid = await identityHarness.app.request("/auth/siwe/verify", {
+    const valid = await identityHarness.app.request("/auth/peezy/siwe/verify", {
       body: JSON.stringify(request),
       headers: {
         "Content-Type": "application/json",
@@ -702,7 +801,7 @@ describe("Sentinel WP5 API", () => {
     const statuses: number[] = [];
     for (let index = 0; index < 51; index += 1) {
       const harness = identityHarnesses[index % identityHarnesses.length]!;
-      const response = await harness.app.request("/auth/siwe/verify", {
+      const response = await harness.app.request("/auth/peezy/siwe/verify", {
         body: JSON.stringify(request),
         headers: {
           "Content-Type": "application/json",
@@ -728,7 +827,7 @@ describe("Sentinel WP5 API", () => {
     const request = await authSiweRequest();
     const statuses: number[] = [];
     for (let index = 0; index < 11; index += 1) {
-      const response = await identityHarness.app.request("/auth/siwe/verify", {
+      const response = await identityHarness.app.request("/auth/peezy/siwe/verify", {
         body: JSON.stringify(request),
         headers: {
           "Content-Type": "application/json",

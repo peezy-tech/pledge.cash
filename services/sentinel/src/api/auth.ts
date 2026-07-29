@@ -40,6 +40,9 @@ const PUBLIC_SIWE_CLIENT_LIMIT = 10;
 // Identity v0.1 allows 60 wallet-grant issues per client and window. Keep ten
 // available for authenticated wallet links even if the public sign-in route is abused.
 const PUBLIC_SIWE_GLOBAL_LIMIT = 50;
+const LegacyTelegramAuthRedirectRequestSchema = AuthRedirectRequestSchema
+  .omit({ provider: true })
+  .extend({ providerId: z.literal("telegram") });
 
 export type ApiChainConfig = {
   readonly chainId: number;
@@ -82,6 +85,10 @@ export type AuthAdapter = {
     userId: string,
     snapshot: AuthSnapshot
   ): Promise<AuthSnapshot>;
+  hydrateWallet?(
+    userId: string,
+    wallet: WalletDto
+  ): Promise<WalletDto>;
   getProviders?(userId: string): Promise<AuthProviderDto[]>;
   getSocialProviders?(): Promise<SocialProviderDto[]>;
   getSession(input: { readonly headers: Headers }): Promise<AuthSession | null>;
@@ -448,29 +455,60 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
 
   const startSocial = deps.auth.startSocial;
   if (startSocial !== undefined) {
-    app.post("/peezy/sign-in", async (c) => {
-      const body = await parseJson(c, AuthRedirectRequestSchema);
-      if (!body.ok) return body.response;
+    const start = async (
+      c: Context<ApiEnv>,
+      request: AuthRedirectRequest,
+      link: boolean,
+      userId?: string
+    ) => {
       const result = await startSocial({
         headers: c.req.raw.headers,
-        link: false,
-        request: body.value
+        link,
+        request,
+        ...(userId === undefined ? {} : { userId })
       });
       copySetCookies(c, result.headers);
       return c.json(result.response);
+    };
+
+    app.post("/peezy/sign-in", async (c) => {
+      const body = await parseJson(c, AuthRedirectRequestSchema);
+      if (!body.ok) return body.response;
+      return start(c, body.value, false);
     });
     app.post("/peezy/link", createSessionMiddleware(deps), async (c) => {
       const body = await parseJson(c, AuthRedirectRequestSchema);
       if (!body.ok) return body.response;
-      const result = await startSocial({
-        headers: c.req.raw.headers,
-        link: true,
-        request: body.value,
-        userId: c.get("user").id
-      });
-      copySetCookies(c, result.headers);
-      return c.json(result.response);
+      return start(c, body.value, true, c.get("user").id);
     });
+
+    if (deps.auth.usesSharedIdentity === true) {
+      app.post("/sign-in/social", async (c) => {
+        const body = await parseJson(c, AuthRedirectRequestSchema);
+        if (!body.ok) return body.response;
+        return start(c, body.value, false);
+      });
+      app.post("/link-social", createSessionMiddleware(deps), async (c) => {
+        const body = await parseJson(c, AuthRedirectRequestSchema);
+        if (!body.ok) return body.response;
+        return start(c, body.value, true, c.get("user").id);
+      });
+      app.post("/sign-in/oauth2", async (c) => {
+        const body = await parseJson(c, LegacyTelegramAuthRedirectRequestSchema);
+        if (!body.ok) return body.response;
+        return start(c, { ...body.value, provider: "telegram" }, false);
+      });
+      app.post("/oauth2/link", createSessionMiddleware(deps), async (c) => {
+        const body = await parseJson(c, LegacyTelegramAuthRedirectRequestSchema);
+        if (!body.ok) return body.response;
+        return start(
+          c,
+          { ...body.value, provider: "telegram" },
+          true,
+          c.get("user").id
+        );
+      });
+    }
   }
 
   const validateIdentitySiwe: MiddlewareHandler<ApiEnv> = async (c, next) => {
@@ -540,7 +578,7 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
 
   if (deps.auth.usesSharedIdentity === true) {
     app.post(
-      "/siwe/verify",
+      "/peezy/siwe/verify",
       validateIdentitySiwe,
       publicSiweClientRateLimit,
       publicSiweGlobalRateLimit,

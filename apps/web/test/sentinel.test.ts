@@ -111,9 +111,54 @@ describe("sentinel web client", () => {
       walletAddress: "0x1000000000000000000000000000000000000000",
     });
 
-    expect(calls[0]?.input).toBe("https://api.example.test/auth/siwe/nonce");
+    expect(calls[0]?.input).toBe("https://api.example.test/auth/peezy/siwe/nonce");
     expect(calls[0]?.init?.body).toBe(
       JSON.stringify({ chainId: 8453, walletAddress: "0x1000000000000000000000000000000000000000" }),
+    );
+  });
+
+  test("falls back to the legacy auth routes while the API rollout is pending", async () => {
+    const calls: { input: string; init: RequestInit | undefined }[] = [];
+    const fetcher: SentinelFetch = async (input, init) => {
+      const url = input.toString();
+      calls.push({ input: url, init });
+      if (url.includes("/auth/peezy/")) {
+        return jsonResponse({ error: { message: "Not found" } }, { status: 404 });
+      }
+      return jsonResponse(
+        url.endsWith("/nonce")
+          ? { nonce: "abcdefghi" }
+          : { redirect: true, success: true, url: "https://oauth.telegram.org/auth" },
+      );
+    };
+    const client = createSentinelClient({ baseUrl: "https://api.example.test", fetcher });
+    const walletRequest = {
+      chainId: 8453,
+      message: "legacy SIWE message",
+      signature: "0x1234",
+      walletAddress: "0x1000000000000000000000000000000000000000",
+    };
+
+    await client.createAuthSiweNonce(walletRequest);
+    await client.verifyAuthSiwe(walletRequest);
+    await client.linkSocial({
+      callbackURL: "https://pledge.cash/notifications",
+      provider: "telegram",
+    });
+
+    expect(calls.map((call) => call.input)).toEqual([
+      "https://api.example.test/auth/peezy/siwe/nonce",
+      "https://api.example.test/auth/siwe/nonce",
+      "https://api.example.test/auth/peezy/siwe/verify",
+      "https://api.example.test/auth/siwe/verify",
+      "https://api.example.test/auth/peezy/link",
+      "https://api.example.test/auth/oauth2/link",
+    ]);
+    expect(calls[5]?.init?.body).toBe(
+      JSON.stringify({
+        callbackURL: "https://pledge.cash/notifications",
+        providerId: "telegram",
+      }),
     );
   });
 
