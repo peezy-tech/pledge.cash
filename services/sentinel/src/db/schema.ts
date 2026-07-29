@@ -432,6 +432,20 @@ export const identityQuotaEvents = pgTable(
   })
 );
 
+export const legacySiweNonces = pgTable(
+  "legacy_siwe_nonces",
+  {
+    nonce: text("nonce").primaryKey(),
+    address: text("address").notNull(),
+    chainId: integer("chain_id").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    expiresAtIdx: index("legacy_siwe_nonces_expires_at_idx").on(table.expiresAt)
+  })
+);
+
 export const organizationMembers = pgTable(
   "organization_members",
   {
@@ -534,6 +548,33 @@ export const wallets = pgTable(
     ),
     addressIdx: index("wallets_address_idx").on(sql`lower(${table.address})`),
     userIdx: index("wallets_user_idx").on(table.userId)
+  })
+);
+
+export const identityWalletLinkReconciliations = pgTable(
+  "identity_wallet_link_reconciliations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    subject: text("subject").notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    address: text("address").notNull(),
+    chainId: integer("chain_id").notNull(),
+    siweMessage: text("siwe_message").notNull(),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    addressUnique: uniqueIndex(
+      "identity_wallet_link_reconciliations_address_unique"
+    ).on(sql`lower(${table.address})`),
+    subjectIdx: index("identity_wallet_link_reconciliations_subject_idx").on(
+      table.subject
+    ),
+    userIdx: index("identity_wallet_link_reconciliations_user_idx").on(
+      table.userId
+    )
   })
 );
 

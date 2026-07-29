@@ -98,7 +98,10 @@ export type AuthAdapter = {
   getProviders?(userId: string): Promise<AuthProviderDto[]>;
   getSocialProviders?(): Promise<SocialProviderDto[]>;
   getSession(input: { readonly headers: Headers }): Promise<AuthSession | null>;
-  handler(request: Request): Promise<Response>;
+  handler(
+    request: Request,
+    context?: { readonly clientIp?: string }
+  ): Promise<Response>;
   linkWalletCredential?(input: {
     readonly address: AddressDto;
     readonly chainId: number;
@@ -224,6 +227,9 @@ export type ApiVariables = {
 };
 
 export type ApiEnv = {
+  Bindings: {
+    readonly clientIp?: string;
+  };
   Variables: ApiVariables;
 };
 
@@ -320,9 +326,7 @@ export function createSessionMiddleware(deps: SentinelApiDeps): MiddlewareHandle
 }
 
 function clientIp(c: Context<ApiEnv>): string {
-  const forwardedAddresses = c.req.header("x-forwarded-for")?.split(",");
-  const forwardedFor = forwardedAddresses?.[forwardedAddresses.length - 1]?.trim();
-  return forwardedFor ?? c.req.header("cf-connecting-ip") ?? "unknown";
+  return c.env?.clientIp?.trim() || "unknown";
 }
 
 export function createRateLimitMiddleware(
@@ -612,30 +616,41 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     }
     return await next();
   };
-  const forwardSiweVerify = (c: Context<ApiEnv>) =>
-    deps.auth.handler(c.req.raw);
+  const forwardAuthRequest = (c: Context<ApiEnv>) =>
+    deps.auth.handler(c.req.raw, {
+      ...(c.env?.clientIp === undefined ? {} : { clientIp: c.env.clientIp })
+    });
 
   if (deps.auth.usesSharedIdentity === true) {
-    for (const path of ["/peezy/siwe/nonce", "/siwe/nonce"]) {
-      app.post(
-        path,
-        publicSiweChallengeClientRateLimit,
-        (c) => deps.auth.handler(c.req.raw)
-      );
-    }
-    for (const path of ["/peezy/siwe/verify", "/siwe/verify"]) {
-      app.post(
-        path,
-        publicSiweBodyLimit,
-        publicSiweClientRateLimit,
-        publicSiweAttemptGlobalRateLimit,
-        validateIdentitySiwe,
-        publicSiweGlobalRateLimit,
-        forwardSiweVerify
-      );
-    }
+    app.post(
+      "/peezy/siwe/nonce",
+      publicSiweChallengeClientRateLimit,
+      forwardAuthRequest
+    );
+    app.post(
+      "/siwe/nonce",
+      publicSiweChallengeClientRateLimit,
+      forwardAuthRequest
+    );
+    app.post(
+      "/peezy/siwe/verify",
+      publicSiweBodyLimit,
+      publicSiweClientRateLimit,
+      publicSiweAttemptGlobalRateLimit,
+      validateIdentitySiwe,
+      publicSiweGlobalRateLimit,
+      forwardAuthRequest
+    );
+    app.post(
+      "/siwe/verify",
+      publicSiweBodyLimit,
+      publicSiweClientRateLimit,
+      publicSiweAttemptGlobalRateLimit,
+      validateIdentitySiwe,
+      forwardAuthRequest
+    );
   } else {
-    app.post("/siwe/verify", forwardSiweVerify);
+    app.post("/siwe/verify", forwardAuthRequest);
   }
 
   return app;

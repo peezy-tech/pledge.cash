@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { randomBytes } from "node:crypto";
 
 import {
   IdentityCapabilitiesSchema,
@@ -21,15 +22,19 @@ import {
   organization,
   type GenericOAuthConfig
 } from "better-auth/plugins";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import { getAddress } from "viem";
+import { parseSiweMessage } from "viem/siwe";
 import { z } from "zod";
 
 import type { Config } from "../config";
 import type { SentinelDb } from "../db/client";
 import {
   authAccounts,
+  authWallets,
   authVerifications,
+  identityWalletLinkReconciliations,
+  legacySiweNonces,
   users,
   walletOwners,
   wallets
@@ -49,6 +54,8 @@ import {
 import type { AuthAdapter, AuthSnapshot } from "./auth";
 import {
   createSentinelAuthDatabaseAdapter,
+  createPledgeCashSiweVerifier,
+  ALERTS_SIWE_STATEMENT,
   internalAuthHeaders
 } from "./better-auth";
 
@@ -65,6 +72,8 @@ const IDENTITY_PRESENTATION_READ_WINDOW_MS = 5 * 60_000;
 // 50 reads and ten wallet links reserve two reads each, leaving 230 for
 // presentation hydration and social callbacks.
 const IDENTITY_PRESENTATION_READ_BUDGET = 230;
+const LEGACY_SIWE_NONCE_TTL_MS = 15 * 60_000;
+const IDENTITY_PENDING_LINK_LIMIT = 10;
 const SOCIAL_PROVIDERS = new Set<SocialProvider>([
   "apple",
   "discord",
@@ -78,6 +87,10 @@ type IdentityFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<R
 type PeezyIdentityAuthAdapterOptions = {
   readonly hydrationCacheMs?: number;
   readonly requestTimeoutMs?: number;
+};
+type IdentityRequestContext = {
+  readonly clientIp?: string;
+  readonly linkUserId?: string;
 };
 type IdentityHydrator = {
   get(subject: string): Promise<IdentityMeResponse>;
@@ -108,9 +121,7 @@ export function createPeezyIdentityAuthAdapter(
     identity.clientId,
     options.hydrationCacheMs ?? IDENTITY_HYDRATION_CACHE_TTL_MS
   );
-  const requestContext = new AsyncLocalStorage<{
-    readonly linkUserId?: string;
-  }>();
+  const requestContext = new AsyncLocalStorage<IdentityRequestContext>();
   const auth = betterAuth({
     appName: "pledge.cash",
     basePath: "/auth",
@@ -212,7 +223,13 @@ export function createPeezyIdentityAuthAdapter(
           )
         ]
       }),
-      peezyWalletSessionPlugin(gateway, db, identityHydrator),
+      peezyWalletSessionPlugin(
+        gateway,
+        db,
+        identityHydrator,
+        config.webOrigin,
+        requestContext
+      ),
       organization({
         allowUserToCreateOrganization: false,
         requireEmailVerificationOnInvitation: true,
@@ -255,7 +272,15 @@ export function createPeezyIdentityAuthAdapter(
         };
       }
       const identityUser = await identityHydrator.get(subject);
-      return hydrateIdentitySnapshot(snapshot, identityUser);
+      const reconciledWallets = await reconcilePendingIdentityWalletLinks(
+        db,
+        subject,
+        identityUser
+      );
+      return hydrateIdentitySnapshot(
+        mergeReconciledWallets(snapshot, reconciledWallets),
+        identityUser
+      );
     },
     async hydrateWallet(userId, wallet) {
       const subject = await identitySubjectForProductUser(db, userId);
@@ -273,11 +298,16 @@ export function createPeezyIdentityAuthAdapter(
       const session = await auth.api.getSession({ headers: input.headers });
       return session === null ? null : { user: { id: session.user.id } };
     },
-    async handler(request) {
+    async handler(request, handlerContext) {
       const identityRequest = rewriteLegacyWalletAuthRequest(request);
       const linkUserId = await identityLinkUserForCallback(db, identityRequest);
       return requestContext.run(
-        linkUserId === undefined ? {} : { linkUserId },
+        {
+          ...(handlerContext?.clientIp === undefined
+            ? {}
+            : { clientIp: handlerContext.clientIp }),
+          ...(linkUserId === undefined ? {} : { linkUserId })
+        },
         () => auth.handler(identityRequest)
       );
     },
@@ -440,29 +470,14 @@ export function createPeezyOidcProviderConfig(
 function rewriteLegacyWalletAuthRequest(request: Request): Request {
   const url = new URL(request.url);
   const path = {
-    "/auth/siwe/nonce": "/auth/peezy/siwe/nonce",
-    "/auth/siwe/verify": "/auth/peezy/siwe/verify"
+    "/auth/siwe/nonce": "/auth/legacy/siwe/nonce",
+    "/auth/siwe/verify": "/auth/legacy/siwe/verify"
   }[url.pathname];
   if (path === undefined) {
     return request;
   }
   url.pathname = path;
   return new Request(url, request);
-}
-
-function identityChallengeForwardedFor(
-  headers: Headers | undefined
-): string | undefined {
-  if (headers === undefined) return undefined;
-  const forwardedAddresses = headers.get("x-forwarded-for")?.split(",");
-  const forwardedFor = forwardedAddresses?.at(-1)?.trim();
-  return (
-    forwardedFor ||
-    headers.get("cf-connecting-ip")?.trim() ||
-    headers.get("true-client-ip")?.trim() ||
-    headers.get("x-real-ip")?.trim() ||
-    undefined
-  );
 }
 
 function hydrateIdentitySnapshot(
@@ -490,6 +505,20 @@ function hydrateIdentitySnapshot(
       canSignIn: walletSignIn.get(wallet.address.toLowerCase()) ?? false
     }))
   };
+}
+
+function mergeReconciledWallets(
+  snapshot: AuthSnapshot,
+  reconciledWallets: readonly WalletDto[]
+): AuthSnapshot {
+  if (reconciledWallets.length === 0) return snapshot;
+  const wallets = new Map(
+    snapshot.wallets.map((wallet) => [wallet.address.toLowerCase(), wallet])
+  );
+  for (const wallet of reconciledWallets) {
+    wallets.set(wallet.address.toLowerCase(), wallet);
+  }
+  return { ...snapshot, wallets: [...wallets.values()] };
 }
 
 function hydrateIdentityWallet(
@@ -549,11 +578,129 @@ async function identityLinkUserForCallback(
 function peezyWalletSessionPlugin(
   gateway: ReturnType<typeof createIdentityGateway>,
   db: SentinelDb,
-  identityHydrator: IdentityHydrator
+  identityHydrator: IdentityHydrator,
+  webOrigin: string,
+  requestContext: AsyncLocalStorage<IdentityRequestContext>
 ) {
+  const verifyLegacySiwe = createPledgeCashSiweVerifier(
+    { webOrigin },
+    [ALERTS_SIWE_STATEMENT]
+  );
   return {
     id: "peezy-wallet-session",
     endpoints: {
+      getLegacyWalletChallenge: createAuthEndpoint(
+        "/legacy/siwe/nonce",
+        {
+          method: "POST",
+          body: z.object({
+            chainId: z.number().int().positive(),
+            walletAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/)
+          })
+        },
+        async (context) => {
+          const nonce = randomBytes(24).toString("hex");
+          const now = new Date();
+          await db.transaction(async (transaction) => {
+            await transaction
+              .delete(legacySiweNonces)
+              .where(lt(legacySiweNonces.expiresAt, now));
+            await transaction.insert(legacySiweNonces).values({
+              address: getAddress(context.body.walletAddress).toLowerCase(),
+              chainId: context.body.chainId,
+              expiresAt: new Date(now.getTime() + LEGACY_SIWE_NONCE_TTL_MS),
+              nonce
+            });
+          });
+          return context.json({ nonce });
+        }
+      ),
+      verifyLegacyWallet: createAuthEndpoint(
+        "/legacy/siwe/verify",
+        {
+          method: "POST",
+          body: z.object({
+            chainId: z.number().int().positive(),
+            message: z.string().min(1).max(AUTH_SIWE_MAX_MESSAGE_LENGTH),
+            signature: z.string().regex(/^0x[a-fA-F0-9]+$/),
+            walletAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/)
+          })
+        },
+        async (context) => {
+          try {
+            const address = getAddress(
+              context.body.walletAddress
+            ).toLowerCase() as AddressDto;
+            const parsed = parseSiweMessage(context.body.message);
+            if (
+              parsed.nonce === undefined ||
+              !(await verifyLegacySiwe({
+                address,
+                chainId: context.body.chainId,
+                message: context.body.message,
+                signature: context.body.signature
+              }))
+            ) {
+              throw new Error("Legacy SIWE proof is invalid");
+            }
+            const userId = await consumeLegacySiweNonce(db, {
+              address,
+              chainId: context.body.chainId,
+              nonce: parsed.nonce,
+              now: new Date()
+            });
+            if (userId === undefined) {
+              throw new Error(
+                "Legacy SIWE sign-in is limited to an existing PledgeCash wallet; refresh to use peezy.tech Identity"
+              );
+            }
+            const subject = await identitySubjectForProductUser(db, userId);
+            if (subject !== undefined) {
+              const centralIdentity = await identityHydrator.getFresh(subject);
+              const centralWallet = centralIdentity.credentials.find(
+                (credential) =>
+                  credential.kind === "wallet" &&
+                  credential.address.toLowerCase() === address &&
+                  credential.verifiedChainIds.includes(context.body.chainId)
+              );
+              if (
+                centralWallet?.kind !== "wallet" ||
+                !centralWallet.signInEnabled
+              ) {
+                throw new Error(
+                  "Wallet sign-in is not enabled by peezy.tech Identity"
+                );
+              }
+            }
+            const [user] = await db
+              .select()
+              .from(users)
+              .where(eq(users.id, userId))
+              .limit(1);
+            if (user === undefined) {
+              throw new Error("PledgeCash user could not be found");
+            }
+            const session =
+              await context.context.internalAdapter.createSession(userId);
+            if (session === null) {
+              throw new Error("PledgeCash session could not be created");
+            }
+            await setSessionCookie(context, { session, user });
+            return context.json({
+              success: true,
+              token: session.token,
+              user: { id: userId }
+            });
+          } catch (error) {
+            throw new APIError("UNAUTHORIZED", {
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Legacy SIWE proof is invalid"
+            });
+          }
+        }
+      ),
       getPeezyWalletChallenge: createAuthEndpoint(
         "/peezy/siwe/nonce",
         {
@@ -564,9 +711,7 @@ function peezyWalletSessionPlugin(
           })
         },
         async (context) => {
-          const forwardedFor = identityChallengeForwardedFor(
-            context.request?.headers
-          );
+          const forwardedFor = requestContext.getStore()?.clientIp;
           const challenge = await gateway.createWalletChallenge({
             address: context.body.walletAddress,
             chainId: context.body.chainId,
@@ -1131,6 +1276,59 @@ async function identitySubjectForProductUser(
   return accounts[0]?.subject;
 }
 
+async function consumeLegacySiweNonce(
+  db: SentinelDb,
+  input: {
+    readonly address: AddressDto;
+    readonly chainId: number;
+    readonly nonce: string;
+    readonly now: Date;
+  }
+): Promise<string | undefined> {
+  return db.transaction(async (transaction) => {
+    const [nonce] = await transaction
+      .delete(legacySiweNonces)
+      .where(
+        and(
+          eq(legacySiweNonces.nonce, input.nonce),
+          eq(legacySiweNonces.address, input.address),
+          eq(legacySiweNonces.chainId, input.chainId),
+          gt(legacySiweNonces.expiresAt, input.now)
+        )
+      )
+      .returning();
+    if (nonce === undefined) {
+      throw new Error("Legacy SIWE nonce is invalid or expired");
+    }
+
+    const candidateUserIds = new Set<string>();
+    const [owner, credentials, coverage] = await Promise.all([
+      transaction
+        .select({ userId: walletOwners.userId })
+        .from(walletOwners)
+        .where(eq(walletOwners.address, input.address))
+        .limit(2),
+      transaction
+        .select({ userId: authWallets.userId })
+        .from(authWallets)
+        .where(sql`lower(${authWallets.address}) = lower(${input.address})`)
+        .limit(2),
+      transaction
+        .select({ userId: wallets.userId })
+        .from(wallets)
+        .where(sql`lower(${wallets.address}) = lower(${input.address})`)
+        .limit(2)
+    ]);
+    for (const row of [...owner, ...credentials, ...coverage]) {
+      candidateUserIds.add(row.userId);
+    }
+    if (candidateUserIds.size > 1) {
+      throw new Error("Legacy wallet resolves to multiple PledgeCash users");
+    }
+    return candidateUserIds.values().next().value;
+  });
+}
+
 async function bindIdentitySubject(
   transaction: SentinelTransaction,
   subject: string,
@@ -1203,64 +1401,274 @@ async function linkIdentityWalletCredential(
 
   const existingIdentity = await gateway.getIdentity(subject);
   assertIdentityCredentialLimit(existingIdentity);
-  return db.transaction(async (transaction) => {
+  if (existingIdentity.user.id !== subject) {
+    throw new Error("Identity wallet link subject mismatch");
+  }
+  await reconcilePendingIdentityWalletLinks(
+    db,
+    subject,
+    existingIdentity
+  );
+  const existingCentralWallet = findCentralIdentityWallet(
+    existingIdentity,
+    input.address,
+    input.chainId
+  );
+  if (existingCentralWallet !== undefined) {
+    return finalizeIdentityWalletCoverage(db, existingIdentity, {
+      address: input.address,
+      canSignIn: existingCentralWallet.signInEnabled,
+      chainId: input.chainId,
+      siweMessage: input.message,
+      subject,
+      userId: input.userId,
+      verifiedAt: input.verifiedAt
+    });
+  }
+
+  await stageIdentityWalletLink(db, existingIdentity, {
+    address: input.address,
+    chainId: input.chainId,
+    siweMessage: input.message,
+    subject,
+    userId: input.userId,
+    verifiedAt: input.verifiedAt
+  });
+
+  // A timeout can hide a successful remote mutation, so force the next
+  // authenticated read to re-fetch Identity even when issuance never returns.
+  identityHydrator.invalidate(subject);
+  const issued = await gateway.issueWalletGrant({
+    message: input.message,
+    signature: input.signature,
+    subject
+  });
+  identityHydrator.invalidate(issued.user.id);
+  const exchanged = await gateway.exchangeWalletGrant(issued.grant);
+  if (
+    exchanged.subject !== issued.user.id ||
+    exchanged.subject !== subject
+  ) {
+    throw new Error("Identity wallet grant resolved to another subject");
+  }
+  const centralIdentity = await gateway.getIdentity(exchanged.subject);
+  identityHydrator.set(exchanged.subject, centralIdentity);
+  assertIdentityCredentialLimit(centralIdentity);
+  const centralWallet = findCentralIdentityWallet(
+    centralIdentity,
+    input.address,
+    input.chainId
+  );
+  if (centralWallet === undefined) {
+    throw new Error("Identity wallet grant did not link the requested wallet");
+  }
+  return finalizeIdentityWalletCoverage(db, centralIdentity, {
+    address: input.address,
+    canSignIn: centralWallet.signInEnabled,
+    chainId: input.chainId,
+    siweMessage: input.message,
+    subject,
+    userId: input.userId,
+    verifiedAt: input.verifiedAt
+  });
+}
+
+function findCentralIdentityWallet(
+  identity: IdentityMeResponse,
+  address: AddressDto,
+  chainId: number
+) {
+  const credential = identity.credentials.find(
+    (candidate) =>
+      candidate.kind === "wallet" &&
+      candidate.address.toLowerCase() === address.toLowerCase() &&
+      candidate.verifiedChainIds.includes(chainId)
+  );
+  return credential?.kind === "wallet" ? credential : undefined;
+}
+
+async function stageIdentityWalletLink(
+  db: SentinelDb,
+  identity: IdentityMeResponse,
+  input: {
+    readonly address: AddressDto;
+    readonly chainId: number;
+    readonly siweMessage: string;
+    readonly subject: string;
+    readonly userId: string;
+    readonly verifiedAt: Date;
+  }
+): Promise<void> {
+  await db.transaction(async (transaction) => {
     await transaction.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`peezy-user:${subject}`}))`
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`peezy-user:${input.subject}`}))`
     );
     await lockWalletAddress(transaction, input.address);
-    await assertWalletOwnerAvailable(
-      transaction,
-      input.address,
-      input.userId
-    );
+    await assertWalletOwnerAvailable(transaction, input.address, input.userId);
     const candidateUserIds = await identityCandidateUserIds(
       transaction,
-      existingIdentity,
+      identity,
       input.userId
     );
     if (candidateUserIds.size > 1) {
       throw new Error("peezy.tech credentials resolve to multiple PledgeCash users");
     }
 
-    // Keep the local ownership and coverage projection inside this transaction
-    // until Identity accepts the canonical link. A rejected central claim then
-    // rolls back without leaving account-continuity evidence behind.
-    const issued = await gateway.issueWalletGrant({
-      message: input.message,
-      signature: input.signature,
-      subject
-    });
-    identityHydrator.invalidate(issued.user.id);
-    const exchanged = await gateway.exchangeWalletGrant(issued.grant);
+    const [pending] = await transaction
+      .select()
+      .from(identityWalletLinkReconciliations)
+      .where(
+        sql`lower(${identityWalletLinkReconciliations.address}) = lower(${input.address})`
+      )
+      .limit(1);
     if (
-      exchanged.subject !== issued.user.id ||
-      exchanged.subject !== subject
+      pending !== undefined &&
+      (pending.subject !== input.subject || pending.userId !== input.userId)
     ) {
-      throw new Error("Identity wallet grant resolved to another subject");
+      throw new Error("Wallet link reconciliation belongs to another account");
     }
-    const centralIdentity = await gateway.getIdentity(exchanged.subject);
-    identityHydrator.set(exchanged.subject, centralIdentity);
-    assertIdentityCredentialLimit(centralIdentity);
-    const centralWallet = centralIdentity.credentials.find(
-      (credential) =>
-        credential.kind === "wallet" &&
-        credential.address.toLowerCase() === input.address.toLowerCase() &&
-        credential.verifiedChainIds.includes(input.chainId)
-    );
-    if (centralWallet?.kind !== "wallet") {
-      throw new Error("Identity wallet grant did not link the requested wallet");
+    const subjectPending = await transaction
+      .select({ id: identityWalletLinkReconciliations.id })
+      .from(identityWalletLinkReconciliations)
+      .where(eq(identityWalletLinkReconciliations.subject, input.subject))
+      .limit(IDENTITY_PENDING_LINK_LIMIT + 1);
+    if (
+      pending === undefined &&
+      subjectPending.length >= IDENTITY_PENDING_LINK_LIMIT
+    ) {
+      throw new Error("Too many pending Identity wallet links");
     }
+    if (pending === undefined) {
+      await transaction
+        .insert(identityWalletLinkReconciliations)
+        .values({
+          address: input.address.toLowerCase(),
+          chainId: input.chainId,
+          siweMessage: input.siweMessage,
+          subject: input.subject,
+          userId: input.userId,
+          verifiedAt: input.verifiedAt
+        })
+        .onConflictDoNothing();
+      const [stored] = await transaction
+        .select({
+          subject: identityWalletLinkReconciliations.subject,
+          userId: identityWalletLinkReconciliations.userId
+        })
+        .from(identityWalletLinkReconciliations)
+        .where(
+          sql`lower(${identityWalletLinkReconciliations.address}) = lower(${input.address})`
+        )
+        .limit(1);
+      if (
+        stored === undefined ||
+        stored.subject !== input.subject ||
+        stored.userId !== input.userId
+      ) {
+        throw new Error("Wallet link reconciliation belongs to another account");
+      }
+      return;
+    }
+    await transaction
+      .update(identityWalletLinkReconciliations)
+      .set({
+        chainId: input.chainId,
+        siweMessage: input.siweMessage,
+        verifiedAt: input.verifiedAt
+      })
+      .where(eq(identityWalletLinkReconciliations.id, pending.id));
+  });
+}
 
-    await bindIdentitySubject(transaction, subject, input.userId);
-    return upsertWalletCoverage(transaction, {
+async function reconcilePendingIdentityWalletLinks(
+  db: SentinelDb,
+  subject: string,
+  identity: IdentityMeResponse
+): Promise<WalletDto[]> {
+  if (identity.user.id !== subject) {
+    throw new Error("Identity reconciliation subject mismatch");
+  }
+  assertIdentityCredentialLimit(identity);
+  const pending = await db
+    .select()
+    .from(identityWalletLinkReconciliations)
+    .where(eq(identityWalletLinkReconciliations.subject, subject))
+    .limit(IDENTITY_PENDING_LINK_LIMIT + 1);
+  if (pending.length > IDENTITY_PENDING_LINK_LIMIT) {
+    throw new Error("Too many pending Identity wallet links");
+  }
+  const reconciled: WalletDto[] = [];
+  for (const link of pending) {
+    const centralWallet = findCentralIdentityWallet(
+      identity,
+      link.address as AddressDto,
+      link.chainId
+    );
+    if (centralWallet === undefined) continue;
+    reconciled.push(
+      await finalizeIdentityWalletCoverage(db, identity, {
+        address: link.address as AddressDto,
+        canSignIn: centralWallet.signInEnabled,
+        chainId: link.chainId,
+        siweMessage: link.siweMessage,
+        subject,
+        userId: link.userId,
+        verifiedAt: link.verifiedAt
+      })
+    );
+  }
+  return reconciled;
+}
+
+async function finalizeIdentityWalletCoverage(
+  db: SentinelDb,
+  identity: IdentityMeResponse,
+  input: {
+    readonly address: AddressDto;
+    readonly canSignIn: boolean;
+    readonly chainId: number;
+    readonly siweMessage: string;
+    readonly subject: string;
+    readonly userId: string;
+    readonly verifiedAt: Date;
+  }
+): Promise<WalletDto> {
+  if (identity.user.id !== input.subject) {
+    throw new Error("Identity wallet link subject mismatch");
+  }
+  return db.transaction(async (transaction) => {
+    await transaction.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`peezy-user:${input.subject}`}))`
+    );
+    await lockWalletAddress(transaction, input.address);
+    await assertWalletOwnerAvailable(transaction, input.address, input.userId);
+    const candidateUserIds = await identityCandidateUserIds(
+      transaction,
+      identity,
+      input.userId
+    );
+    if (candidateUserIds.size > 1) {
+      throw new Error("peezy.tech credentials resolve to multiple PledgeCash users");
+    }
+    await bindIdentitySubject(transaction, input.subject, input.userId);
+    const wallet = await upsertWalletCoverage(transaction, {
       address: input.address,
-      canSignIn: centralWallet.signInEnabled,
+      canSignIn: input.canSignIn,
       chainId: input.chainId,
       reenableAlerts: true,
-      siweMessage: input.message,
+      siweMessage: input.siweMessage,
       userId: input.userId,
       verifiedAt: input.verifiedAt
     });
+    await transaction
+      .delete(identityWalletLinkReconciliations)
+      .where(
+        and(
+          eq(identityWalletLinkReconciliations.subject, input.subject),
+          sql`lower(${identityWalletLinkReconciliations.address}) = lower(${input.address})`
+        )
+      );
+    return wallet;
   });
 }
 

@@ -109,7 +109,7 @@ test("aborts stalled Identity response bodies at the application deadline", asyn
   expect(signal?.aborted).toBe(true);
 });
 
-test("forwards the observed Sentinel caller to the Identity challenge endpoint", async () => {
+test("forwards only Sentinel's trusted socket peer to the Identity challenge endpoint", async () => {
   let forwardedFor: string | null = null;
   const adapter = createPeezyIdentityAuthAdapter(
     config,
@@ -149,11 +149,12 @@ test("forwards the observed Sentinel caller to the Identity challenge endpoint",
         "X-Forwarded-For": "203.0.113.9, 192.0.2.44"
       },
       method: "POST"
-    })
+    }),
+    { clientIp: "198.51.100.7" }
   );
 
   expect(response.status).toBe(200);
-  expect(forwardedFor).toBe("192.0.2.44");
+  expect(forwardedFor).toBe("198.51.100.7");
 });
 
 test("uses the application deadline for the static Identity OIDC token exchange", async () => {
@@ -410,8 +411,20 @@ test("hydrates wallet sign-in authority from the central Identity credential", a
       return this;
     }
   };
+  const emptyQuery = {
+    from() {
+      return this;
+    },
+    limit() {
+      return Promise.resolve([]);
+    },
+    where() {
+      return this;
+    }
+  };
   const db = {
-    select: () => query,
+    select: (selection?: unknown) =>
+      selection === undefined ? emptyQuery : query,
     transaction: async (
       callback: (transaction: {
         delete(): {

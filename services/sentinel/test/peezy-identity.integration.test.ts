@@ -496,10 +496,148 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     ]);
   });
 
-  test("routes legacy SIWE endpoints through canonical Identity authentication", async () => {
+  test("reconciles a central wallet link after the local coverage commit fails", async () => {
+    const primaryWallet = privateKeyToAccount(
+      `0x${randomBytes(32).toString("hex")}`
+    );
+    const linkedWallet = privateKeyToAccount(
+      `0x${randomBytes(32).toString("hex")}`
+    );
+    const signIn = await signInWallet(app, primaryWallet);
+    expect(signIn.status).toBe(200);
+    const cookie = responseCookie(signIn, "pledge-cash.session_token");
+    const session = (await signIn.json()) as { user: { id: string } };
+    const nonceResponse = await app.request(`${apiOrigin}/wallets/nonce`, {
+      body: JSON.stringify({
+        address: linkedWallet.address,
+        chainId: 999
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookie,
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+    expect(nonceResponse.status).toBe(200);
+    const challenge = (await nonceResponse.json()) as { message: string };
+    const signature = await linkedWallet.signMessage({
+      message: challenge.message
+    });
+
+    await dbClient.sql.unsafe(`
+      CREATE FUNCTION fail_test_identity_wallet_coverage()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $$
+      BEGIN
+        RAISE EXCEPTION 'simulated local wallet coverage failure';
+      END;
+      $$
+    `);
+    await dbClient.sql.unsafe(`
+      CREATE TRIGGER fail_test_identity_wallet_coverage
+      BEFORE INSERT ON wallets
+      FOR EACH ROW
+      WHEN (lower(NEW.address) = '${linkedWallet.address.toLowerCase()}')
+      EXECUTE FUNCTION fail_test_identity_wallet_coverage()
+    `);
+    let linkResponse: Response;
+    try {
+      linkResponse = await app.request(`${apiOrigin}/wallets`, {
+        body: JSON.stringify({
+          message: challenge.message,
+          signature
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: cookie,
+          Origin: webOrigin
+        },
+        method: "POST"
+      });
+    } finally {
+      await dbClient.sql.unsafe(
+        `DROP TRIGGER IF EXISTS fail_test_identity_wallet_coverage ON wallets`
+      );
+      await dbClient.sql.unsafe(
+        `DROP FUNCTION IF EXISTS fail_test_identity_wallet_coverage()`
+      );
+    }
+    expect(linkResponse.status).toBe(400);
+    const [centralLink, pendingLink, localCoverage] = await Promise.all([
+      identitySql<{ count: string }[]>`
+        SELECT count(*)::text AS "count"
+        FROM "wallet_principal"
+        WHERE lower("address") = ${linkedWallet.address.toLowerCase()}
+      `,
+      dbClient.sql<{ count: string }[]>`
+        SELECT count(*)::text AS "count"
+        FROM "identity_wallet_link_reconciliations"
+        WHERE lower("address") = ${linkedWallet.address.toLowerCase()}
+          AND "user_id" = ${session.user.id}::uuid
+      `,
+      dbClient.sql<{ count: string }[]>`
+        SELECT count(*)::text AS "count"
+        FROM "wallets"
+        WHERE lower("address") = ${linkedWallet.address.toLowerCase()}
+      `
+    ]);
+    expect(centralLink[0]?.count).toBe("1");
+    expect(pendingLink[0]?.count).toBe("1");
+    expect(localCoverage[0]?.count).toBe("0");
+
+    const reconciledResponse = await app.request(`${apiOrigin}/auth/me`, {
+      headers: { Cookie: cookie, Origin: webOrigin }
+    });
+    expect(reconciledResponse.status).toBe(200);
+    expect(await reconciledResponse.json()).toMatchObject({
+      wallets: expect.arrayContaining([
+        expect.objectContaining({
+          address: linkedWallet.address.toLowerCase(),
+          canSignIn: true
+        })
+      ])
+    });
+    const [pendingAfter, coverageAfter] = await Promise.all([
+      dbClient.sql<{ count: string }[]>`
+        SELECT count(*)::text AS "count"
+        FROM "identity_wallet_link_reconciliations"
+        WHERE lower("address") = ${linkedWallet.address.toLowerCase()}
+      `,
+      dbClient.sql<{ count: string }[]>`
+        SELECT count(*)::text AS "count"
+        FROM "wallets"
+        WHERE lower("address") = ${linkedWallet.address.toLowerCase()}
+          AND "user_id" = ${session.user.id}::uuid
+      `
+    ]);
+    expect(pendingAfter[0]?.count).toBe("0");
+    expect(coverageAfter[0]?.count).toBe("1");
+  });
+
+  test("lets a pre-rollout client sign an existing wallet without creating a second credential", async () => {
     const account = privateKeyToAccount(
       `0x${randomBytes(32).toString("hex")}`
     );
+    const legacyUserId = randomUUID();
+    await dbClient.sql`
+      INSERT INTO "users" (
+        "id", "name", "email", "email_verified", "created_at", "updated_at"
+      )
+      VALUES (
+        ${legacyUserId}::uuid,
+        'Loaded legacy client',
+        ${`${legacyUserId}@wallet.pledge.cash.invalid`},
+        false,
+        now(),
+        now()
+      )
+    `;
+    await dbClient.sql`
+      INSERT INTO "auth_wallets" ("user_id", "address", "chain_id", "is_primary")
+      VALUES (${legacyUserId}::uuid, ${account.address}, 999, true)
+    `;
     const nonceResponse = await app.request(`${apiOrigin}/auth/siwe/nonce`, {
       body: JSON.stringify({
         chainId: 999,
@@ -513,14 +651,25 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     });
     expect(nonceResponse.status).toBe(200);
     const challenge = (await nonceResponse.json()) as {
-      message: string;
       nonce: string;
     };
-    const signature = await account.signMessage({ message: challenge.message });
+    const issuedAt = new Date();
+    const message = createSiweMessage({
+      address: account.address,
+      chainId: 999,
+      domain: "localhost:5173",
+      expirationTime: new Date(issuedAt.getTime() + 10 * 60_000),
+      issuedAt,
+      nonce: challenge.nonce,
+      statement: "Sign in to pledge.cash alerts.",
+      uri: webOrigin,
+      version: "1"
+    });
+    const signature = await account.signMessage({ message });
     const verifyResponse = await app.request(`${apiOrigin}/auth/siwe/verify`, {
       body: JSON.stringify({
         chainId: 999,
-        message: challenge.message,
+        message,
         signature,
         walletAddress: account.address
       }),
@@ -539,7 +688,13 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       FROM "wallet_principal"
       WHERE lower("address") = ${account.address.toLowerCase()}
     `;
-    expect(centralClaim?.count).toBe("1");
+    expect(centralClaim?.count).toBe("0");
+    const [localCredentials] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "auth_wallets"
+      WHERE lower("address") = ${account.address.toLowerCase()}
+    `;
+    expect(localCredentials?.count).toBe("1");
 
     const socialResponse = await app.request(
       `${apiOrigin}/auth/sign-in/social`,
@@ -585,18 +740,29 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     );
     expect(disabledNonceResponse.status).toBe(200);
     const disabledChallenge = (await disabledNonceResponse.json()) as {
-      message: string;
       nonce: string;
     };
+    const disabledIssuedAt = new Date();
+    const disabledMessage = createSiweMessage({
+      address: account.address,
+      chainId: 999,
+      domain: "localhost:5173",
+      expirationTime: new Date(disabledIssuedAt.getTime() + 10 * 60_000),
+      issuedAt: disabledIssuedAt,
+      nonce: disabledChallenge.nonce,
+      statement: "Sign in to pledge.cash alerts.",
+      uri: webOrigin,
+      version: "1"
+    });
     const disabledSignature = await account.signMessage({
-      message: disabledChallenge.message
+      message: disabledMessage
     });
     const disabledVerifyResponse = await app.request(
       `${apiOrigin}/auth/siwe/verify`,
       {
         body: JSON.stringify({
           chainId: 999,
-          message: disabledChallenge.message,
+          message: disabledMessage,
           signature: disabledSignature,
           walletAddress: account.address
         }),
@@ -1702,35 +1868,46 @@ async function signInWallet(
   chainId = 999,
   clientIp?: string
 ): Promise<Response> {
-  const nonceResponse = await app.request(`${apiOrigin}/auth/peezy/siwe/nonce`, {
-    body: JSON.stringify({
-      chainId,
-      walletAddress: wallet.address
-    }),
-    headers: {
-      "Content-Type": "application/json",
-      Origin: webOrigin,
-      ...(clientIp === undefined ? {} : { "X-Forwarded-For": clientIp })
+  const socketIp =
+    clientIp ??
+    `198.51.100.${(Number.parseInt(wallet.address.slice(-2), 16) % 254) + 1}`;
+  const nonceResponse = await app.request(
+    `${apiOrigin}/auth/peezy/siwe/nonce`,
+    {
+      body: JSON.stringify({
+        chainId,
+        walletAddress: wallet.address
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Origin: webOrigin,
+        ...(clientIp === undefined ? {} : { "X-Forwarded-For": clientIp })
+      },
+      method: "POST"
     },
-    method: "POST"
-  });
+    { clientIp: socketIp }
+  );
   expect(nonceResponse.status).toBe(200);
   const challenge = (await nonceResponse.json()) as { message: string };
   const signature = await wallet.signMessage({
     message: challenge.message
   });
-  return app.request(`${apiOrigin}/auth/peezy/siwe/verify`, {
-    body: JSON.stringify({
-      chainId,
-      message: challenge.message,
-      signature,
-      walletAddress: wallet.address
-    }),
-    headers: {
-      "Content-Type": "application/json",
-      Origin: webOrigin,
-      ...(clientIp === undefined ? {} : { "X-Forwarded-For": clientIp })
+  return app.request(
+    `${apiOrigin}/auth/peezy/siwe/verify`,
+    {
+      body: JSON.stringify({
+        chainId,
+        message: challenge.message,
+        signature,
+        walletAddress: wallet.address
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Origin: webOrigin,
+        ...(clientIp === undefined ? {} : { "X-Forwarded-For": clientIp })
+      },
+      method: "POST"
     },
-    method: "POST"
-  });
+    { clientIp: socketIp }
+  );
 }

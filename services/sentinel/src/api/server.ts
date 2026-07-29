@@ -58,7 +58,11 @@ export function createApp(inputDeps: SentinelApiDeps): Hono<ApiEnv> {
   });
 
   app.route("/auth", createAuthRoutes(deps));
-  app.on(["GET", "POST"], "/auth/*", (c) => deps.auth.handler(c.req.raw));
+  app.on(["GET", "POST"], "/auth/*", (c) =>
+    deps.auth.handler(c.req.raw, {
+      ...(c.env?.clientIp === undefined ? {} : { clientIp: c.env.clientIp })
+    })
+  );
   app.route("/wallets", createWalletRoutes(deps));
   app.route("/boardroom-control", createBoardroomControlRoutes(deps));
   app.route("/subscriptions", createSubscriptionRoutes(deps));

@@ -775,7 +775,7 @@ describe("Sentinel WP5 API", () => {
     expect(identityHarness.auth.forwarded).toHaveLength(9);
   });
 
-  test("rate limits public Identity challenges before they reach the shared upstream bucket", async () => {
+  test("rate limits public Identity challenges by socket peer despite rotated forwarding headers", async () => {
     const identityHarness = createHarness({ sharedIdentity: true });
     const statuses: number[] = [];
     for (let index = 0; index < 11; index += 1) {
@@ -790,10 +790,11 @@ describe("Sentinel WP5 API", () => {
           }),
           headers: {
             "Content-Type": "application/json",
-            "X-Forwarded-For": "192.0.2.44"
+            "X-Forwarded-For": `192.0.2.${index + 1}`
           },
           method: "POST"
-        }
+        },
+        { clientIp: "198.51.100.44" }
       );
       statuses.push(response.status);
     }
@@ -876,7 +877,8 @@ describe("Sentinel WP5 API", () => {
             "X-Forwarded-For": `192.0.2.${index + 1}`
           },
           method: "POST"
-        }
+        },
+        { clientIp: `198.51.100.${index + 1}` }
       );
       statuses.push(response.status);
     }
@@ -901,14 +903,18 @@ describe("Sentinel WP5 API", () => {
     const statuses: number[] = [];
     for (let index = 0; index < 51; index += 1) {
       const harness = identityHarnesses[index % identityHarnesses.length]!;
-      const response = await harness.app.request("/auth/peezy/siwe/verify", {
-        body: JSON.stringify(request),
-        headers: {
-          "Content-Type": "application/json",
-          "X-Forwarded-For": `192.0.2.${index + 1}`
+      const response = await harness.app.request(
+        "/auth/peezy/siwe/verify",
+        {
+          body: JSON.stringify(request),
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": `192.0.2.${index + 1}`
+          },
+          method: "POST"
         },
-        method: "POST"
-      });
+        { clientIp: `198.51.100.${index + 1}` }
+      );
       statuses.push(response.status);
     }
 
@@ -922,19 +928,23 @@ describe("Sentinel WP5 API", () => {
     ).toBe(50);
   });
 
-  test("ignores caller-controlled leading forwarded addresses for client quota", async () => {
+  test("ignores every caller-controlled forwarding address for client quota", async () => {
     const identityHarness = createHarness({ sharedIdentity: true });
     const request = await authSiweRequest();
     const statuses: number[] = [];
     for (let index = 0; index < 11; index += 1) {
-      const response = await identityHarness.app.request("/auth/peezy/siwe/verify", {
-        body: JSON.stringify(request),
-        headers: {
-          "Content-Type": "application/json",
-          "X-Forwarded-For": `203.0.113.${index + 1}, 192.0.2.1`
+      const response = await identityHarness.app.request(
+        "/auth/peezy/siwe/verify",
+        {
+          body: JSON.stringify(request),
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": `203.0.113.${index + 1}, 192.0.2.1`
+          },
+          method: "POST"
         },
-        method: "POST"
-      });
+        { clientIp: "198.51.100.1" }
+      );
       statuses.push(response.status);
     }
 
@@ -960,7 +970,7 @@ describe("Sentinel WP5 API", () => {
     expect(harness.auth.forwarded).toHaveLength(51);
   });
 
-  test("bounds client rate-limit buckets under caller-controlled addresses", async () => {
+  test("caller-controlled addresses cannot create fresh rate-limit buckets", async () => {
     const boundedHarness = createHarness({
       rateLimit: {
         capacity: 1,
@@ -982,7 +992,7 @@ describe("Sentinel WP5 API", () => {
       statuses.push(response.status);
     }
 
-    expect(statuses).toEqual([200, 200, 200, 200]);
+    expect(statuses).toEqual([200, 429, 429, 429]);
   });
 
   test("reserves ten shared Identity grants for authenticated wallet links", async () => {

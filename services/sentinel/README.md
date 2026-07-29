@@ -60,14 +60,18 @@ social provider and remain walletless; PledgeCash asks for a wallet only when a
 wallet-dependent feature requires one. Current clients use the
 `/auth/peezy/*` social and exact-message SIWE routes. Shared mode also retains
 the previous social and `/auth/siwe/*` routes so clients loaded before a rolling
-deployment can finish authenticating. Every centrally linked EOA wallet can
-sign into the same subject. PledgeCash stores a local product shadow of that
-subject for its existing relational data and continues to own product sessions,
-alert coverage, delivery channels, subscriptions, and roles. Social and email
-matches never implicitly merge accounts. Wallet proofs through the current
-shared-mode routes are written only to Identity; Sentinel records the separate
-per-chain alert coverage row and does not mirror a second local sign-in
-credential.
+deployment can finish authenticating. The legacy SIWE route accepts the
+previous client-built message only for a wallet already recorded on a
+PledgeCash account; it creates no new local or central credential, and an
+unrecognized wallet must reload before signing in. If that account is already
+mapped to Identity, the central wallet must still be sign-in-enabled for the
+signed chain. Every centrally linked EOA wallet can sign into the same subject.
+PledgeCash stores a local product shadow of that subject for its existing
+relational data and continues to own product sessions, alert coverage, delivery
+channels, subscriptions, and roles. Social and email matches never implicitly
+merge accounts. Wallet proofs through the current shared-mode routes are
+written only to Identity; Sentinel records the separate per-chain alert
+coverage row and does not mirror a second local sign-in credential.
 
 PledgeCash product sessions keep their existing local expiry and revocation
 semantics. Disabling an Identity account prevents new central sign-ins,

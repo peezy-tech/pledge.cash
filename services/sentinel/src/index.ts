@@ -49,11 +49,15 @@ type Logger = Pick<Console, "error" | "log" | "warn">;
 type BunServer = {
   readonly hostname: string;
   readonly port: number;
+  requestIP(request: Request): { readonly address: string } | null;
   stop(force?: boolean): void;
 };
 
 declare const Bun: {
-  serve(options: { fetch(request: Request): Response | Promise<Response>; port: number }): BunServer;
+  serve(options: {
+    fetch(request: Request, server: BunServer): Response | Promise<Response>;
+    port: number;
+  }): BunServer;
 };
 
 export type SentinelRuntime = {
@@ -130,7 +134,16 @@ export async function startSentinel(options: StartSentinelOptions = {}): Promise
     store: createDrizzleApiStore(dbClient.db),
     verifySiweSignature: createPledgeCashSiweVerifier(config, [WALLET_LINK_SIWE_STATEMENT])
   });
-  const server = Bun.serve({ fetch: app.fetch, port: config.port });
+  const server = Bun.serve({
+    fetch(request, bunServer) {
+      const peer = bunServer.requestIP(request);
+      return app.fetch(
+        request,
+        peer === null ? {} : { clientIp: peer.address }
+      );
+    },
+    port: config.port
+  });
 
   logger.log(`Sentinel listening on ${server.hostname}:${server.port}`);
 
