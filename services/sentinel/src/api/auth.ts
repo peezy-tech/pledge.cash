@@ -1,4 +1,5 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { verifyMessage, type Address, type Hex } from "viem";
 import { parseSiweMessage } from "viem/siwe";
 import { z } from "zod";
@@ -34,9 +35,11 @@ import {
 
 const AUTH_SIWE_MAX_AGE_MS = 15 * 60_000;
 const AUTH_SIWE_CLOCK_SKEW_MS = 5 * 60_000;
+const AUTH_SIWE_MAX_BODY_BYTES = 128 * 1024;
 const DEFAULT_RATE_LIMIT_MAX_BUCKETS = 10_000;
 const IDENTITY_RATE_WINDOW_MS = 5 * 60_000;
 const PUBLIC_SIWE_CLIENT_LIMIT = 10;
+const PUBLIC_SIWE_ATTEMPT_GLOBAL_LIMIT = 300;
 // Identity v0.1 allows 60 wallet-grant issues per client and window. Keep ten
 // available for authenticated wallet links even if the public sign-in route is abused.
 const PUBLIC_SIWE_GLOBAL_LIMIT = 50;
@@ -221,7 +224,17 @@ export type ApiEnv = {
   Variables: ApiVariables;
 };
 
-type JsonErrorStatus = 400 | 401 | 403 | 404 | 409 | 422 | 429 | 500 | 503;
+type JsonErrorStatus =
+  | 400
+  | 401
+  | 403
+  | 404
+  | 409
+  | 413
+  | 422
+  | 429
+  | 500
+  | 503;
 
 type ParseResult<T> =
   | {
@@ -360,7 +373,7 @@ export function createRateLimitMiddleware(
 
 function createIdentityQuotaMiddleware(
   deps: SentinelApiDeps,
-  kind: "wallet-grant-public",
+  kind: "wallet-proof-public" | "wallet-grant-public",
   capacity: number,
   windowMs: number
 ): MiddlewareHandler<ApiEnv> {
@@ -398,6 +411,16 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     PUBLIC_SIWE_GLOBAL_LIMIT,
     IDENTITY_RATE_WINDOW_MS
   );
+  const publicSiweAttemptGlobalRateLimit = createIdentityQuotaMiddleware(
+    deps,
+    "wallet-proof-public",
+    PUBLIC_SIWE_ATTEMPT_GLOBAL_LIMIT,
+    IDENTITY_RATE_WINDOW_MS
+  );
+  const publicSiweBodyLimit = bodyLimit({
+    maxSize: AUTH_SIWE_MAX_BODY_BYTES,
+    onError: (c) => jsonError(c, 413, "Request body is too large")
+  });
 
   app.get("/capabilities", async (c) => {
     let socialProviders = deps.auth.socialProviders;
@@ -577,13 +600,17 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     deps.auth.handler(c.req.raw);
 
   if (deps.auth.usesSharedIdentity === true) {
-    app.post(
-      "/peezy/siwe/verify",
-      validateIdentitySiwe,
-      publicSiweClientRateLimit,
-      publicSiweGlobalRateLimit,
-      forwardSiweVerify
-    );
+    for (const path of ["/peezy/siwe/verify", "/siwe/verify"]) {
+      app.post(
+        path,
+        publicSiweBodyLimit,
+        publicSiweClientRateLimit,
+        publicSiweAttemptGlobalRateLimit,
+        validateIdentitySiwe,
+        publicSiweGlobalRateLimit,
+        forwardSiweVerify
+      );
+    }
   } else {
     app.post("/siwe/verify", forwardSiweVerify);
   }

@@ -97,9 +97,11 @@ export const AuthSiweNonceResponseSchema = z.object({
   nonce: z.string().min(8)
 });
 
+export const AUTH_SIWE_MAX_MESSAGE_LENGTH = 16_384;
+
 export const AuthSiweVerifyRequestSchema = z.object({
   chainId: z.number().int().positive(),
-  message: z.string().min(1),
+  message: z.string().min(1).max(AUTH_SIWE_MAX_MESSAGE_LENGTH),
   signature: HexSchema,
   walletAddress: AddressSchema
 });

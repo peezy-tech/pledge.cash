@@ -1,5 +1,4 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { randomBytes } from "node:crypto";
 
 import {
   IdentityCapabilitiesSchema,
@@ -20,7 +19,6 @@ import { authorizationCodeRequest, getOAuth2Tokens } from "better-auth/oauth2";
 import {
   genericOAuth,
   organization,
-  siwe,
   type GenericOAuthConfig
 } from "better-auth/plugins";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -31,7 +29,6 @@ import type { Config } from "../config";
 import type { SentinelDb } from "../db/client";
 import {
   authAccounts,
-  authWallets,
   authVerifications,
   users,
   walletOwners,
@@ -41,16 +38,16 @@ import {
   identityQuotaScope,
   takeIdentityQuota
 } from "./identity-quota";
-import type {
-  AddressDto,
-  AuthRedirectResponse,
-  AuthSiweNonceResponse,
-  SocialProviderDto,
-  WalletDto
+import {
+  AUTH_SIWE_MAX_MESSAGE_LENGTH,
+  type AddressDto,
+  type AuthRedirectResponse,
+  type AuthSiweNonceResponse,
+  type SocialProviderDto,
+  type WalletDto
 } from "./dto";
 import type { AuthAdapter, AuthSnapshot } from "./auth";
 import {
-  createPledgeCashSiweVerifier,
   createSentinelAuthDatabaseAdapter,
   internalAuthHeaders
 } from "./better-auth";
@@ -213,16 +210,6 @@ export function createPeezyIdentityAuthAdapter(
           )
         ]
       }),
-      siwe({
-        anonymous: true,
-        domain: new URL(config.webOrigin).host,
-        emailDomainName: "wallet.pledge.cash.invalid",
-        getNonce: async () => randomBytes(24).toString("hex"),
-        schema: {
-          walletAddress: { modelName: "authWallets" }
-        },
-        verifyMessage: createPledgeCashSiweVerifier(config)
-      }),
       peezyWalletSessionPlugin(gateway, db, identityHydrator),
       organization({
         allowUserToCreateOrganization: false,
@@ -285,21 +272,11 @@ export function createPeezyIdentityAuthAdapter(
       return session === null ? null : { user: { id: session.user.id } };
     },
     async handler(request) {
-      const legacyWalletDenial = await legacyWalletSignInDenial(
-        db,
-        gateway,
-        request
-      );
-      if (legacyWalletDenial !== undefined) {
-        return Response.json(
-          { message: legacyWalletDenial },
-          { status: 401 }
-        );
-      }
-      const linkUserId = await identityLinkUserForCallback(db, request);
+      const identityRequest = rewriteLegacyWalletAuthRequest(request);
+      const linkUserId = await identityLinkUserForCallback(db, identityRequest);
       return requestContext.run(
         linkUserId === undefined ? {} : { linkUserId },
-        () => auth.handler(request)
+        () => auth.handler(identityRequest)
       );
     },
     async linkWalletCredential(input) {
@@ -458,60 +435,17 @@ export function createPeezyOidcProviderConfig(
   };
 }
 
-async function legacyWalletSignInDenial(
-  db: SentinelDb,
-  gateway: ReturnType<typeof createIdentityGateway>,
-  request: Request
-): Promise<string | undefined> {
+function rewriteLegacyWalletAuthRequest(request: Request): Request {
   const url = new URL(request.url);
-  if (
-    request.method !== "POST" ||
-    url.pathname !== "/auth/siwe/verify"
-  ) {
-    return undefined;
+  const path = {
+    "/auth/siwe/nonce": "/auth/peezy/siwe/nonce",
+    "/auth/siwe/verify": "/auth/peezy/siwe/verify"
+  }[url.pathname];
+  if (path === undefined) {
+    return request;
   }
-
-  let body: {
-    readonly chainId?: unknown;
-    readonly walletAddress?: unknown;
-  };
-  try {
-    body = z
-      .object({
-        chainId: z.number().int().positive(),
-        walletAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/)
-      })
-      .parse(await request.clone().json());
-  } catch {
-    return undefined;
-  }
-
-  const address = getAddress(body.walletAddress as string);
-  const [credential] = await db
-    .select({ userId: authWallets.userId })
-    .from(authWallets)
-    .where(sql`lower(${authWallets.address}) = lower(${address})`)
-    .limit(1);
-  if (credential === undefined) return undefined;
-
-  const subject = await identitySubjectForProductUser(db, credential.userId);
-  if (subject === undefined) return undefined;
-
-  const identity = await gateway.getIdentity(subject);
-  const centralWallet = identity.credentials.find(
-    (candidate) =>
-      candidate.kind === "wallet" &&
-      candidate.address.toLowerCase() === address.toLowerCase() &&
-      candidate.verifiedChainIds.includes(body.chainId as number)
-  );
-  if (
-    identity.user.status !== "active" ||
-    centralWallet?.kind !== "wallet" ||
-    !centralWallet.signInEnabled
-  ) {
-    return "Wallet sign-in is disabled by peezy.tech Identity";
-  }
-  return undefined;
+  url.pathname = path;
+  return new Request(url, request);
 }
 
 function hydrateIdentitySnapshot(
@@ -620,7 +554,7 @@ function peezyWalletSessionPlugin(
           method: "POST",
           body: z.object({
             chainId: z.number().int().positive(),
-            message: z.string().min(1),
+            message: z.string().min(1).max(AUTH_SIWE_MAX_MESSAGE_LENGTH),
             signature: z.string().regex(/^0x[a-fA-F0-9]+$/),
             walletAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/)
           })
@@ -1159,10 +1093,7 @@ async function linkIdentityWalletCredential(
 
   const existingIdentity = await gateway.getIdentity(subject);
   assertProvisionableIdentity(existingIdentity);
-  // Identity v0.1 cannot compensate a wallet link. Commit every local
-  // ownership/conflict check and the recoverable alert-coverage intent first,
-  // then make the central mutation with no required database write afterward.
-  const preparedWallet = await db.transaction(async (transaction) => {
+  return db.transaction(async (transaction) => {
     await transaction.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`peezy-user:${subject}`}))`
     );
@@ -1180,10 +1111,40 @@ async function linkIdentityWalletCredential(
     if (candidateUserIds.size > 1) {
       throw new Error("peezy.tech credentials resolve to multiple PledgeCash users");
     }
+
+    // Keep the local ownership and coverage projection inside this transaction
+    // until Identity accepts the canonical link. A rejected central claim then
+    // rolls back without leaving account-continuity evidence behind.
+    const issued = await gateway.issueWalletGrant({
+      message: input.message,
+      signature: input.signature,
+      subject
+    });
+    identityHydrator.invalidate(issued.user.id);
+    const exchanged = await gateway.exchangeWalletGrant(issued.grant);
+    if (
+      exchanged.subject !== issued.user.id ||
+      exchanged.subject !== subject
+    ) {
+      throw new Error("Identity wallet grant resolved to another subject");
+    }
+    const centralIdentity = await gateway.getIdentity(exchanged.subject);
+    identityHydrator.set(exchanged.subject, centralIdentity);
+    assertProvisionableIdentity(centralIdentity);
+    const centralWallet = centralIdentity.credentials.find(
+      (credential) =>
+        credential.kind === "wallet" &&
+        credential.address.toLowerCase() === input.address.toLowerCase() &&
+        credential.verifiedChainIds.includes(input.chainId)
+    );
+    if (centralWallet?.kind !== "wallet") {
+      throw new Error("Identity wallet grant did not link the requested wallet");
+    }
+
     await bindIdentitySubject(transaction, subject, input.userId);
     return upsertWalletCoverage(transaction, {
       address: input.address,
-      canSignIn: false,
+      canSignIn: centralWallet.signInEnabled,
       chainId: input.chainId,
       reenableAlerts: true,
       siweMessage: input.message,
@@ -1191,37 +1152,6 @@ async function linkIdentityWalletCredential(
       verifiedAt: input.verifiedAt
     });
   });
-
-  const issued = await gateway.issueWalletGrant({
-    message: input.message,
-    signature: input.signature,
-    subject
-  });
-  identityHydrator.invalidate(issued.user.id);
-  const exchanged = await gateway.exchangeWalletGrant(issued.grant);
-  if (
-    exchanged.subject !== issued.user.id ||
-    exchanged.subject !== subject
-  ) {
-    throw new Error("Identity wallet grant resolved to another subject");
-  }
-  const centralIdentity = await gateway.getIdentity(exchanged.subject);
-  identityHydrator.set(exchanged.subject, centralIdentity);
-  assertProvisionableIdentity(centralIdentity);
-  const centralWallet = centralIdentity.credentials.find(
-    (credential) =>
-      credential.kind === "wallet" &&
-      credential.address.toLowerCase() === input.address.toLowerCase() &&
-      credential.verifiedChainIds.includes(input.chainId)
-  );
-  if (centralWallet?.kind !== "wallet") {
-    throw new Error("Identity wallet grant did not link the requested wallet");
-  }
-
-  return {
-    ...preparedWallet,
-    canSignIn: centralWallet.signInEnabled
-  };
 }
 
 async function assertWalletOwnerAvailable(

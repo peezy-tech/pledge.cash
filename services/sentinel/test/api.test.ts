@@ -725,7 +725,7 @@ describe("Sentinel WP5 API", () => {
     expect(identityHarness.auth.forwarded).toEqual([]);
   });
 
-  test("does not allocate Identity client quota for malformed SIWE bodies", async () => {
+  test("rate limits malformed SIWE bodies before parsing them", async () => {
     const identityHarness = createHarness({ sharedIdentity: true });
     const clientAddress = "192.0.2.1";
     const malformed = await identityHarness.app.request("/auth/peezy/siwe/verify", {
@@ -752,12 +752,32 @@ describe("Sentinel WP5 API", () => {
       statuses.push(response.status);
     }
 
-    expect(statuses.slice(0, 10).every((status) => status === 200)).toBe(true);
-    expect(statuses[10]).toBe(429);
-    expect(identityHarness.auth.forwarded).toHaveLength(10);
+    expect(statuses.slice(0, 9).every((status) => status === 200)).toBe(true);
+    expect(statuses.slice(9)).toEqual([429, 429]);
+    expect(identityHarness.auth.forwarded).toHaveLength(9);
   });
 
-  test("does not allocate shared Identity quota to invalid signatures", async () => {
+  test("rejects oversized SIWE requests before parsing or quota work", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const request = await authSiweRequest();
+    const response = await identityHarness.app.request(
+      "/auth/peezy/siwe/verify",
+      {
+        body: JSON.stringify({
+          ...request,
+          message: "a".repeat(129 * 1024)
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      }
+    );
+
+    expect(response.status).toBe(413);
+    expect(identityHarness.store.identityQuotaEvents.size).toBe(0);
+    expect(identityHarness.auth.forwarded).toEqual([]);
+  });
+
+  test("rate limits invalid signatures before signature recovery", async () => {
     const identityHarness = createHarness({ sharedIdentity: true });
     const request = await authSiweRequest();
     const statuses: number[] = [];
@@ -776,8 +796,14 @@ describe("Sentinel WP5 API", () => {
       statuses.push(response.status);
     }
 
-    expect(statuses.every((status) => status === 401)).toBe(true);
+    expect(statuses.slice(0, 10).every((status) => status === 401)).toBe(true);
+    expect(statuses.slice(10).every((status) => status === 429)).toBe(true);
     expect(identityHarness.auth.forwarded).toEqual([]);
+    expect(
+      identityHarness.store.identityQuotaEvents.get(
+        "pledge-cash-test:wallet-grant-public"
+      )
+    ).toBeUndefined();
 
     const valid = await identityHarness.app.request("/auth/peezy/siwe/verify", {
       body: JSON.stringify(request),
@@ -787,8 +813,36 @@ describe("Sentinel WP5 API", () => {
       },
       method: "POST"
     });
-    expect(valid.status).toBe(200);
-    expect(identityHarness.auth.forwarded).toHaveLength(1);
+    expect(valid.status).toBe(429);
+    expect(identityHarness.auth.forwarded).toEqual([]);
+  });
+
+  test("globally rate limits SIWE attempts before JSON parsing", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const statuses: number[] = [];
+    for (let index = 0; index < 301; index += 1) {
+      const response = await identityHarness.app.request(
+        "/auth/peezy/siwe/verify",
+        {
+          body: "{",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": `192.0.2.${index + 1}`
+          },
+          method: "POST"
+        }
+      );
+      statuses.push(response.status);
+    }
+
+    expect(statuses.slice(0, 300).every((status) => status === 400)).toBe(true);
+    expect(statuses[300]).toBe(429);
+    expect(
+      identityHarness.store.identityQuotaEvents.get(
+        "pledge-cash-test:wallet-proof-public"
+      )
+    ).toHaveLength(300);
+    expect(identityHarness.auth.forwarded).toEqual([]);
   });
 
   test("reserves shared Identity wallet-grant quota from anonymous traffic", async () => {
@@ -843,7 +897,7 @@ describe("Sentinel WP5 API", () => {
     expect(identityHarness.auth.forwarded).toHaveLength(10);
   });
 
-  test("does not apply the shared Identity quota to legacy SIWE authentication", async () => {
+  test("does not apply shared Identity quotas when shared Identity is disabled", async () => {
     const request = await authSiweRequest();
     const statuses = await Promise.all(
       Array.from({ length: 51 }, async () => {

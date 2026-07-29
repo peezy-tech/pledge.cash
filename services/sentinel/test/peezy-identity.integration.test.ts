@@ -441,7 +441,7 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     });
   });
 
-  test("keeps clients from the previous web revision usable during rollout", async () => {
+  test("routes legacy SIWE endpoints through canonical Identity authentication", async () => {
     const account = privateKeyToAccount(
       `0x${randomBytes(32).toString("hex")}`
     );
@@ -457,24 +457,15 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       method: "POST"
     });
     expect(nonceResponse.status).toBe(200);
-    const nonce = (await nonceResponse.json()) as { nonce: string };
-    const issuedAt = new Date();
-    const message = createSiweMessage({
-      address: account.address,
-      chainId: 999,
-      domain: new URL(webOrigin).host,
-      expirationTime: new Date(issuedAt.getTime() + 10 * 60_000),
-      issuedAt,
-      nonce: nonce.nonce,
-      statement: "Sign in to pledge.cash alerts.",
-      uri: webOrigin,
-      version: "1"
-    });
-    const signature = await account.signMessage({ message });
+    const challenge = (await nonceResponse.json()) as {
+      message: string;
+      nonce: string;
+    };
+    const signature = await account.signMessage({ message: challenge.message });
     const verifyResponse = await app.request(`${apiOrigin}/auth/siwe/verify`, {
       body: JSON.stringify({
         chainId: 999,
-        message,
+        message: challenge.message,
         signature,
         walletAddress: account.address
       }),
@@ -488,6 +479,12 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     expect(
       responseCookie(verifyResponse, "pledge-cash.session_token")
     ).toContain("pledge-cash.session_token");
+    const [centralClaim] = await identitySql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "wallet_principal"
+      WHERE lower("address") = ${account.address.toLowerCase()}
+    `;
+    expect(centralClaim?.count).toBe("1");
 
     const socialResponse = await app.request(
       `${apiOrigin}/auth/sign-in/social`,
@@ -532,30 +529,19 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       }
     );
     expect(disabledNonceResponse.status).toBe(200);
-    const disabledNonce = (await disabledNonceResponse.json()) as {
+    const disabledChallenge = (await disabledNonceResponse.json()) as {
+      message: string;
       nonce: string;
     };
-    const disabledIssuedAt = new Date();
-    const disabledMessage = createSiweMessage({
-      address: account.address,
-      chainId: 999,
-      domain: new URL(webOrigin).host,
-      expirationTime: new Date(disabledIssuedAt.getTime() + 10 * 60_000),
-      issuedAt: disabledIssuedAt,
-      nonce: disabledNonce.nonce,
-      statement: "Sign in to pledge.cash alerts.",
-      uri: webOrigin,
-      version: "1"
-    });
     const disabledSignature = await account.signMessage({
-      message: disabledMessage
+      message: disabledChallenge.message
     });
     const disabledVerifyResponse = await app.request(
       `${apiOrigin}/auth/siwe/verify`,
       {
         body: JSON.stringify({
           chainId: 999,
-          message: disabledMessage,
+          message: disabledChallenge.message,
           signature: disabledSignature,
           walletAddress: account.address
         }),
@@ -898,6 +884,105 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       WHERE lower("address") = ${linkedWallet.address.toLowerCase()}
     `;
     expect(centralWallet?.count).toBe("0");
+  });
+
+  test("does not retain a local wallet claim when Identity rejects the link", async () => {
+    const sessionWallet = privateKeyToAccount(
+      `0x${randomBytes(32).toString("hex")}`
+    );
+    const centrallyOwnedWallet = privateKeyToAccount(
+      `0x${randomBytes(32).toString("hex")}`
+    );
+    const signIn = await signInWallet(app, sessionWallet);
+    expect(signIn.status).toBe(200);
+    const cookie = responseCookie(signIn, "pledge-cash.session_token");
+
+    const centralOwner = randomUUID();
+    await identitySql`
+      INSERT INTO "user" (
+        "id", "name", "email", "email_verified", "status", "created_at", "updated_at"
+      )
+      VALUES (
+        ${centralOwner},
+        'Existing central wallet owner',
+        ${`${centralOwner}@example.com`},
+        true,
+        'active',
+        now(),
+        now()
+      )
+    `;
+    await identitySql`
+      INSERT INTO "wallet_principal" (
+        "id", "user_id", "family", "account_kind", "address",
+        "chain_id", "sign_in_enabled", "created_at", "updated_at"
+      )
+      VALUES (
+        ${randomUUID()},
+        ${centralOwner},
+        'evm',
+        'eoa',
+        ${centrallyOwnedWallet.address},
+        NULL,
+        true,
+        now(),
+        now()
+      )
+    `;
+    await identitySql`
+      INSERT INTO "wallet_address" (
+        "id", "user_id", "address", "chain_id", "is_primary", "created_at"
+      )
+      VALUES (
+        ${randomUUID()},
+        ${centralOwner},
+        ${centrallyOwnedWallet.address},
+        999,
+        true,
+        now()
+      )
+    `;
+
+    const nonceResponse = await app.request(`${apiOrigin}/wallets/nonce`, {
+      body: JSON.stringify({
+        address: centrallyOwnedWallet.address,
+        chainId: 999
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookie,
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+    expect(nonceResponse.status).toBe(200);
+    const challenge = (await nonceResponse.json()) as { message: string };
+    const signature = await centrallyOwnedWallet.signMessage({
+      message: challenge.message
+    });
+    const linkResponse = await app.request(`${apiOrigin}/wallets`, {
+      body: JSON.stringify({ message: challenge.message, signature }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookie,
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+
+    expect(linkResponse.status).toBe(409);
+    const [localOwner] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "wallet_owners"
+      WHERE "address" = ${centrallyOwnedWallet.address.toLowerCase()}
+    `;
+    const [localCoverage] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "wallets"
+      WHERE lower("address") = ${centrallyOwnedWallet.address.toLowerCase()}
+    `;
+    expect(localOwner?.count).toBe("0");
+    expect(localCoverage?.count).toBe("0");
   });
 
   test("refuses a wallet link when the central credentials span product users", async () => {

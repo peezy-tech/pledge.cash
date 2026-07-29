@@ -5,6 +5,7 @@ import { identityQuotaEvents } from "../db/schema";
 
 export type IdentityQuotaKind =
   | "presentation-read"
+  | "wallet-proof-public"
   | "wallet-grant-link"
   | "wallet-grant-public";
 
