@@ -47,10 +47,17 @@ before delegating. SDK transaction and authorization builders require callers
 to provide the hash explicitly.
 
 Controller operation IDs, schedules, and signatures also commit the expected
-hash. Child contracts read the current hash and echo it into a callback in the
-same transaction. A global release activation therefore invalidates stale
-direct calls, callbacks, queued operations, and offchain proofs rather than
-silently executing them under new logic.
+hash. Module callbacks into a Boardroom carry an explicit hash rather than one
+read from the Boardroom in the same frame: entrypoints reachable without going
+through a Boardroom — curve migration and settlement, airdrop claims, and the
+factory callbacks they trigger — take the hash from their own caller, while
+callbacks made inside a Boardroom-initiated frame inherit the hash that frame
+already bound and that the kernel re-verifies before returning. Share-token
+transfers are the one exception: the ERC-20 surface carries no hash, so the
+primary-market guard runs under whichever facet set is active at execution.
+A global release activation therefore invalidates stale direct calls,
+callbacks, queued operations, and offchain authorizations rather than silently
+executing them under new logic.
 
 When a release raises the required storage version, views remain
 backward-safe, but ordinary writes on each Boardroom revert until anyone runs

@@ -199,30 +199,44 @@ contract ModuleCallbackTargetMock is IBoardroomCallbackTarget {
 }
 
 contract BoardroomCallbackHarness {
-    function reserveRedeemableAsset(address boardroom, address asset) external {
-        BoardroomCallbackLib.reserveRedeemableAsset(boardroom, asset);
+    function boundFacetSetHash(address boardroom) external view returns (bytes32) {
+        return BoardroomCallbackLib.boundFacetSetHash(boardroom);
     }
 
-    function precommitBondingCurve(address boardroom, address curve, address quoteAsset, uint256 fundingAmount)
-        external
-    {
-        BoardroomCallbackLib.precommitBondingCurve(boardroom, curve, quoteAsset, fundingAmount);
+    function reserveRedeemableAsset(address boardroom, bytes32 expectedFacetSetHash, address asset) external {
+        BoardroomCallbackLib.reserveRedeemableAsset(boardroom, expectedFacetSetHash, asset);
     }
 
-    function recordGrantFromDistribution(address boardroom, address grant) external {
-        BoardroomCallbackLib.recordGrantFromDistribution(boardroom, grant);
+    function precommitBondingCurve(
+        address boardroom,
+        bytes32 expectedFacetSetHash,
+        address curve,
+        address quoteAsset,
+        uint256 fundingAmount
+    ) external {
+        BoardroomCallbackLib.precommitBondingCurve(boardroom, expectedFacetSetHash, curve, quoteAsset, fundingAmount);
     }
 
-    function recordLockedLiquidityFromDistribution(address boardroom, address locker, address pool) external {
-        BoardroomCallbackLib.recordLockedLiquidityFromDistribution(boardroom, locker, pool);
+    function recordGrantFromDistribution(address boardroom, bytes32 expectedFacetSetHash, address grant) external {
+        BoardroomCallbackLib.recordGrantFromDistribution(boardroom, expectedFacetSetHash, grant);
     }
 
-    function settleBondingCurve(address boardroom) external {
-        BoardroomCallbackLib.settleBondingCurve(boardroom);
+    function recordLockedLiquidityFromDistribution(
+        address boardroom,
+        bytes32 expectedFacetSetHash,
+        address locker,
+        address pool
+    ) external {
+        BoardroomCallbackLib.recordLockedLiquidityFromDistribution(boardroom, expectedFacetSetHash, locker, pool);
+    }
+
+    function settleBondingCurve(address boardroom, bytes32 expectedFacetSetHash) external {
+        BoardroomCallbackLib.settleBondingCurve(boardroom, expectedFacetSetHash);
     }
 
     function precommitProtocolLiquidity(
         address boardroom,
+        bytes32 expectedFacetSetHash,
         address expectedLocker,
         address quoteAsset,
         address curve,
@@ -231,12 +245,13 @@ contract BoardroomCallbackHarness {
         uint64 expiresAt
     ) external {
         BoardroomCallbackLib.precommitProtocolLiquidity(
-            boardroom, expectedLocker, quoteAsset, curve, pairKey, salt, expiresAt
+            boardroom, expectedFacetSetHash, expectedLocker, quoteAsset, curve, pairKey, salt, expiresAt
         );
     }
 
     function activateProtocolLiquidity(
         address boardroom,
+        bytes32 expectedFacetSetHash,
         address locker,
         address pool,
         address quoteAsset,
@@ -244,17 +259,25 @@ contract BoardroomCallbackHarness {
         bytes32 pairKey,
         bytes32 salt
     ) external {
-        BoardroomCallbackLib.activateProtocolLiquidity(boardroom, locker, pool, quoteAsset, curve, pairKey, salt);
+        BoardroomCallbackLib.activateProtocolLiquidity(
+            boardroom, expectedFacetSetHash, locker, pool, quoteAsset, curve, pairKey, salt
+        );
     }
 
-    function releaseProtocolLiquidityReservation(address boardroom, address curve, bytes32 pairKey, bytes32 salt)
+    function releaseProtocolLiquidityReservation(
+        address boardroom,
+        bytes32 expectedFacetSetHash,
+        address curve,
+        bytes32 pairKey,
+        bytes32 salt
+    ) external {
+        BoardroomCallbackLib.releaseProtocolLiquidityReservation(boardroom, expectedFacetSetHash, curve, pairKey, salt);
+    }
+
+    function closeProtocolLiquidityFromFactory(address boardroom, bytes32 expectedFacetSetHash, address locker)
         external
     {
-        BoardroomCallbackLib.releaseProtocolLiquidityReservation(boardroom, curve, pairKey, salt);
-    }
-
-    function closeProtocolLiquidityFromFactory(address boardroom, address locker) external {
-        BoardroomCallbackLib.closeProtocolLiquidityFromFactory(boardroom, locker);
+        BoardroomCallbackLib.closeProtocolLiquidityFromFactory(boardroom, expectedFacetSetHash, locker);
     }
 }
 
@@ -365,34 +388,45 @@ contract BoardroomModuleIntegrationTest is Test {
         harness = new BoardroomCallbackHarness();
     }
 
-    function testAssetAndDistributionCallbacksBindCurrentHashAndPreserveCaller() public {
-        harness.reserveRedeemableAsset(address(target), ASSET);
+    function testAssetAndDistributionCallbacksBindCallerSuppliedHashAndPreserveCaller() public {
+        harness.reserveRedeemableAsset(address(target), RELEASE_A, ASSET);
         _assertCallback(ModuleCallbackTargetMock.reserveRedeemableAsset.selector, RELEASE_A, 1);
         assertEq(target.addressArg0(), ASSET);
 
+        // An activation between authorization and execution invalidates the caller's hash
+        // instead of being silently adopted.
         target.setFacetSetHash(RELEASE_B);
-        harness.precommitBondingCurve(address(target), CURVE, QUOTE_ASSET, 42 ether);
+        vm.expectRevert(
+            abi.encodeWithSelector(ModuleCallbackTargetMock.FacetSetHashMismatch.selector, RELEASE_A, RELEASE_B)
+        );
+        harness.reserveRedeemableAsset(address(target), RELEASE_A, ASSET);
+        assertEq(target.callbackCount(), 1);
+
+        harness.precommitBondingCurve(address(target), RELEASE_B, CURVE, QUOTE_ASSET, 42 ether);
         _assertCallback(ModuleCallbackTargetMock.precommitBondingCurve.selector, RELEASE_B, 2);
         assertEq(target.addressArg0(), CURVE);
         assertEq(target.addressArg1(), QUOTE_ASSET);
         assertEq(target.uint256Arg(), 42 ether);
 
-        harness.recordGrantFromDistribution(address(target), GRANT);
+        harness.recordGrantFromDistribution(address(target), RELEASE_B, GRANT);
         _assertCallback(ModuleCallbackTargetMock.recordGrantFromDistribution.selector, RELEASE_B, 3);
         assertEq(target.addressArg0(), GRANT);
 
-        harness.recordLockedLiquidityFromDistribution(address(target), LOCKER, POOL);
+        harness.recordLockedLiquidityFromDistribution(address(target), RELEASE_B, LOCKER, POOL);
         _assertCallback(ModuleCallbackTargetMock.recordLockedLiquidityFromDistribution.selector, RELEASE_B, 4);
         assertEq(target.addressArg0(), LOCKER);
         assertEq(target.addressArg1(), POOL);
 
-        harness.settleBondingCurve(address(target));
+        harness.settleBondingCurve(address(target), RELEASE_B);
         _assertCallback(ModuleCallbackTargetMock.settleBondingCurve.selector, RELEASE_B, 5);
+
+        // Boardroom-initiated frames resolve the hash their outer route already bound.
+        assertEq(harness.boundFacetSetHash(address(target)), RELEASE_B);
     }
 
-    function testLiquidityCallbacksBindCurrentHashAndPreserveCaller() public {
+    function testLiquidityCallbacksBindCallerSuppliedHashAndPreserveCaller() public {
         harness.precommitProtocolLiquidity(
-            address(target), LOCKER, QUOTE_ASSET, CURVE, PAIR_KEY, SALT, uint64(block.timestamp + 1 days)
+            address(target), RELEASE_A, LOCKER, QUOTE_ASSET, CURVE, PAIR_KEY, SALT, uint64(block.timestamp + 1 days)
         );
         _assertCallback(ModuleCallbackTargetMock.precommitProtocolLiquidity.selector, RELEASE_A, 1);
         assertEq(target.addressArg0(), LOCKER);
@@ -403,7 +437,13 @@ contract BoardroomModuleIntegrationTest is Test {
         assertEq(target.uint64Arg(), uint64(block.timestamp + 1 days));
 
         target.setFacetSetHash(RELEASE_B);
-        harness.activateProtocolLiquidity(address(target), LOCKER, POOL, QUOTE_ASSET, CURVE, PAIR_KEY, SALT);
+        vm.expectRevert(
+            abi.encodeWithSelector(ModuleCallbackTargetMock.FacetSetHashMismatch.selector, RELEASE_A, RELEASE_B)
+        );
+        harness.activateProtocolLiquidity(address(target), RELEASE_A, LOCKER, POOL, QUOTE_ASSET, CURVE, PAIR_KEY, SALT);
+        assertEq(target.callbackCount(), 1);
+
+        harness.activateProtocolLiquidity(address(target), RELEASE_B, LOCKER, POOL, QUOTE_ASSET, CURVE, PAIR_KEY, SALT);
         _assertCallback(ModuleCallbackTargetMock.activateProtocolLiquidity.selector, RELEASE_B, 2);
         assertEq(target.addressArg0(), LOCKER);
         assertEq(target.addressArg1(), POOL);
@@ -412,13 +452,13 @@ contract BoardroomModuleIntegrationTest is Test {
         assertEq(target.bytes32Arg0(), PAIR_KEY);
         assertEq(target.bytes32Arg1(), SALT);
 
-        harness.releaseProtocolLiquidityReservation(address(target), CURVE, PAIR_KEY, SALT);
+        harness.releaseProtocolLiquidityReservation(address(target), RELEASE_B, CURVE, PAIR_KEY, SALT);
         _assertCallback(ModuleCallbackTargetMock.releaseProtocolLiquidityReservation.selector, RELEASE_B, 3);
         assertEq(target.addressArg0(), CURVE);
         assertEq(target.bytes32Arg0(), PAIR_KEY);
         assertEq(target.bytes32Arg1(), SALT);
 
-        harness.closeProtocolLiquidityFromFactory(address(target), LOCKER);
+        harness.closeProtocolLiquidityFromFactory(address(target), RELEASE_B, LOCKER);
         _assertCallback(ModuleCallbackTargetMock.closeProtocolLiquidityFromFactory.selector, RELEASE_B, 4);
         assertEq(target.addressArg0(), LOCKER);
     }
@@ -494,10 +534,10 @@ contract BoardroomRealModuleIntegrationTest is Test {
     bytes32 internal constant RELEASE_HASH = keccak256("module-parity-release");
     bytes32 internal constant RELEASE_B_HASH = keccak256("module-parity-release-b");
     bytes32 internal constant DIRECT_CLAIM_TYPEHASH = keccak256(
-        "MerkleAirdropDirectClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
+        "MerkleAirdropDirectClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
     );
     bytes32 internal constant GRANT_CLAIM_TYPEHASH = keccak256(
-        "MerkleAirdropGrantClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)"
+        "MerkleAirdropGrantClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)"
     );
     bytes32 internal constant GRANT_TERMS_TYPEHASH = keccak256(
         "MerkleAirdropGrantTerms(address paymentToken,uint256 price,uint256 expiry,uint256 vestingCliff,uint256 vestingEnd,bool transferable,uint256 transferUnlockTime,bytes32 salt)"
@@ -650,7 +690,7 @@ contract BoardroomRealModuleIntegrationTest is Test {
             transferUnlockTime: 0,
             salt: keccak256("real-airdrop-grant")
         });
-        bytes32 root = _grantClaimLeaf(predicted, RELEASE_HASH, 0, recipient, grantShares, grantParams);
+        bytes32 root = _grantClaimLeaf(predicted, 0, recipient, grantShares, grantParams);
         MerkleAirdrop.CreateParams memory params = MerkleAirdrop.CreateParams({
             shareToken: address(shares),
             shareAmount: airdropShares,
@@ -695,16 +735,16 @@ contract BoardroomRealModuleIntegrationTest is Test {
         assertEq(airdrop.GRANT_TERMS_TYPEHASH(), GRANT_TERMS_TYPEHASH);
     }
 
-    function testMerkleDirectClaimRejectsStaleReleaseProofAndAcceptsCurrentReleaseProof() public {
+    function testMerkleDirectClaimRejectsStaleReleaseAndSurvivesFacetSetActivation() public {
         uint256 claimShares = 25 ether;
         bytes32 salt = keccak256("release-bound-direct-airdrop");
         address predicted = distributionFactory.predictMerkleAirdropAddress(address(boardroom), salt);
-        bytes32 releaseALeaf = _directClaimLeaf(predicted, RELEASE_HASH, 0, recipient, claimShares);
-        bytes32 releaseBLeaf = _directClaimLeaf(predicted, RELEASE_B_HASH, 1, recipient, claimShares);
+        bytes32 firstLeaf = _directClaimLeaf(predicted, 0, recipient, claimShares);
+        bytes32 secondLeaf = _directClaimLeaf(predicted, 1, recipient, claimShares);
         MerkleAirdrop.CreateParams memory params = MerkleAirdrop.CreateParams({
             shareToken: address(shares),
             shareAmount: 2 * claimShares,
-            merkleRoot: _hashPair(releaseALeaf, releaseBLeaf),
+            merkleRoot: _hashPair(firstLeaf, secondLeaf),
             startTime: uint64(block.timestamp),
             endTime: 0,
             maxGrantClaims: 0,
@@ -714,29 +754,37 @@ contract BoardroomRealModuleIntegrationTest is Test {
         _approveAsBoardroom(address(shares), address(distributionFactory), params.shareAmount);
         vm.prank(address(boardroom));
         MerkleAirdrop airdrop = MerkleAirdrop(distributionFactory.createMerkleAirdrop(params));
+        // The manifest was published under release A; the protocol then activates release B.
         boardroom.setFacetSetHash(RELEASE_B_HASH);
 
-        bytes32[] memory releaseAProof = new bytes32[](1);
-        releaseAProof[0] = releaseBLeaf;
+        bytes32[] memory firstProof = new bytes32[](1);
+        firstProof[0] = secondLeaf;
         uint256 recipientBalanceBefore = shares.balanceOf(recipient);
         vm.expectRevert(
             abi.encodeWithSelector(MerkleAirdrop.FacetSetHashMismatch.selector, RELEASE_HASH, RELEASE_B_HASH)
         );
-        airdrop.claim(RELEASE_HASH, 0, recipient, claimShares, releaseAProof);
+        airdrop.claim(RELEASE_HASH, 0, recipient, claimShares, firstProof);
 
         assertFalse(airdrop.isClaimed(0));
         assertEq(airdrop.claimedShares(), 0);
         assertEq(airdrop.remainingShares(), params.shareAmount);
         assertEq(shares.balanceOf(recipient), recipientBalanceBefore);
 
-        bytes32[] memory releaseBProof = new bytes32[](1);
-        releaseBProof[0] = releaseALeaf;
-        airdrop.claim(RELEASE_B_HASH, 1, recipient, claimShares, releaseBProof);
+        // The activation binds the transaction, not the manifest: the same leaf still claims.
+        airdrop.claim(RELEASE_B_HASH, 0, recipient, claimShares, firstProof);
 
-        assertTrue(airdrop.isClaimed(1));
+        assertTrue(airdrop.isClaimed(0));
         assertEq(airdrop.claimedShares(), claimShares);
         assertEq(airdrop.remainingShares(), claimShares);
         assertEq(shares.balanceOf(recipient), recipientBalanceBefore + claimShares);
+
+        bytes32[] memory secondProof = new bytes32[](1);
+        secondProof[0] = firstLeaf;
+        airdrop.claim(RELEASE_B_HASH, 1, recipient, claimShares, secondProof);
+
+        assertTrue(airdrop.isClaimed(1));
+        assertEq(airdrop.remainingShares(), 0);
+        assertEq(shares.balanceOf(recipient), recipientBalanceBefore + 2 * claimShares);
     }
 
     function testMerkleGrantClaimRejectsStaleReleaseBeforeGrantOrObligationSideEffects() public {
@@ -751,20 +799,21 @@ contract BoardroomRealModuleIntegrationTest is Test {
             transferUnlockTime: 0,
             salt: keccak256("release-bound-grant")
         });
-        (MerkleAirdrop airdrop, bytes32 releaseALeaf, bytes32 releaseBLeaf) =
-            _createReleaseBoundGrantAirdrop(grantShares, grantParams);
+        (MerkleAirdrop airdrop,, bytes32 secondLeaf) = _createReleaseBoundGrantAirdrop(grantShares, grantParams);
         boardroom.setIssuedDistribution(address(airdrop), true);
+        // The manifest was published under release A; the protocol then activates release B.
         boardroom.setFacetSetHash(RELEASE_B_HASH);
 
-        _assertStaleGrantClaimHasNoSideEffects(airdrop, grantShares, grantParams, releaseBLeaf);
+        _assertStaleGrantClaimHasNoSideEffects(airdrop, grantShares, grantParams, secondLeaf);
 
         uint256 callbackCountBefore = boardroom.callbackCount();
-        bytes32[] memory releaseBProof = new bytes32[](1);
-        releaseBProof[0] = releaseALeaf;
+        bytes32[] memory firstProof = new bytes32[](1);
+        firstProof[0] = secondLeaf;
+        // The activation binds the transaction, not the manifest: the same leaf still claims.
         TokenGrant grant =
-            TokenGrant(airdrop.claimGrant(RELEASE_B_HASH, 1, recipient, grantShares, grantParams, releaseBProof));
+            TokenGrant(airdrop.claimGrant(RELEASE_B_HASH, 0, recipient, grantShares, grantParams, firstProof));
 
-        assertTrue(airdrop.isClaimed(1));
+        assertTrue(airdrop.isClaimed(0));
         assertEq(airdrop.claimedGrantCount(), 1);
         assertEq(shares.balanceOf(address(grant)), grantShares);
         assertEq(boardroom.callbackCount(), callbackCountBefore + 1);
@@ -776,23 +825,23 @@ contract BoardroomRealModuleIntegrationTest is Test {
         MerkleAirdrop airdrop,
         uint256 grantShares,
         MerkleAirdrop.GrantClaimParams memory grantParams,
-        bytes32 releaseBLeaf
+        bytes32 secondLeaf
     ) internal {
-        bytes32 releaseAGrantSalt = airdrop.getGrantSalt(0, recipient, grantParams.salt);
-        address predictedReleaseAGrant = grantFactory.predictGrantAddress(address(boardroom), releaseAGrantSalt);
-        bytes32[] memory releaseAProof = new bytes32[](1);
-        releaseAProof[0] = releaseBLeaf;
+        bytes32 grantSalt = airdrop.getGrantSalt(0, recipient, grantParams.salt);
+        address predictedGrant = grantFactory.predictGrantAddress(address(boardroom), grantSalt);
+        bytes32[] memory firstProof = new bytes32[](1);
+        firstProof[0] = secondLeaf;
         uint256 callbackCountBefore = boardroom.callbackCount();
         vm.expectRevert(
             abi.encodeWithSelector(MerkleAirdrop.FacetSetHashMismatch.selector, RELEASE_HASH, RELEASE_B_HASH)
         );
-        airdrop.claimGrant(RELEASE_HASH, 0, recipient, grantShares, grantParams, releaseAProof);
+        airdrop.claimGrant(RELEASE_HASH, 0, recipient, grantShares, grantParams, firstProof);
 
         assertFalse(airdrop.isClaimed(0));
         assertEq(airdrop.claimedGrantCount(), 0);
         assertEq(airdrop.claimedShares(), 0);
         assertEq(airdrop.remainingShares(), 2 * grantShares);
-        assertEq(predictedReleaseAGrant.code.length, 0);
+        assertEq(predictedGrant.code.length, 0);
         assertEq(boardroom.callbackCount(), callbackCountBefore);
     }
 
@@ -967,7 +1016,7 @@ contract BoardroomRealModuleIntegrationTest is Test {
         assertEq(uint256(curve.curveStatus()), uint256(MigratingBondingCurve.CurvePhase.Unwinding));
 
         vm.warp(curve.phaseEndsAt() + 1);
-        curve.finalizeUnwind();
+        curve.finalizeUnwind(RELEASE_HASH);
         assertTrue(curve.isClosed());
         assertFalse(curve.migrationReservationHeld());
         assertEq(boardroom.lastSelector(), ModuleCallbackTargetMock.settleBondingCurve.selector);
@@ -985,16 +1034,16 @@ contract BoardroomRealModuleIntegrationTest is Test {
 
     function _createReleaseBoundGrantAirdrop(uint256 grantShares, MerkleAirdrop.GrantClaimParams memory grantParams)
         internal
-        returns (MerkleAirdrop airdrop, bytes32 releaseALeaf, bytes32 releaseBLeaf)
+        returns (MerkleAirdrop airdrop, bytes32 firstLeaf, bytes32 secondLeaf)
     {
         bytes32 salt = keccak256("release-bound-grant-airdrop");
         address predicted = distributionFactory.predictMerkleAirdropAddress(address(boardroom), salt);
-        releaseALeaf = _grantClaimLeaf(predicted, RELEASE_HASH, 0, recipient, grantShares, grantParams);
-        releaseBLeaf = _grantClaimLeaf(predicted, RELEASE_B_HASH, 1, recipient, grantShares, grantParams);
+        firstLeaf = _grantClaimLeaf(predicted, 0, recipient, grantShares, grantParams);
+        secondLeaf = _grantClaimLeaf(predicted, 1, recipient, grantShares, grantParams);
         MerkleAirdrop.CreateParams memory params = MerkleAirdrop.CreateParams({
             shareToken: address(shares),
             shareAmount: 2 * grantShares,
-            merkleRoot: _hashPair(releaseALeaf, releaseBLeaf),
+            merkleRoot: _hashPair(firstLeaf, secondLeaf),
             startTime: uint64(block.timestamp),
             endTime: 0,
             maxGrantClaims: 1,
@@ -1008,7 +1057,6 @@ contract BoardroomRealModuleIntegrationTest is Test {
 
     function _grantClaimLeaf(
         address airdrop,
-        bytes32 expectedFacetSetHash,
         uint256 index,
         address account,
         uint256 amount,
@@ -1030,7 +1078,6 @@ contract BoardroomRealModuleIntegrationTest is Test {
         return keccak256(
             abi.encode(
                 GRANT_CLAIM_TYPEHASH,
-                expectedFacetSetHash,
                 block.chainid,
                 index,
                 airdrop,
@@ -1044,17 +1091,14 @@ contract BoardroomRealModuleIntegrationTest is Test {
         );
     }
 
-    function _directClaimLeaf(
-        address airdrop,
-        bytes32 expectedFacetSetHash,
-        uint256 index,
-        address account,
-        uint256 amount
-    ) internal view returns (bytes32) {
+    function _directClaimLeaf(address airdrop, uint256 index, address account, uint256 amount)
+        internal
+        view
+        returns (bytes32)
+    {
         return keccak256(
             abi.encode(
                 DIRECT_CLAIM_TYPEHASH,
-                expectedFacetSetHash,
                 block.chainid,
                 index,
                 airdrop,

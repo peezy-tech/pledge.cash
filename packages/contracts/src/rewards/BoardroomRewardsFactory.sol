@@ -74,7 +74,8 @@ contract BoardroomRewardsFactory is IBoardroomObligationPolicy {
         }
         if (amount == 0) revert InvalidAmount();
 
-        BoardroomCallbackLib.reserveRedeemableAsset(boardroom, asset);
+        // Boardroom-initiated frame: the outer mutating route already bound the caller's release hash.
+        BoardroomCallbackLib.reserveRedeemableAsset(boardroom, BoardroomCallbackLib.boundFacetSetHash(boardroom), asset);
         ExactTransferLib.ExactDelta memory delta = ExactTransferLib.pullBetween(asset, boardroom, rewards, amount);
         if (delta.senderBalanceIncreased || delta.senderSpent != amount) {
             revert UnexpectedTokenBalanceChange(asset, amount, delta.senderSpent);

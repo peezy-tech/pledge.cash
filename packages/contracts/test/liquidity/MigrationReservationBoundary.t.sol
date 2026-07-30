@@ -139,7 +139,9 @@ contract ReservationDistribution {
     }
 
     function release(LockedLiquidityFactory liquidityFactory) external {
-        liquidityFactory.releaseMigrationReservation(boardroom, shareToken, quoteToken, migrationSalt);
+        liquidityFactory.releaseMigrationReservation(
+            ReservationBoardroom(boardroom).facetSetHash(), boardroom, shareToken, quoteToken, migrationSalt
+        );
     }
 }
 
@@ -152,7 +154,14 @@ contract ReservationDistributionFactory {
         bytes32 salt
     ) external returns (ReservationDistribution distribution) {
         distribution = new ReservationDistribution(boardroom, shareToken, quoteToken, salt);
-        liquidityFactory.reserveMigration(boardroom, address(distribution), shareToken, quoteToken, salt);
+        liquidityFactory.reserveMigration(
+            ReservationBoardroom(boardroom).facetSetHash(),
+            boardroom,
+            address(distribution),
+            shareToken,
+            quoteToken,
+            salt
+        );
     }
 }
 

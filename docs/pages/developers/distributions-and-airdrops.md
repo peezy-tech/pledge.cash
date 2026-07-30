@@ -51,16 +51,17 @@ recovery currently fails closed.
 
 Generate leaves with the contract's exact type hashes and `abi.encode` layout:
 
-- direct: `DIRECT_CLAIM_TYPEHASH`, `expectedFacetSetHash`, chain id, index, predicted airdrop address, Boardroom,
-  share token, account, amount;
-- grant: `GRANT_CLAIM_TYPEHASH`, `expectedFacetSetHash`, chain id, index, predicted airdrop address, Boardroom,
-  share token, TokenGrantFactory, account, amount, grant-terms hash.
+- direct: `DIRECT_CLAIM_TYPEHASH`, chain id, index, predicted airdrop address, Boardroom, share token, account, amount;
+- grant: `GRANT_CLAIM_TYPEHASH`, chain id, index, predicted airdrop address, Boardroom, share token, TokenGrantFactory,
+  account, amount, grant-terms hash.
 
 The grant-terms hash encodes `GRANT_TERMS_TYPEHASH`, payment token, price, expiry, vesting cliff, vesting end,
 transferability, transfer-unlock time, and salt, in that order. The claim type hash distinguishes direct and grant
-mode; there is no trailing mode field. A claim also requires the committed facet-set hash to equal the Boardroom's live
-`facetSetHash()`. Use `buildMerkleAirdropDirectClaimLeaf` and `buildMerkleAirdropGrantClaimLeaf` from the SDK instead of
-recreating these layouts.
+mode; there is no trailing mode field. Leaves are not release-bound, so a facet-set activation never voids a published
+root; `claim` and `claimGrant` instead take an `expectedFacetSetHash` argument that must equal the Boardroom's live
+`facetSetHash()` when the claim executes. Read that hash at claim time rather than pinning it in a manifest. Use
+`buildMerkleAirdropDirectClaimLeaf` and `buildMerkleAirdropGrantClaimLeaf` from the SDK instead of recreating these
+layouts.
 
 Neither claim function authenticates `msg.sender`: any relayer may submit a valid proof, but direct shares or the grant right always go to the leaf-bound account. The shipped app does not expose a separate relayer account and instead binds that leaf account to the connected wallet.
 
@@ -69,8 +70,6 @@ Manifest requirements:
 - unique indices;
 - raw integer amounts, plus separately documented decimals;
 - explicit `direct` or `grant` mode;
-- exact 32-byte `expectedFacetSetHash`, fixed before root construction and equal to the Boardroom's `facetSetHash()`
-  when a claim executes;
 - full grant terms where applicable: cliff no later than vesting end, expiry still in the future and at least one day
   after vesting end, and canonical Boardroom expiry no more than `5 * 365 days` after intended claim time because the
   factory enforces those conditions at claim execution;

@@ -343,9 +343,14 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
         if (input.funder == input.issuer && isCanonicalBoardroom(input.issuer)) {
             ITokenGrantBoardroomAssetRegistry registry = ITokenGrantBoardroomAssetRegistry(input.issuer);
             address shares = registry.shareToken();
-            if (input.token != shares) BoardroomCallbackLib.reserveRedeemableAsset(input.issuer, input.token);
+            // Reached only when the issuing Boardroom funds its own grant, so the outer
+            // mutating route already bound the caller's release hash.
+            bytes32 expectedFacetSetHash = BoardroomCallbackLib.boundFacetSetHash(input.issuer);
+            if (input.token != shares) {
+                BoardroomCallbackLib.reserveRedeemableAsset(input.issuer, expectedFacetSetHash, input.token);
+            }
             if (input.paymentToken != address(0) && input.paymentToken != input.token) {
-                BoardroomCallbackLib.reserveRedeemableAsset(input.issuer, input.paymentToken);
+                BoardroomCallbackLib.reserveRedeemableAsset(input.issuer, expectedFacetSetHash, input.paymentToken);
             }
         }
 

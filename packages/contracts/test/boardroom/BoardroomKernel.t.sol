@@ -6,6 +6,7 @@ import {LibClone} from "solady/utils/LibClone.sol";
 import {BoardroomDiamondStorage} from "../../src/boardroom/diamond/BoardroomDiamondStorage.sol";
 import {BoardroomKernel} from "../../src/boardroom/diamond/BoardroomKernel.sol";
 import {BoardroomKernelSelectors} from "../../src/boardroom/diamond/BoardroomKernelSelectors.sol";
+import {BoardroomViewDispatcher} from "../../src/boardroom/diamond/BoardroomViewDispatcher.sol";
 import {IBoardroomFacetRegistry} from "../../src/boardroom/diamond/IBoardroomFacetRegistry.sol";
 
 library BoardroomKernelTestStorage {
@@ -401,6 +402,29 @@ contract BoardroomKernelTest is Test {
         (address observedCaller, address observedContext) = abi.decode(output, (address, address));
         assertEq(observedCaller, caller);
         assertEq(observedContext, address(kernel));
+    }
+
+    function testViewRollbackFrameIsNotReachableThroughTheBoardroom() public {
+        // The rollback frame lives on the dispatcher, so the Boardroom exposes no entrypoint that
+        // delegatecalls caller-supplied code in clone storage.
+        bytes memory input = abi.encodeCall(
+            BoardroomViewDispatcher.dispatchViewAndRollback,
+            (address(facet), abi.encodeCall(BoardroomKernelTestFacet.mutate, (RELEASE_HASH_V1, 4242)))
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BoardroomKernel.UnknownSelector.selector, BoardroomViewDispatcher.dispatchViewAndRollback.selector
+            )
+        );
+        _call(kernel, input);
+        (,,,, uint256 stored) = _readContext(kernel);
+        assertEq(stored, 11);
+
+        // Calling the dispatcher directly runs against its own storage and always rolls back.
+        (bool success,) = kernel.viewDispatcher().call(input);
+        assertFalse(success);
+        (,,,, stored) = _readContext(kernel);
+        assertEq(stored, 11);
     }
 
     function testViewDispatchRejectsFacetWhoseRuntimeCodeNoLongerMatchesRelease() public {

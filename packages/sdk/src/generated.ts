@@ -17266,6 +17266,11 @@ export const lockedLiquidityFactoryAbi = [
     "name": "createLockedLiquidityForBoardroom",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "boardroom",
         "type": "address",
         "internalType": "address"
@@ -17602,6 +17607,11 @@ export const lockedLiquidityFactoryAbi = [
     "name": "releaseMigrationReservation",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "boardroom",
         "type": "address",
         "internalType": "address"
@@ -17675,6 +17685,11 @@ export const lockedLiquidityFactoryAbi = [
     "type": "function",
     "name": "reserveMigration",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "boardroom",
         "type": "address",
@@ -18351,14 +18366,26 @@ export const migratingBondingCurveAbi = [
   {
     "type": "function",
     "name": "finalizeQuoteForfeiture",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
     "type": "function",
     "name": "finalizeUnwind",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -18606,6 +18633,11 @@ export const migratingBondingCurveAbi = [
     "type": "function",
     "name": "migrate",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "minShareLiquidity",
         "type": "uint256",
@@ -18861,7 +18893,13 @@ export const migratingBondingCurveAbi = [
   {
     "type": "function",
     "name": "recoverQuarantinedQuote",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [
       {
         "name": "returnedQuote",
@@ -20048,11 +20086,6 @@ export const merkleAirdropAbi = [
     "name": "getDirectClaimLeaf",
     "inputs": [
       {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
         "name": "index",
         "type": "uint256",
         "internalType": "uint256"
@@ -20081,11 +20114,6 @@ export const merkleAirdropAbi = [
     "type": "function",
     "name": "getGrantClaimLeaf",
     "inputs": [
-      {
-        "name": "expectedFacetSetHash",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
       {
         "name": "index",
         "type": "uint256",
@@ -23344,24 +23372,6 @@ export const boardroomKernelAbi = [
   },
   {
     "type": "function",
-    "name": "dispatchViewAndRollback",
-    "inputs": [
-      {
-        "name": "facet",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "input",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "facetRegistry",
     "inputs": [],
     "outputs": [
@@ -23426,6 +23436,19 @@ export const boardroomKernelAbi = [
         "name": "",
         "type": "bool",
         "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "viewDispatcher",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"

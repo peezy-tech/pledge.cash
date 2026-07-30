@@ -1397,8 +1397,13 @@ export function buildBoardroomMigratingCurveCancelCall(input: { policy: Address;
   });
 }
 
+/**
+ * Migration and settlement call back into the Boardroom, so the caller commits to the release
+ * those callbacks must execute under. An activation landing first reverts the transaction.
+ */
 export function buildMigratingBondingCurveMigrationTransaction(input: {
   curve: Address;
+  expectedFacetSetHash: Hex;
   minShareLiquidity: bigint;
   minQuoteLiquidity: bigint;
   deadline: bigint;
@@ -1407,7 +1412,12 @@ export function buildMigratingBondingCurveMigrationTransaction(input: {
     address: input.curve,
     abi: migratingBondingCurveAbi,
     functionName: "migrate",
-    args: [input.minShareLiquidity, input.minQuoteLiquidity, input.deadline] as const,
+    args: [
+      input.expectedFacetSetHash,
+      input.minShareLiquidity,
+      input.minQuoteLiquidity,
+      input.deadline,
+    ] as const,
   };
 }
 
@@ -1419,12 +1429,22 @@ export function buildMigratingBondingCurveFallbackTransaction(curve: Address) {
   return { address: curve, abi: migratingBondingCurveAbi, functionName: "fallbackToUnwind" } as const;
 }
 
-export function buildMigratingBondingCurveFinalizeUnwindTransaction(curve: Address) {
-  return { address: curve, abi: migratingBondingCurveAbi, functionName: "finalizeUnwind" } as const;
+export function buildMigratingBondingCurveFinalizeUnwindTransaction(curve: Address, expectedFacetSetHash: Hex) {
+  return {
+    address: curve,
+    abi: migratingBondingCurveAbi,
+    functionName: "finalizeUnwind",
+    args: [expectedFacetSetHash] as const,
+  } as const;
 }
 
-export function buildMigratingBondingCurveRecoverQuoteTransaction(curve: Address) {
-  return { address: curve, abi: migratingBondingCurveAbi, functionName: "recoverQuarantinedQuote" } as const;
+export function buildMigratingBondingCurveRecoverQuoteTransaction(curve: Address, expectedFacetSetHash: Hex) {
+  return {
+    address: curve,
+    abi: migratingBondingCurveAbi,
+    functionName: "recoverQuarantinedQuote",
+    args: [expectedFacetSetHash] as const,
+  } as const;
 }
 
 export function buildMigratingBondingCurveOpenForfeitureTransaction(curve: Address) {
@@ -1435,8 +1455,13 @@ export function buildMigratingBondingCurveVetoForfeitureTransaction(curve: Addre
   return { address: curve, abi: migratingBondingCurveAbi, functionName: "vetoQuoteForfeiture" } as const;
 }
 
-export function buildMigratingBondingCurveFinalizeForfeitureTransaction(curve: Address) {
-  return { address: curve, abi: migratingBondingCurveAbi, functionName: "finalizeQuoteForfeiture" } as const;
+export function buildMigratingBondingCurveFinalizeForfeitureTransaction(curve: Address, expectedFacetSetHash: Hex) {
+  return {
+    address: curve,
+    abi: migratingBondingCurveAbi,
+    functionName: "finalizeQuoteForfeiture",
+    args: [expectedFacetSetHash] as const,
+  } as const;
 }
 
 export function buildMigratingBondingCurveRecoverForfeitedQuoteTransaction(curve: Address) {

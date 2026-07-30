@@ -135,7 +135,7 @@ contract SeedLocal is Script {
     uint256 internal constant REDEMPTION_HOLDER_SHARES = 1_000 * PLEDGE;
     uint256 internal constant REDEMPTION_CASH_BALANCE = 5_000 * CASH;
     bytes32 internal constant DIRECT_CLAIM_TYPEHASH = keccak256(
-        "MerkleAirdropDirectClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
+        "MerkleAirdropDirectClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
     );
 
     struct Deployment {
@@ -503,22 +503,10 @@ contract SeedLocal is Script {
             bytes32 expectedFacetSetHash = _facetSetHash(address(target));
 
             lifecycle.airdropClaimedLeaf = _directClaimLeaf(
-                expectedFacetSetHash,
-                predictedAirdrop,
-                address(target),
-                target.shareToken(),
-                0,
-                actors.holder,
-                AIRDROP_CLAIMED_SHARES
+                predictedAirdrop, address(target), target.shareToken(), 0, actors.holder, AIRDROP_CLAIMED_SHARES
             );
             lifecycle.airdropUnclaimedLeaf = _directClaimLeaf(
-                expectedFacetSetHash,
-                predictedAirdrop,
-                address(target),
-                target.shareToken(),
-                1,
-                actors.newHolder,
-                AIRDROP_UNCLAIMED_SHARES
+                predictedAirdrop, address(target), target.shareToken(), 1, actors.newHolder, AIRDROP_UNCLAIMED_SHARES
             );
             lifecycle.airdropRoot = _hashPair(lifecycle.airdropClaimedLeaf, lifecycle.airdropUnclaimedLeaf);
 
@@ -1637,7 +1625,6 @@ contract SeedLocal is Script {
     }
 
     function _directClaimLeaf(
-        bytes32 expectedFacetSetHash,
         address airdrop,
         address targetBoardroom,
         address shareToken,
@@ -1647,15 +1634,7 @@ contract SeedLocal is Script {
     ) internal view returns (bytes32) {
         return keccak256(
             abi.encode(
-                DIRECT_CLAIM_TYPEHASH,
-                expectedFacetSetHash,
-                block.chainid,
-                index,
-                airdrop,
-                targetBoardroom,
-                shareToken,
-                account,
-                amount
+                DIRECT_CLAIM_TYPEHASH, block.chainid, index, airdrop, targetBoardroom, shareToken, account, amount
             )
         );
     }

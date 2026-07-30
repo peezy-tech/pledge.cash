@@ -50,40 +50,62 @@ interface IBoardroomCallbackTarget {
 }
 
 /// @notice Hash-bound callbacks shared by canonical module factories and children.
-/// @dev Every helper reads the Boardroom's current release hash and immediately
-/// calls the corresponding hash-prefixed callback. These are internal calls, so
-/// the external callback still observes the invoking factory or child as
-/// `msg.sender`.
+/// @dev Every helper takes the expected release hash as an explicit argument instead of
+/// reading it from the Boardroom it is about to call: a hash read in the same frame always
+/// equals the value the kernel compares it against, so it can never reject the mid-flight
+/// facet swap the mechanism exists to reject. Callers must pass a hash that was fixed
+/// before the current frame, which is one of exactly two things:
+/// - the `expectedFacetSetHash` supplied by the module's own caller, for module entrypoints
+///   reachable without going through the Boardroom (curve settlement/migration, airdrop
+///   claims, and the factory callbacks they trigger); or
+/// - `boundFacetSetHash(boardroom)`, for frames the Boardroom itself initiated. Those already
+///   carry the caller's hash on the outer mutating route, and the kernel reverts with
+///   `ActiveReleaseChanged` if the active release moves before that route returns.
+/// These are internal calls, so the external callback still observes the invoking factory or
+/// child as `msg.sender`.
 library BoardroomCallbackLib {
-    function reserveRedeemableAsset(address boardroom, address asset) internal {
-        IBoardroomCallbackTarget target = IBoardroomCallbackTarget(boardroom);
-        target.reserveRedeemableAsset(target.facetSetHash(), asset);
+    /// @notice Reads the release hash already bound by the Boardroom-initiated frame in progress.
+    /// @dev Only sound when the call stack was entered from `boardroom` itself. Modules reachable
+    /// directly by an arbitrary caller must thread that caller's expected hash instead.
+    function boundFacetSetHash(address boardroom) internal view returns (bytes32) {
+        return IBoardroomCallbackTarget(boardroom).facetSetHash();
     }
 
-    function precommitBondingCurve(address boardroom, address curve, address quoteAsset, uint256 fundingAmount)
-        internal
-    {
-        IBoardroomCallbackTarget target = IBoardroomCallbackTarget(boardroom);
-        target.precommitBondingCurve(target.facetSetHash(), curve, quoteAsset, fundingAmount);
+    function reserveRedeemableAsset(address boardroom, bytes32 expectedFacetSetHash, address asset) internal {
+        IBoardroomCallbackTarget(boardroom).reserveRedeemableAsset(expectedFacetSetHash, asset);
     }
 
-    function recordGrantFromDistribution(address boardroom, address grant) internal {
-        IBoardroomCallbackTarget target = IBoardroomCallbackTarget(boardroom);
-        target.recordGrantFromDistribution(target.facetSetHash(), grant);
+    function precommitBondingCurve(
+        address boardroom,
+        bytes32 expectedFacetSetHash,
+        address curve,
+        address quoteAsset,
+        uint256 fundingAmount
+    ) internal {
+        IBoardroomCallbackTarget(boardroom)
+            .precommitBondingCurve(expectedFacetSetHash, curve, quoteAsset, fundingAmount);
     }
 
-    function recordLockedLiquidityFromDistribution(address boardroom, address locker, address pool) internal {
-        IBoardroomCallbackTarget target = IBoardroomCallbackTarget(boardroom);
-        target.recordLockedLiquidityFromDistribution(target.facetSetHash(), locker, pool);
+    function recordGrantFromDistribution(address boardroom, bytes32 expectedFacetSetHash, address grant) internal {
+        IBoardroomCallbackTarget(boardroom).recordGrantFromDistribution(expectedFacetSetHash, grant);
     }
 
-    function settleBondingCurve(address boardroom) internal {
-        IBoardroomCallbackTarget target = IBoardroomCallbackTarget(boardroom);
-        target.settleBondingCurve(target.facetSetHash());
+    function recordLockedLiquidityFromDistribution(
+        address boardroom,
+        bytes32 expectedFacetSetHash,
+        address locker,
+        address pool
+    ) internal {
+        IBoardroomCallbackTarget(boardroom).recordLockedLiquidityFromDistribution(expectedFacetSetHash, locker, pool);
+    }
+
+    function settleBondingCurve(address boardroom, bytes32 expectedFacetSetHash) internal {
+        IBoardroomCallbackTarget(boardroom).settleBondingCurve(expectedFacetSetHash);
     }
 
     function precommitProtocolLiquidity(
         address boardroom,
+        bytes32 expectedFacetSetHash,
         address expectedLocker,
         address quoteAsset,
         address curve,
@@ -91,14 +113,15 @@ library BoardroomCallbackLib {
         bytes32 salt,
         uint64 expiresAt
     ) internal {
-        IBoardroomCallbackTarget target = IBoardroomCallbackTarget(boardroom);
-        target.precommitProtocolLiquidity(
-            target.facetSetHash(), expectedLocker, quoteAsset, curve, pairKey, salt, expiresAt
-        );
+        IBoardroomCallbackTarget(boardroom)
+            .precommitProtocolLiquidity(
+                expectedFacetSetHash, expectedLocker, quoteAsset, curve, pairKey, salt, expiresAt
+            );
     }
 
     function activateProtocolLiquidity(
         address boardroom,
+        bytes32 expectedFacetSetHash,
         address locker,
         address pool,
         address quoteAsset,
@@ -106,19 +129,24 @@ library BoardroomCallbackLib {
         bytes32 pairKey,
         bytes32 salt
     ) internal {
-        IBoardroomCallbackTarget target = IBoardroomCallbackTarget(boardroom);
-        target.activateProtocolLiquidity(target.facetSetHash(), locker, pool, quoteAsset, curve, pairKey, salt);
+        IBoardroomCallbackTarget(boardroom)
+            .activateProtocolLiquidity(expectedFacetSetHash, locker, pool, quoteAsset, curve, pairKey, salt);
     }
 
-    function releaseProtocolLiquidityReservation(address boardroom, address curve, bytes32 pairKey, bytes32 salt)
+    function releaseProtocolLiquidityReservation(
+        address boardroom,
+        bytes32 expectedFacetSetHash,
+        address curve,
+        bytes32 pairKey,
+        bytes32 salt
+    ) internal {
+        IBoardroomCallbackTarget(boardroom)
+            .releaseProtocolLiquidityReservation(expectedFacetSetHash, curve, pairKey, salt);
+    }
+
+    function closeProtocolLiquidityFromFactory(address boardroom, bytes32 expectedFacetSetHash, address locker)
         internal
     {
-        IBoardroomCallbackTarget target = IBoardroomCallbackTarget(boardroom);
-        target.releaseProtocolLiquidityReservation(target.facetSetHash(), curve, pairKey, salt);
-    }
-
-    function closeProtocolLiquidityFromFactory(address boardroom, address locker) internal {
-        IBoardroomCallbackTarget target = IBoardroomCallbackTarget(boardroom);
-        target.closeProtocolLiquidityFromFactory(target.facetSetHash(), locker);
+        IBoardroomCallbackTarget(boardroom).closeProtocolLiquidityFromFactory(expectedFacetSetHash, locker);
     }
 }

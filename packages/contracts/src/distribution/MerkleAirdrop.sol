@@ -20,10 +20,10 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
     uint8 internal constant BOARDROOM_STATUS_ACTIVE = 0;
 
     bytes32 public constant DIRECT_CLAIM_TYPEHASH = keccak256(
-        "MerkleAirdropDirectClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
+        "MerkleAirdropDirectClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
     );
     bytes32 public constant GRANT_CLAIM_TYPEHASH = keccak256(
-        "MerkleAirdropGrantClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)"
+        "MerkleAirdropGrantClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)"
     );
     bytes32 public constant GRANT_TERMS_TYPEHASH = keccak256(
         "MerkleAirdropGrantTerms(address paymentToken,uint256 price,uint256 expiry,uint256 vestingCliff,uint256 vestingEnd,bool transferable,uint256 transferUnlockTime,bytes32 salt)"
@@ -145,7 +145,7 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         bytes32[] calldata proof
     ) external nonReentrant {
         _requireFacetSetHash(expectedFacetSetHash);
-        _claim(index, account, amount, getDirectClaimLeaf(expectedFacetSetHash, index, account, amount), proof);
+        _claim(index, account, amount, getDirectClaimLeaf(index, account, amount), proof);
         _checkedTransfer(account, amount);
 
         emit AirdropClaimed(index, account, amount);
@@ -162,11 +162,11 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         _requireFacetSetHash(expectedFacetSetHash);
         uint16 nextClaimedGrantCount = _nextClaimedGrantCount();
 
-        _claim(index, account, amount, getGrantClaimLeaf(expectedFacetSetHash, index, account, amount, params), proof);
+        _claim(index, account, amount, getGrantClaimLeaf(index, account, amount, params), proof);
         claimedGrantCount = nextClaimedGrantCount;
 
         grant = _createGrantFromClaim(index, account, amount, params);
-        BoardroomCallbackLib.recordGrantFromDistribution(boardroom, grant);
+        BoardroomCallbackLib.recordGrantFromDistribution(boardroom, expectedFacetSetHash, grant);
 
         emit AirdropGrantClaimed(index, account, grant, amount);
     }
@@ -199,37 +199,27 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         return (claimedWord & mask) == mask;
     }
 
-    function getDirectClaimLeaf(bytes32 expectedFacetSetHash, uint256 index, address account, uint256 amount)
+    /// @dev Leaves deliberately omit the facet-set hash. `merkleRoot` is immutable, so
+    /// committing to a release would make every activation a permanent, protocol-wide
+    /// invalidation of live manifests. The release is bound per transaction instead,
+    /// by the caller-supplied `expectedFacetSetHash` argument of claim/claimGrant.
+    function getDirectClaimLeaf(uint256 index, address account, uint256 amount) public view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                DIRECT_CLAIM_TYPEHASH, block.chainid, index, address(this), boardroom, shareToken, account, amount
+            )
+        );
+    }
+
+    /// @dev See `getDirectClaimLeaf` for why the leaf is not release-bound.
+    function getGrantClaimLeaf(uint256 index, address account, uint256 amount, GrantClaimParams calldata params)
         public
         view
         returns (bytes32)
     {
         return keccak256(
             abi.encode(
-                DIRECT_CLAIM_TYPEHASH,
-                expectedFacetSetHash,
-                block.chainid,
-                index,
-                address(this),
-                boardroom,
-                shareToken,
-                account,
-                amount
-            )
-        );
-    }
-
-    function getGrantClaimLeaf(
-        bytes32 expectedFacetSetHash,
-        uint256 index,
-        address account,
-        uint256 amount,
-        GrantClaimParams calldata params
-    ) public view returns (bytes32) {
-        return keccak256(
-            abi.encode(
                 GRANT_CLAIM_TYPEHASH,
-                expectedFacetSetHash,
                 block.chainid,
                 index,
                 address(this),

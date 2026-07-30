@@ -173,6 +173,9 @@ contract BoardroomToken is ERC20 {
 
     function _beforeTokenTransfer(address from, address to, uint256 amount) internal override {
         IBoardroomPrimaryMarketGuard guarded = IBoardroomPrimaryMarketGuard(boardroom);
+        // The ERC-20 surface has no room for a caller-supplied release hash, so this guard is
+        // bound to whichever facet set is active at execution time. Standard transfers therefore
+        // cannot be authorized against a caller-chosen Boardroom release.
         guarded.validatePrimaryMarketTransfer(guarded.facetSetHash(), from, to, amount);
         if (from == address(0) || rewardLocksDisabled) return;
         uint256 locked = lockedStakeBalance[from];

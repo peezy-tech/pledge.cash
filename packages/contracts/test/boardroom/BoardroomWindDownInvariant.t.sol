@@ -249,7 +249,7 @@ contract BoardroomWindDownHandler is Test {
         reserved[2] = BoardroomKernel.initialize.selector;
         reserved[3] = BoardroomKernel.appliedStorageVersion.selector;
         reserved[4] = BoardroomKernel.migrationRequired.selector;
-        reserved[5] = BoardroomKernel.dispatchViewAndRollback.selector;
+        reserved[5] = bytes4(keccak256("viewDispatcher()"));
         reserved[6] = BoardroomKernel.appliedStorageLayoutHash.selector;
         reserved[7] = BoardroomKernel.kernelSelectorSetHash.selector;
         for (uint256 i = 1; i < reserved.length; ++i) {

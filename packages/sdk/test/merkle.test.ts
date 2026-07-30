@@ -63,7 +63,7 @@ describe("Merkle release binding", () => {
     });
   });
 
-  test("commits the expected release hash to direct and grant leaves", () => {
+  test("binds leaves to allocation identity only, so releases cannot void a published root", () => {
     const directInput = {
       chainId: 31337n,
       index: 1n,
@@ -73,15 +73,10 @@ describe("Merkle release binding", () => {
       account,
       amount: 25n,
     };
-    const directA = buildMerkleAirdropDirectClaimLeaf({
-      expectedFacetSetHash: releaseA,
-      ...directInput,
-    });
-    const directB = buildMerkleAirdropDirectClaimLeaf({
-      expectedFacetSetHash: releaseB,
-      ...directInput,
-    });
-    expect(directA).not.toBe(directB);
+    const direct = buildMerkleAirdropDirectClaimLeaf(directInput);
+    expect(direct).toBe(buildMerkleAirdropDirectClaimLeaf({ ...directInput }));
+    expect(direct).not.toBe(buildMerkleAirdropDirectClaimLeaf({ ...directInput, amount: 26n }));
+    expect(direct).not.toBe(buildMerkleAirdropDirectClaimLeaf({ ...directInput, chainId: 31338n }));
 
     const grantInput = {
       chainId: 31337n,
@@ -94,17 +89,12 @@ describe("Merkle release binding", () => {
       amount: 40n,
       terms,
     };
-    const grantA = buildMerkleAirdropGrantClaimLeaf({
-      expectedFacetSetHash: releaseA,
-      ...grantInput,
-    });
-    const grantB = buildMerkleAirdropGrantClaimLeaf({
-      expectedFacetSetHash: releaseB,
-      ...grantInput,
-    });
-    expect(grantA).not.toBe(grantB);
+    const grant = buildMerkleAirdropGrantClaimLeaf(grantInput);
+    expect(grant).toBe(buildMerkleAirdropGrantClaimLeaf({ ...grantInput }));
+    expect(grant).not.toBe(buildMerkleAirdropGrantClaimLeaf({ ...grantInput, index: 3n }));
+    expect(grant).not.toBe(direct);
     expect(hashMerkleAirdropGrantTerms(terms)).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(hashSortedMerklePair(directA, grantA)).toBe(hashSortedMerklePair(grantA, directA));
+    expect(hashSortedMerklePair(direct, grant)).toBe(hashSortedMerklePair(grant, direct));
   });
 
   test("rejects implicit or malformed release hashes", () => {

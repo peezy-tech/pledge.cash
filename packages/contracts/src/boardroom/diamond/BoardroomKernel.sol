@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import {BoardroomDiamondStorage} from "./BoardroomDiamondStorage.sol";
 import {BoardroomKernelSelectors} from "./BoardroomKernelSelectors.sol";
+import {BoardroomViewDispatcher} from "./BoardroomViewDispatcher.sol";
 import {IBoardroomFacetRegistry} from "./IBoardroomFacetRegistry.sol";
 
 /// @notice Minimal, clone-safe Boardroom selector kernel.
@@ -14,6 +15,8 @@ contract BoardroomKernel {
     bytes4 internal constant INITIALIZE_BOARDROOM_SELECTOR = bytes4(keccak256("initializeBoardroom(bytes32,bytes)"));
 
     IBoardroomFacetRegistry public immutable facetRegistry;
+    /// @dev Owns the view rollback frame so no Boardroom entrypoint delegatecalls caller-supplied code.
+    address public immutable viewDispatcher;
 
     error AlreadyInitialized();
     error NotInitialized();
@@ -72,6 +75,7 @@ contract BoardroomKernel {
             revert InvalidKernelSelectorSetHash(expectedSelectorSetHash, actualSelectorSetHash);
         }
         facetRegistry = registry;
+        viewDispatcher = address(new BoardroomViewDispatcher());
         // Disable initialization of the implementation while leaving clone storage untouched.
         BoardroomDiamondStorage.layout().initialized = true;
     }
@@ -165,18 +169,6 @@ contract BoardroomKernel {
             || BoardroomDiamondStorage.appliedStorageLayoutHash() != _activeStorageLayoutHash();
     }
 
-    /// @dev Delegatecalls a view facet and always reverts with an encoded
-    /// `(success, returndata)` envelope. Fallback catches this frame so every
-    /// storage write and external side effect is rolled back while the original
-    /// caller and Boardroom context are preserved.
-    function dispatchViewAndRollback(address facet, bytes calldata input) external {
-        (bool success, bytes memory output) = facet.delegatecall(input);
-        bytes memory envelope = abi.encode(success, output);
-        assembly ("memory-safe") {
-            revert(add(envelope, 0x20), mload(envelope))
-        }
-    }
-
     fallback() external payable {
         if (!BoardroomDiamondStorage.initialized()) revert NotInitialized();
 
@@ -187,8 +179,11 @@ contract BoardroomKernel {
         if (kind > ROUTE_KIND_MIGRATION) revert InvalidRouteKind(msg.sig, kind);
 
         if (kind == ROUTE_KIND_VIEW) {
-            (bool didNotRollback, bytes memory envelope) =
-                address(this).delegatecall(abi.encodeCall(this.dispatchViewAndRollback, (facet, msg.data)));
+            // Delegatecalling the dispatcher keeps the rollback frame off the Boardroom's own ABI:
+            // the reverting facet delegatecall lives in code no external caller can enter here.
+            (bool didNotRollback, bytes memory envelope) = viewDispatcher.delegatecall(
+                abi.encodeCall(BoardroomViewDispatcher.dispatchViewAndRollback, (facet, msg.data))
+            );
             if (didNotRollback) revert ViewDispatchDidNotRollback();
             if (envelope.length < 96) revert InvalidViewRollbackEnvelope();
             (bool facetSuccess, bytes memory viewOutput) = abi.decode(envelope, (bool, bytes));

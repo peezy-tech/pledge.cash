@@ -108,7 +108,7 @@ abstract contract CanonicalBoardroomTestSetup is Test {
         selectors[2] = BoardroomKernel.initialize.selector;
         selectors[3] = BoardroomKernel.appliedStorageVersion.selector;
         selectors[4] = BoardroomKernel.migrationRequired.selector;
-        selectors[5] = BoardroomKernel.dispatchViewAndRollback.selector;
+        selectors[5] = bytes4(keccak256("viewDispatcher()"));
         selectors[6] = BoardroomKernel.appliedStorageLayoutHash.selector;
         selectors[7] = BoardroomKernel.kernelSelectorSetHash.selector;
         _sortSelectors(selectors);

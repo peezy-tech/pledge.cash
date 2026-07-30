@@ -251,10 +251,10 @@ contract FakeDistributionGrantCaller {
 
 contract DistributionTest is CanonicalBoardroomTestSetup {
     bytes32 internal constant DIRECT_CLAIM_TYPEHASH = keccak256(
-        "MerkleAirdropDirectClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
+        "MerkleAirdropDirectClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
     );
     bytes32 internal constant GRANT_CLAIM_TYPEHASH = keccak256(
-        "MerkleAirdropGrantClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)"
+        "MerkleAirdropGrantClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)"
     );
     bytes32 internal constant GRANT_TERMS_TYPEHASH = keccak256(
         "MerkleAirdropGrantTerms(address paymentToken,uint256 price,uint256 expiry,uint256 vestingCliff,uint256 vestingEnd,bool transferable,uint256 transferUnlockTime,bytes32 salt)"
@@ -681,11 +681,9 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         bytes32 root = _directClaimLeaf(predictedAirdrop, boardroom, shareToken, 0, recipient, AIRDROP_CLAIM_SHARES);
         MerkleAirdrop airdrop = _createMerkleAirdrop(boardroom, shareToken, root, AIRDROP_SHARES, salt);
 
-        bytes32 originalLeaf =
-            airdrop.getDirectClaimLeaf(_expectedFacetSetHash(boardroom), 0, recipient, AIRDROP_CLAIM_SHARES);
+        bytes32 originalLeaf = airdrop.getDirectClaimLeaf(0, recipient, AIRDROP_CLAIM_SHARES);
         vm.chainId(block.chainid + 1);
-        bytes32 otherChainLeaf =
-            airdrop.getDirectClaimLeaf(_expectedFacetSetHash(boardroom), 0, recipient, AIRDROP_CLAIM_SHARES);
+        bytes32 otherChainLeaf = airdrop.getDirectClaimLeaf(0, recipient, AIRDROP_CLAIM_SHARES);
 
         assertNotEq(otherChainLeaf, originalLeaf);
         vm.expectRevert(MerkleAirdrop.InvalidProof.selector);
@@ -1294,7 +1292,7 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
 
         vm.prank(buyer);
         (address locker, address pool, uint256 shares, uint256 quote, uint256 liquidity) =
-            curve.migrate(minShareLiquidity, minQuoteLiquidity, block.timestamp);
+            curve.migrate(_expectedFacetSetHash(boardroom), minShareLiquidity, minQuoteLiquidity, block.timestamp);
         assertTrue(locker != address(0));
         assertTrue(pool != address(0));
         assertEq(shares, 125 ether);
@@ -1323,7 +1321,7 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
 
         quote.armWindDown(address(boardroom));
         vm.expectRevert(MigratingBondingCurve.BoardroomNotActive.selector);
-        curve.migrate(118.75 ether, 237_500000, block.timestamp);
+        curve.migrate(_expectedFacetSetHash(boardroom), 118.75 ether, 237_500000, block.timestamp);
 
         assertEq(uint8(boardroom.status()), uint8(BoardroomFacetTypes.BoardroomStatus.Active));
         assertEq(uint8(curve.curveStatus()), uint8(MigratingBondingCurve.CurvePhase.Graduated));
@@ -1389,7 +1387,7 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         assertEq(curve.outstandingCurveShareLiability(), CURVE_BUY_SHARES - CURVE_SELL_SHARES);
 
         vm.warp(curve.phaseEndsAt() + 1);
-        curve.finalizeUnwind();
+        curve.finalizeUnwind(_expectedFacetSetHash(boardroom));
         assertTrue(curve.isClosed());
         assertEq(curve.outstandingCurveShareLiability(), 0);
         assertEq(shareToken.balanceOf(buyer), CURVE_BUY_SHARES - CURVE_SELL_SHARES);
@@ -1501,7 +1499,7 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         );
         assertEq(uint8(boardroom.primaryMarketMode()), 1);
         vm.warp(block.timestamp + curve.SETTLEMENT_GRACE() + 1);
-        curve.finalizeUnwind();
+        curve.finalizeUnwind(_expectedFacetSetHash(boardroom));
         assertEq(uint8(boardroom.primaryMarketMode()), 2);
 
         vm.prank(oldSpender);
@@ -1654,7 +1652,7 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         );
         assertFalse(curve.isClosed());
         vm.warp(block.timestamp + curve.SETTLEMENT_GRACE() + 1);
-        curve.finalizeUnwind();
+        curve.finalizeUnwind(_expectedFacetSetHash(boardroom));
         boardroom.pruneObligation(_expectedFacetSetHash(boardroom), address(curve));
         assertEq(shareToken.encumberedSupply(), 0);
         assertEq(shareToken.governanceEligibleSupply(), 0);
@@ -1678,7 +1676,7 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         vm.prank(owner);
         boardroom.startWindDown(_expectedFacetSetHash(boardroom));
         vm.expectRevert(MigratingBondingCurve.BoardroomNotActive.selector);
-        curve.migrate(118.75 ether, 237_500000, block.timestamp);
+        curve.migrate(_expectedFacetSetHash(boardroom), 118.75 ether, 237_500000, block.timestamp);
         vm.warp(curve.phaseEndsAt() + 1);
         curve.fallbackToUnwind();
 
@@ -1688,7 +1686,7 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         assertEq(boardroom.liquidityLocker(), address(0));
 
         vm.warp(block.timestamp + curve.SETTLEMENT_GRACE() + 1);
-        curve.finalizeUnwind();
+        curve.finalizeUnwind(_expectedFacetSetHash(boardroom));
         assertEq(curve.outstandingCurveShareLiability(), 0);
         assertTrue(curve.isClosed());
     }
@@ -1904,7 +1902,7 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         assertEq(curve.quoteReserve(), 500_000000);
 
         vm.expectRevert(abi.encodeWithSelector(MigratingBondingCurve.MigrationMinimumTooLow.selector, 0, 118.75 ether));
-        curve.migrate(0, 0, block.timestamp);
+        curve.migrate(_expectedFacetSetHash(boardroom), 0, 0, block.timestamp);
 
         vm.prank(buyer);
         vm.expectRevert(
@@ -1941,7 +1939,7 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
             _createMigratingCurve(boardroom, shareToken, paymentToken, "curve-quarantine-policy-gate-create");
 
         vm.expectRevert(MigratingBondingCurve.QuoteNotQuarantined.selector);
-        curve.recoverQuarantinedQuote();
+        curve.recoverQuarantinedQuote(_expectedFacetSetHash(boardroom));
     }
 
     function testQuarantinedQuoteForfeitureIsWindDownOnlyVetoableAndPostSnapshotRecoveryGoesToExcessRecipient() public {
@@ -1970,7 +1968,7 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         );
         mutableQuote.setFailureMode(false, true);
         vm.warp(curve.phaseEndsAt() + 1);
-        curve.finalizeUnwind();
+        curve.finalizeUnwind(_expectedFacetSetHash(boardroom));
 
         assertEq(uint8(curve.curveStatus()), uint8(MigratingBondingCurve.CurvePhase.Quarantined));
         assertFalse(curve.isClosed());
@@ -1990,7 +1988,7 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         vm.warp(curve.forfeitureEligibleAt());
         curve.openQuoteForfeiture();
         vm.warp(curve.forfeitureWindowEndsAt() + 1);
-        curve.finalizeQuoteForfeiture();
+        curve.finalizeQuoteForfeiture(_expectedFacetSetHash(boardroom));
 
         assertTrue(curve.isClosed());
         assertFalse(curve.migrationReservationHeld());
@@ -2662,7 +2660,6 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         return keccak256(
             abi.encode(
                 DIRECT_CLAIM_TYPEHASH,
-                boardroom.facetSetHash(),
                 block.chainid,
                 index,
                 airdrop,
@@ -2686,7 +2683,6 @@ contract DistributionTest is CanonicalBoardroomTestSetup {
         return keccak256(
             abi.encode(
                 GRANT_CLAIM_TYPEHASH,
-                boardroom.facetSetHash(),
                 block.chainid,
                 index,
                 airdrop,

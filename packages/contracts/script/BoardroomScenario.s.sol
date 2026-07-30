@@ -49,7 +49,7 @@ contract BoardroomScenario is Script {
     uint256 internal constant DEFAULT_DEPLOYER_KEY = 0xA11CE;
     uint256 internal constant DEFAULT_HOLDER_KEY = 0xB0B;
     bytes32 internal constant GRANT_CLAIM_TYPEHASH = keccak256(
-        "MerkleAirdropGrantClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)"
+        "MerkleAirdropGrantClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)"
     );
     bytes32 internal constant GRANT_TERMS_TYPEHASH = keccak256(
         "MerkleAirdropGrantTerms(address paymentToken,uint256 price,uint256 expiry,uint256 vestingCliff,uint256 vestingEnd,bool transferable,uint256 transferUnlockTime,bytes32 salt)"
@@ -437,7 +437,6 @@ contract BoardroomScenario is Script {
         bytes32 grantLeaf = keccak256(
             abi.encode(
                 GRANT_CLAIM_TYPEHASH,
-                releaseAHash,
                 block.chainid,
                 uint256(0),
                 predictedAirdrop,
@@ -452,9 +451,8 @@ contract BoardroomScenario is Script {
         bytes32 directLeaf = keccak256(
             abi.encode(
                 keccak256(
-                    "MerkleAirdropDirectClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
+                    "MerkleAirdropDirectClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
                 ),
-                releaseAHash,
                 block.chainid,
                 uint256(1),
                 predictedAirdrop,
@@ -736,7 +734,7 @@ contract BoardroomScenario is Script {
         uint256 migratedQuote;
         uint256 migratedLiquidity;
         (graduatedCurveLocker, graduatedCurvePool, migratedShares, migratedQuote, migratedLiquidity) =
-            graduatedCurve.migrate(5 ether, 5 ether, block.timestamp + 1 hours);
+            graduatedCurve.migrate(graduatedCurveBoardroom.facetSetHash(), 5 ether, 5 ether, block.timestamp + 1 hours);
         require(migratedShares == 5 ether && migratedQuote == 5 ether, "graduated-migration-amounts");
         require(migratedLiquidity != 0, "graduated-migration-liquidity");
         require(graduatedCurveBoardroom.liquidityLocker() == graduatedCurveLocker, "graduated-liquidity-not-activated");
@@ -938,7 +936,7 @@ contract BoardroomScenario is Script {
 
     function _finalizeAuxiliaryCurve() internal {
         curveBoardroom.migrateBoardroom(releaseBHash);
-        migratingCurve.finalizeUnwind();
+        migratingCurve.finalizeUnwind(curveBoardroom.facetSetHash());
         require(curveBoardroom.activeObligationCount() == 0, "curve-terminal-obligation");
         require(!curveBoardroom.migrationRequired(), "curve-migration");
     }
@@ -1022,7 +1020,7 @@ contract BoardroomScenario is Script {
         reserved[2] = BoardroomKernel.initialize.selector;
         reserved[3] = BoardroomKernel.appliedStorageVersion.selector;
         reserved[4] = BoardroomKernel.migrationRequired.selector;
-        reserved[5] = BoardroomKernel.dispatchViewAndRollback.selector;
+        reserved[5] = bytes4(keccak256("viewDispatcher()"));
         reserved[6] = BoardroomKernel.appliedStorageLayoutHash.selector;
         reserved[7] = BoardroomKernel.kernelSelectorSetHash.selector;
         for (uint256 i = 1; i < reserved.length; ++i) {

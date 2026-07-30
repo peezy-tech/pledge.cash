@@ -106,7 +106,10 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     function createFixedPriceSale(FixedPriceSale.CreateParams calldata params) external returns (address sale) {
         _requireBoardroomShareToken(msg.sender, params.shareToken);
         _requireAsset(params.paymentToken);
-        BoardroomCallbackLib.reserveRedeemableAsset(msg.sender, params.paymentToken);
+        // Boardroom-initiated frame: the outer mutating route already bound the caller's release hash.
+        BoardroomCallbackLib.reserveRedeemableAsset(
+            msg.sender, BoardroomCallbackLib.boundFacetSetHash(msg.sender), params.paymentToken
+        );
 
         sale = _createDistribution(
             fixedPriceSaleLogic,
@@ -126,7 +129,10 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         _requireBoardroomShareToken(msg.sender, params.shareToken);
         if (params.paymentToken == params.shareToken) revert InvalidAsset(params.paymentToken);
         _requireAsset(params.paymentToken);
-        BoardroomCallbackLib.reserveRedeemableAsset(msg.sender, params.paymentToken);
+        // Boardroom-initiated frame: the outer mutating route already bound the caller's release hash.
+        BoardroomCallbackLib.reserveRedeemableAsset(
+            msg.sender, BoardroomCallbackLib.boundFacetSetHash(msg.sender), params.paymentToken
+        );
 
         auction = _createDistribution(
             dutchAuctionLogic,
@@ -156,7 +162,9 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         if (existingCurve != address(0)) revert BondingCurveAlreadyConfigured(msg.sender, existingCurve);
         _requireBoardroomShareToken(msg.sender, params.shareToken);
         _requireAsset(params.quoteToken);
-        BoardroomCallbackLib.reserveRedeemableAsset(msg.sender, params.quoteToken);
+        // Boardroom-initiated frame: the outer mutating route already bound the caller's release hash.
+        bytes32 expectedFacetSetHash = BoardroomCallbackLib.boundFacetSetHash(msg.sender);
+        BoardroomCallbackLib.reserveRedeemableAsset(msg.sender, expectedFacetSetHash, params.quoteToken);
 
         uint256 shareAmount = params.saleSupply + params.migrationSupply;
         address predictedCurve = LibClone.predictDeterministicAddress(
@@ -165,7 +173,9 @@ contract DistributionFactory is IBoardroomObligationPolicy {
             address(this)
         );
         bondingCurveOfBoardroom[msg.sender] = predictedCurve;
-        BoardroomCallbackLib.precommitBondingCurve(msg.sender, predictedCurve, params.quoteToken, shareAmount);
+        BoardroomCallbackLib.precommitBondingCurve(
+            msg.sender, expectedFacetSetHash, predictedCurve, params.quoteToken, shareAmount
+        );
         curve = _createDistribution(
             migratingBondingCurveLogic,
             msg.sender,
@@ -179,7 +189,9 @@ contract DistributionFactory is IBoardroomObligationPolicy {
 
         MigratingBondingCurve(curve).initialize(msg.sender, lockedLiquidityFactory, params);
         LockedLiquidityFactory(lockedLiquidityFactory)
-            .reserveMigration(msg.sender, curve, params.shareToken, params.quoteToken, params.migrationSalt);
+            .reserveMigration(
+                expectedFacetSetHash, msg.sender, curve, params.shareToken, params.quoteToken, params.migrationSalt
+            );
         _checkedTransferFrom(params.shareToken, msg.sender, curve, shareAmount);
     }
 

@@ -9,10 +9,10 @@ library BoardroomKernelSelectors {
         reserved[1] = bytes4(keccak256("appliedStorageLayoutHash()"));
         reserved[2] = bytes4(keccak256("facetSetHash()"));
         reserved[3] = bytes4(keccak256("initialize(bytes32,bytes)"));
-        reserved[4] = bytes4(keccak256("appliedStorageVersion()"));
-        reserved[5] = bytes4(keccak256("migrationRequired()"));
-        reserved[6] = bytes4(keccak256("kernelSelectorSetHash()"));
-        reserved[7] = bytes4(keccak256("dispatchViewAndRollback(address,bytes)"));
+        reserved[4] = bytes4(keccak256("viewDispatcher()"));
+        reserved[5] = bytes4(keccak256("appliedStorageVersion()"));
+        reserved[6] = bytes4(keccak256("migrationRequired()"));
+        reserved[7] = bytes4(keccak256("kernelSelectorSetHash()"));
     }
 
     function selectorSetHash() internal pure returns (bytes32) {

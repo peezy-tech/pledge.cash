@@ -81,7 +81,10 @@ contract BondMarketFactory is IBoardroomObligationPolicy {
 
         address shareToken = IBondMarketFactoryBoardroom(boardroom).shareToken();
         _validateQuoteToken(params.quoteToken, shareToken, params.kind);
-        BoardroomCallbackLib.reserveRedeemableAsset(boardroom, params.quoteToken);
+        // Boardroom-initiated frame: the outer mutating route already bound the caller's release hash.
+        BoardroomCallbackLib.reserveRedeemableAsset(
+            boardroom, BoardroomCallbackLib.boundFacetSetHash(boardroom), params.quoteToken
+        );
 
         market = LibClone.cloneDeterministic(bondMarketLogic, _cloneSalt(boardroom, params.salt));
         isBondMarket[market] = true;

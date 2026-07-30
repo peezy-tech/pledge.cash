@@ -4108,6 +4108,7 @@ export function App(): React.JSX.Element {
   };
 
   const migrateCurve = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
     const curveState = requireLoadedMigratingCurve();
     const curve = curveState.address;
     const [minShareLiquidity, minQuoteLiquidity] = await Promise.all([
@@ -4118,6 +4119,7 @@ export function App(): React.JSX.Element {
       "Migrating curve migration",
       buildMigratingBondingCurveMigrationTransaction({
         curve,
+        expectedFacetSetHash: boardroom.facetSetHash,
         minShareLiquidity,
         minQuoteLiquidity,
         deadline: uintInput(curveMigrationForm.deadline, "Migration deadline"),
@@ -4137,20 +4139,38 @@ export function App(): React.JSX.Element {
     await loadMigratingCurveAddress(curve);
   };
 
+  // Lifecycle steps that call back into the Boardroom commit to the release they run under.
+  const runReleaseBoundMigratingCurveLifecycle = async (
+    label: string,
+    build: (curve: Address, expectedFacetSetHash: Hex) => Record<string, unknown>,
+  ): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const curve = requireLoadedMigratingCurve().address;
+    await submitContractTransaction(label, build(curve, boardroom.facetSetHash));
+    if (!activeActionOriginIsCurrent()) return;
+    await loadMigratingCurveAddress(curve);
+  };
+
   const expireMigratingCurve = () =>
     runMigratingCurveLifecycle("Expire migrating curve", buildMigratingBondingCurveExpireTransaction);
   const fallbackMigratingCurve = () =>
     runMigratingCurveLifecycle("Open curve unwind fallback", buildMigratingBondingCurveFallbackTransaction);
   const finalizeMigratingCurveUnwind = () =>
-    runMigratingCurveLifecycle("Finalize curve unwind", buildMigratingBondingCurveFinalizeUnwindTransaction);
+    runReleaseBoundMigratingCurveLifecycle(
+      "Finalize curve unwind",
+      buildMigratingBondingCurveFinalizeUnwindTransaction,
+    );
   const recoverMigratingCurveQuote = () =>
-    runMigratingCurveLifecycle("Recover quarantined curve quote", buildMigratingBondingCurveRecoverQuoteTransaction);
+    runReleaseBoundMigratingCurveLifecycle(
+      "Recover quarantined curve quote",
+      buildMigratingBondingCurveRecoverQuoteTransaction,
+    );
   const openMigratingCurveForfeiture = () =>
     runMigratingCurveLifecycle("Open curve quote forfeiture", buildMigratingBondingCurveOpenForfeitureTransaction);
   const vetoMigratingCurveForfeiture = () =>
     runMigratingCurveLifecycle("Veto curve quote forfeiture", buildMigratingBondingCurveVetoForfeitureTransaction);
   const finalizeMigratingCurveForfeiture = () =>
-    runMigratingCurveLifecycle(
+    runReleaseBoundMigratingCurveLifecycle(
       "Finalize curve quote forfeiture",
       buildMigratingBondingCurveFinalizeForfeitureTransaction,
     );

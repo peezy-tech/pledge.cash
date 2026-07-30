@@ -969,6 +969,7 @@ describe("SDK action and query helpers", () => {
 
     const migrate = buildMigratingBondingCurveMigrationTransaction({
       curve,
+      expectedFacetSetHash,
       minShareLiquidity: 1n,
       minQuoteLiquidity: 2n,
       deadline: 12345n,
@@ -976,9 +977,12 @@ describe("SDK action and query helpers", () => {
     expect(migrate.address).toBe(curve);
     expect(migrate.abi).toBe(migratingBondingCurveAbi);
     expect(migrate.functionName).toBe("migrate");
-    expect(migrate.args).toEqual([1n, 2n, 12345n]);
+    expect(migrate.args).toEqual([expectedFacetSetHash, 1n, 2n, 12345n]);
     expect(buildMigratingBondingCurveExpireTransaction(curve).functionName).toBe("expire");
-    expect(buildMigratingBondingCurveFinalizeUnwindTransaction(curve).functionName).toBe("finalizeUnwind");
+
+    const finalizeUnwind = buildMigratingBondingCurveFinalizeUnwindTransaction(curve, expectedFacetSetHash);
+    expect(finalizeUnwind.functionName).toBe("finalizeUnwind");
+    expect(finalizeUnwind.args).toEqual([expectedFacetSetHash]);
   });
 
   test("builds Boardroom Merkle airdrop and claim transaction inputs", () => {

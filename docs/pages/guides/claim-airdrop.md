@@ -6,14 +6,13 @@ description: Validate a Merkle allocation and claim project shares immediately o
 # Claim an airdrop
 
 A pledge.cash Merkle airdrop does not discover your allocation from an email or wallet address alone. You need the exact
-manifest data published by the project: expected facet-set hash, claim mode, index, account, amount, proof,
-and—when applicable—every grant term.
+manifest data published by the project: claim mode, index, account, amount, proof, and—when applicable—every grant
+term.
 
 ## Prerequisites
 
 - The canonical project and airdrop contract on the selected network.
-- A trusted allocation manifest or entry containing the exact `expectedFacetSetHash`, index, account, token amount, and
-  proof.
+- A trusted allocation manifest or entry containing the exact index, account, token amount, and proof.
 - The declared mode: **Receive now** or **Vested grant**.
 - For grant mode: payment token, price, expiry, cliff, vesting end, transferability, transfer unlock time, and salt. A
   grant's cliff cannot be after vesting end. A canonical Boardroom grant's expiry must still be in the future, at least
@@ -33,8 +32,9 @@ The app does not host or infer the project's Merkle manifest. Obtain it from the
    `maxGrantClaims` usage.
 4. The current Participate view does not display the raw Boardroom, share-token, `merkleRoot`, `startTime`, or `endTime` fields. Read those public fields directly from the airdrop contract and compare them with the authenticated manifest.
 5. Confirm the Boardroom is Active. Claims stop during wind-down even if the published end time has not arrived.
-6. Confirm the manifest's `expectedFacetSetHash` matches the Boardroom's current `facetSetHash()`, and that the manifest
-   identifies the same chain id, airdrop address, Boardroom, and share token.
+6. Confirm the manifest identifies the same chain id, airdrop address, Boardroom, and share token. Manifests are not
+   release-bound, so a protocol release activation does not invalidate one; the claim transaction binds the Boardroom's
+   live `facetSetHash()` at execution time.
 7. For a paid grant, verify the payment token passes bounded reads and that the parent-to-child transaction records the
    new grant and payment-asset dependency atomically.
 
@@ -46,7 +46,6 @@ If a required read is **Unknown**, stop. Unknown remaining inventory or status i
 
 A direct leaf transfers the proven project-share amount to its bound account. The leaf commits to:
 
-- expected Boardroom facet-set hash;
 - chain id;
 - claim index;
 - airdrop, Boardroom, and share-token addresses;
@@ -55,6 +54,10 @@ A direct leaf transfers the proven project-share amount to its bound account. Th
 ### Vested grant
 
 A grant leaf creates an escrow-backed Boardroom grant instead of transferring immediately. It commits to all direct identity fields, the TokenGrantFactory, and a hash of every grant term.
+
+The Boardroom facet-set hash is not part of either leaf. It is supplied separately as
+`expectedFacetSetHash` when submitting `claim` or `claimGrant`, so an allocation remains claimable after a protocol
+release while a transaction authorized against a stale release still fails.
 
 Grant claims consume the airdrop's published `maxGrantClaims` allowance, not a global Boardroom slot. The child grant
 is recorded atomically before the parent can become terminal. The distribution-only path is creation-fee exempt; a paid
@@ -103,8 +106,10 @@ For direct mode, verify the account received the exact shares. For grant mode, v
 
 ## Recovery
 
-- **Invalid proof:** compare expected facet-set hash, chain, predicted airdrop address, index, account, raw amount, leaf
+- **Invalid proof:** compare chain, predicted airdrop address, Boardroom, share token, index, account, raw amount, leaf
   type, and all grant terms. Formatting is not the only possible mismatch.
+- **Facet-set mismatch:** rebuild the transaction with the current Boardroom facet-set hash. Do not regenerate or
+  republish the Merkle root; the hash is transaction authorization data, not a leaf field.
 - **Already claimed:** inspect the earlier claim event and recipient or grant; an index is one-time even if the manifest duplicated it.
 - **Outside the claim window:** ask the project whether it will publish a new distribution. Existing proof terms cannot extend the contract.
 - **Grant cap reached:** a valid grant leaf cannot fall back to direct mode. The modes have different leaf hashes.

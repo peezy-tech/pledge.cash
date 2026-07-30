@@ -9,10 +9,10 @@ import { merkleAirdropAbi } from "../generated";
 import type { MerkleAirdropGrantClaimTerms } from "./types";
 
 const DIRECT_CLAIM_TYPEHASH = keccak256(stringToHex(
-  "MerkleAirdropDirectClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)",
+  "MerkleAirdropDirectClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)",
 ));
 const GRANT_CLAIM_TYPEHASH = keccak256(stringToHex(
-  "MerkleAirdropGrantClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)",
+  "MerkleAirdropGrantClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address tokenGrantFactory,address account,uint256 amount,bytes32 termsHash)",
 ));
 const GRANT_TERMS_TYPEHASH = keccak256(stringToHex(
   "MerkleAirdropGrantTerms(address paymentToken,uint256 price,uint256 expiry,uint256 vestingCliff,uint256 vestingEnd,bool transferable,uint256 transferUnlockTime,bytes32 salt)",
@@ -98,8 +98,12 @@ export function hashMerkleAirdropGrantTerms(terms: MerkleAirdropGrantClaimTerms)
   ));
 }
 
+/**
+ * Leaves are not release-bound: the immutable root would otherwise be voided protocol-wide by any
+ * facet-set activation. The release is bound per transaction, by the `expectedFacetSetHash`
+ * argument of `claim`/`claimGrant`.
+ */
 export function buildMerkleAirdropDirectClaimLeaf(input: {
-  expectedFacetSetHash: Hex;
   chainId: bigint;
   index: bigint;
   airdrop: Address;
@@ -111,7 +115,6 @@ export function buildMerkleAirdropDirectClaimLeaf(input: {
   return keccak256(encodeAbiParameters(
     [
       { type: "bytes32" },
-      { type: "bytes32" },
       { type: "uint256" },
       { type: "uint256" },
       { type: "address" },
@@ -122,7 +125,6 @@ export function buildMerkleAirdropDirectClaimLeaf(input: {
     ],
     [
       DIRECT_CLAIM_TYPEHASH,
-      requireBytes32("expectedFacetSetHash", input.expectedFacetSetHash),
       input.chainId,
       input.index,
       input.airdrop,
@@ -134,8 +136,8 @@ export function buildMerkleAirdropDirectClaimLeaf(input: {
   ));
 }
 
+/** See {@link buildMerkleAirdropDirectClaimLeaf} for why the leaf is not release-bound. */
 export function buildMerkleAirdropGrantClaimLeaf(input: {
-  expectedFacetSetHash: Hex;
   chainId: bigint;
   index: bigint;
   airdrop: Address;
@@ -149,7 +151,6 @@ export function buildMerkleAirdropGrantClaimLeaf(input: {
   return keccak256(encodeAbiParameters(
     [
       { type: "bytes32" },
-      { type: "bytes32" },
       { type: "uint256" },
       { type: "uint256" },
       { type: "address" },
@@ -162,7 +163,6 @@ export function buildMerkleAirdropGrantClaimLeaf(input: {
     ],
     [
       GRANT_CLAIM_TYPEHASH,
-      requireBytes32("expectedFacetSetHash", input.expectedFacetSetHash),
       input.chainId,
       input.index,
       input.airdrop,

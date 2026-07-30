@@ -156,7 +156,7 @@ kernel_selectors_array() {
       "appliedStorageVersion()" \
       "migrationRequired()" \
       "kernelSelectorSetHash()" \
-      "dispatchViewAndRollback(address,bytes)"; do
+      "viewDispatcher()"; do
       cast sig "$signature"
     done | sort
   )"

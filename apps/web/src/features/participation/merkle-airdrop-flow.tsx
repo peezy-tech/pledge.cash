@@ -188,14 +188,11 @@ export function MerkleAirdropFlow({
       if (ticket.chainId !== chainId) throw new Error(`This ticket is for chain ${ticket.chainId.toString()}, not chain ${chainId.toString()}.`);
       if (ticket.airdrop.toLowerCase() !== state.address.toLowerCase()) throw new Error("This ticket belongs to a different airdrop contract.");
       if (ticket.account.toLowerCase() !== account.toLowerCase()) throw new Error("This ticket belongs to a different wallet.");
-      if (ticket.expectedFacetSetHash.toLowerCase() !== dashboard.snapshot.facetSetHash.toLowerCase()) {
-        throw new Error("This claim ticket is bound to a different protocol release.");
-      }
       const loadedIdentity = merkleAirdropActionIdentity({
         account: ticket.account,
         airdrop: ticket.airdrop,
         amount: ticket.amount,
-        expectedFacetSetHash: ticket.expectedFacetSetHash,
+        expectedFacetSetHash: dashboard.snapshot.facetSetHash,
         grantTerms: ticket.grantTerms,
         index: ticket.index,
         mode: ticket.mode,
@@ -208,8 +205,8 @@ export function MerkleAirdropFlow({
         abi: merkleAirdropAbi,
         functionName: ticket.mode === "direct" ? "getDirectClaimLeaf" : "getGrantClaimLeaf",
         args: ticket.mode === "direct"
-          ? [ticket.expectedFacetSetHash, ticket.index, ticket.account, ticket.amount]
-          : [ticket.expectedFacetSetHash, ticket.index, ticket.account, ticket.amount, ticket.grantTerms!],
+          ? [ticket.index, ticket.account, ticket.amount]
+          : [ticket.index, ticket.account, ticket.amount, ticket.grantTerms!],
       }) as Hex;
       if (!claimTicketGuard.isCurrent(boundRequest)) return;
       if (!verifyAirdropClaimTicket(ticket, leaf, state.merkleRoot)) {
