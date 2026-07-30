@@ -1,8 +1,17 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import { getAddress, type Address } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { createSiweMessage } from "viem/siwe";
 
-import { type AuthAdapter, type WalletNonceRecord } from "../src/api/auth";
+import {
+  AuthRateLimitError,
+  AuthSocialDependencyError,
+  type AuthAdapter,
+  type AuthSnapshot,
+  type RateLimitConfig,
+  type WalletNonceRecord
+} from "../src/api/auth";
+import { WALLET_LINK_SIWE_STATEMENT } from "../src/api/better-auth";
 import { createApp, type SentinelApiDeps, type SentinelApiStore } from "../src/api/server";
 import type {
   AddressDto,
@@ -18,8 +27,10 @@ import type {
   PublicActionsResponse,
   SubscriptionDto,
   TelegramLinkCodeResponse,
-  WalletDto
+  WalletDto,
+  WalletNonceResponse
 } from "../src/api/dto";
+import { AUTH_SIWE_MAX_MESSAGE_LENGTH } from "../src/api/dto";
 
 const WEB_ORIGIN = "https://pledge.cash";
 const FIXED_NOW = new Date("2026-07-09T12:00:00.000Z");
@@ -28,6 +39,9 @@ const CHANNEL_ID = "00000000-0000-4000-8000-000000000002";
 const ACTION_ID = "00000000-0000-4000-8000-000000000003";
 const SESSION_COOKIE = "better-auth.session_token=stub-session";
 const PRIMARY_WALLET = "0x5555555555555555555555555555555555555555" as AddressDto;
+const AUTH_ACCOUNT = privateKeyToAccount(
+  "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+);
 const BOARDROOM = "0x1111111111111111111111111111111111111111" as AddressDto;
 const SHARE_TOKEN = "0x2222222222222222222222222222222222222222" as AddressDto;
 const POLICY = "0x3333333333333333333333333333333333333333" as AddressDto;
@@ -41,6 +55,10 @@ type ForwardedAuthRequest = {
 
 class StubAuth implements AuthAdapter {
   readonly forwarded: ForwardedAuthRequest[] = [];
+  socialFailure?: Error;
+  readonly socialStarts: Array<
+    Parameters<NonNullable<AuthAdapter["startSocial"]>>[0]
+  > = [];
   readonly socialProviders = ["discord", "twitter", "telegram"] as const;
 
   async getSession(input: { readonly headers: Headers }) {
@@ -56,7 +74,7 @@ class StubAuth implements AuthAdapter {
     this.forwarded.push({ body, method: request.method, path });
 
     const headers = new Headers({ "Content-Type": "application/json" });
-    if (path === "/auth/siwe/verify") {
+    if (path.endsWith("/siwe/verify")) {
       headers.set(
         "Set-Cookie",
         `${SESSION_COOKIE}; Path=/; HttpOnly; Secure; SameSite=Lax`
@@ -65,12 +83,28 @@ class StubAuth implements AuthAdapter {
 
     return new Response(JSON.stringify({ forwarded: true, path }), { headers, status: 200 });
   }
+
+  startSocial = async (
+    input: Parameters<NonNullable<AuthAdapter["startSocial"]>>[0]
+  ) => {
+    if (this.socialFailure !== undefined) {
+      throw this.socialFailure;
+    }
+    this.socialStarts.push(input);
+    return {
+      response: {
+        redirect: true,
+        url: `https://identity.example.test/${input.request.provider}`
+      }
+    };
+  };
 }
 
 class InMemoryStore implements SentinelApiStore {
   deliveriesByUser = new Map<string, NotificationDeliveryDto[]>();
   readonly linkCodes = new Map<string, { expiresAt: Date; userId: string }>();
   readonly nonces = new Map<string, WalletNonceRecord>();
+  readonly identityQuotaEvents = new Map<string, number[]>();
   channelsByUser = new Map<string, ChannelDto[]>();
   conflictedWallets = new Set<AddressDto>();
   lastPublicQuery: PublicActionsQuery | undefined;
@@ -332,11 +366,42 @@ class InMemoryStore implements SentinelApiStore {
     this.walletsByUser.set(input.userId, nextWallets);
     return nextWallets.find((wallet) => wallet.address === input.address) ?? null;
   }
+
+  async takeIdentityQuota(input: {
+    readonly capacity: number;
+    readonly now: Date;
+    readonly scope: string;
+    readonly windowMs: number;
+  }): Promise<boolean> {
+    const windowStart = input.now.getTime() - input.windowMs;
+    const events = (this.identityQuotaEvents.get(input.scope) ?? []).filter(
+      (consumedAt) => consumedAt > windowStart
+    );
+    if (events.length >= input.capacity) {
+      this.identityQuotaEvents.set(input.scope, events);
+      return false;
+    }
+    events.push(input.now.getTime());
+    this.identityQuotaEvents.set(input.scope, events);
+    return true;
+  }
 }
 
-function createHarness() {
+function createHarness(
+  options: {
+    readonly rateLimit?: RateLimitConfig;
+    readonly sharedIdentity?: boolean;
+    readonly store?: InMemoryStore;
+  } = {}
+) {
   const auth = new StubAuth();
-  const store = new InMemoryStore();
+  if (options.sharedIdentity === true) {
+    Object.assign(auth, {
+      sharedIdentityClientId: "pledge-cash-test",
+      usesSharedIdentity: true
+    });
+  }
+  const store = options.store ?? new InMemoryStore();
   let nonceSequence = 0;
   const deps: SentinelApiDeps = {
     auth,
@@ -351,7 +416,7 @@ function createHarness() {
       return `nonce${nonceSequence.toString().padStart(4, "0")}`;
     },
     now: () => FIXED_NOW,
-    rateLimit: { capacity: 100 },
+    rateLimit: options.rateLimit ?? { capacity: 100 },
     store
   };
 
@@ -362,14 +427,29 @@ async function readJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function authSiweRequest(statement = "Sign in to pledge.cash.") {
+  const message = createSiweMessage({
+    address: AUTH_ACCOUNT.address,
+    chainId: 31337,
+    domain: "pledge.cash",
+    expirationTime: new Date(FIXED_NOW.getTime() + 5 * 60_000),
+    issuedAt: FIXED_NOW,
+    nonce: "0123456789abcdef",
+    statement,
+    uri: WEB_ORIGIN,
+    version: "1"
+  });
+  return {
+    chainId: 31337,
+    message,
+    signature: await AUTH_ACCOUNT.signMessage({ message }),
+    walletAddress: AUTH_ACCOUNT.address
+  };
+}
+
 async function signedInCookie(harness: ReturnType<typeof createHarness>): Promise<string> {
   const verify = await harness.app.request("/auth/siwe/verify", {
-    body: JSON.stringify({
-      chainId: 31337,
-      message: "stub SIWE message",
-      signature: `0x${"ab".repeat(65)}`,
-      walletAddress: PRIMARY_WALLET
-    }),
+    body: JSON.stringify(await authSiweRequest()),
     headers: { "Content-Type": "application/json" },
     method: "POST"
   });
@@ -414,8 +494,14 @@ describe("Sentinel WP5 API", () => {
   test("reports auth capabilities and returns a wallet-first auth snapshot", async () => {
     const capabilities = await harness.app.request("/auth/capabilities");
     expect(capabilities.status).toBe(200);
-    expect(await readJson<{ socialProviders: string[] }>(capabilities)).toEqual({
-      socialProviders: ["discord", "twitter", "telegram"]
+    expect(
+      await readJson<{
+        socialProviders: string[];
+        walletlessSocialSignIn: boolean;
+      }>(capabilities)
+    ).toEqual({
+      socialProviders: ["discord", "twitter", "telegram"],
+      walletlessSocialSignIn: false
     });
 
     harness.store.providersByUser.set(USER_ID, ["siwe", "github"]);
@@ -450,6 +536,121 @@ describe("Sentinel WP5 API", () => {
     expect(meBody.user).not.toHaveProperty("workosUserId");
   });
 
+  test("keeps an existing product session readable when Identity metadata is unavailable", async () => {
+    Object.assign(harness.auth, {
+      getProviders: async () => {
+        throw new Error("Identity unavailable");
+      },
+      getSocialProviders: async () => {
+        throw new Error("Identity unavailable");
+      }
+    });
+    harness.store.providersByUser.set(USER_ID, ["siwe"]);
+    const cookie = await signedInCookie(harness);
+
+    const capabilities = await harness.app.request("/auth/capabilities");
+    expect(capabilities.status).toBe(200);
+    expect(
+      await readJson<{
+        socialProviders: string[];
+        walletlessSocialSignIn: boolean;
+      }>(capabilities)
+    ).toEqual({
+      socialProviders: ["discord", "twitter", "telegram"],
+      walletlessSocialSignIn: false
+    });
+
+    const me = await harness.app.request("/auth/me", {
+      headers: { Cookie: cookie }
+    });
+    expect(me.status).toBe(200);
+    expect(await readJson<AuthMeResponse>(me)).toMatchObject({
+      providers: ["siwe"],
+      user: { id: USER_ID }
+    });
+  });
+
+  test("uses shared Identity hydration and fails closed on wallet sign-in metadata", async () => {
+    harness.store.providersByUser.set(USER_ID, ["siwe", "github"]);
+    harness.store.walletsByUser.set(USER_ID, [
+      {
+        alertsEnabled: true,
+        address: PRIMARY_WALLET,
+        canSignIn: true,
+        verifiedAt: FIXED_NOW.toISOString()
+      }
+    ]);
+    Object.assign(harness.auth, {
+      hydrateAuthSnapshot: async (
+        _userId: string,
+        snapshot: AuthSnapshot
+      ): Promise<AuthSnapshot> => ({
+        ...snapshot,
+        providers: [],
+        wallets: snapshot.wallets.map((wallet) => ({
+          ...wallet,
+          canSignIn: false
+        }))
+      }),
+      hydrateWallet: async (_userId: string, wallet: WalletDto) => ({
+        ...wallet,
+        canSignIn: false
+      })
+    });
+    const cookie = await signedInCookie(harness);
+
+    const hydrated = await harness.app.request("/auth/me", {
+      headers: { Cookie: cookie }
+    });
+    expect(await readJson<AuthMeResponse>(hydrated)).toMatchObject({
+      providers: [],
+      wallets: [{ canSignIn: false }]
+    });
+    const updated = await harness.app.request(`/wallets/${PRIMARY_WALLET}`, {
+      body: JSON.stringify({ alertsEnabled: false }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookie
+      },
+      method: "PATCH"
+    });
+    expect(await readJson<{ wallet: WalletDto }>(updated)).toMatchObject({
+      wallet: { alertsEnabled: false, canSignIn: false }
+    });
+
+    Object.assign(harness.auth, {
+      hydrateAuthSnapshot: async () => {
+        throw new Error("Identity unavailable");
+      },
+      hydrateWallet: async () => {
+        throw new Error("Identity unavailable");
+      }
+    });
+    const unavailable = await harness.app.request("/auth/me", {
+      headers: { Cookie: cookie }
+    });
+    expect(await readJson<AuthMeResponse>(unavailable)).toMatchObject({
+      providers: [],
+      wallets: [{ canSignIn: false }]
+    });
+    const unavailableUpdate = await harness.app.request(
+      `/wallets/${PRIMARY_WALLET}`,
+      {
+        body: JSON.stringify({ alertsEnabled: true }),
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: cookie
+        },
+        method: "PATCH"
+      }
+    );
+    expect(
+      await readJson<{ wallet: WalletDto }>(unavailableUpdate)
+    ).toMatchObject({
+      wallet: { alertsEnabled: true, canSignIn: false }
+    });
+  });
+
   test("forwards SIWE and sign-out requests to the Better Auth handler", async () => {
     const nonceBody = { chainId: 31337, walletAddress: PRIMARY_WALLET };
     const nonce = await harness.app.request("/auth/siwe/nonce", {
@@ -468,17 +669,612 @@ describe("Sentinel WP5 API", () => {
     expect(harness.auth.forwarded).toEqual([
       { body: nonceBody, method: "POST", path: "/auth/siwe/nonce" },
       {
-        body: {
-          chainId: 31337,
-          message: "stub SIWE message",
-          signature: `0x${"ab".repeat(65)}`,
-          walletAddress: PRIMARY_WALLET
-        },
+        body: await authSiweRequest(),
         method: "POST",
         path: "/auth/siwe/verify"
       },
       { body: null, method: "POST", path: "/auth/sign-out" }
     ]);
+  });
+
+  test("does not expose internal legacy Identity SIWE routes", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const responses = await Promise.all([
+      identityHarness.app.request("/auth/legacy/siwe/nonce", {
+        body: "{}",
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      }),
+      identityHarness.app.request("/auth/legacy/siwe/verify", {
+        body: "{}",
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      })
+    ]);
+
+    expect(responses.map((response) => response.status)).toEqual([404, 404]);
+    expect(identityHarness.auth.forwarded).toEqual([]);
+  });
+
+  test("keeps the previous social-auth routes compatible in shared Identity mode", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const capabilities = await identityHarness.app.request(
+      "/auth/capabilities"
+    );
+    expect(await capabilities.json()).toMatchObject({
+      walletlessSocialSignIn: true
+    });
+    const callbackURL = `${WEB_ORIGIN}/notifications`;
+    const requests = [
+      {
+        body: { callbackURL, provider: "github" },
+        path: "/auth/sign-in/social"
+      },
+      {
+        body: { callbackURL, providerId: "telegram" },
+        path: "/auth/sign-in/oauth2"
+      },
+      {
+        body: { callbackURL, provider: "github" },
+        path: "/auth/link-social",
+        session: true
+      },
+      {
+        body: { callbackURL, providerId: "telegram" },
+        path: "/auth/oauth2/link",
+        session: true
+      }
+    ] as const;
+
+    for (const request of requests) {
+      const response = await identityHarness.app.request(
+        request.path,
+        {
+          body: JSON.stringify(request.body),
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "192.0.2.250",
+            ...(request.session ? { Cookie: SESSION_COOKIE } : {})
+          },
+          method: "POST"
+        },
+        { clientIp: "198.51.100.7" }
+      );
+      expect(response.status).toBe(200);
+    }
+
+    expect(
+      identityHarness.auth.socialStarts.map(
+        ({ clientIp, link, request, userId }) => ({
+          clientIp,
+          link,
+          provider: request.provider,
+          userId
+        })
+      )
+    ).toEqual([
+      {
+        clientIp: "198.51.100.7",
+        link: false,
+        provider: "github",
+        userId: undefined
+      },
+      {
+        clientIp: "198.51.100.7",
+        link: false,
+        provider: "telegram",
+        userId: undefined
+      },
+      {
+        clientIp: "198.51.100.7",
+        link: true,
+        provider: "github",
+        userId: USER_ID
+      },
+      {
+        clientIp: "198.51.100.7",
+        link: true,
+        provider: "telegram",
+        userId: USER_ID
+      }
+    ]);
+  });
+
+  test("does not advertise walletless sign-in without a shared social provider", async () => {
+    for (const getSocialProviders of [
+      async () => [],
+      async () => {
+        throw new Error("Identity unavailable");
+      }
+    ]) {
+      const identityHarness = createHarness({ sharedIdentity: true });
+      Object.assign(identityHarness.auth, {
+        getSocialProviders,
+        socialProviders: []
+      });
+
+      const capabilities = await identityHarness.app.request(
+        "/auth/capabilities"
+      );
+      expect(await capabilities.json()).toEqual({
+        socialProviders: [],
+        walletlessSocialSignIn: false
+      });
+    }
+  });
+
+  test("preserves retryable social-auth dependency statuses", async () => {
+    for (const expected of [
+      {
+        error: new AuthSocialDependencyError(429, "17"),
+        message: "Too many social authentication attempts",
+        retryAfter: "17",
+        status: 429
+      },
+      {
+        error: new AuthSocialDependencyError(500),
+        message: "Social authentication is temporarily unavailable",
+        retryAfter: null,
+        status: 503
+      }
+    ] as const) {
+      const identityHarness = createHarness({ sharedIdentity: true });
+      identityHarness.auth.socialFailure = expected.error;
+
+      const response = await identityHarness.app.request(
+        "/auth/peezy/sign-in",
+        {
+          body: JSON.stringify({
+            callbackURL: `${WEB_ORIGIN}/notifications`,
+            provider: "github"
+          }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST"
+        }
+      );
+
+      expect(response.status).toBe(expected.status);
+      expect(response.headers.get("Retry-After")).toBe(expected.retryAfter);
+      expect(await response.json()).toEqual({
+        error: { message: expected.message }
+      });
+    }
+  });
+
+  test("rejects oversized social-auth request bodies before parsing them", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const oversizedPadding = "a".repeat(129 * 1024);
+    const requests = [
+      {
+        body: {
+          callbackURL: `${WEB_ORIGIN}/notifications`,
+          padding: oversizedPadding,
+          provider: "github"
+        },
+        path: "/auth/peezy/sign-in"
+      },
+      {
+        body: {
+          callbackURL: `${WEB_ORIGIN}/notifications`,
+          padding: oversizedPadding,
+          provider: "github"
+        },
+        path: "/auth/peezy/link",
+        session: true
+      },
+      {
+        body: {
+          callbackURL: `${WEB_ORIGIN}/notifications`,
+          padding: oversizedPadding,
+          provider: "github"
+        },
+        path: "/auth/sign-in/social"
+      },
+      {
+        body: {
+          callbackURL: `${WEB_ORIGIN}/notifications`,
+          padding: oversizedPadding,
+          provider: "github"
+        },
+        path: "/auth/link-social",
+        session: true
+      },
+      {
+        body: {
+          callbackURL: `${WEB_ORIGIN}/notifications`,
+          padding: oversizedPadding,
+          providerId: "telegram"
+        },
+        path: "/auth/sign-in/oauth2"
+      },
+      {
+        body: {
+          callbackURL: `${WEB_ORIGIN}/notifications`,
+          padding: oversizedPadding,
+          providerId: "telegram"
+        },
+        path: "/auth/oauth2/link",
+        session: true
+      }
+    ] as const;
+
+    for (const request of requests) {
+      const response = await identityHarness.app.request(request.path, {
+        body: JSON.stringify(request.body),
+        headers: {
+          "Content-Type": "application/json",
+          ...(request.session ? { Cookie: SESSION_COOKIE } : {})
+        },
+        method: "POST"
+      });
+      expect(response.status).toBe(413);
+    }
+    expect(identityHarness.auth.socialStarts).toEqual([]);
+  });
+
+  test("rejects invalid EOA SIWE proofs before forwarding them", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const request = await authSiweRequest();
+    const statuses: number[] = [];
+    for (const signature of [
+      `0x${"ab".repeat(65)}`,
+      `0x${"ab".repeat(66)}`
+    ]) {
+      const response = await identityHarness.app.request("/auth/peezy/siwe/verify", {
+        body: JSON.stringify({ ...request, signature }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      statuses.push(response.status);
+    }
+
+    expect(statuses).toEqual([401, 401]);
+    expect(identityHarness.auth.forwarded).toEqual([]);
+  });
+
+  test("rate limits malformed SIWE bodies before parsing them", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const clientAddress = "192.0.2.1";
+    const malformed = await identityHarness.app.request("/auth/peezy/siwe/verify", {
+      body: "{",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Forwarded-For": clientAddress
+      },
+      method: "POST"
+    });
+    expect(malformed.status).toBe(400);
+
+    const request = await authSiweRequest();
+    const statuses: number[] = [];
+    for (let index = 0; index < 11; index += 1) {
+      const response = await identityHarness.app.request("/auth/peezy/siwe/verify", {
+        body: JSON.stringify(request),
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": clientAddress
+        },
+        method: "POST"
+      });
+      statuses.push(response.status);
+    }
+
+    expect(statuses.slice(0, 9).every((status) => status === 200)).toBe(true);
+    expect(statuses.slice(9)).toEqual([429, 429]);
+    expect(identityHarness.auth.forwarded).toHaveLength(9);
+  });
+
+  test("keeps public Identity challenge limits independent across resolved edge clients", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const statuses: number[] = [];
+    for (let index = 0; index < 11; index += 1) {
+      const response = await identityHarness.app.request(
+        index % 2 === 0
+          ? "/auth/peezy/siwe/nonce"
+          : "/auth/siwe/nonce",
+        {
+          body: JSON.stringify({
+            chainId: 31337,
+            walletAddress: PRIMARY_WALLET
+          }),
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": `192.0.2.${index + 1}`
+          },
+          method: "POST"
+        },
+        { clientIp: `192.0.2.${index + 1}` }
+      );
+      statuses.push(response.status);
+    }
+
+    expect(statuses.every((status) => status === 200)).toBe(true);
+    expect(identityHarness.auth.forwarded).toHaveLength(11);
+  });
+
+  test("rejects oversized public SIWE requests before parsing or quota work", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const request = await authSiweRequest();
+    const requests = [
+      {
+        body: JSON.stringify({
+          ...request,
+          message: "a".repeat(129 * 1024)
+        }),
+        path: "/auth/peezy/siwe/verify"
+      },
+      {
+        body: JSON.stringify({
+          chainId: 31337,
+          padding: "a".repeat(129 * 1024),
+          walletAddress: PRIMARY_WALLET
+        }),
+        path: "/auth/peezy/siwe/nonce"
+      },
+      {
+        body: JSON.stringify({
+          chainId: 31337,
+          padding: "a".repeat(129 * 1024),
+          walletAddress: PRIMARY_WALLET
+        }),
+        path: "/auth/siwe/nonce"
+      }
+    ] as const;
+
+    for (const request of requests) {
+      const response = await identityHarness.app.request(request.path, {
+        body: request.body,
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      expect(response.status).toBe(413);
+    }
+    expect(identityHarness.store.identityQuotaEvents.size).toBe(0);
+    expect(identityHarness.auth.forwarded).toEqual([]);
+  });
+
+  test("rate limits invalid signatures before signature recovery", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const request = await authSiweRequest();
+    const statuses: number[] = [];
+    for (let index = 0; index < 51; index += 1) {
+      const response = await identityHarness.app.request("/auth/peezy/siwe/verify", {
+        body: JSON.stringify({
+          ...request,
+          signature: `0x${"ab".repeat(66)}`
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": `203.0.113.${index + 1}, 192.0.2.1`
+        },
+        method: "POST"
+      });
+      statuses.push(response.status);
+    }
+
+    expect(statuses.slice(0, 10).every((status) => status === 401)).toBe(true);
+    expect(statuses.slice(10).every((status) => status === 429)).toBe(true);
+    expect(identityHarness.auth.forwarded).toEqual([]);
+    expect(
+      identityHarness.store.identityQuotaEvents.get(
+        "pledge-cash-test:wallet-grant-public"
+      )
+    ).toBeUndefined();
+
+    const valid = await identityHarness.app.request("/auth/peezy/siwe/verify", {
+      body: JSON.stringify(request),
+      headers: {
+        "Content-Type": "application/json",
+        "X-Forwarded-For": "192.0.2.1"
+      },
+      method: "POST"
+    });
+    expect(valid.status).toBe(429);
+    expect(identityHarness.auth.forwarded).toEqual([]);
+  });
+
+  test("globally rate limits SIWE attempts before JSON parsing", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const statuses: number[] = [];
+    for (let index = 0; index < 301; index += 1) {
+      const response = await identityHarness.app.request(
+        "/auth/peezy/siwe/verify",
+        {
+          body: "{",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": `192.0.2.${index + 1}`
+          },
+          method: "POST"
+        },
+        { clientIp: `198.51.100.${index + 1}` }
+      );
+      statuses.push(response.status);
+    }
+
+    expect(statuses.slice(0, 300).every((status) => status === 400)).toBe(true);
+    expect(statuses[300]).toBe(429);
+    expect(
+      identityHarness.store.identityQuotaEvents.get(
+        "pledge-cash-test:wallet-proof-public"
+      )
+    ).toHaveLength(300);
+    expect(identityHarness.auth.forwarded).toEqual([]);
+  });
+
+  test("reserves shared Identity wallet-grant quota from anonymous traffic", async () => {
+    const store = new InMemoryStore();
+    const identityHarnesses = [
+      createHarness({ sharedIdentity: true, store }),
+      createHarness({ sharedIdentity: true, store })
+    ] as const;
+    const request = await authSiweRequest();
+    const statuses: number[] = [];
+    for (let index = 0; index < 51; index += 1) {
+      const harness = identityHarnesses[index % identityHarnesses.length]!;
+      const response = await harness.app.request(
+        "/auth/peezy/siwe/verify",
+        {
+          body: JSON.stringify(request),
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": `192.0.2.${index + 1}`
+          },
+          method: "POST"
+        },
+        { clientIp: `198.51.100.${index + 1}` }
+      );
+      statuses.push(response.status);
+    }
+
+    expect(statuses.slice(0, 50).every((status) => status === 200)).toBe(true);
+    expect(statuses[50]).toBe(429);
+    expect(
+      identityHarnesses.reduce(
+        (total, harness) => total + harness.auth.forwarded.length,
+        0
+      )
+    ).toBe(50);
+  });
+
+  test("ignores every caller-controlled forwarding address for client quota", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const request = await authSiweRequest();
+    const statuses: number[] = [];
+    for (let index = 0; index < 11; index += 1) {
+      const response = await identityHarness.app.request(
+        "/auth/peezy/siwe/verify",
+        {
+          body: JSON.stringify(request),
+          headers: {
+            "Content-Type": "application/json",
+            "X-Forwarded-For": `203.0.113.${index + 1}, 192.0.2.1`
+          },
+          method: "POST"
+        },
+        { clientIp: "198.51.100.1" }
+      );
+      statuses.push(response.status);
+    }
+
+    expect(statuses.slice(0, 10).every((status) => status === 200)).toBe(true);
+    expect(statuses[10]).toBe(429);
+    expect(identityHarness.auth.forwarded).toHaveLength(10);
+  });
+
+  test("does not apply shared Identity quotas when shared Identity is disabled", async () => {
+    const request = await authSiweRequest();
+    const statuses = await Promise.all(
+      Array.from({ length: 51 }, async () => {
+        const response = await harness.app.request("/auth/siwe/verify", {
+          body: JSON.stringify(request),
+          headers: { "Content-Type": "application/json" },
+          method: "POST"
+        });
+        return response.status;
+      })
+    );
+
+    expect(statuses.every((status) => status === 200)).toBe(true);
+    expect(harness.auth.forwarded).toHaveLength(51);
+  });
+
+  test("caller-controlled addresses cannot create fresh rate-limit buckets", async () => {
+    const boundedHarness = createHarness({
+      rateLimit: {
+        capacity: 1,
+        maxBuckets: 2,
+        refillMs: 5 * 60_000
+      }
+    });
+    const statuses: number[] = [];
+    for (const address of ["192.0.2.1", "192.0.2.2", "192.0.2.3", "192.0.2.1"]) {
+      const response = await boundedHarness.app.request("/wallets/nonce", {
+        body: "{}",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: SESSION_COOKIE,
+          "X-Forwarded-For": address
+        },
+        method: "POST"
+      });
+      statuses.push(response.status);
+    }
+
+    expect(statuses).toEqual([200, 429, 429, 429]);
+  });
+
+  test("reserves ten shared Identity grants for authenticated wallet links", async () => {
+    const store = new InMemoryStore();
+    const identityHarnesses = [
+      createHarness({ sharedIdentity: true, store }),
+      createHarness({ sharedIdentity: true, store })
+    ] as const;
+    let linkCalls = 0;
+    const linkWalletCredential = async (
+        input: Parameters<NonNullable<AuthAdapter["linkWalletCredential"]>>[0]
+      ): Promise<WalletDto> => {
+        const admitted = await store.takeIdentityQuota({
+          capacity: 10,
+          now: input.verifiedAt,
+          scope: "pledge-cash-test:wallet-grant-link",
+          windowMs: 5 * 60_000
+        });
+        if (!admitted) {
+          throw new AuthRateLimitError();
+        }
+        linkCalls += 1;
+        return {
+          address: input.address,
+          alertsEnabled: true,
+          canSignIn: true,
+          verifiedAt: input.verifiedAt.toISOString()
+        };
+      };
+    for (const harness of identityHarnesses) {
+      Object.assign(harness.auth, { linkWalletCredential });
+    }
+    const request = await authSiweRequest(WALLET_LINK_SIWE_STATEMENT);
+    const invalidStatuses: number[] = [];
+    for (let index = 0; index < 10; index += 1) {
+      const harness = identityHarnesses[index % identityHarnesses.length]!;
+      const response = await harness.app.request("/wallets", {
+        body: JSON.stringify({
+          message: request.message,
+          signature: `0x${"ab".repeat(65)}`
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: SESSION_COOKIE,
+          "X-Forwarded-For": `203.0.113.${index + 1}`
+        },
+        method: "POST"
+      });
+      invalidStatuses.push(response.status);
+    }
+    expect(invalidStatuses.every((status) => status === 400)).toBe(true);
+
+    const statuses: number[] = [];
+    for (let index = 0; index < 11; index += 1) {
+      const harness = identityHarnesses[index % identityHarnesses.length]!;
+      const response = await harness.app.request("/wallets", {
+        body: JSON.stringify({
+          message: request.message,
+          signature: request.signature
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: SESSION_COOKIE,
+          "X-Forwarded-For": `198.51.100.${index + 1}`
+        },
+        method: "POST"
+      });
+      statuses.push(response.status);
+    }
+
+    expect(statuses.slice(0, 10).every((status) => status === 200)).toBe(true);
+    expect(statuses[10]).toBe(429);
+    expect(linkCalls).toBe(10);
   });
 
   test("reports an anonymous session without noisy errors and protects account routes", async () => {
@@ -499,6 +1295,158 @@ describe("Sentinel WP5 API", () => {
         error: { message: "Authentication required" }
       });
     }
+  });
+
+  test("preserves Identity's checksum address for pre-rollout wallet-link clients", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const cookie = await signedInCookie(identityHarness);
+    let challengeClientIp: string | undefined;
+    const address = "0x8ba1f109551bd432803012645ac136ddd64dba72";
+    const checksumAddress = getAddress(address);
+    const issuedAt = FIXED_NOW;
+    const expirationTime = new Date(FIXED_NOW.getTime() + 10 * 60_000);
+    const challenge = {
+      address,
+      chainId: 1,
+      domain: "pledge.cash",
+      expirationTime: expirationTime.toISOString(),
+      issuedAt: issuedAt.toISOString(),
+      nonce: "0123456789abcdef",
+      statement: "Link this wallet to pledge.cash Sentinel notifications.",
+      uri: WEB_ORIGIN,
+      version: "1" as const
+    };
+    const message = createSiweMessage({
+      ...challenge,
+      address: checksumAddress,
+      expirationTime,
+      issuedAt
+    });
+    Object.assign(identityHarness.auth, {
+      createWalletChallenge: async (input: { clientIp?: string }) => {
+        challengeClientIp = input.clientIp;
+        return { ...challenge, message };
+      }
+    });
+
+    const response = await identityHarness.app.request(
+      "/wallets/nonce",
+      {
+        body: JSON.stringify({ address, chainId: 1 }),
+        headers: { "Content-Type": "application/json", Cookie: cookie },
+        method: "POST"
+      },
+      { clientIp: "198.51.100.8" }
+    );
+
+    expect(response.status).toBe(200);
+    expect(challengeClientIp).toBe("198.51.100.8");
+    const returned = await readJson<WalletNonceResponse>(response);
+    expect(returned.address).toBe(checksumAddress);
+    expect(
+      createSiweMessage({
+        address: returned.address as Address,
+        chainId: returned.chainId!,
+        domain: returned.domain,
+        expirationTime: new Date(returned.expirationTime),
+        issuedAt: new Date(returned.issuedAt),
+        nonce: returned.nonce,
+        statement: returned.statement,
+        uri: returned.uri,
+        version: returned.version
+      })
+    ).toBe(returned.message);
+  });
+
+  test("rejects oversized wallet-link messages and request bodies before linking", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    let linkCalls = 0;
+    Object.assign(identityHarness.auth, {
+      linkWalletCredential: async () => {
+        linkCalls += 1;
+        throw new Error("unexpected wallet link");
+      }
+    });
+
+    const overlongMessage = await identityHarness.app.request("/wallets", {
+      body: JSON.stringify({
+        message: "a".repeat(AUTH_SIWE_MAX_MESSAGE_LENGTH + 1),
+        signature: "0x"
+      }),
+      headers: { "Content-Type": "application/json", Cookie: SESSION_COOKIE },
+      method: "POST"
+    });
+    const oversizedBody = await identityHarness.app.request("/wallets", {
+      body: JSON.stringify({
+        message: "a".repeat(AUTH_SIWE_MAX_MESSAGE_LENGTH * 2),
+        signature: "0x"
+      }),
+      headers: { "Content-Type": "application/json", Cookie: SESSION_COOKIE },
+      method: "POST"
+    });
+
+    expect(overlongMessage.status).toBe(400);
+    expect(oversizedBody.status).toBe(413);
+    expect(linkCalls).toBe(0);
+  });
+
+  test("reports wallet-link dependency failures as retryable", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    Object.assign(identityHarness.auth, {
+      linkWalletCredential: async () => {
+        throw new Error("Identity request timed out after 2000ms");
+      }
+    });
+    const request = await authSiweRequest(WALLET_LINK_SIWE_STATEMENT);
+
+    const response = await identityHarness.app.request("/wallets", {
+      body: JSON.stringify({
+        message: request.message,
+        signature: request.signature
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: SESSION_COOKIE
+      },
+      method: "POST"
+    });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: { message: "Wallet linking is temporarily unavailable" }
+    });
+  });
+
+  test("rejects non-link SIWE messages before delegated wallet coverage", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    let linkCalls = 0;
+    Object.assign(identityHarness.auth, {
+      linkWalletCredential: async () => {
+        linkCalls += 1;
+        throw new Error("unexpected wallet link");
+      }
+    });
+    const request = await authSiweRequest();
+
+    const response = await identityHarness.app.request("/wallets", {
+      body: JSON.stringify({
+        message: request.message,
+        signature: request.signature
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: SESSION_COOKIE
+      },
+      method: "POST"
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: {
+        message: "SIWE statement is not valid for wallet linking"
+      }
+    });
+    expect(linkCalls).toBe(0);
   });
 
   test("links equal wallet credentials and controls alert coverage with chain and conflict checks", async () => {

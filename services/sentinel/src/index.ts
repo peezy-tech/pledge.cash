@@ -8,8 +8,13 @@ import {
 } from "./api/better-auth";
 import { createDrizzleBoardroomControlStore } from "./api/boardroom-control-store";
 import { createApp } from "./api/server";
+import {
+  createPeezyIdentityAuthAdapter,
+  discardOAuthTokensForSharedIdentity
+} from "./api/peezy-identity";
 import { createDrizzleApiStore } from "./api/store";
 import { createConfiguredBoardroomControlChainReader } from "./chain/boardroom-control";
+import { resolveClientIp } from "./client-ip";
 import { runWatcherOnce, type WatcherActionEventHandler } from "./chain/watcher";
 import { loadConfig, type Config, type SentinelChainConfig } from "./config";
 import { createDbClient, type SentinelDbClient } from "./db/client";
@@ -48,11 +53,15 @@ type Logger = Pick<Console, "error" | "log" | "warn">;
 type BunServer = {
   readonly hostname: string;
   readonly port: number;
+  requestIP(request: Request): { readonly address: string } | null;
   stop(force?: boolean): void;
 };
 
 declare const Bun: {
-  serve(options: { fetch(request: Request): Response | Promise<Response>; port: number }): BunServer;
+  serve(options: {
+    fetch(request: Request, server: BunServer): Response | Promise<Response>;
+    port: number;
+  }): BunServer;
 };
 
 export type SentinelRuntime = {
@@ -77,6 +86,13 @@ export async function startSentinel(options: StartSentinelOptions = {}): Promise
   const config = options.config ?? loadConfig();
   const dbClient = createDbClient(config);
   await dbClient.migrate();
+  if (config.auth.identity !== undefined) {
+    await discardOAuthTokensForSharedIdentity(dbClient.db);
+  }
+  const auth =
+    config.auth.identity === undefined
+      ? createBetterAuthAdapter(config, dbClient.db)
+      : createPeezyIdentityAuthAdapter(config, dbClient.db);
 
   const adapter = createHarnessAdapter(config);
   const pipeline = createActionPipeline({
@@ -116,7 +132,7 @@ export async function startSentinel(options: StartSentinelOptions = {}): Promise
     twitterEnabled: config.twitter.enabled
   });
   const app = createApp({
-    auth: createBetterAuthAdapter(config, dbClient.db),
+    auth,
     boardroomControl: {
       chain: createConfiguredBoardroomControlChainReader(config),
       store: createDrizzleBoardroomControlStore(dbClient.db)
@@ -125,7 +141,24 @@ export async function startSentinel(options: StartSentinelOptions = {}): Promise
     store: createDrizzleApiStore(dbClient.db),
     verifySiweSignature: createPledgeCashSiweVerifier(config, [WALLET_LINK_SIWE_STATEMENT])
   });
-  const server = Bun.serve({ fetch: app.fetch, port: config.port });
+  const server = Bun.serve({
+    fetch(request, bunServer) {
+      const peer = bunServer.requestIP(request);
+      return app.fetch(
+        request,
+        peer === null
+          ? {}
+          : {
+              clientIp: resolveClientIp(
+                request.headers,
+                peer.address,
+                config.trustedProxyIps
+              )
+            }
+      );
+    },
+    port: config.port
+  });
 
   logger.log(`Sentinel listening on ${server.hostname}:${server.port}`);
 

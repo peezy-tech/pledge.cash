@@ -33,6 +33,7 @@ export type SentinelEnv = {
 export type SentinelFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export type SentinelSocialProvider = SocialProviderDto;
+export type SentinelAuthCapabilities = AuthCapabilitiesResponse;
 
 export type AuthSiweVerifyResponse = {
   success: boolean;
@@ -103,7 +104,10 @@ export function createSentinelClient(options: SentinelClientOptions = {}) {
       sentinelJson<AuthCapabilitiesResponse>(baseUrl, fetcher, "/auth/capabilities", { signal }),
     authMe: (signal?: AbortSignal) => sentinelJson<AuthMeResponse | null>(baseUrl, fetcher, "/auth/me", { signal }),
     createAuthSiweNonce: (body: AuthSiweNonceRequest) =>
-      sentinelJson<AuthSiweNonceResponse>(baseUrl, fetcher, "/auth/siwe/nonce", { method: "POST", body }),
+      sentinelJsonWithNotFoundFallback<AuthSiweNonceResponse>(
+        () => sentinelJson(baseUrl, fetcher, "/auth/peezy/siwe/nonce", { method: "POST", body }),
+        () => sentinelJson(baseUrl, fetcher, "/auth/siwe/nonce", { method: "POST", body }),
+      ),
     createTelegramLinkCode: () =>
       sentinelJson<TelegramLinkCodeResponse>(baseUrl, fetcher, "/channels/telegram/link-code", { method: "POST" }),
     createWalletNonce: (body: WalletNonceRequest) =>
@@ -147,30 +151,35 @@ export function createSentinelClient(options: SentinelClientOptions = {}) {
     listPublicActions: (query?: SentinelPublicActionsQuery | undefined, signal?: AbortSignal | undefined) =>
       sentinelJson<PublicActionsResponse>(baseUrl, fetcher, "/public/actions", { query: queryParams(query), signal }),
     linkSocial: (body: SocialAuthRequest) =>
-      sentinelJson<AuthRedirectResponse>(
-        baseUrl,
-        fetcher,
-        body.provider === "telegram" ? "/auth/oauth2/link" : "/auth/link-social",
-        {
-          method: "POST",
-          body: socialAuthBody(body),
-        },
+      sentinelJsonWithNotFoundFallback<AuthRedirectResponse>(
+        () => sentinelJson(baseUrl, fetcher, "/auth/peezy/link", { method: "POST", body }),
+        () =>
+          sentinelJson(
+            baseUrl,
+            fetcher,
+            body.provider === "telegram" ? "/auth/oauth2/link" : "/auth/link-social",
+            { method: "POST", body: socialAuthBody(body) },
+          ),
       ),
     logout: () => sentinelJson<AuthSignOutResponse>(baseUrl, fetcher, "/auth/sign-out", { method: "POST" }),
     putSubscription: (body: PutSubscriptionRequest) =>
       sentinelJson<SubscriptionResponse>(baseUrl, fetcher, "/subscriptions", { method: "PUT", body }),
     signInSocial: (body: SocialAuthRequest) =>
-      sentinelJson<AuthRedirectResponse>(
-        baseUrl,
-        fetcher,
-        body.provider === "telegram" ? "/auth/sign-in/oauth2" : "/auth/sign-in/social",
-        {
-          method: "POST",
-          body: socialAuthBody(body),
-        },
+      sentinelJsonWithNotFoundFallback<AuthRedirectResponse>(
+        () => sentinelJson(baseUrl, fetcher, "/auth/peezy/sign-in", { method: "POST", body }),
+        () =>
+          sentinelJson(
+            baseUrl,
+            fetcher,
+            body.provider === "telegram" ? "/auth/sign-in/oauth2" : "/auth/sign-in/social",
+            { method: "POST", body: socialAuthBody(body) },
+          ),
       ),
     verifyAuthSiwe: (body: AuthSiweVerifyRequest) =>
-      sentinelJson<AuthSiweVerifyResponse>(baseUrl, fetcher, "/auth/siwe/verify", { method: "POST", body }),
+      sentinelJsonWithNotFoundFallback<AuthSiweVerifyResponse>(
+        () => sentinelJson(baseUrl, fetcher, "/auth/peezy/siwe/verify", { method: "POST", body }),
+        () => sentinelJson(baseUrl, fetcher, "/auth/siwe/verify", { method: "POST", body }),
+      ),
   };
 }
 
@@ -183,6 +192,18 @@ function socialAuthBody(
     ...(body.errorCallbackURL === undefined ? {} : { errorCallbackURL: body.errorCallbackURL }),
     providerId: "telegram",
   };
+}
+
+async function sentinelJsonWithNotFoundFallback<T>(
+  primary: () => Promise<T>,
+  fallback: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await primary();
+  } catch (error) {
+    if (!(error instanceof SentinelApiError) || error.status !== 404) throw error;
+    return fallback();
+  }
 }
 
 async function sentinelJson<T>(

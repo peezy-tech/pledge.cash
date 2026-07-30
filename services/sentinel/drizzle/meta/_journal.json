@@ -71,6 +71,20 @@
       "when": 1784654439638,
       "tag": "0009_slippery_bromley",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785353483134,
+      "tag": "0010_vengeful_tenebrous",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785364713605,
+      "tag": "0011_nervous_weapon_omega",
+      "breakpoints": true
     }
   ]
 }

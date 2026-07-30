@@ -23,6 +23,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@peezy.tech/identity": "https://github.com/peezy-tech/identity/releases/download/v0.1.0/peezy.tech-identity-0.1.0.tgz",
+    "@peezy.tech/identity-server": "https://github.com/peezy-tech/identity/releases/download/v0.1.0/peezy.tech-identity-server-0.1.0.tgz",
     "@pledge.cash/sdk": "workspace:*",
     "better-auth": "1.6.23",
     "drizzle-orm": "0.45.2",

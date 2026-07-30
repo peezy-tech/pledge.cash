@@ -36,13 +36,13 @@ sign-in or wallet linking. That limitation applies to Sentinel identity—not to
 
 To configure alerts:
 
-1. To create a Sentinel account, connect an EOA browser wallet and choose `Sign in with wallet`. The first account is always created by a SIWE wallet signature.
-2. If you previously linked a social sign-in to that account, you can use the offered social method to reopen it. A social provider cannot create a walletless account.
-3. Under `Wallets`, link the connected wallet and choose `Watch alerts`.
+1. Use an offered social method to create a walletless peezy.tech account or open an existing one. You can instead connect an EOA browser wallet and choose `Sign in with wallet`.
+2. Once signed in, you can link another offered social method from `Identity` as an additional way to open the same account.
+3. Under `Wallets`, connect and link each EOA you want to use for wallet-based alerts, then choose `Watch alerts`.
 4. Under `Delivery`, choose `Link Telegram` and complete the expiring link flow.
 5. Under `Alert rules`, choose `Wallet holdings` or `Specific Boardrooms`, set `Minimum severity`, and `Save`.
 
-Every linked EOA wallet can sign in, but only wallets marked `Watching alerts` contribute wallet-based coverage. `Specific Boardrooms` accepts an explicit chain ID and Boardroom address.
+A linked EOA wallet can sign in only while its Identity credential is enabled; the `Wallets` panel shows its current sign-in status. Only wallets marked `Watching alerts` contribute wallet-based coverage. `Specific Boardrooms` accepts an explicit chain ID and Boardroom address.
 
 ## Recent deliveries
 

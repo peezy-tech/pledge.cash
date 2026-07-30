@@ -53,7 +53,7 @@ export const UserDtoSchema = z.object({
 export const WalletDtoSchema = z.object({
   alertsEnabled: z.boolean(),
   address: AddressSchema,
-  canSignIn: z.literal(true),
+  canSignIn: z.boolean(),
   verifiedAt: IsoDateSchema
 });
 
@@ -84,7 +84,8 @@ export const AuthMeResponseSchema = z.object({
 });
 
 export const AuthCapabilitiesResponseSchema = z.object({
-  socialProviders: z.array(SocialProviderSchema)
+  socialProviders: z.array(SocialProviderSchema),
+  walletlessSocialSignIn: z.boolean()
 });
 
 export const AuthSiweNonceRequestSchema = z.object({
@@ -93,12 +94,15 @@ export const AuthSiweNonceRequestSchema = z.object({
 });
 
 export const AuthSiweNonceResponseSchema = z.object({
+  message: z.string().min(1).optional(),
   nonce: z.string().min(8)
 });
 
+export const AUTH_SIWE_MAX_MESSAGE_LENGTH = 16_384;
+
 export const AuthSiweVerifyRequestSchema = z.object({
   chainId: z.number().int().positive(),
-  message: z.string().min(1),
+  message: z.string().min(1).max(AUTH_SIWE_MAX_MESSAGE_LENGTH),
   signature: HexSchema,
   walletAddress: AddressSchema
 });
@@ -127,6 +131,7 @@ export const WalletNonceResponseSchema = z.object({
   domain: z.string().min(1),
   expirationTime: IsoDateSchema,
   issuedAt: IsoDateSchema,
+  message: z.string().min(1).optional(),
   nonce: z.string().min(8),
   statement: z.string().min(1),
   uri: z.string().url(),
@@ -134,7 +139,7 @@ export const WalletNonceResponseSchema = z.object({
 });
 
 export const LinkWalletRequestSchema = z.object({
-  message: z.string().min(1),
+  message: z.string().min(1).max(AUTH_SIWE_MAX_MESSAGE_LENGTH),
   signature: HexSchema
 });
 

@@ -1,11 +1,14 @@
 import { Hono } from "hono";
-import { getAddress } from "viem";
+import { bodyLimit } from "hono/body-limit";
+import { getAddress, verifyMessage, type Address, type Hex } from "viem";
 import { parseSiweMessage } from "viem/siwe";
 
 import { WALLET_LINK_SIWE_STATEMENT } from "../better-auth";
 import {
   createRateLimitMiddleware,
   createSessionMiddleware,
+  AuthRateLimitError,
+  AuthWalletCredentialRejectedError,
   getNow,
   jsonError,
   parseJson,
@@ -13,6 +16,7 @@ import {
   type SentinelApiDeps
 } from "../auth";
 import {
+  AUTH_SIWE_MAX_MESSAGE_LENGTH,
   DeleteWalletResponseSchema,
   LinkWalletRequestSchema,
   LinkWalletResponseSchema,
@@ -27,6 +31,7 @@ import {
 } from "../dto";
 
 const WALLET_NONCE_TTL_MS = 10 * 60 * 1_000;
+const WALLET_LINK_JSON_MAX_BODY_BYTES = AUTH_SIWE_MAX_MESSAGE_LENGTH * 2;
 
 function webOriginHost(webOrigin: string): string {
   return new URL(webOrigin).host;
@@ -72,6 +77,10 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
   const app = new Hono<ApiEnv>();
   const requireSession = createSessionMiddleware(deps);
   const rateLimit = createRateLimitMiddleware(deps, "wallets");
+  const walletLinkBodyLimit = bodyLimit({
+    maxSize: WALLET_LINK_JSON_MAX_BODY_BYTES,
+    onError: (c) => jsonError(c, 413, "Request body is too large")
+  });
 
   app.use("*", requireSession);
 
@@ -79,6 +88,29 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     const parsed = await parseJson(c, WalletNonceRequestSchema);
     if (!parsed.ok) {
       return parsed.response;
+    }
+
+    if (deps.auth.createWalletChallenge !== undefined) {
+      if (parsed.value.address === undefined || parsed.value.chainId === undefined) {
+        return jsonError(c, 400, "address and chainId are required");
+      }
+      const user = c.get("user");
+      const challenge = await deps.auth.createWalletChallenge({
+        address: normalizeAddress(parsed.value.address),
+        chainId: parsed.value.chainId,
+        ...(c.env?.clientIp === undefined ? {} : { clientIp: c.env.clientIp }),
+        purpose: "link",
+        userId: user.id
+      });
+      return c.json(
+        WalletNonceResponseSchema.parse({
+          ...challenge,
+          // Identity normalizes its response address to lowercase, but the
+          // exact SIWE message uses checksum casing. Preserve that casing for
+          // pre-rollout clients that still reconstruct the signed message.
+          address: getAddress(challenge.address)
+        })
+      );
     }
 
     const issuedAt = getNow(deps);
@@ -101,23 +133,30 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     return c.json(response);
   });
 
-  app.post("/", rateLimit, async (c) => {
+  app.post("/", walletLinkBodyLimit, rateLimit, async (c) => {
     const parsed = await parseJson(c, LinkWalletRequestSchema);
     if (!parsed.ok) {
       return parsed.response;
     }
 
     const siwe = parseSiweMessage(parsed.value.message);
+    const delegatesCredentialLink = deps.auth.linkWalletCredential !== undefined;
     if (
       siwe.address === undefined ||
       siwe.chainId === undefined ||
       siwe.domain === undefined ||
       siwe.nonce === undefined ||
       siwe.uri === undefined ||
-      siwe.statement !== WALLET_LINK_SIWE_STATEMENT ||
       siwe.version !== "1"
     ) {
       return jsonError(c, 400, "SIWE message is missing required fields");
+    }
+    if (siwe.statement !== WALLET_LINK_SIWE_STATEMENT) {
+      return jsonError(
+        c,
+        400,
+        "SIWE statement is not valid for wallet linking"
+      );
     }
 
     if (siwe.domain !== webOriginHost(deps.config.webOrigin)) {
@@ -145,6 +184,68 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     }
 
     const user = c.get("user");
+    if (delegatesCredentialLink && deps.auth.linkWalletCredential !== undefined) {
+      // Identity v0.1 accepts only standard 65-byte EOA signatures. Reject invalid
+      // proofs locally so they cannot consume the shared wallet-grant quota.
+      let signatureValid = false;
+      if (parsed.value.signature.length === 132) {
+        try {
+          signatureValid = await verifyMessage({
+            address: siwe.address as Address,
+            message: parsed.value.message,
+            signature: parsed.value.signature as Hex
+          });
+        } catch {
+          signatureValid = false;
+        }
+      }
+      if (!signatureValid) {
+        return jsonError(c, 400, "SIWE signature is invalid");
+      }
+
+      let wallet;
+      try {
+        wallet = await deps.auth.linkWalletCredential({
+          address: normalizeAddress(siwe.address),
+          chainId: siwe.chainId,
+          message: parsed.value.message,
+          signature: parsed.value.signature,
+          userId: user.id,
+          verifiedAt: now
+        });
+      } catch (error) {
+        if (error instanceof AuthRateLimitError) {
+          return jsonError(c, 429, error.message);
+        }
+        const message = error instanceof Error ? error.message : "";
+        const migrationRequired =
+          /must sign in through peezy\.tech Identity/i.test(message);
+        const credentialConflict =
+          /already linked|another account|multiple PledgeCash users/i.test(
+            message
+          );
+        if (migrationRequired) {
+          return jsonError(
+            c,
+            409,
+            "Sign in through peezy.tech Identity before linking another wallet"
+          );
+        }
+        if (credentialConflict) {
+          return jsonError(
+            c,
+            409,
+            "Wallet is already linked to another account"
+          );
+        }
+        if (error instanceof AuthWalletCredentialRejectedError) {
+          return jsonError(c, 400, "SIWE signature is invalid");
+        }
+        return jsonError(c, 503, "Wallet linking is temporarily unavailable");
+      }
+      return c.json(LinkWalletResponseSchema.parse({ wallet }));
+    }
+
     const nonce = await deps.store.getWalletNonce(siwe.nonce);
     if (nonce === null || nonce.userId !== user.id) {
       return jsonError(c, 400, "Unknown SIWE nonce");
@@ -202,7 +303,7 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     }
 
     const user = c.get("user");
-    const wallet = await deps.store.setWalletAlerts({
+    let wallet = await deps.store.setWalletAlerts({
       address: normalizeAddress(parsed.data.address),
       alertsEnabled: body.value.alertsEnabled,
       userId: user.id
@@ -210,6 +311,14 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
 
     if (wallet === null) {
       return jsonError(c, 404, "Wallet link not found");
+    }
+
+    if (deps.auth.hydrateWallet !== undefined) {
+      try {
+        wallet = await deps.auth.hydrateWallet(user.id, wallet);
+      } catch {
+        wallet = { ...wallet, canSignIn: false };
+      }
     }
 
     return c.json(UpdateWalletAlertsResponseSchema.parse({ wallet }));

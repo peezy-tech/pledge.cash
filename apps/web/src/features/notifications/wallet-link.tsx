@@ -73,7 +73,7 @@ export function WalletLink({
   return (
     <Panel
       title="Wallets"
-      description="Every linked wallet can sign in. Choose which wallets we watch for alerts."
+      description="Choose which linked wallets we watch for alerts. Sign-in availability is shown for each wallet."
       action={
         <Button
           disabled={!wallet.account || !wallet.chainId || pending !== undefined || Boolean(alertWallet)}
@@ -126,7 +126,11 @@ export function WalletLink({
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <WalletCards className="h-4 w-4 text-zinc-500" />
                   <AddressLink address={linkedWalletRow.address as Address} />
-                  <Badge>Sign-in enabled</Badge>
+                  {linkedWalletRow.canSignIn ? (
+                    <Badge>Sign-in enabled</Badge>
+                  ) : (
+                    <Badge variant="muted">Sign-in disabled</Badge>
+                  )}
                   {walletAlertsEnabled(linkedWalletRow) ? (
                     <Badge variant="muted">Watching alerts</Badge>
                   ) : (
@@ -179,6 +183,7 @@ export function buildSentinelSiweMessage(
   fallbackAddress: Address,
   fallbackChainId: number,
 ): string {
+  if (nonce.message !== undefined) return nonce.message;
   const address = nonce.address ?? fallbackAddress;
   const chainId = nonce.chainId ?? fallbackChainId;
 

@@ -6,7 +6,9 @@ Sentinel is a self-hosted off-chain monitor for pledge.cash Boardroom governance
 
 - Bun 1.3.11.
 - Postgres 15 or newer.
-- A 32+ character Better Auth secret for self-hosted account sessions.
+- A 32+ character Better Auth secret for PledgeCash product sessions.
+- A deployed peezy.tech Identity provider and two distinct confidential client
+  secrets for shared identity mode.
 - A Telegram bot from BotFather for private alerts.
 - Optional: `claude` or `codex` on `PATH` with its own host-level authentication for harness analysis.
 - Optional: Twitter API credentials for public high-risk alerts.
@@ -19,6 +21,7 @@ Copy `.env.example` and set values for your environment.
 | --- | --- | --- |
 | `DATABASE_URL` | yes | Postgres connection string used by Drizzle migrations and runtime queries. |
 | `SENTINEL_PORT` | no | API port, default `8787`. |
+| `SENTINEL_TRUSTED_PROXY_IPS` | yes for HTTPS shared mode | Comma-separated exact socket-peer IPs for the TLS edge. Only these peers may supply the client address used by authentication rate limits and Identity. |
 | `SENTINEL_WEB_ORIGIN` | yes | Browser app origin allowed by CORS and SIWE wallet-link messages. |
 | `SENTINEL_CHAIN_IDS` | yes | Comma-separated chain ids to monitor. |
 | `SENTINEL_RPC_URL_<chainId>` | yes | RPC URL for each configured chain. |
@@ -28,11 +31,15 @@ Copy `.env.example` and set values for your environment.
 | `SENTINEL_EXPLORER_URL_<chainId>` | no | Explorer base URL used in rendered notifications. |
 | `BETTER_AUTH_SECRET` | yes | Unique 32+ character secret used to protect self-hosted auth state and tokens. |
 | `BETTER_AUTH_URL` | yes | Public Sentinel API origin. Better Auth is mounted at `/auth`. |
-| `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | no | Enables Discord as an explicitly linked sign-in method. |
-| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | no | Enables GitHub as an explicitly linked sign-in method. |
-| `TWITTER_CLIENT_ID`, `TWITTER_CLIENT_SECRET` | no | Enables X as an explicitly linked sign-in method; separate from Twitter notification credentials. |
-| `TELEGRAM_OAUTH_CLIENT_ID`, `TELEGRAM_OAUTH_CLIENT_SECRET` | no | Enables Telegram OIDC sign-in; separate from the Telegram notification bot token. |
-| `APPLE_CLIENT_ID`, `APPLE_CLIENT_SECRET` | no | Enables Apple as an explicitly linked sign-in method. |
+| `PEEZY_IDENTITY_URL` | yes in shared mode | Bare origin of the shared peezy.tech Identity provider. |
+| `PEEZY_IDENTITY_CLIENT_ID` | yes in shared mode | Registered Identity application and OIDC client identifier. |
+| `PEEZY_IDENTITY_APP_CLIENT_SECRET` | yes in shared mode | Confidential secret for wallet grants, user profiles, and social-link handoffs. |
+| `PEEZY_IDENTITY_OIDC_CLIENT_SECRET` | yes in shared mode | Separate confidential secret for the OIDC authorization-code exchange. |
+| `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | legacy mode only | Enables Sentinel-owned Discord sign-in when shared Identity is not configured. |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | legacy mode only | Enables Sentinel-owned GitHub sign-in when shared Identity is not configured. |
+| `TWITTER_CLIENT_ID`, `TWITTER_CLIENT_SECRET` | legacy mode only | Enables Sentinel-owned X sign-in; separate from Twitter notification credentials. |
+| `TELEGRAM_OAUTH_CLIENT_ID`, `TELEGRAM_OAUTH_CLIENT_SECRET` | legacy mode only | Enables Sentinel-owned Telegram OIDC sign-in; separate from the notification bot token. |
+| `APPLE_CLIENT_ID`, `APPLE_CLIENT_SECRET` | legacy mode only | Enables Sentinel-owned Apple sign-in. |
 | `SENTINEL_HARNESS` | no | `claude`, `codex`, or `none`; default `claude`. |
 | `SENTINEL_HARNESS_CMD` | no | Harness binary override. |
 | `SENTINEL_HARNESS_MODEL` | no | Model label passed to the harness adapter. |
@@ -48,13 +55,65 @@ Copy `.env.example` and set values for your environment.
 
 Harness credentials such as API keys or CLI logins belong to the host environment. Sentinel passes only the configured command/model/workdir settings.
 
-Authentication is wallet-first: the first SIWE signature creates a pseudonymous local account with no profile form, password, or deliverable email address. Every wallet linked with a fresh SIWE signature becomes an equal sign-in credential for that account; alert coverage is a separate per-wallet setting. Ordinary sign-in and wallet linking remain EOA-only. ERC-1271 Boardroom control uses the separate chain-scoped flow below and never creates a wallet credential. Configured social providers can be linked explicitly and can then sign back into that same account; they cannot create walletless accounts. Better Auth organization creation and UI remain disabled; an existing organization membership can be named as the destination of a Boardroom-control proof.
+In shared identity mode, peezy.tech Identity is canonical for the stable user
+subject and all social and wallet credentials. An account may be created with a
+social provider and remain walletless; PledgeCash asks for a wallet only when a
+wallet-dependent feature requires one. Current clients use the
+`/auth/peezy/*` social and exact-message SIWE routes. Shared mode also retains
+the previous social and `/auth/siwe/*` routes so clients loaded before a rolling
+deployment can finish authenticating. The legacy SIWE route accepts the
+previous client-built message only for a wallet already recorded on a
+PledgeCash account and imported under the same UUID in Identity. It creates no
+new local or central credential, rejects a missing or disabled central account,
+requires the central wallet to remain sign-in-enabled for the signed chain, and
+lazily records the product-to-Identity mapping. An unrecognized or unimported
+wallet must reload before signing in. Every centrally linked EOA wallet can sign
+into the same subject.
+PledgeCash stores a local product shadow of that subject for its existing
+relational data and continues to own product sessions, alert coverage, delivery
+channels, subscriptions, and roles. Social and email matches never implicitly
+merge accounts. Wallet proofs through the current shared-mode routes are
+written only to Identity; Sentinel records the separate per-chain alert
+coverage row and does not mirror a second local sign-in credential.
+
+PledgeCash product sessions keep their existing local expiry and revocation
+semantics. Disabling an Identity account prevents new central sign-ins,
+credential links, and handoffs, but v0.1 does not synchronously revoke a
+PledgeCash session that was already issued. A future back-channel revocation
+event can shorten that window without putting Identity on every product request.
+If Identity is temporarily unavailable, existing product sessions and local
+alert state remain readable; starting a new central sign-in or credential link
+requires Identity to recover.
+
+When `PEEZY_IDENTITY_*` is entirely unset, Sentinel retains its previous
+wallet-first, self-hosted implementation as a separate legacy deployment mode.
+Disabling Identity is not an account rollback: shared-mode credentials are not
+mirrored into the legacy Better Auth providers, so changing modes requires a
+separate, explicit credential migration plan. In either mode, alert coverage is
+separate from sign-in credentials. Ordinary sign-in and wallet linking remain
+EOA-only. ERC-1271 Boardroom control uses the separate chain-scoped flow below
+and never creates a wallet credential. Better Auth organization creation and UI
+remain disabled; an existing organization membership can be named as the
+destination of a Boardroom-control proof.
 
 `POST /boardroom-control/challenges` creates an exactly serialized, five-minute SIWE challenge for one scope and one user or organization destination. `POST /boardroom-control/claims` accepts only the server nonce and controller signature. Sentinel re-resolves the v5 canonical Boardroom/controller topology and calls controller ERC-1271 at one pinned finalized block, rechecks the block hash, and atomically consumes the nonce with claim creation. Claims are audit receipts, not reusable authorization: every privileged Boardroom write must repeat the fresh challenge and proof flow. Unknown chains, legacy or incomplete release identities, changed controller generations or configuration epochs, malformed RPC results, and finality uncertainty fail closed.
 
 Signed-in accounts can read their own keyset-paginated delivery receipts from `GET /notifications`. The response exposes safe operational state and action context, but never returns raw provider errors, chat identifiers, credentials, or another account's rows. A `sent` receipt means the provider accepted the send; it does not prove that a person read it.
 
-Built-in OAuth provider callbacks use `${BETTER_AUTH_URL}/auth/callback/<provider>`, for example `http://localhost:8787/auth/callback/discord` in local development. Telegram uses Better Auth's Generic OAuth callback at `${BETTER_AUTH_URL}/auth/oauth2/callback/telegram`; keep the BotFather Web Login signing algorithm at its `RS256` default. Telegram authentication does not grant alert-delivery access, which remains an explicit bot-linking step.
+Shared mode registers `${BETTER_AUTH_URL}/auth/oauth2/callback/peezy` as the
+PledgeCash OIDC redirect URI. Social-provider callbacks terminate at the
+Identity provider, and Telegram authentication still does not grant alert
+delivery access, which remains an explicit bot-linking step.
+Before accepting shared-mode traffic, Sentinel removes access, refresh, and ID
+tokens (and their expiry metadata) from every pre-existing local auth account.
+The configured TLS edge must overwrite client-address headers or append its
+observed client as the rightmost `X-Forwarded-For` value. Sentinel ignores those
+headers from every socket peer outside `SENTINEL_TRUSTED_PROXY_IPS`.
+
+In legacy mode, built-in OAuth provider callbacks use
+`${BETTER_AUTH_URL}/auth/callback/<provider>`. Telegram uses
+`${BETTER_AUTH_URL}/auth/oauth2/callback/telegram`; keep the BotFather Web Login
+signing algorithm at its `RS256` default.
 
 ## Local Commands
 
@@ -102,6 +161,11 @@ docker run --rm --env-file .env -p 8787:8787 pledge-cash-sentinel
 
 Sentinel does not require deployment-specific files in this repository. Provide networking, TLS, persistence, backups, and process supervision in your own hosting environment.
 
-The static web app remains Sentinel-free unless its build receives `VITE_SENTINEL_API_URL`. For
-GitHub Pages, set that repository variable only after the API is deployed and healthy; the Pages
-workflow probes its `/health` endpoint before building or deploying an enabled UI.
+The static web app remains Sentinel-free unless its build receives
+`VITE_SENTINEL_API_URL`. For GitHub Pages, set that repository variable only
+after the API is deployed and healthy; the Pages workflow probes its `/health`
+endpoint before building or deploying an enabled UI. Adjacent web and API
+revisions are compatible in either deployment order: the new web client falls
+back to the previous auth routes only when a `/auth/peezy/*` route returns 404,
+and the shared-mode API retains the previous social and SIWE routes for clients
+that were loaded before the Pages deployment.

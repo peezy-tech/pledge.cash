@@ -20,6 +20,11 @@ import type { AuthAdapter, SiweSignatureVerifier } from "./auth";
 
 export const ALERTS_SIWE_STATEMENT = "Sign in to pledge.cash alerts.";
 export const WALLET_LINK_SIWE_STATEMENT = "Link this wallet to pledge.cash Sentinel notifications.";
+const INTERNAL_AUTH_HEADER_ALLOWLIST = [
+  "cookie",
+  "origin",
+  "user-agent"
+] as const;
 const SIWE_MAX_AGE_MS = 15 * 60 * 1_000;
 const SIWE_CLOCK_SKEW_MS = 5 * 60 * 1_000;
 const TELEGRAM_ISSUER = "https://oauth.telegram.org";
@@ -202,11 +207,63 @@ export function createBetterAuthAdapter(
       const session = await auth.api.getSession({ headers: input.headers });
       return session === null ? null : { user: { id: session.user.id } };
     },
-    handler: (request) => auth.handler(request)
+    handler: (request) => auth.handler(request),
+    async startSocial(input) {
+      const telegram = input.request.provider === "telegram";
+      const path = input.link
+        ? telegram
+          ? "/oauth2/link"
+          : "/link-social"
+        : telegram
+          ? "/sign-in/oauth2"
+          : "/sign-in/social";
+      const body = telegram
+        ? {
+            callbackURL: input.request.callbackURL,
+            ...(input.request.errorCallbackURL === undefined
+              ? {}
+              : { errorCallbackURL: input.request.errorCallbackURL }),
+            providerId: "telegram"
+          }
+        : input.request;
+      const response = await auth.handler(
+        new Request(`${config.auth.baseUrl}/auth${path}`, {
+          body: JSON.stringify(body),
+          headers: internalAuthHeaders(input.headers, input.clientIp),
+          method: "POST"
+        })
+      );
+      if (!response.ok) {
+        throw new Error(`Legacy social authentication failed with status ${response.status}`);
+      }
+      return {
+        headers: response.headers,
+        response: (await response.json()) as {
+          redirect: boolean;
+          url?: string | undefined;
+        }
+      };
+    }
   };
 }
 
-function createSentinelAuthDatabaseAdapter(db: SentinelDb) {
+export function internalAuthHeaders(
+  source: Headers,
+  clientIp?: string
+): Headers {
+  const headers = new Headers({ "Content-Type": "application/json" });
+  for (const name of INTERNAL_AUTH_HEADER_ALLOWLIST) {
+    const value = source.get(name);
+    if (value !== null) headers.set(name, value);
+  }
+  const resolvedClientIp = clientIp?.trim();
+  if (resolvedClientIp) {
+    headers.set("X-Forwarded-For", resolvedClientIp);
+  }
+  return headers;
+}
+
+export function createSentinelAuthDatabaseAdapter(db: SentinelDb) {
   const createAdapter = drizzleAdapter(db, {
     provider: "pg",
     schema
