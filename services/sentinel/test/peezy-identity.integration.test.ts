@@ -282,19 +282,55 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     const linkSignature = await secondWallet.signMessage({
       message: linkChallenge.message
     });
-    const linkResponse = await app.request(`${apiOrigin}/wallets`, {
-      body: JSON.stringify({
-        message: linkChallenge.message,
-        signature: linkSignature
-      }),
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: cookie,
-        Origin: webOrigin
-      },
-      method: "POST"
-    });
+    const [presentationUsage] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "identity_quota_events"
+      WHERE "scope" = 'pledge-cash:presentation-read'
+    `;
+    const presentationQuotaFillTime = new Date().toISOString();
+    const presentationQuotaFill = Math.max(
+      0,
+      230 - Number(presentationUsage?.count ?? 0)
+    );
+    await dbClient.sql`
+      INSERT INTO "identity_quota_events" ("scope", "consumed_at")
+      SELECT
+        'pledge-cash:presentation-read',
+        ${presentationQuotaFillTime}
+      FROM generate_series(1, ${presentationQuotaFill})
+    `;
+    let linkResponse: Response;
+    let presentationReadsAfterLink: string | undefined;
+    try {
+      linkResponse = await app.request(`${apiOrigin}/wallets`, {
+        body: JSON.stringify({
+          message: linkChallenge.message,
+          signature: linkSignature
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: cookie,
+          Origin: webOrigin
+        },
+        method: "POST"
+      });
+      const [presentationUsageAfterLink] = await dbClient.sql<
+        { count: string }[]
+      >`
+        SELECT count(*)::text AS "count"
+        FROM "identity_quota_events"
+        WHERE "scope" = 'pledge-cash:presentation-read'
+      `;
+      presentationReadsAfterLink = presentationUsageAfterLink?.count;
+    } finally {
+      await dbClient.sql`
+        DELETE FROM "identity_quota_events"
+        WHERE "scope" = 'pledge-cash:presentation-read'
+          AND "consumed_at" = ${presentationQuotaFillTime}
+      `;
+    }
     expect(linkResponse.status).toBe(200);
+    expect(presentationReadsAfterLink).toBe("230");
     expect(await linkResponse.json()).toMatchObject({
       wallet: {
         address: secondWallet.address.toLowerCase(),
@@ -307,6 +343,12 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       WHERE "scope" = 'pledge-cash:wallet-grant-link'
     `;
     expect(quotaAfterLink?.count).toBe("1");
+    const [walletLinkReadsAfterLink] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "identity_quota_events"
+      WHERE "scope" = 'pledge-cash:wallet-link-read'
+    `;
+    expect(walletLinkReadsAfterLink?.count).toBe("2");
     const [readQuotaBeforeReplays] = await dbClient.sql<{ count: string }[]>`
       SELECT count(*)::text AS "count"
       FROM "identity_quota_events"
@@ -761,7 +803,7 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       {
         chainId: number;
         siweMessage: string;
-        verifiedAt: Date;
+        verifiedAt: Date | string;
       }[]
     >`
       DELETE FROM "identity_wallet_link_reconciliations"
@@ -771,10 +813,16 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
         "siwe_message" AS "siweMessage",
         "verified_at" AS "verifiedAt"
     `;
-    expect(pending).toEqual({
+    if (pending === undefined) {
+      throw new Error("Expected the newer wallet-link reconciliation");
+    }
+    expect({
+      ...pending,
+      verifiedAt: new Date(pending.verifiedAt).toISOString()
+    }).toEqual({
       chainId: 31337,
       siweMessage: "newer wallet link",
-      verifiedAt: new Date("2040-01-01T00:00:00.000Z")
+      verifiedAt: "2040-01-01T00:00:00.000Z"
     });
   });
 

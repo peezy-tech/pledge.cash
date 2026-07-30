@@ -82,6 +82,7 @@ const IDENTITY_WALLET_LINK_LIMIT = 10;
 // 50 reads and ten wallet links reserve two reads each, leaving 230 for
 // presentation hydration and social callbacks.
 const IDENTITY_PRESENTATION_READ_BUDGET = 230;
+const IDENTITY_WALLET_LINK_READ_BUDGET = 20;
 const LEGACY_SIWE_NONCE_TTL_MS = 15 * 60_000;
 const IDENTITY_PENDING_LINK_LIMIT = 10;
 const IDENTITY_PENDING_LINK_TTL_MS = 5 * 60_000;
@@ -110,10 +111,27 @@ type IdentityHydrator = {
     readonly identity: IdentityMeResponse;
   }>;
   getFresh(subject: string): Promise<IdentityMeResponse>;
+  getFreshForWalletLink(subject: string): Promise<IdentityMeResponse>;
+  getWalletLinkWithFreshness(subject: string): Promise<{
+    readonly fresh: boolean;
+    readonly identity: IdentityMeResponse;
+  }>;
   invalidate(subject: string): void;
   set(subject: string, identity: IdentityMeResponse): void;
 };
+type IdentityReadQuotaKind = "presentation-read" | "wallet-link-read";
 type SentinelTransaction = Parameters<Parameters<SentinelDb["transaction"]>[0]>[0];
+
+class IdentityReadBudgetExhaustedError extends Error {
+  constructor(readQuotaKind: IdentityReadQuotaKind) {
+    super(
+      readQuotaKind === "wallet-link-read"
+        ? "Identity wallet-link read budget exhausted"
+        : "Identity presentation read budget exhausted"
+    );
+    this.name = "IdentityReadBudgetExhaustedError";
+  }
+}
 
 export async function discardOAuthTokensForSharedIdentity(
   db: SentinelDb
@@ -985,7 +1003,11 @@ function createIdentityHydrator(
   >();
   const pending = new Map<
     string,
-    { readonly read: Promise<IdentityMeResponse>; readonly token: symbol }
+    {
+      readonly quotaKind: IdentityReadQuotaKind;
+      readonly read: Promise<IdentityMeResponse>;
+      readonly token: symbol;
+    }
   >();
   const ttlMs = Math.max(0, cacheTtlMs);
 
@@ -1000,17 +1022,26 @@ function createIdentityHydrator(
     }
   };
 
-  const readIdentity = (subject: string, now: number) => {
+  const readIdentity = (
+    subject: string,
+    now: number,
+    quotaKind: IdentityReadQuotaKind
+  ) => {
     const token = Symbol(subject);
+    const walletLinkRead = quotaKind === "wallet-link-read";
     const read = takeIdentityQuota(db, {
-      capacity: IDENTITY_PRESENTATION_READ_BUDGET,
+      capacity: walletLinkRead
+        ? IDENTITY_WALLET_LINK_READ_BUDGET
+        : IDENTITY_PRESENTATION_READ_BUDGET,
       now: new Date(now),
-      scope: identityQuotaScope(clientId, "presentation-read"),
-      windowMs: IDENTITY_PRESENTATION_READ_WINDOW_MS
+      scope: identityQuotaScope(clientId, quotaKind),
+      windowMs: walletLinkRead
+        ? IDENTITY_WALLET_LINK_WINDOW_MS
+        : IDENTITY_PRESENTATION_READ_WINDOW_MS
     })
       .then((admitted) => {
         if (!admitted) {
-          throw new Error("Identity presentation read budget exhausted");
+          throw new IdentityReadBudgetExhaustedError(quotaKind);
         }
         return gateway.getIdentity(subject);
       })
@@ -1026,44 +1057,67 @@ function createIdentityHydrator(
           pending.delete(subject);
         }
       });
-    pending.set(subject, { read, token });
+    pending.set(subject, { quotaKind, read, token });
     return read;
+  };
+
+  const getWithFreshness = async (
+    subject: string,
+    quotaKind: IdentityReadQuotaKind
+  ) => {
+    const now = Date.now();
+    const cached = cache.get(subject);
+    if (cached !== undefined && cached.expiresAt > now) {
+      return { fresh: false, identity: cached.identity };
+    }
+    cache.delete(subject);
+
+    const pendingRead = pending.get(subject);
+    if (pendingRead !== undefined) {
+      try {
+        return { fresh: false, identity: await pendingRead.read };
+      } catch (error) {
+        if (
+          !(error instanceof IdentityReadBudgetExhaustedError) ||
+          pendingRead.quotaKind === quotaKind
+        ) {
+          throw error;
+        }
+      }
+    }
+
+    return {
+      fresh: true,
+      identity: await readIdentity(subject, now, quotaKind)
+    };
+  };
+
+  const getFresh = (
+    subject: string,
+    quotaKind: IdentityReadQuotaKind
+  ): Promise<IdentityMeResponse> => {
+    // Provisioning and wallet linking must not reuse credentials fetched
+    // before the current callback or proof.
+    cache.delete(subject);
+    pending.delete(subject);
+    return readIdentity(subject, Date.now(), quotaKind);
   };
 
   return {
     async get(subject) {
-      const now = Date.now();
-      const cached = cache.get(subject);
-      if (cached !== undefined && cached.expiresAt > now) {
-        return cached.identity;
-      }
-      cache.delete(subject);
-
-      const pendingRead = pending.get(subject);
-      if (pendingRead !== undefined) return pendingRead.read;
-
-      return readIdentity(subject, now);
+      return (await getWithFreshness(subject, "presentation-read")).identity;
     },
-    async getWithFreshness(subject) {
-      const now = Date.now();
-      const cached = cache.get(subject);
-      if (cached !== undefined && cached.expiresAt > now) {
-        return { fresh: false, identity: cached.identity };
-      }
-      cache.delete(subject);
-
-      const pendingRead = pending.get(subject);
-      if (pendingRead !== undefined) {
-        return { fresh: false, identity: await pendingRead.read };
-      }
-
-      return { fresh: true, identity: await readIdentity(subject, now) };
+    getWithFreshness(subject) {
+      return getWithFreshness(subject, "presentation-read");
     },
     getFresh(subject) {
-      // Provisioning must not reuse credentials fetched before this callback.
-      cache.delete(subject);
-      pending.delete(subject);
-      return readIdentity(subject, Date.now());
+      return getFresh(subject, "presentation-read");
+    },
+    getFreshForWalletLink(subject) {
+      return getFresh(subject, "wallet-link-read");
+    },
+    getWalletLinkWithFreshness(subject) {
+      return getWithFreshness(subject, "wallet-link-read");
     },
     invalidate(subject) {
       cache.delete(subject);
@@ -1548,7 +1602,7 @@ async function linkIdentityWalletCredential(
   }
   const subject = input.subject;
 
-  const hydration = await identityHydrator.getWithFreshness(subject);
+  const hydration = await identityHydrator.getWalletLinkWithFreshness(subject);
   let existingIdentity = hydration.identity;
   if (existingIdentity.user.id !== subject) {
     throw new Error("Identity wallet link subject mismatch");
@@ -1575,7 +1629,7 @@ async function linkIdentityWalletCredential(
         verifiedAt: input.verifiedAt
       });
     }
-    existingIdentity = await identityHydrator.getFresh(subject);
+    existingIdentity = await identityHydrator.getFreshForWalletLink(subject);
     if (existingIdentity.user.id !== subject) {
       throw new Error("Identity wallet link subject mismatch");
     }
@@ -1646,8 +1700,9 @@ async function linkIdentityWalletCredential(
   ) {
     throw new Error("Identity wallet grant resolved to another subject");
   }
-  const centralIdentity = await gateway.getIdentity(exchanged.subject);
-  identityHydrator.set(exchanged.subject, centralIdentity);
+  const centralIdentity = await identityHydrator.getFreshForWalletLink(
+    exchanged.subject
+  );
   assertIdentityCredentialLimit(centralIdentity);
   const centralWallet = findCentralIdentityWallet(
     centralIdentity,

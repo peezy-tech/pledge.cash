@@ -11,7 +11,8 @@ export type IdentityQuotaKind =
   | "presentation-read"
   | "wallet-proof-public"
   | "wallet-grant-link"
-  | "wallet-grant-public";
+  | "wallet-grant-public"
+  | "wallet-link-read";
 
 export type IdentityQuotaInput = {
   readonly capacity: number;
