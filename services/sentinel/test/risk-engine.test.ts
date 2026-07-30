@@ -30,6 +30,7 @@ const lockedLiquidityFactory = "0x00000000000000000000000000000000000010cc" as A
 const bondingCurve = "0x000000000000000000000000000000000000c011" as Address;
 const liquidityLocker = "0x00000000000000000000000000000000000010c0" as Address;
 const zeroAddress = "0x0000000000000000000000000000000000000000" as Address;
+const facetSetHash = `0x${"11".repeat(32)}` as Hex;
 
 const ctx = {
   actionId,
@@ -45,8 +46,8 @@ const ctx = {
 } satisfies RiskContext;
 
 describe("risk matrix", () => {
-  test("declares ruleset version 6 and canonical scheduled-market rule ids", () => {
-    expect(RULESET_VERSION).toBe(6);
+  test("declares ruleset version 7 and canonical scheduled-market rule ids", () => {
+    expect(RULESET_VERSION).toBe(7);
     expect(new Set(RISK_MATRIX.map((rule) => rule.id))).toEqual(
       new Set<RiskRuleId>([
         "controller-configuration",
@@ -96,7 +97,7 @@ describe("evaluateAction", () => {
         data: encodeFunctionData({
           abi: boardroomAbi,
           functionName: "replaceController",
-          args: [controller, nextController, holder, 86_400n, 604_800n, 2n]
+          args: [facetSetHash, controller, nextController, holder, 86_400n, 604_800n, 2n]
         })
       }),
       ruleId: "controller-replacement",
@@ -107,7 +108,7 @@ describe("evaluateAction", () => {
         data: encodeFunctionData({
           abi: boardroomAbi,
           functionName: "setRedemptionExcessRecipient",
-          args: [holder]
+          args: [facetSetHash, holder]
         })
       }),
       ruleId: "redemption-excess-recipient",
@@ -115,14 +116,22 @@ describe("evaluateAction", () => {
     },
     {
       call: storedCall({
-        data: encodeFunctionData({ abi: boardroomAbi, functionName: "mint", args: [holder, 1_000n] })
+        data: encodeFunctionData({
+          abi: boardroomAbi,
+          functionName: "mint",
+          args: [facetSetHash, holder, 1_000n]
+        })
       }),
       ruleId: "mint-shares",
       severity: "high"
     },
     {
       call: storedCall({
-        data: encodeFunctionData({ abi: boardroomAbi, functionName: "beginSnapshot" })
+        data: encodeFunctionData({
+          abi: boardroomAbi,
+          functionName: "beginSnapshot",
+          args: [facetSetHash]
+        })
       }),
       ruleId: "begin-snapshot",
       severity: "medium"
@@ -201,7 +210,7 @@ describe("evaluateAction", () => {
         data: encodeFunctionData({
           abi: boardroomAbi,
           functionName: "registerRedeemableAsset",
-          args: [token]
+          args: [facetSetHash, token]
         })
       }),
       ruleId: "register-redeemable-asset",
@@ -209,21 +218,33 @@ describe("evaluateAction", () => {
     },
     {
       call: storedCall({
-        data: encodeFunctionData({ abi: boardroomAbi, functionName: "openRedemptions" })
+        data: encodeFunctionData({
+          abi: boardroomAbi,
+          functionName: "openRedemptions",
+          args: [facetSetHash]
+        })
       }),
       ruleId: "open-redemptions",
       severity: "medium"
     },
     {
       call: storedCall({
-        data: encodeFunctionData({ abi: boardroomAbi, functionName: "burnTreasuryShares" })
+        data: encodeFunctionData({
+          abi: boardroomAbi,
+          functionName: "burnTreasuryShares",
+          args: [facetSetHash]
+        })
       }),
       ruleId: "burn-treasury-shares",
       severity: "low"
     },
     {
       call: storedCall({
-        data: encodeFunctionData({ abi: boardroomAbi, functionName: "wrapNativeBalance" })
+        data: encodeFunctionData({
+          abi: boardroomAbi,
+          functionName: "wrapNativeBalance",
+          args: [facetSetHash]
+        })
       }),
       ruleId: "wrap-native",
       severity: "low"
@@ -366,11 +387,19 @@ describe("evaluateAction", () => {
     const calls = [
       storedCall({
         callIndex: 0,
-        data: encodeFunctionData({ abi: boardroomAbi, functionName: "burnTreasuryShares" })
+        data: encodeFunctionData({
+          abi: boardroomAbi,
+          functionName: "burnTreasuryShares",
+          args: [facetSetHash]
+        })
       }),
       storedCall({
         callIndex: 1,
-        data: encodeFunctionData({ abi: boardroomAbi, functionName: "openRedemptions" })
+        data: encodeFunctionData({
+          abi: boardroomAbi,
+          functionName: "openRedemptions",
+          args: [facetSetHash]
+        })
       }),
       storedCall({
         callIndex: 2,

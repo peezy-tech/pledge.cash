@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export LC_ALL=C
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ARTIFACT="${ARTIFACT:-deployments/998.json}"
 RECEIPTS="${RECEIPTS:-${ARTIFACT%.json}.receipts.json}"
 RPC_URL="${RPC_URL:-${HYPEREVM_TESTNET_RPC_URL:-https://rpc.hyperliquid-testnet.xyz/evm}}"
 REQUIRE_DEPLOYMENT="${REQUIRE_DEPLOYMENT:-0}"
-REQUIRE_BOARDROOM_DEPLOYMENT="${REQUIRE_BOARDROOM_DEPLOYMENT:-0}"
 
 cd "$ROOT_DIR"
 
@@ -14,6 +14,9 @@ fail() {
   echo "Artifact verification failed: $*" >&2
   exit 1
 }
+
+[[ "$REQUIRE_DEPLOYMENT" == "0" || "$REQUIRE_DEPLOYMENT" == "1" ]] \
+  || fail "REQUIRE_DEPLOYMENT must be 0 or 1"
 
 field_exists() {
   jq -e --arg key "$1" 'has($key) and .[$key] != null and .[$key] != ""' "$ARTIFACT" >/dev/null
@@ -23,8 +26,17 @@ field() {
   jq -r --arg key "$1" '.[$key] | if . == null then empty else . end' "$ARTIFACT"
 }
 
+require_field() {
+  local key="$1"
+  field_exists "$key" || fail "$ARTIFACT is missing .$key"
+}
+
 lower() {
   tr '[:upper:]' '[:lower:]'
+}
+
+first_token() {
+  awk 'NR == 1 { print $1 }'
 }
 
 cast_retry() {
@@ -44,15 +56,10 @@ cast_retry() {
   return "$status"
 }
 
-first_token() {
-  awk 'NR == 1 { print $1 }'
-}
-
 expect_equal() {
   local label="$1"
   local expected="$2"
   local actual="$3"
-
   if [[ "$expected" != "$actual" ]]; then
     fail "$label mismatch: expected $expected, got $actual"
   fi
@@ -60,35 +67,46 @@ expect_equal() {
 }
 
 expect_address_equal() {
-  local label="$1"
-  local expected actual
-  expected="$(printf '%s' "$2" | lower)"
-  actual="$(printf '%s' "$3" | lower)"
-  expect_equal "$label" "$expected" "$actual"
+  expect_equal "$1" "$(printf '%s' "$2" | lower)" "$(printf '%s' "$3" | lower)"
 }
 
 expect_hash_equal() {
-  local label="$1"
-  local expected actual
-  expected="$(printf '%s' "$2" | lower)"
-  actual="$(printf '%s' "$3" | lower)"
-  expect_equal "$label" "$expected" "$actual"
+  expect_equal "$1" "$(printf '%s' "$2" | lower)" "$(printf '%s' "$3" | lower)"
 }
 
-require_field() {
-  local key="$1"
-  field_exists "$key" || fail "$ARTIFACT is missing .$key"
-}
-
-require_code() {
+expect_json_equal() {
   local label="$1"
-  local address="$2"
-  local code
-  code="$(cast_retry cast code --rpc-url "$RPC_URL" "$address")"
-  if [[ "$code" == "0x" ]]; then
-    fail "$label has no code at $address"
+  local expected="$2"
+  local actual="$3"
+  if [[ "$expected" != "$actual" ]]; then
+    fail "$label mismatch: expected $expected, got $actual"
   fi
-  echo "Verified $label code at $address"
+  echo "Verified $label."
+}
+
+call_value() {
+  cast_retry cast call --rpc-url "$RPC_URL" "$1" "$2" "${@:3}" | first_token
+}
+
+call_json() {
+  cast_retry cast call --json --rpc-url "$RPC_URL" "$1" "$2" "${@:3}"
+}
+
+call_value_at() {
+  local block_number="$1"
+  local target="$2"
+  local signature="$3"
+  shift 3
+  cast_retry cast call --rpc-url "$RPC_URL" --block "$block_number" "$target" "$signature" "$@" \
+    | first_token
+}
+
+call_json_at() {
+  local block_number="$1"
+  local target="$2"
+  local signature="$3"
+  shift 3
+  cast_retry cast call --json --rpc-url "$RPC_URL" --block "$block_number" "$target" "$signature" "$@"
 }
 
 require_code_hash() {
@@ -103,29 +121,10 @@ require_code_hash() {
   expect_hash_equal "$label code hash" "$(field "$artifact_field")" "$actual"
 }
 
-call_address() {
-  local address="$1"
-  local signature="$2"
-  shift 2
-  cast_retry cast call --rpc-url "$RPC_URL" "$address" "$signature" "$@" | first_token
-}
-
-call_uint() {
-  cast_retry cast call --rpc-url "$RPC_URL" "$1" "$2" | first_token
-}
-
-call_hash() {
-  cast_retry cast call --rpc-url "$RPC_URL" "$1" "$2" "$3" | first_token
-}
-
-call_bool() {
-  cast_retry cast call --rpc-url "$RPC_URL" "$1" "$2" "$3" | first_token
-}
-
 contract_creation_code() {
   local bytecode
   bytecode="$(forge inspect "$1" bytecode)" || fail "could not reproduce creation bytecode for $1"
-  [[ "$bytecode" =~ ^0x([0-9a-fA-F]{2})+$ ]] || fail "invalid locally compiled creation bytecode for $1"
+  [[ "$bytecode" =~ ^0x([0-9a-fA-F]{2})+$ ]] || fail "invalid creation bytecode for $1"
   printf '%s\n' "$bytecode"
 }
 
@@ -136,71 +135,74 @@ creation_code_hash() {
 runtime_code_hash() {
   local bytecode
   bytecode="$(forge inspect "$1" deployedBytecode)" || fail "could not reproduce runtime bytecode for $1"
-  [[ "$bytecode" =~ ^0x([0-9a-fA-F]{2})+$ ]] || fail "invalid locally compiled runtime bytecode for $1"
+  [[ "$bytecode" =~ ^0x([0-9a-fA-F]{2})+$ ]] || fail "invalid runtime bytecode for $1"
   cast keccak "$bytecode"
 }
 
 encoded_hash() {
   local encoded
-  encoded="$(cast abi-encode "$@")" || fail "could not ABI-encode local release identity"
+  encoded="$(cast abi-encode "$@")" || fail "could not ABI-encode release identity"
   cast keccak "$encoded"
 }
 
+kernel_selectors_array() {
+  local selectors
+  selectors="$(
+    for signature in \
+      "facetRegistry()" \
+      "appliedStorageLayoutHash()" \
+      "facetSetHash()" \
+      "initialize(bytes32,bytes)" \
+      "appliedStorageVersion()" \
+      "migrationRequired()" \
+      "kernelSelectorSetHash()" \
+      "dispatchViewAndRollback(address,bytes)"; do
+      cast sig "$signature"
+    done | sort
+  )"
+  printf '[%s]\n' "$(printf '%s\n' "$selectors" | paste -sd, -)"
+}
+
 local_release_code_hash() {
-  local boardroom_policy_registry asset_policy boardroom_governance boardroom_redemption
-  local protocol_fee_router token_grant_factory amm_factory amm_router locked_liquidity_factory
-  local distribution_factory boardroom_rewards_factory bond_market_factory boardroom_factory
-  local boardroom_controller_factory boardroom_controller boardroom_market boardroom
-  local boardroom_architecture
-
-  boardroom_policy_registry="$(creation_code_hash BoardroomPolicyRegistry)"
-  asset_policy="$(creation_code_hash AssetPolicy)"
-  boardroom_governance="$(creation_code_hash BoardroomGovernanceLogic)"
-  boardroom_redemption="$(creation_code_hash BoardroomRedemptionPayout)"
-  protocol_fee_router="$(creation_code_hash ProtocolFeeRouter)"
-  token_grant_factory="$(creation_code_hash TokenGrantFactory)"
-  amm_factory="$(creation_code_hash AmmFactory)"
-  amm_router="$(creation_code_hash AmmRouter)"
-  locked_liquidity_factory="$(creation_code_hash LockedLiquidityFactory)"
-  distribution_factory="$(creation_code_hash DistributionFactory)"
-  boardroom_rewards_factory="$(creation_code_hash BoardroomRewardsFactory)"
-  bond_market_factory="$(creation_code_hash BondMarketFactory)"
-  boardroom_factory="$(creation_code_hash BoardroomFactory)"
-  boardroom_controller_factory="$(creation_code_hash BoardroomControllerFactory)"
-  boardroom_controller="$(creation_code_hash BoardroomController)"
-  boardroom_market="$(creation_code_hash BoardroomMarketLogic)"
-  boardroom="$(creation_code_hash Boardroom)"
-
+  local deterministic boardroom_architecture module_architecture
+  deterministic="$(creation_code_hash PledgeCashDeterministicDeployer)"
   boardroom_architecture="$(
     encoded_hash \
-      "f(bytes32,bytes32,bytes32,bytes32,bytes32)" \
-      "$boardroom_factory" \
-      "$boardroom_controller_factory" \
-      "$boardroom_controller" \
-      "$boardroom_market" \
-      "$boardroom"
+      "f(bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32)" \
+      "$(creation_code_hash ProtocolFacetRegistry)" \
+      "$(creation_code_hash BoardroomKernel)" \
+      "$(creation_code_hash src/boardroom/BoardroomFactory.sol:BoardroomFactory)" \
+      "$(creation_code_hash src/boardroom/BoardroomControllerFactory.sol:BoardroomControllerFactory)" \
+      "$(creation_code_hash src/boardroom/BoardroomController.sol:BoardroomController)" \
+      "$(creation_code_hash BoardroomGovernanceLogic)" \
+      "$(creation_code_hash BoardroomMarketLogic)" \
+      "$(creation_code_hash BoardroomRedemptionPayout)" \
+      "$(creation_code_hash BoardroomAuthorityFacet)" \
+      "$(creation_code_hash BoardroomExecutionFacet)" \
+      "$(creation_code_hash BoardroomMarketFacet)" \
+      "$(creation_code_hash BoardroomRedemptionFacet)" \
+      "$(creation_code_hash BoardroomViewFacet)"
   )"
-
-  encoded_hash \
-    "f(bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32)" \
-    "$boardroom_policy_registry" \
-    "$asset_policy" \
-    "$boardroom_governance" \
-    "$boardroom_redemption" \
-    "$protocol_fee_router" \
-    "$token_grant_factory" \
-    "$amm_factory" \
-    "$amm_router" \
-    "$locked_liquidity_factory" \
-    "$distribution_factory" \
-    "$boardroom_rewards_factory" \
-    "$bond_market_factory" \
-    "$boardroom_architecture"
+  module_architecture="$(
+    encoded_hash \
+      "f(bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32,bytes32)" \
+      "$(creation_code_hash BoardroomPolicyRegistry)" \
+      "$(creation_code_hash AssetPolicy)" \
+      "$(creation_code_hash ProtocolFeeRouter)" \
+      "$(creation_code_hash TokenGrantFactory)" \
+      "$(creation_code_hash AmmFactory)" \
+      "$(creation_code_hash AmmRouter)" \
+      "$(creation_code_hash LockedLiquidityFactory)" \
+      "$(creation_code_hash DistributionFactory)" \
+      "$(creation_code_hash BoardroomRewardsFactory)" \
+      "$(creation_code_hash BondMarketFactory)"
+  )"
+  encoded_hash "f(bytes32,bytes32,bytes32)" "$deterministic" "$boardroom_architecture" "$module_architecture"
 }
 
 verify_deterministic_deployer_provenance() {
   local broadcaster owner create2_factory deterministic_deployer
-  local creation_code constructor_args init_code init_code_hash salt expected_deployer
+  local creation_code constructor_args init_code init_code_hash creation_hash salt expected_deployer
   local expected_runtime_hash live_code live_runtime_hash
 
   broadcaster="$(field deployer)"
@@ -210,58 +212,61 @@ verify_deterministic_deployer_provenance() {
   expect_address_equal "deterministic deployer broadcaster" "$owner" "$broadcaster"
 
   creation_code="$(contract_creation_code PledgeCashDeterministicDeployer)"
-  constructor_args="$(cast abi-encode "f(address)" "$owner")" \
-    || fail "could not encode PledgeCashDeterministicDeployer constructor"
+  creation_hash="$(cast keccak "$creation_code")"
+  constructor_args="$(cast abi-encode "f(address)" "$owner")"
   init_code="${creation_code}${constructor_args#0x}"
   init_code_hash="$(cast keccak "$init_code")"
-  salt="$(cast keccak "pledge.cash.deterministic.v1.PledgeCashDeterministicDeployer")"
+  salt="$(
+    encoded_hash \
+      "f(string,string,bytes32)" \
+      "pledge.cash.protocol.v1" \
+      "PledgeCashDeterministicDeployer" \
+      "$creation_hash"
+  )"
   expected_deployer="$(
     cast create2 \
       --deployer "$create2_factory" \
       --salt "$salt" \
       --init-code-hash "$init_code_hash"
-  )" || fail "could not reproduce the deterministic deployer address"
-  expect_address_equal \
-    "locally reproduced PledgeCashDeterministicDeployer address" \
-    "$expected_deployer" \
-    "$deterministic_deployer"
+  )"
+  expect_address_equal "PledgeCashDeterministicDeployer CREATE2 address" "$expected_deployer" "$deterministic_deployer"
 
   expected_runtime_hash="$(runtime_code_hash PledgeCashDeterministicDeployer)"
-  require_field deterministicDeployerCodeHash
   expect_hash_equal \
-    "locally reproduced PledgeCashDeterministicDeployer artifact code hash" \
+    "PledgeCashDeterministicDeployer artifact code hash" \
     "$expected_runtime_hash" \
     "$(field deterministicDeployerCodeHash)"
   live_code="$(cast_retry cast code --rpc-url "$RPC_URL" "$deterministic_deployer")"
-  [[ "$live_code" != "0x" ]] || fail "PledgeCashDeterministicDeployer has no code at $deterministic_deployer"
+  [[ "$live_code" != "0x" ]] || fail "PledgeCashDeterministicDeployer has no code"
   live_runtime_hash="$(cast keccak "$live_code")"
-  expect_hash_equal \
-    "locally reproduced PledgeCashDeterministicDeployer live code hash" \
-    "$expected_runtime_hash" \
-    "$live_runtime_hash"
+  expect_hash_equal "PledgeCashDeterministicDeployer live code hash" "$expected_runtime_hash" "$live_runtime_hash"
+  expect_address_equal \
+    "PledgeCashDeterministicDeployer owner" \
+    "$owner" \
+    "$(call_value "$deterministic_deployer" "owner()(address)")"
 }
 
 verify_release_deployment() {
   local label="$1"
   local contract_name="$2"
   local artifact_field="$3"
-  local constructor_signature="$4"
-  shift 4
+  local code_hash_field="$4"
+  local constructor_signature="$5"
+  shift 5
 
-  local creation_code creation_code_hash constructor_args init_code init_code_hash salt
+  local creation_code creation_hash constructor_args init_code init_code_hash salt
   local deterministic_deployer live_init_code_hash predicted_address expected_calldata expected_input_hash
   local broadcaster_lower deterministic_deployer_lower transaction_count
 
   creation_code="$(contract_creation_code "$contract_name")"
-  creation_code_hash="$(cast keccak "$creation_code")"
+  creation_hash="$(cast keccak "$creation_code")"
   salt="$(
     encoded_hash \
       "f(string,string,bytes32)" \
-      "pledge.cash.deterministic.v5" \
+      "pledge.cash.protocol.v1" \
       "$label" \
-      "$creation_code_hash"
+      "$creation_hash"
   )"
-
   constructor_args=""
   if [[ -n "$constructor_signature" ]]; then
     constructor_args="$(cast abi-encode "$constructor_signature" "$@")" \
@@ -269,26 +274,17 @@ verify_release_deployment() {
   fi
   init_code="${creation_code}${constructor_args#0x}"
   init_code_hash="$(cast keccak "$init_code")"
-
   deterministic_deployer="$(field deterministicDeployer)"
+
   live_init_code_hash="$(
-    call_hash \
-      "$deterministic_deployer" \
-      "initCodeHashForSalt(bytes32)(bytes32)" \
-      "$salt"
+    call_value "$deterministic_deployer" "initCodeHashForSalt(bytes32)(bytes32)" "$salt"
   )"
   expect_hash_equal "$label deterministic init-code hash" "$init_code_hash" "$live_init_code_hash"
-
-  predicted_address="$(
-    call_address \
-      "$deterministic_deployer" \
-      "predict(bytes32)(address)" \
-      "$salt"
-  )"
+  predicted_address="$(call_value "$deterministic_deployer" "predict(bytes32)(address)" "$salt")"
   expect_address_equal "$label deterministic address" "$(field "$artifact_field")" "$predicted_address"
+  require_code_hash "$label" "$predicted_address" "$code_hash_field"
 
-  expected_calldata="$(cast calldata "deploy(bytes32,bytes)" "$salt" "$init_code")" \
-    || fail "could not reproduce $label deployment calldata"
+  expected_calldata="$(cast calldata "deploy(bytes32,bytes)" "$salt" "$init_code")"
   expected_input_hash="$(cast keccak "$expected_calldata" | lower)"
   broadcaster_lower="$(field deployer | lower)"
   deterministic_deployer_lower="$(printf '%s' "$deterministic_deployer" | lower)"
@@ -313,97 +309,90 @@ verify_release_deployment() {
 }
 
 verify_release_provenance() {
-  local bootstrap_deployer
-  bootstrap_deployer="$(field deployer)"
+  local bootstrap controller_factory selectors
+  bootstrap="$(field deployer)"
+  controller_factory="$(field boardroomControllerFactory)"
+  selectors="$(kernel_selectors_array)"
 
   verify_deterministic_deployer_provenance
   verify_release_deployment \
-    "BoardroomPolicyRegistry" \
-    "BoardroomPolicyRegistry" \
-    boardroomPolicyRegistry \
-    "f(address)" \
-    "$bootstrap_deployer"
+    "BoardroomPolicyRegistry" BoardroomPolicyRegistry boardroomPolicyRegistry boardroomPolicyRegistryCodeHash \
+    "f(address)" "$bootstrap"
   verify_release_deployment \
-    "AssetPolicy" \
-    "AssetPolicy" \
-    assetPolicy \
-    "f(address,address)" \
-    "$bootstrap_deployer" \
-    "$(field wrappedNative)"
+    "ProtocolFacetRegistry" ProtocolFacetRegistry protocolFacetRegistry protocolFacetRegistryCodeHash \
+    "f(address,bytes4[])" "$bootstrap" "$selectors"
   verify_release_deployment \
-    "BoardroomGovernanceLogic" \
-    "BoardroomGovernanceLogic" \
-    boardroomGovernanceLogic \
-    ""
+    "BoardroomKernel" BoardroomKernel boardroomKernel boardroomKernelCodeHash \
+    "f(address)" "$(field protocolFacetRegistry)"
   verify_release_deployment \
-    "BoardroomRedemptionPayout" \
-    "BoardroomRedemptionPayout" \
-    boardroomRedemptionPayout \
-    ""
+    "BoardroomGovernanceLogic" BoardroomGovernanceLogic boardroomGovernanceLogic boardroomGovernanceLogicCodeHash ""
   verify_release_deployment \
-    "BoardroomFactory" \
-    "BoardroomFactory" \
-    boardroomFactory \
-    "f(address,address,address,address)" \
+    "BoardroomRedemptionPayout" BoardroomRedemptionPayout boardroomRedemptionPayout \
+    boardroomRedemptionPayoutCodeHash ""
+  verify_release_deployment \
+    "BoardroomMarketLogic" BoardroomMarketLogic boardroomMarketLogic boardroomMarketLogicCodeHash ""
+  verify_release_deployment \
+    "BoardroomFactory" src/boardroom/BoardroomFactory.sol:BoardroomFactory boardroomFactory boardroomFactoryCodeHash \
+    "f(address,address,address,address,address,address,address)" \
+    "$(field protocolFacetRegistry)" \
     "$(field boardroomPolicyRegistry)" \
     "$(field wrappedNative)" \
+    "$(field boardroomKernel)" \
     "$(field boardroomRedemptionPayout)" \
-    "$(field boardroomGovernanceLogic)"
+    "$(field boardroomGovernanceLogic)" \
+    "$(field boardroomMarketLogic)"
   verify_release_deployment \
-    "ProtocolFeeRouter" \
-    "ProtocolFeeRouter" \
-    protocolFeeRouter \
-    "f(address,address)" \
-    "$bootstrap_deployer" \
-    "$bootstrap_deployer"
+    "BoardroomAuthorityFacet" BoardroomAuthorityFacet authorityFacet authorityFacetCodeHash \
+    "f(address,address,address,address)" \
+    "$(field boardroomRedemptionPayout)" "$(field boardroomGovernanceLogic)" "$controller_factory" \
+    "$(field boardroomMarketLogic)"
   verify_release_deployment \
-    "TokenGrantFactory" \
-    "TokenGrantFactory" \
-    tokenGrantFactory \
-    "f(address,address)" \
-    "$bootstrap_deployer" \
-    "$(field boardroomFactory)"
+    "BoardroomExecutionFacet" BoardroomExecutionFacet executionFacet executionFacetCodeHash \
+    "f(address,address,address,address)" \
+    "$(field boardroomRedemptionPayout)" "$(field boardroomGovernanceLogic)" "$controller_factory" \
+    "$(field boardroomMarketLogic)"
   verify_release_deployment \
-    "AmmFactory" \
-    "AmmFactory" \
-    ammFactory \
-    "f(address,address)" \
-    "$bootstrap_deployer" \
-    "$(field boardroomFactory)"
+    "BoardroomMarketFacet" BoardroomMarketFacet marketFacet marketFacetCodeHash \
+    "f(address,address,address,address)" \
+    "$(field boardroomRedemptionPayout)" "$(field boardroomGovernanceLogic)" "$controller_factory" \
+    "$(field boardroomMarketLogic)"
   verify_release_deployment \
-    "AmmRouter" \
-    "AmmRouter" \
-    ammRouter \
-    "f(address,address)" \
-    "$(field ammFactory)" \
-    "$(field wrappedNative)"
+    "BoardroomRedemptionFacet" BoardroomRedemptionFacet redemptionFacet redemptionFacetCodeHash \
+    "f(address,address,address,address)" \
+    "$(field boardroomRedemptionPayout)" "$(field boardroomGovernanceLogic)" "$controller_factory" \
+    "$(field boardroomMarketLogic)"
   verify_release_deployment \
-    "LockedLiquidityFactory" \
-    "LockedLiquidityFactory" \
-    lockedLiquidityFactory \
-    "f(address,address)" \
-    "$(field ammRouter)" \
-    "$(field boardroomFactory)"
+    "BoardroomViewFacet" BoardroomViewFacet viewFacet viewFacetCodeHash \
+    "f(address,address,address,address)" \
+    "$(field boardroomRedemptionPayout)" "$(field boardroomGovernanceLogic)" "$controller_factory" \
+    "$(field boardroomMarketLogic)"
   verify_release_deployment \
-    "DistributionFactory" \
-    "DistributionFactory" \
-    distributionFactory \
-    "f(address,address)" \
-    "$(field lockedLiquidityFactory)" \
-    "$(field tokenGrantFactory)"
+    "AssetPolicy" AssetPolicy assetPolicy assetPolicyCodeHash \
+    "f(address,address)" "$bootstrap" "$(field wrappedNative)"
   verify_release_deployment \
-    "BoardroomRewardsFactory" \
-    "BoardroomRewardsFactory" \
-    boardroomRewardsFactory \
-    "f(address)" \
-    "$(field boardroomFactory)"
+    "ProtocolFeeRouter" ProtocolFeeRouter protocolFeeRouter protocolFeeRouterCodeHash \
+    "f(address,address)" "$bootstrap" "$(field protocolTreasury)"
   verify_release_deployment \
-    "BondMarketFactory" \
-    "BondMarketFactory" \
-    bondMarketFactory \
-    "f(address,address)" \
-    "$(field ammFactory)" \
-    "$(field boardroomFactory)"
+    "TokenGrantFactory" TokenGrantFactory tokenGrantFactory tokenGrantFactoryCodeHash \
+    "f(address,address)" "$bootstrap" "$(field boardroomFactory)"
+  verify_release_deployment \
+    "AmmFactory" AmmFactory ammFactory ammFactoryCodeHash \
+    "f(address,address)" "$bootstrap" "$(field boardroomFactory)"
+  verify_release_deployment \
+    "AmmRouter" AmmRouter ammRouter ammRouterCodeHash \
+    "f(address,address)" "$(field ammFactory)" "$(field wrappedNative)"
+  verify_release_deployment \
+    "LockedLiquidityFactory" LockedLiquidityFactory lockedLiquidityFactory lockedLiquidityFactoryCodeHash \
+    "f(address,address)" "$(field ammRouter)" "$(field boardroomFactory)"
+  verify_release_deployment \
+    "DistributionFactory" DistributionFactory distributionFactory distributionFactoryCodeHash \
+    "f(address,address)" "$(field lockedLiquidityFactory)" "$(field tokenGrantFactory)"
+  verify_release_deployment \
+    "BoardroomRewardsFactory" BoardroomRewardsFactory boardroomRewardsFactory boardroomRewardsFactoryCodeHash \
+    "f(address)" "$(field boardroomFactory)"
+  verify_release_deployment \
+    "BondMarketFactory" BondMarketFactory bondMarketFactory bondMarketFactoryCodeHash \
+    "f(address,address)" "$(field ammFactory)" "$(field boardroomFactory)"
 }
 
 normalized_receipt() {
@@ -412,9 +401,7 @@ normalized_receipt() {
     blockNumber: (.blockNumber | ascii_downcase),
     status: (.status | ascii_downcase),
     gasUsed: (.gasUsed | ascii_downcase),
-    contractAddress: (
-      if .contractAddress == null then null else (.contractAddress | ascii_downcase) end
-    )
+    contractAddress: (if .contractAddress == null then null else (.contractAddress | ascii_downcase) end)
   }'
 }
 
@@ -432,7 +419,7 @@ normalized_transaction() {
 verify_receipt_manifest() {
   local deployment_block="$1"
   local source_commit="$2"
-  local manifest_chain manifest_commit manifest_deployer receipt_count min_block
+  local manifest_chain manifest_commit manifest_deployer min_block
   local row transaction_hash block_hex block_decimal expected_receipt live_receipt actual_receipt
   local expected_input_hash expected_transaction live_transaction live_input live_input_hash actual_transaction
 
@@ -448,15 +435,7 @@ verify_receipt_manifest() {
       and (.blockNumber | type == "string" and test("^0x[0-9a-fA-F]+$"))
       and (.status | type == "string" and ascii_downcase == "0x1")
       and (.gasUsed | type == "string" and test("^0x[0-9a-fA-F]+$"))
-      and (
-        .contractAddress == null
-        or (.contractAddress | type == "string" and test("^0x[0-9a-fA-F]{40}$"))
-      )
       and (.from | type == "string" and test("^0x[0-9a-fA-F]{40}$"))
-      and (
-        .to == null
-        or (.to | type == "string" and test("^0x[0-9a-fA-F]{40}$"))
-      )
       and (.inputHash | type == "string" and test("^0x[0-9a-fA-F]{64}$"))
       and (.value | type == "string" and test("^0x[0-9a-fA-F]+$"))
     )
@@ -464,17 +443,16 @@ verify_receipt_manifest() {
       [.transactions[].transactionHash | ascii_downcase] as $hashes
       | ($hashes | unique | length) == ($hashes | length)
     )
-  ' "$RECEIPTS" >/dev/null || fail "deployment receipt manifest is malformed or contains a failed transaction"
+  ' "$RECEIPTS" >/dev/null || fail "deployment receipt manifest is malformed"
 
   manifest_chain="$(jq -r '.chainId' "$RECEIPTS")"
   manifest_commit="$(jq -r '.sourceCommit' "$RECEIPTS")"
   expect_equal "receipt manifest chain id" "$(field chainId)" "$manifest_chain"
   expect_equal "receipt manifest source commit" "$source_commit" "$manifest_commit"
   manifest_deployer="$(field deployer | lower)"
-  jq -e \
-    --arg deployer "$manifest_deployer" \
+  jq -e --arg deployer "$manifest_deployer" \
     'all(.transactions[]; (.from | ascii_downcase) == $deployer)' \
-    "$RECEIPTS" >/dev/null || fail "deployment receipt manifest contains a transaction from another sender"
+    "$RECEIPTS" >/dev/null || fail "receipt manifest contains another sender"
 
   min_block=""
   while IFS= read -r row; do
@@ -489,537 +467,756 @@ verify_receipt_manifest() {
     live_receipt="$(cast_retry cast rpc --rpc-url "$RPC_URL" eth_getTransactionReceipt "$transaction_hash")"
     [[ "$live_receipt" != "null" ]] || fail "missing live receipt for $transaction_hash"
     actual_receipt="$(printf '%s' "$live_receipt" | normalized_receipt)"
-    if [[ "$expected_receipt" != "$actual_receipt" ]]; then
-      fail "live receipt mismatch for $transaction_hash"
-    fi
+    [[ "$expected_receipt" == "$actual_receipt" ]] || fail "live receipt mismatch for $transaction_hash"
 
     expected_input_hash="$(printf '%s' "$row" | jq -r '.inputHash')"
     expected_transaction="$(printf '%s' "$row" | normalized_transaction "$expected_input_hash")"
     live_transaction="$(cast_retry cast rpc --rpc-url "$RPC_URL" eth_getTransactionByHash "$transaction_hash")"
     [[ "$live_transaction" != "null" ]] || fail "missing live transaction for $transaction_hash"
     live_input="$(printf '%s' "$live_transaction" | jq -r '.input')"
-    live_input_hash="$(cast keccak "$live_input")" || fail "could not hash live calldata for $transaction_hash"
+    live_input_hash="$(cast keccak "$live_input")"
     actual_transaction="$(printf '%s' "$live_transaction" | normalized_transaction "$live_input_hash")"
-    if [[ "$expected_transaction" != "$actual_transaction" ]]; then
-      fail "live sender, target, calldata, or value mismatch for $transaction_hash"
-    fi
+    [[ "$expected_transaction" == "$actual_transaction" ]] \
+      || fail "live sender, target, calldata, or value mismatch for $transaction_hash"
   done < <(jq -c '.transactions[]' "$RECEIPTS")
 
-  # Idempotent reruns may retain an earlier, already verified scan boundary.
   if [[ "$deployment_block" -gt "$min_block" ]]; then
-    fail "deploymentBlock $deployment_block is later than the earliest receipt block $min_block"
+    fail "deploymentBlock $deployment_block is later than earliest receipt block $min_block"
   fi
-  receipt_count="$(jq '.transactions | length' "$RECEIPTS")"
-  echo "Verified $receipt_count live deployment receipts."
+  echo "Verified $(jq '.transactions | length' "$RECEIPTS") live deployment receipts."
+}
+
+append_facet_routes() {
+  local routes_file="$1"
+  local contract_name="$2"
+  local facet_address="$3"
+  local code_hash="$4"
+  local kind="$5"
+  local mode="$6"
+
+  if [[ "$mode" == "mutating" ]]; then
+    forge inspect "$contract_name" methodIdentifiers --json \
+      | jq -r 'to_entries[]
+          | select(.key | test("^[^(]+\\(bytes32(,|\\))"))
+          | "0x" + .value' \
+      | while IFS= read -r selector; do
+          printf '%s|%s|%s|%s\n' "$selector" "$facet_address" "$code_hash" "$kind" >>"$routes_file"
+        done
+  else
+    forge inspect "$contract_name" methodIdentifiers --json \
+      | jq -r 'to_entries[]
+          | select(
+              .key != "cancelOwnershipHandover()"
+              and .key != "completeOwnershipHandover(address)"
+              and .key != "renounceOwnership()"
+              and .key != "requestOwnershipHandover()"
+              and .key != "transferOwnership(address)"
+            )
+          | "0x" + .value' \
+      | while IFS= read -r selector; do
+          printf '%s|%s|%s|%s\n' "$selector" "$facet_address" "$code_hash" "$kind" >>"$routes_file"
+        done
+  fi
+}
+
+# The root artifact is immutable deployment evidence. Its "active*" fields
+# describe the genesis ceremony and must remain published, but need not remain
+# the registry's current owner or release after promotion.
+verify_genesis_release_manifest() {
+  local registry kernel factory release_hash expected_manifest expected_layout layout_preimage
+  local expected_kernel_hash live_kernel_hash metadata routes_file sorted_file duplicate expected_count actual_count
+  local selector facet_address code_hash kind route_json
+  local routes_array routes_hash type_hash expected_release_hash actual_selectors expected_selectors
+
+  registry="$(field protocolFacetRegistry)"
+  kernel="$(field boardroomKernel)"
+  factory="$(field boardroomFactory)"
+  release_hash="$(field activeFacetSetHash)"
+
+  expected_manifest="$(
+    sed -nE 's/.*RELEASE_A = (0x[0-9a-fA-F]{64});.*/\1/p' \
+      src/boardroom/diamond/BoardroomManifestHashes.sol
+  )"
+  [[ "$expected_manifest" =~ ^0x[0-9a-fA-F]{64}$ ]] || fail "could not read local release-A manifest hash"
+  layout_preimage="$(
+    sed -nE 's/.*RELEASE_A = keccak256\("([^"]+)"\);.*/\1/p' \
+      src/boardroom/diamond/BoardroomStorageLayouts.sol
+  )"
+  [[ -n "$layout_preimage" ]] || fail "could not read local release-A storage layout preimage"
+  expected_layout="$(cast keccak "$layout_preimage")"
+  expect_equal "genesis artifact release" "1" "$(field activeRelease)"
+  expect_equal "genesis artifact storage version" "1" "$(field requiredStorageVersion)"
+  expect_hash_equal "genesis manifest hash" "$expected_manifest" "$(field manifestHash)"
+  expect_hash_equal "genesis storage layout" "$expected_layout" "$(field requiredStorageLayoutHash)"
+
+  expected_kernel_hash="$(encoded_hash "f(bytes4[])" "$(kernel_selectors_array)")"
+  expect_hash_equal "kernel selector set artifact hash" "$expected_kernel_hash" "$(field kernelSelectorSetHash)"
+  live_kernel_hash="$(call_value "$registry" "kernelSelectorSetHash()(bytes32)")"
+  expect_hash_equal "registry kernel selector set hash" "$expected_kernel_hash" "$live_kernel_hash"
+  expect_hash_equal \
+    "kernel selector set hash" \
+    "$expected_kernel_hash" \
+    "$(call_value "$kernel" "kernelSelectorSetHash()(bytes32)")"
+  expect_address_equal \
+    "kernel registry" \
+    "$registry" \
+    "$(call_value "$kernel" "facetRegistry()(address)")"
+
+  metadata="$(call_json "$registry" \
+    "facetSetMetadata(bytes32)(bool,uint64,uint64,bytes32,bytes32,bytes32,address,bytes4,uint256)" \
+    "$release_hash")"
+  expect_equal "genesis release published" "true" "$(printf '%s' "$metadata" | jq -r '.[0]')"
+  expect_equal "published genesis release" "1" "$(printf '%s' "$metadata" | jq -r '.[1]')"
+  expect_equal "published genesis storage version" "1" "$(printf '%s' "$metadata" | jq -r '.[2]')"
+  expect_hash_equal \
+    "published genesis predecessor" \
+    "0x0000000000000000000000000000000000000000000000000000000000000000" \
+    "$(printf '%s' "$metadata" | jq -r '.[3]')"
+  expect_hash_equal \
+    "published genesis storage layout" "$expected_layout" "$(printf '%s' "$metadata" | jq -r '.[4]')"
+  expect_hash_equal \
+    "published genesis manifest hash" "$expected_manifest" "$(printf '%s' "$metadata" | jq -r '.[5]')"
+  expect_address_equal \
+    "release-A migration facet" \
+    "0x0000000000000000000000000000000000000000" \
+    "$(printf '%s' "$metadata" | jq -r '.[6]')"
+  expect_equal "release-A migration selector" "0x00000000" "$(printf '%s' "$metadata" | jq -r '.[7]')"
+
+  routes_file="$(mktemp)"
+  sorted_file="$(mktemp)"
+  cleanup_routes() {
+    rm -f "$routes_file" "$sorted_file"
+  }
+  trap cleanup_routes RETURN EXIT
+  append_facet_routes \
+    "$routes_file" BoardroomAuthorityFacet "$(field authorityFacet)" "$(field authorityFacetCodeHash)" 1 mutating
+  append_facet_routes \
+    "$routes_file" BoardroomExecutionFacet "$(field executionFacet)" "$(field executionFacetCodeHash)" 1 mutating
+  append_facet_routes \
+    "$routes_file" BoardroomMarketFacet "$(field marketFacet)" "$(field marketFacetCodeHash)" 1 mutating
+  append_facet_routes \
+    "$routes_file" BoardroomRedemptionFacet "$(field redemptionFacet)" "$(field redemptionFacetCodeHash)" 1 mutating
+  append_facet_routes "$routes_file" BoardroomViewFacet "$(field viewFacet)" "$(field viewFacetCodeHash)" 0 view
+  sort -t'|' -k1,1 "$routes_file" >"$sorted_file"
+  duplicate="$(cut -d'|' -f1 "$sorted_file" | uniq -d | first_token || true)"
+  [[ -z "$duplicate" ]] || fail "local release manifest has duplicate selector $duplicate"
+  expected_count="$(wc -l <"$sorted_file" | tr -d ' ')"
+  expect_equal "genesis selector count artifact" "$expected_count" "$(field selectorCount)"
+  expect_equal "genesis selector count metadata" "$expected_count" "$(printf '%s' "$metadata" | jq -r '.[8]')"
+
+  actual_selectors="$(
+    call_json "$registry" "facetSetSelectors(bytes32)(bytes4[])" "$release_hash" \
+      | jq -r '.[0][]' | lower
+  )"
+  expected_selectors="$(cut -d'|' -f1 "$sorted_file" | lower)"
+  [[ "$actual_selectors" == "$expected_selectors" ]] \
+    || fail "published genesis selector set differs from local release-A manifest"
+  actual_count="$(printf '%s\n' "$actual_selectors" | awk 'NF { count++ } END { print count + 0 }')"
+  expect_equal "published genesis selector count" "$expected_count" "$actual_count"
+
+  while IFS='|' read -r selector facet_address code_hash kind; do
+    route_json="$(call_json \
+      "$registry" \
+      "facetSetRoute(bytes32,bytes4)(address,bytes32,uint8)" \
+      "$release_hash" \
+      "$selector")"
+    expect_address_equal "published route $selector facet" "$facet_address" "$(printf '%s' "$route_json" | jq -r '.[0]')"
+    expect_hash_equal "published route $selector code hash" "$code_hash" "$(printf '%s' "$route_json" | jq -r '.[1]')"
+    expect_equal "published route $selector kind" "$kind" "$(printf '%s' "$route_json" | jq -r '.[2]')"
+  done <"$sorted_file"
+
+  routes_array="$(
+    awk -F'|' '
+      BEGIN { printf "[" }
+      {
+        if (NR > 1) printf ","
+        printf "(%s,%s,%s,%s)", $1, $2, $3, $4
+      }
+      END { print "]" }
+    ' "$sorted_file"
+  )"
+  routes_hash="$(encoded_hash "f((bytes4,address,bytes32,uint8)[])" "$routes_array")"
+  type_hash="$(
+    cast keccak \
+      "ProtocolFacetSet(uint64 release,uint64 requiredStorageVersion,bytes32 predecessorFacetSetHash,bytes32 storageLayoutHash,bytes32 manifestHash,bytes32 routesHash,address migrationFacet,bytes4 migrationSelector)"
+  )"
+  expected_release_hash="$(
+    encoded_hash \
+      "f(bytes32,uint64,uint64,bytes32,bytes32,bytes32,bytes32,address,bytes4)" \
+      "$type_hash" \
+      1 \
+      1 \
+      "0x0000000000000000000000000000000000000000000000000000000000000000" \
+      "$expected_layout" \
+      "$expected_manifest" \
+      "$routes_hash" \
+      "0x0000000000000000000000000000000000000000" \
+      "0x00000000"
+  )"
+  expect_hash_equal "locally reproduced genesis facet-set hash" "$expected_release_hash" "$release_hash"
+
+  expect_address_equal \
+    "factory facet registry" \
+    "$registry" \
+    "$(call_value "$factory" "facetRegistry()(address)")"
+  expect_address_equal \
+    "factory Boardroom kernel" \
+    "$kernel" \
+    "$(call_value "$factory" "boardroomKernelLogic()(address)")"
+  trap - RETURN EXIT
+  cleanup_routes
+}
+
+# Authenticate mutable registry state from the immutable registry root and
+# runtime code hash without treating live-derived owner/hash values as
+# authorization inputs.
+verify_live_active_release() {
+  local registry block_number block_hash final_block_hash registry_code registry_code_hash live_owner
+  local active_hash metadata published release required_storage_version predecessor_hash
+  local storage_layout_hash manifest_hash migration_facet migration_selector selector_count
+  local active_migration predecessor_metadata predecessor_release selector_json
+  local routes_file route_records selector previous_selector route_json facet_address code_hash kind
+  local active_json facet_code live_code_hash migration_route_count migration_route_facet
+  local migration_route_selector routes_array routes_hash type_hash expected_release_hash
+  local manifest_tuple registry_release_hash expected_facets_json expected_facet_addresses_json
+  local actual_facet_addresses_json actual_facets_json expected_facet grouped_facet
+  local expected_function_selectors actual_function_selectors empty_facet_selectors
+  local -a selectors=()
+
+  registry="$(field protocolFacetRegistry)"
+  block_number="$(cast_retry cast block-number --rpc-url "$RPC_URL" | first_token)"
+  [[ "$block_number" =~ ^[0-9]+$ ]] || fail "RPC returned a malformed verification block number"
+  block_hash="$(cast_retry cast block "$block_number" --field hash --rpc-url "$RPC_URL" | first_token)"
+  [[ "$block_hash" =~ ^0x[0-9a-fA-F]{64}$ ]] || fail "RPC returned a malformed verification block hash"
+
+  registry_code="$(cast_retry cast code "$registry" --block "$block_number" --rpc-url "$RPC_URL")"
+  [[ "$registry_code" != "0x" ]] || fail "ProtocolFacetRegistry has no code at pinned block $block_number"
+  registry_code_hash="$(cast keccak "$registry_code")"
+  expect_hash_equal \
+    "pinned ProtocolFacetRegistry code hash" \
+    "$(field protocolFacetRegistryCodeHash)" \
+    "$registry_code_hash"
+
+  live_owner="$(call_value_at "$block_number" "$registry" "owner()(address)")"
+  [[ "$live_owner" =~ ^0x[0-9a-fA-F]{40}$ ]] || fail "live ProtocolFacetRegistry owner is malformed"
+  [[ "$(printf '%s' "$live_owner" | lower)" != "0x0000000000000000000000000000000000000000" ]] \
+    || fail "live ProtocolFacetRegistry owner is zero"
+  echo "Verified live ProtocolFacetRegistry owner is nonzero: $live_owner"
+
+  active_hash="$(call_value_at "$block_number" "$registry" "activeFacetSetHash()(bytes32)")"
+  [[ "$active_hash" =~ ^0x[0-9a-fA-F]{64}$ ]] || fail "active facet-set hash is malformed"
+  [[ "$(printf '%s' "$active_hash" | lower)" != \
+    "0x0000000000000000000000000000000000000000000000000000000000000000" ]] \
+    || fail "active facet-set hash is zero"
+
+  metadata="$(call_json_at \
+    "$block_number" \
+    "$registry" \
+    "facetSetMetadata(bytes32)(bool,uint64,uint64,bytes32,bytes32,bytes32,address,bytes4,uint256)" \
+    "$active_hash")"
+  published="$(printf '%s' "$metadata" | jq -er '.[0]')"
+  release="$(printf '%s' "$metadata" | jq -er '.[1]')"
+  required_storage_version="$(printf '%s' "$metadata" | jq -er '.[2]')"
+  predecessor_hash="$(printf '%s' "$metadata" | jq -er '.[3]')"
+  storage_layout_hash="$(printf '%s' "$metadata" | jq -er '.[4]')"
+  manifest_hash="$(printf '%s' "$metadata" | jq -er '.[5]')"
+  migration_facet="$(printf '%s' "$metadata" | jq -er '.[6]')"
+  migration_selector="$(printf '%s' "$metadata" | jq -er '.[7]')"
+  selector_count="$(printf '%s' "$metadata" | jq -er '.[8]')"
+
+  expect_equal "active release published" "true" "$published"
+  [[ "$release" =~ ^[0-9]+$ && "$release" -gt 0 ]] || fail "active release must be positive"
+  [[ "$required_storage_version" =~ ^[0-9]+$ ]] || fail "active storage version is malformed"
+  [[ "$storage_layout_hash" =~ ^0x[0-9a-fA-F]{64}$ ]] || fail "active storage layout hash is malformed"
+  [[ "$(printf '%s' "$storage_layout_hash" | lower)" != \
+    "0x0000000000000000000000000000000000000000000000000000000000000000" ]] \
+    || fail "active storage layout hash is zero"
+  [[ "$manifest_hash" =~ ^0x[0-9a-fA-F]{64}$ ]] || fail "active manifest hash is malformed"
+  [[ "$(printf '%s' "$manifest_hash" | lower)" != \
+    "0x0000000000000000000000000000000000000000000000000000000000000000" ]] \
+    || fail "active manifest hash is zero"
+  [[ "$selector_count" =~ ^[0-9]+$ && "$selector_count" -le 256 ]] \
+    || fail "active selector count is malformed or exceeds 256"
+
+  if [[ "$release" == "1" ]]; then
+    expect_hash_equal \
+      "release-1 predecessor" \
+      "0x0000000000000000000000000000000000000000000000000000000000000000" \
+      "$predecessor_hash"
+  else
+    [[ "$predecessor_hash" =~ ^0x[0-9a-fA-F]{64}$ ]] || fail "active predecessor hash is malformed"
+    [[ "$(printf '%s' "$predecessor_hash" | lower)" != \
+      "0x0000000000000000000000000000000000000000000000000000000000000000" ]] \
+      || fail "post-genesis active release has a zero predecessor"
+    predecessor_metadata="$(call_json_at \
+      "$block_number" \
+      "$registry" \
+      "facetSetMetadata(bytes32)(bool,uint64,uint64,bytes32,bytes32,bytes32,address,bytes4,uint256)" \
+      "$predecessor_hash")"
+    expect_equal "active predecessor published" "true" "$(printf '%s' "$predecessor_metadata" | jq -er '.[0]')"
+    predecessor_release="$(printf '%s' "$predecessor_metadata" | jq -er '.[1]')"
+    [[ "$predecessor_release" =~ ^[0-9]+$ && "$predecessor_release" -lt "$release" ]] \
+      || fail "active predecessor release is not lower than $release"
+  fi
+
+  expect_equal \
+    "live active release" \
+    "$release" \
+    "$(call_value_at "$block_number" "$registry" "activeRelease()(uint64)")"
+  expect_equal \
+    "live active storage version" \
+    "$required_storage_version" \
+    "$(call_value_at "$block_number" "$registry" "activeStorageVersion()(uint64)")"
+  expect_hash_equal \
+    "live active storage layout" \
+    "$storage_layout_hash" \
+    "$(call_value_at "$block_number" "$registry" "activeStorageLayoutHash()(bytes32)")"
+  expect_hash_equal \
+    "live release-to-hash index" \
+    "$active_hash" \
+    "$(call_value_at "$block_number" "$registry" "facetSetHashForRelease(uint64)(bytes32)" "$release")"
+
+  active_migration="$(call_json_at "$block_number" "$registry" "activeMigration()(address,bytes4)")"
+  expect_address_equal \
+    "live active migration facet" "$migration_facet" "$(printf '%s' "$active_migration" | jq -er '.[0]')"
+  expect_equal \
+    "live active migration selector" \
+    "$(printf '%s' "$migration_selector" | lower)" \
+    "$(printf '%s' "$active_migration" | jq -er '.[1]' | lower)"
+
+  if [[ "$(printf '%s' "$migration_facet" | lower)" == \
+    "0x0000000000000000000000000000000000000000" ]]; then
+    expect_equal "zero migration metadata selector" "0x00000000" "$(printf '%s' "$migration_selector" | lower)"
+  else
+    [[ "$migration_facet" =~ ^0x[0-9a-fA-F]{40}$ ]] || fail "active migration facet is malformed"
+    [[ "$(printf '%s' "$migration_selector" | lower)" != "0x00000000" ]] \
+      || fail "nonzero migration facet has a zero selector"
+  fi
+
+  selector_json="$(call_json_at "$block_number" "$registry" "facetSetSelectors(bytes32)(bytes4[])" "$active_hash")"
+  mapfile -t selectors < <(printf '%s' "$selector_json" | jq -r '.[0][]?' | lower)
+  expect_equal "live active selector count" "$selector_count" "${#selectors[@]}"
+
+  routes_file="$(mktemp)"
+  route_records="$(mktemp)"
+  cleanup_live_release() {
+    rm -f "$routes_file" "$route_records"
+  }
+  trap cleanup_live_release RETURN EXIT
+
+  previous_selector=""
+  migration_route_count=0
+  migration_route_facet=""
+  migration_route_selector=""
+  for selector in "${selectors[@]}"; do
+    [[ "$selector" =~ ^0x[0-9a-f]{8}$ ]] || fail "malformed active selector $selector"
+    if [[ -n "$previous_selector" && ! "$selector" > "$previous_selector" ]]; then
+      fail "active selectors are not strictly ascending at $selector"
+    fi
+    previous_selector="$selector"
+
+    route_json="$(call_json_at \
+      "$block_number" \
+      "$registry" \
+      "facetSetRoute(bytes32,bytes4)(address,bytes32,uint8)" \
+      "$active_hash" \
+      "$selector")"
+    facet_address="$(printf '%s' "$route_json" | jq -er '.[0]')"
+    code_hash="$(printf '%s' "$route_json" | jq -er '.[1]')"
+    kind="$(printf '%s' "$route_json" | jq -er '.[2]')"
+    [[ "$facet_address" =~ ^0x[0-9a-fA-F]{40}$ ]] || fail "active route $selector facet is malformed"
+    [[ "$(printf '%s' "$facet_address" | lower)" != \
+      "0x0000000000000000000000000000000000000000" ]] \
+      || fail "active route $selector has a zero facet"
+    [[ "$(printf '%s' "$facet_address" | lower)" != "$(printf '%s' "$registry" | lower)" ]] \
+      || fail "active route $selector targets the registry"
+    [[ "$code_hash" =~ ^0x[0-9a-fA-F]{64}$ ]] || fail "active route $selector code hash is malformed"
+    [[ "$(printf '%s' "$code_hash" | lower)" != \
+      "0x0000000000000000000000000000000000000000000000000000000000000000" ]] \
+      || fail "active route $selector has a zero code hash"
+    [[ "$kind" == "0" || "$kind" == "1" || "$kind" == "2" ]] \
+      || fail "active route $selector has invalid kind $kind"
+    expect_equal \
+      "active route $selector is not kernel-reserved" \
+      "false" \
+      "$(call_value_at "$block_number" "$registry" "isReservedKernelSelector(bytes4)(bool)" "$selector")"
+
+    active_json="$(call_json_at \
+      "$block_number" \
+      "$registry" \
+      "route(bytes4)(address,bytes32,uint8,uint64)" \
+      "$selector")"
+    expect_address_equal \
+      "live route $selector facet" "$facet_address" "$(printf '%s' "$active_json" | jq -er '.[0]')"
+    expect_hash_equal \
+      "live route $selector code hash" "$code_hash" "$(printf '%s' "$active_json" | jq -er '.[1]')"
+    expect_equal "live route $selector kind" "$kind" "$(printf '%s' "$active_json" | jq -er '.[2]')"
+    expect_equal \
+      "live route $selector storage version" \
+      "$required_storage_version" \
+      "$(printf '%s' "$active_json" | jq -er '.[3]')"
+    expect_address_equal \
+      "facetAddress loupe route $selector" \
+      "$facet_address" \
+      "$(call_value_at "$block_number" "$registry" "facetAddress(bytes4)(address)" "$selector")"
+
+    facet_code="$(cast_retry cast code "$facet_address" --block "$block_number" --rpc-url "$RPC_URL")"
+    [[ "$facet_code" != "0x" ]] || fail "active facet $facet_address has no code at pinned block $block_number"
+    live_code_hash="$(cast keccak "$facet_code")"
+    expect_hash_equal "active facet $facet_address runtime code hash" "$code_hash" "$live_code_hash"
+
+    printf '%s|%s|%s|%s\n' \
+      "$selector" \
+      "$(printf '%s' "$facet_address" | lower)" \
+      "$(printf '%s' "$code_hash" | lower)" \
+      "$kind" >>"$routes_file"
+    jq -cn \
+      --arg selector "$selector" \
+      --arg facet "$(printf '%s' "$facet_address" | lower)" \
+      --arg code_hash "$(printf '%s' "$code_hash" | lower)" \
+      --argjson kind "$kind" \
+      '{selector: $selector, facet: $facet, codeHash: $code_hash, kind: $kind}' >>"$route_records"
+    if [[ "$kind" == "2" ]]; then
+      migration_route_count=$((migration_route_count + 1))
+      migration_route_facet="$facet_address"
+      migration_route_selector="$selector"
+    fi
+  done
+
+  if [[ "$(printf '%s' "$migration_facet" | lower)" == \
+    "0x0000000000000000000000000000000000000000" ]]; then
+    [[ "$migration_route_count" == "0" ]] || fail "active Migration route lacks migration metadata"
+  else
+    [[ "$migration_route_count" == "1" ]] || fail "active migration metadata must identify exactly one route"
+    expect_address_equal "active migration route facet" "$migration_facet" "$migration_route_facet"
+    expect_equal \
+      "active migration route selector" \
+      "$(printf '%s' "$migration_selector" | lower)" \
+      "$(printf '%s' "$migration_route_selector" | lower)"
+  fi
+
+  routes_array="$(
+    awk -F'|' '
+      BEGIN { printf "[" }
+      {
+        if (NR > 1) printf ","
+        printf "(%s,%s,%s,%s)", $1, $2, $3, $4
+      }
+      END { print "]" }
+    ' "$routes_file"
+  )"
+  routes_hash="$(encoded_hash "f((bytes4,address,bytes32,uint8)[])" "$routes_array")"
+  type_hash="$(
+    cast keccak \
+      "ProtocolFacetSet(uint64 release,uint64 requiredStorageVersion,bytes32 predecessorFacetSetHash,bytes32 storageLayoutHash,bytes32 manifestHash,bytes32 routesHash,address migrationFacet,bytes4 migrationSelector)"
+  )"
+  expected_release_hash="$(
+    encoded_hash \
+      "f(bytes32,uint64,uint64,bytes32,bytes32,bytes32,bytes32,address,bytes4)" \
+      "$type_hash" \
+      "$release" \
+      "$required_storage_version" \
+      "$predecessor_hash" \
+      "$storage_layout_hash" \
+      "$manifest_hash" \
+      "$routes_hash" \
+      "$migration_facet" \
+      "$migration_selector"
+  )"
+  expect_hash_equal "independently reconstructed live facet-set hash" "$expected_release_hash" "$active_hash"
+
+  manifest_tuple="($release,$required_storage_version,$predecessor_hash,$storage_layout_hash,$manifest_hash,$routes_array,$migration_facet,$migration_selector)"
+  registry_release_hash="$(call_value_at \
+    "$block_number" \
+    "$registry" \
+    "computeFacetSetHash((uint64,uint64,bytes32,bytes32,bytes32,(bytes4,address,bytes32,uint8)[],address,bytes4))(bytes32)" \
+    "$manifest_tuple")"
+  expect_hash_equal "registry-computed live facet-set hash" "$active_hash" "$registry_release_hash"
+
+  expected_facets_json="$(
+    jq -sc '
+      reduce .[] as $route ([];
+        ($route.facet) as $facet
+        | (map(.facetAddress) | index($facet)) as $index
+        | if $index == null then
+            . + [{facetAddress: $facet, functionSelectors: [$route.selector]}]
+          else
+            .[$index].functionSelectors += [$route.selector]
+          end
+      )
+    ' "$route_records"
+  )"
+  expected_facet_addresses_json="$(printf '%s' "$expected_facets_json" | jq -c '[.[].facetAddress]')"
+  actual_facet_addresses_json="$(
+    call_json_at "$block_number" "$registry" "facetAddresses()(address[])" \
+      | jq -ce '.[0] | map(ascii_downcase)'
+  )"
+  expect_json_equal \
+    "live facetAddresses loupe inventory" \
+    "$expected_facet_addresses_json" \
+    "$actual_facet_addresses_json"
+
+  actual_facets_json="$(
+    call_json_at "$block_number" "$registry" "facets()((address,bytes4[])[])" \
+      | jq -ce '
+          .[0]
+          | map({
+              facetAddress: (.[0] | ascii_downcase),
+              functionSelectors: (.[1] | map(ascii_downcase))
+            })
+        '
+  )"
+  expect_json_equal "live facets loupe inventory" "$expected_facets_json" "$actual_facets_json"
+
+  while IFS= read -r expected_facet; do
+    grouped_facet="$(printf '%s' "$expected_facet" | jq -er '.facetAddress')"
+    expected_function_selectors="$(printf '%s' "$expected_facet" | jq -c '.functionSelectors')"
+    actual_function_selectors="$(
+      call_json_at \
+        "$block_number" \
+        "$registry" \
+        "facetFunctionSelectors(address)(bytes4[])" \
+        "$grouped_facet" \
+        | jq -ce '.[0] | map(ascii_downcase)'
+    )"
+    expect_json_equal \
+      "live facetFunctionSelectors inventory for $grouped_facet" \
+      "$expected_function_selectors" \
+      "$actual_function_selectors"
+  done < <(printf '%s' "$expected_facets_json" | jq -c '.[]')
+
+  if [[ "$selector_count" == "0" ]]; then
+    expect_address_equal \
+      "empty-release facetAddress" \
+      "0x0000000000000000000000000000000000000000" \
+      "$(call_value_at "$block_number" "$registry" "facetAddress(bytes4)(address)" "0x00000000")"
+    empty_facet_selectors="$(
+      call_json_at \
+        "$block_number" \
+        "$registry" \
+        "facetFunctionSelectors(address)(bytes4[])" \
+        "0x0000000000000000000000000000000000000000" \
+        | jq -ce '.[0]'
+    )"
+    expect_json_equal "empty-release facetFunctionSelectors" "[]" "$empty_facet_selectors"
+  fi
+
+  if [[ "$REQUIRE_DEPLOYMENT" == "1" ]]; then
+    expect_address_equal \
+      "initial candidate live registry owner" \
+      "$(field protocolFacetRegistryOwner)" \
+      "$live_owner"
+    expect_hash_equal "initial candidate active facet-set hash" "$(field activeFacetSetHash)" "$active_hash"
+    expect_equal "initial candidate active release" "$(field activeRelease)" "$release"
+    expect_equal \
+      "initial candidate active storage version" "$(field requiredStorageVersion)" "$required_storage_version"
+    expect_hash_equal \
+      "initial candidate active storage layout" "$(field requiredStorageLayoutHash)" "$storage_layout_hash"
+  fi
+
+  final_block_hash="$(cast_retry cast block "$block_number" --field hash --rpc-url "$RPC_URL" | first_token)"
+  expect_hash_equal "pinned live-release block hash after verification" "$block_hash" "$final_block_hash"
+  echo "Verified live active Boardroom release $release at block $block_number ($block_hash)."
+
+  trap - RETURN EXIT
+  cleanup_live_release
+}
+
+verify_protocol_wiring() {
+  local governance registry policy asset fee_router grants amm router locker distribution rewards bonds factory
+
+  governance="$(field protocolGovernance)"
+  registry="$(field protocolFacetRegistry)"
+  policy="$(field boardroomPolicyRegistry)"
+  asset="$(field assetPolicy)"
+  fee_router="$(field protocolFeeRouter)"
+  grants="$(field tokenGrantFactory)"
+  amm="$(field ammFactory)"
+  router="$(field ammRouter)"
+  locker="$(field lockedLiquidityFactory)"
+  distribution="$(field distributionFactory)"
+  rewards="$(field boardroomRewardsFactory)"
+  bonds="$(field bondMarketFactory)"
+  factory="$(field boardroomFactory)"
+
+  expect_address_equal \
+    "ProtocolFacetRegistry genesis artifact owner" \
+    "$governance" \
+    "$(field protocolFacetRegistryOwner)"
+
+  for owner_spec in \
+    "BoardroomPolicyRegistry|$policy|boardroomPolicyRegistryOwner" \
+    "AssetPolicy|$asset|assetPolicyOwner" \
+    "ProtocolFeeRouter|$fee_router|protocolFeeRouterOwner" \
+    "TokenGrantFactory|$grants|tokenGrantFactoryOwner" \
+    "AmmFactory|$amm|ammFactoryOwner"; do
+    IFS='|' read -r label address owner_field <<<"$owner_spec"
+    expect_address_equal "$label artifact owner" "$governance" "$(field "$owner_field")"
+    expect_address_equal "$label live owner" "$governance" "$(call_value "$address" "owner()(address)")"
+  done
+
+  expect_address_equal \
+    "BoardroomFactory policy registry" "$policy" "$(call_value "$factory" "policyRegistry()(address)")"
+  expect_address_equal \
+    "BoardroomFactory wrapped native" "$(field wrappedNative)" "$(call_value "$factory" "wrappedNative()(address)")"
+  expect_address_equal \
+    "BoardroomFactory redemption payout" \
+    "$(field boardroomRedemptionPayout)" \
+    "$(call_value "$factory" "redemptionPayoutLogic()(address)")"
+  expect_address_equal \
+    "BoardroomFactory governance helper" \
+    "$(field boardroomGovernanceLogic)" \
+    "$(call_value "$factory" "governanceLogic()(address)")"
+  expect_address_equal \
+    "BoardroomFactory market helper" \
+    "$(field boardroomMarketLogic)" \
+    "$(call_value "$factory" "marketLogic()(address)")"
+  expect_address_equal \
+    "BoardroomFactory controller factory" \
+    "$(field boardroomControllerFactory)" \
+    "$(call_value "$factory" "controllerFactory()(address)")"
+  expect_address_equal \
+    "BoardroomControllerFactory BoardroomFactory" \
+    "$factory" \
+    "$(call_value "$(field boardroomControllerFactory)" "boardroomFactory()(address)")"
+  expect_address_equal \
+    "BoardroomControllerFactory implementation" \
+    "$(field boardroomControllerLogic)" \
+    "$(call_value "$(field boardroomControllerFactory)" "controllerImplementation()(address)")"
+
+  expect_address_equal \
+    "ProtocolFeeRouter recipient" "$(field protocolTreasury)" "$(call_value "$fee_router" "feeRecipient()(address)")"
+  expect_address_equal \
+    "TokenGrantFactory fee recipient" "$fee_router" "$(call_value "$grants" "feeRecipient()(address)")"
+  expect_equal "TokenGrantFactory creation fee" "$(field creationFee)" "$(call_value "$grants" "creationFee()(uint256)")"
+  expect_address_equal \
+    "TokenGrantFactory BoardroomFactory" "$factory" "$(call_value "$grants" "boardroomFactory()(address)")"
+  expect_address_equal "AmmFactory fee manager" "$(field ammFeeManager)" "$(call_value "$amm" "feeManager()(address)")"
+  expect_address_equal \
+    "AmmFactory protocol fee recipient" "$fee_router" "$(call_value "$amm" "protocolFeeRecipient()(address)")"
+  expect_address_equal "AmmFactory router" "$router" "$(call_value "$amm" "liquidityRouter()(address)")"
+  expect_address_equal "AmmFactory reservation manager" "$locker" "$(call_value "$amm" "reservationManager()(address)")"
+  expect_address_equal "AmmFactory BoardroomFactory" "$factory" "$(call_value "$amm" "boardroomFactory()(address)")"
+  expect_address_equal "AmmRouter factory" "$amm" "$(call_value "$router" "factory()(address)")"
+  expect_address_equal \
+    "AmmRouter wrapped native" "$(field wrappedNative)" "$(call_value "$router" "wrappedNative()(address)")"
+  expect_address_equal "LockedLiquidityFactory router" "$router" "$(call_value "$locker" "ammRouter()(address)")"
+  expect_address_equal \
+    "LockedLiquidityFactory BoardroomFactory" "$factory" "$(call_value "$locker" "boardroomFactory()(address)")"
+  expect_address_equal \
+    "DistributionFactory locker" "$locker" "$(call_value "$distribution" "lockedLiquidityFactory()(address)")"
+  expect_address_equal \
+    "DistributionFactory grants" "$grants" "$(call_value "$distribution" "tokenGrantFactory()(address)")"
+  expect_address_equal \
+    "DistributionFactory BoardroomFactory" "$factory" "$(call_value "$distribution" "boardroomFactory()(address)")"
+  expect_address_equal \
+    "BoardroomRewardsFactory BoardroomFactory" "$factory" "$(call_value "$rewards" "boardroomFactory()(address)")"
+  expect_address_equal "BondMarketFactory AmmFactory" "$amm" "$(call_value "$bonds" "ammFactory()(address)")"
+  expect_address_equal \
+    "BondMarketFactory BoardroomFactory" "$factory" "$(call_value "$bonds" "boardroomFactory()(address)")"
+
+  expect_equal "AssetPolicy wrapped native" "true" \
+    "$(call_value "$asset" "isAssetAllowed(address)(bool)" "$(field wrappedNative)")"
+  expect_equal "AssetPolicy registry allowance" "true" \
+    "$(call_value "$policy" "isPolicyAllowed(address)(bool)" "$asset")"
+  for module in "$grants" "$distribution" "$bonds" "$locker" "$rewards"; do
+    expect_equal "module policy identity $module" "true" \
+      "$(call_value "$policy" "isModulePolicy(address)(bool)" "$module")"
+    expect_equal "module policy allowance $module" "true" \
+      "$(call_value "$policy" "isPolicyAllowed(address)(bool)" "$module")"
+    expect_equal "module approval allowance $module" "true" \
+      "$(call_value "$asset" "isApprovalSpenderAllowed(address)(bool)" "$module")"
+  done
 }
 
 [[ -f "$ARTIFACT" ]] || fail "missing artifact $ARTIFACT"
 
-artifact_status="$(field status)"
-if [[ "$artifact_status" == "pending" ]]; then
+if [[ "$(field status)" == "pending" ]]; then
   if [[ "$REQUIRE_DEPLOYMENT" == "1" ]]; then
-    fail "Deployment artifact is still marked pending"
+    fail "deployment artifact is still marked pending"
   fi
   echo "Skipping artifact verification: $ARTIFACT is marked pending"
   exit 0
 fi
 
-chain_id="$(cast_retry cast chain-id --rpc-url "$RPC_URL" | first_token)"
-expect_equal "chain id" "$(field chainId)" "$chain_id"
-
 for required in \
-  sourceCommit deterministicDeployment deterministicDeploymentVersion deterministicReleaseCodeHash \
-  deployer create2Factory deterministicDeployer deterministicDeployerOwner \
-  protocolGovernance protocolTreasury protocolFeeRouter protocolFeeRouterOwner protocolFeeRouterRecipient \
-  boardroomPolicyRegistry policyRegistryOwner assetPolicy assetPolicyOwner boardroomFactory \
-  boardroomGovernanceLogic boardroomRedemptionPayout boardroomLogic \
-  boardroomControllerFactory boardroomControllerLogic boardroomMarketLogic \
-  tokenGrantFactory factoryOwner tokenGrantFeeRecipient tokenGrantLogic creationFee \
-  ammFactory ammPoolImplementation ammFactoryOwner ammFeeManager ammProtocolFeeRecipient ammLiquidityRouter \
-  ammReservationManager ammRouter wrappedNative \
-  lockedLiquidityFactory lockedLiquidityLogic \
-  distributionFactory fixedPriceSaleLogic dutchAuctionLogic migratingBondingCurveLogic merkleAirdropLogic \
-  boardroomRewardsFactory boardroomRewardsLogic bondMarketFactory bondMarketLogic \
+  chainId sourceCommit protocolVersion deterministicDeployment deterministicDeploymentVersion \
+  deterministicReleaseCodeHash deployer create2Factory deterministicDeployer deterministicDeployerOwner \
+  protocolGovernance protocolTreasury ammFeeManager wrappedNative \
+  protocolFacetRegistry boardroomKernel boardroomPolicyRegistry boardroomFactory \
+  boardroomControllerFactory boardroomControllerLogic boardroomGovernanceLogic boardroomRedemptionPayout \
+  boardroomMarketLogic authorityFacet executionFacet marketFacet redemptionFacet viewFacet \
+  activeFacetSetHash activeRelease requiredStorageVersion requiredStorageLayoutHash manifestHash \
+  kernelSelectorSetHash selectorCount \
+  assetPolicy protocolFeeRouter tokenGrantFactory tokenGrantLogic ammFactory ammPoolImplementation ammRouter \
+  lockedLiquidityFactory lockedLiquidityLogic distributionFactory fixedPriceSaleLogic dutchAuctionLogic \
+  migratingBondingCurveLogic merkleAirdropLogic boardroomRewardsFactory boardroomRewardsLogic \
+  bondMarketFactory bondMarketLogic \
+  protocolFacetRegistryOwner boardroomPolicyRegistryOwner assetPolicyOwner protocolFeeRouterOwner \
+  tokenGrantFactoryOwner ammFactoryOwner protocolFeeRouterRecipient tokenGrantFeeRecipient \
+  ammProtocolFeeRecipient ammLiquidityRouter ammReservationManager creationFee \
+  deterministicDeployerCodeHash protocolFacetRegistryCodeHash boardroomKernelCodeHash \
+  boardroomPolicyRegistryCodeHash boardroomFactoryCodeHash boardroomControllerFactoryCodeHash \
+  boardroomControllerLogicCodeHash boardroomGovernanceLogicCodeHash boardroomRedemptionPayoutCodeHash \
+  boardroomMarketLogicCodeHash authorityFacetCodeHash executionFacetCodeHash marketFacetCodeHash \
+  redemptionFacetCodeHash viewFacetCodeHash assetPolicyCodeHash protocolFeeRouterCodeHash \
+  tokenGrantFactoryCodeHash tokenGrantLogicCodeHash ammFactoryCodeHash ammPoolImplementationCodeHash \
+  ammRouterCodeHash lockedLiquidityFactoryCodeHash lockedLiquidityLogicCodeHash distributionFactoryCodeHash \
+  fixedPriceSaleLogicCodeHash dutchAuctionLogicCodeHash migratingBondingCurveLogicCodeHash \
+  merkleAirdropLogicCodeHash boardroomRewardsFactoryCodeHash boardroomRewardsLogicCodeHash \
+  bondMarketFactoryCodeHash bondMarketLogicCodeHash wrappedNativeCodeHash \
   deploymentBlock deploymentTimestamp; do
   require_field "$required"
 done
 
+expect_equal "protocol version" "pledge.cash.protocol.v1" "$(field protocolVersion)"
+expect_equal "deterministic deployment version" "pledge.cash.protocol.v1" "$(field deterministicDeploymentVersion)"
+expect_equal "deterministic deployment flag" "true" "$(field deterministicDeployment)"
+
+chain_id="$(cast_retry cast chain-id --rpc-url "$RPC_URL" | first_token)"
+expect_equal "chain id" "$(field chainId)" "$chain_id"
+
 source_commit="$(field sourceCommit)"
 [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]] || fail "sourceCommit must be an exact lowercase Git commit"
 git cat-file -e "${source_commit}^{commit}" 2>/dev/null || fail "source commit $source_commit is not present locally"
-# New parallel, undeployed contracts may legitimately be absent from this v5
-# deployment commit. Existing contract sources must remain byte-for-byte
-# unchanged; the release-code and source-bound init-code checks below then bind
-# the locally reproduced deployment bytecode.
-if ! git diff --quiet --diff-filter=MDR "$source_commit" -- src; then
-  fail "existing contract sources differ from recorded source commit $source_commit"
-fi
+git diff --quiet "$source_commit" -- src script/Deploy.s.sol \
+  || fail "canonical deployment sources differ from recorded source commit $source_commit"
 
 deployment_block="$(field deploymentBlock)"
 [[ "$deployment_block" =~ ^[0-9]+$ ]] || fail "deploymentBlock must be an unsigned decimal integer"
 chain_head="$(cast_retry cast block-number --rpc-url "$RPC_URL" | first_token)"
-if [[ "$deployment_block" -gt "$chain_head" ]]; then
-  fail "deploymentBlock $deployment_block is ahead of chain head $chain_head"
-fi
+[[ "$deployment_block" -le "$chain_head" ]] || fail "deploymentBlock is ahead of chain head"
 verify_receipt_manifest "$deployment_block" "$source_commit"
 
-expected_release_code_hash="$(local_release_code_hash)"
 expect_hash_equal \
   "locally reproduced deterministic release code hash" \
-  "$expected_release_code_hash" \
+  "$(local_release_code_hash)" \
   "$(field deterministicReleaseCodeHash)"
 verify_release_provenance
 
-require_code "CREATE2 factory" "$(field create2Factory)"
-require_code "Wrapped native" "$(field wrappedNative)"
+for code_spec in \
+  "Wrapped native|wrappedNative|wrappedNativeCodeHash" \
+  "BoardroomControllerFactory|boardroomControllerFactory|boardroomControllerFactoryCodeHash" \
+  "BoardroomController implementation|boardroomControllerLogic|boardroomControllerLogicCodeHash" \
+  "TokenGrant implementation|tokenGrantLogic|tokenGrantLogicCodeHash" \
+  "AMM pool implementation|ammPoolImplementation|ammPoolImplementationCodeHash" \
+  "LockedLiquidity implementation|lockedLiquidityLogic|lockedLiquidityLogicCodeHash" \
+  "FixedPriceSale implementation|fixedPriceSaleLogic|fixedPriceSaleLogicCodeHash" \
+  "DutchAuctionSale implementation|dutchAuctionLogic|dutchAuctionLogicCodeHash" \
+  "MigratingBondingCurve implementation|migratingBondingCurveLogic|migratingBondingCurveLogicCodeHash" \
+  "MerkleAirdrop implementation|merkleAirdropLogic|merkleAirdropLogicCodeHash" \
+  "BoardroomRewards implementation|boardroomRewardsLogic|boardroomRewardsLogicCodeHash" \
+  "BondMarket implementation|bondMarketLogic|bondMarketLogicCodeHash"; do
+  IFS='|' read -r label address_field hash_field <<<"$code_spec"
+  require_code_hash "$label" "$(field "$address_field")" "$hash_field"
+done
 
-require_field tokenGrantFactory
-require_field boardroomFactory
-token_grant_factory="$(field tokenGrantFactory)"
-boardroom_factory="$(field boardroomFactory)"
-require_code "TokenGrantFactory" "$token_grant_factory"
-require_code "BoardroomFactory" "$boardroom_factory"
+verify_genesis_release_manifest
+verify_live_active_release
+verify_protocol_wiring
 
-actual_token_grant_boardroom_factory="$(call_address "$token_grant_factory" "boardroomFactory()(address)")"
-expect_address_equal \
-  "TokenGrantFactory immutable BoardroomFactory" \
-  "$boardroom_factory" \
-  "$actual_token_grant_boardroom_factory"
-
-actual_token_grant_fee_recipient="$(call_address "$token_grant_factory" "feeRecipient()(address)")"
-expect_address_equal "TokenGrantFactory feeRecipient" "$(field tokenGrantFeeRecipient)" "$actual_token_grant_fee_recipient"
-expect_address_equal "TokenGrantFactory fee router" "$(field protocolFeeRouter)" "$actual_token_grant_fee_recipient"
-
-if field_exists factoryOwner; then
-  actual_owner="$(call_address "$token_grant_factory" "owner()(address)")"
-  expect_address_equal "TokenGrantFactory owner" "$(field factoryOwner)" "$actual_owner"
-  expect_address_equal "Protocol governance owns TokenGrantFactory" "$(field protocolGovernance)" "$actual_owner"
-fi
-
-protocol_fee_router="$(field protocolFeeRouter)"
-require_code "ProtocolFeeRouter" "$protocol_fee_router"
-actual_protocol_fee_router_owner="$(call_address "$protocol_fee_router" "owner()(address)")"
-actual_protocol_fee_router_recipient="$(call_address "$protocol_fee_router" "feeRecipient()(address)")"
-expect_address_equal "ProtocolFeeRouter owner" "$(field protocolFeeRouterOwner)" "$actual_protocol_fee_router_owner"
-expect_address_equal "Protocol governance owns ProtocolFeeRouter" "$(field protocolGovernance)" "$actual_protocol_fee_router_owner"
-expect_address_equal \
-  "ProtocolFeeRouter recipient" \
-  "$(field protocolFeeRouterRecipient)" \
-  "$actual_protocol_fee_router_recipient"
-expect_address_equal "Protocol treasury receives fees" "$(field protocolTreasury)" "$actual_protocol_fee_router_recipient"
-
-if field_exists creationFee; then
-  actual_creation_fee="$(call_uint "$token_grant_factory" "creationFee()(uint256)")"
-  expect_equal "TokenGrantFactory creationFee" "$(field creationFee)" "$actual_creation_fee"
-fi
-
-if field_exists tokenGrantLogic; then
-  token_grant_logic="$(field tokenGrantLogic)"
-  require_code "TokenGrant logic" "$token_grant_logic"
-  actual_logic="$(call_address "$token_grant_factory" "tokenGrantLogic()(address)")"
-  expect_address_equal "TokenGrantFactory tokenGrantLogic" "$token_grant_logic" "$actual_logic"
-fi
-
-if field_exists deterministicDeployment; then
-  expect_equal "deterministic deployment flag" "true" "$(field deterministicDeployment)"
-  require_field deterministicDeploymentVersion
-  expect_equal "deterministic deployment version" "pledge.cash.deterministic.v5" "$(field deterministicDeploymentVersion)"
-  require_field deterministicDeployer
-  require_field create2Factory
-
-  deterministic_deployer="$(field deterministicDeployer)"
-  require_code "PledgeCashDeterministicDeployer" "$deterministic_deployer"
-
-  if field_exists deterministicDeployerOwner; then
-    actual_deterministic_owner="$(call_address "$deterministic_deployer" "owner()(address)")"
-    expect_address_equal "PledgeCashDeterministicDeployer owner" "$(field deterministicDeployerOwner)" "$actual_deterministic_owner"
-  elif field_exists deployer; then
-    actual_deterministic_owner="$(call_address "$deterministic_deployer" "owner()(address)")"
-    expect_address_equal "PledgeCashDeterministicDeployer owner" "$(field deployer)" "$actual_deterministic_owner"
-  fi
-fi
-
-boardroom_status="$(field boardroomStatus)"
-skip_boardroom_verification=0
-if [[ "$boardroom_status" == "pending" ]]; then
-  if [[ "$REQUIRE_BOARDROOM_DEPLOYMENT" == "1" ]]; then
-    fail "Boardroom deployment is still marked pending"
-  fi
-  echo "Skipping Boardroom verification: artifact marks Boardroom deployment pending"
-  skip_boardroom_verification=1
-fi
-
-if [[ "$skip_boardroom_verification" == "0" ]] && { field_exists boardroomFactory || field_exists boardroomPolicyRegistry; }; then
-  require_field boardroomFactory
-  require_field boardroomGovernanceLogic
-  require_field boardroomRedemptionPayout
-  require_field boardroomLogic
-  require_field boardroomControllerFactory
-  require_field boardroomControllerLogic
-  require_field boardroomMarketLogic
-  require_field boardroomPolicyRegistry
-  require_field assetPolicy
-  require_field wrappedNative
-  require_field policyRegistryOwner
-  require_field assetPolicyOwner
-  require_field assetPolicyAllowed
-  require_field tokenGrantPolicyAllowed
-  require_field tokenGrantModulePolicy
-  require_field distributionFactory
-  require_field fixedPriceSaleLogic
-  require_field dutchAuctionLogic
-  require_field migratingBondingCurveLogic
-  require_field merkleAirdropLogic
-  require_field distributionPolicyAllowed
-  require_field distributionModulePolicy
-  require_field boardroomRewardsFactory
-  require_field boardroomRewardsLogic
-  require_field boardroomRewardsPolicyAllowed
-  require_field boardroomRewardsModulePolicy
-  require_field bondMarketFactory
-  require_field bondMarketLogic
-  require_field bondMarketPolicyAllowed
-  require_field bondMarketModulePolicy
-  require_field assetWrappedNativeAllowed
-  require_field assetTokenGrantSpenderAllowed
-  require_field assetDistributionSpenderAllowed
-  require_field assetBoardroomRewardsSpenderAllowed
-  require_field assetBondMarketSpenderAllowed
-
-  expect_equal "TokenGrantFactory module artifact" "true" "$(field tokenGrantModulePolicy)"
-  expect_equal "DistributionFactory module artifact" "true" "$(field distributionModulePolicy)"
-  expect_equal "BoardroomRewardsFactory module artifact" "true" "$(field boardroomRewardsModulePolicy)"
-  expect_equal "BondMarketFactory module artifact" "true" "$(field bondMarketModulePolicy)"
-
-  policy_registry="$(field boardroomPolicyRegistry)"
-  asset_policy="$(field assetPolicy)"
-  wrapped_native="$(field wrappedNative)"
-  distribution_factory="$(field distributionFactory)"
-  fixed_price_sale_logic="$(field fixedPriceSaleLogic)"
-  dutch_auction_logic="$(field dutchAuctionLogic)"
-  migrating_bonding_curve_logic="$(field migratingBondingCurveLogic)"
-  merkle_airdrop_logic="$(field merkleAirdropLogic)"
-  boardroom_rewards_factory="$(field boardroomRewardsFactory)"
-  boardroom_rewards_logic="$(field boardroomRewardsLogic)"
-  bond_market_factory="$(field bondMarketFactory)"
-  bond_market_logic="$(field bondMarketLogic)"
-  boardroom_governance_logic="$(field boardroomGovernanceLogic)"
-  boardroom_redemption_payout="$(field boardroomRedemptionPayout)"
-  boardroom_logic="$(field boardroomLogic)"
-  boardroom_controller_factory="$(field boardroomControllerFactory)"
-  boardroom_controller_logic="$(field boardroomControllerLogic)"
-  boardroom_market_logic="$(field boardroomMarketLogic)"
-  require_code "BoardroomFactory" "$boardroom_factory"
-  require_code "BoardroomGovernanceLogic" "$boardroom_governance_logic"
-  require_code "BoardroomRedemptionPayout" "$boardroom_redemption_payout"
-  require_code "Boardroom implementation" "$boardroom_logic"
-  require_code "BoardroomControllerFactory" "$boardroom_controller_factory"
-  require_code "BoardroomController implementation" "$boardroom_controller_logic"
-  require_code "BoardroomMarketLogic" "$boardroom_market_logic"
-  require_code "BoardroomPolicyRegistry" "$policy_registry"
-  require_code "AssetPolicy" "$asset_policy"
-  require_code "DistributionFactory" "$distribution_factory"
-  require_code "FixedPriceSale implementation" "$fixed_price_sale_logic"
-  require_code "DutchAuctionSale implementation" "$dutch_auction_logic"
-  require_code "MigratingBondingCurve implementation" "$migrating_bonding_curve_logic"
-  require_code "MerkleAirdrop implementation" "$merkle_airdrop_logic"
-  require_code "BoardroomRewardsFactory" "$boardroom_rewards_factory"
-  require_code "BoardroomRewards implementation" "$boardroom_rewards_logic"
-  require_code "BondMarketFactory" "$bond_market_factory"
-  require_code "BondMarket implementation" "$bond_market_logic"
-
-  actual_boardroom_factory_registry="$(call_address "$boardroom_factory" "policyRegistry()(address)")"
-  expect_address_equal "BoardroomFactory policyRegistry" "$policy_registry" "$actual_boardroom_factory_registry"
-
-  actual_boardroom_factory_wrapped_native="$(call_address "$boardroom_factory" "wrappedNative()(address)")"
-  expect_address_equal "BoardroomFactory wrappedNative" "$wrapped_native" "$actual_boardroom_factory_wrapped_native"
-
-  actual_boardroom_factory_governance_logic="$(call_address "$boardroom_factory" "governanceLogic()(address)")"
-  expect_address_equal \
-    "BoardroomFactory governanceLogic" \
-    "$boardroom_governance_logic" \
-    "$actual_boardroom_factory_governance_logic"
-
-  actual_boardroom_factory_redemption_payout="$(call_address "$boardroom_factory" "redemptionPayoutLogic()(address)")"
-  expect_address_equal \
-    "BoardroomFactory redemptionPayoutLogic" \
-    "$boardroom_redemption_payout" \
-    "$actual_boardroom_factory_redemption_payout"
-
-  actual_boardroom_factory_logic="$(call_address "$boardroom_factory" "boardroomLogic()(address)")"
-  expect_address_equal "BoardroomFactory boardroomLogic" "$boardroom_logic" "$actual_boardroom_factory_logic"
-
-  actual_boardroom_factory_controller_factory="$(call_address "$boardroom_factory" "controllerFactory()(address)")"
-  expect_address_equal \
-    "BoardroomFactory controllerFactory" \
-    "$boardroom_controller_factory" \
-    "$actual_boardroom_factory_controller_factory"
-
-  actual_boardroom_factory_market_logic="$(call_address "$boardroom_factory" "marketLogic()(address)")"
-  expect_address_equal \
-    "BoardroomFactory marketLogic" \
-    "$boardroom_market_logic" \
-    "$actual_boardroom_factory_market_logic"
-
-  actual_controller_factory_boardroom_factory="$(call_address "$boardroom_controller_factory" "boardroomFactory()(address)")"
-  expect_address_equal \
-    "BoardroomControllerFactory BoardroomFactory" \
-    "$boardroom_factory" \
-    "$actual_controller_factory_boardroom_factory"
-
-  actual_controller_implementation="$(call_address "$boardroom_controller_factory" "controllerImplementation()(address)")"
-  expect_address_equal \
-    "BoardroomControllerFactory controllerImplementation" \
-    "$boardroom_controller_logic" \
-    "$actual_controller_implementation"
-
-  actual_boardroom_governance_logic="$(call_address "$boardroom_logic" "governanceLogic()(address)")"
-  expect_address_equal \
-    "Boardroom implementation governanceLogic" \
-    "$boardroom_governance_logic" \
-    "$actual_boardroom_governance_logic"
-
-  actual_boardroom_redemption_payout="$(call_address "$boardroom_logic" "redemptionPayoutLogic()(address)")"
-  expect_address_equal \
-    "Boardroom implementation redemptionPayoutLogic" \
-    "$boardroom_redemption_payout" \
-    "$actual_boardroom_redemption_payout"
-
-  actual_boardroom_controller_factory="$(call_address "$boardroom_logic" "controllerFactory()(address)")"
-  expect_address_equal \
-    "Boardroom implementation controllerFactory" \
-    "$boardroom_controller_factory" \
-    "$actual_boardroom_controller_factory"
-
-  actual_boardroom_market_logic="$(call_address "$boardroom_logic" "marketLogic()(address)")"
-  expect_address_equal \
-    "Boardroom implementation marketLogic" \
-    "$boardroom_market_logic" \
-    "$actual_boardroom_market_logic"
-
-  actual_registry_owner="$(call_address "$policy_registry" "owner()(address)")"
-  expect_address_equal "BoardroomPolicyRegistry owner" "$(field policyRegistryOwner)" "$actual_registry_owner"
-  expect_address_equal "Protocol governance owns registry" "$(field protocolGovernance)" "$actual_registry_owner"
-
-  actual_asset_policy_owner="$(call_address "$asset_policy" "owner()(address)")"
-  expect_address_equal "AssetPolicy owner" "$(field assetPolicyOwner)" "$actual_asset_policy_owner"
-  expect_address_equal "Protocol governance owns AssetPolicy" "$(field protocolGovernance)" "$actual_asset_policy_owner"
-
-  actual_asset_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$asset_policy")"
-  expect_equal "Asset policy allowance" "$(field assetPolicyAllowed)" "$actual_asset_policy_allowed"
-
-  actual_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$token_grant_factory")"
-  expect_equal "Boardroom policy allowance" "$(field tokenGrantPolicyAllowed)" "$actual_policy_allowed"
-
-  actual_token_grant_module_policy="$(call_bool "$policy_registry" "isModulePolicy(address)(bool)" "$token_grant_factory")"
-  expect_equal "TokenGrantFactory permanent module identity" "$(field tokenGrantModulePolicy)" "$actual_token_grant_module_policy"
-
-  actual_distribution_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$distribution_factory")"
-  expect_equal "Distribution policy allowance" "$(field distributionPolicyAllowed)" "$actual_distribution_policy_allowed"
-
-  actual_distribution_module_policy="$(call_bool "$policy_registry" "isModulePolicy(address)(bool)" "$distribution_factory")"
-  expect_equal "DistributionFactory permanent module identity" "$(field distributionModulePolicy)" "$actual_distribution_module_policy"
-
-  actual_distribution_locker="$(call_address "$distribution_factory" "lockedLiquidityFactory()(address)")"
-  expect_address_equal \
-    "DistributionFactory LockedLiquidityFactory wiring" \
-    "$(field lockedLiquidityFactory)" \
-    "$actual_distribution_locker"
-
-  actual_distribution_grants="$(call_address "$distribution_factory" "tokenGrantFactory()(address)")"
-  expect_address_equal \
-    "DistributionFactory TokenGrantFactory wiring" \
-    "$token_grant_factory" \
-    "$actual_distribution_grants"
-
-  for logic_field in fixedPriceSaleLogic dutchAuctionLogic migratingBondingCurveLogic merkleAirdropLogic; do
-    actual_logic="$(call_address "$distribution_factory" "$logic_field()(address)")"
-    expect_address_equal "DistributionFactory $logic_field wiring" "$(field "$logic_field")" "$actual_logic"
-  done
-
-  actual_boardroom_rewards_boardroom_factory="$(call_address "$boardroom_rewards_factory" "boardroomFactory()(address)")"
-  expect_address_equal \
-    "BoardroomRewardsFactory BoardroomFactory wiring" \
-    "$boardroom_factory" \
-    "$actual_boardroom_rewards_boardroom_factory"
-
-  actual_boardroom_rewards_logic="$(call_address "$boardroom_rewards_factory" "rewardsLogic()(address)")"
-  expect_address_equal \
-    "BoardroomRewardsFactory implementation wiring" \
-    "$boardroom_rewards_logic" \
-    "$actual_boardroom_rewards_logic"
-
-  actual_boardroom_rewards_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$boardroom_rewards_factory")"
-  expect_equal "BoardroomRewards policy allowance" "$(field boardroomRewardsPolicyAllowed)" "$actual_boardroom_rewards_policy_allowed"
-
-  actual_boardroom_rewards_module_policy="$(call_bool "$policy_registry" "isModulePolicy(address)(bool)" "$boardroom_rewards_factory")"
-  expect_equal "BoardroomRewardsFactory permanent module identity" "$(field boardroomRewardsModulePolicy)" "$actual_boardroom_rewards_module_policy"
-
-  actual_bond_market_amm_factory="$(call_address "$bond_market_factory" "ammFactory()(address)")"
-  expect_address_equal \
-    "BondMarketFactory AmmFactory wiring" \
-    "$(field ammFactory)" \
-    "$actual_bond_market_amm_factory"
-
-  actual_bond_market_boardroom_factory="$(call_address "$bond_market_factory" "boardroomFactory()(address)")"
-  expect_address_equal \
-    "BondMarketFactory BoardroomFactory wiring" \
-    "$boardroom_factory" \
-    "$actual_bond_market_boardroom_factory"
-
-  actual_bond_market_logic="$(call_address "$bond_market_factory" "bondMarketLogic()(address)")"
-  expect_address_equal \
-    "BondMarketFactory implementation wiring" \
-    "$bond_market_logic" \
-    "$actual_bond_market_logic"
-
-  actual_bond_market_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$bond_market_factory")"
-  expect_equal "BondMarket policy allowance" "$(field bondMarketPolicyAllowed)" "$actual_bond_market_policy_allowed"
-
-  actual_bond_market_module_policy="$(call_bool "$policy_registry" "isModulePolicy(address)(bool)" "$bond_market_factory")"
-  expect_equal "BondMarketFactory permanent module identity" "$(field bondMarketModulePolicy)" "$actual_bond_market_module_policy"
-
-  actual_asset_wrapped_native_allowed="$(call_bool "$asset_policy" "isAssetAllowed(address)(bool)" "$wrapped_native")"
-  expect_equal "AssetPolicy wrapped native allowance" "$(field assetWrappedNativeAllowed)" "$actual_asset_wrapped_native_allowed"
-
-  actual_asset_token_grant_spender_allowed="$(call_bool "$asset_policy" "isApprovalSpenderAllowed(address)(bool)" "$token_grant_factory")"
-  expect_equal "AssetPolicy TokenGrantFactory spender allowance" "$(field assetTokenGrantSpenderAllowed)" "$actual_asset_token_grant_spender_allowed"
-
-  actual_asset_distribution_spender_allowed="$(call_bool "$asset_policy" "isApprovalSpenderAllowed(address)(bool)" "$distribution_factory")"
-  expect_equal "AssetPolicy DistributionFactory spender allowance" "$(field assetDistributionSpenderAllowed)" "$actual_asset_distribution_spender_allowed"
-
-  actual_asset_boardroom_rewards_spender_allowed="$(call_bool "$asset_policy" "isApprovalSpenderAllowed(address)(bool)" "$boardroom_rewards_factory")"
-  expect_equal "AssetPolicy BoardroomRewardsFactory spender allowance" "$(field assetBoardroomRewardsSpenderAllowed)" "$actual_asset_boardroom_rewards_spender_allowed"
-
-  actual_asset_bond_market_spender_allowed="$(call_bool "$asset_policy" "isApprovalSpenderAllowed(address)(bool)" "$bond_market_factory")"
-  expect_equal "AssetPolicy BondMarketFactory spender allowance" "$(field assetBondMarketSpenderAllowed)" "$actual_asset_bond_market_spender_allowed"
-elif [[ "$REQUIRE_BOARDROOM_DEPLOYMENT" == "1" ]]; then
-  fail "Boardroom deployment fields are required but missing"
+if [[ "$REQUIRE_DEPLOYMENT" == "1" ]]; then
+  echo "Verified canonical pledge.cash genesis candidate in $ARTIFACT"
 else
-  echo "Skipping Boardroom verification: no Boardroom deployment fields in artifact"
+  echo "Verified canonical pledge.cash protocol artifact and live Boardroom release from $ARTIFACT"
 fi
-
-if field_exists ammFactory; then
-  amm_factory="$(field ammFactory)"
-  amm_pool_implementation="$(field ammPoolImplementation)"
-  require_code "AmmFactory" "$amm_factory"
-  require_code "AmmPool implementation" "$amm_pool_implementation"
-
-  actual_amm_owner="$(call_address "$amm_factory" "owner()(address)")"
-  actual_amm_fee_manager="$(call_address "$amm_factory" "feeManager()(address)")"
-  actual_amm_protocol_fee_recipient="$(call_address "$amm_factory" "protocolFeeRecipient()(address)")"
-  actual_amm_liquidity_router="$(call_address "$amm_factory" "liquidityRouter()(address)")"
-  actual_amm_reservation_manager="$(call_address "$amm_factory" "reservationManager()(address)")"
-  actual_amm_boardroom_factory="$(call_address "$amm_factory" "boardroomFactory()(address)")"
-  actual_amm_pool_implementation="$(call_address "$amm_factory" "poolImplementation()(address)")"
-  expect_address_equal "AmmFactory owner" "$(field ammFactoryOwner)" "$actual_amm_owner"
-  expect_address_equal "Protocol governance owns AmmFactory" "$(field protocolGovernance)" "$actual_amm_owner"
-  expect_address_equal "AmmFactory feeManager" "$(field ammFeeManager)" "$actual_amm_fee_manager"
-  expect_address_equal "AmmFactory protocolFeeRecipient" "$(field ammProtocolFeeRecipient)" "$actual_amm_protocol_fee_recipient"
-  expect_address_equal "AmmFactory routes through ProtocolFeeRouter" "$protocol_fee_router" "$actual_amm_protocol_fee_recipient"
-  expect_address_equal "AmmFactory liquidityRouter" "$(field ammLiquidityRouter)" "$actual_amm_liquidity_router"
-  expect_address_equal "AmmFactory liquidityRouter wiring" "$(field ammRouter)" "$actual_amm_liquidity_router"
-  expect_address_equal "AmmFactory BoardroomFactory wiring" "$(field boardroomFactory)" "$actual_amm_boardroom_factory"
-  expect_address_equal \
-    "AmmFactory pool implementation wiring" \
-    "$amm_pool_implementation" \
-    "$actual_amm_pool_implementation"
-  expect_address_equal \
-    "AmmFactory reservationManager" \
-    "$(field ammReservationManager)" \
-    "$actual_amm_reservation_manager"
-  expect_address_equal \
-    "AmmFactory reservationManager wiring" \
-    "$(field lockedLiquidityFactory)" \
-    "$actual_amm_reservation_manager"
-fi
-
-if field_exists ammRouter || field_exists lockedLiquidityFactory; then
-  require_field ammFactory
-  require_field wrappedNative
-  require_field ammRouter
-  require_field lockedLiquidityFactory
-  require_field lockedLiquidityLogic
-  require_field boardroomPolicyRegistry
-  require_field assetPolicy
-  require_field lockedLiquidityPolicyAllowed
-  require_field lockedLiquidityModulePolicy
-  require_field assetLockedLiquiditySpenderAllowed
-
-  expect_equal "LockedLiquidityFactory module artifact" "true" "$(field lockedLiquidityModulePolicy)"
-
-  amm_factory="$(field ammFactory)"
-  wrapped_native="$(field wrappedNative)"
-  amm_router="$(field ammRouter)"
-  locked_liquidity_factory="$(field lockedLiquidityFactory)"
-  locked_liquidity_logic="$(field lockedLiquidityLogic)"
-  policy_registry="$(field boardroomPolicyRegistry)"
-  asset_policy="$(field assetPolicy)"
-
-  require_code "AmmFactory" "$amm_factory"
-  require_code "AmmRouter" "$amm_router"
-  require_code "LockedLiquidityFactory" "$locked_liquidity_factory"
-  require_code "LockedLiquidity implementation" "$locked_liquidity_logic"
-
-  actual_router_factory="$(call_address "$amm_router" "factory()(address)")"
-  expect_address_equal "AmmRouter factory" "$amm_factory" "$actual_router_factory"
-
-  actual_wrapped_native="$(call_address "$amm_router" "wrappedNative()(address)")"
-  expect_address_equal "AmmRouter wrappedNative" "$wrapped_native" "$actual_wrapped_native"
-
-  actual_locker_router="$(call_address "$locked_liquidity_factory" "ammRouter()(address)")"
-  expect_address_equal "LockedLiquidityFactory ammRouter" "$amm_router" "$actual_locker_router"
-
-  actual_locker_boardroom_factory="$(call_address "$locked_liquidity_factory" "boardroomFactory()(address)")"
-  expect_address_equal \
-    "LockedLiquidityFactory BoardroomFactory" \
-    "$boardroom_factory" \
-    "$actual_locker_boardroom_factory"
-
-  actual_locked_liquidity_logic="$(call_address "$locked_liquidity_factory" "lockedLiquidityLogic()(address)")"
-  expect_address_equal \
-    "LockedLiquidityFactory implementation wiring" \
-    "$locked_liquidity_logic" \
-    "$actual_locked_liquidity_logic"
-
-  actual_locked_policy_allowed="$(call_bool "$policy_registry" "isPolicyAllowed(address)(bool)" "$locked_liquidity_factory")"
-  expect_equal "Locked liquidity policy allowance" "$(field lockedLiquidityPolicyAllowed)" "$actual_locked_policy_allowed"
-
-  actual_locked_module_policy="$(call_bool "$policy_registry" "isModulePolicy(address)(bool)" "$locked_liquidity_factory")"
-  expect_equal "LockedLiquidityFactory permanent module identity" "$(field lockedLiquidityModulePolicy)" "$actual_locked_module_policy"
-
-  actual_asset_locked_liquidity_spender_allowed="$(call_bool "$asset_policy" "isApprovalSpenderAllowed(address)(bool)" "$locked_liquidity_factory")"
-  expect_equal "AssetPolicy LockedLiquidityFactory spender allowance" "$(field assetLockedLiquiditySpenderAllowed)" "$actual_asset_locked_liquidity_spender_allowed"
-fi
-
-require_code_hash "PledgeCashDeterministicDeployer" "$(field deterministicDeployer)" deterministicDeployerCodeHash
-require_code_hash "BoardroomPolicyRegistry" "$(field boardroomPolicyRegistry)" boardroomPolicyRegistryCodeHash
-require_code_hash "AssetPolicy" "$(field assetPolicy)" assetPolicyCodeHash
-require_code_hash "ProtocolFeeRouter" "$protocol_fee_router" protocolFeeRouterCodeHash
-require_code_hash "BoardroomFactory" "$(field boardroomFactory)" boardroomFactoryCodeHash
-require_code_hash "BoardroomGovernanceLogic" "$(field boardroomGovernanceLogic)" boardroomGovernanceLogicCodeHash
-require_code_hash "BoardroomRedemptionPayout" "$(field boardroomRedemptionPayout)" boardroomRedemptionPayoutCodeHash
-require_code_hash "Boardroom implementation" "$(field boardroomLogic)" boardroomLogicCodeHash
-require_code_hash "BoardroomControllerFactory" "$(field boardroomControllerFactory)" boardroomControllerFactoryCodeHash
-require_code_hash "BoardroomController implementation" "$(field boardroomControllerLogic)" boardroomControllerCodeHash
-require_code_hash "BoardroomMarketLogic" "$(field boardroomMarketLogic)" boardroomMarketLogicCodeHash
-require_code_hash "TokenGrantFactory" "$(field tokenGrantFactory)" tokenGrantFactoryCodeHash
-require_code_hash "TokenGrant implementation" "$(field tokenGrantLogic)" tokenGrantLogicCodeHash
-require_code_hash "AmmFactory" "$(field ammFactory)" ammFactoryCodeHash
-require_code_hash "AmmPool implementation" "$(field ammPoolImplementation)" ammPoolImplementationCodeHash
-require_code_hash "AmmRouter" "$(field ammRouter)" ammRouterCodeHash
-require_code_hash "LockedLiquidityFactory" "$(field lockedLiquidityFactory)" lockedLiquidityFactoryCodeHash
-require_code_hash "LockedLiquidity implementation" "$(field lockedLiquidityLogic)" lockedLiquidityLogicCodeHash
-require_code_hash "DistributionFactory" "$(field distributionFactory)" distributionFactoryCodeHash
-require_code_hash "FixedPriceSale implementation" "$(field fixedPriceSaleLogic)" fixedPriceSaleLogicCodeHash
-require_code_hash "DutchAuctionSale implementation" "$(field dutchAuctionLogic)" dutchAuctionLogicCodeHash
-require_code_hash \
-  "MigratingBondingCurve implementation" \
-  "$(field migratingBondingCurveLogic)" \
-  migratingBondingCurveLogicCodeHash
-require_code_hash "MerkleAirdrop implementation" "$(field merkleAirdropLogic)" merkleAirdropLogicCodeHash
-require_code_hash "BoardroomRewardsFactory" "$(field boardroomRewardsFactory)" boardroomRewardsFactoryCodeHash
-require_code_hash "BoardroomRewards implementation" "$(field boardroomRewardsLogic)" boardroomRewardsLogicCodeHash
-require_code_hash "BondMarketFactory" "$(field bondMarketFactory)" bondMarketFactoryCodeHash
-require_code_hash "BondMarket implementation" "$(field bondMarketLogic)" bondMarketLogicCodeHash
-require_code_hash "Wrapped native" "$(field wrappedNative)" wrappedNativeCodeHash

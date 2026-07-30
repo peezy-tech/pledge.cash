@@ -43,8 +43,11 @@ If the receipt confirms but the page says `Confirmed — refreshing workspace da
 
 ## Current hard boundary
 
-Unsupported-version governance is intentionally blocked. Do not work around it: only a verified v5 Boardroom with the
-matching controller factory, predicted generation, epochs, and code identity may expose launch or controller writes.
-The candidate is not deployed or certified for mainnet.
+Pending or unverified protocol identities are intentionally blocked. Do not
+work around that gate: launch or controller writes require a promoted
+protocol-v1 artifact, matching registry and facet code hashes, the expected
+facet-set hash, matching controller factory/generation/epochs, and
+`migrationRequired() == false`. Both target testnets are pending, and no
+mainnet deployment is certified.
 
 [Review networks and current limitations](networks-and-limitations) · [Open the app](../../explore)

@@ -428,7 +428,10 @@ contract ProtocolFacetRegistry is Ownable, IProtocolFacetRegistry {
     function _validateMigrationShape(ProtocolFacetTypes.FacetSetManifest calldata manifest) internal pure {
         bool hasFacet = manifest.migrationFacet != address(0);
         bool hasSelector = manifest.migrationSelector != bytes4(0);
-        if (hasFacet != hasSelector) {
+        if (
+            hasFacet != hasSelector
+                || (hasSelector && manifest.migrationSelector != ProtocolFacetTypes.CANONICAL_MIGRATION_SELECTOR)
+        ) {
             revert InvalidMigrationRoute(manifest.migrationFacet, manifest.migrationSelector);
         }
     }

@@ -1,6 +1,7 @@
 # Recurring support plans
 
-Status: implementation contract for the first hosted recurring-payment slice.
+Status: implemented boundary; public use unavailable while the HyperEVM
+protocol-v1 artifact is pending.
 
 ## Product boundary
 
@@ -13,9 +14,10 @@ period. Every invoice still requires a fresh x402 payment signature from the
 supporter. Creating a subscription authorizes the router to remember the
 schedule; it never authorizes the router to move funds.
 
-Version one supports:
+Version one is designed to support:
 
-- canonical HyperEVM testnet Boardrooms;
+- canonical HyperEVM testnet Boardrooms after a verified protocol-v1 artifact
+  is promoted, plus matching local integration scenarios;
 - a single monthly cadence, anchored to the subscription creation timestamp;
 - configured HyperEVM USDC as the Boardroom treasury asset;
 - manual renewal from HyperCore testnet USDC through the existing x402
@@ -39,8 +41,11 @@ Boardroom's live authority. A launched Boardroom uses its controller's ERC-1271
 validation over the current proposer's wallet signature; a prelaunch Boardroom
 uses its owner, including ERC-1271 owners. Retirement requires a new challenge.
 Plans also stop accepting subscriptions and invoices when the Boardroom is not
-Active, the configured USDC asset is no longer registered, or the stored
-authority generation no longer matches the Boardroom.
+Active, the configured USDC asset is no longer registered, the stored
+facet-set hash is no longer active, the Boardroom requires migration, or the
+stored authority generation no longer matches the Boardroom. A global release
+activation therefore requires new plan terms; an old plan is never silently
+upgraded to new logic.
 
 ### Subscription
 
@@ -92,6 +97,7 @@ The only new destination call is:
 
 ```text
 canonical Boardroom.contributeTreasuryAsset(
+  expected facet-set hash,
   configured HyperEVM USDC,
   invoice amount,
   signed deadline
@@ -107,20 +113,23 @@ remains inventory-backed and custodial during the settlement/execution
 interval, just as it is for existing marketplace actions.
 
 Plans, subscriptions, and invoices are hosted attestations, not an on-chain
-registry. Challenge messages bind the origin, chain, Boardroom, actor, plan,
-payload hash, nonce, and expiry. The router records the signature hash and
-verified block evidence rather than serving the raw signature, so readers trust
-the gateway's verification and durable database for this hosted layer.
+registry. Challenge messages bind the origin, chain, Boardroom, active
+facet-set hash, actor, plan, payload hash, nonce, and expiry. The router records
+the signature hash and verified block evidence rather than serving the raw
+signature, so readers trust the gateway's verification and durable database
+for this hosted layer.
 
 The execution policy revalidates immediately before simulation that:
 
-- the Boardroom is still factory-canonical and Active;
+- the Boardroom is still factory-canonical and Active, its stored facet-set
+  hash is still active, and it does not require migration;
 - configured USDC is still a registered redeemable asset;
 - the plan is active and its authority identity has not gone stale;
 - the quote is still the invoice's active attempt and no earlier payment from
   that payer to the Boardroom remains unresolved;
 - calldata is exactly one Boardroom `contributeTreasuryAsset` call for the
-  configured USDC, invoice amount, and signed deadline;
+  stored expected facet-set hash, configured USDC, invoice amount, and signed
+  deadline;
 - payer, x402 recipient, and refund address are the same wallet;
 - no second live or uncertain attempt exists for the invoice.
 

@@ -11,7 +11,9 @@ description: Use the seven Studio sections across project setup, operation, gove
 
 ## How Studio unlocks controls
 
-Studio verifies the canonical Boardroom, supported deployment version, and current lifecycle before exposing writes.
+Studio verifies the canonical protocol-v1 deployment, Boardroom factory,
+registry/facet inventory, current facet-set hash, migration state, and
+lifecycle before exposing writes.
 Before governance launch, the recorded owner manages available sections. After launch, the controller proposer schedules
 operator actions while permissionless execution and active-staker actions follow their own rules. A connected wallet on
 the wrong chain gets `Switch wallet network`; an unauthorized wallet gets `Open public project` instead of controls.
@@ -67,8 +69,10 @@ protections, reward pool, and verified operations. Only the proposer can schedul
 Proposer/timing changes are delayed controller self-operations, and controller replacement deploys the next generation
 inside one delayed Boardroom self-call.
 
-Launch and governance writes are exposed only for a verified v5 deployment. Legacy or unknown versions remain readable
-but fail closed. The current public v5 artifact is limited to HyperEVM testnet; it is not a mainnet deployment.
+Launch and governance writes require a promoted, live-verified protocol-v1
+artifact and a Boardroom with `migrationRequired() == false`. Both public
+testnet artifacts are pending, so these writes are currently local-scenario
+workflows only. No mainnet deployment is supported.
 
 ## Wind-down and redemptions
 
@@ -86,8 +90,9 @@ Use `Close` for `Wind-Down` and redemptions. The safe sequence is:
 
 Lifecycle transitions and asset minimums can be irreversible. Treat every contract and recipient as exact data.
 
-Curve quote disposition is intentionally unavailable until the explicit forfeiture, veto, and post-snapshot-recipient
-policy is approved. The contract fails closed instead of choosing a legacy recovery recipient.
+Curve quote recovery remains an explicit obligation. Wind-down forfeiture is
+available only after its quarantine delay and unvetoed holder-protection
+window; snapshotting cannot bypass an unresolved curve dependency.
 
 ## Recovery
 

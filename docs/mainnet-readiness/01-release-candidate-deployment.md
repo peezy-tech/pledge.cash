@@ -2,177 +2,168 @@
 
 Status: **Blocked**
 
-Scope: every public-chain broadcast, mainnet artifact promotion, and real-value product launch.
+Scope: target-testnet promotion, every mainnet broadcast, and real-value
+product launch.
 
 ## Release decision
 
-pledge.cash does not currently have a mainnet release candidate. Do not broadcast the current contract stack to a
-mainnet or publish any artifact as supported until every exit criterion in this document is satisfied.
+The sole contract line is canonical `pledge.cash.protocol.v1`. Its Boardroom is
+the permanent asset-holding kernel routed through
+`ProtocolFacetRegistry`; there is no supported alternative deployment line.
 
-This blocker is not cleared by proving that the contracts compile or by pointing the generic deployment script at a
-mainnet RPC. A supported release must bind an exact source revision, chain, contract version, authority set, wrapped
-native asset, runtime bytecode, immutable wiring, deployment transaction set, and product configuration.
+Neither target testnet has a protocol-v1 broadcast:
+
+- HyperEVM `998.json` is `pending`;
+- Monad `10143.json` is `pending`;
+- no mainnet profile or supported mainnet artifact exists.
+
+Testnet deployment is the next operational stage after final local acceptance
+and the pull-request review cycle. This document does not authorize that
+broadcast. Mainnet remains a NO-GO until every exit criterion below is
+satisfied.
 
 ## Current evidence
 
-- The [security policy](../../SECURITY.md) says the contracts are not mainnet production software and that the
-  repository does not support a mainnet deployment.
-- The checked-in [HyperEVM testnet artifact](../../packages/contracts/deployments/998.json) is a verified deterministic
-  v5 deployment with an adjacent 29-transaction source-bound receipt manifest.
-- The checked-in [Monad testnet artifact](../../packages/contracts/deployments/10143.json) is marked `pending`.
-- [Network documentation](../pages/reference/networks-and-deployments.md) tells users that no mainnet is supported and
-  that pending artifacts do not certify usable addresses.
-- [Deployment documentation](../deployment.md) covers local Anvil plus HyperEVM and Monad testnet procedures, not a
-  mainnet release procedure.
-- Chain-specific deployment and artifact-verification wrappers exist only for HyperEVM testnet and Monad testnet.
-- The SDK and web application expose the verified HyperEVM testnet, pending Monad testnet, and local/custom development
-  paths; they do not contain an authorized mainnet release profile.
-- There is no tagged release or published GitHub release identifying an auditable contract release candidate.
+- Deterministic deployment uses bytecode-bound
+  `pledge.cash.protocol.v1` salts and first-use init-code commitments.
+- `Deploy.s.sol` deploys the 21 protocol roots, publishes and activates the
+  complete 97-route release A, configures policies and fee routes, hands
+  governed roots to protocol governance, and attests the graph.
+- A fresh local Anvil deployment, idempotent rerun, and standalone verifier
+  have checked deterministic provenance, runtime code hashes, the complete
+  release table and recomputed facet-set hash, ownership, wiring, policies,
+  and fee routes.
+- The integrated local Boardroom scenario has exercised release activation,
+  write downtime, permissionless migration, lifecycle cleanup, and redemption.
+- Focused Boardroom, controller, module, registry, kernel, and invariant suites
+  are recorded in the
+  [canonical design/evidence report](../design/boardroom-diamondization-spike.md).
+- Final exact-head full-suite, SDK/application/service, fresh-Anvil, hosted CI,
+  and independent-review gates are still pending.
+- No target-chain receipt, source verification, or promoted artifact exists
+  for this release.
 
 ## Why this is a hard blocker
 
-Without a testnet deployment of the exact intended release, the project has not proved:
+Local execution cannot prove:
 
-- that every root and child contract can be deployed under the target chain's transaction and block gas limits;
-- that deterministic addresses, constructor inputs, salts, runtime hashes, and immutable relationships match the
-  generated artifact;
-- that the final authority addresses can execute the deployment and post-deployment handoffs;
-- that supported wallets can create, simulate, submit, replace, and recover the required transactions;
-- that indexers can discover the deployment through the target RPC's log-range and historical-data constraints;
-- that governance launch, module creation, rewards, bonds, hostile-token recovery, wind-down, and redemption work as a
-  complete lifecycle on the target chain;
-- that the deployed source can be independently verified and reproduced from the release revision;
-- that the web application fails closed before promotion and selects only the promoted deployment afterward.
+- that all deployment and maximum-cost transactions fit the target chain's
+  intended execution lane;
+- that target RPC, finality, log-range, historical-data, and wallet behavior
+  support discovery and recovery;
+- that the final authority accounts can perform the exact bootstrap and
+  ownership handoff;
+- that the supported SDK, web, Sentinel, and x402 paths use the promoted
+  registry/facet identity and fail closed on migration;
+- that the deployed compiler inputs, bytecode, source, receipts, and artifact
+  can be independently reproduced;
+- that a complete lifecycle works against the exact public deployment.
 
-A mainnet broadcast made before those proofs would create an immutable public surface without a validated release
-identity or recovery path.
+A mainnet broadcast before those proofs would create an immutable public asset
+surface whose release authority can change all Boardroom behavior without a
+validated ceremony or recovery plan.
 
-## Decisions required before implementation
+## Decisions already fixed
 
-Record these decisions in accepted architecture or release-decision documents:
+- Release identity: `pledge.cash.protocol.v1`.
+- Boardroom architecture: global complete-release registry plus permanent
+  asset-holding kernels.
+- Initial registry authority: existing protocol governance.
+- Release activation: atomic and global, including terminal lifecycles.
+- Rollback: publish a higher-numbered compatible release; never reactivate old
+  metadata.
+- Storage upgrades: permissionless per-Boardroom migration with accepted write
+  downtime.
+- Transaction binding: every mutation and controller authorization commits an
+  explicit expected facet-set hash.
+- Artifact promotion: verified candidates are retained separately; promotion
+  is an explicit release decision.
 
-1. **First mainnet:** choose one chain for the first release. Do not launch HyperEVM and Monad simultaneously.
-2. **Release version:** choose the post-Boardroom-redesign contract version and deterministic release identity.
-3. **Initial scope:** decide which modules are enabled at launch and whether a deliberately smaller contract surface is
-   required for the first release.
-4. **Supported assets:** define the wrapped-native address and the initial token compatibility standard.
-5. **Authority manifest:** identify protocol governance, treasury, fee manager, deterministic deployer owner, and the
-   transaction broadcaster. This depends on
-   [hard release blocker 3](03-production-authority-ceremony.md).
-6. **Promotion authority:** define who may convert a pending artifact into a supported artifact and which independent
-   evidence that action requires.
-7. **Canary model:** decide whether a meaningful limited mainnet canary is possible for a permissionless deployment. If
-   limits or allowlists are desired, they must be designed into the release rather than implied by a hidden UI.
+## Decisions still required
 
-## Required remediation
+1. Choose the first mainnet chain; do not launch multiple mainnets
+   simultaneously.
+2. Approve the exact protocol-v1 commit and audited compiler/dependency
+   inputs.
+3. Choose the production registry governor, quorum, timelock, veto, and
+   emergency process.
+4. Approve governance, treasury, AMM fee manager, deterministic deployer owner,
+   and broadcaster identities for each rehearsal and target.
+5. Approve target-chain selector-count, release-activation gas, migration gas,
+   and downtime limits.
+6. Define who may promote a verified candidate and which independent evidence
+   is mandatory.
+7. Decide the supported modules/assets and whether any surface is deliberately
+   disabled at first launch.
 
-### 1. Freeze an exact release candidate
+## Required testnet remediation
 
-- Resolve the governance-launch interface in
-  [hard release blocker 2](02-secure-governance-launch.md).
-- Resolve the obligation, discovery, and singleton-liquidity model in
-  [hard release blocker 5](05-boardroom-lifecycle-data-model.md).
-- Resolve the authority model in
-  [hard release blocker 3](03-production-authority-ceremony.md).
-- Complete the independent assurance gate in
-  [hard release blocker 4](04-independent-security-assurance.md).
-- Record the exact 40-character Git commit and require a clean worktree for every rehearsal and broadcast.
-- Stop feature changes to the audited contract surface except for accepted audit remediation.
+### 1. Freeze the exact candidate
 
-### 2. Implement target-chain release support
+- Finish the final local acceptance ledger.
+- Complete the pull-request review cycle with no remaining actionable finding.
+- Record the exact 40-character reviewed commit and clean generated diff.
+- Freeze compiler settings, dependency lockfiles, release manifests, storage
+  layout commitments, and deployment calldata.
+- Complete independent security and economic review before treating that
+  commit as a mainnet candidate.
 
-For the selected first chain, add and test:
+### 2. Rehearse target-chain operations
 
-- an explicit mainnet chain profile rather than a custom-chain fallback;
-- the canonical wrapped-native token and explorer configuration;
-- chain-ID refusal checks in every deployment and verification command;
-- target-chain gas pricing, transaction type, finality, RPC, log-range, and historical-data behavior;
-- deterministic deployment and Safe-compatible execution steps;
-- artifact generation and independent artifact verification;
-- SDK and web configuration that cannot become writable from a partial artifact;
-- Sentinel configuration only if Sentinel is part of the supported launch.
+For the selected testnet:
 
-### 3. Deploy the exact candidate to testnet
+- run the dry-run wrapper against the intended RPC and execution lane;
+- confirm deployment and release-activation gas bounds;
+- rehearse the exact authority and ownership-handoff transaction shape;
+- broadcast from the frozen clean revision;
+- retain candidate artifact and minimized receipt evidence;
+- independently run the live verifier;
+- reproduce contract source verification and compiler inputs;
+- exercise creation, launch, controller operations, modules, wind-down,
+  snapshotting, redemption, release activation, migration, and resumed
+  operation through supported product paths;
+- verify indexer discovery and reorg/finality behavior from the inclusive
+  deployment block.
 
-The testnet deployment must use the same:
+### 3. Promote deliberately
 
-- source revision and compiler configuration;
-- deterministic salts and release version;
-- authority architecture, substituting only explicitly identified test signers where unavoidable;
-- module-policy configuration;
-- artifact schema and verification process;
-- SDK, web, and Sentinel release paths intended for mainnet.
+Promotion must reject any candidate missing:
 
-Exercise the complete lifecycle with real RPCs and real wallet software. Local Anvil remains useful but is not a
-substitute for this step.
+- exact source commit, chain, deployment block/timestamp, and successful
+  receipts;
+- deterministic deployer provenance and init-code commitments;
+- all root, helper, module, child-implementation, kernel, and facet addresses
+  and runtime code hashes;
+- complete release metadata, 97 canonical routes, manifest hash, kernel
+  selector-set hash, required storage version/layout, and active facet-set
+  hash;
+- ownership, immutable reciprocal wiring, policies, wrapped-native identity,
+  treasury, and fee routes;
+- independent live verification output.
 
-The limited funded fixed-price x402 canary in
-`packages/contracts/deployments/998-lifecycle.json` is evidence toward this requirement, but does not clear the complete
-lifecycle, maximum-gas, authority-rehearsal, or mainnet promotion gates.
-
-### 4. Create a protected artifact-promotion gate
-
-The promotion process must reject any artifact that lacks required data. At minimum it must verify:
-
-- schema and release version;
-- chain ID and deployment transaction receipts;
-- every required address and authority role;
-- runtime code at every address;
-- runtime code hashes against locally reproduced bytecode;
-- immutable factory, policy, router, fee, rewards, bond, liquidity, and Boardroom wiring;
-- deterministic address predictions and salt ownership;
-- ownership handoffs and fee recipients;
-- wrapped-native identity;
-- deployment block or timestamp needed for complete discovery.
-
-The verifier must fail on a pending artifact in release CI. A successful skip is acceptable for ordinary development
-CI, but it is not a release-promotion result.
-
-### 5. Publish an auditable release
-
-The release must include:
-
-- a signed or otherwise protected Git tag;
-- exact source and dependency lockfiles;
-- compiler and Foundry versions;
-- deployment and verification commands;
-- verified artifact JSON;
-- transaction hashes and block numbers;
-- contract source-verification links;
-- authority manifest;
-- audit report and remediation mapping;
-- known limitations and supported-chain statement;
-- rollback boundaries, including an explicit statement that immutable contracts cannot be rolled back.
+The product remains unwritable until the promoted artifact is checked in and
+the released SDK/application builds consume exactly that identity.
 
 ## Exit criteria
 
-This blocker is cleared only when all of the following are true:
+- [ ] One first mainnet and one exact audited release commit are approved.
+- [ ] Canonical protocol v1 is deployed to the corresponding public testnet.
+- [ ] The candidate artifact and receipt ledger are independently verified and
+      explicitly promoted.
+- [ ] Full lifecycle, release activation, migration downtime, and resumed
+      operation pass through the supported SDK and product paths.
+- [ ] Maximum deployment, activation, migration, and user transaction costs fit
+      the intended target-chain lanes.
+- [ ] The production authority ceremony is rehearsed with the same transaction
+      shapes and controls.
+- [ ] Mainnet wrappers refuse the wrong chain, dirty source, incomplete roles,
+      partial artifact, and release mismatch.
+- [ ] Release CI requires live code-hash, selector-table, ownership, and
+      immutable-wiring verification.
+- [ ] A protected promotion step controls when clients become writable.
+- [ ] A signed release evidence packet identifies source, compiler inputs,
+      manifests, storage layouts, deployed code, governance calldata, audit,
+      known limitations, and incident boundaries.
 
-- [ ] One first mainnet and one exact release version are approved.
-- [ ] The exact release has been deployed to the corresponding public testnet.
-- [x] The HyperEVM testnet artifact is complete, non-pending, checked in, and independently verified.
-- [ ] Full lifecycle tests have passed against the deployed testnet contracts through the supported SDK and web paths.
-- [ ] Maximum-gas deployment and user transactions fit the target chain's intended execution lane.
-- [ ] The production authority ceremony has been rehearsed with the same transaction shape.
-- [ ] Mainnet deployment and verification wrappers refuse the wrong chain and incomplete role configuration.
-- [ ] The mainnet artifact schema fails closed on missing, malformed, or unexpected fields.
-- [ ] Release CI requires live code-hash and immutable-wiring verification.
-- [ ] A protected promotion step controls when the product becomes writable.
-- [ ] A release tag and release evidence packet identify the exact audited revision.
-- [ ] The public security and network documentation is updated only after the release is verifiably live.
-
-## Evidence packet
-
-The completed release issue or release record should link:
-
-1. the approved decisions;
-2. the exact source revision;
-3. passing local and CI commands;
-4. testnet deployment and lifecycle receipts;
-5. independent verification output;
-6. audit and remediation evidence;
-7. authority rehearsal evidence;
-8. operational and incident-readiness evidence;
-9. the final go/no-go approval.
-
-Documentation or screenshots without onchain and source-reproducible evidence do not clear this blocker.
+Documentation or screenshots without source-reproducible onchain evidence do
+not clear this blocker.

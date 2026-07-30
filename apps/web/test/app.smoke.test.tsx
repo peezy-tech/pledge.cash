@@ -51,7 +51,10 @@ import {
 import { Web3Provider } from "../src/components/web3-provider";
 import type { BoardroomPanelCapabilities } from "../src/features/boardrooms/boardroom-panel-types";
 import type { ProjectCapabilityMap } from "../src/features/capabilities/project-capabilities";
-import { BoardroomPanel } from "../src/features/boardrooms/boardroom-panel";
+import {
+  BoardroomPanel,
+  boardroomMigrationActionAvailable,
+} from "../src/features/boardrooms/boardroom-panel";
 import { DiscoveryPanel, WalletAccessPanel } from "../src/features/discovery/discovery-panel";
 import { GrantInspector } from "../src/features/grants/grant-inspector";
 import { AppHeader } from "../src/features/wallet/app-header";
@@ -1025,6 +1028,12 @@ describe("web app shell", () => {
     expect(canRunGrantIssuerActions(observer, grant, access)).toBe(true);
   });
 
+  test("offers Boardroom migration only while the active release requires it", () => {
+    expect(boardroomMigrationActionAvailable(undefined)).toBe(false);
+    expect(boardroomMigrationActionAvailable({ migrationRequired: false })).toBe(false);
+    expect(boardroomMigrationActionAvailable({ migrationRequired: true })).toBe(true);
+  });
+
   test("bases Manage badges on the selected Boardroom state", () => {
     expect(manageWorkspaceSummary(oldGrant.issuer, boardroom, boardroomSnapshot)).toMatchObject({
       roleLabel: "Owner wallet",
@@ -1074,9 +1083,10 @@ describe("web app shell", () => {
           mintAmount: "1000",
           mintTo: boardroom,
           predicted: boardroom,
-          snapshot: boardroomSnapshot,
+          snapshot: { ...boardroomSnapshot, migrationRequired: true },
           create: noop,
           load: noop,
+          migrate: noop,
           mintShares: noop,
           predict: noop,
           setBoardroomAddress: noopSetter,
@@ -1214,6 +1224,8 @@ describe("web app shell", () => {
     expect(html).toContain("Use Sale");
     expect(html).toContain("Use Airdrop");
     expect(html).toContain("Use Locker");
+    expect(html).toContain("Ordinary writes remain blocked");
+    expect(html).toContain("Migrate Boardroom");
   });
 
   test("preserves exact bigint values from runtime deployment artifacts", () => {

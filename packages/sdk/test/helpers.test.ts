@@ -99,6 +99,7 @@ import {
   type BoardroomMigratingBondingCurveTerms,
   type GrantCreationTerms,
   type MerkleAirdropGrantClaimTerms,
+  type PledgeCashBlockReadClient,
   type PledgeCashLogClient,
   type PledgeCashReadClient,
 } from "../src";
@@ -127,6 +128,7 @@ const boardroomController = "0x000000000000000000000000000000000000c011" as Addr
 const pool = "0x0000000000000000000000000000000000000a00" as Address;
 const wrappedNative = "0x00000000000000000000000000000000000000ee" as Address;
 const salt = "0x1111111111111111111111111111111111111111111111111111111111111111" as Hex;
+const expectedFacetSetHash = "0x2222222222222222222222222222222222222222222222222222222222222222" as Hex;
 const merkleRoot = "0x3333333333333333333333333333333333333333333333333333333333333333" as Hex;
 const proof = ["0x4444444444444444444444444444444444444444444444444444444444444444" as Hex];
 
@@ -314,6 +316,10 @@ describe("SDK action and query helpers", () => {
       controller: boardroomController,
       controllerGeneration: 1n,
       governanceEpoch: 3n,
+      facetSetHash: expectedFacetSetHash,
+      appliedStorageVersion: 2n,
+      appliedStorageLayoutHash: merkleRoot,
+      migrationRequired: false,
       windDownDelay: 172_800n,
       windDownStartedAt: 100n,
       protectionStaker: holder,
@@ -527,6 +533,7 @@ describe("SDK action and query helpers", () => {
 
     const batch = buildBoardroomShareGrantIssuanceBatch({
       boardroom,
+      expectedFacetSetHash,
       factory,
       shareToken,
       terms: shareGrantTerms,
@@ -540,7 +547,7 @@ describe("SDK action and query helpers", () => {
     expect(batch.functionName).toBe("executeBatch");
     expect(batch.value).toBe(10n);
 
-    const calls = batch.args[0];
+    const calls = batch.args[1];
     expect(calls).toHaveLength(2);
     expect(calls[0]).toMatchObject({ policy: assetPolicy, target: shareToken, value: 0n });
     expect(calls[0]?.data).toBe(
@@ -602,12 +609,13 @@ describe("SDK action and query helpers", () => {
   test("builds reward pool creation, funding, staking, cooldown, and claim inputs", () => {
     const creation = buildBoardroomRewardsCreationTransaction({
       boardroom,
+      expectedFacetSetHash,
       factory,
       cooldown: 86_400n,
       salt,
     });
     expect(creation).toMatchObject({ address: boardroom, functionName: "execute" });
-    const creationCall = creation.args[0];
+    const creationCall = creation.args[1];
     expect(creationCall).toMatchObject({ policy: factory, target: factory, value: 0n });
     expect(decodeFunctionData({ abi: boardroomRewardsFactoryAbi, data: creationCall.data })).toMatchObject({
       functionName: "createRewards",
@@ -616,6 +624,7 @@ describe("SDK action and query helpers", () => {
 
     const funding = buildBoardroomRewardFundingBatch({
       boardroom,
+      expectedFacetSetHash,
       factory,
       assetPolicy,
       rewards: rewardPool,
@@ -624,7 +633,7 @@ describe("SDK action and query helpers", () => {
       duration: 604_800n,
     });
     expect(funding).toMatchObject({ address: boardroom, functionName: "executeBatch" });
-    const fundingCalls = funding.args[0];
+    const fundingCalls = funding.args[1];
     expect(fundingCalls).toHaveLength(2);
     const decodedFunding = decodeFunctionData({ abi: boardroomRewardsFactoryAbi, data: fundingCalls[1]!.data });
     expect(decodedFunding.functionName).toBe("fundReward");
@@ -655,52 +664,61 @@ describe("SDK action and query helpers", () => {
   });
 
   test("builds Boardroom direct transaction inputs", () => {
-    expect(buildBoardroomMintTransaction({ boardroom, to: holder, amount: 1000n })).toMatchObject({
+    expect(buildBoardroomMintTransaction({ boardroom, expectedFacetSetHash, to: holder, amount: 1000n })).toMatchObject({
       address: boardroom,
       abi: boardroomAbi,
       functionName: "mint",
-      args: [holder, 1000n],
+      args: [expectedFacetSetHash, holder, 1000n],
     });
-    expect(buildBoardroomStartWindDownTransaction({ boardroom })).toMatchObject({
+    expect(buildBoardroomStartWindDownTransaction({ boardroom, expectedFacetSetHash })).toMatchObject({
       address: boardroom,
       functionName: "startWindDown",
     });
-    expect(buildBoardroomWrapNativeBalanceTransaction({ boardroom })).toMatchObject({
+    expect(buildBoardroomWrapNativeBalanceTransaction({ boardroom, expectedFacetSetHash })).toMatchObject({
       address: boardroom,
       functionName: "wrapNativeBalance",
     });
-    expect(buildBoardroomBurnTreasurySharesTransaction({ boardroom })).toMatchObject({
+    expect(buildBoardroomBurnTreasurySharesTransaction({ boardroom, expectedFacetSetHash })).toMatchObject({
       address: boardroom,
       functionName: "burnTreasuryShares",
     });
-    expect(buildBoardroomOpenRedemptionsTransaction({ boardroom })).toMatchObject({
+    expect(buildBoardroomOpenRedemptionsTransaction({ boardroom, expectedFacetSetHash })).toMatchObject({
       address: boardroom,
       functionName: "openRedemptions",
     });
-    expect(buildBoardroomPruneObligationTransaction({ boardroom, obligation: holder })).toMatchObject({
+    expect(buildBoardroomPruneObligationTransaction({ boardroom, expectedFacetSetHash, obligation: holder })).toMatchObject({
       address: boardroom,
       functionName: "pruneObligation",
-      args: [holder],
+      args: [expectedFacetSetHash, holder],
     });
-    expect(buildBoardroomPruneObligationsTransaction({ boardroom, obligations: [holder, paymentToken] })).toMatchObject({
+    expect(buildBoardroomPruneObligationsTransaction({
+      boardroom,
+      expectedFacetSetHash,
+      obligations: [holder, paymentToken],
+    })).toMatchObject({
       address: boardroom,
       functionName: "pruneObligations",
-      args: [[holder, paymentToken]],
+      args: [expectedFacetSetHash, [holder, paymentToken]],
     });
-    expect(() => buildBoardroomPruneObligationsTransaction({ boardroom, obligations: [] })).toThrow();
-    expect(buildBoardroomRegisterRedeemableAssetTransaction({ boardroom, asset: paymentToken })).toMatchObject({
+    expect(() => buildBoardroomPruneObligationsTransaction({ boardroom, expectedFacetSetHash, obligations: [] })).toThrow();
+    expect(buildBoardroomRegisterRedeemableAssetTransaction({
+      boardroom,
+      expectedFacetSetHash,
+      asset: paymentToken,
+    })).toMatchObject({
       address: boardroom,
       functionName: "registerRedeemableAsset",
-      args: [paymentToken],
+      args: [expectedFacetSetHash, paymentToken],
     });
-    expect(buildBoardroomRedeemTransaction({ boardroom, shares: 10n })).toMatchObject({
+    expect(buildBoardroomRedeemTransaction({ boardroom, expectedFacetSetHash, shares: 10n })).toMatchObject({
       address: boardroom,
       functionName: "redeem",
-      args: [10n],
+      args: [expectedFacetSetHash, 10n],
     });
     expect(
       buildBoardroomClaimRedemptionAssetTransaction({
         boardroom,
+        expectedFacetSetHash,
         asset: paymentToken,
         recipient: holder,
         minAmountOut: 5n,
@@ -708,13 +726,14 @@ describe("SDK action and query helpers", () => {
     ).toMatchObject({
       address: boardroom,
       functionName: "claimRedemptionAsset",
-      args: [paymentToken, holder, 5n],
+      args: [expectedFacetSetHash, paymentToken, holder, 5n],
     });
   });
 
   test("builds Boardroom fixed-price sale batch transaction inputs", () => {
     const batch = buildBoardroomFixedPriceSaleBatch({
       boardroom,
+      expectedFacetSetHash,
       factory: distributionFactory,
       shareToken,
       terms: saleTerms,
@@ -727,7 +746,7 @@ describe("SDK action and query helpers", () => {
     expect(batch.functionName).toBe("executeBatch");
     expect(batch.value).toBe(0n);
 
-    const calls = batch.args[0];
+    const calls = batch.args[1];
     expect(calls).toHaveLength(2);
     expect(calls[0]).toMatchObject({ policy: assetPolicy, target: shareToken, value: 0n });
     expect(calls[0]?.data).toBe(
@@ -759,30 +778,33 @@ describe("SDK action and query helpers", () => {
 
     const close = buildBoardroomFixedPriceSaleCloseAction({
       boardroom,
+      expectedFacetSetHash,
       policy: distributionFactory,
       sale,
     });
     expect(close.address).toBe(boardroom);
     expect(close.abi).toBe(boardroomAbi);
     expect(close.functionName).toBe("execute");
-    expect(close.args[0]).toMatchObject({ policy: distributionFactory, target: sale, value: 0n });
-    expect(close.args[0].data).toBe(encodeFunctionData({ abi: fixedPriceSaleAbi, functionName: "close" }));
+    expect(close.args[1]).toMatchObject({ policy: distributionFactory, target: sale, value: 0n });
+    expect(close.args[1].data).toBe(encodeFunctionData({ abi: fixedPriceSaleAbi, functionName: "close" }));
 
     const cancel = buildBoardroomFixedPriceSaleCancelAction({
       boardroom,
+      expectedFacetSetHash,
       policy: distributionFactory,
       sale,
     });
     expect(cancel.address).toBe(boardroom);
     expect(cancel.abi).toBe(boardroomAbi);
     expect(cancel.functionName).toBe("execute");
-    expect(cancel.args[0]).toMatchObject({ policy: distributionFactory, target: sale, value: 0n });
-    expect(cancel.args[0].data).toBe(encodeFunctionData({ abi: fixedPriceSaleAbi, functionName: "cancel" }));
+    expect(cancel.args[1]).toMatchObject({ policy: distributionFactory, target: sale, value: 0n });
+    expect(cancel.args[1].data).toBe(encodeFunctionData({ abi: fixedPriceSaleAbi, functionName: "cancel" }));
   });
 
   test("builds Boardroom Dutch-auction creation and lifecycle transactions", () => {
     const batch = buildBoardroomDutchAuctionBatch({
       boardroom,
+      expectedFacetSetHash,
       factory: distributionFactory,
       shareToken,
       terms: auctionTerms,
@@ -792,7 +814,7 @@ describe("SDK action and query helpers", () => {
 
     expect(batch.address).toBe(boardroom);
     expect(batch.functionName).toBe("executeBatch");
-    const calls = batch.args[0];
+    const calls = batch.args[1];
     expect(calls).toHaveLength(2);
     expect(calls[0]?.data).toBe(encodeFunctionData({
       abi: boardroomTokenAbi,
@@ -815,15 +837,26 @@ describe("SDK action and query helpers", () => {
       }],
     }));
 
-    const close = buildBoardroomDutchAuctionCloseAction({ boardroom, policy: distributionFactory, auction });
-    expect(close.args[0].data).toBe(encodeFunctionData({ abi: dutchAuctionSaleAbi, functionName: "close" }));
-    const cancel = buildBoardroomDutchAuctionCancelAction({ boardroom, policy: distributionFactory, auction });
-    expect(cancel.args[0].data).toBe(encodeFunctionData({ abi: dutchAuctionSaleAbi, functionName: "cancel" }));
+    const close = buildBoardroomDutchAuctionCloseAction({
+      boardroom,
+      expectedFacetSetHash,
+      policy: distributionFactory,
+      auction,
+    });
+    expect(close.args[1].data).toBe(encodeFunctionData({ abi: dutchAuctionSaleAbi, functionName: "close" }));
+    const cancel = buildBoardroomDutchAuctionCancelAction({
+      boardroom,
+      expectedFacetSetHash,
+      policy: distributionFactory,
+      auction,
+    });
+    expect(cancel.args[1].data).toBe(encodeFunctionData({ abi: dutchAuctionSaleAbi, functionName: "cancel" }));
   });
 
   test("builds non-transferable bond market transactions", () => {
     const batch = buildBoardroomBondMarketBatch({
       boardroom,
+      expectedFacetSetHash,
       factory: bondMarketFactory,
       shareToken,
       terms: bondTerms,
@@ -833,12 +866,12 @@ describe("SDK action and query helpers", () => {
 
     expect(batch.address).toBe(boardroom);
     expect(batch.functionName).toBe("executeBatch");
-    expect(batch.args[0][0]?.data).toBe(encodeFunctionData({
+    expect(batch.args[1][0]?.data).toBe(encodeFunctionData({
       abi: boardroomTokenAbi,
       functionName: "approve",
       args: [bondMarketFactory, bondTerms.capacity],
     }));
-    expect(batch.args[0][1]?.data).toBe(encodeFunctionData({
+    expect(batch.args[1][1]?.data).toBe(encodeFunctionData({
       abi: bondMarketFactoryAbi,
       functionName: "createBondMarket",
       args: [{
@@ -856,9 +889,14 @@ describe("SDK action and query helpers", () => {
       }],
     }));
 
-    const close = buildBoardroomBondMarketCloseAction({ boardroom, policy: bondMarketFactory, market: bondMarket });
-    expect(close.args[0]).toMatchObject({ policy: bondMarketFactory, target: bondMarket, value: 0n });
-    expect(close.args[0].data).toBe(encodeFunctionData({ abi: bondMarketAbi, functionName: "close" }));
+    const close = buildBoardroomBondMarketCloseAction({
+      boardroom,
+      expectedFacetSetHash,
+      policy: bondMarketFactory,
+      market: bondMarket,
+    });
+    expect(close.args[1]).toMatchObject({ policy: bondMarketFactory, target: bondMarket, value: 0n });
+    expect(close.args[1].data).toBe(encodeFunctionData({ abi: bondMarketAbi, functionName: "close" }));
     expect(buildBondPurchaseTransaction({ market: bondMarket, quoteAmount: 25n, minimumPayout: 9n, deadline: 999n }))
       .toMatchObject({ address: bondMarket, functionName: "purchase", args: [25n, 9n, 999n] });
     expect(buildBondRedeemTransaction({ market: bondMarket, positionId: 7n }))
@@ -870,6 +908,7 @@ describe("SDK action and query helpers", () => {
   test("builds Boardroom migrating bonding curve transaction inputs", () => {
     const batch = buildBoardroomMigratingCurveBatch({
       boardroom,
+      expectedFacetSetHash,
       factory: distributionFactory,
       shareToken,
       terms: curveTerms,
@@ -882,7 +921,7 @@ describe("SDK action and query helpers", () => {
     expect(batch.functionName).toBe("executeBatch");
     expect(batch.value).toBe(0n);
 
-    const calls = batch.args[0];
+    const calls = batch.args[1];
     expect(calls).toHaveLength(2);
     expect(calls[0]).toMatchObject({ policy: assetPolicy, target: shareToken, value: 0n });
     expect(calls[0]?.data).toBe(
@@ -918,14 +957,15 @@ describe("SDK action and query helpers", () => {
 
     const cancel = buildBoardroomMigratingCurveCancelAction({
       boardroom,
+      expectedFacetSetHash,
       policy: distributionFactory,
       curve,
     });
     expect(cancel.address).toBe(boardroom);
     expect(cancel.abi).toBe(boardroomAbi);
     expect(cancel.functionName).toBe("execute");
-    expect(cancel.args[0]).toMatchObject({ policy: distributionFactory, target: curve, value: 0n });
-    expect(cancel.args[0].data).toBe(encodeFunctionData({ abi: migratingBondingCurveAbi, functionName: "cancel" }));
+    expect(cancel.args[1]).toMatchObject({ policy: distributionFactory, target: curve, value: 0n });
+    expect(cancel.args[1].data).toBe(encodeFunctionData({ abi: migratingBondingCurveAbi, functionName: "cancel" }));
 
     const migrate = buildMigratingBondingCurveMigrationTransaction({
       curve,
@@ -944,6 +984,7 @@ describe("SDK action and query helpers", () => {
   test("builds Boardroom Merkle airdrop and claim transaction inputs", () => {
     const batch = buildBoardroomMerkleAirdropBatch({
       boardroom,
+      expectedFacetSetHash,
       factory: distributionFactory,
       shareToken,
       terms: airdropTerms,
@@ -956,7 +997,7 @@ describe("SDK action and query helpers", () => {
     expect(batch.functionName).toBe("executeBatch");
     expect(batch.value).toBe(0n);
 
-    const calls = batch.args[0];
+    const calls = batch.args[1];
     expect(calls).toHaveLength(2);
     expect(calls[0]).toMatchObject({ policy: assetPolicy, target: shareToken, value: 0n });
     expect(calls[0]?.data).toBe(
@@ -985,24 +1026,42 @@ describe("SDK action and query helpers", () => {
       }),
     );
 
-    const close = buildBoardroomMerkleAirdropCloseAction({ boardroom, policy: distributionFactory, airdrop });
-    expect(close.args[0]).toMatchObject({ policy: distributionFactory, target: airdrop, value: 0n });
-    expect(close.args[0].data).toBe(encodeFunctionData({ abi: merkleAirdropAbi, functionName: "close" }));
+    const close = buildBoardroomMerkleAirdropCloseAction({
+      boardroom,
+      expectedFacetSetHash,
+      policy: distributionFactory,
+      airdrop,
+    });
+    expect(close.args[1]).toMatchObject({ policy: distributionFactory, target: airdrop, value: 0n });
+    expect(close.args[1].data).toBe(encodeFunctionData({ abi: merkleAirdropAbi, functionName: "close" }));
 
-    const cancel = buildBoardroomMerkleAirdropCancelAction({ boardroom, policy: distributionFactory, airdrop });
-    expect(cancel.args[0]).toMatchObject({ policy: distributionFactory, target: airdrop, value: 0n });
-    expect(cancel.args[0].data).toBe(encodeFunctionData({ abi: merkleAirdropAbi, functionName: "cancel" }));
+    const cancel = buildBoardroomMerkleAirdropCancelAction({
+      boardroom,
+      expectedFacetSetHash,
+      policy: distributionFactory,
+      airdrop,
+    });
+    expect(cancel.args[1]).toMatchObject({ policy: distributionFactory, target: airdrop, value: 0n });
+    expect(cancel.args[1].data).toBe(encodeFunctionData({ abi: merkleAirdropAbi, functionName: "cancel" }));
 
-    expect(buildMerkleAirdropClaimTransaction({ airdrop, index: 1n, account: holder, amount: 100n, proof })).toMatchObject({
+    expect(buildMerkleAirdropClaimTransaction({
+      airdrop,
+      expectedFacetSetHash,
+      index: 1n,
+      account: holder,
+      amount: 100n,
+      proof,
+    })).toMatchObject({
       address: airdrop,
       abi: merkleAirdropAbi,
       functionName: "claim",
-      args: [1n, holder, 100n, proof],
+      args: [expectedFacetSetHash, 1n, holder, 100n, proof],
     });
 
     expect(
       buildMerkleAirdropGrantClaimTransaction({
         airdrop,
+        expectedFacetSetHash,
         index: 2n,
         account: holder,
         amount: 250n,
@@ -1013,13 +1072,14 @@ describe("SDK action and query helpers", () => {
       address: airdrop,
       abi: merkleAirdropAbi,
       functionName: "claimGrant",
-      args: [2n, holder, 250n, airdropGrantTerms, proof],
+      args: [expectedFacetSetHash, 2n, holder, 250n, airdropGrantTerms, proof],
     });
   });
 
   test("builds Boardroom locked-liquidity transaction inputs", () => {
     const batch = buildBoardroomLockedLiquidityBatch({
       boardroom,
+      expectedFacetSetHash,
       factory: lockedLiquidityFactory,
       shareToken,
       terms: lockedLiquidityTerms,
@@ -1032,7 +1092,7 @@ describe("SDK action and query helpers", () => {
     expect(batch.functionName).toBe("executeBatch");
     expect(batch.value).toBe(0n);
 
-    const calls = batch.args[0];
+    const calls = batch.args[1];
     expect(calls).toHaveLength(3);
     expect(calls[0]).toMatchObject({ policy: assetPolicy, target: shareToken, value: 0n });
     expect(calls[0]?.data).toBe(
@@ -1072,6 +1132,7 @@ describe("SDK action and query helpers", () => {
 
     const add = buildBoardroomLockedLiquidityAddBatch({
       boardroom,
+      expectedFacetSetHash,
       factory: lockedLiquidityFactory,
       shareToken,
       terms: {
@@ -1081,9 +1142,9 @@ describe("SDK action and query helpers", () => {
       policy: lockedLiquidityFactory,
       assetPolicy,
     });
-    expect(add.args[0]).toHaveLength(3);
-    expect(add.args[0][2]).toMatchObject({ policy: lockedLiquidityFactory, target: lockedLiquidityFactory });
-    expect(add.args[0][2]?.data).toBe(encodeFunctionData({
+    expect(add.args[1]).toHaveLength(3);
+    expect(add.args[1][2]).toMatchObject({ policy: lockedLiquidityFactory, target: lockedLiquidityFactory });
+    expect(add.args[1][2]?.data).toBe(encodeFunctionData({
       abi: lockedLiquidityFactoryAbi,
       functionName: "addLockedLiquidity",
       args: [{
@@ -1099,6 +1160,7 @@ describe("SDK action and query helpers", () => {
 
     const remove = buildBoardroomLockedLiquidityRemoveAction({
       boardroom,
+      expectedFacetSetHash,
       policy: lockedLiquidityFactory,
       factory: lockedLiquidityFactory,
       liquidity: 5n,
@@ -1106,8 +1168,8 @@ describe("SDK action and query helpers", () => {
       amountBMin: 2n,
       deadline: 12345n,
     });
-    expect(remove.args[0]).toMatchObject({ policy: lockedLiquidityFactory, target: lockedLiquidityFactory });
-    expect(remove.args[0].data).toBe(encodeFunctionData({
+    expect(remove.args[1]).toMatchObject({ policy: lockedLiquidityFactory, target: lockedLiquidityFactory });
+    expect(remove.args[1].data).toBe(encodeFunctionData({
       abi: lockedLiquidityFactoryAbi,
       functionName: "removeLockedLiquidity",
       args: [{ liquidity: 5n, amountAMin: 1n, amountBMin: 2n, deadline: 12345n }],
@@ -1115,16 +1177,18 @@ describe("SDK action and query helpers", () => {
 
     const close = buildBoardroomLockedLiquidityCloseAction({
       boardroom,
+      expectedFacetSetHash,
       policy: lockedLiquidityFactory,
       factory: lockedLiquidityFactory,
     });
-    expect(close.args[0]).toMatchObject({ policy: lockedLiquidityFactory, target: lockedLiquidityFactory });
-    expect(close.args[0].data).toBe(
+    expect(close.args[1]).toMatchObject({ policy: lockedLiquidityFactory, target: lockedLiquidityFactory });
+    expect(close.args[1].data).toBe(
       encodeFunctionData({ abi: lockedLiquidityFactoryAbi, functionName: "closeLockedLiquidity" }),
     );
 
     const exit = buildBoardroomLockedLiquidityExitTransaction({
       boardroom,
+      expectedFacetSetHash,
       amountAMin: 1n,
       amountBMin: 2n,
       deadline: 12345n,
@@ -1132,18 +1196,19 @@ describe("SDK action and query helpers", () => {
     expect(exit.address).toBe(boardroom);
     expect(exit.abi).toBe(boardroomAbi);
     expect(exit.functionName).toBe("exitProtocolLiquidity");
-    expect(exit.args).toEqual([1n, 2n, 12345n]);
+    expect(exit.args).toEqual([expectedFacetSetHash, 1n, 2n, 12345n]);
 
     const claim = buildBoardroomLockedLiquidityFeeClaimAction({
       boardroom,
+      expectedFacetSetHash,
       policy: lockedLiquidityFactory,
       locker,
     });
     expect(claim.address).toBe(boardroom);
     expect(claim.abi).toBe(boardroomAbi);
     expect(claim.functionName).toBe("execute");
-    expect(claim.args[0]).toMatchObject({ policy: lockedLiquidityFactory, target: locker, value: 0n });
-    expect(claim.args[0].data).toBe(encodeFunctionData({ abi: lockedLiquidityAbi, functionName: "claimFees" }));
+    expect(claim.args[1]).toMatchObject({ policy: lockedLiquidityFactory, target: locker, value: 0n });
+    expect(claim.args[1].data).toBe(encodeFunctionData({ abi: lockedLiquidityAbi, functionName: "claimFees" }));
   });
 
   test("requires assetPolicy for Boardroom approval batches", () => {
@@ -1152,6 +1217,7 @@ describe("SDK action and query helpers", () => {
     expect(() =>
       buildBoardroomShareGrantIssuanceBatch({
         boardroom,
+        expectedFacetSetHash,
         factory,
         shareToken,
         terms: shareGrantTerms,
@@ -1162,6 +1228,7 @@ describe("SDK action and query helpers", () => {
     expect(() =>
       buildBoardroomFixedPriceSaleBatch({
         boardroom,
+        expectedFacetSetHash,
         factory: distributionFactory,
         shareToken,
         terms: saleTerms,
@@ -1172,6 +1239,7 @@ describe("SDK action and query helpers", () => {
     expect(() =>
       buildBoardroomBondMarketBatch({
         boardroom,
+        expectedFacetSetHash,
         factory: bondMarketFactory,
         shareToken,
         terms: bondTerms,
@@ -1182,6 +1250,7 @@ describe("SDK action and query helpers", () => {
     expect(() =>
       buildBoardroomMigratingCurveBatch({
         boardroom,
+        expectedFacetSetHash,
         factory: distributionFactory,
         shareToken,
         terms: curveTerms,
@@ -1192,6 +1261,7 @@ describe("SDK action and query helpers", () => {
     expect(() =>
       buildBoardroomLockedLiquidityBatch({
         boardroom,
+        expectedFacetSetHash,
         factory: lockedLiquidityFactory,
         shareToken,
         terms: lockedLiquidityTerms,
@@ -1388,8 +1458,11 @@ describe("SDK action and query helpers", () => {
   });
 });
 
-function mockReadClient(values: Record<string, unknown>): PledgeCashReadClient {
+function mockReadClient(values: Record<string, unknown>): PledgeCashBlockReadClient {
   return {
+    async getBlockNumber() {
+      return 123n;
+    },
     async readContract(parameters) {
       const functionName = parameters.functionName as string;
       if (!(functionName in values)) throw new Error(`Unexpected read: ${functionName}`);
@@ -1468,6 +1541,7 @@ function boardroomCreatedLog(blockNumber: bigint, logIndex: number, discoveredBo
       name: "Pledge Common",
       symbol: "PLDG",
       salt,
+      facetSetHash: expectedFacetSetHash,
     },
   };
 }

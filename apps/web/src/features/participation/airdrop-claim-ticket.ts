@@ -9,13 +9,14 @@ import {
 } from "viem";
 import type { MerkleAirdropGrantClaimTerms } from "@pledge.cash/sdk";
 
-export const AIRDROP_CLAIM_TICKET_SCHEMA = "pledge.cash/airdrop-claim@1" as const;
+export const AIRDROP_CLAIM_TICKET_SCHEMA = "pledge.cash/airdrop-claim@2" as const;
 
 export type AirdropClaimTicket = {
   schema: typeof AIRDROP_CLAIM_TICKET_SCHEMA;
   chainId: number;
   airdrop: Address;
   account: Address;
+  expectedFacetSetHash: Hex;
   mode: "direct" | "grant";
   index: bigint;
   amount: bigint;
@@ -38,6 +39,10 @@ export function parseAirdropClaimTicket(value: string): AirdropClaimTicket {
   const chainId = parseSafeNumber(parsed.chainId, "Claim ticket chain ID");
   const airdrop = parseAddress(parsed.airdrop, "Claim ticket airdrop");
   const account = parseAddress(parsed.account, "Claim ticket account");
+  const expectedFacetSetHash = parsed.expectedFacetSetHash;
+  if (!isBytes32(expectedFacetSetHash)) {
+    throw new Error("Claim ticket protocol release hash is invalid.");
+  }
   const mode = parsed.mode;
   if (mode !== "direct" && mode !== "grant") throw new Error("Claim ticket mode must be direct or grant.");
   const index = parseBigint(parsed.index, "Claim ticket index");
@@ -52,6 +57,7 @@ export function parseAirdropClaimTicket(value: string): AirdropClaimTicket {
     chainId,
     airdrop,
     account,
+    expectedFacetSetHash,
     mode,
     index,
     amount,

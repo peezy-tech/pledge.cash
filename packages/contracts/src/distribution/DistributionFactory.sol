@@ -11,6 +11,7 @@ import {LockedLiquidityFactory} from "../liquidity/LockedLiquidityFactory.sol";
 import {BestEffortTokenLib} from "../lib/BestEffortTokenLib.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 import {IBoardroomObligationPolicy} from "../policy/IBoardroomObligationPolicy.sol";
+import {BoardroomCallbackLib} from "../policy/BoardroomCallbackLib.sol";
 
 interface IDistributionBoardroom {
     function launched() external view returns (bool);
@@ -18,8 +19,14 @@ interface IDistributionBoardroom {
     function primaryMarketMode() external view returns (uint8);
 
     function shareToken() external view returns (address);
-    function reserveRedeemableAsset(address asset) external;
-    function precommitBondingCurve(address curve, address quoteAsset, uint256 fundingAmount) external;
+}
+
+interface IDistributionBoundFactory {
+    function boardroomFactory() external view returns (address);
+}
+
+interface IDistributionBoardroomFactory {
+    function isBoardroom(address boardroom) external view returns (bool);
 }
 
 contract DistributionFactory is IBoardroomObligationPolicy {
@@ -45,6 +52,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
 
     address public immutable lockedLiquidityFactory;
     address public immutable tokenGrantFactory;
+    address public immutable boardroomFactory;
     address public immutable fixedPriceSaleLogic;
     address public immutable dutchAuctionLogic;
     address public immutable migratingBondingCurveLogic;
@@ -57,6 +65,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     mapping(address => address[]) internal distributionsForBoardroom;
 
     error InvalidAddress();
+    error IncoherentFactoryIdentity(address expected, address actual);
     error BondingCurveAlreadyConfigured(address boardroom, address curve);
     error InvalidBoardroom(address boardroom);
     error InvalidShareToken(address expected, address actual);
@@ -76,9 +85,18 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     );
 
     constructor(address lockedLiquidityFactory_, address tokenGrantFactory_) {
-        if (tokenGrantFactory_ == address(0)) revert InvalidAddress();
+        if (
+            lockedLiquidityFactory_ == address(0) || lockedLiquidityFactory_.code.length == 0
+                || tokenGrantFactory_ == address(0) || tokenGrantFactory_.code.length == 0
+        ) revert InvalidAddress();
+        address expectedBoardroomFactory = IDistributionBoundFactory(tokenGrantFactory_).boardroomFactory();
+        address liquidityBoardroomFactory = IDistributionBoundFactory(lockedLiquidityFactory_).boardroomFactory();
+        if (expectedBoardroomFactory == address(0) || liquidityBoardroomFactory != expectedBoardroomFactory) {
+            revert IncoherentFactoryIdentity(expectedBoardroomFactory, liquidityBoardroomFactory);
+        }
         lockedLiquidityFactory = lockedLiquidityFactory_;
         tokenGrantFactory = tokenGrantFactory_;
+        boardroomFactory = expectedBoardroomFactory;
         fixedPriceSaleLogic = address(new FixedPriceSale());
         dutchAuctionLogic = address(new DutchAuctionSale());
         migratingBondingCurveLogic = address(new MigratingBondingCurve());
@@ -88,7 +106,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     function createFixedPriceSale(FixedPriceSale.CreateParams calldata params) external returns (address sale) {
         _requireBoardroomShareToken(msg.sender, params.shareToken);
         _requireAsset(params.paymentToken);
-        IDistributionBoardroom(msg.sender).reserveRedeemableAsset(params.paymentToken);
+        BoardroomCallbackLib.reserveRedeemableAsset(msg.sender, params.paymentToken);
 
         sale = _createDistribution(
             fixedPriceSaleLogic,
@@ -108,7 +126,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         _requireBoardroomShareToken(msg.sender, params.shareToken);
         if (params.paymentToken == params.shareToken) revert InvalidAsset(params.paymentToken);
         _requireAsset(params.paymentToken);
-        IDistributionBoardroom(msg.sender).reserveRedeemableAsset(params.paymentToken);
+        BoardroomCallbackLib.reserveRedeemableAsset(msg.sender, params.paymentToken);
 
         auction = _createDistribution(
             dutchAuctionLogic,
@@ -138,7 +156,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
         if (existingCurve != address(0)) revert BondingCurveAlreadyConfigured(msg.sender, existingCurve);
         _requireBoardroomShareToken(msg.sender, params.shareToken);
         _requireAsset(params.quoteToken);
-        IDistributionBoardroom(msg.sender).reserveRedeemableAsset(params.quoteToken);
+        BoardroomCallbackLib.reserveRedeemableAsset(msg.sender, params.quoteToken);
 
         uint256 shareAmount = params.saleSupply + params.migrationSupply;
         address predictedCurve = LibClone.predictDeterministicAddress(
@@ -147,7 +165,7 @@ contract DistributionFactory is IBoardroomObligationPolicy {
             address(this)
         );
         bondingCurveOfBoardroom[msg.sender] = predictedCurve;
-        IDistributionBoardroom(msg.sender).precommitBondingCurve(predictedCurve, params.quoteToken, shareAmount);
+        BoardroomCallbackLib.precommitBondingCurve(msg.sender, predictedCurve, params.quoteToken, shareAmount);
         curve = _createDistribution(
             migratingBondingCurveLogic,
             msg.sender,
@@ -471,6 +489,11 @@ contract DistributionFactory is IBoardroomObligationPolicy {
     }
 
     function _requireBoardroomShareToken(address boardroom, address shareToken) internal view {
+        try IDistributionBoardroomFactory(boardroomFactory).isBoardroom(boardroom) returns (bool canonical) {
+            if (!canonical) revert InvalidBoardroom(boardroom);
+        } catch {
+            revert InvalidBoardroom(boardroom);
+        }
         try IDistributionBoardroom(boardroom).shareToken() returns (address expectedShareToken) {
             if (shareToken != expectedShareToken) revert InvalidShareToken(expectedShareToken, shareToken);
         } catch {

@@ -13,7 +13,9 @@ import type { BoardroomControlDestination } from "./dto";
 export type BoardroomControlChallengeRecord = {
   readonly audience: string;
   readonly boardroom: Address;
+  readonly boardroomEpoch: bigint;
   readonly chainId: number;
+  readonly configurationHash: Hex;
   readonly configurationEpoch: bigint;
   readonly consumedAt: Date | null;
   readonly controller: Address;
@@ -21,6 +23,7 @@ export type BoardroomControlChallengeRecord = {
   readonly destination: BoardroomControlDestination;
   readonly domain: string;
   readonly expiresAt: Date;
+  readonly facetSetHash: Hex;
   readonly issuedAt: Date;
   readonly issuedBlock: bigint;
   readonly issuedBlockHash: Hex;
@@ -33,12 +36,15 @@ export type BoardroomControlChallengeRecord = {
 
 export type BoardroomControlClaimRecord = {
   readonly boardroom: Address;
+  readonly boardroomEpoch: bigint;
   readonly chainId: number;
+  readonly configurationHash: Hex;
   readonly configurationEpoch: bigint;
   readonly controller: Address;
   readonly controllerGeneration: bigint;
   readonly createdAt: Date;
   readonly destination: BoardroomControlDestination;
+  readonly facetSetHash: Hex;
   readonly id: string;
   readonly scope: string;
   readonly verifiedBlock: bigint;
@@ -80,7 +86,9 @@ export function createDrizzleBoardroomControlStore(db: SentinelDb): BoardroomCon
         await tx.insert(boardroomControlChallenges).values({
           audience: input.audience,
           boardroom: input.boardroom.toLowerCase(),
+          boardroomEpoch: input.boardroomEpoch,
           chainId: input.chainId,
+          configurationHash: input.configurationHash.toLowerCase(),
           configurationEpoch: input.configurationEpoch,
           controller: input.controller.toLowerCase(),
           controllerGeneration: input.controllerGeneration,
@@ -88,6 +96,7 @@ export function createDrizzleBoardroomControlStore(db: SentinelDb): BoardroomCon
           destinationType: input.destination.type,
           domain: input.domain,
           expiresAt: input.expiresAt,
+          facetSetHash: input.facetSetHash.toLowerCase(),
           issuedAt: input.issuedAt,
           issuedBlock: input.issuedBlock,
           issuedBlockHash: input.issuedBlockHash.toLowerCase(),
@@ -165,15 +174,18 @@ export function createDrizzleBoardroomControlStore(db: SentinelDb): BoardroomCon
           .insert(boardroomControlClaims)
           .values({
             boardroom: challenge.boardroom.toLowerCase(),
+            boardroomEpoch: challenge.boardroomEpoch,
             chainId: challenge.chainId,
             challengeNonce: challenge.nonce,
             configurationEpoch: challenge.configurationEpoch,
+            configurationHash: challenge.configurationHash.toLowerCase(),
             controller: challenge.controller.toLowerCase(),
             controllerGeneration: challenge.controllerGeneration,
             createdAt: input.now,
             createdByUserId: input.requestedByUserId,
             destinationId: challenge.destination.id,
             destinationType: challenge.destination.type,
+            facetSetHash: challenge.facetSetHash.toLowerCase(),
             messageHash: input.messageHash.toLowerCase(),
             scope: challenge.scope,
             signatureHash: input.signatureHash.toLowerCase(),
@@ -217,9 +229,12 @@ function snapshotMatchesChallenge(
   return (
     snapshot.chainId === challenge.chainId &&
     snapshot.boardroom.toLowerCase() === challenge.boardroom.toLowerCase() &&
+    snapshot.boardroomEpoch === challenge.boardroomEpoch &&
+    snapshot.facetSetHash.toLowerCase() === challenge.facetSetHash.toLowerCase() &&
     snapshot.controller.toLowerCase() === challenge.controller.toLowerCase() &&
     snapshot.controllerGeneration === challenge.controllerGeneration &&
-    snapshot.configurationEpoch === challenge.configurationEpoch
+    snapshot.configurationEpoch === challenge.configurationEpoch &&
+    snapshot.configurationHash.toLowerCase() === challenge.configurationHash.toLowerCase()
   );
 }
 
@@ -229,7 +244,9 @@ function toChallengeRecord(
   return {
     audience: row.audience,
     boardroom: row.boardroom as Address,
+    boardroomEpoch: row.boardroomEpoch,
     chainId: row.chainId,
+    configurationHash: row.configurationHash as Hex,
     configurationEpoch: row.configurationEpoch,
     consumedAt: row.consumedAt,
     controller: row.controller as Address,
@@ -237,6 +254,7 @@ function toChallengeRecord(
     destination: { id: row.destinationId, type: row.destinationType },
     domain: row.domain,
     expiresAt: row.expiresAt,
+    facetSetHash: row.facetSetHash as Hex,
     issuedAt: row.issuedAt,
     issuedBlock: row.issuedBlock,
     issuedBlockHash: row.issuedBlockHash as Hex,
@@ -253,12 +271,15 @@ function toClaimRecord(
 ): BoardroomControlClaimRecord {
   return {
     boardroom: row.boardroom as Address,
+    boardroomEpoch: row.boardroomEpoch,
     chainId: row.chainId,
+    configurationHash: row.configurationHash as Hex,
     configurationEpoch: row.configurationEpoch,
     controller: row.controller as Address,
     controllerGeneration: row.controllerGeneration,
     createdAt: row.createdAt,
     destination: { id: row.destinationId, type: row.destinationType },
+    facetSetHash: row.facetSetHash as Hex,
     id: row.id,
     scope: row.scope,
     verifiedBlock: row.verifiedBlock,

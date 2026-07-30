@@ -1,33 +1,44 @@
 import {
-  boardroomControlReleaseSupport,
-  SECURE_BOARDROOM_RELEASE_VERSION,
+  boardroomReleaseSupport,
   type Address,
-  type BoardroomControlReleaseSupport,
+  type BoardroomReleaseSupport,
   type PledgeCashDeployment,
 } from "@pledge.cash/sdk";
 
-export { boardroomControlReleaseSupport, SECURE_BOARDROOM_RELEASE_VERSION };
-export type { BoardroomControlReleaseSupport };
+export const boardroomControlReleaseSupport = boardroomReleaseSupport;
+export type BoardroomControlReleaseSupport = BoardroomReleaseSupport;
 
 const STRING_DEPLOYMENT_FIELDS = [
   "status",
   "reason",
+  "protocolVersion",
+  "protocolReleaseCodeHash",
   "sourceCommit",
   "deterministicDeploymentVersion",
   "deterministicReleaseCodeHash",
-  "boardroomStatus",
-  "boardroomReason",
   "deterministicDeployerCodeHash",
   "boardroomPolicyRegistryCodeHash",
   "assetPolicyCodeHash",
   "protocolFeeRouterCodeHash",
   "boardroomFactoryCodeHash",
   "boardroomControllerFactoryCodeHash",
-  "boardroomControllerCodeHash",
+  "boardroomControllerLogicCodeHash",
   "boardroomGovernanceLogicCodeHash",
   "boardroomMarketLogicCodeHash",
   "boardroomRedemptionPayoutCodeHash",
-  "boardroomLogicCodeHash",
+  "protocolFacetRegistryCodeHash",
+  "boardroomKernelCodeHash",
+  "authorityFacetCodeHash",
+  "executionFacetCodeHash",
+  "marketFacetCodeHash",
+  "redemptionFacetCodeHash",
+  "viewFacetCodeHash",
+  "boardroomReleaseBMigrationFacetCodeHash",
+  "boardroomViewFacetV2CodeHash",
+  "activeFacetSetHash",
+  "requiredStorageLayoutHash",
+  "manifestHash",
+  "kernelSelectorSetHash",
   "tokenGrantFactoryCodeHash",
   "tokenGrantLogicCodeHash",
   "ammFactoryCodeHash",
@@ -56,7 +67,15 @@ const ADDRESS_DEPLOYMENT_FIELDS = [
   "boardroomGovernanceLogic",
   "boardroomMarketLogic",
   "boardroomRedemptionPayout",
-  "boardroomLogic",
+  "protocolFacetRegistry",
+  "boardroomKernel",
+  "authorityFacet",
+  "executionFacet",
+  "marketFacet",
+  "redemptionFacet",
+  "viewFacet",
+  "boardroomReleaseBMigrationFacet",
+  "boardroomViewFacetV2",
   "boardroomPolicyRegistry",
   "assetPolicy",
   "protocolFeeRouter",
@@ -79,8 +98,9 @@ const ADDRESS_DEPLOYMENT_FIELDS = [
   "tokenGrantLogic",
   "wrappedNative",
   "deployer",
-  "factoryOwner",
-  "policyRegistryOwner",
+  "protocolFacetRegistryOwner",
+  "boardroomPolicyRegistryOwner",
+  "tokenGrantFactoryOwner",
   "assetPolicyOwner",
   "protocolGovernance",
   "protocolTreasury",
@@ -112,7 +132,14 @@ const BOOLEAN_DEPLOYMENT_FIELDS = [
   "assetBondMarketSpenderAllowed",
   "assetLockedLiquiditySpenderAllowed",
 ] as const;
-const BIGINT_DEPLOYMENT_FIELDS = ["creationFee", "deploymentBlock", "deploymentTimestamp"] as const;
+const BIGINT_DEPLOYMENT_FIELDS = [
+  "activeRelease",
+  "requiredStorageVersion",
+  "selectorCount",
+  "creationFee",
+  "deploymentBlock",
+  "deploymentTimestamp",
+] as const;
 const JSON_PRIMITIVE_TOKEN_PATTERN = '"([^"\\\\]|\\\\.)*"|-?\\d+|true|false|null';
 export function deploymentText(deployment: PledgeCashDeployment | undefined): string {
   if (!deployment) return "{}";

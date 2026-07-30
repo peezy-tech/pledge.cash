@@ -1,6 +1,6 @@
 # Boardroom diamond release A
 
-Status: non-production design-spike release
+Status: canonical genesis release manifest; target-chain deployment pending
 
 - Release number: `1`
 - Required storage version: `1`
@@ -8,8 +8,8 @@ Status: non-production design-spike release
 - Storage layout commitment: `keccak256("pledge.cash.boardroom.diamond.storage.release-a.v1")`
 - Migration: none
 
-Release A creates a new Boardroom clone, initializes the v5-compatible scalar and ERC-7201 storage layout, and deploys
-its vNext share token. The token binds primary-market callbacks to the registry's current facet-set hash.
+Release A creates a new Boardroom clone, initializes the canonical scalar and ERC-7201 storage layout, and deploys
+its share token. The token binds primary-market callbacks to the registry's current facet-set hash.
 
 Selector ownership:
 
@@ -19,8 +19,9 @@ Selector ownership:
   and locked-liquidity callbacks.
 - `BoardroomMarketFacet`: bonding-curve and protocol-liquidity reservation, activation, settlement, exit, and closure.
 - `BoardroomRedemptionFacet`: snapshot, redemption, claims, excess sweep, and treasury-share burn.
-- `BoardroomViewFacet`: the complete aggregate read surface declared by `IBoardroomDiamond`.
+- `BoardroomViewFacet`: the complete aggregate read surface declared by `IBoardroom`.
 
 The exact selector order, facet addresses, route kinds, and runtime code hashes are encoded in the onchain release and
-its `facetSetHash`. Release A uses the isolated v5-compatibility logic bridge for business behavior; that bridge is a
-prototype mechanism and not a claim that every existing v5 child module is vNext callback-compatible.
+its `facetSetHash`. Each facet executes its Boardroom wrapper behavior directly in the kernel's storage context. The
+facets bind immutable governance, market, and redemption helper modules, but neither deploy nor delegate into the
+monolithic Boardroom implementation.

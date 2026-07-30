@@ -20,7 +20,9 @@ contract RegistryTestFacetB {
 }
 
 contract RegistryTestMigrationFacet {
-    function migrateV2() external {}
+    function migrateBoardroom(bytes32) external {}
+
+    function wrongMigration(bytes32) external {}
 }
 
 contract ProtocolFacetRegistryTest is Test {
@@ -30,7 +32,7 @@ contract ProtocolFacetRegistryTest is Test {
     bytes4 internal constant SELECTOR_B = 0x10000002;
     bytes4 internal constant SELECTOR_C = 0x10000003;
     bytes4 internal constant SELECTOR_D = 0x10000004;
-    bytes4 internal constant MIGRATION_SELECTOR = RegistryTestMigrationFacet.migrateV2.selector;
+    bytes4 internal constant MIGRATION_SELECTOR = RegistryTestMigrationFacet.migrateBoardroom.selector;
 
     address internal stranger = address(0xBAD);
     RegistryTestFacetA internal facetA;
@@ -387,6 +389,19 @@ contract ProtocolFacetRegistryTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(
                 ProtocolFacetRegistry.InvalidMigrationRoute.selector, address(migrationFacet), MIGRATION_SELECTOR
+            )
+        );
+        registry.publishFacetSet(manifest);
+
+        bytes4 wrongMigrationSelector = RegistryTestMigrationFacet.wrongMigration.selector;
+        routes = new ProtocolFacetTypes.RouteDefinition[](1);
+        routes[0] = _route(wrongMigrationSelector, address(migrationFacet), ProtocolFacetTypes.RouteKind.Migration);
+        manifest = _manifest(
+            1, 2, keccak256("noncanonical-migration-selector"), routes, address(migrationFacet), wrongMigrationSelector
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ProtocolFacetRegistry.InvalidMigrationRoute.selector, address(migrationFacet), wrongMigrationSelector
             )
         );
         registry.publishFacetSet(manifest);

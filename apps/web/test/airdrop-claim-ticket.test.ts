@@ -12,6 +12,7 @@ const account = "0x0000000000000000000000000000000000000020" as Address;
 const leaf = keccak256("0x01");
 const sibling = keccak256("0x02");
 const root = keccak256(BigInt(leaf) <= BigInt(sibling) ? concatHex([leaf, sibling]) : concatHex([sibling, leaf]));
+const expectedFacetSetHash = `0x${"44".repeat(32)}` as Hex;
 
 describe("airdrop claim tickets", () => {
   test("parses JSON and verifies the sorted Merkle proof", () => {
@@ -20,6 +21,7 @@ describe("airdrop claim tickets", () => {
       chainId: 31337,
       airdrop,
       account,
+      expectedFacetSetHash,
       mode: "direct",
       index: "7",
       amount: "1000000000000000000",
@@ -37,6 +39,7 @@ describe("airdrop claim tickets", () => {
       chainId: 31337,
       airdrop,
       account,
+      expectedFacetSetHash,
       mode: "direct",
       index: "0",
       amount: "1",
@@ -55,6 +58,7 @@ describe("airdrop claim tickets", () => {
       chainId: 31337,
       airdrop,
       account,
+      expectedFacetSetHash,
       mode: "grant",
       index: "1",
       amount: "1",

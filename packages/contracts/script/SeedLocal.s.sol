@@ -9,7 +9,8 @@ import {AmmRouter} from "../src/amm/AmmRouter.sol";
 import {BondMarket} from "../src/bonds/BondMarket.sol";
 import {BondMarketFactory} from "../src/bonds/BondMarketFactory.sol";
 import {AssetPolicy} from "../src/policy/AssetPolicy.sol";
-import {Boardroom} from "../src/boardroom/Boardroom.sol";
+import {IBoardroom as Boardroom} from "../src/boardroom/IBoardroom.sol";
+import {BoardroomFacetTypes} from "../src/boardroom/diamond/BoardroomFacetTypes.sol";
 import {BoardroomController} from "../src/boardroom/BoardroomController.sol";
 import {BoardroomControllerFactory} from "../src/boardroom/BoardroomControllerFactory.sol";
 import {BoardroomFactory} from "../src/boardroom/BoardroomFactory.sol";
@@ -134,7 +135,7 @@ contract SeedLocal is Script {
     uint256 internal constant REDEMPTION_HOLDER_SHARES = 1_000 * PLEDGE;
     uint256 internal constant REDEMPTION_CASH_BALANCE = 5_000 * CASH;
     bytes32 internal constant DIRECT_CLAIM_TYPEHASH = keccak256(
-        "MerkleAirdropDirectClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
+        "MerkleAirdropDirectClaim(bytes32 expectedFacetSetHash,uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
     );
 
     struct Deployment {
@@ -436,7 +437,7 @@ contract SeedLocal is Script {
     }
 
     function _seedBoardroomRewards() internal {
-        Boardroom.Call memory createCall = Boardroom.Call({
+        BoardroomFacetTypes.Call memory createCall = BoardroomFacetTypes.Call({
             policy: address(deployment.boardroomRewardsFactory),
             target: address(deployment.boardroomRewardsFactory),
             value: 0,
@@ -444,7 +445,7 @@ contract SeedLocal is Script {
         });
 
         vm.startBroadcast(BOARDROOM_OWNER_KEY);
-        bytes memory createResult = boardroom.execute(createCall);
+        bytes memory createResult = boardroom.execute(boardroom.facetSetHash(), createCall);
         vm.stopBroadcast();
         boardroomRewards = BoardroomRewards(abi.decode(createResult, (address)));
 
@@ -452,14 +453,14 @@ contract SeedLocal is Script {
         cash.mint(address(boardroom), REWARD_AMOUNT);
         vm.stopBroadcast();
 
-        Boardroom.Call[] memory fundingCalls = new Boardroom.Call[](2);
-        fundingCalls[0] = Boardroom.Call({
+        BoardroomFacetTypes.Call[] memory fundingCalls = new BoardroomFacetTypes.Call[](2);
+        fundingCalls[0] = BoardroomFacetTypes.Call({
             policy: address(deployment.assetPolicy),
             target: address(cash),
             value: 0,
             data: abi.encodeCall(SeedToken.approve, (address(deployment.boardroomRewardsFactory), REWARD_AMOUNT))
         });
-        fundingCalls[1] = Boardroom.Call({
+        fundingCalls[1] = BoardroomFacetTypes.Call({
             policy: address(deployment.boardroomRewardsFactory),
             target: address(deployment.boardroomRewardsFactory),
             value: 0,
@@ -470,7 +471,7 @@ contract SeedLocal is Script {
         });
 
         vm.startBroadcast(BOARDROOM_OWNER_KEY);
-        boardroom.executeBatch(fundingCalls);
+        boardroom.executeBatch(boardroom.facetSetHash(), fundingCalls);
         vm.stopBroadcast();
 
         vm.startBroadcast(INVESTOR_KEY);
@@ -499,12 +500,25 @@ contract SeedLocal is Script {
             address predictedAirdrop =
                 deployment.distributionFactory.predictMerkleAirdropAddress(address(target), airdropSalt);
             uint256 airdropSupply = AIRDROP_CLAIMED_SHARES + AIRDROP_UNCLAIMED_SHARES;
+            bytes32 expectedFacetSetHash = _facetSetHash(address(target));
 
             lifecycle.airdropClaimedLeaf = _directClaimLeaf(
-                predictedAirdrop, address(target), target.shareToken(), 0, actors.holder, AIRDROP_CLAIMED_SHARES
+                expectedFacetSetHash,
+                predictedAirdrop,
+                address(target),
+                target.shareToken(),
+                0,
+                actors.holder,
+                AIRDROP_CLAIMED_SHARES
             );
             lifecycle.airdropUnclaimedLeaf = _directClaimLeaf(
-                predictedAirdrop, address(target), target.shareToken(), 1, actors.newHolder, AIRDROP_UNCLAIMED_SHARES
+                expectedFacetSetHash,
+                predictedAirdrop,
+                address(target),
+                target.shareToken(),
+                1,
+                actors.newHolder,
+                AIRDROP_UNCLAIMED_SHARES
             );
             lifecycle.airdropRoot = _hashPair(lifecycle.airdropClaimedLeaf, lifecycle.airdropUnclaimedLeaf);
 
@@ -517,8 +531,8 @@ contract SeedLocal is Script {
                 maxGrantClaims: 0,
                 salt: airdropSalt
             });
-            Boardroom.Call[] memory calls = new Boardroom.Call[](2);
-            calls[0] = Boardroom.Call({
+            BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](2);
+            calls[0] = BoardroomFacetTypes.Call({
                 policy: address(deployment.assetPolicy),
                 target: target.shareToken(),
                 value: 0,
@@ -526,7 +540,7 @@ contract SeedLocal is Script {
                     "approve(address,uint256)", address(deployment.distributionFactory), airdropSupply
                 )
             });
-            calls[1] = Boardroom.Call({
+            calls[1] = BoardroomFacetTypes.Call({
                 policy: address(deployment.distributionFactory),
                 target: address(deployment.distributionFactory),
                 value: 0,
@@ -534,8 +548,8 @@ contract SeedLocal is Script {
             });
 
             vm.startBroadcast(BOARDROOM_OWNER_KEY);
-            target.mint(address(target), airdropSupply);
-            bytes[] memory results = target.executeBatch(calls);
+            target.mint(target.facetSetHash(), address(target), airdropSupply);
+            bytes[] memory results = target.executeBatch(target.facetSetHash(), calls);
             vm.stopBroadcast();
 
             lifecycle.airdropBoardroom = target;
@@ -545,7 +559,7 @@ contract SeedLocal is Script {
             bytes32[] memory claimedProof = new bytes32[](1);
             claimedProof[0] = lifecycle.airdropUnclaimedLeaf;
             vm.startBroadcast(HOLDER_KEY);
-            lifecycle.airdrop.claim(0, actors.holder, AIRDROP_CLAIMED_SHARES, claimedProof);
+            lifecycle.airdrop.claim(expectedFacetSetHash, 0, actors.holder, AIRDROP_CLAIMED_SHARES, claimedProof);
             vm.stopBroadcast();
         }
 
@@ -588,7 +602,7 @@ contract SeedLocal is Script {
     }
 
     function _launchAndScheduleGovernanceScenario(Boardroom target) internal {
-        Boardroom.Call memory createRewardsCall = Boardroom.Call({
+        BoardroomFacetTypes.Call memory createRewardsCall = BoardroomFacetTypes.Call({
             policy: address(deployment.boardroomRewardsFactory),
             target: address(deployment.boardroomRewardsFactory),
             value: 0,
@@ -601,15 +615,16 @@ contract SeedLocal is Script {
             policy: address(0),
             target: address(target),
             value: 0,
-            data: abi.encodeCall(Boardroom.setRedemptionExcessRecipient, (actors.contractor))
+            data: abi.encodeCall(Boardroom.setRedemptionExcessRecipient, (target.facetSetHash(), actors.contractor))
         });
         lifecycle.scheduledOperationSalt = _salt("civic-set-redemption-excess-recipient");
         scheduledOperationCallData = scheduledCalls[0].data;
 
         vm.startBroadcast(BOARDROOM_OWNER_KEY);
-        target.mint(actors.holder, GOVERNANCE_HOLDER_SHARES);
-        target.mint(actors.newHolder, GOVERNANCE_SECONDARY_SHARES);
-        BoardroomRewards protectionRewards = BoardroomRewards(abi.decode(target.execute(createRewardsCall), (address)));
+        target.mint(target.facetSetHash(), actors.holder, GOVERNANCE_HOLDER_SHARES);
+        target.mint(target.facetSetHash(), actors.newHolder, GOVERNANCE_SECONDARY_SHARES);
+        BoardroomRewards protectionRewards =
+            BoardroomRewards(abi.decode(target.execute(target.facetSetHash(), createRewardsCall), (address)));
         vm.stopBroadcast();
 
         vm.startBroadcast(HOLDER_KEY);
@@ -620,7 +635,7 @@ contract SeedLocal is Script {
         BoardroomControllerFactory controllerFactory =
             BoardroomControllerFactory(deployment.boardroomFactory.controllerFactory());
         address predictedController = controllerFactory.predictControllerAddress(address(target), 1);
-        Boardroom.LaunchConfig memory launchConfig = Boardroom.LaunchConfig({
+        BoardroomFacetTypes.LaunchConfig memory launchConfig = BoardroomFacetTypes.LaunchConfig({
             proposer: actors.boardroomOwner,
             predictedController: predictedController,
             protectionStaker: actors.holder,
@@ -633,9 +648,11 @@ contract SeedLocal is Script {
         });
 
         vm.startBroadcast(BOARDROOM_OWNER_KEY);
-        target.launch(launchConfig);
+        target.launch(target.facetSetHash(), launchConfig);
         (lifecycle.scheduledOperationHash, lifecycle.scheduledOperationEta) = BoardroomController(predictedController)
-            .scheduleBoardroomOperation(scheduledCalls, lifecycle.scheduledOperationSalt, target.governanceEpoch(), 1);
+            .scheduleBoardroomOperation(
+                target.facetSetHash(), scheduledCalls, lifecycle.scheduledOperationSalt, target.governanceEpoch(), 1
+            );
         vm.stopBroadcast();
 
         lifecycle.governanceBoardroom = target;
@@ -653,7 +670,7 @@ contract SeedLocal is Script {
         );
 
         vm.startBroadcast(BOARDROOM_OWNER_KEY);
-        target.startWindDown();
+        target.startWindDown(target.facetSetHash());
         vm.stopBroadcast();
 
         lifecycle.windDownBoardroom = target;
@@ -682,9 +699,9 @@ contract SeedLocal is Script {
         vm.stopBroadcast();
 
         vm.startBroadcast(BOARDROOM_OWNER_KEY);
-        target.mint(actors.holder, REDEMPTION_HOLDER_SHARES);
-        target.registerRedeemableAsset(address(cash));
-        target.startWindDown();
+        target.mint(target.facetSetHash(), actors.holder, REDEMPTION_HOLDER_SHARES);
+        target.registerRedeemableAsset(target.facetSetHash(), address(cash));
+        target.startWindDown(target.facetSetHash());
         vm.stopBroadcast();
 
         lifecycle.snapshotPendingBoardroom = target;
@@ -833,10 +850,11 @@ contract SeedLocal is Script {
         returns (Boardroom created)
     {
         vm.startBroadcast(BOARDROOM_OWNER_KEY);
-        address boardroomAddress =
-            deployment.boardroomFactory.createBoardroom(actors.boardroomOwner, name, symbol, _salt(saltLabel));
+        bytes32 expectedFacetSetHash = deployment.boardroomFactory.facetRegistry().activeFacetSetHash();
+        address boardroomAddress = deployment.boardroomFactory
+            .createBoardroom(expectedFacetSetHash, actors.boardroomOwner, name, symbol, _salt(saltLabel));
         created = Boardroom(payable(boardroomAddress));
-        if (treasuryShares != 0) created.mint(address(created), treasuryShares);
+        if (treasuryShares != 0) created.mint(expectedFacetSetHash, address(created), treasuryShares);
         vm.stopBroadcast();
 
         vm.startBroadcast(deployerKey);
@@ -865,8 +883,8 @@ contract SeedLocal is Script {
             salt: saleSalt
         });
 
-        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
-        calls[0] = Boardroom.Call({
+        BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](2);
+        calls[0] = BoardroomFacetTypes.Call({
             policy: address(deployment.assetPolicy),
             target: target.shareToken(),
             value: 0,
@@ -874,7 +892,7 @@ contract SeedLocal is Script {
                 "approve(address,uint256)", address(deployment.distributionFactory), shareAmount
             )
         });
-        calls[1] = Boardroom.Call({
+        calls[1] = BoardroomFacetTypes.Call({
             policy: address(deployment.distributionFactory),
             target: address(deployment.distributionFactory),
             value: 0,
@@ -882,8 +900,8 @@ contract SeedLocal is Script {
         });
 
         vm.startBroadcast(BOARDROOM_OWNER_KEY);
-        target.mint(address(target), shareAmount);
-        bytes[] memory results = target.executeBatch(calls);
+        target.mint(target.facetSetHash(), address(target), shareAmount);
+        bytes[] memory results = _executeBoardroomBatch(target, calls);
         vm.stopBroadcast();
 
         address createdSale = abi.decode(results[1], (address));
@@ -928,8 +946,8 @@ contract SeedLocal is Script {
             salt: auctionSalt
         });
 
-        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
-        calls[0] = Boardroom.Call({
+        BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](2);
+        calls[0] = BoardroomFacetTypes.Call({
             policy: address(deployment.assetPolicy),
             target: target.shareToken(),
             value: 0,
@@ -937,7 +955,7 @@ contract SeedLocal is Script {
                 "approve(address,uint256)", address(deployment.distributionFactory), shareAmount
             )
         });
-        calls[1] = Boardroom.Call({
+        calls[1] = BoardroomFacetTypes.Call({
             policy: address(deployment.distributionFactory),
             target: address(deployment.distributionFactory),
             value: 0,
@@ -945,8 +963,8 @@ contract SeedLocal is Script {
         });
 
         vm.startBroadcast(BOARDROOM_OWNER_KEY);
-        target.mint(address(target), shareAmount);
-        bytes[] memory results = target.executeBatch(calls);
+        target.mint(target.facetSetHash(), address(target), shareAmount);
+        bytes[] memory results = target.executeBatch(target.facetSetHash(), calls);
         vm.stopBroadcast();
 
         address createdAuction = abi.decode(results[1], (address));
@@ -969,7 +987,7 @@ contract SeedLocal is Script {
     }
 
     function _closeFixedPriceSale(Boardroom target, FixedPriceSale sale) internal {
-        Boardroom.Call memory call = Boardroom.Call({
+        BoardroomFacetTypes.Call memory call = BoardroomFacetTypes.Call({
             policy: address(deployment.distributionFactory),
             target: address(sale),
             value: 0,
@@ -977,7 +995,7 @@ contract SeedLocal is Script {
         });
 
         vm.startBroadcast(BOARDROOM_OWNER_KEY);
-        target.execute(call);
+        target.execute(target.facetSetHash(), call);
         vm.stopBroadcast();
     }
 
@@ -1010,8 +1028,8 @@ contract SeedLocal is Script {
         });
 
         uint256 totalCurveShares = saleSupply + migrationSupply;
-        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
-        calls[0] = Boardroom.Call({
+        BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](2);
+        calls[0] = BoardroomFacetTypes.Call({
             policy: address(deployment.assetPolicy),
             target: target.shareToken(),
             value: 0,
@@ -1019,7 +1037,7 @@ contract SeedLocal is Script {
                 "approve(address,uint256)", address(deployment.distributionFactory), totalCurveShares
             )
         });
-        calls[1] = Boardroom.Call({
+        calls[1] = BoardroomFacetTypes.Call({
             policy: address(deployment.distributionFactory),
             target: address(deployment.distributionFactory),
             value: 0,
@@ -1027,8 +1045,8 @@ contract SeedLocal is Script {
         });
 
         vm.startBroadcast(BOARDROOM_OWNER_KEY);
-        target.mint(address(target), totalCurveShares);
-        bytes[] memory results = target.executeBatch(calls);
+        _mintBoardroom(target, address(target), totalCurveShares);
+        bytes[] memory results = _executeBoardroomBatch(target, calls);
         vm.stopBroadcast();
 
         address createdCurve = abi.decode(results[1], (address));
@@ -1086,8 +1104,8 @@ contract SeedLocal is Script {
             deadline: block.timestamp + 1 hours,
             salt: _salt("seed-primary-liquidity")
         });
-        Boardroom.Call[] memory calls = new Boardroom.Call[](3);
-        calls[0] = Boardroom.Call({
+        BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](3);
+        calls[0] = BoardroomFacetTypes.Call({
             policy: address(deployment.assetPolicy),
             target: boardroom.shareToken(),
             value: 0,
@@ -1095,7 +1113,7 @@ contract SeedLocal is Script {
                 "approve(address,uint256)", address(deployment.lockedLiquidityFactory), PRIMARY_LIQUIDITY_SHARES
             )
         });
-        calls[1] = Boardroom.Call({
+        calls[1] = BoardroomFacetTypes.Call({
             policy: address(deployment.assetPolicy),
             target: address(cash),
             value: 0,
@@ -1103,7 +1121,7 @@ contract SeedLocal is Script {
                 "approve(address,uint256)", address(deployment.lockedLiquidityFactory), PRIMARY_LIQUIDITY_QUOTE
             )
         });
-        calls[2] = Boardroom.Call({
+        calls[2] = BoardroomFacetTypes.Call({
             policy: address(deployment.lockedLiquidityFactory),
             target: address(deployment.lockedLiquidityFactory),
             value: 0,
@@ -1111,9 +1129,9 @@ contract SeedLocal is Script {
         });
 
         vm.startBroadcast(BOARDROOM_OWNER_KEY);
-        bytes[] memory results = boardroom.executeBatch(calls);
-        boardroom.mint(actors.investor, PRIMARY_ALLOCATION_ONE);
-        boardroom.mint(actors.holder, PRIMARY_ALLOCATION_TWO);
+        bytes[] memory results = boardroom.executeBatch(boardroom.facetSetHash(), calls);
+        boardroom.mint(boardroom.facetSetHash(), actors.investor, PRIMARY_ALLOCATION_ONE);
+        boardroom.mint(boardroom.facetSetHash(), actors.holder, PRIMARY_ALLOCATION_TWO);
         vm.stopBroadcast();
 
         (launch.locker, launch.pool, launch.sharesToLiquidity, launch.quoteToLiquidity, launch.lockedLiquidity) =
@@ -1227,8 +1245,8 @@ contract SeedLocal is Script {
             depositInterval: 1 days,
             salt: marketSalt
         });
-        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
-        calls[0] = Boardroom.Call({
+        BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](2);
+        calls[0] = BoardroomFacetTypes.Call({
             policy: address(deployment.assetPolicy),
             target: target.shareToken(),
             value: 0,
@@ -1236,7 +1254,7 @@ contract SeedLocal is Script {
                 "approve(address,uint256)", address(deployment.bondMarketFactory), BOND_CAPACITY
             )
         });
-        calls[1] = Boardroom.Call({
+        calls[1] = BoardroomFacetTypes.Call({
             policy: address(deployment.bondMarketFactory),
             target: address(deployment.bondMarketFactory),
             value: 0,
@@ -1244,7 +1262,7 @@ contract SeedLocal is Script {
         });
 
         vm.startBroadcast(BOARDROOM_OWNER_KEY);
-        bytes[] memory results = target.executeBatch(calls);
+        bytes[] memory results = target.executeBatch(target.facetSetHash(), calls);
         vm.stopBroadcast();
 
         market = BondMarket(abi.decode(results[1], (address)));
@@ -1369,8 +1387,8 @@ contract SeedLocal is Script {
 
     function _createBoardroomGrant(GrantSpec memory spec) internal returns (TokenGrant grant) {
         uint256 fee = creationFee;
-        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
-        calls[0] = Boardroom.Call({
+        BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](2);
+        calls[0] = BoardroomFacetTypes.Call({
             policy: address(deployment.assetPolicy),
             target: spec.token,
             value: 0,
@@ -1378,7 +1396,7 @@ contract SeedLocal is Script {
                 "approve(address,uint256)", address(deployment.tokenGrantFactory), spec.amount
             )
         });
-        calls[1] = Boardroom.Call({
+        calls[1] = BoardroomFacetTypes.Call({
             policy: address(deployment.tokenGrantFactory),
             target: address(deployment.tokenGrantFactory),
             value: fee,
@@ -1386,7 +1404,7 @@ contract SeedLocal is Script {
         });
 
         vm.startBroadcast(BOARDROOM_OWNER_KEY);
-        bytes[] memory results = boardroom.executeBatch{value: fee}(calls);
+        bytes[] memory results = boardroom.executeBatch{value: fee}(boardroom.facetSetHash(), calls);
         vm.stopBroadcast();
 
         grant = TokenGrant(abi.decode(results[1], (address)));
@@ -1526,7 +1544,9 @@ contract SeedLocal is Script {
 
         BoardroomToken governanceShares = BoardroomToken(lifecycle.governanceBoardroom.shareToken());
         _check(lifecycle.governanceBoardroom.launched(), "governance-launched");
-        _check(lifecycle.governanceBoardroom.status() == Boardroom.BoardroomStatus.Active, "governance-active");
+        _check(
+            lifecycle.governanceBoardroom.status() == BoardroomFacetTypes.BoardroomStatus.Active, "governance-active"
+        );
         _check(
             BoardroomController(lifecycle.governanceBoardroom.controller()).proposer() == actors.boardroomOwner,
             "governance-proposer"
@@ -1540,7 +1560,9 @@ contract SeedLocal is Script {
             "governance-operation-status"
         );
 
-        _check(lifecycle.windDownBoardroom.status() == Boardroom.BoardroomStatus.WindingDown, "wind-down-status");
+        _check(
+            lifecycle.windDownBoardroom.status() == BoardroomFacetTypes.BoardroomStatus.WindingDown, "wind-down-status"
+        );
         _check(
             lifecycle.windDownBoardroom.isIssuedDistribution(address(lifecycle.windDownBlocker)),
             "wind-down-blocker-address"
@@ -1554,7 +1576,7 @@ contract SeedLocal is Script {
 
         BoardroomToken snapshotPendingShares = BoardroomToken(lifecycle.snapshotPendingBoardroom.shareToken());
         _check(
-            lifecycle.snapshotPendingBoardroom.status() == Boardroom.BoardroomStatus.WindingDown,
+            lifecycle.snapshotPendingBoardroom.status() == BoardroomFacetTypes.BoardroomStatus.WindingDown,
             "snapshot-pending-status"
         );
         _check(lifecycle.snapshotPendingBoardroom.isRedeemableAsset(address(cash)), "snapshot-pending-asset-registered");
@@ -1615,6 +1637,7 @@ contract SeedLocal is Script {
     }
 
     function _directClaimLeaf(
+        bytes32 expectedFacetSetHash,
         address airdrop,
         address targetBoardroom,
         address shareToken,
@@ -1624,9 +1647,34 @@ contract SeedLocal is Script {
     ) internal view returns (bytes32) {
         return keccak256(
             abi.encode(
-                DIRECT_CLAIM_TYPEHASH, block.chainid, index, airdrop, targetBoardroom, shareToken, account, amount
+                DIRECT_CLAIM_TYPEHASH,
+                expectedFacetSetHash,
+                block.chainid,
+                index,
+                airdrop,
+                targetBoardroom,
+                shareToken,
+                account,
+                amount
             )
         );
+    }
+
+    function _facetSetHash(address boardroomAddress) internal view returns (bytes32 facetSetHash) {
+        (bool ok, bytes memory result) = boardroomAddress.staticcall(abi.encodeWithSignature("facetSetHash()"));
+        if (!ok || result.length != 32) revert ScenarioInvariantFailed("facet-set-hash");
+        facetSetHash = abi.decode(result, (bytes32));
+    }
+
+    function _mintBoardroom(Boardroom target, address recipient, uint256 amount) internal {
+        target.mint(target.facetSetHash(), recipient, amount);
+    }
+
+    function _executeBoardroomBatch(Boardroom target, BoardroomFacetTypes.Call[] memory calls)
+        internal
+        returns (bytes[] memory results)
+    {
+        results = target.executeBatch(target.facetSetHash(), calls);
     }
 
     function _hashPair(bytes32 a, bytes32 b) internal pure returns (bytes32) {

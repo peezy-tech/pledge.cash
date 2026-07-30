@@ -100,9 +100,11 @@ describeWithDatabase("Postgres router durability", () => {
       chainId: 998 as const,
       configurationEpoch: 1n,
       controllerGeneration: 1n,
+      facetSetHash: HASH_D,
       planId: "00000000-0000-4000-8000-000000000002",
       payload: {
-        version: 1,
+        facetSetHash: HASH_D,
+        version: 2,
         planId: "00000000-0000-4000-8000-000000000002",
       },
       payloadHash: HASH_A,
@@ -130,6 +132,7 @@ describeWithDatabase("Postgres router durability", () => {
       authorityMode: "launched_controller" as const,
       controllerGeneration: 1n,
       configurationEpoch: 1n,
+      facetSetHash: HASH_D,
       verifiedBlock: 101n,
       verifiedBlockHash: HASH_C,
       createdAt: new Date(createdAt.getTime() + 1_000),
@@ -146,14 +149,14 @@ describeWithDatabase("Postgres router durability", () => {
       insert into x402_router_support_plans (
         id, chain_id, boardroom, asset, amount, cadence, title, description,
         terms_hash, status, authority_mode, authority,
-        controller_generation, configuration_epoch, verified_block,
+        controller_generation, configuration_epoch, facet_set_hash, verified_block,
         verified_block_hash, created_at
       ) values (
         ${newerPlanId}, 998, ${TARGET.toLowerCase()},
         ${DESTINATION_USDC.toLowerCase()}, '20000000', 'monthly',
         'Newer support', 'A newer public plan.', ${HASH_C},
         'active', 'launched_controller', ${PAYER.toLowerCase()},
-        '1', '1', '101', ${HASH_D},
+        '1', '1', ${HASH_D}, '101', ${HASH_D},
         ${new Date(plan.createdAt.getTime() + 2_000).toISOString()}
       )
     `;
@@ -230,9 +233,10 @@ describeWithDatabase("Postgres router durability", () => {
         chainId: 998,
         configurationEpoch: 1n,
         controllerGeneration: 1n,
+        facetSetHash: HASH_D,
         planId:
           `00000000-0000-4000-8000-${String(100 + index).padStart(12, "0")}`,
-        payload: { version: 1 },
+        payload: { facetSetHash: HASH_D, version: 2 },
         payloadHash: HASH_A,
         message: `support challenge ${index}`,
         issuedBlock: 100n,
@@ -278,14 +282,14 @@ describeWithDatabase("Postgres router durability", () => {
       insert into x402_router_support_plans (
         id, chain_id, boardroom, asset, amount, cadence, title, description,
         terms_hash, status, authority_mode, authority,
-        controller_generation, configuration_epoch, verified_block,
+        controller_generation, configuration_epoch, facet_set_hash, verified_block,
         verified_block_hash, created_at
       ) values (
         ${planId}, 998, ${TARGET.toLowerCase()},
         ${DESTINATION_USDC.toLowerCase()}, '10000000', 'monthly',
         'Core support', 'Keep the project operating.', ${HASH_A},
         'active', 'launched_controller', ${PAYER.toLowerCase()},
-        '1', '1', '100', ${HASH_B}, ${createdAt.toISOString()}
+        '1', '1', ${HASH_D}, '100', ${HASH_B}, ${createdAt.toISOString()}
       )
     `;
     await client.sql`
@@ -426,8 +430,14 @@ describeWithDatabase("Postgres router durability", () => {
       chainId: 998 as const,
       configurationEpoch: 1n,
       controllerGeneration: 1n,
+      facetSetHash: HASH_D,
       planId,
-      payload: { planId, subscriptionId: replacementSubscriptionId },
+      payload: {
+        facetSetHash: HASH_D,
+        planId,
+        subscriptionId: replacementSubscriptionId,
+        version: 2,
+      },
       payloadHash: HASH_B,
       message: "start replacement schedule",
       issuedBlock: 102n,
@@ -567,14 +577,14 @@ describeWithDatabase("Postgres router durability", () => {
       insert into x402_router_support_plans (
         id, chain_id, boardroom, asset, amount, cadence, title, description,
         terms_hash, status, authority_mode, authority,
-        controller_generation, configuration_epoch, verified_block,
+        controller_generation, configuration_epoch, facet_set_hash, verified_block,
         verified_block_hash, created_at
       ) values (
         ${planId}, 998, ${TARGET.toLowerCase()},
         ${DESTINATION_USDC.toLowerCase()}, '10000000', 'monthly',
         'Core support', 'Keep the project operating.', ${HASH_A},
         'active', 'launched_controller', ${PAYER.toLowerCase()},
-        '1', '1', '100', ${HASH_B}, ${createdAt.toISOString()}
+        '1', '1', ${HASH_D}, '100', ${HASH_B}, ${createdAt.toISOString()}
       )
     `;
     await client.sql`

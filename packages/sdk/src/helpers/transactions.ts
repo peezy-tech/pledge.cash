@@ -3,6 +3,7 @@ import {
   ammRouterAbi,
   boardroomAbi,
   boardroomControllerAbi,
+  boardroomFactoryAbi,
   boardroomRewardsAbi,
   boardroomRewardsFactoryAbi,
   boardroomTokenAbi,
@@ -42,6 +43,84 @@ import type {
 } from "./types";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const satisfies Address;
+
+function requireFacetSetHash(value: Hex): Hex {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(value)) {
+    throw new Error("expectedFacetSetHash must be a 32-byte hex value.");
+  }
+  return value;
+}
+
+export type BoardroomMutationFunctionName = Extract<
+  (typeof boardroomAbi)[number],
+  { type: "function"; stateMutability: "nonpayable" | "payable" }
+>["name"];
+
+const boardroomMutationFunctionNames = new Set<string>(
+  boardroomAbi
+    .filter(
+      (item) =>
+        item.type === "function"
+        && (item.stateMutability === "nonpayable" || item.stateMutability === "payable"),
+    )
+    .map((item) => item.name),
+);
+
+export function buildBoardroomMutationTransaction(input: {
+  boardroom: Address;
+  expectedFacetSetHash: Hex;
+  functionName: BoardroomMutationFunctionName;
+  args?: readonly unknown[];
+  value?: bigint;
+}) {
+  if (!boardroomMutationFunctionNames.has(input.functionName)) {
+    throw new Error(`${input.functionName} is not a mutating Boardroom route.`);
+  }
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: input.functionName,
+    args: [
+      requireFacetSetHash(input.expectedFacetSetHash),
+      ...(input.args ?? []),
+    ] as const,
+    ...(input.value === undefined ? {} : { value: input.value }),
+  } as const;
+}
+
+export function buildBoardroomCreateTransaction(input: {
+  factory: Address;
+  expectedFacetSetHash: Hex;
+  owner: Address;
+  name: string;
+  symbol: string;
+  salt: Hex;
+}) {
+  return {
+    address: input.factory,
+    abi: boardroomFactoryAbi,
+    functionName: "createBoardroom",
+    args: [
+      requireFacetSetHash(input.expectedFacetSetHash),
+      input.owner,
+      input.name,
+      input.symbol,
+      requireFacetSetHash(input.salt),
+    ] as const,
+  } as const;
+}
+
+export function buildBoardroomMigrateTransaction(input: {
+  boardroom: Address;
+  expectedFacetSetHash: Hex;
+}) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "migrateBoardroom",
+    args: [requireFacetSetHash(input.expectedFacetSetHash)] as const,
+  } as const;
+}
 
 function requireAssetPolicy(assetPolicy: Address | undefined): Address {
   if (!assetPolicy) {
@@ -112,59 +191,82 @@ export function buildDirectGrantCreationTransaction(input: {
   };
 }
 
-export function buildBoardroomMintTransaction(input: { boardroom: Address; to: Address; amount: bigint }) {
+export function buildBoardroomMintTransaction(input: {
+  boardroom: Address;
+  expectedFacetSetHash: Hex;
+  to: Address;
+  amount: bigint;
+}) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "mint",
-    args: [input.to, input.amount] as const,
+    args: [requireFacetSetHash(input.expectedFacetSetHash), input.to, input.amount] as const,
   };
 }
 
-export function buildBoardroomLaunchTransaction(input: { boardroom: Address; config: BoardroomLaunchConfig }) {
+export function buildBoardroomLaunchTransaction(input: {
+  boardroom: Address;
+  expectedFacetSetHash: Hex;
+  config: BoardroomLaunchConfig;
+}) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "launch",
-    args: [input.config] as const,
+    args: [requireFacetSetHash(input.expectedFacetSetHash), input.config] as const,
   };
 }
 
-export function buildBoardroomBeginSnapshotTransaction(input: { boardroom: Address }) {
+export function buildBoardroomBeginSnapshotTransaction(input: { boardroom: Address; expectedFacetSetHash: Hex }) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "beginSnapshot",
+    args: [requireFacetSetHash(input.expectedFacetSetHash)] as const,
   };
 }
 
-export function buildBoardroomSnapshotAssetsTransaction(input: { boardroom: Address; maximum: bigint }) {
+export function buildBoardroomSnapshotAssetsTransaction(input: {
+  boardroom: Address;
+  expectedFacetSetHash: Hex;
+  maximum: bigint;
+}) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "snapshotAssets",
-    args: [input.maximum] as const,
+    args: [requireFacetSetHash(input.expectedFacetSetHash), input.maximum] as const,
   };
 }
 
-export function buildBoardroomStartWindDownTransaction(input: { boardroom: Address }) {
+export function buildBoardroomStartWindDownTransaction(input: { boardroom: Address; expectedFacetSetHash: Hex }) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "startWindDown",
+    args: [requireFacetSetHash(input.expectedFacetSetHash)] as const,
   };
 }
 
-export function buildBoardroomPruneObligationTransaction(input: { boardroom: Address; obligation: Address }) {
+export function buildBoardroomPruneObligationTransaction(input: {
+  boardroom: Address;
+  expectedFacetSetHash: Hex;
+  obligation: Address;
+}) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "pruneObligation",
-    args: [input.obligation] as const,
+    args: [requireFacetSetHash(input.expectedFacetSetHash), input.obligation] as const,
   };
 }
 
-export function buildBoardroomPruneObligationsTransaction(input: { boardroom: Address; obligations: readonly Address[] }) {
+export function buildBoardroomPruneObligationsTransaction(input: {
+  boardroom: Address;
+  expectedFacetSetHash: Hex;
+  obligations: readonly Address[];
+}) {
   if (input.obligations.length === 0 || input.obligations.length > 32) {
     throw new Error("Obligation prune batches must contain between 1 and 32 addresses.");
   }
@@ -172,57 +274,66 @@ export function buildBoardroomPruneObligationsTransaction(input: { boardroom: Ad
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "pruneObligations",
-    args: [input.obligations] as const,
+    args: [requireFacetSetHash(input.expectedFacetSetHash), input.obligations] as const,
   };
 }
 
-export function buildBoardroomWrapNativeBalanceTransaction(input: { boardroom: Address }) {
+export function buildBoardroomWrapNativeBalanceTransaction(input: { boardroom: Address; expectedFacetSetHash: Hex }) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "wrapNativeBalance",
+    args: [requireFacetSetHash(input.expectedFacetSetHash)] as const,
   };
 }
 
-export function buildBoardroomBurnTreasurySharesTransaction(input: { boardroom: Address }) {
+export function buildBoardroomBurnTreasurySharesTransaction(input: { boardroom: Address; expectedFacetSetHash: Hex }) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "burnTreasuryShares",
+    args: [requireFacetSetHash(input.expectedFacetSetHash)] as const,
   };
 }
 
-export function buildBoardroomOpenRedemptionsTransaction(input: { boardroom: Address }) {
+export function buildBoardroomOpenRedemptionsTransaction(input: { boardroom: Address; expectedFacetSetHash: Hex }) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "openRedemptions",
+    args: [requireFacetSetHash(input.expectedFacetSetHash)] as const,
   };
 }
 
-export function buildBoardroomRegisterRedeemableAssetTransaction(input: { boardroom: Address; asset: Address }) {
+export function buildBoardroomRegisterRedeemableAssetTransaction(input: {
+  boardroom: Address;
+  expectedFacetSetHash: Hex;
+  asset: Address;
+}) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "registerRedeemableAsset",
-    args: [input.asset] as const,
+    args: [requireFacetSetHash(input.expectedFacetSetHash), input.asset] as const,
   };
 }
 
 export function buildBoardroomRedeemTransaction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   shares: bigint;
 }) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "redeem",
-    args: [input.shares] as const,
+    args: [requireFacetSetHash(input.expectedFacetSetHash), input.shares] as const,
   };
 }
 
 export function buildBoardroomClaimRedemptionAssetTransaction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   asset: Address;
   recipient: Address;
   minAmountOut: bigint;
@@ -231,7 +342,12 @@ export function buildBoardroomClaimRedemptionAssetTransaction(input: {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "claimRedemptionAsset",
-    args: [input.asset, input.recipient, input.minAmountOut] as const,
+    args: [
+      requireFacetSetHash(input.expectedFacetSetHash),
+      input.asset,
+      input.recipient,
+      input.minAmountOut,
+    ] as const,
   };
 }
 
@@ -319,12 +435,14 @@ export function buildBoardroomRewardsCreationCall(input: {
 
 export function buildBoardroomRewardsCreationTransaction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   factory: Address;
   cooldown: bigint;
   salt: Hex;
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     call: buildBoardroomRewardsCreationCall(input),
   });
 }
@@ -349,6 +467,7 @@ export function buildBoardroomRewardFundingCall(input: {
 
 export function buildBoardroomRewardFundingBatch(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   factory: Address;
   assetPolicy: Address;
   rewards: Address;
@@ -358,6 +477,7 @@ export function buildBoardroomRewardFundingBatch(input: {
 }) {
   return buildBoardroomExecuteBatchTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     calls: buildBoardroomRewardFundingCalls(input),
   });
 }
@@ -391,32 +511,42 @@ export function buildBoardroomSelfCall(input: { boardroom: Address; data: Hex; v
   });
 }
 
-export function buildBoardroomExecuteTransaction(input: { boardroom: Address; call: BoardroomCall; value?: bigint }) {
+export function buildBoardroomExecuteTransaction(input: {
+  boardroom: Address;
+  expectedFacetSetHash: Hex;
+  call: BoardroomCall;
+  value?: bigint;
+}) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "execute",
-    args: [input.call] as const,
+    args: [requireFacetSetHash(input.expectedFacetSetHash), input.call] as const,
     value: input.value ?? input.call.value,
   };
 }
 
 export function buildBoardroomExecuteBatchTransaction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   calls: readonly BoardroomCall[];
   value?: bigint;
 }) {
+  if (input.calls.length === 0 || input.calls.length > 16) {
+    throw new Error("Boardroom execution batches must contain between 1 and 16 calls.");
+  }
   return {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "executeBatch",
-    args: [input.calls] as const,
+    args: [requireFacetSetHash(input.expectedFacetSetHash), input.calls] as const,
     value: input.value ?? input.calls.reduce((total, call) => total + call.value, 0n),
   };
 }
 
 export function buildControllerScheduleBoardroomOperationTransaction(input: {
   controller: Address;
+  expectedFacetSetHash: Hex;
   calls: readonly BoardroomCall[];
   salt: Hex;
   expectedBoardroomEpoch: bigint;
@@ -426,12 +556,19 @@ export function buildControllerScheduleBoardroomOperationTransaction(input: {
     address: input.controller,
     abi: boardroomControllerAbi,
     functionName: "scheduleBoardroomOperation",
-    args: [input.calls, input.salt, input.expectedBoardroomEpoch, input.expectedConfigurationEpoch] as const,
+    args: [
+      requireFacetSetHash(input.expectedFacetSetHash),
+      input.calls,
+      input.salt,
+      input.expectedBoardroomEpoch,
+      input.expectedConfigurationEpoch,
+    ] as const,
   };
 }
 
 export function buildControllerScheduleConfigurationOperationTransaction(input: {
   controller: Address;
+  expectedFacetSetHash: Hex;
   data: Hex;
   salt: Hex;
   expectedBoardroomEpoch: bigint;
@@ -441,21 +578,32 @@ export function buildControllerScheduleConfigurationOperationTransaction(input: 
     address: input.controller,
     abi: boardroomControllerAbi,
     functionName: "scheduleControllerOperation",
-    args: [input.data, input.salt, input.expectedBoardroomEpoch, input.expectedConfigurationEpoch] as const,
+    args: [
+      requireFacetSetHash(input.expectedFacetSetHash),
+      input.data,
+      input.salt,
+      input.expectedBoardroomEpoch,
+      input.expectedConfigurationEpoch,
+    ] as const,
   };
 }
 
-export function buildBoardroomVetoOperationTransaction(input: { boardroom: Address; operationId: Hex }) {
+export function buildBoardroomVetoOperationTransaction(input: {
+  boardroom: Address;
+  expectedFacetSetHash: Hex;
+  operationId: Hex;
+}) {
   return {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "veto",
-    args: [input.operationId] as const,
+    args: [requireFacetSetHash(input.expectedFacetSetHash), input.operationId] as const,
   };
 }
 
 export function buildControllerExecuteBoardroomOperationTransaction(input: {
   controller: Address;
+  expectedFacetSetHash: Hex;
   calls: readonly BoardroomCall[];
   salt: Hex;
   expectedBoardroomEpoch: bigint;
@@ -467,6 +615,7 @@ export function buildControllerExecuteBoardroomOperationTransaction(input: {
     abi: boardroomControllerAbi,
     functionName: "executeBoardroomOperation",
     args: [
+      requireFacetSetHash(input.expectedFacetSetHash),
       input.calls,
       input.salt,
       input.expectedBoardroomEpoch,
@@ -478,6 +627,7 @@ export function buildControllerExecuteBoardroomOperationTransaction(input: {
 
 export function buildControllerExecuteConfigurationOperationTransaction(input: {
   controller: Address;
+  expectedFacetSetHash: Hex;
   data: Hex;
   salt: Hex;
   expectedBoardroomEpoch: bigint;
@@ -489,6 +639,7 @@ export function buildControllerExecuteConfigurationOperationTransaction(input: {
     abi: boardroomControllerAbi,
     functionName: "executeControllerOperation",
     args: [
+      requireFacetSetHash(input.expectedFacetSetHash),
       input.data,
       input.salt,
       input.expectedBoardroomEpoch,
@@ -500,6 +651,7 @@ export function buildControllerExecuteConfigurationOperationTransaction(input: {
 
 export function buildBoardroomExecuteWindDownCallTransaction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   call: BoardroomCall;
 }) {
   if (input.call.value !== 0n) throw new Error("Wind-down calls cannot transfer native value.");
@@ -507,7 +659,7 @@ export function buildBoardroomExecuteWindDownCallTransaction(input: {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "executeWindDownCall",
-    args: [input.call] as const,
+    args: [requireFacetSetHash(input.expectedFacetSetHash), input.call] as const,
   };
 }
 
@@ -518,10 +670,12 @@ export type BoardroomCallExecutionPlan =
 
 export function planBoardroomCallExecution(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   calls: readonly BoardroomCall[];
   lifecycle: {
     launched: boolean;
     status: number;
+    migrationRequired: boolean;
     controller?: Address;
     governanceEpoch?: bigint;
     controllerConfigurationEpoch?: bigint;
@@ -530,6 +684,9 @@ export function planBoardroomCallExecution(input: {
   salt?: Hex;
 }): BoardroomCallExecutionPlan {
   if (input.calls.length === 0) throw new Error("At least one Boardroom call is required.");
+  if (input.lifecycle.migrationRequired) {
+    throw new Error("The Boardroom must be migrated before calls can be prepared.");
+  }
 
   if (input.lifecycle.status === 0) {
     if (input.lifecycle.launched) {
@@ -542,6 +699,7 @@ export function planBoardroomCallExecution(input: {
         kind: "schedule",
         transaction: buildControllerScheduleBoardroomOperationTransaction({
           controller,
+          expectedFacetSetHash: input.expectedFacetSetHash,
           calls: input.calls,
           salt: input.salt,
           expectedBoardroomEpoch: governanceEpoch,
@@ -553,11 +711,19 @@ export function planBoardroomCallExecution(input: {
     return input.calls.length === 1
       ? {
           kind: "execute",
-          transaction: buildBoardroomExecuteTransaction({ boardroom: input.boardroom, call: input.calls[0]! }),
+          transaction: buildBoardroomExecuteTransaction({
+            boardroom: input.boardroom,
+            expectedFacetSetHash: input.expectedFacetSetHash,
+            call: input.calls[0]!,
+          }),
         }
       : {
           kind: "execute",
-          transaction: buildBoardroomExecuteBatchTransaction({ boardroom: input.boardroom, calls: input.calls }),
+          transaction: buildBoardroomExecuteBatchTransaction({
+            boardroom: input.boardroom,
+            expectedFacetSetHash: input.expectedFacetSetHash,
+            calls: input.calls,
+          }),
         };
   }
 
@@ -565,7 +731,11 @@ export function planBoardroomCallExecution(input: {
     if (input.calls.length !== 1) throw new Error("Wind-down calls must be submitted one at a time.");
     return {
       kind: "windDown",
-      transaction: buildBoardroomExecuteWindDownCallTransaction({ boardroom: input.boardroom, call: input.calls[0]! }),
+      transaction: buildBoardroomExecuteWindDownCallTransaction({
+        boardroom: input.boardroom,
+        expectedFacetSetHash: input.expectedFacetSetHash,
+        call: input.calls[0]!,
+      }),
     };
   }
 
@@ -586,6 +756,7 @@ export function buildControllerUpdateConfigurationData(input: {
 
 export function buildBoardroomReplaceControllerCall(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   expectedCurrentController: Address;
   expectedNextController: Address;
   nextProposer: Address;
@@ -599,6 +770,7 @@ export function buildBoardroomReplaceControllerCall(input: {
       abi: boardroomAbi,
       functionName: "replaceController",
       args: [
+        requireFacetSetHash(input.expectedFacetSetHash),
         input.expectedCurrentController,
         input.expectedNextController,
         input.nextProposer,
@@ -610,20 +782,34 @@ export function buildBoardroomReplaceControllerCall(input: {
   });
 }
 
-export function buildBoardroomMintCall(input: { boardroom: Address; to: Address; amount: bigint }): BoardroomCall {
+export function buildBoardroomMintCall(input: {
+  boardroom: Address;
+  expectedFacetSetHash: Hex;
+  to: Address;
+  amount: bigint;
+}): BoardroomCall {
   return buildBoardroomSelfCall({
     boardroom: input.boardroom,
-    data: encodeFunctionData({ abi: boardroomAbi, functionName: "mint", args: [input.to, input.amount] }),
+    data: encodeFunctionData({
+      abi: boardroomAbi,
+      functionName: "mint",
+      args: [requireFacetSetHash(input.expectedFacetSetHash), input.to, input.amount],
+    }),
   });
 }
 
 export function buildBoardroomRegisterRedeemableAssetCall(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   asset: Address;
 }): BoardroomCall {
   return buildBoardroomSelfCall({
     boardroom: input.boardroom,
-    data: encodeFunctionData({ abi: boardroomAbi, functionName: "registerRedeemableAsset", args: [input.asset] }),
+    data: encodeFunctionData({
+      abi: boardroomAbi,
+      functionName: "registerRedeemableAsset",
+      args: [requireFacetSetHash(input.expectedFacetSetHash), input.asset],
+    }),
   });
 }
 
@@ -706,6 +892,7 @@ export function buildBondFinalizeTransaction(input: { market: Address }) {
 
 export function buildBoardroomBondMarketBatch(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   factory: Address;
   shareToken: Address;
   terms: BondMarketTerms;
@@ -734,7 +921,11 @@ export function buildBoardroomBondMarketBatch(input: {
     }),
   ] as const;
 
-  return buildBoardroomExecuteBatchTransaction({ boardroom: input.boardroom, calls });
+  return buildBoardroomExecuteBatchTransaction({
+    boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
+    calls,
+  });
 }
 
 export function buildBoardroomBondMarketCloseCall(input: { policy: Address; market: Address }): BoardroomCall {
@@ -747,11 +938,13 @@ export function buildBoardroomBondMarketCloseCall(input: { policy: Address; mark
 
 export function buildBoardroomBondMarketCloseAction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   policy: Address;
   market: Address;
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     call: buildBoardroomBondMarketCloseCall(input),
   });
 }
@@ -968,6 +1161,7 @@ export function buildBoardroomFixedPriceSaleCreationCall(input: {
 
 export function buildBoardroomFixedPriceSaleBatch(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   factory: Address;
   shareToken: Address;
   terms: BoardroomFixedPriceSaleTerms;
@@ -993,17 +1187,20 @@ export function buildBoardroomFixedPriceSaleBatch(input: {
 
   return buildBoardroomExecuteBatchTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     calls,
   });
 }
 
 export function buildBoardroomFixedPriceSaleCloseAction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   policy: Address;
   sale: Address;
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     call: buildBoardroomFixedPriceSaleCloseCall(input),
   });
 }
@@ -1018,11 +1215,13 @@ export function buildBoardroomFixedPriceSaleCloseCall(input: { policy: Address; 
 
 export function buildBoardroomFixedPriceSaleCancelAction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   policy: Address;
   sale: Address;
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     call: buildBoardroomFixedPriceSaleCancelCall(input),
   });
 }
@@ -1037,6 +1236,7 @@ export function buildBoardroomFixedPriceSaleCancelCall(input: { policy: Address;
 
 export function buildBoardroomDutchAuctionBatch(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   factory: Address;
   shareToken: Address;
   terms: BoardroomDutchAuctionTerms;
@@ -1067,16 +1267,22 @@ export function buildBoardroomDutchAuctionBatch(input: {
     }),
   ] as const;
 
-  return buildBoardroomExecuteBatchTransaction({ boardroom: input.boardroom, calls });
+  return buildBoardroomExecuteBatchTransaction({
+    boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
+    calls,
+  });
 }
 
 export function buildBoardroomDutchAuctionCloseAction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   policy: Address;
   auction: Address;
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     call: buildBoardroomCall({
       policy: input.policy,
       target: input.auction,
@@ -1087,11 +1293,13 @@ export function buildBoardroomDutchAuctionCloseAction(input: {
 
 export function buildBoardroomDutchAuctionCancelAction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   policy: Address;
   auction: Address;
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     call: buildBoardroomCall({
       policy: input.policy,
       target: input.auction,
@@ -1136,6 +1344,7 @@ export function buildBoardroomMigratingCurveCreationCall(input: {
 
 export function buildBoardroomMigratingCurveBatch(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   factory: Address;
   shareToken: Address;
   terms: BoardroomMigratingBondingCurveTerms;
@@ -1162,17 +1371,20 @@ export function buildBoardroomMigratingCurveBatch(input: {
 
   return buildBoardroomExecuteBatchTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     calls,
   });
 }
 
 export function buildBoardroomMigratingCurveCancelAction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   policy: Address;
   curve: Address;
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     call: buildBoardroomMigratingCurveCancelCall(input),
   });
 }
@@ -1266,6 +1478,7 @@ export function buildBoardroomMerkleAirdropCreationCall(input: {
 
 export function buildBoardroomMerkleAirdropBatch(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   factory: Address;
   shareToken: Address;
   terms: BoardroomMerkleAirdropTerms;
@@ -1291,17 +1504,20 @@ export function buildBoardroomMerkleAirdropBatch(input: {
 
   return buildBoardroomExecuteBatchTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     calls,
   });
 }
 
 export function buildBoardroomMerkleAirdropCloseAction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   policy: Address;
   airdrop: Address;
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     call: buildBoardroomMerkleAirdropCloseCall(input),
   });
 }
@@ -1316,11 +1532,13 @@ export function buildBoardroomMerkleAirdropCloseCall(input: { policy: Address; a
 
 export function buildBoardroomMerkleAirdropCancelAction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   policy: Address;
   airdrop: Address;
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     call: buildBoardroomMerkleAirdropCancelCall(input),
   });
 }
@@ -1331,37 +1549,6 @@ export function buildBoardroomMerkleAirdropCancelCall(input: { policy: Address; 
     target: input.airdrop,
     data: encodeFunctionData({ abi: merkleAirdropAbi, functionName: "cancel" }),
   });
-}
-
-export function buildMerkleAirdropClaimTransaction(input: {
-  airdrop: Address;
-  index: bigint;
-  account: Address;
-  amount: bigint;
-  proof: readonly Hex[];
-}) {
-  return {
-    address: input.airdrop,
-    abi: merkleAirdropAbi,
-    functionName: "claim",
-    args: [input.index, input.account, input.amount, input.proof] as const,
-  };
-}
-
-export function buildMerkleAirdropGrantClaimTransaction(input: {
-  airdrop: Address;
-  index: bigint;
-  account: Address;
-  amount: bigint;
-  terms: MerkleAirdropGrantClaimTerms;
-  proof: readonly Hex[];
-}) {
-  return {
-    address: input.airdrop,
-    abi: merkleAirdropAbi,
-    functionName: "claimGrant",
-    args: [input.index, input.account, input.amount, merkleAirdropGrantClaimArgs(input.terms), input.proof] as const,
-  };
 }
 
 export function buildBoardroomLockedLiquidityApprovalCall(input: {
@@ -1399,6 +1586,7 @@ export function buildBoardroomLockedLiquidityCreationCall(input: {
 
 export function buildBoardroomLockedLiquidityBatch(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   factory: Address;
   shareToken: Address;
   terms: BoardroomLockedLiquidityTerms;
@@ -1452,6 +1640,7 @@ export function buildBoardroomLockedLiquidityBatch(input: {
 
   return buildBoardroomExecuteBatchTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     calls,
   });
 }
@@ -1474,6 +1663,7 @@ export function buildBoardroomLockedLiquidityAddCall(input: {
 
 export function buildBoardroomLockedLiquidityAddBatch(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   factory: Address;
   shareToken: Address;
   terms: BoardroomLockedLiquidityAddTerms;
@@ -1504,6 +1694,7 @@ export function buildBoardroomLockedLiquidityAddBatch(input: {
       } satisfies LockedLiquidityAddTerms);
   return buildBoardroomExecuteBatchTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     calls: [
       buildBoardroomLockedLiquidityApprovalCall({
         policy: assetPolicy,
@@ -1548,6 +1739,7 @@ export function buildBoardroomLockedLiquidityRemoveCall(input: {
 
 export function buildBoardroomLockedLiquidityRemoveAction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   policy: Address;
   factory: Address;
   liquidity: bigint;
@@ -1557,6 +1749,7 @@ export function buildBoardroomLockedLiquidityRemoveAction(input: {
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     call: buildBoardroomLockedLiquidityRemoveCall(input),
   });
 }
@@ -1574,17 +1767,20 @@ export function buildBoardroomLockedLiquidityCloseCall(input: {
 
 export function buildBoardroomLockedLiquidityCloseAction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   policy: Address;
   factory: Address;
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     call: buildBoardroomLockedLiquidityCloseCall(input),
   });
 }
 
 export function buildBoardroomLockedLiquidityExitTransaction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   amountAMin: bigint;
   amountBMin: bigint;
   deadline: bigint;
@@ -1593,25 +1789,48 @@ export function buildBoardroomLockedLiquidityExitTransaction(input: {
     address: input.boardroom,
     abi: boardroomAbi,
     functionName: "exitProtocolLiquidity",
-    args: [input.amountAMin, input.amountBMin, input.deadline] as const,
+    args: [
+      requireFacetSetHash(input.expectedFacetSetHash),
+      input.amountAMin,
+      input.amountBMin,
+      input.deadline,
+    ] as const,
   };
 }
 
-export function buildBoardroomReturnProtocolLiquidityAsLpTransaction(input: { boardroom: Address }) {
-  return { address: input.boardroom, abi: boardroomAbi, functionName: "returnProtocolLiquidityAsLp" };
+export function buildBoardroomReturnProtocolLiquidityAsLpTransaction(input: {
+  boardroom: Address;
+  expectedFacetSetHash: Hex;
+}) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "returnProtocolLiquidityAsLp",
+    args: [requireFacetSetHash(input.expectedFacetSetHash)] as const,
+  };
 }
 
-export function buildBoardroomCloseProtocolLiquidityTransaction(input: { boardroom: Address }) {
-  return { address: input.boardroom, abi: boardroomAbi, functionName: "closeProtocolLiquidityAfterWindDown" };
+export function buildBoardroomCloseProtocolLiquidityTransaction(input: {
+  boardroom: Address;
+  expectedFacetSetHash: Hex;
+}) {
+  return {
+    address: input.boardroom,
+    abi: boardroomAbi,
+    functionName: "closeProtocolLiquidityAfterWindDown",
+    args: [requireFacetSetHash(input.expectedFacetSetHash)] as const,
+  };
 }
 
 export function buildBoardroomLockedLiquidityFeeClaimAction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   policy: Address;
   locker: Address;
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     call: buildBoardroomLockedLiquidityFeeClaimCall(input),
   });
 }
@@ -1644,6 +1863,7 @@ export function buildBoardroomGrantCreationCall(input: {
 
 export function buildBoardroomShareGrantIssuanceBatch(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   factory: Address;
   shareToken: Address;
   terms: BoardroomShareGrantTerms;
@@ -1671,6 +1891,7 @@ export function buildBoardroomShareGrantIssuanceBatch(input: {
 
   return buildBoardroomExecuteBatchTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     calls,
     value: input.creationFee ?? 0n,
   });
@@ -1678,12 +1899,14 @@ export function buildBoardroomShareGrantIssuanceBatch(input: {
 
 export function buildGrantIssuerBoardroomAction(input: {
   boardroom: Address;
+  expectedFacetSetHash: Hex;
   policy: Address;
   grant: Address;
   functionName: "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
 }) {
   return buildBoardroomExecuteTransaction({
     boardroom: input.boardroom,
+    expectedFacetSetHash: input.expectedFacetSetHash,
     call: buildGrantIssuerBoardroomCall(input),
   });
 }

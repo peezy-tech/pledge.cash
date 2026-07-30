@@ -23,6 +23,7 @@ const activePlanId = "00000000-0000-4000-8000-000000000101";
 const retiredPlanId = "00000000-0000-4000-8000-000000000102";
 const activeSubscriptionId = "00000000-0000-4000-8000-000000000201";
 const retiredSubscriptionId = "00000000-0000-4000-8000-000000000202";
+const facetSetHash = `0x${"44".repeat(32)}` as Hex;
 
 const config: X402RouterConfig = {
   application: "api.pledge.cash/x402-router/v1/execute",
@@ -184,6 +185,7 @@ function plan(
     status,
     authority: boardroom,
     authorityMode: "launched_controller",
+    facetSetHash,
     createdAt: "2026-01-31T15:45:00.000Z",
     ...(status === "retired"
       ? { retiredAt: "2026-02-01T15:45:00.000Z" }

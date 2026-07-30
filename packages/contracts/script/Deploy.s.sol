@@ -6,32 +6,50 @@ import {stdJson} from "forge-std/StdJson.sol";
 import {AmmFactory} from "../src/amm/AmmFactory.sol";
 import {AmmRouter} from "../src/amm/AmmRouter.sol";
 import {AssetPolicy} from "../src/policy/AssetPolicy.sol";
-import {BondMarketFactory} from "../src/bonds/BondMarketFactory.sol";
-import {Boardroom} from "../src/boardroom/Boardroom.sol";
-import {BoardroomController} from "../src/boardroom/BoardroomController.sol";
-import {BoardroomControllerFactory} from "../src/boardroom/BoardroomControllerFactory.sol";
-import {BoardroomFactory} from "../src/boardroom/BoardroomFactory.sol";
 import {BoardroomGovernanceLogic} from "../src/boardroom/BoardroomGovernanceLogic.sol";
 import {BoardroomMarketLogic} from "../src/boardroom/BoardroomMarketLogic.sol";
 import {BoardroomPolicyRegistry} from "../src/boardroom/BoardroomPolicyRegistry.sol";
 import {BoardroomRedemptionPayout} from "../src/boardroom/BoardroomRedemptionPayout.sol";
+import {BoardroomControllerFactory} from "../src/boardroom/BoardroomControllerFactory.sol";
+import {BoardroomFactory} from "../src/boardroom/BoardroomFactory.sol";
+import {BoardroomAuthorityFacet} from "../src/boardroom/diamond/BoardroomAuthorityFacet.sol";
+import {BoardroomExecutionFacet} from "../src/boardroom/diamond/BoardroomExecutionFacet.sol";
+import {BoardroomKernel} from "../src/boardroom/diamond/BoardroomKernel.sol";
+import {BoardroomKernelSelectors} from "../src/boardroom/diamond/BoardroomKernelSelectors.sol";
+import {BoardroomMarketFacet} from "../src/boardroom/diamond/BoardroomMarketFacet.sol";
+import {BoardroomRedemptionFacet} from "../src/boardroom/diamond/BoardroomRedemptionFacet.sol";
+import {BoardroomManifestHashes} from "../src/boardroom/diamond/BoardroomManifestHashes.sol";
+import {BoardroomRelease} from "../src/boardroom/diamond/BoardroomRelease.sol";
+import {BoardroomStorageLayouts} from "../src/boardroom/diamond/BoardroomStorageLayouts.sol";
+import {BoardroomViewFacet} from "../src/boardroom/diamond/BoardroomViewFacet.sol";
+import {ProtocolFacetRegistry} from "../src/boardroom/diamond/ProtocolFacetRegistry.sol";
+import {ProtocolFacetTypes} from "../src/boardroom/diamond/ProtocolFacetTypes.sol";
+import {BondMarketFactory} from "../src/bonds/BondMarketFactory.sol";
 import {DistributionFactory} from "../src/distribution/DistributionFactory.sol";
-import {ProtocolFeeRouter} from "../src/fees/ProtocolFeeRouter.sol";
-import {LockedLiquidityFactory} from "../src/liquidity/LockedLiquidityFactory.sol";
 import {PledgeCashDeploymentSalts} from "../src/deployment/PledgeCashDeploymentSalts.sol";
 import {PledgeCashDeterministicDeployer} from "../src/deployment/PledgeCashDeterministicDeployer.sol";
+import {ProtocolFeeRouter} from "../src/fees/ProtocolFeeRouter.sol";
 import {TokenGrantFactory} from "../src/grants/TokenGrantFactory.sol";
+import {LockedLiquidityFactory} from "../src/liquidity/LockedLiquidityFactory.sol";
 import {BoardroomRewardsFactory} from "../src/rewards/BoardroomRewardsFactory.sol";
 
 interface IOwnableDeploymentRoot {
     function owner() external view returns (address);
+
     function transferOwnership(address newOwner) external payable;
 }
 
+/// @notice Deterministically deploys and attests the sole canonical pledge.cash protocol.
+/// @dev Every protocol root except the externally supplied wrapped-native token is deployed
+/// through the CREATE3 root. Re-running with the original deployment authority is safe:
+/// every CREATE3 salt is bound to its first init-code hash and every configuration mutation
+/// is skipped once its postcondition already holds.
 contract Deploy is Script {
     using stdJson for string;
 
     address internal constant DEFAULT_CREATE2_FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
+    uint64 internal constant RELEASE_A = 1;
+    uint64 internal constant STORAGE_VERSION_A = 1;
 
     error MissingWrappedNativeAddress();
     error MissingDeterministicDeployerOwner();
@@ -39,12 +57,22 @@ contract Deploy is Script {
     error MissingProtocolTreasury();
     error MissingAmmFeeManager();
     error MissingDeterministicDeployer(address deterministicDeployer);
+    error MissingContract(address account);
     error DeterministicDeployerMismatch(address expected, address actual);
     error DeterministicDeployerOwnerMismatch(address expected, address actual);
+    error DeterministicDeployerCodeHashMismatch(bytes32 expected, bytes32 actual);
     error DeterministicDeployerOperatorMismatch(address owner, address broadcaster);
+    error DeterministicAddressMismatch(bytes32 salt, address expected, address actual);
+    error DeterministicInitCodeMismatch(bytes32 salt, bytes32 expected, bytes32 actual);
     error RootOwnerMismatch(address root, address expected, address actual);
     error RootConfigurationRequiresBootstrapOwner(address root, address actualOwner);
-    error DeploymentAttestationFailed(bytes32 field, address expected, address actual);
+    error DeploymentAddressAttestationFailed(bytes32 field, address expected, address actual);
+    error DeploymentBytes32AttestationFailed(bytes32 field, bytes32 expected, bytes32 actual);
+    error DeploymentUintAttestationFailed(bytes32 field, uint256 expected, uint256 actual);
+    error ReleaseOwnerRequired(address expected, address actual);
+    error ReleaseHashMismatch(bytes32 expected, bytes32 actual);
+    error ReleaseStateConflict(uint64 activeRelease, bytes32 activeFacetSetHash);
+    error ReleaseRouteMismatch(bytes4 selector);
 
     struct DeployState {
         address deployer;
@@ -54,8 +82,9 @@ contract Deploy is Script {
         address protocolGovernance;
         address protocolTreasury;
         address ammFeeManager;
-        address ammProtocolFeeRecipient;
         PledgeCashDeterministicDeployer deterministicDeployer;
+        ProtocolFacetRegistry protocolFacetRegistry;
+        BoardroomKernel boardroomKernel;
         BoardroomPolicyRegistry boardroomPolicyRegistry;
         AssetPolicy assetPolicy;
         ProtocolFeeRouter protocolFeeRouter;
@@ -69,10 +98,9 @@ contract Deploy is Script {
         BoardroomFactory boardroomFactory;
         BoardroomGovernanceLogic boardroomGovernanceLogic;
         BoardroomRedemptionPayout boardroomRedemptionPayout;
-        Boardroom boardroomLogic;
-        BoardroomControllerFactory boardroomControllerFactory;
-        BoardroomController boardroomControllerLogic;
         BoardroomMarketLogic boardroomMarketLogic;
+        BoardroomRelease.Facets facets;
+        bytes32 activeFacetSetHash;
     }
 
     function run() external {
@@ -86,6 +114,7 @@ contract Deploy is Script {
         }
         state.wrappedNative = vm.envOr("WRAPPED_NATIVE_ADDRESS", address(0));
         if (state.wrappedNative == address(0)) revert MissingWrappedNativeAddress();
+        if (state.wrappedNative.code.length == 0) revert MissingContract(state.wrappedNative);
         state.protocolGovernance = vm.envOr("PLEDGE_CASH_PROTOCOL_GOVERNANCE", address(0));
         if (state.protocolGovernance == address(0)) revert MissingProtocolGovernance();
         state.protocolTreasury = vm.envOr("PLEDGE_CASH_PROTOCOL_TREASURY", address(0));
@@ -99,27 +128,25 @@ contract Deploy is Script {
             vm.startBroadcast(deployerKey);
         }
 
-        _deployContracts(state);
-        _configurePolicies(state);
-        _configureCreationFee(state);
-        _configureFeeAuthorities(state);
+        _deployProtocol(state);
+        _publishAndActivateReleaseA(state);
+        _deployModules(state);
+        _configureProtocol(state);
         _handoffRootOwnership(state);
         _attestDeployment(state);
 
         vm.stopBroadcast();
 
         string memory output = _deploymentJson(state);
-
         if (vm.envOr("WRITE_DEPLOYMENT_STATE", true)) {
             vm.createDir("deployments", true);
             string memory defaultPath = string.concat("deployments/", vm.toString(block.chainid), ".json");
             vm.writeJson(output, vm.envOr("DEPLOYMENT_ARTIFACT_PATH", defaultPath));
         }
-
         _logDeployment(state);
     }
 
-    function _deployContracts(DeployState memory state) internal {
+    function _deployProtocol(DeployState memory state) internal {
         _ensureDeterministicDeployer(state);
 
         state.boardroomPolicyRegistry = BoardroomPolicyRegistry(
@@ -129,12 +156,24 @@ contract Deploy is Script {
                 abi.encodePacked(type(BoardroomPolicyRegistry).creationCode, abi.encode(state.deployer))
             )
         );
-        state.assetPolicy = AssetPolicy(
+        state.protocolFacetRegistry = ProtocolFacetRegistry(
             _deployDeterministic(
                 state,
-                PledgeCashDeploymentSalts.assetPolicy(),
-                abi.encodePacked(type(AssetPolicy).creationCode, abi.encode(state.deployer, state.wrappedNative))
+                PledgeCashDeploymentSalts.protocolFacetRegistry(),
+                abi.encodePacked(
+                    type(ProtocolFacetRegistry).creationCode,
+                    abi.encode(state.deployer, BoardroomKernelSelectors.selectors())
+                )
             )
+        );
+        state.boardroomKernel = BoardroomKernel(
+            payable(_deployDeterministic(
+                    state,
+                    PledgeCashDeploymentSalts.boardroomKernel(),
+                    abi.encodePacked(
+                        type(BoardroomKernel).creationCode, abi.encode(address(state.protocolFacetRegistry))
+                    )
+                ))
         );
         state.boardroomGovernanceLogic = BoardroomGovernanceLogic(
             _deployDeterministic(
@@ -148,6 +187,11 @@ contract Deploy is Script {
                 type(BoardroomRedemptionPayout).creationCode
             )
         );
+        state.boardroomMarketLogic = BoardroomMarketLogic(
+            _deployDeterministic(
+                state, PledgeCashDeploymentSalts.boardroomMarketLogic(), type(BoardroomMarketLogic).creationCode
+            )
+        );
         state.boardroomFactory = BoardroomFactory(
             _deployDeterministic(
                 state,
@@ -155,24 +199,135 @@ contract Deploy is Script {
                 abi.encodePacked(
                     type(BoardroomFactory).creationCode,
                     abi.encode(
+                        address(state.protocolFacetRegistry),
                         address(state.boardroomPolicyRegistry),
                         state.wrappedNative,
+                        address(state.boardroomKernel),
                         address(state.boardroomRedemptionPayout),
-                        address(state.boardroomGovernanceLogic)
+                        address(state.boardroomGovernanceLogic),
+                        address(state.boardroomMarketLogic)
                     )
                 )
             )
         );
-        state.boardroomLogic = Boardroom(payable(state.boardroomFactory.boardroomLogic()));
-        state.boardroomControllerFactory = BoardroomControllerFactory(state.boardroomFactory.controllerFactory());
-        state.boardroomControllerLogic =
-            BoardroomController(state.boardroomControllerFactory.controllerImplementation());
-        state.boardroomMarketLogic = BoardroomMarketLogic(state.boardroomFactory.marketLogic());
+
+        address controllerFactory = state.boardroomFactory.controllerFactory();
+        state.facets.authority = _deployDeterministic(
+            state,
+            PledgeCashDeploymentSalts.boardroomAuthorityFacet(),
+            _facetInitCode(
+                type(BoardroomAuthorityFacet).creationCode,
+                state.boardroomRedemptionPayout,
+                state.boardroomGovernanceLogic,
+                controllerFactory,
+                state.boardroomMarketLogic
+            )
+        );
+        state.facets.execution = _deployDeterministic(
+            state,
+            PledgeCashDeploymentSalts.boardroomExecutionFacet(),
+            _facetInitCode(
+                type(BoardroomExecutionFacet).creationCode,
+                state.boardroomRedemptionPayout,
+                state.boardroomGovernanceLogic,
+                controllerFactory,
+                state.boardroomMarketLogic
+            )
+        );
+        state.facets.market = _deployDeterministic(
+            state,
+            PledgeCashDeploymentSalts.boardroomMarketFacet(),
+            _facetInitCode(
+                type(BoardroomMarketFacet).creationCode,
+                state.boardroomRedemptionPayout,
+                state.boardroomGovernanceLogic,
+                controllerFactory,
+                state.boardroomMarketLogic
+            )
+        );
+        state.facets.redemption = _deployDeterministic(
+            state,
+            PledgeCashDeploymentSalts.boardroomRedemptionFacet(),
+            _facetInitCode(
+                type(BoardroomRedemptionFacet).creationCode,
+                state.boardroomRedemptionPayout,
+                state.boardroomGovernanceLogic,
+                controllerFactory,
+                state.boardroomMarketLogic
+            )
+        );
+        state.facets.viewFacet = _deployDeterministic(
+            state,
+            PledgeCashDeploymentSalts.boardroomViewFacet(),
+            _facetInitCode(
+                type(BoardroomViewFacet).creationCode,
+                state.boardroomRedemptionPayout,
+                state.boardroomGovernanceLogic,
+                controllerFactory,
+                state.boardroomMarketLogic
+            )
+        );
+    }
+
+    function _facetInitCode(
+        bytes memory creationCode,
+        BoardroomRedemptionPayout redemptionPayout,
+        BoardroomGovernanceLogic governanceLogic,
+        address controllerFactory,
+        BoardroomMarketLogic marketLogic
+    ) internal pure returns (bytes memory) {
+        return abi.encodePacked(
+            creationCode,
+            abi.encode(address(redemptionPayout), address(governanceLogic), controllerFactory, address(marketLogic))
+        );
+    }
+
+    function _publishAndActivateReleaseA(DeployState memory state) internal {
+        ProtocolFacetTypes.FacetSetManifest memory manifest = BoardroomRelease.releaseA(state.facets);
+        bytes32 expectedFacetSetHash = state.protocolFacetRegistry.computeFacetSetHash(manifest);
+        bytes32 publishedHash = state.protocolFacetRegistry.facetSetHashForRelease(RELEASE_A);
+
+        if (publishedHash == bytes32(0)) {
+            _requireRegistryBootstrapOwner(state);
+            bytes32 actualFacetSetHash = state.protocolFacetRegistry.publishFacetSet(manifest);
+            if (actualFacetSetHash != expectedFacetSetHash) {
+                revert ReleaseHashMismatch(expectedFacetSetHash, actualFacetSetHash);
+            }
+        } else if (publishedHash != expectedFacetSetHash) {
+            revert ReleaseHashMismatch(expectedFacetSetHash, publishedHash);
+        }
+
+        bytes32 activeHash = state.protocolFacetRegistry.activeFacetSetHash();
+        uint64 activeRelease = state.protocolFacetRegistry.activeRelease();
+        if (activeHash == bytes32(0) && activeRelease == 0) {
+            _requireRegistryBootstrapOwner(state);
+            state.protocolFacetRegistry.activateFacetSet(expectedFacetSetHash);
+        } else if (activeHash != expectedFacetSetHash || activeRelease != RELEASE_A) {
+            revert ReleaseStateConflict(activeRelease, activeHash);
+        }
+        state.activeFacetSetHash = expectedFacetSetHash;
+    }
+
+    function _requireRegistryBootstrapOwner(DeployState memory state) internal view {
+        address actualOwner = state.protocolFacetRegistry.owner();
+        if (actualOwner != state.deployer) revert ReleaseOwnerRequired(state.deployer, actualOwner);
+    }
+
+    function _deployModules(DeployState memory state) internal {
+        state.assetPolicy = AssetPolicy(
+            _deployDeterministic(
+                state,
+                PledgeCashDeploymentSalts.assetPolicy(),
+                abi.encodePacked(type(AssetPolicy).creationCode, abi.encode(state.deployer, state.wrappedNative))
+            )
+        );
         state.protocolFeeRouter = ProtocolFeeRouter(
             payable(_deployDeterministic(
                     state,
                     PledgeCashDeploymentSalts.protocolFeeRouter(),
-                    abi.encodePacked(type(ProtocolFeeRouter).creationCode, abi.encode(state.deployer, state.deployer))
+                    abi.encodePacked(
+                        type(ProtocolFeeRouter).creationCode, abi.encode(state.deployer, state.protocolTreasury)
+                    )
                 ))
         );
         state.tokenGrantFactory = TokenGrantFactory(
@@ -193,8 +348,6 @@ contract Deploy is Script {
                 )
             )
         );
-        state.ammProtocolFeeRecipient = address(state.protocolFeeRouter);
-
         state.ammRouter = AmmRouter(
             payable(_deployDeterministic(
                     state,
@@ -247,37 +400,40 @@ contract Deploy is Script {
 
     function _ensureDeterministicDeployer(DeployState memory state) internal {
         state.create2Factory = vm.envOr("CREATE2_FACTORY_ADDRESS", DEFAULT_CREATE2_FACTORY);
+        bytes memory initCode = abi.encodePacked(
+            type(PledgeCashDeterministicDeployer).creationCode, abi.encode(state.deterministicDeployerOwner)
+        );
+        bytes32 salt = PledgeCashDeploymentSalts.deterministicDeployer();
+        address expectedDeployer = vm.computeCreate2Address(salt, keccak256(initCode), state.create2Factory);
         address configuredDeployer = vm.envOr("PLEDGE_CASH_DETERMINISTIC_DEPLOYER", address(0));
         if (configuredDeployer != address(0)) {
+            if (configuredDeployer != expectedDeployer) {
+                revert DeterministicDeployerMismatch(expectedDeployer, configuredDeployer);
+            }
             if (configuredDeployer.code.length == 0) revert MissingDeterministicDeployer(configuredDeployer);
             state.deterministicDeployer = PledgeCashDeterministicDeployer(configuredDeployer);
             _requireDeterministicDeployerOwner(state);
             return;
         }
 
-        bytes memory initCode = abi.encodePacked(
-            type(PledgeCashDeterministicDeployer).creationCode, abi.encode(state.deterministicDeployerOwner)
-        );
-        address expectedDeployer = vm.computeCreate2Address(
-            PledgeCashDeploymentSalts.deterministicDeployer(), keccak256(initCode), state.create2Factory
-        );
         if (expectedDeployer.code.length == 0) {
-            state.deterministicDeployer = new PledgeCashDeterministicDeployer{
-                salt: PledgeCashDeploymentSalts.deterministicDeployer()
-            }(
-                state.deterministicDeployerOwner
-            );
+            state.deterministicDeployer =
+                new PledgeCashDeterministicDeployer{salt: salt}(state.deterministicDeployerOwner);
             if (address(state.deterministicDeployer) != expectedDeployer) {
                 revert DeterministicDeployerMismatch(expectedDeployer, address(state.deterministicDeployer));
             }
         } else {
             state.deterministicDeployer = PledgeCashDeterministicDeployer(expectedDeployer);
         }
-
         _requireDeterministicDeployerOwner(state);
     }
 
     function _requireDeterministicDeployerOwner(DeployState memory state) internal view {
+        bytes32 expectedCodeHash = keccak256(type(PledgeCashDeterministicDeployer).runtimeCode);
+        bytes32 actualCodeHash = address(state.deterministicDeployer).codehash;
+        if (actualCodeHash != expectedCodeHash) {
+            revert DeterministicDeployerCodeHashMismatch(expectedCodeHash, actualCodeHash);
+        }
         address actualOwner = state.deterministicDeployer.owner();
         if (actualOwner != state.deterministicDeployerOwner) {
             revert DeterministicDeployerOwnerMismatch(state.deterministicDeployerOwner, actualOwner);
@@ -286,17 +442,26 @@ contract Deploy is Script {
 
     function _deployDeterministic(DeployState memory state, bytes32 salt, bytes memory initCode)
         internal
-        returns (address)
+        returns (address deployed)
     {
-        return state.deterministicDeployer.deploy(salt, initCode);
+        address expected = state.deterministicDeployer.predict(salt);
+        bytes32 expectedInitCodeHash = keccak256(initCode);
+        deployed = state.deterministicDeployer.deploy(salt, initCode);
+        if (deployed != expected) revert DeterministicAddressMismatch(salt, expected, deployed);
+        if (deployed.code.length == 0) revert MissingContract(deployed);
+        bytes32 actualInitCodeHash = state.deterministicDeployer.initCodeHashForSalt(salt);
+        if (actualInitCodeHash != expectedInitCodeHash) {
+            revert DeterministicInitCodeMismatch(salt, expectedInitCodeHash, actualInitCodeHash);
+        }
     }
 
-    function _configurePolicies(DeployState memory state) internal {
+    function _configureProtocol(DeployState memory state) internal {
         _configureApprovalSpender(state, address(state.tokenGrantFactory));
         _configureApprovalSpender(state, address(state.distributionFactory));
         _configureApprovalSpender(state, address(state.bondMarketFactory));
         _configureApprovalSpender(state, address(state.lockedLiquidityFactory));
         _configureApprovalSpender(state, address(state.boardroomRewardsFactory));
+
         if (!state.boardroomPolicyRegistry.isPolicyAllowed(address(state.assetPolicy))) {
             _requireBootstrapOwner(address(state.boardroomPolicyRegistry), state);
             state.boardroomPolicyRegistry.setPolicyAllowed(address(state.assetPolicy), true);
@@ -306,40 +471,12 @@ contract Deploy is Script {
         _configureModulePolicy(state, address(state.bondMarketFactory));
         _configureModulePolicy(state, address(state.lockedLiquidityFactory));
         _configureModulePolicy(state, address(state.boardroomRewardsFactory));
-    }
 
-    function _configureApprovalSpender(DeployState memory state, address spender) internal {
-        if (state.assetPolicy.isApprovalSpenderAllowed(spender)) return;
-
-        _requireBootstrapOwner(address(state.assetPolicy), state);
-        state.assetPolicy.setApprovalSpenderAllowed(spender, true);
-    }
-
-    function _configureModulePolicy(DeployState memory state, address policy) internal {
-        BoardroomPolicyRegistry registry = state.boardroomPolicyRegistry;
-        if (!registry.isModulePolicy(policy)) {
-            _requireBootstrapOwner(address(registry), state);
-            registry.registerModulePolicy(policy);
-            return;
-        }
-        if (!registry.isPolicyAllowed(policy)) {
-            _requireBootstrapOwner(address(registry), state);
-            registry.setPolicyAllowed(policy, true);
-        }
-    }
-
-    function _configureCreationFee(DeployState memory state) internal {
         uint256 creationFee = vm.envOr("TOKEN_GRANT_CREATION_FEE_WEI", uint256(0));
-        if (creationFee == 0) {
-            creationFee = vm.envOr("GRANT_CREATION_FEE_WEI", uint256(0));
+        if (state.tokenGrantFactory.creationFee() != creationFee) {
+            _requireBootstrapOwner(address(state.tokenGrantFactory), state);
+            state.tokenGrantFactory.setCreationFee(creationFee);
         }
-        if (state.tokenGrantFactory.creationFee() == creationFee) return;
-
-        _requireBootstrapOwner(address(state.tokenGrantFactory), state);
-        state.tokenGrantFactory.setCreationFee(creationFee);
-    }
-
-    function _configureFeeAuthorities(DeployState memory state) internal {
         if (state.protocolFeeRouter.feeRecipient() != state.protocolTreasury) {
             _requireBootstrapOwner(address(state.protocolFeeRouter), state);
             state.protocolFeeRouter.setFeeRecipient(state.protocolTreasury);
@@ -366,7 +503,25 @@ contract Deploy is Script {
         }
     }
 
+    function _configureApprovalSpender(DeployState memory state, address spender) internal {
+        if (state.assetPolicy.isApprovalSpenderAllowed(spender)) return;
+        _requireBootstrapOwner(address(state.assetPolicy), state);
+        state.assetPolicy.setApprovalSpenderAllowed(spender, true);
+    }
+
+    function _configureModulePolicy(DeployState memory state, address policy) internal {
+        BoardroomPolicyRegistry registry = state.boardroomPolicyRegistry;
+        if (!registry.isModulePolicy(policy)) {
+            _requireBootstrapOwner(address(registry), state);
+            registry.registerModulePolicy(policy);
+        } else if (!registry.isPolicyAllowed(policy)) {
+            _requireBootstrapOwner(address(registry), state);
+            registry.setPolicyAllowed(policy, true);
+        }
+    }
+
     function _handoffRootOwnership(DeployState memory state) internal {
+        _handoffRoot(address(state.protocolFacetRegistry), state);
         _handoffRoot(address(state.boardroomPolicyRegistry), state);
         _handoffRoot(address(state.assetPolicy), state);
         _handoffRoot(address(state.protocolFeeRouter), state);
@@ -380,7 +535,6 @@ contract Deploy is Script {
         if (actualOwner != state.deployer) {
             revert RootOwnerMismatch(root, state.protocolGovernance, actualOwner);
         }
-
         IOwnableDeploymentRoot(root).transferOwnership(state.protocolGovernance);
     }
 
@@ -390,11 +544,122 @@ contract Deploy is Script {
     }
 
     function _attestDeployment(DeployState memory state) internal view {
-        _attestAddress("registry.owner", state.protocolGovernance, state.boardroomPolicyRegistry.owner());
+        _attestAddress("registry.owner", state.protocolGovernance, state.protocolFacetRegistry.owner());
+        _attestAddress("policy.owner", state.protocolGovernance, state.boardroomPolicyRegistry.owner());
         _attestAddress("asset.owner", state.protocolGovernance, state.assetPolicy.owner());
         _attestAddress("feeRouter.owner", state.protocolGovernance, state.protocolFeeRouter.owner());
         _attestAddress("grantFactory.owner", state.protocolGovernance, state.tokenGrantFactory.owner());
         _attestAddress("ammFactory.owner", state.protocolGovernance, state.ammFactory.owner());
+        _attestAddress(
+            "kernel.registry", address(state.protocolFacetRegistry), address(state.boardroomKernel.facetRegistry())
+        );
+        _attestBytes32(
+            "registry.kernelSelectors",
+            BoardroomKernelSelectors.selectorSetHash(),
+            state.protocolFacetRegistry.kernelSelectorSetHash()
+        );
+        _attestBytes32(
+            "kernel.selectorSet",
+            BoardroomKernelSelectors.selectorSetHash(),
+            state.boardroomKernel.kernelSelectorSetHash()
+        );
+        _attestAddress(
+            "factory.registry", address(state.protocolFacetRegistry), address(state.boardroomFactory.facetRegistry())
+        );
+        _attestAddress(
+            "factory.policyRegistry", address(state.boardroomPolicyRegistry), state.boardroomFactory.policyRegistry()
+        );
+        _attestAddress("factory.wrappedNative", state.wrappedNative, state.boardroomFactory.wrappedNative());
+        _attestAddress("factory.kernel", address(state.boardroomKernel), state.boardroomFactory.boardroomKernelLogic());
+        _attestAddress(
+            "factory.payout", address(state.boardroomRedemptionPayout), state.boardroomFactory.redemptionPayoutLogic()
+        );
+        _attestAddress(
+            "factory.governance", address(state.boardroomGovernanceLogic), state.boardroomFactory.governanceLogic()
+        );
+        _attestAddress("factory.market", address(state.boardroomMarketLogic), state.boardroomFactory.marketLogic());
+        address controllerFactory = state.boardroomFactory.controllerFactory();
+        _requireCode(controllerFactory);
+        _attestAddress(
+            "controllerFactory.factory",
+            address(state.boardroomFactory),
+            BoardroomControllerFactory(controllerFactory).boardroomFactory()
+        );
+        _requireCode(BoardroomControllerFactory(controllerFactory).controllerImplementation());
+
+        _attestReleaseA(state);
+        _attestModuleConfiguration(state);
+    }
+
+    function _attestReleaseA(DeployState memory state) internal view {
+        _attestBytes32(
+            "registry.activeHash", state.activeFacetSetHash, state.protocolFacetRegistry.activeFacetSetHash()
+        );
+        _attestUint("registry.activeRelease", RELEASE_A, state.protocolFacetRegistry.activeRelease());
+        _attestUint("registry.storageVersion", STORAGE_VERSION_A, state.protocolFacetRegistry.activeStorageVersion());
+        _attestBytes32(
+            "registry.storageLayout",
+            BoardroomStorageLayouts.RELEASE_A,
+            state.protocolFacetRegistry.activeStorageLayoutHash()
+        );
+        _attestReleaseMetadata(state.protocolFacetRegistry, state.activeFacetSetHash);
+
+        ProtocolFacetTypes.FacetSetManifest memory manifest = BoardroomRelease.releaseA(state.facets);
+        bytes4[] memory publishedSelectors = state.protocolFacetRegistry.facetSetSelectors(state.activeFacetSetHash);
+        _attestUint("release.selectorCount", manifest.routes.length, publishedSelectors.length);
+        for (uint256 i; i < manifest.routes.length; ++i) {
+            _attestReleaseRoute(state.protocolFacetRegistry, state.activeFacetSetHash, manifest.routes[i]);
+        }
+    }
+
+    function _attestReleaseMetadata(ProtocolFacetRegistry registry, bytes32 facetSetHash) internal view {
+        (
+            bool published,
+            uint64 release,
+            uint64 storageVersion,
+            bytes32 predecessor,
+            bytes32 storageLayoutHash,
+            bytes32 manifestHash,
+            address migrationFacet,
+            bytes4 migrationSelector,
+            uint256 selectorCount
+        ) = registry.facetSetMetadata(facetSetHash);
+        if (!published) revert ReleaseHashMismatch(facetSetHash, bytes32(0));
+        _attestUint("release.number", RELEASE_A, release);
+        _attestUint("release.storageVersion", STORAGE_VERSION_A, storageVersion);
+        _attestBytes32("release.predecessor", bytes32(0), predecessor);
+        _attestBytes32("release.storageLayout", BoardroomStorageLayouts.RELEASE_A, storageLayoutHash);
+        _attestBytes32("release.manifest", BoardroomManifestHashes.RELEASE_A, manifestHash);
+        _attestAddress("release.migrationFacet", address(0), migrationFacet);
+        _attestBytes32("release.migrationSelector", bytes32(0), bytes32(migrationSelector));
+        bytes4[] memory selectors = registry.facetSetSelectors(facetSetHash);
+        _attestUint("release.metadataSelectors", selectors.length, selectorCount);
+    }
+
+    function _attestReleaseRoute(
+        ProtocolFacetRegistry registry,
+        bytes32 facetSetHash,
+        ProtocolFacetTypes.RouteDefinition memory definition
+    ) internal view {
+        {
+            (address publishedFacet, bytes32 publishedCodeHash, uint8 publishedKind) =
+                registry.facetSetRoute(facetSetHash, definition.selector);
+            if (
+                publishedFacet != definition.facet || publishedCodeHash != definition.codeHash
+                    || publishedKind != uint8(definition.kind)
+            ) revert ReleaseRouteMismatch(definition.selector);
+        }
+        {
+            (address activeFacet, bytes32 activeCodeHash, uint8 activeKind, uint64 routeVersion) =
+                registry.route(definition.selector);
+            if (
+                activeFacet != definition.facet || activeCodeHash != definition.codeHash
+                    || activeKind != uint8(definition.kind) || routeVersion != STORAGE_VERSION_A
+            ) revert ReleaseRouteMismatch(definition.selector);
+        }
+    }
+
+    function _attestModuleConfiguration(DeployState memory state) internal view {
         _attestAddress("feeRouter.recipient", state.protocolTreasury, state.protocolFeeRouter.feeRecipient());
         _attestAddress(
             "grantFactory.recipient", address(state.protocolFeeRouter), state.tokenGrantFactory.feeRecipient()
@@ -404,105 +669,129 @@ contract Deploy is Script {
             "ammFactory.recipient", address(state.protocolFeeRouter), state.ammFactory.protocolFeeRecipient()
         );
         _attestAddress("ammFactory.router", address(state.ammRouter), state.ammFactory.liquidityRouter());
-        _attestAddress("ammFactory.boardroom", address(state.boardroomFactory), state.ammFactory.boardroomFactory());
         _attestAddress(
             "ammFactory.reserveMgr", address(state.lockedLiquidityFactory), state.ammFactory.reservationManager()
         );
-        _attestAddress(
-            "factory.registry", address(state.boardroomPolicyRegistry), state.boardroomFactory.policyRegistry()
-        );
-        _attestAddress("factory.wrappedNative", state.wrappedNative, state.boardroomFactory.wrappedNative());
-        _attestAddress(
-            "factory.payoutLogic",
-            address(state.boardroomRedemptionPayout),
-            state.boardroomFactory.redemptionPayoutLogic()
-        );
-        _attestAddress(
-            "factory.governanceLogic", address(state.boardroomGovernanceLogic), state.boardroomFactory.governanceLogic()
-        );
-        _attestAddress("factory.boardroomLogic", address(state.boardroomLogic), state.boardroomFactory.boardroomLogic());
-        _attestAddress(
-            "factory.controllerFactory",
-            address(state.boardroomControllerFactory),
-            state.boardroomFactory.controllerFactory()
-        );
-        _attestAddress("factory.marketLogic", address(state.boardroomMarketLogic), state.boardroomFactory.marketLogic());
-        _attestAddress(
-            "ctrlFactory.boardroomFactory",
-            address(state.boardroomFactory),
-            state.boardroomControllerFactory.boardroomFactory()
-        );
-        _attestAddress(
-            "ctrlFactory.controllerLogic",
-            address(state.boardroomControllerLogic),
-            state.boardroomControllerFactory.controllerImplementation()
-        );
-        _attestAddress(
-            "boardroom.payoutLogic",
-            address(state.boardroomRedemptionPayout),
-            state.boardroomLogic.redemptionPayoutLogic()
-        );
-        _attestAddress(
-            "boardroom.governanceLogic", address(state.boardroomGovernanceLogic), state.boardroomLogic.governanceLogic()
-        );
-        _attestAddress(
-            "boardroom.controllerFactory",
-            address(state.boardroomControllerFactory),
-            state.boardroomLogic.controllerFactory()
-        );
-        _attestAddress("boardroom.marketLogic", address(state.boardroomMarketLogic), state.boardroomLogic.marketLogic());
-        _attestAddress(
-            "locker.boardroomFactory", address(state.boardroomFactory), state.lockedLiquidityFactory.boardroomFactory()
-        );
+        _attestAddress("ammFactory.boardroom", address(state.boardroomFactory), state.ammFactory.boardroomFactory());
         _attestAddress(
             "grantFactory.boardroom", address(state.boardroomFactory), state.tokenGrantFactory.boardroomFactory()
         );
         _attestAddress(
-            "rewardsFactory.boardroom",
-            address(state.boardroomFactory),
-            state.boardroomRewardsFactory.boardroomFactory()
+            "locker.boardroom", address(state.boardroomFactory), state.lockedLiquidityFactory.boardroomFactory()
         );
-        _attestAddress("locker.ammRouter", address(state.ammRouter), state.lockedLiquidityFactory.ammRouter());
-        _attestAddress("bondFactory.ammFactory", address(state.ammFactory), state.bondMarketFactory.ammFactory());
+        _attestAddress("locker.router", address(state.ammRouter), state.lockedLiquidityFactory.ammRouter());
         _attestAddress(
-            "bondFactory.boardroom", address(state.boardroomFactory), state.bondMarketFactory.boardroomFactory()
+            "rewards.boardroom", address(state.boardroomFactory), state.boardroomRewardsFactory.boardroomFactory()
         );
+        _attestAddress("bond.ammFactory", address(state.ammFactory), state.bondMarketFactory.ammFactory());
+        _attestAddress("bond.boardroom", address(state.boardroomFactory), state.bondMarketFactory.boardroomFactory());
+        _attestAddress(
+            "distribution.locker",
+            address(state.lockedLiquidityFactory),
+            state.distributionFactory.lockedLiquidityFactory()
+        );
+        _attestAddress(
+            "distribution.grants", address(state.tokenGrantFactory), state.distributionFactory.tokenGrantFactory()
+        );
+        _attestAddress(
+            "distribution.boardroom", address(state.boardroomFactory), state.distributionFactory.boardroomFactory()
+        );
+        if (!state.assetPolicy.isAssetAllowed(state.wrappedNative)) {
+            revert DeploymentAddressAttestationFailed(keccak256("asset.wrappedNative"), state.wrappedNative, address(0));
+        }
+        if (!state.boardroomPolicyRegistry.isPolicyAllowed(address(state.assetPolicy))) {
+            revert DeploymentAddressAttestationFailed(
+                keccak256("policy.assetAllowed"), address(state.assetPolicy), address(0)
+            );
+        }
+        _requireModulePolicy(state, address(state.tokenGrantFactory));
+        _requireModulePolicy(state, address(state.distributionFactory));
+        _requireModulePolicy(state, address(state.bondMarketFactory));
+        _requireModulePolicy(state, address(state.lockedLiquidityFactory));
+        _requireModulePolicy(state, address(state.boardroomRewardsFactory));
+    }
+
+    function _requireModulePolicy(DeployState memory state, address module) internal view {
+        if (
+            !state.boardroomPolicyRegistry.isModulePolicy(module)
+                || !state.boardroomPolicyRegistry.isPolicyAllowed(module)
+                || !state.assetPolicy.isApprovalSpenderAllowed(module)
+        ) {
+            revert DeploymentAddressAttestationFailed(keccak256("module.policy"), module, address(0));
+        }
     }
 
     function _attestAddress(bytes32 field, address expected, address actual) internal pure {
-        if (actual != expected) revert DeploymentAttestationFailed(field, expected, actual);
+        if (actual != expected) revert DeploymentAddressAttestationFailed(field, expected, actual);
+    }
+
+    function _attestBytes32(bytes32 field, bytes32 expected, bytes32 actual) internal pure {
+        if (actual != expected) revert DeploymentBytes32AttestationFailed(field, expected, actual);
+    }
+
+    function _attestUint(bytes32 field, uint256 expected, uint256 actual) internal pure {
+        if (actual != expected) revert DeploymentUintAttestationFailed(field, expected, actual);
+    }
+
+    function _requireCode(address account) internal view {
+        if (account.code.length == 0) revert MissingContract(account);
     }
 
     function _deploymentJson(DeployState memory state) internal returns (string memory output) {
-        uint256 chainId = block.chainid;
         string memory json = "deployment";
-        json.serialize("chainId", chainId);
-        _serializeAddresses(json, state);
-        _serializePolicyState(json, state);
-        _serializeOwnershipState(json, state);
+        json.serialize("chainId", block.chainid);
+        json.serialize("protocolVersion", PledgeCashDeploymentSalts.version());
+        json.serialize("protocolReleaseCodeHash", PledgeCashDeploymentSalts.releaseCodeHash());
+        json.serialize("deterministicDeploymentVersion", PledgeCashDeploymentSalts.version());
+        json.serialize("deterministicReleaseCodeHash", PledgeCashDeploymentSalts.releaseCodeHash());
+        json.serialize("deterministicDeployment", true);
+        json.serialize("create2Factory", state.create2Factory);
+        json.serialize("deterministicDeployer", address(state.deterministicDeployer));
+        json.serialize("deterministicDeployerOwner", state.deterministicDeployerOwner);
+        json.serialize("wrappedNative", state.wrappedNative);
+        json.serialize("protocolGovernance", state.protocolGovernance);
+        json.serialize("protocolTreasury", state.protocolTreasury);
+        json.serialize("ammFeeManager", state.ammFeeManager);
+        _serializeProtocolAddresses(json, state);
+        _serializeModuleAddresses(json, state);
+        _serializeRelease(json, state);
+        _serializeOwnership(json, state);
         _serializeCodeHashes(json, state);
         json.serialize("deploymentBlock", block.number);
         json.serialize("deploymentTimestamp", block.timestamp);
         output = json.serialize("deployer", state.deployer);
     }
 
-    function _serializeAddresses(string memory json, DeployState memory state) internal {
-        json.serialize("deterministicDeployment", true);
-        json.serialize("deterministicDeploymentVersion", PledgeCashDeploymentSalts.version());
-        json.serialize("deterministicReleaseCodeHash", PledgeCashDeploymentSalts.releaseCodeHash());
-        json.serialize("create2Factory", state.create2Factory);
-        json.serialize("deterministicDeployer", address(state.deterministicDeployer));
-        json.serialize("deterministicDeployerOwner", state.deterministicDeployerOwner);
+    function _serializeProtocolAddresses(string memory json, DeployState memory state) internal {
+        json.serialize("protocolFacetRegistry", address(state.protocolFacetRegistry));
+        json.serialize("boardroomKernel", address(state.boardroomKernel));
         json.serialize("boardroomPolicyRegistry", address(state.boardroomPolicyRegistry));
-        json.serialize("assetPolicy", address(state.assetPolicy));
-        json.serialize("protocolFeeRouter", address(state.protocolFeeRouter));
         json.serialize("boardroomFactory", address(state.boardroomFactory));
+        json.serialize("boardroomControllerFactory", state.boardroomFactory.controllerFactory());
+        json.serialize(
+            "boardroomControllerLogic",
+            BoardroomControllerFactory(state.boardroomFactory.controllerFactory()).controllerImplementation()
+        );
         json.serialize("boardroomGovernanceLogic", address(state.boardroomGovernanceLogic));
         json.serialize("boardroomRedemptionPayout", address(state.boardroomRedemptionPayout));
-        json.serialize("boardroomLogic", address(state.boardroomLogic));
-        json.serialize("boardroomControllerFactory", address(state.boardroomControllerFactory));
-        json.serialize("boardroomControllerLogic", address(state.boardroomControllerLogic));
         json.serialize("boardroomMarketLogic", address(state.boardroomMarketLogic));
+        json.serialize("authorityFacet", state.facets.authority);
+        json.serialize("executionFacet", state.facets.execution);
+        json.serialize("marketFacet", state.facets.market);
+        json.serialize("redemptionFacet", state.facets.redemption);
+        json.serialize("viewFacet", state.facets.viewFacet);
+    }
+
+    function _serializeModuleAddresses(string memory json, DeployState memory state) internal {
+        json.serialize("assetPolicy", address(state.assetPolicy));
+        json.serialize("protocolFeeRouter", address(state.protocolFeeRouter));
+        json.serialize("tokenGrantFactory", address(state.tokenGrantFactory));
+        json.serialize("tokenGrantLogic", state.tokenGrantFactory.tokenGrantLogic());
+        json.serialize("ammFactory", address(state.ammFactory));
+        json.serialize("ammPoolImplementation", state.ammFactory.poolImplementation());
+        json.serialize("ammRouter", address(state.ammRouter));
+        json.serialize("lockedLiquidityFactory", address(state.lockedLiquidityFactory));
+        json.serialize("lockedLiquidityLogic", state.lockedLiquidityFactory.lockedLiquidityLogic());
         json.serialize("distributionFactory", address(state.distributionFactory));
         json.serialize("fixedPriceSaleLogic", state.distributionFactory.fixedPriceSaleLogic());
         json.serialize("dutchAuctionLogic", state.distributionFactory.dutchAuctionLogic());
@@ -512,88 +801,28 @@ contract Deploy is Script {
         json.serialize("boardroomRewardsLogic", state.boardroomRewardsFactory.rewardsLogic());
         json.serialize("bondMarketFactory", address(state.bondMarketFactory));
         json.serialize("bondMarketLogic", state.bondMarketFactory.bondMarketLogic());
-        json.serialize("ammFactory", address(state.ammFactory));
-        json.serialize("ammPoolImplementation", state.ammFactory.poolImplementation());
-        json.serialize("ammProtocolFeeRecipient", state.ammFactory.protocolFeeRecipient());
-        json.serialize("wrappedNative", state.wrappedNative);
-        json.serialize("ammRouter", address(state.ammRouter));
-        json.serialize("lockedLiquidityFactory", address(state.lockedLiquidityFactory));
-        json.serialize("lockedLiquidityLogic", state.lockedLiquidityFactory.lockedLiquidityLogic());
-        json.serialize("tokenGrantFactory", address(state.tokenGrantFactory));
-        json.serialize("tokenGrantLogic", state.tokenGrantFactory.tokenGrantLogic());
     }
 
-    function _serializePolicyState(string memory json, DeployState memory state) internal {
-        json.serialize("assetPolicyAllowed", state.boardroomPolicyRegistry.isPolicyAllowed(address(state.assetPolicy)));
-        json.serialize("assetWrappedNativeAllowed", state.assetPolicy.isAssetAllowed(state.wrappedNative));
-        json.serialize(
-            "assetTokenGrantSpenderAllowed",
-            state.assetPolicy.isApprovalSpenderAllowed(address(state.tokenGrantFactory))
-        );
-        json.serialize(
-            "assetDistributionSpenderAllowed",
-            state.assetPolicy.isApprovalSpenderAllowed(address(state.distributionFactory))
-        );
-        json.serialize(
-            "assetBondMarketSpenderAllowed",
-            state.assetPolicy.isApprovalSpenderAllowed(address(state.bondMarketFactory))
-        );
-        json.serialize(
-            "assetLockedLiquiditySpenderAllowed",
-            state.assetPolicy.isApprovalSpenderAllowed(address(state.lockedLiquidityFactory))
-        );
-        json.serialize(
-            "assetBoardroomRewardsSpenderAllowed",
-            state.assetPolicy.isApprovalSpenderAllowed(address(state.boardroomRewardsFactory))
-        );
-        json.serialize(
-            "lockedLiquidityPolicyAllowed",
-            state.boardroomPolicyRegistry.isPolicyAllowed(address(state.lockedLiquidityFactory))
-        );
-        json.serialize(
-            "tokenGrantPolicyAllowed", state.boardroomPolicyRegistry.isPolicyAllowed(address(state.tokenGrantFactory))
-        );
-        json.serialize(
-            "tokenGrantModulePolicy", state.boardroomPolicyRegistry.isModulePolicy(address(state.tokenGrantFactory))
-        );
-        json.serialize(
-            "distributionPolicyAllowed",
-            state.boardroomPolicyRegistry.isPolicyAllowed(address(state.distributionFactory))
-        );
-        json.serialize(
-            "distributionModulePolicy", state.boardroomPolicyRegistry.isModulePolicy(address(state.distributionFactory))
-        );
-        json.serialize(
-            "bondMarketPolicyAllowed", state.boardroomPolicyRegistry.isPolicyAllowed(address(state.bondMarketFactory))
-        );
-        json.serialize(
-            "bondMarketModulePolicy", state.boardroomPolicyRegistry.isModulePolicy(address(state.bondMarketFactory))
-        );
-        json.serialize(
-            "lockedLiquidityModulePolicy",
-            state.boardroomPolicyRegistry.isModulePolicy(address(state.lockedLiquidityFactory))
-        );
-        json.serialize(
-            "boardroomRewardsPolicyAllowed",
-            state.boardroomPolicyRegistry.isPolicyAllowed(address(state.boardroomRewardsFactory))
-        );
-        json.serialize(
-            "boardroomRewardsModulePolicy",
-            state.boardroomPolicyRegistry.isModulePolicy(address(state.boardroomRewardsFactory))
-        );
+    function _serializeRelease(string memory json, DeployState memory state) internal {
+        json.serialize("activeFacetSetHash", state.activeFacetSetHash);
+        json.serialize("activeRelease", state.protocolFacetRegistry.activeRelease());
+        json.serialize("requiredStorageVersion", state.protocolFacetRegistry.activeStorageVersion());
+        json.serialize("requiredStorageLayoutHash", state.protocolFacetRegistry.activeStorageLayoutHash());
+        json.serialize("manifestHash", BoardroomManifestHashes.RELEASE_A);
+        json.serialize("kernelSelectorSetHash", BoardroomKernelSelectors.selectorSetHash());
+        json.serialize("selectorCount", state.protocolFacetRegistry.facetSetSelectors(state.activeFacetSetHash).length);
     }
 
-    function _serializeOwnershipState(string memory json, DeployState memory state) internal {
-        json.serialize("policyRegistryOwner", state.boardroomPolicyRegistry.owner());
+    function _serializeOwnership(string memory json, DeployState memory state) internal {
+        json.serialize("protocolFacetRegistryOwner", state.protocolFacetRegistry.owner());
+        json.serialize("boardroomPolicyRegistryOwner", state.boardroomPolicyRegistry.owner());
         json.serialize("assetPolicyOwner", state.assetPolicy.owner());
-        json.serialize("factoryOwner", state.tokenGrantFactory.owner());
-        json.serialize("protocolGovernance", state.protocolGovernance);
-        json.serialize("protocolTreasury", state.protocolTreasury);
         json.serialize("protocolFeeRouterOwner", state.protocolFeeRouter.owner());
+        json.serialize("tokenGrantFactoryOwner", state.tokenGrantFactory.owner());
+        json.serialize("ammFactoryOwner", state.ammFactory.owner());
         json.serialize("protocolFeeRouterRecipient", state.protocolFeeRouter.feeRecipient());
         json.serialize("tokenGrantFeeRecipient", state.tokenGrantFactory.feeRecipient());
-        json.serialize("ammFactoryOwner", state.ammFactory.owner());
-        json.serialize("ammFeeManager", state.ammFactory.feeManager());
+        json.serialize("ammProtocolFeeRecipient", state.ammFactory.protocolFeeRecipient());
         json.serialize("ammLiquidityRouter", state.ammFactory.liquidityRouter());
         json.serialize("ammReservationManager", state.ammFactory.reservationManager());
         json.serialize("creationFee", state.tokenGrantFactory.creationFee());
@@ -601,16 +830,25 @@ contract Deploy is Script {
 
     function _serializeCodeHashes(string memory json, DeployState memory state) internal {
         json.serialize("deterministicDeployerCodeHash", address(state.deterministicDeployer).codehash);
+        json.serialize("protocolFacetRegistryCodeHash", address(state.protocolFacetRegistry).codehash);
+        json.serialize("boardroomKernelCodeHash", address(state.boardroomKernel).codehash);
         json.serialize("boardroomPolicyRegistryCodeHash", address(state.boardroomPolicyRegistry).codehash);
-        json.serialize("assetPolicyCodeHash", address(state.assetPolicy).codehash);
-        json.serialize("protocolFeeRouterCodeHash", address(state.protocolFeeRouter).codehash);
         json.serialize("boardroomFactoryCodeHash", address(state.boardroomFactory).codehash);
+        json.serialize("boardroomControllerFactoryCodeHash", state.boardroomFactory.controllerFactory().codehash);
+        json.serialize(
+            "boardroomControllerLogicCodeHash",
+            BoardroomControllerFactory(state.boardroomFactory.controllerFactory()).controllerImplementation().codehash
+        );
         json.serialize("boardroomGovernanceLogicCodeHash", address(state.boardroomGovernanceLogic).codehash);
         json.serialize("boardroomRedemptionPayoutCodeHash", address(state.boardroomRedemptionPayout).codehash);
-        json.serialize("boardroomLogicCodeHash", address(state.boardroomLogic).codehash);
-        json.serialize("boardroomControllerFactoryCodeHash", address(state.boardroomControllerFactory).codehash);
-        json.serialize("boardroomControllerCodeHash", address(state.boardroomControllerLogic).codehash);
         json.serialize("boardroomMarketLogicCodeHash", address(state.boardroomMarketLogic).codehash);
+        json.serialize("authorityFacetCodeHash", state.facets.authority.codehash);
+        json.serialize("executionFacetCodeHash", state.facets.execution.codehash);
+        json.serialize("marketFacetCodeHash", state.facets.market.codehash);
+        json.serialize("redemptionFacetCodeHash", state.facets.redemption.codehash);
+        json.serialize("viewFacetCodeHash", state.facets.viewFacet.codehash);
+        json.serialize("assetPolicyCodeHash", address(state.assetPolicy).codehash);
+        json.serialize("protocolFeeRouterCodeHash", address(state.protocolFeeRouter).codehash);
         json.serialize("tokenGrantFactoryCodeHash", address(state.tokenGrantFactory).codehash);
         json.serialize("tokenGrantLogicCodeHash", state.tokenGrantFactory.tokenGrantLogic().codehash);
         json.serialize("ammFactoryCodeHash", address(state.ammFactory).codehash);
@@ -633,89 +871,17 @@ contract Deploy is Script {
     }
 
     function _logDeployment(DeployState memory state) internal view {
-        console2.log("DeterministicDeployment", true);
-        console2.log("DeterministicDeploymentVersion", PledgeCashDeploymentSalts.version());
-        console2.log("Create2Factory", state.create2Factory);
+        console2.log("ProtocolVersion", PledgeCashDeploymentSalts.version());
         console2.log("DeterministicDeployer", address(state.deterministicDeployer));
-        console2.log("DeterministicDeployerOwner", state.deterministicDeployerOwner);
-        console2.log("BoardroomPolicyRegistry", address(state.boardroomPolicyRegistry));
-        console2.log("AssetPolicy", address(state.assetPolicy));
-        console2.log("ProtocolFeeRouter", address(state.protocolFeeRouter));
-        console2.log("ProtocolGovernance", state.protocolGovernance);
-        console2.log("ProtocolTreasury", state.protocolTreasury);
+        console2.log("ProtocolFacetRegistry", address(state.protocolFacetRegistry));
+        console2.log("BoardroomKernel", address(state.boardroomKernel));
         console2.log("BoardroomFactory", address(state.boardroomFactory));
-        console2.log("BoardroomGovernanceLogic", address(state.boardroomGovernanceLogic));
-        console2.log("BoardroomRedemptionPayout", address(state.boardroomRedemptionPayout));
-        console2.log("BoardroomLogic", address(state.boardroomLogic));
-        console2.log("BoardroomControllerFactory", address(state.boardroomControllerFactory));
-        console2.log("BoardroomControllerLogic", address(state.boardroomControllerLogic));
-        console2.log("BoardroomMarketLogic", address(state.boardroomMarketLogic));
-        console2.log("DistributionFactory", address(state.distributionFactory));
-        console2.log("BoardroomRewardsFactory", address(state.boardroomRewardsFactory));
-        console2.log("BondMarketFactory", address(state.bondMarketFactory));
-        console2.log("BondMarketLogic", state.bondMarketFactory.bondMarketLogic());
-        console2.log("AmmFactory", address(state.ammFactory));
-        console2.log("AmmFactoryOwner", state.ammFactory.owner());
-        console2.log("AmmFeeManager", state.ammFactory.feeManager());
-        console2.log("AmmLiquidityRouter", state.ammFactory.liquidityRouter());
-        console2.log("AmmReservationManager", state.ammFactory.reservationManager());
-        if (state.ammProtocolFeeRecipient != address(0)) {
-            console2.log("AmmProtocolFeeRecipient", state.ammFactory.protocolFeeRecipient());
-        }
+        console2.log("BoardroomControllerFactory", state.boardroomFactory.controllerFactory());
+        console2.log("ProtocolGovernance", state.protocolGovernance);
         console2.log("WrappedNative", state.wrappedNative);
-        console2.log("AmmRouter", address(state.ammRouter));
-        console2.log("LockedLiquidityFactory", address(state.lockedLiquidityFactory));
-        _logPolicyState(state);
-        console2.log("TokenGrantFactory", address(state.tokenGrantFactory));
-        console2.log("TokenGrantLogic", state.tokenGrantFactory.tokenGrantLogic());
-        console2.log("PolicyRegistryOwner", state.boardroomPolicyRegistry.owner());
-        console2.log("AssetPolicyOwner", state.assetPolicy.owner());
-        console2.log(
-            "TokenGrantPolicyAllowed", state.boardroomPolicyRegistry.isPolicyAllowed(address(state.tokenGrantFactory))
-        );
-        console2.log(
-            "DistributionPolicyAllowed",
-            state.boardroomPolicyRegistry.isPolicyAllowed(address(state.distributionFactory))
-        );
-        console2.log(
-            "BondMarketPolicyAllowed", state.boardroomPolicyRegistry.isPolicyAllowed(address(state.bondMarketFactory))
-        );
-        console2.log("FactoryOwner", state.tokenGrantFactory.owner());
-        console2.log("TokenGrantFeeRecipient", state.tokenGrantFactory.feeRecipient());
-        console2.log("CreationFee", state.tokenGrantFactory.creationFee());
+        console2.log("ActiveRelease", uint256(state.protocolFacetRegistry.activeRelease()));
+        console2.log("ActiveStorageVersion", uint256(state.protocolFacetRegistry.activeStorageVersion()));
+        console2.logBytes32(state.activeFacetSetHash);
         console2.log("Deployment chain", block.chainid);
-    }
-
-    function _logPolicyState(DeployState memory state) internal view {
-        console2.log("AssetPolicyAllowed", state.boardroomPolicyRegistry.isPolicyAllowed(address(state.assetPolicy)));
-        console2.log("AssetWrappedNativeAllowed", state.assetPolicy.isAssetAllowed(state.wrappedNative));
-        console2.log(
-            "AssetTokenGrantSpenderAllowed",
-            state.assetPolicy.isApprovalSpenderAllowed(address(state.tokenGrantFactory))
-        );
-        console2.log(
-            "AssetDistributionSpenderAllowed",
-            state.assetPolicy.isApprovalSpenderAllowed(address(state.distributionFactory))
-        );
-        console2.log(
-            "AssetBondMarketSpenderAllowed",
-            state.assetPolicy.isApprovalSpenderAllowed(address(state.bondMarketFactory))
-        );
-        console2.log(
-            "AssetLockedLiquiditySpenderAllowed",
-            state.assetPolicy.isApprovalSpenderAllowed(address(state.lockedLiquidityFactory))
-        );
-        console2.log(
-            "AssetBoardroomRewardsSpenderAllowed",
-            state.assetPolicy.isApprovalSpenderAllowed(address(state.boardroomRewardsFactory))
-        );
-        console2.log(
-            "BoardroomRewardsPolicyAllowed",
-            state.boardroomPolicyRegistry.isPolicyAllowed(address(state.boardroomRewardsFactory))
-        );
-        console2.log(
-            "LockedLiquidityPolicyAllowed",
-            state.boardroomPolicyRegistry.isPolicyAllowed(address(state.lockedLiquidityFactory))
-        );
     }
 }

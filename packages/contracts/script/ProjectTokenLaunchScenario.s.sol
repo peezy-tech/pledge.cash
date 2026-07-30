@@ -7,7 +7,8 @@ import {AmmFactory} from "../src/amm/AmmFactory.sol";
 import {AmmPool} from "../src/amm/AmmPool.sol";
 import {AmmRouter} from "../src/amm/AmmRouter.sol";
 import {AssetPolicy} from "../src/policy/AssetPolicy.sol";
-import {Boardroom} from "../src/boardroom/Boardroom.sol";
+import {IBoardroom as Boardroom} from "../src/boardroom/IBoardroom.sol";
+import {BoardroomFacetTypes} from "../src/boardroom/diamond/BoardroomFacetTypes.sol";
 import {BoardroomFactory} from "../src/boardroom/BoardroomFactory.sol";
 import {BoardroomGovernanceLogic} from "../src/boardroom/BoardroomGovernanceLogic.sol";
 import {BoardroomPolicyRegistry} from "../src/boardroom/BoardroomPolicyRegistry.sol";
@@ -17,8 +18,9 @@ import {LockedLiquidity} from "../src/liquidity/LockedLiquidity.sol";
 import {LockedLiquidityFactory} from "../src/liquidity/LockedLiquidityFactory.sol";
 import {TokenGrant} from "../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../src/grants/TokenGrantFactory.sol";
+import {CanonicalBoardroomScriptSetup} from "./CanonicalBoardroomScriptSetup.sol";
 
-contract ProjectTokenLaunchScenario is Script {
+contract ProjectTokenLaunchScenario is CanonicalBoardroomScriptSetup {
     error ScenarioCheckFailed(string label);
 
     struct ScenarioState {
@@ -84,12 +86,9 @@ contract ProjectTokenLaunchScenario is Script {
         state.policyRegistry = new BoardroomPolicyRegistry(owner);
         state.wrappedHype = new WETH();
         state.assetPolicy = new AssetPolicy(owner, address(state.wrappedHype));
-        state.boardroomFactory = new BoardroomFactory(
-            address(state.policyRegistry),
-            address(state.wrappedHype),
-            address(new BoardroomRedemptionPayout()),
-            address(new BoardroomGovernanceLogic())
-        );
+        bytes32 releaseAHash;
+        (state.boardroomFactory, releaseAHash) =
+            _deployCanonicalBoardroomFactory(owner, state.policyRegistry, address(state.wrappedHype));
         state.tokenGrantFactory = new TokenGrantFactory(owner, address(state.boardroomFactory));
         state.ammFactory = new AmmFactory(owner, address(state.boardroomFactory));
         state.ammRouter = new AmmRouter(address(state.ammFactory), address(state.wrappedHype));
@@ -101,7 +100,9 @@ contract ProjectTokenLaunchScenario is Script {
         state.policyRegistry.registerModulePolicy(address(state.lockedLiquidityFactory));
 
         address boardroomAddress = state.boardroomFactory
-            .createBoardroom(owner, "pledge.cash Project Token", "PLEDGE", _salt(nonce, "project-boardroom"));
+            .createBoardroom(
+                releaseAHash, owner, "pledge.cash Project Token", "PLEDGE", _salt(nonce, "project-boardroom")
+            );
         state.boardroom = Boardroom(payable(boardroomAddress));
         state.projectToken = BoardroomToken(state.boardroom.shareToken());
         state.grantFeeRecipient = address(state.boardroom);
@@ -121,8 +122,9 @@ contract ProjectTokenLaunchScenario is Script {
     }
 
     function _seedProjectBalances(ScenarioState memory state, address grantIssuer) internal {
-        state.boardroom.mint(address(state.boardroom), PROJECT_LP_SUPPLY);
-        state.boardroom.mint(grantIssuer, PROJECT_GRANT_SUPPLY);
+        bytes32 expectedFacetSetHash = state.boardroom.facetSetHash();
+        state.boardroom.mint(expectedFacetSetHash, address(state.boardroom), PROJECT_LP_SUPPLY);
+        state.boardroom.mint(expectedFacetSetHash, grantIssuer, PROJECT_GRANT_SUPPLY);
 
         state.wrappedHype.deposit{value: HYPE_LIQUIDITY}();
         _check(state.wrappedHype.transfer(address(state.boardroom), HYPE_LIQUIDITY), "fund-boardroom-hype");
@@ -147,17 +149,17 @@ contract ProjectTokenLaunchScenario is Script {
             salt: salt
         });
 
-        Boardroom.Call[] memory calls = new Boardroom.Call[](3);
+        BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](3);
         calls[0] = _approvalCall(state, address(state.projectToken), PROJECT_LP_SUPPLY);
         calls[1] = _approvalCall(state, address(state.wrappedHype), HYPE_LIQUIDITY);
-        calls[2] = Boardroom.Call({
+        calls[2] = BoardroomFacetTypes.Call({
             policy: address(state.lockedLiquidityFactory),
             target: address(state.lockedLiquidityFactory),
             value: 0,
             data: abi.encodeCall(LockedLiquidityFactory.createLockedLiquidity, (params))
         });
 
-        bytes[] memory results = state.boardroom.executeBatch(calls);
+        bytes[] memory results = state.boardroom.executeBatch(state.boardroom.facetSetHash(), calls);
         uint256 liquidity;
         (state.locker, state.pool,,, liquidity) = abi.decode(results[2], (address, address, uint256, uint256, uint256));
 
@@ -232,7 +234,7 @@ contract ProjectTokenLaunchScenario is Script {
         uint256 wrappedBefore = state.wrappedHype.balanceOf(address(state.boardroom));
 
         vm.startBroadcast(ownerKey);
-        state.boardroom.startWindDown();
+        state.boardroom.startWindDown(state.boardroom.facetSetHash());
         vm.stopBroadcast();
 
         state.wrappedGrantCreationFeeRevenue = state.wrappedHype.balanceOf(address(state.boardroom)) - wrappedBefore;
@@ -244,9 +246,9 @@ contract ProjectTokenLaunchScenario is Script {
     function _approvalCall(ScenarioState memory state, address token, uint256 amount)
         internal
         pure
-        returns (Boardroom.Call memory)
+        returns (BoardroomFacetTypes.Call memory)
     {
-        return Boardroom.Call({
+        return BoardroomFacetTypes.Call({
             policy: address(state.assetPolicy),
             target: token,
             value: 0,

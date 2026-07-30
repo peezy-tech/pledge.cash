@@ -1,6 +1,6 @@
 # Boardroom diamond release B
 
-Status: non-production design-spike migration release
+Status: canonical local migration-rehearsal manifest; not a target-chain release proposal
 
 - Release number: `2`
 - Required storage version: `2`
@@ -10,7 +10,7 @@ Status: non-production design-spike migration release
 
 Release B retains the complete release-A selector table, then:
 
-- replaces `redemptionCredits(address)` with a native view facet;
+- replaces `redemptionCredits(address)` with the release-B view facet;
 - adds `releaseBMigrationState()`;
 - adds the release-pinned migration route.
 

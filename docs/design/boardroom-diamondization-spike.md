@@ -1,37 +1,42 @@
-# Boardroom diamondization design spike
+# Boardroom diamond protocol: design and evidence
 
-> **Status: implemented, local-only prototype; production NO-GO.**
+> **Status: canonical implementation; final local acceptance in progress;
+> target-chain deployment pending.**
 >
-> This spike introduces a separate vNext product line. It does not migrate v5 Boardrooms, alter v5 deployment salts,
-> update chain `998` or `10143` artifacts, broadcast a target-chain transaction, extract custody, or add a redemption
-> sidecar. Its only broadcasts are an ignored, local Anvil lifecycle proof.
+> This is the sole Boardroom product line in the unreleased repository. Both
+> chain `998` and `10143` artifacts are pending, no target-chain transaction has
+> been broadcast, and mainnet remains a NO-GO. The architecture does not
+> extract custody or add a redemption sidecar.
 
 ## Outcome
 
-The prototype demonstrates that a vNext Boardroom can remain the permanent asset-holding address while all routed
+The implementation demonstrates that a Boardroom can remain the permanent asset-holding address while all routed
 behavior is selected by one protocol-owned registry. New Boardrooms are deterministic minimal clones of a kernel.
 Their fallback asks the global `ProtocolFacetRegistry` for the active route and delegates into the selected facet while
 preserving `msg.sender`, `msg.value`, `address(this)`, returndata, and revert data.
 
-The spike also demonstrates an intentionally disruptive storage release:
+The release rehearsal also demonstrates an intentionally disruptive storage
+release:
 
-1. Release A creates and operates vNext Boardrooms with the current Boardroom storage namespaces and core semantics.
+1. Release A creates and operates Boardrooms with the canonical Boardroom storage namespaces and core semantics.
 2. Registry activation of release B changes routing and the required hash globally.
 3. Reads remain available, but ordinary writes on each Boardroom fail until that Boardroom migrates.
 4. Any account can run the release-pinned migration.
 5. The migration performs a real additive state transformation and applies the exact release-B storage commitment.
 6. Normal writes and terminal redemption resume independently on each migrated Boardroom.
 
-The prototype now reaches executable feature parity for the current Boardroom and callback-driven module surface.
-Release-A facets reuse the same Boardroom business implementation, every module family has a hash-bound vNext adapter,
-and the integrated proof covers both ordinary and terminal lifecycles. A real registry/kernel invariant harness also
-ports wind-down conservation and hostile-payout retry across release migration. This is not production-audit parity:
-the individual v5 adversarial cases have not all been parameterized one-for-one through vNext, and no target-chain
-deployment ceremony has been performed.
+The canonical suites now exercise the complete Boardroom behavior,
+controller, callback-driven module, and wind-down invariant surfaces through
+the registry and kernel. Release-A facets implement Boardroom behavior
+natively, every module family uses hash-bound callbacks, and the integrated
+proof covers ordinary and terminal lifecycles. This is feature-parity
+implementation evidence, not production-audit or target-chain evidence. The
+final repository-wide acceptance run and independent security review remain
+open.
 
 ## Authority model
 
-`ProtocolFacetRegistry.owner()` is the only release authority in the spike:
+`ProtocolFacetRegistry.owner()` is the only Boardroom release authority:
 
 - only the owner may publish an immutable, complete release;
 - only the owner may atomically activate a published release;
@@ -45,8 +50,11 @@ The local deployment scenario creates the registry under a bootstrap authority, 
 transfers ownership to `PLEDGE_CASH_PROTOCOL_GOVERNANCE` when that address differs from the bootstrap account. The
 intended initial value is the existing `protocolGovernance` address. Replacing that owner with staking governance or a
 timelock does not require changing any Boardroom.
+The deployment artifact's `protocolFacetRegistryOwner` is evidence of that
+genesis ceremony only; it is not a permanent equality constraint against the
+historical `protocolGovernance` field.
 
-This model deliberately leaves protocol governance with ultimate authority over every vNext Boardroom's assets and
+This model deliberately leaves protocol governance with ultimate authority over every Boardroom's assets and
 redemption behavior. Expected-hash binding protects a transaction from semantic drift; it does not make a malicious
 registry release safe.
 
@@ -89,9 +97,18 @@ non-ascending or duplicate selectors, kernel-reserved selectors, zero/no-code fa
 inconsistent migration metadata. Activation rechecks every runtime code hash before changing the table. Releases and
 release numbers are immutable once published. Active routes retain the committed code hash, and the kernel compares it
 with the facet's live `EXTCODEHASH` before every initialization, view, mutation, and migration delegatecall.
+An empty ordered route array is intentionally valid before the release lineage
+has introduced a migration route. Activating such a complete release removes
+every facet selector and makes routed Boardroom behavior unavailable until a
+higher-numbered recovery release is activated; kernel introspection and native
+receipt remain. After any migration-bearing release, every successor must
+retain one migration route so an older, not-yet-migrated Boardroom can still
+reach the active storage schema. An emergency shutdown in that lineage is
+therefore migration-only rather than empty.
 
 The kernel selector list is canonical rather than an arbitrary deployment input. Its exact hash is checked when the
-registry is constructed, when the kernel binds to the registry, and again when the vNext factory binds both contracts.
+registry is constructed, when the kernel binds to the registry, and again when the Boardroom factory binds both
+contracts.
 This keeps registry loupe metadata from claiming selectors that Solidity dispatch resolves inside the kernel.
 
 Activation additionally requires:
@@ -108,7 +125,7 @@ historical release metadata, selector, and route reads. `FacetSetPublished`, one
 
 ## Selector manifests
 
-The executable manifest builder is `BoardroomVNextRelease.sol`. It sorts complete selector tables before publication.
+The executable manifest builder is `BoardroomRelease.sol`. It sorts complete selector tables before publication.
 The human-readable release specifications are:
 
 - `docs/design/boardroom-diamond-release-a.md`
@@ -118,8 +135,8 @@ Their exact file bytes are committed onchain through:
 
 | Release | Human manifest hash |
 | --- | --- |
-| A | `0x42f9307e89ac60cc7fd7c2d98ec0064876f13c0ebfa64aee8fb272f03d600deb` |
-| B | `0x480533d1aec981866c51057fe59217f34407bc3b3a2cd963921fcda33f43a5ff` |
+| A | `0x49203191b8b3958946efa6e4da2562dc1a9af4c7a75855751c8abd05505025ab` |
+| B | `0xe50a0e6d677c939d5767190157bb3955f3da8fe3ebb86400077e3a99ff659934` |
 
 Release A has 97 routes:
 
@@ -129,14 +146,14 @@ Release A has 97 routes:
 | `BoardroomExecutionFacet` | Mutating | 13 | execution, assets, obligations, callbacks |
 | `BoardroomMarketFacet` | Mutating | 10 | primary market and protocol-liquidity reservations |
 | `BoardroomRedemptionFacet` | Mutating | 7 | snapshotting, redemption, claims, native wrapping |
-| `BoardroomViewFacet` | View | 55 | aggregate legacy-compatible reads |
+| `BoardroomViewFacet` | View | 55 | aggregate native reads |
 
 Release B has 99 routes. It replaces `redemptionCredits(address)` with `BoardroomViewFacetV2`, adds
 `releaseBMigrationState()`, and adds `migrateBoardroom(bytes32)` as the sole Migration route. Selector replacement and
 removal semantics are covered by registry unit tests; omitting a selector from a later complete table removes it
 atomically.
 
-`bun --cwd packages/contracts check:diamond-vnext-manifests` recomputes the two document hashes and fails if either
+`bun --cwd packages/contracts check:boardroom-manifests` recomputes the two document hashes and fails if either
 human manifest drifts from its Solidity commitment.
 
 ## Kernel routing and transaction binding
@@ -172,8 +189,8 @@ routes the kernel:
    returning.
 
 A release change therefore invalidates direct calls, cross-contract callbacks, queued controller operations, and
-ERC-1271 authorizations that were built for the previous hash. `BoardroomTokenVNext` reads the Boardroom's current hash
-and echoes it into its primary-market callback within the same transaction. The vNext controller commits the hash to
+ERC-1271 authorizations that were built for the previous hash. `BoardroomToken` reads the Boardroom's current hash
+and echoes it into its primary-market callback within the same transaction. The Boardroom controller commits the hash to
 operation IDs, schedules, execution checks, and signatures; it never substitutes the current hash for the scheduled
 one.
 
@@ -182,7 +199,7 @@ pin all component reads to one block so a release activation cannot produce a mi
 
 ### Release-bound ERC-1271 proofs
 
-The vNext controller does not accept a legacy raw proposer signature. Its opaque ERC-1271 signature is a canonical,
+The Boardroom controller does not accept a legacy raw proposer signature. Its opaque ERC-1271 signature is a canonical,
 versioned envelope containing the facet-set hash, Boardroom epoch, controller generation, configuration epoch/hash,
 and the proposer signature. The proposer signs an EIP-712 `BoardroomControlProof` that commits the caller's original
 message hash and every envelope field. The EIP-712 domain commits chain ID and controller address; the proof struct
@@ -220,7 +237,10 @@ migration lock, applied storage version, and applied layout hash. Business facet
 Boardroom ERC-7201 namespaces. Release B adds its own `pledge.cash.boardroom.diamond.release-b` namespace.
 
 The registry binds both the predecessor facet-set hash and the required storage-layout commitment. A version increase
-requires a migration route. The release-B migration:
+requires a migration route. Every migration-bearing release uses the permanent
+`migrateBoardroom(bytes32)` entrypoint (`0x6f774fc9`); governance may replace
+the pinned migration facet but cannot change that selector. The release-B
+migration:
 
 - accepts only the active expected hash through kernel dispatch;
 - accepts no arbitrary caller migration data;
@@ -243,52 +263,51 @@ and terminal-accounting liveness before activation.
 
 ## Facet implementation strategy
 
-Release A is a compatibility bridge, not the final native facet decomposition. Each semantic facet is a
-selector-specific adapter into one isolated legacy `Boardroom` implementation. Nested delegatecall keeps custody and
-business storage at the Boardroom clone address while reusing the currently tested Boardroom state machine and ERC-7201
-layouts.
+Release A is a native facet decomposition. Each semantic facet executes its Boardroom wrapper behavior in the kernel's
+storage context and preserves the scalar and ERC-7201 layouts. Purpose-built governance, market, and redemption helper
+modules remain immutable dependencies; no facet deploys or delegates into
+another Boardroom implementation.
 
-Facets expose no independently usable owner, initializer, upgrade, registry-mutation, or destruction surface. The
-authority facet's public `initializeBoardroom` route is usable only while the kernel has entered its one-time
-initialization context; direct calls revert. That route deploys `BoardroomTokenVNext`. Existing Boardroom reentrancy
-storage remains shared across compatibility facets; the kernel supplies a separate migration lock.
+The authority facet's public `initializeBoardroom` route is usable only while the kernel has entered its one-time
+initialization context; direct calls revert. That route deploys `BoardroomToken`. The Solady ownership and
+reentrancy slots remain shared across facets, while the kernel supplies a separate migration lock.
 
-This approach makes the global routing, authority, transaction-binding, and migration design executable without
-rewriting all Boardroom business logic in one spike. Before production, the compatibility bridge should either be
-replaced by native shared libraries/facets or receive an explicit audit of its nested-delegatecall assumptions.
+## Module callbacks
 
-## vNext module compatibility
+The callback ABI is hash-bound throughout the canonical module line without weakening the kernel's expected-hash
+requirement:
 
-The callback-ABI gap is resolved in the prototype through a separate vNext module line rather than by weakening the
-kernel's expected-hash requirement:
-
-- `BoardroomVNextCallbackLib` reads the Boardroom's current `facetSetHash()` immediately before each mutating callback
+- `BoardroomCallbackLib` reads the Boardroom's current `facetSetHash()` immediately before each mutating callback
   and passes it as `expectedFacetSetHash`;
-- `BoardroomRewardsFactoryVNext`, `BondMarketFactoryVNext`, `DistributionFactoryVNext`,
-  `TokenGrantFactoryVNext`, and `LockedLiquidityFactoryVNext` adapt factory-originated callbacks;
-- `MerkleAirdropVNext` and `MigratingBondingCurveVNext` adapt callbacks that originate from a long-lived child;
-- each factory accepts only canonical Boardrooms from the configured `BoardroomVNextFactory`, while the existing
+- `BoardroomRewardsFactory`, `BondMarketFactory`, `DistributionFactory`, `TokenGrantFactory`, and
+  `LockedLiquidityFactory` adapt factory-originated callbacks;
+- `MerkleAirdrop` and `MigratingBondingCurve` adapt callbacks that originate from a long-lived child;
+- each factory accepts only canonical Boardrooms from the configured `BoardroomFactory`, while the existing
   policy and obligation checks still constrain which factory or child may call each callback.
 
 The integrated scenario exercises creation, participation, terminalization, and wind-down cleanup for rewards, fixed
 sales, Dutch auctions, direct and Merkle-created grants, direct Merkle claims, reserve bonds, locked liquidity, and a
 cancelled migrating curve. A third Boardroom buys a complete curve inventory, latches graduation, migrates into the
-reserved vNext locker/pool, replaces the curve obligation with the locked-liquidity obligation, and later exits that
+reserved locker/pool, replaces the curve obligation with the locked-liquidity obligation, and later exits that
 liquidity during wind-down. Release activation between module creation and cleanup proves that autonomous callbacks
 use the live hash, while direct Boardroom transactions and queued governance operations remain pinned to their caller's
 expected hash.
 
-Production remains a NO-GO because the adapter line still needs complete invariant and malicious-token equivalence
-testing, an audit of factory/child provenance and same-transaction hash reads, deterministic target-chain deployment
-evidence, and an approved release-governance ceremony.
+Target-chain use remains pending until the pull-request review and live
+testnet-deployment ceremony gates are complete. Production additionally
+requires an independent audit of factory/child provenance, same-transaction
+hash reads, hostile-token behavior, migration liveness, and the release
+governance ceremony.
 
 ## Deployment, ABI, and SDK boundary
 
-`PledgeCashBoardroomDiamondSalts.sol` defines a disjoint
-`pledge.cash.boardroom-diamond.vnext.*` CREATE2 namespace for the registry, kernel, factory, dependencies, release-A
-facets, release-B facets, fee router, asset policy, and every module root. The local scenario deploys those roots,
-publishes and activates release A, creates sample Boardrooms, rehearses release B, and verifies owners, fee routing,
-hashes, routes, facet code, registry/kernel/factory bindings, and applied storage state.
+`PledgeCashDeploymentSalts.sol` defines the bytecode-bound
+`pledge.cash.protocol.v1` namespace used by `Deploy.s.sol`.
+`PledgeCashBoardroomScenarioSalts.sol` provides isolated addresses for the
+local release-A/release-B lifecycle rehearsal. The deployment proof publishes
+and activates release A and verifies owners, fee routing, hashes, all 97
+routes, facet code, registry/kernel/factory bindings, and applied storage
+state.
 
 The local graph mirrors the production fee boundary without charging the scenario's grant calls: the token-grant
 creation fee remains zero, its fee recipient is `ProtocolFeeRouter`, the AMM protocol-fee recipient is the same router,
@@ -296,61 +315,48 @@ the AMM fee manager is independent, and the router forwards to the configured pr
 `PLEDGE_CASH_PROTOCOL_GOVERNANCE` differs from the bootstrap account, the registry, policy registry, asset policy, fee
 router, token-grant factory, and AMM factory are handed off only after the lifecycle proof has completed.
 
-Because the compatibility implementation embeds a controller factory that must know the vNext factory, the executable
-prototype deploys registry, kernel, a separate deterministic market-logic root, the factory/remaining compatibility
-logic, and facets before publishing release A. Externalizing the market logic keeps the factory's real constructor
-initcode below EIP-3860 on an unmodified Anvil node. No Boardroom can be created until release A is active. A production
-deployment ceremony should preserve the same trust boundary and record all predicted/deployed addresses before
-activation.
+Because the controller factory must know the Boardroom factory, the deployment
+flow deploys registry, kernel,
+factory-bound controller factory, immutable helper logic, and facets before publishing release A. No Boardroom can be
+created until release A is active. A production deployment ceremony should preserve the same trust boundary and record
+all predicted/deployed addresses before activation.
 
-The default scenario is a dry run and deliberately writes no chain deployment artifact. A separate phased harness can
-broadcast the same lifecycle to a fresh local Anvil chain and writes only the ignored
-`31337.diamond-vnext.local.json` checkpoint. Existing `998.json`, `998.receipts.json`, `10143.json`, v5 salts, and
-production configuration remain untouched.
+The dry-run scenario writes no target-chain artifact. The phased Anvil harness
+writes only the ignored `31337.boardroom.local.json` checkpoint. Facet-set
+hashes and addresses are deployment-specific because the release commits
+facet addresses and runtime code hashes; no local address in this report is a
+testnet identity.
 
-The default local rehearsal produced deterministic metadata:
+A fresh local `Deploy.s.sol` broadcast completed for all 21 deterministic
+roots, and an idempotent rerun accepted the same roots and configuration.
+The standalone verifier then checked receipt provenance, CREATE2/CREATE3
+predictions and init-code commitments, every runtime code hash, the complete
+97-selector release-A table and recomputed facet-set hash, owners, immutable
+wiring, policies, and fee routes against the live Anvil RPC. This is the
+current local deployment proof. It must be repeated from the final reviewed
+commit before a testnet broadcast.
 
-| Field | Value |
-| --- | --- |
-| Registry | `0xF2940FF81f8C665ee291D460ce6ecf7FD07A335E` |
-| vNext factory | `0x50Ef110D3FB3d3B11A305E9C8BC41309374Dc7cE` |
-| Sample Boardroom | `0x9E7fF86BAA64E5F6982389440B03c6b4a1817B92` |
-| Release-A facet-set hash | `0x1eabee240f60e93a8d526c6bd87207d620a08343f17ed70e36994574a0a96288` |
-| Release-B facet-set hash | `0xc818bbe647f20b56af4eabb0bc9971e5816e51db6ba9055149dd44dd3d0af91e` |
+The aggregate ABI source is `IBoardroom`. SDK generation exports:
 
-These addresses are evidence for the default local keys and script environment only. They are not target-chain
-deployment addresses.
-
-The separate phased broadcast used the standard Anvil deployer on an unmodified chain-id-31337 node. Its ignored
-`complete` checkpoint records registry `0x50924E13C718E7C78a31Bcd7d44d35088DFe7D76`, factory
-`0x639c241A588cE08b0948DA0a642eEaEFce901CC1`, primary Boardroom
-`0x4041C2156D12A9E3380c1Ae423845b0aab631624`, and active release-B hash
-`0xb48306473ab6b009dc064a50b27566653ed199f94aaaca69fc6cad9e64b94bb3`. Direct post-run reads at block 115
-reported release `2`, storage version `2`, `migrationRequired == false`, and zero active obligations on the primary,
-cancelled-curve, and successfully graduated-curve Boardrooms.
-
-The aggregate ABI source is `IBoardroomDiamond`. SDK generation keeps `boardroomAbi` unchanged and separately exports:
-
-- `boardroomDiamondAbi`;
+- `boardroomAbi`;
 - `protocolFacetRegistryAbi`;
-- `boardroomVNextFactoryAbi`;
-- `boardroomVNextControllerAbi`;
-- vNext reward, bond, distribution, token-grant, locked-liquidity, Merkle-airdrop, and migrating-curve ABIs.
+- `boardroomFactoryAbi`;
+- `boardroomControllerAbi`;
+- reward, bond, distribution, token-grant, locked-liquidity, Merkle-airdrop, and migrating-curve ABIs.
 
 SDK readers return the pinned block, active release/hash, historical release routes and runtime code hashes, applied and
 required storage versions/layouts, and migration requirement. Mutation builders require an explicit expected facet-set
 hash, and the wind-down builder rejects native value exactly as the contract does. Discovery decodes the complete
-`BoardroomVNextCreated` identity separately from v5 creation events. The vNext release helper pins one block while
-checking registry, factory, kernel, controller, compatibility Boardroom, governance, market, redemption, facet,
-storage, and reciprocal canonical identity.
+`BoardroomCreated` identity. The release helper pins one block while checking registry, factory, kernel, controller,
+governance, market, redemption, facet, storage, and reciprocal canonical identity.
 
-The SDK also exposes the exact vNext controller EIP-712 typed-data/hash construction and strict v1 envelope
+The SDK also exposes the exact Boardroom controller EIP-712 typed-data/hash construction and strict v1 envelope
 encoder/decoder. These helpers require explicit context and never fetch or substitute a release hash during
 authorization construction.
 
 ## Local scenario coverage
 
-`bun --cwd packages/contracts scenario:diamond-vnext:dry-run` covers:
+`bun --cwd packages/contracts scenario:boardroom:dry-run` covers:
 
 - deterministic root and facet deployment;
 - release-A publication and activation;
@@ -364,7 +370,7 @@ authorization construction.
 - a second Boardroom's migrating-curve buy, cancellation, holder unwind, grace delay, and finalization;
 - a third Boardroom's complete curve purchase, successful graduation into reserved protocol liquidity, obligation
   replacement, release-B migration, LP return, and locker close;
-- launch and canonical vNext controller deployment;
+- launch and canonical Boardroom controller deployment;
 - release-A-bound controller scheduling and execution;
 - staker-authorized wind-down with eight independently tracked obligations;
 - release-B publication and global activation;
@@ -373,7 +379,7 @@ authorization construction.
 - resumed cleanup, snapshot, open redemptions, and WETH payout;
 - final registry ownership and binding/code-hash checks.
 
-`bun --cwd packages/contracts scenario:diamond-vnext:local` runs the same proof as four real broadcasts against a fresh
+`bun --cwd packages/contracts scenario:boardroom:local` runs the same proof as four real broadcasts against a fresh
 chain-id-31337 Anvil instance. The wrapper mines the stake checkpoint, advances the governance delay, probes the exact
 release-B `StorageMigrationRequired` revert, advances the curve unwind grace, and verifies all three Boardrooms have
 zero active obligations before accepting the `complete` checkpoint.
@@ -381,7 +387,7 @@ zero active obligations before accepting the `complete` checkpoint.
 The Solidity integration suite separately activates release B while Boardrooms are WindingDown, Snapshotting, and
 RedemptionsOpen, and proves independent migration across multiple Boardrooms.
 
-`BoardroomDiamondVNextWindDownInvariant.t.sol` runs a canonical factory/registry/kernel Boardroom through release
+`BoardroomWindDownInvariant.t.sol` runs a canonical factory/registry/kernel Boardroom through release
 activation, permissionless migration, wind-down, paged snapshotting, redemption, a reverting asset payout, and
 successful retry. Six stateful properties each execute 256 runs and 128,000 handler calls with zero handler reverts;
 the deterministic companion test proves a healthy payout remains available while the hostile asset fails.
@@ -393,43 +399,38 @@ Measured with Foundry 1.7.1 using `forge build --sizes`:
 | Contract | Runtime bytes | Initcode bytes |
 | --- | ---: | ---: |
 | `BoardroomKernel` | 6,924 | 8,290 |
-| `ProtocolFacetRegistry` | 9,067 | 10,807 |
-| `BoardroomAuthorityFacet` | 10,304 | 10,519 |
-| `BoardroomExecutionFacet` | 3,760 | 3,983 |
-| `BoardroomMarketFacet` | 1,407 | 1,622 |
-| `BoardroomRedemptionFacet` | 901 | 1,116 |
-| `BoardroomViewFacet` | 178 | 390 |
+| `ProtocolFacetRegistry` | 9,121 | 10,861 |
+| `BoardroomAuthorityFacet` | 16,641 | 17,096 |
+| `BoardroomExecutionFacet` | 8,468 | 8,882 |
+| `BoardroomMarketFacet` | 4,180 | 4,594 |
+| `BoardroomRedemptionFacet` | 3,055 | 3,466 |
+| `BoardroomViewFacet` | 6,825 | 7,259 |
 | `BoardroomReleaseBMigrationFacet` | 741 | 769 |
 | `BoardroomViewFacetV2` | 324 | 352 |
-| `BoardroomVNextController` | 10,166 | 10,303 |
-| `BoardroomVNextFactory` | 3,092 | 41,899 |
-| `BoardroomVNextControllerFactory` | 2,030 | 12,598 |
-| `BoardroomRewardsFactoryVNext` | 5,110 | 15,261 |
-| `BondMarketFactoryVNext` | 7,033 | 18,216 |
-| `DistributionFactoryVNext` | 12,534 | 47,698 |
-| `LockedLiquidityFactoryVNext` | 16,354 | 23,771 |
-| `TokenGrantFactoryVNext` | 13,416 | 21,138 |
-| v5 compatibility `Boardroom` | 24,418 | 24,966 |
+| `BoardroomController` | 10,166 | 10,303 |
+| `BoardroomFactory` | 3,042 | 16,757 |
+| `BoardroomControllerFactory` | 2,030 | 12,598 |
+| `BoardroomRewardsFactory` | 5,110 | 15,261 |
+| `BondMarketFactory` | 7,033 | 18,216 |
+| `DistributionFactory` | 12,534 | 47,698 |
+| `LockedLiquidityFactory` | 16,354 | 23,771 |
+| `TokenGrantFactory` | 13,416 | 21,138 |
 
-The kernel is 1,268 bytes below the spike's 8 KiB target. The registry, every facet, and every vNext factory runtime are
+The kernel is 1,268 bytes below the 8 KiB acceptance target. The registry, every facet, and every factory runtime are
 below 20 KiB. Each deployed Boardroom clone has a 45-byte runtime. The Boardroom factory's seven static constructor
-arguments leave 7,029 bytes under the EIP-3860 transaction-initcode limit. `DistributionFactoryVNext` has the narrowest
-creation margin: its two static constructor arguments leave 1,390 bytes. The normal-limit Anvil broadcast proves both
-complete constructors deploy without a node override.
-
-The compatibility `Boardroom` runtime remains only 158 bytes below the 24,576-byte EIP-170 limit and should not be
-treated as a comfortable production margin.
+arguments leave 32,395 bytes under the EIP-3860 transaction-initcode limit. The normal-limit Anvil broadcast proves
+the complete constructor graph deploys without a node override.
 
 No new unbounded user-controlled loop was introduced. Registry publication/activation are bounded to 256 selectors;
-Boardroom batch/snapshot bounds remain inherited from v5; the release builders cap themselves at 128 selectors.
+Boardroom batch/snapshot bounds remain explicit; the release builders cap themselves at 128 selectors.
 
 ## Gas evidence
 
-Measured with:
+The following local test-VM measurements were captured with:
 
 ```sh
 forge test --gas-report \
-  --match-contract '^(ProtocolFacetRegistryTest|BoardroomKernelTest|BoardroomDiamondVNextTest)$' -vv
+  --match-contract '^(ProtocolFacetRegistryTest|BoardroomKernelTest|BoardroomTest)$' -vv
 ```
 
 | Operation | Representative gas | Notes |
@@ -437,60 +438,64 @@ forge test --gas-report \
 | Publish complete release | 7,103,451 max | 97/99 selector manifests plus validation/revert cases |
 | Activate complete release | 7,342,654 max | release B replaces the complete active table |
 | `route(bytes4)` registry lookup | 7,217 integration median; 9,217 max | returns and loads the release-pinned runtime code hash |
-| Create and initialize vNext Boardroom | 1,917,604 median | includes share-token deployment |
+| Create and initialize Boardroom | 1,917,604 median | includes share-token deployment |
 | Release-B storage migration facet | 48,159 median; 65,262 max | normal migration plus release-B genesis paths |
 | Kernel fallback | 27,138 integration median; 542,125 max | spans small views through full routed mutations |
 | `facetSetHash()` kernel read | 5,523 median | registry-backed |
 | ERC-1271 release-bound validation | 8,623 median; 118,839 max | malformed, stale, EOA, and recursive-contract paths |
 | ERC-1271 EIP-712 digest helper | 1,593 median/max | explicit proof context |
 
-Within the same routed traces, the outer compatibility facets versus the inner v5 Boardroom behavior cost:
+Within the routed traces, the representative Boardroom operations cost:
 
-| Representative mutation | Inner v5-compatible behavior | Routed facet | Routing/adaptation delta |
-| --- | ---: | ---: | ---: |
-| `mint` | 202,621 | 205,848 | +3,227 |
-| `startWindDown` | 69,614 | 72,701 | +3,087 |
-| `execute` minimum | 227,000 | 231,695 | +4,695 |
+| Representative mutation | Routed facet |
+| --- | ---: |
+| `mint` | 205,848 |
+| `startWindDown` | 72,701 |
+| `execute` minimum | 231,695 |
 
 These are local test-VM measurements, not chain fee predictions. Registry activation is intentionally expensive and
-rare. The compatibility runtime margin and complete-table activation cost should be addressed before any production
-proposal.
+rare. They must be refreshed on the final reviewed commit and measured through
+each target chain's execution and block limits before activation. A reproducible
+pre-diamond comparison must use the recorded comparison commit in an isolated
+checkout; the removed implementation is not retained in the canonical source
+tree.
 
 ## Verification evidence
 
-Comparison baseline before the vNext spike:
+Historical comparison baseline before the diamond architecture:
 
 ```text
 55f2ebf138ce078e7790a475e358d1ffe2a6c64b
 ```
 
-Focused evidence on the formatted tree:
+Focused evidence recorded during canonicalization:
 
 | Command | Result |
 | --- | --- |
 | `forge test --match-path test/boardroom/ProtocolFacetRegistry.t.sol -vv` | 17 passed, 0 failed |
 | `forge test --match-path test/boardroom/BoardroomKernel.t.sol -vv` | 28 passed, 0 failed |
-| `forge test --match-path test/boardroom/BoardroomDiamondVNext.t.sol -vv` | 20 passed, 0 failed |
-| `forge test --match-path test/boardroom/BoardroomVNextModuleParity.t.sol -vv` | 14 passed, 0 failed |
-| `forge test --match-path test/boardroom/BoardroomDiamondVNextWindDownInvariant.t.sol -vv` | 7 passed, 0 failed; six invariants at 128,000 calls each |
+| `forge test --match-path test/boardroom/Boardroom.t.sol -vv` | 20 passed, 0 failed |
+| `forge test --match-path test/boardroom/BoardroomBehavior.t.sol -vv` | 64 passed, 0 failed |
+| `forge test --match-path test/boardroom/BoardroomController.t.sol -vv` | 19 passed, 0 failed |
+| `forge test --match-path test/boardroom/BoardroomModuleIntegration.t.sol -vv` | 13 passed, 0 failed |
+| `forge test --match-path test/boardroom/BoardroomWindDownInvariant.t.sol -vv` | 7 passed, 0 failed; six invariants at 128,000 calls each |
 | focused registry/kernel/integration gas-report run | 65 passed, 0 failed |
-| `bun --cwd packages/sdk test` | 71 passed, 0 failed; 656 assertions |
-| `bunx tsc -p packages/sdk/tsconfig.json --noEmit` | passed |
-| `bun --cwd packages/contracts check:diamond-vnext-manifests` | passed |
-| `bun --cwd packages/contracts scenario:diamond-vnext:dry-run` | passed; aggregate script gas 104,934,370 |
-| fresh normal-limit Anvil plus `bun --cwd packages/contracts scenario:diamond-vnext:local` | passed; checkpoint `complete`, three obligation counts zero, migration cleared |
+| `bun --cwd packages/contracts check:boardroom-manifests` | passed |
+| fresh normal-limit Anvil plus `bun --cwd packages/contracts scenario:boardroom:local` | passed; checkpoint `complete`, three obligation counts zero, migration cleared |
 | `forge build --sizes` | passed; sizes recorded above |
 | `bun --cwd packages/contracts build` | passed |
-| `bun --cwd packages/contracts test` | 25 suites; 417 passed, 0 failed, 0 skipped |
-| `bun --cwd packages/contracts verify:testnet-artifacts` | chain 998 verified with 29 receipts; chain 10143 pending and skipped |
-| `bun --cwd packages/sdk build` | passed |
-| generated `packages/sdk/src/generated.ts` before/after SHA-256 | identical |
-| `bun run docs:check` | passed; 36 pages and 36 navigation entries checked |
-| `bun run format:check` | passed |
-| `git diff --check` | passed |
+| `bun --cwd packages/contracts test` | 414 passed, 0 failed across 24 suites |
+| fresh Anvil `Deploy.s.sol`, idempotent rerun, and standalone verifier | passed; 21 roots, 97 routes, code hashes, provenance, owners, wiring, policies, and fee routes checked |
+| SDK generation, build, and tests | generated output byte-identical; 71 passed, 0 failed |
+| web typecheck, tests, and production/docs build | passed; 486 tests, 36 docs pages, and 51 routes |
+| Sentinel tests, typecheck, and Postgres/Anvil integration | passed; 171 tests plus complete Boardroom/control proof |
+| x402 router tests, typecheck, and Postgres/Anvil integration | passed; 103 tests plus AMM, sale, recurring, replay, and refund proof |
+| `bun run docs:check`, `bun run format:check`, `git diff --check` | passed |
 
-These results were recorded from the review-hardened implementation tree on top of the comparison baseline above. The
-final exact-head review and hosted CI gate remain separate from this local evidence ledger.
+The full local ledger, fresh lifecycle rerun, and independent cutover audit are
+clean. The pull-request review cycle and hosted CI gate remain pending; local
+evidence is not a substitute for either gate or for an independent production
+security audit.
 
 Adversarial coverage includes ownership, canonical publication, duplicate/unsorted/reserved selectors, missing code,
 code-hash mismatch at activation and dispatch, canonical kernel-selector binding, add/replace/remove activation, loupe
@@ -500,22 +505,22 @@ reentrancy, storage-slot isolation, kernel-metadata corruption, migration-to-mut
 activation, stale hashes, release-bound callbacks, queued operations, ERC-1271 signatures, wrong migration source,
 failed postconditions, repeat migration, independent lifecycle migration, conservation, and hostile payout retry.
 
-The spike reuses the existing v5 Boardroom behavioral suite through its compatibility implementation, adds full-path
-vNext module tests, and routes the current wind-down conservation properties through a real vNext Boardroom. It does
-not claim that every named v5 adversarial-token and boundary test has been duplicated one-for-one through the new
-callback ABI. That systematic audit matrix remains production acceptance work, not a known feature-parity defect.
+The behavior, controller, module-integration, and invariant suites now construct
+canonical registry/kernel Boardrooms directly. Independent audit must still
+judge whether the adversarial matrix is sufficient for production; that is a
+security-assurance boundary, not a second supported implementation.
 
 ## Unresolved production and audit questions
 
 1. What staking governor, quorum, timelock, veto, and emergency process replaces direct registry ownership?
 2. Must protocol releases remain possible during active redemptions, or should governance add a terminal-release delay?
-3. What invariant and adversarial-token matrix is required to accept the vNext factory/child adapters as equivalent to
-   the v5 modules?
+3. What invariant and adversarial-token matrix is required for the canonical
+   factory/child callbacks?
 4. Should release activation copy a complete table, or should an immutable per-release router reduce activation gas?
 5. How will release manifests, compiler inputs, storage layouts, deployed code, and governance calldata be reproduced
    and independently attested before activation?
-6. Should the compatibility bridge be retired in favor of native facets before audit, especially given its 158-byte
-   runtime margin?
+6. Which additional boundary cases will an independent auditor require beyond
+   the canonical parity suites?
 7. How are failed or gas-infeasible migrations detected and recovered without violating atomicity?
 8. What maximum supported selector count and activation gas are acceptable on each target chain?
 9. What invariant harness proves asset/redemption conservation across every future terminal-state migration?
@@ -524,5 +529,6 @@ callback ABI. That systematic audit matrix remains production acceptance work, n
 11. Which Safe versions, fallback handlers, nested contract-proposer topologies, and RPC gas limits form the required
     production ERC-1271 compatibility matrix?
 
-Until those questions are resolved, this spike is architecture and local lifecycle evidence, not deployment
-authorization.
+Until the pull-request, testnet-ceremony, and governance/audit gates are
+resolved, this report is local architecture evidence, not testnet or production
+deployment authorization.

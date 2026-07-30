@@ -7,23 +7,33 @@ import {WETH} from "solady/tokens/WETH.sol";
 import {CREATE3} from "solady/utils/CREATE3.sol";
 import {AmmFactory} from "../../src/amm/AmmFactory.sol";
 import {AmmRouter} from "../../src/amm/AmmRouter.sol";
-import {BondMarketFactory} from "../../src/bonds/BondMarketFactory.sol";
 import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
-import {Boardroom} from "../../src/boardroom/Boardroom.sol";
 import {BoardroomController} from "../../src/boardroom/BoardroomController.sol";
 import {BoardroomControllerFactory} from "../../src/boardroom/BoardroomControllerFactory.sol";
 import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
 import {BoardroomGovernanceLogic} from "../../src/boardroom/BoardroomGovernanceLogic.sol";
+import {IBoardroom} from "../../src/boardroom/IBoardroom.sol";
 import {BoardroomMarketLogic} from "../../src/boardroom/BoardroomMarketLogic.sol";
 import {BoardroomPolicyRegistry} from "../../src/boardroom/BoardroomPolicyRegistry.sol";
 import {BoardroomRedemptionPayout} from "../../src/boardroom/BoardroomRedemptionPayout.sol";
+import {BoardroomAuthorityFacet} from "../../src/boardroom/diamond/BoardroomAuthorityFacet.sol";
+import {BoardroomExecutionFacet} from "../../src/boardroom/diamond/BoardroomExecutionFacet.sol";
+import {BoardroomKernel} from "../../src/boardroom/diamond/BoardroomKernel.sol";
+import {BoardroomKernelSelectors} from "../../src/boardroom/diamond/BoardroomKernelSelectors.sol";
+import {BoardroomMarketFacet} from "../../src/boardroom/diamond/BoardroomMarketFacet.sol";
+import {BoardroomRedemptionFacet} from "../../src/boardroom/diamond/BoardroomRedemptionFacet.sol";
+import {BoardroomRelease} from "../../src/boardroom/diamond/BoardroomRelease.sol";
+import {BoardroomViewFacet} from "../../src/boardroom/diamond/BoardroomViewFacet.sol";
+import {ProtocolFacetRegistry} from "../../src/boardroom/diamond/ProtocolFacetRegistry.sol";
+import {ProtocolFacetTypes} from "../../src/boardroom/diamond/ProtocolFacetTypes.sol";
+import {BondMarketFactory} from "../../src/bonds/BondMarketFactory.sol";
 import {DistributionFactory} from "../../src/distribution/DistributionFactory.sol";
-import {BoardroomRewardsFactory} from "../../src/rewards/BoardroomRewardsFactory.sol";
-import {ProtocolFeeRouter} from "../../src/fees/ProtocolFeeRouter.sol";
-import {LockedLiquidityFactory} from "../../src/liquidity/LockedLiquidityFactory.sol";
 import {PledgeCashDeploymentSalts} from "../../src/deployment/PledgeCashDeploymentSalts.sol";
 import {PledgeCashDeterministicDeployer} from "../../src/deployment/PledgeCashDeterministicDeployer.sol";
+import {ProtocolFeeRouter} from "../../src/fees/ProtocolFeeRouter.sol";
 import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
+import {LockedLiquidityFactory} from "../../src/liquidity/LockedLiquidityFactory.sol";
+import {BoardroomRewardsFactory} from "../../src/rewards/BoardroomRewardsFactory.sol";
 
 contract DeterministicDeploymentTest is Test {
     address internal owner = address(0xA11CE);
@@ -31,18 +41,19 @@ contract DeterministicDeploymentTest is Test {
 
     PledgeCashDeterministicDeployer internal deployer;
     WETH internal wrappedNative;
-    BoardroomFactory internal canonicalBoardroomFactory;
+    BoardroomPolicyRegistry internal policyRegistry;
+    ProtocolFacetRegistry internal facetRegistry;
+    BoardroomKernel internal kernel;
     BoardroomGovernanceLogic internal governanceLogic;
-    BoardroomRedemptionPayout internal redemptionPayoutLogic;
+    BoardroomRedemptionPayout internal redemptionPayout;
+    BoardroomMarketLogic internal marketLogic;
+    BoardroomFactory internal boardroomFactory;
+    BoardroomRelease.Facets internal facets;
+    bytes32 internal releaseHash;
 
     function setUp() public {
         deployer = new PledgeCashDeterministicDeployer(owner);
         wrappedNative = new WETH();
-        governanceLogic = new BoardroomGovernanceLogic();
-        redemptionPayoutLogic = new BoardroomRedemptionPayout();
-        canonicalBoardroomFactory = new BoardroomFactory(
-            address(1), address(wrappedNative), address(redemptionPayoutLogic), address(governanceLogic)
-        );
     }
 
     function testDeployerRejectsZeroOwnerAndEmptyInitCode() public {
@@ -77,40 +88,26 @@ contract DeterministicDeploymentTest is Test {
     }
 
     function testOnlyOwnerCanDeployDeterministicContracts() public {
-        bytes memory initCode = abi.encodePacked(
-            type(TokenGrantFactory).creationCode, abi.encode(owner, address(canonicalBoardroomFactory))
-        );
+        bytes memory initCode = abi.encodePacked(type(ProtocolFeeRouter).creationCode, abi.encode(owner, owner));
 
         vm.prank(stranger);
         vm.expectRevert(Ownable.Unauthorized.selector);
-        deployer.deploy(PledgeCashDeploymentSalts.tokenGrantFactory(), initCode);
+        deployer.deploy(PledgeCashDeploymentSalts.protocolFeeRouter(), initCode);
     }
 
     function testCreate3PredictionDoesNotDependOnConstructorArguments() public view {
-        bytes memory initCodeA = abi.encodePacked(
-            type(BoardroomFactory).creationCode,
-            abi.encode(address(1), address(2), address(redemptionPayoutLogic), address(governanceLogic))
-        );
-        bytes memory initCodeB = abi.encodePacked(
-            type(BoardroomFactory).creationCode,
-            abi.encode(address(3), address(4), address(redemptionPayoutLogic), address(governanceLogic))
-        );
-        bytes32 salt = PledgeCashDeploymentSalts.boardroomFactory();
+        bytes memory initCodeA = abi.encodePacked(type(ProtocolFeeRouter).creationCode, abi.encode(owner, owner));
+        bytes memory initCodeB = abi.encodePacked(type(ProtocolFeeRouter).creationCode, abi.encode(owner, stranger));
+        bytes32 salt = PledgeCashDeploymentSalts.protocolFeeRouter();
 
         assertNotEq(keccak256(initCodeA), keccak256(initCodeB));
         assertEq(deployer.predict(salt), CREATE3.predictDeterministicAddress(salt, address(deployer)));
     }
 
     function testCreate3DeploymentDoesNotDependOnConstructorArguments() public {
-        bytes memory initCodeA = abi.encodePacked(
-            type(BoardroomFactory).creationCode,
-            abi.encode(address(1), address(2), address(redemptionPayoutLogic), address(governanceLogic))
-        );
-        bytes memory initCodeB = abi.encodePacked(
-            type(BoardroomFactory).creationCode,
-            abi.encode(address(3), address(4), address(redemptionPayoutLogic), address(governanceLogic))
-        );
-        bytes32 salt = PledgeCashDeploymentSalts.boardroomFactory();
+        bytes memory initCodeA = abi.encodePacked(type(ProtocolFeeRouter).creationCode, abi.encode(owner, owner));
+        bytes memory initCodeB = abi.encodePacked(type(ProtocolFeeRouter).creationCode, abi.encode(owner, stranger));
+        bytes32 salt = PledgeCashDeploymentSalts.protocolFeeRouter();
 
         uint256 snapshotId = vm.snapshotState();
         address deployedA = _deploy(salt, initCodeA);
@@ -121,125 +118,164 @@ contract DeterministicDeploymentTest is Test {
         assertEq(deployedA, deployedB);
     }
 
-    function testV5RootSaltsAreMechanicallyCoupledToCreationCode() public pure {
-        assertEq(PledgeCashDeploymentSalts.version(), "pledge.cash.deterministic.v5");
-        assertEq(
+    function testCanonicalRootSaltsAreMechanicallyCoupledToCreationCode() public pure {
+        assertEq(PledgeCashDeploymentSalts.version(), "pledge.cash.protocol.v1");
+        _assertSalt(
+            PledgeCashDeploymentSalts.deterministicDeployer(),
+            "PledgeCashDeterministicDeployer",
+            keccak256(type(PledgeCashDeterministicDeployer).creationCode)
+        );
+        _assertSalt(
+            PledgeCashDeploymentSalts.protocolFacetRegistry(),
+            "ProtocolFacetRegistry",
+            keccak256(type(ProtocolFacetRegistry).creationCode)
+        );
+        _assertSalt(
+            PledgeCashDeploymentSalts.boardroomKernel(),
+            "BoardroomKernel",
+            keccak256(type(BoardroomKernel).creationCode)
+        );
+        _assertSalt(
             PledgeCashDeploymentSalts.boardroomPolicyRegistry(),
-            _releaseSalt("BoardroomPolicyRegistry", keccak256(type(BoardroomPolicyRegistry).creationCode))
+            "BoardroomPolicyRegistry",
+            keccak256(type(BoardroomPolicyRegistry).creationCode)
         );
-        assertEq(
-            PledgeCashDeploymentSalts.assetPolicy(),
-            _releaseSalt("AssetPolicy", keccak256(type(AssetPolicy).creationCode))
-        );
-        assertEq(
+        _assertSalt(PledgeCashDeploymentSalts.assetPolicy(), "AssetPolicy", keccak256(type(AssetPolicy).creationCode));
+        _assertSalt(
             PledgeCashDeploymentSalts.boardroomGovernanceLogic(),
-            _releaseSalt("BoardroomGovernanceLogic", keccak256(type(BoardroomGovernanceLogic).creationCode))
+            "BoardroomGovernanceLogic",
+            keccak256(type(BoardroomGovernanceLogic).creationCode)
         );
-        assertEq(
+        _assertSalt(
             PledgeCashDeploymentSalts.boardroomRedemptionPayout(),
-            _releaseSalt("BoardroomRedemptionPayout", keccak256(type(BoardroomRedemptionPayout).creationCode))
+            "BoardroomRedemptionPayout",
+            keccak256(type(BoardroomRedemptionPayout).creationCode)
         );
-        assertEq(
-            PledgeCashDeploymentSalts.protocolFeeRouter(),
-            _releaseSalt("ProtocolFeeRouter", keccak256(type(ProtocolFeeRouter).creationCode))
+        _assertSalt(
+            PledgeCashDeploymentSalts.boardroomMarketLogic(),
+            "BoardroomMarketLogic",
+            keccak256(type(BoardroomMarketLogic).creationCode)
         );
-        assertEq(
-            PledgeCashDeploymentSalts.tokenGrantFactory(),
-            _releaseSalt("TokenGrantFactory", keccak256(type(TokenGrantFactory).creationCode))
-        );
-        assertEq(
-            PledgeCashDeploymentSalts.ammFactory(), _releaseSalt("AmmFactory", keccak256(type(AmmFactory).creationCode))
-        );
-        assertEq(
-            PledgeCashDeploymentSalts.ammRouter(), _releaseSalt("AmmRouter", keccak256(type(AmmRouter).creationCode))
-        );
-        assertEq(
-            PledgeCashDeploymentSalts.lockedLiquidityFactory(),
-            _releaseSalt("LockedLiquidityFactory", keccak256(type(LockedLiquidityFactory).creationCode))
-        );
-        assertEq(
-            PledgeCashDeploymentSalts.distributionFactory(),
-            _releaseSalt("DistributionFactory", keccak256(type(DistributionFactory).creationCode))
-        );
-        assertEq(
-            PledgeCashDeploymentSalts.boardroomRewardsFactory(),
-            _releaseSalt("BoardroomRewardsFactory", keccak256(type(BoardroomRewardsFactory).creationCode))
-        );
-        assertEq(
-            PledgeCashDeploymentSalts.bondMarketFactory(),
-            _releaseSalt("BondMarketFactory", keccak256(type(BondMarketFactory).creationCode))
-        );
-        assertEq(
+        _assertSalt(
             PledgeCashDeploymentSalts.boardroomFactory(),
-            _releaseSalt("BoardroomFactory", keccak256(type(BoardroomFactory).creationCode))
+            "BoardroomFactory",
+            keccak256(type(BoardroomFactory).creationCode)
         );
+        _assertSalt(
+            PledgeCashDeploymentSalts.boardroomAuthorityFacet(),
+            "BoardroomAuthorityFacet",
+            keccak256(type(BoardroomAuthorityFacet).creationCode)
+        );
+        _assertSalt(
+            PledgeCashDeploymentSalts.boardroomExecutionFacet(),
+            "BoardroomExecutionFacet",
+            keccak256(type(BoardroomExecutionFacet).creationCode)
+        );
+        _assertSalt(
+            PledgeCashDeploymentSalts.boardroomMarketFacet(),
+            "BoardroomMarketFacet",
+            keccak256(type(BoardroomMarketFacet).creationCode)
+        );
+        _assertSalt(
+            PledgeCashDeploymentSalts.boardroomRedemptionFacet(),
+            "BoardroomRedemptionFacet",
+            keccak256(type(BoardroomRedemptionFacet).creationCode)
+        );
+        _assertSalt(
+            PledgeCashDeploymentSalts.boardroomViewFacet(),
+            "BoardroomViewFacet",
+            keccak256(type(BoardroomViewFacet).creationCode)
+        );
+        _assertModuleSalts();
+    }
+
+    function testReleaseCodeHashCommitsToCanonicalArchitecture() public pure {
         bytes32 boardroomArchitectureCodeHash = keccak256(
             abi.encode(
+                keccak256(type(ProtocolFacetRegistry).creationCode),
+                keccak256(type(BoardroomKernel).creationCode),
                 keccak256(type(BoardroomFactory).creationCode),
                 keccak256(type(BoardroomControllerFactory).creationCode),
                 keccak256(type(BoardroomController).creationCode),
+                keccak256(type(BoardroomGovernanceLogic).creationCode),
                 keccak256(type(BoardroomMarketLogic).creationCode),
-                keccak256(type(Boardroom).creationCode)
+                keccak256(type(BoardroomRedemptionPayout).creationCode),
+                keccak256(type(BoardroomAuthorityFacet).creationCode),
+                keccak256(type(BoardroomExecutionFacet).creationCode),
+                keccak256(type(BoardroomMarketFacet).creationCode),
+                keccak256(type(BoardroomRedemptionFacet).creationCode),
+                keccak256(type(BoardroomViewFacet).creationCode)
             )
         );
+        bytes32 moduleArchitectureCodeHash = keccak256(
+            abi.encode(
+                keccak256(type(BoardroomPolicyRegistry).creationCode),
+                keccak256(type(AssetPolicy).creationCode),
+                keccak256(type(ProtocolFeeRouter).creationCode),
+                keccak256(type(TokenGrantFactory).creationCode),
+                keccak256(type(AmmFactory).creationCode),
+                keccak256(type(AmmRouter).creationCode),
+                keccak256(type(LockedLiquidityFactory).creationCode),
+                keccak256(type(DistributionFactory).creationCode),
+                keccak256(type(BoardroomRewardsFactory).creationCode),
+                keccak256(type(BondMarketFactory).creationCode)
+            )
+        );
+
         assertEq(PledgeCashDeploymentSalts.boardroomArchitectureCodeHash(), boardroomArchitectureCodeHash);
+        assertEq(PledgeCashDeploymentSalts.moduleArchitectureCodeHash(), moduleArchitectureCodeHash);
         assertEq(
             PledgeCashDeploymentSalts.releaseCodeHash(),
             keccak256(
                 abi.encode(
-                    keccak256(type(BoardroomPolicyRegistry).creationCode),
-                    keccak256(type(AssetPolicy).creationCode),
-                    keccak256(type(BoardroomGovernanceLogic).creationCode),
-                    keccak256(type(BoardroomRedemptionPayout).creationCode),
-                    keccak256(type(ProtocolFeeRouter).creationCode),
-                    keccak256(type(TokenGrantFactory).creationCode),
-                    keccak256(type(AmmFactory).creationCode),
-                    keccak256(type(AmmRouter).creationCode),
-                    keccak256(type(LockedLiquidityFactory).creationCode),
-                    keccak256(type(DistributionFactory).creationCode),
-                    keccak256(type(BoardroomRewardsFactory).creationCode),
-                    keccak256(type(BondMarketFactory).creationCode),
-                    boardroomArchitectureCodeHash
+                    keccak256(type(PledgeCashDeterministicDeployer).creationCode),
+                    boardroomArchitectureCodeHash,
+                    moduleArchitectureCodeHash
                 )
             )
         );
-
-        assertNotEq(PledgeCashDeploymentSalts.assetPolicy(), keccak256("pledge.cash.deterministic.v1.AssetPolicy"));
-        assertNotEq(PledgeCashDeploymentSalts.ammFactory(), keccak256("pledge.cash.deterministic.v1.AmmFactory"));
-        assertNotEq(PledgeCashDeploymentSalts.ammRouter(), keccak256("pledge.cash.deterministic.v1.AmmRouter"));
     }
 
-    function testDeploysFullRootStackAtPredictedAddresses() public {
-        BoardroomPolicyRegistry policyRegistry = BoardroomPolicyRegistry(
-            _deploy(
-                PledgeCashDeploymentSalts.boardroomPolicyRegistry(),
-                abi.encodePacked(type(BoardroomPolicyRegistry).creationCode, abi.encode(owner))
-            )
-        );
+    function testDeploysCanonicalBoardroomGraphAndActivatesReleaseA() public {
+        _deployCanonicalBoardroomGraph();
+
+        assertEq(address(kernel.facetRegistry()), address(facetRegistry));
+        assertEq(kernel.kernelSelectorSetHash(), BoardroomKernelSelectors.selectorSetHash());
+        assertEq(facetRegistry.kernelSelectorSetHash(), BoardroomKernelSelectors.selectorSetHash());
+        assertEq(facetRegistry.activeFacetSetHash(), releaseHash);
+        assertEq(facetRegistry.activeRelease(), 1);
+        assertEq(facetRegistry.activeStorageVersion(), 1);
+        assertEq(address(boardroomFactory.facetRegistry()), address(facetRegistry));
+        assertEq(boardroomFactory.boardroomKernelLogic(), address(kernel));
+        assertEq(boardroomFactory.policyRegistry(), address(policyRegistry));
+        assertEq(boardroomFactory.wrappedNative(), address(wrappedNative));
+        assertEq(boardroomFactory.governanceLogic(), address(governanceLogic));
+        assertEq(boardroomFactory.redemptionPayoutLogic(), address(redemptionPayout));
+        assertEq(boardroomFactory.marketLogic(), address(marketLogic));
+
+        BoardroomControllerFactory controllerFactory = BoardroomControllerFactory(boardroomFactory.controllerFactory());
+        assertEq(controllerFactory.boardroomFactory(), address(boardroomFactory));
+        assertGt(controllerFactory.controllerImplementation().code.length, 0);
+
+        address boardroomAddress =
+            boardroomFactory.createBoardroom(releaseHash, owner, "Canonical Boardroom", "CBR", keccak256("test"));
+        IBoardroom boardroom = IBoardroom(boardroomAddress);
+        assertEq(boardroom.facetSetHash(), releaseHash);
+        assertEq(boardroom.appliedStorageVersion(), 1);
+        assertFalse(boardroom.migrationRequired());
+        assertEq(boardroom.owner(), owner);
+        assertEq(boardroom.policyRegistry(), address(policyRegistry));
+        assertEq(boardroom.wrappedNative(), address(wrappedNative));
+        assertGt(boardroom.shareToken().code.length, 0);
+    }
+
+    function testDeploysCanonicalModuleGraphAtPredictedAddresses() public {
+        _deployCanonicalBoardroomGraph();
+
         AssetPolicy assetPolicy = AssetPolicy(
             _deploy(
                 PledgeCashDeploymentSalts.assetPolicy(),
                 abi.encodePacked(type(AssetPolicy).creationCode, abi.encode(owner, address(wrappedNative)))
-            )
-        );
-        BoardroomGovernanceLogic deployedGovernanceLogic = BoardroomGovernanceLogic(
-            _deploy(PledgeCashDeploymentSalts.boardroomGovernanceLogic(), type(BoardroomGovernanceLogic).creationCode)
-        );
-        BoardroomRedemptionPayout deployedRedemptionPayout = BoardroomRedemptionPayout(
-            _deploy(PledgeCashDeploymentSalts.boardroomRedemptionPayout(), type(BoardroomRedemptionPayout).creationCode)
-        );
-        BoardroomFactory boardroomFactory = BoardroomFactory(
-            _deploy(
-                PledgeCashDeploymentSalts.boardroomFactory(),
-                abi.encodePacked(
-                    type(BoardroomFactory).creationCode,
-                    abi.encode(
-                        address(policyRegistry),
-                        address(wrappedNative),
-                        address(deployedRedemptionPayout),
-                        address(deployedGovernanceLogic)
-                    )
-                )
             )
         );
         ProtocolFeeRouter protocolFeeRouter = ProtocolFeeRouter(
@@ -268,7 +304,7 @@ contract DeterministicDeploymentTest is Test {
                     )
                 ))
         );
-        LockedLiquidityFactory lockedLiquidityFactory = LockedLiquidityFactory(
+        LockedLiquidityFactory liquidityFactory = LockedLiquidityFactory(
             _deploy(
                 PledgeCashDeploymentSalts.lockedLiquidityFactory(),
                 abi.encodePacked(
@@ -281,7 +317,7 @@ contract DeterministicDeploymentTest is Test {
                 PledgeCashDeploymentSalts.distributionFactory(),
                 abi.encodePacked(
                     type(DistributionFactory).creationCode,
-                    abi.encode(address(lockedLiquidityFactory), address(tokenGrantFactory))
+                    abi.encode(address(liquidityFactory), address(tokenGrantFactory))
                 )
             )
         );
@@ -291,53 +327,33 @@ contract DeterministicDeploymentTest is Test {
                 abi.encodePacked(type(BoardroomRewardsFactory).creationCode, abi.encode(address(boardroomFactory)))
             )
         );
-        assertEq(policyRegistry.owner(), owner);
+        BondMarketFactory bondFactory = BondMarketFactory(
+            _deploy(
+                PledgeCashDeploymentSalts.bondMarketFactory(),
+                abi.encodePacked(
+                    type(BondMarketFactory).creationCode, abi.encode(address(ammFactory), address(boardroomFactory))
+                )
+            )
+        );
+
         assertEq(assetPolicy.owner(), owner);
-        assertEq(tokenGrantFactory.owner(), owner);
-        assertEq(tokenGrantFactory.feeRecipient(), owner);
-        assertEq(tokenGrantFactory.boardroomFactory(), address(boardroomFactory));
         assertEq(protocolFeeRouter.owner(), owner);
-        assertEq(protocolFeeRouter.feeRecipient(), owner);
-        assertEq(ammFactory.owner(), owner);
-        assertEq(ammFactory.feeManager(), owner);
+        assertEq(tokenGrantFactory.boardroomFactory(), address(boardroomFactory));
         assertEq(ammFactory.boardroomFactory(), address(boardroomFactory));
         assertEq(ammRouter.factory(), address(ammFactory));
-        assertEq(ammRouter.wrappedNative(), address(wrappedNative));
-        assertEq(lockedLiquidityFactory.ammRouter(), address(ammRouter));
-        assertEq(lockedLiquidityFactory.boardroomFactory(), address(boardroomFactory));
-        assertEq(distributionFactory.lockedLiquidityFactory(), address(lockedLiquidityFactory));
+        assertEq(liquidityFactory.ammRouter(), address(ammRouter));
+        assertEq(liquidityFactory.boardroomFactory(), address(boardroomFactory));
+        assertEq(distributionFactory.lockedLiquidityFactory(), address(liquidityFactory));
+        assertEq(distributionFactory.tokenGrantFactory(), address(tokenGrantFactory));
+        assertEq(distributionFactory.boardroomFactory(), address(boardroomFactory));
         assertEq(rewardsFactory.boardroomFactory(), address(boardroomFactory));
-        assertGt(rewardsFactory.rewardsLogic().code.length, 0);
-        assertEq(boardroomFactory.policyRegistry(), address(policyRegistry));
-        assertEq(boardroomFactory.wrappedNative(), address(wrappedNative));
-        assertEq(boardroomFactory.redemptionPayoutLogic(), address(deployedRedemptionPayout));
-        assertEq(boardroomFactory.governanceLogic(), address(deployedGovernanceLogic));
-        _assertBoardroomArchitecture(boardroomFactory, deployedRedemptionPayout, deployedGovernanceLogic);
-
-        vm.startPrank(owner);
-        tokenGrantFactory.setFeeRecipient(address(protocolFeeRouter));
-        ammFactory.setProtocolFeeRecipient(address(protocolFeeRouter));
-        assetPolicy.setApprovalSpenderAllowed(address(tokenGrantFactory), true);
-        assetPolicy.setApprovalSpenderAllowed(address(rewardsFactory), true);
-        policyRegistry.registerModulePolicy(address(tokenGrantFactory));
-        policyRegistry.registerModulePolicy(address(rewardsFactory));
-        vm.stopPrank();
-
-        assertTrue(assetPolicy.isApprovalSpenderAllowed(address(tokenGrantFactory)));
-        assertTrue(assetPolicy.isApprovalSpenderAllowed(address(rewardsFactory)));
-        assertTrue(policyRegistry.isPolicyAllowed(address(tokenGrantFactory)));
-        assertTrue(policyRegistry.isModulePolicy(address(tokenGrantFactory)));
-        assertTrue(policyRegistry.isPolicyAllowed(address(rewardsFactory)));
-        assertTrue(policyRegistry.isModulePolicy(address(rewardsFactory)));
-        assertEq(tokenGrantFactory.feeRecipient(), address(protocolFeeRouter));
-        assertEq(ammFactory.protocolFeeRecipient(), address(protocolFeeRouter));
+        assertEq(bondFactory.ammFactory(), address(ammFactory));
+        assertEq(bondFactory.boardroomFactory(), address(boardroomFactory));
     }
 
     function testRepeatedDeployReturnsExistingAddress() public {
-        bytes memory initCode = abi.encodePacked(
-            type(TokenGrantFactory).creationCode, abi.encode(owner, address(canonicalBoardroomFactory))
-        );
-        bytes32 salt = PledgeCashDeploymentSalts.tokenGrantFactory();
+        bytes memory initCode = abi.encodePacked(type(ProtocolFeeRouter).creationCode, abi.encode(owner, owner));
+        bytes32 salt = PledgeCashDeploymentSalts.protocolFeeRouter();
         address predicted = deployer.predict(salt);
 
         address first = _deploy(salt, initCode);
@@ -348,13 +364,10 @@ contract DeterministicDeploymentTest is Test {
     }
 
     function testRepeatedDeployRejectsMismatchedInitCode() public {
-        bytes memory initCode = abi.encodePacked(
-            type(TokenGrantFactory).creationCode, abi.encode(owner, address(canonicalBoardroomFactory))
-        );
-        bytes memory mismatchedInitCode = abi.encodePacked(
-            type(TokenGrantFactory).creationCode, abi.encode(stranger, address(canonicalBoardroomFactory))
-        );
-        bytes32 salt = PledgeCashDeploymentSalts.tokenGrantFactory();
+        bytes memory initCode = abi.encodePacked(type(ProtocolFeeRouter).creationCode, abi.encode(owner, owner));
+        bytes memory mismatchedInitCode =
+            abi.encodePacked(type(ProtocolFeeRouter).creationCode, abi.encode(owner, stranger));
+        bytes32 salt = PledgeCashDeploymentSalts.protocolFeeRouter();
 
         _deploy(salt, initCode);
 
@@ -370,6 +383,93 @@ contract DeterministicDeploymentTest is Test {
         deployer.deploy(salt, mismatchedInitCode);
     }
 
+    function _deployCanonicalBoardroomGraph() internal {
+        policyRegistry = BoardroomPolicyRegistry(
+            _deploy(
+                PledgeCashDeploymentSalts.boardroomPolicyRegistry(),
+                abi.encodePacked(type(BoardroomPolicyRegistry).creationCode, abi.encode(owner))
+            )
+        );
+        facetRegistry = ProtocolFacetRegistry(
+            _deploy(
+                PledgeCashDeploymentSalts.protocolFacetRegistry(),
+                abi.encodePacked(
+                    type(ProtocolFacetRegistry).creationCode, abi.encode(owner, BoardroomKernelSelectors.selectors())
+                )
+            )
+        );
+        kernel = BoardroomKernel(
+            payable(_deploy(
+                    PledgeCashDeploymentSalts.boardroomKernel(),
+                    abi.encodePacked(type(BoardroomKernel).creationCode, abi.encode(address(facetRegistry)))
+                ))
+        );
+        governanceLogic = BoardroomGovernanceLogic(
+            _deploy(PledgeCashDeploymentSalts.boardroomGovernanceLogic(), type(BoardroomGovernanceLogic).creationCode)
+        );
+        redemptionPayout = BoardroomRedemptionPayout(
+            _deploy(PledgeCashDeploymentSalts.boardroomRedemptionPayout(), type(BoardroomRedemptionPayout).creationCode)
+        );
+        marketLogic = BoardroomMarketLogic(
+            _deploy(PledgeCashDeploymentSalts.boardroomMarketLogic(), type(BoardroomMarketLogic).creationCode)
+        );
+        boardroomFactory = BoardroomFactory(
+            _deploy(
+                PledgeCashDeploymentSalts.boardroomFactory(),
+                abi.encodePacked(
+                    type(BoardroomFactory).creationCode,
+                    abi.encode(
+                        address(facetRegistry),
+                        address(policyRegistry),
+                        address(wrappedNative),
+                        address(kernel),
+                        address(redemptionPayout),
+                        address(governanceLogic),
+                        address(marketLogic)
+                    )
+                )
+            )
+        );
+        _deployFacets();
+
+        ProtocolFacetTypes.FacetSetManifest memory manifest = BoardroomRelease.releaseA(facets);
+        vm.startPrank(owner);
+        releaseHash = facetRegistry.publishFacetSet(manifest);
+        facetRegistry.activateFacetSet(releaseHash);
+        vm.stopPrank();
+    }
+
+    function _deployFacets() internal {
+        address controllerFactory = boardroomFactory.controllerFactory();
+        facets.authority = _deploy(
+            PledgeCashDeploymentSalts.boardroomAuthorityFacet(),
+            _facetInitCode(type(BoardroomAuthorityFacet).creationCode, controllerFactory)
+        );
+        facets.execution = _deploy(
+            PledgeCashDeploymentSalts.boardroomExecutionFacet(),
+            _facetInitCode(type(BoardroomExecutionFacet).creationCode, controllerFactory)
+        );
+        facets.market = _deploy(
+            PledgeCashDeploymentSalts.boardroomMarketFacet(),
+            _facetInitCode(type(BoardroomMarketFacet).creationCode, controllerFactory)
+        );
+        facets.redemption = _deploy(
+            PledgeCashDeploymentSalts.boardroomRedemptionFacet(),
+            _facetInitCode(type(BoardroomRedemptionFacet).creationCode, controllerFactory)
+        );
+        facets.viewFacet = _deploy(
+            PledgeCashDeploymentSalts.boardroomViewFacet(),
+            _facetInitCode(type(BoardroomViewFacet).creationCode, controllerFactory)
+        );
+    }
+
+    function _facetInitCode(bytes memory creationCode, address controllerFactory) internal view returns (bytes memory) {
+        return abi.encodePacked(
+            creationCode,
+            abi.encode(address(redemptionPayout), address(governanceLogic), controllerFactory, address(marketLogic))
+        );
+    }
+
     function _deploy(bytes32 salt, bytes memory initCode) internal returns (address deployed) {
         address predicted = deployer.predict(salt);
 
@@ -381,28 +481,46 @@ contract DeterministicDeploymentTest is Test {
         assertGt(deployed.code.length, 0);
     }
 
-    function _assertBoardroomArchitecture(
-        BoardroomFactory boardroomFactory,
-        BoardroomRedemptionPayout deployedRedemptionPayout,
-        BoardroomGovernanceLogic deployedGovernanceLogic
-    ) internal view {
-        BoardroomControllerFactory controllerFactory = BoardroomControllerFactory(boardroomFactory.controllerFactory());
-        BoardroomController controllerLogic = BoardroomController(controllerFactory.controllerImplementation());
-        BoardroomMarketLogic marketLogic = BoardroomMarketLogic(boardroomFactory.marketLogic());
-        Boardroom boardroomLogic = Boardroom(payable(boardroomFactory.boardroomLogic()));
+    function _assertModuleSalts() internal pure {
+        _assertSalt(
+            PledgeCashDeploymentSalts.protocolFeeRouter(),
+            "ProtocolFeeRouter",
+            keccak256(type(ProtocolFeeRouter).creationCode)
+        );
+        _assertSalt(
+            PledgeCashDeploymentSalts.tokenGrantFactory(),
+            "TokenGrantFactory",
+            keccak256(type(TokenGrantFactory).creationCode)
+        );
+        _assertSalt(PledgeCashDeploymentSalts.ammFactory(), "AmmFactory", keccak256(type(AmmFactory).creationCode));
+        _assertSalt(PledgeCashDeploymentSalts.ammRouter(), "AmmRouter", keccak256(type(AmmRouter).creationCode));
+        _assertSalt(
+            PledgeCashDeploymentSalts.lockedLiquidityFactory(),
+            "LockedLiquidityFactory",
+            keccak256(type(LockedLiquidityFactory).creationCode)
+        );
+        _assertSalt(
+            PledgeCashDeploymentSalts.distributionFactory(),
+            "DistributionFactory",
+            keccak256(type(DistributionFactory).creationCode)
+        );
+        _assertSalt(
+            PledgeCashDeploymentSalts.boardroomRewardsFactory(),
+            "BoardroomRewardsFactory",
+            keccak256(type(BoardroomRewardsFactory).creationCode)
+        );
+        _assertSalt(
+            PledgeCashDeploymentSalts.bondMarketFactory(),
+            "BondMarketFactory",
+            keccak256(type(BondMarketFactory).creationCode)
+        );
+    }
 
-        assertGt(address(controllerFactory).code.length, 0);
-        assertGt(address(controllerLogic).code.length, 0);
-        assertGt(address(marketLogic).code.length, 0);
-        assertGt(address(boardroomLogic).code.length, 0);
-        assertEq(controllerFactory.boardroomFactory(), address(boardroomFactory));
-        assertEq(boardroomLogic.redemptionPayoutLogic(), address(deployedRedemptionPayout));
-        assertEq(boardroomLogic.governanceLogic(), address(deployedGovernanceLogic));
-        assertEq(boardroomLogic.controllerFactory(), address(controllerFactory));
-        assertEq(boardroomLogic.marketLogic(), address(marketLogic));
+    function _assertSalt(bytes32 actual, string memory contractName, bytes32 creationCodeHash) internal pure {
+        assertEq(actual, _releaseSalt(contractName, creationCodeHash));
     }
 
     function _releaseSalt(string memory contractName, bytes32 creationCodeHash) internal pure returns (bytes32) {
-        return keccak256(abi.encode("pledge.cash.deterministic.v5", contractName, creationCodeHash));
+        return keccak256(abi.encode("pledge.cash.protocol.v1", contractName, creationCodeHash));
     }
 }

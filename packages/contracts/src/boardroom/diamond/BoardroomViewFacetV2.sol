@@ -4,8 +4,7 @@ pragma solidity ^0.8.30;
 import {BoardroomRedemptionStorage} from "../BoardroomRedemptionStorage.sol";
 import {BoardroomReleaseBStorage} from "./BoardroomReleaseBStorage.sol";
 
-/// @notice Native release-B views proving that a selector can be replaced
-/// independently of the release-A compatibility implementation.
+/// @notice Release-B views proving that a selector can be replaced independently.
 contract BoardroomViewFacetV2 {
     function redemptionCredits(address holder) external view returns (uint256) {
         return BoardroomRedemptionStorage.layout().credits[holder];

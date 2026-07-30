@@ -7,7 +7,11 @@ description: Verify a project, compare its participation paths, and complete a p
 
 Start with evidence, not the project name. A pledge.cash project is a Boardroom contract plus the share token, distributions, grants, and liquidity contracts that can be proven to belong to it.
 
-> **Current availability:** the checked-in HyperEVM testnet (`998`) deployment is verified and uses testnet assets. Monad testnet (`10143`) remains pending. Do not approve or submit a transaction unless the app resolves the current artifact and matching wallet chain. See [Networks and deployments](../reference/networks-and-deployments).
+> **Current availability:** canonical protocol v1 is pending on HyperEVM
+> testnet (`998`) and Monad testnet (`10143`). Public participation writes are
+> unavailable. Use these steps only with a matching local Anvil deployment,
+> or after a target-testnet artifact has been promoted and live-verified. See
+> [Networks and deployments](../reference/networks-and-deployments).
 
 ## Prerequisites
 
@@ -43,10 +47,11 @@ Read [Canonical identity](../reference/canonical-identity) for the checks behind
 | Merkle airdrop | Shares now or a vesting grant | Usually gas; a paid grant may require payment later | Exact published index, amount, proof, and claim mode |
 | AMM | Output token from a pool | Exact input token | Minimum output and quote deadline |
 
-A curve buy increases one global outstanding-share liability. Any current holder can sell up to the lesser of its
-transferable share balance and that global liability, so sell rights follow shares through ERC20 transfers. Graduation
-currently freezes trading; do not rely on migration, cancellation, or expiry until the gated terminal policies are
-implemented and verified.
+A curve buy increases one global outstanding-share liability. Any current
+holder can sell up to the lesser of its transferable share balance and that
+global liability, so sell rights follow shares through ERC20 transfers.
+Graduation pauses trading during the migration window; cancellation, expiry,
+or failed migration enters the bounded sell-only unwind.
 
 An AMM price is different from a sale or curve price. Check reserves, fee, slippage, route, and minimum output immediately before signing.
 

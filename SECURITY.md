@@ -1,16 +1,19 @@
 # Security Policy
 
-pledge.cash is currently a HyperEVM testnet review candidate. The contracts are
-not mainnet production software, and this repository does not support a mainnet
-deployment yet.
+pledge.cash is currently an unreleased local-review candidate. Canonical
+protocol v1 has not been broadcast to HyperEVM or Monad testnet. The contracts
+are not mainnet production software, and this repository does not support a
+mainnet deployment.
 
 ## Supported Scope
 
 Security reports are in scope for:
 
-- all Solidity protocol code under `packages/contracts/src`, including Boardroom governance and redemption, policy
-  registries, token grants, distributions, bonding-curve migration, AMM pools and routing, locked liquidity, protocol
-  fee routing, token-transfer helpers, factories, and deterministic deployment primitives,
+- all Solidity protocol code under `packages/contracts/src`, including the
+  Boardroom registry, kernel, facets, storage migration, governance,
+  redemption, policy registries, token grants, distributions, bonding-curve
+  migration, AMM pools and routing, locked liquidity, protocol fee routing,
+  token-transfer helpers, factories, and deterministic deployment primitives,
 - deployment and verification surfaces that can publish or attest an unsafe contract stack, including
   `packages/contracts/script/Deploy.s.sol`, chain-specific deployment wrappers and artifact verifiers,
   `PledgeCashDeploymentSalts.sol`, and checked-in deployment artifacts,
@@ -41,8 +44,8 @@ Include:
 - affected assets and required authority,
 - the expected invariant and the state transition that violates it,
 - any external-call or non-standard-token assumptions needed for impact,
-- whether the issue affects the testnet candidate only or could affect a
-  future mainnet deployment.
+- whether the issue affects local release proof, a future testnet candidate, or
+  a future mainnet deployment.
 
 If private advisories are not available, open a minimal public issue asking for
 a private security contact without including technical details.
@@ -54,9 +57,9 @@ finding against a shared live deployment when a local Foundry test, fork, or sel
 it. Testnet proofs should use self-funded test accounts and should not degrade public RPC, hosting, or wallet-provider
 services.
 
-This repository has no supported mainnet deployment. Treat reports against the
-current contracts as testnet-candidate findings unless a future release states
-otherwise.
+This repository has no supported public deployment. Treat reports against the
+current contracts as unreleased protocol-v1 findings unless a future release
+states otherwise.
 
 ## GitHub Actions
 

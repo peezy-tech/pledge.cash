@@ -4,12 +4,12 @@ pragma solidity ^0.8.30;
 import {LibClone} from "solady/utils/LibClone.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 import {IBoardroomObligationPolicy} from "../policy/IBoardroomObligationPolicy.sol";
+import {BoardroomCallbackLib} from "../policy/BoardroomCallbackLib.sol";
 import {BoardroomRewards} from "./BoardroomRewards.sol";
 
 interface IBoardroomRewardsFactoryBoardroom {
     function shareToken() external view returns (address);
     function status() external view returns (uint8);
-    function reserveRedeemableAsset(address asset) external;
 }
 
 interface IBoardroomRewardsFactoryBoardroomFactory {
@@ -74,7 +74,7 @@ contract BoardroomRewardsFactory is IBoardroomObligationPolicy {
         }
         if (amount == 0) revert InvalidAmount();
 
-        IBoardroomRewardsFactoryBoardroom(boardroom).reserveRedeemableAsset(asset);
+        BoardroomCallbackLib.reserveRedeemableAsset(boardroom, asset);
         ExactTransferLib.ExactDelta memory delta = ExactTransferLib.pullBetween(asset, boardroom, rewards, amount);
         if (delta.senderBalanceIncreased || delta.senderSpent != amount) {
             revert UnexpectedTokenBalanceChange(asset, amount, delta.senderSpent);

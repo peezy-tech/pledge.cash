@@ -9,12 +9,11 @@ import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 import {BestEffortTokenLib} from "../lib/BestEffortTokenLib.sol";
 import {LockedLiquidityFactory} from "../liquidity/LockedLiquidityFactory.sol";
+import {BoardroomCallbackLib} from "../policy/BoardroomCallbackLib.sol";
 
 interface IMigratingBondingCurveBoardroom {
     function status() external view returns (uint8);
     function redemptionExcessRecipient() external view returns (address);
-    function recordLockedLiquidityFromDistribution(address locker, address pool) external;
-    function settleBondingCurve() external;
     function requireBondingCurveForfeitureVetoPower(address account) external view;
 }
 
@@ -318,7 +317,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         _requireActiveBoardroom();
         migrationInProgress = false;
 
-        IMigratingBondingCurveBoardroom(boardroom).recordLockedLiquidityFromDistribution(createdLocker, createdPool);
+        BoardroomCallbackLib.recordLockedLiquidityFromDistribution(boardroom, createdLocker, createdPool);
         emit CurveMigrated(createdLocker, createdPool, amountA, amountB, liquidity, quoteRemainder, terminalPrice);
     }
 
@@ -367,7 +366,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         } else {
             _releaseMigrationReservation();
             curveStatus = CurvePhase.Settled;
-            IMigratingBondingCurveBoardroom(boardroom).settleBondingCurve();
+            BoardroomCallbackLib.settleBondingCurve(boardroom);
             emit CurvePhaseChanged(CurvePhase.Settled, settlementReason, 0);
         }
 
@@ -387,7 +386,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
             CurvePhase terminalPhase = postQuarantinePhase;
             curveStatus = terminalPhase;
             if (terminalPhase == CurvePhase.Settled) _releaseMigrationReservation();
-            IMigratingBondingCurveBoardroom(boardroom).settleBondingCurve();
+            BoardroomCallbackLib.settleBondingCurve(boardroom);
             emit CurvePhaseChanged(terminalPhase, settlementReason, 0);
         }
     }
@@ -428,7 +427,7 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         CurvePhase terminalPhase = postQuarantinePhase;
         curveStatus = terminalPhase;
         if (terminalPhase == CurvePhase.Settled) _releaseMigrationReservation();
-        IMigratingBondingCurveBoardroom(boardroom).settleBondingCurve();
+        BoardroomCallbackLib.settleBondingCurve(boardroom);
         emit QuoteForfeitureFinalized(forfeited, terminalPhase);
         emit CurvePhaseChanged(terminalPhase, settlementReason, 0);
     }

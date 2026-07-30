@@ -1,17 +1,21 @@
 import {
+  decodeAbiParameters,
   decodeEventLog,
   decodeFunctionData,
   encodeAbiParameters,
-  getAbiItem,
+  hashTypedData,
   isHex,
   keccak256,
+  parseAbi,
+  stringToHex,
   type Address,
   type Hex,
 } from "viem";
-import { boardroomAbi, boardroomControllerAbi } from "../generated";
+import {
+  boardroomAbi,
+  boardroomControllerAbi,
+} from "../generated";
 import type { BoardroomCall, PledgeCashGovernanceClient, PledgeCashLogClient } from "./types";
-
-export type { BoardroomCall } from "./types";
 
 export type GovernanceLogMeta = {
   boardroom: Address;
@@ -19,6 +23,36 @@ export type GovernanceLogMeta = {
   logIndex: number;
   transactionHash: Hex;
 };
+
+export type BoardroomScheduleEvent =
+  | (GovernanceLogMeta & {
+      kind: "boardroomOperationScheduled";
+      controller: Address;
+      operationId: Hex;
+      proposer: Address;
+      facetSetHash: Hex;
+      eta: bigint;
+      expiresAt: bigint;
+      boardroomEpoch: bigint;
+      controllerGeneration: bigint;
+      configurationEpoch: bigint;
+      salt: Hex;
+      callsHash: Hex;
+    })
+  | (GovernanceLogMeta & {
+      kind: "controllerOperationScheduled";
+      controller: Address;
+      operationId: Hex;
+      proposer: Address;
+      facetSetHash: Hex;
+      eta: bigint;
+      expiresAt: bigint;
+      boardroomEpoch: bigint;
+      controllerGeneration: bigint;
+      configurationEpoch: bigint;
+      salt: Hex;
+      dataHash: Hex;
+    });
 
 export type GovernanceEvent =
   | (GovernanceLogMeta & {
@@ -40,32 +74,7 @@ export type GovernanceEvent =
       controllerDelay: bigint;
       gracePeriod: bigint;
     })
-  | (GovernanceLogMeta & {
-      kind: "boardroomOperationScheduled";
-      controller: Address;
-      operationId: Hex;
-      proposer: Address;
-      eta: bigint;
-      expiresAt: bigint;
-      boardroomEpoch: bigint;
-      controllerGeneration: bigint;
-      configurationEpoch: bigint;
-      salt: Hex;
-      callsHash: Hex;
-    })
-  | (GovernanceLogMeta & {
-      kind: "controllerOperationScheduled";
-      controller: Address;
-      operationId: Hex;
-      proposer: Address;
-      eta: bigint;
-      expiresAt: bigint;
-      boardroomEpoch: bigint;
-      controllerGeneration: bigint;
-      configurationEpoch: bigint;
-      salt: Hex;
-      dataHash: Hex;
-    })
+  | BoardroomScheduleEvent
   | (GovernanceLogMeta & { kind: "operationCancelled"; controller: Address; operationId: Hex })
   | (GovernanceLogMeta & { kind: "operationExecuted"; controller: Address; operationId: Hex; executor: Address })
   | (GovernanceLogMeta & {
@@ -104,6 +113,7 @@ export type GovernanceEventsQuery = {
 export type DecodedControllerScheduleInput =
   | {
       kind: "boardroomOperation";
+      expectedFacetSetHash: Hex;
       calls: BoardroomCall[];
       salt: Hex;
       expectedBoardroomEpoch: bigint;
@@ -111,6 +121,7 @@ export type DecodedControllerScheduleInput =
     }
   | {
       kind: "controllerOperation";
+      expectedFacetSetHash: Hex;
       data: Hex;
       salt: Hex;
       expectedBoardroomEpoch: bigint;
@@ -143,6 +154,8 @@ export type ScheduledBoardroomOperation = {
   scheduleBlockNumber: bigint;
   scheduleTransactionHash: Hex;
   status: ScheduledBoardroomOperationStatus;
+  facetSetHash: Hex;
+  currentFacetSetHash: Hex;
   kind?: DecodedControllerScheduleInput["kind"];
   calls?: BoardroomCall[];
   controllerData?: Hex;
@@ -173,6 +186,20 @@ export type HydratedScheduledBoardroomOperations = {
   errors: ScheduledBoardroomOperationCandidateError[];
 };
 
+export function hashBoardroomCalls(calls: readonly BoardroomCall[]): Hex {
+  return keccak256(encodeAbiParameters([
+    {
+      type: "tuple[]",
+      components: [
+        { name: "policy", type: "address" },
+        { name: "target", type: "address" },
+        { name: "value", type: "uint256" },
+        { name: "data", type: "bytes" },
+      ],
+    },
+  ], [calls]));
+}
+
 type RawEventLog = {
   address?: Address;
   args?: Record<string, unknown>;
@@ -181,11 +208,6 @@ type RawEventLog = {
   logIndex?: number;
   transactionHash?: Hex;
 };
-
-type ScheduleEvent = Extract<
-  GovernanceEvent,
-  { kind: "boardroomOperationScheduled" | "controllerOperationScheduled" }
->;
 
 type ScheduleTransaction = {
   blockNumber?: bigint | null;
@@ -202,22 +224,43 @@ type ScheduleReceipt = {
   transactionHash: Hex;
 };
 
-const boardroomEvents = [
-  getAbiItem({ abi: boardroomAbi, name: "BoardroomLaunched" }),
-  getAbiItem({ abi: boardroomAbi, name: "BoardroomControllerReplaced" }),
-  getAbiItem({ abi: boardroomAbi, name: "BoardroomOperationVetoed" }),
-  getAbiItem({ abi: boardroomAbi, name: "BoardroomCallExecuted" }),
-  getAbiItem({ abi: boardroomAbi, name: "GovernanceEpochAdvanced" }),
-  getAbiItem({ abi: boardroomAbi, name: "BoardroomWindDownStarted" }),
-] as const;
+const boardroomEventNames = new Set([
+  "BoardroomLaunched",
+  "BoardroomControllerReplaced",
+  "BoardroomOperationVetoed",
+  "BoardroomCallExecuted",
+  "GovernanceEpochAdvanced",
+  "BoardroomWindDownStarted",
+]);
+const generatedBoardroomEvents = (
+  boardroomAbi as readonly { type: string; name?: string }[]
+).filter(
+  (item) => item.type === "event" && item.name !== undefined && boardroomEventNames.has(item.name),
+);
+// Older checked-in aggregate ABIs contain only the callable interface. Keep an
+// exact event-only fallback so this helper also works before ABI regeneration.
+const boardroomEventFallback = parseAbi([
+  "event BoardroomLaunched(address indexed controller,address indexed proposer,address indexed protectionStaker,uint256 controllerGeneration,uint256 controllerDelay,uint256 windDownDelay,uint256 gracePeriod)",
+  "event BoardroomControllerReplaced(address indexed oldController,address indexed newController,uint256 indexed generation,address proposer,uint256 controllerDelay,uint256 gracePeriod)",
+  "event BoardroomOperationVetoed(bytes32 indexed operationId,address indexed staker)",
+  "event BoardroomCallExecuted(address indexed policy,address indexed target,bytes4 indexed selector,address authority,uint256 value,bytes32 dataHash)",
+  "event GovernanceEpochAdvanced(uint256 indexed epoch)",
+  "event BoardroomWindDownStarted(address indexed caller,uint256 indexed epoch,uint256 windDownDelay)",
+]);
+const boardroomEvents = generatedBoardroomEvents.length === boardroomEventNames.size
+  ? generatedBoardroomEvents
+  : boardroomEventFallback;
 
-const controllerEvents = [
-  getAbiItem({ abi: boardroomControllerAbi, name: "BoardroomOperationScheduled" }),
-  getAbiItem({ abi: boardroomControllerAbi, name: "ControllerOperationScheduled" }),
-  getAbiItem({ abi: boardroomControllerAbi, name: "OperationCancelled" }),
-  getAbiItem({ abi: boardroomControllerAbi, name: "OperationExecuted" }),
-  getAbiItem({ abi: boardroomControllerAbi, name: "ConfigurationUpdated" }),
-] as const;
+const controllerEventNames = new Set([
+  "BoardroomOperationScheduled",
+  "ControllerOperationScheduled",
+  "OperationCancelled",
+  "OperationExecuted",
+  "ConfigurationUpdated",
+]);
+const controllerEvents = boardroomControllerAbi.filter(
+  (item) => item.type === "event" && controllerEventNames.has(item.name),
+);
 
 const DEFAULT_CHUNK_SIZE = 100_000n;
 const MAX_LOG_REQUESTS = 256;
@@ -225,6 +268,170 @@ const MAX_LOGS = 25_000;
 const MAX_BOARDROOMS = 64;
 const MAX_OPERATIONS = 500;
 const MAX_START_SEARCH_STEPS = 64;
+const ZERO_HASH = `0x${"00".repeat(32)}` as Hex;
+const BOARDROOM_ERC1271_DOMAIN_NAME = "PledgeCash Boardroom Controller";
+const BOARDROOM_ERC1271_DOMAIN_VERSION = "1";
+export const BOARDROOM_ERC1271_ENVELOPE_SCHEME = keccak256(stringToHex(
+  "PledgeCash.BoardroomController.ERC1271Envelope.v1",
+)).slice(0, 10) as Hex;
+const BOARDROOM_CONTROL_PROOF_TYPES = {
+  BoardroomControlProof: [
+    { name: "messageHash", type: "bytes32" },
+    { name: "boardroom", type: "address" },
+    { name: "facetSetHash", type: "bytes32" },
+    { name: "boardroomEpoch", type: "uint256" },
+    { name: "controllerGeneration", type: "uint256" },
+    { name: "configurationEpoch", type: "uint256" },
+    { name: "configurationHash", type: "bytes32" },
+  ],
+} as const;
+const BOARDROOM_ERC1271_ENVELOPE_PARAMETERS = [
+  { type: "bytes4" },
+  { type: "bytes32" },
+  { type: "uint256" },
+  { type: "uint256" },
+  { type: "uint256" },
+  { type: "bytes32" },
+  { type: "bytes" },
+] as const;
+
+export type BoardroomERC1271DigestInput = {
+  messageHash: Hex;
+  controller: Address;
+  boardroom: Address;
+  chainId: bigint;
+  facetSetHash: Hex;
+  boardroomEpoch: bigint;
+  controllerGeneration: bigint;
+  configurationEpoch: bigint;
+  configurationHash: Hex;
+};
+
+/**
+ * Builds the exact EIP-712 proof accepted by BoardroomController.
+ * Every context field must come from the same pinned block. EOAs should sign
+ * this typed data directly, not use `signMessage`. Safe tooling should sign or
+ * approve the digest returned by `hashBoardroomERC1271Digest` through its
+ * normal Safe/ERC-1271 flow.
+ */
+export function buildBoardroomERC1271TypedData(input: BoardroomERC1271DigestInput) {
+  return {
+    domain: {
+      name: BOARDROOM_ERC1271_DOMAIN_NAME,
+      version: BOARDROOM_ERC1271_DOMAIN_VERSION,
+      chainId: requireUint256("chainId", input.chainId),
+      verifyingContract: input.controller,
+    },
+    types: BOARDROOM_CONTROL_PROOF_TYPES,
+    primaryType: "BoardroomControlProof",
+    message: {
+      messageHash: requireBytes32("messageHash", input.messageHash),
+      boardroom: input.boardroom,
+      facetSetHash: requireBytes32("facetSetHash", input.facetSetHash),
+      boardroomEpoch: requireUint256("boardroomEpoch", input.boardroomEpoch),
+      controllerGeneration: requireUint256(
+        "controllerGeneration",
+        input.controllerGeneration,
+      ),
+      configurationEpoch: requireUint256(
+        "configurationEpoch",
+        input.configurationEpoch,
+      ),
+      configurationHash: requireBytes32("configurationHash", input.configurationHash),
+    },
+  } as const;
+}
+
+export function hashBoardroomERC1271Digest(input: BoardroomERC1271DigestInput): Hex {
+  return hashTypedData(buildBoardroomERC1271TypedData(input));
+}
+
+/**
+ * Encodes the canonical v1 ERC-1271 envelope. `proposerSignature` must be an
+ * EOA typed-data signature or a contract-wallet signature/approval over the
+ * digest returned by `hashBoardroomERC1271Digest`.
+ */
+export function encodeBoardroomERC1271Signature(input: {
+  facetSetHash: Hex;
+  boardroomEpoch: bigint;
+  controllerGeneration: bigint;
+  configurationEpoch: bigint;
+  configurationHash: Hex;
+  proposerSignature: Hex;
+}): Hex {
+  if (!isStrictHexBytes(input.proposerSignature)) {
+    throw new Error("proposerSignature must be hex-encoded bytes.");
+  }
+  return encodeAbiParameters(
+    BOARDROOM_ERC1271_ENVELOPE_PARAMETERS,
+    [
+      BOARDROOM_ERC1271_ENVELOPE_SCHEME,
+      requireBytes32("facetSetHash", input.facetSetHash),
+      requireUint256("boardroomEpoch", input.boardroomEpoch),
+      requireUint256("controllerGeneration", input.controllerGeneration),
+      requireUint256("configurationEpoch", input.configurationEpoch),
+      requireBytes32("configurationHash", input.configurationHash),
+      input.proposerSignature,
+    ],
+  );
+}
+
+export type DecodedBoardroomERC1271Signature = {
+  scheme: Hex;
+  facetSetHash: Hex;
+  boardroomEpoch: bigint;
+  controllerGeneration: bigint;
+  configurationEpoch: bigint;
+  configurationHash: Hex;
+  proposerSignature: Hex;
+};
+
+export function decodeBoardroomERC1271Signature(
+  signature: Hex,
+): DecodedBoardroomERC1271Signature {
+  if (!isStrictHexBytes(signature)) {
+    throw new Error("ERC-1271 envelope must be hex-encoded bytes.");
+  }
+
+  let decoded: readonly [Hex, Hex, bigint, bigint, bigint, Hex, Hex];
+  try {
+    decoded = decodeAbiParameters(
+      BOARDROOM_ERC1271_ENVELOPE_PARAMETERS,
+      signature,
+    );
+  } catch {
+    throw new Error("ERC-1271 envelope is malformed.");
+  }
+  const [
+    scheme,
+    facetSetHash,
+    boardroomEpoch,
+    controllerGeneration,
+    configurationEpoch,
+    configurationHash,
+    proposerSignature,
+  ] = decoded;
+  if (scheme.toLowerCase() !== BOARDROOM_ERC1271_ENVELOPE_SCHEME.toLowerCase()) {
+    throw new Error("ERC-1271 envelope uses an unsupported scheme.");
+  }
+
+  const canonical = encodeAbiParameters(
+    BOARDROOM_ERC1271_ENVELOPE_PARAMETERS,
+    decoded,
+  );
+  if (canonical.toLowerCase() !== signature.toLowerCase()) {
+    throw new Error("ERC-1271 envelope is not canonically encoded.");
+  }
+  return {
+    scheme,
+    facetSetHash,
+    boardroomEpoch,
+    controllerGeneration,
+    configurationEpoch,
+    configurationHash,
+    proposerSignature,
+  };
+}
 
 export async function queryGovernanceEvents(
   client: PledgeCashLogClient,
@@ -302,10 +509,26 @@ export async function queryScheduledBoardroomOperations(
 ): Promise<ScheduledBoardroomOperation[]> {
   throwIfAborted(input.signal);
   const boardrooms = uniqueAddresses(input.boardrooms);
+  if (boardrooms.length === 0) return [];
+  if (boardrooms.length > MAX_BOARDROOMS) {
+    throw new Error(`Governance discovery supports at most ${MAX_BOARDROOMS} Boardrooms per query.`);
+  }
+  // Controller discovery and readiness must describe one chain snapshot.
+  const snapshotBlockNumber = await readSnapshotBlockNumber(client);
   const controllerPairs = (await Promise.all(boardrooms.map(async (boardroom) => {
     const [launched, controller] = await Promise.all([
-      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "launched" }),
-      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "controller" }),
+      client.readContract({
+        address: boardroom,
+        abi: boardroomAbi,
+        functionName: "launched",
+        blockNumber: snapshotBlockNumber,
+      }),
+      client.readContract({
+        address: boardroom,
+        abi: boardroomAbi,
+        functionName: "controller",
+        blockNumber: snapshotBlockNumber,
+      }),
     ]);
     return launched && !isZeroAddress(controller as Address)
       ? { boardroom, controller: controller as Address }
@@ -313,7 +536,15 @@ export async function queryScheduledBoardroomOperations(
   }))).flatMap((pair) => pair ? [pair] : []);
   if (controllerPairs.length === 0) return [];
 
-  const events = await queryGovernanceEvents(client, { ...input, controllers: controllerPairs });
+  const requestedToBlock = input.toBlock;
+  const eventToBlock = typeof requestedToBlock === "bigint" && requestedToBlock < snapshotBlockNumber
+    ? requestedToBlock
+    : snapshotBlockNumber;
+  const events = await queryGovernanceEvents(client, {
+    ...input,
+    toBlock: eventToBlock,
+    controllers: controllerPairs,
+  });
   const currentControllers = new Set(controllerPairs.map((pair) => pair.controller.toLowerCase()));
   const schedules = latestScheduleEvents(events).filter((event) => currentControllers.has(event.controller.toLowerCase()));
   if (schedules.length > MAX_OPERATIONS) {
@@ -323,12 +554,12 @@ export async function queryScheduledBoardroomOperations(
   const currentTime = input.currentTime ?? BigInt(Math.floor(Date.now() / 1_000));
   const operations = await Promise.all(schedules.map(async (event) => {
     try {
-      return await hydrateScheduleEvent(client, event, currentTime, input.signal);
+      return await hydrateScheduleEvent(client, event, snapshotBlockNumber, currentTime, input.signal);
     } catch (error) {
       return scheduleFromEvent(event, {
-        currentTime,
         currentBoardroomEpoch: 0n,
         currentConfigurationEpoch: 0n,
+        currentFacetSetHash: ZERO_HASH,
         operationStatus: 0,
         status: "unknown",
         payloadError: conciseError(error),
@@ -351,6 +582,7 @@ export async function hydrateScheduledBoardroomOperationCandidates(
   if (candidates.length > MAX_OPERATIONS) {
     throw new Error(`Governance candidate hydration exceeds its ${MAX_OPERATIONS}-operation safety bound.`);
   }
+  if (candidates.length === 0) return { operations: [], errors };
   const currentTime = input.currentTime ?? BigInt(Math.floor(Date.now() / 1_000));
   const results = await Promise.all(candidates.map(async (candidate) => {
     try {
@@ -363,8 +595,28 @@ export async function hydrateScheduledBoardroomOperationCandidates(
       const minedReceipt = receipt as unknown as ScheduleReceipt;
       verifyTransactionProvenance(candidate, tx, minedReceipt);
       const decoded = verifiedSchedulePayload(tx, candidate.controller);
+      const snapshotBlockNumber = await readSnapshotBlockNumber(client);
+      const hydrationBlockNumber = snapshotBlockNumber < minedReceipt.blockNumber
+        ? minedReceipt.blockNumber
+        : snapshotBlockNumber;
+      const controllerBoardroom = await client.readContract({
+        address: candidate.controller,
+        abi: boardroomControllerAbi,
+        functionName: "boardroom",
+        blockNumber: hydrationBlockNumber,
+      }) as Address;
+      if (!sameAddress(controllerBoardroom, candidate.boardroom)) {
+        throw new Error("Candidate Boardroom does not match the controller association.");
+      }
       const event = scheduleEventFromReceipt(candidate, decoded, minedReceipt);
-      const operation = await hydrateScheduleEvent(client, event, currentTime, input.signal, decoded);
+      const operation = await hydrateScheduleEvent(
+        client,
+        event,
+        hydrationBlockNumber,
+        currentTime,
+        input.signal,
+        decoded,
+      );
       return { operation };
     } catch (error) {
       return {
@@ -384,30 +636,42 @@ export async function hydrateScheduledBoardroomOperationCandidates(
   };
 }
 
-export function decodeControllerScheduleCalldata(data: Hex): DecodedControllerScheduleInput | undefined {
+export function decodeControllerScheduleCalldata(
+  data: Hex,
+): DecodedControllerScheduleInput | undefined {
   try {
     const decoded = decodeFunctionData({ abi: boardroomControllerAbi, data });
     const args = decoded.args as readonly unknown[] | undefined;
+    const expectedFacetSetHash = hexValue(args?.[0]);
+    if (!expectedFacetSetHash) return undefined;
     if (decoded.functionName === "scheduleBoardroomOperation") {
-      const calls = normalizeBoardroomCalls(args?.[0]);
-      const salt = hexValue(args?.[1]);
-      const expectedBoardroomEpoch = bigintValue(args?.[2]);
-      const expectedConfigurationEpoch = bigintValue(args?.[3]);
+      const calls = normalizeBoardroomCalls(args?.[1]);
+      const salt = hexValue(args?.[2]);
+      const expectedBoardroomEpoch = bigintValue(args?.[3]);
+      const expectedConfigurationEpoch = bigintValue(args?.[4]);
       if (!calls || !salt || expectedBoardroomEpoch === undefined || expectedConfigurationEpoch === undefined) {
         return undefined;
       }
-      return { kind: "boardroomOperation", calls, salt, expectedBoardroomEpoch, expectedConfigurationEpoch };
+      return {
+        kind: "boardroomOperation",
+        expectedFacetSetHash,
+        calls,
+        salt,
+        expectedBoardroomEpoch,
+        expectedConfigurationEpoch,
+      };
     }
     if (decoded.functionName === "scheduleControllerOperation") {
-      const controllerData = hexValue(args?.[0]);
-      const salt = hexValue(args?.[1]);
-      const expectedBoardroomEpoch = bigintValue(args?.[2]);
-      const expectedConfigurationEpoch = bigintValue(args?.[3]);
+      const controllerData = hexValue(args?.[1]);
+      const salt = hexValue(args?.[2]);
+      const expectedBoardroomEpoch = bigintValue(args?.[3]);
+      const expectedConfigurationEpoch = bigintValue(args?.[4]);
       if (!controllerData || !salt || expectedBoardroomEpoch === undefined || expectedConfigurationEpoch === undefined) {
         return undefined;
       }
       return {
         kind: "controllerOperation",
+        expectedFacetSetHash,
         data: controllerData,
         salt,
         expectedBoardroomEpoch,
@@ -420,23 +684,17 @@ export function decodeControllerScheduleCalldata(data: Hex): DecodedControllerSc
   }
 }
 
-export function hashBoardroomCalls(calls: readonly BoardroomCall[]): Hex {
-  return keccak256(encodeAbiParameters([
-    {
-      type: "tuple[]",
-      components: [
-        { name: "policy", type: "address" },
-        { name: "target", type: "address" },
-        { name: "value", type: "uint256" },
-        { name: "data", type: "bytes" },
-      ],
-    },
-  ], [calls]));
+async function readSnapshotBlockNumber(client: PledgeCashGovernanceClient): Promise<bigint> {
+  if (!client.getBlockNumber) {
+    throw new Error("Governance operation hydration requires a client that can read the latest block.");
+  }
+  return client.getBlockNumber();
 }
 
 async function hydrateScheduleEvent(
   client: PledgeCashGovernanceClient,
-  event: ScheduleEvent,
+  event: BoardroomScheduleEvent,
+  snapshotBlockNumber: bigint,
   currentTime: bigint,
   signal?: AbortSignal,
   knownPayload?: DecodedControllerScheduleInput,
@@ -448,33 +706,70 @@ async function hydrateScheduleEvent(
   const payload = knownPayload ?? verifiedSchedulePayload(transaction!, event.controller);
   verifyPayloadAgainstEvent(payload, event);
 
-  const operationHash = await client.readContract({
-    address: event.controller,
-    abi: boardroomControllerAbi,
-    functionName: payload.kind === "boardroomOperation" ? "hashBoardroomOperation" : "hashControllerOperation",
-    args: payload.kind === "boardroomOperation"
-      ? [payload.calls, payload.salt, payload.expectedBoardroomEpoch, payload.expectedConfigurationEpoch, event.proposer]
-      : [payload.data, payload.salt, payload.expectedBoardroomEpoch, payload.expectedConfigurationEpoch, event.proposer],
-  });
-  if (!sameHex(operationHash as Hex, event.operationId)) {
-    throw new Error("Schedule calldata does not match the controller operation hash.");
-  }
+  // The controller event is authoritative for the operation ID. Its calldata
+  // context and payload hash are checked above; re-calling the hash helper can
+  // observe a configuration update executed later in the same block.
 
-  const [operationState, boardroomEpoch, currentController, currentGeneration, boardroomStatus, configurationEpoch, proposer] =
-    await Promise.all([
-      client.readContract({
-        address: event.controller,
-        abi: boardroomControllerAbi,
-        functionName: "operationState",
-        args: [event.operationId],
-      }),
-      client.readContract({ address: event.boardroom, abi: boardroomAbi, functionName: "governanceEpoch" }),
-      client.readContract({ address: event.boardroom, abi: boardroomAbi, functionName: "controller" }),
-      client.readContract({ address: event.boardroom, abi: boardroomAbi, functionName: "controllerGeneration" }),
-      client.readContract({ address: event.boardroom, abi: boardroomAbi, functionName: "status" }),
-      client.readContract({ address: event.controller, abi: boardroomControllerAbi, functionName: "configurationEpoch" }),
-      client.readContract({ address: event.controller, abi: boardroomControllerAbi, functionName: "proposer" }),
-    ]);
+  const [
+    operationState,
+    boardroomEpoch,
+    currentController,
+    currentGeneration,
+    boardroomStatus,
+    currentFacetSetHash,
+    configurationEpoch,
+    proposer,
+  ] = await Promise.all([
+    client.readContract({
+      address: event.controller,
+      abi: boardroomControllerAbi,
+      functionName: "operationState",
+      args: [event.operationId],
+      blockNumber: snapshotBlockNumber,
+    }),
+    client.readContract({
+      address: event.boardroom,
+      abi: boardroomAbi,
+      functionName: "governanceEpoch",
+      blockNumber: snapshotBlockNumber,
+    }),
+    client.readContract({
+      address: event.boardroom,
+      abi: boardroomAbi,
+      functionName: "controller",
+      blockNumber: snapshotBlockNumber,
+    }),
+    client.readContract({
+      address: event.boardroom,
+      abi: boardroomAbi,
+      functionName: "controllerGeneration",
+      blockNumber: snapshotBlockNumber,
+    }),
+    client.readContract({
+      address: event.boardroom,
+      abi: boardroomAbi,
+      functionName: "status",
+      blockNumber: snapshotBlockNumber,
+    }),
+    client.readContract({
+      address: event.boardroom,
+      abi: boardroomAbi,
+      functionName: "facetSetHash",
+      blockNumber: snapshotBlockNumber,
+    }),
+    client.readContract({
+      address: event.controller,
+      abi: boardroomControllerAbi,
+      functionName: "configurationEpoch",
+      blockNumber: snapshotBlockNumber,
+    }),
+    client.readContract({
+      address: event.controller,
+      abi: boardroomControllerAbi,
+      functionName: "proposer",
+      blockNumber: snapshotBlockNumber,
+    }),
+  ]);
   const [eta, expiresAt, rawStatus] = operationState as readonly [bigint, bigint, number];
   if (eta !== event.eta || expiresAt !== event.expiresAt) {
     throw new Error("Scheduled event does not match controller operation timing.");
@@ -482,17 +777,19 @@ async function hydrateScheduleEvent(
   const operationStatus = Number(rawStatus);
   const currentBoardroomEpoch = boardroomEpoch as bigint;
   const currentConfigurationEpoch = configurationEpoch as bigint;
+  const resolvedFacetSetHash = currentFacetSetHash as Hex;
   const activeContext = Number(boardroomStatus) === 0
     && sameAddress(currentController as Address, event.controller)
     && (currentGeneration as bigint) === event.controllerGeneration
     && currentBoardroomEpoch === event.boardroomEpoch
     && currentConfigurationEpoch === event.configurationEpoch
-    && sameAddress(proposer as Address, event.proposer);
+    && sameAddress(proposer as Address, event.proposer)
+    && sameHex(resolvedFacetSetHash, event.facetSetHash);
   const status = deriveStatus(operationStatus, activeContext, eta, expiresAt, currentTime);
   return scheduleFromEvent(event, {
-    currentTime,
     currentBoardroomEpoch,
     currentConfigurationEpoch,
+    currentFacetSetHash: resolvedFacetSetHash,
     operationStatus,
     status,
     ...(payload.kind === "boardroomOperation"
@@ -502,11 +799,11 @@ async function hydrateScheduleEvent(
 }
 
 function scheduleFromEvent(
-  event: ScheduleEvent,
+  event: BoardroomScheduleEvent,
   state: {
-    currentTime: bigint;
     currentBoardroomEpoch: bigint;
     currentConfigurationEpoch: bigint;
+    currentFacetSetHash: Hex;
     operationStatus: number;
     status: ScheduledBoardroomOperationStatus;
     kind?: DecodedControllerScheduleInput["kind"];
@@ -520,6 +817,8 @@ function scheduleFromEvent(
     controller: event.controller,
     operationId: event.operationId,
     proposer: event.proposer,
+    facetSetHash: event.facetSetHash,
+    currentFacetSetHash: state.currentFacetSetHash,
     eta: event.eta,
     expiresAt: event.expiresAt,
     boardroomEpoch: event.boardroomEpoch,
@@ -566,8 +865,12 @@ function verifiedSchedulePayload(
   return decoded;
 }
 
-function verifyPayloadAgainstEvent(payload: DecodedControllerScheduleInput, event: ScheduleEvent): void {
-  if (!sameHex(payload.salt, event.salt)
+function verifyPayloadAgainstEvent(
+  payload: DecodedControllerScheduleInput,
+  event: BoardroomScheduleEvent,
+): void {
+  if (!sameHex(payload.expectedFacetSetHash, event.facetSetHash)
+    || !sameHex(payload.salt, event.salt)
     || payload.expectedBoardroomEpoch !== event.boardroomEpoch
     || payload.expectedConfigurationEpoch !== event.configurationEpoch) {
     throw new Error("Schedule calldata context does not match the emitted operation.");
@@ -614,7 +917,7 @@ function scheduleEventFromReceipt(
   candidate: ScheduledBoardroomOperationCandidate,
   payload: DecodedControllerScheduleInput,
   receipt: ScheduleReceipt,
-): ScheduleEvent {
+): BoardroomScheduleEvent {
   for (const log of receipt.logs) {
     if (!sameAddress(log.address, candidate.controller)) continue;
     try {
@@ -635,6 +938,7 @@ function scheduleEventFromReceipt(
         controller: candidate.controller,
         operationId,
         proposer: requireAddressArg(args, "proposer"),
+        facetSetHash: requireHexArg(args, "facetSetHash"),
         eta: requireBigintArg(args, "eta"),
         expiresAt: requireBigintArg(args, "expiresAt"),
         boardroomEpoch: requireBigintArg(args, "boardroomEpoch"),
@@ -655,8 +959,8 @@ function scheduleEventFromReceipt(
   throw new Error("Schedule receipt does not contain the matching controller event.");
 }
 
-function latestScheduleEvents(events: readonly GovernanceEvent[]): ScheduleEvent[] {
-  const latest = new Map<string, ScheduleEvent>();
+function latestScheduleEvents(events: readonly GovernanceEvent[]): BoardroomScheduleEvent[] {
+  const latest = new Map<string, BoardroomScheduleEvent>();
   for (const event of events) {
     if (event.kind !== "boardroomOperationScheduled" && event.kind !== "controllerOperationScheduled") continue;
     latest.set(`${event.controller.toLowerCase()}:${event.operationId.toLowerCase()}`, event);
@@ -725,7 +1029,11 @@ function toBoardroomEvent(log: RawEventLog): GovernanceEvent | undefined {
   }
 }
 
-function toControllerEvent(log: RawEventLog, boardroom: Address, controller: Address): GovernanceEvent | undefined {
+function toControllerEvent(
+  log: RawEventLog,
+  boardroom: Address,
+  controller: Address,
+): GovernanceEvent | undefined {
   const meta = logMeta({ ...log, address: boardroom });
   if (!meta || !log.args) return undefined;
   const args = log.args;
@@ -737,6 +1045,7 @@ function toControllerEvent(log: RawEventLog, boardroom: Address, controller: Add
         controller,
         operationId: requireHexArg(args, "operationId"),
         proposer: requireAddressArg(args, "proposer"),
+        facetSetHash: requireHexArg(args, "facetSetHash"),
         eta: requireBigintArg(args, "eta"),
         expiresAt: requireBigintArg(args, "expiresAt"),
         boardroomEpoch: requireBigintArg(args, "boardroomEpoch"),
@@ -752,6 +1061,7 @@ function toControllerEvent(log: RawEventLog, boardroom: Address, controller: Add
         controller,
         operationId: requireHexArg(args, "operationId"),
         proposer: requireAddressArg(args, "proposer"),
+        facetSetHash: requireHexArg(args, "facetSetHash"),
         eta: requireBigintArg(args, "eta"),
         expiresAt: requireBigintArg(args, "expiresAt"),
         boardroomEpoch: requireBigintArg(args, "boardroomEpoch"),
@@ -967,6 +1277,24 @@ function bigintValue(value: unknown): bigint | undefined {
 
 function hexValue(value: unknown): Hex | undefined {
   return typeof value === "string" && isHex(value) ? value as Hex : undefined;
+}
+
+function requireBytes32(name: string, value: Hex): Hex {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(value)) {
+    throw new Error(`${name} must be a 32-byte hex value.`);
+  }
+  return value;
+}
+
+function requireUint256(name: string, value: bigint): bigint {
+  if (value < 0n || value > (1n << 256n) - 1n) {
+    throw new Error(`${name} must be an unsigned 256-bit integer.`);
+  }
+  return value;
+}
+
+function isStrictHexBytes(value: unknown): value is Hex {
+  return typeof value === "string" && /^0x(?:[0-9a-fA-F]{2})*$/.test(value);
 }
 
 function uniqueAddresses(addresses: readonly Address[]): Address[] {

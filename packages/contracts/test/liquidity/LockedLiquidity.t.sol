@@ -8,7 +8,9 @@ import {WETH} from "solady/tokens/WETH.sol";
 import {AmmFactory} from "../../src/amm/AmmFactory.sol";
 import {AmmPool} from "../../src/amm/AmmPool.sol";
 import {AmmRouter} from "../../src/amm/AmmRouter.sol";
-import {Boardroom} from "../../src/boardroom/Boardroom.sol";
+import {IBoardroom} from "../../src/boardroom/IBoardroom.sol";
+import {BoardroomFacetBase} from "../../src/boardroom/diamond/BoardroomFacetBase.sol";
+import {BoardroomFacetTypes as Boardroom} from "../../src/boardroom/diamond/BoardroomFacetTypes.sol";
 import {BoardroomController} from "../../src/boardroom/BoardroomController.sol";
 import {BoardroomControllerFactory} from "../../src/boardroom/BoardroomControllerFactory.sol";
 import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
@@ -24,6 +26,7 @@ import {LockedLiquidity} from "../../src/liquidity/LockedLiquidity.sol";
 import {LockedLiquidityFactory} from "../../src/liquidity/LockedLiquidityFactory.sol";
 import {BoardroomRewards} from "../../src/rewards/BoardroomRewards.sol";
 import {BoardroomRewardsFactory} from "../../src/rewards/BoardroomRewardsFactory.sol";
+import {CanonicalBoardroomTestSetup} from "../helpers/CanonicalBoardroomTestSetup.sol";
 
 contract SingletonLiquidityToken is ERC20 {
     string internal tokenName;
@@ -67,7 +70,7 @@ contract HostileSingletonLiquidityToken is SingletonLiquidityToken {
     }
 }
 
-contract LockedLiquiditySingletonTest is Test {
+contract LockedLiquiditySingletonTest is CanonicalBoardroomTestSetup {
     struct Position {
         address locker;
         address pool;
@@ -96,12 +99,7 @@ contract LockedLiquiditySingletonTest is Test {
         wrappedNative = new WETH();
         policyRegistry = new BoardroomPolicyRegistry(address(this));
         assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
-        boardroomFactory = new BoardroomFactory(
-            address(policyRegistry),
-            address(wrappedNative),
-            address(new BoardroomRedemptionPayout()),
-            address(new BoardroomGovernanceLogic())
-        );
+        boardroomFactory = _deployCanonicalBoardroomFactory(policyRegistry, address(wrappedNative));
         ammFactory = new AmmFactory(address(this), address(boardroomFactory));
         router = new AmmRouter(address(ammFactory), address(wrappedNative));
         liquidityFactory = new LockedLiquidityFactory(address(router), address(boardroomFactory));
@@ -119,7 +117,7 @@ contract LockedLiquiditySingletonTest is Test {
     }
 
     function testCreatesOneCanonicalPositionAndPermanentIdentity() public {
-        (Boardroom boardroom, BoardroomToken shares) = _createBoardroom("singleton-create");
+        (IBoardroom boardroom, BoardroomToken shares) = _createBoardroom("singleton-create");
         Position memory created = _createPosition(boardroom, shares, address(quote), "singleton-create-position");
 
         (address locker, address pool, address quoteAsset, LockedLiquidityFactory.PositionStatus factoryStatus) =
@@ -145,12 +143,12 @@ contract LockedLiquiditySingletonTest is Test {
     }
 
     function testRepeatedAddsUseSameLockerAndPool() public {
-        (Boardroom boardroom, BoardroomToken shares) = _createBoardroom("singleton-add");
+        (IBoardroom boardroom, BoardroomToken shares) = _createBoardroom("singleton-add");
         Position memory created = _createPosition(boardroom, shares, address(quote), "singleton-add-position");
         uint256 beforeLiquidity = LockedLiquidity(created.locker).lockedLiquidity();
 
         vm.prank(owner);
-        boardroom.mint(address(boardroom), 200 ether);
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), 200 ether);
         quote.mint(address(boardroom), 200 ether);
         LockedLiquidityFactory.AddParams memory params = LockedLiquidityFactory.AddParams({
             tokenA: address(shares),
@@ -166,7 +164,7 @@ contract LockedLiquiditySingletonTest is Test {
         calls[1] = _approvalCall(address(quote), 200 ether);
         calls[2] = _factoryCall(abi.encodeCall(LockedLiquidityFactory.addLockedLiquidity, (params)));
         vm.prank(owner);
-        boardroom.executeBatch(calls);
+        boardroom.executeBatch(_expectedFacetSetHash(boardroom), calls);
 
         assertEq(boardroom.liquidityLocker(), created.locker);
         assertEq(boardroom.liquidityPool(), created.pool);
@@ -174,7 +172,7 @@ contract LockedLiquiditySingletonTest is Test {
     }
 
     function testZeroLpIsNotClosedAndExplicitCloseIsIrreversible() public {
-        (Boardroom boardroom, BoardroomToken shares) = _createBoardroom("singleton-close");
+        (IBoardroom boardroom, BoardroomToken shares) = _createBoardroom("singleton-close");
         Position memory created = _createPosition(boardroom, shares, address(quote), "singleton-close-position");
 
         _removePrelaunch(boardroom, created.liquidity);
@@ -184,7 +182,10 @@ contract LockedLiquiditySingletonTest is Test {
         assertTrue(boardroom.isLockedLiquidity(created.locker));
 
         vm.prank(owner);
-        boardroom.execute(_factoryCall(abi.encodeCall(LockedLiquidityFactory.closeLockedLiquidity, ())));
+        boardroom.execute(
+            _expectedFacetSetHash(boardroom),
+            _factoryCall(abi.encodeCall(LockedLiquidityFactory.closeLockedLiquidity, ()))
+        );
         assertTrue(LockedLiquidity(created.locker).isClosed());
         assertEq(uint8(boardroom.liquidityStatus()), uint8(BoardroomLiquidityStorage.Status.Closed));
         assertFalse(boardroom.isLockedLiquidity(created.locker));
@@ -193,26 +194,31 @@ contract LockedLiquiditySingletonTest is Test {
         assertEq(boardroom.liquidityPool(), created.pool);
 
         vm.prank(owner);
-        boardroom.mint(address(boardroom), SHARE_SEED);
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), SHARE_SEED);
         quote.mint(address(boardroom), QUOTE_SEED);
         vm.prank(owner);
         vm.expectRevert();
-        boardroom.executeBatch(_createCalls(shares, address(quote), keccak256("replacement-forbidden")));
+        boardroom.executeBatch(
+            _expectedFacetSetHash(boardroom), _createCalls(shares, address(quote), keccak256("replacement-forbidden"))
+        );
     }
 
     function testCloseRequiresEmptyPositionAndNoImplicitZeroClose() public {
-        (Boardroom boardroom, BoardroomToken shares) = _createBoardroom("empty-close");
+        (IBoardroom boardroom, BoardroomToken shares) = _createBoardroom("empty-close");
         Position memory created = _createPosition(boardroom, shares, address(quote), "empty-close-position");
 
         vm.prank(owner);
         vm.expectRevert();
-        boardroom.execute(_factoryCall(abi.encodeCall(LockedLiquidityFactory.closeLockedLiquidity, ())));
+        boardroom.execute(
+            _expectedFacetSetHash(boardroom),
+            _factoryCall(abi.encodeCall(LockedLiquidityFactory.closeLockedLiquidity, ()))
+        );
         assertEq(uint8(boardroom.liquidityStatus()), uint8(BoardroomLiquidityStorage.Status.Active));
         assertGt(LockedLiquidity(created.locker).lockedLiquidity(), 0);
     }
 
     function testPartialRemovalReturnsOnlyToBoardroom() public {
-        (Boardroom boardroom, BoardroomToken shares) = _createBoardroom("partial-remove");
+        (IBoardroom boardroom, BoardroomToken shares) = _createBoardroom("partial-remove");
         Position memory created = _createPosition(boardroom, shares, address(quote), "partial-remove-position");
         uint256 shareBefore = shares.balanceOf(address(boardroom));
         uint256 quoteBefore = quote.balanceOf(address(boardroom));
@@ -228,7 +234,7 @@ contract LockedLiquiditySingletonTest is Test {
     }
 
     function testAfterLaunchRemovalRequiresDelayedControllerGovernance() public {
-        (Boardroom boardroom, BoardroomToken shares) = _createBoardroom("launched-remove");
+        (IBoardroom boardroom, BoardroomToken shares) = _createBoardroom("launched-remove");
         Position memory created = _createPosition(boardroom, shares, address(quote), "launched-remove-position");
         BoardroomController controller = _launch(boardroom, shares, owner, holder);
 
@@ -244,43 +250,53 @@ contract LockedLiquiditySingletonTest is Test {
         });
 
         vm.prank(owner);
-        vm.expectRevert(Boardroom.BoardroomAlreadyLaunched.selector);
-        boardroom.execute(_factoryCall(calls[0].data));
+        vm.expectRevert(BoardroomFacetBase.BoardroomAlreadyLaunched.selector);
+        boardroom.execute(_expectedFacetSetHash(boardroom), _factoryCall(calls[0].data));
 
         vm.prank(owner);
-        (bytes32 operationId, uint256 eta) =
-            controller.scheduleBoardroomOperation(calls, keccak256("vetoed-remove"), 1, 1);
+        (bytes32 operationId, uint256 eta) = controller.scheduleBoardroomOperation(
+            _expectedFacetSetHash(boardroom), calls, keccak256("vetoed-remove"), 1, 1
+        );
         vm.expectRevert();
-        controller.executeBoardroomOperation(calls, keccak256("vetoed-remove"), 1, 1, owner);
+        controller.executeBoardroomOperation(
+            _expectedFacetSetHash(boardroom), calls, keccak256("vetoed-remove"), 1, 1, owner
+        );
 
         vm.prank(holder);
-        boardroom.veto(operationId);
+        boardroom.veto(_expectedFacetSetHash(boardroom), operationId);
         vm.warp(eta);
         vm.expectRevert(abi.encodeWithSelector(BoardroomController.OperationNotPending.selector, operationId));
-        controller.executeBoardroomOperation(calls, keccak256("vetoed-remove"), 1, 1, owner);
+        controller.executeBoardroomOperation(
+            _expectedFacetSetHash(boardroom), calls, keccak256("vetoed-remove"), 1, 1, owner
+        );
 
         vm.prank(owner);
-        (, uint256 replacementEta) = controller.scheduleBoardroomOperation(calls, keccak256("delayed-remove"), 1, 1);
+        (, uint256 replacementEta) = controller.scheduleBoardroomOperation(
+            _expectedFacetSetHash(boardroom), calls, keccak256("delayed-remove"), 1, 1
+        );
         vm.warp(replacementEta);
         vm.prank(executor);
-        controller.executeBoardroomOperation(calls, keccak256("delayed-remove"), 1, 1, owner);
+        controller.executeBoardroomOperation(
+            _expectedFacetSetHash(boardroom), calls, keccak256("delayed-remove"), 1, 1, owner
+        );
         assertEq(LockedLiquidity(created.locker).lockedLiquidity(), created.liquidity - created.liquidity / 2);
         assertGt(shares.balanceOf(address(boardroom)), 0);
         assertGt(quote.balanceOf(address(boardroom)), 0);
     }
 
     function testWindDownExitIsPermissionlessButSnapshotWaitsForExplicitClose() public {
-        (Boardroom boardroom, BoardroomToken shares) = _createBoardroom("winddown-exit");
+        (IBoardroom boardroom, BoardroomToken shares) = _createBoardroom("winddown-exit");
         Position memory created = _createPosition(boardroom, shares, address(quote), "winddown-exit-position");
         vm.prank(owner);
-        boardroom.startWindDown();
+        boardroom.startWindDown(_expectedFacetSetHash(boardroom));
 
         vm.warp(boardroom.windDownStartedAt() + boardroom.windDownDelay());
         vm.expectRevert(BoardroomRedemptionPayout.SnapshotNotReady.selector);
-        boardroom.beginSnapshot();
+        boardroom.beginSnapshot(_expectedFacetSetHash(boardroom));
 
         vm.prank(executor);
-        (uint256 amountA, uint256 amountB, uint256 liquidity) = boardroom.exitProtocolLiquidity(1, 1, block.timestamp);
+        (uint256 amountA, uint256 amountB, uint256 liquidity) =
+            boardroom.exitProtocolLiquidity(_expectedFacetSetHash(boardroom), 1, 1, block.timestamp);
         assertGt(amountA, 0);
         assertGt(amountB, 0);
         assertEq(liquidity, created.liquidity);
@@ -289,7 +305,7 @@ contract LockedLiquiditySingletonTest is Test {
 
         vm.prank(executor);
         vm.recordLogs();
-        boardroom.closeProtocolLiquidityAfterWindDown();
+        boardroom.closeProtocolLiquidityAfterWindDown(_expectedFacetSetHash(boardroom));
         Vm.Log[] memory closureLogs = vm.getRecordedLogs();
         bytes32 closureTopic = keccak256("ProtocolLiquidityPositionClosed(address,address,address)");
         bool factoryClosureEmitted;
@@ -307,45 +323,45 @@ contract LockedLiquiditySingletonTest is Test {
         (,,, LockedLiquidityFactory.PositionStatus factoryStatus) =
             liquidityFactory.positionOfBoardroom(address(boardroom));
         assertEq(uint8(factoryStatus), uint8(LockedLiquidityFactory.PositionStatus.Closed));
-        boardroom.beginSnapshot();
+        boardroom.beginSnapshot(_expectedFacetSetHash(boardroom));
         _snapshotAll(boardroom);
-        boardroom.openRedemptions();
+        boardroom.openRedemptions(_expectedFacetSetHash(boardroom));
         assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
     }
 
     function testHostileUnderlyingPreservesLpForPermissionlessFallback() public {
         HostileSingletonLiquidityToken hostile = new HostileSingletonLiquidityToken();
         assetPolicy.setAssetAllowed(address(hostile), true);
-        (Boardroom boardroom, BoardroomToken shares) = _createBoardroom("hostile-exit");
+        (IBoardroom boardroom, BoardroomToken shares) = _createBoardroom("hostile-exit");
         Position memory created = _createPosition(boardroom, shares, address(hostile), "hostile-exit-position");
         hostile.setBlockedSender(created.pool);
 
         vm.prank(owner);
-        boardroom.startWindDown();
+        boardroom.startWindDown(_expectedFacetSetHash(boardroom));
         vm.prank(executor);
         vm.expectRevert();
-        boardroom.exitProtocolLiquidity(0, 0, block.timestamp);
+        boardroom.exitProtocolLiquidity(_expectedFacetSetHash(boardroom), 0, 0, block.timestamp);
         assertEq(LockedLiquidity(created.locker).lockedLiquidity(), created.liquidity);
         assertEq(ERC20(created.pool).balanceOf(address(boardroom)), 0);
 
         vm.prank(executor);
-        assertEq(boardroom.returnProtocolLiquidityAsLp(), created.liquidity);
+        assertEq(boardroom.returnProtocolLiquidityAsLp(_expectedFacetSetHash(boardroom)), created.liquidity);
         assertEq(ERC20(created.pool).balanceOf(address(boardroom)), created.liquidity);
         vm.prank(executor);
-        boardroom.closeProtocolLiquidityAfterWindDown();
+        boardroom.closeProtocolLiquidityAfterWindDown(_expectedFacetSetHash(boardroom));
 
         vm.warp(boardroom.windDownStartedAt() + boardroom.windDownDelay());
-        boardroom.beginSnapshot();
+        boardroom.beginSnapshot(_expectedFacetSetHash(boardroom));
         _snapshotAll(boardroom);
         assertEq(
             uint8(boardroom.redeemableAssetSnapshotStatus(created.pool)),
             uint8(BoardroomAssetStorage.SnapshotStatus.Included)
         );
-        boardroom.openRedemptions();
+        boardroom.openRedemptions(_expectedFacetSetHash(boardroom));
     }
 
     function testDirectFactoryCallAndPairWithoutShareAreRejected() public {
-        (Boardroom boardroom, BoardroomToken shares) = _createBoardroom("factory-auth");
+        (IBoardroom boardroom, BoardroomToken shares) = _createBoardroom("factory-auth");
         quote.mint(address(this), QUOTE_SEED);
         SingletonLiquidityToken other = new SingletonLiquidityToken("Other", "OTHER", 18);
         other.mint(address(this), SHARE_SEED);
@@ -358,7 +374,7 @@ contract LockedLiquiditySingletonTest is Test {
         liquidityFactory.createLockedLiquidity(params);
 
         vm.prank(owner);
-        boardroom.mint(address(boardroom), SHARE_SEED);
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), SHARE_SEED);
         quote.mint(address(boardroom), QUOTE_SEED);
         other.mint(address(boardroom), SHARE_SEED);
         LockedLiquidityFactory.CreateParams memory bad =
@@ -369,7 +385,7 @@ contract LockedLiquiditySingletonTest is Test {
         calls[2] = _factoryCall(abi.encodeCall(LockedLiquidityFactory.createLockedLiquidity, (bad)));
         vm.prank(owner);
         vm.expectRevert();
-        boardroom.executeBatch(calls);
+        boardroom.executeBatch(_expectedFacetSetHash(boardroom), calls);
     }
 
     function testFactoryRejectsInvalidBoardroomFactory() public {
@@ -381,26 +397,26 @@ contract LockedLiquiditySingletonTest is Test {
         new LockedLiquidityFactory(address(router), address(0xBEEF));
     }
 
-    function _createBoardroom(string memory label) internal returns (Boardroom boardroom, BoardroomToken shares) {
-        boardroom = Boardroom(
-            payable(boardroomFactory.createBoardroom(owner, "Liquidity Common", "LIQ", keccak256(bytes(label))))
-        );
+    function _createBoardroom(string memory label) internal returns (IBoardroom boardroom, BoardroomToken shares) {
+        boardroom =
+            _createCanonicalBoardroom(boardroomFactory, owner, "Liquidity Common", "LIQ", keccak256(bytes(label)));
         shares = BoardroomToken(boardroom.shareToken());
         assetPolicy.setAssetAllowed(address(shares), true);
     }
 
-    function _createPosition(Boardroom boardroom, BoardroomToken shares, address quoteAsset, string memory label)
+    function _createPosition(IBoardroom boardroom, BoardroomToken shares, address quoteAsset, string memory label)
         internal
         returns (Position memory position)
     {
         vm.prank(owner);
-        boardroom.mint(address(boardroom), SHARE_SEED);
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), SHARE_SEED);
         SingletonLiquidityToken(quoteAsset).mint(address(boardroom), QUOTE_SEED);
         assetPolicy.setAssetAllowed(quoteAsset, true);
         bytes32 salt = keccak256(bytes(label));
         address predicted = liquidityFactory.predictLockedLiquidityAddress(address(boardroom), salt);
         vm.prank(owner);
-        bytes[] memory results = boardroom.executeBatch(_createCalls(shares, quoteAsset, salt));
+        bytes[] memory results =
+            boardroom.executeBatch(_expectedFacetSetHash(boardroom), _createCalls(shares, quoteAsset, salt));
         (position.locker, position.pool,,, position.liquidity) =
             abi.decode(results[2], (address, address, uint256, uint256, uint256));
         assertEq(position.locker, predicted);
@@ -436,22 +452,26 @@ contract LockedLiquiditySingletonTest is Test {
         });
     }
 
-    function _removePrelaunch(Boardroom boardroom, uint256 liquidity) internal {
+    function _removePrelaunch(IBoardroom boardroom, uint256 liquidity) internal {
         LockedLiquidityFactory.RemoveParams memory params = LockedLiquidityFactory.RemoveParams({
             liquidity: liquidity, amountAMin: 1, amountBMin: 1, deadline: block.timestamp
         });
         vm.prank(owner);
-        boardroom.execute(_factoryCall(abi.encodeCall(LockedLiquidityFactory.removeLockedLiquidity, (params))));
+        boardroom.execute(
+            _expectedFacetSetHash(boardroom),
+            _factoryCall(abi.encodeCall(LockedLiquidityFactory.removeLockedLiquidity, (params)))
+        );
     }
 
-    function _launch(Boardroom boardroom, BoardroomToken shares, address proposer, address protection)
+    function _launch(IBoardroom boardroom, BoardroomToken shares, address proposer, address protection)
         internal
         returns (BoardroomController controller)
     {
         vm.prank(owner);
-        boardroom.mint(protection, 100 ether);
+        boardroom.mint(_expectedFacetSetHash(boardroom), protection, 100 ether);
         vm.prank(owner);
         bytes memory output = boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             Boardroom.Call({
                 policy: address(rewardsFactory),
                 target: address(rewardsFactory),
@@ -478,16 +498,17 @@ contract LockedLiquiditySingletonTest is Test {
             generation: 1
         });
         vm.prank(owner);
-        boardroom.launch(config);
+        boardroom.launch(_expectedFacetSetHash(boardroom), config);
         assertEq(shares.balanceOf(protection), 100 ether);
         controller = BoardroomController(predicted);
     }
 
-    function _snapshotAll(Boardroom boardroom) internal {
+    function _snapshotAll(IBoardroom boardroom) internal {
         uint256 count = boardroom.redeemableAssetCount();
         for (uint256 cursor; cursor < count; cursor += boardroom.MAX_SNAPSHOT_PAGE()) {
             uint256 remaining = count - cursor;
             boardroom.snapshotAssets(
+                _expectedFacetSetHash(boardroom),
                 remaining > boardroom.MAX_SNAPSHOT_PAGE() ? boardroom.MAX_SNAPSHOT_PAGE() : remaining
             );
         }

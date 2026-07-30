@@ -31,6 +31,7 @@ const planId = "00000000-0000-4000-8000-000000000001";
 const subscriptionId = "00000000-0000-4000-8000-000000000002";
 const invoiceId = "00000000-0000-4000-8000-000000000003";
 const deadline = 4_102_444_800;
+const facetSetHash = `0x${"44".repeat(32)}` as Hex;
 
 const config: X402RouterConfig = {
   application: "api.pledge.cash/x402-router/v1/execute",
@@ -54,6 +55,7 @@ function view(): RecurringSupportSubscriptionView {
       status: "active",
       authority: boardroom,
       authorityMode: "launched_controller",
+      facetSetHash,
       createdAt: "2026-01-31T15:45:00.000Z",
     },
     subscription: {
@@ -123,6 +125,7 @@ function quote(
     recipient: payer,
     refundAddress: payer,
     supportInvoiceId: invoiceId,
+    facetSetHash,
     ...overrides,
   };
 }
@@ -136,6 +139,7 @@ describe("recurring support browser boundary", () => {
       invoiceId,
       kind: "recurring_support",
       maxSlippageBps: 0,
+      expectedFacetSetHash: facetSetHash,
       payer,
       recipient: payer,
       refundAddress: payer,
@@ -220,11 +224,12 @@ describe("recurring support browser boundary", () => {
     const serverNow = new Date();
     const expiresAt = new Date(serverNow.getTime() + 60_000).toISOString();
     const payload = {
-      version: 1,
+      version: 2,
       action: "subscribe",
       subscriptionId,
       planId,
       boardroom: boardroom.toLowerCase(),
+      facetSetHash: facetSetHash.toLowerCase(),
       payer: payer.toLowerCase(),
     };
     const canonicalPayload = Object.fromEntries(
@@ -242,6 +247,7 @@ describe("recurring support browser boundary", () => {
       `Actor: ${payer}`,
       "Chain ID: 998",
       `Boardroom: ${boardroom}`,
+      `Facet set hash: ${facetSetHash}`,
       `Plan ID: ${planId}`,
       `Payload hash: ${payloadHash}`,
       `Challenge ID: ${challengeId}`,
@@ -263,6 +269,7 @@ describe("recurring support browser boundary", () => {
             chainId: 998,
             challengeId,
             expiresAt,
+            facetSetHash,
             message,
             payload,
             payloadHash,
@@ -324,11 +331,12 @@ describe("recurring support browser boundary", () => {
       serverNow.getTime() + 5 * 60_000,
     ).toISOString();
     const payload = {
-      version: 1,
+      version: 2,
       action: "subscribe",
       subscriptionId,
       planId,
       boardroom: boardroom.toLowerCase(),
+      facetSetHash: facetSetHash.toLowerCase(),
       payer: payer.toLowerCase(),
     };
     const canonicalPayload = Object.fromEntries(
@@ -346,6 +354,7 @@ describe("recurring support browser boundary", () => {
       `Actor: ${payer}`,
       "Chain ID: 998",
       `Boardroom: ${boardroom}`,
+      `Facet set hash: ${facetSetHash}`,
       `Plan ID: ${planId}`,
       `Payload hash: ${payloadHash}`,
       `Challenge ID: ${challengeId}`,
@@ -368,6 +377,7 @@ describe("recurring support browser boundary", () => {
             chainId: 998,
             challengeId,
             expiresAt,
+            facetSetHash,
             message,
             payload,
             payloadHash,
@@ -419,6 +429,7 @@ describe("recurring support browser boundary", () => {
         chainId: 998,
         challengeId: "00000000-0000-4000-8000-000000000010",
         expiresAt: new Date(serverNow.getTime() + 60_000).toISOString(),
+        facetSetHash,
         message: "changed action",
         payload: {},
         payloadHash: `0x${"00".repeat(32)}`,

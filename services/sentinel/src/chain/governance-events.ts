@@ -51,6 +51,7 @@ export type GovernanceEvent =
       readonly configurationEpoch: bigint;
       readonly salt: Hex;
       readonly payloadHash: Hex;
+      readonly facetSetHash: Hex;
     })
   | (GovernanceEventMeta & {
       readonly kind: "operationCancelled";
@@ -292,6 +293,7 @@ function toControllerEvent(log: RawEventLog, boardroom: Address, controller: Add
         boardroomEpoch: bigintArg(args, "boardroomEpoch"),
         controllerGeneration: bigintArg(args, "controllerGeneration"),
         configurationEpoch: bigintArg(args, "configurationEpoch"),
+        facetSetHash: hexArg(args, "facetSetHash"),
         salt: hexArg(args, "salt"),
         payloadHash: hexArg(args, "callsHash")
       };
@@ -308,6 +310,7 @@ function toControllerEvent(log: RawEventLog, boardroom: Address, controller: Add
         boardroomEpoch: bigintArg(args, "boardroomEpoch"),
         controllerGeneration: bigintArg(args, "controllerGeneration"),
         configurationEpoch: bigintArg(args, "configurationEpoch"),
+        facetSetHash: hexArg(args, "facetSetHash"),
         salt: hexArg(args, "salt"),
         payloadHash: hexArg(args, "dataHash")
       };

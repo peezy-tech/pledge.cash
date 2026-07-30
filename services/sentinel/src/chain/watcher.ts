@@ -18,7 +18,7 @@ import {
 
 import {
   assetPolicyAbi,
-  boardroomControlReleaseSupport,
+  boardroomReleaseSupport,
   boardroomControllerAbi,
   boardroomPolicyRegistryAbi,
   discoverBoardrooms,
@@ -50,6 +50,7 @@ import {
   queryShareTransfers,
   type ShareBalanceDeltaInput
 } from "./holders";
+import { SUPPORTED_BOARDROOM_CONTROL_RELEASE } from "./boardroom-control";
 import {
   queryExternalGovernanceEvents,
   type GovernanceEvent
@@ -119,6 +120,7 @@ export type InsertScheduledOperationInput = {
   readonly boardroomEpoch: bigint;
   readonly eta: Date;
   readonly expiresAt: Date;
+  readonly facetSetHash: Lowercase<Hex>;
   readonly operationKind: "boardroom" | "controller";
   readonly proposer: Lowercase<Address>;
   readonly scheduleBlock: bigint;
@@ -282,6 +284,7 @@ const scheduleBoardroomOperationSelector = encodeFunctionData({
   abi: boardroomControllerAbi,
   functionName: "scheduleBoardroomOperation",
   args: [
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
     [],
     "0x0000000000000000000000000000000000000000000000000000000000000000",
     0n,
@@ -292,7 +295,13 @@ const scheduleBoardroomOperationSelector = encodeFunctionData({
 const scheduleControllerOperationSelector = encodeFunctionData({
   abi: boardroomControllerAbi,
   functionName: "scheduleControllerOperation",
-  args: ["0x", "0x0000000000000000000000000000000000000000000000000000000000000000", 0n, 0n]
+  args: [
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    0n,
+    0n
+  ]
 }).slice(0, 10) as Hex;
 
 const safeExecTransactionAbi = [
@@ -434,11 +443,16 @@ export async function runWatcherOnce(
   }
 
   const deployment = options.deployment ?? getPledgeCashDeployment(chainId);
-  const releaseSupport = boardroomControlReleaseSupport(deployment);
-  if (!releaseSupport.supported || !deployment?.boardroomFactory) {
+  const releaseSupport = boardroomReleaseSupport(deployment);
+  if (
+    !releaseSupport.supported ||
+    deployment?.protocolVersion !== SUPPORTED_BOARDROOM_CONTROL_RELEASE ||
+    !deployment.boardroomFactory
+  ) {
     return skippedResult(
       chainId,
-      releaseSupport.reason ?? `No supported boardroomFactory deployment is available for chain ${chainId}`
+      releaseSupport.reason ??
+        `No supported canonical Boardroom release is available for chain ${chainId}`
     );
   }
 
@@ -524,6 +538,7 @@ export function decodeScheduledOperationCalldata(input: {
   readonly controller: Address;
   readonly expectedBoardroomEpoch: bigint;
   readonly expectedConfigurationEpoch: bigint;
+  readonly expectedFacetSetHash: Hex;
   readonly expectedPayloadHash: Hex;
   readonly expectedSalt: Hex;
   readonly operationKind: "boardroom" | "controller";
@@ -536,6 +551,7 @@ export function decodeScheduledOperationCalldata(input: {
     const decoded = decodeScheduleCalldata(candidate);
     if (!decoded) continue;
     if (decoded.input.kind !== input.operationKind) continue;
+    if (lowerHex(decoded.facetSetHash) !== lowerHex(input.expectedFacetSetHash)) continue;
     if (lowerHex(decoded.salt) !== lowerHex(input.expectedSalt)) continue;
     if (decoded.boardroomEpoch !== input.expectedBoardroomEpoch) continue;
     if (decoded.configurationEpoch !== input.expectedConfigurationEpoch) continue;
@@ -558,6 +574,7 @@ function decodeScheduleCalldata(data: Hex):
   | {
       readonly boardroomEpoch: bigint;
       readonly configurationEpoch: bigint;
+      readonly facetSetHash: Hex;
       readonly input: DecodedScheduleInput;
       readonly payloadHash: Hex;
       readonly salt: Hex;
@@ -567,14 +584,22 @@ function decodeScheduleCalldata(data: Hex):
     const decoded = decodeFunctionData({ abi: boardroomControllerAbi, data });
     const args = decoded.args as readonly unknown[] | undefined;
     if (decoded.functionName === "scheduleBoardroomOperation") {
-      const calls = normalizeBoardroomCalls(args?.[0]);
-      const salt = hexValue(args?.[1]);
-      const boardroomEpoch = bigintValue(args?.[2]);
-      const configurationEpoch = bigintValue(args?.[3]);
-      if (!calls || !salt || boardroomEpoch === undefined || configurationEpoch === undefined) return undefined;
+      const facetSetHash = hexValue(args?.[0]);
+      const calls = normalizeBoardroomCalls(args?.[1]);
+      const salt = hexValue(args?.[2]);
+      const boardroomEpoch = bigintValue(args?.[3]);
+      const configurationEpoch = bigintValue(args?.[4]);
+      if (
+        !facetSetHash ||
+        !calls ||
+        !salt ||
+        boardroomEpoch === undefined ||
+        configurationEpoch === undefined
+      ) return undefined;
       return {
         boardroomEpoch,
         configurationEpoch,
+        facetSetHash,
         input: { kind: "boardroom", calls },
         payloadHash: keccak256(
           encodeAbiParameters(
@@ -597,14 +622,22 @@ function decodeScheduleCalldata(data: Hex):
       };
     }
     if (decoded.functionName === "scheduleControllerOperation") {
-      const selfData = hexValue(args?.[0]);
-      const salt = hexValue(args?.[1]);
-      const boardroomEpoch = bigintValue(args?.[2]);
-      const configurationEpoch = bigintValue(args?.[3]);
-      if (!selfData || !salt || boardroomEpoch === undefined || configurationEpoch === undefined) return undefined;
+      const facetSetHash = hexValue(args?.[0]);
+      const selfData = hexValue(args?.[1]);
+      const salt = hexValue(args?.[2]);
+      const boardroomEpoch = bigintValue(args?.[3]);
+      const configurationEpoch = bigintValue(args?.[4]);
+      if (
+        !facetSetHash ||
+        !selfData ||
+        !salt ||
+        boardroomEpoch === undefined ||
+        configurationEpoch === undefined
+      ) return undefined;
       return {
         boardroomEpoch,
         configurationEpoch,
+        facetSetHash,
         input: { kind: "controller", data: selfData },
         payloadHash: keccak256(selfData),
         salt
@@ -1075,6 +1108,7 @@ async function processGovernanceEvent(
       controller: event.controller,
       expectedBoardroomEpoch: event.boardroomEpoch,
       expectedConfigurationEpoch: event.configurationEpoch,
+      expectedFacetSetHash: event.facetSetHash,
       expectedPayloadHash: event.payloadHash,
       expectedSalt: event.salt,
       operationKind: event.operationKind,
@@ -1091,6 +1125,7 @@ async function processGovernanceEvent(
       boardroomEpoch: event.boardroomEpoch,
       eta: new Date(Number(event.eta) * 1000),
       expiresAt: new Date(Number(event.expiresAt) * 1000),
+      facetSetHash: lowerHex(event.facetSetHash),
       operationKind: event.operationKind,
       proposer: lowerAddress(event.proposer),
       scheduleBlock: event.blockNumber,
@@ -1322,6 +1357,7 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
           boardroomEpoch: input.boardroomEpoch,
           eta: input.eta,
           expiresAt: input.expiresAt,
+          facetSetHash: input.facetSetHash,
           operationKind: input.operationKind,
           proposer: input.proposer,
           scheduleBlock: input.scheduleBlock,

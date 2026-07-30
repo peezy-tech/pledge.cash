@@ -84,7 +84,10 @@ export async function readBoardroomCatalogSnapshot(
   };
 }
 
-type BoardroomSnapshotClient = PledgeCashReadClient & Partial<Pick<PublicClient, "getBlockNumber" | "getCode" | "getLogs">>;
+type BoardroomSnapshotClient =
+  & PledgeCashReadClient
+  & Pick<PublicClient, "getBlockNumber">
+  & Partial<Pick<PublicClient, "getCode" | "getLogs">>;
 
 export async function readBoardroomSnapshot(
   client: BoardroomSnapshotClient,

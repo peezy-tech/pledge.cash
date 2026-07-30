@@ -12,7 +12,7 @@ import { toFunctionSelector, type Abi, type AbiFunction, type Hex } from "viem";
 
 import type { Severity } from "../types";
 
-export const RULESET_VERSION = 6;
+export const RULESET_VERSION = 7;
 
 export type RiskRuleId =
   | "controller-configuration"
@@ -60,12 +60,13 @@ export const SELECTORS = {
     setAssetAllowed: selector(assetPolicyAbi, "setAssetAllowed", ["address", "bool"])
   },
   boardroom: {
-    beginSnapshot: selector(boardroomAbi, "beginSnapshot", []),
-    burnTreasuryShares: selector(boardroomAbi, "burnTreasuryShares", []),
-    mint: selector(boardroomAbi, "mint", ["address", "uint256"]),
-    openRedemptions: selector(boardroomAbi, "openRedemptions", []),
-    registerRedeemableAsset: selector(boardroomAbi, "registerRedeemableAsset", ["address"]),
+    beginSnapshot: selector(boardroomAbi, "beginSnapshot", ["bytes32"]),
+    burnTreasuryShares: selector(boardroomAbi, "burnTreasuryShares", ["bytes32"]),
+    mint: selector(boardroomAbi, "mint", ["bytes32", "address", "uint256"]),
+    openRedemptions: selector(boardroomAbi, "openRedemptions", ["bytes32"]),
+    registerRedeemableAsset: selector(boardroomAbi, "registerRedeemableAsset", ["bytes32", "address"]),
     replaceController: selector(boardroomAbi, "replaceController", [
+      "bytes32",
       "address",
       "address",
       "address",
@@ -73,8 +74,11 @@ export const SELECTORS = {
       "uint64",
       "uint64"
     ]),
-    setRedemptionExcessRecipient: selector(boardroomAbi, "setRedemptionExcessRecipient", ["address"]),
-    wrapNativeBalance: selector(boardroomAbi, "wrapNativeBalance", [])
+    setRedemptionExcessRecipient: selector(boardroomAbi, "setRedemptionExcessRecipient", [
+      "bytes32",
+      "address"
+    ]),
+    wrapNativeBalance: selector(boardroomAbi, "wrapNativeBalance", ["bytes32"])
   },
   controller: {
     updateConfiguration: selector(boardroomControllerAbi, "updateConfiguration", ["address", "uint64", "uint64"])

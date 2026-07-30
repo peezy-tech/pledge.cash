@@ -5,12 +5,12 @@ const manifests = [
   {
     path: "docs/design/boardroom-diamond-release-a.md",
     expected:
-      "0x42f9307e89ac60cc7fd7c2d98ec0064876f13c0ebfa64aee8fb272f03d600deb",
+      "0x49203191b8b3958946efa6e4da2562dc1a9af4c7a75855751c8abd05505025ab",
   },
   {
     path: "docs/design/boardroom-diamond-release-b.md",
     expected:
-      "0x480533d1aec981866c51057fe59217f34407bc3b3a2cd963921fcda33f43a5ff",
+      "0xe50a0e6d677c939d5767190157bb3955f3da8fe3ebb86400077e3a99ff659934",
   },
 ] as const;
 

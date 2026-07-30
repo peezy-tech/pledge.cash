@@ -9,9 +9,11 @@ Start with chain, deployment, address, wallet, and receipt. Most dangerous recov
 
 ## The app says the deployment is pending
 
-Monad testnet `10143` remains pending. HyperEVM testnet `998` has a verified v5 artifact, so a pending warning on
-HyperEVM means the client did not load the current artifact. Refresh the published app and confirm the selected chain,
-artifact source commit, and RPC before signing. Do not paste legacy addresses or override the warning.
+HyperEVM testnet `998` and Monad testnet `10143` are both pending because
+canonical protocol v1 has not been broadcast. The warning is expected:
+contract-dependent public workflows are unavailable. Do not paste historical
+addresses or override the gate. Use only a matching local Anvil artifact, or
+wait for a promoted target-testnet release.
 
 ## No browser wallet is detected
 

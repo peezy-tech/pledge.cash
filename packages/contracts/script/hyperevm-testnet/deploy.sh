@@ -135,6 +135,9 @@ if [[ "$BROADCAST" == "1" ]]; then
   ARTIFACT="$DEPLOYMENT_ARTIFACT_PATH" RECEIPTS="$DEPLOYMENT_RECEIPTS_PATH" \
     RPC_URL="$RPC_URL" REQUIRE_DEPLOYMENT=1 \
     script/hyperevm-testnet/verify-artifact.sh
-  mv "$DEPLOYMENT_RECEIPTS_PATH" deployments/998.receipts.json
-  mv "$DEPLOYMENT_ARTIFACT_PATH" deployments/998.json
+  echo "Verified candidate retained at $DEPLOYMENT_ARTIFACT_PATH"
+  echo "Receipt evidence retained at $DEPLOYMENT_RECEIPTS_PATH"
+  echo "Promotion to deployments/998.json is a separate, explicit release decision."
+else
+  script/hyperevm-testnet/verify-artifact.sh
 fi

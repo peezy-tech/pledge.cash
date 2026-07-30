@@ -12,6 +12,12 @@ import {
   type Hex,
   type PublicClient,
 } from "viem";
+import type { CanonicalMarketplaceDeployment } from "../quotes/canonical";
+import {
+  proveLiveFacetRelease,
+  requireSameBlock,
+  type PinnedFacetRelease,
+} from "../release";
 import {
   SUPPORT_CHAIN_ID,
   SupportError,
@@ -36,10 +42,9 @@ const erc1271Abi = [
 export class CanonicalSupportAuthorityReader implements SupportAuthorityReader {
   constructor(
     private readonly client: PublicClient,
-    private readonly deployment: {
-      boardroomFactory: Address;
-      destinationUsdc: Address;
-    },
+    private readonly deployment: CanonicalMarketplaceDeployment,
+    private readonly proveRelease: () => Promise<PinnedFacetRelease> =
+      () => proveLiveFacetRelease(client, deployment),
   ) {}
 
   async resolve(boardroomInput: Address): Promise<SupportAuthorityIdentity> {
@@ -52,14 +57,11 @@ export class CanonicalSupportAuthorityReader implements SupportAuthorityReader {
           503,
         );
       }
-      const block = await this.client.getBlock({ blockTag: "latest" });
-      if (block.number === null || block.hash === null) {
-        throw new SupportError(
-          "HyperEVM did not return a stable block identity.",
-          "support_chain_unavailable",
-          503,
-        );
-      }
+      const release = await this.proveRelease();
+      const block = {
+        number: release.blockNumber,
+        hash: release.blockHash,
+      };
       const boardroom = getAddress(boardroomInput);
       const [
         isBoardroom,
@@ -69,6 +71,10 @@ export class CanonicalSupportAuthorityReader implements SupportAuthorityReader {
         owner,
         controller,
         controllerGeneration,
+        facetSetHash,
+        appliedStorageVersion,
+        appliedStorageLayoutHash,
+        migrationRequired,
       ] = await Promise.all([
         this.client.readContract({
           address: this.deployment.boardroomFactory,
@@ -114,6 +120,30 @@ export class CanonicalSupportAuthorityReader implements SupportAuthorityReader {
           functionName: "controllerGeneration",
           blockNumber: block.number,
         }),
+        this.client.readContract({
+          address: boardroom,
+          abi: boardroomAbi,
+          functionName: "facetSetHash",
+          blockNumber: block.number,
+        }),
+        this.client.readContract({
+          address: boardroom,
+          abi: boardroomAbi,
+          functionName: "appliedStorageVersion",
+          blockNumber: block.number,
+        }),
+        this.client.readContract({
+          address: boardroom,
+          abi: boardroomAbi,
+          functionName: "appliedStorageLayoutHash",
+          blockNumber: block.number,
+        }),
+        this.client.readContract({
+          address: boardroom,
+          abi: boardroomAbi,
+          functionName: "migrationRequired",
+          blockNumber: block.number,
+        }),
       ]);
       if (!isBoardroom) {
         throw new SupportError(
@@ -132,6 +162,25 @@ export class CanonicalSupportAuthorityReader implements SupportAuthorityReader {
         throw new SupportError(
           "Configured HyperEVM USDC is not registered as a Boardroom treasury asset.",
           "support_asset_not_registered",
+          409,
+        );
+      }
+      if (migrationRequired) {
+        throw new SupportError(
+          "Recurring support is paused while the Boardroom requires migration.",
+          "boardroom_migration_required",
+          409,
+        );
+      }
+      if (
+        facetSetHash.toLowerCase() !== release.facetSetHash.toLowerCase() ||
+        BigInt(appliedStorageVersion) !== release.requiredStorageVersion ||
+        appliedStorageLayoutHash.toLowerCase()
+          !== release.requiredStorageLayoutHash.toLowerCase()
+      ) {
+        throw new SupportError(
+          "Recurring support is paused until this Boardroom applies the active facet release.",
+          "boardroom_migration_required",
           409,
         );
       }
@@ -190,7 +239,7 @@ export class CanonicalSupportAuthorityReader implements SupportAuthorityReader {
           409,
         );
       }
-      await this.requireBlock(block.number, block.hash);
+      await requireSameBlock(this.client, release);
       return {
         authority,
         blockHash: block.hash,
@@ -199,6 +248,7 @@ export class CanonicalSupportAuthorityReader implements SupportAuthorityReader {
         chainId: SUPPORT_CHAIN_ID,
         configurationEpoch,
         controllerGeneration: BigInt(controllerGeneration),
+        facetSetHash,
         mode,
         signer,
       };
@@ -345,5 +395,6 @@ function sameAuthority(
     && left.authority.toLowerCase() === right.authority.toLowerCase()
     && left.controllerGeneration === right.controllerGeneration
     && left.configurationEpoch === right.configurationEpoch
+    && left.facetSetHash.toLowerCase() === right.facetSetHash.toLowerCase()
   );
 }

@@ -26,6 +26,8 @@ const payer =
 const usdc =
   "0x4000000000000000000000000000000000000000" as Address;
 const blockHash = `0x${"11".repeat(32)}` as Hex;
+const facetSetHash = `0x${"77".repeat(32)}` as Hex;
+const nextFacetSetHash = `0x${"88".repeat(32)}` as Hex;
 const signature = "0x1234" as Hex;
 
 function identity(
@@ -39,6 +41,7 @@ function identity(
     chainId: 998,
     configurationEpoch: 1n,
     controllerGeneration: 1n,
+    facetSetHash,
     mode: "launched_controller",
     signer: payer,
     ...overrides,
@@ -93,6 +96,8 @@ function fixture() {
         expected.authority.toLowerCase()
           !== currentIdentity.authority.toLowerCase()
         || expected.configurationEpoch !== currentIdentity.configurationEpoch
+        || expected.facetSetHash.toLowerCase()
+          !== currentIdentity.facetSetHash.toLowerCase()
       ) {
         throw new Error("stale authority");
       }
@@ -117,12 +122,14 @@ function fixture() {
       invoiceId: string;
       kind: "recurring_support";
       payer: Address;
+      expectedFacetSetHash: Hex;
     }) {
       quoteCalls += 1;
       const quote = recurringQuote({
         id: `quote-${quoteCalls}`,
         invoiceId: request.invoiceId,
         amount: request.amount,
+        facetSetHash: request.expectedFacetSetHash,
         payer: request.payer,
       });
       quotes.set(quote.id, quote);
@@ -224,11 +231,17 @@ describe("RecurringSupportService", () => {
     expect(challenge.message).toContain(
       "Every contribution still requires a separate x402 payment signature.",
     );
+    expect(challenge.message).toContain(`Facet set hash: ${facetSetHash}`);
+    expect(challenge.payload).toMatchObject({
+      facetSetHash,
+      version: 2,
+    });
     const plan = await state.service.createPlan(challenge.id, signature);
     expect(plan).toMatchObject({
       amount: "10000000",
       asset: usdc,
       boardroom,
+      facetSetHash,
       status: "active",
       termsHash: challenge.payloadHash,
     });
@@ -290,6 +303,7 @@ describe("RecurringSupportService", () => {
     expect(first).toMatchObject({
       kind: "recurring_support",
       supportInvoiceId: invoice.id,
+      facetSetHash,
       boardroom,
       payer,
     });
@@ -330,6 +344,39 @@ describe("RecurringSupportService", () => {
       code: "support_quote_not_payable",
       status: 409,
     });
+  });
+
+  test("invalidates durable plans, schedules, and quotes when the facet set activates", async () => {
+    const state = fixture();
+    const challenge = await state.service.issuePlanChallenge({
+      amount: "10000000",
+      boardroom,
+      cadence: "monthly",
+      chainId: 998,
+      description: "Keep the project operating.",
+      title: "Core support",
+    });
+    const plan = await state.service.createPlan(challenge.id, signature);
+    const subscribe = await state.service.issueSubscriptionChallenge(
+      plan.id,
+      payer,
+    );
+    const view = await state.service.createSubscription(subscribe.id, signature);
+    if (!view.invoice) throw new Error("expected invoice");
+    const quote = await state.service.createInvoiceQuote(view.invoice.id);
+
+    state.setIdentity(identity({ facetSetHash: nextFacetSetHash }));
+
+    await expect(
+      state.service.createInvoiceQuote(view.invoice.id),
+    ).rejects.toMatchObject({
+      code: "support_authority_stale",
+      status: 409,
+    });
+    await expect(
+      state.service.assertQuotePayable(quote),
+    ).rejects.toThrow("stale authority");
+    expect(quote.facetSetHash).toBe(facetSetHash);
   });
 
   test("materializes only the current missed period and rejects historical payment", async () => {
@@ -667,6 +714,7 @@ function recurringQuote(input: {
   id: string;
   invoiceId: string;
   amount: string;
+  facetSetHash: Hex;
   payer: Address;
 }): MarketplaceQuote {
   return {
@@ -679,6 +727,7 @@ function recurringQuote(input: {
     refundAddress: input.payer,
     boardroom,
     canonicalTarget: boardroom,
+    facetSetHash: input.facetSetHash,
     supportInvoiceId: input.invoiceId,
     sourcePayment: {
       network: "hyperliquid:testnet",

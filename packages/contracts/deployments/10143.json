@@ -1,5 +1,6 @@
 {
   "chainId": 10143,
   "status": "pending",
-  "reason": "Boardroom-controller deterministic v5 deployment has not been broadcast yet"
+  "protocolVersion": "pledge.cash.protocol.v1",
+  "reason": "Canonical protocol v1 has not been broadcast to Monad testnet"
 }

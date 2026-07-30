@@ -1,115 +1,261 @@
 # Deployment
 
-This document covers the current contract deployment surface for TokenGrant, Boardroom, fixed-price sale, bond market,
-Merkle airdrop, migrating bonding curve, AMM, and locked-liquidity primitives.
+This document describes deployment of the sole canonical pledge.cash contract
+line, `pledge.cash.protocol.v1`. The canonical Boardroom is the
+registry-routed kernel/facet architecture described in
+[`design/boardroom-diamondization-spike.md`](design/boardroom-diamondization-spike.md).
+There is no parallel Boardroom deployment path in this unreleased repository.
 
-## Testnet Targets
+## Current network status
 
-| Network | Chain id | Default RPC | Wrapped native | Wrapper | Artifact status |
-| --- | ---: | --- | --- | --- | --- |
-| HyperEVM Testnet | `998` | `https://rpc.hyperliquid-testnet.xyz/evm` | `0x5555555555555555555555555555555555555555` | `packages/contracts/script/hyperevm-testnet/deploy.sh` | `998.json`: verified v5 deployment |
-| Monad Testnet | `10143` | `https://testnet-rpc.monad.xyz` | `0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541` | `packages/contracts/script/monad-testnet/deploy.sh` | `10143.json`: `pending` |
+| Network | Chain id | Default RPC | Wrapped native | Checked-in artifact |
+| --- | ---: | --- | --- | --- |
+| HyperEVM testnet | `998` | `https://rpc.hyperliquid-testnet.xyz/evm` | `0x5555555555555555555555555555555555555555` | `998.json`: **pending** |
+| Monad testnet | `10143` | `https://testnet-rpc.monad.xyz` | `0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541` | `10143.json`: **pending** |
+| Local Anvil | `31337` | `http://127.0.0.1:8547` | locally deployed | ignored local artifacts |
 
-Target support is not deployment evidence. The checked-in HyperEVM artifact records the deterministic v5 deployment
-from source commit `87f51633f437a0164d7a2a2503a3660b01a6450a`, discovery block `59850507`, live authorities and wiring,
-runtime code hashes, and an adjacent 29-transaction receipt manifest. Monad remains pending and its artifact contains
-only a chain id, `status`, and `reason`; do not treat Monad as a live pledge.cash deployment until its wrapper promotes a
-fully verified candidate artifact.
+Neither target testnet has a canonical protocol-v1 broadcast. Testnet
+deployment is the next operational step after the final local acceptance and
+review gates, but this repository state does not authorize or evidence that
+broadcast. Mainnet remains unsupported.
 
-### Live HyperEVM testnet staging
+An RPC responding with the expected chain id proves only network access. A
+target becomes usable only after a clean-source broadcast produces a verified
+candidate, an explicit release decision promotes it, and the checked-in
+artifact and receipt evidence agree with live code.
 
-The public testnet staging surfaces run from the checked-in HyperEVM deployment:
+## Canonical deployment graph
 
-- `https://pledge.cash` is the browser origin;
-- `https://api.pledge.cash/health` is the Sentinel health boundary;
-- `https://api.pledge.cash/health/live`, `/health/ready`, and `/v1/*` are the x402 router boundary; and
-- `https://rpcs.chain.link/hyperevm/testnet` is the staging RPC override. The Pages workflow verifies that it reports
-  chain id `998` before embedding it in the browser build.
+`Deploy.s.sol` deploys the complete protocol, publishes and activates
+Boardroom release A, configures module policies and fee routes, transfers the
+governed roots, and then attests the resulting graph. It deploys 21 protocol
+roots through `PledgeCashDeterministicDeployer`:
 
-On 2026-07-26, staging completed one funded fixed-price-sale canary through the production web client and public router.
-Order `e8722f79-11ef-49d0-a95e-1f7e03e900a3` settled 1 testnet USDC on HyperCore and executed transaction
-`0x7955c3773ee9ea341aa9897f5bbe059a6c11bbff3f604aa24a66e6425ecadf56` on HyperEVM. The purchaser received exactly
-one HCAN share, the Boardroom received exactly 1 native testnet USDC, and Sentinel indexed the resulting share balance.
-The minimized receipt and postcondition ledger is
-[`998-lifecycle.json`](../packages/contracts/deployments/998-lifecycle.json).
+- `ProtocolFacetRegistry`, `BoardroomKernel`, `BoardroomFactory`, the policy
+  registry, three immutable Boardroom helper roots, and the five release-A
+  facets;
+- asset policy and protocol fee router;
+- token-grant, AMM, distribution, locked-liquidity, rewards, and bond-market
+  roots.
 
-That ledger proves only the named funded path. It does not prove every protocol lifecycle, every maximum-gas path,
-production authority ceremonies, or mainnet readiness. Mainnet remains a NO-GO.
+The factory creates its bound controller factory and controller
+implementation. Child implementations created by module factories are also
+recorded and code-hash checked.
 
-The deploy script creates or reuses one `PledgeCashDeterministicDeployer`, then creates one
-`BoardroomPolicyRegistry`, one `AssetPolicy`, one `BoardroomGovernanceLogic`, one `BoardroomRedemptionPayout`, one
-`ProtocolFeeRouter`, one `BoardroomFactory`, one `TokenGrantFactory`, one `AmmFactory`, one `AmmRouter`, one
-`LockedLiquidityFactory`, one `DistributionFactory`, one `BoardroomRewardsFactory`, and one `BondMarketFactory`. The
-Boardroom governance and redemption helpers are deterministic roots deployed before the factory. The Boardroom factory
-then constructs exactly one bound `BoardroomControllerFactory`, controller implementation, market helper, and Boardroom
-implementation, and injects their immutable reciprocal references. The Boardroom factory is
-deployed before the token-grant and locked-liquidity factories because its address is an immutable provenance
-constructor argument for both. A wrapped-native address is required because every Boardroom stores the canonical
-wrapped native token and wraps raw native funds before wind-down redemptions.
+`PledgeCashDeploymentSalts` uses the
+`pledge.cash.protocol.v1` namespace. Each salt includes the root creation-code
+hash, and the deterministic deployer permanently commits the first accepted
+init-code hash for each salt. A bytecode or constructor-input change therefore
+cannot silently reuse a root address.
 
-Root protocol contracts are deployed through CREATE3 salts from `PledgeCashDeploymentSalts`. As long as the same
-`PledgeCashDeterministicDeployer` address is used on each chain, the root protocol addresses are the same even when
-constructor arguments differ by chain, such as the wrapped-native token. The deploy script can deploy the deterministic
-deployer through Foundry's default Arachnid CREATE2 factory (`0x4e59b44847b379578588920cA78FbF26c0B4956C`) or reuse an
-existing deployer from `PLEDGE_CASH_DETERMINISTIC_DEPLOYER`. The deterministic deployer owner is encoded in constructor
-arguments, so it cannot be captured by the first account to deploy the public salt. Use the same
-`PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER` on every chain that should share deterministic root addresses.
+## Release and authority boundary
 
-The Boardroom-controller root stack uses the `pledge.cash.deterministic.v5` namespace. The deterministic deployer itself
-keeps its original v1 salt because its bytecode and cross-chain address are unchanged. Each v5 root salt includes the
-hash of that root's creation bytecode, including any embedded implementation bytecode. A bytecode change therefore
-changes the salt mechanically rather than depending on an operator to remember a manual version bump. The artifact also
-records one aggregate `deterministicReleaseCodeHash` and each deployed runtime code hash. Constructor arguments remain
-outside the release salt and continue to affect the CREATE3 initialization transaction rather than the root address.
-The factory-created Boardroom implementation is not a separate CREATE3 root, but its address and runtime code hash are
-serialized and verified together with the controller factory, controller implementation, market helper, helper roots,
-and immutable reciprocal wiring.
+The broadcaster is a bootstrap operator. Before completing, the script
+transfers these owners to `PLEDGE_CASH_PROTOCOL_GOVERNANCE`:
 
-## Authority And Revenue Roles
+- `ProtocolFacetRegistry`;
+- `BoardroomPolicyRegistry`;
+- `AssetPolicy`;
+- `ProtocolFeeRouter`;
+- `TokenGrantFactory`;
+- `AmmFactory`.
 
-The broadcaster is a bootstrap operator, not the default long-term authority. `Deploy.s.sol` configures the complete
-stack and then transfers the registry, asset policy, protocol fee router, token-grant factory, and AMM factory to
-`PLEDGE_CASH_PROTOCOL_GOVERNANCE`. It independently configures:
+This is the genesis ceremony configuration, not a permanent owner pin.
+`protocolGovernance` records the configured genesis role, while
+`protocolFacetRegistryOwner` records the registry's owner observed during that
+deployment. A later valid Ownable handoff can make those addresses differ.
+Post-genesis release operations must approve and verify the registry's current
+live owner explicitly.
 
-- `PLEDGE_CASH_PROTOCOL_TREASURY` as `ProtocolFeeRouter.feeRecipient()`;
-- `PLEDGE_CASH_AMM_FEE_MANAGER` as the operational authority for bounded AMM excess recovery and synchronization;
-- `ProtocolFeeRouter` as both the token-grant creation-fee recipient and the AMM protocol-fee recipient;
-- `AmmRouter` as the only router allowed to consume a reserved initial-liquidity mint;
-- `LockedLiquidityFactory` as the only initial-liquidity reservation manager.
+`ProtocolFacetRegistry.owner()` can publish and atomically activate a complete
+Boardroom release. Activation immediately changes routing for every Boardroom,
+including Boardrooms in wind-down, snapshotting, or open redemption. A release
+that raises the required storage version blocks ordinary writes on each
+Boardroom until anyone successfully runs that release's pinned migration.
+Expected facet-set hashes prevent a transaction or authorization from silently
+executing under different logic; they do not reduce the registry owner's
+authority over Boardroom assets.
 
-Governance can rotate the treasury destination, AMM fee manager, and AMM protocol recipient after deployment. Protocol
-revenue is not coupled to a wind-downable project Boardroom or to factory ownership. The deterministic deployer remains
-owned by `PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER`; the current script requires that role to match the broadcaster so it
-can deploy or reuse roots safely.
+The other configured roles are:
 
-The registry allows `AssetPolicy` for external asset operations and permanently registers the token-grant,
-distribution, Boardroom-reward, bond-market, and locked-liquidity factories as module policies. Registration starts each module in `Active` status.
-Protocol governance may later set a policy to `LifecycleOnly` or `Disabled`; either status blocks new active calls, but
-permanent module identity and each obligation's canonical-policy binding preserve its approved cleanup calls. A disabled
-module therefore cannot become an untracked raw-call target. Each factory authorizes its own calls and reports any
-created Boardroom obligation for redemption accounting. `AmmRouter` is deployed for user and protocol flows but is not
-a deployment-default Boardroom policy. The deploy script also registers the token-grant, distribution, Boardroom-reward,
-bond-market, and locked-liquidity factories as allowed approval spenders in `AssetPolicy`. Boardroom-created share tokens and other
-project-specific assets still need protocol-governance registration in `AssetPolicy` before a Boardroom can approve them
-through that policy.
+- `PLEDGE_CASH_PROTOCOL_TREASURY`, the recipient behind
+  `ProtocolFeeRouter`;
+- `PLEDGE_CASH_AMM_FEE_MANAGER`, the bounded AMM operational authority;
+- `PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER`, which must be the broadcaster
+  for the current deployment flow.
 
-The checked-in testnet artifacts may model subsystems independently while deployment history is being rebuilt. If an
-existing artifact predates a current subsystem, mark that subsystem pending instead of keeping stale partial fields. A
-current TokenGrant deployment is no longer independent of Boardroom provenance: every artifact containing
-`tokenGrantFactory` must also contain the canonical `boardroomFactory` embedded in that factory. Other missing Boardroom
-or distribution fields may remain pending until a full stack broadcast replaces the artifact. A v5 artifact is current
-only when it includes the authority, wiring, release-hash, and per-contract runtime-codehash attestations described
-below.
+These roles may share an address in a disposable local proof. A testnet
+ceremony should choose and record them deliberately before broadcasting.
+
+## Post-genesis Boardroom releases
+
+`Deploy.s.sol` owns genesis only: it deploys the protocol and publishes and
+activates release 1. Every later `ProtocolFacetRegistry` release uses the
+generic operator under
+`packages/contracts/script/registry-release/`. It does not modify the
+deterministic deployment graph or any root deployment artifact.
+
+The operator accepts one complete canonical JSON manifest:
+
+```json
+{
+  "schemaVersion": 1,
+  "release": 2,
+  "requiredStorageVersion": 2,
+  "predecessorFacetSetHash": "0x...",
+  "storageLayoutHash": "0x...",
+  "manifestHash": "0x...",
+  "routes": [
+    {
+      "selector": "0x12345678",
+      "facet": "0x...",
+      "codeHash": "0x...",
+      "kind": "View"
+    }
+  ],
+  "migrationFacet": "0x...",
+  "migrationSelector": "0x..."
+}
+```
+
+`manifestHash` commits the reviewed human release specification; it is not a
+hash invented by the operator. Routes must be the complete selector table,
+strictly ascending by selector, with exact `View`, `Mutating`, or `Migration`
+kinds. A no-migration release uses a zero migration facet and selector. A
+storage-version increase must name exactly one matching migration route. Every
+migration-bearing release uses the permanent
+`migrateBoardroom(bytes32)` selector (`0x6f774fc9`); only its facet
+implementation changes between releases.
+`routes: []` is a valid complete emergency release only while the active
+release lineage has never introduced a migration route. Activating it removes
+every routed selector, so Boardroom facet calls—including views—become
+unavailable while kernel introspection and native receipt remain. Once a
+migration route exists, every successor must retain one so Boardrooms that
+have not yet migrated cannot be stranded; the equivalent emergency release
+therefore keeps only a migration route. Recovery always requires publishing
+and activating a higher-numbered release; an older release cannot be
+reactivated.
+
+Before simulating any registry call, the operator independently parses the
+manifest and checks:
+
+- exact JSON fields, integer bounds, selector order and uniqueness, route
+  kinds, and migration shape;
+- RPC chain id, registry address and runtime code hash, owner, and active
+  predecessor hash;
+- monotonic release/storage versions and storage-layout continuity;
+- every facet's live code and runtime code hash, and every kernel-reserved
+  selector;
+- the registry-computed facet-set hash against an independently supplied
+  expected new hash.
+
+The generic lane requires these explicit values:
+
+```sh
+RPC_URL=https://...
+EXPECTED_CHAIN_ID=...
+PROTOCOL_FACET_REGISTRY=0x...
+EXPECTED_REGISTRY_CODE_HASH=0x...
+EXPECTED_REGISTRY_OWNER=0x...
+EXPECTED_CURRENT_FACET_SET_HASH=0x...
+EXPECTED_NEW_FACET_SET_HASH=0x...
+```
+
+Do not derive the two expected facet-set hashes during an authorization
+ceremony. They are independent operator inputs approved with the release
+manifest. Simulations require no private key. A broadcast additionally
+requires `REGISTRY_RELEASE_PRIVATE_KEY`, and the operator verifies immediately
+before sending that it derives `EXPECTED_REGISTRY_OWNER`. That live
+`protocolFacetRegistryOwner` is intentionally distinct from the deployment's
+historical `protocolGovernance` field.
+
+Publication and activation are deliberately separate. Both commands simulate
+and send no transaction by default:
+
+```sh
+cd packages/contracts
+script/registry-release/operator.sh preflight /absolute/path/release.json
+script/registry-release/operator.sh publish /absolute/path/release.json
+script/registry-release/operator.sh activate /absolute/path/release.json
+```
+
+Broadcast requires both `BROADCAST=1` and an action-and-hash confirmation:
+
+```sh
+BROADCAST=1 \
+CONFIRM_RELEASE_BROADCAST="publish:$EXPECTED_NEW_FACET_SET_HASH" \
+script/registry-release/operator.sh publish /absolute/path/release.json
+
+# Re-review the live published inventory before this separate decision.
+BROADCAST=1 \
+CONFIRM_RELEASE_BROADCAST="activate:$EXPECTED_NEW_FACET_SET_HASH" \
+script/registry-release/operator.sh activate /absolute/path/release.json
+```
+
+`verify-published` checks the immutable stored metadata, ordered selector
+array, and every stored route before activation. `verify-active` checks those
+same commitments plus the active table after activation. Activation changes
+all Boardroom routing immediately. When the storage version increases, normal
+writes remain unavailable on each Boardroom until its permissionless migration
+succeeds.
+
+The target wrappers load their chain-specific environment, pin chain id, and
+refuse any dirty source worktree:
+
+```sh
+script/hyperevm-testnet/registry-release.sh preflight /absolute/path/release.json
+script/monad-testnet/registry-release.sh preflight /absolute/path/release.json
+```
+
+Their target-specific variables are
+`HYPEREVM_TESTNET_{PROTOCOL_FACET_REGISTRY,REGISTRY_CODE_HASH,REGISTRY_OWNER,CURRENT_FACET_SET_HASH,NEW_FACET_SET_HASH,REGISTRY_RELEASE_PRIVATE_KEY}`
+and the equivalent `MONAD_TESTNET_...` names. Common generic names remain
+available as explicit fallbacks. HyperEVM sends legacy transactions only after
+the same broadcast confirmation gate.
+
+The active live inventory can be verified without a manifest or mutation:
+
+```sh
+EXPECTED_ACTIVE_FACET_SET_HASH=0x... \
+script/registry-release/export-active.sh verify
+```
+
+The `export` action additionally requires
+`RELEASE_INVENTORY_OUTPUT=deployments/releases/<chain>-<release>-<hash>.json`.
+It records the verification block, registry/owner/release metadata, complete
+ordered routes, committed code hashes, and independently read live runtime
+hashes. Every state and bytecode read is pinned to the exported block number
+and hash, and a block-hash change before completion invalidates the export.
+The exporter reconstructs `facetSetHash` from that pinned inventory and
+requires `facets`, `facetAddresses`, every `facetFunctionSelectors`, and every
+`facetAddress` result to match the grouped routes exactly, including empty
+arrays for a zero-selector release.
+The exported `protocolFacetRegistryOwner` is live state at that pinned block,
+not an assertion that the genesis owner remains unchanged.
+Output is restricted to `deployments/releases/`; the script cannot
+rewrite `deployments/<chain>.json`, candidate artifacts, or receipt ledgers.
+Existing inventory files also require an explicit hash-bound overwrite
+confirmation.
+
+The disposable end-to-end proof starts its own Anvil instance, deploys a
+no-migration release 1, proves that default publication and activation
+simulations make no state change, performs confirmed local broadcasts, and
+verifies the exported live inventory. It then activates an authentic empty
+complete release on that no-migration lineage and verifies the zero-selector
+active inventory:
+
+```sh
+cd packages/contracts
+test/registry-release/operator-local-anvil.sh
+```
+
+This lane supplies operational safeguards and local evidence. It does not
+remove the independent review, governance ceremony, audit, target-chain
+simulation, and production-acceptance gates.
 
 ## Environment
 
-Start from `.env.example`. Each wrapper requires its matching funded deployment key for both dry-run simulation and broadcast because it derives and verifies the deployer before running Foundry:
-
-```sh
-cp .env.example .env
-```
-
-Required for dry runs and broadcasts:
+Start from `.env.example` and provide:
 
 ```sh
 PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER=0x...
@@ -118,70 +264,38 @@ PLEDGE_CASH_PROTOCOL_TREASURY=0x...
 PLEDGE_CASH_AMM_FEE_MANAGER=0x...
 ```
 
-Required for the HyperEVM wrapper, including dry runs:
+HyperEVM dry runs and broadcasts also require:
 
 ```sh
 HYPEREVM_TESTNET_PRIVATE_KEY=...
 HYPEREVM_WRAPPED_NATIVE_ADDRESS=0x5555555555555555555555555555555555555555
 ```
 
-Required for the Monad wrapper, including dry runs:
+Monad dry runs and broadcasts require:
 
 ```sh
 MONAD_TESTNET_PRIVATE_KEY=...
 ```
 
-Monad uses its canonical WMON default unless `MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS` is set.
-
-Optional:
+Optional overrides include:
 
 ```sh
 HYPEREVM_TESTNET_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
 MONAD_TESTNET_RPC_URL=https://testnet-rpc.monad.xyz
 MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS=0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541
-TOKEN_GRANT_CREATION_FEE_WEI=100000000000000000
-HYPEREVM_GAS_PRICE_WEI=
-HYPEREVM_GAS_ESTIMATE_MULTIPLIER=100
-MONAD_GAS_ESTIMATE_MULTIPLIER=100
+TOKEN_GRANT_CREATION_FEE_WEI=0
 CREATE2_FACTORY_ADDRESS=0x4e59b44847b379578588920cA78FbF26c0B4956C
-PLEDGE_CASH_DETERMINISTIC_DEPLOYER=
+PLEDGE_CASH_DETERMINISTIC_DEPLOYER=0x...
 ```
 
-`TOKEN_GRANT_CREATION_FEE_WEI` is the preferred variable. `GRANT_CREATION_FEE_WEI` remains supported by the Foundry
-script as a legacy fallback.
-`WRAPPED_NATIVE_ADDRESS` remains supported as a legacy HyperEVM fallback. The Monad wrapper uses
-`MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS` or the canonical WMON default so an older HyperEVM env cannot leak into Monad.
-Both testnet wrappers default their gas estimate multipliers to `100`. Monad charges the full transaction gas limit
-rather than post-execution gas used, and the HyperEVM deployment has transactions that must fit large-block limits.
+Each wrapper checks its RPC chain id, derives the broadcaster from the private
+key, requires that address to equal the deterministic-deployer owner, and
+refuses a dirty source worktree.
 
-For Monad broadcasts, install Monad Foundry before running the wrapper:
+## Dry-run simulation
 
-```sh
-foundryup --network monad
-```
-
-For HyperEVM broadcasts, route the deployment account to big blocks before deploying because several root-contract
-transactions exceed the small-block `2M` gas limit. HyperEVM big blocks are slower, so a full broadcast can take many
-minutes. Switch back to small blocks after the deployment:
-
-```sh
-npx -y @layerzerolabs/hyperliquid-composer set-block --size big --network testnet --ci --private-key "$HYPEREVM_TESTNET_PRIVATE_KEY"
-bun run deploy:hyperevm-testnet
-npx -y @layerzerolabs/hyperliquid-composer set-block --size small --network testnet --ci --private-key "$HYPEREVM_TESTNET_PRIVATE_KEY"
-```
-
-`CREATE2_FACTORY_ADDRESS` must name the same CREATE2 factory on every deterministic target chain. If a chain does not
-already have the factory deployed, bootstrap or select that factory before broadcasting.
-`PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER` must name the same owner on every chain that should share root addresses, and
-the current script requires it to match the broadcaster. Set `PLEDGE_CASH_DETERMINISTIC_DEPLOYER` only when a
-pledge.cash deterministic deployer already exists at the intended cross-chain address and its owner matches
-`PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER`.
-
-The three explicit protocol roles may use one development address locally, but production-like deployments should use
-durable, deliberately chosen accounts. In particular, do not use a project Boardroom as the canonical governance,
-treasury, or AMM operations role merely because the broadcaster controls it.
-
-## Dry Run
+Dry runs send no target-chain transaction and do not rewrite deployment
+artifacts:
 
 ```sh
 bun run simulate:hyperevm-testnet
@@ -189,257 +303,93 @@ bun run simulate:monad-testnet
 bun run simulate:testnets
 ```
 
-Each wrapper refuses RPCs that do not report the expected chain id. Dry runs set `WRITE_DEPLOYMENT_STATE=false`, so local
-artifacts are not rewritten. Dry runs still require the deployment private key so the simulated broadcaster matches
-`PLEDGE_CASH_DETERMINISTIC_DEPLOYER_OWNER`.
+A successful simulation is useful deployment evidence, but it is not proof
+that a target chain contains the protocol.
 
-## Broadcast
+## Testnet broadcast and candidate handling
+
+The following commands are state-changing and require deliberate operator
+authorization:
 
 ```sh
 bun run deploy:hyperevm-testnet
 bun run deploy:monad-testnet
-bun run deploy:testnets
 ```
 
-Broadcasts require the chain-specific private key or `PRIVATE_KEY`. The wrappers copy the chain-specific key into
-`PRIVATE_KEY` for Foundry and refuse a dirty source worktree. The Foundry script first writes a chain-specific
-`.candidate.json` artifact. The wrapper derives the first deployment block from Foundry's successful receipts, records
-the exact 40-character source commit, and writes a minimized `.receipts.candidate.json` evidence file without raw signed
-transactions. It then verifies every receipt against the live RPC together with all wiring, owners, policy state,
-locally reproduced release bytecode identity, and runtime code hashes. Both candidates are promoted to the checked-in
-artifact and receipt paths only if every check succeeds; failed verification never overwrites the last published
-evidence.
+After a broadcast, the wrapper:
 
-## Artifact Checks
+1. writes `<chain-id>.candidate.json`;
+2. derives the inclusive discovery block and minimized successful-receipt
+   ledger from Foundry's broadcast record;
+3. attaches the exact 40-character source commit;
+4. verifies deterministic provenance, code hashes, registry release metadata,
+   all 97 release-A routes, ownership, immutable wiring, policy state, and fee
+   routing against the live RPC;
+5. retains the verified candidate and
+   `<chain-id>.receipts.candidate.json`.
 
-After a broadcast, verify each chain artifact contains:
+Verification does **not** overwrite `<chain-id>.json`. Promotion is a separate
+release decision so a successful deployment command cannot silently replace
+the repository's supported identity.
 
-- `chainId`
-- `sourceCommit`
-- `deploymentBlock`
-- `deployer`
-- `deterministicDeployment`
-- `deterministicDeploymentVersion`
-- `deterministicReleaseCodeHash`
-- `create2Factory`
-- `deterministicDeployer`
-- `deterministicDeployerOwner`
-- `boardroomPolicyRegistry`
-- `assetPolicy`
-- `protocolFeeRouter`
-- `boardroomFactory`
-- `boardroomGovernanceLogic`
-- `boardroomRedemptionPayout`
-- `boardroomLogic`
-- `distributionFactory`
-- `fixedPriceSaleLogic`
-- `dutchAuctionLogic`
-- `migratingBondingCurveLogic`
-- `merkleAirdropLogic`
-- `boardroomRewardsFactory`
-- `boardroomRewardsLogic`
-- `bondMarketFactory`
-- `bondMarketLogic`
-- `ammFactory`
-- `ammPoolImplementation`
-- `wrappedNative`
-- `ammRouter`
-- `lockedLiquidityFactory`
-- `lockedLiquidityLogic`
-- `protocolGovernance`
-- `protocolTreasury`
-- `policyRegistryOwner`
-- `assetPolicyOwner`
-- `protocolFeeRouterOwner`
-- `protocolFeeRouterRecipient`
-- `ammFactoryOwner`
-- `ammFeeManager`
-- `ammProtocolFeeRecipient`
-- `ammLiquidityRouter`
-- `ammReservationManager`
-- `assetPolicyAllowed`
-- `tokenGrantPolicyAllowed`
-- `tokenGrantModulePolicy`
-- `distributionPolicyAllowed`
-- `distributionModulePolicy`
-- `boardroomRewardsPolicyAllowed`
-- `boardroomRewardsModulePolicy`
-- `bondMarketPolicyAllowed`
-- `bondMarketModulePolicy`
-- `lockedLiquidityPolicyAllowed`
-- `lockedLiquidityModulePolicy`
-- `assetWrappedNativeAllowed`
-- `assetTokenGrantSpenderAllowed`
-- `assetDistributionSpenderAllowed`
-- `assetBoardroomRewardsSpenderAllowed`
-- `assetBondMarketSpenderAllowed`
-- `assetLockedLiquiditySpenderAllowed`
-- `factoryOwner`
-- `tokenGrantFeeRecipient`
-- `tokenGrantFactory`
-- `tokenGrantLogic`
-- `creationFee`
-- `deploymentTimestamp`
-- `deterministicDeployerCodeHash`
-- `boardroomPolicyRegistryCodeHash`
-- `assetPolicyCodeHash`
-- `protocolFeeRouterCodeHash`
-- `boardroomFactoryCodeHash`
-- `boardroomGovernanceLogicCodeHash`
-- `boardroomRedemptionPayoutCodeHash`
-- `boardroomLogicCodeHash`
-- `tokenGrantFactoryCodeHash`
-- `tokenGrantLogicCodeHash`
-- `ammFactoryCodeHash`
-- `ammPoolImplementationCodeHash`
-- `ammRouterCodeHash`
-- `lockedLiquidityFactoryCodeHash`
-- `lockedLiquidityLogicCodeHash`
-- `distributionFactoryCodeHash`
-- `fixedPriceSaleLogicCodeHash`
-- `dutchAuctionLogicCodeHash`
-- `migratingBondingCurveLogicCodeHash`
-- `merkleAirdropLogicCodeHash`
-- `boardroomRewardsFactoryCodeHash`
-- `boardroomRewardsLogicCodeHash`
-- `bondMarketFactoryCodeHash`
-- `bondMarketLogicCodeHash`
-- `wrappedNativeCodeHash`
+Candidate verification runs with `REQUIRE_DEPLOYMENT=1`. In that mode the
+registry owner and active release must still equal the artifact's genesis
+ceremony state, so a candidate cannot pass after an intervening ownership
+handoff or release activation.
 
-The adjacent `<chain-id>.receipts.json` manifest must identify the same chain and source commit, contain at least one
-successful transaction, and place its earliest live receipt at `deploymentBlock`. The deployment block is an inclusive
-discovery boundary: Sentinel begins its first log query at that block so events cannot be lost at the boundary.
+HyperEVM may require the deployment account to use big blocks during the
+broadcast. Monad uses its network-specific Foundry toolchain. Those operational
+preconditions must be rehearsed again before the first testnet transaction;
+the current pending artifacts do not prove them.
 
-The five `*ModulePolicy` identity fields must be `true`. Unlike the corresponding mutable `*PolicyAllowed` status,
-module identity is permanent and remains true if an operator later disables new calls to that module.
+## Artifact acceptance
 
-`TokenGrantFactory.boardroomFactory()` is an immutable provenance link and must equal the artifact's `boardroomFactory`.
-The fee-exempt distribution-grant path accepts issuers only when that canonical factory reports them as deployed
-Boardrooms; artifact verification checks the link directly to prevent a miswired deployment.
+A promoted protocol-v1 artifact must bind at least:
 
-`BoardroomFactory` must point to the artifact's governance helper, redemption helper, and Boardroom implementation.
-That implementation must point back to the same two helpers, and both `AmmFactory.boardroomFactory()` and
-`LockedLiquidityFactory.boardroomFactory()` must equal the same canonical factory. The verifier checks each link against
-live contract state. The AMM link makes the factory's canonical share-token registry authoritative for protected first
-liquidity.
+- `chainId`, `protocolVersion`, exact `sourceCommit`, `deploymentBlock`, and
+  `deploymentTimestamp`;
+- CREATE2 factory, deterministic deployer, its owner, deterministic release
+  code hash, and all deterministic root addresses;
+- `protocolFacetRegistry`, `boardroomKernel`, `boardroomFactory`, controller
+  factory/implementation, helper roots, five facet addresses, and their runtime
+  code hashes;
+- `activeFacetSetHash`, release number, required storage version/layout,
+  manifest hash, kernel-selector-set hash, and selector count;
+- every module factory/implementation, wrapped-native token, fee routes, and
+  runtime code hash;
+- explicit governed-root owners, protocol governance, treasury, and AMM fee
+  manager.
 
-The verifier also requires `TokenGrantFactory.feeRecipient()` and `AmmFactory.protocolFeeRecipient()` to equal the
-artifact's `protocolFeeRouter`, requires that router's destination to equal `protocolTreasury`, and requires the AMM
-liquidity router and reservation manager to equal `AmmRouter` and `LockedLiquidityFactory` respectively. Every serialized
-runtime code hash is recomputed from live bytecode. Factory child implementations for grants, pools, locked liquidity,
-fixed-price sales, Dutch auctions, migrating curves, Merkle airdrops, rewards, bonds, and Boardroom control are serialized,
-wiring-checked, and code-hash checked. The aggregate deterministic release code hash is independently reproduced from
-the locally compiled creation bytecode before artifact promotion.
+The verifier independently reconstructs release A from locally compiled
+facets, checks the canonical kernel-reserved selector set, and proves that the
+artifact's complete genesis release remains published immutably. Routine
+verification does not require release A to remain active or the recorded
+genesis registry owner to remain current. Instead, it reads a nonzero current
+owner and authenticates the live active release at one pinned block: complete
+metadata and ordered routes, runtime facet code hashes, migration shape,
+independent facet-set-hash reconstruction, the registry's own hash
+reconstruction, and the exact `facetAddress`, `facetAddresses`,
+`facetFunctionSelectors`, and `facets` loupe inventory. It accepts a valid
+empty active release and rejects a block-hash change before verification
+finishes. Reciprocal factory and module bindings remain checked against the
+immutable deployment artifact.
 
-For a partial artifact, keep the deployed subsystem fields and add the relevant pending status/reason fields for the
-missing subsystem.
+The adjacent receipt ledger must identify the same chain and source commit,
+contain only successful transactions, and use the earliest receipt block as
+the inclusive discovery boundary. A partial or failed candidate remains
+unsupported.
 
-The deterministic local proof for the deployment code is:
+## Local protocol deployment
 
-```sh
-bun --cwd packages/contracts build
-bun --cwd packages/contracts test
-cd packages/contracts && forge fmt --check
-```
-
-## Web Network Selection
-
-The web app can switch between the checked-in HyperEVM testnet, Monad testnet, and a local Anvil profile at runtime.
-The selected chain is stored in browser local storage and can also be opened directly with `?chain=998`, `?chain=10143`,
-or `?chain=31337`.
-
-A selectable network profile proves only RPC and chain metadata. The current `998.json` identifies a verified HyperEVM
-testnet stack; `10143.json` remains pending and supplies no usable Monad root contracts. Local Anvil remains an isolated
-interactive scenario when its ignored deployment and seed artifacts have been generated.
-
-Local Anvil uses chain id `31337` and reads ignored runtime artifacts from:
-
-- `packages/contracts/deployments/31337.json`
-- `packages/contracts/deployments/31337.seed.json`
-
-Static builds copy those artifacts into the app's `deployments/` directory. Vite dev serves the same files through a
-development middleware so local chain selection works without copying ignored artifacts into `apps/web/public`.
-
-For root-path local browser development, run:
-
-```sh
-bun --cwd apps/web dev
-```
-
-The Local Anvil network defaults to `http://127.0.0.1:8547` in that mode. For a subpath or remote-browser setup where
-the app is served at `/pledge-cash/` and the RPC is reverse-proxied at `/pledge-cash/rpc`, run:
-
-```sh
-bun --cwd apps/web dev:local
-```
-
-Use `VITE_PLEDGE_CASH_LOCAL_RPC_URL` to override the Local Anvil RPC endpoint without changing the testnet profiles.
-Use `VITE_PLEDGE_CASH_HYPEREVM_RPC_URL` to select an alternate HyperEVM testnet RPC for a deployed browser environment.
-The Pages workflow checks that a configured override reports chain id `998` before building.
-If `VITE_PLEDGE_CASH_CHAIN_ID` is set to another chain id, the app preserves the legacy single-network behavior by
-adding a custom selectable profile from `VITE_PLEDGE_CASH_RPC_URL`, `VITE_PLEDGE_CASH_CHAIN_NAME`,
-`VITE_PLEDGE_CASH_EXPLORER_URL`, and `VITE_PLEDGE_CASH_WRAPPED_NATIVE_SYMBOL`.
-
-## Local vNext Boardroom Lifecycle Proof
-
-The vNext Boardroom prototype has a separate, proof-only lifecycle harness. Start a fresh dedicated Anvil instance; do
-not point the harness at the semi-persistent v5 seed chain:
+Use a fresh chain-id-31337 Anvil instance for the final deterministic
+deployment rehearsal:
 
 ```sh
 anvil --port 8547 --chain-id 31337
 ```
 
-In another shell, run:
-
-```sh
-LOCAL_RPC_URL=http://127.0.0.1:8547 \
-bun run scenario:diamond-vnext:local
-```
-
-The wrapper uses Anvil's first two public development keys and runs four phased Forge broadcasts. Between phases it
-mines the stake checkpoint, advances the controller delay, proves the release-B write gate reverts with
-`StorageMigrationRequired`, and advances the cancelled curve's 30-day unwind grace. It accepts the run only when the
-checkpoint phase is `complete`, migration is cleared, and every primary and auxiliary Boardroom reports zero active
-obligations. The expanded proof uses three Boardrooms: the primary lifecycle, a cancelled curve that completes its
-sell-only unwind, and a graduated curve whose reservation becomes canonical locked liquidity before wind-down.
-
-The ignored checkpoint is
-`packages/contracts/deployments/31337.diamond-vnext.local.json`, separate from both the v5 deployment artifact and its
-seed manifest. Set `PLEDGE_CASH_VNEXT_DEPLOYMENT_PATH` to another path under `packages/contracts/deployments/` for an
-isolated proof. These broadcasts are local architecture evidence only: they neither update a checked-in target-chain
-artifact nor authorize a testnet or mainnet deployment.
-
-## Local Anvil Seed
-
-For a semi-persistent local deployment, run Anvil on chain id `31337`, broadcast
-`Deploy.s.sol` with a predeployed wrapped-native contract, then seed the repeatable
-scenario matrix implemented by `SeedLocal.s.sol`:
-
-- direct grant variations: free partially settled, paid transferred and settled,
-  and halted before cliff;
-- Seed Labs: prelaunch direct creation of its canonical singleton AMM position, two initial holder allocations, three
-  post-liquidity AMM buys, claimable locked-liquidity fees, active reserve and LP bond markets with purchases, and
-  three employee option variants (partially settled active, unvested future-cliff, and vested partially settled), plus
-  a 30-day prefunded CASH reward stream with an investor actively staking 1,000 SEED shares behind a seven-day cooldown;
-- Atlas Payroll: prelaunch active fixed-price sale with two buyers;
-- Kepler Systems: prelaunch active Dutch auction with two buyers;
-- Northstar Robotics: prelaunch active bonding curve with three buys and one sell;
-- Harbor Analytics: prelaunch closed fixed-price sale with two historical buyers and treasury cash already raised;
-- Beacon Contributors: live two-leaf Merkle airdrop with index `0` already claimed, index `1` still claimable, and both
-  leaves and sibling proofs written to the seed manifest;
-- Civic Compute: launched generation-1 external-controller governance with a one-day delay and a scheduled
-  `setRedemptionExcessRecipient` Boardroom operation still waiting;
-- Tidelock Storage: winding down while an active fixed-price distribution remains recorded as the explicit blocker to
-  opening redemptions;
-- Final Harbor: winding down with CASH registered and the snapshot delay still pending while the seeded holder retains
-  the full circulating share balance. It does not skip the required Snapshotting phase.
-
-The first five project Boardrooms remain prelaunch. The lifecycle Boardrooms are intentionally independent so airdrop,
-governance and wind-down browser checks cannot invalidate one another. The ignored
-`deployments/31337.seed.json` manifest includes the actor identities, Merkle root/leaves/proofs, scheduled-operation
-hash, salt, calldata, Boardroom epoch, wind-down blocker identity, and snapshot-pending asset values needed by
-browser automation. Operation ETA and expiry must be read from the controller's `operationState(operationId)`;
-broadcast block timestamps intentionally are not copied from Forge's pre-broadcast simulation into the fixture.
+With a deployed local wrapped-native contract and the four development roles
+configured, run `Deploy.s.sol`:
 
 ```sh
 cd packages/contracts
@@ -455,15 +405,55 @@ forge script script/Deploy.s.sol:Deploy \
   --chain 31337 \
   --always-use-create-2-factory \
   --create2-deployer 0x4e59b44847b379578588920cA78FbF26c0B4956C \
-  --broadcast
+  --broadcast \
+  --slow
+```
 
+Re-running the same command is the idempotence check: existing roots must be
+accepted only when their init-code commitments and live configuration match.
+The ignored `deployments/31337.json` is local evidence, not a public identity.
+
+The canonical Boardroom lifecycle proof uses a separate fresh Anvil state:
+
+```sh
+LOCAL_RPC_URL=http://127.0.0.1:8547 \
+bun run scenario:boardroom:local
+```
+
+It broadcasts the integrated lifecycle in phases, activates release B, proves
+the pre-migration write gate, permissionlessly migrates three independent
+Boardrooms, resumes cleanup and redemption, and accepts the run only after
+migration is cleared and all three obligation counts are zero. Its ignored
+checkpoint is `deployments/31337.boardroom.local.json`.
+
+`SeedLocal.s.sol` can then populate the application scenario matrix against a
+canonical local deployment:
+
+```sh
 LOCAL_SEED_NONCE=1 \
 LOCAL_RPC_URL=http://127.0.0.1:8547 \
 bun run scenario:local-seed:local
 ```
 
-`SeedLocal` uses Anvil's public development keys only. Change
-`LOCAL_SEED_NONCE` to add another batch of scenarios to an existing local chain,
-or reset the Anvil state file before replaying the same nonce. The local
-artifacts `packages/contracts/deployments/31337.json` and
-`packages/contracts/deployments/31337.seed.json` are intentionally ignored.
+Local artifacts and state must be reset together. Reusing chain id `31337`
+after an Anvil reset does not preserve deployment identity.
+
+## Pre-broadcast gates
+
+Before the first testnet broadcast, record a clean result for:
+
+```sh
+bun --cwd packages/contracts build
+bun --cwd packages/contracts test
+forge build --sizes
+bun --cwd packages/sdk generate
+bun --cwd packages/sdk test
+bun run docs:check
+bun run format:check
+git diff --check
+```
+
+Also rerun the fresh-Anvil deployment, idempotence pass, standalone artifact
+verifier, canonical Boardroom lifecycle, application seed, and service
+integration tests. The current design report records focused local evidence;
+the final full-suite acceptance ledger is still pending.

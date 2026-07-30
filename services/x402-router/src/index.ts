@@ -115,10 +115,7 @@ export async function startX402Router(
       )
     : undefined;
   const supportAuthority = deployment.ready
-    ? new CanonicalSupportAuthorityReader(publicClient, {
-        boardroomFactory: deployment.deployment.boardroomFactory,
-        destinationUsdc: deployment.deployment.destinationUsdc,
-      })
+    ? new CanonicalSupportAuthorityReader(publicClient, deployment.deployment)
     : undefined;
   const supportExecution =
     supportAuthority

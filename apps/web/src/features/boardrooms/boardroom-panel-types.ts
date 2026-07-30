@@ -87,6 +87,7 @@ export type BoardroomPanelState = {
   snapshot: BoardroomSnapshot | undefined;
   create: () => Promise<void>;
   load: () => Promise<void>;
+  migrate: () => Promise<void>;
   mintShares: () => Promise<void>;
   predict: () => Promise<void>;
   setBoardroomAddress: (address: string) => void;

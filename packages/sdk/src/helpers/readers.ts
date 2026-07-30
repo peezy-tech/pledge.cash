@@ -205,7 +205,16 @@ export async function readGrantSettlementQuote(
   };
 }
 
-export async function readBoardroomState(client: PledgeCashReadClient, boardroom: Address): Promise<BoardroomState> {
+export async function readBoardroomState(
+  rawClient: PledgeCashBlockReadClient,
+  boardroom: Address,
+): Promise<BoardroomState> {
+  const blockNumber = await rawClient.getBlockNumber();
+  const client = {
+    readContract(request: Parameters<PledgeCashReadClient["readContract"]>[0]) {
+      return rawClient.readContract({ ...request, blockNumber } as never);
+    },
+  } as PledgeCashReadClient;
   const [
     owner,
     policyRegistry,
@@ -218,6 +227,10 @@ export async function readBoardroomState(client: PledgeCashReadClient, boardroom
     controller,
     controllerGeneration,
     governanceEpoch,
+    facetSetHash,
+    appliedStorageVersion,
+    appliedStorageLayoutHash,
+    migrationRequired,
     windDownDelay,
     windDownStartedAt,
     protectionStaker,
@@ -249,6 +262,10 @@ export async function readBoardroomState(client: PledgeCashReadClient, boardroom
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "controller" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "controllerGeneration" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "governanceEpoch" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "facetSetHash" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "appliedStorageVersion" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "appliedStorageLayoutHash" }),
+      client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "migrationRequired" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "windDownDelay" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "windDownStartedAt" }),
       client.readContract({ address: boardroom, abi: boardroomAbi, functionName: "protectionStaker" }),
@@ -275,12 +292,13 @@ export async function readBoardroomState(client: PledgeCashReadClient, boardroom
       functionName: "governanceEligibleSupply",
     }),
     launched && (controller as Address).toLowerCase() !== ZERO_ADDRESS
-      ? readBoardroomControllerState(client, controller as Address)
+      ? readBoardroomControllerState(rawClient, controller as Address, blockNumber)
       : Promise.resolve(undefined),
   ]);
 
   return {
     address: boardroom,
+    blockNumber,
     owner: owner as Address,
     policyRegistry: policyRegistry as Address,
     wrappedNative: wrappedNative as Address,
@@ -296,6 +314,10 @@ export async function readBoardroomState(client: PledgeCashReadClient, boardroom
     controllerGeneration: controllerGeneration as bigint,
     controllerConfigurationEpoch: controllerState?.configurationEpoch ?? 0n,
     governanceEpoch: governanceEpoch as bigint,
+    facetSetHash: facetSetHash as Hex,
+    appliedStorageVersion: appliedStorageVersion as bigint,
+    appliedStorageLayoutHash: appliedStorageLayoutHash as Hex,
+    migrationRequired: migrationRequired as boolean,
     windDownDelay: windDownDelay as bigint,
     windDownStartedAt: windDownStartedAt as bigint,
     protectionStaker: protectionStaker as Address,
@@ -322,9 +344,16 @@ export async function readBoardroomState(client: PledgeCashReadClient, boardroom
 }
 
 export async function readBoardroomControllerState(
-  client: PledgeCashReadClient,
+  rawClient: PledgeCashBlockReadClient,
   controller: Address,
+  atBlockNumber?: bigint,
 ): Promise<BoardroomControllerState> {
+  const blockNumber = atBlockNumber ?? await rawClient.getBlockNumber();
+  const client = {
+    readContract(request: Parameters<PledgeCashReadClient["readContract"]>[0]) {
+      return rawClient.readContract({ ...request, blockNumber } as never);
+    },
+  } as PledgeCashReadClient;
   const [factory, boardroom, proposer, delay, gracePeriod, generation, configurationEpoch, configurationHash] =
     await Promise.all([
       client.readContract({ address: controller, abi: boardroomControllerAbi, functionName: "factory" }),

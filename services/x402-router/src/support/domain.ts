@@ -16,6 +16,7 @@ export type SupportAuthorityIdentity = {
   chainId: typeof SUPPORT_CHAIN_ID;
   configurationEpoch: bigint;
   controllerGeneration: bigint;
+  facetSetHash: Hex;
   mode: SupportAuthorityMode;
   signer?: Address;
 };
@@ -36,6 +37,7 @@ export type SupportChallenge = {
   chainId: typeof SUPPORT_CHAIN_ID;
   configurationEpoch: bigint;
   controllerGeneration: bigint;
+  facetSetHash: Hex;
   planId: string;
   payload: JsonRecord;
   payloadHash: Hex;
@@ -62,6 +64,7 @@ export type SupportPlan = {
   authorityMode: SupportAuthorityMode;
   controllerGeneration: bigint;
   configurationEpoch: bigint;
+  facetSetHash: Hex;
   verifiedBlock: bigint;
   verifiedBlockHash: Hex;
   createdAt: Date;

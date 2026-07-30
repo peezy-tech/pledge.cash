@@ -8,6 +8,7 @@ import {LockedLiquidity} from "./LockedLiquidity.sol";
 import {BestEffortTokenLib} from "../lib/BestEffortTokenLib.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 import {IBoardroomObligationPolicy} from "../policy/IBoardroomObligationPolicy.sol";
+import {BoardroomCallbackLib} from "../policy/BoardroomCallbackLib.sol";
 
 interface ILockedLiquidityFactoryBoardroom {
     function shareToken() external view returns (address);
@@ -15,28 +16,6 @@ interface ILockedLiquidityFactoryBoardroom {
     function isIssuedDistribution(address distribution) external view returns (bool);
 
     function policyRegistry() external view returns (address);
-
-    function precommitProtocolLiquidity(
-        address expectedLocker,
-        address quoteAsset,
-        address curve,
-        bytes32 pairKey,
-        bytes32 salt,
-        uint64 expiresAt
-    ) external;
-
-    function activateProtocolLiquidity(
-        address locker,
-        address pool,
-        address quoteAsset,
-        address curve,
-        bytes32 pairKey,
-        bytes32 salt
-    ) external;
-
-    function releaseProtocolLiquidityReservation(address curve, bytes32 pairKey, bytes32 salt) external;
-
-    function closeProtocolLiquidityFromFactory(address locker) external;
 
     function lockedLiquidityExitAllowed() external view returns (bool);
 }
@@ -85,6 +64,8 @@ interface ILockedLiquidityReservationAmmFactory {
     ) external returns (address pool);
 
     function releaseInitialLiquidityReservation(address tokenA, address tokenB, address reservationOwner) external;
+
+    function boardroomFactory() external view returns (address);
 }
 
 interface ILockedLiquiditySeedPool {
@@ -171,6 +152,7 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
 
     error InvalidAddress();
     error InvalidBoardroomFactory(address factory);
+    error IncoherentFactoryIdentity(address expected, address actual);
     error InvalidAmount();
     error InvalidBoardroom(address boardroom);
     error InvalidPair(address tokenA, address tokenB);
@@ -219,9 +201,15 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
     event MigrationReservationReleased(address indexed boardroom, address indexed curve, bytes32 indexed salt);
 
     constructor(address ammRouter_, address boardroomFactory_) {
-        if (ammRouter_ == address(0)) revert InvalidAddress();
+        if (ammRouter_ == address(0) || ammRouter_.code.length == 0) revert InvalidAddress();
         if (boardroomFactory_ == address(0) || boardroomFactory_.code.length == 0) {
             revert InvalidBoardroomFactory(boardroomFactory_);
+        }
+        address ammFactory = ILockedLiquidityReservationRouter(ammRouter_).factory();
+        if (ammFactory == address(0) || ammFactory.code.length == 0) revert InvalidAddress();
+        address ammBoardroomFactory = ILockedLiquidityReservationAmmFactory(ammFactory).boardroomFactory();
+        if (ammBoardroomFactory != boardroomFactory_) {
+            revert IncoherentFactoryIdentity(boardroomFactory_, ammBoardroomFactory);
         }
         ammRouter = ammRouter_;
         boardroomFactory = boardroomFactory_;
@@ -289,7 +277,7 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         }
         LockedLiquidity(position.locker).close();
         position.status = PositionStatus.Closed;
-        ILockedLiquidityFactoryBoardroom(boardroom).closeProtocolLiquidityFromFactory(position.locker);
+        BoardroomCallbackLib.closeProtocolLiquidityFromFactory(boardroom, position.locker);
         emit ProtocolLiquidityPositionClosed(boardroom, position.locker, position.pool);
     }
 
@@ -332,8 +320,9 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
             salt: salt
         });
         uint64 expiresAt = ILockedLiquidityMigrationDistribution(curve).reservationExpiresAt();
-        ILockedLiquidityFactoryBoardroom(boardroom)
-            .precommitProtocolLiquidity(expectedLocker, tokenB, curve, pairKey, salt, expiresAt);
+        BoardroomCallbackLib.precommitProtocolLiquidity(
+            boardroom, expectedLocker, tokenB, curve, pairKey, salt, expiresAt
+        );
         emit MigrationReserved(boardroom, curve, expectedLocker, expectedPool, salt);
     }
 
@@ -349,8 +338,7 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         ) revert InvalidMigrationReservation(boardroom, msg.sender);
         _releaseInitialLiquidity(tokenA, tokenB, msg.sender);
         delete migrationReservationOf[boardroom];
-        ILockedLiquidityFactoryBoardroom(boardroom)
-            .releaseProtocolLiquidityReservation(msg.sender, reservation.pairKey, salt);
+        BoardroomCallbackLib.releaseProtocolLiquidityReservation(boardroom, msg.sender, reservation.pairKey, salt);
         emit MigrationReservationReleased(boardroom, msg.sender, salt);
     }
 
@@ -430,8 +418,9 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         if (curve == address(0)) {
             if (migrationReservationOf[boardroom].curve != address(0)) revert PositionAlreadyConfigured(boardroom);
             locker = predictLockedLiquidityAddress(boardroom, params.salt);
-            ILockedLiquidityFactoryBoardroom(boardroom)
-                .precommitProtocolLiquidity(locker, quoteAsset, address(0), pairKey, params.salt, 0);
+            BoardroomCallbackLib.precommitProtocolLiquidity(
+                boardroom, locker, quoteAsset, address(0), pairKey, params.salt, 0
+            );
             expectedPool = _reserveInitialLiquidity(params.tokenA, params.tokenB, locker, boardroom);
         } else {
             MigrationReservation memory reservation = migrationReservationOf[boardroom];
@@ -460,8 +449,7 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         positionOfBoardroom[boardroom] =
             Position({locker: locker, pool: pool, quoteAsset: quoteAsset, status: PositionStatus.Active});
         if (curve != address(0)) delete migrationReservationOf[boardroom];
-        ILockedLiquidityFactoryBoardroom(boardroom)
-            .activateProtocolLiquidity(locker, pool, quoteAsset, curve, pairKey, params.salt);
+        BoardroomCallbackLib.activateProtocolLiquidity(boardroom, locker, pool, quoteAsset, curve, pairKey, params.salt);
         CreationResult memory created = CreationResult({
             locker: locker, pool: pool, quoteAsset: quoteAsset, amountA: amountA, amountB: amountB, liquidity: liquidity
         });

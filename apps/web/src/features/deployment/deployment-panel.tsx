@@ -82,7 +82,7 @@ function summarizeDeployment({
     ammProtocolFeeRecipient: deployment?.ammProtocolFeeRecipient ?? localAmmProtocolFeeRecipient,
     ammState: describeAmmState(deployment),
     boardroomState: describeBoardroomState(deployment),
-    factoryOwner: factorySnapshot.owner ?? deployment?.factoryOwner,
+    factoryOwner: factorySnapshot.owner ?? deployment?.tokenGrantFactoryOwner,
     hasTokenGrantFactory: Boolean(deployment?.tokenGrantFactory),
     tokenGrantLogic: factorySnapshot.tokenGrantLogic ?? deployment?.tokenGrantLogic,
   };
@@ -112,7 +112,7 @@ function deploymentFacts({
     { label: "Boardroom", value: summary.boardroomState },
     {
       label: "BoardroomFactory",
-      value: addressValue(deployment?.boardroomFactory, deployment?.boardroomReason ?? "Not in artifact"),
+      value: addressValue(deployment?.boardroomFactory, deployment?.reason ?? "Not in artifact"),
     },
     { label: "AMM", value: summary.ammState },
     {
@@ -140,7 +140,7 @@ function describeBoardroomState(deployment: PledgeCashDeployment | undefined): s
     return "Ready";
   }
 
-  if (deployment?.boardroomStatus === "pending") {
+  if (deployment?.status === "pending") {
     return "Pending";
   }
 

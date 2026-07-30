@@ -18,6 +18,7 @@ interface IBoardroomControllerDeploymentAuthorizer {
     ) external view returns (bool);
 }
 
+/// @notice Canonical controller factory deploying release-bound controllers.
 contract BoardroomControllerFactory {
     address public immutable boardroomFactory;
     address public immutable controllerImplementation;
@@ -59,7 +60,6 @@ contract BoardroomControllerFactory {
             revert OnlyCanonicalBoardroom(msg.sender);
         }
         if (generation == 0) revert InvalidGeneration();
-
         controller = predictControllerAddress(msg.sender, generation);
         if (controller != expectedController) {
             revert ControllerPredictionMismatch(expectedController, controller);
@@ -75,7 +75,6 @@ contract BoardroomControllerFactory {
         isController[controller] = true;
         boardroomOfController[controller] = msg.sender;
         generationOfController[controller] = generation;
-
         emit ControllerDeployed(msg.sender, controller, generation, proposer, delay, gracePeriod);
     }
 

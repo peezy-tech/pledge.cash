@@ -43,6 +43,7 @@ const curve = "0x0000000000000000000000000000000000000c0e" as Address;
 const grant = "0x0000000000000000000000000000000000000123" as Address;
 const policy = "0x0000000000000000000000000000000000000a55" as Address;
 const salt = "0x1111111111111111111111111111111111111111111111111111111111111111" as Hex;
+const expectedFacetSetHash = "0x3333333333333333333333333333333333333333333333333333333333333333" as Hex;
 const actionHash = "0x2222222222222222222222222222222222222222222222222222222222222222" as Hex;
 const controller = "0x000000000000000000000000000000000000c011" as Address;
 
@@ -66,18 +67,19 @@ describe("governance transaction planning", () => {
       gracePeriod: 604_800n,
       generation: 1n,
     } as const;
-    expect(buildBoardroomLaunchTransaction({ boardroom, config: launchConfig })).toMatchObject({
+    expect(buildBoardroomLaunchTransaction({ boardroom, expectedFacetSetHash, config: launchConfig })).toMatchObject({
       address: boardroom,
       functionName: "launch",
-      args: [launchConfig],
+      args: [expectedFacetSetHash, launchConfig],
     });
-    expect(buildBoardroomVetoOperationTransaction({ boardroom, operationId: actionHash })).toMatchObject({
+    expect(buildBoardroomVetoOperationTransaction({ boardroom, expectedFacetSetHash, operationId: actionHash })).toMatchObject({
       functionName: "veto",
-      args: [actionHash],
+      args: [expectedFacetSetHash, actionHash],
     });
 
     const scheduled = buildControllerScheduleBoardroomOperationTransaction({
       controller,
+      expectedFacetSetHash,
       calls: [call],
       salt,
       expectedBoardroomEpoch: 3n,
@@ -86,10 +88,11 @@ describe("governance transaction planning", () => {
     expect(scheduled).toMatchObject({
       address: controller,
       functionName: "scheduleBoardroomOperation",
-      args: [[call], salt, 3n, 2n],
+      args: [expectedFacetSetHash, [call], salt, 3n, 2n],
     });
     expect(buildControllerExecuteBoardroomOperationTransaction({
       controller,
+      expectedFacetSetHash,
       calls: [call],
       salt,
       expectedBoardroomEpoch: 3n,
@@ -98,21 +101,28 @@ describe("governance transaction planning", () => {
     })).toMatchObject({
       address: controller,
       functionName: "executeBoardroomOperation",
-      args: [[call], salt, 3n, 2n, account],
+      args: [expectedFacetSetHash, [call], salt, 3n, 2n, account],
     });
   });
 
   test("selects prelaunch execution, launched scheduling, and wind-down cleanup", () => {
-    expect(planBoardroomCallExecution({ boardroom, calls: [call], lifecycle: { launched: false, status: 0 } })).toMatchObject({
+    expect(planBoardroomCallExecution({
+      boardroom,
+      expectedFacetSetHash,
+      calls: [call],
+      lifecycle: { launched: false, status: 0, migrationRequired: false },
+    })).toMatchObject({
       kind: "execute",
       transaction: { functionName: "execute", value: 7n },
     });
     expect(planBoardroomCallExecution({
       boardroom,
+      expectedFacetSetHash,
       calls: [call],
       lifecycle: {
         launched: true,
         status: 0,
+        migrationRequired: false,
         controller,
         governanceEpoch: 3n,
         controllerConfigurationEpoch: 2n,
@@ -123,15 +133,26 @@ describe("governance transaction planning", () => {
     expect(
       planBoardroomCallExecution({
         boardroom,
+        expectedFacetSetHash,
         calls: [{ ...call, value: 0n }],
-        lifecycle: { launched: true, status: 1 },
+        lifecycle: { launched: true, status: 1, migrationRequired: false },
       }),
     ).toMatchObject({ kind: "windDown", transaction: { functionName: "executeWindDownCall" } });
 
-    expect(() => planBoardroomCallExecution({ boardroom, calls: [call], lifecycle: { launched: true, status: 0 } })).toThrow(
+    expect(() => planBoardroomCallExecution({
+      boardroom,
+      expectedFacetSetHash,
+      calls: [call],
+      lifecycle: { launched: true, status: 0, migrationRequired: false },
+    })).toThrow(
       "governance salt",
     );
-    expect(() => planBoardroomCallExecution({ boardroom, calls: [call], lifecycle: { launched: true, status: 2 } })).toThrow(
+    expect(() => planBoardroomCallExecution({
+      boardroom,
+      expectedFacetSetHash,
+      calls: [call],
+      lifecycle: { launched: true, status: 2, migrationRequired: false },
+    })).toThrow(
       "snapshotting",
     );
   });
@@ -144,6 +165,7 @@ describe("governance transaction planning", () => {
     expect(decodedConfiguration.args?.slice(1)).toEqual([172_800n, 604_800n]);
     const replacement = buildBoardroomReplaceControllerCall({
       boardroom,
+      expectedFacetSetHash,
       expectedCurrentController: controller,
       expectedNextController: recipient,
       nextProposer: account,
@@ -159,11 +181,12 @@ describe("governance transaction planning", () => {
     expect(decodeFunctionData({ abi: boardroomAbi, data: replacement.data }).functionName).toBe("replaceController");
     const decodedMint = decodeFunctionData({
       abi: boardroomAbi,
-      data: buildBoardroomMintCall({ boardroom, to: account, amount: 10n }).data,
+      data: buildBoardroomMintCall({ boardroom, expectedFacetSetHash, to: account, amount: 10n }).data,
     });
     expect(decodedMint.functionName).toBe("mint");
-    expect(String(decodedMint.args?.[0]).toLowerCase()).toBe(account.toLowerCase());
-    expect(decodedMint.args?.[1]).toBe(10n);
+    expect(decodedMint.args?.[0]).toBe(expectedFacetSetHash);
+    expect(String(decodedMint.args?.[1]).toLowerCase()).toBe(account.toLowerCase());
+    expect(decodedMint.args?.[2]).toBe(10n);
   });
 });
 

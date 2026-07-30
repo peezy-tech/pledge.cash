@@ -62,7 +62,8 @@ external controller or exercise delayed scheduling, active-staker veto, or permi
 - Locked LP remains in the locker after the launch trade.
 - The launch trade increases the Boardroom wrapped-HYPE balance by the exact configured protocol fee share.
 - The grant creation increases the Boardroom native HYPE balance by exactly `0.1 HYPE`.
-- `startWindDown()` deposits the Boardroom's scenario-native HYPE balance into the configured wrapped-native contract
+- `startWindDown(expectedFacetSetHash)` deposits the Boardroom's
+  scenario-native HYPE balance into the configured wrapped-native contract
   before the Boardroom enters `WindingDown`.
 - The created grant escrows the full project-token grant amount for the contributor.
 

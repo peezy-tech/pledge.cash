@@ -11,71 +11,114 @@ import {
   boardroomControlReleaseSupport,
   deploymentRuntimeIdentity,
   parseDeployment,
-  SECURE_BOARDROOM_RELEASE_VERSION,
 } from "../src/lib/deployment";
 
 describe("runtime deployment artifacts", () => {
-  test("fails closed for legacy and unknown Boardroom controller releases", () => {
-    const legacy = boardroomControlReleaseSupport({
+  test("fails closed for incomplete and unknown canonical protocol releases", () => {
+    const incomplete = boardroomControlReleaseSupport({
       chainId: 31_337,
-      deterministicDeploymentVersion: "pledge.cash.deterministic.v4",
+      protocolVersion: "pledge.cash.protocol.v1",
       boardroomFactory: "0x1000000000000000000000000000000000000001",
-      boardroomControllerFactory: "0x1000000000000000000000000000000000000002",
-      boardroomControllerLogic: "0x1000000000000000000000000000000000000003",
-      boardroomMarketLogic: "0x1000000000000000000000000000000000000004",
     });
     const unknown = boardroomControlReleaseSupport({ chainId: 31_337 });
 
-    expect(legacy.supported).toBe(false);
-    expect(legacy.reason).toContain("remain read-only");
+    expect(incomplete.supported).toBe(false);
+    expect(incomplete.reason).toContain("missing canonical Boardroom release evidence");
     expect(unknown.supported).toBe(false);
   });
 
-  test("supports controller writes only for a complete accepted release identity", () => {
+  test("supports runtime proof from permanent roots without requiring genesis release evidence", () => {
     const codeHash = `0x${"11".repeat(32)}` as const;
     const complete = {
       chainId: 31_337,
-      deterministicDeployment: true,
-      deterministicDeploymentVersion: SECURE_BOARDROOM_RELEASE_VERSION,
-      deterministicReleaseCodeHash: codeHash,
+      protocolVersion: "pledge.cash.protocol.v1",
+      protocolReleaseCodeHash: codeHash,
+      protocolFacetRegistryOwner: "0x1000000000000000000000000000000000000010" as const,
+      protocolFacetRegistry: "0x1000000000000000000000000000000000000011" as const,
+      protocolFacetRegistryCodeHash: codeHash,
       boardroomFactory: "0x1000000000000000000000000000000000000001" as const,
-      boardroomControllerFactory: "0x1000000000000000000000000000000000000002" as const,
-      boardroomControllerLogic: "0x1000000000000000000000000000000000000003" as const,
-      boardroomGovernanceLogic: "0x1000000000000000000000000000000000000004" as const,
-      boardroomMarketLogic: "0x1000000000000000000000000000000000000005" as const,
-      boardroomRedemptionPayout: "0x1000000000000000000000000000000000000006" as const,
-      boardroomLogic: "0x1000000000000000000000000000000000000007" as const,
       boardroomFactoryCodeHash: codeHash,
+      boardroomKernel: "0x1000000000000000000000000000000000000012" as const,
+      boardroomKernelCodeHash: codeHash,
+      boardroomControllerFactory: "0x1000000000000000000000000000000000000002" as const,
       boardroomControllerFactoryCodeHash: codeHash,
-      boardroomControllerCodeHash: codeHash,
+      boardroomControllerLogic: "0x1000000000000000000000000000000000000003" as const,
+      boardroomControllerLogicCodeHash: codeHash,
+      boardroomGovernanceLogic: "0x1000000000000000000000000000000000000004" as const,
       boardroomGovernanceLogicCodeHash: codeHash,
+      boardroomMarketLogic: "0x1000000000000000000000000000000000000005" as const,
       boardroomMarketLogicCodeHash: codeHash,
+      boardroomRedemptionPayout: "0x1000000000000000000000000000000000000006" as const,
       boardroomRedemptionPayoutCodeHash: codeHash,
-      boardroomLogicCodeHash: codeHash,
+      authorityFacet: "0x1000000000000000000000000000000000000021" as const,
+      authorityFacetCodeHash: codeHash,
+      executionFacet: "0x1000000000000000000000000000000000000022" as const,
+      executionFacetCodeHash: codeHash,
+      marketFacet: "0x1000000000000000000000000000000000000023" as const,
+      marketFacetCodeHash: codeHash,
+      redemptionFacet: "0x1000000000000000000000000000000000000024" as const,
+      redemptionFacetCodeHash: codeHash,
+      viewFacet: "0x1000000000000000000000000000000000000025" as const,
+      viewFacetCodeHash: codeHash,
+      activeFacetSetHash: codeHash,
+      activeRelease: 1n,
+      requiredStorageVersion: 1n,
+      requiredStorageLayoutHash: codeHash,
+      manifestHash: codeHash,
+      kernelSelectorSetHash: codeHash,
+      selectorCount: 97n,
     };
 
     expect(boardroomControlReleaseSupport(complete)).toEqual({ supported: true });
     expect(boardroomControlReleaseSupport({ ...complete, boardroomControllerLogic: undefined }).supported).toBe(false);
-    expect(boardroomControlReleaseSupport({ ...complete, deterministicDeployment: false }).supported).toBe(false);
-    expect(boardroomControlReleaseSupport({ ...complete, boardroomControllerCodeHash: undefined }).supported).toBe(false);
+    expect(boardroomControlReleaseSupport({
+      ...complete,
+      protocolFacetRegistryOwner: undefined,
+      authorityFacet: undefined,
+      authorityFacetCodeHash: undefined,
+      executionFacet: undefined,
+      executionFacetCodeHash: undefined,
+      marketFacet: undefined,
+      marketFacetCodeHash: undefined,
+      redemptionFacet: undefined,
+      redemptionFacetCodeHash: undefined,
+      viewFacet: undefined,
+      viewFacetCodeHash: undefined,
+      activeFacetSetHash: undefined,
+      activeRelease: undefined,
+      requiredStorageVersion: undefined,
+      requiredStorageLayoutHash: undefined,
+      manifestHash: undefined,
+      selectorCount: undefined,
+    })).toEqual({ supported: true });
+    expect(boardroomControlReleaseSupport({ ...complete, boardroomControllerLogicCodeHash: undefined }).supported).toBe(false);
   });
 
-  test("preserves external controller release addresses and code hashes", () => {
+  test("preserves canonical registry, kernel, controller, and facet attestations", () => {
     const deployment = parseDeployment(`{
       "chainId": 31337,
+      "protocolFacetRegistry": "0x1000000000000000000000000000000000000001",
+      "boardroomKernel": "0x1000000000000000000000000000000000000002",
       "boardroomControllerFactory": "0x1000000000000000000000000000000000000002",
       "boardroomControllerLogic": "0x1000000000000000000000000000000000000003",
       "boardroomMarketLogic": "0x1000000000000000000000000000000000000004",
+      "authorityFacet": "0x1000000000000000000000000000000000000005",
+      "protocolFacetRegistryCodeHash": "0xregistry",
+      "boardroomKernelCodeHash": "0xkernel",
       "boardroomControllerFactoryCodeHash": "0xcontrollerfactory",
-      "boardroomControllerCodeHash": "0xcontroller",
+      "boardroomControllerLogicCodeHash": "0xcontroller",
+      "authorityFacetCodeHash": "0xauthority",
       "boardroomMarketLogicCodeHash": "0xmarket"
     }`);
 
+    expect(deployment.protocolFacetRegistry).toBe("0x1000000000000000000000000000000000000001");
+    expect(deployment.boardroomKernel).toBe("0x1000000000000000000000000000000000000002");
     expect(deployment.boardroomControllerFactory).toBe("0x1000000000000000000000000000000000000002");
     expect(deployment.boardroomControllerLogic).toBe("0x1000000000000000000000000000000000000003");
     expect(deployment.boardroomMarketLogic).toBe("0x1000000000000000000000000000000000000004");
+    expect(deployment.authorityFacet).toBe("0x1000000000000000000000000000000000000005");
     expect(deployment.boardroomControllerFactoryCodeHash).toBe("0xcontrollerfactory");
-    expect(deployment.boardroomControllerCodeHash).toBe("0xcontroller");
+    expect(deployment.boardroomControllerLogicCodeHash).toBe("0xcontroller");
     expect(deployment.boardroomMarketLogicCodeHash).toBe("0xmarket");
   });
 
@@ -94,7 +137,7 @@ describe("runtime deployment artifacts", () => {
   test("parses ready, pending, missing, and error artifact statuses", () => {
     expect(deploymentAvailabilityStatus({ chainId: 998 })).toBe("ready");
     expect(deploymentAvailabilityStatus({ chainId: 998, status: "pending" })).toBe("pending");
-    expect(deploymentAvailabilityStatus({ chainId: 998, boardroomStatus: "unavailable" })).toBe("missing");
+    expect(deploymentAvailabilityStatus({ chainId: 998, status: "unavailable" })).toBe("missing");
     expect(deploymentAvailabilityStatus({ chainId: 998, status: "failed" })).toBe("error");
     expect(pendingDeploymentReason({ chainId: 998, status: "pending", reason: "Awaiting broadcast" })).toBe("Awaiting broadcast");
   });
@@ -183,17 +226,19 @@ describe("runtime deployment artifacts", () => {
     expect(deployment.bondMarketFactoryCodeHash).toBe("0xabc123");
   });
 
-  test("preserves Boardroom implementation and helper roots", () => {
+  test("preserves Boardroom kernel, registry, and helper roots", () => {
     const deployment = parseDeployment(`{
       "chainId": 998,
       "boardroomGovernanceLogic": "0x1000000000000000000000000000000000000001",
       "boardroomRedemptionPayout": "0x1000000000000000000000000000000000000002",
-      "boardroomLogic": "0x1000000000000000000000000000000000000003"
+      "boardroomKernel": "0x1000000000000000000000000000000000000003",
+      "protocolFacetRegistry": "0x1000000000000000000000000000000000000004"
     }`);
 
     expect(deployment.boardroomGovernanceLogic).toBe("0x1000000000000000000000000000000000000001");
     expect(deployment.boardroomRedemptionPayout).toBe("0x1000000000000000000000000000000000000002");
-    expect(deployment.boardroomLogic).toBe("0x1000000000000000000000000000000000000003");
+    expect(deployment.boardroomKernel).toBe("0x1000000000000000000000000000000000000003");
+    expect(deployment.protocolFacetRegistry).toBe("0x1000000000000000000000000000000000000004");
   });
 
   test("uses every write-critical artifact value in the runtime identity", () => {

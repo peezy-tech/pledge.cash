@@ -34,6 +34,7 @@ export type RecurringSupportPlan = {
   status: "active" | "retired";
   authority: Address;
   authorityMode: "prelaunch_owner" | "launched_controller";
+  facetSetHash: Hex;
   createdAt: string;
   retiredAt?: string;
 };
@@ -48,6 +49,7 @@ export type RecurringSupportChallenge = {
   actor: Address;
   boardroom: Address;
   chainId: 998;
+  facetSetHash: Hex;
   planId: string;
   message: string;
   payload: Record<string, unknown>;
@@ -153,8 +155,9 @@ export async function publishRecurringSupportPlan(
     action: "plan_create",
     actor: challenge.actor,
     boardroom: draft.boardroom,
+    facetSetHash: challenge.facetSetHash,
     payload: {
-      version: 1,
+      version: 2,
       planId: challenge.planId,
       chainId: 998,
       boardroom: draft.boardroom.toLowerCase(),
@@ -163,6 +166,7 @@ export async function publishRecurringSupportPlan(
       cadence: "monthly",
       title: draft.title.trim(),
       description: draft.description.trim(),
+      facetSetHash: challenge.facetSetHash.toLowerCase(),
     },
     planId: challenge.planId,
   });
@@ -183,6 +187,7 @@ export async function publishRecurringSupportPlan(
     || plan.amount !== draft.amount
     || plan.title !== draft.title.trim()
     || plan.description !== draft.description.trim()
+    || plan.facetSetHash.toLowerCase() !== challenge.facetSetHash.toLowerCase()
   ) {
     throw new Error("The published support plan does not match the signed terms.");
   }
@@ -206,11 +211,13 @@ export async function retireRecurringSupportPlan(
     action: "plan_retire",
     actor: challenge.actor,
     boardroom: plan.boardroom,
+    facetSetHash: plan.facetSetHash,
     payload: {
-      version: 1,
+      version: 2,
       action: "retire",
       planId: safePlanId,
       boardroom: plan.boardroom.toLowerCase(),
+      facetSetHash: plan.facetSetHash.toLowerCase(),
     },
     planId: safePlanId,
   });
@@ -228,7 +235,11 @@ export async function retireRecurringSupportPlan(
     objectValue(body, "plan retirement response").plan,
   );
   assertPlanBoundary(retired, context.config, plan.boardroom);
-  if (retired.id !== plan.id || retired.status !== "retired") {
+  if (
+    retired.id !== plan.id
+    || retired.status !== "retired"
+    || retired.facetSetHash.toLowerCase() !== plan.facetSetHash.toLowerCase()
+  ) {
     throw new Error("The router retired a different support plan.");
   }
   return retired;
@@ -255,12 +266,14 @@ export async function createRecurringSupportSubscription(
     action: "subscription_create",
     actor: payer,
     boardroom: plan.boardroom,
+    facetSetHash: plan.facetSetHash,
     payload: {
-      version: 1,
+      version: 2,
       action: "subscribe",
       subscriptionId,
       planId: plan.id,
       boardroom: plan.boardroom.toLowerCase(),
+      facetSetHash: plan.facetSetHash.toLowerCase(),
       payer: payer.toLowerCase(),
     },
     planId: plan.id,
@@ -280,6 +293,7 @@ export async function createRecurringSupportSubscription(
   assertSubscriptionViewBoundary(view, context.config);
   if (
     view.plan.id !== plan.id
+    || view.plan.facetSetHash.toLowerCase() !== plan.facetSetHash.toLowerCase()
     || view.subscription.id !== subscriptionId
     || view.subscription.payer.toLowerCase() !== payer.toLowerCase()
   ) {
@@ -320,12 +334,14 @@ export async function cancelRecurringSupportSubscription(
     action: "subscription_cancel",
     actor: view.subscription.payer,
     boardroom: view.plan.boardroom,
+    facetSetHash: view.plan.facetSetHash,
     payload: {
-      version: 1,
+      version: 2,
       action: "cancel",
       subscriptionId: id,
       planId: view.plan.id,
       boardroom: view.plan.boardroom.toLowerCase(),
+      facetSetHash: view.plan.facetSetHash.toLowerCase(),
       payer: view.subscription.payer.toLowerCase(),
     },
     planId: view.plan.id,
@@ -345,6 +361,8 @@ export async function cancelRecurringSupportSubscription(
   if (
     cancelled.subscription.id !== id
     || cancelled.subscription.status !== "cancelled"
+    || cancelled.plan.facetSetHash.toLowerCase()
+      !== view.plan.facetSetHash.toLowerCase()
   ) {
     throw new Error("The router cancelled a different support schedule.");
   }
@@ -406,6 +424,7 @@ export function recurringSupportQuoteRequest(
     invoiceId: invoice.id,
     kind: "recurring_support",
     maxSlippageBps: 0,
+    expectedFacetSetHash: view.plan.facetSetHash,
     payer: invoice.payer,
     recipient: invoice.payer,
     refundAddress: invoice.payer,
@@ -563,6 +582,7 @@ function assertChallengeBoundary(
     action: RecurringSupportChallenge["action"];
     actor: Address;
     boardroom: Address;
+    facetSetHash: Hex;
     payload: Record<string, unknown>;
     planId: string;
   },
@@ -574,6 +594,7 @@ function assertChallengeBoundary(
     challenge.action !== expected.action
     || challenge.actor.toLowerCase() !== expected.actor.toLowerCase()
     || challenge.boardroom.toLowerCase() !== expected.boardroom.toLowerCase()
+    || challenge.facetSetHash.toLowerCase() !== expected.facetSetHash.toLowerCase()
     || challenge.planId !== expected.planId
     || payloadHash.toLowerCase() !== challenge.payloadHash.toLowerCase()
     || JSON.stringify(canonicalJson(challenge.payload))
@@ -588,6 +609,7 @@ function assertChallengeBoundary(
     chainId: challenge.chainId,
     challengeId: challenge.challengeId,
     expiresAt: challenge.expiresAt,
+    facetSetHash: challenge.facetSetHash,
     origin: config.baseUrl,
     payloadHash: challenge.payloadHash,
     planId: challenge.planId,
@@ -622,6 +644,7 @@ function buildChallengeMessage(input: {
   chainId: 998;
   challengeId: string;
   expiresAt: string;
+  facetSetHash: Hex;
   origin: string;
   payloadHash: Hex;
   planId: string;
@@ -647,6 +670,7 @@ function buildChallengeMessage(input: {
     `Actor: ${input.actor}`,
     `Chain ID: ${input.chainId}`,
     `Boardroom: ${input.boardroom}`,
+    `Facet set hash: ${input.facetSetHash}`,
     `Plan ID: ${input.planId}`,
     `Payload hash: ${input.payloadHash}`,
     `Challenge ID: ${input.challengeId}`,
@@ -713,6 +737,10 @@ function supportChallengeValue(value: unknown): RecurringSupportChallenge {
     actor: addressValue(record.actor, "support challenge actor"),
     boardroom: addressValue(record.boardroom, "support challenge Boardroom"),
     chainId: literal998(record.chainId),
+    facetSetHash: hashValue(
+      record.facetSetHash,
+      "support challenge facet-set hash",
+    ),
     planId: uuidValue(record.planId, "support plan ID"),
     message: nonemptyString(record.message, "support challenge message"),
     payload: objectValue(record.payload, "support challenge payload"),
@@ -751,6 +779,7 @@ function supportPlanValue(value: unknown): RecurringSupportPlan {
     status,
     authority: addressValue(record.authority, "support plan authority"),
     authorityMode,
+    facetSetHash: hashValue(record.facetSetHash, "support plan facet-set hash"),
     createdAt: dateTimeValue(record.createdAt, "support plan creation"),
     ...(record.retiredAt === undefined
       ? {}

@@ -168,6 +168,7 @@ export function buildGovernanceVetoRequest(
   }
   return buildBoardroomVetoOperationTransaction({
     boardroom: operation.boardroom,
+    expectedFacetSetHash: operation.facetSetHash,
     operationId: operation.operationId,
   });
 }
@@ -187,6 +188,7 @@ export function buildGovernanceExecutionRequest(
     if (!operation.calls?.length) throw new Error("The scheduled operation does not contain Boardroom calls.");
     return buildControllerExecuteBoardroomOperationTransaction({
       controller: operation.controller,
+      expectedFacetSetHash: operation.facetSetHash,
       calls: operation.calls,
       salt: operation.salt,
       expectedBoardroomEpoch: operation.boardroomEpoch,
@@ -203,6 +205,7 @@ export function buildGovernanceExecutionRequest(
     abi: boardroomControllerAbi,
     functionName: "executeControllerOperation",
     args: [
+      operation.facetSetHash,
       operation.controllerData,
       operation.salt,
       operation.boardroomEpoch,

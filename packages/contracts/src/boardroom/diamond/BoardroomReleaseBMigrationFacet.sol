@@ -3,7 +3,7 @@ pragma solidity ^0.8.30;
 
 import {BoardroomDiamondStorage} from "./BoardroomDiamondStorage.sol";
 import {BoardroomReleaseBStorage} from "./BoardroomReleaseBStorage.sol";
-import {BoardroomVNextStorageLayouts} from "./BoardroomVNextStorageLayouts.sol";
+import {BoardroomStorageLayouts} from "./BoardroomStorageLayouts.sol";
 
 /// @notice Release-A to release-B migration used by the integrated spike.
 contract BoardroomReleaseBMigrationFacet {
@@ -19,10 +19,10 @@ contract BoardroomReleaseBMigrationFacet {
         uint64 current = BoardroomDiamondStorage.appliedStorageVersion();
         bytes32 currentLayoutHash = BoardroomDiamondStorage.appliedStorageLayoutHash();
         bool genesis = BoardroomDiamondStorage.initializing() && current == 0 && currentLayoutHash == bytes32(0);
-        bool releaseA = current == FROM_VERSION && currentLayoutHash == BoardroomVNextStorageLayouts.RELEASE_A;
+        bool releaseA = current == FROM_VERSION && currentLayoutHash == BoardroomStorageLayouts.RELEASE_A;
         if (!genesis && !releaseA) {
             revert UnsupportedMigrationSource(
-                current, currentLayoutHash, FROM_VERSION, BoardroomVNextStorageLayouts.RELEASE_A
+                current, currentLayoutHash, FROM_VERSION, BoardroomStorageLayouts.RELEASE_A
             );
         }
 
@@ -30,6 +30,6 @@ contract BoardroomReleaseBMigrationFacet {
         releaseB.migrationMarker = RELEASE_B_MARKER;
         releaseB.migratedAt = uint64(block.timestamp);
         releaseB.migratedFromVersion = current;
-        BoardroomDiamondStorage.setAppliedStorage(TO_VERSION, BoardroomVNextStorageLayouts.RELEASE_B);
+        BoardroomDiamondStorage.setAppliedStorage(TO_VERSION, BoardroomStorageLayouts.RELEASE_B);
     }
 }

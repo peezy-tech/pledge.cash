@@ -1,4 +1,4 @@
-import { getAddress, isAddress, type Address } from "viem";
+import { getAddress, isAddress, type Address, type Hex } from "viem";
 import { z } from "zod";
 import {
   HYPEREVM_TESTNET_CHAIN_ID,
@@ -64,6 +64,10 @@ export const recurringSupportQuoteRequestSchema = baseQuoteRequestSchema
     kind: z.literal("recurring_support"),
     invoiceId: z.string().uuid(),
     amount: decimalIntegerSchema,
+    expectedFacetSetHash: z
+      .string()
+      .regex(/^0x[a-fA-F0-9]{64}$/, "Expected a bytes32 facet-set hash.")
+      .transform(value => value.toLowerCase() as Hex),
   })
   .strict();
 
@@ -100,6 +104,9 @@ export function toQuoteDto(quote: MarketplaceQuote) {
     ...(quote.supportInvoiceId === undefined
       ? {}
       : { supportInvoiceId: quote.supportInvoiceId }),
+    ...(quote.facetSetHash === undefined
+      ? {}
+      : { facetSetHash: quote.facetSetHash }),
     expiresAt: quote.expiresAt.toISOString(),
     payer: quote.payer,
     recipient: quote.recipient,

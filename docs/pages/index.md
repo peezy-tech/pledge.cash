@@ -44,11 +44,15 @@ Read [Use pledge.cash safely](start/use-safely) and [Transactions and wallet act
 
 ## Current Availability
 
-HyperEVM testnet has a verified deterministic v5 deployment and a source-bound receipt manifest. Monad testnet remains **pending** and has no usable current contract stack. The HQ environment also exposes a seeded local Anvil scenario for isolated product testing; local state is not the public HyperEVM deployment.
+Canonical protocol v1 has not been broadcast to HyperEVM testnet or Monad
+testnet. Both checked-in artifacts are **pending**, so public
+contract-dependent workflows are unavailable. A matching local Anvil
+deployment and seed can be used for isolated development; local state is not a
+public deployment.
 
-External-controller launch is available only to a verified v5 candidate deployment. Legacy Boardrooms remain readable
-but fail closed for launch and control writes. The verified public v5 artifact is limited to HyperEVM testnet, and the
-project remains a mainnet NO-GO.
+The app must fail closed for creation, launch, participation, governance, and
+redemption when the selected artifact is pending or its registry/facet
+identity cannot be verified. No mainnet deployment is supported.
 
 Read [Networks and current limitations](start/networks-and-limitations) before interacting with any claimed deployment.
 

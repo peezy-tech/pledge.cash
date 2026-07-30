@@ -92,6 +92,7 @@ export type FixedPriceSaleQuoteRequest = BaseQuoteRequest & {
 
 export type RecurringSupportQuoteRequest = BaseQuoteRequest & {
   amount: string;
+  expectedFacetSetHash: Hex;
   invoiceId: string;
   kind: "recurring_support";
 };
@@ -135,6 +136,7 @@ export type HyperliquidDestinationExecution = {
 export type HyperliquidMarketplaceQuote = {
   execution: HyperliquidDestinationExecution;
   expiresAt: string;
+  facetSetHash?: Hex;
   kind: HyperliquidMarketplaceQuoteRequest["kind"];
   orderId: string;
   payer: Address;
@@ -740,6 +742,9 @@ export function parseHyperliquidMarketplaceQuote(
   const quote: HyperliquidMarketplaceQuote = {
     execution: executionValue(record.execution),
     expiresAt: dateTimeValue(record.expiresAt, "quote.expiresAt"),
+    ...(record.facetSetHash === undefined
+      ? {}
+      : { facetSetHash: bytesValue(record.facetSetHash, 32, "quote.facetSetHash") }),
     kind,
     orderId: nonemptyString(record.orderId, "quote.orderId"),
     payer: addressValue(record.payer, "quote.payer"),
@@ -891,6 +896,9 @@ function assertRequestBoundary(
     }
   } else {
     positiveDecimal(request.amount, "Support invoice amount");
+    if (!/^0x[0-9a-fA-F]{64}$/.test(request.expectedFacetSetHash)) {
+      throw new Error("The support invoice protocol release hash is invalid.");
+    }
     uuidValue(request.invoiceId, "support invoice ID");
     if (
       request.maxSlippageBps !== 0
@@ -982,6 +990,7 @@ function assertQuoteBoundary(
     request.kind === "recurring_support"
     && (
       quote.supportInvoiceId !== request.invoiceId
+      || quote.facetSetHash?.toLowerCase() !== request.expectedFacetSetHash.toLowerCase()
       || quote.execution.inputAmount !== request.amount
       || quote.execution.expectedOutput !== request.amount
       || quote.execution.minimumOutput !== request.amount
@@ -1034,9 +1043,11 @@ function assertCanonicalCalldata(
         "The support execution is not a guarded Boardroom contribution.",
       );
     }
-    const [asset, amount, deadline] = decoded.args;
+    const [expectedFacetSetHash, asset, amount, deadline] = decoded.args;
     if (
-      !sameAddress(asset, expectations.inputToken)
+      expectedFacetSetHash.toLowerCase() !== request.expectedFacetSetHash.toLowerCase()
+      || quote.facetSetHash?.toLowerCase() !== request.expectedFacetSetHash.toLowerCase()
+      || !sameAddress(asset, expectations.inputToken)
       || amount !== BigInt(request.amount)
       || deadline !== BigInt(quote.execution.deadline)
       || !sameAddress(intent.target, request.boardroom)
