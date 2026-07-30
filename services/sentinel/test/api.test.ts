@@ -5,11 +5,13 @@ import { createSiweMessage } from "viem/siwe";
 
 import {
   AuthRateLimitError,
+  AuthSocialDependencyError,
   type AuthAdapter,
   type AuthSnapshot,
   type RateLimitConfig,
   type WalletNonceRecord
 } from "../src/api/auth";
+import { WALLET_LINK_SIWE_STATEMENT } from "../src/api/better-auth";
 import { createApp, type SentinelApiDeps, type SentinelApiStore } from "../src/api/server";
 import type {
   AddressDto,
@@ -53,6 +55,7 @@ type ForwardedAuthRequest = {
 
 class StubAuth implements AuthAdapter {
   readonly forwarded: ForwardedAuthRequest[] = [];
+  socialFailure?: Error;
   readonly socialStarts: Array<
     Parameters<NonNullable<AuthAdapter["startSocial"]>>[0]
   > = [];
@@ -84,6 +87,9 @@ class StubAuth implements AuthAdapter {
   startSocial = async (
     input: Parameters<NonNullable<AuthAdapter["startSocial"]>>[0]
   ) => {
+    if (this.socialFailure !== undefined) {
+      throw this.socialFailure;
+    }
     this.socialStarts.push(input);
     return {
       response: {
@@ -421,7 +427,7 @@ async function readJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function authSiweRequest() {
+async function authSiweRequest(statement = "Sign in to pledge.cash.") {
   const message = createSiweMessage({
     address: AUTH_ACCOUNT.address,
     chainId: 31337,
@@ -429,7 +435,7 @@ async function authSiweRequest() {
     expirationTime: new Date(FIXED_NOW.getTime() + 5 * 60_000),
     issuedAt: FIXED_NOW,
     nonce: "0123456789abcdef",
-    statement: "Sign in to pledge.cash.",
+    statement,
     uri: WEB_ORIGIN,
     version: "1"
   });
@@ -671,6 +677,25 @@ describe("Sentinel WP5 API", () => {
     ]);
   });
 
+  test("does not expose internal legacy Identity SIWE routes", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    const responses = await Promise.all([
+      identityHarness.app.request("/auth/legacy/siwe/nonce", {
+        body: "{}",
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      }),
+      identityHarness.app.request("/auth/legacy/siwe/verify", {
+        body: "{}",
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      })
+    ]);
+
+    expect(responses.map((response) => response.status)).toEqual([404, 404]);
+    expect(identityHarness.auth.forwarded).toEqual([]);
+  });
+
   test("keeps the previous social-auth routes compatible in shared Identity mode", async () => {
     const identityHarness = createHarness({ sharedIdentity: true });
     const capabilities = await identityHarness.app.request(
@@ -753,6 +778,44 @@ describe("Sentinel WP5 API", () => {
         userId: USER_ID
       }
     ]);
+  });
+
+  test("preserves retryable social-auth dependency statuses", async () => {
+    for (const expected of [
+      {
+        error: new AuthSocialDependencyError(429, "17"),
+        message: "Too many social authentication attempts",
+        retryAfter: "17",
+        status: 429
+      },
+      {
+        error: new AuthSocialDependencyError(500),
+        message: "Social authentication is temporarily unavailable",
+        retryAfter: null,
+        status: 503
+      }
+    ] as const) {
+      const identityHarness = createHarness({ sharedIdentity: true });
+      identityHarness.auth.socialFailure = expected.error;
+
+      const response = await identityHarness.app.request(
+        "/auth/peezy/sign-in",
+        {
+          body: JSON.stringify({
+            callbackURL: `${WEB_ORIGIN}/notifications`,
+            provider: "github"
+          }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST"
+        }
+      );
+
+      expect(response.status).toBe(expected.status);
+      expect(response.headers.get("Retry-After")).toBe(expected.retryAfter);
+      expect(await response.json()).toEqual({
+        error: { message: expected.message }
+      });
+    }
   });
 
   test("rejects oversized social-auth request bodies before parsing them", async () => {
@@ -1148,7 +1211,7 @@ describe("Sentinel WP5 API", () => {
     for (const harness of identityHarnesses) {
       Object.assign(harness.auth, { linkWalletCredential });
     }
-    const request = await authSiweRequest();
+    const request = await authSiweRequest(WALLET_LINK_SIWE_STATEMENT);
     const invalidStatuses: number[] = [];
     for (let index = 0; index < 10; index += 1) {
       const harness = identityHarnesses[index % identityHarnesses.length]!;
@@ -1302,7 +1365,7 @@ describe("Sentinel WP5 API", () => {
         throw new Error("Identity request timed out after 2000ms");
       }
     });
-    const request = await authSiweRequest();
+    const request = await authSiweRequest(WALLET_LINK_SIWE_STATEMENT);
 
     const response = await identityHarness.app.request("/wallets", {
       body: JSON.stringify({
@@ -1320,6 +1383,38 @@ describe("Sentinel WP5 API", () => {
     expect(await response.json()).toEqual({
       error: { message: "Wallet linking is temporarily unavailable" }
     });
+  });
+
+  test("rejects non-link SIWE messages before delegated wallet coverage", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    let linkCalls = 0;
+    Object.assign(identityHarness.auth, {
+      linkWalletCredential: async () => {
+        linkCalls += 1;
+        throw new Error("unexpected wallet link");
+      }
+    });
+    const request = await authSiweRequest();
+
+    const response = await identityHarness.app.request("/wallets", {
+      body: JSON.stringify({
+        message: request.message,
+        signature: request.signature
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: SESSION_COOKIE
+      },
+      method: "POST"
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: {
+        message: "SIWE statement is not valid for wallet linking"
+      }
+    });
+    expect(linkCalls).toBe(0);
   });
 
   test("links equal wallet credentials and controls alert coverage with chain and conflict checks", async () => {

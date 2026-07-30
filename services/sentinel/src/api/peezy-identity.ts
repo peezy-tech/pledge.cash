@@ -54,6 +54,7 @@ import {
 } from "./dto";
 import {
   AuthRateLimitError,
+  AuthSocialDependencyError,
   AuthWalletCredentialRejectedError,
   type AuthAdapter,
   type AuthSnapshot
@@ -282,16 +283,11 @@ export function createPeezyIdentityAuthAdapter(
     socialProviders: [],
     sharedIdentityClientId: identity.clientId,
     usesSharedIdentity: true,
-    async createWalletChallenge({ address, chainId, purpose, userId }) {
-      const subject =
-        purpose === "link" && userId !== undefined
-          ? await identitySubjectForProductUser(db, userId)
-          : undefined;
+    async createWalletChallenge({ address, chainId, purpose }) {
       return gateway.createWalletChallenge({
         address,
         chainId,
-        purpose:
-          purpose === "link" && subject === undefined ? "sign-in" : purpose
+        purpose
       });
     },
     async hydrateAuthSnapshot(userId, snapshot) {
@@ -383,8 +379,9 @@ export function createPeezyIdentityAuthAdapter(
             })
           );
           if (!response.ok) {
-            throw new Error(
-              `peezy.tech OIDC account migration failed with status ${response.status}`
+            throw new AuthSocialDependencyError(
+              response.status,
+              response.headers.get("Retry-After") ?? undefined
             );
           }
           const result = (await response.json()) as AuthRedirectResponse;
@@ -428,8 +425,9 @@ export function createPeezyIdentityAuthAdapter(
         })
       );
       if (!response.ok) {
-        throw new Error(
-          `peezy.tech OIDC sign-in failed with status ${response.status}`
+        throw new AuthSocialDependencyError(
+          response.status,
+          response.headers.get("Retry-After") ?? undefined
         );
       }
       return {

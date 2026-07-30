@@ -224,19 +224,22 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       "peezy-identity.session_token"
     );
 
-    const oidcStart = await app.request(`${apiOrigin}/auth/peezy/sign-in`, {
-      body: JSON.stringify({
-        callbackURL: `${webOrigin}/alerts`,
-        errorCallbackURL: `${webOrigin}/alerts`,
-        provider: "github"
-      }),
-      headers: {
-        "Content-Type": "application/json",
-        Origin: webOrigin,
-        "X-Forwarded-For": "192.0.2.1"
+    const oidcStart = await app.request(
+      `${apiOrigin}/auth/peezy/sign-in`,
+      {
+        body: JSON.stringify({
+          callbackURL: `${webOrigin}/alerts`,
+          errorCallbackURL: `${webOrigin}/alerts`,
+          provider: "github"
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Origin: webOrigin
+        },
+        method: "POST"
       },
-      method: "POST"
-    });
+      { clientIp: "192.0.2.1" }
+    );
     expect(oidcStart.status).toBe(200);
     const stateCookie = responseCookie(oidcStart, "pledge-cash.state");
     const authorization = (await oidcStart.json()) as { url: string };
@@ -1428,7 +1431,7 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       throw new Error("Expected a peezy.tech subject mapping");
     }
 
-    const staleAt = new Date(Date.now() - 6 * 60_000);
+    const staleAt = new Date(Date.now() - 6 * 60_000).toISOString();
     for (let index = 0; index < 10; index += 1) {
       const address = `0x${(index + 1).toString(16).padStart(40, "0")}`;
       await dbClient.sql`
@@ -1704,11 +1707,11 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
         }),
         headers: {
           "Content-Type": "application/json",
-          Origin: webOrigin,
-          "X-Forwarded-For": "192.0.2.2"
+          Origin: webOrigin
         },
         method: "POST"
-      }
+      },
+      { clientIp: "192.0.2.2" }
     );
     expect(initialOidcStart.status).toBe(200);
     const initialStateCookie = responseCookie(
@@ -1788,11 +1791,11 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
         }),
         headers: {
           "Content-Type": "application/json",
-          Origin: webOrigin,
-          "X-Forwarded-For": "192.0.2.3"
+          Origin: webOrigin
         },
         method: "POST"
-      }
+      },
+      { clientIp: "192.0.2.3" }
     );
     expect(conflictingOidcStart.status).toBe(200);
     const conflictingStateCookie = responseCookie(
@@ -1928,18 +1931,21 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       FROM "identity_quota_events"
       WHERE "scope" = 'pledge-cash:presentation-read'
     `;
-    const oidcStart = await app.request(`${apiOrigin}/auth/peezy/sign-in`, {
-      body: JSON.stringify({
-        callbackURL: `${webOrigin}/alerts`,
-        provider: "github"
-      }),
-      headers: {
-        "Content-Type": "application/json",
-        Origin: webOrigin,
-        "X-Forwarded-For": "192.0.2.4"
+    const oidcStart = await app.request(
+      `${apiOrigin}/auth/peezy/sign-in`,
+      {
+        body: JSON.stringify({
+          callbackURL: `${webOrigin}/alerts`,
+          provider: "github"
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Origin: webOrigin
+        },
+        method: "POST"
       },
-      method: "POST"
-    });
+      { clientIp: "192.0.2.4" }
+    );
     expect(oidcStart.status).toBe(200);
     const stateCookie = responseCookie(oidcStart, "pledge-cash.state");
     const authorization = (await oidcStart.json()) as { url: string };
@@ -2049,18 +2055,21 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       "peezy-identity.session_token"
     );
 
-    const oidcStart = await app.request(`${apiOrigin}/auth/peezy/sign-in`, {
-      body: JSON.stringify({
-        callbackURL: `${webOrigin}/alerts`,
-        provider: "github"
-      }),
-      headers: {
-        "Content-Type": "application/json",
-        Origin: webOrigin,
-        "X-Forwarded-For": "192.0.2.5"
+    const oidcStart = await app.request(
+      `${apiOrigin}/auth/peezy/sign-in`,
+      {
+        body: JSON.stringify({
+          callbackURL: `${webOrigin}/alerts`,
+          provider: "github"
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Origin: webOrigin
+        },
+        method: "POST"
       },
-      method: "POST"
-    });
+      { clientIp: "192.0.2.5" }
+    );
     expect(oidcStart.status).toBe(200);
     const stateCookie = responseCookie(oidcStart, "pledge-cash.state");
     const authorization = (await oidcStart.json()) as { url: string };

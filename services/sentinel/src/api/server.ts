@@ -58,6 +58,9 @@ export function createApp(inputDeps: SentinelApiDeps): Hono<ApiEnv> {
   });
 
   app.route("/auth", createAuthRoutes(deps));
+  app.on(["GET", "POST"], "/auth/legacy/siwe/*", (c) =>
+    jsonError(c, 404, "Not found")
+  );
   app.on(["GET", "POST"], "/auth/*", (c) =>
     deps.auth.handler(c.req.raw, {
       ...(c.env?.clientIp === undefined ? {} : { clientIp: c.env.clientIp })

@@ -146,10 +146,16 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       siwe.domain === undefined ||
       siwe.nonce === undefined ||
       siwe.uri === undefined ||
-      (!delegatesCredentialLink && siwe.statement !== WALLET_LINK_SIWE_STATEMENT) ||
       siwe.version !== "1"
     ) {
       return jsonError(c, 400, "SIWE message is missing required fields");
+    }
+    if (siwe.statement !== WALLET_LINK_SIWE_STATEMENT) {
+      return jsonError(
+        c,
+        400,
+        "SIWE statement is not valid for wallet linking"
+      );
     }
 
     if (siwe.domain !== webOriginHost(deps.config.webOrigin)) {

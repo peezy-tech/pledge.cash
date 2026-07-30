@@ -57,6 +57,26 @@ export class AuthRateLimitError extends Error {
   }
 }
 
+export class AuthSocialDependencyError extends Error {
+  readonly retryAfter?: string;
+  readonly status: 429 | 503;
+
+  constructor(upstreamStatus: number, retryAfter?: string) {
+    const rateLimited = upstreamStatus === 429;
+    super(
+      rateLimited
+        ? "Too many social authentication attempts"
+        : "Social authentication is temporarily unavailable"
+    );
+    this.name = "AuthSocialDependencyError";
+    this.status = rateLimited ? 429 : 503;
+    const normalizedRetryAfter = retryAfter?.trim();
+    if (normalizedRetryAfter) {
+      this.retryAfter = normalizedRetryAfter;
+    }
+  }
+}
+
 export class AuthWalletCredentialRejectedError extends Error {
   constructor(error: unknown) {
     super(
@@ -523,15 +543,27 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       link: boolean,
       userId?: string
     ) => {
-      const result = await startSocial({
-        headers: c.req.raw.headers,
-        link,
-        request,
-        ...(c.env?.clientIp === undefined ? {} : { clientIp: c.env.clientIp }),
-        ...(userId === undefined ? {} : { userId })
-      });
-      copySetCookies(c, result.headers);
-      return c.json(result.response);
+      try {
+        const result = await startSocial({
+          headers: c.req.raw.headers,
+          link,
+          request,
+          ...(c.env?.clientIp === undefined
+            ? {}
+            : { clientIp: c.env.clientIp }),
+          ...(userId === undefined ? {} : { userId })
+        });
+        copySetCookies(c, result.headers);
+        return c.json(result.response);
+      } catch (error) {
+        if (error instanceof AuthSocialDependencyError) {
+          if (error.retryAfter !== undefined) {
+            c.header("Retry-After", error.retryAfter);
+          }
+          return jsonError(c, error.status, error.message);
+        }
+        throw error;
+      }
     };
 
     app.post("/peezy/sign-in", authBodyLimit, async (c) => {
