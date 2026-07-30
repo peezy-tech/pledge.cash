@@ -73,7 +73,7 @@ export function WalletLink({
   return (
     <Panel
       title="Wallets"
-      description="Every linked wallet can sign in. Choose which wallets we watch for alerts."
+      description="Choose which linked wallets we watch for alerts. Sign-in availability is shown for each wallet."
       action={
         <Button
           disabled={!wallet.account || !wallet.chainId || pending !== undefined || Boolean(alertWallet)}
