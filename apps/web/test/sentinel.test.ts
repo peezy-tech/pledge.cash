@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { Address } from "@pledge.cash/sdk";
-import { buildAlertsSiweMessage } from "../src/features/notifications/alerts-identity";
+import {
+  alertsSocialProviders,
+  buildAlertsSiweMessage,
+  identityStatus,
+} from "../src/features/notifications/alerts-identity";
 import { alertsViewState } from "../src/features/notifications/alerts-view-state";
 import { buildSentinelSiweMessage } from "../src/features/notifications/wallet-link";
 import {
@@ -16,6 +20,26 @@ import {
 } from "../src/features/notifications/subscription-settings";
 
 describe("sentinel web client", () => {
+  test("keeps legacy authentication wallet-first without hiding social account linking", () => {
+    const providers = ["github", "telegram"] as const;
+
+    expect(alertsSocialProviders([...providers], false, false)).toEqual([]);
+    expect(alertsSocialProviders([...providers], true, false)).toEqual(
+      providers,
+    );
+    expect(alertsSocialProviders([...providers], false, true)).toEqual(
+      providers,
+    );
+    expect(identityStatus("connect-wallet", false)).toEqual({
+      description:
+        "Connect a wallet first, then sign a message to create or open your alert account.",
+      title: "Connect a wallet to sign in",
+    });
+    expect(identityStatus("connect-wallet", true).description).toContain(
+      "social sign-in",
+    );
+  });
+
   test("preserves local alert-rule drafts when adding a governance watch", () => {
     const existing = {
       address: "0x2000000000000000000000000000000000000000" as const,
@@ -111,9 +135,54 @@ describe("sentinel web client", () => {
       walletAddress: "0x1000000000000000000000000000000000000000",
     });
 
-    expect(calls[0]?.input).toBe("https://api.example.test/auth/siwe/nonce");
+    expect(calls[0]?.input).toBe("https://api.example.test/auth/peezy/siwe/nonce");
     expect(calls[0]?.init?.body).toBe(
       JSON.stringify({ chainId: 8453, walletAddress: "0x1000000000000000000000000000000000000000" }),
+    );
+  });
+
+  test("falls back to the legacy auth routes while the API rollout is pending", async () => {
+    const calls: { input: string; init: RequestInit | undefined }[] = [];
+    const fetcher: SentinelFetch = async (input, init) => {
+      const url = input.toString();
+      calls.push({ input: url, init });
+      if (url.includes("/auth/peezy/")) {
+        return jsonResponse({ error: { message: "Not found" } }, { status: 404 });
+      }
+      return jsonResponse(
+        url.endsWith("/nonce")
+          ? { nonce: "abcdefghi" }
+          : { redirect: true, success: true, url: "https://oauth.telegram.org/auth" },
+      );
+    };
+    const client = createSentinelClient({ baseUrl: "https://api.example.test", fetcher });
+    const walletRequest = {
+      chainId: 8453,
+      message: "legacy SIWE message",
+      signature: "0x1234",
+      walletAddress: "0x1000000000000000000000000000000000000000",
+    };
+
+    await client.createAuthSiweNonce(walletRequest);
+    await client.verifyAuthSiwe(walletRequest);
+    await client.linkSocial({
+      callbackURL: "https://pledge.cash/notifications",
+      provider: "telegram",
+    });
+
+    expect(calls.map((call) => call.input)).toEqual([
+      "https://api.example.test/auth/peezy/siwe/nonce",
+      "https://api.example.test/auth/siwe/nonce",
+      "https://api.example.test/auth/peezy/siwe/verify",
+      "https://api.example.test/auth/siwe/verify",
+      "https://api.example.test/auth/peezy/link",
+      "https://api.example.test/auth/oauth2/link",
+    ]);
+    expect(calls[5]?.init?.body).toBe(
+      JSON.stringify({
+        callbackURL: "https://pledge.cash/notifications",
+        providerId: "telegram",
+      }),
     );
   });
 
@@ -142,7 +211,7 @@ describe("sentinel web client", () => {
     expect(calls[0]?.init?.body).toBe(JSON.stringify({ alertsEnabled: false }));
   });
 
-  test("starts direct-provider social linking with the current callback", async () => {
+  test("starts peezy.tech social linking with the current callback", async () => {
     const calls: { input: string; init: RequestInit | undefined }[] = [];
     const fetcher: SentinelFetch = async (input, init) => {
       calls.push({ input: input.toString(), init });
@@ -157,12 +226,12 @@ describe("sentinel web client", () => {
 
     await client.linkSocial(body);
 
-    expect(calls[0]?.input).toBe("https://api.example.test/auth/link-social");
+    expect(calls[0]?.input).toBe("https://api.example.test/auth/peezy/link");
     expect(calls[0]?.init?.method).toBe("POST");
     expect(calls[0]?.init?.body).toBe(JSON.stringify(body));
   });
 
-  test("uses the Generic OAuth routes and providerId body for Telegram", async () => {
+  test("routes every provider through the shared peezy.tech identity endpoints", async () => {
     const calls: { input: string; init: RequestInit | undefined }[] = [];
     const fetcher: SentinelFetch = async (input, init) => {
       calls.push({ input: input.toString(), init });
@@ -179,17 +248,13 @@ describe("sentinel web client", () => {
     await client.signInSocial(body);
 
     expect(calls.map((call) => call.input)).toEqual([
-      "https://api.example.test/auth/oauth2/link",
-      "https://api.example.test/auth/sign-in/oauth2",
+      "https://api.example.test/auth/peezy/link",
+      "https://api.example.test/auth/peezy/sign-in",
     ]);
     for (const call of calls) {
       expect(call.init?.method).toBe("POST");
       expect(call.init?.body).toBe(
-        JSON.stringify({
-          callbackURL: body.callbackURL,
-          errorCallbackURL: body.errorCallbackURL,
-          providerId: "telegram",
-        }),
+        JSON.stringify(body),
       );
     }
   });

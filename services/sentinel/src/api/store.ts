@@ -34,6 +34,7 @@ import {
   type WalletDto
 } from "./dto";
 import type { SentinelApiStore, TelegramLinkCodeRecord, WalletNonceRecord } from "./auth";
+import { takeIdentityQuota } from "./identity-quota";
 
 type QueryResult<T> = readonly T[] | { readonly rows: readonly T[] };
 
@@ -320,6 +321,9 @@ export function createDrizzleApiStore(db: SentinelDb): SentinelApiStore {
 
         return toWalletDto(wallet);
       });
+    },
+    async takeIdentityQuota(input) {
+      return takeIdentityQuota(db, input);
     }
   };
 }
@@ -643,7 +647,7 @@ async function listWallets(db: SentinelDb, userId: string): Promise<WalletDto[]>
     byAddress.set(key, {
       address: existing.address,
       alertsEnabled: existing.alertsEnabled || wallet.alertsEnabled,
-      canSignIn: true,
+      canSignIn: existing.canSignIn || wallet.canSignIn,
       verifiedAt:
         Date.parse(existing.verifiedAt) >= Date.parse(wallet.verifiedAt)
           ? existing.verifiedAt

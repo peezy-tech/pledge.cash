@@ -8,6 +8,7 @@ const baseEnv = {
   DATABASE_URL: "postgres://sentinel:sentinel@127.0.0.1:5432/sentinel",
   SENTINEL_CHAIN_IDS: "31337",
   SENTINEL_RPC_URL_31337: "http://127.0.0.1:8545",
+  SENTINEL_TRUSTED_PROXY_IPS: "127.0.0.1,::1",
   SENTINEL_WEB_ORIGIN: "http://localhost:5173"
 };
 
@@ -66,6 +67,108 @@ describe("Sentinel config", () => {
     });
 
     expect(config.auth.socialProviders).toEqual({});
+  });
+
+  test("loads the shared identity provider only when all confidential values are present", () => {
+    const identity = {
+      PEEZY_IDENTITY_APP_CLIENT_SECRET: "app-secret-at-least-32-characters",
+      PEEZY_IDENTITY_CLIENT_ID: "pledge-cash",
+      PEEZY_IDENTITY_OIDC_CLIENT_SECRET: "oidc-secret-at-least-32-characters",
+      PEEZY_IDENTITY_URL: "https://identity.peezy.tech"
+    };
+    expect(loadConfig({ ...baseEnv, ...identity }).auth.identity).toEqual({
+      appClientSecret: identity.PEEZY_IDENTITY_APP_CLIENT_SECRET,
+      baseUrl: identity.PEEZY_IDENTITY_URL,
+      clientId: identity.PEEZY_IDENTITY_CLIENT_ID,
+      oidcClientSecret: identity.PEEZY_IDENTITY_OIDC_CLIENT_SECRET
+    });
+
+    for (const omitted of Object.keys(identity)) {
+      const incomplete = { ...identity };
+      delete incomplete[omitted as keyof typeof incomplete];
+      expect(() => loadConfig({ ...baseEnv, ...incomplete })).toThrow(
+        "PEEZY_IDENTITY_URL, PEEZY_IDENTITY_CLIENT_ID, PEEZY_IDENTITY_APP_CLIENT_SECRET, and PEEZY_IDENTITY_OIDC_CLIENT_SECRET must be configured together"
+      );
+    }
+  });
+
+  test("requires an explicit trusted HTTPS edge for shared Identity client limits", () => {
+    const { SENTINEL_TRUSTED_PROXY_IPS: _, ...withoutTrustedProxy } = baseEnv;
+    expect(() =>
+      loadConfig({
+        ...withoutTrustedProxy,
+        PEEZY_IDENTITY_APP_CLIENT_SECRET: "app-secret-at-least-32-characters",
+        PEEZY_IDENTITY_CLIENT_ID: "pledge-cash",
+        PEEZY_IDENTITY_OIDC_CLIENT_SECRET: "oidc-secret-at-least-32-characters",
+        PEEZY_IDENTITY_URL: "https://identity.peezy.tech"
+      })
+    ).toThrow(
+      "SENTINEL_TRUSTED_PROXY_IPS must identify the HTTPS edge in shared Identity mode"
+    );
+    expect(loadConfig(baseEnv).trustedProxyIps).toEqual(["127.0.0.1", "::1"]);
+    expect(() =>
+      loadConfig({ ...baseEnv, SENTINEL_TRUSTED_PROXY_IPS: "127.0.0.1,proxy" })
+    ).toThrow("Invalid IP address in SENTINEL_TRUSTED_PROXY_IPS: proxy");
+  });
+
+  test("requires the shared identity URL to be a bare origin", () => {
+    expect(() =>
+      loadConfig({
+        ...baseEnv,
+        PEEZY_IDENTITY_APP_CLIENT_SECRET: "app-secret-at-least-32-characters",
+        PEEZY_IDENTITY_CLIENT_ID: "pledge-cash",
+        PEEZY_IDENTITY_OIDC_CLIENT_SECRET: "oidc-secret-at-least-32-characters",
+        PEEZY_IDENTITY_URL: "https://identity.peezy.tech/oauth"
+      })
+    ).toThrow("PEEZY_IDENTITY_URL must be an origin");
+  });
+
+  test("requires HTTPS for a non-loopback shared identity provider", () => {
+    expect(() =>
+      loadConfig({
+        ...baseEnv,
+        PEEZY_IDENTITY_APP_CLIENT_SECRET: "app-secret-at-least-32-characters",
+        PEEZY_IDENTITY_CLIENT_ID: "pledge-cash",
+        PEEZY_IDENTITY_OIDC_CLIENT_SECRET: "oidc-secret-at-least-32-characters",
+        PEEZY_IDENTITY_URL: "http://identity.peezy.tech"
+      })
+    ).toThrow("PEEZY_IDENTITY_URL must use HTTPS outside loopback development");
+
+    expect(
+      loadConfig({
+        ...baseEnv,
+        PEEZY_IDENTITY_APP_CLIENT_SECRET: "app-secret-at-least-32-characters",
+        PEEZY_IDENTITY_CLIENT_ID: "pledge-cash",
+        PEEZY_IDENTITY_OIDC_CLIENT_SECRET: "oidc-secret-at-least-32-characters",
+        PEEZY_IDENTITY_URL: "http://localhost:8790"
+      }).auth.identity?.baseUrl
+    ).toBe("http://localhost:8790");
+  });
+
+  test("validates shared identity client identifiers and secret strength", () => {
+    expect(() =>
+      loadConfig({
+        ...baseEnv,
+        PEEZY_IDENTITY_APP_CLIENT_SECRET: "short",
+        PEEZY_IDENTITY_CLIENT_ID: "pledge:cash",
+        PEEZY_IDENTITY_OIDC_CLIENT_SECRET: "also-short",
+        PEEZY_IDENTITY_URL: "https://identity.peezy.tech"
+      })
+    ).toThrow();
+  });
+
+  test("rejects reuse of one secret across the app API and OIDC boundaries", () => {
+    expect(() =>
+      loadConfig({
+        ...baseEnv,
+        PEEZY_IDENTITY_APP_CLIENT_SECRET: "shared-secret-at-least-32-characters",
+        PEEZY_IDENTITY_CLIENT_ID: "pledge-cash",
+        PEEZY_IDENTITY_OIDC_CLIENT_SECRET: "shared-secret-at-least-32-characters",
+        PEEZY_IDENTITY_URL: "https://identity.peezy.tech"
+      })
+    ).toThrow(
+      "PEEZY_IDENTITY_APP_CLIENT_SECRET and PEEZY_IDENTITY_OIDC_CLIENT_SECRET must be distinct"
+    );
   });
 
   test("requires auth and web URLs to be bare origins", () => {

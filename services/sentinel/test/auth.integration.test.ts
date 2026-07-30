@@ -16,6 +16,7 @@ import {
   createPledgeCashSiweVerifier,
   WALLET_LINK_SIWE_STATEMENT
 } from "../src/api/better-auth";
+import { discardOAuthTokensForSharedIdentity } from "../src/api/peezy-identity";
 import { createApp } from "../src/api/server";
 import { createDrizzleApiStore } from "../src/api/store";
 import { loadConfig, type Config } from "../src/config";
@@ -148,6 +149,25 @@ describeWithDatabase("Better Auth Postgres integration", () => {
     expect(await afterLogout.json()).toBeNull();
   });
 
+  test("shares Identity client quotas across store instances", async () => {
+    const firstStore = createDrizzleApiStore(dbClient.db);
+    const secondStore = createDrizzleApiStore(dbClient.db);
+    const input = {
+      capacity: 2,
+      now: new Date(),
+      scope: `integration:${randomBytes(8).toString("hex")}`,
+      windowMs: 5 * 60_000
+    };
+
+    const results = await Promise.all([
+      firstStore.takeIdentityQuota(input),
+      secondStore.takeIdentityQuota(input),
+      firstStore.takeIdentityQuota(input)
+    ]);
+    expect(results.filter(Boolean)).toHaveLength(2);
+    expect(results.filter((result) => !result)).toHaveLength(1);
+  });
+
   test("rejects a SIWE message with an untrusted URI", async () => {
     const nonce = await authNonce(app, 10);
     const issuedAt = new Date();
@@ -264,6 +284,65 @@ describeWithDatabase("Better Auth Postgres integration", () => {
       .from(wallets)
       .where(eq(wallets.userId, otherUser?.id ?? "00000000-0000-0000-0000-000000000000"));
     expect(crossOwned).toHaveLength(0);
+  });
+
+  test("discards legacy OAuth tokens during shared Identity cutover", async () => {
+    const [legacyUser] = await dbClient.db
+      .insert(users)
+      .values({
+        email: `legacy-oauth-${randomBytes(8).toString("hex")}@pledge.cash.invalid`,
+        emailVerified: false,
+        name: "Legacy OAuth account"
+      })
+      .returning({ id: users.id });
+    expect(legacyUser).toBeDefined();
+
+    const [legacyAccount] = await dbClient.db
+      .insert(authAccounts)
+      .values({
+        accessToken: "encrypted-access-token",
+        accessTokenExpiresAt: new Date(Date.now() + 60_000),
+        accountId: `legacy-${randomBytes(8).toString("hex")}`,
+        idToken: "legacy-id-token",
+        password: "preserved-password",
+        providerId: "github",
+        refreshToken: "encrypted-refresh-token",
+        refreshTokenExpiresAt: new Date(Date.now() + 120_000),
+        scope: "read:user",
+        userId: legacyUser?.id ?? "00000000-0000-0000-0000-000000000000"
+      })
+      .returning({ id: authAccounts.id });
+    expect(legacyAccount).toBeDefined();
+
+    await discardOAuthTokensForSharedIdentity(dbClient.db);
+
+    const [stored] = await dbClient.db
+      .select({
+        accessToken: authAccounts.accessToken,
+        accessTokenExpiresAt: authAccounts.accessTokenExpiresAt,
+        idToken: authAccounts.idToken,
+        password: authAccounts.password,
+        refreshToken: authAccounts.refreshToken,
+        refreshTokenExpiresAt: authAccounts.refreshTokenExpiresAt,
+        scope: authAccounts.scope
+      })
+      .from(authAccounts)
+      .where(
+        eq(
+          authAccounts.id,
+          legacyAccount?.id ?? "00000000-0000-0000-0000-000000000000"
+        )
+      )
+      .limit(1);
+    expect(stored).toEqual({
+      accessToken: null,
+      accessTokenExpiresAt: null,
+      idToken: null,
+      password: "preserved-password",
+      refreshToken: null,
+      refreshTokenExpiresAt: null,
+      scope: "read:user"
+    });
   });
 
   test("backfills legacy alert wallets into sign-in credentials without reenabling coverage", async () => {
