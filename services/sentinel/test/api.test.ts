@@ -780,6 +780,29 @@ describe("Sentinel WP5 API", () => {
     ]);
   });
 
+  test("does not advertise walletless sign-in without a shared social provider", async () => {
+    for (const getSocialProviders of [
+      async () => [],
+      async () => {
+        throw new Error("Identity unavailable");
+      }
+    ]) {
+      const identityHarness = createHarness({ sharedIdentity: true });
+      Object.assign(identityHarness.auth, {
+        getSocialProviders,
+        socialProviders: []
+      });
+
+      const capabilities = await identityHarness.app.request(
+        "/auth/capabilities"
+      );
+      expect(await capabilities.json()).toEqual({
+        socialProviders: [],
+        walletlessSocialSignIn: false
+      });
+    }
+  });
+
   test("preserves retryable social-auth dependency statuses", async () => {
     for (const expected of [
       {

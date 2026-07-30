@@ -1931,11 +1931,16 @@ async function finalizeIdentityWalletCoverage(
       userId: input.userId,
       verifiedAt: input.verifiedAt
     });
+    // Grant issuance runs outside this transaction, so a newer attempt may
+    // have replaced the address-scoped marker while this attempt was remote.
     await transaction
       .delete(identityWalletLinkReconciliations)
       .where(
         and(
           eq(identityWalletLinkReconciliations.subject, input.subject),
+          eq(identityWalletLinkReconciliations.chainId, input.chainId),
+          eq(identityWalletLinkReconciliations.siweMessage, input.siweMessage),
+          eq(identityWalletLinkReconciliations.verifiedAt, input.verifiedAt),
           sql`lower(${identityWalletLinkReconciliations.address}) = lower(${input.address})`
         )
       );

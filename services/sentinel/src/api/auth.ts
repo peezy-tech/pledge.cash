@@ -489,7 +489,8 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
     return c.json(
       AuthCapabilitiesResponseSchema.parse({
         socialProviders,
-        walletlessSocialSignIn: deps.auth.usesSharedIdentity === true
+        walletlessSocialSignIn:
+          deps.auth.usesSharedIdentity === true && socialProviders.length > 0
       })
     );
   });

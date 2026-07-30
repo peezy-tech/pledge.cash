@@ -682,6 +682,102 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     expect(coverageAfter[0]?.count).toBe("1");
   });
 
+  test("preserves a newer reconciliation while finalizing an older wallet link", async () => {
+    const primaryWallet = privateKeyToAccount(
+      `0x${randomBytes(32).toString("hex")}`
+    );
+    const linkedWallet = privateKeyToAccount(
+      `0x${randomBytes(32).toString("hex")}`
+    );
+    const signIn = await signInWallet(app, primaryWallet);
+    expect(signIn.status).toBe(200);
+    const cookie = responseCookie(signIn, "pledge-cash.session_token");
+    const nonceResponse = await app.request(`${apiOrigin}/wallets/nonce`, {
+      body: JSON.stringify({
+        address: linkedWallet.address,
+        chainId: 999
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookie,
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+    expect(nonceResponse.status).toBe(200);
+    const challenge = (await nonceResponse.json()) as { message: string };
+    const signature = await linkedWallet.signMessage({
+      message: challenge.message
+    });
+
+    await dbClient.sql.unsafe(`
+      CREATE FUNCTION replace_test_identity_wallet_reconciliation()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $$
+      BEGIN
+        UPDATE identity_wallet_link_reconciliations
+        SET
+          chain_id = 31337,
+          created_at = '2040-01-01T00:00:00.000Z',
+          siwe_message = 'newer wallet link',
+          verified_at = '2040-01-01T00:00:00.000Z'
+        WHERE lower(address) = '${linkedWallet.address.toLowerCase()}';
+        RETURN NEW;
+      END;
+      $$
+    `);
+    await dbClient.sql.unsafe(`
+      CREATE TRIGGER replace_test_identity_wallet_reconciliation
+      BEFORE INSERT ON wallets
+      FOR EACH ROW
+      WHEN (lower(NEW.address) = '${linkedWallet.address.toLowerCase()}')
+      EXECUTE FUNCTION replace_test_identity_wallet_reconciliation()
+    `);
+    let linkResponse: Response;
+    try {
+      linkResponse = await app.request(`${apiOrigin}/wallets`, {
+        body: JSON.stringify({
+          message: challenge.message,
+          signature
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: cookie,
+          Origin: webOrigin
+        },
+        method: "POST"
+      });
+    } finally {
+      await dbClient.sql.unsafe(
+        `DROP TRIGGER IF EXISTS replace_test_identity_wallet_reconciliation ON wallets`
+      );
+      await dbClient.sql.unsafe(
+        `DROP FUNCTION IF EXISTS replace_test_identity_wallet_reconciliation()`
+      );
+    }
+    expect(linkResponse.status).toBe(200);
+    const [pending] = await dbClient.sql<
+      {
+        chainId: number;
+        siweMessage: string;
+        verifiedAt: Date;
+      }[]
+    >`
+      DELETE FROM "identity_wallet_link_reconciliations"
+      WHERE lower("address") = ${linkedWallet.address.toLowerCase()}
+      RETURNING
+        "chain_id" AS "chainId",
+        "siwe_message" AS "siweMessage",
+        "verified_at" AS "verifiedAt"
+    `;
+    expect(pending).toEqual({
+      chainId: 31337,
+      siweMessage: "newer wallet link",
+      verifiedAt: new Date("2040-01-01T00:00:00.000Z")
+    });
+  });
+
   test("retains wallet-link reconciliation after an ambiguous Identity failure", async () => {
     const primaryWallet = privateKeyToAccount(
       `0x${randomBytes(32).toString("hex")}`
