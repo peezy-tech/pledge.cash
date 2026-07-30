@@ -8,6 +8,7 @@ import {
   createRateLimitMiddleware,
   createSessionMiddleware,
   AuthRateLimitError,
+  AuthWalletCredentialRejectedError,
   getNow,
   jsonError,
   parseJson,
@@ -216,15 +217,24 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
           /already linked|another account|multiple PledgeCash users/i.test(
             message
           );
-        return jsonError(
-          c,
-          credentialConflict || migrationRequired ? 409 : 400,
-          migrationRequired
-            ? "Sign in through peezy.tech Identity before linking another wallet"
-            : credentialConflict
-            ? "Wallet is already linked to another account"
-            : "SIWE signature is invalid"
-        );
+        if (migrationRequired) {
+          return jsonError(
+            c,
+            409,
+            "Sign in through peezy.tech Identity before linking another wallet"
+          );
+        }
+        if (credentialConflict) {
+          return jsonError(
+            c,
+            409,
+            "Wallet is already linked to another account"
+          );
+        }
+        if (error instanceof AuthWalletCredentialRejectedError) {
+          return jsonError(c, 400, "SIWE signature is invalid");
+        }
+        return jsonError(c, 503, "Wallet linking is temporarily unavailable");
       }
       return c.json(LinkWalletResponseSchema.parse({ wallet }));
     }

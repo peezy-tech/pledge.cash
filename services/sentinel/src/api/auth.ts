@@ -57,6 +57,17 @@ export class AuthRateLimitError extends Error {
   }
 }
 
+export class AuthWalletCredentialRejectedError extends Error {
+  constructor(error: unknown) {
+    super(
+      error instanceof Error
+        ? error.message
+        : "Identity rejected the wallet credential"
+    );
+    this.name = "AuthWalletCredentialRejectedError";
+  }
+}
+
 export type ApiChainConfig = {
   readonly chainId: number;
 };
@@ -651,11 +662,13 @@ export function createAuthRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
   if (deps.auth.usesSharedIdentity === true) {
     app.post(
       "/peezy/siwe/nonce",
+      authBodyLimit,
       publicSiweChallengeClientRateLimit,
       forwardAuthRequest
     );
     app.post(
       "/siwe/nonce",
+      authBodyLimit,
       publicSiweChallengeClientRateLimit,
       forwardAuthRequest
     );

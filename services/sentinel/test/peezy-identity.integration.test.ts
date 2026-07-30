@@ -609,7 +609,7 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
         `DROP FUNCTION IF EXISTS fail_test_identity_wallet_coverage()`
       );
     }
-    expect(linkResponse.status).toBe(400);
+    expect(linkResponse.status).toBe(503);
     const [centralLink, pendingLink, localCoverage] = await Promise.all([
       identitySql<{ count: string }[]>`
         SELECT count(*)::text AS "count"
@@ -659,6 +659,96 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     ]);
     expect(pendingAfter[0]?.count).toBe("0");
     expect(coverageAfter[0]?.count).toBe("1");
+  });
+
+  test("retains wallet-link reconciliation after an ambiguous Identity failure", async () => {
+    const primaryWallet = privateKeyToAccount(
+      `0x${randomBytes(32).toString("hex")}`
+    );
+    const linkedWallet = privateKeyToAccount(
+      `0x${randomBytes(32).toString("hex")}`
+    );
+    const signIn = await signInWallet(app, primaryWallet);
+    expect(signIn.status).toBe(200);
+    const cookie = responseCookie(signIn, "pledge-cash.session_token");
+    const session = (await signIn.json()) as { user: { id: string } };
+    const ambiguousApp = createApp({
+      auth: createPeezyIdentityAuthAdapter(
+        config,
+        dbClient.db,
+        async (input, init) => {
+          const requestUrl =
+            input instanceof Request ? input.url : input.toString();
+          if (
+            new URL(requestUrl).pathname === "/v1/wallet/grants/issue"
+          ) {
+            return Response.json(
+              { message: "Identity wallet grant outcome is unknown" },
+              { status: 503 }
+            );
+          }
+          return fetch(input, init);
+        }
+      ),
+      config,
+      store: createDrizzleApiStore(dbClient.db)
+    });
+    const nonceResponse = await ambiguousApp.request(
+      `${apiOrigin}/wallets/nonce`,
+      {
+        body: JSON.stringify({
+          address: linkedWallet.address,
+          chainId: 999
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: cookie,
+          Origin: webOrigin
+        },
+        method: "POST"
+      }
+    );
+    expect(nonceResponse.status).toBe(200);
+    const challenge = (await nonceResponse.json()) as { message: string };
+    const signature = await linkedWallet.signMessage({
+      message: challenge.message
+    });
+
+    const linkResponse = await ambiguousApp.request(`${apiOrigin}/wallets`, {
+      body: JSON.stringify({ message: challenge.message, signature }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookie,
+        Origin: webOrigin
+      },
+      method: "POST"
+    });
+
+    expect(linkResponse.status).toBe(503);
+    expect(await linkResponse.json()).toEqual({
+      error: { message: "Wallet linking is temporarily unavailable" }
+    });
+    const [pendingLink, localCoverage, centralLink] = await Promise.all([
+      dbClient.sql<{ count: string }[]>`
+        SELECT count(*)::text AS "count"
+        FROM "identity_wallet_link_reconciliations"
+        WHERE lower("address") = ${linkedWallet.address.toLowerCase()}
+          AND "user_id" = ${session.user.id}::uuid
+      `,
+      dbClient.sql<{ count: string }[]>`
+        SELECT count(*)::text AS "count"
+        FROM "wallets"
+        WHERE lower("address") = ${linkedWallet.address.toLowerCase()}
+      `,
+      identitySql<{ count: string }[]>`
+        SELECT count(*)::text AS "count"
+        FROM "wallet_principal"
+        WHERE lower("address") = ${linkedWallet.address.toLowerCase()}
+      `
+    ]);
+    expect(pendingLink[0]?.count).toBe("1");
+    expect(localCoverage[0]?.count).toBe("0");
+    expect(centralLink[0]?.count).toBe("0");
   });
 
   test("lets a pre-rollout client sign an existing wallet without creating a second credential", async () => {

@@ -906,22 +906,43 @@ describe("Sentinel WP5 API", () => {
     expect(identityHarness.auth.forwarded).toHaveLength(11);
   });
 
-  test("rejects oversized SIWE requests before parsing or quota work", async () => {
+  test("rejects oversized public SIWE requests before parsing or quota work", async () => {
     const identityHarness = createHarness({ sharedIdentity: true });
     const request = await authSiweRequest();
-    const response = await identityHarness.app.request(
-      "/auth/peezy/siwe/verify",
+    const requests = [
       {
         body: JSON.stringify({
           ...request,
           message: "a".repeat(129 * 1024)
         }),
+        path: "/auth/peezy/siwe/verify"
+      },
+      {
+        body: JSON.stringify({
+          chainId: 31337,
+          padding: "a".repeat(129 * 1024),
+          walletAddress: PRIMARY_WALLET
+        }),
+        path: "/auth/peezy/siwe/nonce"
+      },
+      {
+        body: JSON.stringify({
+          chainId: 31337,
+          padding: "a".repeat(129 * 1024),
+          walletAddress: PRIMARY_WALLET
+        }),
+        path: "/auth/siwe/nonce"
+      }
+    ] as const;
+
+    for (const request of requests) {
+      const response = await identityHarness.app.request(request.path, {
+        body: request.body,
         headers: { "Content-Type": "application/json" },
         method: "POST"
-      }
-    );
-
-    expect(response.status).toBe(413);
+      });
+      expect(response.status).toBe(413);
+    }
     expect(identityHarness.store.identityQuotaEvents.size).toBe(0);
     expect(identityHarness.auth.forwarded).toEqual([]);
   });
@@ -1272,6 +1293,33 @@ describe("Sentinel WP5 API", () => {
     expect(overlongMessage.status).toBe(400);
     expect(oversizedBody.status).toBe(413);
     expect(linkCalls).toBe(0);
+  });
+
+  test("reports wallet-link dependency failures as retryable", async () => {
+    const identityHarness = createHarness({ sharedIdentity: true });
+    Object.assign(identityHarness.auth, {
+      linkWalletCredential: async () => {
+        throw new Error("Identity request timed out after 2000ms");
+      }
+    });
+    const request = await authSiweRequest();
+
+    const response = await identityHarness.app.request("/wallets", {
+      body: JSON.stringify({
+        message: request.message,
+        signature: request.signature
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: SESSION_COOKIE
+      },
+      method: "POST"
+    });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: { message: "Wallet linking is temporarily unavailable" }
+    });
   });
 
   test("links equal wallet credentials and controls alert coverage with chain and conflict checks", async () => {

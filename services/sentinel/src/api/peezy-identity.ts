@@ -52,7 +52,12 @@ import {
   type SocialProviderDto,
   type WalletDto
 } from "./dto";
-import { AuthRateLimitError, type AuthAdapter, type AuthSnapshot } from "./auth";
+import {
+  AuthRateLimitError,
+  AuthWalletCredentialRejectedError,
+  type AuthAdapter,
+  type AuthSnapshot
+} from "./auth";
 import {
   createSentinelAuthDatabaseAdapter,
   createPledgeCashSiweVerifier,
@@ -103,17 +108,6 @@ type IdentityHydrator = {
   set(subject: string, identity: IdentityMeResponse): void;
 };
 type SentinelTransaction = Parameters<Parameters<SentinelDb["transaction"]>[0]>[0];
-
-class IdentityWalletGrantRejectedError extends Error {
-  constructor(error: unknown) {
-    super(
-      error instanceof Error
-        ? error.message
-        : "Identity rejected the wallet grant"
-    );
-    this.name = "IdentityWalletGrantRejectedError";
-  }
-}
 
 export async function discardOAuthTokensForSharedIdentity(
   db: SentinelDb
@@ -911,10 +905,11 @@ function createIdentityGateway(
       signature: string;
       subject?: string;
     }) {
-      let rejected = false;
+      let definitivelyRejected = false;
       const grantFetcher: IdentityFetch = async (request, init) => {
         const response = await client.fetcher(request, init);
-        rejected = !response.ok;
+        definitivelyRejected =
+          response.status >= 400 && response.status < 500;
         return response;
       };
       try {
@@ -924,8 +919,8 @@ function createIdentityGateway(
           fetcher: grantFetcher
         });
       } catch (error) {
-        if (rejected) {
-          throw new IdentityWalletGrantRejectedError(error);
+        if (definitivelyRejected) {
+          throw new AuthWalletCredentialRejectedError(error);
         }
         throw error;
       }
@@ -1523,7 +1518,7 @@ async function linkIdentityWalletCredential(
       subject
     });
   } catch (error) {
-    if (error instanceof IdentityWalletGrantRejectedError) {
+    if (error instanceof AuthWalletCredentialRejectedError) {
       await deleteRejectedIdentityWalletLink(db, {
         address: input.address,
         subject,
