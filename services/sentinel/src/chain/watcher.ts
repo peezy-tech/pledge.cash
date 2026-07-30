@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { and, asc, desc, eq, gt, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import {
   createPublicClient,
   decodeFunctionData,
@@ -24,6 +24,7 @@ import {
   discoverBoardrooms,
   getPledgeCashDeployment,
   pledgeCashAbis,
+  protocolFacetRegistryAbi,
   type BoardroomCall,
   type DiscoveredBoardroom,
   type PledgeCashDeployment,
@@ -172,6 +173,13 @@ export type WatcherStoreTx = {
     readonly terminalLogIndex: number;
     readonly txHash: Lowercase<Hex>;
   }): Promise<Array<{ action: ScheduledOperationRow; calls: StoredCall[] }>>;
+  invalidateScheduledOperationsBeforeFacetSetActivation(input: {
+    readonly chainId: number;
+    readonly facetSetHash: Lowercase<Hex>;
+    readonly terminalBlock: bigint;
+    readonly terminalLogIndex: number;
+    readonly txHash: Lowercase<Hex>;
+  }): Promise<Array<{ action: ScheduledOperationRow; calls: StoredCall[] }>>;
   insertActionCalls(actionId: string, calls: readonly InsertActionCallInput[]): Promise<StoredCall[]>;
   insertMarketLifecycleEvent(input: MarketLifecycleEvent & { readonly chainId: number }): Promise<boolean>;
   insertPolicyAdminEvent(input: InsertPolicyAdminEventInput): Promise<boolean>;
@@ -252,6 +260,13 @@ type WatcherPassPlan = {
 
 type PolicyAdminEvent = InsertPolicyAdminEventInput & {
   readonly affectedScheduledOperations: boolean;
+};
+
+type FacetSetActivationEvent = {
+  readonly blockNumber: bigint;
+  readonly facetSetHash: Lowercase<Hex>;
+  readonly logIndex: number;
+  readonly transactionHash: Lowercase<Hex>;
 };
 
 type PositionedPipelineEvent = {
@@ -424,6 +439,10 @@ const assetAllowedSetEvent = getAbiItem({ abi: assetPolicyAbi, name: "AssetAllow
 const approvalSpenderAllowedSetEvent = getAbiItem({
   abi: assetPolicyAbi,
   name: "ApprovalSpenderAllowedSet"
+});
+const facetSetActivatedEvent = getAbiItem({
+  abi: protocolFacetRegistryAbi,
+  name: "FacetSetActivated"
 });
 
 let defaultActionEventHandler: WatcherActionEventHandler | undefined;
@@ -691,6 +710,11 @@ async function runWatcherPass(input: {
     input.deployment,
     plan.windows.governance
   );
+  const facetSetActivationEvents = await fetchFacetSetActivationEvents(
+    input.client,
+    input.deployment,
+    plan.windows.governance
+  );
   const shareTransfers = await fetchShareTransfers(
     input.client,
     boardroomsForGovernance.map((boardroom) => boardroom.shareToken),
@@ -743,6 +767,23 @@ async function runWatcherPass(input: {
         ...emitted.map((pipelineEvent) => ({
           blockNumber: event.blockNumber,
           event: pipelineEvent,
+          logIndex: event.logIndex
+        }))
+      );
+    }
+
+    for (const event of facetSetActivationEvents) {
+      const invalidated = await tx.invalidateScheduledOperationsBeforeFacetSetActivation({
+        chainId: input.chainId,
+        facetSetHash: event.facetSetHash,
+        terminalBlock: event.blockNumber,
+        terminalLogIndex: event.logIndex,
+        txHash: event.transactionHash
+      });
+      governancePipelineEvents.push(
+        ...invalidated.map((item) => ({
+          blockNumber: event.blockNumber,
+          event: { ...item, event: "invalidated" as const },
           logIndex: event.logIndex
         }))
       );
@@ -1028,6 +1069,44 @@ async function fetchPolicyAdminEvents(
   return events.sort(comparePolicyAdminEvents);
 }
 
+async function fetchFacetSetActivationEvents(
+  client: WatcherClient,
+  deployment: PledgeCashDeployment,
+  window: CursorWindow | undefined
+): Promise<FacetSetActivationEvent[]> {
+  if (!window || !deployment.protocolFacetRegistry) return [];
+
+  const logs = (await client.getLogs({
+    address: deployment.protocolFacetRegistry,
+    event: facetSetActivatedEvent,
+    fromBlock: window.fromBlock,
+    toBlock: window.toBlock
+  } as never)) as Array<{
+    args?: Record<string, unknown>;
+    blockNumber?: bigint;
+    logIndex?: number;
+    transactionHash?: Hex;
+  }>;
+
+  return logs
+    .flatMap((log) => {
+      const facetSetHash = hexValue(log.args?.facetSetHash);
+      if (
+        facetSetHash === undefined
+        || log.blockNumber === undefined
+        || log.logIndex === undefined
+        || log.transactionHash === undefined
+      ) return [];
+      return [{
+        blockNumber: log.blockNumber,
+        facetSetHash: lowerHex(facetSetHash),
+        logIndex: log.logIndex,
+        transactionHash: lowerHex(log.transactionHash)
+      }];
+    })
+    .sort(compareFacetSetActivationEvents);
+}
+
 async function fetchShareTransfers(
   client: WatcherClient,
   shareTokens: readonly Address[],
@@ -1273,6 +1352,48 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
             eq(scheduledOperations.controller, input.controller),
             eq(scheduledOperations.status, "scheduled"),
             lt(scheduledOperations.configurationEpoch, input.configurationEpoch),
+            or(
+              lt(scheduledOperations.scheduleBlock, input.terminalBlock),
+              and(
+                eq(scheduledOperations.scheduleBlock, input.terminalBlock),
+                lt(scheduledOperations.scheduleLogIndex, input.terminalLogIndex)
+              )
+            )
+          )
+        )
+        .returning();
+      invalidated.sort(
+        (left, right) =>
+          Number(left.scheduleBlock - right.scheduleBlock)
+          || left.scheduleLogIndex - right.scheduleLogIndex
+          || left.createdAt.getTime() - right.createdAt.getTime()
+      );
+      return Promise.all(
+        invalidated.map(async (action) => ({
+          action,
+          calls: await this.listActionCalls(action.id)
+        }))
+      );
+    },
+    async invalidateScheduledOperationsBeforeFacetSetActivation(input: {
+      readonly chainId: number;
+      readonly facetSetHash: Lowercase<Hex>;
+      readonly terminalBlock: bigint;
+      readonly terminalLogIndex: number;
+      readonly txHash: Lowercase<Hex>;
+    }): Promise<Array<{ action: ScheduledOperationRow; calls: StoredCall[] }>> {
+      const invalidated = await db
+        .update(scheduledOperations)
+        .set({
+          resolvedTxHash: input.txHash,
+          status: "invalidated",
+          updatedAt: new Date()
+        })
+        .where(
+          and(
+            eq(scheduledOperations.chainId, input.chainId),
+            eq(scheduledOperations.status, "scheduled"),
+            ne(scheduledOperations.facetSetHash, input.facetSetHash),
             or(
               lt(scheduledOperations.scheduleBlock, input.terminalBlock),
               and(
@@ -2033,6 +2154,15 @@ function comparePositionedPipelineEvents(left: PositionedPipelineEvent, right: P
 }
 
 function comparePolicyAdminEvents(left: PolicyAdminEvent, right: PolicyAdminEvent): number {
+  if (left.blockNumber < right.blockNumber) return -1;
+  if (left.blockNumber > right.blockNumber) return 1;
+  return left.logIndex - right.logIndex;
+}
+
+function compareFacetSetActivationEvents(
+  left: FacetSetActivationEvent,
+  right: FacetSetActivationEvent
+): number {
   if (left.blockNumber < right.blockNumber) return -1;
   if (left.blockNumber > right.blockNumber) return 1;
   return left.logIndex - right.logIndex;

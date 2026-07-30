@@ -55,6 +55,7 @@ const cancelTx = bytes32("101");
 const adminTx = bytes32("102");
 const invalidationTx = bytes32("103");
 const facetSetHash = bytes32("fac37");
+const nextFacetSetHash = bytes32("fac38");
 
 const call: BoardroomCall = {
   data: encodeFunctionData({
@@ -630,6 +631,68 @@ describe("runWatcherOnce", () => {
     expect(events.map((event) => event.event)).toEqual(["invalidated", "scheduled"]);
   });
 
+  test("invalidates stale facet-set operations without touching a later queue in the activation block", async () => {
+    const store = new MemoryWatcherStore();
+    store.addBoardroom();
+    store.setCursor("factory-discovery", 5n);
+    store.setCursor("share-transfers", 5n);
+    const oldAction = store.addScheduledOperation({
+      id: "old-facet-set-action",
+      scheduleBlock: 2n,
+      scheduleTxHash: bytes32("231")
+    });
+    const nextOperationId = bytes32("a31");
+    const nextScheduleTx = bytes32("232");
+    const nextScheduleInput = encodeFunctionData({
+      abi: boardroomControllerAbi,
+      functionName: "scheduleBoardroomOperation",
+      args: [nextFacetSetHash, [call], salt, boardroomEpoch, configurationEpoch]
+    });
+    const events: WatcherPipelineEvent[] = [];
+    const deployment = testDeployment();
+
+    const result = await runWatcherOnce(chainId, {
+      client: createClient({
+        latestBlock: 5n,
+        logs: [
+          rawLog(
+            "FacetSetActivated",
+            deployment.protocolFacetRegistry,
+            5n,
+            1,
+            invalidationTx,
+            {
+              facetSetHash: nextFacetSetHash,
+              previousFacetSetHash: facetSetHash,
+              release: 2n
+            }
+          ),
+          scheduledLog(5n, 3, nextScheduleTx, {
+            facetSetHash: nextFacetSetHash,
+            operationId: nextOperationId
+          })
+        ],
+        txInputs: { [nextScheduleTx]: nextScheduleInput }
+      }),
+      config: testConfig(10),
+      deployment,
+      onActionEvent: (event) => events.push(event),
+      store
+    });
+
+    expect(result.actionEvents).toBe(2);
+    expect(store.action(oldAction.id)).toMatchObject({
+      resolvedTxHash: invalidationTx,
+      status: "invalidated"
+    });
+    expect(store.state.actions.find((action) => action.operationId === nextOperationId)).toMatchObject({
+      facetSetHash: nextFacetSetHash,
+      scheduleLogIndex: 3,
+      status: "scheduled"
+    });
+    expect(events.map((event) => event.event)).toEqual(["invalidated", "scheduled"]);
+  });
+
   test("does not replay transitioned actions after their atomic governance cursor commit", async () => {
     const store = new MemoryWatcherStore();
     store.addBoardroom();
@@ -1049,6 +1112,35 @@ class MemoryWatcherTx implements WatcherStoreTx {
         && action.configurationEpoch < input.configurationEpoch
         && (action.scheduleBlock < input.terminalBlock
           || (action.scheduleBlock === input.terminalBlock && action.scheduleLogIndex < input.terminalLogIndex))
+    );
+    return matching.map((action) => {
+      const updated: ScheduledOperationRow = {
+        ...action,
+        resolvedTxHash: input.txHash,
+        status: "invalidated",
+        updatedAt: new Date()
+      };
+      const index = this.state.actions.findIndex((candidate) => candidate.id === action.id);
+      this.state.actions[index] = updated;
+      return { action: updated, calls: this.state.calls.get(updated.id) ?? [] };
+    });
+  }
+
+  async invalidateScheduledOperationsBeforeFacetSetActivation(input: {
+    readonly chainId: number;
+    readonly facetSetHash: Lowercase<Hex>;
+    readonly terminalBlock: bigint;
+    readonly terminalLogIndex: number;
+    readonly txHash: Lowercase<Hex>;
+  }): Promise<Array<{ action: ScheduledOperationRow; calls: StoredCall[] }>> {
+    const matching = this.state.actions.filter(
+      (action) =>
+        action.chainId === input.chainId
+        && action.facetSetHash !== input.facetSetHash
+        && action.status === "scheduled"
+        && (action.scheduleBlock < input.terminalBlock
+          || (action.scheduleBlock === input.terminalBlock
+            && action.scheduleLogIndex < input.terminalLogIndex))
     );
     return matching.map((action) => {
       const updated: ScheduledOperationRow = {
