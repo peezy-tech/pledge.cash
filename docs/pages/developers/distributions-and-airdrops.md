@@ -49,7 +49,11 @@ recovery currently fails closed.
 
 ## Merkle manifests
 
-Generate leaves with the contract's exact type hashes and `abi.encode` layout. Both modes bind chain id, predicted airdrop address, Boardroom, share token, index, account, and amount. Grant leaves additionally bind TokenGrantFactory and `GRANT_TERMS_TYPEHASH` over every grant field.
+Generate leaves with the contract's exact type hashes and `abi.encode` layout. Both modes encode
+`expectedFacetSetHash` immediately after the claim type hash, then bind chain id, predicted airdrop address, Boardroom,
+share token, index, account, and amount. Grant leaves additionally bind TokenGrantFactory and
+`GRANT_TERMS_TYPEHASH` over every grant field. A claim also requires the committed facet-set hash to equal the
+Boardroom's live `facetSetHash()`.
 
 Neither claim function authenticates `msg.sender`: any relayer may submit a valid proof, but direct shares or the grant right always go to the leaf-bound account. The shipped app does not expose a separate relayer account and instead binds that leaf account to the connected wallet.
 
@@ -58,6 +62,8 @@ Manifest requirements:
 - unique indices;
 - raw integer amounts, plus separately documented decimals;
 - explicit `direct` or `grant` mode;
+- exact 32-byte `expectedFacetSetHash`, fixed before root construction and equal to the Boardroom's `facetSetHash()`
+  when a claim executes;
 - full grant terms where applicable: cliff no later than vesting end, expiry still in the future and at least one day
   after vesting end, and canonical Boardroom expiry no more than `5 * 365 days` after intended claim time because the
   factory enforces those conditions at claim execution;

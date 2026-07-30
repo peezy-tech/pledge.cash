@@ -88,9 +88,9 @@ See [Receive and settle a grant](../guides/receive-and-settle-grant).
 
 ## Airdrop claim fails
 
-Compare chain id, airdrop address, Boardroom, share token, index, raw amount, account, proof ordering, and claim mode. For
-a grant claim, compare every term. Check claim window, Boardroom Active status, remaining shares, used index, and the
-airdrop's distribution-specific `maxGrantClaims` count.
+Compare the expected facet-set hash, chain id, airdrop address, Boardroom, share token, index, raw amount, account, proof
+ordering, and claim mode. For a grant claim, compare every term. Check claim window, Boardroom Active status, remaining
+shares, used index, and the airdrop's distribution-specific `maxGrantClaims` count.
 
 See [Claim an airdrop](../guides/claim-airdrop).
 

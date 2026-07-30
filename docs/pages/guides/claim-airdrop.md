@@ -5,12 +5,15 @@ description: Validate a Merkle allocation and claim project shares immediately o
 
 # Claim an airdrop
 
-A pledge.cash Merkle airdrop does not discover your allocation from an email or wallet address alone. You need the exact manifest data published by the project: claim mode, index, account, amount, proof, and—when applicable—every grant term.
+A pledge.cash Merkle airdrop does not discover your allocation from an email or wallet address alone. You need the exact
+manifest data published by the project: expected facet-set hash, claim mode, index, account, amount, proof,
+and—when applicable—every grant term.
 
 ## Prerequisites
 
 - The canonical project and airdrop contract on the selected network.
-- A trusted allocation manifest or entry containing the exact index, account, token amount, and proof.
+- A trusted allocation manifest or entry containing the exact `expectedFacetSetHash`, index, account, token amount, and
+  proof.
 - The declared mode: **Receive now** or **Vested grant**.
 - For grant mode: payment token, price, expiry, cliff, vesting end, transferability, transfer unlock time, and salt. A
   grant's cliff cannot be after vesting end. A canonical Boardroom grant's expiry must still be in the future, at least
@@ -30,7 +33,8 @@ The app does not host or infer the project's Merkle manifest. Obtain it from the
    `maxGrantClaims` usage.
 4. The current Participate view does not display the raw Boardroom, share-token, `merkleRoot`, `startTime`, or `endTime` fields. Read those public fields directly from the airdrop contract and compare them with the authenticated manifest.
 5. Confirm the Boardroom is Active. Claims stop during wind-down even if the published end time has not arrived.
-6. Confirm your manifest identifies the same chain id, airdrop address, Boardroom, and share token.
+6. Confirm the manifest's `expectedFacetSetHash` matches the Boardroom's current `facetSetHash()`, and that the manifest
+   identifies the same chain id, airdrop address, Boardroom, and share token.
 7. For a paid grant, verify the payment token passes bounded reads and that the parent-to-child transaction records the
    new grant and payment-asset dependency atomically.
 
@@ -42,6 +46,7 @@ If a required read is **Unknown**, stop. Unknown remaining inventory or status i
 
 A direct leaf transfers the proven project-share amount to its bound account. The leaf commits to:
 
+- expected Boardroom facet-set hash;
 - chain id;
 - claim index;
 - airdrop, Boardroom, and share-token addresses;
@@ -75,7 +80,7 @@ An empty proof is valid only when the allocation is the root's single leaf. Do n
 
 1. Connect the allocated wallet. The shipped app binds the leaf account to the connected account, although the contract itself permits a relayer to submit the same proof for that account.
 2. Select **Claim project tokens** or **Create vested grant**.
-3. Review airdrop address, function, index, account, raw amount, proof, and grant terms.
+3. Review expected facet-set hash, airdrop address, function, index, account, raw amount, proof, and grant terms.
 4. Confirm simulation succeeds, then compare the wallet request and sign.
 5. Keep the canonical receipt hash through any wallet repricing or replacement.
 
@@ -98,7 +103,8 @@ For direct mode, verify the account received the exact shares. For grant mode, v
 
 ## Recovery
 
-- **Invalid proof:** compare chain, predicted airdrop address, index, account, raw amount, leaf type, and all grant terms. Formatting is not the only possible mismatch.
+- **Invalid proof:** compare expected facet-set hash, chain, predicted airdrop address, index, account, raw amount, leaf
+  type, and all grant terms. Formatting is not the only possible mismatch.
 - **Already claimed:** inspect the earlier claim event and recipient or grant; an index is one-time even if the manifest duplicated it.
 - **Outside the claim window:** ask the project whether it will publish a new distribution. Existing proof terms cannot extend the contract.
 - **Grant cap reached:** a valid grant leaf cannot fall back to direct mode. The modes have different leaf hashes.
