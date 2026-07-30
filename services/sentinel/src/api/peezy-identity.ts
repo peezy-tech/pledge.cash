@@ -833,6 +833,11 @@ function peezyWalletSessionPlugin(
             if (verifiedWallet?.kind !== "wallet") {
               throw new Error("Wallet grant did not verify the requested wallet");
             }
+            if (!verifiedWallet.signInEnabled) {
+              throw new AuthWalletCredentialRejectedError(
+                new Error("Wallet sign-in is not enabled by peezy.tech Identity")
+              );
+            }
             const productUser = await provisionProductUser(db, centralIdentity, {
               ...(target.userId === undefined
                 ? {}

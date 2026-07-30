@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { createSiweMessage } from "viem/siwe";
 
 import type { AuthSnapshot } from "../src/api/auth";
 import {
@@ -372,6 +373,126 @@ test("rejects oversized Identity credential sets before provisioning", async () 
   expect(await response.json()).toMatchObject({
     message: "Wallet sign-in is temporarily unavailable"
   });
+  expect(transactions).toBe(0);
+});
+
+test("rejects mapped wallets whose Identity sign-in credential is disabled", async () => {
+  const subject = "00000000-0000-4000-8000-000000000021";
+  const userId = "00000000-0000-4000-8000-000000000022";
+  const address = "0x1111111111111111111111111111111111111111";
+  let transactions = 0;
+  const db = {
+    select: (fields?: Record<string, unknown>) => {
+      const rows =
+        fields !== undefined && "userId" in fields
+          ? [{ userId }]
+          : fields !== undefined && "subject" in fields
+            ? [{ subject }]
+            : [];
+      return {
+        from() {
+          return this;
+        },
+        limit() {
+          return Promise.resolve(rows);
+        },
+        where() {
+          return this;
+        }
+      };
+    },
+    transaction: () => {
+      transactions += 1;
+      throw new Error("unexpected provisioning transaction");
+    }
+  } as unknown as SentinelDb;
+  const identityRequests: string[] = [];
+  const adapter = createPeezyIdentityAuthAdapter(
+    config,
+    db,
+    async (input) => {
+      const pathname = new URL(input.toString()).pathname;
+      identityRequests.push(pathname);
+      if (pathname === "/v1/wallet/grants/issue") {
+        return Response.json({
+          expiresAt: "2026-07-29T00:05:00.000Z",
+          grant: "g".repeat(32),
+          user: {
+            createdAt: "2026-07-29T00:00:00.000Z",
+            id: subject,
+            status: "active"
+          }
+        });
+      }
+      if (pathname === "/v1/wallet/grants/exchange") {
+        return Response.json({
+          expiresAt: "2026-07-29T00:05:00.000Z",
+          subject
+        });
+      }
+      if (pathname === `/v1/users/${subject}`) {
+        return Response.json({
+          credentials: [
+            {
+              accountKind: "eoa",
+              address,
+              family: "evm",
+              id: "00000000-0000-4000-8000-000000000023",
+              kind: "wallet",
+              linkedAt: "2026-07-29T00:00:00.000Z",
+              signInEnabled: false,
+              verifiedChainIds: [1]
+            }
+          ],
+          user: {
+            createdAt: "2026-07-29T00:00:00.000Z",
+            id: subject,
+            status: "active"
+          }
+        });
+      }
+      throw new Error(`Unexpected Identity request: ${pathname}`);
+    }
+  );
+  const issuedAt = new Date("2026-07-29T00:00:00.000Z");
+  const message = createSiweMessage({
+    address,
+    chainId: 1,
+    domain: "localhost:5173",
+    expirationTime: new Date("2026-07-29T00:05:00.000Z"),
+    issuedAt,
+    nonce: "abcdef0123456789",
+    statement: "Link this wallet to pledge.cash Sentinel notifications.",
+    uri: config.webOrigin,
+    version: "1"
+  });
+
+  const response = await adapter.handler(
+    new Request("http://localhost:8787/auth/peezy/siwe/verify", {
+      body: JSON.stringify({
+        chainId: 1,
+        message,
+        signature: `0x${"ab".repeat(65)}`,
+        walletAddress: address
+      }),
+      headers: {
+        "Content-Type": "application/json",
+        Origin: config.webOrigin
+      },
+      method: "POST"
+    })
+  );
+
+  expect(response.status).toBe(401);
+  expect(await response.json()).toMatchObject({
+    message: "Wallet signature could not be verified"
+  });
+  expect(response.headers.get("set-cookie")).toBeNull();
+  expect(identityRequests).toEqual([
+    "/v1/wallet/grants/issue",
+    "/v1/wallet/grants/exchange",
+    `/v1/users/${subject}`
+  ]);
   expect(transactions).toBe(0);
 });
 

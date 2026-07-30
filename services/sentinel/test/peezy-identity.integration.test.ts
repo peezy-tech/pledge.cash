@@ -470,6 +470,24 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     expect(disabledWallets.every((wallet) => wallet.canSignIn === false)).toBe(
       true
     );
+    const [sessionsBeforeDisabledSignIn] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "auth_sessions"
+      WHERE "user_id" = ${me.user.id}::uuid
+    `;
+    const disabledSignIn = await signInWallet(uncachedApp, firstWallet);
+    expect(disabledSignIn.status).toBe(401);
+    expect(await disabledSignIn.json()).toMatchObject({
+      message: "Wallet signature could not be verified"
+    });
+    const [sessionsAfterDisabledSignIn] = await dbClient.sql<{ count: string }[]>`
+      SELECT count(*)::text AS "count"
+      FROM "auth_sessions"
+      WHERE "user_id" = ${me.user.id}::uuid
+    `;
+    expect(sessionsAfterDisabledSignIn?.count).toBe(
+      sessionsBeforeDisabledSignIn?.count
+    );
     const updatedCoverage = await uncachedApp.request(
       `${apiOrigin}/wallets/${firstWallet.address}`,
       {
