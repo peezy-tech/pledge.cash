@@ -63,7 +63,8 @@ import {
   createSentinelAuthDatabaseAdapter,
   createPledgeCashSiweVerifier,
   ALERTS_SIWE_STATEMENT,
-  internalAuthHeaders
+  internalAuthHeaders,
+  WALLET_LINK_SIWE_STATEMENT
 } from "./better-auth";
 
 const PEEZY_PROVIDER_ID = "peezy";
@@ -283,11 +284,12 @@ export function createPeezyIdentityAuthAdapter(
     socialProviders: [],
     sharedIdentityClientId: identity.clientId,
     usesSharedIdentity: true,
-    async createWalletChallenge({ address, chainId, purpose }) {
+    async createWalletChallenge({ address, chainId, clientIp, purpose }) {
       return gateway.createWalletChallenge({
         address,
         chainId,
-        purpose
+        purpose,
+        ...(clientIp === undefined ? {} : { forwardedFor: clientIp })
       });
     },
     async hydrateAuthSnapshot(userId, snapshot) {
@@ -522,7 +524,10 @@ function hydrateIdentitySnapshot(
   const providers = new Set<AuthSnapshot["providers"][number]>();
   const walletSignIn = new Map<string, boolean>();
   for (const credential of identity.credentials) {
-    if (credential.kind === "wallet") {
+    if (
+      credential.kind === "wallet" &&
+      credential.accountKind === "eoa"
+    ) {
       walletSignIn.set(
         credential.address.toLowerCase(),
         credential.signInEnabled
@@ -562,6 +567,7 @@ function hydrateIdentityWallet(
   const credential = identity.credentials.find(
     (candidate) =>
       candidate.kind === "wallet" &&
+      candidate.accountKind === "eoa" &&
       candidate.address.toLowerCase() === wallet.address.toLowerCase()
   );
   return {
@@ -703,6 +709,7 @@ function peezyWalletSessionPlugin(
             const centralWallet = centralIdentity.credentials.find(
               (credential) =>
                 credential.kind === "wallet" &&
+                credential.accountKind === "eoa" &&
                 credential.address.toLowerCase() === address &&
                 credential.verifiedChainIds.includes(context.body.chainId)
             );
@@ -759,10 +766,14 @@ function peezyWalletSessionPlugin(
         },
         async (context) => {
           const forwardedFor = requestContext.getStore()?.clientIp;
+          const address = getAddress(
+            context.body.walletAddress
+          ).toLowerCase() as AddressDto;
+          const target = await walletSignInTarget(db, address);
           const challenge = await gateway.createWalletChallenge({
-            address: context.body.walletAddress,
+            address,
             chainId: context.body.chainId,
-            purpose: "sign-in",
+            purpose: target.subject === undefined ? "sign-in" : "link",
             ...(forwardedFor === undefined ? {} : { forwardedFor })
           });
           return context.json(challenge);
@@ -781,21 +792,41 @@ function peezyWalletSessionPlugin(
         },
         async (context) => {
           try {
+            const address = getAddress(
+              context.body.walletAddress
+            ).toLowerCase() as AddressDto;
+            const target = await walletSignInTarget(db, address);
+            if (
+              target.subject !== undefined &&
+              parseSiweMessage(context.body.message).statement !==
+                WALLET_LINK_SIWE_STATEMENT
+            ) {
+              throw new Error(
+                "Mapped wallet sign-in requires a central link challenge"
+              );
+            }
             const issued = await gateway.issueWalletGrant({
               message: context.body.message,
-              signature: context.body.signature
+              signature: context.body.signature,
+              ...(target.subject === undefined
+                ? {}
+                : { subject: target.subject })
             });
             identityHydrator.invalidate(issued.user.id);
             const exchanged = await gateway.exchangeWalletGrant(issued.grant);
-            if (exchanged.subject !== issued.user.id) {
+            if (
+              exchanged.subject !== issued.user.id ||
+              (target.subject !== undefined &&
+                exchanged.subject !== target.subject)
+            ) {
               throw new Error("Wallet grant subject mismatch");
             }
             const centralIdentity = await gateway.getIdentity(exchanged.subject);
             identityHydrator.set(exchanged.subject, centralIdentity);
-            const address = getAddress(context.body.walletAddress).toLowerCase() as AddressDto;
             const verifiedWallet = centralIdentity.credentials.find(
               (credential) =>
                 credential.kind === "wallet" &&
+                credential.accountKind === "eoa" &&
                 credential.address === address &&
                 credential.verifiedChainIds.includes(context.body.chainId)
             );
@@ -803,6 +834,9 @@ function peezyWalletSessionPlugin(
               throw new Error("Wallet grant did not verify the requested wallet");
             }
             const productUser = await provisionProductUser(db, centralIdentity, {
+              ...(target.userId === undefined
+                ? {}
+                : { requiredUserId: target.userId }),
               walletCoverage: {
                 address,
                 canSignIn: verifiedWallet.signInEnabled,
@@ -1290,7 +1324,10 @@ async function identityCandidateUserIds(
   const walletAddresses = new Set<string>();
   const socialProvidersByCredentialId = new Map<string, Set<SocialProvider>>();
   for (const credential of identity.credentials) {
-    if (credential.kind === "wallet") {
+    if (
+      credential.kind === "wallet" &&
+      credential.accountKind === "eoa"
+    ) {
       walletAddresses.add(credential.address);
     }
     if (credential.kind === "social") {
@@ -1360,6 +1397,26 @@ async function identitySubjectForProductUser(
     throw new Error("PledgeCash user is linked to multiple peezy.tech subjects");
   }
   return accounts[0]?.subject;
+}
+
+async function walletSignInTarget(
+  db: SentinelDb,
+  address: AddressDto
+): Promise<{
+  readonly subject?: string;
+  readonly userId?: string;
+}> {
+  const [owner] = await db
+    .select({ userId: walletOwners.userId })
+    .from(walletOwners)
+    .where(eq(walletOwners.address, address))
+    .limit(1);
+  if (owner === undefined) return {};
+  const subject = await identitySubjectForProductUser(db, owner.userId);
+  return {
+    ...(subject === undefined ? {} : { subject }),
+    userId: owner.userId
+  };
 }
 
 async function consumeLegacySiweNonce(
@@ -1614,6 +1671,7 @@ function findCentralIdentityWallet(
   const credential = identity.credentials.find(
     (candidate) =>
       candidate.kind === "wallet" &&
+      candidate.accountKind === "eoa" &&
       candidate.address.toLowerCase() === address.toLowerCase() &&
       candidate.verifiedChainIds.includes(chainId)
   );

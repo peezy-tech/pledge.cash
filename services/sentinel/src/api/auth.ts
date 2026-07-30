@@ -113,6 +113,7 @@ export type AuthAdapter = {
   createWalletChallenge?(input: {
     readonly address: AddressDto;
     readonly chainId: number;
+    readonly clientIp?: string;
     readonly purpose: "link" | "sign-in";
     readonly userId?: string;
   }): Promise<AuthSiweNonceResponse & {

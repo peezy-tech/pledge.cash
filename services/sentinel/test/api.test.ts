@@ -1277,6 +1277,7 @@ describe("Sentinel WP5 API", () => {
   test("preserves Identity's checksum address for pre-rollout wallet-link clients", async () => {
     const identityHarness = createHarness({ sharedIdentity: true });
     const cookie = await signedInCookie(identityHarness);
+    let challengeClientIp: string | undefined;
     const address = "0x8ba1f109551bd432803012645ac136ddd64dba72";
     const checksumAddress = getAddress(address);
     const issuedAt = FIXED_NOW;
@@ -1299,16 +1300,24 @@ describe("Sentinel WP5 API", () => {
       issuedAt
     });
     Object.assign(identityHarness.auth, {
-      createWalletChallenge: async () => ({ ...challenge, message })
+      createWalletChallenge: async (input: { clientIp?: string }) => {
+        challengeClientIp = input.clientIp;
+        return { ...challenge, message };
+      }
     });
 
-    const response = await identityHarness.app.request("/wallets/nonce", {
-      body: JSON.stringify({ address, chainId: 1 }),
-      headers: { "Content-Type": "application/json", Cookie: cookie },
-      method: "POST"
-    });
+    const response = await identityHarness.app.request(
+      "/wallets/nonce",
+      {
+        body: JSON.stringify({ address, chainId: 1 }),
+        headers: { "Content-Type": "application/json", Cookie: cookie },
+        method: "POST"
+      },
+      { clientIp: "198.51.100.8" }
+    );
 
     expect(response.status).toBe(200);
+    expect(challengeClientIp).toBe("198.51.100.8");
     const returned = await readJson<WalletNonceResponse>(response);
     expect(returned.address).toBe(checksumAddress);
     expect(

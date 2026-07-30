@@ -1072,7 +1072,7 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     expect(mapping?.subject).not.toBe(legacyUserId);
   });
 
-  test("refuses to bind a second central subject to one legacy product user", async () => {
+  test("links a second legacy wallet to the product user's existing central subject", async () => {
     const legacyUserId = randomUUID();
     await dbClient.sql`
       INSERT INTO "users" (
@@ -1111,18 +1111,191 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     const firstSignIn = await signInWallet(app, secondLegacyWallet);
     expect(firstSignIn.status).toBe(200);
     const secondSignIn = await signInWallet(app, migrationWallet);
-    expect(secondSignIn.status).toBe(503);
-    expect(await secondSignIn.json()).toMatchObject({
-      message: "Wallet sign-in is temporarily unavailable"
-    });
+    expect(secondSignIn.status).toBe(200);
 
-    const [mappingCount] = await dbClient.sql<{ count: string }[]>`
+    const [mapping] = await dbClient.sql<{
+      count: string;
+      subject: string;
+    }[]>`
+      SELECT
+        count(*)::text AS "count",
+        min("account_id") AS "subject"
+      FROM "auth_accounts"
+      WHERE "provider_id" = 'peezy'
+        AND "user_id" = ${legacyUserId}::uuid
+    `;
+    expect(mapping?.count).toBe("1");
+    const [centralWallets] = await identitySql<{
+      count: string;
+      ownerCount: string;
+      subject: string;
+    }[]>`
+      SELECT
+        count(*)::text AS "count",
+        count(DISTINCT "user_id")::text AS "ownerCount",
+        min("user_id")::text AS "subject"
+      FROM "wallet_principal"
+      WHERE lower("address") IN (
+        ${secondLegacyWallet.address.toLowerCase()},
+        ${migrationWallet.address.toLowerCase()}
+      )
+    `;
+    expect(centralWallets).toEqual({
+      count: "2",
+      ownerCount: "1",
+      subject: mapping?.subject
+    });
+  });
+
+  test("does not map chain-scoped smart-account credentials to EOA product owners", async () => {
+    if (!identityUrl || !identityAppSecret) return;
+    const legacyUserId = randomUUID();
+    const subject = randomUUID();
+    const socialAccountId = randomUUID();
+    const smartAccount = privateKeyToAccount(
+      `0x${randomBytes(32).toString("hex")}`
+    );
+    await dbClient.sql`
+      INSERT INTO "users" (
+        "id", "name", "email", "email_verified", "created_at", "updated_at"
+      )
+      VALUES (
+        ${legacyUserId}::uuid,
+        'EOA product owner',
+        ${`${legacyUserId}@wallet.pledge.cash.invalid`},
+        false,
+        now(),
+        now()
+      )
+    `;
+    await dbClient.sql`
+      INSERT INTO "wallets" (
+        "user_id", "address", "chain_id", "alerts_enabled", "verified_at"
+      )
+      VALUES (
+        ${legacyUserId}::uuid,
+        ${smartAccount.address.toLowerCase()},
+        1,
+        true,
+        now()
+      )
+    `;
+    await identitySql`
+      INSERT INTO "user" (
+        "id", "name", "email", "email_verified", "status", "created_at", "updated_at"
+      )
+      VALUES (
+        ${subject},
+        'Chain-scoped smart account',
+        ${`${subject}@example.com`},
+        true,
+        'active',
+        now(),
+        now()
+      )
+    `;
+    await identitySql`
+      INSERT INTO "account" (
+        "id", "account_id", "provider_id", "user_id", "created_at", "updated_at"
+      )
+      VALUES (
+        ${socialAccountId},
+        ${`github-${subject}`},
+        'github',
+        ${subject},
+        now(),
+        now()
+      )
+    `;
+    await identitySql`
+      INSERT INTO "wallet_principal" (
+        "id", "user_id", "family", "account_kind", "address",
+        "chain_id", "sign_in_enabled", "created_at", "updated_at"
+      )
+      VALUES (
+        ${randomUUID()},
+        ${subject},
+        'evm',
+        'smart-account',
+        ${smartAccount.address},
+        999,
+        true,
+        now(),
+        now()
+      )
+    `;
+    const handoffResponse = await fetch(
+      `${identityUrl}/v1/social-link-handoffs`,
+      {
+        body: JSON.stringify({
+          callbackUrl: `${webOrigin}/alerts`,
+          clientId: "pledge-cash",
+          provider: "github",
+          subject
+        }),
+        headers: {
+          Authorization: `Basic ${Buffer.from(
+            `pledge-cash:${identityAppSecret}`
+          ).toString("base64")}`,
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      }
+    );
+    expect(handoffResponse.status).toBe(201);
+    const handoff = (await handoffResponse.json()) as { url: string };
+    const identitySessionResponse = await fetch(handoff.url, {
+      redirect: "manual"
+    });
+    expect(identitySessionResponse.status).toBe(302);
+    const identityCookie = responseCookie(
+      identitySessionResponse,
+      "peezy-identity.session_token"
+    );
+    const oidcStart = await app.request(
+      `${apiOrigin}/auth/peezy/sign-in`,
+      {
+        body: JSON.stringify({
+          callbackURL: `${webOrigin}/alerts`,
+          provider: "github"
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Origin: webOrigin
+        },
+        method: "POST"
+      },
+      { clientIp: "192.0.2.10" }
+    );
+    expect(oidcStart.status).toBe(200);
+    const stateCookie = responseCookie(oidcStart, "pledge-cash.state");
+    const authorization = (await oidcStart.json()) as { url: string };
+    const authorizationResponse = await fetch(authorization.url, {
+      headers: { Cookie: identityCookie },
+      redirect: "manual"
+    });
+    expect(authorizationResponse.status).toBe(302);
+    const callbackUrl = authorizationResponse.headers.get("location");
+    if (!callbackUrl) throw new Error("Expected OIDC callback redirect");
+    const callbackResponse = await app.request(callbackUrl, {
+      headers: { Cookie: stateCookie }
+    });
+    expect(callbackResponse.status).toBe(302);
+
+    const [mapping] = await dbClient.sql<{ userId: string }[]>`
+      SELECT "user_id"::text AS "userId"
+      FROM "auth_accounts"
+      WHERE "provider_id" = 'peezy'
+        AND "account_id" = ${subject}
+    `;
+    expect(mapping?.userId).toBe(subject);
+    const [legacyMapping] = await dbClient.sql<{ count: string }[]>`
       SELECT count(*)::text AS "count"
       FROM "auth_accounts"
       WHERE "provider_id" = 'peezy'
         AND "user_id" = ${legacyUserId}::uuid
     `;
-    expect(mappingCount?.count).toBe("1");
+    expect(legacyMapping?.count).toBe("0");
   });
 
   test("does not mutate Identity when an unmapped product session links a wallet", async () => {

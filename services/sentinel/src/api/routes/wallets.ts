@@ -98,6 +98,7 @@ export function createWalletRoutes(deps: SentinelApiDeps): Hono<ApiEnv> {
       const challenge = await deps.auth.createWalletChallenge({
         address: normalizeAddress(parsed.value.address),
         chainId: parsed.value.chainId,
+        ...(c.env?.clientIp === undefined ? {} : { clientIp: c.env.clientIp }),
         purpose: "link",
         userId: user.id
       });

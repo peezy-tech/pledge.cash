@@ -24,6 +24,23 @@ const config = {
   webOrigin: "http://localhost:5173"
 } satisfies Pick<Config, "auth" | "webOrigin">;
 
+function emptyWalletOwnerDb(): SentinelDb {
+  const query = {
+    from() {
+      return this;
+    },
+    limit() {
+      return Promise.resolve([]);
+    },
+    where() {
+      return this;
+    }
+  };
+  return {
+    select: () => query
+  } as unknown as SentinelDb;
+}
+
 test("returns a retryable failure for stalled Identity sign-in requests", async () => {
   const signals: AbortSignal[] = [];
   const stalledFetcher = (
@@ -37,7 +54,7 @@ test("returns a retryable failure for stalled Identity sign-in requests", async 
   };
   const adapter = createPeezyIdentityAuthAdapter(
     config,
-    {} as SentinelDb,
+    emptyWalletOwnerDb(),
     stalledFetcher,
     { requestTimeoutMs: 10 }
   );
@@ -92,7 +109,7 @@ test("distinguishes rejected wallet credentials from Identity rate limits", asyn
   const verify = async (identityStatus: number) => {
     const adapter = createPeezyIdentityAuthAdapter(
       config,
-      {} as SentinelDb,
+      emptyWalletOwnerDb(),
       async () =>
         Response.json(
           { message: `Identity responded with ${identityStatus}` },
@@ -151,15 +168,17 @@ test("aborts stalled Identity response bodies at the application deadline", asyn
 });
 
 test("forwards only Sentinel's resolved client address to the Identity challenge endpoint", async () => {
-  let forwardedFor: string | null = null;
+  const forwardedFor: Array<string | null> = [];
   const adapter = createPeezyIdentityAuthAdapter(
     config,
-    {} as SentinelDb,
+    emptyWalletOwnerDb(),
     async (input, init) => {
       expect(new URL(input.toString()).pathname).toBe(
         "/v1/wallet/challenges"
       );
-      forwardedFor = new Headers(init?.headers).get("x-forwarded-for");
+      forwardedFor.push(
+        new Headers(init?.headers).get("x-forwarded-for")
+      );
       return Response.json(
         {
           address: "0x1111111111111111111111111111111111111111",
@@ -178,6 +197,12 @@ test("forwards only Sentinel's resolved client address to the Identity challenge
     }
   );
 
+  await adapter.createWalletChallenge?.({
+    address: "0x1111111111111111111111111111111111111111",
+    chainId: 1,
+    clientIp: "198.51.100.8",
+    purpose: "link"
+  });
   const response = await adapter.handler(
     new Request("http://localhost:8787/auth/peezy/siwe/nonce", {
       body: JSON.stringify({
@@ -195,7 +220,7 @@ test("forwards only Sentinel's resolved client address to the Identity challenge
   );
 
   expect(response.status).toBe(200);
-  expect(forwardedFor).toBe("198.51.100.7");
+  expect(forwardedFor).toEqual(["198.51.100.8", "198.51.100.7"]);
 });
 
 test("uses the application deadline for the static Identity OIDC token exchange", async () => {
@@ -257,6 +282,17 @@ test("rejects oversized Identity credential sets before provisioning", async () 
   const address = "0x1111111111111111111111111111111111111111";
   let transactions = 0;
   const db = {
+    select: () => ({
+      from() {
+        return this;
+      },
+      limit() {
+        return Promise.resolve([]);
+      },
+      where() {
+        return this;
+      }
+    }),
     transaction: () => {
       transactions += 1;
       throw new Error("unexpected provisioning transaction");
