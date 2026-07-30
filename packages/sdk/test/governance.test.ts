@@ -39,6 +39,8 @@ const successorFacetSetHash = `0x${"55".repeat(32)}` as Hex;
 const salt = `0x${"11".repeat(32)}` as Hex;
 const operationId = `0x${"22".repeat(32)}` as Hex;
 const transactionHash = `0x${"33".repeat(32)}` as Hex;
+const secondOperationId = `0x${"77".repeat(32)}` as Hex;
+const secondTransactionHash = `0x${"88".repeat(32)}` as Hex;
 const configurationHash = `0x${"66".repeat(32)}` as Hex;
 
 const call = {
@@ -542,6 +544,68 @@ describe("Boardroom governance discovery and hydration", () => {
     expect(result.errors).toEqual([]);
     expect(result.operations[0]?.status).toBe("ready");
   });
+
+  test("hydrates every explicit candidate at one snapshot after all receipts are verified", async () => {
+    const reads: ContractRead[] = [];
+    const receipts = new Set<Hex>();
+    let snapshotReads = 0;
+    const baseClient = governanceClient({ reads });
+    const client = {
+      ...baseClient,
+      async getBlockNumber() {
+        snapshotReads += 1;
+        expect(receipts).toEqual(new Set([transactionHash, secondTransactionHash]));
+        return 20n;
+      },
+      async getTransaction(input: { hash: Hex }) {
+        return {
+          blockNumber: input.hash === secondTransactionHash ? 21n : 11n,
+          from: proposer,
+          hash: input.hash,
+          input: scheduleData,
+          to: controller,
+        };
+      },
+      async getTransactionReceipt(input: { hash: Hex }) {
+        receipts.add(input.hash);
+        return scheduleReceipt(facetSetHash, {
+          blockNumber: input.hash === secondTransactionHash ? 21n : 11n,
+          operationId: input.hash === secondTransactionHash
+            ? secondOperationId
+            : operationId,
+          transactionHash: input.hash,
+        });
+      },
+    } as unknown as PledgeCashGovernanceClient;
+
+    const result = await hydrateScheduledBoardroomOperationCandidates(client, {
+      candidates: [
+        {
+          boardroom,
+          controller,
+          operationId,
+          scheduleTransactionHash: transactionHash,
+          scheduleBlockNumber: 11n,
+        },
+        {
+          boardroom,
+          controller,
+          operationId: secondOperationId,
+          scheduleTransactionHash: secondTransactionHash,
+          scheduleBlockNumber: 21n,
+        },
+      ],
+      currentTime: 150n,
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(result.operations.map((operation) => operation.operationId)).toEqual([
+      secondOperationId,
+      operationId,
+    ]);
+    expect(snapshotReads).toBe(1);
+    expect(reads.every((read) => read.blockNumber === 21n)).toBe(true);
+  });
 });
 
 function governanceClient(overrides: {
@@ -680,11 +744,22 @@ function controllerScheduleArgs(eventFacetSetHash: Hex = facetSetHash) {
   };
 }
 
-function scheduleReceipt(eventFacetSetHash: Hex = facetSetHash) {
+function scheduleReceipt(
+  eventFacetSetHash: Hex = facetSetHash,
+  overrides: {
+    blockNumber?: bigint;
+    operationId?: Hex;
+    transactionHash?: Hex;
+  } = {},
+) {
   const topics = encodeEventTopics({
     abi: boardroomControllerAbi,
     eventName: "BoardroomOperationScheduled",
-    args: { operationId, proposer, facetSetHash: eventFacetSetHash },
+    args: {
+      operationId: overrides.operationId ?? operationId,
+      proposer,
+      facetSetHash: eventFacetSetHash,
+    },
   });
   const data = encodeAbiParameters(
     [
@@ -699,9 +774,9 @@ function scheduleReceipt(eventFacetSetHash: Hex = facetSetHash) {
     [100n, 200n, 3n, 1n, 1n, salt, hashBoardroomCalls([call])],
   );
   return {
-    blockNumber: 11n,
+    blockNumber: overrides.blockNumber ?? 11n,
     logs: [{ address: controller, data, topics }],
     status: "success" as const,
-    transactionHash,
+    transactionHash: overrides.transactionHash ?? transactionHash,
   };
 }

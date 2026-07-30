@@ -377,6 +377,30 @@ describe("RecurringSupportService", () => {
       state.service.assertQuotePayable(quote),
     ).rejects.toThrow("stale authority");
     expect(quote.facetSetHash).toBe(facetSetHash);
+
+    const retirement = await state.service.issueRetirementChallenge(plan.id);
+    expect(retirement).toMatchObject({
+      facetSetHash: nextFacetSetHash,
+      payload: {
+        facetSetHash: nextFacetSetHash,
+        planFacetSetHash: facetSetHash,
+      },
+    });
+    expect(retirement.message).toContain(
+      `Facet set hash: ${nextFacetSetHash}`,
+    );
+    await expect(
+      state.service.retirePlan(retirement.id, signature, plan.id),
+    ).resolves.toMatchObject({
+      facetSetHash,
+      status: "retired",
+    });
+    await expect(state.service.listPlans(boardroom)).resolves.toEqual([
+      expect.objectContaining({
+        id: plan.id,
+        status: "retired",
+      }),
+    ]);
   });
 
   test("materializes only the current missed period and rejects historical payment", async () => {

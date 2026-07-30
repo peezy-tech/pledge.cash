@@ -584,7 +584,7 @@ export async function hydrateScheduledBoardroomOperationCandidates(
   }
   if (candidates.length === 0) return { operations: [], errors };
   const currentTime = input.currentTime ?? BigInt(Math.floor(Date.now() / 1_000));
-  const results = await Promise.all(candidates.map(async (candidate) => {
+  const provenanceResults = await Promise.all(candidates.map(async (candidate) => {
     try {
       if (!client.getTransactionReceipt) throw new Error("Schedule receipt verification is unavailable.");
       const [transaction, receipt] = await Promise.all([
@@ -595,29 +595,7 @@ export async function hydrateScheduledBoardroomOperationCandidates(
       const minedReceipt = receipt as unknown as ScheduleReceipt;
       verifyTransactionProvenance(candidate, tx, minedReceipt);
       const decoded = verifiedSchedulePayload(tx, candidate.controller);
-      const snapshotBlockNumber = await readSnapshotBlockNumber(client);
-      const hydrationBlockNumber = snapshotBlockNumber < minedReceipt.blockNumber
-        ? minedReceipt.blockNumber
-        : snapshotBlockNumber;
-      const controllerBoardroom = await client.readContract({
-        address: candidate.controller,
-        abi: boardroomControllerAbi,
-        functionName: "boardroom",
-        blockNumber: hydrationBlockNumber,
-      }) as Address;
-      if (!sameAddress(controllerBoardroom, candidate.boardroom)) {
-        throw new Error("Candidate Boardroom does not match the controller association.");
-      }
-      const event = scheduleEventFromReceipt(candidate, decoded, minedReceipt);
-      const operation = await hydrateScheduleEvent(
-        client,
-        event,
-        hydrationBlockNumber,
-        currentTime,
-        input.signal,
-        decoded,
-      );
-      return { operation };
+      return { verified: { candidate, decoded, minedReceipt } };
     } catch (error) {
       return {
         error: {
@@ -629,10 +607,83 @@ export async function hydrateScheduledBoardroomOperationCandidates(
       };
     }
   }));
+  const verifiedCandidates = provenanceResults.flatMap((result) =>
+    result.verified ? [result.verified] : []
+  );
+  const provenanceErrors = provenanceResults.flatMap((result) =>
+    result.error ? [result.error] : []
+  );
+  if (verifiedCandidates.length === 0) {
+    return { operations: [], errors: [...errors, ...provenanceErrors] };
+  }
+
+  let hydrationBlockNumber: bigint;
+  try {
+    const snapshotBlockNumber = await readSnapshotBlockNumber(client);
+    hydrationBlockNumber = verifiedCandidates.reduce(
+      (latest, { minedReceipt }) =>
+        latest < minedReceipt.blockNumber ? minedReceipt.blockNumber : latest,
+      snapshotBlockNumber,
+    );
+  } catch (error) {
+    const message = conciseError(error);
+    return {
+      operations: [],
+      errors: [
+        ...errors,
+        ...provenanceErrors,
+        ...verifiedCandidates.map(({ candidate }) => ({
+          boardroom: candidate.boardroom,
+          controller: candidate.controller,
+          operationId: candidate.operationId,
+          message,
+        })),
+      ],
+    };
+  }
+
+  const hydrationResults = await Promise.all(verifiedCandidates.map(
+    async ({ candidate, decoded, minedReceipt }) => {
+      try {
+        const controllerBoardroom = await client.readContract({
+          address: candidate.controller,
+          abi: boardroomControllerAbi,
+          functionName: "boardroom",
+          blockNumber: hydrationBlockNumber,
+        }) as Address;
+        if (!sameAddress(controllerBoardroom, candidate.boardroom)) {
+          throw new Error("Candidate Boardroom does not match the controller association.");
+        }
+        const event = scheduleEventFromReceipt(candidate, decoded, minedReceipt);
+        const operation = await hydrateScheduleEvent(
+          client,
+          event,
+          hydrationBlockNumber,
+          currentTime,
+          input.signal,
+          decoded,
+        );
+        return { operation };
+      } catch (error) {
+        return {
+          error: {
+            boardroom: candidate.boardroom,
+            controller: candidate.controller,
+            operationId: candidate.operationId,
+            message: conciseError(error),
+          } satisfies ScheduledBoardroomOperationCandidateError,
+        };
+      }
+    },
+  ));
   return {
-    operations: results.flatMap((result) => result.operation ? [result.operation] : [])
+    operations: hydrationResults.flatMap((result) => result.operation ? [result.operation] : [])
       .sort((left, right) => compareBigIntDesc(left.scheduleBlockNumber, right.scheduleBlockNumber)),
-    errors: [...errors, ...results.flatMap((result) => result.error ? [result.error] : [])],
+    errors: [
+      ...errors,
+      ...provenanceErrors,
+      ...hydrationResults.flatMap((result) => result.error ? [result.error] : []),
+    ],
   };
 }
 

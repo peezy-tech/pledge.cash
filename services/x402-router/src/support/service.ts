@@ -48,6 +48,7 @@ const storedRetirementPayloadSchema = z
     planId: z.string().uuid(),
     boardroom: supportAddressSchema,
     facetSetHash: z.string().regex(/^0x[a-f0-9]{64}$/),
+    planFacetSetHash: z.string().regex(/^0x[a-f0-9]{64}$/),
   })
   .strict();
 
@@ -191,7 +192,7 @@ export class RecurringSupportService {
 
   async issueRetirementChallenge(planId: string): Promise<SupportChallenge> {
     const plan = await this.requireActivePlan(planId);
-    const identity = await this.requireCurrentPlanAuthority(plan);
+    const identity = await this.authority.resolve(plan.boardroom);
     return this.issueChallenge({
       action: "plan_retire",
       actor: identity.signer ?? identity.authority,
@@ -202,7 +203,8 @@ export class RecurringSupportService {
         action: "retire",
         planId,
         boardroom: plan.boardroom.toLowerCase(),
-        facetSetHash: plan.facetSetHash.toLowerCase(),
+        facetSetHash: identity.facetSetHash.toLowerCase(),
+        planFacetSetHash: plan.facetSetHash.toLowerCase(),
       },
     });
   }
@@ -225,7 +227,7 @@ export class RecurringSupportService {
       );
     }
     const plan = await this.requireActivePlan(payload.planId);
-    assertPlanMatchesChallenge(plan, challenge);
+    assertRetirementPlanMatchesChallenge(plan, challenge, payload);
     const verified = await this.authority.verifyAuthoritySignature({
       expected: authorityFromChallenge(challenge),
       message: challenge.message,
@@ -972,6 +974,27 @@ function assertPlanMatchesChallenge(
     plan.id !== challenge.planId
     || plan.boardroom.toLowerCase() !== challenge.boardroom.toLowerCase()
     || plan.facetSetHash.toLowerCase() !== challenge.facetSetHash.toLowerCase()
+  ) {
+    throw new SupportError(
+      "The recurring-support challenge no longer matches this plan.",
+      "support_challenge_invalid",
+      409,
+    );
+  }
+}
+
+function assertRetirementPlanMatchesChallenge(
+  plan: SupportPlan,
+  challenge: SupportChallenge,
+  payload: z.infer<typeof storedRetirementPayloadSchema>,
+): void {
+  if (
+    plan.id !== challenge.planId
+    || plan.id !== payload.planId
+    || plan.boardroom.toLowerCase() !== challenge.boardroom.toLowerCase()
+    || plan.boardroom.toLowerCase() !== payload.boardroom.toLowerCase()
+    || plan.facetSetHash.toLowerCase()
+      !== payload.planFacetSetHash.toLowerCase()
   ) {
     throw new SupportError(
       "The recurring-support challenge no longer matches this plan.",
