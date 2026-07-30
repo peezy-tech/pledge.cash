@@ -1,20 +1,25 @@
 ---
 title: Boardroom integration
-description: Developer bridge for v5 controller governance, canonical obligations, snapshotting, singleton markets, and redemptions.
+description: Developer bridge for registry-routed Boardrooms, controller governance, obligations, migration, snapshotting, singleton markets, and redemptions.
 ---
 
 # Boardroom integration
 
 Use the [Boardroom protocol specification](https://github.com/peezy-tech/pledge.cash/blob/main/docs/boardroom-protocol.md)
-for the complete candidate state machine. Source lives in `packages/contracts/src/boardroom/`. The candidate is a
-mainnet NO-GO until every readiness blocker and gated curve policy is resolved.
+for the complete state machine. Source lives in
+`packages/contracts/src/boardroom/`. Both target-testnet artifacts are pending,
+and mainnet remains a NO-GO.
 
 ## Canonical reads
 
 Before enabling an action:
 
-- require a supported v5 deployment identity and matching runtime code hashes;
+- require a promoted protocol-v1 deployment identity and matching registry,
+  kernel, facet, helper, factory, and module runtime code hashes;
 - verify `BoardroomFactory.isBoardroom(boardroom)`;
+- at one pinned block, verify the Boardroom registry, active facet-set hash,
+  required storage version/layout, applied storage version/layout, and
+  migration requirement;
 - verify the Boardroom's factory, controller factory, share token, policy registry, and wrapped native;
 - read status, launch state, owner/controller, controller generation, Boardroom governance epoch, protection staker,
   wind-down delay, reward pool, and redemption-excess recipient;
@@ -35,12 +40,17 @@ Before launch, only the owner enters policy-checked `execute` or `executeBatch`.
 controller can enter `executeGovernance`; only its proposer schedules, while any caller may execute ready operations.
 The Boardroom policy gateway must receive the scheduled proposer as authority, never the permissionless executor.
 
-Every operation binds the complete call batch, salt, Boardroom epoch, controller generation, controller configuration
-epoch, proposer, and configuration hash. Proposer or timing changes are delayed controller self-operations. Controller
-replacement is a delayed Boardroom self-call that deploys the next generation during execution.
+Every state-changing Boardroom ABI begins with an explicit
+`expectedFacetSetHash`. Every controller operation and signature binds that
+hash along with the complete call batch, salt, Boardroom epoch, controller
+generation, controller configuration epoch, proposer, and configuration hash.
+Builders must not fetch or substitute a hash while constructing an
+authorization.
 
-Legacy Boardrooms may be read, but writes and Boardroom-control claims must fail closed. Do not translate an old
-`launch(uint256)` or internal queue into the v5 interface.
+Proposer or timing changes are delayed controller self-operations. Controller
+replacement is a delayed Boardroom self-call that deploys the next generation
+during execution. A stale hash or a Boardroom requiring migration must fail
+closed.
 
 ## Wind-down and snapshotting
 
@@ -48,9 +58,15 @@ Treat `Active -> WindingDown -> Snapshotting -> RedemptionsOpen` as monotonic. S
 Boardroom epoch in O(1). Redemptions require zero active obligations, a terminal reward pool, closed singleton
 liquidity, completed treasury-share handling, and the elapsed wind-down delay.
 
-`beginSnapshot` freezes registry length and redemption supply. Anyone may process bounded pages with
-`snapshotAssets(maximum)`; unreadable assets get an explicit status. Only a fully processed frozen registry can enter
-`RedemptionsOpen`.
+`beginSnapshot` freezes registry length and redemption supply. Anyone may
+process bounded pages with `snapshotAssets(expectedFacetSetHash, maximum)`;
+unreadable assets get an explicit status. Only a fully processed frozen
+registry can enter `RedemptionsOpen`.
+
+A storage-version release immediately changes global routing and then blocks
+ordinary writes on each Boardroom until anyone runs its release-pinned,
+atomic migration. Reads must either decode the older layout safely or report
+that migration is required.
 
 Never use share-token `balanceOf` as governance power. Use current and previous-block active stake from the canonical
 reward pool against the corresponding current and prior governance-eligible supply.

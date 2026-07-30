@@ -4,39 +4,59 @@ import {
   ammPoolAbi,
   ammRouterAbi,
   boardroomAbi,
+  boardroomControllerAbi,
+  boardroomControllerFactoryAbi,
   boardroomFactoryAbi,
+  boardroomKernelAbi,
   boardroomPolicyRegistryAbi,
+  boardroomReleaseBMigrationFacetAbi,
   boardroomTokenAbi,
+  boardroomRewardsFactoryAbi,
+  bondMarketFactoryAbi,
   distributionFactoryAbi,
   dutchAuctionSaleAbi,
   fixedPriceSaleAbi,
   lockedLiquidityAbi,
   lockedLiquidityFactoryAbi,
   migratingBondingCurveAbi,
+  merkleAirdropAbi,
   poolFeesAbi,
+  protocolFacetRegistryAbi,
   tokenGrantAbi,
   tokenGrantFactoryAbi,
 } from "../generated";
 import type { DecodedPledgeCashError } from "./types";
 
-const pledgeCashErrorAbi = [
-  ...ammFactoryAbi,
-  ...ammPoolAbi,
-  ...ammRouterAbi,
-  ...boardroomAbi,
-  ...boardroomFactoryAbi,
-  ...boardroomPolicyRegistryAbi,
-  ...boardroomTokenAbi,
-  ...distributionFactoryAbi,
-  ...dutchAuctionSaleAbi,
-  ...fixedPriceSaleAbi,
-  ...lockedLiquidityAbi,
-  ...lockedLiquidityFactoryAbi,
-  ...migratingBondingCurveAbi,
-  ...poolFeesAbi,
-  ...tokenGrantAbi,
-  ...tokenGrantFactoryAbi,
-].filter((item) => item.type === "error") as Abi;
+const pledgeCashErrorAbis: readonly Abi[] = [
+  ammFactoryAbi,
+  ammPoolAbi,
+  ammRouterAbi,
+  boardroomAbi,
+  boardroomControllerAbi,
+  boardroomControllerFactoryAbi,
+  boardroomFactoryAbi,
+  boardroomKernelAbi,
+  boardroomPolicyRegistryAbi,
+  boardroomReleaseBMigrationFacetAbi,
+  boardroomTokenAbi,
+  boardroomRewardsFactoryAbi,
+  bondMarketFactoryAbi,
+  distributionFactoryAbi,
+  dutchAuctionSaleAbi,
+  fixedPriceSaleAbi,
+  lockedLiquidityAbi,
+  lockedLiquidityFactoryAbi,
+  migratingBondingCurveAbi,
+  merkleAirdropAbi,
+  poolFeesAbi,
+  protocolFacetRegistryAbi,
+  tokenGrantAbi,
+  tokenGrantFactoryAbi,
+];
+
+const pledgeCashErrorAbi = pledgeCashErrorAbis.flatMap((abi) =>
+  abi.filter((item) => item.type === "error")
+) as Abi;
 
 export function decodeKnownPledgeCashError(input: unknown): DecodedPledgeCashError | undefined {
   const data = extractHexData(input);

@@ -194,7 +194,10 @@ export type ProductBoardroomHistoryReadOptions = {
   timeoutMs?: number | undefined;
 };
 
-type ProductBoardroomClient = PledgeCashReadClient & Pick<PublicClient, "getBalance"> & Partial<Pick<PublicClient, "getBlock" | "getBlockNumber" | "getCode" | "getLogs">>;
+type ProductBoardroomClient =
+  & PledgeCashReadClient
+  & Pick<PublicClient, "getBalance" | "getBlockNumber">
+  & Partial<Pick<PublicClient, "getBlock" | "getCode" | "getLogs">>;
 type ProductBoardroomEventLog = {
   args?: Record<string, unknown>;
   blockNumber?: bigint | null | undefined;

@@ -52,6 +52,7 @@ const factory = "0x3000000000000000000000000000000000000000" as Address;
 const shareToken = "0x4000000000000000000000000000000000000000" as Address;
 const assetPolicy = "0x5000000000000000000000000000000000000000" as Address;
 const salt = `0x${"1".repeat(64)}` as Hex;
+const expectedFacetSetHash = `0x${"f".repeat(64)}` as Hex;
 const abi = [{
   type: "function",
   name: "setValue",
@@ -104,9 +105,14 @@ describe("transaction review", () => {
   test("requires irreversible acknowledgement when a controller operation opens redemptions", () => {
     const request = buildControllerScheduleBoardroomOperationTransaction({
       controller: factory,
+      expectedFacetSetHash,
       calls: [buildBoardroomSelfCall({
         boardroom: target,
-        data: encodeFunctionData({ abi: boardroomAbi, functionName: "openRedemptions" }),
+        data: encodeFunctionData({
+          abi: boardroomAbi,
+          functionName: "openRedemptions",
+          args: [expectedFacetSetHash],
+        }),
       })],
       salt,
       expectedBoardroomEpoch: 2n,
@@ -127,6 +133,7 @@ describe("transaction review", () => {
     const grant = "0x6000000000000000000000000000000000000000" as Address;
     const request = buildBoardroomExecuteTransaction({
       boardroom: target,
+      expectedFacetSetHash,
       call: buildBoardroomCall({
         policy: assetPolicy,
         target: grant,
@@ -160,7 +167,7 @@ describe("transaction review", () => {
 
     const reviews = calls.map((call) => contractCallReview(
       "Review reward call",
-      buildBoardroomExecuteTransaction({ boardroom: target, call }),
+      buildBoardroomExecuteTransaction({ boardroom: target, expectedFacetSetHash, call }),
     ).boardroomCalls?.[0]);
 
     expect(reviews.map((review) => review?.functionName)).toEqual(["createRewards", "approve", "fundReward"]);
@@ -619,6 +626,7 @@ describe("transaction review", () => {
   test("decodes every argument in a real Boardroom share-grant issuance batch", () => {
     const request = buildBoardroomShareGrantIssuanceBatch({
       boardroom: target,
+      expectedFacetSetHash,
       factory,
       shareToken,
       assetPolicy,
@@ -637,7 +645,12 @@ describe("transaction review", () => {
     });
     const review = contractCallReview("Boardroom grant batch", request);
 
-    expect(review.parameters[0]?.value).toBe("2 Boardroom calls — inspect every decoded argument below");
+    expect(review.parameters[0]).toEqual({
+      name: "expectedFacetSetHash",
+      type: "bytes32",
+      value: expectedFacetSetHash,
+    });
+    expect(review.parameters[1]?.value).toBe("2 Boardroom calls — inspect every decoded argument below");
     expect(review.boardroomCalls).toHaveLength(2);
     expect(review.boardroomCalls?.[0]).toMatchObject({
       functionName: "approve",
@@ -668,6 +681,9 @@ describe("transaction review", () => {
         name: "execute",
         stateMutability: "payable",
         inputs: [{
+          name: "expectedFacetSetHash",
+          type: "bytes32",
+        }, {
           name: "call_",
           type: "tuple",
           components: [
@@ -680,7 +696,7 @@ describe("transaction review", () => {
         outputs: [],
       }] as const,
       functionName: "execute",
-      args: [{ policy: assetPolicy, target: shareToken, value: 0n, data: "0xdeadbeef" }],
+      args: [expectedFacetSetHash, { policy: assetPolicy, target: shareToken, value: 0n, data: "0xdeadbeef" }],
     });
 
     expect(review.boardroomCalls?.[0]).toMatchObject({

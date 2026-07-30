@@ -117,6 +117,7 @@ export function BoardroomRewardsPanel({
     : Number(activeShare * 10_000n / dashboard.snapshot.governanceEligibleSupply) / 100;
   const releaseSupport = boardroomControlReleaseSupport(deployment);
   const canOperatePool = dashboard.snapshot.status === 0
+    && !dashboard.snapshot.migrationRequired
     && releaseSupport.supported
     && operatorCapability?.status === "enabled"
     && Boolean(deployment?.boardroomRewardsFactory);
@@ -147,7 +148,10 @@ export function BoardroomRewardsPanel({
   const createPool = async (): Promise<void> => {
     if (operatorCapability?.status !== "enabled") throw new Error(operatorCapability?.reason ?? "This wallet cannot manage Boardroom rewards.");
     if (!releaseSupport.supported) throw new Error(releaseSupport.reason ?? "This Boardroom release is read-only.");
-    await assertLiveBoardroomControlRelease(publicClient, deployment, dashboard.address);
+    const proof = await assertLiveBoardroomControlRelease(publicClient, deployment, dashboard.address);
+    if (proof.migrationRequired || proof.facetSetHash.toLowerCase() !== dashboard.snapshot.facetSetHash.toLowerCase()) {
+      throw new Error("The Boardroom protocol release changed or requires migration. Refresh before creating rewards.");
+    }
     const factory = deployment?.boardroomRewardsFactory;
     if (!factory) throw new Error("Boardroom reward factory is missing from this deployment.");
     const days = uintInput(cooldownDays, "Cooldown days");
@@ -155,10 +159,12 @@ export function BoardroomRewardsPanel({
     const call = buildBoardroomRewardsCreationCall({ factory, cooldown: days * 86_400n, salt: randomSalt() });
     const plan = planBoardroomCallExecution({
       boardroom: dashboard.address,
+      expectedFacetSetHash: proof.facetSetHash,
       calls: [call],
       lifecycle: {
         launched: dashboard.snapshot.launched,
         status: dashboard.snapshot.status,
+        migrationRequired: false,
         controller: dashboard.snapshot.controller,
         governanceEpoch: dashboard.snapshot.governanceEpoch,
         controllerConfigurationEpoch: dashboard.snapshot.controllerConfigurationEpoch,
@@ -175,7 +181,10 @@ export function BoardroomRewardsPanel({
   const fundReward = async (): Promise<void> => {
     if (operatorCapability?.status !== "enabled") throw new Error(operatorCapability?.reason ?? "This wallet cannot manage Boardroom rewards.");
     if (!releaseSupport.supported) throw new Error(releaseSupport.reason ?? "This Boardroom release is read-only.");
-    await assertLiveBoardroomControlRelease(publicClient, deployment, dashboard.address);
+    const proof = await assertLiveBoardroomControlRelease(publicClient, deployment, dashboard.address);
+    if (proof.migrationRequired || proof.facetSetHash.toLowerCase() !== dashboard.snapshot.facetSetHash.toLowerCase()) {
+      throw new Error("The Boardroom protocol release changed or requires migration. Refresh before funding rewards.");
+    }
     const factory = deployment?.boardroomRewardsFactory;
     const assetPolicy = deployment?.assetPolicy;
     if (!factory || !assetPolicy) throw new Error("Reward factory or asset policy is missing from this deployment.");
@@ -195,10 +204,12 @@ export function BoardroomRewardsPanel({
     });
     const plan = planBoardroomCallExecution({
       boardroom: dashboard.address,
+      expectedFacetSetHash: proof.facetSetHash,
       calls,
       lifecycle: {
         launched: dashboard.snapshot.launched,
         status: dashboard.snapshot.status,
+        migrationRequired: false,
         controller: dashboard.snapshot.controller,
         governanceEpoch: dashboard.snapshot.governanceEpoch,
         controllerConfigurationEpoch: dashboard.snapshot.controllerConfigurationEpoch,

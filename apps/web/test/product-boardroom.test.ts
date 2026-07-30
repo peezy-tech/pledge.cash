@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Address, PledgeCashReadClient } from "@pledge.cash/sdk";
+import type { Address, Hex, PledgeCashReadClient } from "@pledge.cash/sdk";
 import {
   distributionCirculatingShares,
   readFactoryBoardroomPage,
@@ -1304,6 +1304,8 @@ function productBoardroomFixture() {
     cashToken: "0x4000000000000000000000000000000000000000" as Address,
     sale: "0x5000000000000000000000000000000000000000" as Address,
     redeemableAsset: "0x7000000000000000000000000000000000000000" as Address,
+    facetSetHash: `0x${"a".repeat(64)}` as Hex,
+    storageLayoutHash: `0x${"b".repeat(64)}` as Hex,
   };
 }
 
@@ -1412,6 +1414,10 @@ function fakeProductBoardroomClient(
       }
 
       if (address.toLowerCase() === context.boardroom.toLowerCase()) {
+        if (functionName === "facetSetHash") return context.facetSetHash;
+        if (functionName === "appliedStorageVersion") return 1n;
+        if (functionName === "appliedStorageLayoutHash") return context.storageLayoutHash;
+        if (functionName === "migrationRequired") return false;
         if (functionName === "owner") return "0x8000000000000000000000000000000000000000";
         if (functionName === "policyRegistry") return "0x9000000000000000000000000000000000000000";
         if (functionName === "wrappedNative") return context.wrappedNative;

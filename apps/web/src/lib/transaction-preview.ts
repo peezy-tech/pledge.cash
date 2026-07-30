@@ -157,7 +157,7 @@ export function contractCallReview(label: string, request: Record<string, unknow
   const boardroomCalls = extractBoardroomCallReviews(request, functionName, target);
   const parameters = callParameters(request, functionName);
   if (boardroomCalls) {
-    const callsParameter = parameters[0];
+    const callsParameter = parameters[1];
     if (callsParameter) {
       callsParameter.value = `${boardroomCalls.length.toString()} Boardroom call${boardroomCalls.length === 1 ? "" : "s"} — inspect every decoded argument below`;
     }
@@ -260,9 +260,9 @@ function extractBoardroomCallReviews(
   const args = Array.isArray(request.args) ? request.args : [];
   let calls: unknown[] | undefined;
   if (BOARDROOM_SINGLE_CALL_FUNCTIONS.has(functionName)) {
-    calls = [args[0]];
+    calls = [args[1]];
   } else if (BOARDROOM_BATCH_CALL_FUNCTIONS.has(functionName)) {
-    calls = Array.isArray(args[0]) ? args[0] : [args[0]];
+    calls = Array.isArray(args[1]) ? args[1] : [args[1]];
   }
   if (!calls) return undefined;
 

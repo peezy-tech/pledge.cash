@@ -5,15 +5,19 @@ description: Launch and operate the external Boardroom controller, review delaye
 
 # Govern a project
 
-The candidate v5 governance model uses a dedicated controller deployed only inside Boardroom launch. It is not deployed
-on mainnet and must not be treated as production-ready. Legacy Boardrooms remain readable, but the app must fail closed
-for launch, scheduling, execution, control claims, and controller replacement on unsupported versions.
+Canonical protocol v1 uses a dedicated controller deployed only inside
+Boardroom launch. Both target-testnet artifacts are pending and no mainnet
+deployment is supported. The app must fail closed for launch, scheduling,
+execution, control claims, and controller replacement unless the complete
+deployment and active facet release are verified.
 
 ## Before launch
 
 Confirm all launch inputs from one current canonical read:
 
 - Boardroom and BoardroomFactory identity;
+- registry, active facet-set hash, applied and required storage
+  version/layout, and `migrationRequired() == false`;
 - predicted generation-1 controller from the factory bound to that BoardroomFactory;
 - proposer address;
 - named protection staker;
@@ -36,6 +40,7 @@ Only the controller's current proposer can schedule. Build the complete ordered 
 
 - policy, target, value, and decoded calldata for every call;
 - user salt;
+- expected facet-set hash;
 - current Boardroom governance epoch;
 - controller generation;
 - controller configuration epoch;
@@ -50,8 +55,10 @@ does not execute a Boardroom call and grants no authority to the later executor.
 Anyone may execute after the delay and before expiry. The permissionless caller is the transaction executor only; the
 Boardroom policy gateway receives the scheduled proposer as policy authority.
 
-Execution fails closed if the Boardroom entered wind-down, an epoch or generation changed, the controller was replaced,
-the configuration changed, the call batch differs, or a policy rejects a call. A failed policy call rolls back operation
+Execution fails closed if the active facet-set hash changed, migration is
+required, the Boardroom entered wind-down, an epoch or generation changed, the
+controller was replaced, the configuration changed, the call batch differs,
+or a policy rejects a call. A failed policy call rolls back operation
 consumption.
 
 ## Veto
@@ -97,10 +104,13 @@ redemptions. See [Wind down and redeem](wind-down-and-redeem).
 A Better Auth session proves the service user, not Boardroom authority. Every privileged offchain Boardroom write needs a
 fresh server nonce and a current ERC-1271 proof from the controller.
 
-The exact SIWE challenge binds the service audience/domain, destination account or organization, scope, chain,
-Boardroom, controller, generation, configuration epoch, nonce, issued time, and expiry. Sentinel validates all canonical
-reads and the signature at one pinned finalized block, then atomically consumes the nonce and creates the claim. Stale
-relationships, reorg uncertainty, malformed RPC results, and unsupported versions fail closed.
+The exact SIWE challenge binds the service audience/domain, destination account
+or organization, scope, chain, Boardroom, facet-set hash, Boardroom epoch,
+controller, generation, configuration epoch/hash, nonce, issued time, and
+expiry. Sentinel validates the complete release/topology and signature at one
+pinned finalized block, then atomically consumes the nonce and creates the
+claim. Stale relationships, migration downtime, reorg uncertainty, malformed
+RPC results, and pending or mismatched releases fail closed.
 
 This signature path never schedules or executes onchain governance.
 
@@ -108,11 +118,13 @@ This signature path never schedules or executes onchain governance.
 
 Before any governance write:
 
-1. Confirm chain, v5 deployment identity, Boardroom, controller, generation, and epochs.
+1. Confirm chain, protocol-v1 deployment identity, registry, facet-set hash,
+   migration state, Boardroom, controller, generation, and epochs.
 2. Confirm the connected wallet has the required role for that exact action.
 3. Decode every call and verify its policy and target.
 4. Confirm delay, ETA, expiry, and salt.
 5. Simulate, then compare the wallet request.
 6. After confirmation, re-read the operation and canonical controller state.
 
-Do not bypass an unsupported-version warning or describe this candidate as mainnet-ready.
+Do not bypass a pending deployment, release mismatch, or migration warning.
+This protocol is not mainnet-ready.

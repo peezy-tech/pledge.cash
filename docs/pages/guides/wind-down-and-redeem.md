@@ -11,8 +11,9 @@ Wind-down is a one-way shutdown path:
 Active -> WindingDown -> Snapshotting -> RedemptionsOpen
 ```
 
-The v5 candidate is not deployed or mainnet-ready. Do not begin from incomplete identity, obligation, liquidity, or asset
-reads. Unknown is not zero.
+Canonical protocol v1 is pending on both target testnets and is not
+mainnet-ready. Do not begin from incomplete registry/release identity,
+migration, obligation, liquidity, or asset reads. Unknown is not zero.
 
 ## 1. Start wind-down
 
@@ -66,7 +67,8 @@ snapshotting. Removed assets always return to the Boardroom.
 
 ## 4. Begin Snapshotting
 
-After the wind-down delay and once obligations/reward/liquidity gates are clear, anyone calls `beginSnapshot()`.
+After the wind-down delay and once obligations/reward/liquidity gates are
+clear, anyone calls `beginSnapshot(expectedFacetSetHash)`.
 
 That transaction:
 
@@ -81,7 +83,8 @@ Record `assetSnapshotProgress()` and `redemptionSupplyState()`.
 
 ## 5. Process bounded asset pages
 
-Anyone calls `snapshotAssets(maximum)`; the maximum page is 32. Each registry entry becomes:
+Anyone calls `snapshotAssets(expectedFacetSetHash, maximum)`; the maximum page
+is 32. Each registry entry becomes:
 
 - Included, with its frozen Boardroom balance;
 - Excluded, if membership was removed before freeze;
@@ -90,23 +93,31 @@ Anyone calls `snapshotAssets(maximum)`; the maximum page is 32. Each registry en
 Every attempted entry advances the cursor. Re-read events and per-asset status after each page. No transaction performs
 work proportional to the full lifetime registry.
 
-Only when the cursor equals the frozen count may anyone call `openRedemptions()`.
+Only when the cursor equals the frozen count may anyone call
+`openRedemptions(expectedFacetSetHash)`.
 
 ## 6. Redeem and claim assets
 
-`redeem(shares)` burns the caller's shares into caller-owned redemption credits. It does not loop over the asset
-registry.
+`redeem(expectedFacetSetHash, shares)` burns the caller's shares into
+caller-owned redemption credits. It does not loop over the asset registry.
 
-For each Included asset, the credit owner calls `claimRedemptionAsset(asset, recipient, minAmountOut)`. Each asset is
-allocated once for the relevant credit. A hostile or temporarily failing token cannot roll back claims for unrelated
-assets.
+For each Included asset, the credit owner calls
+`claimRedemptionAsset(expectedFacetSetHash, asset, recipient, minAmountOut)`.
+Each asset is allocated once for the relevant credit. A hostile or temporarily
+failing token cannot roll back claims for unrelated assets.
 
 A failed asset transfer does not remint shares. Retry only that asset with the credit-owner wallet after checking
 `allocatedRedemptionShares`, `redemptionAssetState`, and the earlier receipt.
 
-Late deposits do not change frozen holder entitlements. Proven excess is sweepable only to the preserved
-`redemptionExcessRecipient`. Stranded curve quote has separate, still-unapproved post-snapshot recipient semantics and
-must not be routed through a legacy assumption.
+Late deposits do not change frozen holder entitlements. Proven excess is
+sweepable only to the preserved `redemptionExcessRecipient`. Curve quote must
+be recovered or resolve through its time-delayed, vetoable terminal policy
+before snapshotting.
+
+Registry activation remains possible during wind-down, snapshotting, and open
+redemptions. A changed hash makes old calldata stale; a storage-version release
+also pauses writes until this Boardroom is permissionlessly migrated. Re-read
+the active hash and migration state before every transaction.
 
 ## Success proof
 

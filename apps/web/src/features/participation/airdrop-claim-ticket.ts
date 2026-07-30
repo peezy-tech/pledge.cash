@@ -9,7 +9,12 @@ import {
 } from "viem";
 import type { MerkleAirdropGrantClaimTerms } from "@pledge.cash/sdk";
 
-export const AIRDROP_CLAIM_TICKET_SCHEMA = "pledge.cash/airdrop-claim@1" as const;
+/**
+ * Tickets are not release-bound. Airdrop leaves commit to allocation identity only, so a
+ * facet-set activation no longer voids a published manifest; the claim transaction binds the
+ * live release hash read at claim time.
+ */
+export const AIRDROP_CLAIM_TICKET_SCHEMA = "pledge.cash/airdrop-claim@3" as const;
 
 export type AirdropClaimTicket = {
   schema: typeof AIRDROP_CLAIM_TICKET_SCHEMA;

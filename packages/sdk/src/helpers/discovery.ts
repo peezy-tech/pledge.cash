@@ -34,6 +34,7 @@ import type {
   LockedLiquidityState,
   MerkleAirdropState,
   MigratingBondingCurveState,
+  PledgeCashBlockReadClient,
   PledgeCashLogClient,
   PledgeCashReadClient,
 } from "./types";
@@ -50,7 +51,10 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const satis
 const tokenGrantCreatedEvent = getAbiItem({ abi: tokenGrantFactoryAbi, name: "TokenGrantCreated" });
 const grantClosedEvent = getAbiItem({ abi: tokenGrantFactoryAbi, name: "GrantClosed" });
 const transferEvent = getAbiItem({ abi: tokenGrantFactoryAbi, name: "Transfer" });
-const boardroomCreatedEvent = getAbiItem({ abi: boardroomFactoryAbi, name: "BoardroomCreated" });
+const boardroomCreatedEvent = getAbiItem({
+  abi: boardroomFactoryAbi,
+  name: "BoardroomCreated",
+});
 const distributionCreatedEvent = getAbiItem({ abi: distributionFactoryAbi, name: "DistributionCreated" });
 const lockedLiquidityCreatedEvent = getAbiItem({ abi: lockedLiquidityFactoryAbi, name: "ProtocolLiquidityCreated" });
 const poolCreatedEvent = getAbiItem({ abi: ammFactoryAbi, name: "PoolCreated" });
@@ -165,7 +169,9 @@ export async function discoverBoardrooms(
     const args = log.args ?? {};
     const boardroom = addressArg(args, "boardroom");
     const owner = addressArg(args, "owner");
-    if (!boardroom || !owner) continue;
+    const shareToken = addressArg(args, "shareToken");
+    const facetSetHash = hexArg(args, "facetSetHash");
+    if (!boardroom || !owner || !shareToken || !facetSetHash) continue;
     if (input.owner && !sameAddress(owner, input.owner)) continue;
 
     boardrooms.set(addressKey(boardroom), {
@@ -173,10 +179,11 @@ export async function discoverBoardrooms(
       owner,
       policyRegistry: addressArg(args, "policyRegistry") ?? ZERO_ADDRESS,
       wrappedNative: addressArg(args, "wrappedNative") ?? ZERO_ADDRESS,
-      shareToken: addressArg(args, "shareToken") ?? ZERO_ADDRESS,
+      shareToken,
       name: stringArg(args, "name") ?? "",
       symbol: stringArg(args, "symbol") ?? "",
       salt: hexArg(args, "salt") ?? "0x",
+      facetSetHash,
       createdAtBlock: log.blockNumber ?? 0n,
       transactionHash: log.transactionHash ?? "0x",
     });
@@ -295,7 +302,7 @@ export async function discoverPools(
 }
 
 export async function enrichDiscoveredBoardrooms(
-  client: PledgeCashReadClient,
+  client: PledgeCashBlockReadClient,
   boardrooms: readonly DiscoveredBoardroom[],
 ): Promise<EnrichedDiscovery<DiscoveredBoardroom, BoardroomState>[]> {
   return await Promise.all(

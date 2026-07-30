@@ -14,8 +14,8 @@ V1 supports only:
   configured HyperEVM USDC token into the active Boardroom share token;
 - canonical, open, uncapped fixed-price sales paid in that same USDC token; and
 - hosted monthly support plans whose manually approved invoices call the
-  canonical Active Boardroom's deadline-bound treasury contribution path for
-  the configured HyperEVM USDC;
+  canonical Active Boardroom's release-hash- and deadline-bound treasury
+  contribution path for the configured HyperEVM USDC;
 - one address as payer, destination recipient, and refund recipient.
 
 Recurring support does not grant the router a debit mandate: publishing,
@@ -29,12 +29,13 @@ the trust model, state machines, and launch gates.
 
 ## Current availability
 
-The service fails closed until every readiness check passes. In particular, the
-tracked `packages/contracts/deployments/998.json` artifact now records a
-verified non-pending deployment with the canonical Boardroom, AMM, and
-distribution factory addresses. The artifact clears the deployment gate, but
+The service fails closed until every readiness check passes. In particular,
+the tracked `packages/contracts/deployments/998.json` must record a verified,
+non-pending deployment with the canonical Boardroom, registry, AMM, and
+distribution factory addresses. An artifact can clear the deployment gate, but
 does not by itself prove a live funded route. Do not advertise the rail or fund
-an operator until every runtime readiness check passes.
+an operator until every runtime readiness check passes. The checked-in
+protocol-v1 artifact is currently pending, so no public route is available.
 
 Funded settlement also requires `x402-hl` version `0.2.2` or newer. This service
 pins version `0.2.2` to Git commit
@@ -123,14 +124,33 @@ The browser additionally requires chain `998`, the connected payer to equal
 the destination and refund recipient, and the selected AMM input, sale payment
 token, or support-plan asset to equal the configured destination USDC. For
 recurring support, it also verifies exact Boardroom contribution calldata
-against the configured asset, invoice amount, signed deadline, and canonical
-Boardroom. A signed unresolved order identifier is retained locally. An
+against the configured asset, invoice amount, signed deadline, expected facet
+set hash, and canonical Boardroom. A signed unresolved order identifier is
+retained locally. An
 account-scoped watcher continues status recovery across navigation and
 unavailable marketplace routes.
 Serialized, abortable polling resumes after reload, while an exclusive browser
 lock and a fresh storage check prevent two tabs from creating overlapping
 payments. Unreadable recovery data is preserved and disables new payments
 until it is reconciled.
+
+Recurring-support authority snapshots, challenges, plan terms, quote metadata,
+and contribution calldata all commit to one facet-set hash. Permanent registry,
+kernel, factory, controller, helper, and code-hash roots remain
+deployment-pinned. The deployment's `protocolFacetRegistryOwner` is genesis
+ceremony evidence, not a permanent live-owner pin. At one pinned block, the
+router requires the registry's current `owner()` to be a well-formed nonzero
+authority and accepts governance or timelock handoffs. An exact expected
+current owner is supplied only to explicit release-operator actions, not
+inferred by the router's live release proof. The router accepts any
+governance-selected release whose published metadata, strict selector table
+(at most 256), active routes, exact loupe grouping, and unique facet runtime
+code hashes prove against that registry. Reads used to create or execute a
+quote are pinned to one HyperEVM block and fail closed if the Boardroom
+requires migration. Activating a new global facet set therefore pauses existing
+plans and in-flight payments; project authority must publish new plan terms
+after each activation. The router never silently upgrades an old recurring
+authorization to new protocol logic.
 
 ## Local commands
 
@@ -151,9 +171,10 @@ The first test command runs unit tests and type checking. Setting
 `X402_ROUTER_TEST_DATABASE_URL` also enables the Postgres concurrency,
 uniqueness, recurring-invoice, reservation, and sealed-journal tests. The
 deterministic Anvil integration uses Postgres, a mock HyperCore settlement
-boundary, and test-only marketplace contract doubles. It does not deploy the
-production pledge.cash marketplace bytecode, spend funded testnet assets, or
-prove any public route.
+boundary, and test-only marketplace contract doubles. It proves the router's
+registry/kernel/factory binding and executes a release-hash-bound Boardroom
+contribution, but does not deploy the production pledge.cash marketplace
+bytecode, spend funded testnet assets, or prove any public route.
 
 The checked-in Drizzle migrations are applied by the runtime before it accepts
 traffic. For schema changes, generate and review a new immutable migration:

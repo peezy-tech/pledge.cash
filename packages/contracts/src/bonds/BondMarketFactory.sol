@@ -6,10 +6,10 @@ import {BondMarket} from "./BondMarket.sol";
 import {BestEffortTokenLib} from "../lib/BestEffortTokenLib.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 import {IBoardroomObligationPolicy} from "../policy/IBoardroomObligationPolicy.sol";
+import {BoardroomCallbackLib} from "../policy/BoardroomCallbackLib.sol";
 
 interface IBondMarketFactoryBoardroom {
     function shareToken() external view returns (address);
-    function reserveRedeemableAsset(address asset) external;
 }
 
 interface IBondMarketFactoryBoardroomFactory {
@@ -18,6 +18,8 @@ interface IBondMarketFactoryBoardroomFactory {
 
 interface IBondMarketFactoryAmmFactory {
     function isPool(address pool) external view returns (bool);
+
+    function boardroomFactory() external view returns (address);
 }
 
 interface IBondMarketFactoryPool {
@@ -39,6 +41,7 @@ contract BondMarketFactory is IBoardroomObligationPolicy {
     mapping(address => address[]) internal marketsForBoardroom;
 
     error InvalidAddress();
+    error IncoherentFactoryIdentity(address expected, address actual);
     error InvalidBoardroom(address boardroom);
     error InvalidQuoteToken(address quoteToken);
     error InvalidLiquidityPool(address pool);
@@ -60,6 +63,10 @@ contract BondMarketFactory is IBoardroomObligationPolicy {
             ammFactory_ == address(0) || ammFactory_.code.length == 0 || boardroomFactory_ == address(0)
                 || boardroomFactory_.code.length == 0
         ) revert InvalidAddress();
+        address ammBoardroomFactory = IBondMarketFactoryAmmFactory(ammFactory_).boardroomFactory();
+        if (ammBoardroomFactory != boardroomFactory_) {
+            revert IncoherentFactoryIdentity(boardroomFactory_, ammBoardroomFactory);
+        }
 
         ammFactory = ammFactory_;
         boardroomFactory = boardroomFactory_;
@@ -74,7 +81,10 @@ contract BondMarketFactory is IBoardroomObligationPolicy {
 
         address shareToken = IBondMarketFactoryBoardroom(boardroom).shareToken();
         _validateQuoteToken(params.quoteToken, shareToken, params.kind);
-        IBondMarketFactoryBoardroom(boardroom).reserveRedeemableAsset(params.quoteToken);
+        // Boardroom-initiated frame: the outer mutating route already bound the caller's release hash.
+        BoardroomCallbackLib.reserveRedeemableAsset(
+            boardroom, BoardroomCallbackLib.boundFacetSetHash(boardroom), params.quoteToken
+        );
 
         market = LibClone.cloneDeterministic(bondMarketLogic, _cloneSalt(boardroom, params.salt));
         isBondMarket[market] = true;

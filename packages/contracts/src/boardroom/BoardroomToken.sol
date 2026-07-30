@@ -4,9 +4,13 @@ pragma solidity ^0.8.30;
 import {ERC20} from "solady/tokens/ERC20.sol";
 
 interface IBoardroomPrimaryMarketGuard {
-    function validatePrimaryMarketTransfer(address from, address to, uint256 amount) external;
+    function facetSetHash() external view returns (bytes32);
+
+    function validatePrimaryMarketTransfer(bytes32 expectedFacetSetHash, address from, address to, uint256 amount)
+        external;
 }
 
+/// @notice Canonical Boardroom share token with release-bound primary-market callbacks.
 contract BoardroomToken is ERC20 {
     struct Checkpoint {
         uint48 fromBlock;
@@ -14,14 +18,11 @@ contract BoardroomToken is ERC20 {
     }
 
     address public immutable boardroom;
-
     string internal tokenName;
     string internal tokenSymbol;
     mapping(address => Checkpoint[]) internal balanceCheckpoints;
     Checkpoint[] internal totalSupplyCheckpoints;
-    /// @notice Permanent canonical-custody classification; accounts are never reclassified as voters.
     mapping(address => bool) public isEncumberedAccount;
-    /// @notice Sum of all share balances held by registered non-voting custodians.
     uint256 public encumberedSupply;
     Checkpoint[] internal encumberedSupplyCheckpoints;
     address public rewardLocker;
@@ -50,7 +51,6 @@ contract BoardroomToken is ERC20 {
 
     constructor(address boardroom_, string memory name_, string memory symbol_) {
         if (boardroom_ == address(0)) revert InvalidAddress();
-
         boardroom = boardroom_;
         tokenName = name_;
         tokenSymbol = symbol_;
@@ -68,7 +68,6 @@ contract BoardroomToken is ERC20 {
         _requireBoardroomCaller();
         _requireTokenAccount(to);
         _requireTokenAmount(amount);
-
         _mint(to, amount);
     }
 
@@ -76,19 +75,15 @@ contract BoardroomToken is ERC20 {
         _requireBoardroomCaller();
         _requireTokenAccount(from);
         _requireTokenAmount(amount);
-
         _burn(from, amount);
     }
 
-    /// @notice Permanently classifies a canonically authenticated obligation custodian as non-voting.
-    /// @dev The existing balance is included because canonical obligations are funded before Boardroom records them.
     function registerEncumberedAccount(address account) external {
         _requireBoardroomCaller();
         if (account == address(0) || account == boardroom || account.code.length == 0) {
             revert InvalidEncumberedAccount(account);
         }
         if (isEncumberedAccount[account]) revert EncumberedAccountAlreadyRegistered(account);
-
         isEncumberedAccount[account] = true;
         uint256 balance = balanceOf(account);
         if (balance != 0) _setEncumberedSupply(encumberedSupply + balance);
@@ -106,30 +101,26 @@ contract BoardroomToken is ERC20 {
     }
 
     function lockStake(address account, uint256 amount) external {
-        _requireRewardLockerCaller();
+        if (msg.sender != rewardLocker) revert OnlyRewardLocker();
         if (rewardLocksDisabled) revert RewardLocksAreDisabled();
         _requireTokenAccount(account);
         _requireTokenAmount(amount);
-
         uint256 balance = balanceOf(account);
         uint256 locked = lockedStakeBalance[account];
         uint256 available = balance > locked ? balance - locked : 0;
         if (amount > available) revert InsufficientUnlockedBalance(account, amount, available);
-        uint256 nextLocked = locked + amount;
-        lockedStakeBalance[account] = nextLocked;
-        emit StakeBalanceLocked(account, amount, nextLocked);
+        lockedStakeBalance[account] = locked + amount;
+        emit StakeBalanceLocked(account, amount, locked + amount);
     }
 
     function unlockStake(address account, uint256 amount) external {
-        _requireRewardLockerCaller();
+        if (msg.sender != rewardLocker) revert OnlyRewardLocker();
         _requireTokenAccount(account);
         _requireTokenAmount(amount);
-
         uint256 locked = lockedStakeBalance[account];
         if (amount > locked) revert InsufficientLockedStake(account, amount, locked);
-        uint256 nextLocked = locked - amount;
-        lockedStakeBalance[account] = nextLocked;
-        emit StakeBalanceUnlocked(account, amount, nextLocked);
+        lockedStakeBalance[account] = locked - amount;
+        emit StakeBalanceUnlocked(account, amount, locked - amount);
     }
 
     function disableRewardLocks() external {
@@ -146,8 +137,6 @@ contract BoardroomToken is ERC20 {
         return balance > locked ? balance - locked : 0;
     }
 
-    /// @notice Current circulating supply used as the denominator for active-staker governance thresholds.
-    /// @dev Redemption accounting intentionally continues to use total supply after treasury burning.
     function governanceEligibleSupply() public view returns (uint256) {
         return totalSupply() - balanceOf(boardroom) - encumberedSupply;
     }
@@ -182,28 +171,30 @@ contract BoardroomToken is ERC20 {
         return encumberedSupplyCheckpoints.length;
     }
 
-    function _afterTokenTransfer(address from, address to, uint256 amount) internal override {
-        if (from != address(0)) _writeCheckpoint(balanceCheckpoints[from], balanceOf(from));
-        if (to != address(0) && to != from) _writeCheckpoint(balanceCheckpoints[to], balanceOf(to));
-        if (from == address(0) || to == address(0)) _writeCheckpoint(totalSupplyCheckpoints, totalSupply());
-
-        if (from == to) return;
-        bool fromEncumbered = isEncumberedAccount[from];
-        bool toEncumbered = isEncumberedAccount[to];
-        // Transfers inside or outside the custody set do not cross the governance eligibility boundary.
-        if (fromEncumbered == toEncumbered) return;
-        if (fromEncumbered) _setEncumberedSupply(encumberedSupply - amount);
-        else _setEncumberedSupply(encumberedSupply + amount);
-    }
-
     function _beforeTokenTransfer(address from, address to, uint256 amount) internal override {
-        IBoardroomPrimaryMarketGuard(boardroom).validatePrimaryMarketTransfer(from, to, amount);
+        IBoardroomPrimaryMarketGuard guarded = IBoardroomPrimaryMarketGuard(boardroom);
+        // The ERC-20 surface has no room for a caller-supplied release hash, so this guard is
+        // bound to whichever facet set is active at execution time. Standard transfers therefore
+        // cannot be authorized against a caller-chosen Boardroom release.
+        guarded.validatePrimaryMarketTransfer(guarded.facetSetHash(), from, to, amount);
         if (from == address(0) || rewardLocksDisabled) return;
         uint256 locked = lockedStakeBalance[from];
         if (locked == 0) return;
         uint256 balance = balanceOf(from);
         uint256 available = balance > locked ? balance - locked : 0;
         if (amount > available) revert InsufficientUnlockedBalance(from, amount, available);
+    }
+
+    function _afterTokenTransfer(address from, address to, uint256 amount) internal override {
+        if (from != address(0)) _writeCheckpoint(balanceCheckpoints[from], balanceOf(from));
+        if (to != address(0) && to != from) _writeCheckpoint(balanceCheckpoints[to], balanceOf(to));
+        if (from == address(0) || to == address(0)) _writeCheckpoint(totalSupplyCheckpoints, totalSupply());
+        if (from == to) return;
+        bool fromEncumbered = isEncumberedAccount[from];
+        bool toEncumbered = isEncumberedAccount[to];
+        if (fromEncumbered == toEncumbered) return;
+        if (fromEncumbered) _setEncumberedSupply(encumberedSupply - amount);
+        else _setEncumberedSupply(encumberedSupply + amount);
     }
 
     function _setEncumberedSupply(uint256 value) internal {
@@ -213,7 +204,6 @@ contract BoardroomToken is ERC20 {
 
     function _writeCheckpoint(Checkpoint[] storage checkpoints, uint256 value) internal {
         if (value > type(uint208).max) revert CheckpointValueOverflow(value);
-
         uint48 currentBlock = uint48(block.number);
         uint256 length = checkpoints.length;
         if (length != 0 && checkpoints[length - 1].fromBlock == currentBlock) {
@@ -225,7 +215,6 @@ contract BoardroomToken is ERC20 {
 
     function _checkpointLookup(Checkpoint[] storage checkpoints, uint256 blockNumber) internal view returns (uint256) {
         if (blockNumber >= block.number) revert FutureCheckpointLookup(blockNumber, block.number);
-
         uint256 low;
         uint256 high = checkpoints.length;
         while (low < high) {
@@ -233,16 +222,11 @@ contract BoardroomToken is ERC20 {
             if (checkpoints[midpoint].fromBlock > blockNumber) high = midpoint;
             else low = midpoint + 1;
         }
-
         return high == 0 ? 0 : checkpoints[high - 1].value;
     }
 
     function _requireBoardroomCaller() internal view {
         if (msg.sender != boardroom) revert OnlyBoardroom();
-    }
-
-    function _requireRewardLockerCaller() internal view {
-        if (msg.sender != rewardLocker) revert OnlyRewardLocker();
     }
 
     function _requireTokenAccount(address account) internal pure {

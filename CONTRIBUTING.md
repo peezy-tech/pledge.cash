@@ -48,6 +48,9 @@ cd packages/contracts && forge test --fork-url "$MAINNET_RPC_URL" --match-contra
 
 Before changing contract behavior, update or check the relevant protocol docs:
 
+- `docs/boardroom-protocol.md`
+- `docs/design/boardroom-diamondization-spike.md`
+- `docs/deployment.md`
 - `docs/token-grant-protocol.md`
 
 Every meaningful contract change should answer:

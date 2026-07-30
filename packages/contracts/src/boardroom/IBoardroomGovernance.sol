@@ -17,7 +17,10 @@ interface IBoardroomGovernance {
 
     function controllerGeneration() external view returns (uint256);
 
-    function executeGovernance(uint256 expectedEpoch, address authority, BoardroomCall[] calldata calls)
-        external
-        returns (bytes[] memory results);
+    function executeGovernance(
+        bytes32 expectedFacetSetHash,
+        uint256 expectedEpoch,
+        address authority,
+        BoardroomCall[] calldata calls
+    ) external returns (bytes[] memory results);
 }

@@ -1,6 +1,6 @@
 ---
 title: Networks and deployments
-description: Current pledge.cash network availability, verified and pending testnet artifacts, local development boundaries, and deployment verification.
+description: Current pledge.cash network availability, pending testnet artifacts, local development boundaries, and deployment verification.
 ---
 
 # Networks and deployments
@@ -11,20 +11,18 @@ Network support is not the same as a live protocol deployment. The app can offer
 
 | Network | Chain id | Current artifact | What users should do |
 | --- | ---: | --- | --- |
-| HyperEVM testnet | `998` | **Verified testnet** — deterministic v5 artifact plus 29 source-bound receipts | Confirm the current artifact and wallet chain before using testnet assets |
-| Monad testnet | `10143` | **Pending** — Boardroom-controller deterministic v5 has not been broadcast | Do not submit pledge.cash protocol transactions |
+| HyperEVM testnet | `998` | **Pending** — canonical protocol v1 has not been broadcast | Do not submit pledge.cash protocol transactions |
+| Monad testnet | `10143` | **Pending** — canonical protocol v1 has not been broadcast | Do not submit pledge.cash protocol transactions |
 | Local Anvil | `31337` | Generated locally and ignored by Git | Use only for the local scenario that produced it |
 | Mainnet | — | No supported deployment | Treat any claimed mainnet address as unsupported |
 
-The published `998.json` records source commit `87f51633f437a0164d7a2a2503a3660b01a6450a`, deployment block
-`59850507`, deterministic release identity, authorities, wiring, and runtime code hashes. Its adjacent
-`998.receipts.json` binds 29 successful transactions to the same source commit. The `10143.json` artifact remains
-pending and does not certify usable factory addresses. An old transaction, screenshot, or partial legacy artifact is
-not a substitute.
+The checked-in `998.json` and `10143.json` files contain pending status only
+and do not certify usable factory addresses. A local proof, old transaction,
+screenshot, or candidate file is not a promoted public identity.
 
 ## Default RPCs
 
-- Verified HyperEVM testnet: `https://rpc.hyperliquid-testnet.xyz/evm`
+- Pending HyperEVM testnet: `https://rpc.hyperliquid-testnet.xyz/evm`
 - Pending Monad testnet: `https://testnet-rpc.monad.xyz`
 - Local Anvil: normally `http://127.0.0.1:8547`, or the deployment's configured reverse-proxied RPC route
 
@@ -45,11 +43,14 @@ Changing network changes contract identity, balances, receipts, and provenance. 
 A usable deployment artifact binds:
 
 - chain id and deterministic release identity;
-- root factory, policy, helper, router, and fee addresses;
+- protocol version, source commit, receipt boundary, registry, kernel, active
+  release and facet-set hash, 97-route/code-hash inventory, required storage
+  version/layout, and root factory, policy, helper, router, and fee addresses;
 - wrapped-native address;
 - ownership, governance, treasury, and fee-manager roles;
-- immutable reciprocal wiring between BoardroomFactory, Boardroom, ControllerFactory, controller implementation,
-  governance, market, and payout helpers, plus grant, distribution, AMM, and liquidity factories;
+- immutable reciprocal wiring between registry, kernel, BoardroomFactory,
+  ControllerFactory, controller implementation, governance, market, and payout
+  helpers, plus grant, distribution, AMM, and liquidity factories;
 - runtime code hashes and live post-broadcast verification.
 
 A subsystem marked pending is unavailable. The app should fail closed instead of reusing stale addresses.

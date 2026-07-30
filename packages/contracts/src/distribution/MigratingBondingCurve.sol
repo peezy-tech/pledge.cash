@@ -9,12 +9,11 @@ import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 import {BestEffortTokenLib} from "../lib/BestEffortTokenLib.sol";
 import {LockedLiquidityFactory} from "../liquidity/LockedLiquidityFactory.sol";
+import {BoardroomCallbackLib} from "../policy/BoardroomCallbackLib.sol";
 
 interface IMigratingBondingCurveBoardroom {
     function status() external view returns (uint8);
     function redemptionExcessRecipient() external view returns (address);
-    function recordLockedLiquidityFromDistribution(address locker, address pool) external;
-    function settleBondingCurve() external;
     function requireBondingCurveForfeitureVetoPower(address account) external view;
 }
 
@@ -66,6 +65,16 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         uint64 endTime;
         bytes32 migrationSalt;
         bytes32 salt;
+    }
+
+    /// @dev Migration seeding inputs, including the release hash bound by the migrating caller.
+    struct MigrationSeed {
+        bytes32 expectedFacetSetHash;
+        uint256 sharesToLiquidity;
+        uint256 quoteToLiquidity;
+        uint256 minShareLiquidity;
+        uint256 minQuoteLiquidity;
+        uint256 deadline;
     }
 
     address public factory;
@@ -275,7 +284,14 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     }
 
     /// @notice Permissionlessly migrates a graduated curve at the protocol-derived terminal price.
-    function migrate(uint256 minShareLiquidity, uint256 minQuoteLiquidity, uint256 deadline)
+    /// @param expectedFacetSetHash Release the caller commits to; every Boardroom callback this
+    /// transaction makes carries it, so an activation landing first reverts the whole migration.
+    function migrate(
+        bytes32 expectedFacetSetHash,
+        uint256 minShareLiquidity,
+        uint256 minQuoteLiquidity,
+        uint256 deadline
+    )
         external
         nonReentrant
         returns (address createdLocker, address createdPool, uint256 amountA, uint256 amountB, uint256 liquidity)
@@ -284,13 +300,25 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         if (deadline < block.timestamp) revert Expired();
         _requireMigrationReady();
 
+        MigrationSeed memory seed = MigrationSeed({
+            expectedFacetSetHash: expectedFacetSetHash,
+            sharesToLiquidity: 0,
+            quoteToLiquidity: 0,
+            minShareLiquidity: minShareLiquidity,
+            minQuoteLiquidity: minQuoteLiquidity,
+            deadline: deadline
+        });
         uint256 quoteBalance = accountedQuoteReserve;
         uint256 terminalPrice = terminalCurvePrice();
-        uint256 quoteToLiquidity = _quoteToLiquidity(quoteBalance);
-        uint256 sharesToLiquidity = FixedPointMathLib.fullMulDiv(quoteToLiquidity, WAD, terminalPrice);
+        seed.quoteToLiquidity = _quoteToLiquidity(quoteBalance);
+        seed.sharesToLiquidity = FixedPointMathLib.fullMulDiv(seed.quoteToLiquidity, WAD, terminalPrice);
         uint256 availableShares = ERC20(shareToken).balanceOf(address(this));
-        if (sharesToLiquidity > availableShares) revert InsufficientShares(sharesToLiquidity, availableShares);
-        _requireMigrationLiquidity(sharesToLiquidity, quoteToLiquidity, minShareLiquidity, minQuoteLiquidity);
+        if (seed.sharesToLiquidity > availableShares) {
+            revert InsufficientShares(seed.sharesToLiquidity, availableShares);
+        }
+        _requireMigrationLiquidity(
+            seed.sharesToLiquidity, seed.quoteToLiquidity, seed.minShareLiquidity, seed.minQuoteLiquidity
+        );
 
         migrationInProgress = true;
         phaseEndsAt = 0;
@@ -298,14 +326,13 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         outstandingCurveShareLiability = 0;
         accountedQuoteReserve = 0;
 
-        (createdLocker, createdPool, amountA, amountB, liquidity) =
-            _createLockedLiquidity(sharesToLiquidity, quoteToLiquidity, minShareLiquidity, minQuoteLiquidity, deadline);
+        (createdLocker, createdPool, amountA, amountB, liquidity) = _createLockedLiquidity(seed);
         _requireMigrationPrice(amountA, amountB, terminalPrice);
 
         locker = createdLocker;
         pool = createdPool;
         migrationReservationHeld = false;
-        uint256 expectedQuoteRemainder = quoteBalance - quoteToLiquidity;
+        uint256 expectedQuoteRemainder = quoteBalance - seed.quoteToLiquidity;
         _returnCanonicalShares();
         uint256 quoteRemainder = _returnQuoteOrQuarantine(expectedQuoteRemainder, boardroom);
         if (quoteQuarantined) {
@@ -318,7 +345,9 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         _requireActiveBoardroom();
         migrationInProgress = false;
 
-        IMigratingBondingCurveBoardroom(boardroom).recordLockedLiquidityFromDistribution(createdLocker, createdPool);
+        BoardroomCallbackLib.recordLockedLiquidityFromDistribution(
+            boardroom, seed.expectedFacetSetHash, createdLocker, createdPool
+        );
         emit CurveMigrated(createdLocker, createdPool, amountA, amountB, liquidity, quoteRemainder, terminalPrice);
     }
 
@@ -348,7 +377,8 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     }
 
     /// @notice Finalizes a completed unwind without confiscating holder shares during its sell-only grace period.
-    function finalizeUnwind() external nonReentrant {
+    /// @param expectedFacetSetHash Release the caller commits to for the settlement callback.
+    function finalizeUnwind(bytes32 expectedFacetSetHash) external nonReentrant {
         _requireBoardroomBeforeSnapshot();
         _requirePhase(CurvePhase.Unwinding);
         if (block.timestamp <= phaseEndsAt) revert GracePeriodActive(phaseEndsAt);
@@ -365,9 +395,9 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         if (quoteQuarantined) {
             _enterQuarantine(CurvePhase.Settled);
         } else {
-            _releaseMigrationReservation();
+            _releaseMigrationReservation(expectedFacetSetHash);
             curveStatus = CurvePhase.Settled;
-            IMigratingBondingCurveBoardroom(boardroom).settleBondingCurve();
+            BoardroomCallbackLib.settleBondingCurve(boardroom, expectedFacetSetHash);
             emit CurvePhaseChanged(CurvePhase.Settled, settlementReason, 0);
         }
 
@@ -375,8 +405,15 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     }
 
     /// @notice Anyone may retry a quarantined quote return; the recipient is fixed by Boardroom lifecycle.
-    function recoverQuarantinedQuote() external nonReentrant returns (uint256 returnedQuote) {
-        if (curveStatus != CurvePhase.Quarantined || !quoteQuarantined) revert QuoteNotQuarantined();
+    /// @param expectedFacetSetHash Release the caller commits to for the settlement callback.
+    function recoverQuarantinedQuote(bytes32 expectedFacetSetHash)
+        external
+        nonReentrant
+        returns (uint256 returnedQuote)
+    {
+        if (curveStatus != CurvePhase.Quarantined || !quoteQuarantined) {
+            revert QuoteNotQuarantined();
+        }
         uint256 expectedQuote = unrecoveredQuote;
         address recipient = _recoveryRecipient();
         returnedQuote = _returnQuoteOrQuarantine(expectedQuote, recipient);
@@ -386,8 +423,8 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         if (!quoteQuarantined) {
             CurvePhase terminalPhase = postQuarantinePhase;
             curveStatus = terminalPhase;
-            if (terminalPhase == CurvePhase.Settled) _releaseMigrationReservation();
-            IMigratingBondingCurveBoardroom(boardroom).settleBondingCurve();
+            if (terminalPhase == CurvePhase.Settled) _releaseMigrationReservation(expectedFacetSetHash);
+            BoardroomCallbackLib.settleBondingCurve(boardroom, expectedFacetSetHash);
             emit CurvePhaseChanged(terminalPhase, settlementReason, 0);
         }
     }
@@ -414,7 +451,8 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
     }
 
     /// @notice Anyone may accept forfeiture after an unvetoed seven-day window during wind-down.
-    function finalizeQuoteForfeiture() external nonReentrant {
+    /// @param expectedFacetSetHash Release the caller commits to for the settlement callback.
+    function finalizeQuoteForfeiture(bytes32 expectedFacetSetHash) external nonReentrant {
         _requireWindingDownQuarantine();
         uint256 windowEndsAt = forfeitureWindowEndsAt;
         if (windowEndsAt == 0 || block.timestamp <= windowEndsAt) revert ForfeitureWindowNotOpen();
@@ -427,8 +465,8 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         forfeitureWindowEndsAt = 0;
         CurvePhase terminalPhase = postQuarantinePhase;
         curveStatus = terminalPhase;
-        if (terminalPhase == CurvePhase.Settled) _releaseMigrationReservation();
-        IMigratingBondingCurveBoardroom(boardroom).settleBondingCurve();
+        if (terminalPhase == CurvePhase.Settled) _releaseMigrationReservation(expectedFacetSetHash);
+        BoardroomCallbackLib.settleBondingCurve(boardroom, expectedFacetSetHash);
         emit QuoteForfeitureFinalized(forfeited, terminalPhase);
         emit CurvePhaseChanged(terminalPhase, settlementReason, 0);
     }
@@ -627,29 +665,24 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         }
     }
 
-    function _createLockedLiquidity(
-        uint256 sharesToLiquidity,
-        uint256 quoteToLiquidity,
-        uint256 minShareLiquidity,
-        uint256 minQuoteLiquidity,
-        uint256 deadline
-    )
+    function _createLockedLiquidity(MigrationSeed memory seed)
         internal
         returns (address createdLocker, address createdPool, uint256 amountA, uint256 amountB, uint256 liquidity)
     {
-        shareToken.safeApprove(lockedLiquidityFactory, sharesToLiquidity);
-        quoteToken.safeApprove(lockedLiquidityFactory, quoteToLiquidity);
+        shareToken.safeApprove(lockedLiquidityFactory, seed.sharesToLiquidity);
+        quoteToken.safeApprove(lockedLiquidityFactory, seed.quoteToLiquidity);
         (createdLocker, createdPool, amountA, amountB, liquidity) = LockedLiquidityFactory(lockedLiquidityFactory)
             .createLockedLiquidityForBoardroom(
+                seed.expectedFacetSetHash,
                 boardroom,
                 LockedLiquidityFactory.CreateParams({
                 tokenA: shareToken,
                 tokenB: quoteToken,
-                amountADesired: sharesToLiquidity,
-                amountBDesired: quoteToLiquidity,
-                amountAMin: minShareLiquidity,
-                amountBMin: minQuoteLiquidity,
-                deadline: deadline,
+                amountADesired: seed.sharesToLiquidity,
+                amountBDesired: seed.quoteToLiquidity,
+                amountAMin: seed.minShareLiquidity,
+                amountBMin: seed.minQuoteLiquidity,
+                deadline: seed.deadline,
                 salt: migrationSalt
             })
             );
@@ -665,11 +698,11 @@ contract MigratingBondingCurve is Initializable, ReentrancyGuard {
         emit CurvePhaseChanged(CurvePhase.Unwinding, reason, phaseEndsAt);
     }
 
-    function _releaseMigrationReservation() internal {
+    function _releaseMigrationReservation(bytes32 expectedFacetSetHash) internal {
         if (!migrationReservationHeld) return;
         migrationReservationHeld = false;
         LockedLiquidityFactory(lockedLiquidityFactory)
-            .releaseMigrationReservation(boardroom, shareToken, quoteToken, migrationSalt);
+            .releaseMigrationReservation(expectedFacetSetHash, boardroom, shareToken, quoteToken, migrationSalt);
     }
 
     function _enterQuarantine(CurvePhase terminalPhase) internal {

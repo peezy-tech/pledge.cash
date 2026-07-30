@@ -96,7 +96,9 @@ and never creates a wallet credential. Better Auth organization creation and UI
 remain disabled; an existing organization membership can be named as the
 destination of a Boardroom-control proof.
 
-`POST /boardroom-control/challenges` creates an exactly serialized, five-minute SIWE challenge for one scope and one user or organization destination. `POST /boardroom-control/claims` accepts only the server nonce and controller signature. Sentinel re-resolves the v5 canonical Boardroom/controller topology and calls controller ERC-1271 at one pinned finalized block, rechecks the block hash, and atomically consumes the nonce with claim creation. Claims are audit receipts, not reusable authorization: every privileged Boardroom write must repeat the fresh challenge and proof flow. Unknown chains, legacy or incomplete release identities, changed controller generations or configuration epochs, malformed RPC results, and finality uncertainty fail closed.
+`POST /boardroom-control/challenges` creates an exactly serialized, five-minute SIWE challenge for one scope and one user or organization destination. `POST /boardroom-control/claims` accepts only the server nonce and canonical controller ERC-1271 envelope. At one pinned finalized block, Sentinel proves the deployment-attested permanent roots, then authenticates the governance-selected active release from the registry: published metadata, a strict selector table bounded to 256 entries, every published and active route, exact loupe grouping, and every unique facet runtime code hash. The deployment's `protocolFacetRegistryOwner` records genesis ceremony evidence; it is not a permanent live-owner pin. Sentinel requires the current registry `owner()` to be a well-formed nonzero authority but permits governance or timelock handoffs. An exact expected current owner is supplied only to explicit release-operator actions, not inferred by Sentinel's live release proof. Sentinel also proves kernel-clone provenance, applied Boardroom storage version and layout, and the reciprocal controller topology. Later legitimate releases do not need to appear in the genesis deployment artifact. The signed identity includes the active facet-set hash, Boardroom epoch, controller generation, configuration epoch, and configuration hash. Sentinel rechecks the finalized block hash and atomically consumes the nonce with claim creation. Claims are audit receipts, not reusable authorization: every privileged Boardroom write must repeat the fresh challenge and proof flow. Unknown chains, malformed release evidence, a changed facet set, migration downtime, changed controller context, malformed RPC results, and finality uncertainty fail closed.
+
+Canonical Sentinel release evidence for chains `998` and `10143` remains pending. The local Anvil proof is not a public deployment claim.
 
 Signed-in accounts can read their own keyset-paginated delivery receipts from `GET /notifications`. The response exposes safe operational state and action context, but never returns raw provider errors, chat identifiers, credentials, or another account's rows. A `sent` receipt means the provider accepted the send; it does not prove that a person read it.
 
@@ -132,9 +134,9 @@ DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres \
 bun --cwd services/sentinel integration:anvil
 ```
 
-The harness deploys and seeds v5 locally, advances Anvil finality, proves a real EOA-proposer controller signature
-through the challenge/claim API, rejects nonce replay, and then exercises scheduled, vetoed, and policy-admin watcher
-flows against the same temporary database.
+The harness deploys and seeds the canonical diamond protocol locally, advances Anvil finality, proves a real
+release-bound EOA-proposer controller signature through the challenge/claim API, rejects nonce replay, and then
+exercises scheduled, vetoed, and policy-admin watcher flows against the same temporary database.
 
 ## Docker
 

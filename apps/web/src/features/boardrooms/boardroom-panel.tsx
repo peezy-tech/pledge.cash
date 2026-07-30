@@ -73,6 +73,12 @@ type LifecycleActionAvailability = {
   reason?: string;
 };
 
+export function boardroomMigrationActionAvailable(
+  boardroomSnapshot: Pick<BoardroomSnapshot, "migrationRequired"> | undefined,
+): boolean {
+  return boardroomSnapshot?.migrationRequired === true;
+}
+
 export function dutchAuctionLifecycleActions(
   auctionSnapshot: DutchAuctionState | undefined,
   boardroomSnapshot: Pick<BoardroomSnapshot, "address" | "status"> | undefined,
@@ -138,6 +144,7 @@ export function BoardroomPanel({
     snapshot: boardroomSnapshot,
     create: createBoardroom,
     load: loadBoardroom,
+    migrate: migrateBoardroom,
     mintShares: mintBoardroomShares,
     predict: predictBoardroom,
     setBoardroomAddress,
@@ -370,7 +377,7 @@ export function BoardroomPanel({
           columns="one"
           items={[
             { label: "Predicted Boardroom", value: predictedBoardroom ? <AddressLink address={predictedBoardroom} /> : "None" },
-            { label: "Factory", value: deployment?.boardroomFactory ? <AddressLink address={deployment.boardroomFactory} /> : deployment?.boardroomReason ?? "Not in artifact" },
+            { label: "Factory", value: deployment?.boardroomFactory ? <AddressLink address={deployment.boardroomFactory} /> : deployment?.reason ?? "Not in artifact" },
           ]}
         />
       </Panel> : null}
@@ -389,6 +396,7 @@ export function BoardroomPanel({
         setMigratingCurveAddress={setMigratingCurveAddress}
         obligationScope={section === "all" || section === "close" ? "all" : undefined}
         loadBoardroom={loadBoardroom}
+        migrateBoardroom={migrateBoardroom}
         runAction={runAction}
       /> : null}
 
@@ -637,6 +645,7 @@ function BoardroomOverview({
   setMigratingCurveAddress,
   obligationScope,
   loadBoardroom,
+  migrateBoardroom,
   runAction,
 }: {
   addressLocked: boolean;
@@ -652,6 +661,7 @@ function BoardroomOverview({
   setMigratingCurveAddress: (address: string) => void;
   obligationScope: "all" | "distributions" | "grants" | "liquidity" | undefined;
   loadBoardroom: () => Promise<void>;
+  migrateBoardroom: () => Promise<void>;
   runAction: (label: string, action: () => Promise<void>) => Promise<void>;
 }): React.JSX.Element {
   const accountFacts = boardroomAccountFacts(boardroomSnapshot);
@@ -684,6 +694,23 @@ function BoardroomOverview({
         columns="three"
         items={accountFacts}
       />
+      {boardroomMigrationActionAvailable(boardroomSnapshot) ? (
+        <div className="border-t border-amber-900/70 bg-amber-950/20 p-4" role="status">
+          <p className="m-0 text-sm leading-6 text-amber-100">
+            This Boardroom must apply the active protocol storage migration. Ordinary writes remain blocked until anyone completes it.
+          </p>
+          <ActionRow>
+            <ActionButton
+              actionId="migrate-boardroom"
+              pendingAction={pendingAction}
+              onClick={() => void runAction("migrate-boardroom", migrateBoardroom)}
+            >
+              <ShieldCheck className="h-4 w-4" />
+              Migrate Boardroom
+            </ActionButton>
+          </ActionRow>
+        </div>
+      ) : null}
       {obligationScope ? <ObligationLists
         boardroomSnapshot={boardroomSnapshot}
         scope={obligationScope}
@@ -707,6 +734,8 @@ function boardroomAccountFacts(boardroomSnapshot: BoardroomSnapshot | undefined)
     },
     { label: "Share token", value: boardroomSnapshot?.shareToken ? <AddressLink address={boardroomSnapshot.shareToken} /> : "Unknown" },
     { label: "Status", value: <StatusBadge label={boardroomStatusLabel(boardroomSnapshot?.status)} tone={boardroomStatusTone(boardroomSnapshot?.status)} /> },
+    { label: "Facet set", value: boardroomSnapshot?.facetSetHash ?? "Unknown" },
+    { label: "Storage version", value: boardroomSnapshot?.appliedStorageVersion?.toString() ?? "Unknown" },
     { label: "Redeemable assets", value: (boardroomSnapshot?.redeemableAssetCount ?? 0n).toString() },
     { label: "Obligations", value: boardroomObligationCount(boardroomSnapshot) },
   ];

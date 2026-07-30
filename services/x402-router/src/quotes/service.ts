@@ -150,12 +150,15 @@ export class MarketplaceQuoteService {
       kind: request.kind,
       metadata: {
         boardroom: canonical.boardroom,
+        facetSetHash: canonical.facetSetHash,
         inputToken: canonical.execution.inputToken,
         inputAmount: canonical.execution.inputAmount,
         outputToken: canonical.execution.outputToken,
         minimumOutput: canonical.execution.minimumOutput,
         ...(request.kind === "recurring_support"
-          ? { supportInvoiceId: request.invoiceId }
+          ? {
+              supportInvoiceId: request.invoiceId,
+            }
           : {}),
       },
     });
@@ -171,8 +174,11 @@ export class MarketplaceQuoteService {
       refundAddress: request.refundAddress,
       boardroom: canonical.boardroom,
       canonicalTarget: canonical.canonicalTarget,
+      facetSetHash: canonical.facetSetHash,
       ...(request.kind === "recurring_support"
-        ? { supportInvoiceId: request.invoiceId }
+        ? {
+            supportInvoiceId: request.invoiceId,
+          }
         : {}),
       ...(canonical.canonicalPool === undefined
         ? {}

@@ -9,9 +9,11 @@ Start with chain, deployment, address, wallet, and receipt. Most dangerous recov
 
 ## The app says the deployment is pending
 
-Monad testnet `10143` remains pending. HyperEVM testnet `998` has a verified v5 artifact, so a pending warning on
-HyperEVM means the client did not load the current artifact. Refresh the published app and confirm the selected chain,
-artifact source commit, and RPC before signing. Do not paste legacy addresses or override the warning.
+HyperEVM testnet `998` and Monad testnet `10143` are both pending because
+canonical protocol v1 has not been broadcast. The warning is expected:
+contract-dependent public workflows are unavailable. Do not paste historical
+addresses or override the gate. Use only a matching local Anvil artifact, or
+wait for a promoted target-testnet release.
 
 ## No browser wallet is detected
 
@@ -86,8 +88,10 @@ See [Receive and settle a grant](../guides/receive-and-settle-grant).
 
 ## Airdrop claim fails
 
-Compare chain id, airdrop address, Boardroom, share token, index, raw amount, account, proof ordering, and claim mode. For
-a grant claim, compare every term. Check claim window, Boardroom Active status, remaining shares, used index, and the
+For `InvalidProof`, compare chain id, airdrop address, Boardroom, share token, index, raw amount, account, proof ordering,
+and claim mode. For a grant claim, compare every term. The expected facet-set hash is transaction authorization data,
+not a Merkle-leaf field; for a facet-set mismatch, rebuild the transaction with the Boardroom's current hash without
+changing the proof or root. Also check the claim window, Boardroom Active status, remaining shares, used index, and the
 airdrop's distribution-specific `maxGrantClaims` count.
 
 See [Claim an airdrop](../guides/claim-airdrop).

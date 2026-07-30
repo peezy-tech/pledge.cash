@@ -7,10 +7,11 @@ import {ReentrancyGuard} from "solady/utils/ReentrancyGuard.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 import {TokenGrantFactory} from "../grants/TokenGrantFactory.sol";
+import {BoardroomCallbackLib} from "../policy/BoardroomCallbackLib.sol";
 
 interface IMerkleAirdropBoardroom {
+    function facetSetHash() external view returns (bytes32);
     function status() external view returns (uint8);
-    function recordGrantFromDistribution(address grant) external;
 }
 
 contract MerkleAirdrop is Initializable, ReentrancyGuard {
@@ -82,6 +83,7 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
     error InvalidProof();
     error InsufficientShares(uint256 requested, uint256 available);
     error TooManyGrantClaims(uint256 maximum);
+    error FacetSetHashMismatch(bytes32 expected, bytes32 actual);
     error UnexpectedTokenBalanceChange(address token, uint256 expected, uint256 actual);
 
     event MerkleAirdropInitialized(
@@ -135,7 +137,14 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         );
     }
 
-    function claim(uint256 index, address account, uint256 amount, bytes32[] calldata proof) external nonReentrant {
+    function claim(
+        bytes32 expectedFacetSetHash,
+        uint256 index,
+        address account,
+        uint256 amount,
+        bytes32[] calldata proof
+    ) external nonReentrant {
+        _requireFacetSetHash(expectedFacetSetHash);
         _claim(index, account, amount, getDirectClaimLeaf(index, account, amount), proof);
         _checkedTransfer(account, amount);
 
@@ -143,19 +152,21 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
     }
 
     function claimGrant(
+        bytes32 expectedFacetSetHash,
         uint256 index,
         address account,
         uint256 amount,
         GrantClaimParams calldata params,
         bytes32[] calldata proof
     ) external nonReentrant returns (address grant) {
+        _requireFacetSetHash(expectedFacetSetHash);
         uint16 nextClaimedGrantCount = _nextClaimedGrantCount();
 
         _claim(index, account, amount, getGrantClaimLeaf(index, account, amount, params), proof);
         claimedGrantCount = nextClaimedGrantCount;
 
         grant = _createGrantFromClaim(index, account, amount, params);
-        IMerkleAirdropBoardroom(boardroom).recordGrantFromDistribution(grant);
+        BoardroomCallbackLib.recordGrantFromDistribution(boardroom, expectedFacetSetHash, grant);
 
         emit AirdropGrantClaimed(index, account, grant, amount);
     }
@@ -188,6 +199,10 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         return (claimedWord & mask) == mask;
     }
 
+    /// @dev Leaves deliberately omit the facet-set hash. `merkleRoot` is immutable, so
+    /// committing to a release would make every activation a permanent, protocol-wide
+    /// invalidation of live manifests. The release is bound per transaction instead,
+    /// by the caller-supplied `expectedFacetSetHash` argument of claim/claimGrant.
     function getDirectClaimLeaf(uint256 index, address account, uint256 amount) public view returns (bytes32) {
         return keccak256(
             abi.encode(
@@ -196,6 +211,7 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
         );
     }
 
+    /// @dev See `getDirectClaimLeaf` for why the leaf is not release-bound.
     function getGrantClaimLeaf(uint256 index, address account, uint256 amount, GrantClaimParams calldata params)
         public
         view
@@ -286,6 +302,13 @@ contract MerkleAirdrop is Initializable, ReentrancyGuard {
 
     function _requireActive() internal view {
         if (airdropStatus != AirdropStatus.Active) revert AirdropNotActive();
+    }
+
+    function _requireFacetSetHash(bytes32 expectedFacetSetHash) internal view {
+        bytes32 actualFacetSetHash = IMerkleAirdropBoardroom(boardroom).facetSetHash();
+        if (expectedFacetSetHash != actualFacetSetHash) {
+            revert FacetSetHashMismatch(expectedFacetSetHash, actualFacetSetHash);
+        }
     }
 
     function _requireOpen() internal view {

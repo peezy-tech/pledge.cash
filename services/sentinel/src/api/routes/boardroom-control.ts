@@ -84,13 +84,16 @@ export function createBoardroomControlRoutes(deps: SentinelApiDeps): Hono<ApiEnv
     const created = await deps.boardroomControl.store.createChallenge({
       audience,
       boardroom: snapshot.boardroom,
+      boardroomEpoch: snapshot.boardroomEpoch,
       chainId: snapshot.chainId,
+      configurationHash: snapshot.configurationHash,
       configurationEpoch: snapshot.configurationEpoch,
       controller: snapshot.controller,
       controllerGeneration: snapshot.controllerGeneration,
       destination: body.value.destination,
       domain,
       expiresAt,
+      facetSetHash: snapshot.facetSetHash,
       issuedAt,
       issuedBlock: snapshot.blockNumber,
       issuedBlockHash: snapshot.blockHash,
@@ -226,9 +229,12 @@ export function buildBoardroomControlSiweMessage(input: {
     resource("scope", input.scope),
     resource("chain-id", input.identity.chainId.toString()),
     resource("boardroom", getAddress(input.identity.boardroom)),
+    resource("facet-set-hash", input.identity.facetSetHash.toLowerCase()),
+    resource("boardroom-epoch", input.identity.boardroomEpoch.toString()),
     resource("controller", getAddress(input.identity.controller)),
     resource("controller-generation", input.identity.controllerGeneration.toString()),
     resource("controller-configuration-epoch", input.identity.configurationEpoch.toString()),
+    resource("controller-configuration-hash", input.identity.configurationHash.toLowerCase()),
     resource("nonce", input.nonce),
     resource("issued-at", input.issuedAt.toISOString()),
     resource("expiration-time", input.expiresAt.toISOString())
@@ -254,33 +260,45 @@ function resource(name: string, value: string): string {
 
 function challengeIdentity(input: {
   readonly boardroom: Address;
+  readonly boardroomEpoch: bigint;
   readonly chainId: number;
+  readonly configurationHash: Hex;
   readonly configurationEpoch: bigint;
   readonly controller: Address;
   readonly controllerGeneration: bigint;
+  readonly facetSetHash: Hex;
 }): BoardroomControlExpectedIdentity {
   return {
     boardroom: input.boardroom,
+    boardroomEpoch: input.boardroomEpoch,
     chainId: input.chainId,
+    configurationHash: input.configurationHash,
     configurationEpoch: input.configurationEpoch,
     controller: input.controller,
-    controllerGeneration: input.controllerGeneration
+    controllerGeneration: input.controllerGeneration,
+    facetSetHash: input.facetSetHash
   };
 }
 
 function toIdentityDto(input: {
   readonly boardroom: Address;
+  readonly boardroomEpoch: bigint;
   readonly chainId: number;
+  readonly configurationHash: Hex;
   readonly configurationEpoch: bigint;
   readonly controller: Address;
   readonly controllerGeneration: bigint;
+  readonly facetSetHash: Hex;
 }) {
   return {
     boardroom: input.boardroom.toLowerCase() as AddressDto,
+    boardroomEpoch: input.boardroomEpoch.toString(),
     chainId: input.chainId,
+    configurationHash: input.configurationHash.toLowerCase(),
     configurationEpoch: input.configurationEpoch.toString(),
     controller: input.controller.toLowerCase() as AddressDto,
-    controllerGeneration: input.controllerGeneration.toString()
+    controllerGeneration: input.controllerGeneration.toString(),
+    facetSetHash: input.facetSetHash.toLowerCase()
   };
 }
 
@@ -298,6 +316,10 @@ function chainFailureResponse(c: Parameters<typeof jsonError>[0], error: unknown
       return jsonError(c, 422, "Boardroom is not canonical for this release");
     case "stale-relationship":
       return jsonError(c, 409, "Boardroom controller relationship is stale");
+    case "stale-facet-set":
+      return jsonError(c, 409, "Boardroom facet release changed");
+    case "storage-migration-required":
+      return jsonError(c, 409, "Boardroom storage migration is required");
     case "invalid-signature":
       return jsonError(c, 403, "Boardroom-control signature is invalid");
     case "malformed-chain-result":

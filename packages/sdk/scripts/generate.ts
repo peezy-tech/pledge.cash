@@ -7,6 +7,17 @@ type Artifact = {
   abi?: unknown;
 };
 
+type AbiParameter = {
+  type?: unknown;
+  components?: unknown;
+};
+
+type AbiItem = {
+  type?: unknown;
+  name?: unknown;
+  inputs?: unknown;
+};
+
 type DeploymentFieldKind = "address" | "bigint" | "boolean" | "number" | "string";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -18,7 +29,11 @@ const contracts = [
   ["AmmPool", "packages/contracts/out/AmmPool.sol/AmmPool.json", "ammPoolAbi"],
   ["AmmRouter", "packages/contracts/out/AmmRouter.sol/AmmRouter.json", "ammRouterAbi"],
   ["AssetPolicy", "packages/contracts/out/AssetPolicy.sol/AssetPolicy.json", "assetPolicyAbi"],
-  ["Boardroom", "packages/contracts/out/Boardroom.sol/Boardroom.json", "boardroomAbi"],
+  [
+    "Boardroom",
+    "packages/contracts/out/IBoardroom.sol/IBoardroom.json",
+    "boardroomAbi",
+  ],
   [
     "BoardroomController",
     "packages/contracts/out/BoardroomController.sol/BoardroomController.json",
@@ -29,19 +44,21 @@ const contracts = [
     "packages/contracts/out/BoardroomControllerFactory.sol/BoardroomControllerFactory.json",
     "boardroomControllerFactoryAbi",
   ],
-  ["BoardroomFactory", "packages/contracts/out/BoardroomFactory.sol/BoardroomFactory.json", "boardroomFactoryAbi"],
   [
-    "BoardroomGovernanceLogic",
-    "packages/contracts/out/BoardroomGovernanceLogic.sol/BoardroomGovernanceLogic.json",
-    "boardroomGovernanceLogicAbi",
+    "BoardroomFactory",
+    "packages/contracts/out/BoardroomFactory.sol/BoardroomFactory.json",
+    "boardroomFactoryAbi",
   ],
-  ["BoardroomMarketLogic", "packages/contracts/out/BoardroomMarketLogic.sol/BoardroomMarketLogic.json", "boardroomMarketLogicAbi"],
   [
     "BoardroomPolicyRegistry",
     "packages/contracts/out/BoardroomPolicyRegistry.sol/BoardroomPolicyRegistry.json",
     "boardroomPolicyRegistryAbi",
   ],
-  ["BoardroomToken", "packages/contracts/out/BoardroomToken.sol/BoardroomToken.json", "boardroomTokenAbi"],
+  [
+    "BoardroomToken",
+    "packages/contracts/out/BoardroomToken.sol/BoardroomToken.json",
+    "boardroomTokenAbi",
+  ],
   ["BoardroomRewards", "packages/contracts/out/BoardroomRewards.sol/BoardroomRewards.json", "boardroomRewardsAbi"],
   [
     "BoardroomRewardsFactory",
@@ -49,13 +66,16 @@ const contracts = [
     "boardroomRewardsFactoryAbi",
   ],
   ["BondMarket", "packages/contracts/out/BondMarket.sol/BondMarket.json", "bondMarketAbi"],
-  ["BondMarketFactory", "packages/contracts/out/BondMarketFactory.sol/BondMarketFactory.json", "bondMarketFactoryAbi"],
   [
-    "BoardroomRedemptionPayout",
-    "packages/contracts/out/BoardroomRedemptionPayout.sol/BoardroomRedemptionPayout.json",
-    "boardroomRedemptionPayoutAbi",
+    "BondMarketFactory",
+    "packages/contracts/out/BondMarketFactory.sol/BondMarketFactory.json",
+    "bondMarketFactoryAbi",
   ],
-  ["DistributionFactory", "packages/contracts/out/DistributionFactory.sol/DistributionFactory.json", "distributionFactoryAbi"],
+  [
+    "DistributionFactory",
+    "packages/contracts/out/DistributionFactory.sol/DistributionFactory.json",
+    "distributionFactoryAbi",
+  ],
   ["DutchAuctionSale", "packages/contracts/out/DutchAuctionSale.sol/DutchAuctionSale.json", "dutchAuctionSaleAbi"],
   ["ERC20", "packages/contracts/out/ERC20.sol/ERC20.json", "erc20Abi"],
   ["FixedPriceSale", "packages/contracts/out/FixedPriceSale.sol/FixedPriceSale.json", "fixedPriceSaleAbi"],
@@ -76,17 +96,53 @@ const contracts = [
     "packages/contracts/out/MigratingBondingCurve.sol/MigratingBondingCurve.json",
     "migratingBondingCurveAbi",
   ],
-  ["MerkleAirdrop", "packages/contracts/out/MerkleAirdrop.sol/MerkleAirdrop.json", "merkleAirdropAbi"],
+  [
+    "MerkleAirdrop",
+    "packages/contracts/out/MerkleAirdrop.sol/MerkleAirdrop.json",
+    "merkleAirdropAbi",
+  ],
   ["PoolFees", "packages/contracts/out/PoolFees.sol/PoolFees.json", "poolFeesAbi"],
   ["ProtocolFeeRouter", "packages/contracts/out/ProtocolFeeRouter.sol/ProtocolFeeRouter.json", "protocolFeeRouterAbi"],
   ["TokenGrant", "packages/contracts/out/TokenGrant.sol/TokenGrant.json", "tokenGrantAbi"],
-  ["TokenGrantFactory", "packages/contracts/out/TokenGrantFactory.sol/TokenGrantFactory.json", "tokenGrantFactoryAbi"],
+  [
+    "TokenGrantFactory",
+    "packages/contracts/out/TokenGrantFactory.sol/TokenGrantFactory.json",
+    "tokenGrantFactoryAbi",
+  ],
+  [
+    "BoardroomKernel",
+    "packages/contracts/out/BoardroomKernel.sol/BoardroomKernel.json",
+    "boardroomKernelAbi",
+  ],
+  [
+    "BoardroomReleaseBMigrationFacet",
+    "packages/contracts/out/BoardroomReleaseBMigrationFacet.sol/BoardroomReleaseBMigrationFacet.json",
+    "boardroomReleaseBMigrationFacetAbi",
+  ],
+  [
+    "ProtocolFacetRegistry",
+    "packages/contracts/out/ProtocolFacetRegistry.sol/ProtocolFacetRegistry.json",
+    "protocolFacetRegistryAbi",
+  ],
+] as const;
+
+const boardroomDiamondSupplementArtifacts = [
+  "packages/contracts/out/BoardroomKernel.sol/BoardroomKernel.json",
+  "packages/contracts/out/BoardroomAuthorityFacet.sol/BoardroomAuthorityFacet.json",
+  "packages/contracts/out/BoardroomExecutionFacet.sol/BoardroomExecutionFacet.json",
+  "packages/contracts/out/BoardroomMarketFacet.sol/BoardroomMarketFacet.json",
+  "packages/contracts/out/BoardroomRedemptionFacet.sol/BoardroomRedemptionFacet.json",
+  "packages/contracts/out/BoardroomReleaseBMigrationFacet.sol/BoardroomReleaseBMigrationFacet.json",
+  "packages/contracts/out/BoardroomViewFacet.sol/BoardroomViewFacet.json",
+  "packages/contracts/out/BoardroomViewFacetV2.sol/BoardroomViewFacetV2.json",
 ] as const;
 
 const deploymentFields = [
   ["chainId", "number"],
   ["status", "string"],
   ["reason", "string"],
+  ["protocolVersion", "string"],
+  ["protocolReleaseCodeHash", "string"],
   ["sourceCommit", "string"],
   ["deterministicDeployment", "boolean"],
   ["deterministicDeploymentVersion", "string"],
@@ -94,15 +150,28 @@ const deploymentFields = [
   ["deterministicDeployer", "address"],
   ["deterministicDeployerOwner", "address"],
   ["create2Factory", "address"],
-  ["boardroomStatus", "string"],
-  ["boardroomReason", "string"],
   ["boardroomFactory", "address"],
   ["boardroomControllerFactory", "address"],
   ["boardroomControllerLogic", "address"],
   ["boardroomGovernanceLogic", "address"],
   ["boardroomMarketLogic", "address"],
   ["boardroomRedemptionPayout", "address"],
-  ["boardroomLogic", "address"],
+  ["protocolFacetRegistry", "address"],
+  ["boardroomKernel", "address"],
+  ["authorityFacet", "address"],
+  ["executionFacet", "address"],
+  ["marketFacet", "address"],
+  ["redemptionFacet", "address"],
+  ["viewFacet", "address"],
+  ["boardroomReleaseBMigrationFacet", "address"],
+  ["boardroomViewFacetV2", "address"],
+  ["activeFacetSetHash", "string"],
+  ["activeRelease", "bigint"],
+  ["requiredStorageVersion", "bigint"],
+  ["requiredStorageLayoutHash", "string"],
+  ["manifestHash", "string"],
+  ["kernelSelectorSetHash", "string"],
+  ["selectorCount", "bigint"],
   ["boardroomPolicyRegistry", "address"],
   ["assetPolicy", "address"],
   ["protocolFeeRouter", "address"],
@@ -125,8 +194,9 @@ const deploymentFields = [
   ["tokenGrantLogic", "address"],
   ["wrappedNative", "address"],
   ["deployer", "address"],
-  ["factoryOwner", "address"],
-  ["policyRegistryOwner", "address"],
+  ["protocolFacetRegistryOwner", "address"],
+  ["boardroomPolicyRegistryOwner", "address"],
+  ["tokenGrantFactoryOwner", "address"],
   ["assetPolicyOwner", "address"],
   ["protocolGovernance", "address"],
   ["protocolTreasury", "address"],
@@ -163,11 +233,19 @@ const deploymentFields = [
   ["protocolFeeRouterCodeHash", "string"],
   ["boardroomFactoryCodeHash", "string"],
   ["boardroomControllerFactoryCodeHash", "string"],
-  ["boardroomControllerCodeHash", "string"],
+  ["boardroomControllerLogicCodeHash", "string"],
   ["boardroomGovernanceLogicCodeHash", "string"],
   ["boardroomMarketLogicCodeHash", "string"],
   ["boardroomRedemptionPayoutCodeHash", "string"],
-  ["boardroomLogicCodeHash", "string"],
+  ["protocolFacetRegistryCodeHash", "string"],
+  ["boardroomKernelCodeHash", "string"],
+  ["authorityFacetCodeHash", "string"],
+  ["executionFacetCodeHash", "string"],
+  ["marketFacetCodeHash", "string"],
+  ["redemptionFacetCodeHash", "string"],
+  ["viewFacetCodeHash", "string"],
+  ["boardroomReleaseBMigrationFacetCodeHash", "string"],
+  ["boardroomViewFacetV2CodeHash", "string"],
   ["tokenGrantFactoryCodeHash", "string"],
   ["tokenGrantLogicCodeHash", "string"],
   ["ammFactoryCodeHash", "string"],
@@ -187,118 +265,17 @@ const deploymentFields = [
   ["wrappedNativeCodeHash", "string"],
 ] as const satisfies readonly (readonly [string, DeploymentFieldKind])[];
 
-const requiredTokenGrantDeploymentFields = [
-  "boardroomFactory",
-  "tokenGrantFactory",
-  "tokenGrantLogic",
-  "factoryOwner",
-  "tokenGrantFeeRecipient",
-  "protocolFeeRouter",
-  "protocolFeeRouterRecipient",
-  "protocolGovernance",
-  "protocolTreasury",
-  "creationFee",
-  "deploymentTimestamp",
-] as const;
-
-const requiredBoardroomDeploymentFields = [
-  "boardroomFactory",
-  "boardroomControllerFactory",
-  "boardroomControllerLogic",
-  "boardroomGovernanceLogic",
-  "boardroomMarketLogic",
-  "boardroomRedemptionPayout",
-  "boardroomLogic",
-  "boardroomPolicyRegistry",
-  "assetPolicy",
-  "distributionFactory",
-  "boardroomRewardsFactory",
-  "lockedLiquidityFactory",
-  "policyRegistryOwner",
-  "assetPolicyOwner",
-  "protocolFeeRouterOwner",
-  "ammFactoryOwner",
-  "ammFeeManager",
-  "ammLiquidityRouter",
-  "ammReservationManager",
-  "ammProtocolFeeRecipient",
-  "assetPolicyAllowed",
-  "tokenGrantPolicyAllowed",
-  "tokenGrantModulePolicy",
-  "distributionPolicyAllowed",
-  "distributionModulePolicy",
-  "boardroomRewardsPolicyAllowed",
-  "boardroomRewardsModulePolicy",
-  "lockedLiquidityPolicyAllowed",
-  "lockedLiquidityModulePolicy",
-  "assetWrappedNativeAllowed",
-  "assetTokenGrantSpenderAllowed",
-  "assetDistributionSpenderAllowed",
-  "assetBoardroomRewardsSpenderAllowed",
-  "assetLockedLiquiditySpenderAllowed",
-] as const;
-
-const boardroomDeploymentFields = new Set<string>(requiredBoardroomDeploymentFields);
-
-const requiredV4DeploymentFields = [
-  "deterministicReleaseCodeHash",
-  "deterministicDeployerCodeHash",
-  "boardroomPolicyRegistryCodeHash",
-  "assetPolicyCodeHash",
-  "protocolFeeRouterCodeHash",
-  "boardroomFactoryCodeHash",
-  "boardroomGovernanceLogicCodeHash",
-  "boardroomRedemptionPayoutCodeHash",
-  "boardroomLogicCodeHash",
-  "tokenGrantFactoryCodeHash",
-  "ammFactoryCodeHash",
-  "ammRouterCodeHash",
-  "lockedLiquidityFactoryCodeHash",
-  "distributionFactoryCodeHash",
-  "boardroomRewardsFactoryCodeHash",
-  "wrappedNativeCodeHash",
-  "protocolGovernance",
-  "protocolTreasury",
-  "protocolFeeRouter",
-  "protocolFeeRouterOwner",
-  "protocolFeeRouterRecipient",
-  "tokenGrantFeeRecipient",
-  "ammFactoryOwner",
-  "ammFeeManager",
-  "ammLiquidityRouter",
-  "ammReservationManager",
-  "ammProtocolFeeRecipient",
-  "boardroomGovernanceLogic",
-  "boardroomRedemptionPayout",
-  "boardroomLogic",
-] as const;
-
-const requiredV5DeploymentFields = [
-  ...requiredV4DeploymentFields,
-  "sourceCommit",
-  "deploymentBlock",
-  "tokenGrantLogicCodeHash",
-  "ammPoolImplementation",
-  "ammPoolImplementationCodeHash",
-  "lockedLiquidityLogic",
-  "lockedLiquidityLogicCodeHash",
-  "fixedPriceSaleLogic",
-  "fixedPriceSaleLogicCodeHash",
-  "dutchAuctionLogic",
-  "dutchAuctionLogicCodeHash",
-  "migratingBondingCurveLogic",
-  "migratingBondingCurveLogicCodeHash",
-  "merkleAirdropLogic",
-  "merkleAirdropLogicCodeHash",
-  "boardroomRewardsLogic",
-  "boardroomRewardsLogicCodeHash",
-  "boardroomControllerFactory",
-  "boardroomControllerLogic",
-  "boardroomMarketLogic",
-  "boardroomControllerFactoryCodeHash",
-  "boardroomControllerCodeHash",
-  "boardroomMarketLogicCodeHash",
-] as const;
+const optionalCanonicalDeploymentFields = new Set<string>([
+  "status",
+  "reason",
+  "boardroomReleaseBMigrationFacet",
+  "boardroomViewFacetV2",
+  "boardroomReleaseBMigrationFacetCodeHash",
+  "boardroomViewFacetV2CodeHash",
+]);
+const requiredCanonicalDeploymentFields = deploymentFields
+  .map(([field]) => field)
+  .filter((field) => field !== "chainId" && !optionalCanonicalDeploymentFields.has(field));
 
 function literal(value: unknown): string {
   return JSON.stringify(value, null, 2);
@@ -343,64 +320,36 @@ function serializeDeployment(raw: string): string | undefined {
   const chainId = numberLiteral(raw, "chainId");
   if (!chainId) return undefined;
 
-  if (parsed.deterministicDeploymentVersion === "pledge.cash.deterministic.v4" && parsed.status !== "pending") {
-    const missingV4Fields = requiredV4DeploymentFields.filter((field) => propertyToken(raw, field) === undefined);
-    if (missingV4Fields.length > 0) {
-      throw new Error(`Deployment ${chainId} is deterministic v4 but is missing attestations (${missingV4Fields.join(", ")}).`);
+  if (parsed.status === "pending") {
+    const reason =
+      typeof parsed.reason === "string"
+        ? parsed.reason
+        : "Canonical protocol deployment is pending.";
+    const lines = [
+      `chainId: ${chainId}`,
+      `status: ${literal("pending")}`,
+      `reason: ${literal(reason)}`,
+    ];
+    if (typeof parsed.protocolVersion === "string") {
+      lines.push(`protocolVersion: ${literal(parsed.protocolVersion)}`);
     }
+    return `${chainId}: {\n    ${lines.join(",\n    ")}\n  }`;
   }
 
-  if (parsed.deterministicDeploymentVersion === "pledge.cash.deterministic.v5" && parsed.status !== "pending") {
-    const missingV5Fields = requiredV5DeploymentFields.filter((field) => propertyToken(raw, field) === undefined);
-    if (missingV5Fields.length > 0) {
-      throw new Error(`Deployment ${chainId} is deterministic v5 but is missing attestations (${missingV5Fields.join(", ")}).`);
-    }
-  }
-
-  const missingTokenGrantFields = requiredTokenGrantDeploymentFields.filter(
+  const missingCanonicalFields = requiredCanonicalDeploymentFields.filter(
     (field) => propertyToken(raw, field) === undefined,
   );
-  const hasTokenGrantFactory = propertyToken(raw, "tokenGrantFactory") !== undefined;
-
-  if (missingTokenGrantFields.length > 0 && hasTokenGrantFactory) {
+  if (missingCanonicalFields.length > 0) {
     throw new Error(
-      `Deployment ${chainId} has tokenGrantFactory but is missing current fields (${missingTokenGrantFields.join(
+      `Deployment ${chainId} is not explicitly pending and is missing canonical protocol fields (${missingCanonicalFields.join(
         ", ",
       )}).`,
     );
   }
 
-  if (missingTokenGrantFields.length > 0 && !hasTokenGrantFactory) {
-    const status = typeof parsed.status === "string" ? parsed.status : "pending";
-    const reason =
-      typeof parsed.reason === "string"
-        ? parsed.reason
-        : `Deployment artifact is missing current fields: ${missingTokenGrantFields.join(", ")}`;
-    return `${chainId}: {\n    chainId: ${chainId},\n    status: ${literal(status)},\n    reason: ${literal(reason)}\n  }`;
-  }
-
-  const missingBoardroomFields = requiredBoardroomDeploymentFields.filter(
-    (field) => propertyToken(raw, field) === undefined,
-  );
-  const hasBoardroomField = requiredBoardroomDeploymentFields.some((field) => propertyToken(raw, field) !== undefined);
-  const boardroomStatus = typeof parsed.boardroomStatus === "string" ? parsed.boardroomStatus : undefined;
-  const shouldEmitBoardroom = boardroomStatus !== "pending" && missingBoardroomFields.length === 0;
-  const shouldEmitBoardroomPending = !shouldEmitBoardroom && (boardroomStatus === "pending" || hasBoardroomField);
-
   const lines = [`chainId: ${chainId}`];
-  if (shouldEmitBoardroomPending) {
-    const boardroomReason =
-      typeof parsed.boardroomReason === "string"
-        ? parsed.boardroomReason
-        : `Boardroom artifact is missing current fields: ${missingBoardroomFields.join(", ")}`;
-    lines.push(`boardroomStatus: ${literal("pending")}`);
-    lines.push(`boardroomReason: ${literal(boardroomReason)}`);
-  }
-
   for (const [field, kind] of deploymentFields) {
     if (field === "chainId") continue;
-    if (field === "boardroomStatus" || field === "boardroomReason") continue;
-    if (boardroomDeploymentFields.has(field) && !shouldEmitBoardroom) continue;
     if (propertyToken(raw, field) === undefined) continue;
 
     if (kind === "address") {
@@ -432,6 +381,46 @@ async function readAbi(path: string): Promise<unknown[]> {
   return artifact.abi;
 }
 
+function canonicalAbiParameterType(parameter: unknown): string {
+  if (typeof parameter !== "object" || parameter === null) return "";
+  const typed = parameter as AbiParameter;
+  if (typeof typed.type !== "string") return "";
+  if (!typed.type.startsWith("tuple")) return typed.type;
+  const suffix = typed.type.slice("tuple".length);
+  const components = Array.isArray(typed.components)
+    ? typed.components.map(canonicalAbiParameterType).join(",")
+    : "";
+  return `(${components})${suffix}`;
+}
+
+function abiItemKey(item: unknown): string {
+  if (typeof item !== "object" || item === null) return JSON.stringify(item);
+  const typed = item as AbiItem;
+  const inputs = Array.isArray(typed.inputs) ? typed.inputs.map(canonicalAbiParameterType).join(",") : "";
+  return `${String(typed.type)}:${String(typed.name)}(${inputs})`;
+}
+
+async function readBoardroomDiamondAbi(path: string): Promise<unknown[]> {
+  const aggregate = await readAbi(path);
+  const result = [...aggregate];
+  const seen = new Set(result.map(abiItemKey));
+
+  for (const supplementPath of boardroomDiamondSupplementArtifacts) {
+    const supplement = await readAbi(supplementPath);
+    for (const item of supplement) {
+      if (typeof item !== "object" || item === null) continue;
+      const type = (item as AbiItem).type;
+      if (type !== "event" && type !== "error") continue;
+      const key = abiItemKey(item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(item);
+    }
+  }
+
+  return result;
+}
+
 async function deploymentEntries(): Promise<string[]> {
   const deploymentDir = join(repoRoot, "packages/contracts/deployments");
   const files = await readdir(deploymentDir).catch(() => []);
@@ -452,7 +441,9 @@ const abiExports: string[] = [];
 const abiMapEntries: string[] = [];
 
 for (const [contractName, artifactPath, exportName] of contracts) {
-  const abi = await readAbi(artifactPath);
+  const abi = exportName === "boardroomAbi"
+    ? await readBoardroomDiamondAbi(artifactPath)
+    : await readAbi(artifactPath);
   abiExports.push(`export const ${exportName} = ${literal(abi)} as const;`);
   abiMapEntries.push(`${contractName}: ${exportName}`);
 }

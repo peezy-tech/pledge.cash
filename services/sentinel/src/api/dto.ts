@@ -180,10 +180,13 @@ export const BoardroomControlChallengeRequestSchema = z.object({
 
 export const BoardroomControlIdentitySchema = z.object({
   boardroom: AddressSchema,
+  boardroomEpoch: UintStringSchema,
   chainId: z.number().int().positive(),
+  configurationHash: HexSchema,
   configurationEpoch: UintStringSchema,
   controller: AddressSchema,
-  controllerGeneration: UintStringSchema
+  controllerGeneration: UintStringSchema,
+  facetSetHash: HexSchema
 });
 
 export const BoardroomControlChallengeResponseSchema = z.object({

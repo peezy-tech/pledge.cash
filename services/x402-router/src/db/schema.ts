@@ -105,6 +105,7 @@ export const supportChallenges = pgTable(
       scale: 0,
       mode: "bigint",
     }).notNull(),
+    facetSetHash: text("facet_set_hash").notNull(),
     planId: uuid("plan_id").notNull(),
     payload: jsonb("payload").$type<JsonRecord>().notNull(),
     payloadHash: text("payload_hash").notNull(),
@@ -176,6 +177,11 @@ export const supportChallenges = pgTable(
       sql`${table.controllerGeneration} >= 0
         and ${table.configurationEpoch} >= 0`,
     ),
+    facetSetHashCheck: check(
+      "x402_router_support_challenges_facet_set_hash_check",
+      sql`${table.facetSetHash} = lower(${table.facetSetHash})
+        and ${table.facetSetHash} ~ '^0x[0-9a-f]{64}$'`,
+    ),
     payloadCheck: check(
       "x402_router_support_challenges_payload_check",
       sql`jsonb_typeof(${table.payload}) = 'object'`,
@@ -243,6 +249,7 @@ export const supportPlans = pgTable(
       scale: 0,
       mode: "bigint",
     }).notNull(),
+    facetSetHash: text("facet_set_hash").notNull(),
     verifiedBlock: numeric("verified_block", {
       precision: 78,
       scale: 0,
@@ -307,6 +314,11 @@ export const supportPlans = pgTable(
       "x402_router_support_plans_generation_check",
       sql`${table.controllerGeneration} >= 0
         and ${table.configurationEpoch} >= 0`,
+    ),
+    facetSetHashCheck: check(
+      "x402_router_support_plans_facet_set_hash_check",
+      sql`${table.facetSetHash} = lower(${table.facetSetHash})
+        and ${table.facetSetHash} ~ '^0x[0-9a-f]{64}$'`,
     ),
     verifiedBlockHashCheck: check(
       "x402_router_support_plans_verified_block_hash_check",

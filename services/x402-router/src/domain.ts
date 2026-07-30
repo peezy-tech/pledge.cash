@@ -53,6 +53,7 @@ export type MarketplaceQuote = {
   boardroom: Address;
   canonicalTarget: Address;
   canonicalPool?: Address;
+  facetSetHash?: Hex;
   supportInvoiceId?: string;
   sourcePayment: SourcePayment;
   execution: DestinationExecution;

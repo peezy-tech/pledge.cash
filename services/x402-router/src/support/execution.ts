@@ -25,6 +25,7 @@ export class RecurringSupportExecutionGuard
     if (
       quote.kind !== "recurring_support"
       || quote.supportInvoiceId === undefined
+      || quote.facetSetHash === undefined
     ) {
       throw new SupportError(
         "The quote is not bound to a recurring-support invoice.",
@@ -87,6 +88,7 @@ export class RecurringSupportExecutionGuard
       || quote.execution.expectedOutput !== invoice.amount
       || quote.execution.minimumOutput !== invoice.amount
       || quote.maxSlippageBps !== 0
+      || quote.facetSetHash.toLowerCase() !== plan.facetSetHash.toLowerCase()
     ) {
       throw new SupportError(
         "The support quote is no longer the exact payable attempt for this invoice.",
@@ -107,6 +109,7 @@ function authorityFromPlan(plan: SupportPlan) {
     chainId: SUPPORT_CHAIN_ID,
     configurationEpoch: plan.configurationEpoch,
     controllerGeneration: plan.controllerGeneration,
+    facetSetHash: plan.facetSetHash,
     mode: plan.authorityMode,
   } as const;
 }

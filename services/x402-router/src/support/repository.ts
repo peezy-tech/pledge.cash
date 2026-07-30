@@ -25,6 +25,7 @@ type ChallengeRow = {
   authority: string | null;
   controller_generation: string;
   configuration_epoch: string;
+  facet_set_hash: string;
   plan_id: string;
   payload: JsonRecord;
   payload_hash: string;
@@ -51,6 +52,7 @@ type PlanRow = {
   authority: string;
   controller_generation: string;
   configuration_epoch: string;
+  facet_set_hash: string;
   verified_block: string;
   verified_block_hash: string;
   created_at: Date;
@@ -109,6 +111,7 @@ export class PostgresSupportRepository implements SupportRepository {
         authority,
         controller_generation,
         configuration_epoch,
+        facet_set_hash,
         plan_id,
         payload,
         payload_hash,
@@ -127,6 +130,7 @@ export class PostgresSupportRepository implements SupportRepository {
         ${challenge.authority ? lower(challenge.authority) : null},
         ${challenge.controllerGeneration.toString()},
         ${challenge.configurationEpoch.toString()},
+        ${lower(challenge.facetSetHash)},
         ${challenge.planId},
         ${this.sql.json(challenge.payload)},
         ${lower(challenge.payloadHash)},
@@ -185,6 +189,7 @@ export class PostgresSupportRepository implements SupportRepository {
         authority,
         controller_generation::text,
         configuration_epoch::text,
+        facet_set_hash,
         plan_id,
         payload,
         payload_hash,
@@ -230,6 +235,7 @@ export class PostgresSupportRepository implements SupportRepository {
           authority,
           controller_generation,
           configuration_epoch,
+          facet_set_hash,
           verified_block,
           verified_block_hash,
           created_at
@@ -248,6 +254,7 @@ export class PostgresSupportRepository implements SupportRepository {
           ${lower(input.plan.authority)},
           ${input.plan.controllerGeneration.toString()},
           ${input.plan.configurationEpoch.toString()},
+          ${lower(input.plan.facetSetHash)},
           ${input.plan.verifiedBlock.toString()},
           ${lower(input.plan.verifiedBlockHash)},
           ${input.plan.createdAt.toISOString()}
@@ -267,6 +274,7 @@ export class PostgresSupportRepository implements SupportRepository {
           authority,
           controller_generation::text,
           configuration_epoch::text,
+          facet_set_hash,
           verified_block::text,
           verified_block_hash,
           created_at,
@@ -316,6 +324,7 @@ export class PostgresSupportRepository implements SupportRepository {
           authority,
           controller_generation::text,
           configuration_epoch::text,
+          facet_set_hash,
           verified_block::text,
           verified_block_hash,
           created_at,
@@ -515,6 +524,7 @@ export class PostgresSupportRepository implements SupportRepository {
         authority,
         controller_generation::text,
         configuration_epoch::text,
+        facet_set_hash,
         verified_block::text,
         verified_block_hash,
         created_at,
@@ -543,6 +553,7 @@ export class PostgresSupportRepository implements SupportRepository {
         plan.authority,
         plan.controller_generation::text,
         plan.configuration_epoch::text,
+        plan.facet_set_hash,
         plan.verified_block::text,
         plan.verified_block_hash,
         plan.created_at,
@@ -586,6 +597,7 @@ export class PostgresSupportRepository implements SupportRepository {
         authority,
         controller_generation::text,
         configuration_epoch::text,
+        facet_set_hash,
         verified_block::text,
         verified_block_hash,
         created_at,
@@ -939,6 +951,7 @@ async function claimChallenge(
       authority,
       controller_generation::text,
       configuration_epoch::text,
+      facet_set_hash,
       plan_id,
       payload,
       payload_hash,
@@ -1062,6 +1075,7 @@ function challengeFromRow(row: ChallengeRow): SupportChallenge {
     chainId: 998,
     configurationEpoch: BigInt(row.configuration_epoch),
     controllerGeneration: BigInt(row.controller_generation),
+    facetSetHash: row.facet_set_hash as Hex,
     planId: row.plan_id,
     payload: row.payload,
     payloadHash: row.payload_hash as Hex,
@@ -1090,6 +1104,7 @@ function planFromRow(row: PlanRow): SupportPlan {
     authorityMode: row.authority_mode,
     controllerGeneration: BigInt(row.controller_generation),
     configurationEpoch: BigInt(row.configuration_epoch),
+    facetSetHash: row.facet_set_hash as Hex,
     verifiedBlock: BigInt(row.verified_block),
     verifiedBlockHash: row.verified_block_hash as Hex,
     createdAt: row.created_at,
@@ -1156,6 +1171,7 @@ function sameChallenge(
     )
     && left.controllerGeneration === right.controllerGeneration
     && left.configurationEpoch === right.configurationEpoch
+    && lower(left.facetSetHash) === lower(right.facetSetHash)
     && left.planId === right.planId
     && lower(left.payloadHash) === lower(right.payloadHash)
     && left.message === right.message

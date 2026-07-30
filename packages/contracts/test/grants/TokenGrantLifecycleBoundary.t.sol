@@ -8,12 +8,15 @@ import {GrantERC20, MutableFailureGrantERC20, TokenGrantTestBoardroomFactory} fr
 
 contract TokenGrantLifecycleBoardroom {
     address public immutable shareToken;
+    bytes32 public constant facetSetHash = keccak256("token-grant-lifecycle-boardroom-release");
 
     constructor(address shareToken_) {
         shareToken = shareToken_;
     }
 
-    function reserveRedeemableAsset(address) external {}
+    function reserveRedeemableAsset(bytes32 expectedFacetSetHash, address) external pure {
+        require(expectedFacetSetHash == facetSetHash);
+    }
 }
 
 contract TokenGrantLifecycleBoundaryTest is Test {

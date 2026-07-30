@@ -9,6 +9,11 @@ A Boardroom is a canonical project account created by `BoardroomFactory`. It cre
 coordinates treasury execution, obligations, singleton primary-market and liquidity state, governance, wind-down,
 snapshotting, and redemptions.
 
+The Boardroom address is a permanent asset holder and execution gateway. Its
+kernel resolves functions through the protocol-owned
+`ProtocolFacetRegistry`, so one activated complete release changes routing for
+every Boardroom.
+
 ## Token accounting
 
 The Boardroom alone can authorize minting or burning its share token. Before launch, the owner can cause minting through
@@ -45,13 +50,22 @@ Transitions are one-way. Starting wind-down invalidates earlier controller opera
 
 ## Canonical identity
 
-Verify the selected deployment version and code hashes, `BoardroomFactory.isBoardroom`, the Boardroom-reported share
-token, and the token's reciprocal Boardroom reference. Verify child factory relationships separately. An ERC20 name,
-symbol, copied address, or Sentinel record is not canonical identity.
+Verify the selected protocol-v1 artifact, registry/kernel/facet code hashes,
+active facet-set hash, storage version/layout, migration state,
+`BoardroomFactory.isBoardroom`, the Boardroom-reported share token, and the
+token's reciprocal Boardroom reference. Verify child factory relationships
+separately. An ERC20 name, symbol, copied address, or Sentinel record is not
+canonical identity.
 
 ## Release boundary
 
-The v5 candidate is not deployed on mainnet. Its approved curve policy uses a 90-day maximum lifetime, seven-day
-migration grace, 30-day sell-only unwind, 50-basis-point migration-price tolerance, and delayed holder-vetoable
-wind-down forfeiture for unrecoverable quote. Unsupported versions and incomplete relationships must fail closed.
-Release-candidate proof, production authority ceremony, and independent security assurance remain required.
+Canonical protocol v1 is pending on both target testnets and is not deployed
+on mainnet. Its curve policy uses a 90-day maximum lifetime, seven-day
+migration grace, 30-day sell-only unwind, 50-basis-point migration-price
+tolerance, and delayed holder-vetoable wind-down forfeiture for unrecoverable
+quote.
+
+Every mutation is bound to the caller's expected facet-set hash. A
+storage-version activation blocks writes on an individual Boardroom until
+permissionless migration completes. Pending deployments, hash mismatches,
+migration requirements, and incomplete relationships must fail closed.

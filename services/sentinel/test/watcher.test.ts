@@ -54,12 +54,14 @@ const scheduleTx = bytes32("100");
 const cancelTx = bytes32("101");
 const adminTx = bytes32("102");
 const invalidationTx = bytes32("103");
+const facetSetHash = bytes32("fac37");
+const nextFacetSetHash = bytes32("fac38");
 
 const call: BoardroomCall = {
   data: encodeFunctionData({
     abi: boardroomAbi,
     functionName: "mint",
-    args: [address("eeee"), 1n]
+    args: [facetSetHash, address("eeee"), 1n]
   }),
   policy,
   target,
@@ -84,7 +86,7 @@ const operationId = bytes32("a11");
 const scheduleInput = encodeFunctionData({
   abi: boardroomControllerAbi,
   functionName: "scheduleBoardroomOperation",
-  args: [[call], salt, boardroomEpoch, configurationEpoch]
+  args: [facetSetHash, [call], salt, boardroomEpoch, configurationEpoch]
 });
 const safeExecTransactionAbi = parseAbi([
   "function execTransaction(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,bytes signatures) payable returns (bool success)"
@@ -98,6 +100,7 @@ describe("decodeScheduledOperationCalldata", () => {
       controller,
       expectedBoardroomEpoch: boardroomEpoch,
       expectedConfigurationEpoch: configurationEpoch,
+      expectedFacetSetHash: facetSetHash,
       expectedPayloadHash: callsHash,
       expectedSalt: salt,
       operationKind: "boardroom",
@@ -117,7 +120,21 @@ describe("decodeScheduledOperationCalldata", () => {
         controller,
         expectedBoardroomEpoch: boardroomEpoch,
         expectedConfigurationEpoch: configurationEpoch,
+        expectedFacetSetHash: facetSetHash,
         expectedPayloadHash: bytes32("999"),
+        expectedSalt: salt,
+        operationKind: "boardroom",
+        txInput: scanned
+      }).decodeStatus
+    ).toBe("undecoded");
+
+    expect(
+      decodeScheduledOperationCalldata({
+        controller,
+        expectedBoardroomEpoch: boardroomEpoch,
+        expectedConfigurationEpoch: configurationEpoch,
+        expectedFacetSetHash: bytes32("bad"),
+        expectedPayloadHash: callsHash,
         expectedSalt: salt,
         operationKind: "boardroom",
         txInput: scanned
@@ -136,6 +153,7 @@ describe("decodeScheduledOperationCalldata", () => {
       controller,
       expectedBoardroomEpoch: boardroomEpoch,
       expectedConfigurationEpoch: configurationEpoch,
+      expectedFacetSetHash: facetSetHash,
       expectedPayloadHash: callsHash,
       expectedSalt: salt,
       operationKind: "boardroom",
@@ -155,13 +173,14 @@ describe("decodeScheduledOperationCalldata", () => {
     const input = encodeFunctionData({
       abi: boardroomControllerAbi,
       functionName: "scheduleControllerOperation",
-      args: [data, salt, boardroomEpoch, configurationEpoch]
+      args: [facetSetHash, data, salt, boardroomEpoch, configurationEpoch]
     });
 
     const decoded = decodeScheduledOperationCalldata({
       controller,
       expectedBoardroomEpoch: boardroomEpoch,
       expectedConfigurationEpoch: configurationEpoch,
+      expectedFacetSetHash: facetSetHash,
       expectedPayloadHash: keccak256(data),
       expectedSalt: salt,
       operationKind: "controller",
@@ -186,7 +205,7 @@ describe("runWatcherOnce", () => {
     });
 
     expect(result.skipped).toBe(true);
-    expect(result.skipReason).toContain("remain read-only");
+    expect(result.skipReason).toContain("missing canonical Boardroom release evidence");
   });
 
   test("includes the recorded deployment block in the first scan", async () => {
@@ -448,7 +467,7 @@ describe("runWatcherOnce", () => {
     const nextScheduleInput = encodeFunctionData({
       abi: boardroomControllerAbi,
       functionName: "scheduleBoardroomOperation",
-      args: [[call], salt, 2n, 1n]
+      args: [facetSetHash, [call], salt, 2n, 1n]
     });
     const replacementTx = bytes32("220");
     const events: WatcherPipelineEvent[] = [];
@@ -474,6 +493,7 @@ describe("runWatcherOnce", () => {
             boardroomEpoch: 2n,
             controllerGeneration: 2n,
             configurationEpoch: 1n,
+            facetSetHash,
             salt,
             callsHash
           })
@@ -611,6 +631,68 @@ describe("runWatcherOnce", () => {
     expect(events.map((event) => event.event)).toEqual(["invalidated", "scheduled"]);
   });
 
+  test("invalidates stale facet-set operations without touching a later queue in the activation block", async () => {
+    const store = new MemoryWatcherStore();
+    store.addBoardroom();
+    store.setCursor("factory-discovery", 5n);
+    store.setCursor("share-transfers", 5n);
+    const oldAction = store.addScheduledOperation({
+      id: "old-facet-set-action",
+      scheduleBlock: 2n,
+      scheduleTxHash: bytes32("231")
+    });
+    const nextOperationId = bytes32("a31");
+    const nextScheduleTx = bytes32("232");
+    const nextScheduleInput = encodeFunctionData({
+      abi: boardroomControllerAbi,
+      functionName: "scheduleBoardroomOperation",
+      args: [nextFacetSetHash, [call], salt, boardroomEpoch, configurationEpoch]
+    });
+    const events: WatcherPipelineEvent[] = [];
+    const deployment = testDeployment();
+
+    const result = await runWatcherOnce(chainId, {
+      client: createClient({
+        latestBlock: 5n,
+        logs: [
+          rawLog(
+            "FacetSetActivated",
+            deployment.protocolFacetRegistry,
+            5n,
+            1,
+            invalidationTx,
+            {
+              facetSetHash: nextFacetSetHash,
+              previousFacetSetHash: facetSetHash,
+              release: 2n
+            }
+          ),
+          scheduledLog(5n, 3, nextScheduleTx, {
+            facetSetHash: nextFacetSetHash,
+            operationId: nextOperationId
+          })
+        ],
+        txInputs: { [nextScheduleTx]: nextScheduleInput }
+      }),
+      config: testConfig(10),
+      deployment,
+      onActionEvent: (event) => events.push(event),
+      store
+    });
+
+    expect(result.actionEvents).toBe(2);
+    expect(store.action(oldAction.id)).toMatchObject({
+      resolvedTxHash: invalidationTx,
+      status: "invalidated"
+    });
+    expect(store.state.actions.find((action) => action.operationId === nextOperationId)).toMatchObject({
+      facetSetHash: nextFacetSetHash,
+      scheduleLogIndex: 3,
+      status: "scheduled"
+    });
+    expect(events.map((event) => event.event)).toEqual(["invalidated", "scheduled"]);
+  });
+
   test("does not replay transitioned actions after their atomic governance cursor commit", async () => {
     const store = new MemoryWatcherStore();
     store.addBoardroom();
@@ -691,7 +773,7 @@ describe("runWatcherOnce", () => {
     const emptyScheduleInput = encodeFunctionData({
       abi: boardroomControllerAbi,
       functionName: "scheduleBoardroomOperation",
-      args: [[emptyCall], salt, boardroomEpoch, configurationEpoch]
+      args: [facetSetHash, [emptyCall], salt, boardroomEpoch, configurationEpoch]
     });
     const store = new MemoryWatcherStore();
     store.addBoardroom();
@@ -1044,6 +1126,35 @@ class MemoryWatcherTx implements WatcherStoreTx {
     });
   }
 
+  async invalidateScheduledOperationsBeforeFacetSetActivation(input: {
+    readonly chainId: number;
+    readonly facetSetHash: Lowercase<Hex>;
+    readonly terminalBlock: bigint;
+    readonly terminalLogIndex: number;
+    readonly txHash: Lowercase<Hex>;
+  }): Promise<Array<{ action: ScheduledOperationRow; calls: StoredCall[] }>> {
+    const matching = this.state.actions.filter(
+      (action) =>
+        action.chainId === input.chainId
+        && action.facetSetHash !== input.facetSetHash
+        && action.status === "scheduled"
+        && (action.scheduleBlock < input.terminalBlock
+          || (action.scheduleBlock === input.terminalBlock
+            && action.scheduleLogIndex < input.terminalLogIndex))
+    );
+    return matching.map((action) => {
+      const updated: ScheduledOperationRow = {
+        ...action,
+        resolvedTxHash: input.txHash,
+        status: "invalidated",
+        updatedAt: new Date()
+      };
+      const index = this.state.actions.findIndex((candidate) => candidate.id === action.id);
+      this.state.actions[index] = updated;
+      return { action: updated, calls: this.state.calls.get(updated.id) ?? [] };
+    });
+  }
+
   async insertActionCalls(actionId: string, calls: readonly InsertActionCallInput[]): Promise<StoredCall[]> {
     const existing = this.state.calls.get(actionId) ?? [];
     const byIndex = new Map(existing.map((call_) => [call_.callIndex, call_]));
@@ -1309,26 +1420,49 @@ function testConfig(maxBlockRange: number) {
 function testDeployment() {
   const codeHash = bytes32("11");
   return {
+    activeFacetSetHash: facetSetHash,
+    activeRelease: 1n,
     assetPolicy,
+    authorityFacet: address("a01"),
+    authorityFacetCodeHash: codeHash,
     boardroomFactory: factory,
-    boardroomControllerFactory: address("c0f1"),
-    boardroomControllerLogic: address("c010"),
-    boardroomGovernanceLogic: address("600d"),
-    boardroomMarketLogic: address("aa11"),
-    boardroomRedemptionPayout: address("feed"),
-    boardroomLogic: address("b0a4"),
-    deterministicDeployment: true,
-    deterministicDeploymentVersion: "pledge.cash.deterministic.v5",
-    deterministicReleaseCodeHash: codeHash,
     boardroomFactoryCodeHash: codeHash,
+    boardroomControllerFactory: address("c0f1"),
     boardroomControllerFactoryCodeHash: codeHash,
-    boardroomControllerCodeHash: codeHash,
+    boardroomControllerLogic: address("c010"),
+    boardroomControllerLogicCodeHash: codeHash,
+    boardroomGovernanceLogic: address("600d"),
     boardroomGovernanceLogicCodeHash: codeHash,
+    boardroomKernel: address("beef"),
+    boardroomKernelCodeHash: codeHash,
+    boardroomMarketLogic: address("aa11"),
     boardroomMarketLogicCodeHash: codeHash,
+    boardroomRedemptionPayout: address("feed"),
     boardroomRedemptionPayoutCodeHash: codeHash,
-    boardroomLogicCodeHash: codeHash,
+    deterministicDeployment: true,
+    deterministicDeploymentVersion: "pledge.cash.protocol.v1",
+    deterministicReleaseCodeHash: codeHash,
+    executionFacet: address("e02"),
+    executionFacetCodeHash: codeHash,
+    kernelSelectorSetHash: bytes32("12"),
+    manifestHash: bytes32("13"),
+    marketFacet: address("a03"),
+    marketFacetCodeHash: codeHash,
     boardroomPolicyRegistry: policyRegistry,
-    chainId
+    chainId,
+    protocolFacetRegistry: address("f4ce7"),
+    protocolFacetRegistryCodeHash: codeHash,
+    protocolFacetRegistryOwner: owner,
+    protocolGovernance: owner,
+    protocolReleaseCodeHash: codeHash,
+    protocolVersion: "pledge.cash.protocol.v1",
+    redemptionFacet: address("a04"),
+    redemptionFacetCodeHash: codeHash,
+    requiredStorageLayoutHash: bytes32("14"),
+    requiredStorageVersion: 1n,
+    selectorCount: 5n,
+    viewFacet: address("a05"),
+    viewFacetCodeHash: codeHash
   };
 }
 
@@ -1377,6 +1511,7 @@ function createClient(input: {
 function boardroomCreatedLog(blockNumber: bigint): RawLog {
   return rawLog("BoardroomCreated", factory, blockNumber, 0, bytes32("001"), {
     boardroom,
+    facetSetHash,
     name: "Acme Common",
     owner,
     policyRegistry,
@@ -1431,6 +1566,7 @@ function scheduledLog(
     boardroomEpoch: bigint;
     controllerGeneration: bigint;
     configurationEpoch: bigint;
+    facetSetHash: Hex;
     salt: Hex;
     payloadHash: Hex;
   }> = {}
@@ -1443,6 +1579,7 @@ function scheduledLog(
     boardroomEpoch: overrides.boardroomEpoch ?? boardroomEpoch,
     controllerGeneration: overrides.controllerGeneration ?? controllerGeneration,
     configurationEpoch: overrides.configurationEpoch ?? configurationEpoch,
+    facetSetHash: overrides.facetSetHash ?? facetSetHash,
     salt: overrides.salt ?? salt,
     callsHash: overrides.payloadHash ?? callsHash
   });
@@ -1513,6 +1650,7 @@ function scheduledOperation(
     boardroomEpoch: input.boardroomEpoch ?? boardroomEpoch,
     eta: input.eta ?? new Date(1_800_000),
     expiresAt: input.expiresAt ?? new Date("2100-01-01T00:00:00.000Z"),
+    facetSetHash: input.facetSetHash ?? facetSetHash,
     executedBy: null,
     id: input.id,
     invalidatedByEpoch: null,

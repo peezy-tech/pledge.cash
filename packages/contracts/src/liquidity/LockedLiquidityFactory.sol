@@ -8,6 +8,7 @@ import {LockedLiquidity} from "./LockedLiquidity.sol";
 import {BestEffortTokenLib} from "../lib/BestEffortTokenLib.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 import {IBoardroomObligationPolicy} from "../policy/IBoardroomObligationPolicy.sol";
+import {BoardroomCallbackLib} from "../policy/BoardroomCallbackLib.sol";
 
 interface ILockedLiquidityFactoryBoardroom {
     function shareToken() external view returns (address);
@@ -15,28 +16,6 @@ interface ILockedLiquidityFactoryBoardroom {
     function isIssuedDistribution(address distribution) external view returns (bool);
 
     function policyRegistry() external view returns (address);
-
-    function precommitProtocolLiquidity(
-        address expectedLocker,
-        address quoteAsset,
-        address curve,
-        bytes32 pairKey,
-        bytes32 salt,
-        uint64 expiresAt
-    ) external;
-
-    function activateProtocolLiquidity(
-        address locker,
-        address pool,
-        address quoteAsset,
-        address curve,
-        bytes32 pairKey,
-        bytes32 salt
-    ) external;
-
-    function releaseProtocolLiquidityReservation(address curve, bytes32 pairKey, bytes32 salt) external;
-
-    function closeProtocolLiquidityFromFactory(address locker) external;
 
     function lockedLiquidityExitAllowed() external view returns (bool);
 }
@@ -85,6 +64,8 @@ interface ILockedLiquidityReservationAmmFactory {
     ) external returns (address pool);
 
     function releaseInitialLiquidityReservation(address tokenA, address tokenB, address reservationOwner) external;
+
+    function boardroomFactory() external view returns (address);
 }
 
 interface ILockedLiquiditySeedPool {
@@ -151,6 +132,14 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         bytes32 salt;
     }
 
+    /// @dev Caller context for a creation, resolved once by the entrypoint.
+    struct CreationContext {
+        address boardroom;
+        bytes32 expectedFacetSetHash;
+        address payer;
+        address curve;
+    }
+
     struct CreationResult {
         address locker;
         address pool;
@@ -171,6 +160,7 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
 
     error InvalidAddress();
     error InvalidBoardroomFactory(address factory);
+    error IncoherentFactoryIdentity(address expected, address actual);
     error InvalidAmount();
     error InvalidBoardroom(address boardroom);
     error InvalidPair(address tokenA, address tokenB);
@@ -219,9 +209,15 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
     event MigrationReservationReleased(address indexed boardroom, address indexed curve, bytes32 indexed salt);
 
     constructor(address ammRouter_, address boardroomFactory_) {
-        if (ammRouter_ == address(0)) revert InvalidAddress();
+        if (ammRouter_ == address(0) || ammRouter_.code.length == 0) revert InvalidAddress();
         if (boardroomFactory_ == address(0) || boardroomFactory_.code.length == 0) {
             revert InvalidBoardroomFactory(boardroomFactory_);
+        }
+        address ammFactory = ILockedLiquidityReservationRouter(ammRouter_).factory();
+        if (ammFactory == address(0) || ammFactory.code.length == 0) revert InvalidAddress();
+        address ammBoardroomFactory = ILockedLiquidityReservationAmmFactory(ammFactory).boardroomFactory();
+        if (ammBoardroomFactory != boardroomFactory_) {
+            revert IncoherentFactoryIdentity(boardroomFactory_, ammBoardroomFactory);
         }
         ammRouter = ammRouter_;
         boardroomFactory = boardroomFactory_;
@@ -233,16 +229,38 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         nonReentrant
         returns (address locker, address pool, uint256 amountA, uint256 amountB, uint256 liquidity)
     {
-        return _createLockedLiquidity(msg.sender, msg.sender, address(0), params);
+        // Boardroom-initiated frame: the outer mutating route already bound the caller's release
+        // hash. Authenticate the caller before reading it so non-Boardroom callers still get
+        // `InvalidBoardroom` instead of a bare revert from the missing callback surface.
+        _requireCanonicalBoardroom(msg.sender);
+        return _createLockedLiquidity(
+            CreationContext({
+                boardroom: msg.sender,
+                expectedFacetSetHash: BoardroomCallbackLib.boundFacetSetHash(msg.sender),
+                payer: msg.sender,
+                curve: address(0)
+            }),
+            params
+        );
     }
 
-    function createLockedLiquidityForBoardroom(address boardroom, CreateParams calldata params)
+    /// @param expectedFacetSetHash Release hash bound by the migrating distribution's own caller.
+    function createLockedLiquidityForBoardroom(
+        bytes32 expectedFacetSetHash,
+        address boardroom,
+        CreateParams calldata params
+    )
         external
         nonReentrant
         returns (address locker, address pool, uint256 amountA, uint256 amountB, uint256 liquidity)
     {
         _requireIssuedDistribution(boardroom, msg.sender);
-        return _createLockedLiquidity(boardroom, msg.sender, msg.sender, params);
+        return _createLockedLiquidity(
+            CreationContext({
+                boardroom: boardroom, expectedFacetSetHash: expectedFacetSetHash, payer: msg.sender, curve: msg.sender
+            }),
+            params
+        );
     }
 
     function addLockedLiquidity(AddParams calldata params)
@@ -289,7 +307,10 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         }
         LockedLiquidity(position.locker).close();
         position.status = PositionStatus.Closed;
-        ILockedLiquidityFactoryBoardroom(boardroom).closeProtocolLiquidityFromFactory(position.locker);
+        // Boardroom-initiated frame: the outer mutating route already bound the caller's release hash.
+        BoardroomCallbackLib.closeProtocolLiquidityFromFactory(
+            boardroom, BoardroomCallbackLib.boundFacetSetHash(boardroom), position.locker
+        );
         emit ProtocolLiquidityPositionClosed(boardroom, position.locker, position.pool);
     }
 
@@ -308,10 +329,15 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         emit ProtocolLiquidityPositionClosed(boardroom, position.locker, position.pool);
     }
 
-    function reserveMigration(address boardroom, address curve, address tokenA, address tokenB, bytes32 salt)
-        external
-        nonReentrant
-    {
+    /// @param expectedFacetSetHash Release hash bound by the Boardroom-initiated frame that creates the curve.
+    function reserveMigration(
+        bytes32 expectedFacetSetHash,
+        address boardroom,
+        address curve,
+        address tokenA,
+        address tokenB,
+        bytes32 salt
+    ) external nonReentrant {
         _requireAuthorizedMigrationFactory(boardroom, curve, tokenA, tokenB, salt);
         if (
             positionOfBoardroom[boardroom].status != PositionStatus.Unconfigured
@@ -332,15 +358,20 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
             salt: salt
         });
         uint64 expiresAt = ILockedLiquidityMigrationDistribution(curve).reservationExpiresAt();
-        ILockedLiquidityFactoryBoardroom(boardroom)
-            .precommitProtocolLiquidity(expectedLocker, tokenB, curve, pairKey, salt, expiresAt);
+        BoardroomCallbackLib.precommitProtocolLiquidity(
+            boardroom, expectedFacetSetHash, expectedLocker, tokenB, curve, pairKey, salt, expiresAt
+        );
         emit MigrationReserved(boardroom, curve, expectedLocker, expectedPool, salt);
     }
 
-    function releaseMigrationReservation(address boardroom, address tokenA, address tokenB, bytes32 salt)
-        external
-        nonReentrant
-    {
+    /// @param expectedFacetSetHash Release hash bound by the migrating distribution's own caller.
+    function releaseMigrationReservation(
+        bytes32 expectedFacetSetHash,
+        address boardroom,
+        address tokenA,
+        address tokenB,
+        bytes32 salt
+    ) external nonReentrant {
         _requireIssuedDistribution(boardroom, msg.sender);
         MigrationReservation memory reservation = migrationReservationOf[boardroom];
         if (
@@ -349,8 +380,9 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         ) revert InvalidMigrationReservation(boardroom, msg.sender);
         _releaseInitialLiquidity(tokenA, tokenB, msg.sender);
         delete migrationReservationOf[boardroom];
-        ILockedLiquidityFactoryBoardroom(boardroom)
-            .releaseProtocolLiquidityReservation(msg.sender, reservation.pairKey, salt);
+        BoardroomCallbackLib.releaseProtocolLiquidityReservation(
+            boardroom, expectedFacetSetHash, msg.sender, reservation.pairKey, salt
+        );
         emit MigrationReservationReleased(boardroom, msg.sender, salt);
     }
 
@@ -411,61 +443,92 @@ contract LockedLiquidityFactory is IBoardroomObligationPolicy, ReentrancyGuard {
         return LibClone.predictDeterministicAddress(lockedLiquidityLogic, _cloneSalt(boardroom, salt), address(this));
     }
 
-    function _createLockedLiquidity(address boardroom, address payer, address curve, CreateParams calldata params)
+    function _createLockedLiquidity(CreationContext memory context, CreateParams calldata params)
         internal
         returns (address locker, address pool, uint256 amountA, uint256 amountB, uint256 liquidity)
     {
-        _requireCanonicalBoardroom(boardroom);
-        _requireValidPair(boardroom, params.tokenA, params.tokenB);
+        _requireCanonicalBoardroom(context.boardroom);
+        _requireValidPair(context.boardroom, params.tokenA, params.tokenB);
         _requireSeedAmountsAndMinimums(
             params.amountADesired, params.amountBDesired, params.amountAMin, params.amountBMin
         );
-        if (positionOfBoardroom[boardroom].status != PositionStatus.Unconfigured) {
-            revert PositionAlreadyConfigured(boardroom);
+        if (positionOfBoardroom[context.boardroom].status != PositionStatus.Unconfigured) {
+            revert PositionAlreadyConfigured(context.boardroom);
         }
 
-        address quoteAsset = _quoteAsset(boardroom, params.tokenA, params.tokenB);
+        address quoteAsset = _quoteAsset(context.boardroom, params.tokenA, params.tokenB);
         bytes32 pairKey = _pairKey(params.tokenA, params.tokenB);
         address expectedPool;
-        if (curve == address(0)) {
-            if (migrationReservationOf[boardroom].curve != address(0)) revert PositionAlreadyConfigured(boardroom);
-            locker = predictLockedLiquidityAddress(boardroom, params.salt);
-            ILockedLiquidityFactoryBoardroom(boardroom)
-                .precommitProtocolLiquidity(locker, quoteAsset, address(0), pairKey, params.salt, 0);
-            expectedPool = _reserveInitialLiquidity(params.tokenA, params.tokenB, locker, boardroom);
+        if (context.curve == address(0)) {
+            if (migrationReservationOf[context.boardroom].curve != address(0)) {
+                revert PositionAlreadyConfigured(context.boardroom);
+            }
+            locker = predictLockedLiquidityAddress(context.boardroom, params.salt);
+            BoardroomCallbackLib.precommitProtocolLiquidity(
+                context.boardroom, context.expectedFacetSetHash, locker, quoteAsset, address(0), pairKey, params.salt, 0
+            );
+            expectedPool = _reserveInitialLiquidity(params.tokenA, params.tokenB, locker, context.boardroom);
         } else {
-            MigrationReservation memory reservation = migrationReservationOf[boardroom];
+            MigrationReservation memory reservation = migrationReservationOf[context.boardroom];
             if (
-                reservation.curve != curve || reservation.expectedLocker == address(0)
+                reservation.curve != context.curve || reservation.expectedLocker == address(0)
                     || reservation.shareToken != params.tokenA || reservation.quoteAsset != params.tokenB
                     || reservation.pairKey != pairKey || reservation.salt != params.salt
-            ) revert InvalidMigrationReservation(boardroom, curve);
+            ) revert InvalidMigrationReservation(context.boardroom, context.curve);
             locker = reservation.expectedLocker;
             expectedPool = reservation.expectedPool;
         }
         _requireUnseededPool(expectedPool, params.tokenA, params.tokenB);
-        if (locker.code.length != 0 || isLocker[locker]) revert PositionAlreadyConfigured(boardroom);
+        if (locker.code.length != 0 || isLocker[locker]) revert PositionAlreadyConfigured(context.boardroom);
 
-        locker = LibClone.cloneDeterministic(lockedLiquidityLogic, _cloneSalt(boardroom, params.salt));
-        LockedLiquidity(locker).initialize(address(this), boardroom, ammRouter, params.tokenA, params.tokenB);
+        locker = LibClone.cloneDeterministic(lockedLiquidityLogic, _cloneSalt(context.boardroom, params.salt));
+        LockedLiquidity(locker).initialize(address(this), context.boardroom, ammRouter, params.tokenA, params.tokenB);
         isLocker[locker] = true;
-        lockerBoardroom[locker] = boardroom;
-        _pullSeedTokens(locker, payer, params.tokenA, params.tokenB, params.amountADesired, params.amountBDesired);
+        lockerBoardroom[locker] = context.boardroom;
+        _pullSeedTokens(
+            locker, context.payer, params.tokenA, params.tokenB, params.amountADesired, params.amountBDesired
+        );
         (pool, amountA, amountB, liquidity) = LockedLiquidity(locker)
             .addLiquidity(
                 params.amountADesired, params.amountBDesired, params.amountAMin, params.amountBMin, params.deadline
             );
-        if (pool != expectedPool) revert InvalidPosition(boardroom);
+        if (pool != expectedPool) revert InvalidPosition(context.boardroom);
 
-        positionOfBoardroom[boardroom] =
+        positionOfBoardroom[context.boardroom] =
             Position({locker: locker, pool: pool, quoteAsset: quoteAsset, status: PositionStatus.Active});
-        if (curve != address(0)) delete migrationReservationOf[boardroom];
-        ILockedLiquidityFactoryBoardroom(boardroom)
-            .activateProtocolLiquidity(locker, pool, quoteAsset, curve, pairKey, params.salt);
-        CreationResult memory created = CreationResult({
-            locker: locker, pool: pool, quoteAsset: quoteAsset, amountA: amountA, amountB: amountB, liquidity: liquidity
-        });
-        _emitProtocolLiquidityCreated(boardroom, curve, params.salt, created);
+        if (context.curve != address(0)) delete migrationReservationOf[context.boardroom];
+        _activateProtocolLiquidity(
+            context,
+            pairKey,
+            params.salt,
+            CreationResult({
+                locker: locker,
+                pool: pool,
+                quoteAsset: quoteAsset,
+                amountA: amountA,
+                amountB: amountB,
+                liquidity: liquidity
+            })
+        );
+    }
+
+    function _activateProtocolLiquidity(
+        CreationContext memory context,
+        bytes32 pairKey,
+        bytes32 salt,
+        CreationResult memory created
+    ) internal {
+        BoardroomCallbackLib.activateProtocolLiquidity(
+            context.boardroom,
+            context.expectedFacetSetHash,
+            created.locker,
+            created.pool,
+            created.quoteAsset,
+            context.curve,
+            pairKey,
+            salt
+        );
+        _emitProtocolLiquidityCreated(context.boardroom, context.curve, salt, created);
     }
 
     function _emitProtocolLiquidityCreated(

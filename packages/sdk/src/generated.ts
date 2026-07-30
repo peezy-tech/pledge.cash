@@ -7,6 +7,8 @@ export type PledgeCashDeployment = {
   chainId: number;
   status?: string;
   reason?: string;
+  protocolVersion?: string;
+  protocolReleaseCodeHash?: string;
   sourceCommit?: string;
   deterministicDeployment?: boolean;
   deterministicDeploymentVersion?: string;
@@ -14,15 +16,28 @@ export type PledgeCashDeployment = {
   deterministicDeployer?: Address;
   deterministicDeployerOwner?: Address;
   create2Factory?: Address;
-  boardroomStatus?: string;
-  boardroomReason?: string;
   boardroomFactory?: Address;
   boardroomControllerFactory?: Address;
   boardroomControllerLogic?: Address;
   boardroomGovernanceLogic?: Address;
   boardroomMarketLogic?: Address;
   boardroomRedemptionPayout?: Address;
-  boardroomLogic?: Address;
+  protocolFacetRegistry?: Address;
+  boardroomKernel?: Address;
+  authorityFacet?: Address;
+  executionFacet?: Address;
+  marketFacet?: Address;
+  redemptionFacet?: Address;
+  viewFacet?: Address;
+  boardroomReleaseBMigrationFacet?: Address;
+  boardroomViewFacetV2?: Address;
+  activeFacetSetHash?: string;
+  activeRelease?: bigint;
+  requiredStorageVersion?: bigint;
+  requiredStorageLayoutHash?: string;
+  manifestHash?: string;
+  kernelSelectorSetHash?: string;
+  selectorCount?: bigint;
   boardroomPolicyRegistry?: Address;
   assetPolicy?: Address;
   protocolFeeRouter?: Address;
@@ -45,8 +60,9 @@ export type PledgeCashDeployment = {
   tokenGrantLogic?: Address;
   wrappedNative?: Address;
   deployer?: Address;
-  factoryOwner?: Address;
-  policyRegistryOwner?: Address;
+  protocolFacetRegistryOwner?: Address;
+  boardroomPolicyRegistryOwner?: Address;
+  tokenGrantFactoryOwner?: Address;
   assetPolicyOwner?: Address;
   protocolGovernance?: Address;
   protocolTreasury?: Address;
@@ -83,11 +99,19 @@ export type PledgeCashDeployment = {
   protocolFeeRouterCodeHash?: string;
   boardroomFactoryCodeHash?: string;
   boardroomControllerFactoryCodeHash?: string;
-  boardroomControllerCodeHash?: string;
+  boardroomControllerLogicCodeHash?: string;
   boardroomGovernanceLogicCodeHash?: string;
   boardroomMarketLogicCodeHash?: string;
   boardroomRedemptionPayoutCodeHash?: string;
-  boardroomLogicCodeHash?: string;
+  protocolFacetRegistryCodeHash?: string;
+  boardroomKernelCodeHash?: string;
+  authorityFacetCodeHash?: string;
+  executionFacetCodeHash?: string;
+  marketFacetCodeHash?: string;
+  redemptionFacetCodeHash?: string;
+  viewFacetCodeHash?: string;
+  boardroomReleaseBMigrationFacetCodeHash?: string;
+  boardroomViewFacetV2CodeHash?: string;
   tokenGrantFactoryCodeHash?: string;
   tokenGrantLogicCodeHash?: string;
   ammFactoryCodeHash?: string;
@@ -3452,36 +3476,6 @@ export const assetPolicyAbi = [
 
 export const boardroomAbi = [
   {
-    "type": "constructor",
-    "inputs": [
-      {
-        "name": "redemptionPayoutLogic_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "governanceLogic_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "controllerFactory_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "marketLogic_",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "receive",
-    "stateMutability": "payable"
-  },
-  {
     "type": "function",
     "name": "MAX_BATCH_CALLS",
     "inputs": [],
@@ -3537,6 +3531,11 @@ export const boardroomAbi = [
     "type": "function",
     "name": "activateProtocolLiquidity",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "locker",
         "type": "address",
@@ -3629,6 +3628,32 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "appliedStorageLayoutHash",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "appliedStorageVersion",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "assetDependencyCount",
     "inputs": [
       {
@@ -3672,7 +3697,13 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "beginSnapshot",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -3692,7 +3723,13 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "burnTreasuryShares",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [
       {
         "name": "burned",
@@ -3705,7 +3742,13 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "cancelOwnershipHandover",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [],
     "stateMutability": "payable"
   },
@@ -3713,6 +3756,11 @@ export const boardroomAbi = [
     "type": "function",
     "name": "claimRedemptionAsset",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "asset",
         "type": "address",
@@ -3741,7 +3789,13 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "closeProtocolLiquidityAfterWindDown",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -3749,6 +3803,11 @@ export const boardroomAbi = [
     "type": "function",
     "name": "closeProtocolLiquidityFromFactory",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "locker",
         "type": "address",
@@ -3763,6 +3822,11 @@ export const boardroomAbi = [
     "name": "completeOwnershipHandover",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "pendingOwner",
         "type": "address",
         "internalType": "address"
@@ -3775,6 +3839,11 @@ export const boardroomAbi = [
     "type": "function",
     "name": "contributeTreasuryAsset",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "asset",
         "type": "address",
@@ -3838,9 +3907,14 @@ export const boardroomAbi = [
     "name": "execute",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "call_",
         "type": "tuple",
-        "internalType": "struct Boardroom.Call",
+        "internalType": "struct BoardroomFacetTypes.Call",
         "components": [
           {
             "name": "policy",
@@ -3879,9 +3953,14 @@ export const boardroomAbi = [
     "name": "executeBatch",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "calls",
         "type": "tuple[]",
-        "internalType": "struct Boardroom.Call[]",
+        "internalType": "struct BoardroomFacetTypes.Call[]",
         "components": [
           {
             "name": "policy",
@@ -3919,6 +3998,11 @@ export const boardroomAbi = [
     "type": "function",
     "name": "executeGovernance",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "expectedEpoch",
         "type": "uint256",
@@ -3971,9 +4055,14 @@ export const boardroomAbi = [
     "name": "executeWindDownCall",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "call_",
         "type": "tuple",
-        "internalType": "struct Boardroom.Call",
+        "internalType": "struct BoardroomFacetTypes.Call",
         "components": [
           {
             "name": "policy",
@@ -4012,6 +4101,11 @@ export const boardroomAbi = [
     "name": "exitProtocolLiquidity",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "amountAMin",
         "type": "uint256",
         "internalType": "uint256"
@@ -4048,6 +4142,32 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "facetRegistry",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "facetSetHash",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "governanceEpoch",
     "inputs": [],
     "outputs": [
@@ -4077,29 +4197,14 @@ export const boardroomAbi = [
     "name": "initialize",
     "inputs": [
       {
-        "name": "owner_",
-        "type": "address",
-        "internalType": "address"
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
       },
       {
-        "name": "policyRegistry_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "wrappedNative_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "name_",
-        "type": "string",
-        "internalType": "string"
-      },
-      {
-        "name": "symbol_",
-        "type": "string",
-        "internalType": "string"
+        "name": "initializationData",
+        "type": "bytes",
+        "internalType": "bytes"
       }
     ],
     "outputs": [],
@@ -4222,12 +4327,30 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "kernelSelectorSetHash",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "launch",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "config",
         "type": "tuple",
-        "internalType": "struct Boardroom.LaunchConfig",
+        "internalType": "struct BoardroomFacetTypes.LaunchConfig",
         "components": [
           {
             "name": "proposer",
@@ -4419,8 +4542,39 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "migrateBoardroom",
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "migrationRequired",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "mint",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "to",
         "type": "address",
@@ -4534,7 +4688,13 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "openRedemptions",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -4544,7 +4704,7 @@ export const boardroomAbi = [
     "inputs": [],
     "outputs": [
       {
-        "name": "result",
+        "name": "",
         "type": "address",
         "internalType": "address"
       }
@@ -4563,7 +4723,7 @@ export const boardroomAbi = [
     ],
     "outputs": [
       {
-        "name": "result",
+        "name": "",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -4588,6 +4748,11 @@ export const boardroomAbi = [
     "name": "precommitBondingCurve",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "curve",
         "type": "address",
         "internalType": "address"
@@ -4610,6 +4775,11 @@ export const boardroomAbi = [
     "type": "function",
     "name": "precommitProtocolLiquidity",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "expectedLocker",
         "type": "address",
@@ -4688,6 +4858,11 @@ export const boardroomAbi = [
     "name": "pruneObligation",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "obligation",
         "type": "address",
         "internalType": "address"
@@ -4706,6 +4881,11 @@ export const boardroomAbi = [
     "type": "function",
     "name": "pruneObligations",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "obligations",
         "type": "address[]",
@@ -4726,6 +4906,11 @@ export const boardroomAbi = [
     "name": "recordGrantFromDistribution",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "grant",
         "type": "address",
         "internalType": "address"
@@ -4738,6 +4923,11 @@ export const boardroomAbi = [
     "type": "function",
     "name": "recordLockedLiquidityFromDistribution",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "locker",
         "type": "address",
@@ -4756,6 +4946,11 @@ export const boardroomAbi = [
     "type": "function",
     "name": "redeem",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "shares",
         "type": "uint256",
@@ -4937,6 +5132,11 @@ export const boardroomAbi = [
     "name": "registerRedeemableAsset",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "asset",
         "type": "address",
         "internalType": "address"
@@ -4947,8 +5147,36 @@ export const boardroomAbi = [
   },
   {
     "type": "function",
+    "name": "releaseBMigrationState",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "migrationMarker",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "migratedAt",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "migratedFromVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "releaseProtocolLiquidityReservation",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "curve",
         "type": "address",
@@ -4973,6 +5201,11 @@ export const boardroomAbi = [
     "name": "removeRedeemableAsset",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "asset",
         "type": "address",
         "internalType": "address"
@@ -4984,7 +5217,13 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "renounceOwnership",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [],
     "stateMutability": "payable"
   },
@@ -4992,6 +5231,11 @@ export const boardroomAbi = [
     "type": "function",
     "name": "replaceController",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "expectedCurrentController",
         "type": "address",
@@ -5029,7 +5273,13 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "requestOwnershipHandover",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [],
     "stateMutability": "payable"
   },
@@ -5051,6 +5301,11 @@ export const boardroomAbi = [
     "name": "reserveRedeemableAsset",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "asset",
         "type": "address",
         "internalType": "address"
@@ -5062,7 +5317,13 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "returnProtocolLiquidityAsLp",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [
       {
         "name": "liquidity",
@@ -5090,6 +5351,11 @@ export const boardroomAbi = [
     "name": "setRedemptionExcessRecipient",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "recipient",
         "type": "address",
         "internalType": "address"
@@ -5101,7 +5367,13 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "settleBondingCurve",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -5123,6 +5395,11 @@ export const boardroomAbi = [
     "name": "snapshotAssets",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "maximum",
         "type": "uint256",
         "internalType": "uint256"
@@ -5140,7 +5417,13 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "startWindDown",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -5152,7 +5435,7 @@ export const boardroomAbi = [
       {
         "name": "",
         "type": "uint8",
-        "internalType": "enum Boardroom.BoardroomStatus"
+        "internalType": "enum BoardroomFacetTypes.BoardroomStatus"
       }
     ],
     "stateMutability": "view"
@@ -5161,6 +5444,11 @@ export const boardroomAbi = [
     "type": "function",
     "name": "sweepRedemptionExcess",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "asset",
         "type": "address",
@@ -5181,6 +5469,11 @@ export const boardroomAbi = [
     "name": "transferOwnership",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "newOwner",
         "type": "address",
         "internalType": "address"
@@ -5193,6 +5486,11 @@ export const boardroomAbi = [
     "type": "function",
     "name": "validatePrimaryMarketTransfer",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "from",
         "type": "address",
@@ -5216,6 +5514,11 @@ export const boardroomAbi = [
     "type": "function",
     "name": "veto",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "operationId",
         "type": "bytes32",
@@ -5254,7 +5557,13 @@ export const boardroomAbi = [
   {
     "type": "function",
     "name": "wrapNativeBalance",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -5270,6 +5579,373 @@ export const boardroomAbi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "error",
+    "name": "ActiveReleaseChanged",
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actualFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expectedStorageVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "actualStorageVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "expectedStorageLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actualStorageLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "AlreadyInitialized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "AlreadyMigrated",
+    "inputs": [
+      {
+        "name": "appliedVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "AppliedStorageLayoutMismatch",
+    "inputs": [
+      {
+        "name": "appliedLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "requiredLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "FacetCodeHashMismatch",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      },
+      {
+        "name": "facet",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expected",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actual",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "FacetSetHashMismatch",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actual",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidFacet",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      },
+      {
+        "name": "facet",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidInitializationMigrationRoute",
+    "inputs": [
+      {
+        "name": "expectedFacet",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "routeFacet",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "routeVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "activeVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidInitializationRoute",
+    "inputs": [
+      {
+        "name": "facet",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "routeVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "activeVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidInitializationState",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidKernelSelectorSetHash",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actual",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidRegistry",
+    "inputs": [
+      {
+        "name": "registry",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidRouteKind",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidViewRollbackEnvelope",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "KernelMetadataCorrupted",
+    "inputs": [
+      {
+        "name": "initialized",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "initializing",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "migrating",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "MigrationPostconditionFailed",
+    "inputs": [
+      {
+        "name": "expectedVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "actualVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "expectedLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actualLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "MigrationReentrancy",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MissingExpectedFacetSetHash",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NotInitialized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RegistryCallFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RouteStorageVersionMismatch",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      },
+      {
+        "name": "routeVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "activeVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "StorageMigrationRequired",
+    "inputs": [
+      {
+        "name": "appliedVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "requiredVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnknownSelector",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ViewDispatchDidNotRollback",
+    "inputs": []
   },
   {
     "type": "event",
@@ -5653,19 +6329,6 @@ export const boardroomAbi = [
   },
   {
     "type": "event",
-    "name": "Initialized",
-    "inputs": [
-      {
-        "name": "version",
-        "type": "uint64",
-        "indexed": false,
-        "internalType": "uint64"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
     "name": "OwnershipHandoverCanceled",
     "inputs": [
       {
@@ -5963,11 +6626,6 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "AlreadyInitialized",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "BoardroomAlreadyLaunched",
     "inputs": []
   },
@@ -6084,7 +6742,7 @@ export const boardroomAbi = [
   },
   {
     "type": "error",
-    "name": "InvalidInitialization",
+    "name": "InvalidInitializationContext",
     "inputs": []
   },
   {
@@ -6180,12 +6838,12 @@ export const boardroomAbi = [
       {
         "name": "expected",
         "type": "uint8",
-        "internalType": "enum Boardroom.BoardroomStatus"
+        "internalType": "enum BoardroomFacetTypes.BoardroomStatus"
       },
       {
         "name": "actual",
         "type": "uint8",
-        "internalType": "enum Boardroom.BoardroomStatus"
+        "internalType": "enum BoardroomFacetTypes.BoardroomStatus"
       }
     ]
   },
@@ -6209,11 +6867,6 @@ export const boardroomAbi = [
         "internalType": "address"
       }
     ]
-  },
-  {
-    "type": "error",
-    "name": "NotInitializing",
-    "inputs": []
   },
   {
     "type": "error",
@@ -6421,6 +7074,32 @@ export const boardroomAbi = [
     "type": "error",
     "name": "Unauthorized",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "UnsupportedMigrationSource",
+    "inputs": [
+      {
+        "name": "actualVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "actualLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expectedVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "expectedLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
   }
 ] as const;
 
@@ -6429,6 +7108,84 @@ export const boardroomControllerAbi = [
     "type": "constructor",
     "inputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "BOARDROOM_CONTROL_PROOF_TYPEHASH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "EIP712_DOMAIN_TYPEHASH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "EIP712_NAME_HASH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "EIP712_VERSION_HASH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "ERC1271_ENVELOPE_SCHEME",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "ERC1271_INVALID_VALUE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -6578,6 +7335,11 @@ export const boardroomControllerAbi = [
     "name": "executeBoardroomOperation",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "calls",
         "type": "tuple[]",
         "internalType": "struct BoardroomCall[]",
@@ -6638,6 +7400,11 @@ export const boardroomControllerAbi = [
     "type": "function",
     "name": "executeControllerOperation",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "data",
         "type": "bytes",
@@ -6711,6 +7478,11 @@ export const boardroomControllerAbi = [
     "name": "hashBoardroomOperation",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "calls",
         "type": "tuple[]",
         "internalType": "struct BoardroomCall[]",
@@ -6772,6 +7544,11 @@ export const boardroomControllerAbi = [
     "name": "hashControllerOperation",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "data",
         "type": "bytes",
         "internalType": "bytes"
@@ -6795,6 +7572,55 @@ export const boardroomControllerAbi = [
         "name": "authority",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "hashERC1271Digest",
+    "inputs": [
+      {
+        "name": "hash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "boardroom_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "facetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "boardroomEpoch",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "controllerGeneration",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "expectedConfigurationEpoch",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "expectedConfigurationHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
       }
     ],
     "outputs": [
@@ -6910,6 +7736,11 @@ export const boardroomControllerAbi = [
     "name": "scheduleBoardroomOperation",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "calls",
         "type": "tuple[]",
         "internalType": "struct BoardroomCall[]",
@@ -6970,6 +7801,11 @@ export const boardroomControllerAbi = [
     "type": "function",
     "name": "scheduleControllerOperation",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "data",
         "type": "bytes",
@@ -7043,6 +7879,12 @@ export const boardroomControllerAbi = [
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      },
+      {
+        "name": "facetSetHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
       },
       {
         "name": "eta",
@@ -7198,6 +8040,12 @@ export const boardroomControllerAbi = [
         "internalType": "address"
       },
       {
+        "name": "facetSetHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
         "name": "eta",
         "type": "uint256",
         "indexed": false,
@@ -7305,6 +8153,11 @@ export const boardroomControllerAbi = [
   },
   {
     "type": "error",
+    "name": "BoardroomMigrationRequired",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "BoardroomNotActive",
     "inputs": []
   },
@@ -7328,6 +8181,22 @@ export const boardroomControllerAbi = [
     "type": "error",
     "name": "ControllerNotActive",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "FacetSetMismatch",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actual",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
   },
   {
     "type": "error",
@@ -7766,6 +8635,11 @@ export const boardroomFactoryAbi = [
     "type": "constructor",
     "inputs": [
       {
+        "name": "facetRegistry_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
         "name": "policyRegistry_",
         "type": "address",
         "internalType": "address"
@@ -7776,12 +8650,22 @@ export const boardroomFactoryAbi = [
         "internalType": "address"
       },
       {
+        "name": "boardroomKernelLogic_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
         "name": "redemptionPayoutLogic_",
         "type": "address",
         "internalType": "address"
       },
       {
         "name": "governanceLogic_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "marketLogic_",
         "type": "address",
         "internalType": "address"
       }
@@ -7822,7 +8706,7 @@ export const boardroomFactoryAbi = [
   },
   {
     "type": "function",
-    "name": "boardroomLogic",
+    "name": "boardroomKernelLogic",
     "inputs": [],
     "outputs": [
       {
@@ -7850,6 +8734,11 @@ export const boardroomFactoryAbi = [
     "type": "function",
     "name": "createBoardroom",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "owner",
         "type": "address",
@@ -7882,6 +8771,19 @@ export const boardroomFactoryAbi = [
   },
   {
     "type": "function",
+    "name": "facetRegistry",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IProtocolFacetRegistry"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "governanceLogic",
     "inputs": [],
     "outputs": [
@@ -7898,14 +8800,14 @@ export const boardroomFactoryAbi = [
     "name": "isBoardroom",
     "inputs": [
       {
-        "name": "",
+        "name": "boardroom",
         "type": "address",
         "internalType": "address"
       }
     ],
     "outputs": [
       {
-        "name": "",
+        "name": "canonical",
         "type": "bool",
         "internalType": "bool"
       }
@@ -7917,14 +8819,14 @@ export const boardroomFactoryAbi = [
     "name": "isShareToken",
     "inputs": [
       {
-        "name": "",
+        "name": "shareToken",
         "type": "address",
         "internalType": "address"
       }
     ],
     "outputs": [
       {
-        "name": "",
+        "name": "canonical",
         "type": "bool",
         "internalType": "bool"
       }
@@ -8068,310 +8970,9 @@ export const boardroomFactoryAbi = [
         "type": "bytes32",
         "indexed": false,
         "internalType": "bytes32"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "error",
-    "name": "InvalidAddress",
-    "inputs": []
-  }
-] as const;
-
-export const boardroomGovernanceLogicAbi = [
-  {
-    "type": "function",
-    "name": "addObligationDependency",
-    "inputs": [
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
       },
       {
-        "name": "obligation",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "contributeTreasuryAsset",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "deadline",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "deployShareToken",
-    "inputs": [
-      {
-        "name": "name",
-        "type": "string",
-        "internalType": "string"
-      },
-      {
-        "name": "symbol",
-        "type": "string",
-        "internalType": "string"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "token",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "executeCall",
-    "inputs": [
-      {
-        "name": "policyRegistry",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "currentStatus",
-        "type": "uint8",
-        "internalType": "uint8"
-      },
-      {
-        "name": "authority",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "data",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "result",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "pruneObligation",
-    "inputs": [
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "obligation",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "pruned",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "pruneObligations",
-    "inputs": [
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "obligations",
-        "type": "address[]",
-        "internalType": "address[]"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "pruned",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "recordGrantFromDistribution",
-    "inputs": [
-      {
-        "name": "policyRegistry",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "grant",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "recordLockedLiquidityFromDistribution",
-    "inputs": [
-      {
-        "name": "policyRegistry",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "locker",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "pool",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "requireStakerPower",
-    "inputs": [
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "rewardPool",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "thresholdBps",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "bpsDenominator",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "view"
-  },
-  {
-    "type": "event",
-    "name": "BoardroomCallExecuted",
-    "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "indexed": true,
-        "internalType": "bytes4"
-      },
-      {
-        "name": "authority",
-        "type": "address",
-        "indexed": false,
-        "internalType": "address"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "dataHash",
+        "name": "facetSetHash",
         "type": "bytes32",
         "indexed": false,
         "internalType": "bytes32"
@@ -8380,811 +8981,27 @@ export const boardroomGovernanceLogicAbi = [
     "anonymous": false
   },
   {
-    "type": "event",
-    "name": "BoardroomObligationDependency",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "asset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomObligationPruned",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "policy",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "kind",
-        "type": "uint8",
-        "indexed": true,
-        "internalType": "enum BoardroomObligationStorage.Kind"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomObligationRecorded",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "policy",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "kind",
-        "type": "uint8",
-        "indexed": true,
-        "internalType": "enum BoardroomObligationStorage.Kind"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "RedeemableAssetRegistered",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "TreasuryAssetContributed",
-    "inputs": [
-      {
-        "name": "contributor",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "asset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
     "type": "error",
-    "name": "CallFailed",
+    "name": "FacetSetHashMismatch",
     "inputs": [
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "CallNotAllowed",
-    "inputs": [
-      {
-        "name": "policy",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "target",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "selector",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InsufficientStakerPower",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "currentStake",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "pastStake",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "requiredStake",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidAddress",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidAmount",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidExecutionContext",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidExecutionStatus",
-    "inputs": [
-      {
-        "name": "status",
-        "type": "uint8",
-        "internalType": "uint8"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidObligation",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidParentTransition",
-    "inputs": [
-      {
-        "name": "parent",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidRedeemableAsset",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "NoCirculatingShares",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "NotActiveStaker",
-    "inputs": [
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ObligationAlreadyRegistered",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ObligationNotActive",
-    "inputs": [
-      {
-        "name": "obligation",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "SnapshotAlreadyFrozen",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "TooManyCalls",
-    "inputs": [
-      {
-        "name": "requested",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "maximum",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "TooManyObligationDependencies",
-    "inputs": [
-      {
-        "name": "requested",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "maximum",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "TreasuryContributionAmountMismatch",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      },
       {
         "name": "expected",
-        "type": "uint256",
-        "internalType": "uint256"
+        "type": "bytes32",
+        "internalType": "bytes32"
       },
       {
-        "name": "received",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "actual",
+        "type": "bytes32",
+        "internalType": "bytes32"
       }
     ]
   },
   {
     "type": "error",
-    "name": "TreasuryContributionExpired",
+    "name": "InvalidAddress",
     "inputs": [
       {
-        "name": "deadline",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  }
-] as const;
-
-export const boardroomMarketLogicAbi = [
-  {
-    "type": "function",
-    "name": "activateProtocolLiquidity",
-    "inputs": [
-      {
-        "name": "policyRegistry",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "locker",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "pool",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "quoteAsset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "curve",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "pairKey",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "authorizeControllerDeployment",
-    "inputs": [
-      {
-        "name": "expectedController",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "proposer",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "delay",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "gracePeriod",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "generation",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "clearControllerDeploymentAuthorization",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "closeProtocolLiquidity",
-    "inputs": [
-      {
-        "name": "policyRegistry",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "locker",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "closeProtocolLiquidityForWindDown",
-    "inputs": [
-      {
-        "name": "locker",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "precommitBondingCurve",
-    "inputs": [
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "curve",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "quoteAsset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "fundingAmount",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "precommitProtocolLiquidity",
-    "inputs": [
-      {
-        "name": "policyRegistry",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "expectedLocker",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "quoteAsset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "curve",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "pairKey",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "expiresAt",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "releaseProtocolLiquidityReservation",
-    "inputs": [
-      {
-        "name": "policyRegistry",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "curve",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "pairKey",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "settleBondingCurve",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "validatePrimaryMarketTransfer",
-    "inputs": [
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "from",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "to",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "verifyController",
-    "inputs": [
-      {
-        "name": "controllerFactory",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "candidate",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "proposer",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "delay",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "gracePeriod",
-        "type": "uint64",
-        "internalType": "uint64"
-      },
-      {
-        "name": "generation",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "view"
-  },
-  {
-    "type": "event",
-    "name": "BondingCurvePrecommitted",
-    "inputs": [
-      {
-        "name": "curve",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "quoteAsset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "fundingAmount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "PrimaryMarketModeChanged",
-    "inputs": [
-      {
-        "name": "mode",
-        "type": "uint8",
-        "indexed": true,
-        "internalType": "enum BoardroomPrimaryMarketStorage.Mode"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "ProtocolLiquidityActivated",
-    "inputs": [
-      {
-        "name": "locker",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "pool",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "quoteAsset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "curve",
-        "type": "address",
-        "indexed": false,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "ProtocolLiquidityClosed",
-    "inputs": [
-      {
-        "name": "locker",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "pool",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "quoteAsset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "ProtocolLiquidityReservationReleased",
-    "inputs": [
-      {
-        "name": "curve",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "expectedLocker",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "ProtocolLiquidityReserved",
-    "inputs": [
-      {
-        "name": "expectedLocker",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "quoteAsset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "curve",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "pairKey",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "salt",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "expiresAt",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "RedeemableAssetRegistered",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "error",
-    "name": "InvalidController",
-    "inputs": [
-      {
-        "name": "controller",
+        "name": "account",
         "type": "address",
         "internalType": "address"
       }
@@ -9192,25 +9009,15 @@ export const boardroomMarketLogicAbi = [
   },
   {
     "type": "error",
-    "name": "InvalidExecutionContext",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidLiquidityTransition",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidPrimaryMarketTransition",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidRedeemableAsset",
+    "name": "InvalidKernelRegistry",
     "inputs": [
       {
-        "name": "asset",
+        "name": "expected",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "actual",
         "type": "address",
         "internalType": "address"
       }
@@ -9218,29 +9025,19 @@ export const boardroomMarketLogicAbi = [
   },
   {
     "type": "error",
-    "name": "PrimaryMarketTransferRestricted",
+    "name": "InvalidKernelSelectorSetHash",
     "inputs": [
       {
-        "name": "from",
-        "type": "address",
-        "internalType": "address"
+        "name": "expected",
+        "type": "bytes32",
+        "internalType": "bytes32"
       },
       {
-        "name": "to",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "actual",
+        "type": "bytes32",
+        "internalType": "bytes32"
       }
     ]
-  },
-  {
-    "type": "error",
-    "name": "SnapshotAlreadyFrozen",
-    "inputs": []
   }
 ] as const;
 
@@ -13729,6 +13526,22 @@ export const bondMarketFactoryAbi = [
   },
   {
     "type": "error",
+    "name": "IncoherentFactoryIdentity",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "actual",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "InvalidAddress",
     "inputs": []
   },
@@ -13804,496 +13617,6 @@ export const bondMarketFactoryAbi = [
   }
 ] as const;
 
-export const boardroomRedemptionPayoutAbi = [
-  {
-    "type": "function",
-    "name": "beginSnapshot",
-    "inputs": [
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "wrappedNative",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "burnTreasuryShares",
-    "inputs": [
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "forfeit",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "burned",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "openRedemptions",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "payout",
-    "inputs": [
-      {
-        "name": "holder",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "recipient",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "minAmountOut",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "amountOut",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "processSnapshotAssets",
-    "inputs": [
-      {
-        "name": "maximum",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "maximumPage",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "processed",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "redeem",
-    "inputs": [
-      {
-        "name": "shareToken",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "holder",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "shares",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "sweepExcess",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "recipient",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "amount",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "wrapNative",
-    "inputs": [
-      {
-        "name": "wrappedNative",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "event",
-    "name": "BoardroomRedemptionsOpened",
-    "inputs": [
-      {
-        "name": "caller",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomSnapshotPageProcessed",
-    "inputs": [
-      {
-        "name": "fromIndex",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      },
-      {
-        "name": "toIndex",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "BoardroomSnapshottingStarted",
-    "inputs": [
-      {
-        "name": "assetCount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "redemptionSupply",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "NativeWrappedForWindDown",
-    "inputs": [
-      {
-        "name": "wrappedNative",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "RedeemableAssetSnapshot",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "balance",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "RedeemableAssetUnreadable",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "RedemptionAssetClaimed",
-    "inputs": [
-      {
-        "name": "holder",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "recipient",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "asset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "shares",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "RedemptionExcessSwept",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "recipient",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "amount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "TreasurySharesBurned",
-    "inputs": [
-      {
-        "name": "amount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "error",
-    "name": "InsufficientRedemptionAmount",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "amountOut",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "minAmountOut",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidLifecycleStatus",
-    "inputs": [
-      {
-        "name": "expected",
-        "type": "uint8",
-        "internalType": "uint8"
-      },
-      {
-        "name": "actual",
-        "type": "uint8",
-        "internalType": "uint8"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidRedeemableAsset",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "InvalidRedemptionInput",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidSnapshotPage",
-    "inputs": [
-      {
-        "name": "requested",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "maximum",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "NoRedemptionExcess",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "SnapshotAlreadyFrozen",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "SnapshotIncomplete",
-    "inputs": [
-      {
-        "name": "cursor",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "count",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "SnapshotNotReady",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "UnexpectedRedeemableAssetBalanceChange",
-    "inputs": [
-      {
-        "name": "asset",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "expected",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "actual",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "UnexpectedWrappedNativeBalanceChange",
-    "inputs": [
-      {
-        "name": "expected",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "actual",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  }
-] as const;
-
 export const distributionFactoryAbi = [
   {
     "type": "constructor",
@@ -14320,6 +13643,19 @@ export const distributionFactoryAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "boardroomFactory",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -15099,6 +14435,22 @@ export const distributionFactoryAbi = [
       },
       {
         "name": "curve",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "IncoherentFactoryIdentity",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "actual",
         "type": "address",
         "internalType": "address"
       }
@@ -17914,6 +17266,11 @@ export const lockedLiquidityFactoryAbi = [
     "name": "createLockedLiquidityForBoardroom",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "boardroom",
         "type": "address",
         "internalType": "address"
@@ -18250,6 +17607,11 @@ export const lockedLiquidityFactoryAbi = [
     "name": "releaseMigrationReservation",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "boardroom",
         "type": "address",
         "internalType": "address"
@@ -18323,6 +17685,11 @@ export const lockedLiquidityFactoryAbi = [
     "type": "function",
     "name": "reserveMigration",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "boardroom",
         "type": "address",
@@ -18585,6 +17952,22 @@ export const lockedLiquidityFactoryAbi = [
       }
     ],
     "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "IncoherentFactoryIdentity",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "actual",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
   },
   {
     "type": "error",
@@ -18983,14 +18366,26 @@ export const migratingBondingCurveAbi = [
   {
     "type": "function",
     "name": "finalizeQuoteForfeiture",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
     "type": "function",
     "name": "finalizeUnwind",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -19238,6 +18633,11 @@ export const migratingBondingCurveAbi = [
     "type": "function",
     "name": "migrate",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "minShareLiquidity",
         "type": "uint256",
@@ -19493,7 +18893,13 @@ export const migratingBondingCurveAbi = [
   {
     "type": "function",
     "name": "recoverQuarantinedQuote",
-    "inputs": [],
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
     "outputs": [
       {
         "name": "returnedQuote",
@@ -20502,6 +19908,11 @@ export const merkleAirdropAbi = [
     "name": "claim",
     "inputs": [
       {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
         "name": "index",
         "type": "uint256",
         "internalType": "uint256"
@@ -20529,6 +19940,11 @@ export const merkleAirdropAbi = [
     "type": "function",
     "name": "claimGrant",
     "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
       {
         "name": "index",
         "type": "uint256",
@@ -21204,6 +20620,22 @@ export const merkleAirdropAbi = [
         "name": "index",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "FacetSetHashMismatch",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actual",
+        "type": "bytes32",
+        "internalType": "bytes32"
       }
     ]
   },
@@ -23892,6 +23324,1714 @@ export const tokenGrantFactoryAbi = [
   }
 ] as const;
 
+export const boardroomKernelAbi = [
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "facetRegistry_",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "fallback",
+    "stateMutability": "payable"
+  },
+  {
+    "type": "receive",
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "appliedStorageLayoutHash",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "appliedStorageVersion",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "facetRegistry",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IBoardroomFacetRegistry"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "facetSetHash",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "initData",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "kernelSelectorSetHash",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "migrationRequired",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "viewDispatcher",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "error",
+    "name": "ActiveReleaseChanged",
+    "inputs": [
+      {
+        "name": "expectedFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actualFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expectedStorageVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "actualStorageVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "expectedStorageLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actualStorageLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "AlreadyInitialized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "AlreadyMigrated",
+    "inputs": [
+      {
+        "name": "appliedVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "AppliedStorageLayoutMismatch",
+    "inputs": [
+      {
+        "name": "appliedLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "requiredLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "FacetCodeHashMismatch",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      },
+      {
+        "name": "facet",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expected",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actual",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "FacetSetHashMismatch",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actual",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidFacet",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      },
+      {
+        "name": "facet",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidInitializationMigrationRoute",
+    "inputs": [
+      {
+        "name": "expectedFacet",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "routeFacet",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "routeVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "activeVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidInitializationRoute",
+    "inputs": [
+      {
+        "name": "facet",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "routeVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "activeVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidInitializationState",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidKernelSelectorSetHash",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actual",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidRegistry",
+    "inputs": [
+      {
+        "name": "registry",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidRouteKind",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidViewRollbackEnvelope",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "KernelMetadataCorrupted",
+    "inputs": [
+      {
+        "name": "initialized",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "initializing",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "migrating",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "MigrationPostconditionFailed",
+    "inputs": [
+      {
+        "name": "expectedVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "actualVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "expectedLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actualLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "MigrationReentrancy",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MissingExpectedFacetSetHash",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NotInitialized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RegistryCallFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RouteStorageVersionMismatch",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      },
+      {
+        "name": "routeVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "activeVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "StorageMigrationRequired",
+    "inputs": [
+      {
+        "name": "appliedVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "requiredVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnknownSelector",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ViewDispatchDidNotRollback",
+    "inputs": []
+  }
+] as const;
+
+export const boardroomReleaseBMigrationFacetAbi = [
+  {
+    "type": "function",
+    "name": "migrateBoardroom",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "error",
+    "name": "UnsupportedMigrationSource",
+    "inputs": [
+      {
+        "name": "actualVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "actualLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "expectedVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "expectedLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  }
+] as const;
+
+export const protocolFacetRegistryAbi = [
+  {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "protocolGovernance",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "reservedKernelSelectors_",
+        "type": "bytes4[]",
+        "internalType": "bytes4[]"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "MAX_RESERVED_KERNEL_SELECTORS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_SELECTORS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "activateFacetSet",
+    "inputs": [
+      {
+        "name": "facetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "activeFacetSetHash",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "activeMigration",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "facet",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "activeRelease",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "activeStorageLayoutHash",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "activeStorageVersion",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "cancelOwnershipHandover",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "completeOwnershipHandover",
+    "inputs": [
+      {
+        "name": "pendingOwner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "computeFacetSetHash",
+    "inputs": [
+      {
+        "name": "manifest",
+        "type": "tuple",
+        "internalType": "struct ProtocolFacetTypes.FacetSetManifest",
+        "components": [
+          {
+            "name": "release",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "requiredStorageVersion",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "predecessorFacetSetHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "storageLayoutHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "manifestHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "routes",
+            "type": "tuple[]",
+            "internalType": "struct ProtocolFacetTypes.RouteDefinition[]",
+            "components": [
+              {
+                "name": "selector",
+                "type": "bytes4",
+                "internalType": "bytes4"
+              },
+              {
+                "name": "facet",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "codeHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "kind",
+                "type": "uint8",
+                "internalType": "enum ProtocolFacetTypes.RouteKind"
+              }
+            ]
+          },
+          {
+            "name": "migrationFacet",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "migrationSelector",
+            "type": "bytes4",
+            "internalType": "bytes4"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "facetAddress",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "facetAddresses",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address[]",
+        "internalType": "address[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "facetFunctionSelectors",
+    "inputs": [
+      {
+        "name": "facet",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes4[]",
+        "internalType": "bytes4[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "facetSetHashForRelease",
+    "inputs": [
+      {
+        "name": "release",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "facetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "facetSetMetadata",
+    "inputs": [
+      {
+        "name": "facetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "published",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "release",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "requiredStorageVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "predecessorFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "storageLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "manifestHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "migrationFacet",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "migrationSelector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      },
+      {
+        "name": "selectorCount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "facetSetRoute",
+    "inputs": [
+      {
+        "name": "facetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "facet",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "codeHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "uint8"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "facetSetSelectors",
+    "inputs": [
+      {
+        "name": "facetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes4[]",
+        "internalType": "bytes4[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "facets",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "result",
+        "type": "tuple[]",
+        "internalType": "struct ProtocolFacetTypes.Facet[]",
+        "components": [
+          {
+            "name": "facetAddress",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "functionSelectors",
+            "type": "bytes4[]",
+            "internalType": "bytes4[]"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isFacetSetPublished",
+    "inputs": [
+      {
+        "name": "facetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isReservedKernelSelector",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "reserved",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "kernelSelectorSetHash",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "owner",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "result",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "ownershipHandoverExpiresAt",
+    "inputs": [
+      {
+        "name": "pendingOwner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "result",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "publishFacetSet",
+    "inputs": [
+      {
+        "name": "manifest",
+        "type": "tuple",
+        "internalType": "struct ProtocolFacetTypes.FacetSetManifest",
+        "components": [
+          {
+            "name": "release",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "requiredStorageVersion",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "predecessorFacetSetHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "storageLayoutHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "manifestHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "routes",
+            "type": "tuple[]",
+            "internalType": "struct ProtocolFacetTypes.RouteDefinition[]",
+            "components": [
+              {
+                "name": "selector",
+                "type": "bytes4",
+                "internalType": "bytes4"
+              },
+              {
+                "name": "facet",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "codeHash",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "kind",
+                "type": "uint8",
+                "internalType": "enum ProtocolFacetTypes.RouteKind"
+              }
+            ]
+          },
+          {
+            "name": "migrationFacet",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "migrationSelector",
+            "type": "bytes4",
+            "internalType": "bytes4"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "facetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "renounceOwnership",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "requestOwnershipHandover",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "reservedKernelSelectors",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes4[]",
+        "internalType": "bytes4[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "route",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "facet",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "codeHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "requiredStorageVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "transferOwnership",
+    "inputs": [
+      {
+        "name": "newOwner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "event",
+    "name": "FacetRoutePublished",
+    "inputs": [
+      {
+        "name": "facetSetHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "release",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "indexed": true,
+        "internalType": "bytes4"
+      },
+      {
+        "name": "facet",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "codeHash",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "kind",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum ProtocolFacetTypes.RouteKind"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FacetSetActivated",
+    "inputs": [
+      {
+        "name": "previousFacetSetHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "facetSetHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "release",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "requiredStorageVersion",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "storageLayoutHash",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "manifestHash",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "migrationFacet",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "migrationSelector",
+        "type": "bytes4",
+        "indexed": false,
+        "internalType": "bytes4"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FacetSetPublished",
+    "inputs": [
+      {
+        "name": "facetSetHash",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "release",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "requiredStorageVersion",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "predecessorFacetSetHash",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "storageLayoutHash",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "manifestHash",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "selectorCount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "migrationFacet",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "migrationSelector",
+        "type": "bytes4",
+        "indexed": false,
+        "internalType": "bytes4"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OwnershipHandoverCanceled",
+    "inputs": [
+      {
+        "name": "pendingOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OwnershipHandoverRequested",
+    "inputs": [
+      {
+        "name": "pendingOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OwnershipTransferred",
+    "inputs": [
+      {
+        "name": "oldOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "AlreadyInitialized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "FacetCodeHashMismatch",
+    "inputs": [
+      {
+        "name": "facet",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "expected",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actual",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "FacetSetAlreadyPublished",
+    "inputs": [
+      {
+        "name": "facetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "FacetSetNotPublished",
+    "inputs": [
+      {
+        "name": "facetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidFacet",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      },
+      {
+        "name": "facet",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidKernelSelectorSetHash",
+    "inputs": [
+      {
+        "name": "expected",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "actual",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidManifestHash",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidMigrationRoute",
+    "inputs": [
+      {
+        "name": "facet",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidPredecessorFacetSet",
+    "inputs": [
+      {
+        "name": "predecessorFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "release",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidRelease",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidStorageLayoutHash",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MigrationRequired",
+    "inputs": [
+      {
+        "name": "currentVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "requestedVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "MigrationRouteContinuityRequired",
+    "inputs": [
+      {
+        "name": "predecessorFacetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "requiredStorageVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NewOwnerIsZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoHandoverRequest",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ReleaseAlreadyPublished",
+    "inputs": [
+      {
+        "name": "release",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "facetSetHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ReleaseNotIncreasing",
+    "inputs": [
+      {
+        "name": "currentRelease",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "requestedRelease",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ReservedKernelSelector",
+    "inputs": [
+      {
+        "name": "selector",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "SelectorsNotStrictlyAscending",
+    "inputs": [
+      {
+        "name": "previous",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      },
+      {
+        "name": "current",
+        "type": "bytes4",
+        "internalType": "bytes4"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "StorageLayoutChangeRequiresMigration",
+    "inputs": [
+      {
+        "name": "currentLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "requestedLayoutHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "StorageVersionDecreased",
+    "inputs": [
+      {
+        "name": "currentVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "requestedVersion",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TooManySelectors",
+    "inputs": [
+      {
+        "name": "requested",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maximum",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Unauthorized",
+    "inputs": []
+  }
+] as const;
+
 export const pledgeCashAbis = {
   AmmFactory: ammFactoryAbi,
   AmmPool: ammPoolAbi,
@@ -23901,15 +25041,12 @@ export const pledgeCashAbis = {
   BoardroomController: boardroomControllerAbi,
   BoardroomControllerFactory: boardroomControllerFactoryAbi,
   BoardroomFactory: boardroomFactoryAbi,
-  BoardroomGovernanceLogic: boardroomGovernanceLogicAbi,
-  BoardroomMarketLogic: boardroomMarketLogicAbi,
   BoardroomPolicyRegistry: boardroomPolicyRegistryAbi,
   BoardroomToken: boardroomTokenAbi,
   BoardroomRewards: boardroomRewardsAbi,
   BoardroomRewardsFactory: boardroomRewardsFactoryAbi,
   BondMarket: bondMarketAbi,
   BondMarketFactory: bondMarketFactoryAbi,
-  BoardroomRedemptionPayout: boardroomRedemptionPayoutAbi,
   DistributionFactory: distributionFactoryAbi,
   DutchAuctionSale: dutchAuctionSaleAbi,
   ERC20: erc20Abi,
@@ -23923,112 +25060,23 @@ export const pledgeCashAbis = {
   PoolFees: poolFeesAbi,
   ProtocolFeeRouter: protocolFeeRouterAbi,
   TokenGrant: tokenGrantAbi,
-  TokenGrantFactory: tokenGrantFactoryAbi
+  TokenGrantFactory: tokenGrantFactoryAbi,
+  BoardroomKernel: boardroomKernelAbi,
+  BoardroomReleaseBMigrationFacet: boardroomReleaseBMigrationFacetAbi,
+  ProtocolFacetRegistry: protocolFacetRegistryAbi
 } as const;
 
 export const pledgeCashDeployments = {
   10143: {
     chainId: 10143,
     status: "pending",
-    reason: "Boardroom-controller deterministic v5 deployment has not been broadcast yet"
+    reason: "Canonical protocol v1 has not been broadcast to Monad testnet",
+    protocolVersion: "pledge.cash.protocol.v1"
   },
   998: {
     chainId: 998,
-    sourceCommit: "87f51633f437a0164d7a2a2503a3660b01a6450a",
-    deterministicDeployment: true,
-    deterministicDeploymentVersion: "pledge.cash.deterministic.v5",
-    deterministicReleaseCodeHash: "0xde3718772cc37c6fa377f54ed59f21577bc08e1774e4192e5f309b37c568322b",
-    deterministicDeployer: "0xa3bb8CD1442f3B373af5418E68bd2Af15445eC12" as Address,
-    deterministicDeployerOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    create2Factory: "0x4e59b44847b379578588920cA78FbF26c0B4956C" as Address,
-    boardroomFactory: "0xd0b2aE6603d7Ae140cd0Cb4Eb4451923C28cAaef" as Address,
-    boardroomControllerFactory: "0x49843BEBeAabE800f282A4895E4b155790ddb591" as Address,
-    boardroomControllerLogic: "0x9455C7804736A50244Ad7E0c6beFf0900e0dE3CA" as Address,
-    boardroomGovernanceLogic: "0x00941D926d2D33140F05d8Caa1fF30F9C0943096" as Address,
-    boardroomMarketLogic: "0xfF4d923e2956D1A52A3F1A34834A3652fd3e5769" as Address,
-    boardroomRedemptionPayout: "0x0B18640553E437CaDffa743568459Cfebb632a19" as Address,
-    boardroomLogic: "0xb6663E62E6f85cE9f7B0b256025a3dC601F6d9A0" as Address,
-    boardroomPolicyRegistry: "0xd4a1C2D5cEc4aF7938262E11Bf6BBA11F7DE5C6D" as Address,
-    assetPolicy: "0x65F9960431f5fB2e8d23AE5dD93E59C805291870" as Address,
-    protocolFeeRouter: "0xA9762Fd73b29ACa9472A2Ac2023b5F4a24d81639" as Address,
-    distributionFactory: "0xc15a24eE0e281Ca68F29869816E48B57760DDB2F" as Address,
-    fixedPriceSaleLogic: "0x5E4c300B5e6eeB6723cE5359ad6F24067459dC50" as Address,
-    dutchAuctionLogic: "0x3ce6550003b199a52DfECCD0635e362cdD5f9b3B" as Address,
-    migratingBondingCurveLogic: "0xd84965D6970C5B29253A5120B89Ffc3EfAdEbdBa" as Address,
-    merkleAirdropLogic: "0x9dE3D4af479533121833e35659B06B9F3b46cd16" as Address,
-    boardroomRewardsFactory: "0xF27801E8771F11dD04b6581aF6C88F35BEfe7f73" as Address,
-    boardroomRewardsLogic: "0xE01d0B9584a9753529052D1323068F6d969E67d6" as Address,
-    bondMarketFactory: "0x7564aBcc6eecCA4201B9525c5D7f58bEe1B4D752" as Address,
-    bondMarketLogic: "0x6c4028369c1c92D3d4068889553D2B4757F738cB" as Address,
-    ammFactory: "0xF982604BD39834c5459B0C2B37995D7187d09a49" as Address,
-    ammPoolImplementation: "0x220b6199FC3D427e2f22F3491B881C6AFc1f6777" as Address,
-    ammProtocolFeeRecipient: "0xA9762Fd73b29ACa9472A2Ac2023b5F4a24d81639" as Address,
-    ammRouter: "0x302F6b16Ce7fc23fAF8D59C3BD8aF9236aa673Bc" as Address,
-    lockedLiquidityFactory: "0x8B5B443f8D7A6902b884FA04f0c911a07365285d" as Address,
-    lockedLiquidityLogic: "0x883254B20589b1D67dd424EbE4330Bb8eD5bceEf" as Address,
-    tokenGrantFactory: "0xC6abe7071Bbf81fA2372Fc01503761E146685343" as Address,
-    tokenGrantLogic: "0xd2FbC30CAC15e870fbAF996D36d16E6566a065Cd" as Address,
-    wrappedNative: "0x5555555555555555555555555555555555555555" as Address,
-    deployer: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    factoryOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    policyRegistryOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    assetPolicyOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    protocolGovernance: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    protocolTreasury: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    protocolFeeRouterOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    protocolFeeRouterRecipient: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    tokenGrantFeeRecipient: "0xA9762Fd73b29ACa9472A2Ac2023b5F4a24d81639" as Address,
-    ammFactoryOwner: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    ammFeeManager: "0xdaB9C778e4d42b27e4C1b892EEA62dFc08D1300c" as Address,
-    ammLiquidityRouter: "0x302F6b16Ce7fc23fAF8D59C3BD8aF9236aa673Bc" as Address,
-    ammReservationManager: "0x8B5B443f8D7A6902b884FA04f0c911a07365285d" as Address,
-    assetPolicyAllowed: true,
-    distributionPolicyAllowed: true,
-    distributionModulePolicy: true,
-    boardroomRewardsPolicyAllowed: true,
-    boardroomRewardsModulePolicy: true,
-    bondMarketPolicyAllowed: true,
-    bondMarketModulePolicy: true,
-    lockedLiquidityPolicyAllowed: true,
-    lockedLiquidityModulePolicy: true,
-    tokenGrantPolicyAllowed: true,
-    tokenGrantModulePolicy: true,
-    assetWrappedNativeAllowed: true,
-    assetTokenGrantSpenderAllowed: true,
-    assetDistributionSpenderAllowed: true,
-    assetBoardroomRewardsSpenderAllowed: true,
-    assetBondMarketSpenderAllowed: true,
-    assetLockedLiquiditySpenderAllowed: true,
-    creationFee: 100000000000000000n,
-    deploymentBlock: 59850507n,
-    deploymentTimestamp: 1785040845n,
-    deterministicDeployerCodeHash: "0x188fc1247484fb4b6fed4f0e736dd906d36b62e5f70f03cec2cda2ec3485fec8",
-    boardroomPolicyRegistryCodeHash: "0x4e80933a0e8f9498502c9589b3ba07ca6a9488d8d66dbd6e71ea6794b58610e4",
-    assetPolicyCodeHash: "0x92f8e80be3251dc02d059d401877d375994ba118aac63ed47c3c7b8d55c85c7d",
-    protocolFeeRouterCodeHash: "0x0b7e2e7b5ba582ca90eb1ce40c3aabdbac5141e23c7d8b5e13f5f8bf736e3a0a",
-    boardroomFactoryCodeHash: "0xb3179449711143270cc0aaa41c6438e1d54bd3aafa81c13a080f96a3a7fa154d",
-    boardroomControllerFactoryCodeHash: "0x2d2636c8c33d8d2d91c5434f448568e289107e7324fb12da5f4a8e06cec38261",
-    boardroomControllerCodeHash: "0xb174963a10e59ca0547a310c696a3b5ee75f6c4eefaa6aa5cfb28d4aeb337ddf",
-    boardroomGovernanceLogicCodeHash: "0x8b8b00a40684d7c021284602f0fba0749c444a4fb72e803ea21db45546d1718a",
-    boardroomMarketLogicCodeHash: "0xfa852f65ba00f730d27a06a45bfaebc11dca9eb8e8f9d3bd2d75208b80d6381a",
-    boardroomRedemptionPayoutCodeHash: "0x5879c429881c709cc5a53532698451ff7711c1ad5214ac06a1c7cab63f4ee960",
-    boardroomLogicCodeHash: "0x0eb75fe8e2f6d260c61c231339f103aa002c06c24c9bdfa34aa0b378491e077c",
-    tokenGrantFactoryCodeHash: "0x528fbd961c1598d0373fb5b0470d1b3266364555c21e20a6d8e9545bdb03b39d",
-    tokenGrantLogicCodeHash: "0xe69c68ce816153e59e1e477117484195da628bbd0866871a74ebbf24b721fa2a",
-    ammFactoryCodeHash: "0x179b952d45514906fa2c5d84d39b5a7617dec698225994e311705bd69b83c296",
-    ammPoolImplementationCodeHash: "0x57c4977d7cd32676f19b3dfece1bb9da45e44e3a2446e972f9030c3f4ec4f917",
-    ammRouterCodeHash: "0x84fac4863be66c3feaa2d4788a7c1d52e9e1f48ab9d8d85e51034aa366a39926",
-    lockedLiquidityFactoryCodeHash: "0x6b96eaa2e82cb6173d5f96d7be71127f70a486aae03138a297473c99f6a386b1",
-    lockedLiquidityLogicCodeHash: "0xdc59ceddab9ab21d3a5563de2a6c6c2fa90445d9859f9ff4734c66d83d7099b4",
-    distributionFactoryCodeHash: "0xece50a956bdd1ca76a0588c5c44ada60d2f6bbce1accc2f88fd95671decec60a",
-    fixedPriceSaleLogicCodeHash: "0x6b8e5b099073c3fcf68c8cda6e60e176f5d60a9de435777bf252f394aa180d93",
-    dutchAuctionLogicCodeHash: "0x8f3d9c6539f7342cfbc0ae436553890a52aba7282257387aa8724e1510b41495",
-    migratingBondingCurveLogicCodeHash: "0xb76a46187be8484983280099ceda1347541dddfaa84411eae100ccf380ed7563",
-    merkleAirdropLogicCodeHash: "0xb01fc6fadd71ee24b7befa3799b5e641bbca9c3d1e07e20cf0a1d4a5b2b64d27",
-    boardroomRewardsFactoryCodeHash: "0x1c9fd0a06bb8c6a0a06f543ae8912631440b05422112a55aaaa5aeac5c5a0303",
-    boardroomRewardsLogicCodeHash: "0x8b98355433facaa2825a6f01e9cf40e90aced2715e3225ddd8aba77109fc58fb",
-    bondMarketFactoryCodeHash: "0x091e3c2fd709d0ae240c53236d955965d3fd13352896657bf41db2ac7b1007f1",
-    bondMarketLogicCodeHash: "0xe9dedbcfc6f451b5f33a8cc6a90f854cd6d6c95f33427c7cedee50c4caa16cee",
-    wrappedNativeCodeHash: "0xe2e18bc11f218432ca1aabc44b53cce54a78c77ae2d76093a577e0564a77aa04"
+    status: "pending",
+    reason: "Canonical protocol v1 has not been broadcast to HyperEVM testnet",
+    protocolVersion: "pledge.cash.protocol.v1"
   }
 } as const satisfies Record<number, PledgeCashDeployment>;

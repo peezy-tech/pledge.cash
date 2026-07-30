@@ -14,11 +14,15 @@ const factory =
 const usdc =
   "0x4000000000000000000000000000000000000000" as Address;
 const hash = `0x${"11".repeat(32)}` as Hex;
+const facetSetHash = `0x${"22".repeat(32)}` as Hex;
+const storageLayoutHash = `0x${"44".repeat(32)}` as Hex;
 
 function reader(values: {
   launched?: boolean;
   owner?: Address;
   configurationEpoch?: bigint;
+  facetSetHash?: Hex;
+  migrationRequired?: boolean;
   signatureResult?: Hex;
 }) {
   const owner = values.owner ?? controller;
@@ -50,6 +54,16 @@ function reader(values: {
       if (input.functionName === "controllerGeneration") {
         return values.launched === false ? 0n : 1n;
       }
+      if (input.functionName === "facetSetHash") {
+        return values.facetSetHash ?? facetSetHash;
+      }
+      if (input.functionName === "appliedStorageVersion") return 1n;
+      if (input.functionName === "appliedStorageLayoutHash") {
+        return storageLayoutHash;
+      }
+      if (input.functionName === "migrationRequired") {
+        return values.migrationRequired ?? false;
+      }
       if (input.functionName === "configurationEpoch") {
         return values.configurationEpoch ?? 1n;
       }
@@ -60,10 +74,22 @@ function reader(values: {
       throw new Error(`unexpected ${input.functionName}`);
     },
   };
-  return new CanonicalSupportAuthorityReader(client as never, {
-    boardroomFactory: factory,
-    destinationUsdc: usdc,
-  });
+  const liveFacetSetHash = values.facetSetHash ?? facetSetHash;
+  return new CanonicalSupportAuthorityReader(
+    client as never,
+    {
+      boardroomFactory: factory,
+      destinationUsdc: usdc,
+    } as never,
+    async () => ({
+      blockHash: hash,
+      blockNumber: 100n,
+      facetSetHash: liveFacetSetHash,
+      release: liveFacetSetHash === facetSetHash ? 1n : 2n,
+      requiredStorageLayoutHash: storageLayoutHash,
+      requiredStorageVersion: 1n,
+    }),
+  );
 }
 
 describe("canonical support authority", () => {
@@ -76,6 +102,7 @@ describe("canonical support authority", () => {
       chainId: 998,
       configurationEpoch: 1n,
       controllerGeneration: 1n,
+      facetSetHash,
       mode: "launched_controller",
       signer: proposer,
     });
@@ -96,6 +123,24 @@ describe("canonical support authority", () => {
       }),
     ).rejects.toMatchObject({
       code: "support_authority_stale",
+      status: 409,
+    });
+  });
+
+  test("invalidates authority identities on facet activation and during migration", async () => {
+    const original = await reader({ facetSetHash }).resolve(boardroom);
+    await expect(
+      reader({
+        facetSetHash: `0x${"33".repeat(32)}`,
+      }).assertCurrent(original),
+    ).rejects.toMatchObject({
+      code: "support_authority_stale",
+      status: 409,
+    });
+    await expect(
+      reader({ migrationRequired: true }).resolve(boardroom),
+    ).rejects.toMatchObject({
+      code: "boardroom_migration_required",
       status: 409,
     });
   });

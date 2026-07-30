@@ -11,7 +11,7 @@ Canonical identity is a relationship, not a logo or address-shaped string. It al
 
 | Object | Canonical proof |
 | --- | --- |
-| Boardroom | The selected BoardroomFactory reports that it created the address |
+| Boardroom | The selected BoardroomFactory reports that it created the address; the Boardroom reports the artifact registry; its kernel selector-set hash, active facet-set hash, applied storage version/layout, and migration state agree with the registry at one pinned block |
 | Project token | Full reciprocal proof is that the Boardroom reports the token and the token reports that Boardroom as authority. The current app uses the factory-verified Boardroom's token field but does not separately read the reverse token authority |
 | Grant | The selected TokenGrantFactory maps its token id to the grant and the grant reports that factory |
 | Boardroom-issued grant | The grant has the factory proof above and reports the verified Boardroom as issuer; the Boardroom's obligation record is an additional live-state check only while the grant remains active |
@@ -39,10 +39,10 @@ Transient RPC failure is different. The app can report that a canonical object i
 
 Chain id alone is insufficient, especially on local Anvil. A reset can deploy a new stack on the same chain id. Transaction refresh and cached state must also match the deployment identity active when the read or transaction began.
 
-The current HyperEVM testnet identity is the verified chain `998` artifact anchored by BoardroomFactory
-`0xd0b2aE6603d7Ae140cd0Cb4Eb4451923C28cAaef`, deployment block `59850507`, and source commit
-`87f51633f437a0164d7a2a2503a3660b01a6450a`. Chain `10143` remains pending and has no current root identity for
-writes.
+HyperEVM testnet chain `998` and Monad testnet chain `10143` both have pending
+canonical protocol-v1 artifacts. Neither has a current root identity for
+writes. A local chain has an identity only while its ignored artifact, Anvil
+state, and source build remain together.
 
 ## Current state and history
 
@@ -59,7 +59,8 @@ Sentinel can index public governance actions and store wallet-linked alert subsc
 Before a material transaction, record:
 
 - chain id and deployment artifact identity;
-- root factory addresses;
+- registry, kernel, active release/facet-set hash, storage requirement, and
+  root factory addresses;
 - Boardroom and project-token addresses;
 - selected child contract and its factory/Boardroom relationships;
 - transaction target, function, calldata, value, and simulation block;

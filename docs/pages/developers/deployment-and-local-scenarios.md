@@ -9,10 +9,15 @@ Use the [deployment specification](https://github.com/peezy-tech/pledge.cash/blo
 
 ## Public testnet status
 
-HyperEVM testnet `998` has a promoted deterministic v5 artifact and 29 source-bound successful receipts. Monad testnet
-`10143` remains pending; clients must withhold stale Monad root addresses while that status persists.
+Canonical protocol v1 is pending on HyperEVM testnet `998` and Monad testnet
+`10143`. Neither checked-in artifact provides usable root addresses. Clients
+must withhold contract-dependent workflows while either selected artifact is
+pending.
 
-Do not develop against guessed legacy addresses. A candidate artifact becomes publishable only after live code, ownership, policy, helper, factory, router, fee, and immutable-wiring verification succeeds.
+Do not develop against guessed or historical addresses. A candidate artifact
+becomes publishable only after deterministic provenance, the complete
+registry/facet release, live code, ownership, policy, helper, factory, router,
+fee, and immutable-wiring verification succeeds.
 
 ## Deterministic deployment flow
 
@@ -20,7 +25,8 @@ Do not develop against guessed legacy addresses. A candidate artifact becomes pu
 2. Run the chain-specific dry-run wrapper and confirm chain id.
 3. Broadcast through the maintained wrapper.
 4. Verify the candidate against live RPC state and runtime code hashes.
-5. Promote only the verified candidate to the checked-in artifact.
+5. Retain the verified candidate and receipts, then promote them only through
+   a separate explicit release decision.
 6. Build the web app and confirm it resolves the promoted deployment.
 
 Use the exact commands in the engineering deployment note; network gas behavior and Foundry variants differ.
@@ -28,6 +34,10 @@ Use the exact commands in the engineering deployment note; network gas behavior 
 ## Local Anvil scenario
 
 Local Anvil uses chain id `31337`, normally on port `8547`. Deploy the full stack with a local wrapped-native contract, write the ignored local artifact, then run the maintained seed scenario.
+
+Also run `bun run scenario:boardroom:local` on a fresh Anvil state. That
+scenario activates release B, proves writes stop before migration, migrates
+three Boardrooms independently, and resumes cleanup and redemption.
 
 The seed covers standalone grant variants plus nine Boardroom projects: direct canonical AMM, active fixed price, active
 Dutch auction, active curve, closed sale, live Merkle airdrop, launched generation-1 controller governance with a

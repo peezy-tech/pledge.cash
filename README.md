@@ -2,6 +2,12 @@
 
 pledge.cash is a permissionless protocol and product workspace for token-backed project accounts. Projects can issue tokens, create grants and distributions, govern delayed actions, own liquidity, and wind down into redemptions while keeping the resulting authority and asset movement explainable from contract state.
 
+The repository is unreleased. Its sole contract line is canonical protocol v1:
+Boardrooms are asset-holding kernels routed through a protocol-owned facet
+registry. HyperEVM and Monad testnet artifacts are both pending; testnet
+deployment is the next operational stage after final local acceptance and
+review, and no mainnet deployment is supported.
+
 ## Repository Layout
 
 - `packages/contracts`: Foundry contracts, tests, and contract-specific configuration.
@@ -59,7 +65,9 @@ Simulate the HyperEVM testnet deployment:
 bun run simulate:hyperevm-testnet
 ```
 
-Broadcast the testnet factory deployment after loading the deployment key:
+The state-changing HyperEVM broadcast command is reserved for the explicit
+testnet deployment ceremony after all gates in
+[`docs/deployment.md`](docs/deployment.md) pass:
 
 ```sh
 BROADCAST=1 bun --cwd packages/contracts deploy:hyperevm-testnet

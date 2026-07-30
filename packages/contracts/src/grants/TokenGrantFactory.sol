@@ -10,6 +10,7 @@ import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {TokenGrant} from "./TokenGrant.sol";
 import {ExactTransferLib} from "../lib/ExactTransferLib.sol";
 import {IBoardroomObligationPolicy} from "../policy/IBoardroomObligationPolicy.sol";
+import {BoardroomCallbackLib} from "../policy/BoardroomCallbackLib.sol";
 
 interface ITokenGrantDistributionIssuer {
     function isIssuedDistribution(address distribution) external view returns (bool);
@@ -21,8 +22,6 @@ interface ITokenGrantBoardroomFactory {
 
 interface ITokenGrantBoardroomAssetRegistry {
     function shareToken() external view returns (address);
-
-    function reserveRedeemableAsset(address asset) external;
 }
 
 contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
@@ -344,9 +343,14 @@ contract TokenGrantFactory is Ownable, ERC721, IBoardroomObligationPolicy {
         if (input.funder == input.issuer && isCanonicalBoardroom(input.issuer)) {
             ITokenGrantBoardroomAssetRegistry registry = ITokenGrantBoardroomAssetRegistry(input.issuer);
             address shares = registry.shareToken();
-            if (input.token != shares) registry.reserveRedeemableAsset(input.token);
+            // Reached only when the issuing Boardroom funds its own grant, so the outer
+            // mutating route already bound the caller's release hash.
+            bytes32 expectedFacetSetHash = BoardroomCallbackLib.boundFacetSetHash(input.issuer);
+            if (input.token != shares) {
+                BoardroomCallbackLib.reserveRedeemableAsset(input.issuer, expectedFacetSetHash, input.token);
+            }
             if (input.paymentToken != address(0) && input.paymentToken != input.token) {
-                registry.reserveRedeemableAsset(input.paymentToken);
+                BoardroomCallbackLib.reserveRedeemableAsset(input.issuer, expectedFacetSetHash, input.paymentToken);
             }
         }
 

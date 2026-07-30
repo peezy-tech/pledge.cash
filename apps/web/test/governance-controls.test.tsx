@@ -31,12 +31,17 @@ const recipient = "0x5000000000000000000000000000000000000000" as Address;
 const operationId = `0x${"a".repeat(64)}` as Hex;
 const salt = `0x${"b".repeat(64)}` as Hex;
 const transactionHash = `0x${"c".repeat(64)}` as Hex;
+const facetSetHash = `0x${"d".repeat(64)}` as Hex;
 
 const mintCall: BoardroomCall = {
   policy,
   target: boardroom,
   value: 0n,
-  data: encodeFunctionData({ abi: boardroomAbi, functionName: "mint", args: [recipient, 1_000n] }),
+  data: encodeFunctionData({
+    abi: boardroomAbi,
+    functionName: "mint",
+    args: [facetSetHash, recipient, 1_000n],
+  }),
 };
 
 const readyOperation: ScheduledBoardroomOperation = {
@@ -56,6 +61,8 @@ const readyOperation: ScheduledBoardroomOperation = {
   scheduleBlockNumber: 100n,
   scheduleTransactionHash: transactionHash,
   status: "ready",
+  facetSetHash,
+  currentFacetSetHash: facetSetHash,
   kind: "boardroomOperation",
   calls: [mintCall],
 };
@@ -72,7 +79,7 @@ describe("external controller governance controls", () => {
     expect(view.statusLabel).toBe("Ready to execute");
     expect(view.calls[0]).toMatchObject({
       functionName: "mint",
-      signature: "mint(address,uint256)",
+      signature: "mint(bytes32,address,uint256)",
       verification: "verified",
     });
 
@@ -102,11 +109,11 @@ describe("external controller governance controls", () => {
       address: controller,
       functionName: "executeBoardroomOperation",
     });
-    expect(request.args).toEqual([[mintCall], salt, 2n, 3n, proposer]);
+    expect(request.args).toEqual([facetSetHash, [mintCall], salt, 2n, 3n, proposer]);
     expect(buildGovernanceVetoRequest(readyOperation, 1_700_100_000n)).toMatchObject({
       address: boardroom,
       functionName: "veto",
-      args: [operationId],
+      args: [facetSetHash, operationId],
     });
   });
 

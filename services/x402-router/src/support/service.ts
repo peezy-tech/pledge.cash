@@ -34,39 +34,44 @@ const PLAN_LIST_LIMIT = 50;
 
 const storedPlanPayloadSchema = supportPlanDraftSchema
   .extend({
-    version: z.literal(1),
+    version: z.literal(2),
     planId: z.string().uuid(),
     asset: supportAddressSchema,
+    facetSetHash: z.string().regex(/^0x[a-f0-9]{64}$/),
   })
   .strict();
 
 const storedRetirementPayloadSchema = z
   .object({
-    version: z.literal(1),
+    version: z.literal(2),
     action: z.literal("retire"),
     planId: z.string().uuid(),
     boardroom: supportAddressSchema,
+    facetSetHash: z.string().regex(/^0x[a-f0-9]{64}$/),
+    planFacetSetHash: z.string().regex(/^0x[a-f0-9]{64}$/),
   })
   .strict();
 
 const storedSubscriptionPayloadSchema = z
   .object({
-    version: z.literal(1),
+    version: z.literal(2),
     action: z.literal("subscribe"),
     subscriptionId: z.string().uuid(),
     planId: z.string().uuid(),
     boardroom: supportAddressSchema,
+    facetSetHash: z.string().regex(/^0x[a-f0-9]{64}$/),
     payer: supportAddressSchema,
   })
   .strict();
 
 const storedCancellationPayloadSchema = z
   .object({
-    version: z.literal(1),
+    version: z.literal(2),
     action: z.literal("cancel"),
     subscriptionId: z.string().uuid(),
     planId: z.string().uuid(),
     boardroom: supportAddressSchema,
+    facetSetHash: z.string().regex(/^0x[a-f0-9]{64}$/),
     payer: supportAddressSchema,
   })
   .strict();
@@ -122,7 +127,7 @@ export class RecurringSupportService {
     const identity = await this.authority.resolve(draft.boardroom);
     const planId = this.id();
     const payload = {
-      version: 1,
+      version: 2,
       planId,
       chainId: SUPPORT_CHAIN_ID,
       boardroom: draft.boardroom.toLowerCase(),
@@ -131,6 +136,7 @@ export class RecurringSupportService {
       cadence: "monthly",
       title: draft.title,
       description: draft.description,
+      facetSetHash: identity.facetSetHash.toLowerCase(),
     } as const;
     return this.issueChallenge({
       action: "plan_create",
@@ -172,6 +178,7 @@ export class RecurringSupportService {
       authorityMode: verified.mode,
       controllerGeneration: verified.controllerGeneration,
       configurationEpoch: verified.configurationEpoch,
+      facetSetHash: verified.facetSetHash,
       verifiedBlock: verified.blockNumber,
       verifiedBlockHash: verified.blockHash,
       createdAt,
@@ -185,17 +192,19 @@ export class RecurringSupportService {
 
   async issueRetirementChallenge(planId: string): Promise<SupportChallenge> {
     const plan = await this.requireActivePlan(planId);
-    const identity = await this.requireCurrentPlanAuthority(plan);
+    const identity = await this.authority.resolve(plan.boardroom);
     return this.issueChallenge({
       action: "plan_retire",
       actor: identity.signer ?? identity.authority,
       authority: identity,
       planId,
       payload: {
-        version: 1,
+        version: 2,
         action: "retire",
         planId,
         boardroom: plan.boardroom.toLowerCase(),
+        facetSetHash: identity.facetSetHash.toLowerCase(),
+        planFacetSetHash: plan.facetSetHash.toLowerCase(),
       },
     });
   }
@@ -218,7 +227,7 @@ export class RecurringSupportService {
       );
     }
     const plan = await this.requireActivePlan(payload.planId);
-    assertPlanMatchesChallenge(plan, challenge);
+    assertRetirementPlanMatchesChallenge(plan, challenge, payload);
     const verified = await this.authority.verifyAuthoritySignature({
       expected: authorityFromChallenge(challenge),
       message: challenge.message,
@@ -245,11 +254,12 @@ export class RecurringSupportService {
       authority: identity,
       planId,
       payload: {
-        version: 1,
+        version: 2,
         action: "subscribe",
         subscriptionId,
         planId,
         boardroom: plan.boardroom.toLowerCase(),
+        facetSetHash: plan.facetSetHash.toLowerCase(),
         payer: payer.toLowerCase(),
       },
     });
@@ -354,11 +364,12 @@ export class RecurringSupportService {
       authority: authorityFromPlan(plan),
       planId: plan.id,
       payload: {
-        version: 1,
+        version: 2,
         action: "cancel",
         subscriptionId: subscription.id,
         planId: plan.id,
         boardroom: plan.boardroom.toLowerCase(),
+        facetSetHash: plan.facetSetHash.toLowerCase(),
         payer: subscription.payer.toLowerCase(),
       },
     });
@@ -508,6 +519,7 @@ export class RecurringSupportService {
         refundAddress: invoice.payer,
         maxSlippageBps: 0,
         amount: invoice.amount,
+        expectedFacetSetHash: plan.facetSetHash,
       });
       try {
         await this.repository.linkInvoiceQuote({
@@ -573,6 +585,7 @@ export class RecurringSupportService {
       chainId: SUPPORT_CHAIN_ID,
       configurationEpoch: input.authority.configurationEpoch,
       controllerGeneration: input.authority.controllerGeneration,
+      facetSetHash: input.authority.facetSetHash,
       planId: input.planId,
       payload: input.payload,
       payloadHash,
@@ -583,6 +596,7 @@ export class RecurringSupportService {
         chainId: SUPPORT_CHAIN_ID,
         challengeId: id,
         expiresAt,
+        facetSetHash: input.authority.facetSetHash,
         origin: this.config.publicOrigin,
         payloadHash,
         planId: input.planId,
@@ -626,6 +640,9 @@ export class RecurringSupportService {
     if (
       hashPayload(challenge.payload).toLowerCase()
         !== challenge.payloadHash.toLowerCase()
+      || typeof challenge.payload.facetSetHash !== "string"
+      || challenge.payload.facetSetHash.toLowerCase()
+        !== challenge.facetSetHash.toLowerCase()
       || buildSupportChallengeMessage({
         action: challenge.action,
         actor: challenge.actor,
@@ -633,6 +650,7 @@ export class RecurringSupportService {
         chainId: challenge.chainId,
         challengeId: challenge.id,
         expiresAt: challenge.expiresAt,
+        facetSetHash: challenge.facetSetHash,
         origin: this.config.publicOrigin,
         payloadHash: challenge.payloadHash,
         planId: challenge.planId,
@@ -702,6 +720,8 @@ export class RecurringSupportService {
       || current.mode !== expected.mode
       || current.controllerGeneration !== expected.controllerGeneration
       || current.configurationEpoch !== expected.configurationEpoch
+      || current.facetSetHash.toLowerCase()
+        !== expected.facetSetHash.toLowerCase()
     ) {
       throw new SupportError(
         "The Boardroom authority changed after this support plan was published.",
@@ -843,6 +863,7 @@ export function buildSupportChallengeMessage(input: {
   chainId: typeof SUPPORT_CHAIN_ID;
   challengeId: string;
   expiresAt: Date;
+  facetSetHash: Hex;
   origin: string;
   payloadHash: Hex;
   planId: string;
@@ -862,6 +883,7 @@ export function buildSupportChallengeMessage(input: {
     `Actor: ${input.actor}`,
     `Chain ID: ${input.chainId}`,
     `Boardroom: ${input.boardroom}`,
+    `Facet set hash: ${input.facetSetHash}`,
     `Plan ID: ${input.planId}`,
     `Payload hash: ${input.payloadHash}`,
     `Challenge ID: ${input.challengeId}`,
@@ -903,6 +925,7 @@ function invoiceMaterializationIsPaused(error: unknown): boolean {
       error.code === "boardroom_not_active"
       || error.code === "support_asset_not_registered"
       || error.code === "support_authority_stale"
+      || error.code === "boardroom_migration_required"
     );
 }
 
@@ -924,6 +947,7 @@ function authorityFromChallenge(
     chainId: SUPPORT_CHAIN_ID,
     configurationEpoch: challenge.configurationEpoch,
     controllerGeneration: challenge.controllerGeneration,
+    facetSetHash: challenge.facetSetHash,
     mode: challenge.authorityMode,
   };
 }
@@ -937,6 +961,7 @@ function authorityFromPlan(plan: SupportPlan): SupportAuthorityIdentity {
     chainId: SUPPORT_CHAIN_ID,
     configurationEpoch: plan.configurationEpoch,
     controllerGeneration: plan.controllerGeneration,
+    facetSetHash: plan.facetSetHash,
     mode: plan.authorityMode,
   };
 }
@@ -948,6 +973,28 @@ function assertPlanMatchesChallenge(
   if (
     plan.id !== challenge.planId
     || plan.boardroom.toLowerCase() !== challenge.boardroom.toLowerCase()
+    || plan.facetSetHash.toLowerCase() !== challenge.facetSetHash.toLowerCase()
+  ) {
+    throw new SupportError(
+      "The recurring-support challenge no longer matches this plan.",
+      "support_challenge_invalid",
+      409,
+    );
+  }
+}
+
+function assertRetirementPlanMatchesChallenge(
+  plan: SupportPlan,
+  challenge: SupportChallenge,
+  payload: z.infer<typeof storedRetirementPayloadSchema>,
+): void {
+  if (
+    plan.id !== challenge.planId
+    || plan.id !== payload.planId
+    || plan.boardroom.toLowerCase() !== challenge.boardroom.toLowerCase()
+    || plan.boardroom.toLowerCase() !== payload.boardroom.toLowerCase()
+    || plan.facetSetHash.toLowerCase()
+      !== payload.planFacetSetHash.toLowerCase()
   ) {
     throw new SupportError(
       "The recurring-support challenge no longer matches this plan.",

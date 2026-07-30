@@ -10,7 +10,7 @@ description: Plain-language definitions for pledge.cash contracts, roles, lifecy
 | Active | Boardroom state in which allowed issuance and participation can continue. It can be pre-launch or launched. |
 | Airdrop manifest | Offchain data that maps a claim index and account to amount, proof, claim mode, and optional grant terms. The root commits to it, but the contract does not publish it. |
 | AMM | Automated market maker that swaps supported ERC20 pairs through a constant-product pool. |
-| Boardroom | Canonical onchain project account, share-token issuer, treasury, policy gateway, and obligation coordinator. |
+| Boardroom | Canonical onchain project account and permanent asset-holding execution gateway whose kernel routes protocol functions through the active facet release. |
 | BoardroomFactory | Deployment root that creates and recognizes canonical Boardrooms. |
 | Boardroom owner | Address with direct pre-launch authority and certain lifecycle powers. Ownership does not survive as direct treasury execution after launch. |
 | Canonical | Proven through the selected chain, deployment, factory, and contract relationships—not merely a matching name. |
@@ -20,6 +20,8 @@ description: Plain-language definitions for pledge.cash contracts, roles, lifecy
 | Deployment artifact | Chain-specific record of current protocol addresses, authority, wiring, and code identity, or an explicit pending status. |
 | Distribution | Boardroom-created fixed sale, Merkle airdrop, or migrating curve that escrows project shares. |
 | Controller | External generation-bound owner that accepts proposer-scheduled operations and enters the Boardroom policy gateway after delay. |
+| Expected facet-set hash | Explicit release hash supplied as the first argument to every state-changing Boardroom call and committed by controller authorizations. A stale value reverts. |
+| Facet-set hash | Commitment to one complete ordered Boardroom release, including selectors, route kinds, facet addresses/code hashes, storage requirements, migration metadata, and human manifest. |
 | Proposer | EOA or ERC-1271 contract authorized by the current controller to schedule operations. |
 | Grant | Contract that escrows existing tokens and releases vested amounts under fixed terms. |
 | Grant-right NFT | ERC721 whose current owner is synchronized as the grant holder while the grant remains live. |
@@ -29,10 +31,12 @@ description: Plain-language definitions for pledge.cash contracts, roles, lifecy
 | Issuer | Account or Boardroom that escrows tokens into a grant and receives paid-settlement proceeds. |
 | Locked liquidity | Boardroom-owned LP principal held in a canonical locker until wind-down exit rules apply. |
 | Merkle proof | Sibling hashes proving one exact leaf belongs to a published Merkle root. |
+| Migration required | Boardroom state after a storage-version activation but before that individual Boardroom has applied the release-pinned atomic migration; ordinary writes are blocked. |
 | Obligation | Recorded grant, distribution, or locker that must close before Boardroom redemptions open. |
 | Payment token | ERC20 paid in a sale or paid grant. It is distinct from the delivered grant token in a paid grant. |
 | Pending deployment | Artifact state that deliberately withholds protocol addresses until a current stack is broadcast and verified. |
 | Policy | Contract that authorizes a bounded Boardroom call or module lifecycle operation. |
+| ProtocolFacetRegistry | Global protocol-governed registry that publishes immutable complete Boardroom releases and atomically activates one release for every Boardroom. |
 | Price | Stored rate per whole delivered token. For paid grants, total settlement cost depends on chosen amount and rounds up. |
 | Provenance | Factory and contract relationships that establish canonical identity. |
 | Redemption credit | Per-holder, per-asset right created when project shares burn; failed asset payouts remain retryable against it. |

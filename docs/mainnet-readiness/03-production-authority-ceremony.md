@@ -25,6 +25,9 @@ development and testnet operation:
   only its owner to consume deterministic release salts.
 - The deployment script transfers selected root contracts to `PLEDGE_CASH_PROTOCOL_GOVERNANCE`, but does not transfer
   the deterministic deployer.
+- Those governed roots include `ProtocolFacetRegistry`. Its owner can publish
+  and atomically activate complete Boardroom releases for every lifecycle
+  state.
 - The environment template recommends using the same deterministic deployment owner on every chain that should share
   root contract addresses.
 - Policy registration, asset and spender admission, fee-recipient rotation, and several AMM controls are immediate
@@ -41,6 +44,7 @@ The ceremony must account for at least these authority classes:
 | --- | --- | --- |
 | Deterministic deployer owner | Deploy the init code assigned to unused release salts | Future release capture, salt occupation, cross-chain drift |
 | Transaction broadcaster | Pay gas and submit deployment/configuration transactions | Failed or reordered ceremony, exposed hot key |
+| Facet-registry owner | Publish and activate Boardroom logic and storage migrations globally | Loss or redirection of every Boardroom asset and redemption path |
 | Protocol governance | Register/disable policies and administer root-owned components | Module censorship or unsafe module admission |
 | Asset-policy owner | Admit approval assets and spenders | Unsafe approvals or denial of supported assets |
 | Protocol treasury | Receive protocol fees and other designated value | Fee loss or custody compromise |
@@ -49,8 +53,12 @@ The ceremony must account for at least these authority classes:
 | Hosting and DNS authority | Publish or withdraw product access | Phishing, stale UI, unavailable emergency communication |
 | Sentinel operator | Operate hosted accounts, indexing, and notifications | Missed alerts, privacy breach, misleading context |
 
-Contract non-upgradeability limits what any emergency authority can do after deployment. The ceremony and incident plan
-must not imply a pause, rollback, or recovery power that does not exist onchain.
+The Boardroom kernel is deliberately release-routed. Protocol governance can
+change Boardroom behavior globally, including during wind-down and redemption,
+but cannot reactivate an old release: rollback requires a higher-numbered
+compatible release. Other immutable roots retain their own limits. The
+ceremony and incident plan must describe those exact powers without implying a
+pause, pin, rollback, or recovery path that does not exist onchain.
 
 ## Threat model
 
@@ -66,6 +74,11 @@ Design and rehearse responses for:
 - reused or unexpectedly occupied salt;
 - wrong wrapped-native, treasury, governance, or fee-manager address;
 - incomplete root-ownership handoff;
+- malicious, mistaken, or incompletely reviewed facet publication/activation;
+- a storage migration that is too expensive or impossible for a terminal
+  Boardroom;
+- emergency rollback calldata whose predecessor, storage layout, or selector
+  table is incompatible;
 - mainnet artifact published before final verification;
 - one chain succeeding while a second chain's ceremony fails;
 - emergency pressure to bypass review or lower a signing threshold;
@@ -91,6 +104,12 @@ broadcasting while preserving deterministic address proofs.
 Decide:
 
 - Safe members, threshold, signer diversity, and hardware-wallet requirements;
+- what staking governor, proposal threshold, quorum, timelock, veto, and
+  emergency process controls facet publication and activation;
+- whether release activation is delayed or restricted during active
+  redemptions;
+- which independent attestations of selectors, facet code hashes, manifests,
+  storage layouts, and migration gas are mandatory before activation;
 - whether policy and asset changes pass through a timelock;
 - which changes, if any, an emergency guardian may make immediately;
 - whether disabling new module calls differs from permitting lifecycle cleanup;
@@ -182,6 +201,8 @@ This blocker is cleared only when all of the following are true:
 - [ ] Every production role has a documented address, owner, purpose, and recovery process.
 - [ ] Durable deterministic release authority is not held by the broadcaster EOA.
 - [ ] Protocol governance and treasury use approved threshold controls.
+- [ ] Facet publication and activation use an approved governor/timelock,
+      independent release attestation, and rehearsed higher-numbered rollback.
 - [ ] Timelock and emergency-power decisions are explicit and reflected in live configuration.
 - [ ] Deployment tooling supports the selected threshold authority without bypassing ownership checks.
 - [ ] The complete ceremony has been rehearsed on the target testnet with the exact release transaction shape.

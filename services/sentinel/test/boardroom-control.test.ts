@@ -24,6 +24,9 @@ const SESSION_COOKIE = "better-auth.session_token=boardroom-control";
 const BOARDROOM = "0x1111111111111111111111111111111111111111" as Address;
 const CONTROLLER = "0x2222222222222222222222222222222222222222" as Address;
 const BLOCK_HASH = `0x${"ab".repeat(32)}` as Hex;
+const FACET_SET_HASH = `0x${"cd".repeat(32)}` as Hex;
+const CONFIGURATION_HASH = `0x${"ef".repeat(32)}` as Hex;
+const STORAGE_LAYOUT_HASH = `0x${"12".repeat(32)}` as Hex;
 
 class StubAuth implements AuthAdapter {
   readonly socialProviders = [];
@@ -98,12 +101,15 @@ class MemoryControlStore implements BoardroomControlStore {
     this.sequence += 1;
     const claim: BoardroomControlClaimRecord = {
       boardroom: challenge.boardroom,
+      boardroomEpoch: challenge.boardroomEpoch,
       chainId: challenge.chainId,
+      configurationHash: challenge.configurationHash,
       configurationEpoch: challenge.configurationEpoch,
       controller: challenge.controller,
       controllerGeneration: challenge.controllerGeneration,
       createdAt: input.now,
       destination: challenge.destination,
+      facetSetHash: challenge.facetSetHash,
       id,
       scope: challenge.scope,
       verifiedBlock: input.verified.blockNumber,
@@ -145,6 +151,9 @@ class StubControlChain implements BoardroomControlChainReader {
     if (this.failure !== undefined) throw this.failure;
     const value = this.snapshots.get(input.expected.chainId);
     if (value === undefined) throw new BoardroomControlChainError("unknown-chain");
+    if (value.facetSetHash.toLowerCase() !== input.expected.facetSetHash.toLowerCase()) {
+      throw new BoardroomControlChainError("stale-facet-set");
+    }
     if (!sameIdentity(value, input.expected)) {
       throw new BoardroomControlChainError("stale-relationship");
     }
@@ -188,10 +197,13 @@ describe("Boardroom-control challenge and claim flow", () => {
     expect(response.domain).toBe("pledge.cash");
     expect(response.identity).toEqual({
       boardroom: BOARDROOM,
+      boardroomEpoch: "5",
       chainId: 31337,
+      configurationHash: CONFIGURATION_HASH,
       configurationEpoch: "7",
       controller: CONTROLLER,
-      controllerGeneration: "3"
+      controllerGeneration: "3",
+      facetSetHash: FACET_SET_HASH
     });
     expect(response.messageHash).toBe(hashMessage(response.message));
 
@@ -210,9 +222,12 @@ describe("Boardroom-control challenge and claim flow", () => {
       "urn:pledge.cash:sentinel:scope:governance%3Awrite",
       "urn:pledge.cash:sentinel:chain-id:31337",
       `urn:pledge.cash:sentinel:boardroom:${BOARDROOM}`,
+      `urn:pledge.cash:sentinel:facet-set-hash:${FACET_SET_HASH}`,
+      "urn:pledge.cash:sentinel:boardroom-epoch:5",
       `urn:pledge.cash:sentinel:controller:${CONTROLLER}`,
       "urn:pledge.cash:sentinel:controller-generation:3",
       "urn:pledge.cash:sentinel:controller-configuration-epoch:7",
+      `urn:pledge.cash:sentinel:controller-configuration-hash:${CONFIGURATION_HASH}`,
       `urn:pledge.cash:sentinel:nonce:${response.nonce}`,
       "urn:pledge.cash:sentinel:issued-at:2026-07-21T12%3A00%3A00.000Z",
       "urn:pledge.cash:sentinel:expiration-time:2026-07-21T12%3A05%3A00.000Z"
@@ -233,9 +248,12 @@ describe("Boardroom-control challenge and claim flow", () => {
       ["governance%3Awrite", "governance%3Aadmin"],
       ["chain-id:31337", "chain-id:1"],
       [BOARDROOM, "0x3333333333333333333333333333333333333333"],
+      [FACET_SET_HASH, `0x${"01".repeat(32)}`],
+      ["boardroom-epoch:5", "boardroom-epoch:6"],
       [CONTROLLER, "0x4444444444444444444444444444444444444444"],
       ["controller-generation:3", "controller-generation:4"],
       ["controller-configuration-epoch:7", "controller-configuration-epoch:8"],
+      [CONFIGURATION_HASH, `0x${"02".repeat(32)}`],
       [challenge.nonce, "controlnonce99999999999999999999"],
       ["2026-07-21T12%3A00%3A00.000Z", "2026-07-21T12%3A00%3A01.000Z"],
       ["2026-07-21T12%3A05%3A00.000Z", "2026-07-21T12%3A06%3A00.000Z"]
@@ -314,7 +332,15 @@ describe("Boardroom-control challenge and claim flow", () => {
     expect(store.claims.size).toBe(2);
   });
 
-  test("fails closed after controller replacement, epoch rotation, or Safe signer change", async () => {
+  test("fails closed after a facet release, controller, epoch, or signer change", async () => {
+    const releaseChallenge = await createChallenge();
+    chain.snapshots.set(31337, {
+      ...snapshot(31337),
+      facetSetHash: `0x${"99".repeat(32)}`
+    });
+    expect((await claim(releaseChallenge.nonce, releaseChallenge.messageHash)).status).toBe(409);
+
+    chain.snapshots.set(31337, snapshot(31337));
     const replacementChallenge = await createChallenge();
     chain.snapshots.set(31337, {
       ...snapshot(31337),
@@ -391,6 +417,8 @@ describe("Boardroom-control challenge and claim flow", () => {
       ["unsupported-release", 422],
       ["non-canonical-boardroom", 422],
       ["stale-relationship", 409],
+      ["stale-facet-set", 409],
+      ["storage-migration-required", 409],
       ["malformed-chain-result", 503],
       ["reorg-uncertainty", 503],
       ["rpc-failure", 503]
@@ -412,10 +440,13 @@ async function createChallenge(overrides: Record<string, unknown> = {}) {
     expirationTime: string;
     identity: {
       boardroom: Address;
+      boardroomEpoch: string;
       chainId: number;
+      configurationHash: Hex;
       configurationEpoch: string;
       controller: Address;
       controllerGeneration: string;
+      facetSetHash: Hex;
     };
     issuedAt: string;
     message: string;
@@ -456,28 +487,43 @@ function authHeaders() {
 
 function snapshot(chainId: number): BoardroomControlSnapshot {
   return {
+    appliedStorageLayoutHash: STORAGE_LAYOUT_HASH,
+    appliedStorageVersion: 1n,
     blockHash: BLOCK_HASH,
     blockNumber: 500n,
     boardroom: BOARDROOM,
+    boardroomEpoch: 5n,
     chainId,
+    configurationHash: CONFIGURATION_HASH,
     configurationEpoch: 7n,
     controller: CONTROLLER,
-    controllerGeneration: 3n
+    controllerGeneration: 3n,
+    facetSetHash: FACET_SET_HASH
   };
 }
 
 function sameIdentity(
   left: Pick<
     BoardroomControlSnapshot,
-    "boardroom" | "chainId" | "configurationEpoch" | "controller" | "controllerGeneration"
+    | "boardroom"
+    | "boardroomEpoch"
+    | "chainId"
+    | "configurationHash"
+    | "configurationEpoch"
+    | "controller"
+    | "controllerGeneration"
+    | "facetSetHash"
   >,
   right: BoardroomControlExpectedIdentity
 ): boolean {
   return (
     left.boardroom.toLowerCase() === right.boardroom.toLowerCase() &&
+    left.boardroomEpoch === right.boardroomEpoch &&
     left.chainId === right.chainId &&
+    left.configurationHash.toLowerCase() === right.configurationHash.toLowerCase() &&
     left.configurationEpoch === right.configurationEpoch &&
     left.controller.toLowerCase() === right.controller.toLowerCase() &&
-    left.controllerGeneration === right.controllerGeneration
+    left.controllerGeneration === right.controllerGeneration &&
+    left.facetSetHash.toLowerCase() === right.facetSetHash.toLowerCase()
   );
 }

@@ -1,12 +1,21 @@
 # Boardroom Protocol
 
-This document describes the candidate Boardroom v5 architecture in `packages/contracts/src/boardroom/`. It is not a
-mainnet-readiness claim. No v5 mainnet deployment exists. The approved bonding-curve terminal policies are implemented,
-but release-candidate proof, production authority ceremony, and independent security assurance remain blockers.
+This document describes the sole canonical Boardroom architecture in
+`packages/contracts/src/boardroom/`. Boardrooms are deterministic clones of a
+small asset-holding kernel whose functions are supplied by the global
+`ProtocolFacetRegistry`. Both target-testnet artifacts are pending, and no
+mainnet deployment exists. Final exact-head acceptance, a target-chain
+ceremony, and independent security assurance remain separate blockers.
 
 ## Authority model
 
 A Boardroom is a canonical treasury, share-token issuer, policy gateway, obligation registry, and redemption account.
+
+Protocol governance controls the registry that selects Boardroom behavior.
+Boardroom owners and controllers cannot install or pin facets. Registry
+activation changes routing globally and remains possible during every
+lifecycle phase, so the registry owner is ultimately authoritative over
+Boardroom assets and redemption behavior.
 
 Before launch:
 
@@ -28,9 +37,40 @@ The `BoardroomFactory` constructs one immutable `BoardroomControllerFactory`, th
 implementation with that factory reference. The controller factory deploys only for a canonical Boardroom registered by
 its bound Boardroom factory and only during that Boardroom's explicit deployment-authorization window.
 
+## Release binding and migration
+
+Every state-changing Boardroom function takes
+`bytes32 expectedFacetSetHash` as its first ABI argument. The kernel requires
+that value to equal the registry's active hash and requires the Boardroom's
+applied storage version and layout commitment to match the active release
+before delegating. SDK transaction and authorization builders require callers
+to provide the hash explicitly.
+
+Controller operation IDs, schedules, and signatures also commit the expected
+hash. Module callbacks into a Boardroom carry an explicit hash rather than one
+read from the Boardroom in the same frame: entrypoints reachable without going
+through a Boardroom — curve migration and settlement, airdrop claims, and the
+factory callbacks they trigger — take the hash from their own caller, while
+callbacks made inside a Boardroom-initiated frame inherit the hash that frame
+already bound and that the kernel re-verifies before returning. Share-token
+transfers are the one exception: the ERC-20 surface carries no hash, so the
+primary-market guard runs under whichever facet set is active at execution.
+A global release activation therefore invalidates stale direct calls,
+callbacks, queued operations, and offchain authorizations rather than silently
+executing them under new logic.
+
+When a release raises the required storage version, views remain
+backward-safe, but ordinary writes on each Boardroom revert until anyone runs
+the release-pinned migration. Every migration-bearing release uses the
+permanent `migrateBoardroom(bytes32)` entrypoint (`0x6f774fc9`), while the
+registry pins the release-specific facet implementation. Migration is atomic,
+independently applied per Boardroom, and post-verified against the exact target
+version and layout. Release publication alone causes no downtime.
+
 ## Launch
 
-`launch(LaunchConfig)` binds all launch-critical values in calldata:
+`launch(bytes32, LaunchConfig)` binds the active facet-set hash and all
+launch-critical values in calldata:
 
 - proposer;
 - predicted controller;
@@ -59,6 +99,7 @@ Only the current proposer can schedule operations. Anyone can execute a ready, u
 A Boardroom operation commits to:
 
 - Boardroom address;
+- expected facet-set hash;
 - the complete ordered call batch;
 - user salt;
 - Boardroom governance epoch;
@@ -90,11 +131,15 @@ The controller implements ERC-1271 only as an offchain authority proof:
 - a contract proposer is checked recursively through ERC-1271;
 - validation never schedules, cancels, or executes governance.
 
-Sentinel uses a separate Boardroom-control claim flow. It hashes the exact serialized SIWE message with EIP-191 and
-binds audience/domain, destination user or organization, scope, chain ID, Boardroom, controller, generation,
-configuration epoch, nonce, issued time, and expiry. Canonical topology reads, block-hash confirmation, and the
-ERC-1271 call use one pinned finalized block. Nonce consumption and claim creation are atomic. Every privileged
-offchain Boardroom write requires a fresh nonce and proof; a Better Auth session establishes user identity only.
+Sentinel uses a separate Boardroom-control claim flow. It hashes the exact
+serialized SIWE message with EIP-191 and binds audience/domain, destination
+user or organization, scope, chain ID, Boardroom, active facet-set hash,
+Boardroom epoch, controller, generation, configuration epoch/hash, nonce,
+issued time, and expiry. Complete release/topology reads, block-hash
+confirmation, and the ERC-1271 call use one pinned finalized block. Migration
+downtime fails closed. Nonce consumption and claim creation are atomic. Every
+privileged offchain Boardroom write requires a fresh nonce and proof; a Better
+Auth session establishes user identity only.
 
 ## Lifecycle and obligations
 
@@ -132,10 +177,13 @@ capacity. Wind-down cannot begin snapshotting until:
 - singleton protocol liquidity is closed;
 - treasury-share handling is complete.
 
-`beginSnapshot` freezes the registry length and redemption supply, entering `Snapshotting`. It also freezes asset
-registration, liquidity mutation, and treasury-share treatment. Anyone can call `snapshotAssets(maximum)` with a
-bounded page size. Each asset is marked snapshotted or explicitly unreadable. `openRedemptions` succeeds only after
-the frozen registry is completely processed.
+`beginSnapshot(expectedFacetSetHash)` freezes the registry length and
+redemption supply, entering `Snapshotting`. It also freezes asset registration,
+liquidity mutation, and treasury-share treatment. Anyone can call
+`snapshotAssets(expectedFacetSetHash, maximum)` with a bounded page size. Each
+asset is marked snapshotted or explicitly unreadable.
+`openRedemptions(expectedFacetSetHash)` succeeds only after the frozen registry
+is completely processed.
 
 In `RedemptionsOpen`, burned shares create per-holder credits. Each asset can be claimed independently, so one hostile
 asset cannot roll back unrelated payouts. Excess above the frozen accounting is sweepable only to the preserved

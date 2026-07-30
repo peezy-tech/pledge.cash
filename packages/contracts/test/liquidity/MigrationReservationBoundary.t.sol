@@ -39,6 +39,7 @@ contract ReservationBoardroomFactory {
 contract ReservationBoardroom {
     address public immutable policyRegistry;
     address public immutable shareToken;
+    bytes32 public constant facetSetHash = keccak256("migration-reservation-boardroom-release");
     mapping(address => bool) public isIssuedDistribution;
 
     address public permanentQuoteAsset;
@@ -60,6 +61,7 @@ contract ReservationBoardroom {
     }
 
     function precommitProtocolLiquidity(
+        bytes32 expectedFacetSetHash,
         address expectedLocker,
         address quoteAsset,
         address curve,
@@ -67,6 +69,7 @@ contract ReservationBoardroom {
         bytes32 salt,
         uint64
     ) external {
+        require(expectedFacetSetHash == facetSetHash);
         if (permanentQuoteAsset != address(0) || pendingCurve != address(0)) {
             revert PrimaryMarketAlreadyCommitted();
         }
@@ -77,7 +80,13 @@ contract ReservationBoardroom {
         pendingSalt = salt;
     }
 
-    function releaseProtocolLiquidityReservation(address curve, bytes32 pairKey, bytes32 salt) external {
+    function releaseProtocolLiquidityReservation(
+        bytes32 expectedFacetSetHash,
+        address curve,
+        bytes32 pairKey,
+        bytes32 salt
+    ) external {
+        require(expectedFacetSetHash == facetSetHash);
         if (curve != pendingCurve || pairKey != pendingPairKey || salt != pendingSalt) revert ReservationMismatch();
         pendingCurve = address(0);
         pendingLocker = address(0);
@@ -85,9 +94,21 @@ contract ReservationBoardroom {
         pendingSalt = bytes32(0);
     }
 
-    function activateProtocolLiquidity(address, address, address, address, bytes32, bytes32) external {}
+    function activateProtocolLiquidity(
+        bytes32 expectedFacetSetHash,
+        address,
+        address,
+        address,
+        address,
+        bytes32,
+        bytes32
+    ) external pure {
+        require(expectedFacetSetHash == facetSetHash);
+    }
 
-    function closeProtocolLiquidityFromFactory(address) external {}
+    function closeProtocolLiquidityFromFactory(bytes32 expectedFacetSetHash, address) external pure {
+        require(expectedFacetSetHash == facetSetHash);
+    }
 
     function liquidityMutationAllowed() external pure returns (bool) {
         return true;
@@ -118,7 +139,9 @@ contract ReservationDistribution {
     }
 
     function release(LockedLiquidityFactory liquidityFactory) external {
-        liquidityFactory.releaseMigrationReservation(boardroom, shareToken, quoteToken, migrationSalt);
+        liquidityFactory.releaseMigrationReservation(
+            ReservationBoardroom(boardroom).facetSetHash(), boardroom, shareToken, quoteToken, migrationSalt
+        );
     }
 }
 
@@ -131,7 +154,14 @@ contract ReservationDistributionFactory {
         bytes32 salt
     ) external returns (ReservationDistribution distribution) {
         distribution = new ReservationDistribution(boardroom, shareToken, quoteToken, salt);
-        liquidityFactory.reserveMigration(boardroom, address(distribution), shareToken, quoteToken, salt);
+        liquidityFactory.reserveMigration(
+            ReservationBoardroom(boardroom).facetSetHash(),
+            boardroom,
+            address(distribution),
+            shareToken,
+            quoteToken,
+            salt
+        );
     }
 }
 

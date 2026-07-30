@@ -14,6 +14,7 @@ const payer = "0x00000000000000000000000000000000000000A1" as const;
 const router = "0x00000000000000000000000000000000000000B1" as const;
 const usdc = "0x00000000000000000000000000000000000000C1" as const;
 const shares = "0x00000000000000000000000000000000000000D1" as const;
+const facetSetHash = `0x${"aa".repeat(32)}` as const;
 const callData = encodeFunctionData({
   abi: ammRouterAbi,
   functionName: "swapExactTokensForTokens",
@@ -161,13 +162,14 @@ describe("canonical execution policy", () => {
     const supportCall = encodeFunctionData({
       abi: boardroomAbi,
       functionName: "contributeTreasuryAsset",
-      args: [usdc, 1_000_000n, 1_700_000_060n],
+      args: [facetSetHash, usdc, 1_000_000n, 1_700_000_060n],
     });
     const supportQuote: MarketplaceQuote = {
       ...quote(),
       id: "support-quote",
       kind: "recurring_support",
       canonicalTarget: payer,
+      facetSetHash,
       supportInvoiceId: "00000000-0000-4000-8000-000000000001",
       maxSlippageBps: 0,
       execution: {
@@ -231,7 +233,7 @@ describe("canonical execution policy", () => {
     const divertedCall = encodeFunctionData({
       abi: boardroomAbi,
       functionName: "contributeTreasuryAsset",
-      args: [shares, 1_000_000n, 1_700_000_060n],
+      args: [facetSetHash, shares, 1_000_000n, 1_700_000_060n],
     });
     const diverted = {
       ...supportQuote,
@@ -256,6 +258,42 @@ describe("canonical execution policy", () => {
         intent: {
           ...supportContext.intent,
           callData: divertedCall,
+        },
+      } as never),
+    ).resolves.toEqual({ allowed: false });
+
+    const staleFacetCall = encodeFunctionData({
+      abi: boardroomAbi,
+      functionName: "contributeTreasuryAsset",
+      args: [
+        `0x${"bb".repeat(32)}`,
+        usdc,
+        1_000_000n,
+        1_700_000_060n,
+      ],
+    });
+    await expect(
+      createMarketplaceExecutionPolicy(
+        {
+          ...repository,
+          async get() {
+            return {
+              ...supportQuote,
+              execution: {
+                ...supportQuote.execution,
+                callData: staleFacetCall,
+                callDataHash: keccak256(staleFacetCall),
+              },
+            };
+          },
+        },
+        canonical,
+        recurringSupport,
+      )({
+        ...supportContext,
+        intent: {
+          ...supportContext.intent,
+          callData: staleFacetCall,
         },
       } as never),
     ).resolves.toEqual({ allowed: false });

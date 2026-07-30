@@ -160,6 +160,7 @@ export const scheduledOperations = pgTable(
     operationKind: governanceOperationKindEnum("operation_kind").notNull().default("boardroom"),
     controllerGeneration: bigint("controller_generation", { mode: "bigint" }).notNull().default(sql`0`),
     configurationEpoch: bigint("configuration_epoch", { mode: "bigint" }).notNull().default(sql`0`),
+    facetSetHash: text("facet_set_hash").notNull(),
     eta: timestamp("eta", { withTimezone: true }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     boardroomEpoch: bigint("epoch", { mode: "bigint" }),
@@ -600,9 +601,12 @@ export const boardroomControlChallenges = pgTable(
     scope: text("scope").notNull(),
     chainId: integer("chain_id").notNull(),
     boardroom: text("boardroom").notNull(),
+    boardroomEpoch: bigint("boardroom_epoch", { mode: "bigint" }).notNull(),
     controller: text("controller").notNull(),
     controllerGeneration: bigint("controller_generation", { mode: "bigint" }).notNull(),
+    configurationHash: text("configuration_hash").notNull(),
     configurationEpoch: bigint("configuration_epoch", { mode: "bigint" }).notNull(),
+    facetSetHash: text("facet_set_hash").notNull(),
     issuedBlock: bigint("issued_block", { mode: "bigint" }).notNull(),
     issuedBlockHash: text("issued_block_hash").notNull(),
     audience: text("audience").notNull(),
@@ -623,8 +627,11 @@ export const boardroomControlChallenges = pgTable(
     identityIdx: index("boardroom_control_challenges_identity_idx").on(
       table.chainId,
       table.boardroom,
+      table.facetSetHash,
+      table.boardroomEpoch,
       table.controller,
       table.controllerGeneration,
+      table.configurationHash,
       table.configurationEpoch
     ),
     requesterIdx: index("boardroom_control_challenges_requester_idx").on(
@@ -650,9 +657,12 @@ export const boardroomControlClaims = pgTable(
     scope: text("scope").notNull(),
     chainId: integer("chain_id").notNull(),
     boardroom: text("boardroom").notNull(),
+    boardroomEpoch: bigint("boardroom_epoch", { mode: "bigint" }).notNull(),
     controller: text("controller").notNull(),
     controllerGeneration: bigint("controller_generation", { mode: "bigint" }).notNull(),
+    configurationHash: text("configuration_hash").notNull(),
     configurationEpoch: bigint("configuration_epoch", { mode: "bigint" }).notNull(),
+    facetSetHash: text("facet_set_hash").notNull(),
     verifiedBlock: bigint("verified_block", { mode: "bigint" }).notNull(),
     verifiedBlockHash: text("verified_block_hash").notNull(),
     messageHash: text("message_hash").notNull(),
@@ -668,8 +678,11 @@ export const boardroomControlClaims = pgTable(
     identityIdx: index("boardroom_control_claims_identity_idx").on(
       table.chainId,
       table.boardroom,
+      table.facetSetHash,
+      table.boardroomEpoch,
       table.controller,
       table.controllerGeneration,
+      table.configurationHash,
       table.configurationEpoch,
       table.createdAt
     )

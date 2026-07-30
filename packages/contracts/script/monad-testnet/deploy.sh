@@ -66,27 +66,7 @@ if [[ ! "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
   echo "Could not resolve an exact source commit." >&2
   exit 1
 fi
-if [[ "${PLEDGE_CASH_ALLOW_998_DEPLOYMENT_OUTPUTS:-0}" == "1" ]]; then
-  if ! git -C "$REPO_DIR" diff --quiet HEAD -- . \
-    ':(exclude)packages/contracts/deployments/998.json' \
-    ':(exclude)packages/contracts/deployments/998.receipts.json'; then
-    echo "Refusing to deploy with changes beyond the preceding HyperEVM deployment outputs." >&2
-    exit 1
-  fi
-  unexpected_untracked="$(
-    git -C "$REPO_DIR" ls-files --others --exclude-standard \
-      | while IFS= read -r path; do
-          if [[ "$path" != "packages/contracts/deployments/998.receipts.json" ]]; then
-            printf '%s\n' "$path"
-          fi
-        done
-  )"
-  if [[ -n "$unexpected_untracked" ]]; then
-    echo "Refusing to deploy with untracked files beyond the preceding HyperEVM receipt manifest:" >&2
-    printf '%s\n' "$unexpected_untracked" >&2
-    exit 1
-  fi
-elif [[ -n "$(git -C "$REPO_DIR" status --porcelain --untracked-files=normal)" ]]; then
+if [[ -n "$(git -C "$REPO_DIR" status --porcelain --untracked-files=normal)" ]]; then
   echo "Refusing to deploy from a dirty worktree." >&2
   exit 1
 fi
@@ -141,6 +121,9 @@ if [[ "$BROADCAST" == "1" ]]; then
   ARTIFACT="$DEPLOYMENT_ARTIFACT_PATH" RECEIPTS="$DEPLOYMENT_RECEIPTS_PATH" \
     RPC_URL="$RPC_URL" REQUIRE_DEPLOYMENT=1 \
     script/monad-testnet/verify-artifact.sh
-  mv "$DEPLOYMENT_RECEIPTS_PATH" deployments/10143.receipts.json
-  mv "$DEPLOYMENT_ARTIFACT_PATH" deployments/10143.json
+  echo "Verified candidate retained at $DEPLOYMENT_ARTIFACT_PATH"
+  echo "Receipt evidence retained at $DEPLOYMENT_RECEIPTS_PATH"
+  echo "Promotion to deployments/10143.json is a separate, explicit release decision."
+else
+  script/monad-testnet/verify-artifact.sh
 fi

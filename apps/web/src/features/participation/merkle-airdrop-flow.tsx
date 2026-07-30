@@ -133,6 +133,7 @@ export function MerkleAirdropFlow({
     account,
     airdrop: state?.address,
     amount: amount.value,
+    expectedFacetSetHash: dashboard.snapshot.facetSetHash,
     grantTerms: mode === "grant" ? grantTerms.value : undefined,
     index: index.value,
     mode,
@@ -146,6 +147,7 @@ export function MerkleAirdropFlow({
     account,
     airdrop: state?.address,
     chainId,
+    expectedFacetSetHash: dashboard.snapshot.facetSetHash,
     merkleRoot: state?.merkleRoot,
     rawTicket: claimTicketInput,
   });
@@ -190,6 +192,7 @@ export function MerkleAirdropFlow({
         account: ticket.account,
         airdrop: ticket.airdrop,
         amount: ticket.amount,
+        expectedFacetSetHash: dashboard.snapshot.facetSetHash,
         grantTerms: ticket.grantTerms,
         index: ticket.index,
         mode: ticket.mode,
@@ -295,6 +298,7 @@ export function MerkleAirdropFlow({
     index: index.value,
     indexError: index.error,
     mode,
+    migrationRequired: dashboard.snapshot.migrationRequired,
     proofError: proof.error,
     state,
   });
@@ -309,11 +313,15 @@ export function MerkleAirdropFlow({
     if (!account || index.value === undefined || amount.value === undefined || proof.value === undefined) {
       throw new Error("Complete the allocation details before claiming.");
     }
+    if (dashboard.snapshot.migrationRequired) {
+      throw new Error("This Boardroom must be migrated before its airdrop can accept claims.");
+    }
     const actionTicket = actionGuard.capture();
     const claimedAllocation = { airdrop: state.address, index: index.value, ticket: actionTicket };
     if (mode === "direct") {
       await submitTransaction("Direct airdrop claim", buildMerkleAirdropClaimTransaction({
         airdrop: state.address,
+        expectedFacetSetHash: dashboard.snapshot.facetSetHash,
         index: index.value,
         account,
         amount: amount.value,
@@ -323,6 +331,7 @@ export function MerkleAirdropFlow({
       if (!grantTerms.value) throw new Error(grantTerms.error ?? "Grant terms are incomplete.");
       await submitTransaction("Vested airdrop claim", buildMerkleAirdropGrantClaimTransaction({
         airdrop: state.address,
+        expectedFacetSetHash: dashboard.snapshot.facetSetHash,
         index: index.value,
         account,
         amount: amount.value,
@@ -560,6 +569,7 @@ export function merkleAirdropActionIdentity(input: {
   account: `0x${string}` | undefined;
   airdrop: `0x${string}` | undefined;
   amount: bigint | undefined;
+  expectedFacetSetHash: `0x${string}` | undefined;
   grantTerms: MerkleAirdropGrantClaimTerms | undefined;
   index: bigint | undefined;
   mode: ClaimMode;
@@ -570,6 +580,7 @@ export function merkleAirdropActionIdentity(input: {
     input.account?.toLowerCase() ?? "",
     input.airdrop?.toLowerCase() ?? "",
     input.amount?.toString() ?? "",
+    input.expectedFacetSetHash?.toLowerCase() ?? "",
     input.index?.toString() ?? "",
     input.mode,
     input.proof?.join(",").toLowerCase() ?? "",
@@ -684,9 +695,11 @@ function airdropBlocker(input: {
   index: bigint | undefined;
   indexError: string | undefined;
   mode: ClaimMode;
+  migrationRequired: boolean;
   proofError: string | undefined;
   state: MerkleAirdropState;
 }): string | undefined {
+  if (input.migrationRequired) return "This Boardroom must be migrated before its airdrop can accept claims.";
   if (input.boardroomStatus !== 0) return "This project is no longer active, so its airdrop cannot accept claims.";
   if (input.state.airdropStatus !== 0 || input.state.closed) return "This airdrop is closed.";
   const window = unixWindowStatus(input.state.startTime, input.state.endTime);

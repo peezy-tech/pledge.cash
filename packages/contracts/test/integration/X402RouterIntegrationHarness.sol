@@ -33,18 +33,197 @@ contract X402RouterTestToken is ERC20 {
 
 contract X402RouterTestBoardroom {
     address public immutable shareToken;
+    address public immutable paymentToken;
+    bytes32 public immutable facetSetHash;
     uint8 public status;
+    uint256 public contributionCount;
 
-    constructor(address shareToken_) {
+    constructor(address shareToken_, address paymentToken_, bytes32 facetSetHash_) {
         shareToken = shareToken_;
+        paymentToken = paymentToken_;
+        facetSetHash = facetSetHash_;
+    }
+
+    function migrationRequired() external pure returns (bool) {
+        return false;
+    }
+
+    function isRedeemableAsset(address asset) external view returns (bool) {
+        return asset == paymentToken;
+    }
+
+    function contributeTreasuryAsset(bytes32 expectedFacetSetHash, address asset, uint256 amount, uint256 deadline)
+        external
+    {
+        require(expectedFacetSetHash == facetSetHash, "facet set mismatch");
+        require(asset == paymentToken, "unsupported asset");
+        require(deadline >= block.timestamp, "expired");
+        require(ERC20(asset).transferFrom(msg.sender, address(this), amount), "contribution transfer");
+        contributionCount += 1;
     }
 }
 
 contract X402RouterTestBoardroomFactory {
+    address public immutable facetRegistry;
+    address public immutable boardroomKernelLogic;
+    address public controllerFactory;
+    address public governanceLogic;
+    address public marketLogic;
+    address public redemptionPayoutLogic;
     mapping(address => bool) public isBoardroom;
+
+    constructor(address facetRegistry_, address boardroomKernelLogic_) {
+        facetRegistry = facetRegistry_;
+        boardroomKernelLogic = boardroomKernelLogic_;
+    }
+
+    function configureDependencies(
+        address controllerFactory_,
+        address governanceLogic_,
+        address marketLogic_,
+        address redemptionPayoutLogic_
+    ) external {
+        require(controllerFactory == address(0), "already configured");
+        controllerFactory = controllerFactory_;
+        governanceLogic = governanceLogic_;
+        marketLogic = marketLogic_;
+        redemptionPayoutLogic = redemptionPayoutLogic_;
+    }
 
     function register(address boardroom_) external {
         isBoardroom[boardroom_] = true;
+    }
+}
+
+contract X402RouterTestFacetRegistry {
+    struct Facet {
+        address facetAddress;
+        bytes4[] functionSelectors;
+    }
+
+    bytes4 internal constant TEST_SELECTOR = bytes4(keccak256("releaseView()"));
+    bytes32 internal constant KERNEL_SELECTOR_SET_HASH = keccak256("x402-router-integration-kernel-selectors");
+    bytes32 internal constant STORAGE_LAYOUT_HASH = keccak256("x402-router-integration-storage-layout");
+    bytes32 internal constant MANIFEST_HASH = keccak256("x402-router-integration-manifest");
+
+    bytes32 public immutable activeFacetSetHash;
+    address public immutable owner;
+    address public immutable testFacet;
+
+    constructor(bytes32 activeFacetSetHash_, address testFacet_) {
+        activeFacetSetHash = activeFacetSetHash_;
+        owner = msg.sender;
+        testFacet = testFacet_;
+    }
+
+    function activeRelease() external pure returns (uint64) {
+        return 1;
+    }
+
+    function activeStorageVersion() external pure returns (uint64) {
+        return 1;
+    }
+
+    function activeStorageLayoutHash() external pure returns (bytes32) {
+        return STORAGE_LAYOUT_HASH;
+    }
+
+    function kernelSelectorSetHash() external pure returns (bytes32) {
+        return KERNEL_SELECTOR_SET_HASH;
+    }
+
+    function facetSetMetadata(bytes32 facetSetHash)
+        external
+        view
+        returns (
+            bool published,
+            uint64 release,
+            uint64 requiredStorageVersion,
+            bytes32 predecessorFacetSetHash,
+            bytes32 storageLayoutHash,
+            bytes32 manifestHash,
+            address migrationFacet,
+            bytes4 migrationSelector,
+            uint256 selectorCount
+        )
+    {
+        published = facetSetHash == activeFacetSetHash;
+        release = 1;
+        requiredStorageVersion = 1;
+        predecessorFacetSetHash = bytes32(0);
+        storageLayoutHash = STORAGE_LAYOUT_HASH;
+        manifestHash = MANIFEST_HASH;
+        migrationFacet = address(0);
+        migrationSelector = bytes4(0);
+        selectorCount = 1;
+    }
+
+    function facetSetSelectors(bytes32 facetSetHash) external view returns (bytes4[] memory selectors) {
+        require(facetSetHash == activeFacetSetHash, "unknown release");
+        selectors = new bytes4[](1);
+        selectors[0] = TEST_SELECTOR;
+    }
+
+    function facetSetRoute(bytes32 facetSetHash, bytes4 selector)
+        external
+        view
+        returns (address facet, bytes32 codeHash, uint8 kind)
+    {
+        require(facetSetHash == activeFacetSetHash && selector == TEST_SELECTOR, "unknown route");
+        facet = testFacet;
+        codeHash = testFacet.codehash;
+        kind = 0;
+    }
+
+    function route(bytes4 selector)
+        external
+        view
+        returns (address facet, bytes32 codeHash, uint8 kind, uint64 requiredStorageVersion)
+    {
+        require(selector == TEST_SELECTOR, "unknown route");
+        facet = testFacet;
+        codeHash = testFacet.codehash;
+        kind = 0;
+        requiredStorageVersion = 1;
+    }
+
+    function facets() external view returns (Facet[] memory facetList) {
+        facetList = new Facet[](1);
+        bytes4[] memory selectors = new bytes4[](1);
+        selectors[0] = TEST_SELECTOR;
+        facetList[0] = Facet({facetAddress: testFacet, functionSelectors: selectors});
+    }
+}
+
+contract X402RouterTestBoardroomKernel {
+    bytes32 internal constant KERNEL_SELECTOR_SET_HASH = keccak256("x402-router-integration-kernel-selectors");
+
+    address public immutable facetRegistry;
+
+    constructor(address facetRegistry_) {
+        facetRegistry = facetRegistry_;
+    }
+
+    function kernelSelectorSetHash() external pure returns (bytes32) {
+        return KERNEL_SELECTOR_SET_HASH;
+    }
+}
+
+contract X402RouterTestFacet {
+    function releaseView() external pure returns (bool) {
+        return true;
+    }
+}
+
+contract X402RouterTestDependency {}
+
+contract X402RouterTestControllerFactory {
+    address public immutable boardroomFactory;
+    address public immutable controllerImplementation;
+
+    constructor(address boardroomFactory_, address controllerImplementation_) {
+        boardroomFactory = boardroomFactory_;
+        controllerImplementation = controllerImplementation_;
     }
 }
 
@@ -92,12 +271,14 @@ contract X402RouterTestAmmRouter {
 }
 
 contract X402RouterTestAmmFactory {
+    address public immutable owner;
     address public immutable liquidityRouter;
     address public immutable pool;
     address public immutable tokenA;
     address public immutable tokenB;
 
     constructor(address liquidityRouter_, address pool_, address tokenA_, address tokenB_) {
+        owner = msg.sender;
         liquidityRouter = liquidityRouter_;
         pool = pool_;
         tokenA = tokenA_;
@@ -188,7 +369,15 @@ contract X402RouterTestDistributionFactory {
 }
 
 contract X402RouterIntegrationHarness {
+    bytes32 public constant FACET_SET_HASH = keccak256("x402-router-integration-release");
+    X402RouterTestFacetRegistry public immutable protocolFacetRegistry;
+    X402RouterTestBoardroomKernel public immutable boardroomKernel;
     X402RouterTestBoardroomFactory public immutable boardroomFactory;
+    X402RouterTestControllerFactory public immutable boardroomControllerFactory;
+    X402RouterTestDependency public immutable boardroomControllerLogic;
+    X402RouterTestDependency public immutable boardroomGovernanceLogic;
+    X402RouterTestDependency public immutable boardroomMarketLogic;
+    X402RouterTestDependency public immutable boardroomRedemptionPayout;
     X402RouterTestToken public immutable paymentToken;
     X402RouterTestToken public immutable shareToken;
     X402RouterTestBoardroom public immutable boardroom;
@@ -199,10 +388,25 @@ contract X402RouterIntegrationHarness {
     X402RouterTestFixedPriceSale public immutable fixedPriceSale;
 
     constructor() {
-        boardroomFactory = new X402RouterTestBoardroomFactory();
+        X402RouterTestFacet testFacet = new X402RouterTestFacet();
+        protocolFacetRegistry = new X402RouterTestFacetRegistry(FACET_SET_HASH, address(testFacet));
+        boardroomKernel = new X402RouterTestBoardroomKernel(address(protocolFacetRegistry));
+        boardroomFactory = new X402RouterTestBoardroomFactory(address(protocolFacetRegistry), address(boardroomKernel));
+        boardroomControllerLogic = new X402RouterTestDependency();
+        boardroomGovernanceLogic = new X402RouterTestDependency();
+        boardroomMarketLogic = new X402RouterTestDependency();
+        boardroomRedemptionPayout = new X402RouterTestDependency();
+        boardroomControllerFactory =
+            new X402RouterTestControllerFactory(address(boardroomFactory), address(boardroomControllerLogic));
+        boardroomFactory.configureDependencies(
+            address(boardroomControllerFactory),
+            address(boardroomGovernanceLogic),
+            address(boardroomMarketLogic),
+            address(boardroomRedemptionPayout)
+        );
         paymentToken = new X402RouterTestToken("Test USDC", "USDC", 6);
         shareToken = new X402RouterTestToken("Test Project Share", "SHARE", 18);
-        boardroom = new X402RouterTestBoardroom(address(shareToken));
+        boardroom = new X402RouterTestBoardroom(address(shareToken), address(paymentToken), FACET_SET_HASH);
         boardroomFactory.register(address(boardroom));
         pool = new X402RouterTestPool();
         ammRouter = new X402RouterTestAmmRouter(address(paymentToken), address(shareToken), address(pool));

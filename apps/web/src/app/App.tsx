@@ -1,12 +1,13 @@
 import {
-  boardroomAbi,
   boardroomControllerAbi,
-  boardroomFactoryAbi,
   assertLiveBoardroomControlRelease,
+  assertLiveProtocolFacetRelease,
   buildBoardroomBondMarketBatch,
   buildBoardroomBondMarketCloseAction,
+  buildBoardroomBeginSnapshotTransaction,
   buildBoardroomBurnTreasurySharesTransaction,
   buildBoardroomClaimRedemptionAssetTransaction,
+  buildBoardroomCreateTransaction,
   buildBoardroomExecuteTransaction,
   buildBoardroomDutchAuctionBatch,
   buildBoardroomDutchAuctionCancelAction,
@@ -39,6 +40,7 @@ import {
   buildMigratingBondingCurveRecoverQuoteTransaction,
   buildMigratingBondingCurveVetoForfeitureTransaction,
   buildBoardroomMintCall,
+  buildBoardroomMigrateTransaction,
   buildBoardroomOpenRedemptionsTransaction,
   buildBoardroomPruneObligationTransaction,
   buildBoardroomPruneObligationsTransaction,
@@ -46,6 +48,7 @@ import {
   buildBoardroomRegisterRedeemableAssetTransaction,
   buildBoardroomReplaceControllerCall,
   buildBoardroomShareGrantIssuanceBatch,
+  buildBoardroomSnapshotAssetsTransaction,
   buildBoardroomStartWindDownTransaction,
   buildDirectGrantCreationTransaction,
   buildDutchAuctionFinalizeTransaction,
@@ -2436,6 +2439,23 @@ export function App(): React.JSX.Element {
     }
   };
 
+  const requireWritableBoardroomFacetSetHash = async (
+    boardroom: Address,
+    preparedFacetSetHash?: Hex,
+  ): Promise<Hex> => {
+    const proof = await assertLiveBoardroomControlRelease(publicClient, deployment, boardroom);
+    if (proof.migrationRequired) {
+      throw new Error("This Boardroom must be migrated to the active protocol release before it can accept writes.");
+    }
+    if (
+      preparedFacetSetHash
+      && proof.facetSetHash.toLowerCase() !== preparedFacetSetHash.toLowerCase()
+    ) {
+      throw new Error("The Boardroom release changed after this operation was prepared. Refresh and review it again.");
+    }
+    return proof.facetSetHash;
+  };
+
   const submitBoardroomExecution = async (
     label: string,
     boardroom: {
@@ -2444,20 +2464,27 @@ export function App(): React.JSX.Element {
       controllerConfigurationEpoch: bigint;
       governanceEpoch: bigint;
       launched: boolean;
+      facetSetHash: Hex;
+      migrationRequired: boolean;
       proposer: Address;
       status: number;
     },
     request: Record<string, unknown>,
     actionGuard?: TransactionActionGuard,
   ): Promise<"execute" | "schedule" | "windDown"> => {
-    await assertLiveBoardroomControlRelease(publicClient, deployment, boardroom.address);
+    const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
+      boardroom.address,
+      boardroom.facetSetHash,
+    );
     const calls = boardroomCallsFromExecution(request);
     const plan = planBoardroomCallExecution({
       boardroom: boardroom.address,
+      expectedFacetSetHash,
       calls,
       lifecycle: {
         launched: boardroom.launched,
         status: boardroom.status,
+        migrationRequired: false,
         controller: boardroom.controller,
         governanceEpoch: boardroom.governanceEpoch,
         controllerConfigurationEpoch: boardroom.controllerConfigurationEpoch,
@@ -3143,7 +3170,13 @@ export function App(): React.JSX.Element {
       await submitBoardroomExecution(
         `${successMessage} through Boardroom`,
         issuerBoardroom,
-        buildGrantIssuerBoardroomAction({ boardroom: issuer, policy: factory, grant, functionName }),
+        buildGrantIssuerBoardroomAction({
+          boardroom: issuer,
+          expectedFacetSetHash: issuerBoardroom.facetSetHash,
+          policy: factory,
+          grant,
+          functionName,
+        }),
       );
       return;
     }
@@ -3181,6 +3214,10 @@ export function App(): React.JSX.Element {
 
   const createBoardroom = async (): Promise<void> => {
     const factory = requireDeploymentAddress(deployment?.boardroomFactory, "BoardroomFactory");
+    if (!boardroomControlSupport.supported) {
+      throw new Error(boardroomControlSupport.reason ?? "The canonical Boardroom release is unavailable.");
+    }
+    const release = await assertLiveProtocolFacetRelease(publicClient, deployment);
     const owner = requireAddress(boardroomForm.owner, "Boardroom owner");
     const salt = requireBytes32(boardroomForm.salt, "Boardroom salt");
     const predicted = await sdkPredictBoardroomAddress(publicClient, {
@@ -3190,16 +3227,42 @@ export function App(): React.JSX.Element {
       symbol: boardroomForm.symbol,
       salt,
     });
-    await submitContractTransaction("Boardroom creation", {
-      address: factory,
-      abi: boardroomFactoryAbi,
-      functionName: "createBoardroom",
-      args: [owner, boardroomForm.name, boardroomForm.symbol, salt],
-    });
+    await submitContractTransaction(
+      "Boardroom creation",
+      buildBoardroomCreateTransaction({
+        factory,
+        expectedFacetSetHash: release.facetSetHash,
+        owner,
+        name: boardroomForm.name,
+        symbol: boardroomForm.symbol,
+        salt,
+      }),
+    );
     if (!activeActionOriginIsCurrent()) return;
     setPredictedBoardroom(predicted);
     setBoardroomAddress(predicted);
     navigateRoute({ kind: "studio-project", chainId: activeNetwork.chainId, boardroom: predicted, section: "setup" });
+  };
+
+  const migrateBoardroomStorage = async (): Promise<void> => {
+    const route = activeAppRouteRef.current;
+    const address = route.kind === "studio-project"
+      ? route.boardroom
+      : requireAddress(boardroomAddress, "Boardroom address");
+    const proof = await assertLiveBoardroomControlRelease(publicClient, deployment, address);
+    if (!proof.migrationRequired) {
+      throw new Error("This Boardroom already uses the active protocol storage version.");
+    }
+    await submitContractTransaction(
+      "Migrate Boardroom to active protocol release",
+      buildBoardroomMigrateTransaction({
+        boardroom: address,
+        expectedFacetSetHash: proof.facetSetHash,
+      }),
+    );
+    if (!activeActionOriginIsCurrent()) return;
+    await refreshBoardroom(address);
+    pushLog(`Migrated Boardroom ${address} to protocol release ${proof.activeRelease.toString()}.`, "success");
   };
 
   const loadBoardroom = async (): Promise<void> => {
@@ -3220,7 +3283,16 @@ export function App(): React.JSX.Element {
     await submitBoardroomExecution(
       "Share mint",
       lifecycle,
-      buildBoardroomExecuteTransaction({ boardroom, call: buildBoardroomMintCall({ boardroom, to, amount }) }),
+      buildBoardroomExecuteTransaction({
+        boardroom,
+        expectedFacetSetHash: lifecycle.facetSetHash,
+        call: buildBoardroomMintCall({
+          boardroom,
+          expectedFacetSetHash: lifecycle.facetSetHash,
+          to,
+          amount,
+        }),
+      }),
     );
   };
 
@@ -3281,6 +3353,7 @@ export function App(): React.JSX.Element {
       loadedBoardroom,
       buildBoardroomExecuteTransaction({
         boardroom: loadedBoardroom.address,
+        expectedFacetSetHash: loadedBoardroom.facetSetHash,
         call: buildBoardroomGrantApprovalCall({
           policy: assetPolicy,
           shareToken: loadedBoardroom.shareToken,
@@ -3305,6 +3378,7 @@ export function App(): React.JSX.Element {
       loadedBoardroom,
       buildBoardroomExecuteTransaction({
         boardroom: loadedBoardroom.address,
+        expectedFacetSetHash: loadedBoardroom.facetSetHash,
         call: buildBoardroomGrantCreationCall({
           policy: factory,
           factory,
@@ -3334,6 +3408,7 @@ export function App(): React.JSX.Element {
       loadedBoardroom,
       buildBoardroomShareGrantIssuanceBatch({
         boardroom: loadedBoardroom.address,
+        expectedFacetSetHash: loadedBoardroom.facetSetHash,
         factory,
         shareToken: loadedBoardroom.shareToken,
         terms,
@@ -3454,6 +3529,7 @@ export function App(): React.JSX.Element {
       boardroom,
       buildBoardroomBondMarketBatch({
         boardroom: boardroom.address,
+        expectedFacetSetHash: boardroom.facetSetHash,
         factory,
         shareToken: boardroom.shareToken,
         terms,
@@ -3474,7 +3550,12 @@ export function App(): React.JSX.Element {
     await submitBoardroomExecution(
       "Bond market close",
       boardroom,
-      buildBoardroomBondMarketCloseAction({ boardroom: boardroom.address, policy: factory, market }),
+      buildBoardroomBondMarketCloseAction({
+        boardroom: boardroom.address,
+        expectedFacetSetHash: boardroom.facetSetHash,
+        policy: factory,
+        market,
+      }),
     );
     if (!activeActionOriginIsCurrent()) return;
     await loadBondMarketAddress(market);
@@ -3580,6 +3661,7 @@ export function App(): React.JSX.Element {
       boardroom,
       buildBoardroomDutchAuctionBatch({
         boardroom: boardroom.address,
+        expectedFacetSetHash: boardroom.facetSetHash,
         factory,
         shareToken: boardroom.shareToken,
         terms,
@@ -3607,7 +3689,12 @@ export function App(): React.JSX.Element {
     await submitBoardroomExecution(
       "Dutch auction close",
       boardroom,
-      buildBoardroomDutchAuctionCloseAction({ boardroom: boardroom.address, policy: factory, auction }),
+      buildBoardroomDutchAuctionCloseAction({
+        boardroom: boardroom.address,
+        expectedFacetSetHash: boardroom.facetSetHash,
+        policy: factory,
+        auction,
+      }),
     );
     if (!activeActionOriginIsCurrent()) return;
     await loadDutchAuctionAddress(auction);
@@ -3620,7 +3707,12 @@ export function App(): React.JSX.Element {
     await submitBoardroomExecution(
       "Dutch auction cancel",
       boardroom,
-      buildBoardroomDutchAuctionCancelAction({ boardroom: boardroom.address, policy: factory, auction }),
+      buildBoardroomDutchAuctionCancelAction({
+        boardroom: boardroom.address,
+        expectedFacetSetHash: boardroom.facetSetHash,
+        policy: factory,
+        auction,
+      }),
     );
     if (!activeActionOriginIsCurrent()) return;
     await loadDutchAuctionAddress(auction);
@@ -3707,6 +3799,7 @@ export function App(): React.JSX.Element {
       boardroom,
       buildBoardroomFixedPriceSaleBatch({
         boardroom: boardroom.address,
+        expectedFacetSetHash: boardroom.facetSetHash,
         factory,
         shareToken: boardroom.shareToken,
         terms,
@@ -3727,7 +3820,12 @@ export function App(): React.JSX.Element {
     await submitBoardroomExecution(
       "Fixed-price sale close",
       boardroom,
-      buildBoardroomFixedPriceSaleCloseAction({ boardroom: boardroom.address, policy: factory, sale }),
+      buildBoardroomFixedPriceSaleCloseAction({
+        boardroom: boardroom.address,
+        expectedFacetSetHash: boardroom.facetSetHash,
+        policy: factory,
+        sale,
+      }),
     );
     if (!activeActionOriginIsCurrent()) return;
     await loadFixedPriceSaleAddress(sale);
@@ -3740,7 +3838,12 @@ export function App(): React.JSX.Element {
     await submitBoardroomExecution(
       "Fixed-price sale cancel",
       boardroom,
-      buildBoardroomFixedPriceSaleCancelAction({ boardroom: boardroom.address, policy: factory, sale }),
+      buildBoardroomFixedPriceSaleCancelAction({
+        boardroom: boardroom.address,
+        expectedFacetSetHash: boardroom.facetSetHash,
+        policy: factory,
+        sale,
+      }),
     );
     if (!activeActionOriginIsCurrent()) return;
     await loadFixedPriceSaleAddress(sale);
@@ -3825,6 +3928,7 @@ export function App(): React.JSX.Element {
       boardroom,
       buildBoardroomMerkleAirdropBatch({
         boardroom: boardroom.address,
+        expectedFacetSetHash: boardroom.facetSetHash,
         factory,
         shareToken: boardroom.shareToken,
         terms,
@@ -3845,7 +3949,12 @@ export function App(): React.JSX.Element {
     await submitBoardroomExecution(
       "Merkle airdrop close",
       boardroom,
-      buildBoardroomMerkleAirdropCloseAction({ boardroom: boardroom.address, policy: factory, airdrop }),
+      buildBoardroomMerkleAirdropCloseAction({
+        boardroom: boardroom.address,
+        expectedFacetSetHash: boardroom.facetSetHash,
+        policy: factory,
+        airdrop,
+      }),
     );
     if (!activeActionOriginIsCurrent()) return;
     await loadMerkleAirdropAddress(airdrop);
@@ -3858,7 +3967,12 @@ export function App(): React.JSX.Element {
     await submitBoardroomExecution(
       "Merkle airdrop cancel",
       boardroom,
-      buildBoardroomMerkleAirdropCancelAction({ boardroom: boardroom.address, policy: factory, airdrop }),
+      buildBoardroomMerkleAirdropCancelAction({
+        boardroom: boardroom.address,
+        expectedFacetSetHash: boardroom.facetSetHash,
+        policy: factory,
+        airdrop,
+      }),
     );
     if (!activeActionOriginIsCurrent()) return;
     await loadMerkleAirdropAddress(airdrop);
@@ -3961,6 +4075,7 @@ export function App(): React.JSX.Element {
       boardroom,
       buildBoardroomMigratingCurveBatch({
         boardroom: boardroom.address,
+        expectedFacetSetHash: boardroom.facetSetHash,
         factory,
         shareToken: boardroom.shareToken,
         terms,
@@ -3981,13 +4096,19 @@ export function App(): React.JSX.Element {
     await submitBoardroomExecution(
       "Migrating curve cancel",
       boardroom,
-      buildBoardroomMigratingCurveCancelAction({ boardroom: boardroom.address, policy: factory, curve }),
+      buildBoardroomMigratingCurveCancelAction({
+        boardroom: boardroom.address,
+        expectedFacetSetHash: boardroom.facetSetHash,
+        policy: factory,
+        curve,
+      }),
     );
     if (!activeActionOriginIsCurrent()) return;
     await loadMigratingCurveAddress(curve);
   };
 
   const migrateCurve = async (): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
     const curveState = requireLoadedMigratingCurve();
     const curve = curveState.address;
     const [minShareLiquidity, minQuoteLiquidity] = await Promise.all([
@@ -3998,6 +4119,7 @@ export function App(): React.JSX.Element {
       "Migrating curve migration",
       buildMigratingBondingCurveMigrationTransaction({
         curve,
+        expectedFacetSetHash: boardroom.facetSetHash,
         minShareLiquidity,
         minQuoteLiquidity,
         deadline: uintInput(curveMigrationForm.deadline, "Migration deadline"),
@@ -4017,20 +4139,38 @@ export function App(): React.JSX.Element {
     await loadMigratingCurveAddress(curve);
   };
 
+  // Lifecycle steps that call back into the Boardroom commit to the release they run under.
+  const runReleaseBoundMigratingCurveLifecycle = async (
+    label: string,
+    build: (curve: Address, expectedFacetSetHash: Hex) => Record<string, unknown>,
+  ): Promise<void> => {
+    const boardroom = requireLoadedBoardroom();
+    const curve = requireLoadedMigratingCurve().address;
+    await submitContractTransaction(label, build(curve, boardroom.facetSetHash));
+    if (!activeActionOriginIsCurrent()) return;
+    await loadMigratingCurveAddress(curve);
+  };
+
   const expireMigratingCurve = () =>
     runMigratingCurveLifecycle("Expire migrating curve", buildMigratingBondingCurveExpireTransaction);
   const fallbackMigratingCurve = () =>
     runMigratingCurveLifecycle("Open curve unwind fallback", buildMigratingBondingCurveFallbackTransaction);
   const finalizeMigratingCurveUnwind = () =>
-    runMigratingCurveLifecycle("Finalize curve unwind", buildMigratingBondingCurveFinalizeUnwindTransaction);
+    runReleaseBoundMigratingCurveLifecycle(
+      "Finalize curve unwind",
+      buildMigratingBondingCurveFinalizeUnwindTransaction,
+    );
   const recoverMigratingCurveQuote = () =>
-    runMigratingCurveLifecycle("Recover quarantined curve quote", buildMigratingBondingCurveRecoverQuoteTransaction);
+    runReleaseBoundMigratingCurveLifecycle(
+      "Recover quarantined curve quote",
+      buildMigratingBondingCurveRecoverQuoteTransaction,
+    );
   const openMigratingCurveForfeiture = () =>
     runMigratingCurveLifecycle("Open curve quote forfeiture", buildMigratingBondingCurveOpenForfeitureTransaction);
   const vetoMigratingCurveForfeiture = () =>
     runMigratingCurveLifecycle("Veto curve quote forfeiture", buildMigratingBondingCurveVetoForfeitureTransaction);
   const finalizeMigratingCurveForfeiture = () =>
-    runMigratingCurveLifecycle(
+    runReleaseBoundMigratingCurveLifecycle(
       "Finalize curve quote forfeiture",
       buildMigratingBondingCurveFinalizeForfeitureTransaction,
     );
@@ -4123,6 +4263,7 @@ export function App(): React.JSX.Element {
       boardroom,
       buildBoardroomLockedLiquidityBatch({
         boardroom: boardroom.address,
+        expectedFacetSetHash: boardroom.facetSetHash,
         factory,
         shareToken: boardroom.shareToken,
         terms,
@@ -4143,7 +4284,12 @@ export function App(): React.JSX.Element {
     await submitBoardroomExecution(
       "Locked-liquidity fee claim",
       boardroom,
-      buildBoardroomLockedLiquidityFeeClaimAction({ boardroom: boardroom.address, policy: factory, locker }),
+      buildBoardroomLockedLiquidityFeeClaimAction({
+        boardroom: boardroom.address,
+        expectedFacetSetHash: boardroom.facetSetHash,
+        policy: factory,
+        locker,
+      }),
     );
     if (!activeActionOriginIsCurrent()) return;
     await loadLockedLiquidityAddress(locker);
@@ -4166,6 +4312,7 @@ export function App(): React.JSX.Element {
       boardroom,
       buildBoardroomLockedLiquidityAddBatch({
         boardroom: boardroom.address,
+        expectedFacetSetHash: boardroom.facetSetHash,
         factory,
         shareToken: boardroom.shareToken,
         terms,
@@ -4193,6 +4340,7 @@ export function App(): React.JSX.Element {
       boardroom,
       buildBoardroomLockedLiquidityRemoveAction({
         boardroom: boardroom.address,
+        expectedFacetSetHash: boardroom.facetSetHash,
         policy: factory,
         factory,
         liquidity,
@@ -4210,16 +4358,27 @@ export function App(): React.JSX.Element {
     const lockerState = requireLoadedLockedLiquidity();
     const factory = requireDeploymentAddress(deployment?.lockedLiquidityFactory, "LockedLiquidityFactory");
     if (boardroom.status === 1) {
-      await assertLiveBoardroomControlRelease(publicClient, deployment, boardroom.address);
+      const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
+        boardroom.address,
+        boardroom.facetSetHash,
+      );
       await submitContractTransaction(
         "Close empty protocol liquidity after wind-down",
-        buildBoardroomCloseProtocolLiquidityTransaction({ boardroom: boardroom.address }),
+        buildBoardroomCloseProtocolLiquidityTransaction({
+          boardroom: boardroom.address,
+          expectedFacetSetHash,
+        }),
       );
     } else {
       await submitBoardroomExecution(
         "Close empty canonical protocol liquidity",
         boardroom,
-        buildBoardroomLockedLiquidityCloseAction({ boardroom: boardroom.address, policy: factory, factory }),
+        buildBoardroomLockedLiquidityCloseAction({
+          boardroom: boardroom.address,
+          expectedFacetSetHash: boardroom.facetSetHash,
+          policy: factory,
+          factory,
+        }),
       );
     }
     if (!activeActionOriginIsCurrent()) return;
@@ -4235,11 +4394,15 @@ export function App(): React.JSX.Element {
       parseErc20Amount(publicClient, lockedLiquidityExitForm.amountAMin, lockerState.tokenA, "Exit amount A minimum"),
       parseErc20Amount(publicClient, lockedLiquidityExitForm.amountBMin, lockerState.tokenB, "Exit amount B minimum"),
     ]);
-    await assertLiveBoardroomControlRelease(publicClient, deployment, boardroom.address);
+    const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
+      boardroom.address,
+      boardroom.facetSetHash,
+    );
     await submitContractTransaction(
       "Locked-liquidity exit",
       buildBoardroomLockedLiquidityExitTransaction({
         boardroom: boardroom.address,
+        expectedFacetSetHash,
         amountAMin,
         amountBMin,
         deadline: uintInput(lockedLiquidityExitForm.deadline, "Exit deadline"),
@@ -4251,21 +4414,42 @@ export function App(): React.JSX.Element {
 
   const startWindDown = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
-    await submitContractTransaction("Boardroom wind-down start", buildBoardroomStartWindDownTransaction({ boardroom: boardroom.address }));
+    const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
+      boardroom.address,
+      boardroom.facetSetHash,
+    );
+    await submitContractTransaction(
+      "Boardroom wind-down start",
+      buildBoardroomStartWindDownTransaction({ boardroom: boardroom.address, expectedFacetSetHash }),
+    );
   };
 
   const burnTreasuryShares = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
-    await submitContractTransaction("Treasury share burn", buildBoardroomBurnTreasurySharesTransaction({ boardroom: boardroom.address }));
+    const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
+      boardroom.address,
+      boardroom.facetSetHash,
+    );
+    await submitContractTransaction(
+      "Treasury share burn",
+      buildBoardroomBurnTreasurySharesTransaction({ boardroom: boardroom.address, expectedFacetSetHash }),
+    );
   };
 
   const pruneBoardroomObligation = async (obligationInput: string): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const obligation = requireAddress(obligationInput, "Obligation");
-    await assertLiveBoardroomControlRelease(publicClient, deployment, boardroom.address);
+    const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
+      boardroom.address,
+      boardroom.facetSetHash,
+    );
     await submitContractTransaction(
       "Prune terminal Boardroom obligation",
-      buildBoardroomPruneObligationTransaction({ boardroom: boardroom.address, obligation }),
+      buildBoardroomPruneObligationTransaction({
+        boardroom: boardroom.address,
+        expectedFacetSetHash,
+        obligation,
+      }),
     );
     if (!activeActionOriginIsCurrent()) return;
     await refreshBoardroom(boardroom.address);
@@ -4278,10 +4462,17 @@ export function App(): React.JSX.Element {
       throw new Error("Provide between 1 and 32 obligation addresses.");
     }
     const obligations = rawObligations.map((value, index) => requireAddress(value, `Obligation ${index + 1}`));
-    await assertLiveBoardroomControlRelease(publicClient, deployment, boardroom.address);
+    const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
+      boardroom.address,
+      boardroom.facetSetHash,
+    );
     await submitContractTransaction(
       "Prune terminal Boardroom obligations",
-      buildBoardroomPruneObligationsTransaction({ boardroom: boardroom.address, obligations }),
+      buildBoardroomPruneObligationsTransaction({
+        boardroom: boardroom.address,
+        expectedFacetSetHash,
+        obligations,
+      }),
     );
     if (!activeActionOriginIsCurrent()) return;
     await refreshBoardroom(boardroom.address);
@@ -4290,34 +4481,58 @@ export function App(): React.JSX.Element {
   const registerRedeemableAsset = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
     const asset = requireAddress(windDownForm.redeemableAsset, "Redeemable asset");
+    const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
+      boardroom.address,
+      boardroom.facetSetHash,
+    );
     await submitContractTransaction(
       "Redeemable asset registration",
-      buildBoardroomRegisterRedeemableAssetTransaction({ boardroom: boardroom.address, asset }),
+      buildBoardroomRegisterRedeemableAssetTransaction({
+        boardroom: boardroom.address,
+        expectedFacetSetHash,
+        asset,
+      }),
     );
   };
 
   const beginRedemptionSnapshot = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
-    await submitContractTransaction("Begin Boardroom redemption snapshot", {
-      address: boardroom.address,
-      abi: boardroomAbi,
-      functionName: "beginSnapshot",
-    });
+    const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
+      boardroom.address,
+      boardroom.facetSetHash,
+    );
+    await submitContractTransaction(
+      "Begin Boardroom redemption snapshot",
+      buildBoardroomBeginSnapshotTransaction({ boardroom: boardroom.address, expectedFacetSetHash }),
+    );
   };
 
   const processRedemptionSnapshot = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
-    await submitContractTransaction("Process Boardroom redemption snapshot page", {
-      address: boardroom.address,
-      abi: boardroomAbi,
-      functionName: "snapshotAssets",
-      args: [32n] as const,
-    });
+    const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
+      boardroom.address,
+      boardroom.facetSetHash,
+    );
+    await submitContractTransaction(
+      "Process Boardroom redemption snapshot page",
+      buildBoardroomSnapshotAssetsTransaction({
+        boardroom: boardroom.address,
+        expectedFacetSetHash,
+        maximum: 32n,
+      }),
+    );
   };
 
   const openRedemptions = async (): Promise<void> => {
     const boardroom = requireLoadedBoardroom();
-    await submitContractTransaction("Boardroom redemptions open", buildBoardroomOpenRedemptionsTransaction({ boardroom: boardroom.address }));
+    const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
+      boardroom.address,
+      boardroom.facetSetHash,
+    );
+    await submitContractTransaction(
+      "Boardroom redemptions open",
+      buildBoardroomOpenRedemptionsTransaction({ boardroom: boardroom.address, expectedFacetSetHash }),
+    );
   };
 
   const redeemBoardroomShares = async (): Promise<void> => {
@@ -4328,10 +4543,15 @@ export function App(): React.JSX.Element {
       boardroom.shareToken,
       "Redeem shares",
     );
+    const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
+      boardroom.address,
+      boardroom.facetSetHash,
+    );
     await submitContractTransaction(
       "Boardroom share redemption",
       buildBoardroomRedeemTransaction({
         boardroom: boardroom.address,
+        expectedFacetSetHash,
         shares,
       }),
     );
@@ -4349,9 +4569,19 @@ export function App(): React.JSX.Element {
       asset,
       "Redemption claim minimum",
     );
+    const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
+      boardroom.address,
+      boardroom.facetSetHash,
+    );
     await submitContractTransaction(
       "Boardroom redemption asset claim",
-      buildBoardroomClaimRedemptionAssetTransaction({ boardroom: boardroom.address, asset, recipient, minAmountOut }),
+      buildBoardroomClaimRedemptionAssetTransaction({
+        boardroom: boardroom.address,
+        expectedFacetSetHash,
+        asset,
+        recipient,
+        minAmountOut,
+      }),
     );
   };
 
@@ -4781,6 +5011,7 @@ export function App(): React.JSX.Element {
         snapshot: displayedBoardroomSnapshot,
         create: createBoardroom,
         load: loadBoardroom,
+        migrate: migrateBoardroomStorage,
         mintShares: mintBoardroomShares,
         predict: predictBoardroom,
         setBoardroomAddress: updateBoardroomAddress,
@@ -4971,7 +5202,10 @@ export function App(): React.JSX.Element {
         pendingAction={pendingAction}
         runAction={runAction}
         submitTransaction={async (label, request) => {
-          await assertLiveBoardroomControlRelease(publicClient, deployment, exactProjectDashboard.address);
+          await requireWritableBoardroomFacetSetHash(
+            exactProjectDashboard.address,
+            exactProjectDashboard.snapshot.facetSetHash,
+          );
           return await submitContractTransaction(label, request);
         }}
       />
@@ -4997,7 +5231,10 @@ export function App(): React.JSX.Element {
           || !sameAddress(route.boardroom, exactProjectDashboard.address)) {
           throw new Error("The selected Studio project changed. Reopen Governance before scheduling this operation.");
         }
-        await assertLiveBoardroomControlRelease(publicClient, deployment, exactProjectDashboard.address);
+        const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
+          exactProjectDashboard.address,
+          exactProjectDashboard.snapshot.facetSetHash,
+        );
         const data = encodeFunctionData({
           abi: boardroomControllerAbi,
           functionName: "updateConfiguration",
@@ -5010,6 +5247,7 @@ export function App(): React.JSX.Element {
             abi: boardroomControllerAbi,
             functionName: "scheduleControllerOperation",
             args: [
+              expectedFacetSetHash,
               data,
               randomSalt(),
               exactProjectDashboard.snapshot.governanceEpoch,
@@ -5025,9 +5263,13 @@ export function App(): React.JSX.Element {
           || !sameAddress(route.boardroom, exactProjectDashboard.address)) {
           throw new Error("The selected Studio project changed. Reopen Governance before scheduling replacement.");
         }
-        await assertLiveBoardroomControlRelease(publicClient, deployment, exactProjectDashboard.address);
+        const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
+          exactProjectDashboard.address,
+          exactProjectDashboard.snapshot.facetSetHash,
+        );
         const call = buildBoardroomReplaceControllerCall({
           boardroom: exactProjectDashboard.address,
+          expectedFacetSetHash,
           expectedCurrentController: exactProjectDashboard.snapshot.controller,
           expectedNextController,
           nextProposer: proposer,
@@ -5037,10 +5279,12 @@ export function App(): React.JSX.Element {
         });
         const plan = planBoardroomCallExecution({
           boardroom: exactProjectDashboard.address,
+          expectedFacetSetHash,
           calls: [call],
           lifecycle: {
             launched: true,
             status: exactProjectDashboard.snapshot.status,
+            migrationRequired: false,
             controller: exactProjectDashboard.snapshot.controller,
             governanceEpoch: exactProjectDashboard.snapshot.governanceEpoch,
             controllerConfigurationEpoch: exactProjectDashboard.snapshot.controllerConfigurationEpoch,
@@ -5072,10 +5316,17 @@ export function App(): React.JSX.Element {
           || !sameAddress(route.boardroom, exactProjectDashboard.address)) {
           throw new Error("The selected Studio project changed. Reopen Governance before launching.");
         }
-        await assertLiveBoardroomControlRelease(publicClient, deployment, exactProjectDashboard.address);
+        const expectedFacetSetHash = await requireWritableBoardroomFacetSetHash(
+          exactProjectDashboard.address,
+          exactProjectDashboard.snapshot.facetSetHash,
+        );
         await submitContractTransaction(
           "Launch Boardroom controller governance",
-          buildBoardroomLaunchTransaction({ boardroom: exactProjectDashboard.address, config }),
+          buildBoardroomLaunchTransaction({
+            boardroom: exactProjectDashboard.address,
+            expectedFacetSetHash,
+            config,
+          }),
           actionGuard,
         );
       }}

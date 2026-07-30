@@ -8,7 +8,8 @@ import {AmmFactory} from "../../src/amm/AmmFactory.sol";
 import {AmmPool} from "../../src/amm/AmmPool.sol";
 import {AmmRouter} from "../../src/amm/AmmRouter.sol";
 import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
-import {Boardroom} from "../../src/boardroom/Boardroom.sol";
+import {IBoardroom} from "../../src/boardroom/IBoardroom.sol";
+import {BoardroomFacetTypes as Boardroom} from "../../src/boardroom/diamond/BoardroomFacetTypes.sol";
 import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
 import {BoardroomGovernanceLogic} from "../../src/boardroom/BoardroomGovernanceLogic.sol";
 import {BoardroomPolicyRegistry} from "../../src/boardroom/BoardroomPolicyRegistry.sol";
@@ -16,6 +17,7 @@ import {BoardroomRedemptionPayout} from "../../src/boardroom/BoardroomRedemption
 import {BoardroomToken} from "../../src/boardroom/BoardroomToken.sol";
 import {BondMarket} from "../../src/bonds/BondMarket.sol";
 import {BondMarketFactory} from "../../src/bonds/BondMarketFactory.sol";
+import {CanonicalBoardroomTestSetup} from "../helpers/CanonicalBoardroomTestSetup.sol";
 
 contract BondTestToken is ERC20 {
     string internal tokenName;
@@ -83,14 +85,14 @@ contract BondFeeToken {
     }
 }
 
-contract BondMarketTest is Test {
+contract BondMarketTest is CanonicalBoardroomTestSetup {
     BoardroomPolicyRegistry internal policyRegistry;
     AssetPolicy internal assetPolicy;
     BoardroomFactory internal boardroomFactory;
     AmmFactory internal ammFactory;
     AmmRouter internal ammRouter;
     BondMarketFactory internal bondMarketFactory;
-    Boardroom internal boardroom;
+    IBoardroom internal boardroom;
     BoardroomToken internal shareToken;
     BondTestToken internal quoteToken;
 
@@ -106,12 +108,7 @@ contract BondMarketTest is Test {
         WETH wrappedNative = new WETH();
         policyRegistry = new BoardroomPolicyRegistry(address(this));
         assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
-        boardroomFactory = new BoardroomFactory(
-            address(policyRegistry),
-            address(wrappedNative),
-            address(new BoardroomRedemptionPayout()),
-            address(new BoardroomGovernanceLogic())
-        );
+        boardroomFactory = _deployCanonicalBoardroomFactory(policyRegistry, address(wrappedNative));
         ammFactory = new AmmFactory(address(this), address(boardroomFactory));
         ammRouter = new AmmRouter(address(ammFactory), address(wrappedNative));
         ammFactory.setLiquidityRouter(address(ammRouter));
@@ -123,9 +120,8 @@ contract BondMarketTest is Test {
         policyRegistry.registerModulePolicy(address(bondMarketFactory));
         assetPolicy.setApprovalSpenderAllowed(address(bondMarketFactory), true);
 
-        boardroom = Boardroom(
-            payable(boardroomFactory.createBoardroom(owner, "Bond Boardroom", "BOND", keccak256("bond-boardroom")))
-        );
+        boardroom =
+            _createCanonicalBoardroom(boardroomFactory, owner, "Bond Boardroom", "BOND", keccak256("bond-boardroom"));
         shareToken = BoardroomToken(boardroom.shareToken());
         assetPolicy.setAssetAllowed(address(shareToken), true);
         quoteToken.mint(buyer, 10_000_000000);
@@ -257,6 +253,7 @@ contract BondMarketTest is Test {
 
         vm.prank(owner);
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(address(bondMarketFactory), address(market), 0, abi.encodeCall(BondMarket.close, ()))
         );
 
@@ -271,7 +268,7 @@ contract BondMarketTest is Test {
         market.redeem(positionId);
         assertTrue(market.isClosed());
 
-        boardroom.pruneObligation(address(market));
+        boardroom.pruneObligation(_expectedFacetSetHash(boardroom), address(market));
         assertFalse(boardroom.isIssuedDistribution(address(market)));
         assertEq(bondMarketFactory.bondMarketCountForBoardroom(address(boardroom)), 1);
     }
@@ -341,7 +338,7 @@ contract BondMarketTest is Test {
     function testBoardroomCreatesLiquidityBondForFundedCanonicalSharePool() public {
         BondTestToken pairedToken = new BondTestToken("Paired Asset", "PAIR", 18);
         vm.prank(owner);
-        boardroom.mint(owner, 1_000 ether);
+        boardroom.mint(_expectedFacetSetHash(boardroom), owner, 1_000 ether);
         pairedToken.mint(owner, 1_000 ether);
 
         address pool =
@@ -391,7 +388,7 @@ contract BondMarketTest is Test {
 
     function _createMarket(BondMarket.CreateParams memory params) internal returns (BondMarket market) {
         vm.startPrank(owner);
-        boardroom.mint(address(boardroom), CAPACITY);
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), CAPACITY);
 
         Boardroom.Call[] memory calls = new Boardroom.Call[](2);
         calls[0] = _policyCall(
@@ -406,7 +403,7 @@ contract BondMarketTest is Test {
             0,
             abi.encodeCall(BondMarketFactory.createBondMarket, (params))
         );
-        bytes[] memory results = boardroom.executeBatch(calls);
+        bytes[] memory results = boardroom.executeBatch(_expectedFacetSetHash(boardroom), calls);
         vm.stopPrank();
 
         market = BondMarket(abi.decode(results[1], (address)));

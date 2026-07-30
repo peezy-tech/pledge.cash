@@ -10,6 +10,7 @@ import {
   fixedPriceSaleAbi,
 } from "@pledge.cash/sdk";
 import {
+  decodeFunctionData,
   encodeFunctionData,
   getAddress,
   keccak256,
@@ -20,14 +21,16 @@ import {
 import type { RouterQuoteRequest } from "../api/dto";
 import { QuoteRequestError } from "../api/dto";
 import type { DestinationExecution, MarketplaceQuote } from "../domain";
+import {
+  FacetReleaseProofError,
+  proveLiveFacetRelease,
+  requireSameBlock,
+  type CanonicalProtocolRoots,
+  type PinnedFacetRelease,
+} from "../release";
 import { minimumWithSlippage, maximumWithSlippage } from "./math";
 
-export type CanonicalMarketplaceDeployment = {
-  chainId: 998;
-  ammFactory: Address;
-  ammRouter: Address;
-  distributionFactory: Address;
-  boardroomFactory: Address;
+export type CanonicalMarketplaceDeployment = CanonicalProtocolRoots & {
   destinationUsdc: Address;
   executor: Address;
 };
@@ -36,6 +39,7 @@ export type CanonicalQuoteResult = {
   boardroom: Address;
   canonicalTarget: Address;
   canonicalPool?: Address;
+  facetSetHash: Hex;
   destinationPrincipal: bigint;
   availableInventory: bigint;
   allowance?: bigint;
@@ -54,40 +58,27 @@ export class CanonicalMarketplaceReader {
   ) {}
 
   async assertReady(): Promise<void> {
-    const actualChainId = await this.client.getChainId();
-    if (actualChainId !== this.deployment.chainId) {
-      throw new CanonicalRouteError(
-        `HyperEVM RPC returned chain ${actualChainId}; expected ${this.deployment.chainId}.`,
-        "wrong_destination_chain",
-        503,
-      );
-    }
+    await this.liveRelease();
+  }
 
-    const addresses = [
-      this.deployment.ammFactory,
-      this.deployment.ammRouter,
-      this.deployment.distributionFactory,
-      this.deployment.boardroomFactory,
-      this.deployment.destinationUsdc,
-    ];
-    const code = await Promise.all(addresses.map(address => this.client.getCode({ address })));
-    if (code.some(value => !value || value === "0x")) {
+  private async liveRelease(): Promise<PinnedFacetRelease> {
+    try {
+      const release = await proveLiveFacetRelease(this.client, this.deployment);
+      const destinationAssetCode = await this.client.getCode({
+        address: this.deployment.destinationUsdc,
+        blockNumber: release.blockNumber,
+      });
+      if (!destinationAssetCode || destinationAssetCode === "0x") {
+        throw new FacetReleaseProofError("destination_asset_unavailable");
+      }
+      await requireSameBlock(this.client, release);
+      return release;
+    } catch (error) {
       throw new CanonicalRouteError(
-        "The configured HyperEVM deployment is missing required contract code.",
-        "deployment_not_ready",
-        503,
-      );
-    }
-
-    const configuredRouter = await this.client.readContract({
-      address: this.deployment.ammFactory,
-      abi: ammFactoryAbi,
-      functionName: "liquidityRouter",
-    });
-    if (!sameAddress(configuredRouter, this.deployment.ammRouter)) {
-      throw new CanonicalRouteError(
-        "The configured AMM router is not the factory's active liquidity router.",
-        "noncanonical_amm_router",
+        error instanceof FacetReleaseProofError
+          ? `The active Boardroom facet release failed canonical proof: ${error.failure}.`
+          : "The active Boardroom facet release could not be proven.",
+        "noncanonical_boardroom_release",
         503,
       );
     }
@@ -97,13 +88,14 @@ export class CanonicalMarketplaceReader {
     request: RouterQuoteRequest,
     deadline: number,
   ): Promise<CanonicalQuoteResult> {
+    const release = await this.liveRelease();
     if (request.kind === "amm_swap") {
-      return this.quoteAmm(request, deadline);
+      return this.quoteAmm(request, deadline, release);
     }
     if (request.kind === "fixed_price_sale") {
-      return this.quoteFixedPrice(request, deadline);
+      return this.quoteFixedPrice(request, deadline, release);
     }
-    return this.quoteRecurringSupport(request, deadline);
+    return this.quoteRecurringSupport(request, deadline, release);
   }
 
   /**
@@ -113,23 +105,35 @@ export class CanonicalMarketplaceReader {
    * only fail closed into the refund path.
    */
   async assertCanonicalExecution(quote: MarketplaceQuote): Promise<void> {
-    await this.assertReady();
+    const release = await this.liveRelease();
+    if (
+      quote.facetSetHash === undefined ||
+      quote.facetSetHash.toLowerCase() !== release.facetSetHash.toLowerCase()
+    ) {
+      throw new CanonicalRouteError(
+        "The stored execution was prepared for a different Boardroom facet release.",
+        "stale_boardroom_release",
+        409,
+      );
+    }
     if (quote.kind === "amm_swap") {
-      await this.assertCanonicalAmmExecution(quote);
+      await this.assertCanonicalAmmExecution(quote, release);
       return;
     }
     if (quote.kind === "fixed_price_sale") {
-      await this.assertCanonicalFixedPriceExecution(quote);
+      await this.assertCanonicalFixedPriceExecution(quote, release);
       return;
     }
-    await this.assertCanonicalRecurringSupportExecution(quote);
+    await this.assertCanonicalRecurringSupportExecution(quote, release);
   }
 
   private async assertCanonicalRecurringSupportExecution(
     quote: MarketplaceQuote,
+    release: PinnedFacetRelease,
   ): Promise<void> {
     if (
       quote.supportInvoiceId === undefined ||
+      quote.facetSetHash === undefined ||
       !sameAddress(quote.canonicalTarget, quote.boardroom) ||
       !sameAddress(quote.execution.target, quote.boardroom) ||
       !sameAddress(quote.execution.inputToken, this.deployment.destinationUsdc) ||
@@ -143,34 +147,103 @@ export class CanonicalMarketplaceReader {
       );
     }
 
-    const [isBoardroom, boardroomStatus, isRedeemableAsset] =
+    let decoded;
+    try {
+      decoded = decodeFunctionData({
+        abi: boardroomAbi,
+        data: quote.execution.callData,
+      });
+    } catch {
+      throw new CanonicalRouteError(
+        "The stored support execution calldata is invalid.",
+        "noncanonical_support_route",
+      );
+    }
+    if (
+      decoded.functionName !== "contributeTreasuryAsset"
+      || !decoded.args
+    ) {
+      throw new CanonicalRouteError(
+        "The stored support execution calldata is not a Boardroom contribution.",
+        "noncanonical_support_route",
+      );
+    }
+    const [expectedFacetSetHash, asset, amount, deadline] = decoded.args;
+    if (
+      !sameAddress(asset, quote.execution.inputToken)
+      || BigInt(amount) !== BigInt(quote.execution.inputAmount)
+      || Number(deadline) !== quote.execution.deadline
+    ) {
+      throw new CanonicalRouteError(
+        "The stored support execution calldata no longer matches the quote.",
+        "noncanonical_support_route",
+      );
+    }
+
+    const block = {
+      number: release.blockNumber,
+      hash: release.blockHash,
+    };
+    const [
+      isBoardroom,
+      boardroomStatus,
+      isRedeemableAsset,
+      currentFacetSetHash,
+      migrationRequired,
+    ] =
       await Promise.all([
         this.client.readContract({
           address: this.deployment.boardroomFactory,
           abi: boardroomFactoryAbi,
           functionName: "isBoardroom",
           args: [quote.boardroom],
+          blockNumber: block.number,
         }),
         this.client.readContract({
           address: quote.boardroom,
           abi: boardroomAbi,
           functionName: "status",
+          blockNumber: block.number,
         }),
         this.client.readContract({
           address: quote.boardroom,
           abi: boardroomAbi,
           functionName: "isRedeemableAsset",
           args: [this.deployment.destinationUsdc],
+          blockNumber: block.number,
+        }),
+        this.client.readContract({
+          address: quote.boardroom,
+          abi: boardroomAbi,
+          functionName: "facetSetHash",
+          blockNumber: block.number,
+        }),
+        this.client.readContract({
+          address: quote.boardroom,
+          abi: boardroomAbi,
+          functionName: "migrationRequired",
+          blockNumber: block.number,
         }),
       ]);
+    const confirmedBlock = await this.client.getBlock({
+      blockNumber: block.number,
+    });
 
     if (
       !isBoardroom ||
       Number(boardroomStatus) !== 0 ||
-      !isRedeemableAsset
+      !isRedeemableAsset ||
+      migrationRequired ||
+      currentFacetSetHash.toLowerCase()
+        !== expectedFacetSetHash.toLowerCase() ||
+      currentFacetSetHash.toLowerCase() !== release.facetSetHash.toLowerCase() ||
+      quote.facetSetHash.toLowerCase()
+        !== expectedFacetSetHash.toLowerCase() ||
+      confirmedBlock.hash === null ||
+      confirmedBlock.hash.toLowerCase() !== block.hash.toLowerCase()
     ) {
       throw new CanonicalRouteError(
-        "The support plan's Boardroom or treasury asset is no longer eligible to receive renewals.",
+        "The support plan's Boardroom, facet release, or treasury asset is no longer eligible to receive renewals.",
         "support_route_unavailable",
       );
     }
@@ -178,6 +251,7 @@ export class CanonicalMarketplaceReader {
 
   private async assertCanonicalAmmExecution(
     quote: MarketplaceQuote,
+    release: PinnedFacetRelease,
   ): Promise<void> {
     const pool = quote.canonicalPool;
     if (
@@ -191,7 +265,6 @@ export class CanonicalMarketplaceReader {
         "noncanonical_pool",
       );
     }
-
     const [
       isBoardroom,
       isPool,
@@ -199,34 +272,53 @@ export class CanonicalMarketplaceReader {
       configuredRouter,
       boardroomShareToken,
       boardroomStatus,
+      boardroomFacetSetHash,
+      migrationRequired,
     ] = await Promise.all([
-      this.client.readContract({ address: this.deployment.boardroomFactory, abi: boardroomFactoryAbi, functionName: "isBoardroom", args: [quote.boardroom] }),
+      this.client.readContract({ address: this.deployment.boardroomFactory, abi: boardroomFactoryAbi, functionName: "isBoardroom", args: [quote.boardroom], blockNumber: release.blockNumber }),
       this.client.readContract({
         address: this.deployment.ammFactory,
         abi: ammFactoryAbi,
         functionName: "isPool",
         args: [pool],
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: this.deployment.ammFactory,
         abi: ammFactoryAbi,
         functionName: "getPool",
         args: [quote.execution.inputToken, quote.execution.outputToken],
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: this.deployment.ammFactory,
         abi: ammFactoryAbi,
         functionName: "liquidityRouter",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: quote.boardroom,
         abi: boardroomAbi,
         functionName: "shareToken",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: quote.boardroom,
         abi: boardroomAbi,
         functionName: "status",
+        blockNumber: release.blockNumber,
+      }),
+      this.client.readContract({
+        address: quote.boardroom,
+        abi: boardroomAbi,
+        functionName: "facetSetHash",
+        blockNumber: release.blockNumber,
+      }),
+      this.client.readContract({
+        address: quote.boardroom,
+        abi: boardroomAbi,
+        functionName: "migrationRequired",
+        blockNumber: release.blockNumber,
       }),
     ]);
 
@@ -235,17 +327,21 @@ export class CanonicalMarketplaceReader {
       !sameAddress(registeredPool, pool) ||
       !sameAddress(configuredRouter, this.deployment.ammRouter) ||
       !sameAddress(boardroomShareToken, quote.execution.outputToken) ||
-      Number(boardroomStatus) !== 0
+      Number(boardroomStatus) !== 0 ||
+      migrationRequired ||
+      boardroomFacetSetHash.toLowerCase() !== release.facetSetHash.toLowerCase()
     ) {
       throw new CanonicalRouteError(
         "The live AMM factory, pool, router, or boardroom relationship changed after quoting.",
         "noncanonical_pool",
       );
     }
+    await requireSameBlock(this.client, release);
   }
 
   private async assertCanonicalFixedPriceExecution(
     quote: MarketplaceQuote,
+    release: PinnedFacetRelease,
   ): Promise<void> {
     const sale = quote.canonicalTarget;
     if (!sameAddress(quote.execution.target, sale)) {
@@ -271,90 +367,119 @@ export class CanonicalMarketplaceReader {
       endTime,
       boardroomShareToken,
       boardroomStatus,
+      boardroomFacetSetHash,
+      migrationRequired,
       paymentAmount,
       latestBlock,
     ] = await Promise.all([
-      this.client.readContract({ address: this.deployment.boardroomFactory, abi: boardroomFactoryAbi, functionName: "isBoardroom", args: [quote.boardroom] }),
+      this.client.readContract({ address: this.deployment.boardroomFactory, abi: boardroomFactoryAbi, functionName: "isBoardroom", args: [quote.boardroom], blockNumber: release.blockNumber }),
       this.client.readContract({
         address: this.deployment.distributionFactory,
         abi: distributionFactoryAbi,
         functionName: "isDistribution",
         args: [sale],
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: this.deployment.distributionFactory,
         abi: distributionFactoryAbi,
         functionName: "distributionKind",
         args: [sale],
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: this.deployment.distributionFactory,
         abi: distributionFactoryAbi,
         functionName: "distributionBoardroom",
         args: [sale],
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: sale,
         abi: fixedPriceSaleAbi,
         functionName: "factory",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: sale,
         abi: fixedPriceSaleAbi,
         functionName: "boardroom",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: sale,
         abi: fixedPriceSaleAbi,
         functionName: "shareToken",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: sale,
         abi: fixedPriceSaleAbi,
         functionName: "paymentToken",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: sale,
         abi: fixedPriceSaleAbi,
         functionName: "maxPerBuyer",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: sale,
         abi: fixedPriceSaleAbi,
         functionName: "remainingShares",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: sale,
         abi: fixedPriceSaleAbi,
         functionName: "saleStatus",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: sale,
         abi: fixedPriceSaleAbi,
         functionName: "startTime",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: sale,
         abi: fixedPriceSaleAbi,
         functionName: "endTime",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: quote.boardroom,
         abi: boardroomAbi,
         functionName: "shareToken",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: quote.boardroom,
         abi: boardroomAbi,
         functionName: "status",
+        blockNumber: release.blockNumber,
+      }),
+      this.client.readContract({
+        address: quote.boardroom,
+        abi: boardroomAbi,
+        functionName: "facetSetHash",
+        blockNumber: release.blockNumber,
+      }),
+      this.client.readContract({
+        address: quote.boardroom,
+        abi: boardroomAbi,
+        functionName: "migrationRequired",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: sale,
         abi: fixedPriceSaleAbi,
         functionName: "getPaymentAmount",
         args: [BigInt(quote.execution.minimumOutput)],
+        blockNumber: release.blockNumber,
       }),
-      this.client.getBlock({ blockTag: "latest" }),
+      this.client.getBlock({ blockNumber: release.blockNumber }),
     ]);
 
     const notStarted = BigInt(startTime) > latestBlock.timestamp;
@@ -375,6 +500,8 @@ export class CanonicalMarketplaceReader {
       BigInt(paymentAmount) !== BigInt(quote.execution.inputAmount) ||
       Number(saleStatus) !== 0 ||
       Number(boardroomStatus) !== 0 ||
+      migrationRequired ||
+      boardroomFacetSetHash.toLowerCase() !== release.facetSetHash.toLowerCase() ||
       notStarted ||
       ended
     ) {
@@ -383,11 +510,13 @@ export class CanonicalMarketplaceReader {
         "fixed_price_configuration_mismatch",
       );
     }
+    await requireSameBlock(this.client, release);
   }
 
   private async quoteAmm(
     request: Extract<RouterQuoteRequest, { kind: "amm_swap" }>,
     deadline: number,
+    release: PinnedFacetRelease,
   ): Promise<CanonicalQuoteResult> {
     if (!sameAddress(request.tokenIn, this.deployment.destinationUsdc)) {
       throw new CanonicalRouteError(
@@ -399,41 +528,73 @@ export class CanonicalMarketplaceReader {
       throw new CanonicalRouteError("AMM input and output assets must differ.", "invalid_pair");
     }
 
-    const [isBoardroom, isPool, registeredPool, boardroomShareToken, boardroomStatus] =
+    const [
+      isBoardroom,
+      isPool,
+      registeredPool,
+      boardroomShareToken,
+      boardroomStatus,
+      boardroomFacetSetHash,
+      migrationRequired,
+    ] =
       await Promise.all([
-        this.client.readContract({ address: this.deployment.boardroomFactory, abi: boardroomFactoryAbi, functionName: "isBoardroom", args: [request.boardroom] }),
+        this.client.readContract({ address: this.deployment.boardroomFactory, abi: boardroomFactoryAbi, functionName: "isBoardroom", args: [request.boardroom], blockNumber: release.blockNumber }),
         this.client.readContract({
           address: this.deployment.ammFactory,
           abi: ammFactoryAbi,
           functionName: "isPool",
           args: [request.pool],
+          blockNumber: release.blockNumber,
         }),
         this.client.readContract({
           address: this.deployment.ammFactory,
           abi: ammFactoryAbi,
           functionName: "getPool",
           args: [request.tokenIn, request.tokenOut],
+          blockNumber: release.blockNumber,
         }),
         this.client.readContract({
           address: request.boardroom,
           abi: boardroomAbi,
           functionName: "shareToken",
+          blockNumber: release.blockNumber,
         }),
         this.client.readContract({
           address: request.boardroom,
           abi: boardroomAbi,
           functionName: "status",
+          blockNumber: release.blockNumber,
+        }),
+        this.client.readContract({
+          address: request.boardroom,
+          abi: boardroomAbi,
+          functionName: "facetSetHash",
+          blockNumber: release.blockNumber,
+        }),
+        this.client.readContract({
+          address: request.boardroom,
+          abi: boardroomAbi,
+          functionName: "migrationRequired",
+          blockNumber: release.blockNumber,
         }),
       ]);
 
     if (
       !isBoardroom || !isPool ||
       !sameAddress(registeredPool, request.pool) ||
-      !sameAddress(boardroomShareToken, request.tokenOut)
+      !sameAddress(boardroomShareToken, request.tokenOut) ||
+      boardroomFacetSetHash.toLowerCase() !== release.facetSetHash.toLowerCase()
     ) {
       throw new CanonicalRouteError(
         "The requested AMM route is not the canonical USDC/project-token pool.",
         "noncanonical_pool",
+      );
+    }
+    if (migrationRequired) {
+      throw new CanonicalRouteError(
+        "The project Boardroom requires migration before a route can be quoted.",
+        "boardroom_migration_required",
+        409,
       );
     }
     if (Number(boardroomStatus) !== 0) {
@@ -449,6 +610,7 @@ export class CanonicalMarketplaceReader {
       abi: ammRouterAbi,
       functionName: "getAmountsOut",
       args: [amountIn, [request.tokenIn, request.tokenOut]],
+      blockNumber: release.blockNumber,
     });
     const expectedOutput = amounts.at(-1);
     if (!expectedOutput || expectedOutput <= 0n) {
@@ -474,12 +636,15 @@ export class CanonicalMarketplaceReader {
     const [availableInventory, allowance] = await this.readInventory(
       request.tokenIn,
       this.deployment.ammRouter,
+      release.blockNumber,
     );
+    await requireSameBlock(this.client, release);
 
     return {
       boardroom: request.boardroom,
       canonicalTarget: this.deployment.ammRouter,
       canonicalPool: request.pool,
+      facetSetHash: release.facetSetHash,
       destinationPrincipal: amountIn,
       availableInventory,
       allowance,
@@ -501,27 +666,31 @@ export class CanonicalMarketplaceReader {
   private async quoteFixedPrice(
     request: Extract<RouterQuoteRequest, { kind: "fixed_price_sale" }>,
     deadline: number,
+    release: PinnedFacetRelease,
   ): Promise<CanonicalQuoteResult> {
     const [isBoardroom, isDistribution, distributionKind, distributionBoardroom] =
       await Promise.all([
-        this.client.readContract({ address: this.deployment.boardroomFactory, abi: boardroomFactoryAbi, functionName: "isBoardroom", args: [request.boardroom] }),
+        this.client.readContract({ address: this.deployment.boardroomFactory, abi: boardroomFactoryAbi, functionName: "isBoardroom", args: [request.boardroom], blockNumber: release.blockNumber }),
         this.client.readContract({
           address: this.deployment.distributionFactory,
           abi: distributionFactoryAbi,
           functionName: "isDistribution",
           args: [request.sale],
+          blockNumber: release.blockNumber,
         }),
         this.client.readContract({
           address: this.deployment.distributionFactory,
           abi: distributionFactoryAbi,
           functionName: "distributionKind",
           args: [request.sale],
+          blockNumber: release.blockNumber,
         }),
         this.client.readContract({
           address: this.deployment.distributionFactory,
           abi: distributionFactoryAbi,
           functionName: "distributionBoardroom",
           args: [request.sale],
+          blockNumber: release.blockNumber,
         }),
       ]);
     if (
@@ -547,6 +716,8 @@ export class CanonicalMarketplaceReader {
       endTime,
       boardroomShareToken,
       boardroomStatus,
+      boardroomFacetSetHash,
+      migrationRequired,
       paymentAmount,
       latestBlock,
     ] = await Promise.all([
@@ -554,64 +725,88 @@ export class CanonicalMarketplaceReader {
         address: request.sale,
         abi: fixedPriceSaleAbi,
         functionName: "factory",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: request.sale,
         abi: fixedPriceSaleAbi,
         functionName: "boardroom",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: request.sale,
         abi: fixedPriceSaleAbi,
         functionName: "shareToken",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: request.sale,
         abi: fixedPriceSaleAbi,
         functionName: "paymentToken",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: request.sale,
         abi: fixedPriceSaleAbi,
         functionName: "maxPerBuyer",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: request.sale,
         abi: fixedPriceSaleAbi,
         functionName: "remainingShares",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: request.sale,
         abi: fixedPriceSaleAbi,
         functionName: "saleStatus",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: request.sale,
         abi: fixedPriceSaleAbi,
         functionName: "startTime",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: request.sale,
         abi: fixedPriceSaleAbi,
         functionName: "endTime",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: request.boardroom,
         abi: boardroomAbi,
         functionName: "shareToken",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: request.boardroom,
         abi: boardroomAbi,
         functionName: "status",
+        blockNumber: release.blockNumber,
+      }),
+      this.client.readContract({
+        address: request.boardroom,
+        abi: boardroomAbi,
+        functionName: "facetSetHash",
+        blockNumber: release.blockNumber,
+      }),
+      this.client.readContract({
+        address: request.boardroom,
+        abi: boardroomAbi,
+        functionName: "migrationRequired",
+        blockNumber: release.blockNumber,
       }),
       this.client.readContract({
         address: request.sale,
         abi: fixedPriceSaleAbi,
         functionName: "getPaymentAmount",
         args: [BigInt(request.shareAmount)],
+        blockNumber: release.blockNumber,
       }),
-      this.client.getBlock({ blockTag: "latest" }),
+      this.client.getBlock({ blockNumber: release.blockNumber }),
     ]);
 
     const notStarted = BigInt(startTime) > latestBlock.timestamp;
@@ -622,6 +817,7 @@ export class CanonicalMarketplaceReader {
       !sameAddress(saleBoardroom, request.boardroom) ||
       !sameAddress(shareToken, boardroomShareToken) ||
       !sameAddress(paymentToken, this.deployment.destinationUsdc)
+      || boardroomFacetSetHash.toLowerCase() !== release.facetSetHash.toLowerCase()
     ) {
       throw new CanonicalRouteError(
         "The fixed-price sale's live configuration no longer matches the canonical route.",
@@ -637,6 +833,7 @@ export class CanonicalMarketplaceReader {
     if (
       Number(saleStatus) !== 0 ||
       Number(boardroomStatus) !== 0 ||
+      migrationRequired ||
       notStarted ||
       ended
     ) {
@@ -672,11 +869,14 @@ export class CanonicalMarketplaceReader {
     const [availableInventory, allowance] = await this.readInventory(
       this.deployment.destinationUsdc,
       request.sale,
+      release.blockNumber,
     );
+    await requireSameBlock(this.client, release);
 
     return {
       boardroom: request.boardroom,
       canonicalTarget: request.sale,
+      facetSetHash: release.facetSetHash,
       destinationPrincipal: BigInt(paymentAmount),
       availableInventory,
       allowance,
@@ -698,11 +898,18 @@ export class CanonicalMarketplaceReader {
   private async quoteRecurringSupport(
     request: Extract<RouterQuoteRequest, { kind: "recurring_support" }>,
     deadline: number,
+    release: PinnedFacetRelease,
   ): Promise<CanonicalQuoteResult> {
+    const block = {
+      number: release.blockNumber,
+      hash: release.blockHash,
+    };
     const [
       isBoardroom,
       boardroomStatus,
       isRedeemableAsset,
+      facetSetHash,
+      migrationRequired,
       [availableInventory, allowance],
     ] =
       await Promise.all([
@@ -711,23 +918,52 @@ export class CanonicalMarketplaceReader {
           abi: boardroomFactoryAbi,
           functionName: "isBoardroom",
           args: [request.boardroom],
+          blockNumber: block.number,
         }),
         this.client.readContract({
           address: request.boardroom,
           abi: boardroomAbi,
           functionName: "status",
+          blockNumber: block.number,
         }),
         this.client.readContract({
           address: request.boardroom,
           abi: boardroomAbi,
           functionName: "isRedeemableAsset",
           args: [this.deployment.destinationUsdc],
+          blockNumber: block.number,
+        }),
+        this.client.readContract({
+          address: request.boardroom,
+          abi: boardroomAbi,
+          functionName: "facetSetHash",
+          blockNumber: block.number,
+        }),
+        this.client.readContract({
+          address: request.boardroom,
+          abi: boardroomAbi,
+          functionName: "migrationRequired",
+          blockNumber: block.number,
         }),
         this.readInventory(
           this.deployment.destinationUsdc,
           request.boardroom,
+          block.number,
         ),
       ]);
+    const confirmedBlock = await this.client.getBlock({
+      blockNumber: block.number,
+    });
+    if (
+      confirmedBlock.hash === null
+      || confirmedBlock.hash.toLowerCase() !== block.hash.toLowerCase()
+    ) {
+      throw new CanonicalRouteError(
+        "The HyperEVM block changed while the support quote was constructed.",
+        "support_reorg_uncertainty",
+        503,
+      );
+    }
     if (!isBoardroom) {
       throw new CanonicalRouteError(
         "The support plan does not belong to a canonical Boardroom.",
@@ -746,16 +982,40 @@ export class CanonicalMarketplaceReader {
         "support_asset_not_registered",
       );
     }
+    if (migrationRequired) {
+      throw new CanonicalRouteError(
+        "Recurring support is paused while the Boardroom requires migration.",
+        "boardroom_migration_required",
+        409,
+      );
+    }
+    if (
+      facetSetHash.toLowerCase()
+      !== request.expectedFacetSetHash.toLowerCase() ||
+      facetSetHash.toLowerCase() !== release.facetSetHash.toLowerCase()
+    ) {
+      throw new CanonicalRouteError(
+        "The support plan was authorized for a different Boardroom facet release.",
+        "support_facet_set_stale",
+        409,
+      );
+    }
 
     const amount = BigInt(request.amount);
     const callData = encodeFunctionData({
       abi: boardroomAbi,
       functionName: "contributeTreasuryAsset",
-      args: [this.deployment.destinationUsdc, amount, BigInt(deadline)],
+      args: [
+        request.expectedFacetSetHash,
+        this.deployment.destinationUsdc,
+        amount,
+        BigInt(deadline),
+      ],
     });
     return {
       boardroom: request.boardroom,
       canonicalTarget: request.boardroom,
+      facetSetHash: request.expectedFacetSetHash,
       destinationPrincipal: amount,
       availableInventory,
       allowance,
@@ -777,6 +1037,7 @@ export class CanonicalMarketplaceReader {
   private async readInventory(
     token: Address,
     spender: Address,
+    blockNumber?: bigint,
   ): Promise<readonly [bigint, bigint]> {
     return Promise.all([
       this.client.readContract({
@@ -784,12 +1045,14 @@ export class CanonicalMarketplaceReader {
         abi: erc20Abi,
         functionName: "balanceOf",
         args: [this.deployment.executor],
+        ...(blockNumber === undefined ? {} : { blockNumber }),
       }),
       this.client.readContract({
         address: token,
         abi: erc20Abi,
         functionName: "allowance",
         args: [this.deployment.executor, spender],
+        ...(blockNumber === undefined ? {} : { blockNumber }),
       }),
     ]);
   }

@@ -7,6 +7,11 @@ description: Go directly to the pledge.cash workspace that matches what you need
 
 Start with the outcome you want. You can inspect public project state before connecting a wallet.
 
+> **Availability:** canonical protocol v1 is pending on both HyperEVM and
+> Monad testnets. The workflows below describe a verified future deployment or
+> a matching local Anvil scenario; public protocol writes are currently
+> unavailable.
+
 ## I want to inspect a project
 
 Open `Explore`, search by name, symbol, or Boardroom address, then select a project. Use `Overview` for the useful summary and `Transparency` for balances, commitments, history, and contract addresses.
@@ -39,9 +44,10 @@ Open the project’s `Governance` section to inspect controller/proposer authori
 wind-down thresholds, and scheduled operations. Connect only when the app must compare current and previous-block stake
 or authorize an available action.
 
-External-controller launch and governance writes require a verified v5 deployment. Legacy Boardrooms remain readable
-but fail closed. The verified public v5 artifact is limited to HyperEVM testnet; Monad remains pending and mainnet
-remains unsupported.
+External-controller launch and governance writes require a promoted,
+live-verified protocol-v1 artifact, a matching active facet-set hash, and a
+Boardroom that does not require migration. Both testnets remain pending and
+mainnet remains unsupported.
 
 ## I need raw diagnostics or alerts
 

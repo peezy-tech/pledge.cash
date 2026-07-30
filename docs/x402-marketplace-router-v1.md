@@ -5,10 +5,10 @@
 This document defines the implemented v1 boundary and the gates required before
 funded use. It does not claim a live deployment.
 
-`packages/contracts/deployments/998.json` now records the verified deterministic
-v5 HyperEVM testnet release. The router still reports not ready and refuses
-quotes unless that exact artifact and every operational gate below pass in its
-running environment.
+`packages/contracts/deployments/998.json` is pending because canonical
+protocol v1 has not been broadcast to HyperEVM testnet. The router must report
+not ready and refuse quotes while that remains true. A future verified
+candidate must still pass every operational gate below before funded use.
 
 The router pins `x402-hl` version `0.2.2` to the exact Git commit
 `131aff37cf87c48036ab0e347f008e77bf446150`. That version is the first accepted
@@ -112,6 +112,8 @@ An AMM quote is accepted only when:
 - `tokenIn` is the configured HyperEVM USDC;
 - `tokenOut` is the requested active Boardroom's share token;
 - `BoardroomFactory.isBoardroom(boardroom)` is true;
+- the Boardroom, registry, active facet-set hash, and required storage version
+  are read at one pinned block and `migrationRequired()` is false;
 - `AmmFactory.isPool(pool)` is true;
 - `AmmFactory.getPool(tokenIn, tokenOut)` returns the same pool;
 - the tracked router equals `AmmFactory.liquidityRouter()`;
@@ -131,6 +133,8 @@ A fixed-price quote is accepted only when:
 - `DistributionFactory.isDistribution(sale)` is true;
 - the recorded distribution kind is fixed-price;
 - the factory and Boardroom relationships match live state;
+- the Boardroom, registry, active facet-set hash, and required storage version
+  are read at one pinned block and `migrationRequired()` is false;
 - the sale share token equals the Boardroom share token;
 - the payment token is the configured HyperEVM USDC;
 - the Boardroom and sale are active and the latest HyperEVM block timestamp is
@@ -329,8 +333,8 @@ every item below:
 - [ ] Exact `x402-hl` commit
   `131aff37cf87c48036ab0e347f008e77bf446150` is present in `bun.lock`, reports
   version `0.2.2`, and passes its release gate.
-- [x] `packages/contracts/deployments/998.json` is verified and no longer
-  `pending`.
+- [ ] `packages/contracts/deployments/998.json` is a promoted, verified
+  canonical protocol-v1 artifact and is no longer `pending`.
 - [ ] Configured USDC, Boardroom factory, AMM router, AMM factory, and
   distribution factory match the tracked artifact and live code.
 - [ ] `X402_ROUTER_SERVICE_FEE_BPS` and

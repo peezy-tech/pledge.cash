@@ -8,7 +8,9 @@ import {AmmFactory} from "../../src/amm/AmmFactory.sol";
 import {AmmPool} from "../../src/amm/AmmPool.sol";
 import {AmmRouter} from "../../src/amm/AmmRouter.sol";
 import {AssetPolicy} from "../../src/policy/AssetPolicy.sol";
-import {Boardroom} from "../../src/boardroom/Boardroom.sol";
+import {IBoardroom as Boardroom} from "../../src/boardroom/IBoardroom.sol";
+import {BoardroomFacetBase} from "../../src/boardroom/diamond/BoardroomFacetBase.sol";
+import {BoardroomFacetTypes} from "../../src/boardroom/diamond/BoardroomFacetTypes.sol";
 import {BoardroomController} from "../../src/boardroom/BoardroomController.sol";
 import {BoardroomControllerFactory} from "../../src/boardroom/BoardroomControllerFactory.sol";
 import {BoardroomFactory} from "../../src/boardroom/BoardroomFactory.sol";
@@ -29,6 +31,7 @@ import {TokenGrant} from "../../src/grants/TokenGrant.sol";
 import {TokenGrantFactory} from "../../src/grants/TokenGrantFactory.sol";
 import {BoardroomRewards} from "../../src/rewards/BoardroomRewards.sol";
 import {BoardroomRewardsFactory} from "../../src/rewards/BoardroomRewardsFactory.sol";
+import {CanonicalBoardroomTestSetup} from "../helpers/CanonicalBoardroomTestSetup.sol";
 
 contract DistributionCurrency {
     string public name;
@@ -151,7 +154,8 @@ contract WindDownReentrantDistributionCurrency is DistributionCurrency {
         bool transferred = super.transfer(to, amount);
         if (callbackArmed && to == callbackBoardroom) {
             callbackArmed = false;
-            Boardroom(payable(callbackBoardroom)).startWindDown();
+            Boardroom targetBoardroom = Boardroom(payable(callbackBoardroom));
+            targetBoardroom.startWindDown(targetBoardroom.facetSetHash());
         }
         return transferred;
     }
@@ -245,7 +249,7 @@ contract FakeDistributionGrantCaller {
     }
 }
 
-contract DistributionTest is Test {
+contract DistributionTest is CanonicalBoardroomTestSetup {
     bytes32 internal constant DIRECT_CLAIM_TYPEHASH = keccak256(
         "MerkleAirdropDirectClaim(uint256 chainId,uint256 index,address airdrop,address boardroom,address shareToken,address account,uint256 amount)"
     );
@@ -292,12 +296,7 @@ contract DistributionTest is Test {
         wrappedNative = new WETH();
         policyRegistry = new BoardroomPolicyRegistry(address(this));
         assetPolicy = new AssetPolicy(address(this), address(wrappedNative));
-        boardroomFactory = new BoardroomFactory(
-            address(policyRegistry),
-            address(wrappedNative),
-            address(new BoardroomRedemptionPayout()),
-            address(new BoardroomGovernanceLogic())
-        );
+        boardroomFactory = _deployCanonicalBoardroomFactory(policyRegistry, address(wrappedNative));
         ammFactory = new AmmFactory(address(this), address(boardroomFactory));
         ammRouter = new AmmRouter(address(ammFactory), address(wrappedNative));
         lockedLiquidityFactory = new LockedLiquidityFactory(address(ammRouter), address(boardroomFactory));
@@ -408,7 +407,7 @@ contract DistributionTest is Test {
         assertEq(auction.remainingShares(), 0);
         assertEq(auction.settlementPrice(), 3_000000);
         assertEq(auction.totalPayment(), expectedPayment);
-        assertTrue(boardroom.pruneObligation(address(auction)));
+        assertTrue(boardroom.pruneObligation(_expectedFacetSetHash(boardroom), address(auction)));
         assertFalse(boardroom.isIssuedDistribution(address(auction)));
     }
 
@@ -439,7 +438,7 @@ contract DistributionTest is Test {
         assertEq(auction.settlementPrice(), 3_000000);
         assertEq(shareToken.balanceOf(address(boardroom)), returned);
         assertEq(shareToken.encumberedSupply(), 0);
-        assertTrue(boardroom.pruneObligation(address(auction)));
+        assertTrue(boardroom.pruneObligation(_expectedFacetSetHash(boardroom), address(auction)));
     }
 
     function testDutchAuctionCanSeedCanonicalLiquidityAfterSettlement() public {
@@ -471,7 +470,7 @@ contract DistributionTest is Test {
             deadline: block.timestamp,
             salt: keccak256("dutch-auction-liquidity-lock")
         });
-        Boardroom.Call[] memory calls = new Boardroom.Call[](3);
+        BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](3);
         calls[0] = _policyCall(
             address(assetPolicy),
             address(shareToken),
@@ -492,7 +491,7 @@ contract DistributionTest is Test {
         );
 
         vm.prank(owner);
-        bytes[] memory results = boardroom.executeBatch(calls);
+        bytes[] memory results = boardroom.executeBatch(_expectedFacetSetHash(boardroom), calls);
         (address locker, address pool,,,) = abi.decode(results[2], (address, address, uint256, uint256, uint256));
 
         assertEq(auction.settlementPrice(), 3_000000);
@@ -511,11 +510,13 @@ contract DistributionTest is Test {
         vm.prank(owner);
         vm.expectRevert(DutchAuctionSale.WindDownRequired.selector);
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(address(distributionFactory), address(auction), 0, abi.encodeCall(DutchAuctionSale.close, ()))
         );
 
         vm.prank(owner);
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(address(distributionFactory), address(auction), 0, abi.encodeCall(DutchAuctionSale.cancel, ()))
         );
         assertTrue(auction.isClosed());
@@ -526,8 +527,9 @@ contract DistributionTest is Test {
             boardroom, shareToken, paymentToken, "dutch-auction-wind-down-create", block.timestamp, 10 days
         );
         vm.prank(owner);
-        boardroom.startWindDown();
+        boardroom.startWindDown(_expectedFacetSetHash(boardroom));
         boardroom.executeWindDownCall(
+            _expectedFacetSetHash(boardroom),
             _policyCall(
                 address(distributionFactory), address(windDownAuction), 0, abi.encodeCall(DutchAuctionSale.close, ())
             )
@@ -574,7 +576,7 @@ contract DistributionTest is Test {
         address lostProposer = address(0xDEAD);
 
         vm.startPrank(owner);
-        boardroom.mint(recipient, 10 ether);
+        boardroom.mint(_expectedFacetSetHash(boardroom), recipient, 10 ether);
         BoardroomRewards rewards = _createRewardPool(boardroom);
         vm.stopPrank();
         vm.prank(recipient);
@@ -587,9 +589,9 @@ contract DistributionTest is Test {
         assertEq(shareToken.governanceEligibleSupply(), 10 ether);
 
         vm.prank(recipient);
-        boardroom.startWindDown();
+        boardroom.startWindDown(_expectedFacetSetHash(boardroom));
 
-        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.WindingDown));
+        assertEq(uint8(boardroom.status()), uint8(BoardroomFacetTypes.BoardroomStatus.WindingDown));
     }
 
     function testBoardroomOwnedGrantFactoryAdminCallsWorkThroughCanonicalPolicyWithoutObligation() public {
@@ -598,6 +600,7 @@ contract DistributionTest is Test {
 
         vm.prank(owner);
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(
                 address(tokenGrantFactory),
                 address(tokenGrantFactory),
@@ -612,6 +615,7 @@ contract DistributionTest is Test {
 
         vm.prank(owner);
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(
                 address(tokenGrantFactory),
                 address(tokenGrantFactory),
@@ -655,7 +659,7 @@ contract DistributionTest is Test {
         proof[0] = buyerLeaf;
 
         vm.prank(recipient);
-        airdrop.claim(0, recipient, AIRDROP_CLAIM_SHARES, proof);
+        airdrop.claim(_expectedFacetSetHash(boardroom), 0, recipient, AIRDROP_CLAIM_SHARES, proof);
 
         assertEq(shareToken.balanceOf(recipient), AIRDROP_CLAIM_SHARES);
         assertEq(shareToken.balanceOf(address(airdrop)), AIRDROP_SHARES - AIRDROP_CLAIM_SHARES);
@@ -667,7 +671,7 @@ contract DistributionTest is Test {
 
         vm.prank(recipient);
         vm.expectRevert(abi.encodeWithSelector(MerkleAirdrop.ClaimAlreadyMade.selector, 0));
-        airdrop.claim(0, recipient, AIRDROP_CLAIM_SHARES, proof);
+        airdrop.claim(_expectedFacetSetHash(boardroom), 0, recipient, AIRDROP_CLAIM_SHARES, proof);
     }
 
     function testMerkleAirdropClaimLeavesAreBoundToChainId() public {
@@ -683,7 +687,7 @@ contract DistributionTest is Test {
 
         assertNotEq(otherChainLeaf, originalLeaf);
         vm.expectRevert(MerkleAirdrop.InvalidProof.selector);
-        airdrop.claim(0, recipient, AIRDROP_CLAIM_SHARES, new bytes32[](0));
+        airdrop.claim(_expectedFacetSetHash(boardroom), 0, recipient, AIRDROP_CLAIM_SHARES, new bytes32[](0));
         assertEq(airdrop.claimedShares(), 0);
         assertEq(airdrop.remainingShares(), AIRDROP_SHARES);
     }
@@ -700,14 +704,14 @@ contract DistributionTest is Test {
 
         bytes32[] memory firstProof = new bytes32[](1);
         firstProof[0] = secondLeaf;
-        airdrop.claim(0, recipient, claimAmount, firstProof);
+        airdrop.claim(_expectedFacetSetHash(boardroom), 0, recipient, claimAmount, firstProof);
 
         bytes32[] memory secondProof = new bytes32[](1);
         secondProof[0] = firstLeaf;
         vm.expectRevert(
             abi.encodeWithSelector(MerkleAirdrop.InsufficientShares.selector, claimAmount, AIRDROP_SHARES - claimAmount)
         );
-        airdrop.claim(1, buyer, claimAmount, secondProof);
+        airdrop.claim(_expectedFacetSetHash(boardroom), 1, buyer, claimAmount, secondProof);
 
         assertEq(airdrop.claimedShares(), claimAmount);
         assertEq(airdrop.remainingShares(), AIRDROP_SHARES - claimAmount);
@@ -731,7 +735,9 @@ contract DistributionTest is Test {
 
         assertEq(airdrop.maxGrantClaims(), 1);
         vm.prank(recipient);
-        address grantAddress = airdrop.claimGrant(0, recipient, AIRDROP_CLAIM_SHARES, grantParams, proof);
+        address grantAddress = airdrop.claimGrant(
+            _expectedFacetSetHash(boardroom), 0, recipient, AIRDROP_CLAIM_SHARES, grantParams, proof
+        );
 
         TokenGrant grant = TokenGrant(grantAddress);
         uint256 grantTokenId = uint256(uint160(grantAddress));
@@ -772,7 +778,9 @@ contract DistributionTest is Test {
         tokenGrantFactory.setCreationFee(0.01 ether);
         uint256 feeRecipientBalanceBefore = address(this).balance;
 
-        address grant = airdrop.claimGrant(0, recipient, AIRDROP_CLAIM_SHARES, grantParams, new bytes32[](0));
+        address grant = airdrop.claimGrant(
+            _expectedFacetSetHash(boardroom), 0, recipient, AIRDROP_CLAIM_SHARES, grantParams, new bytes32[](0)
+        );
 
         assertNotEq(grant, address(0));
         assertEq(address(this).balance, feeRecipientBalanceBefore);
@@ -832,12 +840,16 @@ contract DistributionTest is Test {
         secondProof[0] = firstLeaf;
 
         vm.prank(recipient);
-        airdrop.claimGrant(0, recipient, AIRDROP_CLAIM_SHARES, firstGrantParams, firstProof);
+        airdrop.claimGrant(
+            _expectedFacetSetHash(boardroom), 0, recipient, AIRDROP_CLAIM_SHARES, firstGrantParams, firstProof
+        );
 
         assertEq(airdrop.claimedGrantCount(), 1);
         vm.prank(buyer);
         vm.expectRevert(abi.encodeWithSelector(MerkleAirdrop.TooManyGrantClaims.selector, 1));
-        airdrop.claimGrant(1, buyer, AIRDROP_CLAIM_SHARES, secondGrantParams, secondProof);
+        airdrop.claimGrant(
+            _expectedFacetSetHash(boardroom), 1, buyer, AIRDROP_CLAIM_SHARES, secondGrantParams, secondProof
+        );
     }
 
     function testMerkleAirdropCreationHasNoProtocolGrantReservationCeiling() public {
@@ -851,9 +863,9 @@ contract DistributionTest is Test {
         params.maxGrantClaims = 129;
 
         vm.startPrank(owner);
-        boardroom.mint(address(boardroom), AIRDROP_SHARES);
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), AIRDROP_SHARES);
 
-        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](2);
         calls[0] = _policyCall(
             address(assetPolicy),
             address(shareToken),
@@ -867,7 +879,7 @@ contract DistributionTest is Test {
             abi.encodeCall(DistributionFactory.createMerkleAirdrop, (params))
         );
 
-        bytes[] memory results = boardroom.executeBatch(calls);
+        bytes[] memory results = boardroom.executeBatch(_expectedFacetSetHash(boardroom), calls);
         vm.stopPrank();
 
         address airdrop = abi.decode(results[1], (address));
@@ -887,6 +899,7 @@ contract DistributionTest is Test {
 
         vm.prank(owner);
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(address(distributionFactory), address(airdrop), 0, abi.encodeCall(MerkleAirdrop.close, ()))
         );
 
@@ -909,7 +922,10 @@ contract DistributionTest is Test {
                 address(0)
             )
         );
-        boardroom.execute(_policyCall(address(0), address(airdrop), 0, abi.encodeCall(MerkleAirdrop.close, ())));
+        boardroom.execute(
+            _expectedFacetSetHash(boardroom),
+            _policyCall(address(0), address(airdrop), 0, abi.encodeCall(MerkleAirdrop.close, ()))
+        );
 
         assertEq(uint8(airdrop.airdropStatus()), uint8(MerkleAirdrop.AirdropStatus.Active));
         assertEq(airdrop.remainingShares(), AIRDROP_SHARES);
@@ -923,6 +939,7 @@ contract DistributionTest is Test {
             )
         );
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(address(tokenGrantFactory), address(airdrop), 0, abi.encodeCall(MerkleAirdrop.close, ()))
         );
 
@@ -930,6 +947,7 @@ contract DistributionTest is Test {
         assertEq(airdrop.remainingShares(), AIRDROP_SHARES);
         vm.prank(owner);
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(address(distributionFactory), address(airdrop), 0, abi.encodeCall(MerkleAirdrop.close, ()))
         );
 
@@ -948,9 +966,10 @@ contract DistributionTest is Test {
         MerkleAirdrop airdrop = _createMerkleAirdrop(boardroom, shareToken, root, AIRDROP_SHARES, salt, 2);
 
         vm.prank(owner);
-        boardroom.startWindDown();
+        boardroom.startWindDown(_expectedFacetSetHash(boardroom));
 
         boardroom.executeWindDownCall(
+            _expectedFacetSetHash(boardroom),
             _policyCall(address(distributionFactory), address(airdrop), 0, abi.encodeCall(MerkleAirdrop.close, ()))
         );
 
@@ -958,7 +977,7 @@ contract DistributionTest is Test {
 
         _openRedemptions(boardroom);
 
-        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
+        assertEq(uint8(boardroom.status()), uint8(BoardroomFacetTypes.BoardroomStatus.RedemptionsOpen));
     }
 
     function testBoardroomRedemptionsWaitForMerkleAirdropToClose() public {
@@ -971,18 +990,19 @@ contract DistributionTest is Test {
         assertTrue(boardroom.isIssuedDistribution(address(airdrop)));
 
         vm.prank(owner);
-        boardroom.startWindDown();
+        boardroom.startWindDown(_expectedFacetSetHash(boardroom));
 
         bytes32[] memory proof = new bytes32[](0);
         vm.prank(recipient);
         vm.expectRevert(MerkleAirdrop.AirdropNotOpen.selector);
-        airdrop.claim(0, recipient, AIRDROP_CLAIM_SHARES, proof);
+        airdrop.claim(_expectedFacetSetHash(boardroom), 0, recipient, AIRDROP_CLAIM_SHARES, proof);
 
         vm.warp(boardroom.windDownStartedAt() + boardroom.windDownDelay());
         vm.expectRevert(BoardroomRedemptionPayout.SnapshotNotReady.selector);
-        boardroom.beginSnapshot();
+        boardroom.beginSnapshot(_expectedFacetSetHash(boardroom));
 
         boardroom.executeWindDownCall(
+            _expectedFacetSetHash(boardroom),
             _policyCall(address(distributionFactory), address(airdrop), 0, abi.encodeCall(MerkleAirdrop.close, ()))
         );
 
@@ -992,7 +1012,7 @@ contract DistributionTest is Test {
 
         _openRedemptions(boardroom);
 
-        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
+        assertEq(uint8(boardroom.status()), uint8(BoardroomFacetTypes.BoardroomStatus.RedemptionsOpen));
     }
 
     function testFixedPriceSaleRoundsPaymentUpForDustPurchase() public {
@@ -1023,6 +1043,7 @@ contract DistributionTest is Test {
 
         vm.prank(owner);
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(address(distributionFactory), address(sale), 0, abi.encodeCall(FixedPriceSale.close, ()))
         );
 
@@ -1043,6 +1064,7 @@ contract DistributionTest is Test {
 
         vm.prank(owner);
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(address(distributionFactory), address(sale), 0, abi.encodeCall(FixedPriceSale.close, ()))
         );
 
@@ -1089,6 +1111,7 @@ contract DistributionTest is Test {
 
         vm.prank(owner);
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(address(distributionFactory), address(sale), 0, abi.encodeCall(FixedPriceSale.cancel, ()))
         );
 
@@ -1106,7 +1129,7 @@ contract DistributionTest is Test {
         assertTrue(boardroom.isIssuedDistribution(address(sale)));
 
         vm.prank(owner);
-        boardroom.startWindDown();
+        boardroom.startWindDown(_expectedFacetSetHash(boardroom));
 
         vm.prank(buyer);
         paymentToken.approve(address(sale), BUY_PAYMENT);
@@ -1117,9 +1140,10 @@ contract DistributionTest is Test {
 
         vm.warp(boardroom.windDownStartedAt() + boardroom.windDownDelay());
         vm.expectRevert(BoardroomRedemptionPayout.SnapshotNotReady.selector);
-        boardroom.beginSnapshot();
+        boardroom.beginSnapshot(_expectedFacetSetHash(boardroom));
 
         boardroom.executeWindDownCall(
+            _expectedFacetSetHash(boardroom),
             _policyCall(address(distributionFactory), address(sale), 0, abi.encodeCall(FixedPriceSale.close, ()))
         );
 
@@ -1127,7 +1151,7 @@ contract DistributionTest is Test {
 
         _openRedemptions(boardroom);
 
-        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.RedemptionsOpen));
+        assertEq(uint8(boardroom.status()), uint8(BoardroomFacetTypes.BoardroomStatus.RedemptionsOpen));
     }
 
     function testBoardroomRejectsWrapperPolicyForDistributionCreation() public {
@@ -1137,20 +1161,20 @@ contract DistributionTest is Test {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("fixed-sale-wrapper-policy");
 
         vm.startPrank(owner);
-        boardroom.mint(address(boardroom), SALE_SHARES);
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), SALE_SHARES);
 
         bytes32 salt = keccak256("fixed-sale-wrapper-policy-create");
         FixedPriceSale.CreateParams memory params =
             _saleParams(address(shareToken), address(paymentToken), SALE_SHARES, PRICE, salt);
 
-        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
-        calls[0] = Boardroom.Call({
+        BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](2);
+        calls[0] = BoardroomFacetTypes.Call({
             policy: address(wrapperPolicy),
             target: address(shareToken),
             value: 0,
             data: abi.encodeWithSignature("approve(address,uint256)", address(distributionFactory), SALE_SHARES)
         });
-        calls[1] = Boardroom.Call({
+        calls[1] = BoardroomFacetTypes.Call({
             policy: address(wrapperPolicy),
             target: address(distributionFactory),
             value: 0,
@@ -1160,7 +1184,7 @@ contract DistributionTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(BoardroomPolicyRegistry.ModulePolicyRequired.selector, address(distributionFactory))
         );
-        boardroom.executeBatch(calls);
+        boardroom.executeBatch(_expectedFacetSetHash(boardroom), calls);
         vm.stopPrank();
     }
 
@@ -1268,7 +1292,7 @@ contract DistributionTest is Test {
 
         vm.prank(buyer);
         (address locker, address pool, uint256 shares, uint256 quote, uint256 liquidity) =
-            curve.migrate(minShareLiquidity, minQuoteLiquidity, block.timestamp);
+            curve.migrate(_expectedFacetSetHash(boardroom), minShareLiquidity, minQuoteLiquidity, block.timestamp);
         assertTrue(locker != address(0));
         assertTrue(pool != address(0));
         assertEq(shares, 125 ether);
@@ -1297,9 +1321,9 @@ contract DistributionTest is Test {
 
         quote.armWindDown(address(boardroom));
         vm.expectRevert(MigratingBondingCurve.BoardroomNotActive.selector);
-        curve.migrate(118.75 ether, 237_500000, block.timestamp);
+        curve.migrate(_expectedFacetSetHash(boardroom), 118.75 ether, 237_500000, block.timestamp);
 
-        assertEq(uint8(boardroom.status()), uint8(Boardroom.BoardroomStatus.Active));
+        assertEq(uint8(boardroom.status()), uint8(BoardroomFacetTypes.BoardroomStatus.Active));
         assertEq(uint8(curve.curveStatus()), uint8(MigratingBondingCurve.CurvePhase.Graduated));
         assertTrue(curve.canMigrate());
         assertFalse(curve.migrationInProgress());
@@ -1363,7 +1387,7 @@ contract DistributionTest is Test {
         assertEq(curve.outstandingCurveShareLiability(), CURVE_BUY_SHARES - CURVE_SELL_SHARES);
 
         vm.warp(curve.phaseEndsAt() + 1);
-        curve.finalizeUnwind();
+        curve.finalizeUnwind(_expectedFacetSetHash(boardroom));
         assertTrue(curve.isClosed());
         assertEq(curve.outstandingCurveShareLiability(), 0);
         assertEq(shareToken.balanceOf(buyer), CURVE_BUY_SHARES - CURVE_SELL_SHARES);
@@ -1373,7 +1397,7 @@ contract DistributionTest is Test {
     function testLaunchAfterNonCurveReleasePreservesGeneralAvailabilityAndFactoryRejectsCurve() public {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("launch-unset-primary-market");
         vm.startPrank(owner);
-        boardroom.mint(recipient, 10 ether);
+        boardroom.mint(_expectedFacetSetHash(boardroom), recipient, 10 ether);
         BoardroomRewards rewards = _createRewardPool(boardroom);
         vm.stopPrank();
         vm.prank(recipient);
@@ -1428,8 +1452,9 @@ contract DistributionTest is Test {
         assetPolicy.setApprovalSpenderAllowed(oldSpender, true);
 
         vm.startPrank(owner);
-        boardroom.mint(address(boardroom), 10 ether);
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), 10 ether);
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(
                 address(assetPolicy),
                 address(shareToken),
@@ -1444,34 +1469,37 @@ contract DistributionTest is Test {
         vm.prank(oldSpender);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Boardroom.PrimaryMarketTransferRestricted.selector, address(boardroom), recipient, 1 ether
+                BoardroomFacetBase.PrimaryMarketTransferRestricted.selector, address(boardroom), recipient, 1 ether
             )
         );
         shareToken.transferFrom(address(boardroom), recipient, 1 ether);
 
         vm.prank(owner);
         vm.expectRevert(
-            abi.encodeWithSelector(Boardroom.PrimaryMarketTransferRestricted.selector, address(0), recipient, 1 ether)
+            abi.encodeWithSelector(
+                BoardroomFacetBase.PrimaryMarketTransferRestricted.selector, address(0), recipient, 1 ether
+            )
         );
-        boardroom.mint(recipient, 1 ether);
+        boardroom.mint(_expectedFacetSetHash(boardroom), recipient, 1 ether);
 
         vm.prank(owner);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Boardroom.PrimaryMarketTransferRestricted.selector, address(0), address(curve), 1 ether
+                BoardroomFacetBase.PrimaryMarketTransferRestricted.selector, address(0), address(curve), 1 ether
             )
         );
-        boardroom.mint(address(curve), 1 ether);
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(curve), 1 ether);
 
         vm.prank(owner);
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(
                 address(distributionFactory), address(curve), 0, abi.encodeCall(MigratingBondingCurve.cancel, ())
             )
         );
         assertEq(uint8(boardroom.primaryMarketMode()), 1);
         vm.warp(block.timestamp + curve.SETTLEMENT_GRACE() + 1);
-        curve.finalizeUnwind();
+        curve.finalizeUnwind(_expectedFacetSetHash(boardroom));
         assertEq(uint8(boardroom.primaryMarketMode()), 2);
 
         vm.prank(oldSpender);
@@ -1482,7 +1510,7 @@ contract DistributionTest is Test {
     function testActiveCurveRejectsTreasuryBurnBatchedDistributionAndDirectLiquiditySeed() public {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("curve-competing-release-guards");
         vm.prank(owner);
-        boardroom.mint(address(boardroom), 30 ether);
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), 30 ether);
         MigratingBondingCurve curve =
             _createMigratingCurve(boardroom, shareToken, "curve-competing-release-guards-create");
 
@@ -1490,7 +1518,7 @@ contract DistributionTest is Test {
         address predictedSale = distributionFactory.predictFixedPriceSaleAddress(address(boardroom), saleSalt);
         FixedPriceSale.CreateParams memory saleParams =
             _saleParams(address(shareToken), address(paymentToken), 10 ether, PRICE, saleSalt);
-        Boardroom.Call[] memory saleCalls = new Boardroom.Call[](2);
+        BoardroomFacetTypes.Call[] memory saleCalls = new BoardroomFacetTypes.Call[](2);
         saleCalls[0] = _policyCall(
             address(assetPolicy),
             address(shareToken),
@@ -1505,7 +1533,7 @@ contract DistributionTest is Test {
         );
         vm.prank(owner);
         vm.expectRevert(SafeTransferLib.TransferFromFailed.selector);
-        boardroom.executeBatch(saleCalls);
+        boardroom.executeBatch(_expectedFacetSetHash(boardroom), saleCalls);
         assertEq(distributionFactory.distributionCountForBoardroom(address(boardroom)), 1);
         assertEq(predictedSale.code.length, 0);
         assertEq(shareToken.allowance(address(boardroom), address(distributionFactory)), 0);
@@ -1523,7 +1551,7 @@ contract DistributionTest is Test {
             deadline: block.timestamp,
             salt: keccak256("curve-competing-liquidity")
         });
-        Boardroom.Call[] memory liquidityCalls = new Boardroom.Call[](3);
+        BoardroomFacetTypes.Call[] memory liquidityCalls = new BoardroomFacetTypes.Call[](3);
         liquidityCalls[0] = _policyCall(
             address(assetPolicy),
             address(shareToken),
@@ -1544,17 +1572,17 @@ contract DistributionTest is Test {
         );
         vm.prank(owner);
         vm.expectRevert();
-        boardroom.executeBatch(liquidityCalls);
+        boardroom.executeBatch(_expectedFacetSetHash(boardroom), liquidityCalls);
         assertEq(boardroom.liquidityLocker(), address(0));
 
         vm.prank(owner);
-        boardroom.startWindDown();
+        boardroom.startWindDown(_expectedFacetSetHash(boardroom));
         vm.expectRevert(
             abi.encodeWithSelector(
-                Boardroom.PrimaryMarketTransferRestricted.selector, address(boardroom), address(0), 30 ether
+                BoardroomFacetBase.PrimaryMarketTransferRestricted.selector, address(boardroom), address(0), 30 ether
             )
         );
-        boardroom.burnTreasuryShares();
+        boardroom.burnTreasuryShares(_expectedFacetSetHash(boardroom));
         assertEq(shareToken.balanceOf(address(boardroom)), 30 ether);
         assertEq(curve.outstandingCurveShareLiability(), 0);
     }
@@ -1563,7 +1591,7 @@ contract DistributionTest is Test {
         (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("primary-market-self-transfer");
 
         vm.prank(owner);
-        boardroom.mint(address(boardroom), 1 ether);
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), 1 ether);
         vm.prank(address(boardroom));
         assertTrue(shareToken.transfer(address(boardroom), 1 ether));
 
@@ -1577,6 +1605,7 @@ contract DistributionTest is Test {
 
         vm.prank(owner);
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(
                 address(distributionFactory), address(curve), 0, abi.encodeCall(MigratingBondingCurve.cancel, ())
             )
@@ -1592,13 +1621,16 @@ contract DistributionTest is Test {
         vm.prank(owner);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Boardroom.CallNotAllowed.selector,
+                BoardroomFacetBase.CallNotAllowed.selector,
                 address(distributionFactory),
                 address(distributionFactory),
                 DistributionFactory.createMigratingBondingCurve.selector
             )
         );
-        boardroom.execute(_policyCall(address(distributionFactory), address(distributionFactory), 0, createData));
+        boardroom.execute(
+            _expectedFacetSetHash(boardroom),
+            _policyCall(address(distributionFactory), address(distributionFactory), 0, createData)
+        );
     }
 
     function testWindDownCanCancelActiveMigratingCurveBeforeRedemptions() public {
@@ -1606,27 +1638,28 @@ contract DistributionTest is Test {
         MigratingBondingCurve curve = _createMigratingCurve(boardroom, shareToken, "curve-cancel-create");
 
         vm.prank(owner);
-        boardroom.startWindDown();
+        boardroom.startWindDown(_expectedFacetSetHash(boardroom));
 
         vm.warp(boardroom.windDownStartedAt() + boardroom.windDownDelay());
         vm.expectRevert(BoardroomRedemptionPayout.SnapshotNotReady.selector);
-        boardroom.beginSnapshot();
+        boardroom.beginSnapshot(_expectedFacetSetHash(boardroom));
 
         boardroom.executeWindDownCall(
+            _expectedFacetSetHash(boardroom),
             _policyCall(
                 address(distributionFactory), address(curve), 0, abi.encodeCall(MigratingBondingCurve.cancel, ())
             )
         );
         assertFalse(curve.isClosed());
         vm.warp(block.timestamp + curve.SETTLEMENT_GRACE() + 1);
-        curve.finalizeUnwind();
-        boardroom.pruneObligation(address(curve));
+        curve.finalizeUnwind(_expectedFacetSetHash(boardroom));
+        boardroom.pruneObligation(_expectedFacetSetHash(boardroom), address(curve));
         assertEq(shareToken.encumberedSupply(), 0);
         assertEq(shareToken.governanceEligibleSupply(), 0);
         _openRedemptions(boardroom);
 
         assertTrue(curve.isClosed());
-        assertEq(uint256(boardroom.status()), uint256(Boardroom.BoardroomStatus.RedemptionsOpen));
+        assertEq(uint256(boardroom.status()), uint256(BoardroomFacetTypes.BoardroomStatus.RedemptionsOpen));
         assertEq(shareToken.balanceOf(address(boardroom)), 0);
     }
 
@@ -1641,9 +1674,9 @@ contract DistributionTest is Test {
         assertTrue(curve.canMigrate());
 
         vm.prank(owner);
-        boardroom.startWindDown();
+        boardroom.startWindDown(_expectedFacetSetHash(boardroom));
         vm.expectRevert(MigratingBondingCurve.BoardroomNotActive.selector);
-        curve.migrate(118.75 ether, 237_500000, block.timestamp);
+        curve.migrate(_expectedFacetSetHash(boardroom), 118.75 ether, 237_500000, block.timestamp);
         vm.warp(curve.phaseEndsAt() + 1);
         curve.fallbackToUnwind();
 
@@ -1653,7 +1686,7 @@ contract DistributionTest is Test {
         assertEq(boardroom.liquidityLocker(), address(0));
 
         vm.warp(block.timestamp + curve.SETTLEMENT_GRACE() + 1);
-        curve.finalizeUnwind();
+        curve.finalizeUnwind(_expectedFacetSetHash(boardroom));
         assertEq(curve.outstandingCurveShareLiability(), 0);
         assertTrue(curve.isClosed());
     }
@@ -1677,8 +1710,8 @@ contract DistributionTest is Test {
         params.quoteToLpBps = 1;
 
         vm.startPrank(owner);
-        boardroom.mint(address(boardroom), 2);
-        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), 2);
+        BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](2);
         calls[0] = _policyCall(
             address(assetPolicy),
             address(shareToken),
@@ -1693,13 +1726,13 @@ contract DistributionTest is Test {
         );
         vm.expectRevert(
             abi.encodeWithSelector(
-                Boardroom.CallNotAllowed.selector,
+                BoardroomFacetBase.CallNotAllowed.selector,
                 address(distributionFactory),
                 address(distributionFactory),
                 DistributionFactory.createMigratingBondingCurve.selector
             )
         );
-        boardroom.executeBatch(calls);
+        boardroom.executeBatch(_expectedFacetSetHash(boardroom), calls);
         vm.stopPrank();
     }
 
@@ -1714,7 +1747,7 @@ contract DistributionTest is Test {
         address predictedCurve = distributionFactory.predictMigratingBondingCurveAddress(address(boardroom), salt);
         MigratingBondingCurve.CreateParams memory params =
             _curveParams(address(shareToken), address(paymentToken), salt);
-        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](2);
         calls[0] = _policyCall(
             address(assetPolicy),
             address(shareToken),
@@ -1729,9 +1762,9 @@ contract DistributionTest is Test {
         );
 
         vm.startPrank(owner);
-        boardroom.mint(address(boardroom), totalShares);
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), totalShares);
         vm.expectRevert(abi.encodeWithSelector(LockedLiquidityFactory.PoolAlreadySeeded.selector, pool));
-        boardroom.executeBatch(calls);
+        boardroom.executeBatch(_expectedFacetSetHash(boardroom), calls);
         vm.stopPrank();
 
         assertEq(predictedCurve.code.length, 0);
@@ -1811,13 +1844,14 @@ contract DistributionTest is Test {
         vm.prank(owner);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Boardroom.CallNotAllowed.selector,
+                BoardroomFacetBase.CallNotAllowed.selector,
                 address(distributionFactory),
                 address(distributionFactory),
                 DistributionFactory.createMigratingBondingCurve.selector
             )
         );
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(
                 address(distributionFactory),
                 address(distributionFactory),
@@ -1868,7 +1902,7 @@ contract DistributionTest is Test {
         assertEq(curve.quoteReserve(), 500_000000);
 
         vm.expectRevert(abi.encodeWithSelector(MigratingBondingCurve.MigrationMinimumTooLow.selector, 0, 118.75 ether));
-        curve.migrate(0, 0, block.timestamp);
+        curve.migrate(_expectedFacetSetHash(boardroom), 0, 0, block.timestamp);
 
         vm.prank(buyer);
         vm.expectRevert(
@@ -1905,7 +1939,7 @@ contract DistributionTest is Test {
             _createMigratingCurve(boardroom, shareToken, paymentToken, "curve-quarantine-policy-gate-create");
 
         vm.expectRevert(MigratingBondingCurve.QuoteNotQuarantined.selector);
-        curve.recoverQuarantinedQuote();
+        curve.recoverQuarantinedQuote(_expectedFacetSetHash(boardroom));
     }
 
     function testQuarantinedQuoteForfeitureIsWindDownOnlyVetoableAndPostSnapshotRecoveryGoesToExcessRecipient() public {
@@ -1925,15 +1959,16 @@ contract DistributionTest is Test {
         vm.roll(block.number + 1);
 
         vm.prank(owner);
-        boardroom.startWindDown();
+        boardroom.startWindDown(_expectedFacetSetHash(boardroom));
         boardroom.executeWindDownCall(
+            _expectedFacetSetHash(boardroom),
             _policyCall(
                 address(distributionFactory), address(curve), 0, abi.encodeCall(MigratingBondingCurve.cancel, ())
             )
         );
         mutableQuote.setFailureMode(false, true);
         vm.warp(curve.phaseEndsAt() + 1);
-        curve.finalizeUnwind();
+        curve.finalizeUnwind(_expectedFacetSetHash(boardroom));
 
         assertEq(uint8(curve.curveStatus()), uint8(MigratingBondingCurve.CurvePhase.Quarantined));
         assertFalse(curve.isClosed());
@@ -1953,7 +1988,7 @@ contract DistributionTest is Test {
         vm.warp(curve.forfeitureEligibleAt());
         curve.openQuoteForfeiture();
         vm.warp(curve.forfeitureWindowEndsAt() + 1);
-        curve.finalizeQuoteForfeiture();
+        curve.finalizeQuoteForfeiture(_expectedFacetSetHash(boardroom));
 
         assertTrue(curve.isClosed());
         assertFalse(curve.migrationReservationHeld());
@@ -1961,7 +1996,7 @@ contract DistributionTest is Test {
         assertFalse(boardroom.isIssuedDistribution(address(curve)));
 
         rewards.terminalize();
-        boardroom.pruneObligation(address(rewards));
+        boardroom.pruneObligation(_expectedFacetSetHash(boardroom), address(rewards));
         mutableQuote.setFailureMode(false, false);
         _openRedemptions(boardroom);
 
@@ -2010,13 +2045,14 @@ contract DistributionTest is Test {
         vm.prank(owner);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Boardroom.CallNotAllowed.selector,
+                BoardroomFacetBase.CallNotAllowed.selector,
                 address(distributionFactory),
                 address(paymentToken),
                 DistributionCurrency.approve.selector
             )
         );
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(
                 address(distributionFactory),
                 address(paymentToken),
@@ -2125,13 +2161,14 @@ contract DistributionTest is Test {
         vm.prank(owner);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Boardroom.CallNotAllowed.selector,
+                BoardroomFacetBase.CallNotAllowed.selector,
                 address(distributionFactory),
                 address(sale),
                 FixedPriceSale.close.selector
             )
         );
         secondBoardroom.execute(
+            _expectedFacetSetHash(secondBoardroom),
             _policyCall(address(distributionFactory), address(sale), 0, abi.encodeCall(FixedPriceSale.close, ()))
         );
     }
@@ -2152,13 +2189,14 @@ contract DistributionTest is Test {
         vm.prank(owner);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Boardroom.CallNotAllowed.selector,
+                BoardroomFacetBase.CallNotAllowed.selector,
                 address(distributionFactory),
                 address(distributionFactory),
                 DistributionFactory.createFixedPriceSale.selector
             )
         );
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(
                 address(distributionFactory),
                 address(distributionFactory),
@@ -2178,6 +2216,7 @@ contract DistributionTest is Test {
 
         vm.startPrank(owner);
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(
                 address(assetPolicy),
                 address(wrappedNative),
@@ -2191,13 +2230,14 @@ contract DistributionTest is Test {
         );
         vm.expectRevert(
             abi.encodeWithSelector(
-                Boardroom.CallNotAllowed.selector,
+                BoardroomFacetBase.CallNotAllowed.selector,
                 address(distributionFactory),
                 address(distributionFactory),
                 DistributionFactory.createFixedPriceSale.selector
             )
         );
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(
                 address(distributionFactory),
                 address(distributionFactory),
@@ -2210,13 +2250,14 @@ contract DistributionTest is Test {
             _curveParams(address(wrappedNative), address(paymentToken), keccak256("distribution-wrong-share-curve"));
         vm.expectRevert(
             abi.encodeWithSelector(
-                Boardroom.CallNotAllowed.selector,
+                BoardroomFacetBase.CallNotAllowed.selector,
                 address(distributionFactory),
                 address(distributionFactory),
                 DistributionFactory.createMigratingBondingCurve.selector
             )
         );
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(
                 address(distributionFactory),
                 address(distributionFactory),
@@ -2233,13 +2274,14 @@ contract DistributionTest is Test {
         );
         vm.expectRevert(
             abi.encodeWithSelector(
-                Boardroom.CallNotAllowed.selector,
+                BoardroomFacetBase.CallNotAllowed.selector,
                 address(distributionFactory),
                 address(distributionFactory),
                 DistributionFactory.createMerkleAirdrop.selector
             )
         );
         boardroom.execute(
+            _expectedFacetSetHash(boardroom),
             _policyCall(
                 address(distributionFactory),
                 address(distributionFactory),
@@ -2251,44 +2293,8 @@ contract DistributionTest is Test {
     }
 
     function testDistributionPolicyRejectsMigratingCurveWithoutLockedLiquidityFactory() public {
-        DistributionFactory factoryWithoutLocker = new DistributionFactory(address(0), address(tokenGrantFactory));
-        policyRegistry.registerModulePolicy(address(factoryWithoutLocker));
-        assetPolicy.setApprovalSpenderAllowed(address(factoryWithoutLocker), true);
-
-        (Boardroom boardroom, BoardroomToken shareToken) = _createBoardroom("curve-no-locker");
-        uint256 totalShares = CURVE_SALE_SHARES + CURVE_MIGRATION_SHARES;
-
-        vm.startPrank(owner);
-        boardroom.mint(address(boardroom), totalShares);
-        boardroom.execute(
-            _policyCall(
-                address(assetPolicy),
-                address(shareToken),
-                0,
-                abi.encodeWithSignature("approve(address,uint256)", address(factoryWithoutLocker), totalShares)
-            )
-        );
-
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                Boardroom.CallNotAllowed.selector,
-                address(factoryWithoutLocker),
-                address(factoryWithoutLocker),
-                DistributionFactory.createMigratingBondingCurve.selector
-            )
-        );
-        boardroom.execute(
-            _policyCall(
-                address(factoryWithoutLocker),
-                address(factoryWithoutLocker),
-                0,
-                abi.encodeCall(
-                    DistributionFactory.createMigratingBondingCurve,
-                    (_curveParams(address(shareToken), address(paymentToken), keccak256("curve-no-locker-create")))
-                )
-            )
-        );
-        vm.stopPrank();
+        vm.expectRevert(DistributionFactory.InvalidAddress.selector);
+        new DistributionFactory(address(0), address(tokenGrantFactory));
     }
 
     function _createBoardroom(string memory saltLabel)
@@ -2302,17 +2308,23 @@ contract DistributionTest is Test {
         internal
         returns (Boardroom boardroom, BoardroomToken shareToken)
     {
-        address boardroomAddress = boardroomFactory.createBoardroom(
-            boardroomOwner, "Distribution Common", "DIST", keccak256(bytes(saltLabel))
+        boardroom = Boardroom(
+            payable(boardroomFactory.createBoardroom(
+                    canonicalFacetSetHash[address(boardroomFactory)],
+                    boardroomOwner,
+                    "Distribution Common",
+                    "DIST",
+                    keccak256(bytes(saltLabel))
+                ))
         );
-        boardroom = Boardroom(payable(boardroomAddress));
         shareToken = BoardroomToken(boardroom.shareToken());
         assetPolicy.setAssetAllowed(address(shareToken), true);
     }
 
     function _createRewardPool(Boardroom boardroom) internal returns (BoardroomRewards rewards) {
         bytes memory result = boardroom.execute(
-            Boardroom.Call({
+            _expectedFacetSetHash(boardroom),
+            BoardroomFacetTypes.Call({
                 policy: address(rewardsFactory),
                 target: address(rewardsFactory),
                 value: 0,
@@ -2329,14 +2341,14 @@ contract DistributionTest is Test {
         string memory saltLabel
     ) internal returns (FixedPriceSale sale) {
         vm.startPrank(owner);
-        boardroom.mint(address(boardroom), SALE_SHARES);
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), SALE_SHARES);
 
         bytes32 salt = keccak256(bytes(saltLabel));
         address predictedSale = distributionFactory.predictFixedPriceSaleAddress(address(boardroom), salt);
         FixedPriceSale.CreateParams memory params =
             _saleParams(address(shareToken), address(paymentToken_), SALE_SHARES, PRICE, salt);
 
-        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](2);
         calls[0] = _policyCall(
             address(assetPolicy),
             address(shareToken),
@@ -2350,7 +2362,7 @@ contract DistributionTest is Test {
             abi.encodeCall(DistributionFactory.createFixedPriceSale, (params))
         );
 
-        bytes[] memory results = boardroom.executeBatch(calls);
+        bytes[] memory results = boardroom.executeBatch(_expectedFacetSetHash(boardroom), calls);
         vm.stopPrank();
 
         address createdSale = abi.decode(results[1], (address));
@@ -2367,14 +2379,14 @@ contract DistributionTest is Test {
         uint256 duration
     ) internal returns (DutchAuctionSale auction) {
         vm.startPrank(owner);
-        boardroom.mint(address(boardroom), SALE_SHARES);
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), SALE_SHARES);
 
         bytes32 salt = keccak256(bytes(saltLabel));
         address predictedAuction = distributionFactory.predictDutchAuctionAddress(address(boardroom), salt);
         DutchAuctionSale.CreateParams memory params =
             _auctionParams(address(shareToken), address(paymentToken_), SALE_SHARES, salt, startsAt, duration);
 
-        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](2);
         calls[0] = _policyCall(
             address(assetPolicy),
             address(shareToken),
@@ -2388,7 +2400,7 @@ contract DistributionTest is Test {
             abi.encodeCall(DistributionFactory.createDutchAuction, (params))
         );
 
-        bytes[] memory results = boardroom.executeBatch(calls);
+        bytes[] memory results = boardroom.executeBatch(_expectedFacetSetHash(boardroom), calls);
         vm.stopPrank();
 
         address createdAuction = abi.decode(results[1], (address));
@@ -2440,13 +2452,13 @@ contract DistributionTest is Test {
         uint256 totalShares = CURVE_SALE_SHARES + CURVE_MIGRATION_SHARES;
 
         vm.startPrank(curveOwner);
-        boardroom.mint(address(boardroom), totalShares);
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), totalShares);
 
         bytes32 salt = keccak256(bytes(saltLabel));
         address predictedCurve = distributionFactory.predictMigratingBondingCurveAddress(address(boardroom), salt);
         MigratingBondingCurve.CreateParams memory params = _curveParams(address(shareToken), quoteToken, salt);
 
-        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](2);
         calls[0] = _policyCall(
             address(assetPolicy),
             address(shareToken),
@@ -2460,7 +2472,7 @@ contract DistributionTest is Test {
             abi.encodeCall(DistributionFactory.createMigratingBondingCurve, (params))
         );
 
-        bytes[] memory results = boardroom.executeBatch(calls);
+        bytes[] memory results = boardroom.executeBatch(_expectedFacetSetHash(boardroom), calls);
         vm.stopPrank();
 
         address createdCurve = abi.decode(results[1], (address));
@@ -2497,13 +2509,13 @@ contract DistributionTest is Test {
         uint16 maxGrantClaims
     ) internal returns (MerkleAirdrop airdrop) {
         vm.startPrank(owner);
-        boardroom.mint(address(boardroom), shareAmount);
+        boardroom.mint(_expectedFacetSetHash(boardroom), address(boardroom), shareAmount);
 
         address predictedAirdrop = distributionFactory.predictMerkleAirdropAddress(address(boardroom), salt);
         MerkleAirdrop.CreateParams memory params = _airdropParams(address(shareToken), shareAmount, root, salt);
         params.maxGrantClaims = maxGrantClaims;
 
-        Boardroom.Call[] memory calls = new Boardroom.Call[](2);
+        BoardroomFacetTypes.Call[] memory calls = new BoardroomFacetTypes.Call[](2);
         calls[0] = _policyCall(
             address(assetPolicy),
             address(shareToken),
@@ -2517,7 +2529,7 @@ contract DistributionTest is Test {
             abi.encodeCall(DistributionFactory.createMerkleAirdrop, (params))
         );
 
-        bytes[] memory results = boardroom.executeBatch(calls);
+        bytes[] memory results = boardroom.executeBatch(_expectedFacetSetHash(boardroom), calls);
         vm.stopPrank();
 
         address createdAirdrop = abi.decode(results[1], (address));
@@ -2715,7 +2727,7 @@ contract DistributionTest is Test {
         vm.roll(block.number + 1);
         BoardroomControllerFactory controllerFactory = BoardroomControllerFactory(boardroomFactory.controllerFactory());
         address predicted = controllerFactory.predictControllerAddress(address(boardroom), 1);
-        Boardroom.LaunchConfig memory config = Boardroom.LaunchConfig({
+        BoardroomFacetTypes.LaunchConfig memory config = BoardroomFacetTypes.LaunchConfig({
             proposer: proposer,
             predictedController: predicted,
             protectionStaker: protection,
@@ -2727,41 +2739,44 @@ contract DistributionTest is Test {
             generation: 1
         });
         vm.prank(boardroom.owner());
-        boardroom.launch(config);
+        boardroom.launch(_expectedFacetSetHash(boardroom), config);
         controller_ = BoardroomController(predicted);
     }
 
     function _openRedemptions(Boardroom boardroom) internal {
         uint256 readyAt = boardroom.windDownStartedAt() + boardroom.windDownDelay();
         if (block.timestamp < readyAt) vm.warp(readyAt);
-        boardroom.beginSnapshot();
+        boardroom.beginSnapshot(_expectedFacetSetHash(boardroom));
         uint256 count = boardroom.redeemableAssetCount();
         for (uint256 cursor; cursor < count; cursor += boardroom.MAX_SNAPSHOT_PAGE()) {
             uint256 remaining = count - cursor;
             boardroom.snapshotAssets(
+                _expectedFacetSetHash(boardroom),
                 remaining > boardroom.MAX_SNAPSHOT_PAGE() ? boardroom.MAX_SNAPSHOT_PAGE() : remaining
             );
         }
-        boardroom.openRedemptions();
+        boardroom.openRedemptions(_expectedFacetSetHash(boardroom));
     }
 
     function _windDownAndRedeemAfterMigration(Boardroom boardroom, BoardroomToken shareToken, address) internal {
         uint256 buyerShares = shareToken.balanceOf(buyer);
 
         vm.prank(owner);
-        boardroom.startWindDown();
-        boardroom.exitProtocolLiquidity(1, 1, block.timestamp);
-        boardroom.closeProtocolLiquidityAfterWindDown();
+        boardroom.startWindDown(_expectedFacetSetHash(boardroom));
+        boardroom.exitProtocolLiquidity(_expectedFacetSetHash(boardroom), 1, 1, block.timestamp);
+        boardroom.closeProtocolLiquidityAfterWindDown(_expectedFacetSetHash(boardroom));
         _openRedemptions(boardroom);
 
-        assertEq(uint256(boardroom.status()), uint256(Boardroom.BoardroomStatus.RedemptionsOpen));
+        assertEq(uint256(boardroom.status()), uint256(BoardroomFacetTypes.BoardroomStatus.RedemptionsOpen));
         assertEq(shareToken.balanceOf(address(boardroom)), 0);
 
         uint256 expectedQuote = paymentToken.balanceOf(address(boardroom)) * buyerShares / shareToken.totalSupply();
         vm.prank(buyer);
-        boardroom.redeem(buyerShares);
+        boardroom.redeem(_expectedFacetSetHash(boardroom), buyerShares);
         vm.prank(buyer);
-        uint256 amountOut = boardroom.claimRedemptionAsset(address(paymentToken), buyer, expectedQuote);
+        uint256 amountOut = boardroom.claimRedemptionAsset(
+            _expectedFacetSetHash(boardroom), address(paymentToken), buyer, expectedQuote
+        );
 
         assertEq(amountOut, expectedQuote);
         assertEq(shareToken.balanceOf(buyer), 0);
@@ -2770,8 +2785,8 @@ contract DistributionTest is Test {
     function _policyCall(address policy, address target, uint256 value, bytes memory data)
         internal
         pure
-        returns (Boardroom.Call memory call_)
+        returns (BoardroomFacetTypes.Call memory call_)
     {
-        call_ = Boardroom.Call({policy: policy, target: target, value: value, data: data});
+        call_ = BoardroomFacetTypes.Call({policy: policy, target: target, value: value, data: data});
     }
 }

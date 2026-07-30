@@ -10,7 +10,14 @@ import {
   PAYMENT_IDENTIFIER,
   appendPaymentIdentifierToExtensions,
 } from "@x402/extensions/payment-identifier";
-import { erc20Abi } from "@pledge.cash/sdk";
+import {
+  ammFactoryAbi,
+  boardroomControllerFactoryAbi,
+  boardroomFactoryAbi,
+  boardroomKernelAbi,
+  erc20Abi,
+  protocolFacetRegistryAbi,
+} from "@pledge.cash/sdk";
 import postgres from "postgres";
 import {
   createPublicClient,
@@ -91,6 +98,9 @@ const fixtureAbi = parseAbi([
   "function shareToken() view returns (address)",
   "function boardroom() view returns (address)",
   "function boardroomFactory() view returns (address)",
+  "function boardroomKernel() view returns (address)",
+  "function protocolFacetRegistry() view returns (address)",
+  "function FACET_SET_HASH() view returns (bytes32)",
   "function pool() view returns (address)",
   "function ammRouter() view returns (address)",
   "function ammFactory() view returns (address)",
@@ -100,6 +110,9 @@ const fixtureAbi = parseAbi([
 ]);
 const ammHarnessAbi = parseAbi(["function swapCount() view returns (uint256)"]);
 const saleHarnessAbi = parseAbi(["function purchaseCount() view returns (uint256)"]);
+const boardroomHarnessAbi = parseAbi([
+  "function contributionCount() view returns (uint256)",
+]);
 
 const executor = privateKeyToAccount(executorKey);
 const payer = privateKeyToAccount(payerKey);
@@ -159,6 +172,8 @@ try {
       | "shareToken"
       | "boardroom"
       | "boardroomFactory"
+      | "boardroomKernel"
+      | "protocolFacetRegistry"
       | "pool"
       | "ammRouter"
       | "ammFactory"
@@ -177,6 +192,8 @@ try {
     shareToken,
     boardroom,
     boardroomFactory,
+    boardroomKernel,
+    protocolFacetRegistry,
     pool,
     ammRouter,
     ammFactory,
@@ -187,12 +204,19 @@ try {
     readFixtureAddress("shareToken"),
     readFixtureAddress("boardroom"),
     readFixtureAddress("boardroomFactory"),
+    readFixtureAddress("boardroomKernel"),
+    readFixtureAddress("protocolFacetRegistry"),
     readFixtureAddress("pool"),
     readFixtureAddress("ammRouter"),
     readFixtureAddress("ammFactory"),
     readFixtureAddress("distributionFactory"),
     readFixtureAddress("fixedPriceSale"),
   ]);
+  const activeFacetSetHash = await publicClient.readContract({
+    address: fixture,
+    abi: fixtureAbi,
+    functionName: "FACET_SET_HASH",
+  });
 
   await submit(
     publicClient,
@@ -214,6 +238,16 @@ try {
     }),
     "approve fixed-price inventory",
   );
+  await submit(
+    publicClient,
+    executorClient.writeContract({
+      address: paymentToken,
+      abi: erc20Abi,
+      functionName: "approve",
+      args: [boardroom, 10_000_000n * 10n ** 6n],
+    }),
+    "approve recurring-support inventory",
+  );
 
   tempDatabase = await createTempDatabase();
   database = createDbClient(tempDatabase.databaseUrl);
@@ -225,16 +259,146 @@ try {
   );
   const operationStore = new PostgresAdapterOperationStore(database.sql, journalKey);
   const intentStore = new PostgresIntentExecutionStore(database.sql);
+  const [
+    boardroomControllerFactory,
+    boardroomGovernanceLogic,
+    boardroomMarketLogic,
+    boardroomRedemptionPayout,
+    protocolFacetRegistryOwner,
+    ammFactoryOwner,
+    kernelSelectorSetHash,
+  ] = await Promise.all([
+    publicClient.readContract({
+      address: boardroomFactory,
+      abi: boardroomFactoryAbi,
+      functionName: "controllerFactory",
+    }),
+    publicClient.readContract({
+      address: boardroomFactory,
+      abi: boardroomFactoryAbi,
+      functionName: "governanceLogic",
+    }),
+    publicClient.readContract({
+      address: boardroomFactory,
+      abi: boardroomFactoryAbi,
+      functionName: "marketLogic",
+    }),
+    publicClient.readContract({
+      address: boardroomFactory,
+      abi: boardroomFactoryAbi,
+      functionName: "redemptionPayoutLogic",
+    }),
+    publicClient.readContract({
+      address: protocolFacetRegistry,
+      abi: protocolFacetRegistryAbi,
+      functionName: "owner",
+    }),
+    publicClient.readContract({
+      address: ammFactory,
+      abi: ammFactoryAbi,
+      functionName: "owner",
+    }),
+    publicClient.readContract({
+      address: boardroomKernel,
+      abi: boardroomKernelAbi,
+      functionName: "kernelSelectorSetHash",
+    }),
+  ]);
+  const boardroomControllerLogic = await publicClient.readContract({
+    address: boardroomControllerFactory,
+    abi: boardroomControllerFactoryAbi,
+    functionName: "controllerImplementation",
+  });
+  const codeHash = async (address: Address): Promise<Hex> => {
+    const code = await publicClient.getCode({ address });
+    if (!code || code === "0x") throw new Error(`missing integration code at ${address}`);
+    return keccak256(code);
+  };
+  const [
+    ammFactoryCodeHash,
+    ammRouterCodeHash,
+    distributionFactoryCodeHash,
+    boardroomFactoryCodeHash,
+    boardroomControllerFactoryCodeHash,
+    boardroomControllerLogicCodeHash,
+    boardroomGovernanceLogicCodeHash,
+    boardroomMarketLogicCodeHash,
+    boardroomRedemptionPayoutCodeHash,
+    boardroomKernelCodeHash,
+    protocolFacetRegistryCodeHash,
+  ] = await Promise.all([
+    codeHash(ammFactory),
+    codeHash(ammRouter),
+    codeHash(distributionFactory),
+    codeHash(boardroomFactory),
+    codeHash(boardroomControllerFactory),
+    codeHash(boardroomControllerLogic),
+    codeHash(boardroomGovernanceLogic),
+    codeHash(boardroomMarketLogic),
+    codeHash(boardroomRedemptionPayout),
+    codeHash(boardroomKernel),
+    codeHash(protocolFacetRegistry),
+  ]);
   const canonical = new CanonicalMarketplaceReader(publicClient as PublicClient, {
     chainId,
-    ammFactory: getAddress(ammFactory),
-    ammRouter: getAddress(ammRouter),
-    distributionFactory: getAddress(distributionFactory),
-    boardroomFactory: getAddress(boardroomFactory),
+    ammFactory,
+    ammFactoryCodeHash,
+    ammFactoryOwner,
+    ammRouter,
+    ammRouterCodeHash,
+    distributionFactory,
+    distributionFactoryCodeHash,
+    boardroomFactory,
+    boardroomFactoryCodeHash,
+    boardroomControllerFactory,
+    boardroomControllerFactoryCodeHash,
+    boardroomControllerLogic,
+    boardroomControllerLogicCodeHash,
+    boardroomGovernanceLogic,
+    boardroomGovernanceLogicCodeHash,
+    boardroomMarketLogic,
+    boardroomMarketLogicCodeHash,
+    boardroomRedemptionPayout,
+    boardroomRedemptionPayoutCodeHash,
+    boardroomKernel,
+    boardroomKernelCodeHash,
+    protocolFacetRegistry,
+    protocolFacetRegistryCodeHash,
+    protocolFacetRegistryOwner,
+    protocolGovernance: protocolFacetRegistryOwner,
+    kernelSelectorSetHash,
     destinationUsdc: getAddress(paymentToken),
     executor: executor.address,
   });
   await canonical.assertReady();
+  const latestBlock = await publicClient.getBlock({ blockTag: "latest" });
+  const supportDeadline = Number(latestBlock.timestamp) + 300;
+  const supportRoute = await canonical.quote({
+    kind: "recurring_support",
+    chainId,
+    boardroom: getAddress(boardroom),
+    invoiceId: "00000000-0000-4000-8000-000000000001",
+    amount: "1000000",
+    expectedFacetSetHash: activeFacetSetHash,
+    maxSlippageBps: 0,
+    payer: payer.address,
+    recipient: payer.address,
+    refundAddress: payer.address,
+  }, supportDeadline);
+  const supportExecution = await executorClient.sendTransaction({
+    to: supportRoute.execution.target,
+    data: supportRoute.execution.callData,
+  });
+  await publicClient.waitForTransactionReceipt({ hash: supportExecution });
+  assertEqual(
+    await publicClient.readContract({
+      address: boardroom,
+      abi: boardroomHarnessAbi,
+      functionName: "contributionCount",
+    }),
+    1n,
+    "recurring-support contribution count",
+  );
 
   let nextId = 0;
   const quoteService = new MarketplaceQuoteService(
@@ -431,6 +595,7 @@ try {
           ammExecution: ammResult.execution.executionTransaction,
           duplicateReplay: replay.execution.executionTransaction,
           fixedPriceExecution: saleResult.execution.executionTransaction,
+          recurringSupportExecution: supportExecution,
           fullRefund: refundResult.execution.refundTransaction,
         },
         sourceSettlements: facilitator.sourceSettlements,

@@ -77,6 +77,7 @@ export function supportChallengeDto(challenge: SupportChallenge) {
     actor: challenge.actor,
     boardroom: challenge.boardroom,
     chainId: challenge.chainId,
+    facetSetHash: challenge.facetSetHash,
     planId: challenge.planId,
     message: challenge.message,
     payload: challenge.payload,
@@ -99,6 +100,7 @@ export function supportPlanDto(plan: SupportPlan) {
     status: plan.status,
     authority: plan.authority,
     authorityMode: plan.authorityMode,
+    facetSetHash: plan.facetSetHash,
     createdAt: plan.createdAt.toISOString(),
     ...(plan.retiredAt ? { retiredAt: plan.retiredAt.toISOString() } : {}),
   };

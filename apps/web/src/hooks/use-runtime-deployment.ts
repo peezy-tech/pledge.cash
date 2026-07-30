@@ -224,7 +224,7 @@ export function selectRuntimeDeploymentAvailability(
 export function deploymentAvailabilityStatus(
   deployment: PledgeCashDeployment,
 ): Extract<RuntimeDeploymentAvailabilityStatus, "ready" | "pending" | "missing" | "error"> {
-  const statuses = [deployment.status, deployment.boardroomStatus]
+  const statuses = [deployment.status]
     .map(normalizedStatus)
     .filter((status): status is string => status !== undefined);
 
@@ -241,9 +241,7 @@ export function deploymentAvailabilityStatus(
 export function pendingDeploymentReason(deployment: PledgeCashDeployment | undefined): string {
   const reason = deployment?.status?.trim().toLowerCase() === "pending"
     ? deployment.reason
-    : deployment?.boardroomStatus?.trim().toLowerCase() === "pending"
-      ? deployment.boardroomReason ?? deployment.reason
-      : deployment?.reason ?? deployment?.boardroomReason;
+    : deployment?.reason;
   return reason?.trim() || "The deployment is still being prepared for this network.";
 }
 
@@ -295,7 +293,7 @@ function deploymentStatusReason(
   deployment: PledgeCashDeployment,
   status: "missing" | "error",
 ): string {
-  const reason = deployment.reason ?? deployment.boardroomReason;
+  const reason = deployment.reason;
   if (reason?.trim()) return reason.trim();
   return status === "missing"
     ? "No deployment artifact is published for this network."
@@ -321,5 +319,5 @@ function runtimeDeploymentUrl(chainId: number): string {
 }
 
 function isStatusOnlyDeployment(deployment: PledgeCashDeployment): boolean {
-  return Boolean(deployment.status || deployment.reason || deployment.boardroomStatus || deployment.boardroomReason);
+  return Boolean(deployment.status || deployment.reason);
 }

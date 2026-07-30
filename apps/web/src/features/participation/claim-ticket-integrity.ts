@@ -2,6 +2,7 @@ export type ClaimTicketVerificationSource = {
   account: `0x${string}` | undefined;
   airdrop: `0x${string}` | undefined;
   chainId: number;
+  expectedFacetSetHash: `0x${string}` | undefined;
   merkleRoot: `0x${string}` | undefined;
   rawTicket: string;
 };
@@ -21,6 +22,7 @@ export function claimTicketVerificationSourceIdentity(input: ClaimTicketVerifica
     input.chainId,
     input.account?.toLowerCase() ?? "wallet-disconnected",
     input.airdrop?.toLowerCase() ?? "airdrop-unavailable",
+    input.expectedFacetSetHash?.toLowerCase() ?? "release-unavailable",
     input.merkleRoot?.toLowerCase() ?? "root-unavailable",
   ]);
 }

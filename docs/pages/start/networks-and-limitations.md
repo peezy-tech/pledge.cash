@@ -11,8 +11,8 @@ The app’s `Network` selector can show HyperEVM Testnet, Monad Testnet, and `Lo
 
 | Network | Chain ID | Current status |
 | --- | ---: | --- |
-| HyperEVM Testnet | `998` | The checked-in deterministic v5 artifact and its 29 source-bound receipts are verified. Contract workflows use testnet assets only. |
-| Monad Testnet | `10143` | The checked-in deterministic v5 candidate artifact is `pending`; it has not been broadcast. Contract-dependent app workflows are unavailable. |
+| HyperEVM Testnet | `998` | Canonical protocol v1 is `pending`; it has not been broadcast. Contract-dependent app workflows are unavailable. |
+| Monad Testnet | `10143` | Canonical protocol v1 is `pending`; it has not been broadcast. Contract-dependent app workflows are unavailable. |
 | Local Anvil | `31337` | Intended for a host or developer environment that provides the matching RPC and local deployment artifact. Local addresses and state are not durable public deployments. |
 
 No mainnet deployment is supported by these docs. A network appearing in the selector is not proof that a current pledge.cash contract stack exists there.
@@ -23,14 +23,17 @@ The shipped app connects through an injected browser wallet. It checks for walle
 
 If connection fails, unlock or enable the browser wallet for the site and choose `Check again`. If the app and wallet are on different chains, use `Switch wallet network` rather than signing on the wrong network.
 
-## Governance limitation
+## Governance and release limitation
 
-The candidate v5 release has the external-controller launch flow, but no public artifact has been broadcast or
-independently assured. Legacy Boardrooms remain readable and fail closed for v5 launch, controller operations, and
-Boardroom-control claims. The app must not translate an old internal queue into the new interface.
+Canonical protocol v1 includes external-controller launch and global
+registry-routed Boardroom releases, but neither target testnet has a usable
+artifact. The app must fail closed for launch, controller operations, and
+Boardroom-control claims while a deployment is pending.
 
-Four bonding-curve terminal-policy decisions also remain unresolved, so even a successful local v5 build is not a
-mainnet-readiness claim.
+Every state-changing Boardroom call and controller authorization is bound to
+an expected facet-set hash. After a storage-version activation, writes remain
+unavailable on each Boardroom until its permissionless migration completes.
+Local success is not a mainnet-readiness claim.
 
 ## Read and service limitations
 

@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { and, asc, desc, eq, gt, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import {
   createPublicClient,
   decodeFunctionData,
@@ -18,12 +18,13 @@ import {
 
 import {
   assetPolicyAbi,
-  boardroomControlReleaseSupport,
+  boardroomReleaseSupport,
   boardroomControllerAbi,
   boardroomPolicyRegistryAbi,
   discoverBoardrooms,
   getPledgeCashDeployment,
   pledgeCashAbis,
+  protocolFacetRegistryAbi,
   type BoardroomCall,
   type DiscoveredBoardroom,
   type PledgeCashDeployment,
@@ -50,6 +51,7 @@ import {
   queryShareTransfers,
   type ShareBalanceDeltaInput
 } from "./holders";
+import { SUPPORTED_BOARDROOM_CONTROL_RELEASE } from "./boardroom-control";
 import {
   queryExternalGovernanceEvents,
   type GovernanceEvent
@@ -119,6 +121,7 @@ export type InsertScheduledOperationInput = {
   readonly boardroomEpoch: bigint;
   readonly eta: Date;
   readonly expiresAt: Date;
+  readonly facetSetHash: Lowercase<Hex>;
   readonly operationKind: "boardroom" | "controller";
   readonly proposer: Lowercase<Address>;
   readonly scheduleBlock: bigint;
@@ -166,6 +169,13 @@ export type WatcherStoreTx = {
     readonly chainId: number;
     readonly configurationEpoch: bigint;
     readonly controller: Lowercase<Address>;
+    readonly terminalBlock: bigint;
+    readonly terminalLogIndex: number;
+    readonly txHash: Lowercase<Hex>;
+  }): Promise<Array<{ action: ScheduledOperationRow; calls: StoredCall[] }>>;
+  invalidateScheduledOperationsBeforeFacetSetActivation(input: {
+    readonly chainId: number;
+    readonly facetSetHash: Lowercase<Hex>;
     readonly terminalBlock: bigint;
     readonly terminalLogIndex: number;
     readonly txHash: Lowercase<Hex>;
@@ -252,6 +262,13 @@ type PolicyAdminEvent = InsertPolicyAdminEventInput & {
   readonly affectedScheduledOperations: boolean;
 };
 
+type FacetSetActivationEvent = {
+  readonly blockNumber: bigint;
+  readonly facetSetHash: Lowercase<Hex>;
+  readonly logIndex: number;
+  readonly transactionHash: Lowercase<Hex>;
+};
+
 type PositionedPipelineEvent = {
   readonly blockNumber: bigint;
   readonly event: WatcherPipelineEvent;
@@ -282,6 +299,7 @@ const scheduleBoardroomOperationSelector = encodeFunctionData({
   abi: boardroomControllerAbi,
   functionName: "scheduleBoardroomOperation",
   args: [
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
     [],
     "0x0000000000000000000000000000000000000000000000000000000000000000",
     0n,
@@ -292,7 +310,13 @@ const scheduleBoardroomOperationSelector = encodeFunctionData({
 const scheduleControllerOperationSelector = encodeFunctionData({
   abi: boardroomControllerAbi,
   functionName: "scheduleControllerOperation",
-  args: ["0x", "0x0000000000000000000000000000000000000000000000000000000000000000", 0n, 0n]
+  args: [
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    0n,
+    0n
+  ]
 }).slice(0, 10) as Hex;
 
 const safeExecTransactionAbi = [
@@ -416,6 +440,10 @@ const approvalSpenderAllowedSetEvent = getAbiItem({
   abi: assetPolicyAbi,
   name: "ApprovalSpenderAllowedSet"
 });
+const facetSetActivatedEvent = getAbiItem({
+  abi: protocolFacetRegistryAbi,
+  name: "FacetSetActivated"
+});
 
 let defaultActionEventHandler: WatcherActionEventHandler | undefined;
 
@@ -434,11 +462,16 @@ export async function runWatcherOnce(
   }
 
   const deployment = options.deployment ?? getPledgeCashDeployment(chainId);
-  const releaseSupport = boardroomControlReleaseSupport(deployment);
-  if (!releaseSupport.supported || !deployment?.boardroomFactory) {
+  const releaseSupport = boardroomReleaseSupport(deployment);
+  if (
+    !releaseSupport.supported ||
+    deployment?.protocolVersion !== SUPPORTED_BOARDROOM_CONTROL_RELEASE ||
+    !deployment.boardroomFactory
+  ) {
     return skippedResult(
       chainId,
-      releaseSupport.reason ?? `No supported boardroomFactory deployment is available for chain ${chainId}`
+      releaseSupport.reason ??
+        `No supported canonical Boardroom release is available for chain ${chainId}`
     );
   }
 
@@ -524,6 +557,7 @@ export function decodeScheduledOperationCalldata(input: {
   readonly controller: Address;
   readonly expectedBoardroomEpoch: bigint;
   readonly expectedConfigurationEpoch: bigint;
+  readonly expectedFacetSetHash: Hex;
   readonly expectedPayloadHash: Hex;
   readonly expectedSalt: Hex;
   readonly operationKind: "boardroom" | "controller";
@@ -536,6 +570,7 @@ export function decodeScheduledOperationCalldata(input: {
     const decoded = decodeScheduleCalldata(candidate);
     if (!decoded) continue;
     if (decoded.input.kind !== input.operationKind) continue;
+    if (lowerHex(decoded.facetSetHash) !== lowerHex(input.expectedFacetSetHash)) continue;
     if (lowerHex(decoded.salt) !== lowerHex(input.expectedSalt)) continue;
     if (decoded.boardroomEpoch !== input.expectedBoardroomEpoch) continue;
     if (decoded.configurationEpoch !== input.expectedConfigurationEpoch) continue;
@@ -558,6 +593,7 @@ function decodeScheduleCalldata(data: Hex):
   | {
       readonly boardroomEpoch: bigint;
       readonly configurationEpoch: bigint;
+      readonly facetSetHash: Hex;
       readonly input: DecodedScheduleInput;
       readonly payloadHash: Hex;
       readonly salt: Hex;
@@ -567,14 +603,22 @@ function decodeScheduleCalldata(data: Hex):
     const decoded = decodeFunctionData({ abi: boardroomControllerAbi, data });
     const args = decoded.args as readonly unknown[] | undefined;
     if (decoded.functionName === "scheduleBoardroomOperation") {
-      const calls = normalizeBoardroomCalls(args?.[0]);
-      const salt = hexValue(args?.[1]);
-      const boardroomEpoch = bigintValue(args?.[2]);
-      const configurationEpoch = bigintValue(args?.[3]);
-      if (!calls || !salt || boardroomEpoch === undefined || configurationEpoch === undefined) return undefined;
+      const facetSetHash = hexValue(args?.[0]);
+      const calls = normalizeBoardroomCalls(args?.[1]);
+      const salt = hexValue(args?.[2]);
+      const boardroomEpoch = bigintValue(args?.[3]);
+      const configurationEpoch = bigintValue(args?.[4]);
+      if (
+        !facetSetHash ||
+        !calls ||
+        !salt ||
+        boardroomEpoch === undefined ||
+        configurationEpoch === undefined
+      ) return undefined;
       return {
         boardroomEpoch,
         configurationEpoch,
+        facetSetHash,
         input: { kind: "boardroom", calls },
         payloadHash: keccak256(
           encodeAbiParameters(
@@ -597,14 +641,22 @@ function decodeScheduleCalldata(data: Hex):
       };
     }
     if (decoded.functionName === "scheduleControllerOperation") {
-      const selfData = hexValue(args?.[0]);
-      const salt = hexValue(args?.[1]);
-      const boardroomEpoch = bigintValue(args?.[2]);
-      const configurationEpoch = bigintValue(args?.[3]);
-      if (!selfData || !salt || boardroomEpoch === undefined || configurationEpoch === undefined) return undefined;
+      const facetSetHash = hexValue(args?.[0]);
+      const selfData = hexValue(args?.[1]);
+      const salt = hexValue(args?.[2]);
+      const boardroomEpoch = bigintValue(args?.[3]);
+      const configurationEpoch = bigintValue(args?.[4]);
+      if (
+        !facetSetHash ||
+        !selfData ||
+        !salt ||
+        boardroomEpoch === undefined ||
+        configurationEpoch === undefined
+      ) return undefined;
       return {
         boardroomEpoch,
         configurationEpoch,
+        facetSetHash,
         input: { kind: "controller", data: selfData },
         payloadHash: keccak256(selfData),
         salt
@@ -655,6 +707,11 @@ async function runWatcherPass(input: {
   const policyAdminEvents = await fetchPolicyAdminEvents(
     input.client,
     input.chainId,
+    input.deployment,
+    plan.windows.governance
+  );
+  const facetSetActivationEvents = await fetchFacetSetActivationEvents(
+    input.client,
     input.deployment,
     plan.windows.governance
   );
@@ -710,6 +767,23 @@ async function runWatcherPass(input: {
         ...emitted.map((pipelineEvent) => ({
           blockNumber: event.blockNumber,
           event: pipelineEvent,
+          logIndex: event.logIndex
+        }))
+      );
+    }
+
+    for (const event of facetSetActivationEvents) {
+      const invalidated = await tx.invalidateScheduledOperationsBeforeFacetSetActivation({
+        chainId: input.chainId,
+        facetSetHash: event.facetSetHash,
+        terminalBlock: event.blockNumber,
+        terminalLogIndex: event.logIndex,
+        txHash: event.transactionHash
+      });
+      governancePipelineEvents.push(
+        ...invalidated.map((item) => ({
+          blockNumber: event.blockNumber,
+          event: { ...item, event: "invalidated" as const },
           logIndex: event.logIndex
         }))
       );
@@ -995,6 +1069,44 @@ async function fetchPolicyAdminEvents(
   return events.sort(comparePolicyAdminEvents);
 }
 
+async function fetchFacetSetActivationEvents(
+  client: WatcherClient,
+  deployment: PledgeCashDeployment,
+  window: CursorWindow | undefined
+): Promise<FacetSetActivationEvent[]> {
+  if (!window || !deployment.protocolFacetRegistry) return [];
+
+  const logs = (await client.getLogs({
+    address: deployment.protocolFacetRegistry,
+    event: facetSetActivatedEvent,
+    fromBlock: window.fromBlock,
+    toBlock: window.toBlock
+  } as never)) as Array<{
+    args?: Record<string, unknown>;
+    blockNumber?: bigint;
+    logIndex?: number;
+    transactionHash?: Hex;
+  }>;
+
+  return logs
+    .flatMap((log) => {
+      const facetSetHash = hexValue(log.args?.facetSetHash);
+      if (
+        facetSetHash === undefined
+        || log.blockNumber === undefined
+        || log.logIndex === undefined
+        || log.transactionHash === undefined
+      ) return [];
+      return [{
+        blockNumber: log.blockNumber,
+        facetSetHash: lowerHex(facetSetHash),
+        logIndex: log.logIndex,
+        transactionHash: lowerHex(log.transactionHash)
+      }];
+    })
+    .sort(compareFacetSetActivationEvents);
+}
+
 async function fetchShareTransfers(
   client: WatcherClient,
   shareTokens: readonly Address[],
@@ -1075,6 +1187,7 @@ async function processGovernanceEvent(
       controller: event.controller,
       expectedBoardroomEpoch: event.boardroomEpoch,
       expectedConfigurationEpoch: event.configurationEpoch,
+      expectedFacetSetHash: event.facetSetHash,
       expectedPayloadHash: event.payloadHash,
       expectedSalt: event.salt,
       operationKind: event.operationKind,
@@ -1091,6 +1204,7 @@ async function processGovernanceEvent(
       boardroomEpoch: event.boardroomEpoch,
       eta: new Date(Number(event.eta) * 1000),
       expiresAt: new Date(Number(event.expiresAt) * 1000),
+      facetSetHash: lowerHex(event.facetSetHash),
       operationKind: event.operationKind,
       proposer: lowerAddress(event.proposer),
       scheduleBlock: event.blockNumber,
@@ -1261,6 +1375,48 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
         }))
       );
     },
+    async invalidateScheduledOperationsBeforeFacetSetActivation(input: {
+      readonly chainId: number;
+      readonly facetSetHash: Lowercase<Hex>;
+      readonly terminalBlock: bigint;
+      readonly terminalLogIndex: number;
+      readonly txHash: Lowercase<Hex>;
+    }): Promise<Array<{ action: ScheduledOperationRow; calls: StoredCall[] }>> {
+      const invalidated = await db
+        .update(scheduledOperations)
+        .set({
+          resolvedTxHash: input.txHash,
+          status: "invalidated",
+          updatedAt: new Date()
+        })
+        .where(
+          and(
+            eq(scheduledOperations.chainId, input.chainId),
+            eq(scheduledOperations.status, "scheduled"),
+            ne(scheduledOperations.facetSetHash, input.facetSetHash),
+            or(
+              lt(scheduledOperations.scheduleBlock, input.terminalBlock),
+              and(
+                eq(scheduledOperations.scheduleBlock, input.terminalBlock),
+                lt(scheduledOperations.scheduleLogIndex, input.terminalLogIndex)
+              )
+            )
+          )
+        )
+        .returning();
+      invalidated.sort(
+        (left, right) =>
+          Number(left.scheduleBlock - right.scheduleBlock)
+          || left.scheduleLogIndex - right.scheduleLogIndex
+          || left.createdAt.getTime() - right.createdAt.getTime()
+      );
+      return Promise.all(
+        invalidated.map(async (action) => ({
+          action,
+          calls: await this.listActionCalls(action.id)
+        }))
+      );
+    },
     async insertActionCalls(actionId: string, calls: readonly InsertActionCallInput[]): Promise<StoredCall[]> {
       if (calls.length === 0) return [];
 
@@ -1322,6 +1478,7 @@ function createDrizzleWatcherTx(db: SentinelDb): WatcherStoreTx {
           boardroomEpoch: input.boardroomEpoch,
           eta: input.eta,
           expiresAt: input.expiresAt,
+          facetSetHash: input.facetSetHash,
           operationKind: input.operationKind,
           proposer: input.proposer,
           scheduleBlock: input.scheduleBlock,
@@ -1997,6 +2154,15 @@ function comparePositionedPipelineEvents(left: PositionedPipelineEvent, right: P
 }
 
 function comparePolicyAdminEvents(left: PolicyAdminEvent, right: PolicyAdminEvent): number {
+  if (left.blockNumber < right.blockNumber) return -1;
+  if (left.blockNumber > right.blockNumber) return 1;
+  return left.logIndex - right.logIndex;
+}
+
+function compareFacetSetActivationEvents(
+  left: FacetSetActivationEvent,
+  right: FacetSetActivationEvent
+): number {
   if (left.blockNumber < right.blockNumber) return -1;
   if (left.blockNumber > right.blockNumber) return 1;
   return left.logIndex - right.logIndex;

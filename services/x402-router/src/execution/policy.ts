@@ -202,10 +202,12 @@ function decodeAndValidateCanonicalCall(quote: MarketplaceQuote): boolean {
       if (
         decoded.functionName !== "contributeTreasuryAsset"
         || !decoded.args
+        || quote.facetSetHash === undefined
       ) return false;
-      const [asset, amount, deadline] = decoded.args;
+      const [expectedFacetSetHash, asset, amount, deadline] = decoded.args;
       if (
-        !sameAddress(quote.execution.target, quote.canonicalTarget) ||
+        expectedFacetSetHash.toLowerCase() !== quote.facetSetHash.toLowerCase()
+        || !sameAddress(quote.execution.target, quote.canonicalTarget) ||
         !sameAddress(quote.canonicalTarget, quote.boardroom) ||
         !sameAddress(asset, quote.execution.inputToken) ||
         !sameAddress(

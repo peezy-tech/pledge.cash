@@ -7,6 +7,7 @@ import {
   publishRecurringSupportPlan,
   recurringSupportExpectations,
   recurringSupportQuoteRequest,
+  retireRecurringSupportPlan,
   saveRecurringSupportSubscription,
   saveRecurringSupportSubscriptionId,
   type RecurringSupportSubscriptionView,
@@ -31,6 +32,8 @@ const planId = "00000000-0000-4000-8000-000000000001";
 const subscriptionId = "00000000-0000-4000-8000-000000000002";
 const invoiceId = "00000000-0000-4000-8000-000000000003";
 const deadline = 4_102_444_800;
+const facetSetHash = `0x${"44".repeat(32)}` as Hex;
+const nextFacetSetHash = `0x${"55".repeat(32)}` as Hex;
 
 const config: X402RouterConfig = {
   application: "api.pledge.cash/x402-router/v1/execute",
@@ -54,6 +57,7 @@ function view(): RecurringSupportSubscriptionView {
       status: "active",
       authority: boardroom,
       authorityMode: "launched_controller",
+      facetSetHash,
       createdAt: "2026-01-31T15:45:00.000Z",
     },
     subscription: {
@@ -123,6 +127,7 @@ function quote(
     recipient: payer,
     refundAddress: payer,
     supportInvoiceId: invoiceId,
+    facetSetHash,
     ...overrides,
   };
 }
@@ -136,6 +141,7 @@ describe("recurring support browser boundary", () => {
       invoiceId,
       kind: "recurring_support",
       maxSlippageBps: 0,
+      expectedFacetSetHash: facetSetHash,
       payer,
       recipient: payer,
       refundAddress: payer,
@@ -181,6 +187,179 @@ describe("recurring support browser boundary", () => {
     ).rejects.toThrow("changed the support invoice");
   });
 
+  test("retires a plan through the current facet-set authority", async () => {
+    const challengeId = "00000000-0000-4000-8000-000000000012";
+    const serverNow = new Date();
+    const expiresAt = new Date(serverNow.getTime() + 60_000).toISOString();
+    const payload = {
+      version: 2,
+      action: "retire",
+      planId,
+      boardroom: boardroom.toLowerCase(),
+      facetSetHash: nextFacetSetHash.toLowerCase(),
+      planFacetSetHash: facetSetHash.toLowerCase(),
+    };
+    const canonicalPayload = Object.fromEntries(
+      Object.entries(payload).sort(([left], [right]) =>
+        left.localeCompare(right)
+      ),
+    );
+    const payloadHash = keccak256(
+      stringToHex(JSON.stringify(canonicalPayload)),
+    );
+    const message = [
+      "pledge.cash recurring support",
+      "",
+      "Action: Retire support plan",
+      `Actor: ${boardroom}`,
+      "Chain ID: 998",
+      `Boardroom: ${boardroom}`,
+      `Facet set hash: ${nextFacetSetHash}`,
+      `Plan ID: ${planId}`,
+      `Payload hash: ${payloadHash}`,
+      `Challenge ID: ${challengeId}`,
+      `Origin: ${config.baseUrl}`,
+      `Expires at: ${expiresAt}`,
+      "",
+      "This retires the plan and stops new invoices.",
+      "Every contribution still requires a separate x402 payment signature.",
+    ].join("\n");
+    let calls = 0;
+    let signatures = 0;
+    const fetch = async () => {
+      calls += 1;
+      if (calls === 1) {
+        return Response.json(
+          {
+            action: "plan_retire",
+            actor: boardroom,
+            boardroom,
+            chainId: 998,
+            challengeId,
+            expiresAt,
+            facetSetHash: nextFacetSetHash,
+            message,
+            payload,
+            payloadHash,
+            planId,
+          },
+          {
+            headers: { Date: serverNow.toUTCString() },
+            status: 201,
+          },
+        );
+      }
+      return Response.json({
+        plan: {
+          ...view().plan,
+          status: "retired",
+          retiredAt: serverNow.toISOString(),
+        },
+      });
+    };
+
+    const retired = await retireRecurringSupportPlan(
+      {
+        config,
+        walletClient: () => ({
+          account: { address: boardroom },
+          async signMessage() {
+            signatures += 1;
+            return `0x${"11".repeat(65)}`;
+          },
+        } as never),
+      },
+      view().plan,
+      { fetch: fetch as typeof globalThis.fetch },
+    );
+
+    expect(retired).toMatchObject({
+      id: planId,
+      facetSetHash,
+      status: "retired",
+    });
+    expect(signatures).toBe(1);
+    expect(calls).toBe(2);
+  });
+
+  test("rejects retirement for a different plan facet set before signing", async () => {
+    const challengeId = "00000000-0000-4000-8000-000000000013";
+    const serverNow = new Date();
+    const expiresAt = new Date(serverNow.getTime() + 60_000).toISOString();
+    const payload = {
+      version: 2,
+      action: "retire",
+      planId,
+      boardroom: boardroom.toLowerCase(),
+      facetSetHash: nextFacetSetHash.toLowerCase(),
+      planFacetSetHash: `0x${"66".repeat(32)}`,
+    };
+    const canonicalPayload = Object.fromEntries(
+      Object.entries(payload).sort(([left], [right]) =>
+        left.localeCompare(right)
+      ),
+    );
+    const payloadHash = keccak256(
+      stringToHex(JSON.stringify(canonicalPayload)),
+    );
+    const message = [
+      "pledge.cash recurring support",
+      "",
+      "Action: Retire support plan",
+      `Actor: ${boardroom}`,
+      "Chain ID: 998",
+      `Boardroom: ${boardroom}`,
+      `Facet set hash: ${nextFacetSetHash}`,
+      `Plan ID: ${planId}`,
+      `Payload hash: ${payloadHash}`,
+      `Challenge ID: ${challengeId}`,
+      `Origin: ${config.baseUrl}`,
+      `Expires at: ${expiresAt}`,
+      "",
+      "This retires the plan and stops new invoices.",
+      "Every contribution still requires a separate x402 payment signature.",
+    ].join("\n");
+    let signatures = 0;
+    const fetch = async () =>
+      Response.json(
+        {
+          action: "plan_retire",
+          actor: boardroom,
+          boardroom,
+          chainId: 998,
+          challengeId,
+          expiresAt,
+          facetSetHash: nextFacetSetHash,
+          message,
+          payload,
+          payloadHash,
+          planId,
+        },
+        {
+          headers: { Date: serverNow.toUTCString() },
+          status: 201,
+        },
+      );
+
+    await expect(
+      retireRecurringSupportPlan(
+        {
+          config,
+          walletClient: () => ({
+            account: { address: boardroom },
+            async signMessage() {
+              signatures += 1;
+              return `0x${"11".repeat(65)}`;
+            },
+          } as never),
+        },
+        view().plan,
+        { fetch: fetch as typeof globalThis.fetch },
+      ),
+    ).rejects.toThrow("changed the requested support action");
+    expect(signatures).toBe(0);
+  });
+
   test("stores only the opaque subscription identity locally", () => {
     const values = new Map<string, string>();
     const storage = {
@@ -220,11 +399,12 @@ describe("recurring support browser boundary", () => {
     const serverNow = new Date();
     const expiresAt = new Date(serverNow.getTime() + 60_000).toISOString();
     const payload = {
-      version: 1,
+      version: 2,
       action: "subscribe",
       subscriptionId,
       planId,
       boardroom: boardroom.toLowerCase(),
+      facetSetHash: facetSetHash.toLowerCase(),
       payer: payer.toLowerCase(),
     };
     const canonicalPayload = Object.fromEntries(
@@ -242,6 +422,7 @@ describe("recurring support browser boundary", () => {
       `Actor: ${payer}`,
       "Chain ID: 998",
       `Boardroom: ${boardroom}`,
+      `Facet set hash: ${facetSetHash}`,
       `Plan ID: ${planId}`,
       `Payload hash: ${payloadHash}`,
       `Challenge ID: ${challengeId}`,
@@ -263,6 +444,7 @@ describe("recurring support browser boundary", () => {
             chainId: 998,
             challengeId,
             expiresAt,
+            facetSetHash,
             message,
             payload,
             payloadHash,
@@ -324,11 +506,12 @@ describe("recurring support browser boundary", () => {
       serverNow.getTime() + 5 * 60_000,
     ).toISOString();
     const payload = {
-      version: 1,
+      version: 2,
       action: "subscribe",
       subscriptionId,
       planId,
       boardroom: boardroom.toLowerCase(),
+      facetSetHash: facetSetHash.toLowerCase(),
       payer: payer.toLowerCase(),
     };
     const canonicalPayload = Object.fromEntries(
@@ -346,6 +529,7 @@ describe("recurring support browser boundary", () => {
       `Actor: ${payer}`,
       "Chain ID: 998",
       `Boardroom: ${boardroom}`,
+      `Facet set hash: ${facetSetHash}`,
       `Plan ID: ${planId}`,
       `Payload hash: ${payloadHash}`,
       `Challenge ID: ${challengeId}`,
@@ -368,6 +552,7 @@ describe("recurring support browser boundary", () => {
             chainId: 998,
             challengeId,
             expiresAt,
+            facetSetHash,
             message,
             payload,
             payloadHash,
@@ -419,6 +604,7 @@ describe("recurring support browser boundary", () => {
         chainId: 998,
         challengeId: "00000000-0000-4000-8000-000000000010",
         expiresAt: new Date(serverNow.getTime() + 60_000).toISOString(),
+        facetSetHash,
         message: "changed action",
         payload: {},
         payloadHash: `0x${"00".repeat(32)}`,

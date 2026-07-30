@@ -10,10 +10,16 @@ import { and, eq } from "drizzle-orm";
 import {
   assetPolicyAbi,
   boardroomAbi,
+  boardroomFactoryAbi,
+  boardroomRewardsFactoryAbi,
+  buildBoardroomCreateTransaction,
+  buildBoardroomERC1271TypedData,
+  buildBoardroomRewardsCreationCall,
   boardroomControllerAbi,
   boardroomControllerFactoryAbi,
   boardroomRewardsAbi,
   erc20Abi,
+  encodeBoardroomERC1271Signature,
   type BoardroomCall,
   type PledgeCashDeployment
 } from "@pledge.cash/sdk";
@@ -55,7 +61,6 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(scriptDir, "../../..");
 const contractsDir = join(repoRoot, "packages/contracts");
 const deploymentPath = join(contractsDir, "deployments/31337.json");
-const seedPath = join(contractsDir, "deployments/31337.seed.json");
 
 const chainId = 31337;
 const controllerDelay = 86_400n;
@@ -111,10 +116,11 @@ try {
   anvil = await ensureAnvil();
   const wrappedNative = process.env.WRAPPED_NATIVE_ADDRESS ?? (await deployWrappedNative());
   await deployContracts(wrappedNative as Address);
-  await seedLocal();
 
-  const deployment = await readJson<PledgeCashDeployment>(deploymentPath);
-  const seed = await readJson<SeedArtifact>(seedPath);
+  const deployment = normalizeDeployment(
+    await readJson<PledgeCashDeployment>(deploymentPath)
+  );
+  const seed = await createSentinelFixture(deployment);
   assertAddress(deployment.boardroomFactory, "deployment.boardroomFactory");
   assertAddress(deployment.assetPolicy, "deployment.assetPolicy");
   assertAddress(seed.boardroom, "seed.boardroom");
@@ -141,6 +147,11 @@ try {
 
   const subscriberUserId = await linkShareholder(dbClient, seed.holder.toLowerCase() as Address);
   const controller = await launchBoardroom(seed);
+  const expectedFacetSetHash = await publicClient.readContract({
+    address: seed.boardroom,
+    abi: boardroomAbi,
+    functionName: "facetSetHash"
+  });
   await mineFinalizedProofBlocks();
   const controlClaim = await requireBoardroomControlProof(
     config,
@@ -172,6 +183,7 @@ try {
     abi: boardroomControllerAbi,
     functionName: "hashControllerOperation",
     args: [
+      expectedFacetSetHash,
       updateConfigurationData,
       updateConfigurationSalt,
       boardroomEpoch,
@@ -184,7 +196,13 @@ try {
     address: controller,
     abi: boardroomControllerAbi,
     functionName: "scheduleControllerOperation",
-    args: [updateConfigurationData, updateConfigurationSalt, boardroomEpoch, configurationEpoch]
+    args: [
+      expectedFacetSetHash,
+      updateConfigurationData,
+      updateConfigurationSalt,
+      boardroomEpoch,
+      configurationEpoch
+    ]
   }), "schedule controller configuration operation");
   await runWatcherOnce(chainId, {
     config,
@@ -207,7 +225,7 @@ try {
     address: seed.boardroom,
     abi: boardroomAbi,
     functionName: "veto",
-    args: [updateConfigurationOperationId]
+    args: [expectedFacetSetHash, updateConfigurationOperationId]
   }), "veto controller configuration operation");
   await runWatcherOnce(chainId, {
     config,
@@ -241,7 +259,14 @@ try {
     address: controller,
     abi: boardroomControllerAbi,
     functionName: "hashBoardroomOperation",
-    args: [[approveCall], approveSalt, boardroomEpoch, configurationEpoch, owner.address]
+    args: [
+      expectedFacetSetHash,
+      [approveCall],
+      approveSalt,
+      boardroomEpoch,
+      configurationEpoch,
+      owner.address
+    ]
   });
   await submit(deployerClient.writeContract({
     address: deployment.assetPolicy as Address,
@@ -259,7 +284,13 @@ try {
     address: controller,
     abi: boardroomControllerAbi,
     functionName: "scheduleBoardroomOperation",
-    args: [[approveCall], approveSalt, boardroomEpoch, configurationEpoch]
+    args: [
+      expectedFacetSetHash,
+      [approveCall],
+      approveSalt,
+      boardroomEpoch,
+      configurationEpoch
+    ]
   }), "schedule approve operation");
   await runWatcherOnce(chainId, {
     config,
@@ -387,22 +418,67 @@ async function deployContracts(wrappedNative: Address): Promise<void> {
   });
 }
 
-async function seedLocal(): Promise<void> {
-  await runCommand("seed local", "forge", [
-    "script",
-    "script/SeedLocal.s.sol:SeedLocal",
-    "--rpc-url",
-    rpcUrl,
-    "--broadcast",
-    "--slow",
-    "-vvv"
-  ], {
-    cwd: contractsDir,
-    env: {
-      LOCAL_SEED_NONCE: process.env.LOCAL_SEED_NONCE ?? "2",
-      PRIVATE_KEY: deployerKey
-    }
+async function createSentinelFixture(deployment: PledgeCashDeployment): Promise<SeedArtifact> {
+  assertAddress(deployment.boardroomFactory, "deployment.boardroomFactory");
+  assertAddress(deployment.boardroomRewardsFactory, "deployment.boardroomRewardsFactory");
+  assertAddress(deployment.wrappedNative, "deployment.wrappedNative");
+  assertHash(deployment.activeFacetSetHash, "deployment.activeFacetSetHash");
+
+  const name = "Sentinel Integration";
+  const symbol = "SINT";
+  const boardroomSalt = salt(`sentinel-boardroom-${randomBytes(8).toString("hex")}`);
+  const boardroom = await publicClient.readContract({
+    address: deployment.boardroomFactory,
+    abi: boardroomFactoryAbi,
+    functionName: "predictBoardroomAddress",
+    args: [owner.address, name, symbol, boardroomSalt]
   });
+
+  await submit(ownerClient.writeContract(buildBoardroomCreateTransaction({
+    expectedFacetSetHash: deployment.activeFacetSetHash,
+    factory: deployment.boardroomFactory,
+    name,
+    owner: owner.address,
+    salt: boardroomSalt,
+    symbol
+  })), "create canonical Sentinel Boardroom");
+
+  const boardroomShareToken = await publicClient.readContract({
+    address: boardroom,
+    abi: boardroomAbi,
+    functionName: "shareToken"
+  });
+  assertAddress(boardroomShareToken, "fixture.boardroomShareToken");
+
+  const rewardSalt = salt(`sentinel-rewards-${randomBytes(8).toString("hex")}`);
+  const createRewardsCall = buildBoardroomRewardsCreationCall({
+    cooldown: 86_400n,
+    factory: deployment.boardroomRewardsFactory,
+    salt: rewardSalt
+  });
+  await submit(ownerClient.writeContract({
+    address: boardroom,
+    abi: boardroomAbi,
+    functionName: "execute",
+    args: [deployment.activeFacetSetHash, createRewardsCall]
+  }), "create canonical Sentinel rewards pool");
+
+  const boardroomRewards = await publicClient.readContract({
+    address: deployment.boardroomRewardsFactory,
+    abi: boardroomRewardsFactoryAbi,
+    functionName: "rewardsForBoardroom",
+    args: [boardroom]
+  });
+  assertAddress(boardroomRewards, "fixture.boardroomRewards");
+
+  return {
+    boardroom,
+    boardroomOwner: owner.address,
+    boardroomRewards,
+    boardroomShareToken,
+    cashToken: deployment.wrappedNative,
+    holder: holder.address
+  };
 }
 
 async function createTempDatabase(): Promise<TempDatabase> {
@@ -512,10 +588,40 @@ async function requireBoardroomControlProof(
     );
   }
   const challenge = (await challengeResponse.json()) as {
+    readonly identity: {
+      readonly boardroom: Address;
+      readonly boardroomEpoch: string;
+      readonly configurationEpoch: string;
+      readonly configurationHash: Hex;
+      readonly controller: Address;
+      readonly controllerGeneration: string;
+      readonly facetSetHash: Hex;
+    };
     readonly message: string;
+    readonly messageHash: Hex;
     readonly nonce: string;
   };
-  const signature = await owner.signMessage({ message: challenge.message });
+  const proposerSignature = await owner.signTypedData(
+    buildBoardroomERC1271TypedData({
+      boardroom: challenge.identity.boardroom,
+      boardroomEpoch: BigInt(challenge.identity.boardroomEpoch),
+      chainId: BigInt(chainId),
+      configurationEpoch: BigInt(challenge.identity.configurationEpoch),
+      configurationHash: challenge.identity.configurationHash,
+      controller: challenge.identity.controller,
+      controllerGeneration: BigInt(challenge.identity.controllerGeneration),
+      facetSetHash: challenge.identity.facetSetHash,
+      messageHash: challenge.messageHash
+    })
+  );
+  const signature = encodeBoardroomERC1271Signature({
+    boardroomEpoch: BigInt(challenge.identity.boardroomEpoch),
+    configurationEpoch: BigInt(challenge.identity.configurationEpoch),
+    configurationHash: challenge.identity.configurationHash,
+    controllerGeneration: BigInt(challenge.identity.controllerGeneration),
+    facetSetHash: challenge.identity.facetSetHash,
+    proposerSignature
+  });
   const claimRequest = {
     body: JSON.stringify({ nonce: challenge.nonce, signature }),
     headers,
@@ -558,6 +664,11 @@ async function mineFinalizedProofBlocks(): Promise<void> {
 }
 
 async function launchBoardroom(seed: SeedArtifact): Promise<Address> {
+  const expectedFacetSetHash = await publicClient.readContract({
+    address: seed.boardroom,
+    abi: boardroomAbi,
+    functionName: "facetSetHash"
+  });
   const launched = await publicClient.readContract({
     address: seed.boardroom,
     abi: boardroomAbi,
@@ -583,10 +694,16 @@ async function launchBoardroom(seed: SeedArtifact): Promise<Address> {
         address: seed.boardroom,
         abi: boardroomAbi,
         functionName: "mint",
-        args: [seed.holder, 100n * 10n ** 18n]
+        args: [expectedFacetSetHash, seed.holder, 100n * 10n ** 18n]
       }), "mint protection-staker shares");
       shareBalance = 100n * 10n ** 18n;
     }
+    await submit(holderClient.writeContract({
+      address: seed.boardroomShareToken,
+      abi: erc20Abi,
+      functionName: "approve",
+      args: [seed.boardroomRewards, shareBalance]
+    }), "approve protection-staker shares");
     await submit(holderClient.writeContract({
       address: seed.boardroomRewards,
       abi: boardroomRewardsAbi,
@@ -621,17 +738,20 @@ async function launchBoardroom(seed: SeedArtifact): Promise<Address> {
       address: seed.boardroom,
       abi: boardroomAbi,
       functionName: "launch",
-      args: [{
-        proposer: owner.address,
-        predictedController,
-        protectionStaker: seed.holder,
-        expectedRewardPool,
-        expectedRedemptionExcessRecipient,
-        controllerDelay: controllerDelay,
-        windDownDelay: controllerDelay,
-        gracePeriod: governanceGracePeriod,
-        generation: 1n
-      }]
+      args: [
+        expectedFacetSetHash,
+        {
+          proposer: owner.address,
+          predictedController,
+          protectionStaker: seed.holder,
+          expectedRewardPool,
+          expectedRedemptionExcessRecipient,
+          controllerDelay: controllerDelay,
+          windDownDelay: controllerDelay,
+          gracePeriod: governanceGracePeriod,
+          generation: 1n
+        }
+      ]
     }), "launch Boardroom with generation-1 controller");
   }
 
@@ -807,6 +927,30 @@ async function submit(hashPromise: Promise<Hex>, label: string): Promise<Hex> {
   return hash;
 }
 
+function normalizeDeployment(deployment: PledgeCashDeployment): PledgeCashDeployment {
+  return {
+    ...deployment,
+    ...(deployment.activeRelease === undefined
+      ? {}
+      : { activeRelease: BigInt(deployment.activeRelease) }),
+    ...(deployment.requiredStorageVersion === undefined
+      ? {}
+      : { requiredStorageVersion: BigInt(deployment.requiredStorageVersion) }),
+    ...(deployment.selectorCount === undefined
+      ? {}
+      : { selectorCount: BigInt(deployment.selectorCount) }),
+    ...(deployment.creationFee === undefined
+      ? {}
+      : { creationFee: BigInt(deployment.creationFee) }),
+    ...(deployment.deploymentBlock === undefined
+      ? {}
+      : { deploymentBlock: BigInt(deployment.deploymentBlock) }),
+    ...(deployment.deploymentTimestamp === undefined
+      ? {}
+      : { deploymentTimestamp: BigInt(deployment.deploymentTimestamp) })
+  };
+}
+
 async function rpcReady(): Promise<boolean> {
   try {
     return (await publicClient.getChainId()) === chainId;
@@ -911,6 +1055,12 @@ function salt(label: string): Hex {
 function assertAddress(value: unknown, label: string): asserts value is Address {
   if (typeof value !== "string" || !/^0x[a-fA-F0-9]{40}$/.test(value)) {
     throw new Error(`${label} is missing or not an address`);
+  }
+}
+
+function assertHash(value: unknown, label: string): asserts value is Hex {
+  if (typeof value !== "string" || !/^0x[a-fA-F0-9]{64}$/.test(value) || /^0x0{64}$/.test(value)) {
+    throw new Error(`${label} is missing, zero, or not a bytes32 value`);
   }
 }
 

@@ -432,6 +432,7 @@ export type BoardroomControllerState = {
 
 export type BoardroomState = {
   address: Address;
+  blockNumber: bigint;
   owner: Address;
   policyRegistry: Address;
   wrappedNative: Address;
@@ -447,6 +448,10 @@ export type BoardroomState = {
   controllerGeneration: bigint;
   controllerConfigurationEpoch: bigint;
   governanceEpoch: bigint;
+  facetSetHash: Hex;
+  appliedStorageVersion: bigint;
+  appliedStorageLayoutHash: Hex;
+  migrationRequired: boolean;
   windDownDelay: bigint;
   windDownStartedAt: bigint;
   protectionStaker: Address;
@@ -570,6 +575,7 @@ export type DiscoveredBoardroom = {
   name: string;
   symbol: string;
   salt: Hex;
+  facetSetHash: Hex;
   createdAtBlock: bigint;
   transactionHash: Hex;
 };

@@ -7,7 +7,11 @@ description: Create a Boardroom, issue its token, and operate grants, distributi
 
 Studio is the operator workspace. A Boardroom is the project account, share-token issuer, treasury, and obligation coordinator; it is not a company record or multisig substitute.
 
-> **Availability boundary:** HyperEVM testnet (`998`) has a verified deterministic v5 deployment. Monad testnet (`10143`) remains pending. Creation requires the current artifact, matching wallet chain, and testnet assets; a local scenario remains isolated from the public testnet.
+> **Availability boundary:** canonical protocol v1 is pending on HyperEVM
+> testnet (`998`) and Monad testnet (`10143`). Public project creation is
+> unavailable. These steps currently apply only to a matching local Anvil
+> deployment and will apply to a target testnet after a verified artifact is
+> explicitly promoted.
 
 ## Prerequisites
 
@@ -66,24 +70,30 @@ See [Distributions and liquidity](../understand/distributions-and-liquidity), [G
 - Monitor open inventory, claim windows, curve reserves, global curve liability, grant expiries, LP fees, scalar
   obligation counts, and bounded discovery pages.
 - Close or cancel obsolete sales and airdrops so unused inventory returns to the Boardroom.
-- Do not use curve terminal paths until the approved lifetime, migration-price, unwind, and quarantine policies are
-  implemented and verified.
+- Verify the curve's lifetime, migration-price, unwind, and quarantine
+  parameters before using a terminal path.
 - Claim locked-liquidity fees to the Boardroom where appropriate.
 - Prune closed obligations to decrement active counts while preserving permanent provenance.
 - Keep Sentinel wallet coverage, Boardroom subscriptions, severity thresholds, and delivery channels current, but never treat an alert as onchain authority.
 
-For the singleton curve, sell rights follow transferable shares through one global liability. Graduation currently
-freezes trading, but cancellation/expiry unwind, permissionless migration, and quarantined-quote disposition are still
-decision-gated. A stranded-quote curve remains open and recovery fails closed.
+For the singleton curve, sell rights follow transferable shares through one
+global liability. Graduation pauses trading during its migration window.
+Cancellation, expiry, or failed migration uses the bounded sell-only unwind;
+quarantined quote remains an explicit obligation until recovery or the
+time-delayed, vetoable wind-down forfeiture path completes.
 
 ## 5. Governance launch boundary
 
-Launch is available only for a verified v5 Boardroom. Review the proposer, predicted generation-1 controller, named
-protection staker, reward pool, redemption-excess recipient, delays, grace period, and generation in calldata. The first
-controller is deployed only inside launch and every mismatch reverts atomically.
+Launch requires a promoted protocol-v1 artifact, verified registry/facet
+inventory, the explicit active facet-set hash, and
+`migrationRequired() == false`. Review the proposer, predicted generation-1
+controller, named protection staker, reward pool, redemption-excess recipient,
+delays, grace period, and generation in calldata. The first controller is
+deployed only inside launch and every mismatch reverts atomically.
 
-Legacy and unknown versions remain readable but fail closed for launch, controller writes, and Boardroom-control
-claims. The verified public v5 artifact is limited to HyperEVM testnet; it does not authorize mainnet use.
+Both public testnets remain pending. Unknown or mismatched releases fail closed
+for launch, controller writes, and Boardroom-control claims, and no artifact
+authorizes mainnet use.
 
 Read [Govern a project](govern-a-project) for the launched state machine.
 
