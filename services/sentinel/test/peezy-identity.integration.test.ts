@@ -339,8 +339,8 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
       FROM "identity_quota_events"
       WHERE "scope" = 'pledge-cash:presentation-read'
     `;
-    expect(Number(readQuotaAfterReplays?.count ?? 0)).toBe(
-      Number(readQuotaBeforeReplays?.count ?? 0) + replayStatuses.length
+    expect(readQuotaAfterReplays?.count).toBe(
+      readQuotaBeforeReplays?.count
     );
 
     const [localCredential] = await dbClient.sql<{ count: string }[]>`
@@ -1108,7 +1108,10 @@ describeWithIdentity("peezy.tech Identity compatibility integration", () => {
     const firstSignIn = await signInWallet(app, secondLegacyWallet);
     expect(firstSignIn.status).toBe(200);
     const secondSignIn = await signInWallet(app, migrationWallet);
-    expect(secondSignIn.status).toBe(401);
+    expect(secondSignIn.status).toBe(503);
+    expect(await secondSignIn.json()).toMatchObject({
+      message: "Wallet sign-in is temporarily unavailable"
+    });
 
     const [mappingCount] = await dbClient.sql<{ count: string }[]>`
       SELECT count(*)::text AS "count"

@@ -103,6 +103,10 @@ type IdentityRequestContext = {
 };
 type IdentityHydrator = {
   get(subject: string): Promise<IdentityMeResponse>;
+  getWithFreshness(subject: string): Promise<{
+    readonly fresh: boolean;
+    readonly identity: IdentityMeResponse;
+  }>;
   getFresh(subject: string): Promise<IdentityMeResponse>;
   invalidate(subject: string): void;
   set(subject: string, identity: IdentityMeResponse): void;
@@ -827,11 +831,13 @@ function peezyWalletSessionPlugin(
               }
             });
           } catch (error) {
-            throw new APIError("UNAUTHORIZED", {
-              message:
-                error instanceof Error
-                  ? error.message
-                  : "Wallet signature could not be verified"
+            if (error instanceof AuthWalletCredentialRejectedError) {
+              throw new APIError("UNAUTHORIZED", {
+                message: "Wallet signature could not be verified"
+              });
+            }
+            throw new APIError("SERVICE_UNAVAILABLE", {
+              message: "Wallet sign-in is temporarily unavailable"
             });
           }
         }
@@ -909,7 +915,9 @@ function createIdentityGateway(
       const grantFetcher: IdentityFetch = async (request, init) => {
         const response = await client.fetcher(request, init);
         definitivelyRejected =
-          response.status >= 400 && response.status < 500;
+          response.status >= 400 &&
+          response.status < 500 &&
+          response.status !== 429;
         return response;
       };
       try {
@@ -998,6 +1006,21 @@ function createIdentityHydrator(
       if (pendingRead !== undefined) return pendingRead.read;
 
       return readIdentity(subject, now);
+    },
+    async getWithFreshness(subject) {
+      const now = Date.now();
+      const cached = cache.get(subject);
+      if (cached !== undefined && cached.expiresAt > now) {
+        return { fresh: false, identity: cached.identity };
+      }
+      cache.delete(subject);
+
+      const pendingRead = pending.get(subject);
+      if (pendingRead !== undefined) {
+        return { fresh: false, identity: await pendingRead.read };
+      }
+
+      return { fresh: true, identity: await readIdentity(subject, now) };
     },
     getFresh(subject) {
       // Provisioning must not reuse credentials fetched before this callback.
@@ -1465,9 +1488,37 @@ async function linkIdentityWalletCredential(
   }
   const subject = input.subject;
 
-  const existingIdentity = await identityHydrator.getFresh(subject);
+  const hydration = await identityHydrator.getWithFreshness(subject);
+  let existingIdentity = hydration.identity;
   if (existingIdentity.user.id !== subject) {
     throw new Error("Identity wallet link subject mismatch");
+  }
+  if (!hydration.fresh) {
+    await reconcilePendingIdentityWalletLinks(
+      db,
+      subject,
+      existingIdentity
+    );
+    const cachedCentralWallet = findCentralIdentityWallet(
+      existingIdentity,
+      input.address,
+      input.chainId
+    );
+    if (cachedCentralWallet !== undefined) {
+      return finalizeIdentityWalletCoverage(db, existingIdentity, {
+        address: input.address,
+        canSignIn: cachedCentralWallet.signInEnabled,
+        chainId: input.chainId,
+        siweMessage: input.message,
+        subject,
+        userId: input.userId,
+        verifiedAt: input.verifiedAt
+      });
+    }
+    existingIdentity = await identityHydrator.getFresh(subject);
+    if (existingIdentity.user.id !== subject) {
+      throw new Error("Identity wallet link subject mismatch");
+    }
   }
   await reconcilePendingIdentityWalletLinks(
     db,

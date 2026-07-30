@@ -24,7 +24,7 @@ const config = {
   webOrigin: "http://localhost:5173"
 } satisfies Pick<Config, "auth" | "webOrigin">;
 
-test("aborts every stalled Identity request at the application deadline", async () => {
+test("returns a retryable failure for stalled Identity sign-in requests", async () => {
   const signals: AbortSignal[] = [];
   const stalledFetcher = (
     _input: RequestInfo | URL,
@@ -79,13 +79,54 @@ test("aborts every stalled Identity request at the application deadline", async 
   const verify = results[2];
   expect(verify?.status).toBe("fulfilled");
   if (verify?.status === "fulfilled") {
-    expect(verify.value.status).toBe(401);
+    expect(verify.value.status).toBe(503);
     expect(await verify.value.json()).toMatchObject({
-      message: "Identity request timed out after 10ms"
+      message: "Wallet sign-in is temporarily unavailable"
     });
   }
   expect(signals).toHaveLength(3);
   expect(signals.every((signal) => signal.aborted)).toBe(true);
+});
+
+test("distinguishes rejected wallet credentials from Identity rate limits", async () => {
+  const verify = async (identityStatus: number) => {
+    const adapter = createPeezyIdentityAuthAdapter(
+      config,
+      {} as SentinelDb,
+      async () =>
+        Response.json(
+          { message: `Identity responded with ${identityStatus}` },
+          { status: identityStatus }
+        )
+    );
+    return adapter.handler(
+      new Request("http://localhost:8787/auth/peezy/siwe/verify", {
+        body: JSON.stringify({
+          chainId: 1,
+          message: "wallet grant request",
+          signature: `0x${"ab".repeat(65)}`,
+          walletAddress: "0x1111111111111111111111111111111111111111"
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          Origin: "http://localhost:5173"
+        },
+        method: "POST"
+      })
+    );
+  };
+
+  const rejected = await verify(401);
+  expect(rejected.status).toBe(401);
+  expect(await rejected.json()).toMatchObject({
+    message: "Wallet signature could not be verified"
+  });
+
+  const rateLimited = await verify(429);
+  expect(rateLimited.status).toBe(503);
+  expect(await rateLimited.json()).toMatchObject({
+    message: "Wallet sign-in is temporarily unavailable"
+  });
 });
 
 test("aborts stalled Identity response bodies at the application deadline", async () => {
@@ -291,9 +332,9 @@ test("rejects oversized Identity credential sets before provisioning", async () 
     })
   );
 
-  expect(response.status).toBe(401);
+  expect(response.status).toBe(503);
   expect(await response.json()).toMatchObject({
-    message: "peezy.tech identity exceeds the 256-credential provisioning limit"
+    message: "Wallet sign-in is temporarily unavailable"
   });
   expect(transactions).toBe(0);
 });
