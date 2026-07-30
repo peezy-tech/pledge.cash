@@ -211,13 +211,14 @@ export async function retireRecurringSupportPlan(
     action: "plan_retire",
     actor: challenge.actor,
     boardroom: plan.boardroom,
-    facetSetHash: plan.facetSetHash,
+    facetSetHash: challenge.facetSetHash,
     payload: {
       version: 2,
       action: "retire",
       planId: safePlanId,
       boardroom: plan.boardroom.toLowerCase(),
-      facetSetHash: plan.facetSetHash.toLowerCase(),
+      facetSetHash: challenge.facetSetHash.toLowerCase(),
+      planFacetSetHash: plan.facetSetHash.toLowerCase(),
     },
     planId: safePlanId,
   });

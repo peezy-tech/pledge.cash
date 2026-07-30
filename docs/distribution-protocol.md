@@ -83,10 +83,13 @@ intentionally supplies no default proceeds percentage, and all amounts and minim
 
 ## Merkle airdrop
 
-An airdrop escrows shares behind one Merkle root. After its claim type hash, every leaf first binds the expected
-Boardroom facet-set hash, then chain, predicted airdrop, Boardroom, share token, index, account, amount, and claim mode.
-Grant leaves also bind the canonical grant factory and every grant term. A claim succeeds only while the committed
-facet-set hash equals the Boardroom's live `facetSetHash()`.
+An airdrop escrows shares behind one Merkle root. Direct leaves encode the direct-claim type hash,
+`expectedFacetSetHash`, chain id, index, predicted airdrop, Boardroom, share token, account, and amount, in that exact
+order. Grant leaves encode the grant-claim type hash, `expectedFacetSetHash`, chain id, index, predicted airdrop,
+Boardroom, share token, canonical grant factory, account, amount, and grant-terms hash, in that exact order. The type
+hash distinguishes the claim mode; there is no trailing mode field. A claim succeeds only while the committed facet-set
+hash equals the Boardroom's live `facetSetHash()`. Use the SDK's `buildMerkleAirdropDirectClaimLeaf` and
+`buildMerkleAirdropGrantClaimLeaf` helpers instead of recreating these layouts.
 
 Direct claims deliver shares to the committed account. Grant claims perform an atomic parent-to-child transition:
 
