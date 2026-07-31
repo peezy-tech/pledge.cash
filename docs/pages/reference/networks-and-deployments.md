@@ -11,7 +11,6 @@ Network support is not the same as a live protocol deployment. The app can offer
 
 | Network | Chain id | Current artifact | What users should do |
 | --- | ---: | --- | --- |
-| HyperEVM testnet | `998` | **Pending** — canonical protocol v1 has not been broadcast | Do not submit pledge.cash protocol transactions |
 | Monad testnet | `10143` | **Pending** — canonical protocol v1 has not been broadcast | Do not submit pledge.cash protocol transactions |
 | Local Anvil | `31337` | Generated locally and ignored by Git | Use only for the local scenario that produced it |
 | Mainnet | — | No supported deployment | Treat any claimed mainnet address as unsupported |
@@ -22,7 +21,6 @@ screenshot, or candidate file is not a promoted public identity.
 
 ## Default RPCs
 
-- Pending HyperEVM testnet: `https://rpc.hyperliquid-testnet.xyz/evm`
 - Pending Monad testnet: `https://testnet-rpc.monad.xyz`
 - Local Anvil: normally `http://127.0.0.1:8547`, or the deployment's configured reverse-proxied RPC route
 

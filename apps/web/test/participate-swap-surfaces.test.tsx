@@ -9,7 +9,7 @@ import {
   scheduleParticipationRefresh,
 } from "../src/app/pages/participate-page";
 import { Web3Provider } from "../src/components/web3-provider";
-import { SwapPanel, ammHyperliquidBlocker, liquidityActionState, positionActionState, swapActionState, swapDecisionFormKey } from "../src/features/swap/swap-panel";
+import { SwapPanel, liquidityActionState, positionActionState, swapActionState, swapDecisionFormKey } from "../src/features/swap/swap-panel";
 import type { Capability } from "../src/features/capabilities/project-capabilities";
 import { exactRational, knownMetric } from "../src/lib/market-data";
 import type { ProductBoardroomDashboardState } from "../src/lib/product-boardroom";
@@ -279,7 +279,6 @@ function renderSwap(input: {
   account?: Address | undefined;
   actionCapability?: Capability | undefined;
   form?: SwapForm | undefined;
-  hyperliquid?: boolean | undefined;
   pendingAction?: string | undefined;
   quote?: SwapQuoteState | undefined;
 }): string {
@@ -288,8 +287,8 @@ function renderSwap(input: {
       <SwapPanel
         account={input.account}
         actionCapability={input.actionCapability ?? { status: input.account ? "enabled" : "connect" }}
-        boardroom={input.hyperliquid ? boardroom : undefined}
-        deployment={input.hyperliquid ? { ...deployment, chainId: 998 } : undefined}
+        boardroom={undefined}
+        deployment={undefined}
         form={input.form ?? swapForm}
         liquidityForm={defaultLiquidityForm()}
         liquidityQuote={undefined}
@@ -304,19 +303,8 @@ function renderSwap(input: {
         tokenList={{ loaded: true, pools: [], tokens: [] }}
         tokenListLoading={false}
         wrappedNativeSymbol="WETH"
-        hyperliquid={input.hyperliquid ? {
-          config: {
-            application: "api.pledge.cash/x402-router/v1/execute",
-            baseUrl: "https://x402.example",
-            gateway: owner,
-            hyperevmUsdc: quoteToken,
-          },
-          walletClient: () => {
-            throw new Error("not invoked while rendering");
-          },
-        } : undefined}
         mode="swap"
-        projectShareToken={input.hyperliquid ? shareToken : undefined}
+        projectShareToken={undefined}
         addLiquidity={noop}
         approveLiquidityTokenA={noop}
         approveLiquidityTokenB={noop}
@@ -696,79 +684,6 @@ describe("participation route liveness", () => {
 });
 
 describe("swap decision UX", () => {
-  test("offers the Hyperliquid action only for a current project-token buy route", () => {
-    const form: SwapForm = {
-      ...swapForm,
-      tokenIn: quoteToken,
-      tokenOut: shareToken,
-      useNative: false,
-    };
-    const quote: SwapQuoteState = {
-      ...readyQuote,
-      requestIdentity: swapQuoteRequestIdentity(form),
-      tokenIn: {
-        address: quoteToken,
-        allowance: 0n,
-        balance: 0n,
-        decimals: 6,
-        symbol: "USDC",
-      },
-      tokenOut: {
-        address: shareToken,
-        decimals: 18,
-        symbol: "PLEDGE",
-      },
-      pool: {
-        ...readyQuote.pool!,
-        reserveIn: readyQuote.pool!.reserveOut,
-        reserveOut: readyQuote.pool!.reserveIn,
-      },
-      amountIn: 1_000_000n,
-      amountOut: 400_000_000_000_000_000n,
-      amountOutMin: 398_000_000_000_000_000n,
-    };
-    expect(ammHyperliquidBlocker({
-      account: owner,
-      actionCapability: enabledCapability,
-      boardroom,
-      deployment: { ...deployment, chainId: 998 },
-      destinationUsdc: quoteToken,
-      form,
-      projectShareToken: shareToken,
-      quote,
-    })).toBeUndefined();
-    expect(ammHyperliquidBlocker({
-      account: owner,
-      actionCapability: enabledCapability,
-      boardroom,
-      deployment: { ...deployment, chainId: 998 },
-      destinationUsdc: owner,
-      form,
-      projectShareToken: shareToken,
-      quote,
-    })).toContain("configured HyperEVM USDC input token");
-
-    const html = renderSwap({
-      account: owner,
-      form,
-      hyperliquid: true,
-      quote,
-    });
-    expect(html).toContain("Pay from Hyperliquid");
-    expect(html).toContain("Settle USDC on HyperCore");
-
-    expect(ammHyperliquidBlocker({
-      account: owner,
-      actionCapability: enabledCapability,
-      boardroom,
-      deployment: { ...deployment, chainId: 998 },
-      destinationUsdc: quoteToken,
-      form: swapForm,
-      projectShareToken: shareToken,
-      quote: readyQuote,
-    })).toContain("USDC-to-project-token direction");
-  });
-
   test("prioritizes execution metrics and keeps slippage separate", () => {
     const html = renderSwap({ account: owner, quote: readyQuote });
     expect(html).toContain('aria-label="Swap tokens"');

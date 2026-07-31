@@ -9,9 +9,9 @@ Use the [deployment specification](https://github.com/peezy-tech/pledge.cash/blo
 
 ## Public testnet status
 
-Canonical protocol v1 is pending on HyperEVM testnet `998` and Monad testnet
-`10143`. Neither checked-in artifact provides usable root addresses. Clients
-must withhold contract-dependent workflows while either selected artifact is
+Canonical protocol v1 is pending on Monad testnet `10143`. The checked-in
+artifact does not provide usable root addresses. Clients
+must withhold contract-dependent workflows while the selected artifact is
 pending.
 
 Do not develop against guessed or historical addresses. A candidate artifact

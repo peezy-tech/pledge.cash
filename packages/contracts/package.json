@@ -7,9 +7,8 @@
   "scripts": {
     "build": "forge build",
     "check:boardroom-manifests": "bun script/check-boardroom-diamond-manifests.ts",
-    "deploy:hyperevm-testnet": "BROADCAST=1 script/hyperevm-testnet/deploy.sh && bun --cwd ../sdk generate",
     "deploy:monad-testnet": "BROADCAST=1 script/monad-testnet/deploy.sh && bun --cwd ../sdk generate",
-    "deploy:testnets": "BROADCAST=1 script/hyperevm-testnet/deploy.sh && BROADCAST=1 script/monad-testnet/deploy.sh && bun --cwd ../sdk generate",
+    "deploy:testnets": "bun run deploy:monad-testnet",
     "format": "forge fmt",
     "format:check": "forge fmt --check",
     "scenario:local-seed:dry-run": "forge script script/SeedLocal.s.sol:SeedLocal --rpc-url ${LOCAL_RPC_URL:-local} -vvv",
@@ -18,12 +17,10 @@
     "scenario:boardroom:local": "script/run-boardroom-local.sh",
     "scenario:project-token:dry-run": "forge script script/ProjectTokenLaunchScenario.s.sol:ProjectTokenLaunchScenario -vvv",
     "scenario:project-token:local": "forge script script/ProjectTokenLaunchScenario.s.sol:ProjectTokenLaunchScenario --rpc-url local --broadcast -vvv",
-    "simulate:hyperevm-testnet": "script/hyperevm-testnet/deploy.sh",
     "simulate:monad-testnet": "script/monad-testnet/deploy.sh",
-    "simulate:testnets": "bun run simulate:hyperevm-testnet && bun run simulate:monad-testnet",
+    "simulate:testnets": "bun run simulate:monad-testnet",
     "test": "forge test -vvv",
-    "verify:hyperevm-testnet-artifact": "script/hyperevm-testnet/verify-artifact.sh",
     "verify:monad-testnet-artifact": "script/monad-testnet/verify-artifact.sh",
-    "verify:testnet-artifacts": "bun run verify:hyperevm-testnet-artifact && bun run verify:monad-testnet-artifact"
+    "verify:testnet-artifacts": "bun run verify:monad-testnet-artifact"
   }
 }

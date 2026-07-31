@@ -1,1 +1,0 @@
-CREATE INDEX "x402_router_support_invoices_boardroom_payer_idx" ON "x402_router_support_invoices" USING btree ("boardroom","payer");

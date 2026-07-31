@@ -389,7 +389,6 @@ describe("web app shell", () => {
     expect(html).toContain('href="#app-main-content"');
     expect(html).toContain("Skip to main content");
     expect(html).toContain("Checking deployment availability");
-    expect(html).toContain("HyperEVM Testnet — checking deployment");
     expect(html).toContain("Monad Testnet — checking deployment");
     expect(html).toContain("pledge.cash will not run discovery, contract reads, or wallet actions");
     expect(html).toContain('aria-label="Testnet environment: Public test network using test assets with no real value."');
@@ -426,13 +425,13 @@ describe("web app shell", () => {
     const pending = renderToString(
       <DeploymentUnavailablePage
         availability={{
-          chainId: 998,
+          chainId: 10143,
           deployment: undefined,
           reason: "Awaiting the public broadcast artifact.",
           source: undefined,
           status: "pending",
         }}
-        networkName="HyperEVM Testnet"
+        networkName="Monad Testnet"
       />,
     );
     const unsupported = renderToString(

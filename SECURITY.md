@@ -1,7 +1,7 @@
 # Security Policy
 
 pledge.cash is currently an unreleased local-review candidate. Canonical
-protocol v1 has not been broadcast to HyperEVM or Monad testnet. The contracts
+protocol v1 has not been broadcast to Monad testnet. The contracts
 are not mainnet production software, and this repository does not support a
 mainnet deployment.
 

@@ -1,6 +1,0 @@
-{
-  "chainId": 998,
-  "status": "pending",
-  "protocolVersion": "pledge.cash.protocol.v1",
-  "reason": "Canonical protocol v1 has not been broadcast to HyperEVM testnet"
-}

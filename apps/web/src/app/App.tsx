@@ -124,7 +124,6 @@ import {
 } from "../features/capabilities/project-capabilities";
 import type { BoardroomPanelCapabilities } from "../features/boardrooms/boardroom-panel-types";
 import { BoardroomRewardsPanel } from "../features/rewards";
-import { RecurringSupportPanel } from "../features/support";
 import { GovernanceLaunchControl, GovernanceOperations, GovernanceProposalComposer } from "../features/governance";
 import {
   prepareSmartGrantSettlement,
@@ -133,7 +132,6 @@ import {
 } from "../features/grants/smart-settlement";
 import { createParticipationFlowContent, participationAmmKey, type ParticipationContentKey } from "../features/participation";
 import { AppHeader, type NetworkDeploymentAvailability } from "../features/wallet/app-header";
-import { HyperliquidRecoveryCenter } from "../features/x402";
 import { useActionRunner } from "../hooks/use-action-runner";
 import { useFactorySnapshot } from "../hooks/use-factory-snapshot";
 import {
@@ -283,10 +281,6 @@ import {
   type TransactionIdentity,
 } from "../lib/transaction-identity";
 import {
-  HYPEREVM_TESTNET_CHAIN_ID,
-  getX402RouterConfig,
-} from "../lib/x402-router";
-import {
   TransactionTray,
   useTransactionCenter,
   type TransactionRecord,
@@ -369,7 +363,6 @@ const MIN_SETTLEMENT_GRACE_SECONDS = 86_400n;
 const GOVERNANCE_LOAD_DEADLINE_MS = 30_000;
 const AMM_TOKEN_LOAD_DEADLINE_MS = 30_000;
 const TRANSACTION_RECEIPT_WAIT_TIMEOUT_MS = 60_000;
-const X402_ROUTER_CONFIG = getX402RouterConfig();
 
 type GrantIssuerAction = "stopVestingAndWithdrawUnvested" | "withdrawExpiredTokens";
 type ActiveActionOrigin = {
@@ -1287,12 +1280,6 @@ export function App(): React.JSX.Element {
     onAccountChanged: clearDirectGrantPrediction,
     pushLog,
   });
-  const hyperliquidCheckout = useMemo(
-    () => X402_ROUTER_CONFIG && activeNetwork.chainId === HYPEREVM_TESTNET_CHAIN_ID
-      ? { config: X402_ROUTER_CONFIG, walletClient }
-      : undefined,
-    [activeNetwork.chainId, walletClient],
-  );
   const activeProjectPositionKey = appRoute.kind === "project"
     && appRoute.section === "overview"
     && exactProjectDashboard
@@ -4934,7 +4921,6 @@ export function App(): React.JSX.Element {
       tokenList={appRoute.kind === "studio-project" && appRoute.section === "liquidity" ? scopedStudioTokenList : swapTokenList}
       tokenListLoading={swapTokenListLoading}
       wrappedNativeSymbol={activeNetwork.wrappedNativeSymbol}
-      hyperliquid={hyperliquidCheckout}
       mode={appRoute.kind === "project" ? "swap" : appRoute.kind === "studio-project" && appRoute.section === "liquidity" ? "liquidity" : "all"}
       lockSwapPair={appRoute.kind === "project" && appRoute.section === "participate"}
       projectShareToken={appRoute.kind === "project" && appRoute.section === "participate"
@@ -5411,43 +5397,17 @@ export function App(): React.JSX.Element {
   const participationAmmContent = Object.fromEntries(
     exactProjectPools.map((pool) => [participationAmmKey(pool), marketPanel]),
   ) as Partial<Record<ParticipationContentKey, React.JSX.Element>>;
-  const recurringSupportContent =
-    exactProjectDashboard && hyperliquidCheckout
-      ? {
-          support: (
-            <RecurringSupportPanel
-              account={wallet.account}
-              boardroomActive={exactProjectDashboard.snapshot.status === 0}
-              boardroom={exactProjectDashboard.address}
-              canPublish={Boolean(
-                wallet.account
-                && sameAddress(
-                  wallet.account,
-                  exactProjectDashboard.snapshot.launched
-                    ? exactProjectDashboard.snapshot.proposer
-                    : exactProjectDashboard.snapshot.owner,
-                )
-              )}
-              checkout={hyperliquidCheckout}
-              pendingAction={pendingAction}
-              runAction={runAction}
-            />
-          ),
-        }
-      : {};
   const participationContent = exactProjectDashboard ? {
     ...createParticipationFlowContent({
       account: wallet.account,
       chainId: activeNetwork.chainId,
       dashboard: exactProjectDashboard,
-      hyperliquid: hyperliquidCheckout,
       pendingAction,
       publicClient,
       runAction,
       submitTransaction: submitContractTransaction,
     }),
     ...participationAmmContent,
-    ...recurringSupportContent,
   } : {};
   const portfolioTasks = walletPortfolioTasks({
     account: wallet.account,
@@ -5873,11 +5833,6 @@ export function App(): React.JSX.Element {
         switchChain={switchChain}
       />
       <EnvironmentDisclosure environment={environment} />
-      <HyperliquidRecoveryCenter
-        config={X402_ROUTER_CONFIG}
-        payer={wallet.account}
-      />
-
       <div className="sticky top-14 z-20 hidden border-b border-[var(--pc-border)] bg-[color:var(--pc-canvas-translucent)] px-5 py-2 backdrop-blur-xl md:block">
         <div className="mx-auto flex w-full max-w-[1240px] items-center justify-between">
           <DesktopPrimaryNav

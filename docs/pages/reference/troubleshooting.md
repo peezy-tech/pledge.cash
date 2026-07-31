@@ -9,7 +9,7 @@ Start with chain, deployment, address, wallet, and receipt. Most dangerous recov
 
 ## The app says the deployment is pending
 
-HyperEVM testnet `998` and Monad testnet `10143` are both pending because
+Monad testnet `10143` is pending because
 canonical protocol v1 has not been broadcast. The warning is expected:
 contract-dependent public workflows are unavailable. Do not paste historical
 addresses or override the gate. Use only a matching local Anvil artifact, or

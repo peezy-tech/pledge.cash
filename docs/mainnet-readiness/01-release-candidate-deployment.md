@@ -11,9 +11,8 @@ The sole contract line is canonical `pledge.cash.protocol.v1`. Its Boardroom is
 the permanent asset-holding kernel routed through
 `ProtocolFacetRegistry`; there is no supported alternative deployment line.
 
-Neither target testnet has a protocol-v1 broadcast:
+The target testnet does not have a protocol-v1 broadcast:
 
-- HyperEVM `998.json` is `pending`;
 - Monad `10143.json` is `pending`;
 - no mainnet profile or supported mainnet artifact exists.
 
@@ -53,7 +52,7 @@ Local execution cannot prove:
   support discovery and recovery;
 - that the final authority accounts can perform the exact bootstrap and
   ownership handoff;
-- that the supported SDK, web, Sentinel, and x402 paths use the promoted
+- that the supported SDK, web, and Sentinel paths use the promoted
   registry/facet identity and fail closed on migration;
 - that the deployed compiler inputs, bytecode, source, receipts, and artifact
   can be independently reproduced;

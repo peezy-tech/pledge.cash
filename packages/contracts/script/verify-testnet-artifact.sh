@@ -3,9 +3,9 @@ set -euo pipefail
 export LC_ALL=C
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ARTIFACT="${ARTIFACT:-deployments/998.json}"
+ARTIFACT="${ARTIFACT:?Set ARTIFACT to the deployment JSON path}"
 RECEIPTS="${RECEIPTS:-${ARTIFACT%.json}.receipts.json}"
-RPC_URL="${RPC_URL:-${HYPEREVM_TESTNET_RPC_URL:-https://rpc.hyperliquid-testnet.xyz/evm}}"
+RPC_URL="${RPC_URL:?Set RPC_URL to the target chain RPC URL}"
 REQUIRE_DEPLOYMENT="${REQUIRE_DEPLOYMENT:-0}"
 
 cd "$ROOT_DIR"
@@ -1220,3 +1220,4 @@ if [[ "$REQUIRE_DEPLOYMENT" == "1" ]]; then
 else
   echo "Verified canonical pledge.cash protocol artifact and live Boardroom release from $ARTIFACT"
 fi
+

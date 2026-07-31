@@ -183,7 +183,6 @@ function unsafeClaims(page, source) {
 
 async function pendingDeploymentChecks(pageSources) {
   const networkNames = new Map([
-    [998, "HyperEVM"],
     [10143, "Monad"],
   ]);
   const artifacts = (await readdir(deploymentsRoot))

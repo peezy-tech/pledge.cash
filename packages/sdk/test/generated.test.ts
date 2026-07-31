@@ -153,12 +153,6 @@ describe("generated SDK exports", () => {
   });
 
   test("includes checked-in deployment metadata", () => {
-    expect(pledgeCashDeployments[998]?.chainId).toBe(998);
-    expect(pledgeCashDeployments[998]?.status).toBe("pending");
-    expect(pledgeCashDeployments[998]?.protocolVersion).toBe("pledge.cash.protocol.v1");
-    expect(pledgeCashDeployments[998]?.tokenGrantFactory).toBeUndefined();
-    expect(pledgeCashDeployments[998]?.boardroomFactory).toBeUndefined();
-    expect(pledgeCashDeployments[998]?.distributionFactory).toBeUndefined();
     expect(pledgeCashDeployments[10143]?.chainId).toBe(10143);
     expect(pledgeCashDeployments[10143]?.status).toBe("pending");
     expect(pledgeCashDeployments[10143]?.protocolVersion).toBe("pledge.cash.protocol.v1");

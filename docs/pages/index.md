@@ -44,8 +44,8 @@ Read [Use pledge.cash safely](start/use-safely) and [Transactions and wallet act
 
 ## Current Availability
 
-Canonical protocol v1 has not been broadcast to HyperEVM testnet or Monad
-testnet. Both checked-in artifacts are **pending**, so public
+Canonical protocol v1 has not been broadcast to Monad testnet. Its checked-in
+artifact is **pending**, so public
 contract-dependent workflows are unavailable. A matching local Anvil
 deployment and seed can be used for isolated development; local state is not a
 public deployment.

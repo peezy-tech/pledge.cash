@@ -65,7 +65,7 @@ final exact-head release ledger.
 
 - full contract suite on the final source tree;
 - clean SDK regeneration, typecheck, and SDK tests;
-- web, Sentinel, and x402 integration suites using the canonical release
+- web and Sentinel integration suites using the canonical release
   identity and migration gates;
 - fresh-Anvil deterministic deployment, idempotence, standalone verifier,
   Boardroom lifecycle, seed, and service integrations on the final reviewed

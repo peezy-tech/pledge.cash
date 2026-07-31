@@ -10,11 +10,10 @@ There is no parallel Boardroom deployment path in this unreleased repository.
 
 | Network | Chain id | Default RPC | Wrapped native | Checked-in artifact |
 | --- | ---: | --- | --- | --- |
-| HyperEVM testnet | `998` | `https://rpc.hyperliquid-testnet.xyz/evm` | `0x5555555555555555555555555555555555555555` | `998.json`: **pending** |
 | Monad testnet | `10143` | `https://testnet-rpc.monad.xyz` | `0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541` | `10143.json`: **pending** |
 | Local Anvil | `31337` | `http://127.0.0.1:8547` | locally deployed | ignored local artifacts |
 
-Neither target testnet has a canonical protocol-v1 broadcast. Testnet
+The target testnet does not have a canonical protocol-v1 broadcast. Testnet
 deployment is the next operational step after the final local acceptance and
 review gates, but this repository state does not authorize or evidence that
 broadcast. Mainnet remains unsupported.
@@ -203,15 +202,12 @@ The target wrappers load their chain-specific environment, pin chain id, and
 refuse any dirty source worktree:
 
 ```sh
-script/hyperevm-testnet/registry-release.sh preflight /absolute/path/release.json
 script/monad-testnet/registry-release.sh preflight /absolute/path/release.json
 ```
 
-Their target-specific variables are
-`HYPEREVM_TESTNET_{PROTOCOL_FACET_REGISTRY,REGISTRY_CODE_HASH,REGISTRY_OWNER,CURRENT_FACET_SET_HASH,NEW_FACET_SET_HASH,REGISTRY_RELEASE_PRIVATE_KEY}`
-and the equivalent `MONAD_TESTNET_...` names. Common generic names remain
-available as explicit fallbacks. HyperEVM sends legacy transactions only after
-the same broadcast confirmation gate.
+Its target-specific variables use the
+`MONAD_TESTNET_{PROTOCOL_FACET_REGISTRY,REGISTRY_CODE_HASH,REGISTRY_OWNER,CURRENT_FACET_SET_HASH,NEW_FACET_SET_HASH,REGISTRY_RELEASE_PRIVATE_KEY}`
+names. Common generic names remain available as explicit fallbacks.
 
 The active live inventory can be verified without a manifest or mutation:
 
@@ -264,13 +260,6 @@ PLEDGE_CASH_PROTOCOL_TREASURY=0x...
 PLEDGE_CASH_AMM_FEE_MANAGER=0x...
 ```
 
-HyperEVM dry runs and broadcasts also require:
-
-```sh
-HYPEREVM_TESTNET_PRIVATE_KEY=...
-HYPEREVM_WRAPPED_NATIVE_ADDRESS=0x5555555555555555555555555555555555555555
-```
-
 Monad dry runs and broadcasts require:
 
 ```sh
@@ -280,7 +269,6 @@ MONAD_TESTNET_PRIVATE_KEY=...
 Optional overrides include:
 
 ```sh
-HYPEREVM_TESTNET_RPC_URL=https://rpc.hyperliquid-testnet.xyz/evm
 MONAD_TESTNET_RPC_URL=https://testnet-rpc.monad.xyz
 MONAD_TESTNET_WRAPPED_NATIVE_ADDRESS=0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541
 TOKEN_GRANT_CREATION_FEE_WEI=0
@@ -298,7 +286,6 @@ Dry runs send no target-chain transaction and do not rewrite deployment
 artifacts:
 
 ```sh
-bun run simulate:hyperevm-testnet
 bun run simulate:monad-testnet
 bun run simulate:testnets
 ```
@@ -312,7 +299,6 @@ The following commands are state-changing and require deliberate operator
 authorization:
 
 ```sh
-bun run deploy:hyperevm-testnet
 bun run deploy:monad-testnet
 ```
 
@@ -337,8 +323,7 @@ registry owner and active release must still equal the artifact's genesis
 ceremony state, so a candidate cannot pass after an intervening ownership
 handoff or release activation.
 
-HyperEVM may require the deployment account to use big blocks during the
-broadcast. Monad uses its network-specific Foundry toolchain. Those operational
+Monad uses its network-specific Foundry toolchain. Those operational
 preconditions must be rehearsed again before the first testnet transaction;
 the current pending artifacts do not prove them.
 

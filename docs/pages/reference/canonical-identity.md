@@ -39,8 +39,8 @@ Transient RPC failure is different. The app can report that a canonical object i
 
 Chain id alone is insufficient, especially on local Anvil. A reset can deploy a new stack on the same chain id. Transaction refresh and cached state must also match the deployment identity active when the read or transaction began.
 
-HyperEVM testnet chain `998` and Monad testnet chain `10143` both have pending
-canonical protocol-v1 artifacts. Neither has a current root identity for
+Monad testnet chain `10143` has a pending canonical protocol-v1 artifact. It
+does not have a current root identity for
 writes. A local chain has an identity only while its ignored artifact, Anvil
 state, and source build remain together.
 

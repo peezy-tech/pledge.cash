@@ -5,13 +5,12 @@ description: Current network choices, deployment availability, wallet support, a
 
 # Networks and Limitations
 
-The app’s `Network` selector can show HyperEVM Testnet, Monad Testnet, and `Local`. Selecting a network changes which deployment artifact, RPC, projects, and transaction history the app uses. It does not automatically switch an already connected wallet; use `Switch` when the header asks you to match networks.
+The app’s `Network` selector can show Monad Testnet and `Local`. Selecting a network changes which deployment artifact, RPC, projects, and transaction history the app uses. It does not automatically switch an already connected wallet; use `Switch` when the header asks you to match networks.
 
 ## Current deployment availability
 
 | Network | Chain ID | Current status |
 | --- | ---: | --- |
-| HyperEVM Testnet | `998` | Canonical protocol v1 is `pending`; it has not been broadcast. Contract-dependent app workflows are unavailable. |
 | Monad Testnet | `10143` | Canonical protocol v1 is `pending`; it has not been broadcast. Contract-dependent app workflows are unavailable. |
 | Local Anvil | `31337` | Intended for a host or developer environment that provides the matching RPC and local deployment artifact. Local addresses and state are not durable public deployments. |
 
@@ -26,7 +25,7 @@ If connection fails, unlock or enable the browser wallet for the site and choose
 ## Governance and release limitation
 
 Canonical protocol v1 includes external-controller launch and global
-registry-routed Boardroom releases, but neither target testnet has a usable
+registry-routed Boardroom releases, but the target testnet does not have a usable
 artifact. The app must fail closed for launch, controller operations, and
 Boardroom-control claims while a deployment is pending.
 

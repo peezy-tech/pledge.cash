@@ -4,7 +4,7 @@ pledge.cash is a permissionless protocol and product workspace for token-backed 
 
 The repository is unreleased. Its sole contract line is canonical protocol v1:
 Boardrooms are asset-holding kernels routed through a protocol-owned facet
-registry. HyperEVM and Monad testnet artifacts are both pending; testnet
+registry. The Monad testnet artifact is pending; testnet
 deployment is the next operational stage after final local acceptance and
 review, and no mainnet deployment is supported.
 
@@ -25,7 +25,7 @@ review, and no mainnet deployment is supported.
 - [Bond Market Protocol](docs/bond-market-protocol.md): oracleless reserve and first-party LP auctions with non-transferable vested positions.
 - [AMM Protocol](docs/amm-protocol.md): Boardroom-owned liquidity, trading, and fee accounting.
 - [Project Token Launch](docs/project-token-launch.md): local dogfood scenario for a Boardroom-backed project token.
-- [Deployment](docs/deployment.md): deterministic full-stack deployment, simulation, verification, and HyperEVM/Monad testnet operator flows.
+- [Deployment](docs/deployment.md): deterministic full-stack deployment, simulation, verification, and Monad testnet operator flows.
 - [Contributing](CONTRIBUTING.md): local setup, PR expectations, and contract-change checklist.
 - [Security](SECURITY.md): supported scope and vulnerability reporting process.
 - [Agent Guide](AGENTS.md): operating rules for coding agents and humans making repo changes.
@@ -59,18 +59,18 @@ Run only the contracts package:
 bun --cwd packages/contracts test
 ```
 
-Simulate the HyperEVM testnet deployment:
+Simulate the Monad testnet deployment:
 
 ```sh
-bun run simulate:hyperevm-testnet
+bun run simulate:monad-testnet
 ```
 
-The state-changing HyperEVM broadcast command is reserved for the explicit
+The state-changing Monad broadcast command is reserved for the explicit
 testnet deployment ceremony after all gates in
 [`docs/deployment.md`](docs/deployment.md) pass:
 
 ```sh
-BROADCAST=1 bun --cwd packages/contracts deploy:hyperevm-testnet
+BROADCAST=1 bun --cwd packages/contracts deploy:monad-testnet
 ```
 
 Build the product workspace and its public docs for GitHub Pages:

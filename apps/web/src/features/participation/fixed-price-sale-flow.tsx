@@ -12,9 +12,7 @@ import { Input } from "../../components/ui/input";
 import { errorMessage } from "../../lib/forms";
 import { formatTokenAmount, parseTokenAmountInput } from "../../lib/token-amounts";
 import type { BoardroomDistributionSnapshot } from "../../lib/types";
-import { HYPEREVM_TESTNET_CHAIN_ID } from "../../lib/x402-router";
 import { ConnectWalletPrompt } from "../wallet/connect-wallet-prompt";
-import { HyperliquidPaymentAction } from "../x402";
 import { ParticipationActionGuard } from "./action-integrity";
 import {
   AdvancedFields,
@@ -69,10 +67,8 @@ type PrepareFixedPriceSaleActionOptions = {
 
 export function FixedPriceSaleFlow({
   account,
-  chainId,
   dashboard,
   distribution,
-  hyperliquid,
   pendingAction,
   publicClient,
   runAction,
@@ -190,36 +186,6 @@ export function FixedPriceSaleFlow({
   const needsApproval = Boolean(quote && maxPayment !== undefined && quote.paymentAllowance < maxPayment);
   const actionId = needsApproval ? "Approve fixed-price payment" : "Buy fixed-price shares";
   const actionLabel = needsApproval ? `Approve ${paymentMetadata?.symbol ?? "payment token"}` : "Buy project tokens";
-  const hyperliquidBlocker = fixedPriceHyperliquidBlocker({
-    account,
-    amount: parsedAmount.value,
-    amountError: parsedAmount.error,
-    boardroomStatus: dashboard.snapshot.status,
-    chainId,
-    destinationUsdc: hyperliquid?.config.hyperevmUsdc,
-    distributionError: distribution.error,
-    recipient,
-    recipientError,
-    slippageBps: slippage.value,
-    slippageError: slippage.error,
-    state,
-  });
-  const hyperliquidRequest = hyperliquid && !hyperliquidBlocker
-    && account && recipient && parsedAmount.value !== undefined
-    && slippage.value !== undefined
-    ? {
-        boardroom: state.boardroom,
-        chainId: HYPEREVM_TESTNET_CHAIN_ID,
-        kind: "fixed_price_sale" as const,
-        maxSlippageBps: Number(slippage.value),
-        payer: account,
-        recipient,
-        refundAddress: account,
-        sale: state.address,
-        shareAmount: parsedAmount.value.toString(),
-      }
-    : undefined;
-
   const submitAction = async (): Promise<void> => {
     if (!account || !quote || maxPayment === undefined || !recipient || parsedAmount.value === undefined || slippage.value === undefined) {
       throw new Error("Refresh a valid quote before continuing.");
@@ -347,26 +313,6 @@ export function FixedPriceSaleFlow({
         pendingAction={pendingAction}
         runAction={runAction}
       />
-      {hyperliquid ? (
-        <HyperliquidPaymentAction
-          checkout={hyperliquid}
-          disabledReason={hyperliquidBlocker}
-          expectations={{
-            inputToken: state.paymentToken,
-            outputToken: state.shareToken,
-            target: state.address,
-          }}
-          kind="fixed_price_sale"
-          output={{
-            decimals: shareMetadata?.decimals,
-            symbol: shareMetadata?.symbol,
-          }}
-          payer={account}
-          pendingAction={pendingAction}
-          request={hyperliquidRequest}
-          runAction={runAction}
-        />
-      ) : null}
     </div>
   );
 }
@@ -522,56 +468,5 @@ function fixedPriceBlocker(input: {
   if (!input.quote || input.maxPayment === undefined) return "A current quote is required before purchase.";
   if (input.amount > input.quote.remainingBuyerCapacity) return "This amount exceeds the wallet’s remaining purchase limit.";
   if (input.quote.paymentBalance < input.maxPayment) return "The wallet balance does not cover the maximum payment.";
-  return undefined;
-}
-
-export function fixedPriceHyperliquidBlocker(input: {
-  account: Address | undefined;
-  amount: bigint | undefined;
-  amountError: string | undefined;
-  boardroomStatus: number;
-  chainId: number;
-  destinationUsdc: Address | undefined;
-  distributionError: string | undefined;
-  recipient: Address | undefined;
-  recipientError: string | undefined;
-  slippageBps: bigint | undefined;
-  slippageError: string | undefined;
-  state: FixedPriceSaleState;
-}): string | undefined {
-  if (!input.account) return "Connect the wallet that will pay from HyperCore.";
-  if (input.chainId !== HYPEREVM_TESTNET_CHAIN_ID) {
-    return "The Hyperliquid payment rail is available on HyperEVM testnet only.";
-  }
-  if (input.distributionError) return "The sale’s canonical state could not be verified.";
-  if (
-    !input.destinationUsdc
-    || !sameAddress(input.destinationUsdc, input.state.paymentToken)
-  ) {
-    return "Hyperliquid v1 requires the configured HyperEVM USDC payment token.";
-  }
-  if (input.boardroomStatus !== 0) return "This project is no longer active.";
-  if (input.state.saleStatus !== 0 || input.state.closed) return "This sale is closed.";
-  const window = unixWindowStatus(input.state.startTime, input.state.endTime);
-  if (window === "not-started") return "This sale has not started yet.";
-  if (window === "ended") return "This sale window has ended.";
-  if (input.state.maxPerBuyer !== 0n) {
-    return "Buyer-capped fixed-price sales are not supported by the Hyperliquid v1 rail.";
-  }
-  if (input.amountError) return input.amountError;
-  if (input.amount === undefined || input.amount === 0n) {
-    return "Enter the number of project tokens you want to receive.";
-  }
-  if (input.amount > input.state.remainingShares) {
-    return "That amount is larger than the sale’s remaining inventory.";
-  }
-  if (input.recipientError) return input.recipientError;
-  if (!input.recipient || !sameAddress(input.recipient, input.account)) {
-    return "Payer, recipient, and refund address must be the connected wallet in v1.";
-  }
-  if (input.slippageError) return input.slippageError;
-  if (input.slippageBps === undefined || input.slippageBps > 1_000n) {
-    return "Hyperliquid v1 price protection must be between 0% and 10%.";
-  }
   return undefined;
 }

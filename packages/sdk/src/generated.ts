@@ -25072,11 +25072,5 @@ export const pledgeCashDeployments = {
     status: "pending",
     reason: "Canonical protocol v1 has not been broadcast to Monad testnet",
     protocolVersion: "pledge.cash.protocol.v1"
-  },
-  998: {
-    chainId: 998,
-    status: "pending",
-    reason: "Canonical protocol v1 has not been broadcast to HyperEVM testnet",
-    protocolVersion: "pledge.cash.protocol.v1"
   }
 } as const satisfies Record<number, PledgeCashDeployment>;

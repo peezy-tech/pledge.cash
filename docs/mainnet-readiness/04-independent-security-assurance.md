@@ -73,7 +73,7 @@ target-chain fixtures.
 
 ### Offchain trust boundaries
 
-SDK builders, web release hydration, Sentinel control proofs, x402 quotes,
+SDK builders, web release hydration, Sentinel control proofs,
 artifact parsers, and receipt discovery must pin coherent block/release
 identity and fail closed on pending deployments, code-hash drift, stale hashes,
 and migration downtime.
@@ -131,7 +131,7 @@ yet release gates.
 - independent recreation of all 97 routes and code hashes;
 - ownership handoff, reciprocal wiring, policies, and fee routes;
 - generated ABI freshness and explicit expected-hash builders;
-- coherent pinned-block release reads in SDK, web, Sentinel, and x402;
+- coherent pinned-block release reads in SDK, web, and Sentinel;
 - protected artifact promotion and fail-closed client behavior.
 
 ## Required assurance work

@@ -7,8 +7,8 @@ description: Create a Boardroom, issue its token, and operate grants, distributi
 
 Studio is the operator workspace. A Boardroom is the project account, share-token issuer, treasury, and obligation coordinator; it is not a company record or multisig substitute.
 
-> **Availability boundary:** canonical protocol v1 is pending on HyperEVM
-> testnet (`998`) and Monad testnet (`10143`). Public project creation is
+> **Availability boundary:** canonical protocol v1 is pending on Monad testnet
+> (`10143`). Public project creation is
 > unavailable. These steps currently apply only to a matching local Anvil
 > deployment and will apply to a target testnet after a verified artifact is
 > explicitly promoted.

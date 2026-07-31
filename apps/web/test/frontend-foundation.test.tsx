@@ -97,10 +97,10 @@ describe("frontend foundation", () => {
 
   test("labels and disables networks whose deployment is not ready", () => {
     const local = PLEDGE_CASH_NETWORKS.find((network) => network.chainId === 31337)!;
-    const hyperEvm = PLEDGE_CASH_NETWORKS.find((network) => network.chainId === 998)!;
+    const monad = PLEDGE_CASH_NETWORKS.find((network) => network.chainId === 10143)!;
 
     expect(networkOptionLabel(local)).toBe("Local Anvil — Local (resettable, no real value)");
-    expect(networkOptionLabel(hyperEvm, "pending")).toBe("HyperEVM Testnet — deployment pending");
+    expect(networkOptionLabel(monad, "pending")).toBe("Monad Testnet — deployment pending");
     expect(networkAvailabilityLabel("missing")).toBe("not deployed");
     expect(networkOptionDisabled("pending")).toBe(true);
     expect(networkOptionDisabled("ready")).toBe(false);
@@ -110,7 +110,7 @@ describe("frontend foundation", () => {
         <AppHeader
           chainId={31337}
           chainName="Local Anvil"
-          networkAvailability={{ 998: "pending", 10143: "missing", 31337: "ready" }}
+          networkAvailability={{ 10143: "pending", 31337: "ready" }}
           networks={PLEDGE_CASH_NETWORKS}
           onNetworkChange={() => undefined}
           pendingAction={undefined}
@@ -121,9 +121,8 @@ describe("frontend foundation", () => {
       </Web3Provider>,
     );
 
-    expect(html).toContain("HyperEVM Testnet — deployment pending");
-    expect(html).toContain("Monad Testnet — not deployed");
-    expect(html.match(/<option disabled=""/g)?.length).toBe(2);
+    expect(html).toContain("Monad Testnet — deployment pending");
+    expect(html.match(/<option disabled=""/g)?.length).toBe(1);
   });
 
   test("keeps small muted text above WCAG AA contrast on raised surfaces", async () => {

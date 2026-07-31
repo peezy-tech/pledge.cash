@@ -7,8 +7,8 @@ description: Go directly to the pledge.cash workspace that matches what you need
 
 Start with the outcome you want. You can inspect public project state before connecting a wallet.
 
-> **Availability:** canonical protocol v1 is pending on both HyperEVM and
-> Monad testnets. The workflows below describe a verified future deployment or
+> **Availability:** canonical protocol v1 is pending on Monad testnet. The
+> workflows below describe a verified future deployment or
 > a matching local Anvil scenario; public protocol writes are currently
 > unavailable.
 
